@@ -187,6 +187,53 @@ func TestDispatchLiveSeatLeasesReadsLiveAccountSidecars(t *testing.T) {
 	}
 }
 
+// TestLiveResolutionLanesDropsDeadBannerNoopWorker is the #1398 witness: a docs lane
+// "held" only by an exited opencode banner-no-op worker must report FREE, not busy.
+// An exited opencode worker runs as a `node` image, so AFTER it exits a recycled
+// `node` pid that lands in the spawn window passes the weak liveness gate
+// (dispatchPIDAlive) and would pin `docs` at LANE_BUSY forever behind a dead
+// 122-byte no-op. The banner-no-op log (under the 512-byte stub floor, "> build ·
+// glm-…") must be dropped so the lane reports FREE and `fak dispatch tick --lane docs`
+// returns WOULD_SPAWN rather than LANE_BUSY.
+func TestLiveResolutionLanesDropsDeadBannerNoopWorker(t *testing.T) {
+	runsDir := t.TempDir()
+	stem := filepath.Join(runsDir, "resolve-1398-20260629-101010")
+	// header + the documented opencode/glm banner-only no-op, well under the 512-byte
+	// stub floor (the real #1398 holders were 122 bytes).
+	if err := os.WriteFile(stem+".log",
+		[]byte("# fak-spawn 20260629-101010 issue=1398 lane=docs backend=opencode argv0=node\n> build · glm-4.5-air\n"),
+		0o644); err != nil {
+		t.Fatalf("write banner log: %v", err)
+	}
+	// a recycled, still-LIVE pid (our own) -- exactly what passes dispatchPIDAlive.
+	if err := os.WriteFile(stem+".pid", []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write live pid: %v", err)
+	}
+	if held := liveResolutionLanes(runsDir); len(held) != 0 {
+		t.Fatalf("held lanes = %v, want none (a dead banner no-op holds no lane)", held)
+	}
+}
+
+// TestLiveResolutionLanesKeepsLiveStreamingWorker is the safety side of #1398: a
+// genuinely live worker streams past the 512-byte stub floor within seconds (even
+// though its log opens with the same banner), so it never classifies as a no-op and
+// its lane stays held -- the banner-no-op reap must not free a lane with real work.
+func TestLiveResolutionLanesKeepsLiveStreamingWorker(t *testing.T) {
+	runsDir := t.TempDir()
+	stem := filepath.Join(runsDir, "resolve-1398-20260629-101011")
+	body := "# fak-spawn 20260629-101011 issue=1398 lane=docs backend=opencode argv0=node\n> build · glm-4.5-air\n" +
+		strings.Repeat("streaming real work output line\n", 40) // well past the 512-byte floor
+	if err := os.WriteFile(stem+".log", []byte(body), 0o644); err != nil {
+		t.Fatalf("write streaming log: %v", err)
+	}
+	if err := os.WriteFile(stem+".pid", []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write live pid: %v", err)
+	}
+	if held := liveResolutionLanes(runsDir); !held["docs"] {
+		t.Fatalf("held lanes = %v, want docs held (a live streaming worker holds its lane)", held)
+	}
+}
+
 // TestDispatchTickDryRunHoldsGuardedSelfModifyLane is the #1397 witness: a dry-run
 // dispatch that lands on a lane rooted in fak's own running source (here the cmd lane,
 // tree cmd/**) reports the SELF_MODIFY_HOLD rather than would_spawn -- a guarded worker

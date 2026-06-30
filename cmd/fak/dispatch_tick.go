@@ -661,11 +661,55 @@ func liveResolutionLanes(runsDir string) map[string]bool {
 		if !ok || !dispatchPIDAlive(pid) {
 			continue
 		}
+		// A worker whose log is a terminal banner no-op (#1275: it printed only its
+		// startup banner -- "> build · glm-…" -- and produced nothing) holds no real
+		// work even when its pid still passes the liveness gate above. An opencode
+		// worker runs as a `node` image, so AFTER it exits a recycled `node` pid that
+		// lands in the spawn window passes dispatchPIDAlive and would otherwise pin
+		// the lane FOREVER (#1398: `docs` stayed LANE_BUSY behind dead 122-byte no-ops
+		// while real docs work could not dispatch). Drop such a lane so a lane held
+		// ONLY by dead no-op workers reports FREE and `fak dispatch tick --lane docs`
+		// returns WOULD_SPAWN. Safe: a genuinely live worker streams kilobytes past
+		// the stub floor within seconds so it never classifies as a banner no-op, and
+		// on a LIVE tick the fenced git-ref lease (acquireDispatchLaneLease) still
+		// serializes a just-started worker across hosts.
+		if dispatchLogIsBannerNoop(log) {
+			continue
+		}
 		if lane := laneFromSpawnHeader(log); lane != "" {
 			out[lane] = true
 		}
 	}
 	return out
+}
+
+// dispatchResolveLogStubFloorBytes mirrors the Python dispatcher's _STUB_LOG_MAX_BYTES
+// (tools/issue_resolve_dispatch.py): a genuinely live worker streams kilobytes within
+// seconds, so a log at or under this floor that carries only the opencode/glm startup
+// banner is a terminal banner no-op (#1275), never live work.
+const dispatchResolveLogStubFloorBytes = 512
+
+// dispatchNoopBannerRE matches the opencode/glm startup banner ("> build · glm-…"),
+// the documented banner-only no-op signature (#1275). Mirrors the Python
+// _NOOP_BANNER_RE so the Go tick classifies a dead no-op the same way the legacy
+// helper does.
+var dispatchNoopBannerRE = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
+
+// dispatchLogIsBannerNoop reports whether a worker log is a terminal banner no-op: it
+// is at/under the stub floor AND carries only the opencode/glm startup banner. Used to
+// reap a lane held by a dead no-op worker whose recycled pid still passes the liveness
+// gate (#1398). FAIL-CLOSED to false on any stat/read error or an over-floor log so a
+// log we cannot classify -- or one with real streamed work -- is never falsely reaped.
+func dispatchLogIsBannerNoop(path string) bool {
+	st, err := os.Stat(path)
+	if err != nil || st.Size() > dispatchResolveLogStubFloorBytes {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return dispatchNoopBannerRE.Match(b)
 }
 
 func recentlyAttemptedIssues(runsDir string, cooldownMin int) map[int]bool {
