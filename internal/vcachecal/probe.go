@@ -54,15 +54,15 @@ type ProbeSample struct {
 // MEASURED from a probe or is the ASSUMED §5 hypothesis — the calibrate-don't-assume
 // guard made mechanical and auditable.
 type Calibration struct {
-	Provider          string
-	ModelID           string
-	Endpoint          string
-	TTLMillis         int64
-	TTLMeasured       bool
-	MinPrefixTokens   int64
-	MinPrefixMeasured bool
-	ReadMult          float64
-	ReadMultMeasured  bool
+	Provider          string  `json:"provider,omitempty"`
+	ModelID           string  `json:"model_id,omitempty"`
+	Endpoint          string  `json:"endpoint,omitempty"`
+	TTLMillis         int64   `json:"ttl_millis"`
+	TTLMeasured       bool    `json:"ttl_measured"`
+	MinPrefixTokens   int64   `json:"min_prefix_tokens"`
+	MinPrefixMeasured bool    `json:"min_prefix_measured"`
+	ReadMult          float64 `json:"read_mult"`
+	ReadMultMeasured  bool    `json:"read_mult_measured"`
 }
 
 // FitCalibration fits T (TTL), M_min (minimum cacheable prefix), and r (read discount)
