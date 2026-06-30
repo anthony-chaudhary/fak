@@ -31,6 +31,10 @@ DISPATCH_VIEW_SLUGS = {
     "trust-floor",
     "gpu",
     "current",
+    "generation-now",
+    "generation-next",
+    "generation-second-next",
+    "generation-future",
     "m1-durable-sessions",
     "m2-kv-cache",
     "m3-serving",
@@ -42,6 +46,13 @@ DISPATCH_VIEW_SLUGS = {
     "m9-dispatch-fleet",
     "m10-model-support",
     "m11-substrate",
+}
+
+GENERATION_VIEW_BINDINGS = {
+    "generation-now": ("gen/now", 'milestone:"Generation G0 - Now / Immediate"'),
+    "generation-next": ("gen/next", 'milestone:"Generation G1 - Next Gen"'),
+    "generation-second-next": ("gen/second-next", 'milestone:"Generation G2 - Second Next Gen"'),
+    "generation-future": ("gen/future", 'milestone:"Generation G3 - Future"'),
 }
 
 ISSUE_CREATE_PRODUCERS = {
@@ -161,6 +172,18 @@ class ShippedConfig(unittest.TestCase):
             query = vm[slug]["query"]
             for label in TRIAGE_EXCLUDES:
                 self.assertIn(f"-label:{label}", query, f"{slug} must exclude {label}")
+
+    def test_generation_views_bind_stream_label_and_milestone(self):
+        cfg = m.load_config(SHIPPED_CONFIG)
+        vm = m.view_map(cfg)
+        for slug, (stream_label, milestone) in GENERATION_VIEW_BINDINGS.items():
+            self.assertIn(slug, vm)
+            query = vm[slug]["query"]
+            self.assertIn("label:generation", query)
+            self.assertIn(f"label:{stream_label}", query)
+            self.assertIn(milestone, query)
+            self.assertIn("-label:epic", query)
+            self.assertIn("no:assignee", query)
 
     def test_slack_watchdog_files_triage_only_issues(self):
         workflow = SLACK_WATCHDOG.read_text(encoding="utf-8")
