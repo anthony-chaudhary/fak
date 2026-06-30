@@ -4,7 +4,7 @@
 > process for creating, verifying, and publishing benchmark results. Every claim traces back
 > to committed artifacts with `dos_commit_audit` verification.
 
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-30
 **Status:** Living process — update when benchmark workflow evolves
 
 ---
@@ -88,10 +88,45 @@ Before a benchmark claim is "shipped," verify:
 - [ ] **BENCHMARK-AUTHORITY.md** updated with entry
 - [ ] **Cross-references** added from related docs
 - [ ] **Baseline is clear** (what are we comparing against?)
+- [ ] **Measurement Status block** is present in the benchmark doc
 - [ ] **Reproduction command** documented
 - [ ] **Tombstoned outdated claims** if replacing old numbers
 
 **No benchmark is shipped until all boxes are checked.**
+
+---
+
+## Measurement Status Policy (#72)
+
+Every benchmark document that publishes or repeats a benchmark number must include
+this block near the top, before any result table:
+
+```markdown
+## Measurement Status
+
+- Dataset: [source, size, version/hash]
+- Model: [name/version/date, or none for model-free deterministic geometry]
+- Runs: [n iterations and dates, or n=0 live runs for theory/model-only]
+- Artifacts: [committed JSON/log/trace paths]
+- Status: THEORETICAL | MEASURED | VERIFIED
+```
+
+Definitions:
+
+- **THEORETICAL** means a formula, deterministic geometry model, simulation, or
+  projection. It can document a floor or plan, but it is not a benchmark result
+  headline and must be labeled in every table or paragraph that cites it.
+- **MEASURED** means real data plus real execution produced the recorded number.
+  Token counts, timings, and sample size come from logs or artifacts, not assumed
+  geometry.
+- **VERIFIED** means MEASURED plus an independent reproduction or external
+  grader/witness.
+
+The repo also uses finer provenance words such as `MODELED`, `SIMULATED`,
+`OBSERVED`, and `WITNESSED`. Those may appear beside the status, but they do not
+replace the status block. A theoretical/model-only number cannot be promoted in
+copy as "cheaper", "faster", "win", "SOTA", or "measured" unless the same sentence
+names it as theoretical/model-only and states the missing measurement.
 
 ---
 

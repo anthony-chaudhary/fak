@@ -173,6 +173,13 @@ func RenderMarkdown(c *Comparison) string {
 	b.WriteString(fmt.Sprintf("**Generated:** %s\n\n", c.GeneratedAt))
 	b.WriteString(fmt.Sprintf("**Instances:** %d\n\n", c.Summary.Instances))
 
+	b.WriteString("## Measurement Status\n\n")
+	b.WriteString(fmt.Sprintf("- Dataset: caller-supplied webbench dataset (%d loaded instances); source lineage must be carried by the dataset artifact\n", c.Summary.Instances))
+	b.WriteString("- Model: none for the prefill/KV geometry rows; no live model execution is implied by this report\n")
+	b.WriteString("- Runs: n=0 live model runs for deterministic geometry; metric families with `Provenance: measured` are the only measured rows\n")
+	b.WriteString("- Artifacts: this markdown plus the optional `fak webbench compare --out` JSON; attach logs/traces for any measured family\n")
+	b.WriteString("- Status: THEORETICAL (MODELED) for prefill/KV geometry; MEASURED only where a metric family says `Provenance: measured`\n\n")
+
 	// Turn statistics.
 	b.WriteString("## Navigation Turn Statistics\n\n")
 	b.WriteString("| Metric | Value |\n")

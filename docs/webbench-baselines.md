@@ -5,9 +5,19 @@ description: "fak's modeled WebVoyager prefill geometry: over the real 643-task 
 
 # Frontier WebBench Baselines & SOTA Comparison
 
-This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; it is the serving kernel that makes any SOTA web agent cheaper to run by not re-processing the same browser context on every turn.
+This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; this page is the model-only floor for the live cost benchmark still to be run.
 
 **Last Updated:** 2026-06-20
+
+---
+
+## Measurement Status
+
+- Dataset: `testdata/webbench/webvoyager-converted.jsonl`, converted from the official WebVoyager export; 643 tasks in this repo's converted artifact.
+- Model: none for the numbers on this page; no live agent/model execution is included.
+- Runs: n=0 live model runs; the tables are deterministic `fak webbench describe` geometry recomputations.
+- Artifacts: `experiments/webbench/webvoyager-geometry-20260625.json`, `experiments/webbench/webvoyager-fleet-scale-20260626.json`.
+- Status: THEORETICAL (MODELED). The page is not a MEASURED or VERIFIED end-to-end WebVoyager cost/latency benchmark.
 
 ---
 
@@ -50,16 +60,22 @@ The real-set number is lower because actual WebVoyager tasks have fewer turns
 
 ## Executive Summary
 
-**fak is not a web agent.** It's the kernel that makes running SOTA web agents **15x+ cheaper** by eliminating the wasted work of re-processing the same browser context on every turn.
+**fak is not a web agent.** This page documents the current WebBench efficiency
+floor: a modeled 8.8x-9.7x prefill-work reduction versus the naive re-prefill
+floor over the converted WebVoyager task set. That is not a measured cost or
+latency result.
 
-The current web agent benchmark leaderboard measures **capability** (success rate). That's the model's job. fak measures **efficiency** (prefill work-elimination). That's the infrastructure's job. A SOTA agent running through fak gets the same 98.5% success rate at a fraction of the cost.
+The current web agent benchmark leaderboard measures **capability** (success
+rate). That's the model's job. fak's current WebBench surface measures a
+model-only **efficiency floor** (prefill work-elimination). A live A/B run is
+still required before claiming a measured cost reduction for any SOTA web agent.
 
 ## The Position: Capability vs. Efficiency
 
 | What | Who | Metric | fak's Role |
 |------|-----|--------|------------|
 | **Can the agent complete the task?** | Model (Claude, GPT-4, etc.) | Success Rate | ✗ None - model's capability |
-| **How much compute does it cost?** | Infrastructure (orchestrator, serving) | $ per task | ✓ **15x+ work-elimination** |
+| **How much compute does it cost?** | Infrastructure (orchestrator, serving) | $ per task | Current page: **modeled prefill-work floor only** |
 
 **The point:** Every web agent system today is paying the **turn-tax** — re-prefill megabytes of browser state on every navigation action. That wasted work doesn't exist in fak.
 
@@ -86,9 +102,11 @@ The current web agent benchmark leaderboard measures **capability** (success rat
 | **Halluminate Web Bench** | rtrvr.ai: 81.4% | 7-23x faster than competitors |
 | **Skyvern 2.0** | 85.85% | Maintains 76.8% at 250 concurrent agents |
 
-## fak's Value Proposition: SOTA @ 15x Less Work
+## Modeled Prefill Floor
 
-Running any of the above SOTA agents **through fak** delivers:
+The legacy mock geometry showed what the arithmetic could look like before the
+real WebVoyager task set was converted. It is retained here only as historical
+theory, not as a result claim.
 
 ### Deterministic Prefill Work-Elimination
 
@@ -99,7 +117,7 @@ Running any of the above SOTA agents **through fak** delivers:
 | 4 | 13.5 M tokens | 870K tokens | 824K tokens | **16.4x** |
 | 8 | 27.1 M tokens | 1.7 M tokens | 1.6 M tokens | **16.6x** |
 
-**Methodology:** 5-task sample MOCK dataset (example.com domains); ASSUMED WebVoyager-style geometry (P=3.4K, Action=150, DOMState=2K). These are THEORETICAL calculations demonstrating the framework. Real measurements on actual WebVoyager data are pending (issues #510, #511).
+**Methodology:** 5-task sample MOCK dataset (example.com domains); ASSUMED WebVoyager-style geometry (P=3.4K, Action=150, DOMState=2K). These are THEORETICAL calculations demonstrating the framework. Live measurements on actual WebVoyager runs are pending.
 
 ### The Breakdown
 
@@ -109,7 +127,9 @@ Running any of the above SOTA agents **through fak** delivers:
 | **B/C (Cross-Worker Reuse)** | Isolated agents vs. shared session value stack | **1.00x - 1.07x** |
 | **A/B (Turn-Tax)** | Re-prefill vs. per-agent KV persistence | **15.6x** (worker-independent) |
 
-**Key finding:** The turn-tax (A/B = 15.6x) is *worker-independent* — every agent pays it, every time, regardless of fleet size. That's the structural waste fak eliminates.
+**Historical note:** The turn-tax (A/B = 15.6x) in this table came from a 5-task
+mock dataset and assumed geometry. It is not a benchmark result and must not be
+used as the WebBench headline.
 
 ---
 
@@ -140,7 +160,9 @@ Running any of the above SOTA agents **through fak** delivers:
 | **B/C (Cross-Worker Reuse)** | Cross-worker prefix reuse | **1.00x - 1.10x** |
 | **A/B (Turn-Tax)** | Re-prefill vs KV persistence | **8.8x** (worker-independent) |
 
-**Key finding:** The turn-tax is **structural** — every agent pays it, every turn. On the real WebVoyager dataset, this amounts to **8.8x** wasted work that fak eliminates.
+**Key finding:** The modeled turn-tax is **structural** — every agent pays it,
+every turn in the geometry model. On the real WebVoyager task set, this computes
+to an **8.8x** prefill-work floor.
 
 ---
 
@@ -151,7 +173,10 @@ Take Alumnium's 98.5% SOTA run: ~$5 in API costs for 586 tasks. That's **capabil
 - **Without fak:** Every navigation action re-prefills the entire browser context (DOM state, tool schemas, task history) — that's 2K+ tokens per turn, times ~12 turns per task, times 586 tasks.
 - **With fak:** The shared prefix is prefilled once; all workers reuse it. Turn-by-turn, only the new DOM state is processed.
 
-The net elimination (15.6x) means the same 98.5% SOTA agent running through fak costs **~15x less** in prefill compute. For fleet-scale deployments (100+ concurrent agents), that's the difference between viable and prohibitively expensive.
+The modeled 8.8x-9.7x prefill-work floor suggests where a live cost run should
+look for savings. It does not prove that the same 98.5% SOTA agent costs less
+through fak; that claim requires the pending live harness run with the same
+agent, same task set, and logged token/cost artifacts.
 
 ## Proper Comparison: Whatfak Actually Competes With
 
@@ -161,16 +186,16 @@ The net elimination (15.6x) means the same 98.5% SOTA agent running through fak 
 - Agent orchestration logic — that's LangChain, custom controllers
 
 **fak DOES compete with:**
-- Naive agent serving (re-send full context every turn) — **15.6x win**
-- Per-agent KV isolation (vLLM prefix caching per worker) — **1.04x-1.07x win at 2-8 workers**
+- Naive agent serving (re-send full context every turn) — **modeled 8.8x-9.7x less prefill work vs the naive floor**
+- Per-agent KV isolation (vLLM prefix caching per worker) — **modeled 1.00x-1.10x cross-worker gain at 1-8 workers**
 - Frontier prompt caches (append-only, no eviction) — **addressable eviction advantage**
 
 The only thing that matters for the comparison is: **how much prefill work does your infrastructure do per turn?**
 
 | System | Prefill Strategy | Work Relative to fak |
 |--------|------------------|----------------------|
-| Naive re-send | Full context every turn | **15.6x more** |
-| Per-agent KV | Prefix cached per worker | **1.04x-1.07x more** (at 2-8 workers) |
+| Naive re-send | Full context every turn | **modeled 8.8x-9.7x more prefill work** |
+| Per-agent KV | Prefix cached per worker | **modeled 1.00x-1.10x more prefill work** (at 1-8 workers) |
 | vLLM prefix cache | Shared prefix per serving instance | Similar (if single-tenant) |
 | Frontier prompt cache | Append-only reuse | Similar (can't evict) |
 | **fak fused** | Shared prefix + cross-worker reuse + addressable eviction | **1x (baseline)** |

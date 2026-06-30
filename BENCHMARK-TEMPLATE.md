@@ -7,10 +7,18 @@
 **Commit:** `<hash>`
 **DOS Verify:** `dos_commit_audit <hash>` → **OK** (diff-witnessed)
 
+## Measurement Status
+
+- Dataset: [source, size, version/hash]
+- Model: [name, version, date; use "none" only for model-free deterministic geometry]
+- Runs: [n iterations, dates; use "n=0 live runs" only for theory/model-only]
+- Artifacts: [links to committed JSON, logs, traces]
+- Status: THEORETICAL | MEASURED | VERIFIED
+
 ## Summary
 
 | Claim | Number | Baseline | Context |
-|---|---|---|---|---|
+|---|---|---|---|
 | **Primary result** | **X.X×** | [baseline description] | [workload description] |
 
 ## What This Measures
@@ -71,6 +79,7 @@ When benchmarking a new model:
 - Date
 - Commit hash
 - DOS verification status
+- Measurement Status block (Dataset, Model, Runs, Artifacts, Status)
 - Primary result number with baseline
 - Reproduction command
 - Committed artifact path

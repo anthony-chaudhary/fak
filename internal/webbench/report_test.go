@@ -1,6 +1,9 @@
 package webbench
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestBuildSuccessRateFamilyGatedWhenNoPredictions pins the default: with no --predictions
 // the "Task success rate + safety" family stays the honest gated placeholder — the
@@ -60,5 +63,34 @@ func TestBuildComparisonAlwaysHasSuccessFamily(t *testing.T) {
 	}
 	if !found {
 		t.Error("BuildComparison must always include the Task success rate + safety family")
+	}
+}
+
+// TestRenderMarkdownIncludesMeasurementStatus pins issue #72's doc contract for
+// generated WebBench reports: the deterministic geometry table must be labeled as
+// theoretical/model-only before any result table appears.
+func TestRenderMarkdownIncludesMeasurementStatus(t *testing.T) {
+	d := NewDataset([]Instance{{TaskID: "t1", Description: "Find a contact email."}})
+	c := BuildComparison(CompareInputs{
+		Dataset:     d,
+		Geometry:    DefaultGeometryModel(),
+		Workers:     []int{1},
+		GeneratedAt: "2026-06-30T00:00:00Z",
+	})
+	md := RenderMarkdown(c)
+	for _, want := range []string{
+		"## Measurement Status",
+		"- Dataset:",
+		"- Model:",
+		"- Runs:",
+		"- Artifacts:",
+		"- Status: THEORETICAL (MODELED)",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("rendered markdown missing %q:\n%s", want, md)
+		}
+	}
+	if strings.Index(md, "## Measurement Status") > strings.Index(md, "## Prefill-Token Work-Elimination") {
+		t.Fatalf("measurement status must precede result tables:\n%s", md)
 	}
 }

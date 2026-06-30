@@ -5,7 +5,7 @@ description: "Summarizes fak's modeled prefill work-elimination over the real 64
 
 # WebBench Modeled Geometry — Status Summary
 
-fak's WebBench geometry result is a closed-form MODEL — not a wall-clock measurement — of how much redundant prefill work fak's fused KV adjudication eliminates across the real 643-task WebVoyager dataset. Computed by `internal/webbench/geometry.go::ComputeArms` over difficulty-derived per-task turn geometry, it reports an 8.8x–9.7x reduction versus the naive re-prefill floor (the A/C ratio) as worker count scales from 1 to 8; measured against a tuned per-agent-KV stack instead (B/C), the cross-worker gain is a modest 1.0x–1.1x. The task set is real but the turn geometry is derived, so these are a structural prefill work floor, not end-to-end latency or cost. The CLI (`fak webbench`) and the geometry model are shipped; live-model harness runs that would turn this into an end-to-end measured number remain pending.
+fak's WebBench geometry result is a closed-form MODEL — not a wall-clock measurement — of how much redundant prefill work fak's fused KV adjudication eliminates across the real 643-task WebVoyager dataset. Computed by `internal/webbench/geometry.go::ComputeArms` over difficulty-derived per-task turn geometry, it reports an 8.8x–9.7x reduction versus the naive re-prefill floor (the A/C ratio) as worker count scales from 1 to 8; compared with a tuned per-agent-KV stack instead (B/C), the cross-worker gain is a modest 1.0x–1.1x. The task set is real but the turn geometry is derived, so these are a structural prefill work floor, not end-to-end latency or cost. The CLI (`fak webbench`) and the geometry model are shipped; live-model harness runs that would turn this into an end-to-end measured number remain pending.
 
 > **Provenance.** The numbers below are a deterministic geometry MODEL over the
 > real 643-task WebVoyager set — closed-form prefill-token arithmetic
@@ -20,9 +20,19 @@ fak's WebBench geometry result is a closed-form MODEL — not a wall-clock measu
 
 ---
 
+## Measurement Status
+
+- Dataset: `testdata/webbench/webvoyager-converted.jsonl`, converted from the official WebVoyager export; 643 tasks in this repo's converted artifact.
+- Model: none for the geometry result; no live model/API/browser-agent execution is included.
+- Runs: n=0 live model runs; deterministic `fak webbench describe` geometry recomputations only.
+- Artifacts: `experiments/webbench/webvoyager-geometry-20260625.json`, `experiments/webbench/webvoyager-fleet-scale-20260626.json`.
+- Status: THEORETICAL (MODELED). The result is not MEASURED or VERIFIED end-to-end latency, token billing, or task-cost evidence.
+
+---
+
 ## What We Achieved ✅
 
-### 1. Real WebVoyager Dataset Acquisition
+### 1. WebVoyager Dataset Acquisition
 - **Downloaded:** Official WebVoyager dataset (643 tasks) from [MinorJerry/WebVoyager](https://github.com/MinorJerry/WebVoyager)
 - **Converted:** Created webbench-convert tool to transform to webbench format
 - **Validated:** 643 tasks successfully processed with metadata (difficulty, category, domain)
@@ -55,20 +65,21 @@ fak's WebBench geometry result is a closed-form MODEL — not a wall-clock measu
 All docs updated with:
 - Real vs theoretical comparison
 - Honest status badges (mock-geometry → real-set modeled)
-- Updated README with real numbers
+- Updated README with real-set modeled numbers
 - Full WebVoyager results report
 
 ---
 
-## Theoretical vs Real: Why the Difference?
+## Mock vs Real-Set Geometry: Why the Difference?
 
-| Metric | Theoretical (mock) | Real (WebVoyager) | Reason |
+| Metric | Theoretical mock geometry | Real-set modeled geometry | Reason |
 |--------|-------------------|-------------------|--------|
 | Dataset | 5 tasks (example.com) | 643 tasks (real websites) | Real vs synthetic |
 | Median turns | Assumed higher | 12 (from the real set) | Difficulty-derived WebVoyager geometry |
 | A/C Net Elimination | 15.6x - 16.6x | **8.8x - 9.7x** | Fewer turns = lower cumulative waste |
 
-**Key insight:** The real number is lower but still VERY significant. An 8.8x structural waste is enormous at scale.
+**Key insight:** the real-set modeled floor is lower than the mock ceiling. It is
+still a model-only prefill-work floor, not a live measured result.
 
 ---
 
@@ -97,7 +108,7 @@ Reading this against #920's stated expectations:
 - **B/C (cross-worker reuse) exceeds 1.10x at 100+ workers — CONFIRMED by the model**
   (1.11x, saturating at the asymptote `1 + Prefix/(growth·(T−1))`).
 - **A/C "~16x" — CORRECTED.** The deterministic asymptote is ~9.8x, not 16x. The 16x
-  figure was the synthetic-mock ceiling (see the "Theoretical vs Real" table above);
+  figure was the synthetic-mock ceiling (see the mock-vs-real-set table above);
   over the real WebVoyager turn geometry the naive-vs-fused ratio saturates at ~9.8x.
   A/B (the worker-independent turn-tax) stays 8.8x throughout.
 
@@ -141,7 +152,7 @@ end-to-end MEASURED fleet number is still gated on GPU server access + orchestra
 - [x] Real dataset acquisition
 - [x] Geometry modeling
 - [x] Cost arm computation
-- [x] Prefill work-elimination measurement
+- [x] Prefill work-elimination model over the real task set
 
 ### Phase 2: Live Model Runs 🔄 PENDING
 The following require additional infrastructure (browser harness + model access):
@@ -172,15 +183,19 @@ The following require additional infrastructure (browser harness + model access)
 
 ---
 
-## Why 8.8x is Still a HUGE Win
+## Why the 8.8x Floor Still Matters
 
-Even though it's lower than the theoretical 15.6x, **8.8x is enormous**:
+Even though it is lower than the theoretical 15.6x mock ceiling, **8.8x is a large
+model-only prefill-work floor**:
 
-- At 100 concurrent agents: 8.8x less prefill work
-- At 1,000 turns per agent: 8.8x savings scale linearly
-- For SOTA agents: Same 98.5% success rate at ~9x the efficiency
+- At 100 concurrent agents: modeled 8.8x less prefill work
+- At 1,000 turns per agent: modeled 8.8x savings scale linearly
+- For SOTA agents: a live A/B run should test whether the same success rate can
+  be preserved while realizing some of this modeled prefill-work reduction
 
-The turn-tax is **structural** — every web agent pays it, every turn. That's 8.8x wasted compute that fak eliminates.
+The modeled turn-tax is **structural** — every web agent pays it, every turn in
+the geometry model. On the real WebVoyager task set, this computes to an 8.8x
+prefill-work floor.
 
 ---
 
@@ -216,7 +231,7 @@ The turn-tax is **structural** — every web agent pays it, every turn. That's 8
 
 ## Commits
 
-- `d015ee9`: REAL WebVoyager measurements - 8.8x-9.7x on 643 tasks
+- `d015ee9`: WebVoyager real-set modeled geometry - 8.8x-9.7x on 643 tasks
 - `65e3caa`: Docs honesty pass - theory vs measurement
 - `496e176`: SOTA baseline results + visualization
 - `3c0623e`: Webbench implementation shipped
