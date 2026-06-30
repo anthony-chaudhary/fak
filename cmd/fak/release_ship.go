@@ -40,28 +40,30 @@ type releaseShipOptions struct {
 }
 
 type releaseShipResult struct {
-	OK               bool                 `json:"ok"`
-	DryRun           bool                 `json:"dry_run"`
-	Root             string               `json:"root"`
-	Base             string               `json:"base"`
-	BaseSHA          string               `json:"base_sha,omitempty"`
-	Worktree         string               `json:"worktree,omitempty"`
-	LockRoot         string               `json:"lock_root,omitempty"`
-	ReleaseOwner     string               `json:"release_owner,omitempty"`
-	Version          string               `json:"version,omitempty"`
-	Tag              string               `json:"tag,omitempty"`
-	CommitSHA        string               `json:"commit_sha,omitempty"`
-	Remote           string               `json:"remote,omitempty"`
-	Trunk            string               `json:"trunk,omitempty"`
-	Cut              map[string]any       `json:"cut,omitempty"`
-	TagResult        map[string]any       `json:"tag_result,omitempty"`
-	Publish          map[string]any       `json:"publish,omitempty"`
-	RemoteBranch     map[string]string    `json:"remote_branch,omitempty"`
-	Cleanup          map[string]any       `json:"cleanup,omitempty"`
-	Warnings         []string             `json:"warnings,omitempty"`
-	Errors           []string             `json:"errors,omitempty"`
-	CommandTail      map[string]string    `json:"command_tail,omitempty"`
-	ExecutedCommands []releaseShipCommand `json:"executed_commands,omitempty"`
+	OK                 bool                 `json:"ok"`
+	DryRun             bool                 `json:"dry_run"`
+	Root               string               `json:"root"`
+	Base               string               `json:"base"`
+	BaseSHA            string               `json:"base_sha,omitempty"`
+	Worktree           string               `json:"worktree,omitempty"`
+	LockRoot           string               `json:"lock_root,omitempty"`
+	ReleaseOwner       string               `json:"release_owner,omitempty"`
+	Version            string               `json:"version,omitempty"`
+	Tag                string               `json:"tag,omitempty"`
+	CommitSHA          string               `json:"commit_sha,omitempty"`
+	Remote             string               `json:"remote,omitempty"`
+	Trunk              string               `json:"trunk,omitempty"`
+	Cut                map[string]any       `json:"cut,omitempty"`
+	TagResult          map[string]any       `json:"tag_result,omitempty"`
+	Publish            map[string]any       `json:"publish,omitempty"`
+	ReleaseLock        map[string]any       `json:"release_lock,omitempty"`
+	ReleaseLockRelease map[string]any       `json:"release_lock_release,omitempty"`
+	RemoteBranch       map[string]string    `json:"remote_branch,omitempty"`
+	Cleanup            map[string]any       `json:"cleanup,omitempty"`
+	Warnings           []string             `json:"warnings,omitempty"`
+	Errors             []string             `json:"errors,omitempty"`
+	CommandTail        map[string]string    `json:"command_tail,omitempty"`
+	ExecutedCommands   []releaseShipCommand `json:"executed_commands,omitempty"`
 }
 
 type releaseShipCommand struct {
@@ -148,9 +150,9 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	return opts, nil
 }
 
-func executeReleaseShip(opts releaseShipOptions) releaseShipResult {
+func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	root := repoRoot()
-	result := releaseShipResult{
+	result = releaseShipResult{
 		DryRun:       !opts.execute,
 		Root:         root,
 		Base:         opts.base,
@@ -163,6 +165,25 @@ func executeReleaseShip(opts releaseShipOptions) releaseShipResult {
 	owner := releaseShipOwner()
 	result.ReleaseOwner = owner
 	env := releaseShipEnv(root, owner)
+	lockAcquired := false
+	defer func() {
+		if lockAcquired {
+			result.ReleaseLockRelease = runReleaseShipLockRelease(&result, root, env)
+			if ok, _ := result.ReleaseLockRelease["ok"].(bool); !ok {
+				result.Warnings = append(result.Warnings, "release lock release failed: "+jsonTail(result.ReleaseLockRelease))
+			}
+		}
+	}()
+
+	if opts.execute {
+		lock := runReleaseShipLockAcquire(&result, root, env, opts)
+		result.ReleaseLock = lock
+		if ok, _ := lock["ok"].(bool); !ok {
+			result.fail("release_lock_refused", jsonTail(lock))
+			return finishReleaseShip(result)
+		}
+		lockAcquired = true
+	}
 
 	if opts.fetch {
 		refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", opts.trunk, opts.remote, opts.trunk)
@@ -253,7 +274,7 @@ func executeReleaseShip(opts releaseShipOptions) releaseShipResult {
 func runReleaseShipCut(result *releaseShipResult, wt string, env []string, opts releaseShipOptions) map[string]any {
 	args := []string{releaseShipScript(wt, "release_cut.py"), "--json", "--allow-stale-upstream", "--limit-commits", strconv.Itoa(opts.limitCommits)}
 	if opts.execute {
-		args = append(args, "--execute")
+		args = append(args, "--execute", "--lock-already-held")
 	} else {
 		args = append(args, "--allow-hold")
 	}
@@ -296,12 +317,30 @@ func runReleaseShipTag(result *releaseShipResult, wt string, env []string, opts 
 	if opts.skipDryRun {
 		args = append(args, "--skip-dry-run")
 	}
+	if opts.execute {
+		args = append(args, "--lock-already-held")
+	}
 	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 45*time.Minute, "tag")
 }
 
 func runReleaseShipPublish(result *releaseShipResult, wt string, env []string, version string) map[string]any {
 	args := []string{releaseShipScript(wt, "release_publish.py"), "--version", version, "--execute", "--json"}
 	return releaseShipJSONCommand(result, wt, releaseShipPython(), args, env, 10*time.Minute, "publish")
+}
+
+func runReleaseShipLockAcquire(result *releaseShipResult, root string, env []string, opts releaseShipOptions) map[string]any {
+	args := []string{
+		releaseShipScript(root, "release_lock.py"),
+		"acquire",
+		"--ttl", strconv.Itoa(opts.ttl),
+		"--note", "fak release ship",
+	}
+	return releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock")
+}
+
+func runReleaseShipLockRelease(result *releaseShipResult, root string, env []string) map[string]any {
+	args := []string{releaseShipScript(root, "release_lock.py"), "release"}
+	return releaseShipJSONCommand(result, root, releaseShipPython(), args, env, time.Minute, "release_lock_release")
 }
 
 func releaseShipJSONCommand(result *releaseShipResult, cwd, name string, args []string, env []string, timeout time.Duration, label string) map[string]any {

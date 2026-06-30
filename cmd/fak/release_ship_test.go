@@ -10,6 +10,14 @@ import (
 func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			if !envHas(env, "FAK_RELEASE_LOCK_ROOT=") || !envHas(env, "FAK_RELEASE_OWNER=") {
+				t.Fatalf("release_lock acquire env missing shared lock fields: %v", env)
+			}
+			if !containsReleaseShipArg(args, "--ttl") || !containsReleaseShipArg(args, "--note") {
+				t.Fatalf("release_lock acquire missing ttl/note: %v", args)
+			}
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
 		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
@@ -20,6 +28,9 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			if !envHas(env, "FAK_RELEASE_LOCK_ROOT=") || !envHas(env, "FAK_RELEASE_OWNER=") {
 				t.Fatalf("release_cut env missing shared lock fields: %v", env)
 			}
+			if !containsReleaseShipArg(args, "--lock-already-held") {
+				t.Fatalf("release_cut must run under the parent release lock: %v", args)
+			}
 			return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha"}`
 		case name == "git" && sameArgs(args, "push", "origin", "HEAD:refs/heads/main"):
 			return 0, ""
@@ -29,6 +40,9 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			if !containsArgPair(args, "--trunk", "") {
 				t.Fatalf("release_tag must skip local-branch reachability after remote push: %v", args)
 			}
+			if !containsReleaseShipArg(args, "--lock-already-held") {
+				t.Fatalf("release_tag must run under the parent release lock: %v", args)
+			}
 			return 0, `{"ok":true,"tag":"v0.35.0","tag_created":true,"tag_pushed":true}`
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_publish.py")):
 			return 0, `{"ok":true,"release_created":true,"github_release":{"status":"present","url":"https://example.test/v0.35.0"}}`
@@ -36,6 +50,8 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "worktree", "prune"):
 			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
 		default:
 			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
 			return 127, "unexpected"
@@ -73,11 +89,19 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 	if result.Cleanup == nil || result.Cleanup["ok"] != true {
 		t.Fatalf("cleanup missing/failed: %#v", result.Cleanup)
 	}
+	if result.ReleaseLock == nil || result.ReleaseLockRelease == nil {
+		t.Fatalf("release lock acquire/release missing: acquire=%#v release=%#v", result.ReleaseLock, result.ReleaseLockRelease)
+	}
+	if len(result.ExecutedCommands) == 0 || !strings.HasSuffix(result.ExecutedCommands[0].Args[0], filepath.Join("tools", "release_lock.py")) || result.ExecutedCommands[0].Args[1] != "acquire" {
+		t.Fatalf("release lock must be acquired before release work: %#v", result.ExecutedCommands)
+	}
 }
 
 func TestReleaseShipCleansDetachedWorktreeWhenCutRefuses(t *testing.T) {
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
 		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
@@ -90,6 +114,8 @@ func TestReleaseShipCleansDetachedWorktreeWhenCutRefuses(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "worktree", "prune"):
 			return 0, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
 		default:
 			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
 			return 127, "unexpected"
@@ -117,6 +143,44 @@ func TestReleaseShipCleansDetachedWorktreeWhenCutRefuses(t *testing.T) {
 	}
 	if len(result.Errors) == 0 || !strings.Contains(result.Errors[0], "release_cut_refused") {
 		t.Fatalf("errors = %#v", result.Errors)
+	}
+	if result.ReleaseLock == nil || result.ReleaseLockRelease == nil {
+		t.Fatalf("release lock must be released after cut refusal: acquire=%#v release=%#v", result.ReleaseLock, result.ReleaseLockRelease)
+	}
+}
+
+func TestReleaseShipRefusesWhenReleaseLockHeldByAnotherOwner(t *testing.T) {
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 3, `{"ok":false,"reason":"held","holder":{"owner":"human-release"}}`
+		default:
+			t.Fatalf("release ship must refuse before cut work when the release lock is held; got %s %v in %s", name, args, cwd)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:      true,
+		base:         "origin/main",
+		remote:       "origin",
+		trunk:        "main",
+		workflow:     "ci.yml",
+		limitCommits: 50,
+		ttl:          1800,
+		fetch:        true,
+		skipDryRun:   true,
+	})
+
+	if result.OK {
+		t.Fatalf("result unexpectedly ok: %#v", result)
+	}
+	if len(result.Errors) == 0 || !strings.Contains(result.Errors[0], "release_lock_refused") {
+		t.Fatalf("errors = %#v", result.Errors)
+	}
+	if result.Worktree != "" || result.Cut != nil || result.ReleaseLockRelease != nil {
+		t.Fatalf("release work should not start and lock should not be released when acquire failed: %#v", result)
 	}
 }
 
@@ -151,6 +215,15 @@ func sameArgs(got []string, want ...string) bool {
 func containsArgPair(args []string, key, value string) bool {
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == key && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsReleaseShipArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
 			return true
 		}
 	}
