@@ -1,15 +1,14 @@
 package windowgate
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -59,11 +58,52 @@ func (r LiveTaskReport) OK() bool { return len(r.Violations) == 0 }
 
 // VisibleWindow is one visible top-level window observed from the desktop.
 type VisibleWindow struct {
-	PID         int    `json:"pid"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Path        string `json:"path"`
-	CommandLine string `json:"command_line"`
+	PID                    int    `json:"pid"`
+	Name                   string `json:"name"`
+	Title                  string `json:"title"`
+	Path                   string `json:"path"`
+	CommandLine            string `json:"command_line"`
+	ParentPID             int    `json:"parent_pid,omitempty"`
+	ParentName            string `json:"parent_name,omitempty"`
+	ParentCommandLine     string `json:"parent_command_line,omitempty"`
+	GrandparentPID        int    `json:"grandparent_pid,omitempty"`
+	GrandparentName       string `json:"grandparent_name,omitempty"`
+	GrandparentCommandLine string `json:"grandparent_command_line,omitempty"`
+}
+
+// VisibleWindowFinding is the machine-readable form of a live desktop finding.
+// Command-line fields are redacted/truncated; source VisibleWindow values retain
+// the raw OS read-back for local classification only.
+type VisibleWindowFinding struct {
+	Level                  string                    `json:"level"`
+	Category               string                    `json:"category"`
+	Reason                 string                    `json:"reason"`
+	Message                string                    `json:"message"`
+	PID                    int                       `json:"pid"`
+	Name                   string                    `json:"name"`
+	Title                  string                    `json:"title"`
+	Path                   string                    `json:"path,omitempty"`
+	CommandLine            string                    `json:"command_line,omitempty"`
+	ParentPID             int                       `json:"parent_pid,omitempty"`
+	ParentName            string                    `json:"parent_name,omitempty"`
+	ParentCommandLine     string                    `json:"parent_command_line,omitempty"`
+	GrandparentPID        int                       `json:"grandparent_pid,omitempty"`
+	GrandparentName       string                    `json:"grandparent_name,omitempty"`
+	GrandparentCommandLine string                    `json:"grandparent_command_line,omitempty"`
+	Browser                *BrowserAutomationDetails `json:"browser,omitempty"`
+}
+
+// BrowserAutomationDetails carries the browser-specific hints that are otherwise
+// buried past the truncation point of a long Chrome/Edge/Firefox command line.
+type BrowserAutomationDetails struct {
+	Engine              string `json:"engine,omitempty"`
+	RemoteDebuggingPort string `json:"remote_debugging_port,omitempty"`
+	UserDataDir         string `json:"user_data_dir,omitempty"`
+	Profile             string `json:"profile,omitempty"`
+	WindowPosition      string `json:"window_position,omitempty"`
+	Offscreen           bool   `json:"offscreen,omitempty"`
+	Headless            bool   `json:"headless,omitempty"`
+	StartMinimized      bool   `json:"start_minimized,omitempty"`
 }
 
 // VisibleWindowReport audits what is visible right now. It is intentionally
@@ -73,79 +113,14 @@ type VisibleWindowReport struct {
 	Scanned    int
 	Violations []string
 	Watchlist  []string
+	Findings   []VisibleWindowFinding
 }
 
 // OK reports whether the live desktop has no hard visible automation window.
 func (r VisibleWindowReport) OK() bool { return len(r.Violations) == 0 }
 
-// ScanLiveScheduledTasks reads local Windows Scheduled Tasks and classifies any
-// console-prone interactive actions. On non-Windows hosts it returns an empty
-// report so the CLI flag stays portable.
-func ScanLiveScheduledTasks(ctx context.Context) (LiveTaskReport, error) {
-	if runtime.GOOS != "windows" {
-		return LiveTaskReport{}, nil
-	}
-	const ps = `$ErrorActionPreference='SilentlyContinue'
-Get-ScheduledTask | ForEach-Object {
-  $task = $_
-  foreach ($action in $task.Actions) {
-    [pscustomobject]@{
-      task_path = "$($task.TaskPath)"
-      task_name = "$($task.TaskName)"
-      state = "$($task.State)"
-      logon_type = "$($task.Principal.LogonType)"
-      user = "$($task.Principal.UserId)"
-      execute = "$($action.Execute)"
-      arguments = "$($action.Arguments)"
-    }
-  }
-} | ConvertTo-Json -Depth 4`
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-	ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return LiveTaskReport{}, fmt.Errorf("read scheduled tasks: %w", err)
-	}
-	tasks, err := parseLiveScheduledTasks(out)
-	if err != nil {
-		return LiveTaskReport{}, err
-	}
-	return ClassifyLiveScheduledTasks(tasks), nil
-}
-
-// ScanVisibleWindows reads visible top-level windows and classifies console/tool
-// windows likely to belong to background automation. On non-Windows hosts it
-// returns an empty report so the CLI flag stays portable.
-func ScanVisibleWindows(ctx context.Context) (VisibleWindowReport, error) {
-	if runtime.GOOS != "windows" {
-		return VisibleWindowReport{}, nil
-	}
-	const ps = `$ErrorActionPreference='SilentlyContinue'
-$cmds = @{}
-Get-CimInstance Win32_Process | ForEach-Object { $cmds[[int]$_.ProcessId] = "$($_.CommandLine)" }
-Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) } | ForEach-Object {
-  [pscustomobject]@{
-    pid = [int]$_.Id
-    name = "$($_.ProcessName)"
-    title = "$($_.MainWindowTitle)"
-    path = "$($_.Path)"
-    command_line = "$($cmds[[int]$_.Id])"
-  }
-} | ConvertTo-Json -Depth 4`
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-	ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return VisibleWindowReport{}, fmt.Errorf("read visible windows: %w", err)
-	}
-	windows, err := parseVisibleWindows(out)
-	if err != nil {
-		return VisibleWindowReport{}, err
-	}
-	return ClassifyVisibleWindows(windows), nil
-}
-
-func parseVisibleWindows(out []byte) ([]VisibleWindow, error) {
+// ParseVisibleWindows decodes the JSON emitted by the CLI's live-window collector.
+func ParseVisibleWindows(out []byte) ([]VisibleWindow, error) {
 	text := strings.TrimSpace(string(out))
 	if text == "" || text == "null" {
 		return nil, nil
@@ -168,26 +143,105 @@ func parseVisibleWindows(out []byte) ([]VisibleWindow, error) {
 func ClassifyVisibleWindows(windows []VisibleWindow) VisibleWindowReport {
 	rep := VisibleWindowReport{Scanned: len(windows)}
 	for _, win := range windows {
-		if visibleWindowIgnored(win) {
+		finding, ok := classifyVisibleWindow(win)
+		if !ok {
 			continue
 		}
-		row := visibleWindowRow(win)
-		switch {
-		case visibleConsoleTool(win) && visibleAutomationOwned(win):
-			rep.Violations = append(rep.Violations, row+" is a visible console/tool window owned by repo automation")
-		case visibleConsoleTool(win):
-			rep.Watchlist = append(rep.Watchlist, row+" is a visible console/tool window; confirm this is user-attended")
-		case visibleBrowserAutomation(win):
-			rep.Watchlist = append(rep.Watchlist, row+" is browser automation with a visible top-level window; keep it off-screen or headless")
+		rep.Findings = append(rep.Findings, finding)
+		switch finding.Level {
+		case "violation":
+			rep.Violations = append(rep.Violations, finding.Message)
+		case "watchlist":
+			rep.Watchlist = append(rep.Watchlist, finding.Message)
 		}
 	}
 	sort.Strings(rep.Violations)
 	sort.Strings(rep.Watchlist)
+	sort.Slice(rep.Findings, func(i, j int) bool {
+		a, b := rep.Findings[i], rep.Findings[j]
+		if a.Level != b.Level {
+			return a.Level < b.Level
+		}
+		if a.Category != b.Category {
+			return a.Category < b.Category
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.Title != b.Title {
+			return a.Title < b.Title
+		}
+		return a.PID < b.PID
+	})
 	return rep
 }
 
+func classifyVisibleWindow(win VisibleWindow) (VisibleWindowFinding, bool) {
+	if visibleWindowIgnored(win) {
+		return VisibleWindowFinding{}, false
+	}
+	finding := visibleWindowFinding(win)
+	switch {
+	case visibleConsoleTool(win) && visibleAutomationOwned(win):
+		finding.Level = "violation"
+		finding.Category = "repo_console_tool"
+		finding.Reason = "visible console/tool window owned by repo automation"
+	case visibleConsoleTool(win):
+		finding.Level = "watchlist"
+		finding.Category = "console_tool"
+		finding.Reason = "visible console/tool window; confirm this is user-attended"
+	case visibleBrowserAutomation(win):
+		finding.Level = "watchlist"
+		finding.Category = "browser_automation"
+		finding.Reason = "browser automation with a visible top-level window; keep it off-screen or headless"
+	default:
+		return VisibleWindowFinding{}, false
+	}
+	finding.Message = visibleWindowRow(win) + " is " + finding.Reason
+	return finding, true
+}
+
+func visibleWindowFinding(win VisibleWindow) VisibleWindowFinding {
+	return VisibleWindowFinding{
+		PID:                    win.PID,
+		Name:                   win.Name,
+		Title:                  win.Title,
+		Path:                   win.Path,
+		CommandLine:            redactCommandLine(win.CommandLine),
+		ParentPID:              win.ParentPID,
+		ParentName:             win.ParentName,
+		ParentCommandLine:      redactCommandLine(win.ParentCommandLine),
+		GrandparentPID:         win.GrandparentPID,
+		GrandparentName:        win.GrandparentName,
+		GrandparentCommandLine: redactCommandLine(win.GrandparentCommandLine),
+		Browser:                browserAutomationDetails(win),
+	}
+}
+
 func visibleWindowRow(win VisibleWindow) string {
-	return fmt.Sprintf("pid=%d name=%s title=%q cmd=%s", win.PID, win.Name, win.Title, redactCommandLine(win.CommandLine))
+	parts := []string{fmt.Sprintf("pid=%d name=%s title=%q", win.PID, win.Name, win.Title)}
+	if browser := browserAutomationDetails(win); browser != nil {
+		if browser.RemoteDebuggingPort != "" {
+			parts = append(parts, "port="+browser.RemoteDebuggingPort)
+		}
+		if browser.Profile != "" {
+			parts = append(parts, "profile="+browser.Profile)
+		}
+		if browser.WindowPosition != "" {
+			parts = append(parts, "window_pos="+browser.WindowPosition)
+		}
+		if browser.Offscreen {
+			parts = append(parts, "offscreen=true")
+		}
+		if browser.Headless {
+			parts = append(parts, "headless=true")
+		}
+	}
+	if win.ParentPID != 0 || win.ParentName != "" {
+		parts = append(parts, fmt.Sprintf("parent=%s[%d]", emptyDash(win.ParentName), win.ParentPID))
+	}
+	parts = append(parts, "cmd="+redactCommandLine(win.CommandLine))
+	return strings.Join(parts, " ")
 }
 
 func visibleWindowIgnored(win VisibleWindow) bool {
@@ -236,9 +290,58 @@ func visibleBrowserAutomation(win VisibleWindow) bool {
 }
 
 var (
-	reHTTPURL = regexp.MustCompile(`https?://\S+`)
-	reSecrets = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|state=[^&\s]+|code_challenge=[^&\s]+)`)
+	reHTTPURL              = regexp.MustCompile(`https?://\S+`)
+	reSecrets              = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|state=[^&\s]+|code_challenge=[^&\s]+)`)
+	reRemoteDebuggingPort  = regexp.MustCompile(`(?i)--remote-debugging-port(?:=|\s+)(\d+)`)
+	reUserDataDir          = regexp.MustCompile(`(?i)--user-data-dir(?:=|\s+)("[^"]+"|'[^']+'|\S+)`)
+	reBrowserWindowPos     = regexp.MustCompile(`(?i)--window-position(?:=|\s+)(-?\d+,-?\d+)`)
+	reBrowserWindowPosPair = regexp.MustCompile(`^(-?\d+),(-?\d+)$`)
 )
+
+func browserAutomationDetails(win VisibleWindow) *BrowserAutomationDetails {
+	if !visibleBrowserAutomation(win) {
+		return nil
+	}
+	cmd := win.CommandLine
+	d := &BrowserAutomationDetails{
+		Engine:         strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe")),
+		Headless:       strings.Contains(strings.ToLower(cmd), "--headless"),
+		StartMinimized: strings.Contains(strings.ToLower(cmd), "--start-minimized"),
+	}
+	if m := reRemoteDebuggingPort.FindStringSubmatch(cmd); m != nil {
+		d.RemoteDebuggingPort = m[1]
+	}
+	if m := reUserDataDir.FindStringSubmatch(cmd); m != nil {
+		d.UserDataDir = strings.Trim(m[1], `"'`)
+		d.Profile = filepath.Base(strings.ReplaceAll(d.UserDataDir, "\\", "/"))
+	}
+	if m := reBrowserWindowPos.FindStringSubmatch(cmd); m != nil {
+		d.WindowPosition = m[1]
+		d.Offscreen = browserWindowPositionOffscreen(m[1])
+	}
+	return d
+}
+
+func browserWindowPositionOffscreen(pos string) bool {
+	m := reBrowserWindowPosPair.FindStringSubmatch(strings.TrimSpace(pos))
+	if m == nil {
+		return false
+	}
+	x, errX := strconv.Atoi(m[1])
+	y, errY := strconv.Atoi(m[2])
+	if errX != nil || errY != nil {
+		return false
+	}
+	return x <= -10000 || y <= -10000
+}
+
+func emptyDash(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "-"
+	}
+	return s
+}
 
 func redactCommandLine(s string) string {
 	s = reHTTPURL.ReplaceAllString(s, "[url-redacted]")
@@ -250,7 +353,8 @@ func redactCommandLine(s string) string {
 	return s
 }
 
-func parseLiveScheduledTasks(out []byte) ([]LiveScheduledTask, error) {
+// ParseLiveScheduledTasks decodes the JSON emitted by the CLI's scheduled-task collector.
+func ParseLiveScheduledTasks(out []byte) ([]LiveScheduledTask, error) {
 	text := strings.TrimSpace(string(out))
 	if text == "" || text == "null" {
 		return nil, nil
