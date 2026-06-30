@@ -48,6 +48,7 @@ type Report struct {
 	State       State          `json:"state"`
 	Attention   Attention      `json:"attention"`
 	HumanUse    HumanUse       `json:"human_use"`
+	Generation  *Generation    `json:"generation,omitempty"`
 	Coherence   Coherence      `json:"coherence"`
 	Delta       *Delta         `json:"since_previous,omitempty"`
 	Strengths   []Strength     `json:"strengths,omitempty"`
@@ -152,6 +153,27 @@ type HumanUse struct {
 	LetAgentsDo  string `json:"let_agents_do"`
 	Avoid        string `json:"avoid"`
 	EscalateWhen string `json:"escalate_when"`
+}
+
+// Generation is the compact "what ships now vs later" readout for the operator.
+// It is derived from the milestone report's generation lanes, not from issue-body
+// prose, so the answer stays tied to the same witnessed roadmap fold.
+type Generation struct {
+	Summary   string           `json:"summary"`
+	Attention string           `json:"attention"`
+	Lanes     []GenerationLane `json:"lanes,omitempty"`
+}
+
+// GenerationLane is the operator-brief projection of one product horizon.
+type GenerationLane struct {
+	Generation   string  `json:"generation"`
+	Tracked      int     `json:"tracked"`
+	Measured     int     `json:"measured"`
+	Programs     int     `json:"programs"`
+	Discrete     int     `json:"discrete"`
+	OpenDiscrete int     `json:"open_discrete"`
+	OverallPct   float64 `json:"overall_pct"`
+	Errored      int     `json:"errored,omitempty"`
 }
 
 // Strength is evidence-backed work the operator can trust or delegate. It keeps
@@ -345,6 +367,9 @@ func addMilestone(r *Report, m milestonereport.Report) {
 	if m.Trend != nil && m.Trend.Direction == "regressed" {
 		r.addWatch("milestone", "milestone trend regressed", m.Trend.Summary, "inspect climb and roadmap deltas before changing priorities")
 	}
+	if len(m.Epics.Generations) > 0 {
+		r.Generation = generationReadout(m.Epics.Generations)
+	}
 	if m.Epics.OK && m.Epics.Total > m.Epics.Closed {
 		detail := fmt.Sprintf("roadmap %.1f%% across %d discrete epic(s)", m.Epics.OverallPct, m.Epics.Discrete)
 		r.addAgent("milestone", "roadmap work remains", detail, m.NextAction)
@@ -355,6 +380,48 @@ func addMilestone(r *Report, m milestonereport.Report) {
 	if m.OK && m.Finding == "milestone_recorded" && m.Epics.Total == m.Epics.Closed {
 		r.addBackground("milestone", "milestone measured", m.Reason, "keep the scheduled milestone tick")
 	}
+}
+
+func generationReadout(rows []milestonereport.GenerationRow) *Generation {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := &Generation{}
+	var nowOpen, laterTracked, unreadable int
+	for _, row := range rows {
+		lane := GenerationLane{
+			Generation:   row.Generation,
+			Tracked:      row.Tracked,
+			Measured:     row.Measured,
+			Programs:     row.Programs,
+			Discrete:     row.Discrete,
+			OpenDiscrete: maxInt(0, row.Total-row.Closed),
+			OverallPct:   row.OverallPct,
+			Errored:      row.Errored,
+		}
+		out.Lanes = append(out.Lanes, lane)
+		if row.Generation == "now" {
+			nowOpen = lane.OpenDiscrete
+		} else if row.Generation != "unclassified" {
+			laterTracked += lane.Tracked
+		}
+		unreadable += lane.Errored
+	}
+	switch {
+	case unreadable > 0:
+		out.Summary = fmt.Sprintf("generation lanes have %d unreadable item(s); do not promote or demote from this readout yet", unreadable)
+		out.Attention = "repair the unreadable generation lane signal before changing dispatch focus"
+	case nowOpen > 0:
+		out.Summary = fmt.Sprintf("ship-now lane has %d open discrete item(s); %d later-horizon item(s) stay visible", nowOpen, laterTracked)
+		out.Attention = "delegate from the now lane first; review later lanes only when promotion evidence changes"
+	case laterTracked > 0:
+		out.Summary = fmt.Sprintf("ship-now lane is clear; %d later-horizon item(s) remain as bets or foundations", laterTracked)
+		out.Attention = "no extra human attention unless a later item asks for promotion into now"
+	default:
+		out.Summary = "generation lanes are clear or unclassified only"
+		out.Attention = "preserve generation labels and project fields; no attention budget needed"
+	}
+	return out
 }
 
 func addHeaviness(r *Report, h scorecard.Payload) {
@@ -891,6 +958,7 @@ func Render(r Report) string {
 		"  coherence  " + renderCoherence(r.Coherence),
 		"  sources    " + renderSources(r.Sources),
 	}
+	lines = appendGeneration(lines, r.Generation)
 	lines = appendDelta(lines, r.Delta)
 	lines = appendStrengths(lines, r.Strengths)
 	lines = appendChoices(lines, r.Choices)
@@ -903,6 +971,35 @@ func Render(r Report) string {
 	lines = appendSection(lines, "background", capItems(r.Background, 4))
 	lines = append(lines, "", "  -> "+r.NextAction)
 	return strings.Join(lines, "\n")
+}
+
+func appendGeneration(lines []string, g *Generation) []string {
+	if g == nil {
+		return lines
+	}
+	lines = append(lines, "  generation "+g.Summary)
+	if g.Attention != "" {
+		lines = append(lines, "              "+g.Attention)
+	}
+	for _, lane := range g.Lanes {
+		if lane.Tracked == 0 {
+			lines = append(lines, fmt.Sprintf("              %s: 0 tracked", lane.Generation))
+			continue
+		}
+		parts := []string{fmt.Sprintf("%s: %d tracked", lane.Generation, lane.Tracked)}
+		if lane.OpenDiscrete > 0 || lane.Discrete > 0 {
+			parts = append(parts, fmt.Sprintf("%d open discrete", lane.OpenDiscrete))
+			parts = append(parts, fmt.Sprintf("%.1f%% discrete", lane.OverallPct))
+		}
+		if lane.Programs > 0 {
+			parts = append(parts, fmt.Sprintf("%d ongoing", lane.Programs))
+		}
+		if lane.Errored > 0 {
+			parts = append(parts, fmt.Sprintf("%d unreadable", lane.Errored))
+		}
+		lines = append(lines, "              "+strings.Join(parts, "; "))
+	}
+	return lines
 }
 
 func appendDelta(lines []string, d *Delta) []string {
@@ -1344,6 +1441,13 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func containsString(vals []string, want string) bool {

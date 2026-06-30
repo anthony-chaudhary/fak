@@ -135,6 +135,52 @@ func TestFoldDelegatesMaturityDebtToAgents(t *testing.T) {
 	}
 }
 
+func TestFoldCarriesGenerationReadoutFromMilestone(t *testing.T) {
+	c := cleanCadence()
+	p := cleanProgram()
+	m := cleanMilestone()
+	m.Epics = milestonereport.InterpretEpics(
+		[]milestonereport.EpicSpec{
+			{Number: 1315, Title: "native harness", Generation: "now"},
+			{Number: 1010, Title: "GLM kernel", Generation: "next"},
+			{Number: 42, Title: "future option", Generation: "future"},
+		},
+		[]milestonereport.EpicCounts{
+			{Number: 1315, Closed: 1, Total: 3, Source: "label"},
+			{Number: 1010, Closed: 7, Total: 10, Source: "label"},
+			{Number: 42, Closed: 1, Total: 1, Source: "checklist"},
+		},
+		"",
+	)
+
+	got := Fold(Inputs{Cadence: &c, Program: &p, Milestone: &m})
+	if got.Generation == nil {
+		t.Fatal("generation readout missing")
+	}
+	if !strings.Contains(got.Generation.Summary, "ship-now lane has 2 open discrete") || !strings.Contains(got.Generation.Summary, "2 later-horizon") {
+		t.Fatalf("generation summary = %q", got.Generation.Summary)
+	}
+	if !strings.Contains(got.Generation.Attention, "now lane first") {
+		t.Fatalf("generation attention = %q", got.Generation.Attention)
+	}
+	byGen := map[string]GenerationLane{}
+	for _, lane := range got.Generation.Lanes {
+		byGen[lane.Generation] = lane
+	}
+	if lane := byGen["now"]; lane.OpenDiscrete != 2 || lane.Discrete != 1 || lane.OverallPct != 33.3 {
+		t.Fatalf("now lane = %+v, want 2 open discrete at 33.3%%", lane)
+	}
+	if lane := byGen["next"]; lane.Programs != 1 || lane.OpenDiscrete != 0 {
+		t.Fatalf("next lane = %+v, want one ongoing program and no discrete open count", lane)
+	}
+	rendered := Render(got)
+	for _, want := range []string{"generation ship-now lane", "delegate from the now lane first", "now: 1 tracked", "next: 1 tracked", "future: 1 tracked"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("render missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestFoldReviewModeForRegressedProgramFrontier(t *testing.T) {
 	c := cleanCadence()
 	m := cleanMilestone()
