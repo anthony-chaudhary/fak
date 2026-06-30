@@ -21469,7 +21469,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | Qwen3.6-27B fak **Metal Q4_K** decode / prefill ([#63](https://github.com/anthony-chaudhary/fak/issues/63)) | **decode 1.2 tok/s · warm prefill 2.6 @P=27, 7.3 @P=940 tok/s** (cold first prefill 0.5; decode 0.16× and warm prefill 0.05×→0.14× of SOTA) | Qwen3.6-27B q4_k_m, M3 Pro (`-tags fakmetal`, `FAK_Q4K=1 FAK_METAL=1`, post-#1085; no co-resident llama-server for clean runs) | llama.cpp Metal 7.29 decode / 51.55 prefill | _this commit_ | `experiments/qwen36/metal-fak-q4k-post1085-m3pro-20260628.json` archives the owner-witnessed post-#1085 prefill refresh (GPU q4_k GEMM engaged for all 184 resident weights; greedy first token still matches CPU). Decode is carried forward from `experiments/benchmark/runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json` (kernels bit-correct; GEMV cosine 1.000000, greedy token-parity vs CPU) until #67 remeasures resident-forward decode. **Still trails SOTA; no pass claimed.** Remaining wall is weight upload + per-call GPU round-trip / result memcpy (#1113/#69). Full prior diagnosis: `docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md` |
 | Qwen3.6-27B token parity | 2-token match (drift @3) | Qwen3.6-27B q4_k_m | llama.cpp oracle | `d03be46` | `model-ladder/qwen36-resident-q4k-parity-20260619.json` |
 | Qwen3.6-27B surface smoke | 4/4 surfaces PASS | Qwen3.6-27B (served) | agent/gateway/mcp/dogfood | `8a0f5bc` | `model-ladder/qwen36-surfaces-dogfood-opencode-20260619.json` |
-| **Qwen3.6-27B 8-GPU SGLang serving — fak-gateway vs raw-SGLang (model-ladder Rung 4 headline, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak C=64: fak-gateway 1085.6 vs raw-SGLang 1451.6 completion tok/s = 0.75×; gateway tax converges to ~3% at saturation (C=128: 1074.4 vs 1103.2 = 0.97×); 3/3 fak surfaces PASS (agent / gateway-OpenAI single-stream decode 59.3 tok/s / MCP-HTTP)** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server | raw SGLang 0.5.10.post1 (TP=8, bf16) | `a2559041` | `experiments/qwen36/dgx-r4-20260622/compare.json` (+ `COMPARE.md`, `fak-gateway.json`, `raw-sglang.json`, `surface-smoke.json`); results doc `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. **SGLang-serves + fak-adjudicates, NOT fak's native CUDA engine** (no quantized multi-GPU 27B path yet; f32 27B is 108 GB > 80 GB). fak's axis is the adjudication/coherence/measurement plane, not raw tok/s — the gateway tax is the cost of mediation and amortizes to ~3% at load. Marker-compliance caveat: the load harness requires a literal `FAK_DGX_REQ_` echo the reasoning model emits only ~35–66% of the time, so throughput is over the compliant subset (`--max-error-rate 0.9`); per-point ok/requests in the JSONs (C=64: fak 55/64, raw 59/64). Single-stream rates ≪ batched and not fak's axis |
+| **Qwen3.6-27B 8-GPU SGLang serving — fak-gateway vs raw-SGLang (SGLang adapter closure [#39](https://github.com/anthony-chaudhary/fak/issues/39); model-ladder Rung 4 headline [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak C=64: fak-gateway 1085.6 vs raw-SGLang 1451.6 completion tok/s = 0.75×; gateway tax converges to ~3% at saturation (C=128: 1074.4 vs 1103.2 = 0.97×); 3/3 fak surfaces PASS (agent / gateway-OpenAI single-stream decode 59.3 tok/s / MCP-HTTP)** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server | raw SGLang 0.5.10.post1 (TP=8, bf16) | `a2559041` | `experiments/qwen36/dgx-r4-20260622/compare.json` (+ `COMPARE.md`, `fak-gateway.json`, `raw-sglang.json`, `surface-smoke.json`); results doc `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md`. **SGLang-serves + fak-adjudicates, NOT fak's native CUDA engine** (no quantized multi-GPU 27B path yet; f32 27B is 108 GB > 80 GB). fak's axis is the adjudication/coherence/measurement plane, not raw tok/s — the gateway tax is the cost of mediation and amortizes to ~3% at load. Marker-compliance caveat: the load harness requires a literal `FAK_DGX_REQ_` echo the reasoning model emits only ~35–66% of the time, so throughput is over the compliant subset (`--max-error-rate 0.9`); per-point ok/requests in the JSONs (C=64: fak 55/64, raw 59/64). Single-stream rates ≪ batched and not fak's axis |
 | **Qwen3.6-27B cold standup on 8-GPU datacenter server — raw-SGLang serving baseline (Rung-4 fresh-standup witness, [#921](https://github.com/anthony-chaudhary/fak/issues/921))** | **peak 820.5 completion tok/s @ C=64 (16.5k total tok/s incl. prompt) · 0 errors across all 6 points C=1→64 · single-stream 77.8 completion tok/s @ C=1** | Qwen/Qwen3.6-27B (dense hybrid Gated-DeltaNet), 8-GPU datacenter server, TP=8 | raw SGLang (`--tp 8 --mem-fraction-static 0.85`), cold standup from all-GPUs-idle (0 MiB) | _this commit_ | `experiments/qwen36/dgx-standup-27b-20260624/raw-sglang.json` (`fak.dgx-endpoint-bench.v1`, 6-point sweep + 8-GPU datacenter server topology/driver provenance) + `STANDUP.md` (narrative) + `samples.json` (3 live temperature-0 completions). **Cold-standup witness**: at start all 8 GPUs idle and nothing on `:30000`; weights load + CUDA-graph capture, then a real OpenAI-compatible sweep. This is the **raw SGLang serving baseline** (fresh bring-up proof), NOT a fak-gateway number — the gateway-tax comparison is the dgx-r4 Rung-4 row above. C=64 cap ⇒ 820.5 is a floor, not a ceiling (throughput still climbing monotonically at the top of the sweep); the wider C=128 sweep on the same box is the dgx-r4 row (raw 1451.6 @ C=64 → 1103.2 @ C=128). Marker gate disabled (`--no-require-response-marker`: the reasoning model echoes the literal `FAK_DGX_REQ_` only ~35–66% of the time), throughput measured over completed requests (`errors=0` at every point) |
 | Synthetic model live ratio | 1.64× | 64h/4L wiring | Full re-prefill | `a200c3d` | `radixbench-synthetic.json` |
 | **GPU Q8 decode (Vulkan, RX 7600)** | **24.6 tok/s · 1.49× vs GPU f32** | SmolLM2-135M Q8 | Same forward, f32 weights on GPU | `60db592` | `q8gpu-smollm2-135m-{gpu-q8,gpu-f32}-20260619.json` |
@@ -22706,9 +22706,19 @@ description: "fak's modeled WebVoyager prefill geometry: over the real 643-task 
 
 # Frontier WebBench Baselines & SOTA Comparison
 
-This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; it is the serving kernel that makes any SOTA web agent cheaper to run by not re-processing the same browser context on every turn.
+This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; this page is the model-only floor for the live cost benchmark still to be run.
 
 **Last Updated:** 2026-06-20
+
+---
+
+## Measurement Status
+
+- Dataset: `testdata/webbench/webvoyager-converted.jsonl`, converted from the official WebVoyager export; 643 tasks in this repo's converted artifact.
+- Model: none for the numbers on this page; no live agent/model execution is included.
+- Runs: n=0 live model runs; the tables are deterministic `fak webbench describe` geometry recomputations.
+- Artifacts: `experiments/webbench/webvoyager-geometry-20260625.json`, `experiments/webbench/webvoyager-fleet-scale-20260626.json`.
+- Status: THEORETICAL (MODELED). The page is not a MEASURED or VERIFIED end-to-end WebVoyager cost/latency benchmark.
 
 ---
 
@@ -22751,16 +22761,22 @@ The real-set number is lower because actual WebVoyager tasks have fewer turns
 
 ## Executive Summary
 
-**fak is not a web agent.** It's the kernel that makes running SOTA web agents **15x+ cheaper** by eliminating the wasted work of re-processing the same browser context on every turn.
+**fak is not a web agent.** This page documents the current WebBench efficiency
+floor: a modeled 8.8x-9.7x prefill-work reduction versus the naive re-prefill
+floor over the converted WebVoyager task set. That is not a measured cost or
+latency result.
 
-The current web agent benchmark leaderboard measures **capability** (success rate). That's the model's job. fak measures **efficiency** (prefill work-elimination). That's the infrastructure's job. A SOTA agent running through fak gets the same 98.5% success rate at a fraction of the cost.
+The current web agent benchmark leaderboard measures **capability** (success
+rate). That's the model's job. fak's current WebBench surface measures a
+model-only **efficiency floor** (prefill work-elimination). A live A/B run is
+still required before claiming a measured cost reduction for any SOTA web agent.
 
 ## The Position: Capability vs. Efficiency
 
 | What | Who | Metric | fak's Role |
 |------|-----|--------|------------|
 | **Can the agent complete the task?** | Model (Claude, GPT-4, etc.) | Success Rate | ✗ None - model's capability |
-| **How much compute does it cost?** | Infrastructure (orchestrator, serving) | $ per task | ✓ **15x+ work-elimination** |
+| **How much compute does it cost?** | Infrastructure (orchestrator, serving) | $ per task | Current page: **modeled prefill-work floor only** |
 
 **The point:** Every web agent system today is paying the **turn-tax** — re-prefill megabytes of browser state on every navigation action. That wasted work doesn't exist in fak.
 
@@ -22787,9 +22803,11 @@ The current web agent benchmark leaderboard measures **capability** (success rat
 | **Halluminate Web Bench** | rtrvr.ai: 81.4% | 7-23x faster than competitors |
 | **Skyvern 2.0** | 85.85% | Maintains 76.8% at 250 concurrent agents |
 
-## fak's Value Proposition: SOTA @ 15x Less Work
+## Modeled Prefill Floor
 
-Running any of the above SOTA agents **through fak** delivers:
+The legacy mock geometry showed what the arithmetic could look like before the
+real WebVoyager task set was converted. It is retained here only as historical
+theory, not as a result claim.
 
 ### Deterministic Prefill Work-Elimination
 
@@ -22800,7 +22818,7 @@ Running any of the above SOTA agents **through fak** delivers:
 | 4 | 13.5 M tokens | 870K tokens | 824K tokens | **16.4x** |
 | 8 | 27.1 M tokens | 1.7 M tokens | 1.6 M tokens | **16.6x** |
 
-**Methodology:** 5-task sample MOCK dataset (example.com domains); ASSUMED WebVoyager-style geometry (P=3.4K, Action=150, DOMState=2K). These are THEORETICAL calculations demonstrating the framework. Real measurements on actual WebVoyager data are pending (issues #510, #511).
+**Methodology:** 5-task sample MOCK dataset (example.com domains); ASSUMED WebVoyager-style geometry (P=3.4K, Action=150, DOMState=2K). These are THEORETICAL calculations demonstrating the framework. Live measurements on actual WebVoyager runs are pending.
 
 ### The Breakdown
 
@@ -22810,7 +22828,9 @@ Running any of the above SOTA agents **through fak** delivers:
 | **B/C (Cross-Worker Reuse)** | Isolated agents vs. shared session value stack | **1.00x - 1.07x** |
 | **A/B (Turn-Tax)** | Re-prefill vs. per-agent KV persistence | **15.6x** (worker-independent) |
 
-**Key finding:** The turn-tax (A/B = 15.6x) is *worker-independent* — every agent pays it, every time, regardless of fleet size. That's the structural waste fak eliminates.
+**Historical note:** The turn-tax (A/B = 15.6x) in this table came from a 5-task
+mock dataset and assumed geometry. It is not a benchmark result and must not be
+used as the WebBench headline.
 
 ---
 
@@ -22841,7 +22861,9 @@ Running any of the above SOTA agents **through fak** delivers:
 | **B/C (Cross-Worker Reuse)** | Cross-worker prefix reuse | **1.00x - 1.10x** |
 | **A/B (Turn-Tax)** | Re-prefill vs KV persistence | **8.8x** (worker-independent) |
 
-**Key finding:** The turn-tax is **structural** — every agent pays it, every turn. On the real WebVoyager dataset, this amounts to **8.8x** wasted work that fak eliminates.
+**Key finding:** The modeled turn-tax is **structural** — every agent pays it,
+every turn in the geometry model. On the real WebVoyager task set, this computes
+to an **8.8x** prefill-work floor.
 
 ---
 
@@ -22852,7 +22874,10 @@ Take Alumnium's 98.5% SOTA run: ~$5 in API costs for 586 tasks. That's **capabil
 - **Without fak:** Every navigation action re-prefills the entire browser context (DOM state, tool schemas, task history) — that's 2K+ tokens per turn, times ~12 turns per task, times 586 tasks.
 - **With fak:** The shared prefix is prefilled once; all workers reuse it. Turn-by-turn, only the new DOM state is processed.
 
-The net elimination (15.6x) means the same 98.5% SOTA agent running through fak costs **~15x less** in prefill compute. For fleet-scale deployments (100+ concurrent agents), that's the difference between viable and prohibitively expensive.
+The modeled 8.8x-9.7x prefill-work floor suggests where a live cost run should
+look for savings. It does not prove that the same 98.5% SOTA agent costs less
+through fak; that claim requires the pending live harness run with the same
+agent, same task set, and logged token/cost artifacts.
 
 ## Proper Comparison: Whatfak Actually Competes With
 
@@ -22862,16 +22887,16 @@ The net elimination (15.6x) means the same 98.5% SOTA agent running through fak 
 - Agent orchestration logic — that's LangChain, custom controllers
 
 **fak DOES compete with:**
-- Naive agent serving (re-send full context every turn) — **15.6x win**
-- Per-agent KV isolation (vLLM prefix caching per worker) — **1.04x-1.07x win at 2-8 workers**
+- Naive agent serving (re-send full context every turn) — **modeled 8.8x-9.7x less prefill work vs the naive floor**
+- Per-agent KV isolation (vLLM prefix caching per worker) — **modeled 1.00x-1.10x cross-worker gain at 1-8 workers**
 - Frontier prompt caches (append-only, no eviction) — **addressable eviction advantage**
 
 The only thing that matters for the comparison is: **how much prefill work does your infrastructure do per turn?**
 
 | System | Prefill Strategy | Work Relative to fak |
 |--------|------------------|----------------------|
-| Naive re-send | Full context every turn | **15.6x more** |
-| Per-agent KV | Prefix cached per worker | **1.04x-1.07x more** (at 2-8 workers) |
+| Naive re-send | Full context every turn | **modeled 8.8x-9.7x more prefill work** |
+| Per-agent KV | Prefix cached per worker | **modeled 1.00x-1.10x more prefill work** (at 1-8 workers) |
 | vLLM prefix cache | Shared prefix per serving instance | Similar (if single-tenant) |
 | Frontier prompt cache | Append-only reuse | Similar (can't evict) |
 | **fak fused** | Shared prefix + cross-worker reuse + addressable eviction | **1x (baseline)** |
@@ -24492,6 +24517,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Planner per-turn COMPUTE flatten MEASURED over the heaviest REAL session transcripts (issues #558/#559, `cmd/ctxplanbench` planning-cost arm): the empirical counterpart to `Index`'s `IndexBoundedPlannerCompute` model (claim above) — measuring the planner's OWN work, not just its resident output. The bench maintains ONE persistent `ctxplan.Index` across the replay (the `SessionPlanner` pattern) and per turn scores the bounded `Index.PlanCells` probe alongside the full-scan `Materialize` plan under the IDENTICAL forecast/budget/`Optimize(ObjGreedy)`, so the only variable is the candidate set (N vs c). On the 5 heaviest transcripts (851 replayed turns, W=8000, default cap c=128/recency 32): the per-turn probe never overran the cap on ANY of 851 turns (the Θ(c·N) bound held), cumulative candidate-scoring **100.1K full-scan vs 68.0K bounded (1.5× less planner work, growing with N** — 43-turn session 1.0× → 342-turn 1.7×, the Θ(N²)→Θ(c·N) shape); resident-token efficiency is PRESERVED under the bounded planner (bounded cum 6.29M vs full-scan 6.36M, within 1.2%; both ~12× below linear 76.97M). Mechanism equivalence witnessed end-to-end: probe=ALL candidates ⇒ **342/342 IDENTICAL plans** on the largest session. Honest fences: at the SHIPPED default width the bounded plan picks a DIFFERENT resident set than the full scan on most long-session turns (plan-agree 208/851) — the divergence is access-path COVERAGE, not the cap (a real session spreads selection-worthy benefit across more spans than recency/relevance/durability reach) — but every divergence is a bounded efficiency miss, NEVER a lost fact (15,530 back-reference faults, 100% served, 0 lost), and the cap/recency are a measured cost↔fidelity dial (recency 32→4096 lifts agreement 39→131/342 at ~equal cost; the named next lever is a utility access path); the flatten is Θ(N) in the horizon (modest at hundreds of turns, pays off on long sessions); resident units are the bytes/4 proxy; hardware-independent exact counts (reproduces on `node-macos-a`); off the live path (a bench cmd; the `SessionPlanner` it mirrors, #558, is the agent-seam home, unit-witnessed by `TestSessionPlannerBoundedMatchesStatelessFullScan`). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants` asserts the bound + plan-agreement at N<cap; `TestPlanningCostFlattenWhenBounded` forces the cap to bite and asserts the Θ(c·N) ceiling + a real flatten); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real run `-heaviest 5`; `docs/notes/CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md`.
 - [SHIPPED] Provable-deletion certificate (`internal/deletioncert`, demo `cmd/deletioncert`): a `DeletionCertificate` binds the evicted span, `EvictedCount`, the byte-exact equivalence (evicted == never-saw, max|Δ|=0), a tamper-evident hash-chained journal anchor, and the trust epoch under one ed25519 signature, and **fails closed** on any forged field, non-zero drift, or absent/rewritten anchor (re-verified live in the demo). Honest fences: it is a **self-signed v1** receipt (it attests the integrity of the recorded facts, not independence from the recorder); `EvictedCount` is a self-report; and the bound `max|Δ|=0` is checked as a **signed string, not re-measured** — the eviction's bit-exactness is proven separately by the KV-quarantine bridge above (synthetic model; HF numerics by the oracle). Witness: `go test ./internal/deletioncert`; `docs/proofs/deletioncert.md`; `go run ./cmd/deletioncert -selfcheck` exit 0.
 - [SHIPPED] The in-kernel model is wired as a `RegisterEngine` backend (`internal/modelengine`, id `inkernel`) and now completes lifecycle requests through the native continuous-batching scheduler (#401): an allowed tool call is prefetched into a kernel-owned `model.Session`, concurrent admissions are promoted between decode steps, multi-lane decode advances through `model.BatchSession.StepBatch`, and finished/cancelled lanes reclaim their KV-bearing session. Batch-1 keeps the serial `Session.Step` fast path, so the scheduler does not impose a single-request regression in the committed witness; `FAK_NATIVE_MAX_RUNNING` caps the running set when an operator wants a smaller batch. Lazily builds a deterministic synthetic checkpoint (runs with no model export); `FAK_MODEL_DIR` / `fak serve --gguf` preload real weights through the identical dispatch path, with the armed tokenizer and resident-Q4_K mode preserved. Honest fences: resident Q4_K multi-lane decode falls back to per-lane `Session.Step` because `BatchSession` has no Q4_K dispatch yet, and production paged-attention / multi-tenant SLA policy remains outside this lifecycle scheduler. Witness: `go test ./internal/modelengine`; `BenchmarkEngineContinuousBatching` (`.\test.ps1 -run '^$' -bench BenchmarkEngineContinuousBatching -benchmem -benchtime=50x ./internal/modelengine`) records B1 1.12×, B2 1.30×, B4 1.61×, B8 1.92× req/s vs the legacy per-request lifecycle in `experiments/modelengine/native-continuous-batching-20260629.json`.
+- [SHIPPED] SGLang is a first-class ridden engine adapter behind the frozen `abi.EngineDriver` / lifecycle seam (#39): `internal/engine` registers `abi.RegisterEngine("sglang", DefaultSGLangEngine)`, drives SGLang's public `/generate` streaming API, folds RadixAttention residency snapshots into the shared `PrefixResidencyIndex`, normalizes SGLang scheduler counters into the shared `fak_serving_*` schema, and keeps governance on the existing `enginecache.EngineSGLang` identity where `SupportsExactSpan==false` means whole-prefix `flush_cache`, not exact-span eviction. Honest fences: the radix-residency endpoint is a bridge/test seam because SGLang has no single standardized public radix-dump path; this is an adapter/control-plane integration, not an SGLang fork or a claim that fak owns SGLang KV pages. Witness: `go test ./internal/engine` (`TestSGLangIsRouterDispatchableNotProxyOnly`, `/generate` streaming, radix snapshot fold, Prometheus normalization, enginecache identity); live fak-fronted-SGLang vs raw-SGLang overhead is recorded in `experiments/qwen36/dgx-r4-20260622/compare.json` and `docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md` (gateway tax 0.75x at C=64, 0.97x at C=128).
 - [SHIPPED] Poly-model serving core (`internal/polymodel`, foundation leaf, stdlib-only): the deterministic **"host many models, share the prefill, decode one"** mechanism — a weight-byte-budgeted multi-model residency `Pool` (LRU eviction of the coldest UNPINNED model, all-or-nothing admit), a single **SERIAL** decode-lane scheduler (`Schedule`/`NextDecoder`, the at-most-one-model-decodes-per-step invariant asserted), and the cache-led multi-token-prediction accept core (`AcceptGreedy`: the greedy speculative-decoding accept rule whose KEEP/EVICT counts map 1:1 onto the bit-exact `KVCache.Clone` fork + `KVCache.Evict` rollback; `AcceptTree` the next-gen token-TREE generalization (Medusa/EAGLE-2/SpecInfer: many candidate continuations share a KV prefix, verified in one pass, only the accepted path kept); `PickDrafter` ensemble drafter selection; `EffectiveTokensPerVerify` geometric-series speedup model), plus `CanShare`, the cross-model prefill-share gate (model B reuses model A's prefix KV iff same `Family` + byte-identical `PrefixDigest` ⇒ lossless reuse — the verdict-layer unlock that lifts the cache's exact-ModelID barrier; share DECISION plus the verdict-layer wiring + KVCache.Clone splice, shipped in #534 — `cachemeta.PrefillSharePolicy` lifts the ModelID barrier for a declared-compatible family (opt-in via `WithPrefillShare`, ModelID-axis-only, every other axis still verified), and `internal/spec.CrossModelPrefillShare` / `SplicePrefillShare` is the off-defconfig bridge + bit-exact Clone splice). It encodes the prefill(compute-bound)/decode(HBM-bandwidth-bound) asymmetry that makes "decode one" a hardware consequence, not a compromise. Honest fence: this is the policy/accounting brain ONLY — it runs no model, moves no KV bytes, touches no GPU, and is **off mainline by construction**: the leaf is NOT in the defconfig (`internal/registrations`), so the `fak` binary never links it (only `cmd/polymodelbench` does), and the eventual live-path wiring is gated behind `polymodel.Enabled()` (`FAK_POLYMODEL`, default off); real multi-model residency on a backend remains sequenced (the verify EXECUTION shipped in #533 — single-pass batched + tree-attention masks); served cross-model prefill share — the verdict-layer barrier lift + KVCache.Clone splice — shipped in #534 (`cachemeta.MaterializeVerdict` + `WithPrefillShare`; `internal/spec` bridge) in `docs/serving/polymodel-prefill-share-plan.md` (the frozen ABI MTP envelope — `abi.SpeculationContext`/`TxnID`/`Outcome`/`ProvisionalSink` — has no implementation behind it yet). Witness: `go test ./internal/polymodel` (residency budget-never-exceeded + pinned-never-evicted, serial-lane invariant, accept KEEP+EVICT conservation, drafter selection, speedup monotonicity); `go test ./internal/architest` (tier-1 layering); `go run ./cmd/polymodelbench -selfcheck` exit 0 — hosts 10 synthetic models under a budget, drives the serial decode lane over REAL `model.Session` decode, and proves greedy speculative decode is token-identical to plain greedy even when an adversarial draft forces a rollback every round (the bit-exact `KVCache.Evict` path, exercised 96 spans / vacuity-guarded).
 - [SHIPPED] Single-pass batched + tree-attention verify execution (`internal/model.VerifyForward` + `internal/spec`, rung #533 of epic #529): the throughput half that turns the shipped accept DECISION (`polymodel.AcceptGreedy`/`AcceptTree`) + bit-exact rollback (`spec.Sink`→`KVCache.Evict`) into a real ONE-pass forward over the candidate tokens, instead of one decode step per candidate. `model.VerifyForward(ids, pos, allow)` runs the PreNorm-standard batched forward over P candidates and returns each position's next-token logits: with nil `pos`/nil `allow` it is the CHAIN verify — bit-identical to P sequential `Session.Step` calls (same per-position logits AND the same appended K/Kraw/V/pos in every layer, witnessed `TestVerifyForwardChainMatchesSerial`), so `spec.SpeculativeGreedy` now verifies a kk-token draft in ONE pass instead of kk Steps and stays token-identical to plain greedy; with depth-based `pos` (siblings share `base+depth-1`) and an ancestor `allow` mask it is the TREE verify — tree-attention masks, where each node attends only to its ancestor chain + the committed prefix and never to sibling branches (witnessed `TestVerifyForwardTreeMaskIsolatesBranches`). `spec.VerifyTree`/`SpeculativeTree` drive the tree through `polymodel.AcceptTree` and commit the accepted path (rewind the speculation with one bit-exact `KVCache.Evict`, recommit the accepted chain as one `VerifyForward`); the accepted path is token-identical to plain greedy decode (`TestSpeculativeTreeLosslessGreedyPath`: 21/63 accepted, distractor branches rejected by the mask; `TestSpeculativeTreeLosslessArbitrary`: lossless regardless of drafter quality; `TestVerifyTreeRewindsAndCommitsCleanly`: the target cache is byte-exact to a greedy session after the round). Honest fences: it runs on the CPU synthetic PreNorm regime (no GPU, so no tokens/sec — the speedup is the closed-form `EffectiveTokensPerVerify` arithmetic; a measured number needs the bench harness #535); the chain falls back to sequential `Step`s on a non-batched regime (always correct, just not single-pass); the tree recomputes the accepted path's KV rather than keeping it from the verify pass (a tree-aware KV-compaction primitive is the honest sequenced cost, not a correctness gap); off mainline by construction (NOT in the defconfig, `FAK_POLYMODEL`-gated, default off). Witness: `go test ./internal/model ./internal/spec`.
 - [SHIPPED] Multi-model weight-residency layer (`internal/residency`, mechanism leaf, rung #531): `Manager` lifts the single-`*model.Model` assumption (`modelengine.Default` is one `*model.Model`) — a pool of `*model.Model` under one weight-byte budget with LRU page-out, **reusing `polymodel.Pool` as the budget + eviction policy** and binding each residency descriptor (id / weightBytes / family / prefixDigest / pinned — the cross-model prefill-share and speculation keys) to the real in-kernel weights it governs. The budget test, the LRU victim choice, the pinned-exemption, and the all-or-nothing admit are ALL `polymodel.Pool`'s (Manager delegates, never re-implements), so every polymodel invariant holds here by construction; what this layer adds is the descriptor→weights binding and the page-out hand-back (an evicted resident's `*model.Model` is returned to the caller for release — the signal `polymodel.Pool` cannot give, since it owns no weights). Honest fence: it is the policy + binding layer ONLY — it moves no weight bytes and touches no GPU; the real per-backend weight load/evict (the compute-HAL per-weight budget `internal/compute/vulkan.go`, the process-wide `gpulease`) is the deeper rung a future wiring drives through `Admit`/`Evict`, and `WeightBytes` is caller-supplied at admit (the quantized footprint a real backend reports). It is **off mainline by construction**: NOT in the defconfig (`internal/registrations`) and registers nothing from `init()` (a library type a caller constructs, like `polymodel`), so the `fak` binary never links it; the eventual live-path wiring is gated behind `polymodel.Enabled()` (`FAK_POLYMODEL`, default off). Witness: `go test ./internal/residency` (budget-never-exceeded, LRU evicts coldest-unpinned WITH the weight handle handed back, pinned-never-evicted + ErrPinnedNoRoom fail-closed, all-or-nothing admit, re-admit-is-Touch, explicit Evict hand-back, nil-weights rejected, descriptor round-trip, concurrent-admit budget invariant under `-race`); `go test ./internal/architest` (tier-2 layering — composes model+polymodel under the root ABI).
@@ -25300,12 +25326,14 @@ in that order.
 
 ## 2. Ongoing work: what is in flight right now
 
-The weakest-organized of the three: real, but spread across three parallel surfaces with
-no single live view.
+The weakest-organized of the three: real, but spread across several parallel surfaces.
+`fak operator brief` is now the synthesis layer over the main report panes; the
+underlying work is still owned by the source reports.
 
 | Surface | Role |
 |---|---|
 | [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md), "Status & tracking" | The hub that links every per-effort tracker, and the closest thing to a single roll-up today. |
+| [`operator-brief.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/operator-brief.md) / `fak operator brief` | The human pacing layer: folds cadence, program, and milestone JSON into `human`, `agent`, `watch`, and `background` buckets so operators can see decisions separately from delegable work and ambient telemetry. |
 | `docs/notes/*-tracking-*.md`, `*-status-*.md` | The per-effort trackers (dated by design, so they age out): Track B perf parity (#306), Track D agent-framework parity (#304), Track F integration/tooling (#302), GPU parity (#480), SIMD CPU parity (#400), the self-tax performance-assurance plane (#1147), the model-arch seam (#487), ultra-long context (#519), the [verification-ladder epics](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/verification-ladder-epics.md). |
 | [GitHub Issues](https://github.com/anthony-chaudhary/fak/issues) plus [`docs/dispatch-loop.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/dispatch-loop.md) | The live backlog and the witness-gated loop that drives it (`cmd/dispatchworker`: spawn, ship #N, witness, close). The always-current open-issue count lives in the tracker, never hard-coded here. |
 | [`docs/idea-scout.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/idea-scout.md) | The inbound feeder: a daily arXiv and GitHub sweep that files triage-ready issues (`tools/idea_scout.py`), the complement to the dispatch loop. |
