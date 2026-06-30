@@ -220,9 +220,77 @@ func commandWrites(cmd string) bool {
 	if archiveExtractsOrSyncs(lc) {
 		return true
 	}
-	// Output redirect: a bare '>' or '>>' (not the '2>&1'/'>&' fd-dup forms, which
-	// are not a file write per se, but conservatively a '>' anywhere is a write).
-	return strings.Contains(cmd, ">")
+	// Output redirect to a REAL file: a `>`/`>>` whose target is an actual path.
+	// fd-duplication (`2>&1`, `>&2`, `1>&2`) and a redirect to the null device
+	// (`2>/dev/null`, `>/dev/null`) write NO named file, so — matching this floor's
+	// "only a WRITE into a guarded tree is refused; a read of a guarded file is
+	// allowed" contract — they are NOT writes. The prior `strings.Contains(cmd, ">")`
+	// counted a bare `>` anywhere as a write, which refused the ubiquitous
+	// `cat internal/kernel/x.go 2>/dev/null` read-with-stderr idiom (and any command
+	// naming a guarded glob that merely carried a `2>/dev/null`/`2>&1`) as SELF_MODIFY
+	// (#1569). A genuine `> guarded/path` / `>> ~/.ssh/id_rsa` still fires.
+	return hasFileWriteRedirect(cmd)
+}
+
+// hasFileWriteRedirect reports whether cmd contains an output redirect (`>`/`>>`)
+// whose target is a real file, as opposed to an fd-duplication (`2>&1`, `>&2`,
+// `1>&2`) or a redirect to the null device (`2>/dev/null`, `>/dev/null`) — neither
+// of which writes a named file. It keeps commandWrites true to its documented
+// "a read is allowed; only a write is refused" contract: the pervasive trailing
+// `… 2>/dev/null` / `… 2>&1` stderr idiom on an otherwise read-only command no
+// longer marks it write-shaped, while a genuine `> path` (including
+// `>> internal/kernel/x.go` or `> ~/.ssh/id_rsa`) still does. Conservative on the
+// rare/odd forms: an unrecognised or empty target (process substitution `>(cmd)`,
+// a dangling `>`) is treated as NOT a write only when it names no real path, so the
+// floor never loses a redirect into a guarded tree.
+func hasFileWriteRedirect(cmd string) bool {
+	for i := 0; i < len(cmd); i++ {
+		if cmd[i] != '>' {
+			continue
+		}
+		j := i + 1
+		if j < len(cmd) && cmd[j] == '>' { // collapse `>>` to its target
+			j++
+		}
+		if j < len(cmd) && cmd[j] == '|' { // `>|` clobber-override still writes a file
+			j++
+		}
+		// fd-duplication: `>&` / `2>&1` / `>&2` duplicates a descriptor, not a file.
+		if j < len(cmd) && cmd[j] == '&' {
+			continue
+		}
+		// Skip whitespace between the operator and its target.
+		for j < len(cmd) && (cmd[j] == ' ' || cmd[j] == '\t') {
+			j++
+		}
+		// Read the target token up to the next shell boundary.
+		k := j
+		for k < len(cmd) && !isRedirectTargetBoundary(cmd[k]) {
+			k++
+		}
+		target := cmd[j:k]
+		if target == "" || isNullSink(target) {
+			continue // no real file written by this redirect
+		}
+		return true
+	}
+	return false
+}
+
+// isNullSink reports whether a redirect target is the null device — a write that
+// reaches no file-system path and so can never touch a guarded tree.
+func isNullSink(target string) bool {
+	return target == "/dev/null"
+}
+
+// isRedirectTargetBoundary reports whether b ends a redirect target token (a shell
+// separator, whitespace, another redirect, or a quote).
+func isRedirectTargetBoundary(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', ';', '|', '&', '<', '>', '(', ')', '"', '\'', '`':
+		return true
+	}
+	return false
 }
 
 // archiveExtractsOrSyncs reports whether lc (the lowercased command) is an archive
