@@ -4,7 +4,7 @@
 `tools/qwen36_mac_parity_gate.sh` runs on an Apple-Silicon M3 Pro and emits one
 witness JSON (`experiments/agent-live/qwen36-mac-parity-gate-<ts>.json`) with three
 arms: correctness (the token ids fak vs the llama.cpp b9707 oracle + the first
-divergence index), the #116 Metal hybrid-prefill gate result, and speed vs the
+divergence index), the #71 Metal hybrid-prefill gate result, and speed vs the
 51.55/7.29 bar. That script computes a one-shot inline verdict and exits -- nothing
 re-grades the witness afterward, so there is no across-run REGRESSION tracking and no
 gate that runs on a plain CPU box.
@@ -48,6 +48,16 @@ KNOWN_FAK_IDS = [248068, 198, 8160]        # fak GGUF->Q8 greedy today (`<think>
 KNOWN_DIVERGENCE_INDEX = 2                  # two-token match, then the token-3 near-tie flip
 BAR_PREFILL = 51.55                         # llama.cpp b9707 Metal prefill bar (M3 Pro)
 BAR_DECODE = 7.29                           # llama.cpp b9707 Metal decode bar (M3 Pro)
+
+# Open M4 issue map for this witness surface. The witness does not close every
+# linked issue by itself; it gives each issue a stable artifact to inspect once the
+# Mac node produces a run.
+ISSUE_LINKS = {
+    "correctness": [64, 1458],
+    "metal_gate": [71, 1458],
+    "speed": [64, 1382],
+    "q6k_fused_mlp": [1381],
+}
 
 # The sanctioned PUBLIC placeholder host (docs/fak/scrubbing-real-values.md). Any other
 # `.local` hostname, an IP, a `user@host`, or a tailnet `.ts.net` in the witness is a leak.
@@ -230,6 +240,7 @@ def grade_witness(witness: dict, witness_path: str = "<inline>", min_ratio: floa
     return {
         "schema": SCHEMA,
         "witness": witness_path,
+        "issues": ISSUE_LINKS,
         "commit": witness.get("commit"),
         "captured_at": witness.get("captured_at"),
         "host": witness.get("host"),
@@ -248,13 +259,28 @@ def no_witness_report(require: bool) -> dict:
             f"({WITNESS_DIR}/{WITNESS_GLOB})")
     return {
         "schema": SCHEMA, "witness": "<none>", "status": "NO_WITNESS",
+        "issues": ISSUE_LINKS,
         "passed": not require, "failures": [note] if require else [], "note": note,
     }
 
 
+def issue_links_markdown(issues: dict[str, list[int]]) -> str:
+    parts = []
+    for key in ("correctness", "metal_gate", "speed", "q6k_fused_mlp"):
+        nums = issues.get(key, [])
+        label = key.replace("_", " ")
+        parts.append(f"{label}: " + "/".join(f"#{n}" for n in nums))
+    return "; ".join(parts)
+
+
 def render_markdown(report: dict) -> str:
     if report.get("status") == "NO_WITNESS":
-        return f"# Qwen3.6 Parity Witness Gate\n\n- Verdict: NO_WITNESS\n- {report['note']}\n"
+        return (
+            "# Qwen3.6 Parity Witness Gate\n\n"
+            "- Verdict: NO_WITNESS\n"
+            f"- Issues: {issue_links_markdown(report.get('issues', ISSUE_LINKS))}\n"
+            f"- {report['note']}\n"
+        )
     c = report["correctness"]
     s = report["speed"]
     lines = [
@@ -262,10 +288,11 @@ def render_markdown(report: dict) -> str:
         "",
         f"- Verdict: {'PASS' if report['passed'] else 'FAIL'}",
         f"- Witness: `{report['witness']}`  (commit `{report.get('commit')}`)",
+        f"- Issues: {issue_links_markdown(report.get('issues', ISSUE_LINKS))}",
         f"- Correctness: **{c['verdict']}** -- {c['note']}",
         f"  - fak ids `{c['fak_ids']}`  vs oracle `{c['oracle_ids']}`  "
         f"(first divergence index {c['first_divergence_index']}, known {c['known_divergence_index']})",
-        f"- Metal hybrid-prefill gate (#116): {'PASS' if report['metal_gate']['pass'] else 'not-yet'} "
+        f"- Metal hybrid-prefill gate (#71): {'PASS' if report['metal_gate']['pass'] else 'not-yet'} "
         "(recorded, not gated here)",
         f"- Speed (recorded): prefill {s['prefill_tok_s']} tok/s ({s['prefill_ratio']}x bar "
         f"{s['bar_prefill_tok_s']}), decode {s['decode_tok_s']} tok/s ({s['decode_ratio']}x bar "

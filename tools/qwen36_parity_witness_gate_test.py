@@ -128,11 +128,26 @@ def test_speed_gates_when_min_ratio_set():
     assert any("decode" in f for f in r["speed"]["failures"])
 
 
+def test_report_carries_open_m4_issue_links():
+    r = gate.grade_witness(witness(list(gate.KNOWN_FAK_IDS)))
+    assert r["issues"]["correctness"] == [64, 1458]
+    assert r["issues"]["metal_gate"] == [71, 1458]
+    assert r["issues"]["speed"] == [64, 1382]
+    assert r["issues"]["q6k_fused_mlp"] == [1381]
+
+
+def test_markdown_names_issue_71_not_stale_116():
+    md = gate.render_markdown(gate.grade_witness(witness(list(gate.KNOWN_FAK_IDS))))
+    assert "Metal hybrid-prefill gate (#71)" in md
+    assert "#116" not in md
+
+
 def test_no_witness_is_not_a_pass_when_required():
     soft = gate.no_witness_report(require=False)
     hard = gate.no_witness_report(require=True)
     assert soft["passed"] is True and soft["status"] == "NO_WITNESS"
     assert hard["passed"] is False
+    assert hard["issues"]["metal_gate"] == [71, 1458]
 
 
 def test_find_latest_witness_picks_newest_by_timestamp():
