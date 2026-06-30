@@ -4,18 +4,18 @@
 
 ## What's new
 
+- **2026-06-30** — Shipped: sync window gate command ([`04a4eb0a`](https://github.com/anthony-chaudhary/fak/commit/04a4eb0a))
+- **2026-06-30** — Shipped: sync window gate coverage ([`4a564c74`](https://github.com/anthony-chaudhary/fak/commit/4a564c74))
+- **2026-06-30** — Documented: add silicon-vendor answer-engine terms ([`02b1240e`](https://github.com/anthony-chaudhary/fak/commit/02b1240e))
+- **2026-06-30** — Shipped: sync shared worktree ([`e03dd2e6`](https://github.com/anthony-chaudhary/fak/commit/e03dd2e6))
 - **2026-06-30** — Shipped: sync shared worktree ([`d4ba89a9`](https://github.com/anthony-chaudhary/fak/commit/d4ba89a9))
 - **2026-06-30** — Shipped: sync shared worktree ([`3a03db49`](https://github.com/anthony-chaudhary/fak/commit/3a03db49))
-- **2026-06-30** — Documented: sync shared documentation ([`e6758095`](https://github.com/anthony-chaudhary/fak/commit/e6758095))
+- **2026-06-30** — Documented: add binding-layer AEO vendor routing ([`e6758095`](https://github.com/anthony-chaudhary/fak/commit/e6758095))
 - **2026-06-30** — Shipped: sync shared worktree ([`21996096`](https://github.com/anthony-chaudhary/fak/commit/21996096))
 - **2026-06-30** — Fixed: cover concept-disambiguation ci gaps ([`fd7e46ef`](https://github.com/anthony-chaudhary/fak/commit/fd7e46ef))
 - **2026-06-30** — New: add generation readout (#1633) ([`e0467ea0`](https://github.com/anthony-chaudhary/fak/commit/e0467ea0))
 - **2026-06-30** — Shipped: sync shared worktree ([`a30e8802`](https://github.com/anthony-chaudhary/fak/commit/a30e8802))
 - **2026-06-30** — Shipped: sync shared worktree ([`d7992dca`](https://github.com/anthony-chaudhary/fak/commit/d7992dca))
-- **2026-06-30** — Documented: sync shared documentation ([`1710137e`](https://github.com/anthony-chaudhary/fak/commit/1710137e))
-- **2026-06-30** — Shipped: sync shared worktree ([`1d82a07d`](https://github.com/anthony-chaudhary/fak/commit/1d82a07d))
-- **2026-06-30** — Shipped: sync shared worktree ([`607aff73`](https://github.com/anthony-chaudhary/fak/commit/607aff73))
-- **2026-06-30** — Shipped: sync shared worktree ([`47b882cc`](https://github.com/anthony-chaudhary/fak/commit/47b882cc))
 
 <!-- WHATS-NEW:END -->
 
