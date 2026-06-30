@@ -234,10 +234,39 @@ func TestVCacheWarmthBeliefMetrics(t *testing.T) {
 		`fak_vcache_warmth_predictions_total 3`,
 		`fak_vcache_warmth_false_warm_rate 1`,
 		`fak_vcache_warmth_false_cold_rate 1`,
+		`fak_vcache_warmth_demotions_total 1`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("warmth scrape missing %q\n--- metrics ---\n%s", want, text)
 		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	records := vars.VCacheWarmth
+	if len(records) != 1 {
+		t.Fatalf("warmth demotion journal recorded %d rows, want 1: %+v", len(records), records)
+	}
+	r := records[0]
+	if r.Schema != vcacheWarmthDemotionJournalSchema {
+		t.Fatalf("schema = %q, want %q", r.Schema, vcacheWarmthDemotionJournalSchema)
+	}
+	if r.Family != "warm" || r.Action != "mark_belief_cold" || r.Reason != "false_warm" {
+		t.Fatalf("unexpected demotion record identity: %+v", r)
+	}
+	if !r.PredictedWarm || r.ActualWarm || r.StateBefore != "resident" || r.StateAfter != "expired" {
+		t.Fatalf("unexpected demotion state: %+v", r)
+	}
+	if r.InputTokens != 100 || r.CacheReadTokens != 0 || r.CacheCreationTokens != 0 {
+		t.Fatalf("unexpected demotion token counters: %+v", r)
+	}
+	if r.DivergenceProbe != "not_wired" {
+		t.Fatalf("divergence probe = %q, want explicit not_wired scope", r.DivergenceProbe)
+	}
+	if r.PrevHash != "" || r.Hash == "" {
+		t.Fatalf("bad demotion hash chain genesis: %+v", r)
+	}
+	if got := hashVCacheWarmthDemotion(r.PrevHash, r); got != r.Hash {
+		t.Fatalf("demotion hash mismatch: got %q want %q", got, r.Hash)
 	}
 }
 
