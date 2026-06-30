@@ -29,17 +29,19 @@ file (that would be unsafe in the live shared worktree). It only reads the store
 through ``dos memory verify`` and shapes the standard fleet control-pane payload.
 
 STORE LOCATION: the Claude Code auto-memory store is per-project and
-machine-specific - NOT a repo-relative committed mirror. It lives under the
-home directory at ``~/.claude/projects/<ns>/memory/``, where ``<ns>`` is the
-absolute workspace path with the drive colon and path separators collapsed to
-``-`` (e.g. ``C:\\work\\fak`` -> ``C--work-fak``). ``collect`` resolves this
-default from ``--workspace``; pass ``--store`` to point at any other store. The
-store is NOT shipped via git, so every node audits its OWN local memories.
+machine-specific - NOT a repo-relative committed mirror. ``collect`` resolves
+it as ``CLAUDE_MEMORY_DIR`` > ``CLAUDE_CONFIG_DIR/projects/<ns>/memory`` >
+``~/.claude/projects/<ns>/memory``, where ``<ns>`` is the absolute workspace
+path with the drive colon and path separators collapsed to ``-`` (e.g.
+``C:\\work\\fak`` -> ``C--work-fak``). Pass ``--store`` to point at any other
+store. The store is NOT shipped via git, so every node audits its OWN local
+memories.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -76,12 +78,18 @@ def project_namespace(workspace: Path) -> str:
 def default_store(workspace: Path) -> Path:
     """The per-project auto-memory store for ``workspace``.
 
-    Resolves to ``~/.claude/projects/<ns>/memory`` - the real, machine-specific
-    location of the Claude Code auto-memory store. It is NOT a committed,
-    repo-relative mirror: each node has its OWN store under its home directory.
+    Resolves through the same relocation-aware precedence as the harness:
+    ``CLAUDE_MEMORY_DIR`` > ``CLAUDE_CONFIG_DIR`` > ``~/.claude``. It is NOT a
+    committed, repo-relative mirror: each node has its OWN store under its
+    active config home.
     """
+    env = os.environ.get("CLAUDE_MEMORY_DIR")
+    if env:
+        return Path(env)
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    base = Path(config_dir) if config_dir else Path.home() / ".claude"
     ns = project_namespace(workspace)
-    return Path.home() / ".claude" / "projects" / ns / "memory"
+    return base / "projects" / ns / "memory"
 
 
 def run_text(cmd: list[str], cwd: Path, *, timeout: int = 120) -> dict[str, Any]:

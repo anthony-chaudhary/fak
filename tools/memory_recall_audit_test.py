@@ -10,6 +10,7 @@ Run: `python tools/memory_recall_audit_test.py`  (exit 0 = all pass).
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -110,6 +111,29 @@ def main() -> int:
     check("default store is NOT repo-relative .claude/memory",
           ".claude/memory" not in str(store).replace("\\", "/").rsplit("projects", 1)[0],
           str(store))
+    old_mem = os.environ.get("CLAUDE_MEMORY_DIR")
+    old_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    try:
+        os.environ.pop("CLAUDE_MEMORY_DIR", None)
+        os.environ["CLAUDE_CONFIG_DIR"] = "/tmp/claude-config"
+        cfg_store = mra.default_store(Path("/work/fak"))
+        check("CLAUDE_CONFIG_DIR relocates default store",
+              str(cfg_store).replace("\\", "/").endswith("/tmp/claude-config/projects/" + ns + "/memory"),
+              str(cfg_store))
+        os.environ["CLAUDE_MEMORY_DIR"] = "/tmp/explicit-memory"
+        mem_store = mra.default_store(Path("/work/fak"))
+        check("CLAUDE_MEMORY_DIR overrides CLAUDE_CONFIG_DIR",
+              str(mem_store).replace("\\", "/") == "/tmp/explicit-memory",
+              str(mem_store))
+    finally:
+        if old_mem is None:
+            os.environ.pop("CLAUDE_MEMORY_DIR", None)
+        else:
+            os.environ["CLAUDE_MEMORY_DIR"] = old_mem
+        if old_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = old_cfg
 
     # 7) LIVE smoke (tolerant): if dos is available and the real per-project
     #    store exists, collect must fold it without crashing and return a
