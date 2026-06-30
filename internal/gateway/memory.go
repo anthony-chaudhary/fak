@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/memq"
@@ -29,6 +30,16 @@ type MemoryRequest struct {
 	Budget   int64       `json:"budget,omitempty"`
 	ImageDir string      `json:"image_dir,omitempty"`
 	Apply    bool        `json:"apply,omitempty"`
+
+	// Backend selects the recall source (#1431): "" (or "recall"/"demo") keeps the
+	// image_dir-else-demo default; "codex" reads the external Codex memories home as a
+	// READ-ONLY generated recall layer. CodexHome is that home (default: $CODEX_HOME — never
+	// silently ~/.codex over MCP); IncludeChronicle opts into the higher-risk screen-derived
+	// chronicle memories. Every Codex cell is stamped external/untrusted, so it rides the same
+	// result gate as any other backend — selecting it does NOT widen the trust boundary.
+	Backend          string `json:"backend,omitempty"`
+	CodexHome        string `json:"codex_home,omitempty"`
+	IncludeChronicle bool   `json:"include_chronicle,omitempty"`
 }
 
 func (r MemoryRequest) resolveQuery() (memq.Query, error) {
@@ -85,13 +96,29 @@ func (s *Server) memoryRun(ctx context.Context, req MemoryRequest) (memq.Result,
 		return memq.Result{}, err
 	}
 	var backend memq.Backend
-	if dir := strings.TrimSpace(req.ImageDir); dir != "" {
+	switch {
+	case strings.TrimSpace(req.Backend) == "codex":
+		// External Codex memories, READ-ONLY (#1431). The home is the request's (an MCP
+		// caller is explicit) or $CODEX_HOME — never silently ~/.codex from a remote call.
+		// NewCodexBackend never errors on a missing home (it yields an empty corpus), so a
+		// non-nil error here is a real failure; cells are external/untrusted, gated as usual.
+		home := strings.TrimSpace(req.CodexHome)
+		if home == "" {
+			home = strings.TrimSpace(os.Getenv("CODEX_HOME"))
+		}
+		b, err := memq.NewCodexBackend(home, req.IncludeChronicle)
+		if err != nil {
+			return memq.Result{}, fmt.Errorf("codex memories backend: %w", err)
+		}
+		backend = b
+	case strings.TrimSpace(req.ImageDir) != "":
+		dir := strings.TrimSpace(req.ImageDir)
 		sess, err := recall.Load(dir)
 		if err != nil {
 			return memq.Result{}, fmt.Errorf("load core image: %w", err)
 		}
 		backend = memq.NewRecallBackend(sess, dir)
-	} else {
+	default:
 		backend = memq.NewDemoStore()
 	}
 	caps := memq.Caps{}
@@ -102,7 +129,7 @@ func (s *Server) memoryRun(ctx context.Context, req MemoryRequest) (memq.Result,
 	if err != nil {
 		return memq.Result{}, err
 	}
-	s.logf("gateway: memory run driver=%q apply=%v image=%q rendered=%d effects=%d/%d",
-		req.Driver, req.Apply, req.ImageDir, res.Stats.Rendered, res.Stats.EffectsApplied, res.Stats.EffectsProposed)
+	s.logf("gateway: memory run driver=%q backend=%q apply=%v image=%q rendered=%d effects=%d/%d",
+		req.Driver, req.Backend, req.Apply, req.ImageDir, res.Stats.Rendered, res.Stats.EffectsApplied, res.Stats.EffectsProposed)
 	return res, nil
 }
