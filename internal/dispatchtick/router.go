@@ -160,6 +160,15 @@ type SkippedIssue struct {
 	ExpectedSteps int    `json:"expected_steps,omitempty"`
 }
 
+type RouterRepairQueue struct {
+	Kind       string         `json:"kind"`
+	Count      int            `json:"count"`
+	StepBudget int            `json:"step_budget"`
+	NextAction string         `json:"next_action"`
+	ByReason   map[string]int `json:"by_reason,omitempty"`
+	Issues     []int          `json:"issues,omitempty"`
+}
+
 type RouterCoverage struct {
 	Complete      bool     `json:"complete"`
 	Truncated     bool     `json:"truncated"`
@@ -206,6 +215,7 @@ type RouterPayload struct {
 	Counts              RouterCounts               `json:"counts"`
 	Lanes               map[string]RouterLaneGroup `json:"lanes"`
 	Issues              []IssueRoute               `json:"issues"`
+	RepairQueues        []RouterRepairQueue        `json:"repair_queues,omitempty"`
 	SkippedHumanBlocked []SkippedIssue             `json:"skipped_human_blocked"`
 }
 
@@ -595,6 +605,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 
 	issues := append([]IssueRoute(nil), in.Routes...)
 	sort.Slice(issues, func(i, j int) bool { return routeSortLess(issues[i], issues[j]) })
+	repairQueues := routerRepairQueues(issues, skipped)
 
 	return RouterPayload{
 		Schema:              RouterSchema,
@@ -608,7 +619,130 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		Counts:              RouterCounts{Open: total, Routed: routed, Unrouted: unrouted, UnroutedFrac: frac, RoutedStepBudget: routedStepBudget, ByConfidence: byConf, SkippedHumanBlocked: len(skipped), SkippedByReason: skippedByReason},
 		Lanes:               lanes,
 		Issues:              issues,
+		RepairQueues:        repairQueues,
 		SkippedHumanBlocked: skipped,
+	}
+}
+
+func routerRepairQueues(routes []IssueRoute, skipped []SkippedIssue) []RouterRepairQueue {
+	queues := map[string]*RouterRepairQueue{}
+	add := func(kind string, issue int, stepBudget int, reason string) {
+		if stepBudget <= 0 {
+			stepBudget = 1
+		}
+		queue := queues[kind]
+		if queue == nil {
+			queue = &RouterRepairQueue{
+				Kind:       kind,
+				NextAction: routerRepairAction(kind),
+				ByReason:   map[string]int{},
+			}
+			queues[kind] = queue
+		}
+		queue.Count++
+		queue.StepBudget += stepBudget
+		if reason != "" {
+			queue.ByReason[reason]++
+		}
+		if issue > 0 && len(queue.Issues) < 12 {
+			queue.Issues = append(queue.Issues, issue)
+		}
+	}
+	for _, route := range routes {
+		if route.Lane == "" {
+			add("route", route.Number, routeStepBudget(route), "ISSUE_UNROUTED")
+			continue
+		}
+		add("dispatch", route.Number, routeStepBudget(route), "")
+	}
+	for _, skippedIssue := range skipped {
+		add(routerRepairKind(skippedIssue.Reason), skippedIssue.Number, skippedIssueStepBudget(skippedIssue), skippedIssue.Reason)
+	}
+	out := make([]RouterRepairQueue, 0, len(queues))
+	for _, queue := range queues {
+		if len(queue.ByReason) == 0 {
+			queue.ByReason = nil
+		}
+		out = append(out, *queue)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ri, rj := routerRepairRank(out[i].Kind), routerRepairRank(out[j].Kind)
+		if ri != rj {
+			return ri < rj
+		}
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
+func skippedIssueStepBudget(issue SkippedIssue) int {
+	if issue.ExpectedSteps > 0 {
+		return issue.ExpectedSteps
+	}
+	return 1
+}
+
+func routerRepairKind(reason string) string {
+	switch reason {
+	case "BLOCKED_BY_HUMAN":
+		return "human"
+	case "ISSUE_NOT_DISPATCH_LEAF", "ISSUE_OVERSIZED_EXPECTED_STEPS":
+		return "split"
+	case "ISSUE_SCOPE_INCOMPLETE", "ISSUE_TRIAGE_ONLY":
+		return "scope"
+	case "ISSUE_UNROUTED":
+		return "route"
+	case "ISSUE_LIVE_UNARMORED", "ISSUE_NOISE_CONTROL_INCOMPLETE", "ISSUE_AGENT_CONTEXT_INCOMPLETE":
+		return "noise"
+	case "ISSUE_PRIVATE_BOUNDARY":
+		return "private"
+	default:
+		return "other"
+	}
+}
+
+func routerRepairRank(kind string) int {
+	switch kind {
+	case "dispatch":
+		return 0
+	case "split":
+		return 1
+	case "scope":
+		return 2
+	case "route":
+		return 3
+	case "noise":
+		return 4
+	case "private":
+		return 5
+	case "human":
+		return 6
+	default:
+		return 9
+	}
+}
+
+func routerRepairAction(kind string) string {
+	switch kind {
+	case "dispatch":
+		return "launch scoped leaf issues through their routed lanes"
+	case "split":
+		return fmt.Sprintf("decompose non-leaves or oversized rows into child issues with <= %d expected steps", MaxDispatchExpectedSteps)
+	case "scope":
+		return "add worker-ready scope, done condition, witness, and agent context before dispatch"
+	case "route":
+		return "add lane/path hints or extend routing aliases so each issue maps to one lane"
+	case "noise":
+		return "add trigger, batch policy, agent context, and live dedupe/cap evidence"
+	case "private":
+		return "remove private/operator-only evidence or move the work to the private companion repo"
+	case "human":
+		return "wait for the human blocker to clear before worker dispatch"
+	default:
+		return "inspect the skipped reason before dispatch"
 	}
 }
 

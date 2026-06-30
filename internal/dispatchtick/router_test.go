@@ -200,6 +200,18 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	if !sameStringIntMap(p.Counts.SkippedByReason, wantReasons) {
 		t.Fatalf("skipped reasons = %#v, want %#v", p.Counts.SkippedByReason, wantReasons)
 	}
+	assertRouterRepairQueue(t, p.RepairQueues, "dispatch", 1, 3, nil, []int{1})
+	assertRouterRepairQueue(t, p.RepairQueues, "split", 3, 14, map[string]int{
+		"ISSUE_NOT_DISPATCH_LEAF":        2,
+		"ISSUE_OVERSIZED_EXPECTED_STEPS": 1,
+	}, []int{10, 8, 2})
+	assertRouterRepairQueue(t, p.RepairQueues, "scope", 6, 6, map[string]int{
+		"ISSUE_SCOPE_INCOMPLETE": 1,
+		"ISSUE_TRIAGE_ONLY":      5,
+	}, []int{11, 9, 7, 6, 5, 4})
+	assertRouterRepairQueue(t, p.RepairQueues, "human", 1, 1, map[string]int{
+		"BLOCKED_BY_HUMAN": 1,
+	}, []int{3})
 	if strings.Contains(p.Reason, "human-blocked skipped") {
 		t.Fatalf("router reason kept legacy human-blocked wording: %q", p.Reason)
 	}
@@ -270,6 +282,39 @@ func skippedIssueByNumber(skipped []SkippedIssue, number int) SkippedIssue {
 		}
 	}
 	return SkippedIssue{}
+}
+
+func assertRouterRepairQueue(t *testing.T, queues []RouterRepairQueue, kind string, count, steps int, reasons map[string]int, issues []int) {
+	t.Helper()
+	queue := routerRepairQueueByKind(queues, kind)
+	if queue.Kind == "" {
+		t.Fatalf("repair queue %q missing from %+v", kind, queues)
+	}
+	if queue.Count != count || queue.StepBudget != steps || queue.NextAction == "" {
+		t.Fatalf("repair queue %q = %+v, want count=%d steps=%d and next action", kind, queue, count, steps)
+	}
+	if len(queue.Issues) != len(issues) {
+		t.Fatalf("repair queue %q issues = %+v, want %+v", kind, queue.Issues, issues)
+	}
+	for i := range issues {
+		if queue.Issues[i] != issues[i] {
+			t.Fatalf("repair queue %q issues = %+v, want %+v", kind, queue.Issues, issues)
+		}
+	}
+	for reason, want := range reasons {
+		if queue.ByReason[reason] != want {
+			t.Fatalf("repair queue %q reasons = %+v, want %s=%d", kind, queue.ByReason, reason, want)
+		}
+	}
+}
+
+func routerRepairQueueByKind(queues []RouterRepairQueue, kind string) RouterRepairQueue {
+	for _, queue := range queues {
+		if queue.Kind == kind {
+			return queue
+		}
+	}
+	return RouterRepairQueue{}
 }
 
 func sameStringIntMap(got, want map[string]int) bool {
