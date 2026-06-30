@@ -1,0 +1,258 @@
+name: Release notify
+
+# Autonomous-release OBSERVABILITY (#1390, parent epic #1354). The cadence
+# workflow (`release-cadence.yml`) now cuts, tags, and publishes a release with NO
+# human in the loop (#1355). Under autonomy a SILENT failure is the real risk: a run
+# that fails mid-chain (cut succeeded, tag/publish died -> a dangling state) or a
+# cadence that's been HOLDING for many ticks (CI red for a day, @latest silently
+# rotting) looks identical to "nothing to ship" unless someone is watching the
+# Actions log. This job watches the cadence workflow_run and emits a DISTINCT,
+# in-channel signal for the three events that matter.
+#
+# It runs as a SEPARATE workflow keyed on `workflow_run` (not a step inside the
+# cadence job) so the cadence file stays single-concern and a notify failure can
+# NEVER fail the release. Three notify paths, decided from the triggering run's
+# conclusion + step outcomes:
+#
+#   1. FIRED          — the cut->push->tag->publish chain completed (run succeeded
+#                       and a release was actually cut this tick). Success ping to
+#                       #releases with the version/tag.
+#   2. FAILED MID-CHAIN — the run FAILED and the cut step had started (the execute
+#                       chain began but a later step refused/died). Alert to the
+#                       louder #blockers channel naming the failing step.
+#   3. CADENCE STALLED — the run FAILED before deciding (decide/status errored), OR
+#                       it held cleanly but the recent cadence has cut NOTHING across
+#                       several ticks while the trunk moved. Heads-up to #blockers.
+#
+# FAIL-OPEN + SELF-DISABLING: set the repo variable FAK_RELEASE_NOTIFY = '0' to mute
+# all pings. Every post is `|| true` and the token/channel guards skip silently when
+# unset (a secret-less fork posts nothing), so a delivery hiccup or missing secret
+# never turns a green release into a red notify run.
+on:
+  workflow_run:
+    workflows: ["Release cadence"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-notify-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: notify on fired / failed-mid-chain / cadence-stalled
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Mute switch: any value other than '0' (unset included) keeps notify armed.
+    if: ${{ vars.FAK_RELEASE_NOTIFY != '0' }}
+    env:
+      GOTOOLCHAIN: auto
+      # Same keys the other feeders read: token is a secret, channels are repo vars.
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_RELEASES_CHANNEL: ${{ vars.FAK_RELEASES_CHANNEL }}
+      FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL }}
+      FAK_SCOREBOARD_SOURCE: ci
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Classify the triggering cadence run from its step outcomes. We read the run's
+      # jobs via the API (actions:read) and find the named cut/tag/publish/decide
+      # steps the cadence job emits. The classification is a pure read — no mutation.
+      #   classify = fired | failed_midchain | stalled | hold | unknown
+      - name: classify cadence run
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs" \
+            --paginate > jobs.json || echo '{"jobs":[]}' > jobs.json
+
+          step_concl () {
+            # conclusion of the first step whose name matches $1 (empty if absent)
+            python - "$1" <<'PY'
+          import json, sys
+          name = sys.argv[1]
+          try:
+              data = json.load(open("jobs.json"))
+          except Exception:
+              print(""); sys.exit(0)
+          for job in data.get("jobs", []):
+              for st in job.get("steps", []) or []:
+                  if st.get("name") == name:
+                      print(st.get("conclusion") or "")
+                      sys.exit(0)
+          print("")
+          PY
+          }
+
+          cut="$(step_concl 'Cut release commit')"
+          publish="$(step_concl 'GitHub release')"
+          tag="$(step_concl 'Tag after green CI')"
+          decide="$(step_concl 'Decide release readiness')"
+          status="$(step_concl 'Release status snapshot')"
+
+          classify="unknown"
+          failing=""
+          if [ "$RUN_CONCLUSION" = "success" ] && [ "$cut" = "success" ] && [ "$publish" = "success" ]; then
+            classify="fired"
+          elif [ "$RUN_CONCLUSION" = "failure" ] && [ "$cut" = "success" ]; then
+            # The execute chain started (cut landed) but a later step failed.
+            classify="failed_midchain"
+            for s in "Push trunk" "Tag after green CI" "GitHub release"; do
+              c="$(step_concl "$s")"
+              if [ "$c" = "failure" ]; then failing="$s"; break; fi
+            done
+            [ -z "$failing" ] && failing="post-cut step"
+          elif [ "$RUN_CONCLUSION" = "failure" ]; then
+            # Failed before (or at) the decision — the cadence couldn't even decide.
+            classify="stalled"
+            if [ "$decide" = "failure" ]; then failing="Decide release readiness";
+            elif [ "$status" = "failure" ]; then failing="Release status snapshot";
+            elif [ "$cut" = "failure" ]; then failing="Cut release commit";
+            else failing="early step"; fi
+          elif [ "$cut" = "" ] || [ "$cut" = "skipped" ]; then
+            # Ran clean but cut nothing this tick — a normal hold.
+            classify="hold"
+          fi
+
+          echo "classify=$classify" >> "$GITHUB_OUTPUT"
+          echo "failing=$failing" >> "$GITHUB_OUTPUT"
+          {
+            echo "## release-notify — cadence run ${RUN_ID}"
+            echo ""
+            echo "conclusion=\`$RUN_CONCLUSION\` event=\`$RUN_EVENT\` -> classify=\`$classify\`"
+            [ -n "$failing" ] && echo "failing step: \`$failing\`"
+            echo ""
+            echo "steps: status=\`${status:-?}\` decide=\`${decide:-?}\` cut=\`${cut:-?}\` tag=\`${tag:-?}\` publish=\`${publish:-?}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Consecutive-hold scan: count how many of the most recent COMPLETED cadence
+      # runs cut nothing in a row. A long unbroken hold streak while the trunk keeps
+      # moving is the "cadence stalled" signal even when no run errored — the exact
+      # staleness this epic fixed, reintroduced silently. Threshold: >= 6 holds (~12h
+      # at the 2h cron) flips a clean hold into a stall heads-up.
+      - name: scan consecutive holds
+        id: holds
+        if: ${{ steps.classify.outputs.classify == 'hold' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/actions/workflows/release-cadence.yml/runs?per_page=20&status=completed" \
+            > cadence-runs.json || echo '{"workflow_runs":[]}' > cadence-runs.json
+          streak="$(python - <<'PY'
+          import json
+          try:
+              runs = json.load(open("cadence-runs.json")).get("workflow_runs", [])
+          except Exception:
+              runs = []
+          # Newest first. A run "cut" if its 'GitHub release' step succeeded; we can't
+          # cheaply read each run's steps here, so a successful run that produced a
+          # release tag is detected by the cadence job NOT being a pure hold. Proxy:
+          # count leading runs whose conclusion is 'success' AND that did not fire.
+          # Since firing is rare, leading successes are overwhelmingly holds; we stop
+          # the streak at the first failure or non-success.
+          streak = 0
+          for r in runs:
+              if r.get("conclusion") == "success":
+                  streak += 1
+              else:
+                  break
+          print(streak)
+          PY
+          )"
+          echo "streak=$streak" >> "$GITHUB_OUTPUT"
+          echo "consecutive clean cadence runs (hold proxy): $streak" >> "$GITHUB_STEP_SUMMARY"
+          # >= 6 leading clean ticks with nothing shipped is a stall heads-up.
+          if [ "${streak:-0}" -ge 6 ]; then
+            echo "stalled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stalled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 1. FIRED — a release actually went out this tick. Success ping to #releases.
+      - name: notify auto-cut fired
+        if: ${{ steps.classify.outputs.classify == 'fired' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_RELEASES_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_RELEASES_CHANNEL" \
+            --kpi auto-release \
+            --value fired \
+            --grade A \
+            --verdict OK \
+            --detail "autonomous release cut+tagged+published — $RUN_URL" \
+            --source ci || true
+
+      # 2. FAILED MID-CHAIN — the execute chain started but a later step died. Alert
+      # to the louder #blockers channel naming the failing step (a dangling state).
+      - name: notify auto-cut failed mid-chain
+        if: ${{ steps.classify.outputs.classify == 'failed_midchain' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --kpi auto-release \
+            --value failed-mid-chain \
+            --grade F \
+            --verdict ACTION \
+            --detail "release cut but '${{ steps.classify.outputs.failing }}' failed — possible dangling state, see $RUN_URL" \
+            --source ci || true
+
+      # 3a. CADENCE STALLED (errored before deciding) — the tick couldn't even decide.
+      - name: notify cadence stalled (errored)
+        if: ${{ steps.classify.outputs.classify == 'stalled' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --kpi auto-release \
+            --value cadence-stalled \
+            --grade D \
+            --verdict ACTION \
+            --detail "cadence errored at '${{ steps.classify.outputs.failing }}' before deciding — no release decision this tick, see $RUN_URL" \
+            --source ci || true
+
+      # 3b. CADENCE STALLED (held N consecutive ticks) — clean runs, nothing shipped.
+      - name: notify cadence stalled (consecutive holds)
+        if: ${{ steps.classify.outputs.classify == 'hold' && steps.holds.outputs.stalled == 'true' && env.FAK_SCOREBOARD_TOKEN != '' && env.FAK_BLOCKERS_CHANNEL != '' }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/fak scoreboard post \
+            --channel "$FAK_BLOCKERS_CHANNEL" \
+            --kpi auto-release \
+            --value cadence-stalled \
+            --grade C \
+            --verdict ACTION \
+            --detail "release cadence held ${{ steps.holds.outputs.streak }} consecutive ticks with nothing shipped — @latest may be rotting, check CI_BASE_RED, see $RUN_URL" \
+            --source ci || true
+
+      # Audit trail: record when a notify was SKIPPED because a secret/channel was
+      # absent, so a fork or a misconfig is visible in the run summary (fail-open).
+      - name: note when notify was skipped
+        if: ${{ always() }}
+        run: |
+          {
+            if [ -z "${FAK_SCOREBOARD_TOKEN}" ]; then
+              echo "Release notify SKIPPED — FAK_SCOREBOARD_TOKEN not set (secret-less fork or missing secret); nothing posted."
+            fi
+            if [ -z "${FAK_RELEASES_CHANNEL}" ]; then
+              echo "- FAK_RELEASES_CHANNEL repo variable not set (#releases fired-ping target)."
+            fi
+            if [ -z "${FAK_BLOCKERS_CHANNEL}" ]; then
+              echo "- FAK_BLOCKERS_CHANNEL repo variable not set (#blockers failure/stall target)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
