@@ -83,6 +83,7 @@ func TestSlackHealthFreshVsStale(t *testing.T) {
 	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-ok")
 	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C0SCORE") // daily cadence => 36h budget
 	t.Setenv("FAK_PRODUCT_CHANNEL", "C0PROD")     // weekly cadence => 8d budget
+	t.Setenv("FAK_BACKLOG_CHANNEL", "C0BACKLOG")  // weekly cadence => 8d budget
 
 	hub := newHealthHub(t)
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
@@ -90,6 +91,8 @@ func TestSlackHealthFreshVsStale(t *testing.T) {
 	hub.historyTS["C0SCORE"] = slackTS(now.Add(-3 * time.Hour))
 	// product: posted 10 days ago => stale against the 8d budget.
 	hub.historyTS["C0PROD"] = slackTS(now.Add(-10 * 24 * time.Hour))
+	// backlog: posted 2 days ago => fresh against the weekly budget.
+	hub.historyTS["C0BACKLOG"] = slackTS(now.Add(-2 * 24 * time.Hour))
 
 	reports := buildSurfaceReports()
 	runAuthChecks(reports, hub.base())
@@ -116,6 +119,14 @@ func TestSlackHealthFreshVsStale(t *testing.T) {
 	}
 	if !strings.Contains(pr.Detail, "exceeds") {
 		t.Fatalf("stale detail should explain the age vs budget: %q", pr.Detail)
+	}
+
+	bl := healthByName(health, "backlog")
+	if bl == nil || bl.Verdict != verdictOK {
+		t.Fatalf("fresh backlog should be OK: %+v", bl)
+	}
+	if bl.BudgetS != int64((8*24*time.Hour)/time.Second) {
+		t.Fatalf("backlog budget should be 8d, got %ds", bl.BudgetS)
 	}
 }
 

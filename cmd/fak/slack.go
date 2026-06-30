@@ -73,6 +73,7 @@ var slackSurfaces = []slackSurface{
 	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", benchpost.ChannelDefault, false},
 	{"dispatch", "background code-dispatch results", "FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "", false},
 	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault, false},
+	{"backlog", "issue triage + bottleneck digest", "", "FAK_BACKLOG_CHANNEL", "", false},
 	{"marketing", "marketing updates feed", "FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL", "", true},
 	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},
 	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault, false},

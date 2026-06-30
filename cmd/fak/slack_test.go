@@ -21,6 +21,7 @@ func clearSlackEnv(t *testing.T) {
 		"FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL",
 		"FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL",
 		"FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL",
+		"FAK_BACKLOG_CHANNEL",
 		"FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL",
 		"FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL",
 		"FAK_STEERING_CHANNEL",
@@ -74,6 +75,24 @@ func TestBuildSurfaceReportsScoreboardFallback(t *testing.T) {
 	blk := reportByName(reports, "blockers")
 	if blk.Channel == "" || blk.ChannelSource != "built-in default" {
 		t.Fatalf("blockers should use its built-in channel default: %+v", blk)
+	}
+}
+
+func TestBuildSurfaceReportsBacklogUsesScoreboardTokenAndChannelVar(t *testing.T) {
+	clearSlackEnv(t)
+	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-sb")
+	t.Setenv("FAK_BACKLOG_CHANNEL", "C0BACKLOG")
+
+	reports := buildSurfaceReports()
+	bl := reportByName(reports, "backlog")
+	if bl == nil {
+		t.Fatal("backlog surface must be registered")
+	}
+	if !bl.TokenSet || !strings.Contains(bl.TokenSource, "scoreboard-fallback") {
+		t.Fatalf("backlog should fall back to scoreboard token: %+v", bl)
+	}
+	if bl.Channel != "C0BACKLOG" || !strings.Contains(bl.ChannelSource, "FAK_BACKLOG_CHANNEL") || !bl.Ready {
+		t.Fatalf("backlog should resolve FAK_BACKLOG_CHANNEL and be ready: %+v", bl)
 	}
 }
 

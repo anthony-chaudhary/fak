@@ -58,6 +58,7 @@ var surfaceFreshnessBudget = map[string]time.Duration{
 	"node-usage": 36 * time.Hour,     // node-usage-feed.yml — daily
 	"steering":   36 * time.Hour,     // steering-guard.yml — daily
 	"product":    8 * 24 * time.Hour, // product-feed.yml — weekly (Mon)
+	"backlog":    8 * 24 * time.Hour, // backlog-feed.yml — weekly (Mon)
 }
 
 // historyProbeLimit is how many recent messages the staleness probe fetches. Any message
