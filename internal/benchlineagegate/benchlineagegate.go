@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ReasonUnstampedEmitter is the closed-vocabulary refusal code for a bench source
@@ -136,6 +138,7 @@ func ScanTree(repoRoot string) ([]Offense, error) {
 // and anything under a cmd/<dir> whose directory name contains "bench".
 func trackedBenchSources(repoRoot string) ([]string, error) {
 	cmd := exec.Command("git", "ls-files", "cmd", "internal/bench")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
