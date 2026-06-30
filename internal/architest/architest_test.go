@@ -62,6 +62,7 @@ var tier = map[string]int{
 	"supportmaturityscore": 2,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
 	"supportmaturity":      2,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
 	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
+	"releasestatus":        1,                // pure read-only release-posture fold (Compute over injected Facts) porting tools/release_status.py; the broader sibling of releasestale. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
