@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="766" viewBox="0 0 1600 766" role="img" aria-labelledby="title desc">
   <title id="title">fak SOTA benchmark leaderboard — fak's number bolded where it leads the SOTA baseline</title>
-  <desc id="desc">Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</desc>
+  <desc id="desc">Four agent-fleet / KV-reuse benchmarks plus one AMD/Vulkan single-stream win · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</desc>
   <defs>
     <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#f7faf9"/>
@@ -24,12 +24,12 @@
     </style>
   </defs>
 
-  <rect width="1600" height="700" fill="url(#bg2)"/>
-  <rect x="32" y="24" width="1536" height="652" rx="10" fill="#ffffff" opacity="0.62"/>
+  <rect width="1600" height="766" fill="url(#bg2)"/>
+  <rect x="32" y="24" width="1536" height="718" rx="10" fill="#ffffff" opacity="0.62"/>
 
   <text x="64" y="76" class="kicker">SOTA BENCHMARK LEADERBOARD</text>
   <text x="64" y="120" class="title">Every row is fak vs the best already-shipped SOTA — leader bolded</text>
-  <text x="64" y="150" class="subtitle">Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</text>
+  <text x="64" y="150" class="subtitle">Four agent-fleet / KV-reuse benchmarks plus one AMD/Vulkan single-stream win · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</text>
 
   <rect x="64" y="178" width="1472" height="44" rx="6" fill="#2e3a47"/>
   <text x="80" y="206" class="hcol">#</text>
@@ -79,18 +79,26 @@
   <text x="800" y="527" class="base" style="font-weight:800;fill:#1b2733;">llama.cpp Metal: 17.3 tok/s</text>
   <text x="1168" y="529" class="fakLose">8.7 tok/s  (0.50×)</text>
   <text x="1452" y="530" font-size="22" text-anchor="middle">—</text>
-  <rect x="64" y="556" width="1472" height="62" rx="4" fill="#fff5e8" stroke="#e7d3a8"/>
+  <rect x="64" y="556" width="1472" height="62" rx="4" fill="#edf7f0" stroke="#cfe7d8"/>
   <text x="80" y="594" class="rank">6</text>
-  <text x="132" y="588" class="bname">Single-stream prefill  (1.5B–7B Q8)</text>
-  <text x="132" y="608" class="bsub">arm64 lacks the GEMM tile (fleet#578); x86 slope = parity · commit 34c74f4</text>
+  <text x="132" y="588" class="bname">Qwen3.6-27B prefill (AMD Vulkan)</text>
+  <text x="132" y="608" class="bsub">RX 7600 · llama.cpp Vulkan b9673 · commit c98eddff</text>
   <rect x="600" y="574" width="160" height="26" rx="13" fill="#6a7685"/><text x="680" y="592" class="regTag" text-anchor="middle">SINGLE STREAM</text>
-  <text x="800" y="593" class="base" style="font-weight:800;fill:#1b2733;">llama.cpp CPU (+ Metal GPU)</text>
-  <text x="1168" y="595" class="fakLose">0.12× CPU · 0.083× Metal-GPU</text>
-  <text x="1452" y="596" font-size="22" text-anchor="middle">—</text>
+  <text x="800" y="593" class="base">llama.cpp Vulkan: 5.20–9.95 tok/s</text>
+  <text x="1168" y="595" class="fakWin">14.86–31.34 tok/s  (1.88–3.15×)</text>
+  <text x="1452" y="596" font-size="24" text-anchor="middle">✅</text>
+  <rect x="64" y="622" width="1472" height="62" rx="4" fill="#fff5e8" stroke="#e7d3a8"/>
+  <text x="80" y="660" class="rank">7</text>
+  <text x="132" y="654" class="bname">Single-stream prefill  (1.5B–7B Q8)</text>
+  <text x="132" y="674" class="bsub">arm64 lacks the GEMM tile (fleet#578); x86 slope = parity · commit 34c74f4</text>
+  <rect x="600" y="640" width="160" height="26" rx="13" fill="#6a7685"/><text x="680" y="658" class="regTag" text-anchor="middle">SINGLE STREAM</text>
+  <text x="800" y="659" class="base" style="font-weight:800;fill:#1b2733;">llama.cpp CPU (+ Metal GPU)</text>
+  <text x="1168" y="661" class="fakLose">0.12× CPU · 0.083× Metal-GPU</text>
+  <text x="1452" y="662" font-size="22" text-anchor="middle">—</text>
 
-  <rect x="64" y="628" width="22" height="22" rx="4" fill="#edf7f0" stroke="#85bc98"/>
-  <text x="96" y="645" class="legend"><tspan style="font-weight:900;fill:#2e8b57;">Bold green</tspan> = fak leads the SOTA baseline.</text>
-  <rect x="520" y="628" width="22" height="22" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
-  <text x="552" y="645" class="legend">Amber = fak trails (single-stream raw throughput) — shown honestly.</text>
-  <text x="1180" y="645" class="small">All numbers trace to BENCHMARK-AUTHORITY.md.</text>
+  <rect x="64" y="694" width="22" height="22" rx="4" fill="#edf7f0" stroke="#85bc98"/>
+  <text x="96" y="711" class="legend"><tspan style="font-weight:900;fill:#2e8b57;">Bold green</tspan> = fak leads the SOTA baseline.</text>
+  <rect x="520" y="694" width="22" height="22" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="552" y="711" class="legend">Amber = fak trails (single-stream raw throughput) — shown honestly.</text>
+  <text x="1180" y="711" class="small">All numbers trace to BENCHMARK-AUTHORITY.md.</text>
 </svg>

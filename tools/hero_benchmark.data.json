@@ -154,8 +154,8 @@
   },
   "leaderboard": {
     "heading": "Every row is fak vs the best already-shipped SOTA — leader bolded",
-    "subtitle": "Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.",
-    "note_md": "Six benchmarks, each `fak` against the **best already-shipped SOTA serving system** — no naive-strawman rows. The **absolute measured number leads**; the multiplier is a parenthetical reference (model-card style). **`fak`'s number is bolded where it leads or reaches parity**; the two single-stream rows where it trails are shown plain — not a clean sweep."
+    "subtitle": "Four agent-fleet / KV-reuse benchmarks plus one AMD/Vulkan single-stream win · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.",
+    "note_md": "Seven benchmarks, each `fak` against the **best already-shipped SOTA serving system** — no naive-strawman rows. The **absolute measured number leads**; the multiplier is a parenthetical reference (model-card style). **`fak`'s number is bolded where it leads or reaches parity**; the two single-stream rows where it trails are shown plain — not a clean sweep."
   },
   "top10": [
     {
@@ -237,6 +237,19 @@
     },
     {
       "rank": 6,
+      "benchmark": "Qwen3.6-27B prefill (AMD Vulkan)",
+      "sub": "RX 7600 · llama.cpp Vulkan b9673 · commit c98eddff",
+      "regime": "SINGLE STREAM",
+      "baseline": "llama.cpp Vulkan: 5.20–9.95 tok/s",
+      "fak": "14.86–31.34 tok/s  (1.88–3.15×)",
+      "fak_md": "14.86–31.34 tok/s (1.88–3.15×)",
+      "win": true,
+      "commit": "c98eddff",
+      "provenance_doc": "experiments/qwen36/qwen36-perf-gate-amd-20260619.json · docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+      "field": ""
+    },
+    {
+      "rank": 7,
       "benchmark": "Single-stream prefill  (1.5B–7B Q8)",
       "sub": "arm64 lacks the GEMM tile (fleet#578); x86 slope = parity · commit 34c74f4",
       "regime": "SINGLE STREAM",
@@ -249,12 +262,12 @@
       "field": ""
     }
   ],
-  "leaderboard_takeaway_md": "**Every win is in the agent-fleet / KV-reuse regime — `fak`'s actual product category — and every row is against the best already-shipped SOTA, not a naive strawman.** The 2 trailing rows are single-stream raw throughput, which `fak` explicitly does not target. A bolded number means `fak` beat (or reached parity with) the best already-shipped baseline on that axis, stated as the absolute measured number.",
+  "leaderboard_takeaway_md": "**Most wins are in the agent-fleet / KV-reuse regime — `fak`'s actual product category — and every row is against the best already-shipped SOTA, not a naive strawman.** The AMD Vulkan single-stream row is a real platform-specific win; the M3 single-stream rows are the honest fence where `fak` trails today. A bolded number means `fak` beat (or reached parity with) the best already-shipped baseline on that axis, stated as the absolute measured number.",
   "not_leading": {
     "intro": "The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where it trailed Gemini 3 Pro, here is where `fak` trails the SOTA — stated plainly, not buried:",
     "bullets": [
       "**Single-stream decode:** `fak` decodes **8.7 tok/s** on Qwen2.5-7B Q8 vs llama.cpp Metal's **17.3 tok/s** — **0.50×**. Across the ladder the gap is **0.39× → 0.53×** (1.5B → 7B); it *narrows* with model size (decode is bandwidth-bound toward the same ~150 GB/s unified-memory floor) — `fak` trails today, and the gap is actively closing.",
-      "**Single-stream prefill:** `fak` trails — and the figure depends entirely on the baseline backend. **Apples-to-apples (both engines on CPU, same machine + Q8 weights):** on Apple M3 Pro arm64 — which still lacks the register-blocked int8 GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues)) — `fak` prefill is **~0.10–0.15× of llama.cpp CPU** (1.5B 0.101×–0.15×, 7B 0.123×; median **~0.12×**). On x86 Zen5, where that tile already exists, the per-token raw-compute *slope* reaches **parity (1.03×)** — the ceiling arm64 inherits once the tile lands. **Against a Metal GPU (NOT apples-to-apples):** **0.083× (7B)** / 0.01× (27B), but the 7B doc attributes ~12× of that gap to the GPU *device* (0.083× × 12 ≈ 1.0×), so it collapses toward the ~0.10–0.12× CPU-vs-CPU figure once the GPU is removed — a device gap, not a kernel gap. Either way `fak` trails single-stream prefill **today** — closing as the arm64 tile lands (x86 slope is already at parity). The honest fence, measured fairly.",
+      "**Single-stream prefill on Apple M3 Pro:** `fak` trails due to a missing register-blocked int8 GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues)). On M3 Pro arm64, `fak` prefill is **~0.10–0.15× of llama.cpp CPU** (1.5B 0.101×–0.15×, 7B 0.123×; median **~0.12×**). On x86 Zen5, where that tile already exists, the per-token raw-compute *slope* reaches **parity (1.03×)** — the ceiling arm64 inherits once the tile lands. **Against a Metal GPU (NOT apples-to-apples):** **0.083× (7B)** / 0.01× (27B), but the 7B doc attributes ~12× of that gap to the GPU *device* (0.083× × 12 ≈ 1.0×), so it collapses toward the ~0.10–0.12× CPU-vs-CPU figure once the GPU is removed — a device gap, not a kernel gap. **Note:** On AMD Vulkan (Qwen3.6-27B), `fak` **beats** llama.cpp by **1.88–3.15×** on prefill (row 6 in the leaderboard above). The trailing figure is platform-specific to M3 Pro arm64, not a universal `fak` property.",
       "**Model-size ceiling on this box:** `fak`'s faithful ceiling is **7B** on 36 GB (GGUF dequant-to-f32 OOMs above; two arch families fail at load — [tracked](https://github.com/anthony-chaudhary/fak/issues)). llama.cpp reaches 72B (CPU) / ~32B (Metal). The MoE standout (Qwen3-30B-A3B, **50 tok/s** on llama.cpp) runs because only 3B of 30B params are active per token — sparse activation is the lever, and `fak` doesn't load it yet."
     ],
     "synthesis": "**The synthesis:** *one chat → use llama.cpp; an agent fleet → use `fak`.* Both are true; never cross-compare them."
