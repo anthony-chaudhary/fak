@@ -101,7 +101,11 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Files under tools/ that are not gradable first-party modules.
 PY_EXCLUDE_NAMES = {"__init__.py", "conftest.py"}
-PY_EXCLUDE_DIRS = {"__pycache__", ".git", "testdata", "node_modules"}
+# `.dos`/`.fak`/`.claude` hold full repo CHECKOUTS / copies the agent machinery leaves
+# behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`); walking them
+# double-grades every copied .py as phantom debt (a `.dos` tree once added 537 phantom .py
+# here). Exclude them, matching the code-slop/code-quality scorecards.
+PY_EXCLUDE_DIRS = {"__pycache__", ".git", ".dos", ".fak", ".claude", "testdata", "node_modules"}
 
 
 def _clamp(score: float) -> int:
@@ -307,6 +311,10 @@ def _safe_read(path: Path) -> str:
 
 
 def _excluded_py(rel: str) -> bool:
+    # A Private-Use-Area (U+E000–U+F8FF) or control char in the path is a cp1252<->utf-8
+    # mojibake phantom (a faulted absolute path landing under a garbage name), never source.
+    if any(0xE000 <= ord(c) <= 0xF8FF or ord(c) < 0x20 for c in rel):
+        return True
     parts = Path(rel).parts
     if set(parts) & PY_EXCLUDE_DIRS:
         return True

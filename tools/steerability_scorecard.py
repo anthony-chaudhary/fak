@@ -113,7 +113,11 @@ try:
 except Exception:  # noqa: BLE001 — stand-alone fallback
     FILE_HARD_MAX = 1500
     FUNC_HARD_MAX = 200
-    GO_EXCLUDE_DIRS = {".git", "node_modules", "testdata", "vendor", "__pycache__"}
+    # `.dos`/`.fak`/`.claude` hold full repo CHECKOUTS / copies the agent machinery leaves
+    # behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`); walking them
+    # double-grades every copied .go as phantom debt — a `.dos` tree once added 2357 phantom
+    # .go to this corpus. Exclude them, matching the code-slop/code-quality scorecards.
+    GO_EXCLUDE_DIRS = {".git", ".dos", ".fak", ".claude", "node_modules", "testdata", "vendor", "__pycache__"}
 
     def _safe_read(path: Path) -> str:  # type: ignore[misc]
         try:
@@ -125,6 +129,11 @@ except Exception:  # noqa: BLE001 — stand-alone fallback
         out: list[str] = []
         for p in root.rglob("*.go"):
             rel = p.relative_to(root).as_posix()
+            # A Private-Use-Area (U+E000–U+F8FF) or control char in the path is a
+            # cp1252<->utf-8 mojibake phantom (e.g. a faulted absolute path landing as a
+            # U+F05C-named dir holding a repo copy), never tracked source.
+            if any(0xE000 <= ord(c) <= 0xF8FF or ord(c) < 0x20 for c in rel):
+                continue
             if set(Path(rel).parts) & GO_EXCLUDE_DIRS:
                 continue
             if rel.endswith("_test.go") == tests:
