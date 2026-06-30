@@ -12,8 +12,9 @@ import (
 
 // Reason codes: the closed-vocabulary forms the gate refuses with.
 const (
-	ReasonInteractiveTask   = "INTERACTIVE_TASK_POPUP" // a .ps1 installs an on-desktop task
-	ReasonUnsuppressedSpawn = "UNSUPPRESSED_SPAWN"     // a suppressing module forgot a flag
+	ReasonInteractiveTask    = "INTERACTIVE_TASK_POPUP" // a .ps1 installs an on-desktop task
+	ReasonUnsuppressedSpawn  = "UNSUPPRESSED_SPAWN"     // a suppressing module forgot a flag
+	ReasonGoUnsuppressedExec = "UNSUPPRESSED_GO_EXEC"   // a Go dispatch helper forgot the no-window hook
 )
 
 // ---- PowerShell scheduled-task installer rules ---------------------------- //
@@ -107,6 +108,69 @@ func PySpawnViolations(rel, src string) []string {
 	return out
 }
 
+// ---- Go dispatch helper window-suppression rules ------------------------ //
+
+var (
+	reGoExecAssign = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*exec\.Command(?:Context)?\s*\(`)
+)
+
+// GoExecViolations returns one message per cmd/fak dispatch helper command that
+// reaches Run/Output/CombinedOutput/Start before the Windows no-window hook is
+// applied. The long-lived worker spawn may use configureDispatchSpawn; short
+// helper probes should use configureDispatchHelperCommand.
+func GoExecViolations(rel, src string) []string {
+	if !strings.HasPrefix(rel, "cmd/fak/dispatch") || strings.HasSuffix(rel, "_test.go") {
+		return nil
+	}
+	lines := strings.Split(src, "\n")
+	var out []string
+	for i, line := range lines {
+		m := reGoExecAssign.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		name := m[1]
+		configured := false
+		for j := i + 1; j < len(lines) && j <= i+16; j++ {
+			text := stripGoLineComment(lines[j])
+			if strings.Contains(text, "configureDispatchHelperCommand("+name+")") ||
+				strings.Contains(text, "configureDispatchSpawn("+name+")") {
+				configured = true
+				continue
+			}
+			if reGoExecAssign.MatchString(text) {
+				break
+			}
+			if goCommandTerminal(name, text) {
+				if !configured {
+					out = append(out, fmt.Sprintf("%s:%d: exec.Command reaches %s before "+
+						"configureDispatchHelperCommand(%s) / configureDispatchSpawn(%s) — a "+
+						"windowless Windows parent can flash a console child (%s)",
+						rel, i+1, strings.TrimSpace(text), name, name, ReasonGoUnsuppressedExec))
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
+func stripGoLineComment(line string) string {
+	if i := strings.Index(line, "//"); i >= 0 {
+		return line[:i]
+	}
+	return line
+}
+
+func goCommandTerminal(name, line string) bool {
+	for _, method := range []string{".Run(", ".Output(", ".CombinedOutput(", ".Start("} {
+		if strings.Contains(line, name+method) {
+			return true
+		}
+	}
+	return false
+}
+
 // callArgs returns the text between the call's opening paren at openIdx and its
 // matching close paren, skipping Python string literals and # comments so that a
 // paren inside a string or a nested .join(...) does not confuse the balance.
@@ -184,10 +248,13 @@ func lineOf(src string, off int) int {
 type Report struct {
 	PSInstallers []string // task installers that flash
 	PySpawns     []string // suppressing modules with an unflagged spawn
+	GoExecs      []string // Go dispatch helpers with unflagged child commands
 }
 
 // OK reports whether the tree is clean.
-func (r Report) OK() bool { return len(r.PSInstallers) == 0 && len(r.PySpawns) == 0 }
+func (r Report) OK() bool {
+	return len(r.PSInstallers) == 0 && len(r.PySpawns) == 0 && len(r.GoExecs) == 0
+}
 
 // ScanTree audits the git-tracked .ps1 and .py files under repoRoot.
 func ScanTree(repoRoot string) (Report, error) {
@@ -216,8 +283,20 @@ func ScanTree(repoRoot string) (Report, error) {
 		}
 		rep.PySpawns = append(rep.PySpawns, PySpawnViolations(rel, src)...)
 	}
+	goFiles, err := tracked(repoRoot, "cmd/fak/dispatch*.go")
+	if err != nil {
+		return rep, err
+	}
+	for _, rel := range goFiles {
+		src, err := readRel(repoRoot, rel)
+		if err != nil {
+			continue
+		}
+		rep.GoExecs = append(rep.GoExecs, GoExecViolations(rel, src)...)
+	}
 	sort.Strings(rep.PSInstallers)
 	sort.Strings(rep.PySpawns)
+	sort.Strings(rep.GoExecs)
 	return rep, nil
 }
 

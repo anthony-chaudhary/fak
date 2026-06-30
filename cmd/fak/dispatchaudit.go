@@ -116,6 +116,7 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 			"--title", f.Title,
 			"--body", body,
 			"--label", "dispatch", "--label", "observability")
+		configureDispatchHelperCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(stderr, "file-issues: gh issue create for %s failed: %v\n%s\n", f.Fingerprint, err, out)
@@ -137,6 +138,7 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 func openIssueTitles(stderr io.Writer) map[string]bool {
 	out := map[string]bool{}
 	cmd := exec.Command("gh", "issue", "list", "--state", "open", "--limit", "400", "--json", "title")
+	configureDispatchHelperCommand(cmd)
 	b, err := cmd.Output()
 	if err != nil {
 		fmt.Fprintf(stderr, "file-issues: gh issue list (dedup scan) failed; relying on markers only: %v\n", err)

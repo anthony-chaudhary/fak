@@ -89,6 +89,40 @@ func TestEverySpawnConstructorChecked(t *testing.T) {
 	}
 }
 
+func TestGoDispatchExecRules(t *testing.T) {
+	cases := []struct {
+		name string
+		rel  string
+		src  string
+		want int
+	}{
+		{"non-dispatch-go-ignored",
+			"cmd/fak/serve.go",
+			"package main\nimport \"os/exec\"\nfunc f(){ cmd := exec.Command(\"git\"); _, _ = cmd.Output() }\n",
+			0},
+		{"dispatch-helper-missing-hook-flagged",
+			"cmd/fak/dispatch_tick.go",
+			"package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"git\", \"status\")\n cmd.Dir = \".\"\n _, _ = cmd.Output()\n}\n",
+			1},
+		{"dispatch-helper-hook-clean",
+			"cmd/fak/dispatch_tick.go",
+			"package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.CommandContext(ctx, \"git\", \"status\")\n cmd.Dir = \".\"\n configureDispatchHelperCommand(cmd)\n _, _ = cmd.CombinedOutput()\n}\n",
+			0},
+		{"dispatch-worker-spawn-clean",
+			"cmd/fak/dispatch_tick.go",
+			"package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(exe, args...)\n configureDispatchSpawn(cmd)\n _ = cmd.Start()\n}\n",
+			0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := GoExecViolations(c.rel, c.src)
+			if len(got) != c.want {
+				t.Fatalf("GoExecViolations = %d %v, want %d", len(got), got, c.want)
+			}
+		})
+	}
+}
+
 // TestTrackedTreeHasNoPopups is the live trunk guard: the real repo's tracked
 // .ps1 task installers and window-suppressing .py modules must be clean.
 func TestTrackedTreeHasNoPopups(t *testing.T) {
@@ -102,9 +136,12 @@ func TestTrackedTreeHasNoPopups(t *testing.T) {
 	for _, v := range rep.PySpawns {
 		t.Errorf("unsuppressed spawn: %s", v)
 	}
+	for _, v := range rep.GoExecs {
+		t.Errorf("go exec popup: %s", v)
+	}
 	if !rep.OK() {
 		t.Errorf("fix: make the installer off-desktop (S4U) or headless (conhost --headless); " +
-			"flag the spawn with creationflags=no_window_creationflags()")
+			"flag Python spawns with creationflags=no_window_creationflags(); configure Go dispatch execs")
 	}
 }
 

@@ -2,7 +2,7 @@
 // always-on fleet automation from flashing console windows on the interactive
 // desktop — the "random terminal popups".
 //
-// # Two ways a scheduled tick pops a window, both guarded here
+// # Three ways a scheduled tick pops a window, all guarded here
 //
 // 1. TASK LEVEL (PowerShell installers). A Scheduled Task that runs in the user's
 // INTERACTIVE session (-LogonType Interactive, schtasks ... /IT, or the
@@ -27,10 +27,17 @@
 // creationflags hint (a **kwargs splat counts as provided; a POSIX-only tool such as
 // pgrep is exempt since it can never run on Windows).
 //
+// 3. CODE LEVEL (Go dispatch helpers). The native `fak dispatch ...` path shells out
+// to `gh`, `git`, `dos`, `powershell`, and Python helpers before it launches a worker.
+// Those short helper commands need the same Windows no-window hook as the worker
+// spawn, otherwise moving a tick from Python to Go reopens the desktop-flash bug.
+// ScanTree FAILS cmd/fak/dispatch*.go helper execs that reach Output/CombinedOutput/
+// Run/Start before configureDispatchHelperCommand(cmd) or configureDispatchSpawn(cmd).
+//
 // # Why Go, scanning Python and PowerShell
 //
 // The de-Python ratchet (internal/pythongate) bans NEW tools/*.py, so this gate — the
 // checking layer over the fleet's launch hygiene — lives in Go and analyzes the
-// tracked .ps1 / .py text directly. It scans the git-tracked tree so untracked peer
-// scratch files never affect the verdict.
+// tracked .ps1 / .py / dispatch .go text directly. It scans the git-tracked tree so
+// untracked peer scratch files never affect the verdict.
 package windowgate
