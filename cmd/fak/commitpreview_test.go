@@ -58,7 +58,7 @@ func TestRunCommitPreview_jsonShape(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{
 		"--preview", "--json", "--dir", tmp,
-		"-m", "feat(gateway): add x (fak gateway)",
+		"-m", "feat(gateway): add x (fak gateway)\n\nGeneration: gen/next",
 		"--path", "internal/gateway/server.go",
 	})
 	if code != 0 {
@@ -73,6 +73,25 @@ func TestRunCommitPreview_jsonShape(t *testing.T) {
 	}
 	if got["score"] == nil || got["grade"] == nil {
 		t.Errorf("preview JSON should carry score and grade, got %v", got)
+	}
+	if got["generation"] != "gen/next" {
+		t.Errorf("preview JSON should preserve generation sidecar, got %v", got["generation"])
+	}
+}
+
+func TestRunCommitPreview_rendersGenerationSidecar(t *testing.T) {
+	tmp := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--preview", "--dir", tmp,
+		"-m", "feat(gateway): add x (fak gateway)\n\nGeneration: future",
+		"--path", "internal/gateway/server.go",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d (out=%q err=%q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "generation: gen/future") {
+		t.Fatalf("preview should render normalized generation sidecar, got %q", out.String())
 	}
 }
 

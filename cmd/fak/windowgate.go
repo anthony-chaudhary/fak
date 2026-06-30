@@ -36,6 +36,7 @@ type windowgatePayload struct {
 	Dirs        map[string]int     `json:"watchlist_dirs,omitempty"`
 	LiveTasks   *liveTaskPayload   `json:"live_tasks,omitempty"`
 	Windows     *liveWindowPayload `json:"visible_windows,omitempty"`
+	Processes   *liveProcessPayload `json:"live_processes,omitempty"`
 }
 
 type liveTaskPayload struct {
@@ -54,6 +55,17 @@ type liveWindowPayload struct {
 	Categories map[string]int                    `json:"categories,omitempty"`
 }
 
+type liveProcessPayload struct {
+	OK         bool                              `json:"ok"`
+	Scanned    int                               `json:"scanned"`
+	Observed   map[string]int                    `json:"observed,omitempty"`
+	Unreadable map[string]int                    `json:"unreadable,omitempty"`
+	Violations []string                          `json:"violations,omitempty"`
+	Watchlist  []string                          `json:"watchlist,omitempty"`
+	Findings   []windowgate.LiveProcessFinding   `json:"findings,omitempty"`
+	Categories map[string]int                    `json:"categories,omitempty"`
+}
+
 func cmdWindowgate(argv []string) { os.Exit(runWindowgate(os.Stdout, os.Stderr, argv)) }
 
 func runWindowgate(stdout, stderr io.Writer, argv []string) int {
@@ -67,6 +79,7 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	failCandidates := fs.Bool("fail-on-candidates", false, "also exit non-zero when advisory console-tool candidates remain")
 	liveTasks := fs.Bool("live-tasks", false, "also audit already-installed Windows Scheduled Tasks")
 	visibleWindows := fs.Bool("visible-windows", false, "also audit currently visible top-level windows")
+	liveProcesses := fs.Bool("live-processes", false, "also audit live console-prone helper processes")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -106,6 +119,16 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		attachVisibleWindowPayload(&payload, visible, *failCandidates)
+	}
+	if *liveProcesses {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		processes, err := scanLiveProcesses(ctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak windowgate: live processes: %v\n", err)
+			return 1
+		}
+		attachLiveProcessPayload(&payload, processes, *failCandidates)
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, payload); err != nil {
@@ -209,6 +232,68 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and -not [string]::IsNul
 		return windowgate.VisibleWindowReport{}, err
 	}
 	return windowgate.ClassifyVisibleWindows(windows), nil
+}
+
+func scanLiveProcesses(ctx context.Context) (windowgate.LiveProcessReport, error) {
+	if runtime.GOOS != "windows" {
+		return windowgate.LiveProcessReport{}, nil
+	}
+	const ps = `$ErrorActionPreference='SilentlyContinue'
+$interesting = @(
+  'cmd.exe','powershell.exe','pwsh.exe','conhost.exe','openconsole.exe',
+  'git.exe','gh.exe','dos.exe','fak.exe','go.exe',
+  'python.exe','python3.exe','pythonw.exe',
+  'node.exe','npm.cmd','npx.cmd','wsl.exe',
+  'taskkill.exe','tasklist.exe','schtasks.exe',
+  'chrome.exe','msedge.exe','firefox.exe'
+)
+$procs = @{}
+Get-CimInstance Win32_Process | ForEach-Object { $procs[[int]$_.ProcessId] = $_ }
+$procs.Values | Where-Object {
+  $interesting -contains "$($_.Name)".ToLowerInvariant() -or
+  "$($_.CommandLine)" -match 'Chrome-CDP-Apply|remote-debugging-port|playwright-mcp|@playwright/mcp'
+} | ForEach-Object {
+  $ppid = [int]$_.ParentProcessId
+  $pname = ""
+  $pcmd = ""
+  $gpid = 0
+  $gname = ""
+  $gcmd = ""
+  if ($procs.ContainsKey($ppid)) {
+    $parent = $procs[$ppid]
+    $pname = "$($parent.Name)"
+    $pcmd = "$($parent.CommandLine)"
+    $gpid = [int]$parent.ParentProcessId
+    if ($procs.ContainsKey($gpid)) {
+      $grand = $procs[$gpid]
+      $gname = "$($grand.Name)"
+      $gcmd = "$($grand.CommandLine)"
+    }
+  }
+  [pscustomobject]@{
+    pid = [int]$_.ProcessId
+    name = "$($_.Name)"
+    path = "$($_.ExecutablePath)"
+    command_line = "$($_.CommandLine)"
+    parent_pid = $ppid
+    parent_name = "$pname"
+    parent_command_line = "$pcmd"
+    grandparent_pid = $gpid
+    grandparent_name = "$gname"
+    grandparent_command_line = "$gcmd"
+  }
+} | ConvertTo-Json -Depth 4`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return windowgate.LiveProcessReport{}, fmt.Errorf("read live processes: %w", err)
+	}
+	processes, err := windowgate.ParseLiveProcesses(out)
+	if err != nil {
+		return windowgate.LiveProcessReport{}, err
+	}
+	return windowgate.ClassifyLiveProcesses(processes), nil
 }
 
 func buildWindowgatePayload(root string, rep windowgate.Report, failCandidates bool) windowgatePayload {
@@ -318,6 +403,36 @@ func attachVisibleWindowPayload(p *windowgatePayload, visible windowgate.Visible
 	}
 }
 
+func attachLiveProcessPayload(p *windowgatePayload, processes windowgate.LiveProcessReport, failWatchlist bool) {
+	p.Processes = &liveProcessPayload{
+		OK:         processes.OK(),
+		Scanned:    processes.Scanned,
+		Observed:   copyIntMap(processes.Observed),
+		Unreadable: copyIntMap(processes.Unreadable),
+		Violations: append([]string{}, processes.Violations...),
+		Watchlist:  append([]string{}, processes.Watchlist...),
+		Findings:   append([]windowgate.LiveProcessFinding{}, processes.Findings...),
+		Categories: liveProcessCategoryCounts(processes.Findings),
+	}
+	if len(processes.Violations) > 0 {
+		p.OK = false
+		p.Verdict = "ACTION"
+		p.Finding = "no_desktop_popup_live_process_regression"
+		p.Reason = fmt.Sprintf("%d live console-prone process(es) are hard popup risks", len(processes.Violations))
+		p.NextAction = "stop or relaunch the named process through a hidden/headless path, then fix the launcher"
+		return
+	}
+	if len(processes.Watchlist) > 0 {
+		p.Finding = "no_desktop_popup_live_process_watchlist"
+		p.Reason = fmt.Sprintf("live-process hard gate is clean; %d console/browser helper process(es) remain on the review watchlist", len(processes.Watchlist))
+		p.NextAction = "review the live-process watchlist and route unattended helper launches through hidden/no-window process creation"
+		if failWatchlist {
+			p.OK = false
+			p.Verdict = "ACTION"
+		}
+	}
+}
+
 func renderWindowgate(p windowgatePayload) string {
 	var b strings.Builder
 	status := "OK"
@@ -378,6 +493,28 @@ func renderWindowgate(p windowgatePayload) string {
 			}
 		}
 	}
+	if p.Processes != nil {
+		fmt.Fprintf(&b, "\nlive processes: scanned=%d violations=%d watchlist=%d\n",
+			p.Processes.Scanned, len(p.Processes.Violations), len(p.Processes.Watchlist))
+		if len(p.Processes.Observed) > 0 {
+			fmt.Fprintf(&b, "live-process observed: %s\n", renderToolCounts(p.Processes.Observed))
+		}
+		if len(p.Processes.Unreadable) > 0 {
+			fmt.Fprintf(&b, "live-process unreadable: %s\n", renderToolCounts(p.Processes.Unreadable))
+		}
+		if len(p.Processes.Categories) > 0 {
+			fmt.Fprintf(&b, "live-process categories: %s\n", renderToolCounts(p.Processes.Categories))
+		}
+		for _, row := range p.Processes.Violations {
+			fmt.Fprintf(&b, "  - %s\n", row)
+		}
+		if len(p.Processes.Watchlist) > 0 {
+			b.WriteString("live-process watchlist:\n")
+			for _, row := range p.Processes.Watchlist {
+				fmt.Fprintf(&b, "  - %s\n", row)
+			}
+		}
+	}
 	fmt.Fprintf(&b, "\nreason: %s\nnext: %s", p.Reason, p.NextAction)
 	return b.String()
 }
@@ -392,6 +529,31 @@ func visibleWindowCategoryCounts(findings []windowgate.VisibleWindowFinding) map
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func liveProcessCategoryCounts(findings []windowgate.LiveProcessFinding) map[string]int {
+	out := map[string]int{}
+	for _, finding := range findings {
+		key := strings.TrimSpace(finding.Category)
+		if key != "" {
+			out[key]++
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func copyIntMap(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }
