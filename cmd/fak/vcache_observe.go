@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
@@ -26,7 +27,8 @@ func runVCacheObserve(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&transcripts, "transcript", "real Claude Code transcript .jsonl (repeatable)")
 	telemetry := fs.String("telemetry", "", "session-telemetry JSONL ('-' for stdin) with session_id + cache counters")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	readMult := fs.Float64("read-mult", 0.1, "provider cached-read input-token multiplier")
+	calibrationPath := fs.String("calibration", "", "vcache calibration JSON from fitted provider probe constants")
+	readMult := fs.Float64("read-mult", 0, "override provider cached-read input-token multiplier (default: calibration or 0.1 hypothesis)")
 	write5mMult := fs.Float64("write-5m-mult", vcachegov.WriteMult5Minutes, "5m cache-write input-token multiplier")
 	write1hMult := fs.Float64("write-1h-mult", vcachegov.WriteMult1Hour, "1h cache-write input-token multiplier")
 	if err := fs.Parse(argv); err != nil {
@@ -59,8 +61,20 @@ func runVCacheObserve(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	rep := vcacheobserve.Observe(turns, vcacheobserve.Multipliers{
+	var cal vcachecal.Calibration
+	if strings.TrimSpace(*calibrationPath) != "" {
+		var err error
+		cal, err = readVCacheCalibration(*calibrationPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak vcache observe: calibration %q: %v\n", *calibrationPath, err)
+			return 2
+		}
+	}
+	rep := vcacheobserve.ObserveWithOptions(turns, vcacheobserve.Options{
+		Calibration: cal,
+		Multipliers: vcacheobserve.Multipliers{
 		Read: *readMult, Write5m: *write5mMult, Write1h: *write1hMult,
+		},
 	})
 	if *asJSON {
 		return writeJSON(stdout, rep)
@@ -212,6 +226,18 @@ func readObserveTelemetry(path string, stdin io.Reader) ([]vcacheobserve.Turn, e
 		})
 	}
 	return out, sc.Err()
+}
+
+func readVCacheCalibration(path string) (vcachecal.Calibration, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return vcachecal.Calibration{}, err
+	}
+	var cal vcachecal.Calibration
+	if err := json.Unmarshal(raw, &cal); err != nil {
+		return vcachecal.Calibration{}, err
+	}
+	return cal, nil
 }
 
 // renderObserveReport prints the per-sub-concept observability as an aligned, scannable
