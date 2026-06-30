@@ -105,6 +105,8 @@ DEFAULT_ORPHAN_PATTERNS: tuple[str, ...] = ("dos_mcp.server",)
 # session exited. Matched against the bare (extension-stripped) process name.
 DEFAULT_IDLE_SHELL_NAMES = frozenset({"pwsh", "powershell", "bash"})
 DEFAULT_IDLE_SHELL_AGE_SEC = 1800  # 30 min: well past any session-launch transient
+DEFAULT_ORPHAN_CONSOLE_SHELL_NAMES = frozenset({"cmd"})
+DEFAULT_CONSOLE_HOST_CHILD_NAMES = frozenset({"conhost", "openconsole"})
 DEFAULT_INTERACTIVE_PARENT_NAMES = frozenset({
     "windowsterminal", "terminal", "conhost", "openconsole",
     "explorer", "cmd", "powershell", "pwsh",
@@ -215,9 +217,12 @@ def classify_orphans(
     *,
     live_pids: frozenset[int],
     child_counts: dict[int, int] | None = None,
+    child_names: dict[int, list[str]] | None = None,
     parent_names: dict[int, str] | None = None,
     orphan_patterns: tuple[str, ...] = (),
     idle_shell_names: frozenset[str] = frozenset(),
+    orphan_console_shell_names: frozenset[str] = DEFAULT_ORPHAN_CONSOLE_SHELL_NAMES,
+    console_host_child_names: frozenset[str] = DEFAULT_CONSOLE_HOST_CHILD_NAMES,
     interactive_parent_names: frozenset[str] = DEFAULT_INTERACTIVE_PARENT_NAMES,
     min_age_sec: int = 0,
     reap_idle_shells: bool = False,
@@ -232,7 +237,10 @@ def classify_orphans(
     the shape ``classify`` emits (+ a ``kind``) so the reaper treats them alike."""
     patterns = tuple(p for p in orphan_patterns if p)
     shells = {n.lower() for n in idle_shell_names}
+    orphan_console_shells = {n.lower() for n in orphan_console_shell_names}
+    console_hosts = {n.lower() for n in console_host_child_names}
     counts = child_counts or {}
+    kids_by_parent = child_names or {}
     parents = parent_names or {}
     allow = {n.lower() for n in allow_names}
     flagged: list[dict[str, Any]] = []
@@ -265,6 +273,22 @@ def classify_orphans(
                 reasons.append(f"idle launcher shell: 0 live children{age_note}")
                 kind = kind or "idle-shell"
 
+        # Orphaned console shell: cmd.exe can outlive the parent with only its
+        # conhost/openconsole child, so the generic "zero children" idle-shell
+        # rule cannot see it. This is safe only when the owner is gone and every
+        # remaining child is just the console host.
+        if reap_idle_shells and name.lower() in orphan_console_shells:
+            aged = min_age_sec <= 0 or (age_sec is not None and age_sec >= min_age_sec)
+            child_list = [c.lower() for c in kids_by_parent.get(pid or -1, [])]
+            only_console_children = all(child in console_hosts for child in child_list)
+            if (not _owner_alive(ppid, live_pids)) and aged and only_console_children:
+                age_note = f", age {age_sec}s" if age_sec is not None else ""
+                child_note = f", children={','.join(child_list)}" if child_list else ", children=none"
+                reasons.append(
+                    f"orphaned console shell: owner pid {ppid} not alive{child_note}{age_note}"
+                )
+                kind = kind or "orphan-console-shell"
+
         if not reasons:
             continue
         protected = (pid in protected_pids) or (name.lower() in protected_names)
@@ -294,6 +318,16 @@ def _child_counts(rows: Iterable[dict[str, Any]]) -> dict[int, int]:
         if ppid is not None:
             counts[ppid] = counts.get(ppid, 0) + 1
     return counts
+
+
+def _child_names(rows: Iterable[dict[str, Any]]) -> dict[int, list[str]]:
+    out: dict[int, list[str]] = {}
+    for row in rows:
+        ppid = _as_int(row.get("ppid"))
+        if ppid is None:
+            continue
+        out.setdefault(ppid, []).append(str(row.get("name") or "").lower())
+    return out
 
 
 def _parent_names(rows: Iterable[dict[str, Any]]) -> dict[int, str]:
@@ -970,6 +1004,7 @@ def main(argv: list[str] | None = None) -> int:
             relations,
             live_pids=live_pids,
             child_counts=_child_counts(relations),
+            child_names=_child_names(relations),
             parent_names=_parent_names(relations),
             orphan_patterns=patterns,
             idle_shell_names=DEFAULT_IDLE_SHELL_NAMES,

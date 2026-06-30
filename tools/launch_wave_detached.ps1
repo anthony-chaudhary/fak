@@ -10,7 +10,7 @@
   -- no session has registered yet to move the switcher's fewest-live tie-break --
   so all N workers share ONE usage pool and the fan-out serializes (witnessed: 3
   resolves -> the same tag thrice while 3 distinct pools sat free). This launcher
-  asks the switcher for N DISTINCT pools in ONE call (`fleet_accounts.py wave`),
+  asks the switcher for N DISTINCT pools in ONE call (`fak fleet-accounts wave`),
   then dispatches one detached worker per pool. Distinctness is by Anthropic
   accountUuid, so two dirs on one account never both get a lane.
 
@@ -45,6 +45,9 @@ param(
   [ValidateSet('auto','t1','t2','t3','1','2','3')]
   [string]$Tier        = 'auto',
   [string]$Product     = 'claude',
+  # Optional fak binary. Empty probes this repo's tools\.bin/fak.exe, repo-root fak.exe,
+  # then PATH fak.
+  [string]$FakExe      = '',
   [switch]$AllowTierFallback,
   # Actually spawn the workers. Without it, this is a dry-run that only prints the plan.
   [switch]$Launch
@@ -53,20 +56,73 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot   # tools/ -> repo root
 
+function Resolve-FakExe {
+  param([string]$RepoRoot, [string]$Explicit)
+  function Test-FakWaveCount {
+    param([string]$Candidate)
+    try {
+      $help = & $Candidate 'fleet-accounts' 'wave' '-h' 2>&1 | Out-String
+    } catch {
+      return $false
+    }
+    return ($help -match '(?m)^\s*-count\b')
+  }
+  function Resolve-FakCandidate {
+    param([string]$Candidate)
+    if (Test-Path $Candidate) { return (Resolve-Path $Candidate).Path }
+    $cmd = Get-Command $Candidate -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return ''
+  }
+  if ($Explicit) {
+    $resolved = Resolve-FakCandidate -Candidate $Explicit
+    if (-not $resolved) { throw "fak binary not found: $Explicit" }
+    if (-not (Test-FakWaveCount -Candidate $resolved)) {
+      throw "fak binary does not support 'fleet-accounts wave --count': $resolved"
+    }
+    return $resolved
+  }
+  $candidates = @(
+    (Join-Path $RepoRoot 'tools\.bin\fak.exe'),
+    (Join-Path $RepoRoot 'tools\.bin\fak'),
+    (Join-Path $RepoRoot 'fak.exe'),
+    (Join-Path $RepoRoot 'fak')
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      $resolved = (Resolve-Path $candidate).Path
+      if (Test-FakWaveCount -Candidate $resolved) { return $resolved }
+    }
+  }
+  $cmd = Get-Command fak -ErrorAction SilentlyContinue
+  if ($cmd -and (Test-FakWaveCount -Candidate $cmd.Source)) { return $cmd.Source }
+  throw "no compatible fak binary found with 'fleet-accounts wave --count' (looked in $RepoRoot\tools\.bin, repo root, and PATH; rebuild fak or pass -FakExe)"
+}
+
 # --- Ask the switcher for N DISTINCT pools in ONE call --------------------------------
-$py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
-$waveArgs = @((Join-Path $repoRoot 'tools\fleet_accounts.py'), 'wave',
-              '--count', "$Count", '--product', $Product)
+$fak = Resolve-FakExe -RepoRoot $repoRoot -Explicit $FakExe
+$waveArgs = @('fleet-accounts', 'wave', '--count', "$Count", '--product', $Product)
 if ($WorkKind)          { $waveArgs += @('--work-kind', $WorkKind) }
-else                    { $waveArgs += @('--tier', $Tier) }
+else {
+  switch ($Tier) {
+    { $_ -in @('t1','1') } { $waveArgs += '--t1'; break }
+    { $_ -in @('t2','2') } { $waveArgs += '--t2'; break }
+    { $_ -in @('t3','3') } { $waveArgs += '--t3'; break }
+  }
+}
 if ($AllowTierFallback) { $waveArgs += '--allow-tier-fallback' }
 
 $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ("wave-{0}.json" -f ([Guid]::NewGuid().ToString('N')))
-& $py @waveArgs > $tmpOut 2>$null
-$rc = $LASTEXITCODE
+Push-Location $Workspace
+try {
+  & $fak @waveArgs > $tmpOut 2>$null
+  $rc = $LASTEXITCODE
+} finally {
+  Pop-Location
+}
 $w = $null
 if (Test-Path $tmpOut) { try { $w = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $w = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
-if (-not $w)    { throw "wave allocation produced no JSON (python=$py, rc=$rc) -- cannot dispatch" }
+if (-not $w)    { throw "wave allocation produced no JSON (fak=$fak, rc=$rc) -- cannot dispatch" }
 if (-not $w.ok) { throw "account switcher refused the wave: $($w.reason) -- re-login / wait for reset, or pass -AllowTierFallback." }
 
 # --- Print the plan (always) ----------------------------------------------------------
@@ -107,6 +163,7 @@ foreach ($l in $w.lanes) {
       LogDir      = $LogDir
       Account     = $l.tag
       WorkKind    = $WorkKind
+      FakExe      = $fak
     }
     if ($AllowTierFallback) { $fwd.AllowTierFallback = $true }
     & $launcher @fwd

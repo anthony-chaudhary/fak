@@ -467,6 +467,33 @@ class OrphanClassifyTests(unittest.TestCase):
         self.assertEqual([r["pid"] for r in flagged], [31736])
         self.assertEqual(flagged[0]["parent_name"], "codex")
 
+    def test_orphan_console_shell_with_only_conhost_child_flags(self):
+        rows = [
+            {"pid": 10, "name": "cmd", "ppid": 999, "cmdline": "", "age_sec": 4000},
+            {"pid": 11, "name": "conhost", "ppid": 10, "cmdline": "", "age_sec": 4000},
+        ]
+        flagged = self.mod.classify_orphans(
+            rows, live_pids=frozenset({10, 11}), child_counts=self.mod._child_counts(rows),
+            child_names=self.mod._child_names(rows), parent_names=self.mod._parent_names(rows),
+            reap_idle_shells=True, idle_shell_names=self.mod.DEFAULT_IDLE_SHELL_NAMES,
+            min_age_sec=1800,
+        )
+        self.assertEqual([r["pid"] for r in flagged], [10])
+        self.assertEqual(flagged[0]["kind"], "orphan-console-shell")
+
+    def test_orphan_console_shell_with_real_child_spared(self):
+        rows = [
+            {"pid": 10, "name": "cmd", "ppid": 999, "cmdline": "", "age_sec": 4000},
+            {"pid": 11, "name": "python", "ppid": 10, "cmdline": "python worker.py", "age_sec": 4000},
+        ]
+        flagged = self.mod.classify_orphans(
+            rows, live_pids=frozenset({10, 11}), child_counts=self.mod._child_counts(rows),
+            child_names=self.mod._child_names(rows), parent_names=self.mod._parent_names(rows),
+            reap_idle_shells=True, idle_shell_names=self.mod.DEFAULT_IDLE_SHELL_NAMES,
+            min_age_sec=1800,
+        )
+        self.assertEqual(flagged, [])
+
     def test_orphan_protected_name_marked(self):
         rows = [{"pid": 4, "name": "csrss", "ppid": 999, "cmdline": "dos_mcp.server", "age_sec": 9}]
         flagged = self.mod.classify_orphans(rows, live_pids=frozenset(), orphan_patterns=("dos_mcp.server",))

@@ -1,8 +1,8 @@
 #!/bin/sh
 # fleet trunk-discipline guard  --  DOS reason: OFF_TRUNK
 #
-# Nudges every actor to work directly on `main` (the single-tree-on-trunk
-# policy) instead of spinning up stray feature branches / worktrees. This is the
+# Nudges every actor to work directly on the configured development branch (the
+# single-tree-on-trunk policy) instead of spinning up stray feature branches / worktrees. This is the
 # CROSS-AGENT floor: git runs it below the agent layer, so it binds Claude Code,
 # Codex, and a human at the same point -- none of them can talk their way around
 # a refusal the way they can around a CLAUDE.md / AGENTS.md sentence.
@@ -15,7 +15,8 @@
 #   warn   allow the ref, print an advisory citing OFF_TRUNK   (exit 0)
 #   off    do nothing
 # Escape hatch:  FLEET_ALLOW_BRANCH=1 <git cmd>   always allows (e.g. release tooling).
-# Allowlisted branch names: main, master (master is the legacy private-repo alias).
+# Allowlisted branch name: [branch_roles].development_branch from dos.toml.
+# Release tooling uses FLEET_ALLOW_BRANCH=1 when it must create or repair another role branch.
 #
 # git calls this hook once per phase ("prepared", "committed", "aborted") with the
 # transaction (one "<old> <new> <ref>" line per updated ref) on stdin. A branch
@@ -26,6 +27,53 @@ mode="${FLEET_TRUNK_GUARD:-block}"
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_BRANCH:-0}" = "1" ] && exit 0
 
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+dos_file="$repo_root/dos.toml"
+
+trim_branch_role() {
+	printf '%s\n' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+branch_role_value() {
+	key="$1"
+	file="$2"
+	[ -r "$file" ] || return 1
+	in_roles=0
+	while IFS= read -r raw || [ -n "$raw" ]; do
+		line=${raw%%#*}
+		line=$(trim_branch_role "$line")
+		[ -n "$line" ] || continue
+		case "$line" in
+			\[*\])
+				if [ "$line" = "[branch_roles]" ]; then
+					in_roles=1
+				else
+					in_roles=0
+				fi
+				continue
+				;;
+		esac
+		[ "$in_roles" = "1" ] || continue
+		case "$line" in
+			*=*) : ;;
+			*) continue ;;
+		esac
+		k=$(trim_branch_role "${line%%=*}")
+		[ "$k" = "$key" ] || continue
+		v=$(trim_branch_role "${line#*=}")
+		case "$v" in
+			\"*\") v=${v#\"}; v=${v%\"} ;;
+			\'*\') v=${v#\'}; v=${v%\'} ;;
+		esac
+		printf '%s\n' "$v"
+		return 0
+	done < "$file"
+	return 1
+}
+
+development_branch=$(branch_role_value development_branch "$dos_file")
+[ -n "$development_branch" ] || development_branch=main
+
 zero="0000000000000000000000000000000000000000"
 violations=""
 while read -r old new ref; do
@@ -35,9 +83,7 @@ while read -r old new ref; do
 	esac
 	[ "$old" = "$zero" ] || continue          # creations only (skip normal commits)
 	name="${ref#refs/heads/}"
-	case "$name" in
-		main|master) continue ;;              # allowlisted trunk (main; master legacy)
-	esac
+	[ "$name" = "$development_branch" ] && continue
 	violations="$violations $name"
 done
 
@@ -47,7 +93,7 @@ if [ "$mode" = "block" ]; then
 	# abort before the ref is written
 	if [ "$phase" = "prepared" ]; then
 		echo "OFF_TRUNK (blocked): refusing off-trunk branch creation:$violations" >&2
-		echo "  policy: work directly on main -- single tree on the trunk (CLAUDE.md / AGENTS.md)." >&2
+		echo "  policy: work directly on configured development branch '$development_branch' -- single tree on the trunk (CLAUDE.md / AGENTS.md)." >&2
 		echo "  override once: FLEET_ALLOW_BRANCH=1 <git cmd>   |   reason: dos.toml [reasons.OFF_TRUNK]" >&2
 		exit 1
 	fi
@@ -55,7 +101,7 @@ else
 	# warn once, after the ref exists
 	if [ "$phase" = "committed" ]; then
 		echo "OFF_TRUNK (advisory): created off-trunk branch:$violations" >&2
-		echo "  prefer committing directly to main (single tree on the trunk policy)." >&2
+		echo "  prefer committing directly to configured development branch '$development_branch' (single tree on the trunk policy)." >&2
 		echo "  see CLAUDE.md / AGENTS.md; hard-enforce with FLEET_TRUNK_GUARD=block." >&2
 	fi
 fi

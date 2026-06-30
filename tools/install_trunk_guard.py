@@ -7,7 +7,8 @@ cross-agent enforcement the docs alone cannot give. The hook is the named "floor
 under ``dos.toml [reasons.OFF_TRUNK]``.
 
 Effect: sets ``core.hooksPath -> tools/githooks`` and marks the hook executable.
-Idempotent -- safe to re-run. Default mode blocks off-trunk branch creation; export
+Idempotent -- safe to re-run. Default mode blocks branch creation outside the
+configured development branch; export
 ``FLEET_TRUNK_GUARD=warn`` to make it advisory, or ``FLEET_TRUNK_GUARD=off`` to mute.
 
 Run once per clone/node:  ``python tools/install_trunk_guard.py``
@@ -49,7 +50,7 @@ def main() -> int:
         capture_output=True, text=True,
     ).stdout.strip()
     print(f"core.hooksPath = {got}  (armed: {', '.join(armed)})")
-    print("  trunk guard active, blocking off-trunk branches")
+    print("  trunk guard active, blocking branches outside [branch_roles].development_branch")
     print("  leak-scan guard active, blocking redact-needles in staged content")
     print("  claim-honesty guard active (pre-push, blocking), surfacing CLAIM_UNWITNESSED via `dos review`")
     print("  override once:  FLEET_ALLOW_BRANCH=1 <git cmd>   |   FLEET_ALLOW_LEAK=1 <git cmd>   |   FLEET_ALLOW_RESIDUAL=1 git push")
