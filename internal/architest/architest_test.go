@@ -227,6 +227,7 @@ var tier = map[string]int{
 	"promptaudit":     1, // scans system/developer/context prompt text for hidden control markers (apostrophe-alphabet / date-separator channels) before they cross a model or cache boundary; stdlib-only, imports nothing internal, off the hot path.
 	"corelocks":       1, // parses + validates the declarative core-lock taxonomy (#1681): classes hard-self/serial-core/soft-contract/shadow-learn/open-leaf and reason tokens, classifying a path to its lock class from an embedded fixture; data + validation only, stdlib-only, imports nothing internal, off the hot path.
 	"corelockaudit":   1, // read-only changed-path core-lock audit fold (#1680): classifies changed paths via the corelocks(1) taxonomy into a closed-schema, deterministic Report (measurement-only warnings); imports only corelocks(1), shells to git in a thin off-hot-path I/O layer.
+	"frontierswe":     1, // typed FrontierSWE dataset spine (#1707, epic #1706): the Task model + Category enum + 17-task Catalog + hand-rolled task.toml/job.yaml/oracle.yaml loaders, mirroring internal/swebench's Instance; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
