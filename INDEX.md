@@ -3,7 +3,10 @@
 The curated map of everything in this repo that is not on the front page. If a
 doc exists, it is reachable from here. New dated notes go under
 [`docs/notes/`](docs/notes/) and get a line in the **Notes & research** section
-below, so the front door never has to grow to stay complete.
+below, so the front door never has to grow to stay complete. Before touching this
+map or [`llms.txt`](llms.txt), run `python tools/check_index_sync.py --audit-tree`;
+the same reciprocal check runs in staged mode for front-door index and dated-note
+changes.
 
 > New here? Start with the front doors, not this map: the
 > [README](README.md), [START-HERE](START-HERE.md), and the
@@ -125,6 +128,7 @@ Dated working notes: research, audits, and run logs. Kept for the record, not th
 front page.
 
 - [Self-feature query spine — fak asks fak what it can do (2026-06-30)](docs/notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) — issue spine [#1484](https://github.com/anthony-chaudhary/fak/issues/1484) for making fak's dev facts, live gateway tools, and memory strategies queryable to agents: cards first, detail/explain on demand, and every selected action routed through `fak_adjudicate` / `fak_syscall` or the memory apply gate.
+- [Core soft locks: coherence locks for fast-moving agent code (2026-06-30)](docs/notes/CONCEPT-CORE-SOFT-LOCKS-2026-06-30.md) — concept note for a DOS-shaped lock doctrine: hard-lock self-grading machinery, soft-lock authority/coherence changes with explicit witnesses, and keep ordinary leaf work fast.
 - [Virtual-cache concept refresh: O(1) → vCaches, live vs gated, honest attribution (2026-06-30)](docs/notes/VCACHE-CONCEPT-REFRESH-2026-06-30.md) — re-grounds every fak caching concept against the tree: the **five** distinct saving mechanisms and their owners (provider prompt-cache vs fak's compaction-shed / KV-reuse / vDSO / cache_control-preservation), which fire by default and which are **built-and-gated-OFF** (M2–M5), and the one accounting gap — the default `saved=` headline is **100% the provider's** prompt-cache while fak's own slice is measured but never folded in. Names the legacy assumptions to remove. Companion to the top-50 plan.
 - [Top-50: caching useful-by-default and honestly attributed (2026-06-30)](docs/notes/VCACHE-DEFAULT-ON-TOP50-2026-06-30.md) — 50 ranked, default-on, witnessed items to (a) decompose every saving by mechanism + owner so the provider's cache stops masquerading as fak's win, (b) make the vCache agentic loop (M2–M5) fire by default, and (c) push the vBlock/anchor abstraction into pure-fak, API, and sglang/vllm/llama paths. Each item: what · why · where (file) · default-on lever · witness.
 - [vCache gate-enablement tickets (2026-06-30)](docs/notes/VCACHE-GATES-ON-TICKETS-2026-06-30.md) — the GitHub issues filed from the top-50 plan: keystone epic [#1490](https://github.com/anthony-chaudhary/fak/issues/1490) + children for attribution (#1491), gate enablement (M5 #1492, M2 #1493, M1 #1497), cross-path integration (#1498), and the QA-honesty (#1495) + dogfood (#1496) contract every gate must pass before it flips default-on. Consumes #1303 (Track-2 ledger) and #1407 (anchor-starved compaction).

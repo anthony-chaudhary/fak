@@ -168,6 +168,7 @@ fak-specific code into a domain-free form.
 | Content-addressed provable deletion | evict bit-exact + attest with a certificate | fak-specific | `kvmmu`, `deletioncert` |
 | Taint / IFC sink-gating | tainted→sink flow refused at adjudication | fak-specific | `ifc`, `engine` |
 | One-sided screen + witnessed-loss polarity | an additive screen may only tighten; a wrong proposal costs a fault, never a loss | fak naming only | `wirescreen`, `ctxmmu` |
+| Core soft locks / coherence locks | hard-lock self-grading machinery; soft-lock authority changes with explicit witnesses | concept only | [core soft locks note](notes/CONCEPT-CORE-SOFT-LOCKS-2026-06-30.md) |
 | Prediction-vs-reality calibration | back-test a projection against telemetry before defaulting it on | partially | `dojo`, `resume` Backtest |
 | Per-aspect routing + ensembles | route an aspect, not the request; ensemble+reduction is a plan | partially | `modelroute` |
 | Provider-cache-as-virtual-pages | model a cache you don't own; Law A1/A2 safety + amortized governor | partially | `vcachegov`, `vcachechain` |
@@ -223,7 +224,10 @@ it:
    general primitive; add a Part 3 row with its `Expressed` level.
 4. **Grammar** — when a `G#` lift ships a verb, move it from "next verbs" to "shipped"
    in Part 4 and update the grammar note + epic.
-5. **Cross-check** — the entries here must agree with `CLAIMS.md` tags; an `[SHIPPED]`
+5. **Map sync** — if the refresh adds or moves a dated note or front-door index entry,
+   run `python tools/check_index_sync.py --audit-tree`; it catches dangling `INDEX.md`
+   / `llms.txt` links and dated notes missing from the repo map.
+6. **Cross-check** — the entries here must agree with `CLAIMS.md` tags; an `[SHIPPED]`
    row here that is `[STUB]` there is a bug in this index, not a claim.
 
 Cadence: refresh on each major subsystem ship or at least per release. This page is

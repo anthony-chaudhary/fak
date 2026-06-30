@@ -154,11 +154,13 @@ the live versions run on the [demos page](demos.html). Or watch the worked examp
 
 ## What fak is not
 
-`fak` is **not** a faster model server. vLLM, SGLang, and llama.cpp win raw throughput
-and front-of-prompt prefix caching, and `fak` doesn't try to beat them — it owns the
-orthogonal questions they don't: which effects are allowed, which results may enter
-memory, when reuse is still legal, and what survives a session boundary. You can run
-`fak serve` in front of any of them.
+`fak` is **not** a drop-in replacement for tuned token engines. Use vLLM, SGLang,
+llama.cpp, or a hosted provider when raw tokens/sec is the job, and put `fak serve`
+in front for the agent boundary: which effects are allowed, which results may enter
+memory, when reuse is still legal, what gets audited, and what survives a session
+boundary. The in-kernel model path is a correctness/reference engine with narrow
+witnessed performance rungs; broad serving-speed claims need a benchmark-authority
+row, not a slogan.
 
 ## For security teams
 
@@ -232,6 +234,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **What the words mean** (preflight vs inflight vs prefill; cache rebate / net saving) | [Glossary](glossary.md) |
 | **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
 | **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
+| **How agents discover fak features and memory tools** | [Self-feature query spine](notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |
