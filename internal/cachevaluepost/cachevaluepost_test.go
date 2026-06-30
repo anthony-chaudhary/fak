@@ -179,7 +179,7 @@ func TestFoldTwoTrackCardRendersCurrentEconomicsAndNextAction(t *testing.T) {
 		"anthropic/provider_prompt_cache",
 		"fak/compaction_shed",
 		"next: post the two-track P&L",
-		"Track 1 (WITNESSED) and Track 2 (OBSERVED $) stay side by side",
+		"Track 1 (WITNESSED) and Track 2 (OBSERVED/projected $) stay side by side",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("two-track card missing %q:\n%s", want, got)
