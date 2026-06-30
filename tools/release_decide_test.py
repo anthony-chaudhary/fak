@@ -222,6 +222,70 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertIn("CI_RETRY_TO_GREEN", verdict["blockers"])
         self.assertIn("FAK_AUTO_RELEASE=0", verdict["reason"])
 
+    def test_fast_subset_green_clears_ci_while_race_in_progress(self) -> None:
+        rd = load()
+        # The whole ci.yml run is still in progress (status "none": no decisive
+        # completed run yet, because the slow -race job hasn't concluded), but the
+        # fast subset (ci-fast.yml) has already concluded green. The cut must clear
+        # CI_BASE_RED/NONE on the fast signal and not wait on the -race tail. #1374.
+        verdict = rd.decide(payload(
+            ci_on_head={"status": "none"},
+            ci_fast={"status": "green"},
+        ))
+        self.assertEqual(verdict["decision"], "release")
+        self.assertEqual(verdict["blockers"], [])
+        self.assertEqual(verdict["ci_source"], "fast")
+
+    def test_fast_subset_red_still_holds(self) -> None:
+        rd = load()
+        # A red fast subset holds the cut even if the whole ci.yml hasn't
+        # concluded — the fast subset caught a real regression. #1374.
+        verdict = rd.decide(payload(
+            ci_on_head={"status": "none"},
+            ci_fast={"status": "red"},
+        ))
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertEqual(verdict["ci_source"], "fast")
+        self.assertIn("ci-fast.yml", verdict["reason"])
+
+    def test_fail_safe_falls_back_to_whole_ci_when_fast_missing(self) -> None:
+        rd = load()
+        # No ci_fast field at all: fall back to the whole ci.yml signal. A red
+        # whole-ci base still holds — a missing fast signal never cuts blind.
+        missing = rd.decide(payload(ci_on_head={"status": "red"}))
+        self.assertEqual(missing["decision"], "hold")
+        self.assertIn("CI_BASE_RED", missing["blockers"])
+        self.assertEqual(missing["ci_source"], "whole")
+
+        # An indecisive (unknown/none) fast signal is NOT trusted: fall back to
+        # the whole ci.yml signal rather than treat the fast run as a verdict.
+        for fast in ({"status": "unknown"}, {"status": "none"}, {}, None, "garbage"):
+            v = rd.decide(payload(ci_on_head={"status": "red"}, ci_fast=fast))
+            self.assertEqual(v["ci_source"], "whole", fast)
+            self.assertIn("CI_BASE_RED", v["blockers"], fast)
+
+        # And when the fall-back whole-ci base is green, the cut clears.
+        green = rd.decide(payload(ci_on_head={"status": "green"}))
+        self.assertEqual(green["decision"], "release")
+        self.assertEqual(green["ci_source"], "whole")
+
+    def test_retry_to_green_does_not_apply_to_fast_subset(self) -> None:
+        rd = load()
+        # CI_RETRY_TO_GREEN is a whole-ci concern (flaky -race / heavy suite). A
+        # decisive green fast subset clears without that guard, regardless of any
+        # attempt count carried on the whole-ci payload.
+        verdict = rd.decide(payload(
+            ci_fast={"status": "green"},
+            ci_on_head={
+                "status": "green",
+                "latest_trunk_ci": {"conclusion": "success", "attempt": 3},
+            },
+        ))
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("CI_RETRY_TO_GREEN", verdict["blockers"])
+        self.assertEqual(verdict["ci_source"], "fast")
+
     def test_cli_contract_on_live_repo(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(DECIDE), "--json"],

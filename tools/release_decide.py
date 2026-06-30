@@ -23,6 +23,22 @@ CC_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?:"
 VERSION_SUBJECT_RE = re.compile(r"^v\d+\.\d+\.\d+:")
 BREAKING_RE = re.compile(r"\bBREAKING[ -]CHANGE\b")
 
+# The fast release-critical CI subset (issue #1374). release_decide normally
+# gates CI_BASE_RED on the WHOLE ci.yml run, which only concludes once the slow
+# `-race` job finishes — a real release-latency tax. ci-fast.yml runs the
+# correctness subset (build + vet + `go test ./...`, no `-race`) and produces a
+# fast decisive conclusion. When the payload carries a decisive `ci_fast`
+# signal, we gate on THAT instead of the `-race`-inclusive `ci.yml`, so a green
+# fast subset clears the cut even while `-race` is still in flight.
+#
+# FAIL-SAFE: if `ci_fast` is absent, unknown, or unreadable, we fall back to the
+# old whole-`ci.yml` `ci_on_head` behavior, so a missing fast signal never cuts
+# on a blind base — it can only ever speed up a cut we would already allow, never
+# bypass a real red. The gated workflow name is configurable so an operator can
+# point the signal at a renamed/forked fast workflow without editing this file.
+FAST_CI_WORKFLOW = (os.environ.get("FAK_RELEASE_FAST_CI_WORKFLOW") or "ci-fast.yml").strip()
+_DECISIVE_CI_STATES = {"green", "red"}
+
 LEVELS = ("patch", "minor", "major")
 TYPE_LEVEL = {
     "feat": "minor",
@@ -181,6 +197,28 @@ def _ci_attempt(ci_on_head: dict) -> int | None:
         return None
 
 
+def effective_ci(payload: dict) -> tuple[dict, str]:
+    """Pick the CI signal release_decide gates on (issue #1374).
+
+    Returns ``(ci, source)`` where ``ci`` is the dict whose ``status`` drives the
+    CI_BASE_* blockers and ``source`` is ``"fast"`` or ``"whole"`` for
+    diagnostics.
+
+    The fast subset (ci-fast.yml, build + vet + non-race tests) is preferred ONLY
+    when it carries a DECISIVE status (``green`` or ``red``) — that is the whole
+    point: a green fast subset clears the cut without waiting on the slow `-race`
+    tail in ci.yml. Fail-safe: if the fast signal is absent, ``unknown``,
+    ``none``, or otherwise not decisive, fall back to the whole-``ci.yml``
+    ``ci_on_head`` signal, so a missing/in-progress fast subset can never cut on a
+    blind base.
+    """
+    whole = payload.get("ci_on_head") or {}
+    fast = payload.get("ci_fast")
+    if isinstance(fast, dict) and str(fast.get("status")) in _DECISIVE_CI_STATES:
+        return fast, "fast"
+    return whole, "whole"
+
+
 def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
            require_ci_green: bool = False, significance_floor: bool = True) -> dict:
     commits = payload.get("commits_since_tag") or []
@@ -219,16 +257,21 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     if tag_drift.get("source_behind_reachable_tag"):
         blockers.append("VERSION_BEHIND_REACHABLE_TAG")
 
-    ci_on_head = payload.get("ci_on_head") or {}
-    ci_status = ci_on_head.get("status")
+    # Gate on the fast release-critical subset when it is decisive, else fall
+    # back to the whole `-race`-inclusive ci.yml run (issue #1374). The
+    # CI_RETRY_TO_GREEN guard only applies to the whole-ci signal: a fast-subset
+    # retry does not carry the same "flaky -race / heavy suite" concern, and the
+    # fast subset has no per-run attempt contract.
+    ci_signal, ci_source = effective_ci(payload)
+    ci_status = ci_signal.get("status")
     if ci_status == "red":
         blockers.append("CI_BASE_RED")
     elif ci_status == "none":
         blockers.append("CI_BASE_NONE")
     elif ci_status == "unknown" and require_ci_green:
         blockers.append("CI_STATE_UNKNOWN")
-    elif ci_status == "green":
-        attempt = _ci_attempt(ci_on_head)
+    elif ci_status == "green" and ci_source == "whole":
+        attempt = _ci_attempt(ci_signal)
         if attempt is not None and attempt > 1:
             blockers.append("CI_RETRY_TO_GREEN")
 
@@ -254,7 +297,8 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         )
 
     if blockers:
-        reason = _blocker_reason(blockers[0], last_tag, sig, min_substantive, tag_drift)
+        reason = _blocker_reason(blockers[0], last_tag, sig, min_substantive,
+                                 tag_drift, ci_source)
 
     return {
         "decision": "hold" if blockers else "release",
@@ -269,12 +313,19 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         "blockers": blockers,
         "warnings": warnings,
         "recover": recover and not blockers,
+        # Which CI signal answered the CI_BASE_* gate: "fast" (ci-fast.yml subset,
+        # decisive) or "whole" (the -race-inclusive ci.yml, the fail-safe). #1374.
+        "ci_source": ci_source,
         "reason": reason,
     }
 
 
 def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
-                    min_substantive: int, tag_drift: dict) -> str:
+                    min_substantive: int, tag_drift: dict,
+                    ci_source: str = "whole") -> str:
+    # Name the workflow whose conclusion actually decided the CI gate (#1374):
+    # the fast subset (ci-fast.yml) when it was decisive, else the whole ci.yml.
+    ci_label = f"{FAST_CI_WORKFLOW} (fast subset)" if ci_source == "fast" else "ci.yml"
     reasons = {
         "NOTHING_TO_SHIP": f"no commits since {last_tag or '(no reachable tag)'} and no tag recovery pending",
         "BELOW_SIGNIFICANCE": (
@@ -289,8 +340,8 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
         ),
         "VERSION_DRIFT": "version markers disagree",
         "VERSION_BEHIND_REACHABLE_TAG": tag_drift.get("reason") or "VERSION is behind the reachable release tag",
-        "CI_BASE_RED": "latest decisive main ci.yml run is red",
-        "CI_BASE_NONE": "no decisive completed main ci.yml run is available",
+        "CI_BASE_RED": f"latest decisive main {ci_label} run is red",
+        "CI_BASE_NONE": f"no decisive completed main {ci_label} run is available",
         "CI_STATE_UNKNOWN": "CI state is unknown and --require-ci-green was set",
         "CI_RETRY_TO_GREEN": (
             "latest decisive main ci.yml run is green only after a retry; pause auto-cut "

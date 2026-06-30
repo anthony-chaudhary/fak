@@ -1,0 +1,76 @@
+# ci-fast: the release-critical CI SUBSET (issue #1374). This is the FAST
+# decisive signal `tools/release_decide.py` gates on so an auto-cut on a green
+# trunk no longer waits on the slow `-race` tail in ci.yml.
+#
+# It runs the same correctness-gating steps as ci.yml's build-vet-test job —
+# build + vet + `go test ./...` WITHOUT `-race` — and nothing else. The slow
+# `-race` job stays in ci.yml as a non-blocking post-merge guard: it still runs
+# on every push, it just no longer sits on the release-decide critical path.
+#
+# Contract: release_decide reads this workflow's latest decisive (completed)
+# conclusion on main. A green ci-fast run clears CI_BASE_RED even while the
+# `-race` job in ci.yml is still in flight; a red ci-fast run still holds the
+# cut. If this signal is missing/unknown, release_decide FALLS BACK to the whole
+# ci.yml run, so a missing fast signal never cuts on a blind base.
+name: ci-fast
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vet-test-fast:
+    name: build · vet · test (no -race, fast release gate)
+    runs-on: ubuntu-latest
+    env:
+      # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
+      # `go` fetch it if the runner's Go is older.
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release
+          # note AT the tag, which a default shallow checkout doesn't fetch.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      # Build/test cache: share the SAME content-addressed GOCACHE prefix as
+      # ci.yml's build-vet-test job (gobuild, non-race) so a warm cache skips
+      # unchanged packages and unchanged tests. A restored entry is never wrong
+      # — a miss just rebuilds.
+      - name: cache Go build/test artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-gobuild-${{ hashFiles('go.mod') }}-
+            ${{ runner.os }}-gobuild-
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      # The architest tier/root/chat-client gates read the repository filesystem;
+      # run them uncached so a new internal leaf or a stale tier-table row cannot
+      # inherit a cached PASS from a previous commit.
+      - name: architest tier gate (uncached)
+        run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
+
+      # The correctness gate: the same `go test ./...` as ci.yml, WITHOUT `-race`.
+      # This is the fast decisive conclusion release_decide waits on.
+      - name: go test ./... (no -race)
+        run: go test ./...
