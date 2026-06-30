@@ -58,6 +58,17 @@ func usageCoreVerbs() {
                  --budget reds on a latency regression after tests pass; --report writes the
                  measured verify-loop JSON; --file supplies a representative changed path.
                  make ci still runs the full suite as the authoritative gate.)
+  fak test      [fast|full|race|<pkg>] [--list] [-n] [-- go test args]
+                (HOST-AWARE TEST RUNNER: resolve the right go test invocation for a tier
+                 (fast=-short ./..., full, race) or a package target, and on Windows route
+                 it to WSL via test.ps1 (native go test is OS-policy-blocked). -n prints the
+                 resolved command without running. The make targets and fak affected stay
+                 the authoritative gates; this is the host-routing convenience layer.)
+  fak profile   <pkg> [--bench RE] [--benchtime DUR] [--cpuprofile F] [--memprofile F] [--top] [-n]
+                (HOST-AWARE PROFILER: capture a CPU + allocation profile of a package's
+                 benchmarks (go test -bench -cpuprofile -memprofile), Windows->WSL routed
+                 like fak test, then point at go tool pprof (or run --top). Go pprof and
+                 fak benchmarks/ablate remain the curated perf surfaces.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
                 (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
                  tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff

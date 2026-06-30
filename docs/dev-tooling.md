@@ -13,12 +13,10 @@ task to the right front door) and the verb-by-verb [CLI reference](cli-reference
 commands and the hard rules; this page is the "now I'm in the loop, what do I run?"
 layer.
 
-> **Honest scope.** `fak test` ships (a host-aware runner over `go test`); a
-> dedicated `fak profile` verb does not yet. The capabilities each wraps already
-> exist as the Go toolchain plus a few `fak`/`make` verbs, and this guide shows the
-> real commands. The
-> [What ships vs. what's planned](#what-ships-vs-whats-planned) table at the end is
-> explicit about which is which, so you never reach for a verb that isn't there.
+> **Honest scope.** `fak debug`, `fak profile`, and `fak test` all ship as CLI
+> surfaces. `fak profile` and `fak test` are host-aware convenience wrappers over
+> the Go toolchain and the repo's existing gates; the authoritative green bar is
+> still `make ci`.
 
 ## Build and run
 
@@ -104,8 +102,18 @@ verdict surface and the audit log.
 
 ## Profiling and benchmarking
 
-There is no `fak profile` verb. Profiling fak is standard Go profiling plus the
-benchmark verbs the repo already ships.
+`fak profile` is the host-aware profiler: it resolves the `go test -bench`
+invocation for a package, captures CPU and allocation profiles, routes through WSL
+on Windows, and points at `go tool pprof` for inspection. It is a convenience layer
+over standard Go profiling; the benchmark verbs below remain the curated perf
+surfaces.
+
+```bash
+fak profile ./internal/ctxmmu/                         # CPU + allocation profiles for all package benchmarks
+fak profile ./internal/recall/ --bench BenchmarkDigest # narrow to one benchmark regexp
+fak profile ./internal/ctxmmu/ --benchtime 2s --top    # profile, then print pprof -top
+fak profile ./internal/ctxmmu/ -n                      # print the resolved command without running it
+```
 
 ### Go pprof (CPU, memory, blocking)
 
@@ -114,7 +122,7 @@ hot package through its benchmarks:
 
 ```bash
 # CPU + allocation profile for one package's benchmarks (run under WSL on Windows)
-go test -run=NONE -bench=. -benchmem \
+go test -run=^$ -bench=. -benchmem \
         -cpuprofile cpu.out -memprofile mem.out ./internal/<pkg>/...
 
 go tool pprof -top cpu.out          # hottest functions
@@ -186,12 +194,11 @@ So you never reach for a verb that isn't there:
 | Capability | Today | Dedicated verb |
 |---|---|---|
 | Enhanced debugging | `fak debug` (context/session core-dump debugger) + `fak doctor` (answer-shape diagnostic) + [integrations/debugging.md](integrations/debugging.md) | shipped |
-| Built-in profiling | Go pprof (`go test -cpuprofile/-memprofile -bench`) + `fak benchmarks` / `fak bench` / `fak ablate` | a `fak profile` wrapper is **planned**, not shipped |
+| Built-in profiling | `fak profile` (host-aware wrapper over `go test -bench -cpuprofile -memprofile`) + Go pprof + `fak benchmarks` / `fak bench` / `fak ablate` | shipped |
 | Test runner | `fak test` (host-aware runner: routes `go test` to WSL on Windows), over `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | shipped |
 | Dev workflow guide | this page, plus [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md), [Work map](WORK-MAP.md) | shipped |
 
-`fak test` is the first of these convenience verbs to land — it encodes the host
-knowledge this guide carries (routing `go test` to WSL on Windows automatically) over
-the same `make`/`go test` gates. The remaining planned wrapper, `fak profile`, would
-be a thin verb over Go pprof; it is tracked under the developer-tooling epic, and until
-it lands the profiling commands above are the supported path.
+`fak test` and `fak profile` encode the host knowledge this guide carries (routing
+`go test` to WSL on Windows automatically) over the same `make`/`go test` gates.
+They are the developer-experience layer, not a replacement for the repo's
+authoritative CI gates.

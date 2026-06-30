@@ -70,16 +70,16 @@ shipped while a named, separable piece did not.
 | **F-002** #218 prompt caching (P1) | 🟡 **Cache + hit/miss metrics shipped; control-API/TTL/pricing open** | The **vCache** virtual-API-cache spine (epic **#715**, CLOSED) caches over upstream providers with a cost-gated correctness law; **cache hit/miss + provider hit-ratio render on `/metrics`** (`fak_cache_*` via the unified cachemeta fold). `fak vcache` proves the recall cost-gate deterministically. | A user-facing **cache-control header/param** matching Anthropic/OpenAI `cache_control`, a **configurable TTL** knob, and a **pricing model** — vCache budgets at the *uncached* price (hits are realized rebates), not a TTL/cache-control surface. | [`cmd/fak/vcache.go`](../../cmd/fak/vcache.go) · [`internal/cachemeta/provider.go`](../../internal/cachemeta/provider.go) · [`internal/cachemeta/stream_metrics.go`](../../internal/cachemeta/stream_metrics.go) |
 | **F-003** #216 metrics/telemetry (P1) | 🟡 **Prometheus + Grafana + alerts shipped; OTel spans open** | A full **Prometheus exposition** `/metrics` endpoint (`fak_gateway_*`/`fak_vdso_*`/`fak_cache_*` with `# HELP`/`# TYPE`, histograms, build-info); a **Grafana** stack (provisioned dashboards + `gen_dashboard.py`); **alert/SLO definitions** in `prometheus-alerts.yml`. | **OpenTelemetry spans/tracing** — there is **no `go.opentelemetry.io` import**; tracing today is an internal `tracesink` + the `/v1/fak/trace` endpoint, not OTel-wire spans. 3 of 4 acceptance boxes are met; OTel is the one gap. | [`internal/gateway/metrics.go`](../../internal/gateway/metrics.go) · [`tools/grafana/gen_dashboard.py`](../../tools/grafana/gen_dashboard.py) · [`tools/grafana/prometheus-alerts.yml`](../../tools/grafana/prometheus-alerts.yml) |
 | **F-004** #213 MCP expansion (P2) | 🟡 **fak governs MCP; the registry/discovery surface is unbuilt** | fak **governs** MCP traffic: a `/mcp` gateway endpoint (openapi `paths./mcp`) plus a governance example and a worked client (`examples/mcp`, `examples/mcp-client`). | The F-004 *expansion* features — **tool auto-discovery, a tool registry, resource access, prompt templates, a server directory** — are not built. This is partly an architecture-fit question: fak is the *gate* in front of an MCP server, not an MCP registry/provider. | [`examples/mcp/README.md`](../../examples/mcp/README.md) · [`examples/mcp-client/client.py`](../../examples/mcp-client/client.py) · [`docs/fak/openapi.yaml`](../../docs/fak/openapi.yaml) (`/mcp`) |
-| **F-005** #211 developer tooling (P2) | 🟡 **debug/doctor/bench shipped; dedicated `profile`/`test` verbs absent** | `fak debug`, `fak doctor`, `fak headroom`, and a bench family (`fak bench`/`webbench`/`routebench`/`swebench`) ship as verbs; the dev-workflow contract lives in `AGENTS.md`/`CONTRIBUTING.md`. | A dedicated **`fak profile`** verb and a **`fak test` runner** verb as named in the issue — neither is registered in `cmd/fak/main.go`'s verb switch. | [`cmd/fak/debug.go`](../../cmd/fak/debug.go) · [`cmd/fak/doctor.go`](../../cmd/fak/doctor.go) · [`cmd/fak/headroom.go`](../../cmd/fak/headroom.go) |
+| **F-005** #211 developer tooling (P2) | 🟢 **shipped** | Enhanced debugging ships through `fak debug` plus `fak doctor`; built-in profiling ships as `fak profile`; the host-aware test runner ships as `fak test`; the dev-workflow contract lives in `docs/dev-tooling.md`, `AGENTS.md`, and `CONTRIBUTING.md`. | — (all #211 acceptance boxes have a reachable CLI/doc surface) | [`cmd/fak/debug.go`](../../cmd/fak/debug.go) · [`cmd/fak/profile.go`](../../cmd/fak/profile.go) · [`cmd/fak/test.go`](../../cmd/fak/test.go) · [`docs/dev-tooling.md`](../dev-tooling.md) |
 | **F-006** #208 deployment guides (P2) | 🟡 **Guides shipped (Docker/Compose/K8s/bare-metal/checklist); published image open** | A complete `deployment-guide.md` with **Docker** build/run-hardened, **Docker Compose**, **Kubernetes** (live `deploy/k8s/` manifests + kustomization), **bare-metal** (systemd unit, hardened sandbox), and a **production-readiness checklist**. | An **official, registry-published Docker image** (the guide builds from a clone, no `ghcr.io`-pushed artifact) — a release-infra task, not a doc. Also formally `Depends on` F-003 (#216). | [`docs/fak/deployment-guide.md`](../../docs/fak/deployment-guide.md) · [`Dockerfile`](../../Dockerfile) · [`deploy/k8s/fak.yaml`](../../deploy/k8s/fak.yaml) · [`deploy/k8s/kustomization.yaml`](../../deploy/k8s/kustomization.yaml) |
 | **F-007** #205 SDK generation (P2) | 🟡 **OpenAPI spec shipped; published SDKs absent** | A generated **OpenAPI 3 spec** (`docs/fak/openapi.yaml`, v0.30.0) covering the chat/embeddings/moderations/models/messages + `/v1/fak/*` + `/mcp` surface. The Go module itself is importable as a client. | **Published Python, TypeScript, and Go SDK packages** generated from the spec — no generated SDK packages exist in-tree or on a registry. | [`docs/fak/openapi.yaml`](../../docs/fak/openapi.yaml) |
 | **F-008** #202 policy editor GUI (P2) | 🔴 **Not implemented** | `fak policy` CLI authoring + JSON-schema validation exist on the command line. | A **web-based** visual editor (React/Next.js frontend, real-time validation, visual tool builder, export-to-JSON) — no `.tsx`/`.jsx`/web frontend in the tree. A 14–21-day effort by the issue's own estimate. | — (no web UI) |
 
 Legend: 🟢 done · 🟡 partial (real subset shipped, named piece open) · 🔴 not implemented.
 
-**Roll-up: 1 / 8 children closed (#221).** Of the 7 open: two are essentially *acceptance-
-complete except one published artifact* (F-006 a registry image, F-003 OTel spans), two are
-*real-subset partials* (F-002 cache-control API; F-005 the `profile`/`test` verbs), one is
+**Roll-up: 2 / 8 children shipped (#221, #211).** Of the 6 open: two are essentially
+*acceptance-complete except one published artifact* (F-006 a registry image, F-003 OTel
+spans), one is a *real-subset partial* (F-002 cache-control API), one is
 *spec-shipped-SDKs-pending* (F-007), one is an *architecture-fit unbuilt surface* (F-004), and
 one is an *unbuilt web GUI* (F-008). So #302 stays **OPEN** — correctly.
 
@@ -87,7 +87,7 @@ one is an *unbuilt web GUI* (F-008). So #302 stays **OPEN** — correctly.
 
 ## 2. The gate — why #302 cannot honestly close here
 
-The seven open acceptance gates fall into three classes, and **none is a single in-repo change
+The six open acceptance gates fall into three classes, and **none is a single in-repo change
 this host can land without fabricating a shipped artifact:**
 
 1. **Published-artifact acceptances (F-006 official Docker image, F-007 three published SDKs).**
@@ -102,13 +102,13 @@ this host can land without fabricating a shipped artifact:**
    MCP expansion needs a registry/discovery/prompt-template surface (and a prior architecture-fit
    decision, since fak *gates* MCP rather than *providing* it); the GUI is a 14–21-day React app.
 
-3. **Real-subset partials (F-002 cache-control/TTL/pricing API, F-005 the `fak profile`/`fak test`
-   verbs).** A genuine subset shipped (cache hit/miss metrics; `debug`/`doctor`/bench), but the
-   named remaining piece is a separate leaf, not a one-line completion.
+3. **Real-subset partial (F-002 cache-control/TTL/pricing API).** A genuine subset shipped
+   (cache hit/miss metrics), but the named remaining piece is a separate leaf, not a
+   one-line completion.
 
 **The single honest gate, stated plainly:** epic #302 closes only when all 8 children meet their
-acceptance, and **7 are open** — spanning two published-artifact gaps, three unbuilt surfaces, and
-two real-subset partials. No code or doc change on this host can flip those bits without either
+acceptance, and **6 are open** — spanning two published-artifact gaps, three unbuilt surfaces, and
+one real-subset partial. No code or doc change on this host can flip those bits without either
 publishing a registry artifact this box cannot publish or shipping a multi-day feature. So the
 correct deliverable is this tracker, not a closed epic.
 
@@ -122,7 +122,7 @@ correct deliverable is this tracker, not a closed epic.
 | F-002 #218 | Add a `cache_control`-style request param + a configurable TTL knob over the vCache spine, surface a pricing/rebate line in the cache stats; the `fak_cache_*` hit/miss metrics already exist to validate it | host-tractable |
 | F-003 #216 | Wire the `go.opentelemetry.io` SDK through the gateway request path (spans around adjudicate/serve), keeping the existing `tracesink` as the local sink; Prometheus + Grafana + alerts are already shipped | host-tractable |
 | F-004 #213 | Decide the architecture fit first (does fak host an MCP registry, or only govern upstream MCP servers?); if hosting, add tool auto-discovery + a server directory as the first leaf | host-tractable (design first) |
-| F-005 #211 | Register a `fak profile` verb (pprof capture over a serve/bench run) and a `fak test` runner verb wrapping the witness suites; both follow the existing `cmd/fak` verb pattern | host-tractable |
+| F-005 #211 | Done: `fak profile`, `fak test`, `fak debug`, and the developer-tooling guide cover the issue acceptance. | — |
 | F-006 #208 | Add a CI release job that builds and pushes an `official` image to a registry (e.g. `ghcr.io`), then cite the pulled tag from the guide; the guides themselves are complete | a CI/release runner |
 | F-007 #205 | Run an OpenAPI generator over `docs/fak/openapi.yaml` for Python/TS/Go, smoke each against a live `fak serve`, publish the three packages | a CI/release runner |
 | F-008 #202 | Scaffold the React/Next.js policy editor as a separate `web/` app (or sibling repo): load the policy JSON schema, real-time validate, export to JSON | host-tractable (large) |
@@ -140,7 +140,7 @@ correct deliverable is this tracker, not a closed epic.
   (F-001); `cmd/fak/vcache.go` + `internal/cachemeta/{provider,stream_metrics}.go` (F-002);
   `internal/gateway/metrics.go` + `tools/grafana/{gen_dashboard.py,prometheus-alerts.yml}` (F-003);
   `examples/mcp` + `examples/mcp-client` + `docs/fak/openapi.yaml` `/mcp` (F-004);
-  `cmd/fak/{debug,doctor,headroom}.go` (F-005); `docs/fak/deployment-guide.md` + `Dockerfile` +
+  `cmd/fak/{debug,doctor,profile,test}.go` + `docs/dev-tooling.md` (F-005); `docs/fak/deployment-guide.md` + `Dockerfile` +
   `deploy/k8s/` (F-006); `docs/fak/openapi.yaml` v0.30.0 (F-007); no web frontend in-tree (F-008).
 - **OTel-absence check:** `rg 'go.opentelemetry.io|otel\.'` over the Go tree returns no SDK import
   (only the internal `tracesink`), grounding the F-003 OTel gap.
