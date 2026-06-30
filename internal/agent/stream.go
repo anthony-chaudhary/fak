@@ -333,21 +333,13 @@ type openAIStreamChunk struct {
 // invisible to the client and the caller can still choose an HTTP status. It NEVER retries
 // mid-stream: once bytes have flowed a read error is returned as-is. A non-OpenAI wire
 // returns ErrStreamingUnsupported without a network call.
-func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-	if !p.StreamingSupported() {
-		return nil, ErrStreamingUnsupported
-	}
-	call, err := p.prepareUpstream(messages, tools, true, opts...)
-	if err != nil {
-		return nil, err
-	}
-	// Retry a transient transport error OR a retryable status (429/503/529/…) with the
-	// SAME backoff+jitter+Retry-After policy as Complete — but ONLY here, before the first
-	// byte is streamed. A pre-stream failure has emitted nothing to the sink, so the retry
-	// is safe and invisible to the client. A deterministic dial failure fails fast (no
-	// backoff). A 401 on the rotating-credential path self-heals once via a fresh-token
-	// re-send (a no-op on the static-key/passthrough paths). Each non-200 response body is
-	// drained+closed in the loop; only the successful 200 escapes to the streaming reader.
+// streamConnect dials the upstream with the same retry/backoff/Retry-After policy as
+// Complete, but ONLY before the first byte is streamed: a pre-stream failure has emitted
+// nothing to the sink, so the retry is safe and invisible to the client. A deterministic
+// dial failure fails fast; a 401 on the rotating-credential path self-heals once via a
+// fresh-token re-send. It returns a live 200 response (body still open — the caller closes
+// it) or, after exhausting attempts, the true upstream status error (never a later glitch).
+func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, error) {
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var lastErr error
 	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
@@ -426,6 +418,28 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 			return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastStatusErr)
 		}
 		return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastErr)
+	}
+	return resp, nil
+}
+
+func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	if !p.StreamingSupported() {
+		return nil, ErrStreamingUnsupported
+	}
+	call, err := p.prepareUpstream(messages, tools, true, opts...)
+	if err != nil {
+		return nil, err
+	}
+	// Retry a transient transport error OR a retryable status (429/503/529/…) with the
+	// SAME backoff+jitter+Retry-After policy as Complete — but ONLY here, before the first
+	// byte is streamed. A pre-stream failure has emitted nothing to the sink, so the retry
+	// is safe and invisible to the client. A deterministic dial failure fails fast (no
+	// backoff). A 401 on the rotating-credential path self-heals once via a fresh-token
+	// re-send (a no-op on the static-key/passthrough paths). Each non-200 response body is
+	// drained+closed in the loop; only the successful 200 escapes to the streaming reader.
+	resp, err := p.streamConnect(ctx, call)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
