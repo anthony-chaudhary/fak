@@ -2274,7 +2274,7 @@ func (m *gatewayMetrics) writeVCacheWarmthMetrics(b *strings.Builder) {
 	if pred.Total == 0 {
 		return
 	}
-	writeHelpType(b, "fak_vcache_warmth_prediction_outcomes", "DECISION (M1 warmth belief): rolling-window count of predicted-warm/cold outcomes reconciled against provider cache_read feedback. false_warm is the lethal believed-warm/provider-missed case; false_cold is benign missed opportunity. Derived by the same vcacheobserve engine as `fak vcache observe`.", "gauge")
+	writeHelpType(b, "fak_vcache_warmth_prediction_outcomes", "OBSERVED provider-relayed DECISION (M1 warmth belief): rolling-window count of predicted-warm/cold outcomes reconciled against provider cache_read feedback. false_warm is the lethal believed-warm/provider-missed case; false_cold is benign missed opportunity. Derived by the same vcacheobserve engine as `fak vcache observe`.", "gauge")
 	for _, row := range []struct {
 		class string
 		n     int
@@ -2286,11 +2286,11 @@ func (m *gatewayMetrics) writeVCacheWarmthMetrics(b *strings.Builder) {
 	} {
 		fmt.Fprintf(b, "fak_vcache_warmth_prediction_outcomes{class=%q} %d\n", row.class, row.n)
 	}
-	writeHelpType(b, "fak_vcache_warmth_predictions_total", "DECISION (M1 warmth belief): total predictions reconciled in the rolling provider-cache window. Gauge because the retained window is bounded and rolling.", "gauge")
+	writeHelpType(b, "fak_vcache_warmth_predictions_total", "OBSERVED provider-relayed DECISION (M1 warmth belief): total predictions reconciled in the rolling provider-cache window. Gauge because the retained window is bounded and rolling.", "gauge")
 	fmt.Fprintf(b, "fak_vcache_warmth_predictions_total %d\n", pred.Total)
-	writeHelpType(b, "fak_vcache_warmth_false_warm_rate", "DECISION (M1 warmth belief): false_warm / predicted_warm over the rolling provider-cache window; this is the Law A1 demote/alarm signal.", "gauge")
+	writeHelpType(b, "fak_vcache_warmth_false_warm_rate", "OBSERVED provider-relayed DECISION (M1 warmth belief): false_warm / predicted_warm over the rolling provider-cache window; this is the Law A1 demote/alarm signal.", "gauge")
 	fmt.Fprintf(b, "fak_vcache_warmth_false_warm_rate %s\n", promFloat(pred.FalseWarmRate()))
-	writeHelpType(b, "fak_vcache_warmth_false_cold_rate", "DECISION (M1 warmth belief): false_cold / predicted_cold over the rolling provider-cache window; a missed warm opportunity, not a correctness risk.", "gauge")
+	writeHelpType(b, "fak_vcache_warmth_false_cold_rate", "OBSERVED provider-relayed DECISION (M1 warmth belief): false_cold / predicted_cold over the rolling provider-cache window; a missed warm opportunity, not a correctness risk.", "gauge")
 	fmt.Fprintf(b, "fak_vcache_warmth_false_cold_rate %s\n", promFloat(pred.FalseColdRate()))
 }
 
