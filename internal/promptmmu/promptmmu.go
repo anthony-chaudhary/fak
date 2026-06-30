@@ -12,6 +12,7 @@ const (
 	SkipEmptyPlan        = "empty-plan"               // plan.Drop had no names
 	SkipNotJSONObject    = "not-json-object"          // raw is not a JSON object
 	SkipNoTools          = "no-tools"                 // no tools[] array, or it is empty
+	SkipNoSystem         = "no-system"                // no system[] array, or system is a bare string
 	SkipUndecodableTools = "undecodable-tools"        // tools[] spans could not be recovered exactly
 	SkipNoBreakpoint     = "no-breakpoint"            // no cache_control to anchor the cached prefix on
 	SkipNothingAfter     = "nothing-after-breakpoint" // no droppable tool sits strictly after the breakpoint
@@ -27,6 +28,61 @@ type ToolPlan struct {
 	// Drop is the set of tool names to remove from the advertised tool list.
 	// Membership only; order is irrelevant (the spine preserves tools[] order).
 	Drop map[string]bool
+}
+
+// CompactInboundSystem is the system[] twin of CompactInboundTools. It keeps the
+// cached prefix through the last system cache_control block byte-identical and
+// removes only named blocks after that boundary whose block and name match plan.
+func CompactInboundSystem(raw []byte, plan BlockPlan, decode func([]byte) error) PruneResult {
+	if len(raw) == 0 {
+		return identity(raw, SkipEmptyInput)
+	}
+	if len(plan.Drop) == 0 {
+		return identity(raw, SkipEmptyPlan)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return identity(raw, SkipNotJSONObject)
+	}
+	systemRaw, ok := obj["system"]
+	if !ok || len(systemRaw) == 0 || systemRaw[0] != '[' {
+		return identity(raw, SkipNoSystem)
+	}
+	elems, spans, ok := decodeArrayElements(raw, systemRaw)
+	if !ok || len(elems) == 0 {
+		return identity(raw, SkipNoSystem)
+	}
+	breakIdx := lastToolBreakpoint(elems)
+	if breakIdx < 0 {
+		return identity(raw, SkipNoBreakpoint)
+	}
+	keep := make([]int, 0, len(elems))
+	var pruned []string
+	for i, el := range elems {
+		block, name := blockName(el)
+		if i > breakIdx && block == plan.Block && plan.Drop[name] {
+			pruned = append(pruned, name)
+			continue
+		}
+		keep = append(keep, i)
+	}
+	if len(pruned) == 0 {
+		return identity(raw, SkipNothingAfter)
+	}
+	out, ok := spliceTools(raw, spans, keep)
+	if !ok {
+		return identity(raw, SkipSpliceUnproven)
+	}
+	prefixEnd := spans[breakIdx].end
+	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
+		return identity(raw, SkipSpliceUnproven)
+	}
+	if decode != nil {
+		if err := decode(out); err != nil {
+			return identity(raw, SkipSpliceUnproven)
+		}
+	}
+	return PruneResult{Body: out, Pruned: pruned, Changed: true}
 }
 
 // PruneResult reports what CompactInboundTools did, so the drop is LEGIBLE:
@@ -258,6 +314,17 @@ func toolName(el json.RawMessage) string {
 		return ""
 	}
 	return t.Name
+}
+
+func blockName(el json.RawMessage) (string, string) {
+	var b struct {
+		Block string `json:"block"`
+		Name  string `json:"name"`
+	}
+	if json.Unmarshal(el, &b) != nil {
+		return "", ""
+	}
+	return b.Block, b.Name
 }
 
 // rawHasCacheControl reports whether a JSON value (a tool object, or a `system`
