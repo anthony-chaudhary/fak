@@ -48,7 +48,10 @@ var tier = map[string]int{
 
 	"agenticbench":     1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
+	"apihostprobe":     1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"benchruns":        1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"benchcli":         1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
@@ -57,7 +60,7 @@ var tier = map[string]int{
 	"callavoid":        1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":         1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
-	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1,
+	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1, "sessionaudit": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; imports scoreboard(1)+stdlib, off the hot path.
 	"supportmaturityscore": 2,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
 	"supportmaturity":      2,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
@@ -72,6 +75,8 @@ var tier = map[string]int{
 	"propagationscore":     4,                // convention-propagation scorecard + fan-out: measures how far a proven scorecard convention (shared kernel/--compare/--markdown) has fanned across the family, files one deduped issue per laggard via dogfoodissues(3); imports dogfoodissues(3)+pkg/scorecard+stdlib, off the hot path.
 	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
 	"heavinessscore":       1,                // operator-heaviness scorecard over the cmd/fak dispatch table + guard flag set + dos.toml reasons + llms.txt doc map; imports pkg/scorecard, off the hot path.
+	"operatorbrief":        3,                // folds cadence/program/milestone/heaviness report envelopes into one human pacing control pane; composer-only, off the hot path.
+	"productscorecard":     1,                // pure Go port of tools/product_scorecard.py; folds CLAIMS.md + tools/product_scorecard.data into product_debt; stdlib-only, off the hot path.
 	"scorecardpane":        1,                // pure Go port of tools/scorecard_control_pane.py (portfolio debt-ratchet fold) + tools/repo_hygiene_scorecard.py (the tree-wide hygiene fold); stdlib-only, off the hot path.
 	"uiquality":            1,                // UI/UX-quality scorecard over the terminal render source (the fak console panes + fak info overlay + guard --split); stdlib-only, off the hot path.
 	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
@@ -103,6 +108,7 @@ var tier = map[string]int{
 	"agentdemo":     3,                // agentic "try-it" demo spine (epic #1167): a deterministic, no-key tool-using agent loop that folds the REAL kernel per call â€” the live-loop dual of turnbench's trace replay. Composer: imports abi(0)+adjudicator(2)+kernel(2), off the hot path.
 	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
+	"selfquery": 3, // unified self-feature catalog over devindex, memq, gateway-supplied tool descriptors, and capindex cards; composer view, off the hot path.
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"docfreshrsi": 4, // RSI rung of the docs-freshness loop (#1278/#1284): an rsiloop(4) sibling that imports only shipgate(2)'s keep-bit, off the hot path.
@@ -190,8 +196,10 @@ var tier = map[string]int{
 	"looprecover":     1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
 	"nightrun":        1, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	"claimcheck":      1, // pure net-true-value claim grader; stdlib-only, off the hot path.
+	"ideascout":       1, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
 	"loopindex":       1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":         1, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
+	"superloop":       1, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens; stdlib-only, off the hot path.
 	"sessionobs":      1, // SESSION-OBSERVABILITY-for-RSI scorecard: the value-side complement to tools/session_audit.py â€” grades how far our coding-session data has climbed the capture->structure->link->aggregate->learn ladder, folding the missing rungs into one sessionobs_debt integer. Pure scorer (Record/Outcome/Pipeline/Score), stdlib-only, imports nothing internal, off the hot path.
 	"compactcohere":   1, // fak<->harness context-manager COHERENCE policy (#1131): attributes a served turn's prefix event (stable/fak_cut/fak_world_break/harness_rewrite/cold_ttl) + a standing PreCompact block/allow posture to suppress Claude Code's cache-destroying auto-compaction while fak's cache-preserving compaction copes. Pure sensor+policy, stdlib-only, imports nothing internal, off the hot path.
 	"loopdrive":       1,
@@ -202,16 +210,19 @@ var tier = map[string]int{
 	"rehydrate":       1, // horizon-gated re-entry orchestrator (#1181, epic #1178 Phase-2 spine): the CRaC afterRestore analog — a staged Gate that runs strictly more revalidation rungs (COLD_CACHE/STALE_CRED/STALE_RECALL/STALE_LEASE/STALE_PLAN) the longer the image was dormant, refusing admission at the first that does not clear. COMPOSES rungs (the four children supply the checks); imports only dormancy(1)+stdlib, registers nothing, off the hot path. sessionimage.Rehydrate composes a Gate at its boundary.
 	"syspromptmmu":    2, // system-prompt MMU: Rung 1 (#1259) emits fak's ordered base-context plan (SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each content-witnessed); Rung 2 (#1260) is the cache-safe system-block splicer (BuildSystemValue + SpliceSystemOverlay, bytes.Equal(prefix) proven, fail-safe identity). Pure authorship/decision layer: imports cachemeta(1)+promptmmu(1)+stdlib, off the hot path.
 	"devindex":        1,
-	"workflowlint":   1, // refutes fak-blind ultracode Workflow scripts (#1494/C4 #1502): pure Lint over the self-index/memory/shared-path concept classes; stdlib-only (embed/regexp/sort/strings), imports nothing internal, off the hot path.
+	"workflowlint":    1, // refutes fak-blind ultracode Workflow scripts (#1494/C4 #1502): pure Lint over the self-index/memory/shared-path concept classes; stdlib-only (embed/regexp/sort/strings), imports nothing internal, off the hot path.
 	"execrollup":      1, // executive activity roll-up: pure fold-over-folds turning the agentic-fleet plane payloads (dispatch closure-honesty + throughput, dark loops, cadence ship-stamp rate, fleet box liveness) into one GREEN/WATCH/RED control-pane envelope + a ranked what-needs-you list with provenance labels; stdlib-only, imports nothing internal, off the hot path.
 	"opttarget":       4, // declarative target layer of the RSI optimization fuser (epic #1279): Compile lowers an OptTarget (data) into a rsiloop.Harness, so it imports rsiloop(4) and is forced to the integrator layer. Off the hot path.
 	"cachevaluepost":  2, // outbound Slack publisher for the cache-value P&L roll-up (twin of benchpost/dojopost/grafanapost); forced to tier 2 by its cachevaluereport(2) import. Imports cachevalueledger(1)+cachevaluereport(2)+scoreboard(1)+slackenv(1), off the hot path.
 	"loopscore":       1, // pure loop scorecard: folds the loopmgr ledger + job registry into a durability/self-report/dogfood score for the agentic background loops; imports loopmgr(1), off the hot path.
 	"loopfleet":       1, // cross-ledger loop-health fold (#1196): pure read-only adapters over the loopmgr/nightrun/dojo/cadence/dispatch journals joined into one per-loop health view in loopmgr's HealthState vocabulary; imports loopmgr(1), off the hot path.
+	"fleetpane":       4, // native fleet control-pane reader: shells to git/status helpers and folds loop/fleet/operator state for cmd/fak; command-facing integrator, off the hot path.
 	"trendreport":     1, // the generic trend-report substrate (#1437): the durable-JSONL ledger plumbing (ParseLedger/LatestBefore/AppendLedgerLine over a Row key), DirectionWord, the embeddable control-pane Envelope+Stamp, and the AdvisoryGate whose only failing finding is the caller's *_unmeasured token. Lifts the machinery cadencereport/milestonereport/the dojo board each re-declare; stdlib+generics only, imports nothing internal, off the hot path. Consumer migration is a documented follow-on.
 	"dispatchaudit":   1, // pure dispatch-worker outcome fold (#1454): classifies each .dispatch-runs worker (shipped/wasted-spawn/quota-walled/retry-storm/no-op/errored), rolls up wasted-spawn + wasted-wall-clock per backend, and emits fingerprinted findings; stdlib-only core + a thin I/O shell, off the hot path.
+	"issuecatalog":    3, // performance-enablement issue-catalog planner/syncer; reads curated rows, reviews them through issuecontract(1), and shells to gh only behind --live; off the hot path.
 	"safesync":        2, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
-	// new-leaf:tier â€” `python tools/new_leaf.py <name> --tier <name>` inserts the
+	"usagelog":        1, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
+	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
 
@@ -1861,6 +1872,7 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 //   - "fakread"    â€” agent: the read-only engine for fak_read gateway calls.
 //   - "mock"       â€” engine: the routing/mock engine used by the engine-route capability.
 //   - "dynamo"     â€” engine: the Dynamo EngineDriver adapter for ridden P/D pools.
+//   - "llm-d"      â€” engine: the llm-d EngineDriver adapter for ridden Kubernetes P/D pools.
 //
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
@@ -1868,6 +1880,7 @@ var engineDriverRole = map[string]map[string]string{
 	"dynamo":     {"engine": "the Dynamo EngineDriver adapter for ridden P/D serving pools"},
 	"inkernel":   {"modelengine": "the in-kernel Go model-fusion engine (dogfood default)"},
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
+	"llm-d":      {"engine": "the llm-d EngineDriver adapter for ridden Kubernetes P/D serving pools"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
 	"sglang":     {"engine": "the SGLang EngineDriver adapter for hosted generation, metrics, and radix-cache observations"},
