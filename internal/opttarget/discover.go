@@ -105,6 +105,15 @@ func discoverFile(absPath, relPath string) ([]OptTarget, []string) {
 			if !found {
 				continue
 			}
+			// A fak:opttarget tag only marks an INT tunable (`const <Name> = <int>`):
+			// the int-sweep grammar rewrites that integer literal in place. A tag found
+			// on any other const is documentation, not a target — most notably
+			// annotationTag's OWN doc comment, which carries the format EXAMPLE
+			// (`dir=<higher|lower>`) on a string const. Skip those silently so the
+			// walker never false-positives on its own documentation.
+			if !isIntLiteralSpec(vs) {
+				continue
+			}
 			t, perr := parseAnnotation(line, vs.Names[0].Name, relPath)
 			if perr != nil {
 				errs = append(errs, relPath+" ("+vs.Names[0].Name+"): "+perr.Error())
@@ -118,6 +127,20 @@ func discoverFile(absPath, relPath string) ([]OptTarget, []string) {
 		}
 	}
 	return targets, errs
+}
+
+// isIntLiteralSpec reports whether vs declares exactly one const bound to an
+// integer literal (e.g. `const DefaultCacheSize = 4`). The int-sweep grammar
+// rewrites that literal in place, so only an int-literal const is a tunable
+// target; grouped iota specs, typed expressions, and string/float consts are
+// not, and a fak:opttarget tag on one of them is documentation (or a mistake),
+// never harvested.
+func isIntLiteralSpec(vs *ast.ValueSpec) bool {
+	if len(vs.Values) != 1 {
+		return false
+	}
+	lit, ok := vs.Values[0].(*ast.BasicLit)
+	return ok && lit.Kind == token.INT
 }
 
 // annotationLine returns the text following annotationTag in the first doc line
