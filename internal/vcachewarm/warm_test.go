@@ -14,6 +14,7 @@ func fp(id string) PrefixFingerprint {
 func baseAnthropic() Request {
 	return Request{
 		Provider:               ProviderAnthropic,
+		ActiveCapability:       ActiveCacheCapabilitySupported,
 		ExpectedReuseBeforeTTL: 2,
 		ReadDiscount:           0.1,
 		WarmPrefix:             fp("same"),
@@ -71,6 +72,7 @@ func TestAnthropicRejectedCombinationsFallbackToDecodeOne(t *testing.T) {
 func TestDecodeOneRequiresByteIdenticalPrefix(t *testing.T) {
 	req := Request{
 		Provider:               "implicit-provider",
+		ActiveCapability:       ActiveCacheCapabilitySupported,
 		ExpectedReuseBeforeTTL: 3,
 		ReadDiscount:           0.5,
 		WarmPrefix:             fp("warm"),
@@ -104,6 +106,7 @@ func TestBreakEvenGateIsStrict(t *testing.T) {
 
 	req := Request{
 		Provider:               "implicit-provider",
+		ActiveCapability:       ActiveCacheCapabilitySupported,
 		ExpectedReuseBeforeTTL: 2,
 		ReadDiscount:           0.5,
 		WarmPrefix:             fp("same"),
@@ -123,6 +126,7 @@ func TestAutoCacheProvidersNeverSpendDecodeOne(t *testing.T) {
 		t.Run(string(provider), func(t *testing.T) {
 			dec := Plan(Request{
 				Provider:               provider,
+				ActiveCapability:       ActiveCacheCapabilitySupported,
 				ExpectedReuseBeforeTTL: 99,
 				ReadDiscount:           0.5,
 				WarmPrefix:             fp("same"),
@@ -157,9 +161,32 @@ func TestFanoutGateReleasesOnlyOnContentDelta(t *testing.T) {
 	}
 }
 
+func TestUnsupportedActiveCacheCapabilityFailsClosed(t *testing.T) {
+	for _, capability := range []ActiveCacheCapability{ActiveCacheCapabilityUnknown, ActiveCacheCapabilityUnsupported} {
+		t.Run(string(capability), func(t *testing.T) {
+			dec := Plan(Request{
+				Provider:               ProviderAnthropic,
+				ActiveCapability:       capability,
+				ExpectedReuseBeforeTTL: 99,
+				ReadDiscount:           0.1,
+				WarmPrefix:             fp("same"),
+				RealPrefix:             fp("same"),
+				SharedBlockCount:       3,
+			})
+			if dec.Primitive != PrimitiveNone || dec.Dedicated {
+				t.Fatalf("unsupported capability chose an active primitive: %+v", dec)
+			}
+			if dec.Reason != ReasonUnsupportedActiveCacheCapability {
+				t.Fatalf("reason = %q, want %q", dec.Reason, ReasonUnsupportedActiveCacheCapability)
+			}
+		})
+	}
+}
+
 func TestDedicatedWarmWithoutLaterCacheReadIsWasted(t *testing.T) {
 	dec := Plan(Request{
 		Provider:               "implicit-provider",
+		ActiveCapability:       ActiveCacheCapabilitySupported,
 		ExpectedReuseBeforeTTL: 3,
 		ReadDiscount:           0.5,
 		WarmPrefix:             fp("same"),
@@ -185,6 +212,7 @@ func TestDedicatedWarmWithoutLaterCacheReadIsWasted(t *testing.T) {
 func TestNaturalAutoCacheWarmIsNotBookedAsDedicated(t *testing.T) {
 	dec := Plan(Request{
 		Provider:               ProviderOpenAI,
+		ActiveCapability:       ActiveCacheCapabilitySupported,
 		ExpectedReuseBeforeTTL: 3,
 		WarmPrefix:             fp("same"),
 		RealPrefix:             fp("same"),

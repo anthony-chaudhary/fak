@@ -34,19 +34,30 @@ const (
 	PrimitiveOrderFirstReal      Primitive = "order_first_real"
 )
 
+// ActiveCacheCapability is the caller's witness that this provider/engine can
+// honor the active warming primitive the planner may select.
+type ActiveCacheCapability string
+
+const (
+	ActiveCacheCapabilityUnknown     ActiveCacheCapability = ""
+	ActiveCacheCapabilitySupported   ActiveCacheCapability = "supported"
+	ActiveCacheCapabilityUnsupported ActiveCacheCapability = "unsupported"
+)
+
 // Reason explains why a primitive was selected or refused.
 type Reason string
 
 const (
-	ReasonAnthropicExplicitWarm     Reason = "anthropic_explicit_warm"
-	ReasonExplicitRejectedFallback  Reason = "explicit_rejected_fallback_decode_1"
-	ReasonImplicitDecode1           Reason = "implicit_decode_1"
-	ReasonAutoCacheNaturalWarm      Reason = "auto_cache_order_first_real"
-	ReasonBelowBreakEven            Reason = "below_break_even"
-	ReasonPrefixFingerprintMismatch Reason = "prefix_fingerprint_mismatch"
-	ReasonInvalidDiscount           Reason = "invalid_read_discount"
-	ReasonNoExpectedReuse           Reason = "no_expected_reuse"
-	ReasonNoSharedAnchor            Reason = "no_shared_anchor"
+	ReasonAnthropicExplicitWarm            Reason = "anthropic_explicit_warm"
+	ReasonExplicitRejectedFallback         Reason = "explicit_rejected_fallback_decode_1"
+	ReasonImplicitDecode1                  Reason = "implicit_decode_1"
+	ReasonAutoCacheNaturalWarm             Reason = "auto_cache_order_first_real"
+	ReasonUnsupportedActiveCacheCapability Reason = "unsupported_active_cache_capability"
+	ReasonBelowBreakEven                   Reason = "below_break_even"
+	ReasonPrefixFingerprintMismatch        Reason = "prefix_fingerprint_mismatch"
+	ReasonInvalidDiscount                  Reason = "invalid_read_discount"
+	ReasonNoExpectedReuse                  Reason = "no_expected_reuse"
+	ReasonNoSharedAnchor                   Reason = "no_shared_anchor"
 )
 
 // PrefixFingerprint is the byte-stability witness M2 hands M3. Digest should be
@@ -76,6 +87,11 @@ func (f PrefixFingerprint) Valid() bool {
 // Request is the pure decision input for one candidate warm.
 type Request struct {
 	Provider Provider
+
+	// ActiveCapability must be Supported before Plan may choose any active
+	// warming path. Unknown and Unsupported both fail closed with a named
+	// reason, so default-on callers cannot silently spend on an unproved path.
+	ActiveCapability ActiveCacheCapability
 
 	// ExpectedReuseBeforeTTL is k: the expected number of later reads before the
 	// provider TTL expires. Dedicated warms are refused below the strict
@@ -137,6 +153,10 @@ func Plan(req Request) Decision {
 	}
 	if !ok {
 		base.Reason = ReasonInvalidDiscount
+		return base
+	}
+	if req.ActiveCapability != ActiveCacheCapabilitySupported {
+		base.Reason = ReasonUnsupportedActiveCacheCapability
 		return base
 	}
 	if req.ExpectedReuseBeforeTTL <= 0 {
