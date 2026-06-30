@@ -1,10 +1,13 @@
 name: project-board-sync
 
 # Auto-add newly opened / reopened / transferred issues to the operator-configured
-# ProjectsV2 board. The board is the fleet's single work pane; without this it only grows when someone
-# adds an item by hand, so a freshly filed issue silently never lands on it. This
-# closes that gap: every issue that opens (or reopens, or is transferred in) is
-# added to project #1 as it happens. The one-time historical backlog was
+# ProjectsV2 board, and preserve their generation horizon in the board's
+# Generation single-select field. The board is the fleet's single work pane;
+# without this it only grows when someone adds an item by hand, so a freshly filed
+# issue silently never lands on it. This closes that gap: every issue that opens
+# (or reopens, or is transferred in) is added to project #1 as it happens. Label
+# events are included so a later gen/now|gen/next|gen/second-next|gen/future
+# classification updates the board field too. The one-time historical backlog was
 # backfilled separately; this workflow keeps the board current going forward.
 #
 # WHY A PAT (not the built-in GITHUB_TOKEN): the default Actions token is scoped
@@ -20,6 +23,11 @@ name: project-board-sync
 # the repo variable FAK_PROJECT_URL to the target ProjectsV2 URL, e.g.
 #   gh variable set FAK_PROJECT_URL --repo anthony-chaudhary/fak --body <PROJECT_URL>
 #   gh secret set FAK_PROJECT_TOKEN --repo anthony-chaudhary/fak --body <PAT>
+# The project should also have a single-select field named "Generation" with
+# options: now, next, second-next, future. Override the field or option names with
+# repo variables FAK_PROJECT_GENERATION_FIELD, FAK_PROJECT_GENERATION_NOW_OPTION,
+# FAK_PROJECT_GENERATION_NEXT_OPTION, FAK_PROJECT_GENERATION_SECOND_NEXT_OPTION,
+# and FAK_PROJECT_GENERATION_FUTURE_OPTION if the UI names differ.
 # Scope the PAT to the project only -- do NOT paste a broad, long-lived login /
 # OAuth token here, so a compromised workflow run cannot use it beyond the board.
 #
@@ -30,7 +38,7 @@ name: project-board-sync
 # token/configuration smoke test (there is no out-of-band issue to add).
 on:
   issues:
-    types: [opened, reopened, transferred]
+    types: [opened, reopened, transferred, labeled]
   workflow_dispatch:
 
 permissions:
@@ -51,25 +59,99 @@ jobs:
       # mirrors the fail-open posting gate the cadence feeders use.
       FAK_PROJECT_TOKEN: ${{ secrets.FAK_PROJECT_TOKEN }}
       FAK_PROJECT_URL: ${{ vars.FAK_PROJECT_URL }}
+      FAK_PROJECT_GENERATION_FIELD: ${{ vars.FAK_PROJECT_GENERATION_FIELD }}
+      FAK_PROJECT_GENERATION_NOW_OPTION: ${{ vars.FAK_PROJECT_GENERATION_NOW_OPTION }}
+      FAK_PROJECT_GENERATION_NEXT_OPTION: ${{ vars.FAK_PROJECT_GENERATION_NEXT_OPTION }}
+      FAK_PROJECT_GENERATION_SECOND_NEXT_OPTION: ${{ vars.FAK_PROJECT_GENERATION_SECOND_NEXT_OPTION }}
+      FAK_PROJECT_GENERATION_FUTURE_OPTION: ${{ vars.FAK_PROJECT_GENERATION_FUTURE_OPTION }}
     steps:
       - name: Add the issue to configured project
+        id: add
         if: ${{ github.event_name == 'issues' && env.FAK_PROJECT_TOKEN != '' && env.FAK_PROJECT_URL != '' && vars.FAK_PROJECT_SYNC != '0' }}
         uses: actions/add-to-project@v1
         with:
           project-url: ${{ env.FAK_PROJECT_URL }}
           github-token: ${{ secrets.FAK_PROJECT_TOKEN }}
 
+      - name: Set project Generation field from issue labels
+        if: ${{ github.event_name == 'issues' && env.FAK_PROJECT_TOKEN != '' && env.FAK_PROJECT_URL != '' && vars.FAK_PROJECT_SYNC != '0' && steps.add.outputs.itemId != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.FAK_PROJECT_TOKEN }}
+          PROJECT_ITEM_ID: ${{ steps.add.outputs.itemId }}
+          ISSUE_LABELS_JSON: ${{ toJson(github.event.issue.labels) }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          label="$(jq -r '[.[].name | select(. == "gen/now" or . == "gen/next" or . == "gen/second-next" or . == "gen/future")] | first // ""' <<<"${ISSUE_LABELS_JSON}")"
+          if [ -z "${label}" ]; then
+            echo "Issue #${ISSUE_NUMBER} has no gen/* label yet -- Generation field left unchanged." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          case "${label}" in
+            gen/now) generation="${FAK_PROJECT_GENERATION_NOW_OPTION:-now}" ;;
+            gen/next) generation="${FAK_PROJECT_GENERATION_NEXT_OPTION:-next}" ;;
+            gen/second-next) generation="${FAK_PROJECT_GENERATION_SECOND_NEXT_OPTION:-second-next}" ;;
+            gen/future) generation="${FAK_PROJECT_GENERATION_FUTURE_OPTION:-future}" ;;
+            *) echo "Unhandled generation label ${label}" >&2; exit 1 ;;
+          esac
+          field_name="${FAK_PROJECT_GENERATION_FIELD:-Generation}"
+
+          if [[ "${FAK_PROJECT_URL}" =~ github.com/(users|orgs)/([^/]+)/projects/([0-9]+) ]]; then
+            owner_kind="${BASH_REMATCH[1]}"
+            owner_login="${BASH_REMATCH[2]}"
+            project_number="${BASH_REMATCH[3]}"
+          else
+            echo "FAK_PROJECT_URL does not look like a ProjectsV2 URL: ${FAK_PROJECT_URL}" >&2
+            exit 1
+          fi
+
+          if [ "${owner_kind}" = "users" ]; then
+            query='query($login:String!, $number:Int!) { user(login:$login) { projectV2(number:$number) { id fields(first:100) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }'
+            project_json="$(gh api graphql -f query="${query}" -f login="${owner_login}" -F number="${project_number}")"
+            project_expr='.data.user.projectV2'
+          else
+            query='query($login:String!, $number:Int!) { organization(login:$login) { projectV2(number:$number) { id fields(first:100) { nodes { ... on ProjectV2SingleSelectField { id name options { id name } } } } } } }'
+            project_json="$(gh api graphql -f query="${query}" -f login="${owner_login}" -F number="${project_number}")"
+            project_expr='.data.organization.projectV2'
+          fi
+
+          project_id="$(jq -r "${project_expr}.id // empty" <<<"${project_json}")"
+          if [ -z "${project_id}" ]; then
+            echo "Could not resolve project from ${FAK_PROJECT_URL}" >&2
+            exit 1
+          fi
+
+          field_id="$(jq -r --arg name "${field_name}" "${project_expr}.fields.nodes[]? | select(.name == \$name) | .id // empty" <<<"${project_json}" | head -n1)"
+          if [ -z "${field_id}" ]; then
+            echo "Project field ${field_name} not found on ${FAK_PROJECT_URL}" >&2
+            exit 1
+          fi
+
+          option_id="$(jq -r --arg name "${field_name}" --arg option "${generation}" "${project_expr}.fields.nodes[]? | select(.name == \$name) | .options[]? | select(.name == \$option) | .id // empty" <<<"${project_json}" | head -n1)"
+          if [ -z "${option_id}" ]; then
+            echo "Generation option ${generation} not found in project field ${field_name}" >&2
+            exit 1
+          fi
+
+          mutation='mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) { updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) { projectV2Item { id } } }'
+          gh api graphql -f query="${mutation}" -f project="${project_id}" -f item="${PROJECT_ITEM_ID}" -f field="${field_id}" -f option="${option_id}" >/dev/null
+
+          echo "Set project Generation=${generation} for issue #${ISSUE_NUMBER} from label ${label}." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Skipped note (fail open)
         if: ${{ github.event_name == 'issues' && (env.FAK_PROJECT_TOKEN == '' || env.FAK_PROJECT_URL == '') }}
         run: |
           echo "FAK_PROJECT_TOKEN or FAK_PROJECT_URL absent -- skipped adding issue #${{ github.event.issue.number }} to the configured project (fail-open)." >> "$GITHUB_STEP_SUMMARY"
-          echo "Set the secret and repo variable (see this workflow's header) to enable auto-add." >> "$GITHUB_STEP_SUMMARY"
+          echo "Set the secret and repo variable (see this workflow's header) to enable auto-add and Generation field sync." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Project sync wired? (dispatch smoke test)
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           if [ -n "${FAK_PROJECT_TOKEN}" ] && [ -n "${FAK_PROJECT_URL}" ]; then
-            echo "FAK_PROJECT_TOKEN and FAK_PROJECT_URL are present -- newly opened issues will be added to the configured project." >> "$GITHUB_STEP_SUMMARY"
+            echo "FAK_PROJECT_TOKEN and FAK_PROJECT_URL are present -- newly opened issues will be added to the configured project and gen/* labels will sync to the Generation field." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "FAK_PROJECT_TOKEN or FAK_PROJECT_URL is NOT set -- the add step fails open (skips). See the workflow header for the one-time operator step." >> "$GITHUB_STEP_SUMMARY"
           fi
