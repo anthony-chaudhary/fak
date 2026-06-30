@@ -237,11 +237,12 @@ Acceptance for "true end to end working":
   declares a numeric cap (`at most 2`, `max 20`, `limit 5`, etc.), the group also
   reports the declared cap and the overflow count, so agents can update or split
   a flood before blindly creating excess GitHub issues. The audit also emits
-  `coordination_groups` keyed by the worker-facing coordination note, with step
-  budgets, split child-issue budgets, lane/reason buckets, and sample issue keys;
-  that gives supervisors a direct view of work that must serialize around the
-  same assumption, lease, dependency, or sibling-file risk. It also emits
-  explicit repair queues (`dispatch`, `split`, `scope`, `route`, `noise`,
+  `assumption_groups`, `confusion_groups`, and `coordination_groups` keyed by
+  the worker-facing agent note, with step budgets, split child-issue budgets,
+  lane/reason buckets, and sample issue keys. That gives supervisors a direct
+  view of work that should verify the same assumption, avoid the same confusion,
+  or serialize around the same lease, dependency, or sibling-file risk. It also
+  emits explicit repair queues (`dispatch`, `split`, `scope`, `route`, `noise`,
   `private`) with next actions, missing-field counts, and sample keys, so agents
   can batch the correct repair across many rows before launching workers.
 - The native dispatch prompt now parses the standard issue sections into an
