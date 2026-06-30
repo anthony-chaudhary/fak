@@ -345,7 +345,9 @@ change first (`make test-fast` for code, `python tools/readme_freshness_audit.py
 for this page, or the relevant `--dry-run`/`--check` command), then use `make ci` as the
 green bar before delivery. Shipping is continuous but path-scoped: preview the exact
 subject and files with `fak commit --preview -m "<subject>" --path <p>`, commit only those
-paths, and push after the gate is green. No side branch, no `git add -A`, no force-push.
+paths, and push after the gate is green. Each pushed commit should be a self-building
+snapshot; do not rely on a later commit in the same push to repair a broken intermediate.
+No side branch, no `git add -A`, no force-push.
 
 ## Boundaries
 
