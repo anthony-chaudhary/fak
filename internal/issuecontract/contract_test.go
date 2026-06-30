@@ -15,6 +15,13 @@ func completeCandidate() Candidate {
 		WhyNow:          "Generated issues are the next weak point before dispatch.",
 		WorkingSpine:    "A verified task completion creates one scoped follow-up issue.",
 		PriorityContext: "Working path: clean Stop handoff -> scoped issue -> dispatch. Current blocker: vague follow-ups waste dispatch cycles. Unblocks: guard live handoff. Not polish: enforce the smallest leaf before optimization.",
+		WorkUnit:        "leaf",
+		ExpectedSteps:   3,
+		Assumptions:     []string{"The handoff producer can derive the candidate before syncing."},
+		ConfusionRisks:  []string{"A broad follow-up can be mistaken for an epic unless scoped."},
+		Coordination:    []string{"Do not dispatch concurrently with taskmgr handoff body edits."},
+		Trigger:         "A verified completion handoff proposes this next leaf.",
+		BatchPolicy:     "At most two follow-up issues per handoff; update by marker key on rerun.",
 		InScope:         "Review the next-step candidate and render scoped sections.",
 		OutOfScope:      "Do not optimize issue routing or add new scorecards.",
 		DoneCondition:   "Legacy handoffs pass by default; strict handoffs refuse vague next steps.",
@@ -38,6 +45,9 @@ func TestReviewCandidateDispatchableScoresFull(t *testing.T) {
 	if review.SpinePriority.Total != 100 {
 		t.Fatalf("spine priority = %+v, want total 100", review.SpinePriority)
 	}
+	if review.AgentContext.Total != 100 {
+		t.Fatalf("agent context = %+v, want total 100", review.AgentContext)
+	}
 	if len(review.Reasons) != 0 || len(review.MissingFields) != 0 {
 		t.Fatalf("unexpected reasons/missing: %+v %+v", review.Reasons, review.MissingFields)
 	}
@@ -56,6 +66,38 @@ func TestReviewCandidateScoresGoldPlatingBelowSpineWork(t *testing.T) {
 	}
 	if review.SpinePriority.Total >= 50 {
 		t.Fatalf("spine priority = %+v, want below 50 for scoped polish", review.SpinePriority)
+	}
+}
+
+func TestReviewCandidateFlagsNonLeafWorkUnits(t *testing.T) {
+	c := completeCandidate()
+	c.WorkUnit = "epic"
+	review := ReviewCandidate(c, Options{})
+	if review.OK || review.Dispatchability != TriageOnly || review.Verdict != "needs_scope" {
+		t.Fatalf("non-leaf review = %+v, want triage-only needs-scope", review)
+	}
+	if !has(review.Reasons, ReasonNotDispatchLeaf) {
+		t.Fatalf("non-leaf reason missing: %+v", review.Reasons)
+	}
+
+	c = completeCandidate()
+	c.WorkUnit = ""
+	c.Labels = []string{"triage-only"}
+	review = ReviewCandidate(c, Options{})
+	if review.OK || !has(review.Reasons, ReasonNotDispatchLeaf) {
+		t.Fatalf("triage-only label review = %+v, want non-dispatch leaf reason", review)
+	}
+}
+
+func TestReviewCandidateFlagsOversizedExpectedSteps(t *testing.T) {
+	c := completeCandidate()
+	c.ExpectedSteps = MaxDispatchExpectedSteps + 1
+	review := ReviewCandidate(c, Options{})
+	if review.OK || review.Dispatchability != TriageOnly || review.Verdict != "needs_scope" {
+		t.Fatalf("oversized review = %+v, want triage-only needs-scope", review)
+	}
+	if !has(review.Reasons, ReasonOversizedSteps) {
+		t.Fatalf("oversized reason missing: %+v", review.Reasons)
 	}
 }
 
@@ -130,6 +172,26 @@ func TestReviewCandidateLiveRequiresDedupeArmor(t *testing.T) {
 	}
 }
 
+func TestReviewCandidateLiveRequiresNoiseControl(t *testing.T) {
+	c := completeCandidate()
+	c.Trigger = ""
+	c.BatchPolicy = ""
+	review := ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
+	if review.OK || review.Dispatchability != Refused || review.Verdict != "refused" {
+		t.Fatalf("noise-uncontrolled live review = %+v, want refused", review)
+	}
+	if !has(review.Reasons, ReasonNoiseIncomplete) {
+		t.Fatalf("noise-control reason missing: %+v", review.Reasons)
+	}
+
+	c.Trigger = "A scored feeder crosses the issue threshold."
+	c.BatchPolicy = "One issue per marker key; reruns update existing issues."
+	review = ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
+	if !review.OK {
+		t.Fatalf("noise-controlled live review refused: %+v", review)
+	}
+}
+
 func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 	review := ReviewIssueDraft(IssueDraft{
 		Number: 1440,
@@ -149,6 +211,20 @@ func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 			"Current blocker: blank reasons hide the failing gate.",
 			"Unblocks: guard-rsi tuning depends on reason buckets.",
 			"Not polish: this fixes the smallest witnessed guard hole before threshold optimization.",
+			"### Work unit",
+			"leaf",
+			"### Expected steps",
+			"3",
+			"### Assumptions",
+			"- The guard journal fixture can reproduce the blank reason.",
+			"### Confusion risks",
+			"- Reason labels and threshold tuning are adjacent but separate.",
+			"### Coordination notes",
+			"- Avoid concurrent edits to the guard reason taxonomy.",
+			"### Trigger",
+			"Guard journal emits a denied verdict with no reason.",
+			"### Batch policy",
+			"One issue per repeated reason class; update existing marker on rerun.",
 			"### In scope",
 			"Add the missing reason mapping and one regression fixture.",
 			"### Out of scope",
@@ -175,11 +251,104 @@ func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 	if review.SpinePriority.Total != 100 {
 		t.Fatalf("spine priority = %+v, want full-score issue draft", review.SpinePriority)
 	}
+	if review.AgentContext.Total != 100 {
+		t.Fatalf("agent context = %+v, want full-score issue draft", review.AgentContext)
+	}
 	if review.Key != "issue/1440" || review.Lane != "guardrsi" {
 		t.Fatalf("identity = key %q lane %q", review.Key, review.Lane)
 	}
 	if len(review.Paths) != 1 || review.Paths[0] != "internal/guardrsi/**" {
 		t.Fatalf("paths = %+v", review.Paths)
+	}
+}
+
+func TestReviewIssueDraftFlagsOversizedExpectedSteps(t *testing.T) {
+	review := ReviewIssueDraft(IssueDraft{
+		Number: 42,
+		Title:  "taskmgr: too large",
+		Body: strings.Join([]string{
+			"### Parent context",
+			"task handoff",
+			"### Current state",
+			"Generated issues can already carry worker metadata.",
+			"### Why this is next",
+			"The producer would otherwise sync a bundled task.",
+			"### Working spine",
+			"Keep one issue to a dispatchable worker leaf.",
+			"### Work unit",
+			"leaf",
+			"### Expected steps",
+			"12",
+			"### In scope",
+			"Split the oversized leaf.",
+			"### Out of scope",
+			"Do not implement every child issue.",
+			"### Done condition",
+			"The candidate is refused before live sync.",
+			"### Witness",
+			"go test ./internal/issuecontract",
+			"### Acceptance gate",
+			"go test ./internal/issuecontract",
+			"### Lane",
+			"issuecontract",
+			"### Path hints",
+			"- `internal/issuecontract/contract.go`",
+			"### Boundary notes",
+			"Public issue only.",
+			"### Closure binding",
+			"Resolving commit cites #N and carries a matching trailer.",
+		}, "\n"),
+	}, Options{})
+	if review.OK || review.Dispatchability != TriageOnly || !has(review.Reasons, ReasonOversizedSteps) {
+		t.Fatalf("issue draft review = %+v, want oversized expected steps", review)
+	}
+}
+
+func TestCandidateFromIssueDraftParsesAgentContext(t *testing.T) {
+	body := strings.Join([]string{
+		"### Parent context",
+		"issue-catalog",
+		"### Current state",
+		"The feeder has a stable source row.",
+		"### Why this is next",
+		"The generated issue needs agent context before dispatch.",
+		"### Working spine",
+		"source row -> scoped issue -> worker prompt",
+		"### Work unit",
+		"step",
+		"### Expected steps",
+		"Expected: 4 steps.",
+		"### Assumptions",
+		"- Existing marker dedupe is available.",
+		"### Confusion risks",
+		"- Do not split this into an epic.",
+		"### Coordination",
+		"- Serialize with issuecontract body parser edits.",
+		"### Trigger",
+		"Catalog row crosses the default-on threshold.",
+		"### Noise control",
+		"Batch at most 20 creates per live wave.",
+		"### In scope",
+		"Render the fields.",
+		"### Out of scope",
+		"Do not sync live.",
+		"### Done condition",
+		"The parser returns the agent fields.",
+		"### Witness",
+		"go test ./internal/issuecontract",
+		"### Acceptance gate",
+		"go test ./internal/issuecontract",
+		"### Lane",
+		"issuecontract",
+		"### Closure binding",
+		"Commit cites #N.",
+	}, "\n")
+	c := CandidateFromIssueDraft(IssueDraft{Number: 1443, Title: "issuecontract: parse agent context", Body: body})
+	if c.WorkUnit != "step" || c.ExpectedSteps != 4 || c.BatchPolicy != "Batch at most 20 creates per live wave." {
+		t.Fatalf("candidate agent context = %+v", c)
+	}
+	if len(c.Assumptions) != 1 || len(c.ConfusionRisks) != 1 || len(c.Coordination) != 1 {
+		t.Fatalf("candidate lists = assumptions=%v confusion=%v coordination=%v", c.Assumptions, c.ConfusionRisks, c.Coordination)
 	}
 }
 

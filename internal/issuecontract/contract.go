@@ -28,7 +28,11 @@ const (
 	ReasonPrivateBoundary = "ISSUE_PRIVATE_BOUNDARY"
 	ReasonLiveUnarmored   = "ISSUE_LIVE_UNARMORED"
 	ReasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
+	ReasonOversizedSteps  = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	ReasonNoiseIncomplete = "ISSUE_NOISE_CONTROL_INCOMPLETE"
 )
+
+const MaxDispatchExpectedSteps = 8
 
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
@@ -164,8 +168,14 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	if opt.Live && (!opt.DedupeChecked || opt.DedupeCap <= 0) {
 		reasons.add(ReasonLiveUnarmored)
 	}
+	if opt.Live && (c.Trigger == "" || c.BatchPolicy == "") {
+		reasons.add(ReasonNoiseIncomplete)
+	}
 	if !isDispatchLeaf(c) {
 		reasons.add(ReasonNotDispatchLeaf)
+	}
+	if c.ExpectedSteps > MaxDispatchExpectedSteps {
+		reasons.add(ReasonOversizedSteps)
 	}
 
 	score := score(c, routeOK)
@@ -187,7 +197,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	case out.OK:
 		out.Verdict = "ready"
 		out.Dispatchability = Dispatchable
-	case private || reasons.has(ReasonLiveUnarmored):
+	case private || reasons.has(ReasonLiveUnarmored) || reasons.has(ReasonNoiseIncomplete):
 		out.Verdict = "refused"
 		out.Dispatchability = Refused
 	default:
