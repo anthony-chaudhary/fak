@@ -19,7 +19,14 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
 	}
 	var got struct {
-		OK      bool `json:"ok"`
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total            int            `json:"total"`
+			Dispatchable     int            `json:"dispatchable"`
+			AgentContextAvg  int            `json:"agent_context_avg"`
+			AgentContextFull int            `json:"agent_context_full"`
+			ByReason         map[string]int `json:"by_reason"`
+		} `json:"counts"`
 		Reviews []struct {
 			OK              bool   `json:"ok"`
 			Key             string `json:"key"`
@@ -37,6 +44,11 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 	}
 	if !got.OK || len(got.Reviews) != 1 || !got.Reviews[0].OK {
 		t.Fatalf("review = %+v, want one OK review", got)
+	}
+	if got.Counts.Total != 1 || got.Counts.Dispatchable != 1 ||
+		got.Counts.AgentContextAvg != 100 || got.Counts.AgentContextFull != 1 ||
+		len(got.Counts.ByReason) != 0 {
+		t.Fatalf("counts = %+v, want one full-context dispatchable review", got.Counts)
 	}
 	if got.Reviews[0].Key != "task_push_next/strict-scope" ||
 		got.Reviews[0].Dispatchability != issuecontract.Dispatchable ||
@@ -59,7 +71,14 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
 	}
 	rendered := out.String()
-	for _, want := range []string{"ISSUE_SCOPE_INCOMPLETE", "ISSUE_UNROUTED", "missing: out_of_scope", "missing: done_condition"} {
+	for _, want := range []string{
+		"counts: dispatchable=0 triage_only=1 refused=0",
+		"reasons: ISSUE_SCOPE_INCOMPLETE=1, ISSUE_UNROUTED=1",
+		"ISSUE_SCOPE_INCOMPLETE",
+		"ISSUE_UNROUTED",
+		"missing: out_of_scope",
+		"missing: done_condition",
+	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered review missing %q:\n%s", want, rendered)
 		}
@@ -112,39 +131,7 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 	body := []issuecontract.IssueDraft{{
 		Number: 1450,
 		Title:  "guardrsi: require block reasons",
-		Body: strings.Join([]string{
-			"### Parent context",
-			"guard-verdict-rsi",
-			"### Current state",
-			"A guard verdict can reach the journal without a closed reason.",
-			"### Why this is next",
-			"Reasonless blocks weaken the guard before any tuning work.",
-			"### Working spine",
-			"Every blocked guard verdict records one closed-vocabulary reason.",
-			"### Priority context",
-			"Working path: guard preflight to closed reason.",
-			"Current blocker: reasonless guard blocks hide the failing gate.",
-			"Unblocks: guard tuning depends on reason buckets.",
-			"Not polish: fix the smallest guard hole before threshold optimization.",
-			"### In scope",
-			"Add the missing classification and one regression fixture.",
-			"### Out of scope",
-			"Do not retune guard thresholds.",
-			"### Done condition",
-			"The fixture no longer emits a blank reason.",
-			"### Witness",
-			"go test ./internal/guardrsi",
-			"### Acceptance gate",
-			"go test ./internal/guardrsi ./internal/guardroute",
-			"### Lane",
-			"guardrsi",
-			"### Path hints",
-			"- `internal/guardrsi/**`",
-			"### Boundary notes",
-			"- Public issue only.",
-			"### Closure binding",
-			"Resolving commit cites #N and carries `(fak guardrsi)`.",
-		}, "\n"),
+		Body:   completeIssueDraftBody(),
 		Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
 	}}
 	b, err := json.Marshal(body)
@@ -163,6 +150,64 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 		!strings.Contains(out.String(), `"key": "issue/1450"`) ||
 		!strings.Contains(out.String(), `"dispatchability": "dispatchable"`) {
 		t.Fatalf("issue review missing expected fields:\n%s", out.String())
+	}
+}
+
+func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	body := []issuecontract.IssueDraft{
+		{
+			Number: 1450,
+			Title:  "guardrsi: require block reasons",
+			Body:   completeIssueDraftBody(),
+			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		},
+		{
+			Number: 1451,
+			Title:  "make it better",
+			Body:   "### Current state\nExists.\n",
+		},
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total               int            `json:"total"`
+			Dispatchable        int            `json:"dispatchable"`
+			TriageOnly          int            `json:"triage_only"`
+			Refused             int            `json:"refused"`
+			AgentContextAvg     int            `json:"agent_context_avg"`
+			AgentContextFull    int            `json:"agent_context_full"`
+			AgentContextMissing int            `json:"agent_context_missing"`
+			ByReason            map[string]int `json:"by_reason"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.OK {
+		t.Fatalf("ok = true, want mixed audit to fail")
+	}
+	if got.Counts.Total != 2 || got.Counts.Dispatchable != 1 || got.Counts.TriageOnly != 1 || got.Counts.Refused != 0 {
+		t.Fatalf("dispatch counts = %+v, want one dispatchable and one triage-only", got.Counts)
+	}
+	if got.Counts.AgentContextAvg != 50 || got.Counts.AgentContextFull != 1 || got.Counts.AgentContextMissing != 1 {
+		t.Fatalf("agent context counts = %+v, want one full and one missing", got.Counts)
+	}
+	if got.Counts.ByReason[issuecontract.ReasonScopeIncomplete] != 1 ||
+		got.Counts.ByReason[issuecontract.ReasonUnrouted] != 1 {
+		t.Fatalf("reason counts = %+v, want one scope and one unrouted refusal", got.Counts.ByReason)
 	}
 }
 
@@ -186,6 +231,56 @@ func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 			t.Fatalf("rendered review missing %q:\n%s", want, out.String())
 		}
 	}
+}
+
+func completeIssueDraftBody() string {
+	return strings.Join([]string{
+		"### Parent context",
+		"guard-verdict-rsi",
+		"### Current state",
+		"A guard verdict can reach the journal without a closed reason.",
+		"### Why this is next",
+		"Reasonless blocks weaken the guard before any tuning work.",
+		"### Working spine",
+		"Every blocked guard verdict records one closed-vocabulary reason.",
+		"### Priority context",
+		"Working path: guard preflight to closed reason.",
+		"Current blocker: reasonless guard blocks hide the failing gate.",
+		"Unblocks: guard tuning depends on reason buckets.",
+		"Not polish: fix the smallest guard hole before threshold optimization.",
+		"### Work unit",
+		"leaf",
+		"### Expected steps",
+		"3",
+		"### Assumptions",
+		"- The guard journal fixture can reproduce the blank reason.",
+		"### Confusion risks",
+		"- Reason labels and threshold tuning are adjacent but separate.",
+		"### Coordination notes",
+		"- Avoid concurrent edits to the guard reason taxonomy.",
+		"### Trigger",
+		"Guard journal emits a denied verdict with no reason.",
+		"### Batch policy",
+		"One issue per repeated reason class; update existing marker on rerun.",
+		"### In scope",
+		"Add the missing classification and one regression fixture.",
+		"### Out of scope",
+		"Do not retune guard thresholds.",
+		"### Done condition",
+		"The fixture no longer emits a blank reason.",
+		"### Witness",
+		"go test ./internal/guardrsi",
+		"### Acceptance gate",
+		"go test ./internal/guardrsi ./internal/guardroute",
+		"### Lane",
+		"guardrsi",
+		"### Path hints",
+		"- `internal/guardrsi/**`",
+		"### Boundary notes",
+		"- Public issue only.",
+		"### Closure binding",
+		"Resolving commit cites #N and carries `(fak guardrsi)`.",
+	}, "\n")
 }
 
 func completeIssueCandidate() issuecontract.Candidate {

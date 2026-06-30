@@ -46,10 +46,12 @@ type liveTaskPayload struct {
 }
 
 type liveWindowPayload struct {
-	OK         bool     `json:"ok"`
-	Scanned    int      `json:"scanned"`
-	Violations []string `json:"violations,omitempty"`
-	Watchlist  []string `json:"watchlist,omitempty"`
+	OK         bool                                `json:"ok"`
+	Scanned    int                                 `json:"scanned"`
+	Violations []string                            `json:"violations,omitempty"`
+	Watchlist  []string                            `json:"watchlist,omitempty"`
+	Findings   []windowgate.VisibleWindowFinding   `json:"findings,omitempty"`
+	Categories map[string]int                      `json:"categories,omitempty"`
 }
 
 func cmdWindowgate(argv []string) { os.Exit(runWindowgate(os.Stdout, os.Stderr, argv)) }
@@ -156,15 +158,44 @@ func scanVisibleWindows(ctx context.Context) (windowgate.VisibleWindowReport, er
 		return windowgate.VisibleWindowReport{}, nil
 	}
 	const ps = `$ErrorActionPreference='SilentlyContinue'
-$cmds = @{}
-Get-CimInstance Win32_Process | ForEach-Object { $cmds[[int]$_.ProcessId] = "$($_.CommandLine)" }
+$procs = @{}
+Get-CimInstance Win32_Process | ForEach-Object { $procs[[int]$_.ProcessId] = $_ }
 Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) } | ForEach-Object {
+  $cim = $procs[[int]$_.Id]
+  $cmd = ""
+  $ppid = 0
+  $pname = ""
+  $pcmd = ""
+  $gpid = 0
+  $gname = ""
+  $gcmd = ""
+  if ($null -ne $cim) {
+    $cmd = "$($cim.CommandLine)"
+    $ppid = [int]$cim.ParentProcessId
+    if ($procs.ContainsKey($ppid)) {
+      $parent = $procs[$ppid]
+      $pname = "$($parent.Name)"
+      $pcmd = "$($parent.CommandLine)"
+      $gpid = [int]$parent.ParentProcessId
+      if ($procs.ContainsKey($gpid)) {
+        $grand = $procs[$gpid]
+        $gname = "$($grand.Name)"
+        $gcmd = "$($grand.CommandLine)"
+      }
+    }
+  }
   [pscustomobject]@{
     pid = [int]$_.Id
     name = "$($_.ProcessName)"
     title = "$($_.MainWindowTitle)"
     path = "$($_.Path)"
-    command_line = "$($cmds[[int]$_.Id])"
+    command_line = "$cmd"
+    parent_pid = $ppid
+    parent_name = "$pname"
+    parent_command_line = "$pcmd"
+    grandparent_pid = $gpid
+    grandparent_name = "$gname"
+    grandparent_command_line = "$gcmd"
   }
 } | ConvertTo-Json -Depth 4`
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
@@ -263,6 +294,8 @@ func attachVisibleWindowPayload(p *windowgatePayload, visible windowgate.Visible
 		Scanned:    visible.Scanned,
 		Violations: append([]string{}, visible.Violations...),
 		Watchlist:  append([]string{}, visible.Watchlist...),
+		Findings:   append([]windowgate.VisibleWindowFinding{}, visible.Findings...),
+		Categories: visibleWindowCategoryCounts(visible.Findings),
 	}
 	if len(visible.Violations) > 0 {
 		p.OK = false
@@ -328,6 +361,9 @@ func renderWindowgate(p windowgatePayload) string {
 	if p.Windows != nil {
 		fmt.Fprintf(&b, "\nvisible windows: scanned=%d violations=%d watchlist=%d\n",
 			p.Windows.Scanned, len(p.Windows.Violations), len(p.Windows.Watchlist))
+		if len(p.Windows.Categories) > 0 {
+			fmt.Fprintf(&b, "visible-window categories: %s\n", renderToolCounts(p.Windows.Categories))
+		}
 		for _, row := range p.Windows.Violations {
 			fmt.Fprintf(&b, "  - %s\n", row)
 		}
@@ -340,6 +376,20 @@ func renderWindowgate(p windowgatePayload) string {
 	}
 	fmt.Fprintf(&b, "\nreason: %s\nnext: %s", p.Reason, p.NextAction)
 	return b.String()
+}
+
+func visibleWindowCategoryCounts(findings []windowgate.VisibleWindowFinding) map[string]int {
+	out := map[string]int{}
+	for _, finding := range findings {
+		key := strings.TrimSpace(finding.Category)
+		if key != "" {
+			out[key]++
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func suppressionCounts(rep windowgate.Report) map[string]int {

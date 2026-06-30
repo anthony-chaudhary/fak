@@ -31,15 +31,15 @@ type llmdSmokeOptions struct {
 }
 
 type llmdSmokeReport struct {
-	OK         bool              `json:"ok"`
-	Engine     string            `json:"engine"`
-	BaseURL    string            `json:"base_url"`
-	Model      string            `json:"model"`
-	Models     llmdSmokeModels   `json:"models"`
-	Chat       llmdSmokeChat     `json:"chat"`
-	Metrics    llmdSmokeMetrics  `json:"metrics"`
-	DurationMS int64             `json:"duration_ms"`
-	Error      string            `json:"error,omitempty"`
+	OK         bool             `json:"ok"`
+	Engine     string           `json:"engine"`
+	BaseURL    string           `json:"base_url"`
+	Model      string           `json:"model"`
+	Models     llmdSmokeModels  `json:"models"`
+	Chat       llmdSmokeChat    `json:"chat"`
+	Metrics    llmdSmokeMetrics `json:"metrics"`
+	DurationMS int64            `json:"duration_ms"`
+	Error      string           `json:"error,omitempty"`
 }
 
 type llmdSmokeModels struct {

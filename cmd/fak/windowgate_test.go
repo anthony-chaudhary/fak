@@ -86,12 +86,22 @@ func TestAttachVisibleWindowPayloadFailsVisibleAutomation(t *testing.T) {
 		Scanned:    3,
 		Violations: []string{"pid=1 powershell C:\\work\\fak"},
 		Watchlist:  []string{"pid=2 WindowsTerminal"},
+		Findings: []windowgate.VisibleWindowFinding{
+			{Level: "violation", Category: "repo_console_tool", PID: 1, Name: "powershell"},
+			{
+				Level: "watchlist", Category: "browser_automation", PID: 2, Name: "chrome",
+				Browser: &windowgate.BrowserAutomationDetails{RemoteDebuggingPort: "9223", Profile: "Chrome-CDP-Apply-anthony-1", Offscreen: true},
+			},
+		},
 	}, false)
 	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_visible_window_regression" {
 		t.Fatalf("payload = ok %v verdict %q finding %q, want visible-window ACTION", p.OK, p.Verdict, p.Finding)
 	}
 	if p.Windows == nil || p.Windows.Scanned != 3 || len(p.Windows.Violations) != 1 || len(p.Windows.Watchlist) != 1 {
 		t.Fatalf("visible-window payload not surfaced: %+v", p.Windows)
+	}
+	if len(p.Windows.Findings) != 2 || p.Windows.Categories["repo_console_tool"] != 1 || p.Windows.Categories["browser_automation"] != 1 {
+		t.Fatalf("visible-window structured findings not surfaced: %+v", p.Windows)
 	}
 }
 
