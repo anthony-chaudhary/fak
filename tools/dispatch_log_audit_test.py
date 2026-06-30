@@ -13,7 +13,6 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
-import json
 import sys
 import tempfile
 import unittest

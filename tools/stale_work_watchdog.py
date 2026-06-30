@@ -43,11 +43,10 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_REPO = HERE.parent  # tools/ -> repo root

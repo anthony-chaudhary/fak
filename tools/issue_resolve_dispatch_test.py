@@ -1423,8 +1423,8 @@ class LaneLeaseHelperTest(unittest.TestCase):
 
     def test_acquire_exit3_is_refused(self) -> None:
         mod = load()
-        runner = lambda root, args, **k: {
-            "rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}}
+        def runner(root, args, **k):
+            return {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}}
         out = mod.acquire_lane_lease(ROOT, "docs", tree=["docs/**"], ttl_s=900, runner=runner)
         self.assertTrue(out["refused"])
         self.assertFalse(out["acquired"])
@@ -1459,7 +1459,8 @@ class LaneLeaseHelperTest(unittest.TestCase):
     def test_acquire_other_exit_fails_open(self) -> None:
         mod = load()
         for rc in (1, 2, 127):
-            runner = lambda root, args, _rc=rc, **k: {"rc": _rc, "verdict": None}
+            def runner(root, args, _rc=rc, **k):
+                return {"rc": _rc, "verdict": None}
             out = mod.acquire_lane_lease(ROOT, "gateway", tree=["internal/gateway/**"],
                                          ttl_s=900, runner=runner)
             self.assertFalse(out["acquired"], rc)
@@ -1553,9 +1554,10 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         def boom(*a, **k):
             raise AssertionError("a held lease must short-circuit before the spawn")
         self._stub(mod, spawn=boom)
-        lease_runner = lambda root, args, **k: (
-            {"rc": 0, "verdict": None} if args[0] == "reap" else
-            {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}})
+        def lease_runner(root, args, **k):
+            if args[0] == "reap":
+                return {"rc": 0, "verdict": None}
+            return {"rc": 3, "verdict": {"verdict": {"ok": False, "reason": "LEASE_HELD"}}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
                          live=True, lease_runner=lease_runner)
         self.assertFalse(p["ok"])
@@ -1574,7 +1576,8 @@ class EvaluateLeaseGateTest(unittest.TestCase):
             return {"pid": 9, "log": "resolve-467.log", "issue": 467,
                     "lane": "gateway", "backend": "claude"}
         self._stub(mod, spawn=spawn)
-        lease_runner = lambda root, args, **k: {"rc": 1, "verdict": None}
+        def lease_runner(root, args, **k):
+            return {"rc": 1, "verdict": None}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
                          live=True, lease_runner=lease_runner)
         self.assertTrue(p["ok"])
@@ -1593,10 +1596,11 @@ class EvaluateLeaseGateTest(unittest.TestCase):
                     "early_exit": {"checked": True, "alive": False, "wait_s": 5.0,
                                    "silent": True, "returncode": 0, "log_bytes": 0}}
         self._stub(mod, spawn=spawn)
-        lease_runner = lambda root, args, **k: (
-            {"rc": 0, "verdict": {"verdict": {"ok": True},
-                                  "record": {"id": "resolve-gateway", "generation": 1}}}
-            if args[0] == "acquire" else {"rc": 0, "verdict": None})
+        def lease_runner(root, args, **k):
+            if args[0] == "acquire":
+                return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                             "record": {"id": "resolve-gateway", "generation": 1}}}
+            return {"rc": 0, "verdict": None}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
                          live=True, spawn_probe_s=5.0, lease_runner=lease_runner)
         self.assertEqual(p["verdict"], "SPAWN_FAILED")
@@ -1620,16 +1624,17 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         # The commit-time witness verdicts (#1324 proposal #2) are surfaced on a live
         # tick so a CLAIM_UNWITNESSED slot is visible in the tick record, not silent.
         mod = load()
-        spawn = lambda *a, **k: {"pid": 9, "log": "resolve-467.log", "issue": 467,
-                                 "lane": "gateway", "backend": "claude"}
+        def spawn(*a, **k):
+            return {"pid": 9, "log": "resolve-467.log", "issue": 467,
+                    "lane": "gateway", "backend": "claude"}
         self._stub(mod, spawn=spawn)
         mod.witness_exited_workers = lambda runs_dir, root, **k: {
             "live": True, "audited": [{"issue": 470, "claim": "CLAIM_UNWITNESSED"}],
             "witnessed": [], "unwitnessed": [{"issue": 470, "claim": "CLAIM_UNWITNESSED"}],
             "no_commit": []}
-        lease_runner = lambda root, args, **k: {
-            "rc": 0, "verdict": {"verdict": {"ok": True},
-                                 "record": {"id": "resolve-gateway", "generation": 1}}}
+        def lease_runner(root, args, **k):
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-gateway", "generation": 1}}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
                          live=True, lease_runner=lease_runner)
         self.assertEqual(p["verdict"], "SPAWNED")
@@ -1753,8 +1758,10 @@ class WitnessExitedWorkersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             log = self._mk(runs, 1324, "20260629-120000", pid=4242)
-            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
-            audit = lambda root, sha: {"verdict": "ABSTAIN", "witness": "abstain"}
+            def git(root, args):
+                return (0, "cafef00d\x1ffix: bind (#1324)\n")
+            def audit(root, sha):
+                return {"verdict": "ABSTAIN", "witness": "abstain"}
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=git, audit_runner=audit)
             self.assertEqual(len(out["unwitnessed"]), 1)
@@ -1771,8 +1778,10 @@ class WitnessExitedWorkersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 1324, "20260629-120100", pid=4243)
-            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
-            audit = lambda root, sha: {"verdict": "OK", "witness": "diff-witnessed"}
+            def git(root, args):
+                return (0, "cafef00d\x1ffix: bind (#1324)\n")
+            def audit(root, sha):
+                return {"verdict": "OK", "witness": "diff-witnessed"}
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=git, audit_runner=audit)
             self.assertEqual(len(out["witnessed"]), 1)
@@ -1785,8 +1794,10 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             runs = Path(d)
             self._mk(runs, 1324, "20260629-120200", pid=4244)
             # git finds nothing citing #1324 -> the worker landed no resolving commit.
-            git = lambda root, args: (0, "deadbeef\x1fchore: unrelated (#5)\n")
-            boom = lambda root, sha: (_ for _ in ()).throw(AssertionError("no audit without a sha"))
+            def git(root, args):
+                return (0, "deadbeef\x1fchore: unrelated (#5)\n")
+            def boom(root, sha):
+                raise AssertionError("no audit without a sha")
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=git, audit_runner=boom)
             self.assertEqual(len(out["no_commit"]), 1)
@@ -1800,11 +1811,12 @@ class WitnessExitedWorkersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 1324, "20260629-120300", pid=4245)
-            alive_probe = lambda pid: {"alive": True, "create_time": 0.0,
-                                       "name": "claude.exe",
-                                       "cmdline": "claude -p resolve GitHub issue #1324"}
-            boom_git = lambda root, args: (_ for _ in ()).throw(
-                AssertionError("a live worker must not be audited"))
+            def alive_probe(pid):
+                return {"alive": True, "create_time": 0.0,
+                        "name": "claude.exe",
+                        "cmdline": "claude -p resolve GitHub issue #1324"}
+            def boom_git(root, args):
+                raise AssertionError("a live worker must not be audited")
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=alive_probe,
                                              git=boom_git)
             self.assertEqual(out["audited"], [])
@@ -1817,8 +1829,8 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             log = self._mk(runs, 1324, "20260629-120400", pid=4246)
             log.with_suffix(".witness").write_text('{"claim": "CLAIM_WITNESSED"}',
                                                    encoding="utf-8")
-            boom_git = lambda root, args: (_ for _ in ()).throw(
-                AssertionError("an already-witnessed worker must not be re-audited"))
+            def boom_git(root, args):
+                raise AssertionError("an already-witnessed worker must not be re-audited")
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=boom_git)
             self.assertEqual(out["audited"], [])
@@ -1829,8 +1841,10 @@ class WitnessExitedWorkersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             log = self._mk(runs, 1324, "20260629-120500", pid=4247)
-            git = lambda root, args: (0, "cafef00d\x1ffix: bind (#1324)\n")
-            audit = lambda root, sha: {"verdict": "ABSTAIN", "witness": "abstain"}
+            def git(root, args):
+                return (0, "cafef00d\x1ffix: bind (#1324)\n")
+            def audit(root, sha):
+                return {"verdict": "ABSTAIN", "witness": "abstain"}
             out = mod.witness_exited_workers(runs, ROOT, live=False, probe=self._dead,
                                              git=git, audit_runner=audit)
             self.assertEqual(out["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
@@ -1843,8 +1857,8 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             runs = Path(d)
             # a log with no .pid sidecar: we cannot prove it finished.
             (runs / "resolve-1324-20260629-120600.log").write_text("x", encoding="utf-8")
-            boom_git = lambda root, args: (_ for _ in ()).throw(
-                AssertionError("a worker we cannot prove finished must not be audited"))
+            def boom_git(root, args):
+                raise AssertionError("a worker we cannot prove finished must not be audited")
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=boom_git)
             self.assertEqual(out["audited"], [])

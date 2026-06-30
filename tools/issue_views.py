@@ -177,7 +177,7 @@ def cmd_show(cfg: dict[str, Any], ns: argparse.Namespace) -> int:
     print(f"# {view['slug']} — {view.get('title', '')}  ({len(rows)} open)")
     print(f"# {view['query']}")
     for r in rows:
-        labs = ",".join(l.get("name", "") for l in r.get("labels", []))
+        labs = ",".join(lab.get("name", "") for lab in r.get("labels", []))
         assignee = (r.get("assignees") or [{}])[0].get("login", "") if r.get("assignees") else ""
         who = f" @{assignee}" if assignee else ""
         print(f"#{r['number']:<6} {r.get('title', '')}{who}   [{labs}]")

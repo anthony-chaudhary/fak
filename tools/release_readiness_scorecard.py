@@ -71,7 +71,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -370,15 +369,12 @@ def score(facts: dict) -> dict:
         if val is True:
             band_got[band] += weight
             ok = True
-            counts = False
         elif val is None:
             # unwitnessed (e.g. offline gh) — neither credit nor HARD debt
             ok = False
-            counts = False
             soft += 1
         else:
             ok = False
-            counts = True
             hard_debt += 1
         rows.append({
             "key": key, "band": band, "weight": weight, "ok": ok,
@@ -509,7 +505,7 @@ def render_markdown(p: dict, stamp: str | None) -> str:
     out.append(f"| **Release-debt (total HARD defects)** | **{p['release_debt']}** |")
     out.append(f"| Composite score | {p['score']}/100 (grade {p['grade']}) |")
     out.append(f"| @latest staleness | {st['latest_tag'] or '(none)'} — {st['commits_behind']} commits / {st['days_behind']}d behind HEAD → **{st['verdict']}** |")
-    out.append(f"| Release lifecycle | " + " · ".join(f"{b} {p['band_scores'][b]:.0f}" for b in BANDS) + " |")
+    out.append("| Release lifecycle | " + " · ".join(f"{b} {p['band_scores'][b]:.0f}" for b in BANDS) + " |")
     out.append(f"| Documented gotcha count | {p['gotcha_count']} |")
     out.append(f"| Stable rollback anchors | {len(p['stable_tags'])} |")
     out.append(f"| Unwitnessed (offline) signals | {p['soft_signals']} |")

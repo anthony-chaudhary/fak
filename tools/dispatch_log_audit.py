@@ -302,7 +302,6 @@ def render_issue(cand: dict[str, Any], today: str) -> dict[str, Any]:
     logs = cand["logs"][:6]
     sample = cand["sample"][:6]
     ev_logs = "\n".join(f"- `.dispatch-runs/{lg}`" for lg in logs) or "- (none)"
-    ev_sample = "\n".join(f"    {s}" for s in sample) or "    (none)"
     body = (
         f"> Auto-filed by **dispatch-log-audit** (`tools/dispatch_log_audit.py`, "
         f"{today}). A novel worker-log failure signature; **needs triage** — close "
