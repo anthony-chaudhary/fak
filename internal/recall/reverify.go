@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ErrStale is returned when a recalled page names a concrete artifact that no
@@ -266,6 +268,7 @@ func DefaultArtifactVerifier(ctx context.Context, claims []ArtifactClaim) []Arti
 
 func gitRoot(ctx context.Context) (string, bool) {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err == nil {
 		if root := strings.TrimSpace(string(out)); root != "" {
@@ -282,16 +285,22 @@ func verifyGitSHA(ctx context.Context, root string, gitOK bool, c ArtifactClaim)
 	if !gitOK {
 		return ArtifactFinding{Claim: c, Status: ArtifactUnverifiable, Detail: "git root unavailable"}
 	}
-	if err := exec.CommandContext(ctx, "git", "-C", root, "cat-file", "-e", c.Value+"^{commit}").Run(); err != nil {
+	catFile := exec.CommandContext(ctx, "git", "-C", root, "cat-file", "-e", c.Value+"^{commit}")
+	windowgate.ConfigureBackgroundCommand(catFile)
+	if err := catFile.Run(); err != nil {
 		return ArtifactFinding{Claim: c, Status: ArtifactStale, Detail: "commit does not resolve in git"}
 	}
 	full := c.Value
-	if out, err := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--verify", c.Value+"^{commit}").Output(); err == nil {
+	revParse := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--verify", c.Value+"^{commit}")
+	windowgate.ConfigureBackgroundCommand(revParse)
+	if out, err := revParse.Output(); err == nil {
 		if resolved := strings.TrimSpace(string(out)); resolved != "" {
 			full = resolved
 		}
 	}
-	err := exec.CommandContext(ctx, "git", "-C", root, "merge-base", "--is-ancestor", full, "HEAD").Run()
+	mergeBase := exec.CommandContext(ctx, "git", "-C", root, "merge-base", "--is-ancestor", full, "HEAD")
+	windowgate.ConfigureBackgroundCommand(mergeBase)
+	err := mergeBase.Run()
 	if err == nil {
 		if revertSHA, ok := revertedBy(ctx, root, full); ok {
 			return ArtifactFinding{Claim: c, Status: ArtifactStale, Detail: "commit is reachable but later reverted by " + shortArtifactSHA(revertSHA)}
@@ -302,7 +311,9 @@ func verifyGitSHA(ctx context.Context, root string, gitOK bool, c ArtifactClaim)
 }
 
 func revertedBy(ctx context.Context, root, fullSHA string) (string, bool) {
-	out, err := exec.CommandContext(ctx, "git", "-C", root, "log", "--format=%H%x00%B%x00", fullSHA+"..HEAD").Output()
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "log", "--format=%H%x00%B%x00", fullSHA+"..HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}
@@ -345,7 +356,9 @@ func verifyFlag(ctx context.Context, root string, gitOK bool, c ArtifactClaim) A
 	if !gitOK {
 		return ArtifactFinding{Claim: c, Status: ArtifactUnverifiable, Detail: "git grep unavailable"}
 	}
-	err := exec.CommandContext(ctx, "git", "-C", root, "grep", "-F", "--", c.Value, "--", ".").Run()
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "grep", "-F", "--", c.Value, "--", ".")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	err := cmd.Run()
 	if err == nil {
 		return ArtifactFinding{Claim: c, Status: ArtifactFresh, Detail: "flag appears in tracked checkout"}
 	}

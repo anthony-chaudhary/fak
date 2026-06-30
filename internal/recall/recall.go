@@ -51,6 +51,12 @@ const ManifestVersion = "recall.v1"
 // errors.Is so a caller can branch on "the gate held" vs a plain lookup error.
 var ErrSealed = errors.New("recall: page sealed by the trust gate")
 
+// ErrExpired is returned before CAS fetch when a bounded-validity page is read
+// after its ValidTo tick.
+var ErrExpired = errors.New("recall: page expired")
+
+const durabilityBounded = "bounded"
+
 // Page is one entry in the persisted page table. For a quarantined page the
 // Descriptor carries ONLY safe metadata (tool, reason, length) — never any of the
 // sealed bytes — so even the recall index cannot smuggle the poison back into a
@@ -66,6 +72,7 @@ type Page struct {
 	QID         string `json:"qid,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Durability  string `json:"durability,omitempty"`  // rung-1 write-time class (#82): turn|session|durable; auditable in manifest.json
+	ValidTo     int64  `json:"valid_to,omitempty"`    // optional bounded-validity tick; read fails closed after this point
 	Witness     string `json:"witness,omitempty"`     // external trust witness this page was admitted under
 	TrustEpoch  uint64 `json:"trust_epoch,omitempty"` // vdso trust epoch observed at record time
 
@@ -344,11 +351,14 @@ func (s *Session) Clear(qid string) { s.cleared[qid] = true }
 //     a page that looked benign at write time) and returned BYTE-IDENTICAL;
 //   - quarantined page: refused unless a witness Clear() ran AND a fresh content
 //     re-screen passes. Either gate failing keeps the page sealed.
-func (s *Session) Resolve(ctx context.Context, step int) ([]byte, error) {
+func (s *Session) Resolve(ctx context.Context, step int, asOf ...int64) ([]byte, error) {
 	if step < 0 || step >= len(s.Manifest.Pages) {
 		return nil, fmt.Errorf("recall: no page %d", step)
 	}
 	p := s.Manifest.Pages[step]
+	if err := validityGate(p, firstAsOf(asOf)); err != nil {
+		return nil, err
+	}
 	if err := s.trustGate(p, step); err != nil {
 		return nil, err
 	}
@@ -380,6 +390,20 @@ func (s *Session) Resolve(ctx context.Context, step int) ([]byte, error) {
 		return nil, err
 	}
 	return append([]byte(nil), body...), nil
+}
+
+func firstAsOf(vals []int64) int64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	return vals[0]
+}
+
+func validityGate(p Page, asOf int64) error {
+	if p.Durability != durabilityBounded || p.ValidTo <= 0 || asOf <= 0 || asOf <= p.ValidTo {
+		return nil
+	}
+	return fmt.Errorf("%w: page %d valid_to=%d as_of=%d", ErrExpired, p.Step, p.ValidTo, asOf)
 }
 
 func (s *Session) trustGate(p Page, step int) error {
@@ -453,16 +477,20 @@ type Slice struct {
 // their content), so the assembled window can never contain a poisoned slice. This
 // is the "working set, not the transcript" payoff: a ~k-page window instead of the
 // whole history.
-func (s *Session) Recall(ctx context.Context, query string, k int) []Slice {
+func (s *Session) Recall(ctx context.Context, query string, k int, asOf ...int64) []Slice {
 	type scored struct {
 		p     Page
 		score int     // phase 1: lexical/semantic relevance (a HARD filter)
 		rank  float64 // phase 2: relevance + learned outcome-utility (#540)
 	}
 	q := tokenize(query)
+	now := firstAsOf(asOf)
 	var cand []scored
 	for _, p := range s.Manifest.Pages {
 		if p.Quarantined || s.Tombstoned(p.Step) {
+			continue
+		}
+		if validityGate(p, now) != nil {
 			continue
 		}
 		// Phase 1 is unchanged: the relevance filter. A score-0 page is NOT a
@@ -486,7 +514,7 @@ func (s *Session) Recall(ctx context.Context, query string, k int) []Slice {
 
 	var out []Slice
 	for i := 0; i < len(cand) && len(out) < k; i++ {
-		b, err := s.Resolve(ctx, cand[i].p.Step)
+		b, err := s.Resolve(ctx, cand[i].p.Step, asOf...)
 		if err != nil {
 			continue
 		}
