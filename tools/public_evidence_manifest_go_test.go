@@ -51,7 +51,15 @@ assert exp == set() and res == set()
 `, string(quotedToolsDir))
 	python := strings.TrimSpace(os.Getenv("FAK_PYTHON"))
 	if python == "" {
-		python = "python"
+		for _, candidate := range []string{"python3", "python"} {
+			if path, err := exec.LookPath(candidate); err == nil {
+				python = path
+				break
+			}
+		}
+	}
+	if python == "" {
+		t.Fatal("no python interpreter found; set FAK_PYTHON or install python3/python")
 	}
 	cmd := exec.Command(python, "-c", code)
 	cmd.Dir = toolsDir
