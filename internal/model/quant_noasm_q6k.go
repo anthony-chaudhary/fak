@@ -1,4 +1,4 @@
-//go:build !arm64 && !amd64
+//go:build (!arm64 && !amd64) || (fakaccel && darwin && arm64 && cgo)
 
 package model
 
