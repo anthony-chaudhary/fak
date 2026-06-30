@@ -16,8 +16,8 @@
 | `serve_raw_vllm` | manual-live-serving | `(manual)` | MANUAL | manual serving step; witnessed by downstream artifacts |
 | `serving_witness` | live-serving | `experiments/glm52/full-size-serving-witness.json` | MISSING | missing |
 | `vllm_tax` | live-serving | `experiments/vllm/adjudication-tax-witness.json` | MISSING | missing |
-| `swebench_compare_preflight` | live-agentic-preflight | `/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json` | MISSING | missing |
-| `swebench_verified_20` | live-agentic | `/tmp/swe-glm52-vllm-20/compare.json` | MISSING | missing |
+| `swebench_compare_preflight` | live-agentic-preflight | `<private-swebench-run>/COMPARE-PREFLIGHT.json` | MISSING | missing |
+| `swebench_verified_20` | live-agentic | `<private-swebench-run>/compare.json` | MISSING | missing |
 | `swebench_floor_20` | fak-native-floor | `experiments/vllm/swebench-20-fak-floor.json` | PASS | fak SWE-bench floor: 20 instances workers=[1,2,4,8] |
 | `turntax_airline` | fak-native-floor | `experiments/vllm/turntax-airline.json` | PASS | turntax-airline turns_saved=9 |
 | `sessionbench_synthetic` | fak-native-floor | `experiments/vllm/sessionbench-synthetic.json` | PASS | sessionbench synthetic T=50 C=5 deterministic token-count floor present |
@@ -31,7 +31,7 @@
 Record the raw-vLLM vs fak-gateway same-model run contract.
 
 ```bash
-python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200
+python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir <private-swebench-run> --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200
 ```
 
 ### preflight
@@ -71,7 +71,7 @@ python tools/vllm_tax_witness.py --base-url http://127.0.0.1:8000/v1 --model glm
 Fail fast before the long SWE-bench agent run.
 
 ```bash
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only
 ```
 
 ### swebench_verified_20
@@ -79,7 +79,7 @@ python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 -
 Run raw-vLLM vs fak-gateway on a 20-task SWE-bench Verified slice.
 
 ```bash
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200
 ```
 
 ### swebench_floor_20

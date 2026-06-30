@@ -6,10 +6,10 @@ set -euo pipefail
 # Set GLM52_TOOL_CALL_PARSER to the parser name required by your vLLM build/model card.
 
 # Prepare artifact directories.
-mkdir -p /tmp/swe-glm52-vllm-20 experiments/glm52 experiments/vllm experiments/vllm/glm52-agentic-battery
+mkdir -p <private-swebench-run> experiments/glm52 experiments/vllm experiments/vllm/glm52-agentic-battery
 
 # raw_fak_run_contract: Record the raw-vLLM vs fak-gateway same-model run contract.
-python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200
+python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir <private-swebench-run> --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200
 
 # preflight: Fail-closed GLM-5.2/vLLM node readiness gate.
 python tools/glm52_serve_preflight.py --engine vllm --quant fp8 --require-ready --out experiments/vllm/glm52-vllm-preflight.json --markdown experiments/vllm/glm52-vllm-preflight.md
@@ -24,10 +24,10 @@ python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 --mode
 python tools/vllm_tax_witness.py --base-url http://127.0.0.1:8000/v1 --model glm-5.2 --count 8 --record --out experiments/vllm/adjudication-tax-witness.json --markdown experiments/vllm/adjudication-tax-witness.md
 
 # swebench_compare_preflight: Fail fast before the long SWE-bench agent run.
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only
 
 # swebench_verified_20: Run raw-vLLM vs fak-gateway on a 20-task SWE-bench Verified slice.
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200
 
 # swebench_floor_20: Record the deterministic fak-native SWE-bench geometry floor at the same 20-task scale.
 go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md --difficulty testdata/swebench_verified_20_difficulty.json
@@ -46,4 +46,4 @@ go run ./cmd/radixbench -live=false -out experiments/vllm/radixbench-synthetic.j
 
 # Final strict gate: exits nonzero unless every required artifact exists
 # and matches the GLM-5.2/vLLM benchmark identity.
-python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --out experiments/vllm/glm52-agentic-battery/final-check.json --markdown experiments/vllm/glm52-agentic-battery/FINAL-CHECK.md --authority-draft experiments/vllm/glm52-agentic-battery/BENCHMARK-AUTHORITY-DRAFT.md --swebench-difficulty testdata/swebench_verified_20_difficulty.json --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json
+python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir <private-swebench-run> --out experiments/vllm/glm52-agentic-battery/final-check.json --markdown experiments/vllm/glm52-agentic-battery/FINAL-CHECK.md --authority-draft experiments/vllm/glm52-agentic-battery/BENCHMARK-AUTHORITY-DRAFT.md --swebench-difficulty testdata/swebench_verified_20_difficulty.json --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json

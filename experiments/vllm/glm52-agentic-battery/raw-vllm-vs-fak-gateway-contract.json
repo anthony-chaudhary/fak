@@ -156,15 +156,15 @@
   "required_artifacts": {
     "serving_witness": "experiments/glm52/full-size-serving-witness.json",
     "vllm_tax": "experiments/vllm/adjudication-tax-witness.json",
-    "compare_preflight": "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
-    "compare_result": "/tmp/swe-glm52-vllm-20/compare.json",
-    "compare_markdown": "/tmp/swe-glm52-vllm-20/COMPARE.md",
-    "done_rc": "/tmp/swe-glm52-vllm-20/DONE.rc",
+    "compare_preflight": "<private-swebench-run>/COMPARE-PREFLIGHT.json",
+    "compare_result": "<private-swebench-run>/compare.json",
+    "compare_markdown": "<private-swebench-run>/COMPARE.md",
+    "done_rc": "<private-swebench-run>/DONE.rc",
     "final_check": "experiments/vllm/glm52-agentic-battery/final-check.json"
   },
   "commands": {
-    "compare_preflight": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only",
-    "compare_run": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200"
+    "compare_preflight": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only",
+    "compare_run": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200"
   },
   "honesty": "This is a run contract, not a benchmark result. It records the identity, arms, budgets, required metrics, and artifact boundaries for the future live GLM-5.2/vLLM comparison."
 }

@@ -12,7 +12,7 @@
   "python": "python",
   "out_dir": "experiments/vllm",
   "serving_out_dir": "experiments/glm52",
-  "swe_run_dir": "/tmp/swe-glm52-vllm-20",
+  "swe_run_dir": "<private-swebench-run>",
   "swebench_difficulty": "testdata/swebench_verified_20_difficulty.json",
   "swebench_dataset": "",
   "run_contract_artifact": "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
@@ -46,14 +46,14 @@
           "--serving-out-dir",
           "experiments/glm52",
           "--swe-run-dir",
-          "/tmp/swe-glm52-vllm-20",
+          "<private-swebench-run>",
           "--run-contract",
           "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
           "--contract-only",
           "--require-gpu-name",
           "H200"
         ],
-        "shell": "python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir /tmp/swe-glm52-vllm-20 --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200"
+        "shell": "python tools/glm52_vllm_agentic_battery.py --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --base-url http://127.0.0.1:8000/v1 --context-length 131072 --quant fp8 --verified-count 20 --tax-count 8 --out-dir experiments/vllm --serving-out-dir experiments/glm52 --swe-run-dir <private-swebench-run> --run-contract experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json --contract-only --require-gpu-name H200"
       },
       "primary_artifact": "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
       "artifacts": [
@@ -191,7 +191,7 @@
       "command": {
         "argv": [
           "python",
-          "tools/dgx_swebench_compare.py",
+          "<private-swebench-compare>",
           "--engine",
           "vllm",
           "--model",
@@ -206,17 +206,17 @@
           "--require-tool-calls",
           "--require-grade",
           "--run-dir",
-          "/tmp/swe-glm52-vllm-20",
+          "<private-swebench-run>",
           "--require-gpu-name",
           "H200",
           "--preflight-only"
         ],
-        "shell": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only"
+        "shell": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only"
       },
-      "primary_artifact": "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
+      "primary_artifact": "<private-swebench-run>/COMPARE-PREFLIGHT.json",
       "artifacts": [
-        "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
-        "/tmp/swe-glm52-vllm-20/DONE.rc"
+        "<private-swebench-run>/COMPARE-PREFLIGHT.json",
+        "<private-swebench-run>/DONE.rc"
       ],
       "check": "swebench_compare_preflight",
       "claim_boundary": "Dependency/raw-endpoint/GPU gate only; resolve claims come from swebench_verified_20.",
@@ -232,7 +232,7 @@
       "command": {
         "argv": [
           "python",
-          "tools/dgx_swebench_compare.py",
+          "<private-swebench-compare>",
           "--engine",
           "vllm",
           "--model",
@@ -247,18 +247,18 @@
           "--require-tool-calls",
           "--require-grade",
           "--run-dir",
-          "/tmp/swe-glm52-vllm-20",
+          "<private-swebench-run>",
           "--require-gpu-name",
           "H200"
         ],
-        "shell": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200"
+        "shell": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200"
       },
-      "primary_artifact": "/tmp/swe-glm52-vllm-20/compare.json",
+      "primary_artifact": "<private-swebench-run>/compare.json",
       "artifacts": [
-        "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
-        "/tmp/swe-glm52-vllm-20/compare.json",
-        "/tmp/swe-glm52-vllm-20/COMPARE.md",
-        "/tmp/swe-glm52-vllm-20/DONE.rc"
+        "<private-swebench-run>/COMPARE-PREFLIGHT.json",
+        "<private-swebench-run>/compare.json",
+        "<private-swebench-run>/COMPARE.md",
+        "<private-swebench-run>/DONE.rc"
       ],
       "check": "swebench_compare",
       "claim_boundary": "Completion/resolve claims require official harness grading for both arms.",
