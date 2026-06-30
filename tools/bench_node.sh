@@ -9,8 +9,10 @@
 #   tools/bench_node.sh <node> bench           # kernel-latency microbenches (ns/op)
 #   tools/bench_node.sh <node> kernels         # arm64 NEON quant hot-path: correctness gate +
 #                                              #   percell-vs-row4 GEMM A/B + prove/refute verdict
+#   tools/bench_node.sh <node> keepawake       # arm macOS caffeinate as soon as SSH is reachable
 #   tools/bench_node.sh <node> cmd <shell...>  # arbitrary command on the node
 #   WAIT=1 tools/bench_node.sh <node> bench    # auto-wait if the node is asleep
+#   BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake  # caffeinate duration
 #   KCOUNT=8 tools/bench_node.sh <node> kernels  # benchmark -count (default 6)
 #
 # Every run writes a lineage.json (utc datetime, fak version+commit+branch, node, go) next to
@@ -22,7 +24,7 @@
 # CPU brand / hostname. Promoting a result to a committed path needs a real redaction pass.
 set -uo pipefail
 
-RUNNER_VERSION="0.5.0"   # 0.5.0: windows-wsl remote_shell; 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels
+RUNNER_VERSION="0.6.0"   # 0.6.0: keepawake grabber; 0.5.0: windows-wsl remote_shell; 0.4.0: resolve_cmd dynamic host/IP resolver; 0.3.0: kernels
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SELF_DIR/.." && pwd)"
 REG="${BENCH_NODES:-$SELF_DIR/bench_nodes.json}"
@@ -40,11 +42,13 @@ usage: bench_node.sh <node> <subcommand> [args]
   wait            poll (SSH handshake, backoff) until reachable or BENCH_WAIT_MAX_S
   info            print resolved node facts (sanitized name only)
   cmd <shell...>  run an arbitrary command on the node (-> gitignored scratch)
+  keepawake       wait if needed, then arm macOS caffeinate on the node
   tests           go test ./internal/ggufload ./internal/model -count=1
   bench           kernel-latency microbenches (adjudicator+ctxmmu, count=8, ns/op)
   kernels         arm64 NEON quant hot-path: bit-exact correctness gate + per-cell-vs-row4
                   GEMM A/B (MAC/ns) + a prove/refute verdict on the row4 speedup claim
 env: WAIT=1 auto-wait when offline; BENCH_ALLOW_COLOCATED=1 override placement law;
+     BENCH_KEEPAWAKE_S=N keepawake duration seconds (default 28800);
      KCOUNT=N kernels benchmark -count (default 6)
 U
 exit 64; }
@@ -245,6 +249,30 @@ case "$SUB" in
     ;;
   wait)
     ensure_online || exit $?
+    ;;
+  keepawake)
+    WAIT=1
+    ensure_online || exit $?
+    OUT="$(newrun)"
+    dur="${BENCH_KEEPAWAKE_S:-28800}"
+    case "$dur" in
+      ''|*[!0-9]*) echo "BENCH_KEEPAWAKE_S must be an integer duration in seconds" >&2; exit 64 ;;
+    esac
+    remote_bash > "$OUT/run.log" 2>&1 <<EOF
+set -uo pipefail
+if command -v caffeinate >/dev/null 2>&1; then
+  nohup caffeinate -dimsu -t "$dur" >/tmp/fak-bench-node-keepawake.log 2>&1 &
+  echo "KEEP_AWAKE armed duration_s=$dur"
+else
+  echo "KEEP_AWAKE unavailable: caffeinate not found"
+  exit 69
+fi
+EOF
+    rc=$?
+    lineage "$OUT" "$SUB" >/dev/null 2>&1 || true
+    tail -8 "$OUT/run.log"
+    echo "keepawake rc=$rc -> $OUT (gitignored)"
+    exit $rc
     ;;
   cmd)
     ensure_online || exit $?

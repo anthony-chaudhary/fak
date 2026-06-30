@@ -26,12 +26,19 @@ tools/bench_node.sh <node> ping            # SSH-handshake reachability
 tools/bench_node.sh <node> wait            # poll (backoff) until reachable
 tools/bench_node.sh <node> tests           # go test ggufload+model (correctness)
 tools/bench_node.sh <node> bench           # kernel-latency microbenches (ns/op)
+tools/bench_node.sh <node> keepawake       # wait, then arm macOS caffeinate
 tools/bench_node.sh <node> cmd <shell...>  # arbitrary command on the node
 WAIT=1 tools/bench_node.sh <node> bench    # auto-wait if the node is asleep
+BENCH_KEEPAWAKE_S=28800 tools/bench_node.sh <node> keepawake
 ```
 
 `<node>` is a key in the registry (e.g. `macbook`). Results land in
 `tools/_registry/bench-runs/<sanitized>/<ts>-<sub>/` — **gitignored**.
+
+`keepawake` is intentionally repo-independent on the remote side: once SSH answers, the
+first remote script starts `caffeinate -dimsu -t <seconds>` before any checkout/toolchain
+inspection. That preserves the wake window for follow-up `tests`, `bench`, `kernels`, or
+`cmd` runs on macOS nodes that would otherwise go back to sleep.
 
 ## Lineage / observability (every run)
 

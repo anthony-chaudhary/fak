@@ -88,7 +88,11 @@ FAKEBIN="$TMP/bin"; mkdir -p "$FAKEBIN"
 cat > "$FAKEBIN/ssh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${SSH_LOG:?}"
-cat >/dev/null
+if [ -n "${SSH_STDIN_LOG:-}" ]; then
+  cat >> "$SSH_STDIN_LOG"
+else
+  cat >/dev/null
+fi
 exit 0
 SH
 chmod +x "$FAKEBIN/ssh"
@@ -110,6 +114,18 @@ t "windows-wsl run scripts enter WSL bash"
 PATH="$FAKEBIN:$PATH" SSH_LOG="$SSH_LOG" run win cmd 'echo OK' >/dev/null 2>&1
 if grep -q "wsl.exe -d Ubuntu -e bash -s" "$SSH_LOG"; then ok
 else no "windows-wsl cmd did not use WSL bash (log: $(cat "$SSH_LOG"))"; fi
+
+SSH_STDIN_LOG="$TMP/ssh.stdin"; : > "$SSH_STDIN_LOG"
+reg <<JSON
+{ "schema":"fleet-bench-nodes/1","nodes":[
+  { "name":"mac","sanitized_name":"node-macos-a","tailnet_ip":"203.0.113.10",
+    "ssh_user":"u","ssh_key":"~/.ssh/id_ed25519","ssh_port":22,"host_key":"",
+    "repo_path":"~/r","toolchain_env":"GOTOOLCHAIN=auto" } ]}
+JSON
+t "keepawake sends caffeinate in remote script"
+PATH="$FAKEBIN:$PATH" SSH_LOG="$SSH_LOG" SSH_STDIN_LOG="$SSH_STDIN_LOG" BENCH_KEEPAWAKE_S=123 run mac keepawake >/dev/null 2>&1
+if grep -q "nohup caffeinate -dimsu -t \"123\"" "$SSH_STDIN_LOG" && grep -q "KEEP_AWAKE armed duration_s=123" "$SSH_STDIN_LOG"; then ok
+else no "keepawake did not arm caffeinate (stdin: $(cat "$SSH_STDIN_LOG"))"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "PASS (bench_node resolve_cmd)"; exit 0
