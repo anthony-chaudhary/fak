@@ -435,6 +435,18 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		}
 	}
 
+	return s.halFinalLogits(x, mode, capturing, useQ8Weights, finishGraph)
+}
+
+// halFinalLogits runs the post-layer final RMSNorm + lm_head and finishes the CUDA-graph
+// capture, returning the same (logits, nextToken) contract as the inline tail it replaces:
+// halNoLogits short-circuits; halArgmax prefers a fused norm+matmul+argmax (then a fused
+// matmul+argmax, then host Argmax); the logits modes prefer a fused norm+matmul. The fused
+// argmax paths stay gated on !capturing and (for the F32 matmul) an F32 head, and every
+// fused-norm path stays gated on !useQ8Weights, exactly as before.
+func (s *Session) halFinalLogits(x compute.Tensor, mode halOutputMode, capturing, useQ8Weights bool, finishGraph func()) (compute.Tensor, int) {
+	be := s.Backend
+	eps := float32(s.M.Cfg.RMSNormEps)
 	if mode == halNoLogits {
 		finishGraph()
 		return compute.Tensor{}, 0
