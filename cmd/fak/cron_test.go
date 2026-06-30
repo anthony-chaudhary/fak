@@ -104,6 +104,106 @@ func TestCronEmitLedgerPassthrough(t *testing.T) {
 	mustContain(t, out, "--ledger /var/lib/fak/loops.jsonl")
 }
 
+// TestCronEmitCommandSystemd proves --command emits a unit whose ExecStart is the
+// arbitrary command verbatim — no `fak loop run` wrapper — and matches the garden
+// watchdog's spec name so `fak start` auto-heals what `cron emit` produced (#1385).
+func TestCronEmitCommandSystemd(t *testing.T) {
+	out := emitCron(t, "--target", "systemd", "--label", "fleet-stale-work-garden",
+		"--command", "fak garden --check", "--interval", "1h")
+	mustContain(t, out,
+		"# === fleet-stale-work-garden.service ===",
+		"# === fleet-stale-work-garden.timer ===",
+		"Type=oneshot",
+		"ExecStart=fak garden --check",
+		"OnUnitActiveSec=3600s",
+		"WantedBy=timers.target",
+	)
+	if strings.Contains(out, "loop run") {
+		t.Fatalf("--command unit must not carry a `fak loop run` wrapper:\n%s", out)
+	}
+}
+
+// TestCronEmitCommandLaunchd proves the arbitrary command lands as ProgramArguments
+// (one <string> per token) with the watchdog's com.fleet.* label.
+func TestCronEmitCommandLaunchd(t *testing.T) {
+	out := emitCron(t, "--target", "launchd", "--label", "com.fleet.stale-work-garden",
+		"--command", "fak garden --check", "--interval", "1h")
+	assertWellFormedXML(t, out)
+	mustContain(t, out,
+		"<string>com.fleet.stale-work-garden</string>",
+		"<string>fak</string>",
+		"<string>garden</string>",
+		"<string>--check</string>",
+		"<integer>3600</integer>",
+	)
+	if strings.Contains(out, "<string>loop</string>") || strings.Contains(out, "<string>run</string>") {
+		t.Fatalf("--command unit must not carry a `fak loop run` wrapper:\n%s", out)
+	}
+}
+
+// TestCronEmitCommandTaskScheduler proves the arbitrary command becomes the task's
+// -Execute (first token) + -Argument (the rest) with the watchdog's PascalCase name.
+func TestCronEmitCommandTaskScheduler(t *testing.T) {
+	out := emitCron(t, "--target", "taskscheduler", "--label", "FleetStaleWorkGarden",
+		"--command", "fak garden --check", "--interval", "1h")
+	mustContain(t, out,
+		"Register-ScheduledTask",
+		"New-ScheduledTaskAction -Execute 'fak' -Argument 'garden --check'",
+		"New-TimeSpan -Seconds 3600",
+		"-TaskName 'FleetStaleWorkGarden'",
+	)
+	if strings.Contains(out, "loop run") {
+		t.Fatalf("--command unit must not carry a `fak loop run` wrapper:\n%s", out)
+	}
+}
+
+// TestCronEmitCommandQuoting proves a multi-word argument (one shlex token with an
+// embedded space) survives into each unit re-quoted faithfully, not split apart.
+func TestCronEmitCommandQuoting(t *testing.T) {
+	const cmd = `fak garden --note "two words" --check`
+	// systemd: the spaced token is double-quoted in the ExecStart line.
+	sd := emitCron(t, "--target", "systemd", "--label", "garden", "--command", cmd)
+	mustContain(t, sd, `ExecStart=fak garden --note "two words" --check`)
+	// launchd: each token (including the spaced one) is its own <string>.
+	ld := emitCron(t, "--target", "launchd", "--label", "garden", "--command", cmd)
+	assertWellFormedXML(t, ld)
+	mustContain(t, ld, "<string>two words</string>", "<string>--note</string>")
+	// taskscheduler: the spaced token is double-quoted inside the -Argument literal.
+	ts := emitCron(t, "--target", "taskscheduler", "--label", "garden", "--command", cmd)
+	mustContain(t, ts, `-Argument 'garden --note "two words" --check'`)
+}
+
+// TestCronEmitCommandDefaultLabel proves --command with no --label derives a safe
+// fak-cron-<verb> name from the command's first token.
+func TestCronEmitCommandDefaultLabel(t *testing.T) {
+	out := emitCron(t, "--target", "systemd", "--command", "fak garden --check")
+	mustContain(t, out, "# === fak-cron-fak.service ===")
+}
+
+// TestCronEmitDefaultUnchanged is a regression guard: with no --command the systemd
+// unit is byte-for-byte the historical `fak loop run` form (the back-compat rung).
+func TestCronEmitDefaultUnchanged(t *testing.T) {
+	out := emitCron(t, "--target", "systemd", "--interval", "5m", "--loop", "nightly")
+	mustContain(t, out,
+		"Description=fak loop nightly (cron-emitted; OS fires, fak owns overlap-lock + missed-run policy)",
+		"Description=Timer for fak loop nightly",
+		"ExecStart=fak loop run --loop nightly --source systemd -- fak agent",
+	)
+}
+
+func TestCronEmitCommandRejectsBadInput(t *testing.T) {
+	cases := [][]string{
+		{"emit", "--target", "systemd", "--command", `fak "unterminated`}, // unbalanced quote
+		{"emit", "--target", "systemd", "--command", "   "},               // empty after split
+	}
+	for _, argv := range cases {
+		var stdout, stderr bytes.Buffer
+		if code := runCron(&stdout, &stderr, argv); code != 2 {
+			t.Fatalf("runCron(%v) = %d, want 2 (stderr=%s stdout=%s)", argv, code, stderr.String(), stdout.String())
+		}
+	}
+}
+
 func TestCronEmitRejectsBadInput(t *testing.T) {
 	cases := [][]string{
 		{"emit"}, // no target, no loop
