@@ -47,6 +47,10 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The scorecard member asks git what shipped after the learning-scorecard
+          # stamp; a shallow checkout makes the boundary commit look like a mass add.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:

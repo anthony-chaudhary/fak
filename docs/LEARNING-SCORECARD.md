@@ -5,7 +5,7 @@ description: "fak's deterministic learning-docs scorecard: does the teaching set
 
 # Learning-docs scorecard
 
-<!-- learning-scorecard: 2026-06-29 · process: tools/learning_scorecard.py -->
+<!-- learning-scorecard: 2026-06-30 · process: tools/learning_scorecard.py -->
 
 > Regenerate: `python tools/learning_scorecard.py --markdown --stamp DATE > docs/LEARNING-SCORECARD.md`
 
@@ -131,4 +131,3 @@ Seven KPIs, each 0–100 — pedagogy (orientation · runnable · worked · hone
 No learning-debt: every learning doc clears the HARD bar. 🎉
 
 Remaining work is soft-signal polish on the priority docs above.
-

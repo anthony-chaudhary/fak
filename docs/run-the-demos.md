@@ -10,6 +10,10 @@ start with hosted infrastructure, a model download, a GPU, or an API key. Start 
 lowest-common-denominator set: one Go command, deterministic output, no browser required,
 no network, no model weights.
 
+Read this if you want to prove the demos from a fresh checkout before touching hosted
+infrastructure. By the end, you'll be able to pick the right track, run the model-free
+witnesses first, and know which demos require a browser, network, or live model.
+
 ## Cache-frontier walkthrough
 
 Use this path when the goal is fak's caching value-add rather than the whole demo
