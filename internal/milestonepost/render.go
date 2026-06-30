@@ -40,22 +40,34 @@ func (c Card) ladderLine() string {
 	return "ladder: " + milestonereport.RenderDist(c.Report.Maturity.Dist)
 }
 
-// roadmapLine is the roadmap headline: the overall completion across measured epics.
+// roadmapLine is the roadmap headline: the completion across DISCRETE epics, plus the
+// count of ongoing optimization programs (which carry no completion %).
 func (c Card) roadmapLine() string {
 	e := c.Report.Epics
 	if e.Err != "" {
 		return "roadmap: unmeasured (" + e.Err + ")"
 	}
-	return fmt.Sprintf("roadmap: %.1f%% overall across %d/%d tracked epic(s)", e.OverallPct, e.Measured, e.Tracked)
+	return fmt.Sprintf("roadmap: %.1f%% across %d discrete epic(s); %d ongoing program(s)", e.OverallPct, e.Discrete, e.Programs)
 }
 
-// epicLines renders one bullet per tracked epic, honestly surfacing an unreadable
-// epic as "gh read failed" rather than a fabricated 0%.
+// epicLines renders one bullet per tracked epic, split by work class: a discrete
+// epic shows its completion % (-> done), an ongoing program shows frontier activity
+// (shipped / in-flight, no % — it has no 100%). An unreadable row is surfaced
+// honestly as "gh read failed" rather than a fabricated 0%.
 func (c Card) epicLines() []string {
 	var out []string
 	for _, row := range c.Report.Epics.Rows {
 		if row.Err != "" {
 			out = append(out, fmt.Sprintf("#%d %s — gh read failed", row.Number, row.Title))
+			continue
+		}
+		if row.Ongoing() {
+			open := row.Total - row.Closed
+			src := ""
+			if row.Source != "" {
+				src = " {" + row.Source + "}"
+			}
+			out = append(out, fmt.Sprintf("#%d %s [%s] — %d shipped / %d in-flight%s", row.Number, row.Title, row.Class.Label(), row.Closed, open, src))
 			continue
 		}
 		src := ""

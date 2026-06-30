@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
+	"github.com/anthony-chaudhary/fak/internal/worktype"
 )
 
 // Schema is the stable control-pane schema identifier for the report envelope.
@@ -126,28 +127,43 @@ type EpicCounts struct {
 	Err    string
 }
 
-// EpicRow is one tracked epic's completion in the folded report.
+// EpicRow is one tracked epic's completion in the folded report. Class is its
+// work-class (worktype.ClassifyEpic): a DISCRETE epic's Pct is a meaningful "how
+// far to done", while an ONGOING program's child tally is a frontier-activity
+// signal — the report renders it WITHOUT a completion-% framing and excludes it
+// from the roadmap's OverallPct, because an ongoing program has no 100%.
 type EpicRow struct {
-	Number int     `json:"number"`
-	Title  string  `json:"title"`
-	Closed int     `json:"closed"`
-	Total  int     `json:"total"`
-	Pct    float64 `json:"pct"`
-	Source string  `json:"source,omitempty"`
-	Err    string  `json:"err,omitempty"`
+	Number int            `json:"number"`
+	Title  string         `json:"title"`
+	Class  worktype.Class `json:"class"`
+	Closed int            `json:"closed"`
+	Total  int            `json:"total"`
+	Pct    float64        `json:"pct"`
+	Source string         `json:"source,omitempty"`
+	Err    string         `json:"err,omitempty"`
 }
 
-// Epics is the ROADMAP dimension: completion across the tracked epics. Err is set
-// ONLY when EVERY tracked epic failed to read (a true unmeasured dimension that
-// gates); a partial failure (some epics read, some not) records a non-gating
+// Ongoing reports whether this row is an ongoing optimization program rather than a
+// discrete deliverable — the one predicate the render branches on.
+func (r EpicRow) Ongoing() bool { return r.Class.Ongoing() }
+
+// Epics is the ROADMAP dimension: completion across the tracked epics, split by
+// work class. The completion math (Closed/Total/OverallPct) folds DISCRETE epics
+// ONLY — an ongoing optimization program has no 100%, so blending its child tally
+// into a "roadmap % complete" would manufacture a false stall. The program rows are
+// still measured and surfaced (Programs); they just trend as frontier activity, not
+// as progress toward done. Err is set ONLY when EVERY tracked epic failed to read (a
+// true unmeasured dimension that gates); a partial failure records a non-gating
 // PartialNote and leaves Err == "", so one flaky `gh` query never reds the report.
 type Epics struct {
 	Rows        []EpicRow `json:"rows"`
 	Tracked     int       `json:"tracked"`
 	Measured    int       `json:"measured"`
-	Closed      int       `json:"closed"`      // summed over measured rows
-	Total       int       `json:"total"`       // summed over measured rows
-	OverallPct  float64   `json:"overall_pct"` // 100 * Closed/Total over measured rows
+	Programs    int       `json:"programs"`    // count of ongoing-program rows (any read state)
+	Discrete    int       `json:"discrete"`    // count of discrete-epic rows (any read state)
+	Closed      int       `json:"closed"`      // summed over measured DISCRETE rows only
+	Total       int       `json:"total"`       // summed over measured DISCRETE rows only
+	OverallPct  float64   `json:"overall_pct"` // 100 * Closed/Total over measured DISCRETE rows
 	PartialNote string    `json:"partial_note,omitempty"`
 	Err         string    `json:"err,omitempty"`
 	OK          bool      `json:"ok"`
@@ -165,7 +181,17 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 	}
 	var failed int
 	for _, spec := range specs {
-		row := EpicRow{Number: spec.Number, Title: spec.Title}
+		// Classify by number via the canonical worktype map. The resolver's EpicSpec
+		// is intentionally taxonomy-free (it only knows how to READ children); the
+		// work-class lives in one table (internal/worktype) so a reclassification is a
+		// one-line edit there, not a field threaded through the resolver.
+		class := worktype.ClassifyEpic(spec.Number)
+		row := EpicRow{Number: spec.Number, Title: spec.Title, Class: class}
+		if class.Ongoing() {
+			e.Programs++
+		} else {
+			e.Discrete++
+		}
 		c, ok := byNum[spec.Number]
 		switch {
 		case runErr != "":
@@ -178,8 +204,13 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 			row.Closed, row.Total, row.Source = c.Closed, c.Total, c.Source
 			row.Pct = pct(c.Closed, c.Total)
 			e.Measured++
-			e.Closed += c.Closed
-			e.Total += c.Total
+			// Only DISCRETE epics fold into the roadmap completion %. An ongoing
+			// program's child tally is read + surfaced but never blended into a
+			// "% complete" — it has no 100%.
+			if !row.Ongoing() {
+				e.Closed += c.Closed
+				e.Total += c.Total
+			}
 		}
 		if row.Err != "" {
 			failed++
@@ -277,7 +308,9 @@ func Fold(m Maturity, e Epics, opts FoldOpts) Report {
 	}
 
 	climbLine := fmt.Sprintf("climb: %s, %d/%d matured (progress %.1f%%)", m.Highest, m.Matured, m.Cells, m.ProgressPct)
-	roadLine := fmt.Sprintf("roadmap: %.1f%% overall (%d/%d epic(s) measured)", e.OverallPct, e.Measured, e.Tracked)
+	// The roadmap % is over DISCRETE epics only; programs are reported alongside as
+	// ongoing-frontier activity, never folded into a completion bar.
+	roadLine := fmt.Sprintf("roadmap: %.1f%% over %d discrete epic(s); %d ongoing program(s)", e.OverallPct, e.Discrete, e.Programs)
 	summary := climbLine + "; " + roadLine
 	if e.PartialNote != "" {
 		summary += " — " + e.PartialNote
@@ -494,10 +527,30 @@ func Render(r Report) string {
 	if len(r.Maturity.Worst) > 0 {
 		lines = append(lines, "      lowest: "+strings.Join(r.Maturity.Worst, ", "))
 	}
-	lines = append(lines, fmt.Sprintf("  %s roadmap     %.1f%% overall across %d/%d tracked epic(s)",
-		mark(r.Epics.OK, r.Epics.Err), r.Epics.OverallPct, r.Epics.Measured, r.Epics.Tracked))
+	// The roadmap renders in two sections so an ongoing optimization PROGRAM is never
+	// read as a stalled deliverable: discrete epics carry a completion %, programs
+	// carry a frontier-activity line (closed/open children, no "% complete").
+	var programs, discrete []EpicRow
 	for _, row := range r.Epics.Rows {
-		lines = append(lines, "      "+epicRowLine(row))
+		if row.Ongoing() {
+			programs = append(programs, row)
+		} else {
+			discrete = append(discrete, row)
+		}
+	}
+	lines = append(lines, fmt.Sprintf("  %s roadmap     %.1f%% across %d discrete epic(s); %d ongoing program(s)",
+		mark(r.Epics.OK, r.Epics.Err), r.Epics.OverallPct, r.Epics.Discrete, r.Epics.Programs))
+	if len(discrete) > 0 {
+		lines = append(lines, "      discrete epics (-> done):")
+		for _, row := range discrete {
+			lines = append(lines, "        "+epicRowLine(row))
+		}
+	}
+	if len(programs) > 0 {
+		lines = append(lines, "      ongoing programs (frontier + trend, never 'done'):")
+		for _, row := range programs {
+			lines = append(lines, "        "+programRowLine(row))
+		}
 	}
 	if r.Epics.PartialNote != "" {
 		lines = append(lines, "      ("+r.Epics.PartialNote+")")
@@ -532,6 +585,24 @@ func epicRowLine(row EpicRow) string {
 		src = " [" + row.Source + "]"
 	}
 	return fmt.Sprintf("#%d %s — %.0f%% (%d/%d)%s", row.Number, row.Title, row.Pct, row.Closed, row.Total, src)
+}
+
+// programRowLine renders one ONGOING-program row. It deliberately does NOT show a
+// completion % — an optimization program has no 100%. Instead it shows frontier
+// ACTIVITY: closed children (shipped frontier moves) vs open (in-flight), plus the
+// program label, so an operator reads "is this frontier still advancing?" not "how
+// far to done?". An unreadable program is surfaced honestly, like a discrete epic.
+func programRowLine(row EpicRow) string {
+	label := " [" + row.Class.Label() + "]"
+	if row.Err != "" {
+		return fmt.Sprintf("#%d %s%s — gh read failed (%s)", row.Number, row.Title, label, row.Err)
+	}
+	open := row.Total - row.Closed
+	src := ""
+	if row.Source != "" {
+		src = " {" + row.Source + "}"
+	}
+	return fmt.Sprintf("#%d %s%s — %d shipped / %d in-flight%s", row.Number, row.Title, label, row.Closed, open, src)
 }
 
 // CheckGate is the advisory CI gate over a folded report (pure: exit code + message).

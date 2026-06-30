@@ -176,6 +176,73 @@ func TestInterpretEpicsNeverFabricatesZero(t *testing.T) {
 	}
 }
 
+// --- the work-class split ---------------------------------------------------
+
+// TestInterpretEpicsSplitsProgramsFromDiscrete is the load-bearing test for this
+// change: an ONGOING-program epic (#1010 kernel-opt) is measured and surfaced but
+// its child tally is EXCLUDED from the roadmap completion %, while a DISCRETE epic
+// (#1315 native harness) folds into the %. This is what stops a never-"done"
+// optimization program from being read as a stalled deliverable.
+func TestInterpretEpicsSplitsProgramsFromDiscrete(t *testing.T) {
+	specs := []EpicSpec{
+		{Number: 1010, Title: "GLM kernel"},     // kernel-optimization (ongoing)
+		{Number: 1315, Title: "native harness"}, // discrete
+		{Number: 1301, Title: "cache P&L"},      // cache-optimization (ongoing)
+	}
+	counts := []EpicCounts{
+		{Number: 1010, Closed: 7, Total: 10, Source: "label"},
+		{Number: 1315, Closed: 3, Total: 4, Source: "label"},
+		{Number: 1301, Closed: 2, Total: 5, Source: "checklist"},
+	}
+	e := InterpretEpics(specs, counts, "")
+	if e.Programs != 2 || e.Discrete != 1 {
+		t.Fatalf("split = %d program / %d discrete, want 2/1", e.Programs, e.Discrete)
+	}
+	// OverallPct folds ONLY the discrete epic (3/4), NOT the two programs' children.
+	if e.Closed != 3 || e.Total != 4 {
+		t.Fatalf("roadmap completion must fold discrete epics only, got closed=%d total=%d (want 3/4)", e.Closed, e.Total)
+	}
+	if e.OverallPct < 74 || e.OverallPct > 76 { // 3/4 = 75%
+		t.Fatalf("overall pct = %.1f, want ~75 (discrete only)", e.OverallPct)
+	}
+	// Every measured row still carries its closed/total (programs are surfaced, just
+	// not folded into the %).
+	byNum := map[int]EpicRow{}
+	for _, r := range e.Rows {
+		byNum[r.Number] = r
+	}
+	if r := byNum[1010]; !r.Ongoing() || r.Closed != 7 || r.Total != 10 {
+		t.Fatalf("the kernel program row must be ongoing and carry its tally, got %+v", r)
+	}
+	if r := byNum[1315]; r.Ongoing() {
+		t.Fatalf("#1315 must classify as discrete, got ongoing")
+	}
+}
+
+// TestRenderSplitsSections proves the human render carries two labeled sections and
+// that an ongoing program is rendered WITHOUT a misleading completion %.
+func TestRenderSplitsSections(t *testing.T) {
+	specs := []EpicSpec{
+		{Number: 1010, Title: "GLM kernel"},     // ongoing
+		{Number: 1315, Title: "native harness"}, // discrete
+	}
+	counts := []EpicCounts{
+		{Number: 1010, Closed: 7, Total: 10, Source: "label"},
+		{Number: 1315, Closed: 3, Total: 4, Source: "label"},
+	}
+	r := Fold(goodMaturity(), InterpretEpics(specs, counts, ""), FoldOpts{Date: "2026-06-29", Commit: "abc"})
+	out := Render(r)
+	for _, want := range []string{"discrete epics (-> done):", "ongoing programs", "kernel-optimization", "shipped", "in-flight"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q\n%s", want, out)
+		}
+	}
+	// The kernel program must NOT be rendered as "70%" — an ongoing program has no %.
+	if strings.Contains(out, "GLM kernel — 70%") || strings.Contains(out, "GLM kernel [kernel-optimization] — 70%") {
+		t.Fatalf("an ongoing program must never render a completion %%\n%s", out)
+	}
+}
+
 // --- the fold ---------------------------------------------------------------
 
 func goodMaturity() Maturity {
