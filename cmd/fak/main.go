@@ -309,6 +309,8 @@ func main() {
 		cmdNode(os.Args[2:])
 	case "lab":
 		cmdLab(os.Args[2:])
+	case "codex-memory":
+		cmdCodexMemory(os.Args[2:])
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
