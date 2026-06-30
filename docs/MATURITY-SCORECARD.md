@@ -41,7 +41,7 @@ Each gap is a concrete, checkable next work item. `fak maturity next` is the que
 
 | | From → gap | Next work item | Witness |
 |---|---|---|---|
-|  | `proposed → prototyped` | prototype dgxbridge: land a v1 in internal/dgxbridge | a non-test .go file exists under internal/dgxbridge |
+|  | `proposed → prototyped` | prototype private bridge: land a v1 in private bridge package | a non-test .go file exists under private bridge package |
 |  | `tested → dogfooded` | dogfood advmodel: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/advmodel imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood architest: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/architest imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood boundarylint: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/boundarylint imported by cmd/, internal/registrations, or internal/kernel |

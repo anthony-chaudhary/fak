@@ -32,7 +32,7 @@ description: "A fak-native SWE-bench Verified benchmark directly comparable to t
 ## Why this exists — the comparison contract
 
 bench runs SWE-bench Verified as a **KV-cache / serving** benchmark: `bench
-exec-sweep --swebench-preset verified --serve-preset <model> --target <dgx>
+exec-sweep --swebench-preset verified --serve-preset <model> --target <gpu-server>
 --sweep-workers 1,2,4,8` drives the upstream **`mini-swe-agent`** (`mini-extra
 swebench`) against a self-hosted **SGLang OpenAI-compatible endpoint**, scrapes
 SGLang's **Prometheus** for the server stream (TTFT/throughput/**cache-hit**/KV),

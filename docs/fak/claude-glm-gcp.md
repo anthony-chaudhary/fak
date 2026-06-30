@@ -67,7 +67,7 @@ It picks the serve path from the tier's GPU arch (override with `SERVE=`):
 | `SERVE` | what runs | default on |
 |---|---|---|
 | `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192`). **Preferred.** | Ampere (datacenter GPU, sm_80) |
-| `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/glm52_stage_serve_dgx3.sh`, the GPU server example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
+| `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/private GLM-5.2 stage runner`, the GPU server example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
 | `sglang` / `vllm` | stock DSA engines (`tools/glm52_sglang_vllm_serve.sh`), gated by `tools/glm52_serve_preflight.py` (fails closed below sm_90). | Hopper / Blackwell (sm_90+) |
 
 So **"whatever is available" includes datacenter GPU** — `GCP_TIER=a2-ultra-a100-80gb` serves GLM-5.2
@@ -192,7 +192,7 @@ the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 - `scripts/dogfood-claude.sh` / `.ps1` — the launcher + the `glm-gcp` preset
 - `tools/gcp_accel.py` — the GCP accelerator registry (datacenter GPU tiers + `--emit-shell` feeds the bring-up)
 - `tools/glm52_fak_native_serve.sh` — the **pure fak kernel** on-node serve (datacenter GPU default)
-- `tools/glm52_stage_serve_dgx3.sh` — the **llama.cpp benchmark** on-node serve (the GPU server example)
+- `tools/private GLM-5.2 stage runner` — the **llama.cpp benchmark** on-node serve (the GPU server example)
 - `tools/glm52_sglang_vllm_serve.sh` / `tools/glm52_serve_preflight.py` — the sm_90 stock serve + arch gate
 - `internal/compute/build_cuda.sh binary <pkg> <out>` — the DRY `-tags cuda` binary build the fak-native serve uses
 - [`GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md`](../notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md) — the honest fak-vs-llama.cpp comparison framework

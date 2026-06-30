@@ -57,7 +57,7 @@ Small-context (P=8 / 64, the bisection that pinned the leak):
 Decode tok/s falls with depth, width, and **context length** (DSA attends the
 selected keys per token, so a 512-context decode does more work than a P=8 one). The
 4-config `glm-throughput/1` record persists on the box at
-`/tmp/fakgpu/glmw116b7ed250b7.result` — landing it is a P1 below.
+`<private-scratch>/glmw116b7ed250b7.result` — landing it is a P1 below.
 
 ## 3. Open issues / next steps (prioritized)
 
@@ -69,7 +69,7 @@ selected keys per token, so a 512-context decode does more work than a P=8 one).
   code; the `k_dsa_*` kernels were untouched). **Next:** single-variable on-box
   bisection (vary layers / hidden / heads / topk one at a time) to pin the kernel
   out-of-bounds, fix it, and re-run the full 6-config sweep clean.
-- **P1 — Runner GPU auto-pick.** `tools/dgx_glm_throughput_run.sh` hardcodes
+- **P1 — Runner GPU auto-pick.** `private throughput runner` hardcodes
   `--gpu 0`; a transiently-busy GPU 0 produced a false "allocation failed" earlier.
   Select the freest GPU (`nvidia-smi` min-used) before the sweep.
 - **P1 — Land the throughput record.** Scrubbed a100 rollup public + raw private
@@ -153,9 +153,9 @@ So every comparison table should carry a **correctness column** and a
 
 ```sh
 # Forward-correctness witness (cosine 1.0):
-python tools/dgx_witness_fetch.py dgx3 --runner tools/dgx_witness_run.sh
+python private witness fetcher GPU server --runner private witness runner
 # Native throughput sweep (this note's numbers):
-python tools/dgx_witness_fetch.py dgx3 --runner tools/dgx_glm_throughput_run.sh
+python private witness fetcher GPU server --runner private throughput runner
 # Local single run on a CUDA node:
 go run -tags cuda ./cmd/glmdsatput -layers 8 -hidden 2048 -backend cuda -decode-steps 64 -json
 ```

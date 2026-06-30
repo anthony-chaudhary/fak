@@ -106,14 +106,14 @@ the #971 wall — are no longer scalar.
       (github.com and huggingface.co return HTTP/2 200), so `wget` the go.dev linux-amd64 tarball,
       extract it, `git clone` fak, and `go build ./cmd/fak` natively on the EPYC — the 26 MB binary
       never has to cross Slack.
-    - **the ~436 GB GLM-5.2 q4 GGUF fits on `/mnt/nvme-glm` (3.1 TB free)** — root `/` is 95% full
+    - **the ~436 GB GLM-5.2 q4 GGUF fits on `<private-nvme>` (3.1 TB free)** — root `/` is 95% full
       (~22 GB), but the **nvme drive** (plus `/projects` 3.6 T, `/home/mplservice` 8.9 T) is the
-      staging target; pull the GGUF straight from HF to `/mnt/nvme-glm/glm52-q4/`.
+      staging target; pull the GGUF straight from HF to `<private-nvme>/glm52-q4/`.
     - then a pure-CPU serve (`FAK_KQ_INT8=1`, no `--backend`) + decode is the remaining step.
 
   **ATTEMPTED on CPU server (2026-06-28 ~06:00Z) — hit a hard, quantified RAM-capacity wall.** Built fak
-  on-box (Go installed to `/mnt/nvme-glm/go`, cloned + built `/mnt/nvme-glm/fak-bin`; the GGUF is at
-  `/mnt/nvme-glm/glm52-q4/UD-Q4_K_M/`), then launched `fak-bin serve --gguf <shard1> --addr :8077
+  on-box (Go installed to `<private-nvme>/go`, cloned + built `<private-nvme>/fak-bin`; the GGUF is at
+  `<private-nvme>/glm52-q4/UD-Q4_K_M/`), then launched `fak-bin serve --gguf <shard1> --addr :8077
   --context-budget-tokens 2048` (`FAK_KQ_INT8=1`). It refuses with a typed `FitTooBig` every time:
   `weights 433.82 GiB + kv 1.04 GiB needs 434.91, host has ~394 GiB`. Cause: `cmd/fak/serve.go:713
   serveGGUFHostHeadroom = 0.15` requires `weights ≤ MemAvailable × 0.85`; CPU server's MemAvailable is

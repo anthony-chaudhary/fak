@@ -45,7 +45,7 @@ value · M#10 Model support & routing · M#5 (epic #1010).
   tok/s is unwitnessed.
 
 **Next checkable step:** epic **#1010** — drive the Claude harness over one real solved ticket
-through fak's kernel+cache on the dgx and capture the tok/s + correctness witness. Until then
+through fak's kernel+cache on the GPU server and capture the tok/s + correctness witness. Until then
 the CPU-offload baseline (0.2324 tok/s native vs 0.89 tok/s llama.cpp CPU) stands.
 
 ## 2 — Mac Qwen-3.6 working
@@ -78,7 +78,7 @@ serving (pure-fak) · M#11 Substrate/interop (half-fak) · dogfood scorecard (#1
   milestone **M#1 has 0 of 23 issues closed** — the durable-session value is demonstrated, not
   yet *milestone-landed*.
 - **(b) pure-fak** — gated on workstream 1 (no live kernel e2e). `not yet`.
-- **(c) half-fak (sglang/vllm/plugin)** — SGLang serving + fak gateway bridges to the dgx
+- **(c) half-fak (sglang/vllm/plugin)** — SGLang serving + fak gateway bridges to the GPU server
   Qwen3.6 box. The stale adapter block is cleared: **#39 (SGLang)** is committed under
   `internal/engine/sglang.go` with `go test ./internal/engine` coverage, and **#38** is the
   committed Dynamo interop decision. The remaining `not yet` is the witnessed end-to-end value

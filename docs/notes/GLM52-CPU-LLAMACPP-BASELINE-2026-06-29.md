@@ -92,9 +92,9 @@ trunk for raw-resident IQ3 and re-run the q3 serve with the same sequential pre-
 
 ```sh
 # Pre-warm page cache (sequential), then pure-CPU llama.cpp bench:
-numactl --interleave=all cat /mnt/nvme-glm/glm52-q4/UD-Q4_K_M/*.gguf > /dev/null
+numactl --interleave=all cat <private-nvme>/glm52-q4/UD-Q4_K_M/*.gguf > /dev/null
 /projects/llama.cpp/build-cpu/bin/llama-bench \
-  -m /mnt/nvme-glm/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf \
+  -m <private-nvme>/glm52-q4/UD-Q4_K_M/GLM-5.2-UD-Q4_K_M-00001-of-00011.gguf \
   -ngl 0 -t 128 -p 512 -n 64 -r 2 -o md
 # NB: use build-cpu/ (the build/bin/ llama-server is a broken 17 KB CUDA stub); do NOT pass
 # --numa distribute on this memory-constrained host (anon blow-up + cache thrash).

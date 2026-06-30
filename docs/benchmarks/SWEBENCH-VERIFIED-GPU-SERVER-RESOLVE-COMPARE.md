@@ -66,7 +66,7 @@ opposite completion, decided entirely by the floor.
 
 ## Method (exactly reproducible)
 
-One self-contained driver, [`tools/dgx_swebench_compare.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_swebench_compare.py),
+One self-contained driver, [`private SWE-bench compare runner`](https://github.com/anthony-chaudhary/fak/blob/main/private SWE-bench compare runner),
 launched detached on the GPU server via the private control bridge
 (private lab tooling) and polled from a host-shared `/tmp` log:
 
@@ -76,7 +76,7 @@ launched detached on the GPU server via the private control bridge
    generation to a single token (empty patches) — see [[qwen36-sglang-tool-call-parser]].
 2. **Front** with `fak serve --provider openai --base-url …:30000/v1` on `:8080`,
    `--policy <manifest>` for the allow arms
-   ([`tools/dgx_fak_gateway_repolicy.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_fak_gateway_repolicy.sh)).
+   ([`private gateway policy helper`](https://github.com/anthony-chaudhary/fak/blob/main/private gateway policy helper)).
 3. **Tool-call self-test** both endpoints before the agent runs (proves SGLang
    returns OpenAI `tool_calls`, and shows the gateway's per-call verdict).
 4. Per arm: `mini-extra swebench --subset verified --split test

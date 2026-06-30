@@ -114,7 +114,7 @@ both_completed: true
 | `tools/sweep_config.py` | YAML profile loader/saver |
 | `tools/run_sweep.py` | Python sweep orchestrator |
 | `tools/sweep_profiles/quick-smoke.yaml` | API model smoke test |
-<!-- `tools/sweep_profiles/glm52-dgx.yaml` excluded from the public copy (operator-private lab infra). -->
+<!-- `private GPU-server sweep profile` excluded from the public copy (operator-private lab infra). -->
 | `fak/cmd/demorace/main.go` | Live race server |
 | `fak/cmd/demorace/page.html` | Embedded dashboard |
 | `docs/benchmarking/README.md` | Infrastructure overview |
@@ -127,7 +127,7 @@ both_completed: true
 - openai/gpt-4.1-nano ($0.10/$0.40 per M tok)
 - deepseek/deepseek-v4-flash ($0.14/$0.28 per M tok)
 
-<!-- glm52-dgx profile (sglang/vllm GPU server endpoints) excluded from the public copy. -->
+<!-- GPU-server profile (sglang/vllm GPU server endpoints) excluded from the public copy. -->
 
 ---
 
@@ -304,7 +304,7 @@ python tools/run_sweep.py --list
 
 # Run quick smoke test
 python tools/run_sweep.py --profile quick-smoke
-<!-- GLM-5.2 DGX sweep (`--profile glm52-dgx`) excluded from the public copy. -->
+<!-- GLM-5.2 GPU-server sweep (`--profile gpu-server-glm52`) excluded from the public copy. -->
 ```
 
 ---

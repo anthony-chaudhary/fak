@@ -177,13 +177,13 @@ DSA floor), ~2 TB host RAM, 256 cores, `/projects` 4.1 TB free,
 go1.26.4 + cuda-12.8 + the HF CLI staged. The preflight planner run against that exact shape
 returns `BLOCKED_ARCH` for stock SGLang/vLLM (sm_80 is below the sm_90 DSA floor) — so the
 datacenter GPU **llama.cpp MLA fork is the path**, captured in the live node snapshot
-[`experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json`](../../experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json).
+[`experiments/glm-gpu-witness/gpu-server-node-state-2026-06-25.json`](../../experiments/glm-gpu-witness/gpu-server-node-state-2026-06-25.json).
 
 **Smallest next step — run the self-staging datacenter GPU serve runner on GPU server, then the witness:**
 
 ```bash
 # ON THE GPU SERVER (detached so a disconnect does not orphan a ~466 GB load):
-systemd-run --user --unit=glm52stage --collect bash tools/glm52_stage_serve_dgx3.sh
+systemd-run --user --unit=glm52stage --collect bash tools/private GLM-5.2 stage runner
 # poll progress out-of-band:  cat /projects/glm52-q4/PHASE
 # on GLM52_SERVE_READY, capture the #413 witness through fak:
 python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 \
@@ -194,7 +194,7 @@ python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 \
 fak guard --provider openai --base-url http://127.0.0.1:8000/v1 -- claude
 ```
 
-[`tools/glm52_stage_serve_dgx3.sh`](../../tools/glm52_stage_serve_dgx3.sh) self-stages
+[`tools/private GLM-5.2 stage runner`](../../tools/private GLM-5.2 stage runner) self-stages
 unsloth/GLM-5.2-GGUF UD-Q4_K_M (the published 11-shard ~466 GB dynamic-Q4 quant), builds
 llama.cpp (CUDA sm_80), launches `llama-server` with all MoE experts on host RAM, and writes
 a `PHASE` file so progress is pollable. At `GLM52_SERVE_READY` the witness + guard commands

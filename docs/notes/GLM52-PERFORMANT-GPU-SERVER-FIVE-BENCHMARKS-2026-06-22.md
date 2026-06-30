@@ -5,7 +5,7 @@ description: "One honest assembly of the three GLM-5.2 goal axes — the archite
 
 # GLM-5.2 — performant, on the GPU server, proven on the five benchmarks (2026-06-22)
 
-> **Goal (verbatim):** *glm 5.2 highly performant and actually working on dgx and
+> **Goal (verbatim):** *glm 5.2 highly performant and actually working on the GPU server and
 > proven on the five benchmarks.*
 >
 > This note **assembles** evidence that already exists in the tree with a **fresh
@@ -182,6 +182,6 @@ go run ./cmd/fak turntax --suite turntax-airline && go run ./cmd/fak turntax --s
 go run ./cmd/radixbench -scale 1
 go run ./cmd/ctxdemo    -print
 
-# 3. GLM-5.2 on the pure fak CUDA kernel on the A100 DGX (via the private control bridge)
-#    bash tools/dgx_glm_gpu_witness.sh   # clones origin/main, nvcc sm_80, runs TestCUDAGLMMoeDsaBackendForward
+# 3. GLM-5.2 on the pure fak CUDA kernel on the GPU server (via the private control bridge)
+#    bash private GPU witness runner   # clones origin/main, nvcc sm_80, runs TestCUDAGLMMoeDsaBackendForward
 ```

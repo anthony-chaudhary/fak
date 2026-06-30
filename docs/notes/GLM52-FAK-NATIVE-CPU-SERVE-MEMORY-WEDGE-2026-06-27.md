@@ -107,7 +107,7 @@ The local copy was verified before relying on it: all 11 shards size-match the N
 first-64 MB byte-identical, and a full per-shard `sha256` manifest generated on the box. Recorded
 end-to-end effect from a prior on-box load: **~44 min from NVMe vs ~1h41m from NFS**.
 
-**Shipped (`516953e6`, fak):** `tools/glm52_stage_serve_dgx3.sh` + `tools/glm52_fak_native_serve.sh`
+**Shipped (`516953e6`, fak):** `tools/private GLM-5.2 stage runner` + `tools/glm52_fak_native_serve.sh`
 now resolve **NVMe-first** (the pattern `glm52_load_witness.sh` already used) and log the winner
 loudly (`USING_LOCAL_NVME` / a `USING_PRESTAGED` slow-path warning) — so the slow NFS path can
 never be taken silently again (the fail-loud safeguard). They also skip the HF re-download when a

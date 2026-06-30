@@ -80,7 +80,7 @@ The same backend path, with a lean (Q8-resident) GLM-DSA model on the **cuda bac
 runs all eight projections on `k_q8_gemm` — the GPU pure kernel — alongside the MoE/FFN
 experts, router, and vocab head. This was **re-run on the lab 8-GPU datacenter server on
 2026-06-22 at the slice's HEAD (`498a4ab`)**, via the live private control bridge
-(`tools/dgx_glm_gpu_witness.sh`: clone `origin/main` → `nvcc -arch=sm_80` → isolated
+(`private GPU witness runner`: clone `origin/main` → `nvcc -arch=sm_80` → isolated
 `-tags cuda` test). The node's own `go test` output (not self-report):
 
 ```
@@ -104,7 +104,7 @@ slice was committed `cf9d9a1` / `e3a92b7`, 2026-06-21; see
 isolated witness):
 
 ```bash
-bash tools/dgx_glm_gpu_witness.sh    # -> /tmp/fakglm/run.log + /tmp/fakglm/DONE.<rc>
+bash private GPU witness runner    # -> <private-scratch>/run.log + <private-scratch>/DONE.<rc>
 ```
 
 ## §4 — What stays host-resident (the labeled residual)
@@ -134,7 +134,7 @@ NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native eng
   unchanged (full `internal/model` + GLM coherence suites green); `go build ./...` +
   `go vet` green.
 - **Proven on real datacenter GPU hardware, fresh on 2026-06-22 at HEAD `498a4ab`** (and
-  reproducible via `tools/dgx_glm_gpu_witness.sh`): GLM-5.2's MoE/FFN/router/head **plus
+  reproducible via `private GPU witness runner`): GLM-5.2's MoE/FFN/router/head **plus
   the DSA attention projections** on the pure fak CUDA kernel (`k_q8_gemm`), cosine =
   1.000000, argmax-exact (`TestCUDAGLMMoeDsaBackendForward`, sm_80). The prior MoE/FFN/head
   slice was committed `cf9d9a1`/`e3a92b7`.

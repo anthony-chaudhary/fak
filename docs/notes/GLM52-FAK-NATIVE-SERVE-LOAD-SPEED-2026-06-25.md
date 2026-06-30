@@ -132,7 +132,7 @@ parallel across the 261 threads — if it's serial per tensor, thread it.
 2. Extend raw-resident split to the mixed K-quants (or fix loader threading) → target ≤10 min load.
 3. Serve from the **NVMe** path (`/mnt/sglang_dv3/glm52-q4/...-00001-of-00011.gguf`), not `/projects`
    (NFS). With the MLA dims fixed, the smoke decode should now pass.
-4. Run the e2e (`tools/glm52_e2e_after_serve_dgx3.sh`): the #413 serving witness + `fak guard
+4. Run the e2e (`tools/private GLM-5.2 e2e runner`): the #413 serving witness + `fak guard
    --provider openai --base-url http://127.0.0.1:8000/v1 -- claude` against the fak-native endpoint.
    Pass `--model glm-5.2` to label `/v1/models` (today it shows the `--model` default `mock`; the
    in-kernel planner IS active — the tokenizer loads fine, `FromGGML` ok, 154880 tokens / 321649

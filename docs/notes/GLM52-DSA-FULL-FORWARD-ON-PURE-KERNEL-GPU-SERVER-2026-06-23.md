@@ -54,7 +54,7 @@ silently falling back to the host loop** — so its PASS confirms the sparse att
 executed on the device kernel, not host. Reproduce on any sm_80+ CUDA node:
 
 ```bash
-bash tools/dgx_glm_gpu_witness.sh    # clone origin/main -> nvcc -arch=sm_80 -> the isolated witness
+bash private GPU witness runner    # clone origin/main -> nvcc -arch=sm_80 -> the isolated witness
 ```
 
 ## The honest boundary: this is kernel-math, not 753B serving

@@ -71,7 +71,7 @@ clean, `gofmt` clean, and the cgo side **type-checks under `-tags cuda`**
 The same backend path runs the sparse attention on `k_dsa_sparse_attend` on a real GPU. The
 on-device witness is `TestCUDAGLMMoeDsaBackendForward` — which also asserts the device
 sparse path is wired (a `compute.DSASparseBackend` type-assert that **fails** the test rather
-than silently falling back to host) — run via `tools/dgx_glm_gpu_witness.sh` on an sm_80+
+than silently falling back to host) — run via `private GPU witness runner` on an sm_80+
 GPU server, or the no-sudo WSL path (`~/cudaenv` CUDA 12.6, `FAK_CUDA_ARCH=sm_89`) on an Ada laptop.
 
 **Captured on real hardware — the new `k_dsa_sparse_attend` on-device cosine (2026-06-23, RTX
@@ -102,8 +102,8 @@ path shows — now an **observed pass on real hardware**, no longer an expectati
 sm_80 dense capture are two independent on-hardware witnesses across two GPU architectures.
 
 ```bash
-# DGX (sm_80) path:
-bash tools/dgx_glm_gpu_witness.sh   # clone origin/main → nvcc -arch=sm_80 → -tags cuda test
+# GPU server (sm_80) path:
+bash private GPU witness runner   # clone origin/main → nvcc -arch=sm_80 → -tags cuda test
 # Ada laptop (sm_89), no-sudo WSL: source ~/cudaenv.env, then build_cuda.sh build +
 #   go test -tags cuda -run TestCUDAGLMMoeDsaBackendForward ./internal/model/
 ```
@@ -140,7 +140,7 @@ path, not the native engine.
   argmax-exact** (`cpu=40 cuda=40 tier=sm_89 class=approx`), `TestCUDAGLMMoeDsaBackendForward`
   PASS at HEAD `e1ccc66`; the `DSASparseBackend` type-assert confirms the sparse path ran
   on-device, not host. Reproduce via `build_cuda.sh build` + the `-tags cuda` test on any
-  sm_80+ node (GPU server: `tools/dgx_glm_gpu_witness.sh`).
+  sm_80+ node (GPU server: `private GPU witness runner`).
 - **Proven on real datacenter GPU hardware (committed `498a4ab`):** GLM-5.2's **dense** forward
   (MoE/FFN/router/head + attention projections) on `k_q8_gemm`, cosine = 1.000000,
   argmax-exact (`tier=sm_80`).

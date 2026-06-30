@@ -540,7 +540,7 @@ Before a machine is considered "production" for benchmarking:
 
 Existing paths remain valid:
 - `fak/experiments/fleet-nodes/` → Migrate to `experiments/benchmark/runs/by-machine/`
-<!-- `fak/experiments/dgx/` excluded from the public copy (operator-private lab infra). -->
+<!-- private GPU-server run artifacts excluded from the public copy (operator-private lab infra). -->
 - `fak/experiments/model-baseline/` → Cross-reference from catalog
 
 ## Implementation Priority

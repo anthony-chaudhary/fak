@@ -404,7 +404,7 @@ The user should be able to ask context questions directly:
 
 ```text
 show context for "Qwen readiness blockers"
-pin pages matching "DGX endpoint smoke"
+pin pages matching "GPU-server endpoint smoke"
 exclude stale release candidates
 answer using only pages admitted after witness git:abc123
 diff this answer's source set against yesterday

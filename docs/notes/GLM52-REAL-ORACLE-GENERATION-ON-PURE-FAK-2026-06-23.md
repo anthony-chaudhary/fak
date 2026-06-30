@@ -48,7 +48,7 @@ checkpoint (the only public glm_moe_dsa artifact small enough to export), so it 
 
 ## 2. The full GLM-5.2 DSA forward is bit-exact on fak's own CUDA kernels
 
-Re-witnessed on this idle node (`tools/dgx_glm_gpu_witness.sh`, three isolated `-tags cuda`
+Re-witnessed on this idle node (`private GPU witness runner`, three isolated `-tags cuda`
 tests, all rc=0):
 
 - full GLM-MoE-DSA forward — MoE/FFN + router + head on `k_q8_gemm`, the DSA attention dense
@@ -62,7 +62,7 @@ tests, all rc=0):
 ## 3. Real tokens through the pure kernel: SmolLM2-135M at 131 tok/s
 
 To show fak's own GPU kernel *generating* real tokens end-to-end (the closest real-model
-decode that loads today), `tools/dgx_pure_kernel_bench.sh` decoded SmolLM2-135M (a Llama
+decode that loads today), `private pure-kernel benchmark runner` decoded SmolLM2-135M (a Llama
 family model) on the datacenter GPU through the pure `k_q8_gemm` path, **zero cuBLAS**: **decode 7.6
 ms/tok = 131.0 tok/s** (prefill 107–166 tok/s), `engine: fak-in-kernel via compute HAL
 backend "cuda"`, `tier=sm_80`.

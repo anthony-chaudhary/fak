@@ -5,7 +5,7 @@ description: "The final #86/#413 slice: GLM-5.2's learned-indexer SCORE + top-k 
 
 # GLM-5.2: the DSA index selection moves onto the pure fak kernel (2026-06-23)
 
-> **Goal (verbatim):** *best effort glm 5.2 working fully on dgx on our own kernel.*
+> **Goal (verbatim):** *best effort glm 5.2 working fully on the GPU server on our own kernel.*
 >
 > This note records the slice that takes GLM-5.2's per-token decode from "everything on the
 > kernel except the host-resident learned-indexer selection" to "the selection too on the
@@ -83,7 +83,7 @@ clean, and the cgo side **type-checks under `-tags cuda`** (`go vet -tags cuda .
 
 <!-- FILL ON GPU server: paste the node's own `go test -tags cuda` log for TestCUDAGLMMoeDsaIndexSelectMatches
      (k_dsa_index_score + k_dsa_index_topk), cosine + argmax cpu=/cuda=, tier=sm_80. The run is
-     `bash tools/dgx_glm_gpu_witness.sh` on the lab 8-GPU datacenter server node (rc3 = index selection). -->
+     `bash private GPU witness runner` on the lab 8-GPU datacenter server node (rc3 = index selection). -->
 
 `TestCUDAGLMMoeDsaIndexSelectMatches` runs a lean GLM-DSA **decode step** on the cuda backend so
 `k_dsa_index_score` + `k_dsa_index_topk` execute on the GPU, and asserts the cuda backend is a
@@ -95,7 +95,7 @@ argmax-exact vs the all-host Q8 decode — which, because a flipped selection wo
 device witnesses — forward, cpu-offload hybrid, index selection):
 
 ```bash
-bash tools/dgx_glm_gpu_witness.sh   # -> /tmp/fakglm/run.log + /tmp/fakglm/DONE.<rc>
+bash private GPU witness runner   # -> <private-scratch>/run.log + <private-scratch>/DONE.<rc>
 ```
 
 ## §3 — What stays host-resident (the labeled residual)

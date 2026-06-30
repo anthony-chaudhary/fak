@@ -110,7 +110,7 @@ make cuda-accept                # wraps: bash tools/cuda_acceptance.sh — one m
 
 [`tools/cuda_acceptance.sh`](../tools/cuda_acceptance.sh) runs each acceptance witness
 (`run_479`/`run_482`/`run_483`/`run_484`/`run_485`/`run_486` and the GLM-DSA
-[`tools/dgx_glm_gpu_witness.sh`](../tools/dgx_glm_gpu_witness.sh)) and prints a per-family
+[`private GPU witness runner`](../private GPU witness runner)) and prints a per-family
 `PASS | SKIP | FAIL` manifest. A **SKIP is not a PASS**: on a host with no reachable GPU every
 family skips and the aggregator exits non-zero, so a CPU-only box can never read as green.
 Each individual witness — e.g. [`tools/run_484_acceptance_on_gpu.sh`](../tools/run_484_acceptance_on_gpu.sh)

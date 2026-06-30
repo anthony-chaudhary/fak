@@ -93,7 +93,7 @@ on the machine you picked.
 
 The fast front door is `fak lab status` — one command, no flags, that answers "which
 lab nodes are alive right now?" It ships a **generic** default roster (the lab boxes
-written down as `dgx-a`/`a100x8`/`lab`, never a real host or channel), folds the per-box
+written down as `gpu-server-a`/`gpu-server-class`/`lab`, never a real host or channel), folds the per-box
 report JSON against it, and renders the same bounded view + 0–100 readiness score
 `fleetctl` does (they share `internal/fleet`):
 
@@ -124,7 +124,7 @@ fleet view.
 
 ## Boundary rules (do not trip)
 
-- The Slack control plane stays in `fak-private`. Never add `cmd|internal/*dgx*` or
+- The private control plane stays in `fak-private`. Never add `private bridge/control packages` or
   `*slack*bridge*` paths here — the commit gate (`tools/check_committed_files.py`) refuses
   them, and `internal/pythongate` refuses a new `tools/*.py`.
 - No real host, IP, channel id, or token in any tracked file. Real values live in

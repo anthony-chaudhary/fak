@@ -47,11 +47,11 @@ func (bs *BatchSession) PrefillEach(prompts [][]int) [][]float32
 - `tools/sweep_config.py` — Configuration loader/saver
 - `tools/run_sweep.py` — Python sweep orchestrator
 - `tools/sweep_profiles/quick-smoke.yaml` — Fast API smoke test
-<!-- glm52-dgx profile excluded from the public copy (operator-private lab infra). -->
+<!-- GPU-server profile excluded from the public copy (operator-private lab infra). -->
 
 **Profiles:**
 - **quick-smoke:** 3 models (glm-4.7-flash, gpt-4.1-nano, deepseek-v4-flash)
-<!-- glm52-dgx profile excluded from the public copy. -->
+<!-- GPU-server profile excluded from the public copy. -->
 
 **Tested:**
 ```bash
@@ -132,7 +132,7 @@ python tools/run_sweep.py --list
 - `tools/run_sweep.py`
 - `tools/glm52_serving_witness.py`
 - `tools/sweep_profiles/quick-smoke.yaml`
-<!-- `tools/sweep_profiles/glm52-dgx.yaml` excluded from the public copy. -->
+<!-- `private GPU-server sweep profile` excluded from the public copy. -->
 - `docs/benchmarking/README.md`
 - `docs/benchmarking/SESSION-SUMMARY.md` (this file)
 

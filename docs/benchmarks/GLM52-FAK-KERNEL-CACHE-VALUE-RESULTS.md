@@ -91,7 +91,7 @@ served from cache on this run."
 
 | Metric | Source | Value | Provenance |
 |---|---|---|---|
-| **Decode throughput (tok/s)** | live serve on the dgx box | **`not yet`** (~0.03–0.17 expected under `--cpu-offload-experts`) | OBSERVED — relayed reading of a live box |
+| **Decode throughput (tok/s)** | live serve on the GPU server box | **`not yet`** (~0.03–0.17 expected under `--cpu-offload-experts`) | OBSERVED — relayed reading of a live box |
 
 The tok/s is a reading of the hardware under the [#996](https://github.com/anthony-chaudhary/fak/issues/996)/[#971](https://github.com/anthony-chaudhary/fak/issues/971)
 expert-GEMM wall. It is **OBSERVED**, never WITNESSED, and the slow figure is **never
@@ -165,7 +165,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 
 | Number | Trust class | Missing witness |
 |---|---|---|
-| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server dgx box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server GPU-server box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
 When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.

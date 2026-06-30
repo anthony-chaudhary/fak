@@ -31,7 +31,7 @@ block, which is what makes Slack actually page — see `internal/blockerpost/ren
 
 ```bash
 # background — an ongoing impediment, recorded quietly, pages no one
-fak blockers post --title "GPU-gated, waiting on DGX hours" \
+fak blockers post --title "GPU-gated, waiting on GPU-server hours" \
   --detail "Rungs 1/2/3/5 need the private GPU server." --ref "#921"
 
 # surfaced — needs a human; pages the channel's active members (<!here>)

@@ -50,7 +50,7 @@ only the first is achievable today. This doc proves #1 on a real datacenter GPU 
 
 ## §1 — The node + the access path
 
-- **Node:** the lab 8-GPU datacenter server (`8× NVIDIA A100-SXM4-40GB`, compute capability
+- **Node:** the lab 8-GPU datacenter server (`8× NVIDIA datacenter GPU`, compute capability
   **8.0 / sm_80**), 256 logical cores, **~1007 GB host RAM**. GPUs idle except GPU0, which holds
   **~6 GB** — a llama.cpp `llama-server` (the CPU-offloaded GLM path; see §5). CUDA **12.8**
   (`/usr/local/cuda`), **go1.26.0**.
@@ -59,7 +59,7 @@ only the first is achievable today. This doc proves #1 on a real datacenter GPU 
   The build host is win32 with **no CUDA toolkit / no GPU**, so the device execution below is the
   explicit residual it cannot run.
 - **Why a fresh clone on the node:** the node's `/srv/fleet/fak` is an *older* rsync whose
-  `cuda_kernels.cu` predates the Q8/Q4K/flash kernels. `tools/dgx_pure_kernel_run.sh` clones the
+  `cuda_kernels.cu` predates the Q8/Q4K/flash kernels. `private pure-kernel runner` clones the
   pushed public HEAD onto the node and builds it for sm_80, so the device runs exactly the code
   on `origin/main`.
 
@@ -89,8 +89,8 @@ strongest honest meaning of "100% pure fak kernel on the GPU," and it is what §
 
 ## §3 — Pure fak kernel on the datacenter GPU: witnessed (live run, 2026-06-21)
 
-Run via `tools/dgx_pure_kernel_run.sh` on the node (clone `origin/main` → `nvcc -arch=sm_80` →
-`-tags cuda` witnesses). Node: `NVIDIA A100-SXM4-40GB`, **tier `sm_80`**, CUDA 12.8, go1.26.0.
+Run via `private pure-kernel runner` on the node (clone `origin/main` → `nvcc -arch=sm_80` →
+`-tags cuda` witnesses). Node: `NVIDIA datacenter GPU`, **tier `sm_80`**, CUDA 12.8, go1.26.0.
 
 **Build:** `internal/compute/build_cuda.sh build` (nvcc `sm_80` → `libfakcuda.a`; `go build -tags
 cuda ./internal/compute/`) → **rc=0**. The pure-Go-plus-cgo CUDA backend compiles and links on the
@@ -127,7 +127,7 @@ forward routes through `k_q8_gemm` + `k_flash_attention`), bit-faithful to the C
    passes cleanly in isolation and graphs-off). A cross-test/graph-path state bug, not a kernel
    correctness defect. Fileable; needs datacenter GPU iteration to fix.
 
-**End-to-end decode throughput (`tools/dgx_pure_kernel_bench.sh`, SmolLM2-135M Q8 on the datacenter GPU, the
+**End-to-end decode throughput (`private pure-kernel benchmark runner`, SmolLM2-135M Q8 on the datacenter GPU, the
 pure `k_q8_gemm` + `k_flash_attention` decode path — the closest honest "real model generating
 tokens on the pure fak GPU kernel," since GLM-DSA can't take the backend, §4):**
 
@@ -229,6 +229,6 @@ end-to-end on CPU — the prior doc's §1.)
   (#474/#413, oracle-gated); real 753B serving (VRAM: INT4 ≈ 376 GB > 320 GB; plus the NCCL/offload
   reshape). Each is bounded exactly above — none is faked.
 
-_Reproduce: `bash tools/dgx_pure_kernel_run.sh` on an sm_80 CUDA node (or via the control bridge:
-`ship` it, `exec 'bash /tmp/dgx_pure_kernel_run.sh'`, poll `/tmp/fakpure/run.log` +
-`/tmp/fakpure/DONE.<rc>`)._
+_Reproduce: `bash private pure-kernel runner` on an sm_80 CUDA node (or via the control bridge:
+`ship` it, `exec 'bash <private-scratch>/pure-kernel-run.sh'`, poll `<private-scratch>/run.log` +
+`<private-scratch>/DONE.<rc>`)._
