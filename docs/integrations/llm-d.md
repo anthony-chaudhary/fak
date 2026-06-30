@@ -77,6 +77,20 @@ The adapter streams via `/v1/chat/completions` or `/v1/completions`, forces
 manifests and audit records name the real serving control plane instead of collapsing it
 into a generic vLLM label.
 
+For a concrete route-manifest starting point, validate the shipped preset and run serve
+with it:
+
+```bash
+fak route --check examples/routing-presets/llm-d.json
+fak serve --engine llm-d \
+  --route-manifest examples/routing-presets/llm-d.json \
+  --model "<served-model>"
+```
+
+The preset defaults governed tool-call dispatch to `llm-d` and keeps common
+sensitivity labels (`tenant`, `pii`, `secret`) on `inkernel`. The residency gate still
+fails closed for any sensitive/tenant-scoped call that reaches the remote `llm-d` route.
+
 ## 4. Metrics and KV boundary
 
 The `llm-d` adapter normalizes vLLM-style Prometheus worker signals under

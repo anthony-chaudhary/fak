@@ -79,6 +79,12 @@ fak serve --engine llm-d --model "<served-model>"
 uses llm-d's public OpenAI-compatible frontend and Prometheus/vLLM-style worker signals;
 it does not import llm-d internals or claim exact remote KV-span eviction.
 
+The route-manifest preset at
+[`examples/routing-presets/llm-d.json`](../../examples/routing-presets/llm-d.json)
+uses `llm-d` as the default dispatch target while keeping common sensitivity labels on
+`inkernel`. Validate it with `fak route --check examples/routing-presets/llm-d.json`
+before using it with `--route-manifest`.
+
 ## 2. The in-kernel reference engine
 
 fak also ships an engine of its own: a pure-Go model runner fused into the kernel. You
