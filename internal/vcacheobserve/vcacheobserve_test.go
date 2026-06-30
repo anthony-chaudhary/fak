@@ -3,6 +3,7 @@ package vcacheobserve
 import (
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
@@ -88,6 +89,35 @@ func TestObserveWarmthBeliefNeverFalseWarms(t *testing.T) {
 	}
 	if got := r.Prediction.FalseWarmRate(); got != 0 {
 		t.Fatalf("false-warm rate must be 0, got %v", got)
+	}
+}
+
+func TestObserveWithCalibrationFeedsTTLAndReadMultiplier(t *testing.T) {
+	const min = 60 * 1000
+	turns := []Turn{
+		{Family: "cal", UnixMillis: 0, InputTokens: 100, CacheRead: 40000},
+		{Family: "cal", UnixMillis: 10 * min, InputTokens: 100, CacheCreation: 1},
+	}
+	defaulted := Observe(turns, DefaultMultipliers())
+	if defaulted.Prediction.FalseWarm != 0 {
+		t.Fatalf("default 5m TTL should expire before the 10m miss, got false_warm=%d", defaulted.Prediction.FalseWarm)
+	}
+
+	calibrated := ObserveWithOptions(turns, Options{
+		Calibration: vcachecal.Calibration{
+			TTLMillis:       20 * min,
+			TTLMeasured:     true,
+			MinPrefixTokens: 1024,
+			ReadMult:        0.25,
+			ReadMultMeasured: true,
+		},
+	})
+	if calibrated.Prediction.FalseWarm != 1 {
+		t.Fatalf("measured 20m TTL should keep belief warm and flag the 10m miss, got %+v", calibrated.Prediction)
+	}
+	if calibrated.Aggregate.ActualTokenEquiv <= defaulted.Aggregate.ActualTokenEquiv {
+		t.Fatalf("measured read_mult=0.25 should price cached reads above default: got %.1f <= %.1f",
+			calibrated.Aggregate.ActualTokenEquiv, defaulted.Aggregate.ActualTokenEquiv)
 	}
 }
 

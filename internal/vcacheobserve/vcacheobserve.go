@@ -40,9 +40,50 @@ type Multipliers struct {
 	Write1h float64 `json:"write_1h"`
 }
 
+// Options carries the provider constants used by the observe fold. Calibration feeds
+// the M1 warmth-belief TTL and, when ReadMult is measured, the provider cached-read
+// multiplier; Multipliers still carries the write prices and explicit read override.
+type Options struct {
+	Multipliers Multipliers           `json:"multipliers"`
+	Calibration vcachecal.Calibration `json:"calibration"`
+}
+
 // DefaultMultipliers returns the Anthropic prompt-cache multipliers.
 func DefaultMultipliers() Multipliers {
 	return Multipliers{Read: 0.1, Write5m: vcachegov.WriteMult5Minutes, Write1h: vcachegov.WriteMult1Hour}
+}
+
+// DefaultOptions returns the hypothesis-backed observe options. It is the same posture
+// as DefaultMultipliers, but keeps the TTL/read-mult constants in the calibration shape
+// later live probes can replace.
+func DefaultOptions() Options {
+	h := vcachecal.DefaultHypothesis()
+	return Options{
+		Multipliers: DefaultMultipliers(),
+		Calibration: vcachecal.Calibration{
+			TTLMillis:       h.TTLMillis,
+			MinPrefixTokens: h.MinPrefixTokens,
+			ReadMult:        h.ReadMult,
+		},
+	}
+}
+
+func (o Options) normalized() Options {
+	h := vcachecal.DefaultHypothesis()
+	if o.Calibration.TTLMillis <= 0 {
+		o.Calibration.TTLMillis = h.TTLMillis
+	}
+	if o.Calibration.MinPrefixTokens <= 0 {
+		o.Calibration.MinPrefixTokens = h.MinPrefixTokens
+	}
+	if o.Calibration.ReadMult <= 0 {
+		o.Calibration.ReadMult = h.ReadMult
+	}
+	if o.Multipliers.Read <= 0 {
+		o.Multipliers.Read = o.Calibration.ReadMult
+	}
+	o.Multipliers = o.Multipliers.normalized()
+	return o
 }
 
 func (m Multipliers) normalized() Multipliers {
@@ -140,7 +181,15 @@ type Report struct {
 // decision leaf over the real telemetry, returning one panel per sub-concept. It is
 // pure and deterministic: same turns in, same report out.
 func Observe(turns []Turn, m Multipliers) Report {
-	m = m.normalized()
+	return ObserveWithOptions(turns, Options{Multipliers: m})
+}
+
+// ObserveWithOptions is the calibration-aware observe fold. It keeps the old pure
+// behavior, but moves the M1 TTL and cached-read multiplier behind an injected
+// Calibration so callers can stop hard-coding §5 constants once a probe measured them.
+func ObserveWithOptions(turns []Turn, opt Options) Report {
+	opt = opt.normalized()
+	m := opt.Multipliers
 	rep := Report{Schema: Schema, Turns: len(turns)}
 	if len(turns) == 0 {
 		rep.Concentration = vcachecal.FitConcentration(nil)
@@ -154,7 +203,7 @@ func Observe(turns []Turn, m Multipliers) Report {
 	var ranked []vcachecal.RankedVBlock
 	var residentSum float64
 	var residentN int
-	policy := vcachecal.BeliefPolicy{ProviderTTLMillis: ttl5mMillis, GraceMillis: 30 * 1000}
+	policy := vcachecal.FromCalibration(opt.Calibration)
 
 	for i := range families {
 		fam := &families[i]
@@ -175,7 +224,7 @@ func Observe(turns []Turn, m Multipliers) Report {
 		}
 		fam.MeanPrefixTokens = famResidentSum / float64(fam.Turns)
 		fam.Prediction = predictFamily(famTurns(turns, fam.Key), policy)
-		fam.ArrivalRatePerSec, fam.GovernorDecision = classifyFamily(famTurns(turns, fam.Key), m)
+		fam.ArrivalRatePerSec, fam.GovernorDecision = classifyFamily(famTurns(turns, fam.Key), m, policy.ProviderTTLMillis)
 
 		// Fold aggregates.
 		rep.Prediction.Total += fam.Prediction.Total
@@ -338,7 +387,7 @@ func predictFamily(ft []Turn, policy vcachecal.BeliefPolicy) vcachecal.Predictio
 
 // classifyFamily projects the family's OBSERVED arrival rate (turns over elapsed) onto
 // the shipped Governor and returns λ and the steady-state verdict (§5.4).
-func classifyFamily(ft []Turn, m Multipliers) (float64, vcachegov.GovernorDecision) {
+func classifyFamily(ft []Turn, m Multipliers, ttlMillis int64) (float64, vcachegov.GovernorDecision) {
 	if len(ft) == 0 {
 		return 0, vcachegov.DecisionEvict
 	}
@@ -353,7 +402,7 @@ func classifyFamily(ft []Turn, m Multipliers) (float64, vcachegov.GovernorDecisi
 	}
 	stats := vcachegov.PrefixStats{
 		ArrivalRatePerSec: lambda,
-		TTLMillis:         ttl5mMillis,
+		TTLMillis:         ttlMillis,
 		WriteMult:         m.Write5m,
 		LatencyValue:      1,
 		RateShadowPrice:   0,
