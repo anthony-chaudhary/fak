@@ -112,6 +112,28 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertIn("worktree doctor - safe prune", text)
         text.encode("ascii")
 
+    def test_render_notes_preserves_generation_metadata(self) -> None:
+        rc = load()
+        text = rc.render_notes(
+            "0.23.0",
+            date="2026-06-18",
+            level="minor",
+            themes=["tools"],
+            headline="Minor release",
+            commits=[
+                {"subject": "feat(tools): add generation preview", "generation": "gen/now"},
+                {"subject": "fix(agent): preserve horizon", "body": "Generation: next"},
+                {"subject": "v0.22.0: prior release", "generation": "gen/future"},
+            ],
+        )
+
+        self.assertIn("generations:\n  gen/now: 1\n  gen/next: 1", text)
+        self.assertIn("## Generation", text)
+        self.assertIn("- gen/now: 1 commit(s)", text)
+        self.assertIn("- feat(tools): add generation preview [gen/now]", text)
+        self.assertIn("- fix(agent): preserve horizon [gen/next]", text)
+        self.assertNotIn("gen/future: 1", text)
+
     def test_upstream_state_refuses_behind_branch_for_release_cut(self) -> None:
         rc = load()
         origin, clone = self._clone_with_upstream()

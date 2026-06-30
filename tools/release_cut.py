@@ -195,6 +195,7 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
     headline = ascii_clean(headline)
     themes = [ascii_clean(t) for t in themes]
     buckets, order = grouped_subjects(commits)
+    generations = generation_counts(commits)
     highlights: list[str] = []
     for theme in themes:
         if theme in buckets and buckets[theme]:
@@ -211,6 +212,11 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
     ]
     for theme in themes[:8]:
         lines.append(f"  - {_yaml_str(theme)}")
+    if generations:
+        lines.append("generations:")
+        for gen in GENERATION_ORDER:
+            if generations.get(gen):
+                lines.append(f"  {gen}: {generations[gen]}")
     lines.append("highlights:")
     for item in highlights[:8]:
         lines.append(f"  - {_yaml_str(item)}")
@@ -220,6 +226,12 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
         f"**TL;DR** - Automatic {level} release cut from {len(commits)} commit(s) since the previous tag.",
         "",
     ])
+    if generations:
+        lines.extend(["## Generation", ""])
+        for gen in GENERATION_ORDER:
+            if generations.get(gen):
+                lines.append(f"- {gen}: {generations[gen]} commit(s)")
+        lines.append("")
     for scope in order:
         lines.append(f"## {scope}")
         lines.append("")
