@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdGarden(argv []string) { os.Exit(runGarden(os.Stdout, os.Stderr, argv)) }
@@ -133,6 +134,7 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak garden tick: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 
 	root := *workspace
 	if root == "" {

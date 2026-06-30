@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
@@ -40,6 +42,25 @@ func TestRegisterGardenTickLoopArmsDurableUnit(t *testing.T) {
 	job2, _ := reg2.Get(gardenTickLoopID)
 	if job2.CreatedUnixNano != created {
 		t.Fatalf("re-register changed CreatedUnixNano %d -> %d", created, job2.CreatedUnixNano)
+	}
+}
+
+func TestGardenTickRegisterAcceptsTildeDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+
+	var stdout, stderr bytes.Buffer
+	registry := filepath.Join(t.TempDir(), "registry.json")
+	code := runGardenTick(&stdout, &stderr, []string{
+		"--register",
+		"--registry", registry,
+		"--dir", "~/leases",
+	})
+	if code != 0 {
+		t.Fatalf("runGardenTick code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 }
 
