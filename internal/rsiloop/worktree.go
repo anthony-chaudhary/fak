@@ -184,7 +184,9 @@ type wtPaths struct {
 
 // resolveRef returns the full SHA a ref points at.
 func resolveRef(repo, ref string) (string, error) {
-	out, err := exec.Command("git", "-C", repo, "rev-parse", ref).Output()
+	cmd := exec.Command("git", "-C", repo, "rev-parse", ref)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("rev-parse %s: %w", ref, err)
 	}
@@ -200,7 +202,9 @@ func shortSHA(sha string) string {
 
 // repoTopAndRel resolves the git repo root and the module's path relative to it.
 func repoTopAndRel(repoArg string) (top, moduleRel string, err error) {
-	out, rerr := exec.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel").Output()
+	cmd := exec.Command("git", "-C", repoArg, "rev-parse", "--show-toplevel")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, rerr := cmd.Output()
 	if rerr != nil {
 		return "", "", fmt.Errorf("rev-parse --show-toplevel: %w", rerr)
 	}
@@ -329,7 +333,9 @@ func tail(s string, n int) string {
 // returns false — a candidate that changed nothing is not a real proposal. Build
 // artifacts or unexpected edits fail closed.
 func treeChangedOnly(wtRoot, only string) bool {
-	out, err := exec.Command("git", "-C", wtRoot, "status", "--porcelain").Output()
+	cmd := exec.Command("git", "-C", wtRoot, "status", "--porcelain")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
