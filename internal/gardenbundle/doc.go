@@ -33,5 +33,17 @@
 // decision over a folded payload). The live runner shells out to
 // python3 tools/<x>.py exactly as the Python version did.
 //
+// Beyond the read-only fold, two ACT-side passes share this package:
+//
+//   - tick.go (PlanTick) acts at the MEMBER level: it turns a member's surfaced
+//     stale-work condition into a documented, idempotent remediation (reap an
+//     expired lease, surface an orphan worklist) on a recurring cadence.
+//   - walk.go (PlanWalk) acts at the ITEM level: it walks the HUNDREDS of
+//     individual items a member surfaces (today the open-issue backlog) and folds
+//     them into a resource-aware, worst-first, budget-bounded worklist — skipping
+//     the in-progress/fresh/healthy items so a 300-item set yields a bounded
+//     proposal, not 300 reports. Both are pure and tested; the cmd verb performs
+//     the side effects and ledgers the run.
+//
 // Full design: docs/notes/GARDENING-BUNDLE-DEFAULT-ON-2026-06-25.md.
 package gardenbundle
