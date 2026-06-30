@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	maturityscore "github.com/anthony-chaudhary/fak/internal/maturity"
 	"github.com/anthony-chaudhary/fak/internal/releasestale"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ScoresArgv is the scorecard-control-pane fold, emitting the portfolio debt +
@@ -191,6 +192,7 @@ func WorkFromGit(root string, windowDays int) Work {
 // window on HEAD. Errors degrade to ("", errString) for the soft-fail path above.
 func gitShipSubjects(root, since string) ([]string, string) {
 	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%s", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -232,6 +234,7 @@ func shipsBySubjects(subjects []string) (ships int, byLane map[string]int) {
 // it. Returns (count, errString); errString is empty on success.
 func gitCount(root string, args []string) (int, string) {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
