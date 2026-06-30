@@ -2,9 +2,9 @@
 
 <!-- readme-verified: 2026-06-29 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; the capability-floor / policy material moved down to "For security teams" + the per-domain docs. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
-**fak is a fused agent kernel:** one Go binary that sits in front of an agent's tool calls,
-adjudicates each call, and reuses the stable work in long sessions so the same agent loop is
-safer, cheaper, and faster.
+**fak in one line:** fak is a fused agent kernel: one Go binary that sits in front of an
+agent's tool calls, checks each call, and reuses the stable work in long sessions so the same
+agent loop is safer, cheaper, and faster.
 
 **Put one binary in front of the agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — and the same long session gets cheaper and faster, with nothing else changed.**
 
@@ -99,7 +99,7 @@ way to see the kernel do something real before you wire it to anything.
 
 Prefer a hosted run with expected-state checks? Open the
 [modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb):
-policy proof, HTTP adjudication, offline value measurement, and an optional T4-backed
+policy proof, HTTP tool-call checking, offline value measurement, and an optional T4-backed
 Ollama gateway case.
 
 ## Run the model in the kernel
