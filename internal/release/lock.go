@@ -48,6 +48,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // LockName is the well-known lockfile basename, shared with tools/release_lock.py
@@ -356,6 +357,7 @@ func HeldByOther(opts Options) (bool, *Lock) {
 // Diagnostics only — a missing git never blocks a lock op.
 func gitOut(root string, args ...string) string {
 	cmd := exec.Command("git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if root != "" {
 		cmd.Dir = root
 	}
