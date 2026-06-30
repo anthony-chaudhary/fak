@@ -32,10 +32,10 @@
       "canonical": "Coverage (concept-disambiguation scorecard)",
       "surface": "concept-scorecard-doc",
       "kind": "coverage",
-      "invited_intent": "the whole discovered confusable namespace is now positioned",
-      "literal": "100.0% = 862/862 confusable tree tokens positioned; the denominator is the whole discovered confusable space (not a hand-picked set), so the high number is the honest 'the known confusable namespace is now positioned' - the positioned ones carry zero clarity defects",
+      "invited_intent": "most of the discovered confusable namespace is positioned, and the positioned rows are clean",
+      "literal": "95.3% = 880/923 confusable tree tokens positioned; the denominator is the whole discovered confusable space (not a hand-picked set), so the number is the honest 'most of the known confusable namespace is positioned' with a small band still open as new tokens land - the positioned ones carry zero clarity defects",
       "denominator": "external-universe",
-      "grounding": "862/862",
+      "grounding": "880/923",
       "disclosure": "Read this right",
       "verdict": "clear",
       "gaps": ["Contrast row: this denominator is the discovered universe, the honest fix to the self-referential framing industry-coverage exposes."]
