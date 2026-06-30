@@ -24,6 +24,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ReadHFConfig loads the Hugging Face config.json from dir into a model.Config.
@@ -224,7 +225,9 @@ func stampCommit() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_BENCH_COMMIT")); v != "" {
 		return v
 	}
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return lineageUnknown
 	}
