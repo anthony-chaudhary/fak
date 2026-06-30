@@ -16,6 +16,30 @@ body:
       placeholder: "Example: maturity route / #1234 / score-signal guard_rsi"
     validations:
       required: true
+  - type: dropdown
+    id: generation
+    attributes:
+      label: Generation
+      description: Product horizon for this issue. If uncertain, choose unknown / needs-triage instead of guessing.
+      options:
+        - now
+        - next
+        - second-next
+        - future
+        - unknown / needs-triage
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        Generation binding:
+        - now -> labels `generation`, `gen/now`; milestone `Generation G0 - Now / Immediate`
+        - next -> labels `generation`, `gen/next`; milestone `Generation G1 - Next Gen`
+        - second-next -> labels `generation`, `gen/second-next`; milestone `Generation G2 - Second Next Gen`
+        - future -> labels `generation`, `gen/future`; milestone `Generation G3 - Future`
+        - unknown / needs-triage -> use `needs-triage`; do not guess a stream
+
+        Generation is a horizon, not priority, branch strategy, or runtime feature gate. See `docs/generation.md`.
   - type: textarea
     id: current-state
     attributes:
@@ -199,6 +223,8 @@ body:
       label: Final checks
       options:
         - label: This is a leaf, not an epic or research placeholder.
+          required: true
+        - label: The generation horizon is selected, or this issue is explicitly marked needs-triage.
           required: true
         - label: The in-scope work can be verified by the witness above.
           required: true
