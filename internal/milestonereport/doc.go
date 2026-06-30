@@ -16,7 +16,10 @@
 //     read live from `gh`. A child signal is resolved by a PROVENANCE-honest priority
 //     chain (a track label, then the epic body's task-list checklist) and each row
 //     records WHICH source answered. An epic with no resolvable child signal is an
-//     ERRORED row, never a fabricated 0%.
+//     ERRORED row, never a fabricated 0%. The roadmap is split two ways: by work
+//     class (discrete deliverables vs ongoing optimization programs) and by
+//     generation horizon (now/next/second-next/future/unclassified), so an operator
+//     can see completion and product horizon without conflating the two.
 //
 // The report is a REPORT CONTRACT, not a second quality gate (the same posture as
 // cadencereport): --check fails ONLY when a dimension could not be MEASURED — i.e.
