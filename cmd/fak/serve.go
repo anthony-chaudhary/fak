@@ -118,8 +118,8 @@ func cmdServe(argv []string) {
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	metal := fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
-	expertParallel := fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 is REJECTED until the device NCCL collective lands: the EP arithmetic is host-proven bit-exact at ranks=1, but a real resident-across-GPUs reduction needs a non-cpu-ref compute.CollectiveBackend (cudaSetDevice(0) is still pinned, Caps().Collective=false).")
-	tensorParallel := fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 is REJECTED until the device NCCL collective lands (same device-collective gate as --expert-parallel); registered now so the flag surface is stable for the multi-GPU rungs.")
+	expertParallel := fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
+	tensorParallel := fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
@@ -216,17 +216,30 @@ func cmdServe(argv []string) {
 	}
 	// Multi-GPU rank counts (#971). The EP arithmetic is host-proven bit-exact at ranks=1
 	// (the no-op default), but a ranks>1 reduction is only a real multi-GPU serve when it
-	// runs over a non-cpu-ref device collective — and no device backend advertises one yet
-	// (cudaSetDevice(0) is pinned, Caps().Collective=false). Fail loud on N>1 rather than
-	// silently reduce through the single-box LocalCollective and mislabel it "multi-GPU".
+	// runs over a non-cpu-ref device collective. Fail loud on N>1 rather than silently reduce
+	// through the single-box LocalCollective and mislabel it "multi-GPU".
 	if *expertParallel < 1 || *tensorParallel < 1 {
 		fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel must be >= 1")
 		os.Exit(2)
 	}
 	if *expertParallel > 1 || *tensorParallel > 1 {
+		if *expertParallel > 1 && *tensorParallel > 1 && *expertParallel != *tensorParallel {
+			fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel currently must match when both are >1; the single-process NCCL backend has one communicator world and no subgroup split yet (#971)")
+			os.Exit(2)
+		}
+		collectiveRanks := *expertParallel
+		if *tensorParallel > collectiveRanks {
+			collectiveRanks = *tensorParallel
+		}
+		if init, ok := chatBackend.(compute.CollectiveInitializer); ok {
+			if err := init.InitCollective(collectiveRanks); err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: initialize %d-rank device collective: %v\n", collectiveRanks, err)
+				os.Exit(2)
+			}
+		}
 		deviceCollective := chatBackend != nil && chatBackend.Caps().Collective
 		if !deviceCollective {
-			fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel/--tensor-parallel N>1 requires a multi-device collective backend (not yet wired): no compute backend advertises Caps().Collective. The expert-parallel forward is wired and bit-exact at ranks=1; a real resident-across-GPUs reduction needs the device NCCL CollectiveBackend rung (#971).\n")
+			fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel/--tensor-parallel N>1 requires a multi-device collective backend: no compute backend advertises Caps().Collective after initialization. Build with the device NCCL CollectiveBackend rung (CUDA: -tags cuda,nccl via FAK_CUDA_NCCL=1) and run on a box with enough visible GPUs (#971).\n")
 			os.Exit(2)
 		}
 	}
@@ -260,6 +273,15 @@ func cmdServe(argv []string) {
 	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, chatBackend, *cpuOffloadExperts, *contextBudgetTokens)
 	if loadPhase.Name != "" {
 		startupPhases = append(startupPhases, loadPhase)
+	}
+	// Per-GPU residency pre-check for an expert-parallel serve: refuse an --expert-parallel N whose
+	// per-card shard (replicated weights + the largest expert band) exceeds a GPU, BEFORE binding the
+	// listener and letting rank r OOM uploading its band. Fail-open on cpu-ref / a non-probing backend
+	// (the load above already gated host/aggregate fit); this adds only the per-rank VRAM check the
+	// rank-count + Caps().Collective gate above does not make (#971).
+	if err := refuseEPPlanIfUnfit(inKernelModel, chatBackend, *expertParallel); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel %d does not fit resident across the GPUs: %v\n", *expertParallel, err)
+		os.Exit(2)
 	}
 
 	inKernelTok, tokLoaded := resolveServeTokenizer(*tokPath, *ggufPath)
@@ -745,6 +767,29 @@ func resolveServeMetal(flag, env bool, backendName string) (bool, error) {
 }
 
 const serveGGUFDeviceHeadroom = 0.15
+
+// refuseEPPlanIfUnfit fails the serve closed when `--expert-parallel N>1` cannot fit the model
+// resident across N GPUs. It partitions the loaded model's resident weights into the replicated
+// remainder and the routed experts (model.MoEResidentWeightBytes), builds the BUSIEST rank's
+// per-card plan (compute.ExpertParallelPerRankPlan: replicated + largest expert band), and checks
+// it against the device backend's PER-GPU capacity with the same headroom the load-time fit uses.
+//
+// It is FAIL-OPEN by construction (the contract every capacity check here keeps): a non-MoE model,
+// a model whose weights cannot be accounted, ranks<=1, a nil backend, or a backend whose capacity is
+// unknown (cpu-ref, a non-probing device) all return nil. So it can ONLY turn a KNOWN per-card
+// overflow (e.g. a 434 GiB model at N=4 ≈ 118 GiB/card on 80 GiB GPUs) into a clean pre-serve
+// refusal — instead of an OOM that surfaces minutes in, when rank r uploads its expert band to GPU r.
+func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks int) error {
+	if m == nil || be == nil || ranks <= 1 {
+		return nil
+	}
+	replicated, expert, ok := m.MoEResidentWeightBytes()
+	if !ok {
+		return nil // nothing accounted (non-MoE / unloaded) -> fail open
+	}
+	plan := compute.ExpertParallelPerRankPlan(replicated, expert, m.Cfg.NumExperts, ranks, nil)
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+}
 
 // serveGGUFHostHeadroom reserves a fraction of the process host's allocatable RAM (MemAvailable)
 // for the pure-CPU reference serve path's costs NOT in the header estimate: the resident-Q4K
