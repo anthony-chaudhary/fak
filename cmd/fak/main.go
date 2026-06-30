@@ -231,6 +231,8 @@ func main() {
 		cmdCadence(os.Args[2:])
 	case "milestone":
 		cmdMilestone(os.Args[2:])
+	case "program":
+		cmdProgram(os.Args[2:])
 	case "rollup":
 		cmdRollup(os.Args[2:])
 	case "nightrun":
