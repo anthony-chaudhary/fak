@@ -191,7 +191,7 @@ func main() {
 		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
 		// --landlock-hooks` re-execs itself into this verb, which applies the
 		// read-only-.git/hooks ruleset to itself and then execs the real agent. Not
-		// listed in usage() â€” an internal implementation detail of the spawn seam.
+		// listed in usage() — an internal implementation detail of the spawn seam.
 		if err := guard.LandlockTrampoline(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "fak: %v\n", err)
 			os.Exit(127)
@@ -372,7 +372,7 @@ func cmdRunTrace(argv []string) {
 	trace := fs.String("trace", "", "path to a trace JSON file")
 	engineID := fs.String("engine", "inkernel", "engine id (inkernel: the fused in-kernel model; mock; cassette)")
 	vdso := fs.Bool("vdso", true, "enable the vDSO fast path")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor â€” the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)
 
 	if *trace == "" {
@@ -407,7 +407,7 @@ func cmdPreflight(argv []string) {
 	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor â€” the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	grammarSchema := fs.String("grammar-schema", "", "load a JSON Schema grammar for --tool before adjudication (demo/debug witness)")
 	showDispatchedArgs := fs.Bool("show-dispatched-args", false, "print post-transform args that would be dispatched (may include raw arg values; demo/debug only)")
 	explain := fs.Bool("explain", false, "print the full decision trace: every rung folded, what each returned, which won, and why")
@@ -589,12 +589,12 @@ func cmdTurnTax(argv []string) {
 
 // printBreakEven renders the hit-rate curve as an operator-readable table: the
 // expected turns saved per session at each addressable rate, the priced net, and
-// the Â§3.1 self-host amortization (the real ~0.7% row is the honest answer to "is
+// the §3.1 self-host amortization (the real ~0.7% row is the honest answer to "is
 // 9 cherry-picked").
 func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 	fmt.Fprintf(w, "== fak turntax break-even: %s  (base %d calls, %d trials/point, hash %s) ==\n",
 		r.SliceID, r.BaseCalls, r.Trials, r.BaseHash)
-	fmt.Fprintf(w, "real-world addressable hit-rate (TURN-TAX Â§3.1, tau2-airline): %.1f%%\n\n", r.RealWorldHitRate*100)
+	fmt.Fprintf(w, "real-world addressable hit-rate (TURN-TAX §3.1, tau2-airline): %.1f%%\n\n", r.RealWorldHitRate*100)
 	fmt.Fprintf(w, "%6s  %11s  %4s  %4s  %9s  %9s  %8s  %16s\n",
 		"h", "mean_turns", "p50", "p90", "tok/sess", "$/sess", "lat(s)", "self-host_sess")
 	for _, p := range r.Points {
@@ -637,7 +637,7 @@ func cmdAgent(argv []string) {
 	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
 	out := fs.String("out", "agent-report.json", "report output path")
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor â€” the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
 
@@ -892,11 +892,11 @@ func controlSession(ctx context.Context, traceID, verb string, req gateway.Sessi
 // that POSTs HTTP; only the server can enqueue onto the bus it shares with the served loop).
 //
 // The body rides the a2achan floor: "operator" is a different principal from the target
-// trace, so a Private (ScopeAgent) body would be refused â€” Shared (ScopeFleet) is the
+// trace, so a Private (ScopeAgent) body would be refused — Shared (ScopeFleet) is the
 // auditable cross-principal widening the operator must make, and it stays Tainted (operator
 // input is untrusted, screened on ingress). A tainted/over-scoped/uncapped Send is refused
 // by the SAME default-deny floor that gates a tool call; that deny-as-value becomes the
-// error the route maps to 422 â€” "a tainted/over-scoped steer is refused", mechanically.
+// error the route maps to 422 — "a tainted/over-scoped steer is refused", mechanically.
 func steerSession(ctx context.Context, traceID, text string) error {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
@@ -1323,9 +1323,9 @@ func resolveSuite(dir, suite string) string {
 	}
 	avail := availableSuites(dir)
 	if len(avail) == 0 {
-		fmt.Fprintf(os.Stderr, "fak: unknown suite %q â€” no suites found under %s (pass --trace PATH to load a trace directly)\n", suite, dir)
+		fmt.Fprintf(os.Stderr, "fak: unknown suite %q — no suites found under %s (pass --trace PATH to load a trace directly)\n", suite, dir)
 	} else {
-		fmt.Fprintf(os.Stderr, "fak: unknown suite %q â€” available: %s (or pass --trace PATH)\n", suite, strings.Join(avail, ", "))
+		fmt.Fprintf(os.Stderr, "fak: unknown suite %q — available: %s (or pass --trace PATH)\n", suite, strings.Join(avail, ", "))
 	}
 	os.Exit(2)
 	return path // unreachable
