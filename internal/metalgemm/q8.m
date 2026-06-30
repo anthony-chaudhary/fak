@@ -1,6 +1,6 @@
 //go:build darwin && arm64 && cgo
 
-// q8.m — the Metal Q8_0 dequant-GEMV. The Q8 twin of q4k.m, and the missing primitive for the
+// q8.m — the Metal Q8_0 dequant-GEMV/GEMM. The Q8 twin of q4k.m, and the missing primitive for the
 // GPU-resident GDN decode forward (issue #67). The q4_k GPU kernels alone CANNOT move the
 // Gated-DeltaNet token mixer onto the device: every linear_attn.* projection (in_proj_qkv/z/b/a,
 // out_proj) plus the full-attn q/k are reordered/unpermuted for qwen35, so ResidentQ4KEligible
@@ -57,9 +57,83 @@ kernel void q8_gemv(device const char*  W    [[buffer(0)]],  // out*in int8 code
     acc = simd_sum(acc);
     if (lid == 0) Y[o] = acc;
 }
+
+// q8_gemm: register-blocked tiled batched prefill GEMM. This is the Q8_0 sibling of q4k_gemm:
+// each threadgroup owns a Q8_BM×Q8_BN output tile, walks the K axis one 32-wide Q8 block at a
+// time, stages dequanted weights + activations into threadgroup memory, and accumulates a
+// Q8_TM×Q8_TN register micro-tile. The whole activation panel is dispatched in one command buffer.
+#define Q8_BM 64
+#define Q8_BN 64
+#define Q8_TM 4
+#define Q8_TN 4
+#define Q8_TGX 16
+#define Q8_TGY 16
+#define Q8_TG 256
+kernel void q8_gemm(device const char*  W    [[buffer(0)]],  // out*in int8 codes, row-major
+                    device const float* WD   [[buffer(1)]],  // out*nblk weight block-scales
+                    device const char*  X    [[buffer(2)]],  // P*in int8 activation codes
+                    device const float* XD   [[buffer(3)]],  // P*nblk activation block-scales
+                    device float*       Y    [[buffer(4)]],
+                    constant int&       nblk [[buffer(5)]],
+                    constant int&       out_ [[buffer(6)]],
+                    constant int&       P    [[buffer(7)]],
+                    constant int&       t0   [[buffer(8)]],
+                    constant int&       nt   [[buffer(9)]],
+                    uint ob [[threadgroup_position_in_grid]],
+                    uint lid [[thread_index_in_threadgroup]]) {
+    threadgroup float wbuf[Q8_BM * 32];
+    threadgroup float xbuf[Q8_BN * 32];
+    int in = nblk * 32;
+    int o0 = (int)ob * Q8_BM;
+    int tr = (int)lid / Q8_TGX;
+    int tc = (int)lid % Q8_TGX;
+    float acc[Q8_TM][Q8_TN];
+    for (int i = 0; i < Q8_TM; i++)
+        for (int j = 0; j < Q8_TN; j++) acc[i][j] = 0.0f;
+
+    for (int b = 0; b < nblk; b++) {
+        for (int idx = (int)lid; idx < Q8_BM * 32; idx += Q8_TG) {
+            int row = idx >> 5, k = idx & 31;
+            int orow = o0 + row;
+            float val = 0.0f;
+            if (orow < out_) {
+                long wbase = (long)orow * in + (long)b * 32;
+                val = (float)W[wbase + k] * WD[(long)orow * nblk + b];
+            }
+            wbuf[idx] = val;
+        }
+        for (int idx = (int)lid; idx < Q8_BN * 32; idx += Q8_TG) {
+            int tk = idx >> 5, k = idx & 31;
+            float val = 0.0f;
+            if (tk < nt) {
+                int t = t0 + tk;
+                long xbase = (long)t * in + (long)b * 32;
+                val = (float)X[xbase + k] * XD[(long)t * nblk + b];
+            }
+            xbuf[idx] = val;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (int k = 0; k < 32; k++) {
+            float wreg[Q8_TM], xreg[Q8_TN];
+            for (int i = 0; i < Q8_TM; i++) wreg[i] = wbuf[(tr * Q8_TM + i) * 32 + k];
+            for (int j = 0; j < Q8_TN; j++) xreg[j] = xbuf[(tc * Q8_TN + j) * 32 + k];
+            for (int i = 0; i < Q8_TM; i++)
+                for (int j = 0; j < Q8_TN; j++) acc[i][j] += wreg[i] * xreg[j];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    for (int i = 0; i < Q8_TM; i++) {
+        int orow = o0 + tr * Q8_TM + i;
+        if (orow >= out_) continue;
+        for (int j = 0; j < Q8_TN; j++) {
+            int tcol = tc * Q8_TN + j;
+            if (tcol < nt) Y[(long)(t0 + tcol) * out_ + orow] = acc[i][j];
+        }
+    }
+}
 )MSL";
 
-static id<MTLComputePipelineState> psoQ8Gemv;
+static id<MTLComputePipelineState> psoQ8Gemv, psoQ8Gemm;
 static int gQ8Ready;
 
 static int q8_init(void) {
@@ -69,7 +143,8 @@ static int q8_init(void) {
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kQ8Src options:nil error:&err];
     if (lib == nil) { NSLog(@"q8: library compile failed: %@", err); return 0; }
     psoQ8Gemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q8_gemv"] error:&err];
-    if (!psoQ8Gemv) { NSLog(@"q8: pipeline build failed: %@", err); return 0; }
+    psoQ8Gemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q8_gemm"] error:&err];
+    if (!psoQ8Gemv || !psoQ8Gemm) { NSLog(@"q8: pipeline build failed: %@", err); return 0; }
     gQ8Ready = 1;
     return 1;
 }
@@ -200,6 +275,48 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         [cmd waitUntilCompleted];
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
+    }
+}
+
+// mg_q8_gemm computes Y[P,out] = X[P,in] * W[wid]^T for a Q8_0 activation panel in one command
+// buffer. This is the Metal prefill primitive for Q8-minority projections in the resident-Q4_K
+// lane (#1087): full-attn q/k and Qwen3.6 linear_attn.* no longer have to fall back to CPU qGemm8.
+void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y) {
+    if (wid < 0 || wid >= gNQ8 || P <= 0) return;
+    @autoreleasepool {
+        Q8W W = gQ8[wid];
+        q8_grow_scratch((long)P * W.in, (long)P * W.nblk, (long)P * W.out);
+        memcpy(gQ8XBuf.contents,  Xq, (size_t)P * W.in);
+        memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W.nblk * 4);
+
+        id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        [e setComputePipelineState:psoQ8Gemm];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
+        [e setBuffer:gQ8XBuf  offset:0 atIndex:2];
+        [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
+        [e setBuffer:gQ8YBuf  offset:0 atIndex:4];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+        [e setBytes:&W.out  length:sizeof(int) atIndex:6];
+        [e setBytes:&P      length:sizeof(int) atIndex:7];
+        const int BM = 64;  // output rows per threadgroup; must match Q8_BM in the MSL source
+        const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
+        const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
+        int rowBlocks = (W.out + BM - 1) / BM;
+        for (int t0 = 0; t0 < P; t0 += BN) {
+            int nt = P - t0;
+            if (nt > BN) nt = BN;
+            [e setBytes:&t0 length:sizeof(int) atIndex:8];
+            [e setBytes:&nt length:sizeof(int) atIndex:9];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+        }
+        [e endEncoding];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+
+        memcpy(Y, gQ8YBuf.contents, (size_t)P * W.out * 4);
     }
 }
 

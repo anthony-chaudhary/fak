@@ -28,8 +28,8 @@ import (
 //     and reused across all P prompt tokens.
 //   - everything else (self_attn q/k, and EVERY linear_attn.* projection — these are
 //     reordered/unpermuted for qwen35, so ResidentQ4KEligible keeps them out of q4kw; plus
-//     any Q6_K weight) → the proven batched Q8 GEMM qGemm8 on a Q8-quantized activation
-//     panel, the SAME path prefillQwen35HybridQ already takes.
+//     any Q6_K weight) → q8GemmDispatch on a Q8-quantized activation panel: CPU qGemm8 by
+//     default, Metal Q8 GEMM when MetalQ4K is enabled (#1087).
 //
 // Everything else — the conv1d causal scan, the per-head Gated-DeltaNet recurrence, the
 // L2/RMS norms, RoPE, the causal GQA over the f32 KV cache, SwiGLU, the residuals — is the
@@ -40,11 +40,11 @@ import (
 // Correctness contract vs the per-token Q4K decode path (tokenHiddenQ via sessionQ4KKernel):
 // sessionQ4KKernel.mul resolves a projection by name with the IDENTICAL order proj uses
 // (q4kw first → q4kMatRows, else → qGemm8/qMatRows on m.q8). So per weight, both paths take
-// the same kernel: the q4_k_m majority is bit-identical (q4kGemm == q4kMatRows per (o,t),
-// TestQ4KGemmMatchesMatRows), and the Q8 minority differs only by the documented Q8
-// deferred-reduction/FMA-rounding drift the Q8 hybrid path's own gate already covers. The
-// recurrence is the same f32 math fed by those projections. Pinned by
-// TestPrefillQwen35HybridQ4KMatchesTokenLoop.
+// the same kernel: the q4_k_m majority is bit-identical on CPU (q4kGemm == q4kMatRows per
+// (o,t), TestQ4KGemmMatchesMatRows) and approximate on Metal; the Q8 minority differs only by
+// the documented Q8 deferred-reduction/FMA-rounding drift the Q8 hybrid path's own gate already
+// covers. The recurrence is the same f32 math fed by those projections. Pinned by
+// TestPrefillQwen35HybridQ4KMatchesTokenLoop and the Metal Q4K/Q8 gates.
 
 // q4kQwen35HybridPrefillOK gates the batched resident-Q4_K hybrid prefill. It is the same
 // architecture gate the Q8 hybrid path uses (q8Qwen35HybridPrefillOK) — the resident-Q4_K
@@ -54,8 +54,9 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 }
 
 // hybridQ4KProj is the per-weight projection dispatch shared by every GEMM in the batched
-// resident-Q4_K hybrid prefill: q4kw-resident → q4kGemm on the raw f32 activation Xf;
-// otherwise → qGemm8 on the pre-quantized Q8 panel Xq. Mirrors prefillBatchedQ4K's `proj`.
+// resident-Q4_K hybrid prefill: q4kw-resident -> q4kGemm on the raw f32 activation Xf;
+// otherwise -> q8GemmDispatch on the pre-quantized Q8 panel Xq (CPU qGemm8 by default,
+// Metal Q8 GEMM when MetalQ4K is enabled). Mirrors prefillBatchedQ4K's `proj`.
 type hybridQ4KProj func(name string, Xf []float32, Xq *q8Panel) []float32
 
 func (s *Session) prefillQwen35HybridQ4K(ids []int) []float32 {
@@ -112,7 +113,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			}
 			return Y
 		}
-		return qGemm8(m.q8(name), Xq)
+		return s.q8GemmDispatch(name, m.q8(name), Xq)
 	}
 	if profile {
 		rawProj := proj
@@ -141,6 +142,9 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		// amortizing all the copies up front restores full prefill speed on the Metal hybrid
 		// path the 27B Qwen3.6 takes (#71). No-op on the pure-Go build (stub returns nil).
 		m.metalQ4KWeights()
+		// Upload the Q8-minority projections too (full-attn q/k and linear_attn.*). Otherwise
+		// #1087's Metal Q8 GEMM path would pay one upload inside the first timed projection call.
+		m.metalQ8Weights()
 	}
 
 	for l := 0; l < cfg.NumLayers; l++ {

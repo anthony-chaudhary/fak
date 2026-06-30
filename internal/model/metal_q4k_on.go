@@ -26,6 +26,10 @@ var (
 	// metalQ6KW caches one GPU Q6_K weight handle per (model, weight-name) for the fused MLP's
 	// Q6_K down_proj. Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
 	metalQ6KW = map[*Model]map[string]*metalgemm.Q6KWeight{}
+	// metalQ8KW caches one GPU Q8_0 weight handle per (model, weight-name) for Q8-minority
+	// prefill projections in the resident-Q4_K lane (full-attn q/k and Qwen3.6 linear_attn.*).
+	// Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
+	metalQ8KW = map[*Model]map[string]*metalgemm.Q8Weight{}
 	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
 	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
@@ -43,6 +47,23 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	}
 	Y := make([]float32, P*qt.out)
 	w.GEMM(Xf, P, Y)
+	return Y
+}
+
+// q8GemmDispatch is the prefill-GEMM twin for the Q8-minority projections in the resident-Q4_K
+// path. Pure CPU builds and non-Metal sessions use qGemm8. With MetalQ4K enabled, the Q8 panel
+// runs through metalgemm's batched Q8 GEMM, so Qwen3.6's full-attn q/k and linear_attn.* no longer
+// cap prefill on the CPU side (#1087). The caller supplies the already-quantized activation panel.
+func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float32 {
+	if !s.MetalQ4K || !metalgemm.Available() {
+		return qGemm8(qt, Xq)
+	}
+	w := s.M.metalQ8Weight(name, qt)
+	if w == nil {
+		return qGemm8(qt, Xq)
+	}
+	Y := make([]float32, Xq.P*qt.out)
+	w.GEMM(Xq.q, Xq.d, Xq.P, Y)
 	return Y
 }
 
@@ -180,6 +201,25 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 	return w
 }
 
+// metalQ8Weight returns this model's GPU Q8 handle for `name`, uploading the Q8_0 codes/scales
+// once (cached per *Model, nil cached too). It backs batched Metal prefill for the Q8-minority
+// projections in the resident-Q4_K lane.
+func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	tbl := metalQ8KW[m]
+	if tbl == nil {
+		tbl = map[string]*metalgemm.Q8Weight{}
+		metalQ8KW[m] = tbl
+	}
+	if w, ok := tbl[name]; ok {
+		return w
+	}
+	w := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
+	tbl[name] = w
+	return w
+}
+
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
 // caching them per *Model. This is the prefill-weight-upload twin of metalWeights(): it
 // uploads every q4_k-resident projection (q/k/v/o, gate/up/down) upfront so the prefill
@@ -207,6 +247,48 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 			// metalQ4KWeight uploads if not already cached and records the result
 			w := m.metalQ4KWeight(name, qt)
 			uploaded[name] = w != nil
+		}
+	}
+	return uploaded
+}
+
+// metalQ8Weights uploads the Q8-minority projection weights for this model to the GPU once. It
+// deliberately skips names already present in q4kw or kqw: those route through Q4_K/Q6_K resident
+// kernels, and uploading their Q8 copies would waste unified memory.
+func (m *Model) metalQ8Weights() map[string]bool {
+	if !metalgemm.Available() {
+		return nil
+	}
+	uploaded := map[string]bool{}
+	add := func(name string) {
+		if m.q4kw[name] != nil || m.kqw[name] != nil {
+			return
+		}
+		qt := m.q8w[name]
+		if qt == nil {
+			return
+		}
+		w := m.metalQ8Weight(name, qt)
+		uploaded[name] = w != nil
+	}
+	cfg := m.Cfg
+	for l := 0; l < cfg.NumLayers; l++ {
+		lp := func(str string) string { return layerName(l, str) }
+		for _, name := range []string{
+			lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
+			lp("self_attn.v_proj.weight"), lp("self_attn.o_proj.weight"),
+			lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight"), lp("mlp.down_proj.weight"),
+		} {
+			add(name)
+		}
+		if cfg.isLinearAttnLayer(l) {
+			for _, name := range []string{
+				lp("linear_attn.in_proj_qkv.weight"), lp("linear_attn.in_proj_z.weight"),
+				lp("linear_attn.in_proj_b.weight"), lp("linear_attn.in_proj_a.weight"),
+				lp("linear_attn.out_proj.weight"),
+			} {
+				add(name)
+			}
 		}
 	}
 	return uploaded

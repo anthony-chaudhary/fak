@@ -16,9 +16,9 @@ package model
 //     weight bandwidth across the P free axes is what closes the gap to llama.cpp-Metal on
 //     the q4_k_m artifact (QWEN36-NATIVE-PERF-PLAN-2026-06-19.md P3).
 //   - the normalize-sensitive / Q6_K minority (self_attn.q_proj/k_proj always, plus any Q6_K
-//     weight such as mlp.down_proj or lm_head in a q4_k_m mix) runs the proven batched Q8
-//     GEMM qGemm8 against the q8w store — the SAME path prefillBatchedQ takes, on a Q8-
-//     quantized activation panel.
+//     weight such as mlp.down_proj or lm_head in a q4_k_m mix) runs q8GemmDispatch against the
+//     q8w store — CPU qGemm8 by default, Metal Q8 GEMM when MetalQ4K is enabled — on a
+//     Q8-quantized activation panel.
 //
 // Everything else — RMSNorm, RoPE, the causal GQA attention over the f32 KV cache, SwiGLU,
 // the residuals — is the identical f32 math prefillBatchedQ runs. The cache it builds is the
@@ -86,7 +86,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		return scratch
 	}
 	// proj dispatches a batched projection [P,out] by resident format: q4kw-resident →
-	// q4kGemmDispatch on the f32 activation Xf; otherwise → qGemm8 on the Q8 panel Xq. The
+	// q4kGemmDispatch on the f32 activation Xf; otherwise → q8GemmDispatch on the Q8 panel Xq. The
 	// width is inferred from the resident tensor's .out, so the caller does not pass it. Xq
 	// may be nil when the caller knows the projection is q4k-resident (it is only read on the
 	// q8 branch); passing the matching panel is the caller's responsibility for minority names.
@@ -102,7 +102,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 		if qt := m.q4kw[name]; qt != nil {
 			r = s.q4kGemmDispatch(name, qt, Xf, P)
 		} else {
-			r = qGemm8(m.q8(name), Xq)
+			r = s.q8GemmDispatch(name, m.q8(name), Xq)
 		}
 		toc(&tGemm, t)
 		return r
@@ -123,6 +123,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 
 	if s.MetalQ4K {
 		m.metalQ4KWeights() // upload all Q4_K weights upfront — avoids per-call GPU round-trips (#1113)
+		m.metalQ8Weights()  // upload Q8-minority projection weights upfront for Metal Q8 prefill (#1087)
 	}
 
 	for l := 0; l < cfg.NumLayers; l++ {

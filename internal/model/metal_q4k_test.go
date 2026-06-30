@@ -206,10 +206,10 @@ func TestMetalQ4KGemvGroupMatchesSingle(t *testing.T) {
 // TestMetalQ4KPrefillMatchesCPU is the end-to-end wiring gate: the resident-Q4_K hybrid
 // prefill with MetalQ4K=true (q4_k-majority GEMMs on the GPU) produces the same logits as the
 // CPU path (MetalQ4K=false) on the synthetic hybrid model. CPU GEMV is forced to f32
-// (setQ4KSDOTForTest(false)) so the comparison is GPU-f32 vs CPU-f32 — the q4_k majority is
-// then equivalent up to GPU float-accumulation order; the Q8 minority (q/k + linear_attn.*) is
-// identical on both paths. A wiring bug (wrong weight, layout mismatch, the GPU result not
-// flowing into the recurrence) diverges O(1) per layer and blows past the bound.
+// (setQ4KSDOTForTest(false)) so the comparison is GPU-f32 vs CPU-f32 for the q4_k majority; the
+// Q8 minority (q/k + linear_attn.*) may also route through Metal Q8 GEMM. A wiring bug (wrong
+// weight, layout mismatch, the GPU result not flowing into the recurrence) diverges O(1) per layer
+// and blows past the bound.
 func TestMetalQ4KPrefillMatchesCPU(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")

@@ -10,6 +10,11 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	return q4kGemm(qt, Xf, P)
 }
 
+// q8GemmDispatch is the Q8-minority prefill twin; pure-Go builds always use the CPU qGemm8.
+func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float32 {
+	return qGemm8(qt, Xq)
+}
+
 // q4kMatRowsDispatch is the decode-GEMV twin: always the CPU q4kMatRows in the pure-Go build.
 func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) []float32 {
 	return q4kMatRows(qt, xf)
@@ -31,5 +36,10 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 // Metal device. The on-Metal implementation (metal_q4k_on.go) uploads all Q4_K projection
 // weights upfront to avoid per-call GPU round-trips during prefill (#1113).
 func (m *Model) metalQ4KWeights() map[string]bool {
+	return nil
+}
+
+// metalQ8Weights is the pure-Go stub for the Q8-minority Metal prefill uploads.
+func (m *Model) metalQ8Weights() map[string]bool {
 	return nil
 }

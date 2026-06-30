@@ -1,6 +1,6 @@
 //go:build darwin && arm64 && cgo
 
-// q8.go — Go side of the Metal Q8_0 dequant-GEMV (q8.m). The Q8 twin of q4k.go. It exists
+// q8.go — Go side of the Metal Q8_0 dequant-GEMV/GEMM (q8.m). The Q8 twin of q4k.go. It exists
 // because the Gated-DeltaNet token mixer's projections (every linear_attn.* weight, plus the
 // full-attn q/k) are reordered/unpermuted for qwen35 and so resolve to Q8 (internal/model.q8Tensor)
 // rather than raw resident q4_k — the q4_k GPU kernels can't touch them. A GPU-resident decode
@@ -15,6 +15,7 @@ package metalgemm
 int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in);
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y);
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff);
+void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y);
 void mg_q8_reset(void);
 */
 import "C"
@@ -92,6 +93,17 @@ func GEMVGroupQ8(ws []*Q8Weight, xq []int8, xd []float32) [][]float32 {
 		o += w.Out
 	}
 	return out
+}
+
+// GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a Q8_0-quantized activation panel: Xq are
+// P*In int8 codes, Xd are P*Nblk per-block f32 scales. Y must have length >= P*Out. The
+// call is the prefill twin of GEMV and runs the whole panel in one Metal command buffer.
+func (w *Q8Weight) GEMM(Xq []int8, Xd []float32, P int, Y []float32) {
+	if w == nil || w.id < 0 || P <= 0 || len(Xq) < P*w.In || len(Xd) < P*w.Nblk || len(Y) < P*w.Out {
+		return
+	}
+	C.mg_q8_gemm(w.id, (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
+		C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
 }
 
 // ID returns the backend handle for this matrix.
