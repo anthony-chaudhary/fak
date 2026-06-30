@@ -12,7 +12,7 @@ import (
 
 // ReportSchema tags a per-box report — the PUBLIC/PRIVATE SEAM. The live control
 // plane (the private Slack control-bridge to the lab boxes; see
-// docs/dgx-slack-boundary.md and docs/private-comms-channel.md) emits one of these
+// docs/gpu-server-private-boundary.md and docs/private-comms-channel.md) emits one of these
 // JSON files per box from live state; this public package reads, folds, renders, and
 // scores them. The boundary is a DATA contract, not a code import: the private side
 // never links this package and this package never knows the lab transport. A report

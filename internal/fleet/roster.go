@@ -8,7 +8,7 @@
 // THE PUBLIC/PRIVATE BOUNDARY IS A DATA CONTRACT, NOT A CODE IMPORT. The live control
 // plane — the Slack control-bridge to the lab boxes — is private (it speaks a lab
 // protocol and carries lab identifiers, so it lives in fak-private; see
-// docs/dgx-slack-boundary.md and docs/private-comms-channel.md). The seam between it
+// docs/gpu-server-private-boundary.md and docs/private-comms-channel.md). The seam between it
 // and this public core is the per-box REPORT JSON (fak.fleet.report/v1, report.go):
 // the private bridge emits one report file per box from live state; this package
 // reads, folds, renders, and scores them. Neither side imports the other, and
@@ -41,7 +41,7 @@ const MaxBoxes = 4096
 // own terms (the public file transport treats it as a report-file stem; the private
 // Slack/box bridge resolves it to a channel/session). Keeping the reference opaque
 // is what lets the live control plane stay private while this core stays public —
-// see docs/fleet.md and docs/dgx-slack-boundary.md.
+// see docs/fleet.md and docs/gpu-server-private-boundary.md.
 type Box struct {
 	ID       string            `json:"id"`
 	Class    string            `json:"class,omitempty"`    // hardware/role class, e.g. "a100x8", "h100x8", "cpu"
