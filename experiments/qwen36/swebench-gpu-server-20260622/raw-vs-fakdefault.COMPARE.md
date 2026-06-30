@@ -1,6 +1,6 @@
 # SWE-bench Verified — fak-gateway vs raw-SGLang (overall completion)
 
-**Model:** `Qwen/Qwen3.6-27B` served as `qwen36-27b` (SGLang TP=8, bf16) · **Selection:** astropy__astropy-12907 · **Host:** dgx-a100.example.lab
+**Model:** `Qwen/Qwen3.6-27B` served as `qwen36-27b` (SGLang TP=8, bf16) · **Selection:** astropy__astropy-12907 · **Host:** gpu-server.example.lab
 
 Both arms drive the identical `mini-swe-agent` against the SAME SGLang weights; the only difference is whether each tool turn is routed through the `fak serve` adjudication gateway (`:8080`) or hits raw SGLang (`:30000`) directly. *Overall completion* = the agent ran to the end and emitted a non-empty patch; *resolved* = the official harness (`swebench.harness.run_evaluation`) PASS_TO_PASS + FAIL_TO_PASS grade.
 

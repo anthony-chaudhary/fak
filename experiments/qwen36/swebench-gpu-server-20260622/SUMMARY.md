@@ -33,7 +33,7 @@ just allow-listing the tool.
 - `raw-sglang.preds.json` — the 504-byte patch that resolved the instance (correct fix).
 
 ## Reproduce
-`tools/dgx_swebench_compare.py` (driver), `tools/dgx_swebench_launch.sh` (detached
-launcher), `tools/dgx_fak_gateway_repolicy.sh` (re-policy the gateway),
+the private SWE-bench compare runner (driver), the private detached launcher (detached
+launcher), the private gateway policy helper (re-policy the gateway),
 `examples/swebench-coding-agent-policy.json` (allow-bash policy). Drive via
 the private lab control bridge. See the doc for the exact command sequence.

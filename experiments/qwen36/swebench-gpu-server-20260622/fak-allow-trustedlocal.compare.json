@@ -1,15 +1,15 @@
 {
   "benchmark": "swe-bench-verified-resolve-compare",
-  "schema": "fak.dgx-swebench-compare.v1",
+  "schema": "fak.gpu-server-swebench-compare.v1",
   "model": "Qwen/Qwen3.6-27B",
   "served_as": "qwen36-27b",
   "tp": 8,
   "dataset": "princeton-nlp/SWE-bench_Verified",
   "selection": "astropy__astropy-12907",
   "env": {
-    "host": "dgx-a100.example.lab",
+    "host": "gpu-server.example.lab",
     "time": "2026-06-22T15:10:03Z",
-    "gpu0": "NVIDIA A100-SXM4-40GB",
+    "gpu0": "NVIDIA datacenter GPU",
     "ngpu": "8"
   },
   "arms": [

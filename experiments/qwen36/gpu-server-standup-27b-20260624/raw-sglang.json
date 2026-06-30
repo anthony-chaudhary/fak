@@ -6,7 +6,7 @@
     "base_url": "http://127.0.0.1:30000/v1",
     "model": "Qwen/Qwen3.6-27B",
     "stack": "raw-sglang",
-    "hardware": "dgx-a100-40gb-tp8",
+    "hardware": "gpu-server-40gb-tp8",
     "concurrency": [
       1,
       4,
@@ -26,7 +26,7 @@
     "request_template": "chat.completions.system_user.temperature0.max_tokens_case.marker.v2",
     "system_prompt_sha256": "95f87392a1501408c04421c0644b65d837771a9a2170d4e5fb95d7e852feef4f",
     "response_marker_required": false,
-    "response_marker_prefix": "FAK_DGX_REQ_",
+    "response_marker_prefix": "FAK_GPU_SERVER_REQ_",
     "case_count": 6,
     "dry_run": false
   },
@@ -43,7 +43,7 @@
       "--stack",
       "raw-sglang",
       "--hardware",
-      "dgx-a100-40gb-tp8",
+      "gpu-server-40gb-tp8",
       "--concurrency",
       "1,4,8,16,32,64",
       "--requests-per-concurrency",
@@ -56,7 +56,7 @@
       "0.98",
       "--no-require-response-marker",
       "--out",
-      "/tmp/fakgpu/bench-raw-sglang.json"
+      "<private-scratch>/bench-raw-sglang.json"
     ],
     "git": {
       "rev": null,
@@ -68,7 +68,7 @@
       "query": {
         "ok": true,
         "returncode": 0,
-        "stdout": "0, NVIDIA A100-SXM4-40GB, GPU-4d411923-efc8-9618-288d-535785f9e904, 40960, 580.159.03\n1, NVIDIA A100-SXM4-40GB, GPU-9b110c57-4598-ccca-84c4-42c50bbd52b4, 40960, 580.159.03\n2, NVIDIA A100-SXM4-40GB, GPU-4a3308ea-9b82-e4d2-bce9-aaf5e10ecd78, 40960, 580.159.03\n3, NVIDIA A100-SXM4-40GB, GPU-7009bce8-6342-f003-4d1c-fdf38b28a427, 40960, 580.159.03\n4, NVIDIA A100-SXM4-40GB, GPU-91414d2f-d903-46f6-688f-aaeef51d0f8f, 40960, 580.159.03\n5, NVIDIA A100-SXM4-40GB, GPU-64315e68-a056-4aab-4401-316b77e9e8cd, 40960, 580.159.03\n6, NVIDIA A100-SXM4-40GB, GPU-99d7fa53-fa9b-6b79-aedf-b6cf32289376, 40960, 580.159.03\n7, NVIDIA A100-SXM4-40GB, GPU-74ba046f-b64f-5462-17fc-30533124299b, 40960, 580.159.03",
+        "stdout": "0, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n1, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n2, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n3, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n4, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n5, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n6, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03\n7, NVIDIA datacenter GPU, GPU-<redacted>, 40960, 580.159.03",
         "stderr": "",
         "cmd": [
           "/usr/bin/nvidia-smi",

@@ -1,7 +1,7 @@
 [
   {
     "version": "0.24.0",
-    "path": "/srv/fleet/fak/experiments/dgx/ladder-r4-20260622T032144Z/fak-gateway.json",
+    "path": "<private-run-root>/ladder-r4-20260622T032144Z/fak-gateway.json",
     "stack": "fak-gateway",
     "hardware": "gpu-server",
     "model": "Qwen/Qwen3.6-27B",
@@ -23,7 +23,7 @@
   },
   {
     "version": "0.24.0",
-    "path": "/srv/fleet/fak/experiments/dgx/ladder-r4-20260622T032144Z/raw-sglang.json",
+    "path": "<private-run-root>/ladder-r4-20260622T032144Z/raw-sglang.json",
     "stack": "raw-sglang",
     "hardware": "gpu-server",
     "model": "Qwen/Qwen3.6-27B",

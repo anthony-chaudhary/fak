@@ -1,6 +1,6 @@
 # Qwen3.6-27B standup + throughput on the lab GPU server (2026-06-24)
 
-A cold standup of `Qwen/Qwen3.6-27B` on the lab 8-GPU datacenter server (`dgx2`,
+A cold standup of `Qwen/Qwen3.6-27B` on the lab 8-GPU datacenter server (`GPU server`,
 `gpu-server-lab`, 40 GB/GPU), driven end to end from a laptop through the
 slack-helpers control bridge, with a real OpenAI-compatible throughput sweep as proof.
 
@@ -64,7 +64,7 @@ sweep on the same box reached ~1.45k completion tok/s at C=128.)
 - **Sweep range.** Capped at C=64; the curve had not flattened, so the peak number is
   a lower bound for this hardware, not its ceiling.
 - **Marker gate disabled.** Qwen3.6-27B rarely echoes the load harness's literal
-  `FAK_DGX_REQ_` marker (it answers in its own reasoning format), so the run used
+  `FAK_GPU_SERVER_REQ_` marker (it answers in its own reasoning format), so the run used
   `--no-require-response-marker`. That gate is about instruction-echo, not serving
   health; every request completed and produced tokens (`errors 0`).
 - **Scope.** This is the raw `sglang` serving rate (the baseline). It is not a fak-kernel
