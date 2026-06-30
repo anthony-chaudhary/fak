@@ -228,6 +228,62 @@ func TestWalkUnmeasuredBlocks(t *testing.T) {
 	}
 }
 
+// TestWalkSatisfiedWithContainer pins the load-bearing container rule: a clean,
+// all-measured walk that ALSO carries a container (a descend pointer) is still
+// SATISFIED — the container is excluded from the unmeasured tally, so it cannot flip
+// a clean intent to permanently-unsatisfied, yet it is still surfaced for descent. A
+// regression that counted the container as unmeasured would red every container-
+// bearing intent (improve-quality, improve-loops, manage-benchmarks all carry one)
+// while the rest of the suite stayed green.
+func TestWalkSatisfiedWithContainer(t *testing.T) {
+	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
+		{Kind: KindScorecard, Ref: "a"},
+		{Kind: KindGarden, Ref: "garden"},
+	}}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Debt: 0, Measured: true},
+		{Member: s.Members[1], Container: true, Measured: false},
+	})
+	if !rep.Satisfied {
+		t.Errorf("a clean walk carrying a container must be satisfied; reason=%q unmeasured=%d", rep.Reason, rep.Unmeasured)
+	}
+	if rep.Unmeasured != 0 {
+		t.Errorf("a container must not count as unmeasured, got %d", rep.Unmeasured)
+	}
+	if rep.Verdict != "OK" {
+		t.Errorf("want OK, got %s", rep.Verdict)
+	}
+	// The container is still surfaced as a descend pointer even on a satisfied walk.
+	if len(rep.Worklist) != 1 || rep.Worklist[0].Member.Ref != "garden" {
+		t.Errorf("container should remain a descend pointer in the worklist, got %+v", rep.Worklist)
+	}
+}
+
+// TestWalkUnmeasuredBeatsDark pins walkVerdict's precedence: when a walk has BOTH an
+// unmeasured leaf and a dark leaf, the unmeasured finding wins (a status we could not
+// even read is more conservative than a known-dark loop). If the dark branch were
+// reordered above unmeasured, this would silently flip and the unmeasured-only /
+// dark-only tests would both still pass.
+func TestWalkUnmeasuredBeatsDark(t *testing.T) {
+	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
+		{Kind: KindScorecard, Ref: "unread"},
+		{Kind: KindLoop, Ref: "darkloop"},
+	}}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: false},
+		{Member: s.Members[1], Dark: true, Measured: true},
+	})
+	if rep.Finding != "superloop_unmeasured" {
+		t.Errorf("unmeasured must take precedence over dark; got finding %q", rep.Finding)
+	}
+	if rep.Verdict != "ACTION" {
+		t.Errorf("want ACTION, got %s", rep.Verdict)
+	}
+	if rep.Unmeasured != 1 || rep.Dark != 1 {
+		t.Errorf("want unmeasured=1 dark=1, got unmeasured=%d dark=%d", rep.Unmeasured, rep.Dark)
+	}
+}
+
 func containsProp(v Verdict, name string, holds bool) bool {
 	for _, p := range v.Properties {
 		if p.Name == name {
