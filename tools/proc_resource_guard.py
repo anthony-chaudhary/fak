@@ -105,6 +105,10 @@ DEFAULT_ORPHAN_PATTERNS: tuple[str, ...] = ("dos_mcp.server",)
 # session exited. Matched against the bare (extension-stripped) process name.
 DEFAULT_IDLE_SHELL_NAMES = frozenset({"pwsh", "powershell", "bash"})
 DEFAULT_IDLE_SHELL_AGE_SEC = 1800  # 30 min: well past any session-launch transient
+DEFAULT_INTERACTIVE_PARENT_NAMES = frozenset({
+    "windowsterminal", "terminal", "conhost", "openconsole",
+    "explorer", "cmd", "powershell", "pwsh",
+})
 
 # OS-critical processes that must NEVER be killed even with --enact. Matched
 # case-insensitively against the bare process name (no path, no extension).
@@ -211,8 +215,10 @@ def classify_orphans(
     *,
     live_pids: frozenset[int],
     child_counts: dict[int, int] | None = None,
+    parent_names: dict[int, str] | None = None,
     orphan_patterns: tuple[str, ...] = (),
     idle_shell_names: frozenset[str] = frozenset(),
+    interactive_parent_names: frozenset[str] = DEFAULT_INTERACTIVE_PARENT_NAMES,
     min_age_sec: int = 0,
     reap_idle_shells: bool = False,
     protected_pids: frozenset[int] = frozenset(),
@@ -227,6 +233,7 @@ def classify_orphans(
     patterns = tuple(p for p in orphan_patterns if p)
     shells = {n.lower() for n in idle_shell_names}
     counts = child_counts or {}
+    parents = parent_names or {}
     allow = {n.lower() for n in allow_names}
     flagged: list[dict[str, Any]] = []
     for proc in procs:
@@ -251,7 +258,9 @@ def classify_orphans(
         if reap_idle_shells and name.lower() in shells:
             kids = counts.get(pid, 0) if pid is not None else 0
             aged = min_age_sec <= 0 or (age_sec is not None and age_sec >= min_age_sec)
-            if kids == 0 and aged:
+            parent_name = (parents.get(ppid or -1) or "").lower()
+            attended_parent = parent_name in interactive_parent_names
+            if kids == 0 and aged and not attended_parent:
                 age_note = f", age {age_sec}s" if age_sec is not None else ""
                 reasons.append(f"idle launcher shell: 0 live children{age_note}")
                 kind = kind or "idle-shell"
@@ -259,11 +268,13 @@ def classify_orphans(
         if not reasons:
             continue
         protected = (pid in protected_pids) or (name.lower() in protected_names)
+        parent_name = parents.get(ppid or -1)
         flagged.append(
             {
                 "pid": pid,
                 "name": name,
                 "ppid": ppid,
+                "parent_name": parent_name,
                 "threads": _as_int(proc.get("threads")),
                 "handles": None,
                 "ws_mb": _as_int(proc.get("ws_mb")),
@@ -283,6 +294,15 @@ def _child_counts(rows: Iterable[dict[str, Any]]) -> dict[int, int]:
         if ppid is not None:
             counts[ppid] = counts.get(ppid, 0) + 1
     return counts
+
+
+def _parent_names(rows: Iterable[dict[str, Any]]) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for row in rows:
+        pid = _as_int(row.get("pid"))
+        if pid is not None:
+            out[pid] = str(row.get("name") or "")
+    return out
 
 
 def _merge_flagged(
@@ -950,6 +970,7 @@ def main(argv: list[str] | None = None) -> int:
             relations,
             live_pids=live_pids,
             child_counts=_child_counts(relations),
+            parent_names=_parent_names(relations),
             orphan_patterns=patterns,
             idle_shell_names=DEFAULT_IDLE_SHELL_NAMES,
             min_age_sec=max(0, args.idle_shell_age_min) * 60,

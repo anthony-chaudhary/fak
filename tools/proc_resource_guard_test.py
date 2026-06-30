@@ -442,6 +442,31 @@ class OrphanClassifyTests(unittest.TestCase):
         )
         self.assertEqual(flagged, [])
 
+    def test_idle_shell_parented_by_terminal_spared(self):
+        rows = [
+            {"pid": 9, "name": "WindowsTerminal", "ppid": 1, "cmdline": "wt", "age_sec": 5000},
+            {"pid": 31736, "name": "pwsh", "ppid": 9, "cmdline": "pwsh", "age_sec": 4000},
+        ]
+        flagged = self.mod.classify_orphans(
+            rows, live_pids=frozenset({1, 9, 31736}), child_counts=self.mod._child_counts(rows),
+            parent_names=self.mod._parent_names(rows), reap_idle_shells=True,
+            idle_shell_names=self.mod.DEFAULT_IDLE_SHELL_NAMES, min_age_sec=1800,
+        )
+        self.assertEqual(flagged, [])
+
+    def test_idle_shell_parented_by_background_launcher_flags(self):
+        rows = [
+            {"pid": 9, "name": "codex", "ppid": 1, "cmdline": "codex", "age_sec": 5000},
+            {"pid": 31736, "name": "pwsh", "ppid": 9, "cmdline": "pwsh", "age_sec": 4000},
+        ]
+        flagged = self.mod.classify_orphans(
+            rows, live_pids=frozenset({1, 9, 31736}), child_counts=self.mod._child_counts(rows),
+            parent_names=self.mod._parent_names(rows), reap_idle_shells=True,
+            idle_shell_names=self.mod.DEFAULT_IDLE_SHELL_NAMES, min_age_sec=1800,
+        )
+        self.assertEqual([r["pid"] for r in flagged], [31736])
+        self.assertEqual(flagged[0]["parent_name"], "codex")
+
     def test_orphan_protected_name_marked(self):
         rows = [{"pid": 4, "name": "csrss", "ppid": 999, "cmdline": "dos_mcp.server", "age_sec": 9}]
         flagged = self.mod.classify_orphans(rows, live_pids=frozenset(), orphan_patterns=("dos_mcp.server",))
