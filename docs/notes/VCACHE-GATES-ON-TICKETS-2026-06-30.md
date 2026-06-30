@@ -6,6 +6,9 @@ description: "The GitHub issues filed from the top-50 default-on-cache plan: a k
 # vCache gate-enablement tickets (2026-06-30)
 
 Filed from [`VCACHE-DEFAULT-ON-TOP50-2026-06-30.md`](VCACHE-DEFAULT-ON-TOP50-2026-06-30.md).
+The item-level backlog exists separately as **#1519-#1568**
+(`cache-default[01]` through `cache-default[50]`); this page names the
+keystone gate-enablement tree.
 The vCache milestones #715–#720 were closed as *built*; the audit on 2026-06-30
 showed they are **built-and-gated-OFF**. These issues are the *enablement* layer:
 each gate flips default-ON only after a paired **QA** (honesty test + non-forgeable

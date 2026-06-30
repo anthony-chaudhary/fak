@@ -317,6 +317,9 @@ claude` run with **no flags**, the operator sees one attribution line —
 
 The keystone epic and child issues filed from this plan are tracked in
 [`VCACHE-GATES-ON-TICKETS-2026-06-30.md`](VCACHE-GATES-ON-TICKETS-2026-06-30.md).
+The one-ticket-per-item backlog is also filed as **#1519-#1568**
+(`cache-default[01]` through `cache-default[50]`), matching items 1-50 in
+this note.
 Every gate-enablement item (section B) carries a paired **QA** acceptance
 (honesty test + witness) and **dogfood** acceptance (it runs on our own
 `fak guard`/`fak serve` sessions and writes a ledger/journal row), so a gate can
