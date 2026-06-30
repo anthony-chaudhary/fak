@@ -59,10 +59,14 @@ type issueContractCounts struct {
 	AgentContextAvg      int            `json:"agent_context_avg"`
 	AgentContextFull     int            `json:"agent_context_full"`
 	AgentContextMissing  int            `json:"agent_context_missing"`
+	GenerationFitAvg     int            `json:"generation_fit_avg,omitempty"`
+	GenerationFitMeasured int           `json:"generation_fit_measured,omitempty"`
+	GenerationMismatches int            `json:"generation_mismatches,omitempty"`
 	ByReason             map[string]int `json:"by_reason"`
 	ByLane               map[string]int `json:"by_lane"`
 	ByWorkUnit           map[string]int `json:"by_work_unit"`
 	ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
+	ByGeneration         map[string]int `json:"by_generation,omitempty"`
 }
 
 type issueContractBatchGroup struct {
@@ -230,6 +234,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		ByLane:               map[string]int{},
 		ByWorkUnit:           map[string]int{},
 		ByExpectedStepBucket: map[string]int{},
+		ByGeneration:         map[string]int{},
 	}
 	batches := map[string]*issueContractBatchGroup{}
 	duplicateGroups := map[string]*issueContractDuplicateGroup{}
@@ -237,6 +242,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 	confusionGroups := map[string]*issueContractAgentNoteGroup{}
 	coordinationGroups := map[string]*issueContractAgentNoteGroup{}
 	agentContextSum := 0
+	generationFitSum := 0
 	for _, review := range reviews {
 		switch review.Dispatchability {
 		case issuecontract.Dispatchable:
@@ -260,6 +266,14 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		counts.ByWorkUnit[issueContractBucketValue(review.WorkUnit, "(missing)")]++
 		counts.ByExpectedStepBucket[issueContractStepBucket(review.ExpectedSteps)]++
 		agentContextSum += review.AgentContext.Total
+		if issueContractReviewHasGenerationFit(review) {
+			counts.GenerationFitMeasured++
+			generationFitSum += review.GenerationFit.Total
+			if len(review.GenerationFit.Flags) > 0 {
+				counts.GenerationMismatches++
+			}
+			counts.ByGeneration[issueContractBucketValue(review.GenerationFit.Stream, "(unclassified)")]++
+		}
 		for _, reason := range review.Reasons {
 			counts.ByReason[reason]++
 		}
@@ -306,6 +320,11 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 	if len(reviews) > 0 {
 		counts.AgentContextAvg = (agentContextSum + len(reviews)/2) / len(reviews)
 	}
+	if counts.GenerationFitMeasured > 0 {
+		counts.GenerationFitAvg = (generationFitSum + counts.GenerationFitMeasured/2) / counts.GenerationFitMeasured
+	} else {
+		counts.ByGeneration = nil
+	}
 	groups := make([]issueContractBatchGroup, 0, len(batches))
 	for _, group := range batches {
 		if len(group.ByReason) == 0 {
@@ -343,6 +362,13 @@ func issueContractReviewStepBudget(review issuecontract.Review) int {
 		return review.ExpectedSteps
 	}
 	return 1
+}
+
+func issueContractReviewHasGenerationFit(review issuecontract.Review) bool {
+	return strings.TrimSpace(review.GenerationFit.Stream) != "" ||
+		strings.TrimSpace(review.GenerationFit.LabelStream) != "" ||
+		strings.TrimSpace(review.GenerationFit.BodyStream) != "" ||
+		len(review.GenerationFit.Flags) > 0
 }
 
 func issueContractAddDuplicateGroup(groups map[string]*issueContractDuplicateGroup, review issuecontract.Review, stepBudget int) {
@@ -840,6 +866,10 @@ func renderIssueContract(r issueContractResult) string {
 			r.Counts.StepBudget, r.Counts.MissingExpectedSteps,
 			r.Counts.AgentContextAvg, r.Counts.AgentContextFull, r.Counts.AgentContextMissing),
 	}
+	if r.Counts.GenerationFitMeasured > 0 {
+		lines = append(lines, fmt.Sprintf("  generation_fit: measured=%d avg=%d mismatches=%d",
+			r.Counts.GenerationFitMeasured, r.Counts.GenerationFitAvg, r.Counts.GenerationMismatches))
+	}
 	if len(r.Counts.ByReason) > 0 {
 		lines = append(lines, "  reasons: "+renderIssueContractReasonCounts(r.Counts.ByReason))
 	}
@@ -851,6 +881,9 @@ func renderIssueContract(r issueContractResult) string {
 	}
 	if len(r.Counts.ByExpectedStepBucket) > 0 {
 		lines = append(lines, "  step_buckets: "+renderIssueContractReasonCounts(r.Counts.ByExpectedStepBucket))
+	}
+	if len(r.Counts.ByGeneration) > 0 {
+		lines = append(lines, "  generations: "+renderIssueContractReasonCounts(r.Counts.ByGeneration))
 	}
 	for i, group := range r.BatchGroups {
 		if i >= 8 {
@@ -923,13 +956,22 @@ func renderIssueContract(r issueContractResult) string {
 		if strings.TrimSpace(key) == "" {
 			key = "(missing-key)"
 		}
-		lines = append(lines, fmt.Sprintf("  [%s] %s dispatchability=%s score=%d spine_priority=%d",
-			review.Verdict, key, review.Dispatchability, review.Score.Total, review.SpinePriority.Total))
+		line := fmt.Sprintf("  [%s] %s dispatchability=%s score=%d spine_priority=%d",
+			review.Verdict, key, review.Dispatchability, review.Score.Total, review.SpinePriority.Total)
+		if issueContractReviewHasGenerationFit(review) {
+			line += fmt.Sprintf(" generation=%s generation_fit=%d",
+				issueContractBucketValue(review.GenerationFit.Stream, "(unclassified)"),
+				review.GenerationFit.Total)
+		}
+		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
 		}
 		for _, missing := range review.MissingFields {
 			lines = append(lines, "    missing: "+missing)
+		}
+		for _, flag := range review.GenerationFit.Flags {
+			lines = append(lines, "    generation_flag: "+flag)
 		}
 	}
 	return strings.Join(lines, "\n")
