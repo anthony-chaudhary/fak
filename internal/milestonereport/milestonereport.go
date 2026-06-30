@@ -175,15 +175,21 @@ type Epics struct {
 // discrete-vs-ongoing honesty rule: OverallPct folds measured DISCRETE rows only,
 // while ongoing programs are counted as frontier activity, not completion.
 type GenerationRow struct {
-	Generation string  `json:"generation"`
-	Tracked    int     `json:"tracked"`
-	Measured   int     `json:"measured"`
-	Programs   int     `json:"programs"`
-	Discrete   int     `json:"discrete"`
-	Closed     int     `json:"closed"`
-	Total      int     `json:"total"`
-	OverallPct float64 `json:"overall_pct"`
-	Errored    int     `json:"errored,omitempty"`
+	Generation          string  `json:"generation"`
+	Tracked             int     `json:"tracked"`
+	Measured            int     `json:"measured"`
+	Programs            int     `json:"programs"`
+	Discrete            int     `json:"discrete"`
+	Closed              int     `json:"closed"`
+	Total               int     `json:"total"`
+	OverallPct          float64 `json:"overall_pct"`
+	Errored             int     `json:"errored,omitempty"`
+	DebtScore           int     `json:"debt_score"`
+	StaleIssues         int     `json:"stale_issues,omitempty"`
+	MissingWitnesses    int     `json:"missing_witnesses,omitempty"`
+	UnpromotedBets      int     `json:"unpromoted_bets,omitempty"`
+	LabelShipMismatches int     `json:"label_ship_mismatches,omitempty"`
+	DebtReason          string  `json:"debt_reason,omitempty"`
 }
 
 // InterpretEpics folds the per-epic child tallies into the roadmap dimension. A
@@ -285,12 +291,25 @@ func summarizeGenerations(rows []EpicRow) []GenerationRow {
 		}
 		if row.Err != "" {
 			lane.Errored++
+			lane.MissingWitnesses++
 			continue
 		}
 		lane.Measured++
 		if !row.Ongoing() {
 			lane.Closed += row.Closed
 			lane.Total += row.Total
+			open := row.Total - row.Closed
+			if open > 0 {
+				lane.StaleIssues += open
+				if gen != "now" && gen != "unclassified" {
+					lane.UnpromotedBets += open
+				}
+			}
+		} else if gen != "now" && gen != "unclassified" {
+			lane.UnpromotedBets++
+		}
+		if gen == "unclassified" {
+			lane.LabelShipMismatches++
 		}
 	}
 	out := make([]GenerationRow, 0, len(by))
@@ -298,6 +317,7 @@ func summarizeGenerations(rows []EpicRow) []GenerationRow {
 	for _, gen := range generationOrder {
 		lane := by[gen]
 		lane.OverallPct = pct(lane.Closed, lane.Total)
+		finalizeGenerationDebt(lane)
 		out = append(out, *lane)
 		seen[gen] = true
 	}
@@ -311,9 +331,31 @@ func summarizeGenerations(rows []EpicRow) []GenerationRow {
 	for _, gen := range extras {
 		lane := by[gen]
 		lane.OverallPct = pct(lane.Closed, lane.Total)
+		finalizeGenerationDebt(lane)
 		out = append(out, *lane)
 	}
 	return out
+}
+
+func finalizeGenerationDebt(row *GenerationRow) {
+	if row == nil {
+		return
+	}
+	row.DebtScore = row.StaleIssues + 3*row.MissingWitnesses + 2*row.UnpromotedBets + 2*row.LabelShipMismatches
+	var reasons []string
+	if row.StaleIssues > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d stale-risk issue(s)", row.StaleIssues))
+	}
+	if row.MissingWitnesses > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d missing witness(es)", row.MissingWitnesses))
+	}
+	if row.UnpromotedBets > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d unpromoted bet(s)", row.UnpromotedBets))
+	}
+	if row.LabelShipMismatches > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d label/ship mismatch(es)", row.LabelShipMismatches))
+	}
+	row.DebtReason = strings.Join(reasons, ", ")
 }
 
 // --- the fold ---------------------------------------------------------------
@@ -708,6 +750,13 @@ func generationRowLine(row GenerationRow) string {
 	}
 	if row.Errored > 0 {
 		parts = append(parts, fmt.Sprintf("%d unreadable", row.Errored))
+	}
+	if row.DebtScore > 0 {
+		if row.DebtReason != "" {
+			parts = append(parts, fmt.Sprintf("debt %d (%s)", row.DebtScore, row.DebtReason))
+		} else {
+			parts = append(parts, fmt.Sprintf("debt %d", row.DebtScore))
+		}
 	}
 	return strings.Join(parts, "; ")
 }

@@ -261,14 +261,39 @@ func TestInterpretEpicsSummarizesGenerationLanes(t *testing.T) {
 	if row := byGen["now"]; row.Tracked != 1 || row.Discrete != 1 || row.Closed != 2 || row.Total != 4 || row.OverallPct != 50 {
 		t.Fatalf("now generation row = %+v, want one 2/4 discrete epic", row)
 	}
+	if row := byGen["now"]; row.DebtScore != 2 || row.StaleIssues != 2 {
+		t.Fatalf("now generation debt = %+v, want score 2 from two stale-risk issues", row)
+	}
 	if row := byGen["next"]; row.Tracked != 1 || row.Programs != 1 || row.Discrete != 0 || row.Total != 0 {
 		t.Fatalf("next generation row = %+v, want one ongoing program with no completion pct", row)
+	}
+	if row := byGen["next"]; row.DebtScore != 2 || row.UnpromotedBets != 1 {
+		t.Fatalf("next generation debt = %+v, want score 2 from one unpromoted bet", row)
 	}
 	if row := byGen["second-next"]; row.Tracked != 0 {
 		t.Fatalf("second-next generation row = %+v, want seeded zero row", row)
 	}
 	if row := byGen["future"]; row.Tracked != 1 || row.Errored != 1 || row.Measured != 0 {
 		t.Fatalf("future generation row = %+v, want one unreadable row", row)
+	}
+	if row := byGen["future"]; row.DebtScore != 3 || row.MissingWitnesses != 1 {
+		t.Fatalf("future generation debt = %+v, want score 3 from one missing witness", row)
+	}
+}
+
+func TestGenerationDebtFlagsUnclassifiedLabelShipMismatch(t *testing.T) {
+	specs := []EpicSpec{{Number: 10, Title: "unclassified shipped row", Generation: ""}}
+	counts := []EpicCounts{{Number: 10, Closed: 1, Total: 1, Source: "label"}}
+	e := InterpretEpics(specs, counts, "")
+	var row GenerationRow
+	for _, r := range e.Generations {
+		if r.Generation == "unclassified" {
+			row = r
+			break
+		}
+	}
+	if row.Tracked != 1 || row.LabelShipMismatches != 1 || row.DebtScore != 2 {
+		t.Fatalf("unclassified generation debt = %+v, want one label/ship mismatch with score 2", row)
 	}
 }
 
@@ -379,7 +404,7 @@ func TestRenderCarriesBothDimensions(t *testing.T) {
 	r := Fold(goodMaturity(), goodEpics(), FoldOpts{Date: "2026-06-29", Commit: "abc"})
 	r = r.WithTrend(TrendVsLast(RowFromReport(r), nil))
 	out := Render(r)
-	for _, want := range []string{"milestone report", "climb", "ladder:", "M0:", "roadmap", "generation lanes:", "now:", "second-next: 0 tracked", "#1 x", "->", "trend:"} {
+	for _, want := range []string{"milestone report", "climb", "ladder:", "M0:", "roadmap", "generation lanes:", "now:", "debt", "second-next: 0 tracked", "#1 x", "->", "trend:"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q\n%s", want, out)
 		}
