@@ -699,9 +699,30 @@ def _int(value: Any, default: int | None = None) -> int | None:
 # a slice of every resource. These per-worker budgets are deliberately conservative
 # (the safe default is "barely grow"); the operator's --max-workers is still the
 # outer ceiling.
+def _env_pos_int(name: str, default: int) -> int:
+    """A positive-int env override, falling back to ``default`` on unset/garbage.
+
+    The host budgets below assume a box DEDICATED to the fleet. On a shared box
+    the live OS-thread total also counts threads the fleet never spawned and
+    cannot reap (another user's editor/browser/agent tree), so the thread
+    dimension throttles to host_cap=1 even with cores and RAM to spare. The
+    operator raises FAK_HOST_THREADS_PER_CORE on such a box to discount that
+    foreign baseline; the boolean host_safe gate (not this gradient) remains the
+    hard stop on a genuine runaway."""
+    raw = os.environ.get(name, "").strip()
+    if raw:
+        try:
+            val = int(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return default
+
+
 HOST_CORES_PER_WORKER = 2       # cores a worker + its hook subprocess tree occupies
 HOST_RAM_MB_PER_WORKER = 1500   # resident MB across that subprocess tree
-HOST_THREADS_PER_CORE = 400     # host-wide OS-thread budget, scaled by core count
+HOST_THREADS_PER_CORE = _env_pos_int("FAK_HOST_THREADS_PER_CORE", 400)  # host-wide OS-thread budget, scaled by core count
 HOST_THREADS_PER_WORKER = 200   # OS threads a worker + its hooks add to the box
 HOST_CAP_FLOOR = 1              # never throttle below one worker — the hard stop on
                                 # a genuine runaway stays the host_safe gate, not this
