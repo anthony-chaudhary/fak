@@ -102,6 +102,74 @@ Whichever surface you're on, the pass is the same five steps:
 
 ---
 
+## The clean read (measure the committed tree, not the working-tree dirt)
+
+A scorecard number is only trustworthy if two people at the same commit get the
+same number. On a shared, multi-session tree that is **not** automatic — a
+working tree carries untracked scratch, nested mirror checkouts
+(`.fak/tmp/…`, `.dos/_dos_park/_iso_build/…`), mangled root paths a prior session
+dumped, and your own half-finished WIP. Two pollution classes can corrupt a read:
+
+1. **File-enumeration pollution** — scratch / mirror / mangled paths get counted,
+   inflating the occurrence-counters (slop, disambiguation) many-fold.
+2. **Build-break pollution** — uncommitted WIP that doesn't compile makes every
+   Go-backed card (`go run ./cmd/fak …`) error and drop out of the fold, so a
+   regression there can't be caught.
+
+**The canonical clean read — run from the repo ROOT, no extra checkout needed:**
+
+```
+python tools/scorecard_control_pane.py            # the folded portfolio read
+python tools/scorecard_control_pane.py --json      # machine payload
+```
+
+Class (1) is handled **in-place, by construction** — the occurrence-counters
+report the committed floor on a dirty tree just as on a clean one, via one of two
+immunity mechanisms:
+
+- **`git ls-files`** (the strongest, used by `code-slop`, `repo-hygiene`,
+  `agent-readiness`, `stability`, …): enumerate tracked paths directly and read
+  working-tree bytes. An untracked path is *structurally unreachable*.
+- **Tracked-subtree scoping** (used by `concept-disambiguation`, …): walk only the
+  source subtrees (`internal/`, `cmd/`, `docs/`) and skip scratch dirs (`.git`,
+  caches, `vendor`, `.dispatch-runs`, `.goal-runs`), so a nested mirror checkout at
+  `.fak/…` or `.dos/…` is never descended into.
+
+(This is why the fix for a polluted read is to make the *measurement* immune,
+**never** to delete the untracked junk by hand — it may be a peer's scratch on a
+shared tree.) When you build a NEW tree-reading scorecard, prefer **`git
+ls-files`** over a root `rglob` — it is immune by construction, not by remembering
+to exclude every scratch dir the fleet invents.
+
+Class (2) has one requirement: **the tree must COMPILE.** If your working tree
+has WIP that doesn't build, either commit/stash it first, or measure a pristine
+checkout of HEAD that **keeps `.git`** (every git-based card needs it):
+
+```
+git worktree add --detach /path/to/clean HEAD     # or: git clone --local . /path/to/clean
+python tools/scorecard_control_pane.py --workspace /path/to/clean
+```
+
+Do **not** use `git archive HEAD | tar -x` for this: it strips `.git`, so
+`repo-hygiene` and the churn-based cards error on the missing repo.
+
+### Regression note — a build break is not a card bug
+
+When a Go-backed card errors, the control pane now says so directly (it tags the
+errored Go cards and points here). To triage by hand:
+
+- Run **`go build ./...`**. If it **FAILS**, the errored cards are a working-tree
+  **build break** — commit/stash your WIP or measure a clean HEAD checkout; the
+  cards are fine.
+- If `go build ./...` **PASSES** but a card still errors, it is a **real card
+  bug** — debug that card's `--json` directly.
+
+The live-smoke test `test_live_collect_and_fold` asserts **zero** errored cards on
+the real tree, so a genuine card breakage reds CI; this note keeps a transient WIP
+build-break from being mistaken for one.
+
+---
+
 ## Building a NEW scorecard (the recipe)
 
 When a surface isn't measured yet, add one. The fastest path is to copy the closest
