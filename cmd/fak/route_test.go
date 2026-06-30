@@ -85,6 +85,45 @@ func TestRouteCheckMissingFile(t *testing.T) {
 	}
 }
 
+func TestRouteLLMDPreset(t *testing.T) {
+	preset := filepath.Join("..", "..", "examples", "routing-presets", "llm-d.json")
+	code, out, errb := runRT("--check", preset)
+	if code != 0 {
+		t.Fatalf("llm-d preset check exit=%d err=%q out=%q", code, errb, out)
+	}
+
+	code, out, errb = runRT("--manifest", preset, "--aspect", "tool_call", "--tool", "allow_search", "--json")
+	if code != 0 {
+		t.Fatalf("llm-d preset route exit=%d err=%q", code, errb)
+	}
+	var def struct {
+		Matched bool   `json:"matched"`
+		Primary string `json:"primary"`
+	}
+	if err := json.Unmarshal([]byte(out), &def); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if def.Matched || def.Primary != "llm-d" {
+		t.Fatalf("default llm-d route = %+v, want unmatched primary llm-d", def)
+	}
+
+	code, out, errb = runRT("--manifest", preset, "--aspect", "tool_call", "--tool", "allow_search", "--labels", "sensitivity=tenant", "--json")
+	if code != 0 {
+		t.Fatalf("llm-d sensitive route exit=%d err=%q", code, errb)
+	}
+	var sensitive struct {
+		Matched bool   `json:"matched"`
+		Rule    string `json:"rule"`
+		Primary string `json:"primary"`
+	}
+	if err := json.Unmarshal([]byte(out), &sensitive); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if !sensitive.Matched || sensitive.Rule != "tenant-sensitive-local" || sensitive.Primary != "inkernel" {
+		t.Fatalf("sensitive llm-d route = %+v, want tenant-sensitive-local -> inkernel", sensitive)
+	}
+}
+
 // An unknown flag is a usage error (exit 2).
 func TestRouteUnknownFlag(t *testing.T) {
 	code, _, _ := runRT("--no-such-flag")

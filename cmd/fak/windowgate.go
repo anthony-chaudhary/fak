@@ -18,20 +18,20 @@ import (
 const windowgateSchema = "fak-windowgate/1"
 
 type windowgatePayload struct {
-	Schema      string         `json:"schema"`
-	OK          bool           `json:"ok"`
-	Verdict     string         `json:"verdict"`
-	Finding     string         `json:"finding"`
-	Reason      string         `json:"reason"`
-	NextAction  string         `json:"next_action"`
-	Workspace   string         `json:"workspace"`
-	Counts      map[string]int `json:"counts"`
-	Suppression map[string]int `json:"suppression,omitempty"`
-	Violations  []string       `json:"violations"`
-	Watchlist   []string       `json:"watchlist,omitempty"`
-	Tools       map[string]int `json:"watchlist_tools,omitempty"`
-	Files       map[string]int `json:"watchlist_files,omitempty"`
-	Dirs        map[string]int `json:"watchlist_dirs,omitempty"`
+	Schema      string           `json:"schema"`
+	OK          bool             `json:"ok"`
+	Verdict     string           `json:"verdict"`
+	Finding     string           `json:"finding"`
+	Reason      string           `json:"reason"`
+	NextAction  string           `json:"next_action"`
+	Workspace   string           `json:"workspace"`
+	Counts      map[string]int   `json:"counts"`
+	Suppression map[string]int   `json:"suppression,omitempty"`
+	Violations  []string         `json:"violations"`
+	Watchlist   []string         `json:"watchlist,omitempty"`
+	Tools       map[string]int   `json:"watchlist_tools,omitempty"`
+	Files       map[string]int   `json:"watchlist_files,omitempty"`
+	Dirs        map[string]int   `json:"watchlist_dirs,omitempty"`
 	LiveTasks   *liveTaskPayload `json:"live_tasks,omitempty"`
 }
 
