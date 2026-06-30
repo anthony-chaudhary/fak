@@ -232,6 +232,45 @@ func TestMaybeCompactDefaultBudgetLeavesShortSessionAlone(t *testing.T) {
 	}
 }
 
+func TestMaybeCompactAppliesM2SystemAnchorRewrite(t *testing.T) {
+	rawA := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"trace 11111111-2222-3333-4444-555555555555"},{"type":"text","text":"stable policy"}],` +
+		`"messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}`)
+	rawB := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"trace aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},{"type":"text","text":"stable policy"}],` +
+		`"messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}`)
+	reqA, err := agent.DecodeAnthropicMessagesRequest(rawA)
+	if err != nil {
+		t.Fatalf("decode A: %v", err)
+	}
+	reqB, err := agent.DecodeAnthropicMessagesRequest(rawB)
+	if err != nil {
+		t.Fatalf("decode B: %v", err)
+	}
+
+	anthropicPassthroughServer(DefaultCompactHistoryBudget).maybeCompactAnthropicRaw(reqA)
+	anthropicPassthroughServer(DefaultCompactHistoryBudget).maybeCompactAnthropicRaw(reqB)
+
+	if bytes.Equal(reqA.Raw, rawA) {
+		t.Fatal("gateway preflight left volatile-before-stable system anchor unchanged")
+	}
+	if !bytes.Contains(reqA.Raw, []byte(`"text":"stable policy","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("gateway preflight did not place the breakpoint on the stable system block:\n%s", reqA.Raw)
+	}
+	if bytes.Contains(reqA.Raw, []byte(`555555555555","cache_control"`)) {
+		t.Fatalf("gateway preflight cached the volatile UUID block:\n%s", reqA.Raw)
+	}
+	if !bytes.Equal(systemCachePrefixFromTest(t, reqA.Raw), systemCachePrefixFromTest(t, reqB.Raw)) {
+		t.Fatalf("gateway M2 rewrite did not make the forwarded cache prefix stable:\nA=%s\nB=%s", systemCachePrefixFromTest(t, reqA.Raw), systemCachePrefixFromTest(t, reqB.Raw))
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(reqA.Raw); err != nil {
+		t.Fatalf("rewritten gateway body A failed to decode: %v", err)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(reqB.Raw); err != nil {
+		t.Fatalf("rewritten gateway body B failed to decode: %v", err)
+	}
+}
+
 // The two helpers below let the gateway test reach the agent package's unexported span
 // locators indirectly: we re-derive the boundary with the same public primitive the
 // gateway relies on (DecodeAnthropicMessagesRequest round-trips), then compute the split
@@ -287,6 +326,25 @@ func lastBreakpointMessageFromTest(elems []json.RawMessage) int {
 		}
 	}
 	return last
+}
+
+func systemCachePrefixFromTest(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	elems, spans, ok := decodeArrayElementsFromTest(t, raw, obj["system"])
+	if !ok {
+		t.Fatal("decode system elements failed")
+	}
+	for i, el := range elems {
+		if bytes.Contains(el, []byte("cache_control")) {
+			return raw[:spans[i].end]
+		}
+	}
+	t.Fatal("no system cache_control block found")
+	return nil
 }
 
 // TestSpliceMaxTokensPreservesPrefix is the F13 regression: capping max_tokens must NOT
