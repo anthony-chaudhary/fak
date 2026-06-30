@@ -453,20 +453,26 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	for lane, info := range router.Lanes {
 		nums := append([]int(nil), info.Issues...)
 		treesByLane[lane] = append([]string(nil), info.Tree...)
-		// Order the lane's open issues so PickTargetIssue (which takes the first
-		// not-skipped) prefers OLDER tickets by default: ascending issue number is
-		// oldest-first, since GitHub issue numbers are monotonic in creation time, so
-		// the dispatcher drains the oldest backlog instead of forever chasing the
-		// newest filing. This is safe ("when reasonable") because the anti-churn
-		// cooldown (recentlyAttemptedIssues) advances past an old issue a worker could
-		// not land, rather than re-storming it every tick. --prefer-newest restores the
-		// historical newest-first pick.
-		if preferNewest {
-			sort.Sort(sort.Reverse(sort.IntSlice(nums)))
-		} else {
-			sort.Ints(nums)
+		// Order the lane's open issues PRIORITY-first, then by recency (#1395), so
+		// PickTargetIssue (which takes the first not-skipped) drains the heaviest
+		// priority/P* work before newer unlabeled noise: an old priority/P1 outranks
+		// a fresh unlabeled filing. Ties fall back to the by-number recency order --
+		// oldest-first by default (GitHub issue numbers are monotonic in creation
+		// time, so the dispatcher drains the oldest backlog instead of forever
+		// chasing the newest filing), newest-first under --prefer-newest. When no
+		// candidate carries a priority/* label every weight is equal and the order
+		// is byte-for-byte the old by-number order. This is safe ("when reasonable")
+		// because the anti-churn cooldown (recentlyAttemptedIssues) advances past an
+		// issue a worker could not land rather than re-storming it every tick.
+		cands := make([]dispatchtick.LaneCandidate, len(nums))
+		for i, n := range nums {
+			weight := dispatchtick.PriorityWeightDefault
+			if w, ok := info.Priority[n]; ok {
+				weight = w
+			}
+			cands[i] = dispatchtick.LaneCandidate{Number: n, Weight: weight}
 		}
-		numsByLane[lane] = nums
+		numsByLane[lane] = dispatchtick.OrderLaneCandidates(cands, preferNewest)
 		counts[lane] = len(nums)
 	}
 	chosen := strings.TrimSpace(explicit)

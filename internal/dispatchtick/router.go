@@ -159,6 +159,11 @@ type RouterLaneGroup struct {
 	Tree   []string `json:"tree"`
 	Count  int      `json:"count"`
 	Issues []int    `json:"issues"`
+	// Priority maps an issue number to its dispatch-priority weight for the
+	// issues that carry a priority/* label (unlabeled issues are omitted and
+	// resolve to PriorityWeightDefault). It is how the picker orders the lane's
+	// candidates priority-first (#1395) without re-deriving weights from labels.
+	Priority map[int]int `json:"priority,omitempty"`
 }
 
 type RouterPayload struct {
@@ -233,17 +238,22 @@ func RouteIssues(in RouterInput) RouterPayload {
 	}
 
 	routes := make([]IssueRoute, 0, len(routable))
+	priority := map[int]int{}
 	for _, issue := range routable {
 		routes = append(routes, RouteIssue(issue, in.Taxonomy, RouteOptions{
 			ScopeAlias:   in.ScopeAlias,
 			LabelAlias:   in.LabelAlias,
 			KeywordAlias: in.KeywordAlias,
 		}))
+		if w := PriorityWeight(labelNames(issue)); w != PriorityWeightDefault {
+			priority[issue.Number] = w
+		}
 	}
 	return BuildRouterPayload(RouterPayloadInput{
 		Workspace:        in.Workspace,
 		Routes:           routes,
 		Trees:            in.Taxonomy.Trees,
+		Priority:         priority,
 		MaxUnroutedFrac:  maxUnrouted,
 		FetchError:       fetchError,
 		Coverage:         coverage,
@@ -436,9 +446,13 @@ func ComputeRouterCoverage(issuesFetched, issueLimit int) RouterCoverage {
 }
 
 type RouterPayloadInput struct {
-	Workspace        string
-	Routes           []IssueRoute
-	Trees            map[string][]string
+	Workspace string
+	Routes    []IssueRoute
+	Trees     map[string][]string
+	// Priority maps an issue number to its dispatch-priority weight for issues
+	// that carry a priority/* label (unlabeled issues are omitted). It drives the
+	// priority-first ordering of each lane group's Issues (#1395).
+	Priority         map[int]int
 	MaxUnroutedFrac  float64
 	FetchError       string
 	Coverage         RouterCoverage
@@ -465,7 +479,26 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		grp.Tree = append([]string(nil), in.Trees[r.Lane]...)
 		grp.Count++
 		grp.Issues = append(grp.Issues, r.Number)
+		if w := laneIssueWeight(in.Priority, r.Number); w != PriorityWeightDefault {
+			if grp.Priority == nil {
+				grp.Priority = map[int]int{}
+			}
+			grp.Priority[r.Number] = w
+		}
 		lanes[r.Lane] = grp
+	}
+	// Order each lane's candidates priority-first (#1395): the heaviest priority/P*
+	// label wins, oldest-first within a tier, so an old priority/P1 surfaces ahead
+	// of newer unlabeled noise. The picker (cmd/fak) re-applies this with the
+	// caller's recency tiebreak; ordering here keeps the payload itself honest for
+	// any consumer that reads lanes[*].issues directly.
+	for lane, grp := range lanes {
+		cands := make([]LaneCandidate, len(grp.Issues))
+		for i, n := range grp.Issues {
+			cands[i] = LaneCandidate{Number: n, Weight: laneIssueWeight(grp.Priority, n)}
+		}
+		grp.Issues = OrderLaneCandidates(cands, false)
+		lanes[lane] = grp
 	}
 	total := len(in.Routes)
 	unrouted := byConf["none"]
