@@ -183,12 +183,41 @@ func TestReviewCandidateLiveRequiresNoiseControl(t *testing.T) {
 	if !has(review.Reasons, ReasonNoiseIncomplete) {
 		t.Fatalf("noise-control reason missing: %+v", review.Reasons)
 	}
+	for _, want := range []string{"trigger", "batch_policy"} {
+		if !has(review.MissingFields, want) {
+			t.Fatalf("missing field %q absent: %+v", want, review.MissingFields)
+		}
+	}
 
 	c.Trigger = "A scored feeder crosses the issue threshold."
 	c.BatchPolicy = "One issue per marker key; reruns update existing issues."
 	review = ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
 	if !review.OK {
 		t.Fatalf("noise-controlled live review refused: %+v", review)
+	}
+}
+
+func TestReviewCandidateLiveRequiresAgentContext(t *testing.T) {
+	c := completeCandidate()
+	c.WorkUnit = ""
+	c.ExpectedSteps = 0
+	c.Assumptions = nil
+	c.ConfusionRisks = nil
+	c.Coordination = nil
+	review := ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
+	if review.OK || review.Dispatchability != Refused || review.Verdict != "refused" {
+		t.Fatalf("agent-context-incomplete live review = %+v, want refused", review)
+	}
+	if !has(review.Reasons, ReasonAgentIncomplete) {
+		t.Fatalf("agent-context reason missing: %+v", review.Reasons)
+	}
+	if has(review.Reasons, ReasonNoiseIncomplete) {
+		t.Fatalf("noise-control reason should not fire when trigger/batch are present: %+v", review.Reasons)
+	}
+	for _, want := range []string{"work_unit", "expected_steps", "assumptions", "confusion_risks", "coordination"} {
+		if !has(review.MissingFields, want) {
+			t.Fatalf("missing field %q absent: %+v", want, review.MissingFields)
+		}
 	}
 }
 

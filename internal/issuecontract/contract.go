@@ -153,7 +153,8 @@ type Review struct {
 func ReviewCandidate(c Candidate, opt Options) Review {
 	c = normalize(c)
 
-	missing := missingScopeFields(c)
+	scopeMissing := missingScopeFields(c)
+	missing := append([]string(nil), scopeMissing...)
 	agentMissing := []string{}
 	noiseMissing := []string{}
 	if opt.Live {
@@ -163,7 +164,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		missing = append(missing, noiseMissing...)
 	}
 	reasons := reasonSet{}
-	if len(missing) > 0 {
+	if len(scopeMissing) > 0 {
 		reasons.add(ReasonScopeIncomplete)
 	}
 	routeOK := c.Lane != "" || len(c.Paths) > 0
