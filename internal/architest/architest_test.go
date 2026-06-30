@@ -223,6 +223,7 @@ var tier = map[string]int{
 	"issuecatalog":    3, // performance-enablement issue-catalog planner/syncer; reads curated rows, reviews them through issuecontract(1), and shells to gh only behind --live; off the hot path.
 	"safesync":        2, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
 	"usagelog":        1, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
+	"promptaudit":     1, // scans system/developer/context prompt text for hidden control markers (apostrophe-alphabet / date-separator channels) before they cross a model or cache boundary; stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
