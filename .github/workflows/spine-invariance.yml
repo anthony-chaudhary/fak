@@ -27,6 +27,21 @@ jobs:
           ./fak-arm64 --version
       - name: Run invariant tests
         run: |
+          set -euo pipefail
+          normalize_go_test_output() {
+            python3 - "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+text = p.read_text()
+text = re.sub(r"\([0-9]+(?:\.[0-9]+)?s\)", "(Xs)", text)
+text = re.sub(r"(?m)^ok(\s+\S+)\s+(?:[0-9]+(?:\.[0-9]+)?s|\(cached\))$", r"ok\1\tXs", text)
+p.write_text(text)
+PY
+          }
+
           # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
           echo "=== Invariant 1: Static binary (CGO_ENABLED=0) ===" > static-binary-arm64.txt
           go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-arm64.txt 2>&1
@@ -46,6 +61,10 @@ jobs:
           # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
           echo "=== Invariant 5: Tamper-evident audit ===" > audit-arm64.txt
           go test -v ./internal/journal >> audit-arm64.txt 2>&1
+
+          for f in static-binary-arm64.txt default-deny-arm64.txt quarantine-arm64.txt kv-reuse-arm64.txt audit-arm64.txt; do
+            normalize_go_test_output "$f"
+          done
       - name: Upload arm64 artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -72,6 +91,21 @@ jobs:
           ./fak-x86_64 --version
       - name: Run invariant tests
         run: |
+          set -euo pipefail
+          normalize_go_test_output() {
+            python3 - "$1" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+text = p.read_text()
+text = re.sub(r"\([0-9]+(?:\.[0-9]+)?s\)", "(Xs)", text)
+text = re.sub(r"(?m)^ok(\s+\S+)\s+(?:[0-9]+(?:\.[0-9]+)?s|\(cached\))$", r"ok\1\tXs", text)
+p.write_text(text)
+PY
+          }
+
           # Invariant 1: One static pure-Go binary, zero deps, CGO_ENABLED=0
           echo "=== Invariant 1: Static binary (CGO_ENABLED=0) ===" > static-binary-x86_64.txt
           go test -v -run "TestRequestPathDefaultBuildIsCgoFree" ./internal/architest >> static-binary-x86_64.txt 2>&1
@@ -91,6 +125,10 @@ jobs:
           # Invariant 5: Tamper-evident audit: append-only, SHA-256 hash-chained
           echo "=== Invariant 5: Tamper-evident audit ===" > audit-x86_64.txt
           go test -v ./internal/journal >> audit-x86_64.txt 2>&1
+
+          for f in static-binary-x86_64.txt default-deny-x86_64.txt quarantine-x86_64.txt kv-reuse-x86_64.txt audit-x86_64.txt; do
+            normalize_go_test_output "$f"
+          done
       - name: Upload x86_64 artifacts
         uses: actions/upload-artifact@v4
         with:
