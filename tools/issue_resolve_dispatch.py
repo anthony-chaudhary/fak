@@ -234,7 +234,8 @@ def live_resolution_lanes(
     stamps into each ``resolve-<N>-<stamp>.log`` and keep only the lanes whose
     worker pid is still alive — the SAME identity gate as
     :func:`live_resolution_issues`. Best effort: a log we cannot parse, or whose
-    pid is gone, contributes no lane."""
+    pid is gone, contributes no lane. A lane whose worker log is a terminal
+    banner no-op (#1275/#1398) is also dropped — see the inline note below."""
     lanes: set[str] = set()
     if not runs_dir.is_dir():
         return lanes
@@ -254,8 +255,23 @@ def live_resolution_lanes(
                 pid_file, alive=alive, probe=probe):
             continue
         lane = _spawn_header_lane(log)
-        if lane:
-            lanes.add(lane)
+        if not lane:
+            continue
+        # A worker whose log is a terminal banner no-op (#1275: it printed only its
+        # startup banner — "> build · glm-…" — and produced nothing) holds no real
+        # work even when its pid still passes the liveness gate. An opencode worker
+        # runs as a ``node`` image, so AFTER it exits a recycled ``node`` pid that
+        # lands in the sidecar's spawn window passes the weak create-time fallback
+        # and would pin the lane FOREVER (#1398: ``docs`` stayed LANE_BUSY behind
+        # dead 122-byte no-ops while real docs work could not dispatch). Drop such a
+        # lane so a lane held ONLY by dead no-op workers reports FREE. This is safe:
+        # a genuinely live worker streams kilobytes past the stub floor within
+        # seconds so it never classifies as a banner no-op, and on a LIVE tick the
+        # authoritative fenced git-ref lease (:func:`acquire_lane_lease`) still
+        # serializes a just-started worker across hosts.
+        if classify_no_commit_reason(log) == NO_COMMIT_BANNER_NOOP:
+            continue
+        lanes.add(lane)
     return lanes
 
 

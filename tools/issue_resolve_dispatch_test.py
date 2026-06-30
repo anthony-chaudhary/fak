@@ -157,6 +157,32 @@ class LiveResolutionLanesTest(unittest.TestCase):
                         "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolution_lanes(runs, probe=probe), set())
 
+    def test_banner_noop_log_does_not_hold_its_lane(self) -> None:
+        """A worker whose log is a terminal banner no-op (#1275) holds no lane even
+        when a recycled pid passes the weak liveness gate (#1398). An exited opencode
+        worker runs as a ``node`` image, so a recycled ``node`` pid landing in the
+        sidecar's spawn window passes the create-time fallback and would otherwise pin
+        ``docs`` at LANE_BUSY forever behind a dead 122-byte no-op."""
+        import os, tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = runs / "resolve-1398-20260629-101010.log"
+            # header + the documented opencode/glm banner-only no-op, well under the
+            # 512-byte stub floor (the real #1398 holders were 122 bytes).
+            log.write_text(
+                "# fak-spawn 20260629-101010 issue=1398 lane=docs backend=opencode "
+                "argv0=node\n> build · glm-4.5-air\n",
+                encoding="utf-8")
+            pid_file = log.with_suffix(".pid")
+            pid_file.write_text("777", encoding="utf-8")
+            os.utime(pid_file, (now, now))
+            def probe(pid):  # a recycled `node` pid in the spawn window → weak-live
+                return {"alive": True, "create_time": now - 1,
+                        "name": "node.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolution_lanes(runs, probe=probe), set())
+
     def test_two_live_workers_hold_two_lanes(self) -> None:
         import tempfile
         mod = load()
