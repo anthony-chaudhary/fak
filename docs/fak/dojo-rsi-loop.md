@@ -68,6 +68,13 @@ write any of these:
 `shipgate.Evaluate` keeps iff `strictGain AND SuiteGreen AND TruthClean`. The breaker
 (`shipgate.Gate`, k=3) upgrades the k-th consecutive non-keep to ESCALATE.
 
+Every tick also emits a structured `dojo_calibration` scorecard beside the scalar
+FoldCalibrable value. The scorecard records the before/after folded value, measured
+delta, estimate/floor sub-terms, sample floor, selector priority, witness bit, and
+agent-arm routing bit. It is telemetry only: DOS observe receipts and JSON output can
+explain why a tick was kept, reverted, or escalated, but the keep-bit still reads only
+the scalar gain plus the suite/truth witnesses above.
+
 ### Anti-gaming defenses (structural, not checks)
 
 1. **Widening the ruler is impossible.** `CalibBand`/`calibErr`/`MaxCalibErr` live in

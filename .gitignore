@@ -121,6 +121,7 @@ internal/compute/spirv/
 .gobuild-tmp/
 fak/.gocache/
 fak/.gotmp/
+/coverage
 
 # Scratch test-runner logs dropped into fak/ by WSL/PowerShell test runs
 # (test.sh, pre-commit, glm-oracle export). Regenerable; some carry the

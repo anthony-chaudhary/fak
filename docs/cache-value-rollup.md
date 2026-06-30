@@ -80,15 +80,27 @@ the roll-up is pinned by:
 go test ./internal/cachevaluereport
 ```
 
-The intended cachevalue front-door spelling for a dated operator report is:
+The cachevalue front-door spelling for a dated operator report is:
 
 ```bash
 fak cachevalue report --since 2026-06-22
 ```
 
-Do not treat that spelling as the witness on a build that does not expose the
-`cachevalue report` subcommand yet; use `fak nightrun score --json` for the shipped
-Track-1 gate on current `main`.
+For the cache-frontier product review, generate the human note and appendable JSONL row
+from the same ledgers:
+
+```bash
+fak cachevalue review \
+  --since 2026-06-22 \
+  --date 2026-06-29 \
+  --source-markdown reviews/2026-06-29.md \
+  --append-ledger docs/cache-frontier/review-ledger.jsonl \
+  --markdown-out docs/cache-frontier/reviews/2026-06-29.md
+```
+
+Use `--json` without `--append-ledger` to inspect the row first. The review artifact is
+still a planning artifact: it keeps Track 1 and Track 2 separate, names thin or missing
+evidence, and points to the missing dogfood/product witnesses.
 
 ## See Also
 

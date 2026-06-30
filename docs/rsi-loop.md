@@ -68,6 +68,49 @@ With the default candidates `6,8,8,10` the loop produces **KEEP, KEEP, REVERT, K
 each strict gain is kept (advancing the baseline), and the no-op `8` (no gain over the
 already-kept `8`) is reverted — driven by the *measurement*, not a flag.
 
+## Structured scores for multi-axis controls
+
+The keep-bit still reads exactly three candidate witnesses: scalar `Metric`,
+`SuiteGreen`, and `TruthClean`. Some controls need more operator-visible shape than a
+single float, though. Context signal/noise is the canonical case: the scalar fitness
+must travel with mean S/N ratio, fault pressure, token split, and a grade so a loop can
+tell "lean" from "starving" instead of overfitting one number.
+
+`rsiloop.Measurement.Score` is that additive side-channel. It is copied into the JSONL
+row as `score`, observed by any `RunObserved` consumer, and deliberately ignored by
+`shipgate.Evaluate`. A scorecard can explain a metric; it cannot make a REVERT into a
+KEEP. The shipped harnesses now use it consistently: `cmd/attnsnrsi` journals
+`attention_sn` fitness with `mean_ratio`, `mean_fault_ratio`, and token totals;
+`rulesynth` journals caught/regressed/cluster/self-modify axes; `sessionobs` journals
+loop-index and debt axes; and the LRU worktree demo journals cache-size and trace-shape
+axes. `cmd/rsiloop` prints a compact score summary in its per-cycle trace and includes
+the same summary in `-dos-observe` narration, so external loop ledgers can see the score
+without re-gating the decision.
+
+The same rule now applies to the standalone RSI-like controls that do not run through
+`internal/rsiloop`: `fak dojo-rsi` emits a `dojo_calibration` scorecard for its
+FoldCalibrable replay, sample floor, selector priority, floor-breach pressure, and
+witness bits; `internal/docfreshrsi` carries a `doc_freshness_debt` score on every
+verdict, separating the debt drop from the cleanliness and link-resolution truth
+signals. These scorecards are evidence surfaces, not extra authority.
+
+Inside `internal/rsiloop`, the same scoring shape also covers the meta controls:
+`loopvariant` archive rows carry `spec_oracle_points` scorecards with pass counts,
+point deltas, task counts, and DOS-evidence cleanliness; `metarsi` apply records carry
+`keep_rate_truth_clean` scorecards with before/after rates, row counts, and the
+suite/truth bits that fenced the proposed gate retune.
+
+Lower-level keep-bit helpers now expose score evidence at the point where they prove
+it, too. `internal/rulesynth.Validate` returns a `near_misses_caught` scorecard on
+the direct verdict, so callers outside the generic harness still see caught,
+regressed, cluster, support, and self-modify axes. `internal/supportmaturity`
+keeps the compact `Promote` API, but `PromoteWithRecord` returns a
+`support_maturity_promotion` scorecard with rung movement, witness-kind binding,
+metric delta, and suite/truth evidence for lifecycle promotion gates.
+The one-shot `cmd/rsicycle` adapter has no journal, but its stdout now includes the
+same compact score line (`score=rsicycle ... metric_delta=...`) before the unchanged
+`DECISION` line and exit-code verdict.
+
 ## S0 as the objective: session outcomes
 
 The same engine now has a session-observability harness for the dev-ex learning loop:

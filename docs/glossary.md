@@ -85,7 +85,7 @@ metaphor and nothing else — the two Go ones and the two Python ones are unrela
 - Kernel ladder: `internal/preflight` — `Ladder.Adjudicate`, `Ladder.caughtAt`, registered by `RegisterAdjudicator(10, …)`. Proof: [`docs/proofs/preflight.md`](proofs/preflight.md).
 - CLI: `cmd/fak/main.go` — `cmdPreflight` (see the subtlety below).
 - Serve-readiness: `tools/glm52_serve_preflight.py` — `evaluate_engine`; siblings `tools/extend_preflight.py` (contributor setup), `tools/qwen36_standalone_readiness.py`.
-- Dispatch spawn gate: `tools/dispatch_preflight.py` — `evaluate`; called from `tools/issue_dispatch.py`. Walkthrough: [`docs/dispatch-loop.md`](dispatch-loop.md).
+- Dispatch spawn gate/router/progress: `fak dispatch route` / `fak dispatch tick` / `fak dispatch wave` / `fak dispatch progress` — the native `internal/dispatchtick` preflight evaluator, host process guard, issue-lane router, account route, live seat-pool fold, distinct-pool wave allocator, and issue-progress snapshot; the legacy `tools/dispatch_preflight.py` / `tools/proc_resource_guard.py` / `tools/issue_lane_router.py` / `tools/fleet_accounts.py route|seats|wave` remain compatibility oracles. Walkthrough: [`docs/dispatch-loop.md`](dispatch-loop.md).
 
 ### The subtlety that trips everyone: `fak preflight` ≠ the `internal/preflight` package
 

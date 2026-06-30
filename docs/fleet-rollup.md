@@ -9,8 +9,9 @@ A fleet of agents produces more than a person can read. In a day it closes a
 hundred-odd issues, lands dozens of commits, runs a dozen loops, and re-scores
 half a dozen scorecards. Almost all of that is noise to someone deciding where
 to look. The few things that are signal are narrow: how much of the volume is
-real rather than merely claimed done, what is trending the wrong way, and the
-short list of things that actually need a human right now.
+real rather than merely claimed done, what is trending the wrong way, the short
+list of things that actually need a human right now, and the first productive
+next-work seed an agent can pick when nothing is on fire.
 
 `fak rollup` is that page. It folds the per-plane folds the fleet already emits
 into one envelope and prints, in a glance, the answer to "what do I owe attention
@@ -38,6 +39,9 @@ one-line headline. Then three blocks:
 - **What needs you.** The ranked list, critical before merely worth-a-glance.
   This is the part to act on. A clean fleet shows nothing here — silence is the
   absence of signal, so it is the absence of lines.
+- **Useful next work.** Productive work that is not an alarm. Today this includes
+  the public-routeable `fak maturity route` seed, so a clean fleet can still tell
+  an agent what to queue next without pretending ordinary backlog is a problem.
 - **Plane coverage.** A small table of which planes were measured and what each
   reported, so you can see what was and was not looked at.
 
@@ -51,7 +55,7 @@ where every plane reported and nothing deviated reads GREEN.
 |---|---|---|
 | dispatch | `tools/dispatch_status.py` | closure honesty (the marquee) + throughput vs target |
 | loops | `loopfleet` cross-ledger fold | dark loops — automation a human thinks is running but isn't |
-| cadence | git work-done + the scorecard pane | ship-stamp rate + quality-debt trend |
+| cadence | git work-done + maturity + the scorecard pane | ship-stamp rate + quality-debt trend + the first public maturity route seed |
 | fleet | the lab roster fold (`fak lab status`) | box liveness / GPU waste |
 
 The slow planes (the closure audit and the ~4-minute scorecard pane) are skipped

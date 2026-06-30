@@ -172,14 +172,17 @@ plan to make it *default* and *critical* — the long-horizon program:
    (`internal/cadencereport`) and the scorecard control pane so the maturity index
    and the rung distribution trend over time in `docs/cadence/history.jsonl` — the
    ratchet then holds the one honest invariant (`maturity_debt` may not regress above
-   baseline; no new ladder-skips land). *(next.)*
-3. **Wire `fak maturity next` into the issue-dispatch loop.** The backlog is already
-   the shape the dispatcher consumes (one checkable item per capability, ranked).
-   Feed it through `tools/findings_route.py` (idempotent, damped, escalatable) or
-   file the top items as GitHub issues with done-conditions, so the fleet
-   continuously advances the least-mature capability without anyone deciding to.
-   This is the literal mechanization of "each agent has the desire to create the
-   next work item." *(next.)*
+   baseline; no new ladder-skips land). *(landed: `fak cadence` now carries a
+   maturity dimension and the unified scorecard pane folds `fak maturity --json`.)*
+3. **Wire `fak maturity next` into the issue-dispatch loop.** The backlog is now a
+   feeder for the same GitHub-issue surface the dispatcher already drains:
+   `fak maturity route` turns the ranked top rows into stable, marker-keyed issue
+   create/update plans, and `--live` files them with done-conditions/witnesses.
+   The issue titles carry `maturity(<lane>)`, so the existing issue router sends
+   each item back to the capability lane. Private-boundary lanes remain visible in
+   `fak maturity next`, but `route` reports them as skipped instead of filing
+   public issues. This is the literal mechanization of "each agent has the desire
+   to create the next work item." *(landed.)*
 4. **Per-capability targets + surface ceilings (v2).** Not every capability should
    reach `default` — an internal building block legitimately tops out at
    `dogfooded`. Add an optional, curatable target/surface-class per lane (the

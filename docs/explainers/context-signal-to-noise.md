@@ -95,6 +95,13 @@ Three properties make it the right number where cache-hit is the wrong one:
 
 `|resident| == |desired|` is just **ratio → 1.0** with faults near 0.
 
+For RSI and sibling controls, `ctxplan.ScoreWitnessedSN(forecast, session)` packages the
+same math into a reusable score: scalar `fitness` for the keep-bit, mean ratio, mean
+fault ratio, token totals, scored-turn count, and grade. `WitnessedSNFitness` is the
+scalar projection of that score. The attention-S/N RSI driver journals the structured
+score through `rsiloop.Measurement.Score`, so controllers can audit the paired axes
+without letting that explanatory payload bypass the normal suite/truth keep gate.
+
 ## Where the exact number lives, and where it can't
 
 The exact, token-weighted S/N requires the per-span Hit/Waste labels in a

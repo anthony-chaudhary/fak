@@ -10,6 +10,33 @@ start with hosted infrastructure, a model download, a GPU, or an API key. Start 
 lowest-common-denominator set: one Go command, deterministic output, no browser required,
 no network, no model weights.
 
+## Cache-frontier walkthrough
+
+Use this path when the goal is fak's caching value-add rather than the whole demo
+catalog. It is the runnable companion to the
+[cache frontier operating plan](CACHE-FRONTIER-OPERATING-PLAN.md): start with the
+multi-agent reuse win, then show the bounded context/query layer, then prove that a
+poisoned span can be removed from the cache story rather than merely hidden in text.
+
+| Step | Command | What it proves |
+|---|---|---|
+| **1. Multi-agent reuse** | `go run ./cmd/ctxdemo -bars` | cold vs warm-cache vs fak work on the multi-agent reuse axis, with the tuned baseline visible. |
+| **2. Forced-turn tax** | `go run ./cmd/turntaxdemo -print` | the kernel deletes avoidable retry/error turns while the clean control stays at zero saved turns. |
+| **3. O(1) planned view** | `go run ./cmd/ctxplandemo -selfcheck` | the resident context stays bounded over a lossless store; poison is excluded and pruned spans remain recoverable. |
+| **4. Queryable memory algebra** | `go run ./cmd/memqdemo` | memory operations compose as queries over a store instead of as one hardcoded summarizer. |
+| **5. Addressable KV removal** | `go run ./cmd/unseedemo -print` | a poisoned KV span is removed and the evicted path matches the never-saw path under the demo's witness. |
+| **6. Dogfood cache ledger** | `fak nightrun score --json` | the sessions fak actually ran report WITNESSED realized reuse, or honestly say the corpus is still thin. |
+
+If the local build exposes `fak cachevalue report`, add the dated two-track roll-up:
+
+```bash
+fak cachevalue report --since 2026-06-22 --json
+```
+
+That report is the operator-facing cache P&L surface. Keep Track 1 WITNESSED kernel
+reuse and Track 2 OBSERVED provider-dollar savings separate; do not infer Track 2 from
+the demo commands above.
+
 | Start-here demo | Command | Track |
 |---|---|---|
 | **dropindemo** — how fak wraps the agent you already run | `go run ./cmd/dropindemo -print` | adoption |

@@ -5,9 +5,9 @@ description: "Every declared fak capability (one per internal/<leaf> lane) place
 
 # fak maturity scorecard — lifecycle, not just completeness
 
-**maturity_debt (ladder-skips): 0**; maturity index **78/100 (C)** over **111** declared capabilities (35 carry the benchmarked badge).
+**maturity_debt (ladder-skips): 0**; maturity index **79/100 (C)** over **112** declared capabilities (35 carry the benchmarked badge).
 
-> maturity: 111 capabilities, index 78/100 (C); no ladder-skips (every capability is at most as mature as its evidence); 1 proposed · 0 prototyped · 18 tested · 56 dogfooded · 36 default
+> maturity: 112 capabilities, index 79/100 (C); no ladder-skips (every capability is at most as mature as its evidence); 1 proposed · 0 prototyped · 17 tested · 58 dogfooded · 36 default
 
 A v1 prototype can be legitimately *complete* and still not be tested, dogfooded, benchmarked, or the default. This scorecard makes that lifecycle visible: it places every declared capability (one per `internal/<leaf>` lane in [`dos.toml`](../dos.toml) `[lanes.trees]`) on a closed ladder, and for each one names the next step that would mature it. Every rung is gated by evidence the author did not write — code on disk, a `*_test.go`, an edge in the running binary's transitive import graph (fak itself runs it), a documented verb — so the only way up the ladder is to change the real tree.
 
@@ -30,8 +30,8 @@ A v1 prototype can be legitimately *complete* and still not be tested, dogfooded
 |---|---|
 | `proposed` | 1 |
 | `prototyped` | 0 |
-| `tested` | 18 |
-| `dogfooded` | 56 |
+| `tested` | 17 |
+| `dogfooded` | 58 |
 | `default` | 36 |
 | `benchmarked` (badge) | 35 |
 
@@ -45,7 +45,6 @@ Each gap is a concrete, checkable next work item. `fak maturity next` is the que
 |  | `tested → dogfooded` | dogfood advmodel: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/advmodel imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood architest: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/architest imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood boundarylint: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/boundarylint imported by cmd/, internal/registrations, or internal/kernel |
-|  | `tested → dogfooded` | dogfood capindex: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/capindex imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood capindexgw: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/capindexgw imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood cohort: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/cohort imported by cmd/, internal/registrations, or internal/kernel |
 |  | `tested → dogfooded` | dogfood ctxresidency: wire it onto the running binary's path so fak itself runs it | github.com/anthony-chaudhary/fak/internal/ctxresidency imported by cmd/, internal/registrations, or internal/kernel |
@@ -69,18 +68,23 @@ Each gap is a concrete, checkable next work item. `fak maturity next` is the que
 |  | `dogfooded → default` | default blobfs: promote it to a documented default surface (a fak verb) | blobfs documented in docs/cli-reference.md |
 |  | `dogfooded → default` | default blobhttp: promote it to a documented default surface (a fak verb) | blobhttp documented in docs/cli-reference.md |
 |  | `dogfooded → default` | default cachemeta: promote it to a documented default surface (a fak verb) | cachemeta documented in docs/cli-reference.md |
+|  | `dogfooded → default` | default capindex: promote it to a documented default surface (a fak verb) | capindex documented in docs/cli-reference.md |
 |  | `dogfooded → default` | default comm: promote it to a documented default surface (a fak verb) | comm documented in docs/cli-reference.md |
 |  | `dogfooded → default` | default contextq: promote it to a documented default surface (a fak verb) | contextq documented in docs/cli-reference.md |
-| | | _… and 58 more (run `fak maturity next`)_ | |
+| | | _… and 59 more (run `fak maturity next`)_ | |
 
 ## Run it
 
 ```bash
 go run ./cmd/fak maturity              # the lifecycle scorecard
 go run ./cmd/fak maturity next         # the next-work backlog (ladder-skips first)
+go run ./cmd/fak maturity route        # plan deduped public GitHub issues for the top public rows
+go run ./cmd/fak maturity route --live # create/update public-routeable issues so dispatch can drain them
 go run ./cmd/fak maturity --markdown    # regenerate this doc
 go run ./cmd/fak maturity --json        # machine payload (control-pane / dispatch loop)
 go test ./internal/maturity/...        # prove the ladder + skip detection + next-work fold
 ```
 
-**Next:** advance the fleet one rung: `fak maturity next` lists 88 next work item(s); the least-mature capability is the most leverage
+`maturity route` keeps private-boundary lanes visible in `maturity next`, but reports them as skipped instead of filing public issues.
+
+**Next:** advance the fleet one rung: `fak maturity next` lists 89 next work item(s); the least-mature capability is the most leverage

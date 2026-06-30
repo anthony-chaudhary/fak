@@ -22,11 +22,13 @@ The four dimensions:
   across every scorecard, the grade-weighted severity debt, and the trend
   against its pinned baseline.
 - **maturity** comes from `fak maturity`: the feature lifecycle index, ladder-skip
-  debt, next-work backlog size, and per-rung distribution.
+  debt, next-work backlog size, per-rung distribution, and the first
+  public-routeable `fak maturity route` seed. Private-boundary maturity rows stay
+  visible in the raw backlog and are counted as skipped in the route preview.
 - **work** is read straight from git over a trailing window (7 days by default,
   `--window N` to change it): the commit count, and the subset that carry a
   `(fak <leaf>)` ship trailer.
-- **releases** come from `tools/release_status.py` run offline: the latest tag
+- **releases** come from `fak release status` run offline: the latest tag
   and the next release action.
 
 ## The advisory gate
@@ -52,6 +54,7 @@ across weeks, not just against a single pinned baseline. Each row is one
 | `standing_health_bp` / `standing_difficulty` / `standing_difficulty_delta` | the 0..100% normalized health input and the denominator/difficulty that made that tick harder or easier |
 | `maturity_score` / `maturity_debt` / `maturity_backlog` | lifecycle index, ladder-skip debt, and next-work count |
 | `maturity_proposed` / `maturity_prototyped` / `maturity_tested` / `maturity_dogfooded` / `maturity_default` | per-rung distribution, so the complete-but-not-dogfooded tail is trendable |
+| `maturity_route_key` / `maturity_route_lane` / `maturity_route_skipped_private` | the top public maturity issue seed and how many private-boundary rows the public issue feeder skipped |
 | `work_window_days` / `work_commits` / `work_ships` | the work-done window and counts |
 | `release_version` / `release_action` | latest tag and next release action |
 

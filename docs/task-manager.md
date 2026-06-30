@@ -58,6 +58,52 @@ go run ./cmd/fak task sample --task build --concept observe
 This command is a sample/export surface, not a scheduler. The load-bearing API is
 the `internal/taskmgr.Manager` type.
 
+`fak task handoff` is the completion-to-next-work gate. It reads a
+`fak.task-handoff.v1` JSON file and refuses unless the record carries:
+
+- a `task` with `state: "done"` and a `witness.verified_state:
+  "verified_done"`;
+- a `current_state` summary describing where the item stands now;
+- either one or two `next_steps` or a `no_next_step_reason`.
+
+Dry-run mode prints the stable GitHub issue create/update plan. `--live` is the
+only mode that calls `gh`, and each next step is deduped by an HTML marker in the
+issue body.
+
+The planned hardening for generated follow-up issues is tracked in
+[`docs/notes/NEXT-STEP-SCOPING-GUARDS-2026-06-30.md`](notes/NEXT-STEP-SCOPING-GUARDS-2026-06-30.md):
+default issue creation should require explicit current state, in-scope and
+out-of-scope boundaries, done condition, witness, route, and acceptance gate
+before a machine-created issue becomes dispatchable.
+
+Minimal handoff input:
+
+```json
+{
+  "schema": "fak.task-handoff.v1",
+  "current_state": "The implementation is committed; the remaining proof is a live issue sync smoke.",
+  "task": {
+    "task_id": "task_push_next",
+    "title": "Push next work",
+    "state": "done",
+    "witness": {
+      "verified_state": "verified_done",
+      "source": "commit-audit",
+      "sha": "deadbeef"
+    }
+  },
+  "next_steps": [
+    {
+      "key": "task_push_next/live-smoke",
+      "title": "Run live task handoff issue sync smoke",
+      "body": "Exercise `fak task handoff --live` against a disposable follow-up issue.",
+      "reason": "Dry-run planning is covered; live gh behavior still needs an operator-owned witness.",
+      "labels": ["agent-handoff"]
+    }
+  ]
+}
+```
+
 ## Embedding shape
 
 ```go

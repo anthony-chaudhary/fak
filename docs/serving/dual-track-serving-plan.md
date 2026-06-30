@@ -116,7 +116,7 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 | **Pipeline parallelism** | codec **[SHIPPED]** / transport **[SEAM-ONLY]**: real bit-exact hidden-state codec + a `TCPTransport`, but its only peer is `EchoFrames` (identity echo), no band-running worker | `internal/model/pipeline.go:159` (`MarshalHidden`); `internal/model/pipeline_transport.go:30` (`TCPTransport`), `:105` (`EchoFrames`) | per-rank worker process that runs its band on GPU and forwards to the next rank over NCCL P2P |
 | **Tensor parallelism** | **[SEAM-ONLY] / [GAP]**: single-box host-array **simulation** + swap-in seam shipped; real NCCL/world-size/device-mesh/per-rank-device GAP | `internal/model/tensor_parallel.go:140` (`Collective`/`LocalCollective`); `internal/compute/compute.go:347` (`CollectiveBackend`, cpu-ref only); `internal/compute/cuda_kernels.cu:52` (`cudaSetDevice(0)`) | vLLM/SGLang: `init_distributed_environment` builds TP/PP/EP groups over a NCCL world (world_size/rank/local_rank) + custom all-reduce |
 | **Expert parallelism (MoE)** | **[GAP]** `ForwardTP` fails closed on MoE | `internal/model/tensor_parallel_forward.go:82` | all-to-all expert dispatch (e.g. DeepEP) |
-| **Serving metrics** | **[PARTIAL]** Prometheus plumbing + an inference family (`fak_gateway_inference_*`) is good; **no** TTFT/TPOT/ITL/goodput/queue-depth/KV-util/per-token series | `internal/gateway/metrics.go:24` (`gatewayMetrics`) | `vllm:time_to_first_token_seconds`, `vllm:time_per_output_token_seconds`, `num_requests_running/waiting`, `gpu_cache_usage_perc` |
+| **Serving metrics** | **[SHIPPED]** normalized `fak_serving_*` Prometheus schema covers TTFT, TPOT, ITL, goodput, running/waiting queue depth, KV-cache utilization, and prefix-cache hit rate with `worker`/`engine`/`model` labels. Track A has a scrape emitter that relabels vLLM/SGLang rows into the schema, including current vLLM `kv_cache_usage_perc` and prefix hit/query counters; Track B has the native emitter seam and the gateway's measured inference/admission signals feed the same row shape. | `internal/gateway/serving_metrics.go`; `internal/gateway/serving_metrics_test.go` | `vllm:time_to_first_token_seconds`, `vllm:time_per_output_token_seconds`, `vllm:num_requests_running/waiting`, `vllm:kv_cache_usage_perc`, `vllm:prefix_cache_hits/queries` |
 
 ## 6. The four explicit honesty calls
 
@@ -264,6 +264,7 @@ rg -n 'writeChatCompletionStream|segmentContent' internal/gateway/http.go       
 rg -n 'BaseURL|planner +agent.Planner'        internal/gateway/gateway.go          # honesty-call 1
 rg -n 'EchoFrames|type TCPTransport'          internal/model/pipeline_transport.go # honesty-call 3
 rg -n 'func \(bs \*BatchSession\) StepBatch'  internal/model/batch.go              # scheduler seam
+rg -n 'ServingScrapeEmitter|fak_serving_kv_cache_usage_perc' internal/gateway        # serving metrics
 rg -n 'cudaSetDevice'                         internal/compute/cuda_kernels.cu     # parallelism greenfield
 rg -n 'ncclCommInitRank|world_size|DeviceMesh' .                                   # expect: no real substrate
 ```

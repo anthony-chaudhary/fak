@@ -63,6 +63,7 @@ concurrent = [
   "vcacheobserve",
   "loopdrive",
   "devindex",
+  "operatorbrief",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -147,9 +148,12 @@ concurrent = [
   "maturity",
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine); cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   "codexmcphealth",
+  "operatorbrief",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
-exclusive = ["abi", "release", "global"]
+# `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
+# they serialize like release/ABI/global work instead of running as ordinary docs.
+exclusive = ["abi", "release", "dos", "global"]
 autopick = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
   "cachemeta",
@@ -210,6 +214,7 @@ autopick = [
   "maturity", # internal/maturity leaf (the feature-maturity lifecycle scorecard), see [lanes].concurrent note
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine), see [lanes].concurrent note
   "codexmcphealth",
+  "operatorbrief",
   # new-leaf:lane
 ]
 
@@ -357,17 +362,22 @@ opttarget = ["internal/opttarget/**"]
 guardcomplaint = ["internal/guardcomplaint/**"] # agent APPEAL channel (`fak complain`); cmd/fak/complain.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 loopindex = ["internal/loopindex/**"] # #1152: agentic-coding loop-index spine (cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 codexmcphealth = ["internal/codexmcphealth/**"]
+operatorbrief = ["internal/operatorbrief/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
 examples    = ["examples/**"]
-docs        = ["docs/**"]
-tools       = ["tools/**"]
+# Root docs/index files are part of the docs lane too. Without these exact
+# entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
+# so the shared tree never fully drains through `fak sweep --apply --lane docs`.
+docs        = ["docs/**", "README.md", "INDEX.md", "llms.txt", "llms-full.txt", "llms-updates.txt"]
+tools       = ["tools/**", "scripts/**"]
 visuals     = ["visuals/**"]
 claude      = [".claude/**"]
 ci          = [".github/**"]
 abi         = ["internal/abi/**"]
 release     = ["VERSION", "docs/releases/**"]
+dos         = ["dos.toml", ".gitignore"]
 global      = ["**/*"]
 
 # Where fleet keeps the state DOS reads. fak/ carries no version constant; the bare

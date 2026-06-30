@@ -36,13 +36,13 @@ scoped worker per issue — while keeping every safety primitive the plan path h
 
 | Stage | Tool | What it does |
 |---|---|---|
-| 0. **Gate** | [`dispatch_preflight.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_preflight.py) | `SPAWN_OK` iff host guard clean ∧ an account is free ∧ live workers < cap. The cap bound is the no-DoS proof. |
-| 1. **Route** | [`issue_lane_router.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_lane_router.py) | Maps each open `gh` issue → a `dos.toml` lane via a confidence ladder (path-confirmed > exact-scope > alias > label > none). `UNROUTED` is first-class; exclusive lanes are never auto-routed. |
-| 2. **Spawn** | [`issue_resolve_dispatch.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_dispatch.py) | Picks the busiest lane's first non-skipped open issue, renders the prompt, launches ONE detached `claude -p` worker on the switcher-pinned account. Anti-churn cooldown + in-flight de-dup so it *walks* the backlog instead of re-storming one un-landable issue. |
-| 2a. **Prompt** | [`issue_worker_prompt.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_worker_prompt.py) | Renders the per-issue resolution prompt: the smallest correct change, the git laws (trunk-only, commit `-s` by path), honest-block-first, and the load-bearing **`#N`-in-subject** rule. |
+| 0. **Gate** | `fak dispatch tick` (`internal/dispatchtick` preflight evaluator) | `SPAWN_OK` iff native host process guard clean ∧ native account routing finds a free worker ∧ native seat-pool admission has headroom ∧ live workers < cap. The account route reads `tools/_registry/sessions.json` plus host-local `route_weights`; the seat pool reads live `.account` sidecars. The cap bound is the no-DoS proof. The legacy [`dispatch_preflight.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_preflight.py) / [`proc_resource_guard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/proc_resource_guard.py) / `fleet_accounts.py route|seats` path remains for compatibility and standalone operator modes; `fak dispatch tick` no longer shells to them. |
+| 1. **Route** | `fak dispatch route` / `fak dispatch tick` (`internal/dispatchtick` router) | Maps each open `gh` issue → a `dos.toml` lane via a confidence ladder (path-confirmed > exact-scope > alias > label > none). `UNROUTED` is first-class; exclusive lanes are never auto-routed. `route --json` exposes the same lanes payload that `tick` consumes. The legacy [`issue_lane_router.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_lane_router.py) remains for older Python dispatch entry points; native dispatch no longer shells to it. |
+| 2. **Spawn** | `fak dispatch tick` / `fak dispatch wave` | `tick` picks the busiest lane's first non-skipped open issue, renders the prompt, and launches ONE detached worker on the routed account. `wave` allocates N distinct native account pools in one call, stamps rank/wave membership, then feeds each lane through the same tick path. Anti-churn cooldown + in-flight de-dup so it *walks* the backlog instead of re-storming one un-landable issue. The scheduled `FleetIssueDispatch -Mode resolve` task now runs `fak dispatch tick`; the legacy [`issue_resolve_dispatch.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_dispatch.py) path remains for older Python entry points. |
+| 2a. **Prompt** | `fak dispatch tick` (`internal/dispatchtick` prompt renderer) | Renders the per-issue resolution prompt: the smallest correct change, the git laws (trunk-only, commit `-s` by path), honest-block-first, and the load-bearing **`#N`-in-subject** rule. The legacy [`issue_worker_prompt.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_worker_prompt.py) remains as a compatibility shim for older Python dispatch entry points. |
 | 3. **Witness** | [`issue_closure_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_closure_audit.py) | Binds each issue to its resolving commit(s) from the commit text, grades through `dos commit-audit`: `TRUE_RESOLVED` / `CLAIMED_CLOSED` / `OPEN_WITNESSED` / `OPEN`. `closure_rate = TRUE / (TRUE + CLAIMED)`. |
 | 4. **Close** | [`issue_resolve_witnessed.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_witnessed.py) | The deterministic close arm — no model, no edit. For each `OPEN_WITNESSED` issue it **re-runs** `dos commit-audit <sha>` at close time and closes via `gh issue close` citing the SHA iff `OK` ∧ `diff-witnessed`. Reversible with `gh issue reopen`. |
-| 5. **Harvest** | [`issue_resolve_progress.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_progress.py) | Snapshots open / closed-by-loop / witnessed counts to `.dispatch-runs/progress.jsonl` (the curve) and drives the close arm. Counts only closes carrying the close-arm's signature as the loop's own work. |
+| 5. **Harvest** | `fak dispatch progress` / [`issue_resolve_progress.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_progress.py) | Native `progress` snapshots open / closed-by-loop / witnessed counts to `.dispatch-runs/progress.jsonl` (the curve), records the baseline, and emits loop-ledger witness rows. The legacy Python progress script still drives `--close` until the native witnessed close arm lands. Counts only closes carrying the close-arm's signature as the loop's own work. |
 | 6. **Surface** | [`dispatch_status.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_status.py) | One-touch operator card; `--md` writes the operator-local `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane, closure honesty, silent-worker scan). |
 
 ## The load-bearing invariants
@@ -97,11 +97,16 @@ spawns the next worker.
 python tools/dispatch_status.py
 
 # progress toward the target (snapshot only)
-python tools/issue_resolve_progress.py --target 50
+go run ./cmd/fak dispatch progress --target 50
 
 # spawn ONE issue worker now (cooldown-aware; busiest lane's next fresh issue)
-python tools/issue_resolve_dispatch.py            # dry-run / plan
-python tools/issue_resolve_dispatch.py --live      # spawn
+go run ./cmd/fak dispatch tick            # dry-run / plan
+go run ./cmd/fak dispatch tick --live      # spawn
+
+# feed public-routeable maturity-ladder gaps into the issue backlog the dispatcher drains
+# private-boundary lanes stay visible in `fak maturity next` and are skipped here
+go run ./cmd/fak maturity route --fetch-existing --limit 3   # dry-run: create/update plan
+go run ./cmd/fak maturity route --live --limit 3             # create/update public issues
 
 # close every witnessed-but-still-open issue now (each re-verified per-SHA)
 python tools/issue_resolve_witnessed.py            # dry-run / plan
@@ -118,17 +123,20 @@ default**; `-Live` opts into the side effect.
 
 | Task | Installer | Cadence | Arm |
 |---|---|---|---|
-| `FleetIssueDispatch` | [`register_issue_dispatch.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_issue_dispatch.ps1) | 10 min | SPAWN — one guarded issue worker per tick (`-Mode resolve`, default). `-Mode loop` runs the plan-portfolio arm instead (dormant until `PLAN-*.md` ship). |
+| `FleetIssueDispatch` | [`register_issue_dispatch.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_issue_dispatch.ps1) | 10 min | SPAWN — one native `fak dispatch tick` issue worker per tick (`-Mode resolve`, default). `-Mode loop` runs the legacy plan-portfolio arm instead (dormant until `PLAN-*.md` ship). |
 | `FleetResolveProgress` | [`register_resolve_progress.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_resolve_progress.ps1) | 15 min | CLOSE / harvest — snapshot the curve and close `OPEN_WITNESSED` issues. DoS-free (no worker spawned). |
 | `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render the gitignored, operator-local `.dispatch-runs/dispatch-status.md`. Read-only fold; never committed. |
 
-All three tasks are installed through `fak loop run`, not directly through Python. The
-Task Scheduler fire/start/end wrapper rows land in `.fak/loops.jsonl` under
+All three tasks are installed through `fak loop run`; the spawn task's default
+resolve arm also runs the native `fak dispatch tick` child instead of the legacy
+Python dispatcher. The Task Scheduler fire/start/end wrapper rows land in
+`.fak/loops.jsonl` under
 `issue-resolve-dispatch/task-scheduler/<backend>`, `issue-resolve-progress/task-scheduler`,
-and `dispatch-status-doc/task-scheduler`; the Python producers then record their own
-admission/spawn/progress/witness rows under `issue-resolve-dispatch/<backend>` and
-`issue-resolve-progress`. (`FleetDispatchStatusDoc` is a read-only render, so it adds only
-the wrapper run rows — enough to see in `fak loop status` that the doc actually refreshed.)
+and `dispatch-status-doc/task-scheduler`; the native spawn child records its own
+admission/spawn rows under `issue-resolve-dispatch/<backend>`, while the progress
+producer records progress/witness rows under `issue-resolve-progress`.
+(`FleetDispatchStatusDoc` is a read-only render, so it adds only the wrapper run
+rows — enough to see in `fak loop status` that the doc actually refreshed.)
 
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)
@@ -137,6 +145,7 @@ the wrapper run rows — enough to see in `fak loop status` that the doc actuall
 .\tools\register_dispatch_status_doc.ps1 -Workspace C:\work\fak -EveryMinutes 30
 
 # status / remove any of them
+.\tools\register_issue_dispatch.ps1 -Action preview
 .\tools\register_issue_dispatch.ps1 -Action status
 .\tools\register_issue_dispatch.ps1 -Action remove
 ```

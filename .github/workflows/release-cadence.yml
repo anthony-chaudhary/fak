@@ -53,6 +53,8 @@ jobs:
     if: github.ref_name == 'main' || github.ref_name == 'master'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      GOTOOLCHAIN: auto
     permissions:
       contents: write
       actions: read
@@ -66,12 +68,16 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Release status snapshot
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python tools/release_status.py --json --require-ci-green --skip-gh --skip-cut-plan --limit-commits 50 > release-status.json
+          go run ./cmd/fak release status --json --require-ci-green --skip-gh --skip-cut-plan --limit-commits 50 > release-status.json
           cat release-status.json
           action="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["kind"])')"
           detail="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["detail"])')"
@@ -175,18 +181,52 @@ jobs:
           echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
           echo "This run stops after the plan (a manual dispatch with dry_run=true, or scheduled auto-cut killed via FAK_AUTO_RELEASE=0). Dispatch with dry_run=false to execute now (#1355)." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Cut release commit
-        id: cut
+      - name: Acquire release lock
+        id: release_lock
         if: >-
           steps.decide.outputs.decision == 'release' &&
           steps.arm.outputs.execute == 'true'
         env:
+          FAK_RELEASE_OWNER: release-cadence-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          set +e
+          python tools/release_lock.py acquire \
+            --ttl 5400 \
+            --note "release-cadence ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}" > release-lock.json
+          code=$?
+          set -e
+          cat release-lock.json
+          echo "owner=$FAK_RELEASE_OWNER" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 0 ]; then
+            echo "acquired=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "acquired=false" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 3 ]; then
+            {
+              echo "## Release lock held"
+              echo ""
+              echo "Another release owns \`.release.lock\`; this cadence tick defers to the next run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$code"
+
+      - name: Cut release commit
+        id: cut
+        if: >-
+          steps.decide.outputs.decision == 'release' &&
+          steps.arm.outputs.execute == 'true' &&
+          steps.release_lock.outputs.acquired == 'true'
+        env:
           GH_TOKEN: ${{ github.token }}
+          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
         run: |
           set -euo pipefail
           git config user.name "fleet-release-cadence[bot]"
           git config user.email "fleet-release-cadence@users.noreply.github.com"
-          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 > cut.json
+          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 --lock-already-held > cut.json
           cat cut.json
           ok="$(python -c 'import json; print(json.load(open("cut.json"))["ok"])')"
           if [ "$ok" != "True" ]; then
@@ -217,6 +257,7 @@ jobs:
         if: steps.cut.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
         run: |
           set -euo pipefail
           python tools/release_tag.py \
@@ -226,6 +267,7 @@ jobs:
             --wait-ci \
             --execute \
             --push \
+            --lock-already-held \
             --json > tag.json
           cat tag.json
           ok="$(python -c 'import json; print(json.load(open("tag.json"))["ok"])')"
@@ -250,3 +292,11 @@ jobs:
             echo "::error::release_publish refused"
             exit 1
           fi
+
+      - name: Release release lock
+        if: always() && steps.release_lock.outputs.acquired == 'true'
+        env:
+          FAK_RELEASE_OWNER: ${{ steps.release_lock.outputs.owner }}
+        run: |
+          set -euo pipefail
+          python tools/release_lock.py release
