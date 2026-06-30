@@ -20,8 +20,10 @@ Self-bounded: --target workers max, dedup, dry-run by default (--live to spawn).
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +60,38 @@ def live_glm_workers() -> int:
     return n
 
 
+def glm_provider_exhausted(runs: Path, *, lookback: int = 16) -> str | None:
+    """Reset hint if the zai-coding-plan pool is drained, else None.
+
+    The glm-4.5-air key is a weekly/monthly quota pool. When it is exhausted
+    every spawn just retry-loops on 'Weekly/Monthly Limit Exhausted', burning a
+    worker slot and ~30 host threads until the documented reset. Detect that from
+    the freshest worker logs so the scheduled task is a clean no-op until the pool
+    resets, instead of flooding the docs lane with dead workers."""
+    try:
+        logs = sorted(runs.glob("resolve-*.log"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)[:lookback]
+    except OSError:
+        return None
+    today = dt.date.today()
+    for log in logs:
+        try:
+            tail = log.read_text(errors="replace")[-4000:]
+        except OSError:
+            continue
+        if "Limit Exhausted" not in tail or "zai-coding-plan" not in tail:
+            continue
+        m = re.search(r"reset at (\d{4}-\d{2}-\d{2})", tail)
+        if not m:
+            return "unknown"  # exhausted but no parseable reset -> back off conservatively
+        try:
+            if dt.date.fromisoformat(m.group(1)) >= today:
+                return m.group(1)
+        except ValueError:
+            return "unknown"
+    return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--target", type=int, default=2, help="desired live glm workers")
@@ -81,6 +115,16 @@ def main(argv=None) -> int:
         print(json.dumps(msg) if args.json else
               f"glm-docs: live={have}/{args.target} would_spawn={targets} "
               f"({msg['reason']}; --live to spawn)")
+        return 0
+
+    reset = glm_provider_exhausted(RUNS)
+    if reset is not None:
+        msg = {"pool": "glm-docs", "live": have, "target": args.target,
+               "deficit": deficit, "would_spawn": [],
+               "reason": f"zai-coding-plan quota exhausted (resets {reset}); skipping spawn"}
+        print(json.dumps(msg) if args.json else
+              f"glm-docs: provider quota exhausted (resets {reset}); "
+              f"skipping {len(targets)} spawn(s) until reset")
         return 0
 
     acct = {"tag": "zai-coding-plan", "dir": OPENCODE_DIR, "model": GLM_MODEL, "tier": 2}
