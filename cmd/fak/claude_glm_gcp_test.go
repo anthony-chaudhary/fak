@@ -105,7 +105,7 @@ func TestClaudeGLMGCPDefaultTierClearsDSAFloor(t *testing.T) {
 func TestClaudeGLMGCPA100TiersInRegistry(t *testing.T) {
 	root := repoRootFromTest(t)
 	accel := readRepoTextForClaudeGLMGCP(t, root, "tools", "gcp_accel.py")
-	// The 80GB A100 tier (a2-ultragpu-8g) is the same 640 GB-VRAM shape as the DGX A100
+	// The 80GB A100 tier (a2-ultragpu-8g) is the same 640 GB-VRAM shape as the private GPU-server
 	// example; sm_80 is below the DSA floor, so the bring-up serves it via the pure fak
 	// kernel / llama.cpp, never the stock SGLang/vLLM DSA path.
 	idx := strings.Index(accel, `slug="a2-ultra-a100-80gb"`)
@@ -192,7 +192,7 @@ func TestClaudeGLMGCPA100LlamacppBenchmarkPlan(t *testing.T) {
 		t.Fatalf("gcp-glm-serve A100 llamacpp plan failed: %v\n%s", err, out)
 	}
 	text := string(out)
-	// SERVE=llamacpp stands up the DGX A100 example (llama.cpp MLA) as the benchmark baseline.
+	// SERVE=llamacpp stands up the private GPU-server example (llama.cpp MLA) as the benchmark baseline.
 	for _, want := range []string{
 		"a2-ultragpu-8g",
 		"glm52_stage_serve_dgx3.sh",

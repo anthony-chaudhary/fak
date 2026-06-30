@@ -202,6 +202,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	if id.Email != "" {
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
 	}
+	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
 	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(argv, " "))

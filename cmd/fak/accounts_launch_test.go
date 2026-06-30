@@ -137,6 +137,7 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	for _, want := range []string{
 		`seat "gem8-seat"`,
 		"CLAUDE_CONFIG_DIR = " + seat,
+		"login             = ready (can_serve=true)",
 		"guard             = on",
 		"--dangerously-skip-permissions",
 		"dry-run",

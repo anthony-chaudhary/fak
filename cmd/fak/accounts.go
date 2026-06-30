@@ -398,6 +398,7 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 		if seat.Email != "" {
 			line += "  (" + seat.Email + ")"
 		}
+		line += fmt.Sprintf("  login=%s can_serve=%t", seat.Login, seat.CanServe)
 		fmt.Fprintln(stdout, line)
 	}
 	return 0
