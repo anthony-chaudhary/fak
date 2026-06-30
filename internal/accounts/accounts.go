@@ -414,19 +414,20 @@ func (r Registry) walkRehome(name string, stop func(Home) bool, next func(Home) 
 	}
 }
 
-// serveable reports whether a seat can run a session right now: it is active (not
-// tombstoned) and its config home exists on disk with live credentials. It reads the
-// disk-derived Identity, so callers should Refresh the registry first.
+// serveable reports whether a seat can run a session right now. The closed login status
+// vocabulary owns that definition so launch, rotation, and human status surfaces do not
+// drift: ready means active, enabled, present on disk, and carrying live credentials. It
+// reads disk-derived Identity, so callers should Refresh the registry first.
 func (r Registry) serveable(h Home) bool {
-	return h.Active() && h.Identity.Exists && h.Identity.HasCreds
+	return h.CanServe()
 }
 
 // Serve resolves name to the seat that should actually run it, REHOMING BY DEFAULT.
 // This is the non-aggressive default: pinning to one exact account is brittle (the
 // account gets retired, throttled, or logged out), so unless a seat can serve right now,
 // resolution falls FORWARD — a tombstoned seat follows its rehome_to (as Resolve does),
-// and a live-but-unserveable seat (missing dir / no credentials) likewise falls forward,
-// to its rehome_to if set, else the registry's Default seat. chain reports the hops
+// and a live-but-unserveable seat (disabled, missing dir, or no credentials) likewise
+// falls forward, to its rehome_to if set, else the registry's Default seat. chain reports the hops
 // (requested -> … -> served) so a caller can explain the redirect. An already-serveable
 // requested seat is returned as-is (rehome only kicks in when needed). Use Resolve when
 // you truly need to PIN to an exact seat. Serve reads disk-derived Identity, so Refresh

@@ -14,11 +14,11 @@ func viewFixture() Registry {
 		Roles: map[string]string{RoleAnchor: "gem8-netra", RoleActive: "day24-netra"},
 		Homes: []Home{
 			{Name: "gem8-netra", Dir: `C:\Users\U\.claude-gem8-netra`,
-				Identity: Identity{Email: "gem8@netra.test"}, Enabled: &tru},
+				Identity: Identity{Email: "gem8@netra.test", Exists: true, HasCreds: true}, Enabled: &tru},
 			{Name: "day24-netra", Dir: `C:\Users\U\.claude-day24-netra`, Reserved: true,
-				Identity: Identity{Email: "day24@netra.test"}, ChromeProfile: "Profile 3"},
+				Identity: Identity{Email: "day24@netra.test", Exists: true, HasCreds: true}, ChromeProfile: "Profile 3"},
 			{Name: "gem7-netra", Dir: `C:\Users\U\.claude-gem7-netra`,
-				Identity: Identity{Email: "gem7@netra.test"}, ChromeProfile: "Profile 10"},
+				Identity: Identity{Email: "gem7@netra.test", Exists: true}, ChromeProfile: "Profile 10"},
 			{Name: "q-netra", Status: StatusTombstoned, RehomeTo: "gem8-netra",
 				Dir: `C:\Users\U\.claude-q-netra.DELETED`, Identity: Identity{Email: "gem8@netra.test"},
 				TombstonedAt: "2026-06-25T15:00:00Z", TombstoneReason: "phantom duplicate of gem8-netra"},
@@ -66,6 +66,10 @@ func TestRenderDosView(t *testing.T) {
 		`    config_dir: "C:\\Users\\U\\.claude-gem8-netra"` + "\n", // backslash+colon path is quoted+escaped
 		"  - name: day24-netra\n",
 		"  - name: gem7-netra\n",
+		"    login_status: ready\n",
+		"    can_serve: true\n",
+		"    login_status: needs_login\n",
+		"    can_serve: false\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dos view missing %q in:\n%s", want, got)
@@ -123,6 +127,8 @@ func TestRenderJobView(t *testing.T) {
 	// Active rows carry the richer field set.
 	for _, want := range []string{
 		"  - name: day24-netra\n",
+		"    login_status: ready\n",
+		"    can_serve: true\n",
 		"    chrome_profile: Profile 3\n",
 		"    email: day24@netra.test\n",
 		"    enabled: true\n",
@@ -136,6 +142,8 @@ func TestRenderJobView(t *testing.T) {
 	for _, want := range []string{
 		"\ntombstoned_accounts:\n",
 		"  - name: q-netra\n",
+		"    login_status: tombstoned\n",
+		"    can_serve: false\n",
 		"    enabled: false\n",
 		`    tombstoned_at: "2026-06-25T15:00:00Z"` + "\n", // contains ':' -> quoted
 		"    tombstone_reason: phantom duplicate of gem8-netra\n",

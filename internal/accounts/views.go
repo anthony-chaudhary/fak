@@ -81,6 +81,14 @@ func writeNameDirRow(b *strings.Builder, h Home) {
 	b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
 }
 
+// writeLoginRowFields materializes the shared login vocabulary into generated roster views.
+// Existing consumers can keep reading name/config_dir, while switchers that understand these
+// fields no longer need to infer launch readiness from enabled/status/credential side effects.
+func writeLoginRowFields(b *strings.Builder, h Home) {
+	b.WriteString("    login_status: " + yamlScalar(string(h.LoginStatus())) + "\n")
+	b.WriteString("    can_serve: " + strconv.FormatBool(h.CanServe()) + "\n")
+}
+
 // renderDos emits the dos roster: `accounts:` rows of name+config_dir for every active home,
 // the active-default seat + the full role map (so a launcher/watchdog can pick the right seat
 // without re-reading the registry), then the view's config blocks (rotation/defaults).
@@ -90,6 +98,7 @@ func (r Registry) renderDos() string {
 	b.WriteString("accounts:\n")
 	for _, h := range r.activeHomes() {
 		writeNameDirRow(&b, h)
+		writeLoginRowFields(&b, h)
 	}
 	// active_default: the name+config_dir of the ACTIVE-role seat — the account a bare launch /
 	// watchdog should use. Emitted as a top-level scalar so the existing flat `accounts:`
@@ -124,6 +133,7 @@ func (r Registry) renderJob() string {
 	b.WriteString("accounts:\n")
 	for _, h := range r.activeHomes() {
 		writeNameDirRow(&b, h)
+		writeLoginRowFields(&b, h)
 		b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
 		b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
 		b.WriteString("    enabled: " + strconv.FormatBool(h.EnabledOrDefault()) + "\n")
@@ -135,6 +145,7 @@ func (r Registry) renderJob() string {
 		b.WriteString("\ntombstoned_accounts:\n")
 		for _, h := range tomb {
 			writeNameDirRow(&b, h)
+			writeLoginRowFields(&b, h)
 			b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
 			b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
 			b.WriteString("    enabled: false\n")

@@ -56,6 +56,7 @@ type RotationSeat struct {
 	// derivable identity (an unidentifiable serveable seat is its own singleton bucket).
 	Account   string         `json:"account,omitempty"`
 	Status    RotationStatus `json:"status"`
+	Login     LoginStatus    `json:"login_status,omitempty"`
 	Email     string         `json:"email,omitempty"`
 	Canonical string         `json:"canonical,omitempty"` // for a duplicate, the pool seat it collapses onto
 }
@@ -95,17 +96,13 @@ func (r Registry) RotationPlan() RotationResult {
 
 	var eligible []Home
 	for _, h := range r.Homes {
-		switch {
-		case !h.Active():
-			res.Excluded = append(res.Excluded, seatStatus(h, RotationTombstoned))
-		case !h.EnabledOrDefault():
-			res.Excluded = append(res.Excluded, seatStatus(h, RotationDisabled))
-		case pol.AvoidReserved && h.Reserved:
-			res.Excluded = append(res.Excluded, seatStatus(h, RotationReserved))
-		case !r.serveable(h):
-			res.Excluded = append(res.Excluded, seatStatus(h, RotationUnservable))
-		default:
+		switch st := rotationStatusFor(h, pol); st {
+		case RotationIncluded:
 			eligible = append(eligible, h)
+		case RotationReserved:
+			res.Excluded = append(res.Excluded, seatStatus(h, RotationReserved))
+		default:
+			res.Excluded = append(res.Excluded, seatStatus(h, st))
 		}
 	}
 
@@ -143,6 +140,27 @@ func (r Registry) RotationPlan() RotationResult {
 	sort.Slice(res.Excluded, func(i, j int) bool { return res.Excluded[i].Name < res.Excluded[j].Name })
 	res.Pool = pool
 	return res
+}
+
+// rotationStatusFor is the single primary-status bridge from login readiness into
+// rotation. LoginStatus owns whether a config home can serve; rotation layers only
+// rotation-specific policy on top, such as holding reserved seats out of the routine pool.
+func rotationStatusFor(h Home, pol RotationPolicy) RotationStatus {
+	switch h.LoginStatus() {
+	case LoginReady:
+		if pol.AvoidReserved && h.Reserved {
+			return RotationReserved
+		}
+		return RotationIncluded
+	case LoginTombstoned:
+		return RotationTombstoned
+	case LoginDisabled:
+		return RotationDisabled
+	case LoginMissingDir, LoginNeedsLogin:
+		return RotationUnservable
+	default:
+		return RotationUnservable
+	}
 }
 
 // NextInRotation returns the next pool seat AFTER the account bucket that `after` belongs
@@ -193,6 +211,7 @@ func seatStatus(h Home, st RotationStatus) RotationSeat {
 		Dir:     h.Dir,
 		Account: h.Identity.AccountKey(),
 		Status:  st,
+		Login:   h.LoginStatus(),
 		Email:   h.Identity.Email,
 	}
 }

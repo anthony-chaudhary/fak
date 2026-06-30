@@ -26,12 +26,19 @@ func poolNames(res RotationResult) []string {
 
 // excludedReason returns the status recorded for seat `name` in the excluded list (or "").
 func excludedReason(res RotationResult, name string) RotationStatus {
-	for _, s := range res.Excluded {
-		if s.Name == name {
-			return s.Status
-		}
+	if s, ok := excludedSeat(res, name); ok {
+		return s.Status
 	}
 	return ""
+}
+
+func excludedSeat(res RotationResult, name string) (RotationSeat, bool) {
+	for _, s := range res.Excluded {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return RotationSeat{}, false
 }
 
 func TestRotationPlanDedupAndExclusions(t *testing.T) {
@@ -48,6 +55,14 @@ func TestRotationPlanDedupAndExclusions(t *testing.T) {
 		// Active+enabled but no live credentials -> unservable, never a rotation target.
 		{Name: "eve", Dir: "/home/eve", Status: StatusActive,
 			Identity: Identity{Exists: true, HasCreds: false, AccountUUID: "u-eve", Email: "eve@x.test"}},
+		// Reserved is a rotation policy, not a substitute for login status: this is still
+		// unservable because it cannot launch without /login.
+		func() Home {
+			h := active("zreserved-dead", "u-reserved-dead", "dead@x.test")
+			h.Reserved = true
+			h.Identity.HasCreds = false
+			return h
+		}(),
 		// Tombstoned -> rehomes via Serve, never rotated onto.
 		{Name: "old", Status: StatusTombstoned, RehomeTo: "alice"},
 	}}
@@ -77,11 +92,20 @@ func TestRotationPlanDedupAndExclusions(t *testing.T) {
 	if r := excludedReason(res, "dave"); r != RotationDisabled {
 		t.Fatalf("dave excluded reason = %q, want disabled", r)
 	}
-	if r := excludedReason(res, "eve"); r != RotationUnservable {
-		t.Fatalf("eve excluded reason = %q, want unservable", r)
+	if s, ok := excludedSeat(res, "dave"); !ok || s.Login != LoginDisabled {
+		t.Fatalf("dave login = %q,%v, want disabled,true", s.Login, ok)
+	}
+	if s, ok := excludedSeat(res, "eve"); !ok || s.Status != RotationUnservable || s.Login != LoginNeedsLogin {
+		t.Fatalf("eve excluded = %+v,%v, want unservable with login needs_login", s, ok)
+	}
+	if s, ok := excludedSeat(res, "zreserved-dead"); !ok || s.Status != RotationUnservable || s.Login != LoginNeedsLogin {
+		t.Fatalf("reserved no-creds excluded = %+v,%v, want unservable with login needs_login", s, ok)
 	}
 	if r := excludedReason(res, "old"); r != RotationTombstoned {
 		t.Fatalf("old excluded reason = %q, want tombstoned", r)
+	}
+	if s, ok := excludedSeat(res, "old"); !ok || s.Login != LoginTombstoned {
+		t.Fatalf("old login = %q,%v, want tombstoned,true", s.Login, ok)
 	}
 	// Honesty: applied order is the witnessed stable round-robin, not an unwitnessed by_reset.
 	if res.OrderApplied != "stable-by-name" {
