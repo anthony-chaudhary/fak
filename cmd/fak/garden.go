@@ -33,6 +33,13 @@ func runGarden(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "tick" {
 		return runGardenTick(stdout, stderr, argv[1:])
 	}
+	// `fak garden walk` is the ITEM pass (#item-walk): one resource-aware fold over
+	// the HUNDREDS of individual garden items (issues today) a member surfaces — it
+	// cheaply skips the live/healthy ones and proposes a budget-bounded, worst-first
+	// worklist for the rest. Complements `tick` (which acts at the member level).
+	if len(argv) > 0 && argv[0] == "walk" {
+		return runGardenWalk(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("garden", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
