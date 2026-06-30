@@ -228,6 +228,36 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(p["lanes"]["gateway"]["count"], 2)
         self.assertEqual(p["lanes"]["compute"]["count"], 1)
 
+    def test_lane_issues_ordered_by_confidence_then_number_desc(self):
+        # A lane's issue list is folded by a dos-dispatch worker, so the best-routed
+        # ticket must come first: path-confirmed (rung 1) outranks exact-scope (rung 2),
+        # and within one confidence the newer issue number wins. gh fetch order (here
+        # 1,2,3) must NOT leak through.
+        routes = [
+            route(issue(1, "fix(gateway): low a")),                      # exact-scope
+            route(issue(2, "perf work", body="see fak/internal/gateway/serve.go")),  # path
+            route(issue(3, "fix(gateway): low b")),                      # exact-scope
+        ]
+        p = self._payload(routes)
+        grp = p["lanes"]["gateway"]
+        # sanity: the fixtures produced the two confidence rungs we intend to order.
+        self.assertEqual({r["number"]: r["confidence"] for r in
+                          (route(issue(1, "fix(gateway): low a")),
+                           route(issue(2, "perf work", body="see fak/internal/gateway/serve.go")),
+                           route(issue(3, "fix(gateway): low b")))},
+                         {1: "exact-scope", 2: "path-confirmed", 3: "exact-scope"})
+        self.assertEqual(grp["issues"], [2, 3, 1])   # path first, then number desc
+
+    def test_lane_carries_its_own_by_confidence(self):
+        routes = [
+            route(issue(1, "fix(gateway): a")),                          # exact-scope
+            route(issue(2, "perf", body="see fak/internal/gateway/serve.go")),  # path
+            route(issue(3, "fix(gateway): b")),                          # exact-scope
+        ]
+        p = self._payload(routes)
+        self.assertEqual(p["lanes"]["gateway"]["by_confidence"],
+                         {"path-confirmed": 1, "exact-scope": 2})
+
     def test_unrouted_first_sort(self):
         routes = [route(issue(1, "fix(gateway): a")),
                   route(issue(2, "Merge branches"))]
