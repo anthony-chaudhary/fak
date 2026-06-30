@@ -71,10 +71,12 @@ type Descriptor struct {
 	// Run is the persisted PCB position. A restart re-attaches at THIS state, not the
 	// Running default — a Stopped descriptor restores Stopped, never silently resurrected.
 	Run RunState `json:"run"`
-	// Budget / Priority / Generation mirror the live State fields so a restart resumes at
-	// the real allotment / rank / re-continuation depth, not at defaults.
+	// Budget / Priority / Pace / Generation mirror the live State fields so a restart
+	// resumes at the real allotment / rank / throttle / re-continuation depth, not at
+	// defaults.
 	Budget     Budget `json:"budget"`
 	Priority   int    `json:"priority"`
+	Pace       Pace   `json:"pace"`
 	Generation int    `json:"generation,omitempty"`
 	// Reason is the closed token on a Throttled/Stopped descriptor ("" otherwise), carried
 	// so a restart of a terminal session still reports WHY it stopped.
@@ -120,6 +122,7 @@ func descriptorFromState(st State) Descriptor {
 		Run:        st.Run,
 		Budget:     st.Budget,
 		Priority:   st.Priority,
+		Pace:       st.Pace,
 		Generation: st.Generation,
 		Reason:     st.Reason,
 		Rev:        st.Rev,
@@ -139,6 +142,7 @@ func (d Descriptor) RestoredState() State {
 		Run:        d.Run,
 		Budget:     d.Budget,
 		Priority:   d.Priority,
+		Pace:       d.Pace,
 		Generation: d.Generation,
 		Reason:     d.Reason,
 		Rev:        d.Rev,

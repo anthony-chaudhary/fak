@@ -1,6 +1,7 @@
 package dispatchtick
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ const SeatPoolSchema = "fleet-seat-pool/1"
 type AccountRow struct {
 	Account        string
 	Tag            string
+	Kind           string
 	Product        string
 	Dir            string
 	Model          string
@@ -38,6 +40,56 @@ type AccountRouteResult struct {
 	FallbackUsed          bool
 	Account               AccountRow
 	BlockedTargetAccounts []AccountRow
+}
+
+type AccountWaveInput struct {
+	Rows     []AccountRow
+	Count    int
+	Product  string
+	WorkKind string
+	WaveID   string
+}
+
+type AccountWaveLane struct {
+	OK           bool   `json:"ok"`
+	Reason       string `json:"reason"`
+	Account      string `json:"account"`
+	Tag          string `json:"tag"`
+	Product      string `json:"product"`
+	ConfigDir    string `json:"config_dir"`
+	Model        string `json:"model"`
+	ModelTier    int    `json:"model_tier"`
+	SelectedTier int    `json:"selected_tier"`
+	TargetTier   int    `json:"target_tier"`
+	FallbackUsed bool   `json:"fallback_used"`
+	BlockReason  string `json:"block_reason"`
+	Pool         string `json:"pool"`
+	Rank         int    `json:"rank"`
+	WaveID       string `json:"wave_id"`
+	Size         int    `json:"size"`
+}
+
+type BlockedAccount struct {
+	Tag       string `json:"tag"`
+	Account   string `json:"account"`
+	Product   string `json:"product"`
+	ModelTier int    `json:"model_tier"`
+	Model     string `json:"model"`
+	Reason    string `json:"reason"`
+}
+
+type AccountWaveResult struct {
+	OK                    bool
+	Requested             int
+	Granted               int
+	Shortfall             int
+	DistinctPools         int
+	Size                  int
+	WaveID                string
+	TargetTier            int
+	Reason                string
+	Lanes                 []AccountWaveLane
+	BlockedTargetAccounts []BlockedAccount
 }
 
 type SeatLease struct {
@@ -99,6 +151,7 @@ func TagFromAccount(account string) string {
 func NormalizeAccountRow(row AccountRow) AccountRow {
 	row.Account = strings.TrimSpace(row.Account)
 	row.Tag = strings.TrimSpace(row.Tag)
+	row.Kind = strings.TrimSpace(row.Kind)
 	if row.Tag == "" {
 		row.Tag = TagFromAccount(row.Account)
 	}
@@ -173,6 +226,112 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 	}
 }
 
+func AllocateWave(in AccountWaveInput) AccountWaveResult {
+	n := in.Count
+	if n < 0 {
+		n = 0
+	}
+	product := strings.ToLower(strings.TrimSpace(in.Product))
+	target := targetTierForWorkKind(in.WorkKind)
+	workers := []AccountRow{}
+	for _, raw := range in.Rows {
+		row := NormalizeAccountRow(raw)
+		if !routableAccount(row) {
+			continue
+		}
+		if product != "" && row.Product != product {
+			continue
+		}
+		workers = append(workers, row)
+	}
+	tierOrder := []int{target}
+	if target == 2 {
+		tierOrder = append(tierOrder, 1)
+	}
+	lanes := []AccountWaveLane{}
+	seenPools := map[string]bool{}
+	for _, tier := range tierOrder {
+		if len(lanes) >= n {
+			break
+		}
+		candidates := []AccountRow{}
+		for _, row := range workers {
+			if row.Available && row.ModelTier == tier {
+				candidates = append(candidates, row)
+			}
+		}
+		sort.Slice(candidates, func(i, j int) bool { return accountRouteLess(candidates[i], candidates[j]) })
+		for _, row := range candidates {
+			if len(lanes) >= n {
+				break
+			}
+			pool := PoolKey(row)
+			if seenPools[pool] {
+				continue
+			}
+			seenPools[pool] = true
+			lanes = append(lanes, AccountWaveLane{
+				OK:           true,
+				Reason:       chooseString(tier == target, "wave lane (target tier)", "wave lane (fallback tier)"),
+				Account:      row.Account,
+				Tag:          row.Tag,
+				Product:      row.Product,
+				ConfigDir:    row.Dir,
+				Model:        row.Model,
+				ModelTier:    row.ModelTier,
+				SelectedTier: row.ModelTier,
+				TargetTier:   target,
+				FallbackUsed: tier != target,
+				Pool:         pool,
+			})
+		}
+	}
+	granted := len(lanes)
+	shortfall := n - granted
+	if shortfall < 0 {
+		shortfall = 0
+	}
+	waveID := strings.TrimSpace(in.WaveID)
+	if waveID == "" {
+		pools := make([]string, 0, len(lanes))
+		for _, lane := range lanes {
+			pools = append(pools, lane.Pool)
+		}
+		waveID = waveIDForPools(pools)
+	}
+	for i := range lanes {
+		lanes[i].Rank = i
+		lanes[i].WaveID = waveID
+		lanes[i].Size = granted
+	}
+	reason := ""
+	switch {
+	case granted == 0:
+		reason = fmt.Sprintf("no available account for a wave (target tier %d", target)
+		if product != "" {
+			reason += fmt.Sprintf(", product %s", product)
+		}
+		reason += ")"
+	case shortfall > 0:
+		reason = fmt.Sprintf("granted %d of %d distinct pools; %d short (roster has no more distinct available pools at the requested tiers)", granted, n, shortfall)
+	default:
+		reason = fmt.Sprintf("granted %d distinct pools", granted)
+	}
+	return AccountWaveResult{
+		OK:                    granted > 0,
+		Requested:             n,
+		Granted:               granted,
+		Shortfall:             shortfall,
+		DistinctPools:         granted,
+		Size:                  granted,
+		WaveID:                waveID,
+		TargetTier:            target,
+		Reason:                reason,
+		Lanes:                 lanes,
+		BlockedTargetAccounts: publicBlockedAccounts(workers, target),
+	}
+}
+
 func BuildSeatPool(rows []AccountRow, leases []SeatLease, product string) SeatPoolResult {
 	wanted := strings.ToLower(strings.TrimSpace(product))
 	if wanted == "" {
@@ -231,6 +390,62 @@ func BuildSeatPool(rows []AccountRow, leases []SeatLease, product string) SeatPo
 	return pool
 }
 
+func (r AccountWaveResult) Map() map[string]any {
+	lanes := make([]any, 0, len(r.Lanes))
+	for _, lane := range r.Lanes {
+		lanes = append(lanes, lane.Map())
+	}
+	blocked := make([]any, 0, len(r.BlockedTargetAccounts))
+	for _, row := range r.BlockedTargetAccounts {
+		blocked = append(blocked, row.Map())
+	}
+	return map[string]any{
+		"ok":                      r.OK,
+		"requested":               r.Requested,
+		"granted":                 r.Granted,
+		"shortfall":               r.Shortfall,
+		"distinct_pools":          r.DistinctPools,
+		"size":                    r.Size,
+		"wave_id":                 r.WaveID,
+		"target_tier":             r.TargetTier,
+		"reason":                  r.Reason,
+		"lanes":                   lanes,
+		"blocked_target_accounts": blocked,
+	}
+}
+
+func (l AccountWaveLane) Map() map[string]any {
+	return map[string]any{
+		"ok":            l.OK,
+		"reason":        l.Reason,
+		"account":       l.Account,
+		"tag":           l.Tag,
+		"product":       l.Product,
+		"config_dir":    l.ConfigDir,
+		"model":         l.Model,
+		"model_tier":    l.ModelTier,
+		"selected_tier": l.SelectedTier,
+		"target_tier":   l.TargetTier,
+		"fallback_used": l.FallbackUsed,
+		"block_reason":  l.BlockReason,
+		"pool":          l.Pool,
+		"rank":          l.Rank,
+		"wave_id":       l.WaveID,
+		"size":          l.Size,
+	}
+}
+
+func (b BlockedAccount) Map() map[string]any {
+	return map[string]any{
+		"tag":        b.Tag,
+		"account":    b.Account,
+		"product":    b.Product,
+		"model_tier": b.ModelTier,
+		"model":      b.Model,
+		"reason":     b.Reason,
+	}
+}
+
 func PoolKey(row AccountRow) string {
 	row = NormalizeAccountRow(row)
 	if strings.TrimSpace(row.AccountUUID) != "" {
@@ -244,6 +459,10 @@ func PoolKey(row AccountRow) string {
 
 func routableAccount(row AccountRow) bool {
 	if strings.EqualFold(row.IdentityRole, "duplicate") {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(row.Kind))
+	if kind != "" && kind != "worker" {
 		return false
 	}
 	return strings.TrimSpace(row.Account) != "" || strings.TrimSpace(row.Dir) != ""
@@ -283,6 +502,43 @@ func blockedTierAccounts(rows []AccountRow, tier int) []AccountRow {
 	}
 	sort.Slice(out, func(i, j int) bool { return accountRouteLess(out[i], out[j]) })
 	return out
+}
+
+func publicBlockedAccounts(rows []AccountRow, tier int) []BlockedAccount {
+	out := []BlockedAccount{}
+	for _, row := range rows {
+		if row.ModelTier != tier || row.Available {
+			continue
+		}
+		reason := strings.TrimSpace(row.BlockReason)
+		if reason == "" {
+			reason = "blocked"
+		}
+		out = append(out, BlockedAccount{
+			Tag:       row.Tag,
+			Account:   row.Account,
+			Product:   row.Product,
+			ModelTier: row.ModelTier,
+			Model:     row.Model,
+			Reason:    reason,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Product != out[j].Product {
+			return out[i].Product < out[j].Product
+		}
+		return out[i].Tag < out[j].Tag
+	})
+	return out
+}
+
+func waveIDForPools(pools []string) string {
+	if len(pools) == 0 {
+		return ""
+	}
+	sort.Strings(pools)
+	sum := sha256.Sum256([]byte(strings.Join(pools, ",")))
+	return "wave-" + fmt.Sprintf("%x", sum[:6])
 }
 
 func leaseMatchesSeat(lease SeatLease, row AccountRow) bool {

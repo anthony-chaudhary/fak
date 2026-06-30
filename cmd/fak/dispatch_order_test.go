@@ -176,6 +176,32 @@ func TestDispatchOrderBareArrayAndObject(t *testing.T) {
 	}
 }
 
+// TestDispatchOrderPreferOldest: --prefer-oldest flips the dispatch order so the oldest-created
+// ticket is picked, even when a newer ticket has the freshest UPDATE (which the default
+// freshest-first pick selects). Two distinct keys so neither supersedes the other.
+func TestDispatchOrderPreferOldest(t *testing.T) {
+	path := writeCandidates(t, `[
+	  {"id":"old","key":"A","created_unix":100,"updated_unix":200},
+	  {"id":"new","key":"B","created_unix":800,"updated_unix":990}
+	]`)
+	// default: freshest update ("new", updated 990) leads.
+	def, _, code := runDispatchAt("order", "--in", path, "--now", "2000", "--json")
+	if code != 0 {
+		t.Fatalf("default exit = %d, want 0", code)
+	}
+	if !strings.Contains(def, `"pick": "new"`) {
+		t.Errorf("default should pick the freshest-updated ticket:\n%s", def)
+	}
+	// --prefer-oldest: oldest-created ("old", created 100) leads.
+	out, _, code := runDispatchAt("order", "--in", path, "--now", "2000", "--prefer-oldest", "--json")
+	if code != 0 {
+		t.Fatalf("--prefer-oldest exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, `"pick": "old"`) {
+		t.Errorf("--prefer-oldest should pick the oldest-created ticket:\n%s", out)
+	}
+}
+
 // TestDispatchUsageErrors covers the exit-2 / exit-1 paths.
 func TestDispatchUsageErrors(t *testing.T) {
 	if _, _, code := runDispatchAt(); code != 2 {

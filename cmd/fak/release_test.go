@@ -2,20 +2,20 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReleaseDefaultsToStatusAndPassesFlags(t *testing.T) {
-	old := releaseRunScript
-	defer func() { releaseRunScript = old }()
+	old := releaseRunStatus
+	defer func() { releaseRunStatus = old }()
 
-	var gotScript string
 	var gotArgs []string
-	releaseRunScript = func(root, script string, args []string, stdout, stderr io.Writer) int {
-		gotScript = script
+	releaseRunStatus = func(stdout, stderr io.Writer, args []string) int {
 		gotArgs = append([]string(nil), args...)
 		return 7
 	}
@@ -25,10 +25,26 @@ func TestReleaseDefaultsToStatusAndPassesFlags(t *testing.T) {
 	if rc != 7 {
 		t.Fatalf("exit = %d, want 7", rc)
 	}
-	if gotScript != "release_status.py" {
-		t.Fatalf("script = %q, want release_status.py", gotScript)
-	}
 	if !reflect.DeepEqual(gotArgs, []string{"--json", "--skip-gh"}) {
+		t.Fatalf("args = %#v", gotArgs)
+	}
+}
+
+func TestReleaseStatusSubcommandUsesNativeRunner(t *testing.T) {
+	old := releaseRunStatus
+	defer func() { releaseRunStatus = old }()
+
+	var gotArgs []string
+	releaseRunStatus = func(stdout, stderr io.Writer, args []string) int {
+		gotArgs = append([]string(nil), args...)
+		return 3
+	}
+
+	rc := runRelease(io.Discard, io.Discard, []string{"status", "--json", "--skip-cut-plan"})
+	if rc != 3 {
+		t.Fatalf("exit = %d, want 3", rc)
+	}
+	if !reflect.DeepEqual(gotArgs, []string{"--json", "--skip-cut-plan"}) {
 		t.Fatalf("args = %#v", gotArgs)
 	}
 }
@@ -144,6 +160,96 @@ func TestReleaseUsageSurfacesCanonicalPath(t *testing.T) {
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestReleaseStatusNativeJSONEnvelope(t *testing.T) {
+	oldRun := releaseStatusRunJSON
+	oldNow := releaseStatusNow
+	defer func() {
+		releaseStatusRunJSON = oldRun
+		releaseStatusNow = oldNow
+	}()
+
+	var scripts []string
+	releaseStatusRunJSON = func(root string, timeout time.Duration, script string, args ...string) (map[string]any, int, error) {
+		scripts = append(scripts, script)
+		switch script {
+		case "release_context.py":
+			return map[string]any{
+				"head_sha":                "abc123",
+				"current_branch":          "main",
+				"last_tag":                "v0.1.0",
+				"latest_any_tag":          "v0.1.0",
+				"commits_since_tag":       []any{},
+				"files_touched_since_tag": []any{},
+				"tag_drift":               map[string]any{},
+				"ci_on_head":              map[string]any{"status": "green"},
+				"workflows_parse_ok":      map[string]any{"ok": true},
+			}, 0, nil
+		case "release_decide.py":
+			return map[string]any{
+				"decision":       "hold",
+				"reason":         "nothing release-worthy pending",
+				"blockers":       []any{},
+				"warnings":       []any{},
+				"last_tag":       "v0.1.0",
+				"latest_any_tag": "v0.1.0",
+			}, 2, nil
+		default:
+			t.Fatalf("unexpected helper script %s", script)
+		}
+		return nil, 1, nil
+	}
+	releaseStatusNow = func() time.Time { return time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC) }
+
+	var out, errb bytes.Buffer
+	rc := runReleaseStatus(&out, &errb, []string{"--json", "--skip-gh", "--skip-cut-plan", "--limit-commits", "5"})
+	if rc != 0 {
+		t.Fatalf("exit = %d, stderr: %s", rc, errb.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got["schema"] != releaseStatusSchema {
+		t.Fatalf("schema = %v, want %s", got["schema"], releaseStatusSchema)
+	}
+	rolling := got["rolling"].(map[string]any)
+	if rolling["last_tag"] != "v0.1.0" {
+		t.Fatalf("rolling.last_tag = %v", rolling["last_tag"])
+	}
+	if cut := rolling["cut_plan"].(map[string]any); cut["skipped"] != true {
+		t.Fatalf("cut_plan = %#v, want skipped", cut)
+	}
+	if gh := got["github_release"].(map[string]any); gh["status"] != "skipped" {
+		t.Fatalf("github_release = %#v, want skipped", gh)
+	}
+	if len(scripts) != 2 || scripts[0] != "release_context.py" || scripts[1] != "release_decide.py" {
+		t.Fatalf("helpers = %#v, want context+decide only", scripts)
+	}
+}
+
+func TestReleaseStatusRelevantDirtyPathClassifier(t *testing.T) {
+	for _, path := range []string{
+		"VERSION",
+		".github/workflows/ci.yml",
+		"docs/releases/v1.2.3.md",
+		"tools/release_status.py",
+		"tools/stable_release_promote.py",
+	} {
+		if !releaseStatusIsRelevantDirtyPath(path) {
+			t.Fatalf("%s should be release-relevant", path)
+		}
+	}
+	for _, path := range []string{
+		"tools/control_pane.loops.json",
+		"docs/dispatch-loop.md",
+		"cmd/fak/release.go",
+	} {
+		if releaseStatusIsRelevantDirtyPath(path) {
+			t.Fatalf("%s should not be release-relevant", path)
 		}
 	}
 }

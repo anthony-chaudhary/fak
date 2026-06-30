@@ -17,9 +17,9 @@ type releaseScriptRunner func(root, script string, args []string, stdout, stderr
 
 var releaseRunScript releaseScriptRunner = runReleaseScript
 var releaseRunShip = runReleaseShip
+var releaseRunStatus = runReleaseStatus
 
 var releaseScripts = map[string]string{
-	"status":         "release_status.py",
 	"plan":           "release_status.py",
 	"decide":         "release_decide.py",
 	"cut":            "release_cut.py",
@@ -53,6 +53,9 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		if key == "staleness" {
 			return runReleaseStaleness(stdout, stderr, argv[1:])
 		}
+		if key == "status" {
+			return releaseRunStatus(stdout, stderr, argv[1:])
+		}
 		if key == "ship" || key == "auto" {
 			return releaseRunShip(stdout, stderr, argv[1:])
 		}
@@ -63,6 +66,9 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		}
 		mode = key
 		rest = argv[1:]
+	}
+	if mode == "status" {
+		return releaseRunStatus(stdout, stderr, rest)
 	}
 
 	return releaseRunScript(repoRoot(), releaseScripts[mode], releaseArgs(mode, rest), stdout, stderr)
@@ -143,9 +149,9 @@ Helper order underneath:
   detached worktree at origin/main -> release_decide -> release_lock -> release_cut
   -> push main -> release_tag -> release_publish -> release-artifacts verification
 
-The underlying helpers live in tools/release_*.py / tools/stable_release_*.py and
-remain the release contract. The staleness subcommand is the native
-fak release-staleness signal.
+The status and staleness subcommands are native Go folds. The deeper release
+helpers live in tools/release_*.py / tools/stable_release_*.py and remain the
+release contract while their implementation is migrated.
 The ship subcommand is the default hot-tree path: it leaves this checkout's
 unrelated modified/untracked files alone by cutting in a transient detached
 worktree, while sharing the same single-writer release lock.

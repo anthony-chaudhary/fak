@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -274,6 +276,41 @@ func TestMemStoreRejectsBlankID(t *testing.T) {
 	r := NewRegistry(s)
 	if _, err := r.Register("", "h", State{TraceID: "t"}, time.Minute, fixedClock()); err == nil {
 		t.Fatalf("Register accepted a blank id")
+	}
+}
+
+func TestFileStorePersistsAcrossInstances(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-registry.json")
+	t0 := fixedClock()
+	store1 := NewFileStore(path)
+	r1 := NewRegistry(store1)
+	if _, err := r1.Register("sess-file", "host-a", State{
+		TraceID: "trace-file",
+		Run:     Running,
+		Budget:  Budget{TurnsLeft: 2, TokensLeft: 200},
+		Rev:     3,
+	}, time.Hour, t0); err != nil {
+		t.Fatalf("Register file-backed descriptor: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("file store did not create registry file: %v", err)
+	}
+
+	store2 := NewFileStore(path)
+	r2 := NewRegistry(store2)
+	got, ok, err := r2.Get("sess-file")
+	if err != nil || !ok {
+		t.Fatalf("Get from second store: ok=%v err=%v", ok, err)
+	}
+	if got.Trace != "trace-file" || got.Budget.TokensLeft != 200 || got.Rev != 3 {
+		t.Fatalf("descriptor did not persist across store instances: %+v", got)
+	}
+
+	if err := store2.Delete("sess-file"); err != nil {
+		t.Fatalf("Delete file-backed descriptor: %v", err)
+	}
+	if _, ok, err := NewRegistry(NewFileStore(path)).Get("sess-file"); err != nil || ok {
+		t.Fatalf("deleted descriptor reappeared: ok=%v err=%v", ok, err)
 	}
 }
 

@@ -10,7 +10,7 @@
 // STATUS (a number the moment it changes). This posts a DISPATCH RESULT, and it is
 // WITNESSED from git, not self-reported. The card's "shipped" line is built from the
 // HEAD delta the run actually produced (HeadBefore..HeadAfter), so a dispatch that
-// exited 0 but committed nothing is reported as "ran, no commit" rather than letting
+// exited 0 but committed nothing is reported as "OK (no commit)" rather than letting
 // a green exit code masquerade as a landed change. That mirrors the repo's honesty
 // contract (dos verify / commit-audit): a claim is only as strong as its witness.
 //

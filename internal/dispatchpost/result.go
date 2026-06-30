@@ -34,8 +34,8 @@ func (r Result) Shipped() bool { return len(r.Commits) > 0 }
 
 // emoji picks the leading glyph from the two orthogonal facts: a failed dispatch is
 // red regardless of commits; a green dispatch that shipped is a check; a green
-// dispatch that landed nothing is a neutral "ran, no change" glyph so a no-op run is
-// visibly distinct from a landed one.
+// dispatch that landed nothing is green but not a check, so an exit-0 no-op reads as
+// not broken without masquerading as a shipped change.
 func (r Result) emoji() string {
 	switch {
 	case r.ExitCode != 0:
@@ -43,11 +43,11 @@ func (r Result) emoji() string {
 	case r.Shipped():
 		return ":white_check_mark:"
 	default:
-		return ":white_circle:"
+		return ":large_green_circle:"
 	}
 }
 
-// title is the headline: the loop id and a one-word outcome.
+// title is the headline: the loop id and the witnessed outcome.
 func (r Result) title() string {
 	outcome := "ok"
 	switch {
@@ -56,18 +56,18 @@ func (r Result) title() string {
 	case r.Shipped():
 		outcome = "shipped"
 	default:
-		outcome = "ran, no commit"
+		outcome = "passed; no code shipped"
 	}
 	loop := r.LoopID
 	if loop == "" {
 		loop = "dispatch"
 	}
-	return fmt.Sprintf("dispatch %s — %s", loop, outcome)
+	return fmt.Sprintf("dispatch result %s — %s", loop, outcome)
 }
 
 // lead is the one-line summary under the title: duration, command, and the HEAD delta.
 func (r Result) lead() string {
-	var parts []string
+	parts := []string{fmt.Sprintf("exit %d", r.ExitCode)}
 	if d := time.Duration(r.DurationMS) * time.Millisecond; d > 0 {
 		parts = append(parts, "ran "+humaniseDuration(d))
 	}
@@ -78,7 +78,7 @@ func (r Result) lead() string {
 	case r.HeadBefore != "" && r.HeadAfter != "" && r.HeadBefore != r.HeadAfter:
 		parts = append(parts, fmt.Sprintf("HEAD %s→%s", r.HeadBefore, r.HeadAfter))
 	case r.HeadBefore != "" && r.HeadAfter != "" && r.HeadBefore == r.HeadAfter:
-		parts = append(parts, fmt.Sprintf("HEAD unchanged at %s", r.HeadAfter))
+		parts = append(parts, fmt.Sprintf("HEAD %s unchanged", r.HeadAfter))
 	}
 	if r.RunID != "" {
 		parts = append(parts, "run `"+r.RunID+"`")
@@ -87,16 +87,34 @@ func (r Result) lead() string {
 }
 
 // lines is the body: one line per landed commit (the witness), or a single honest
-// "no commit landed" line when the delta is empty.
+// no-change line when the delta is empty.
 func (r Result) lines() []string {
 	if !r.Shipped() {
-		return []string{"_no commit landed — the dispatch produced no git change (witnessed via HEAD delta)_"}
+		return []string{r.noCommitLine()}
 	}
 	out := make([]string, 0, len(r.Commits))
 	for _, c := range r.Commits {
 		out = append(out, c)
 	}
 	return out
+}
+
+func (r Result) noCommitLine() string {
+	prefix := "passed: command exited 0"
+	if r.ExitCode != 0 {
+		prefix = fmt.Sprintf("FAILED: exit %d", r.ExitCode)
+	}
+	switch {
+	case r.HeadBefore == "" || r.HeadAfter == "":
+		return prefix + "; commit witness unavailable, so no shipped-work claim is made."
+	case r.HeadBefore == r.HeadAfter:
+		if r.ExitCode == 0 {
+			return prefix + "; this was a check/test result, not shipped work (HEAD unchanged)."
+		}
+		return prefix + "; no code shipped (HEAD unchanged)."
+	default:
+		return prefix + "; HEAD changed, but no commit rows were witnessed."
+	}
 }
 
 // Text renders the plain-text fallback — what Slack shows in notifications and what

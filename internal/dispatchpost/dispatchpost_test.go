@@ -62,10 +62,13 @@ func TestResult_Shipped_RendersCommits(t *testing.T) {
 		t.Fatal("a run with commits must be Shipped()")
 	}
 	txt := r.Text()
-	for _, want := range []string{":white_check_mark:", "shipped", "HEAD aaaa111→bbbb222", "fix(gateway)", "2m5s", "posted by cron"} {
+	for _, want := range []string{":white_check_mark:", "shipped", "exit 0", "HEAD aaaa111→bbbb222", "fix(gateway)", "2m5s", "posted by cron"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("shipped card missing %q in:\n%s", want, txt)
 		}
+	}
+	if strings.Contains(txt, "S/N self-score") {
+		t.Errorf("dispatch result should not include noisy S/N footer:\n%s", txt)
 	}
 }
 
@@ -85,10 +88,13 @@ func TestResult_GreenButNoCommit_IsHonest(t *testing.T) {
 	if strings.Contains(txt, ":white_check_mark:") {
 		t.Errorf("no-commit run must not use the shipped check glyph:\n%s", txt)
 	}
-	for _, want := range []string{":white_circle:", "ran, no commit", "no commit landed", "HEAD unchanged at aaaa111"} {
+	for _, want := range []string{":large_green_circle:", "passed; no code shipped", "exit 0", "passed: command exited 0; this was a check/test result, not shipped work", "HEAD aaaa111 unchanged"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("no-commit card missing %q in:\n%s", want, txt)
 		}
+	}
+	if strings.Contains(txt, "S/N self-score") {
+		t.Errorf("no-commit card should not include noisy S/N footer:\n%s", txt)
 	}
 }
 
@@ -107,6 +113,27 @@ func TestResult_NonZeroExit_IsRedRegardlessOfCommits(t *testing.T) {
 	}
 }
 
+func TestResult_FailedNoCommit_IsUnambiguous(t *testing.T) {
+	r := Result{
+		LoopID:     "scheduler/test",
+		RunID:      "run-fail",
+		ExitCode:   7,
+		DurationMS: 5,
+		Command:    "fak.test",
+		HeadBefore: "e8fcc66e",
+		HeadAfter:  "e8fcc66e",
+	}
+	txt := r.Text()
+	for _, want := range []string{":red_circle:", "FAILED (exit 7)", "exit 7", "HEAD e8fcc66e unchanged", "FAILED: exit 7; no code shipped"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("failed no-commit card missing %q in:\n%s", want, txt)
+		}
+	}
+	if strings.Contains(txt, "S/N self-score") {
+		t.Errorf("failed card should not include noisy S/N footer:\n%s", txt)
+	}
+}
+
 func TestResult_Blocks_CarrySameFacts(t *testing.T) {
 	r := Result{LoopID: "L", ExitCode: 0, Commits: []string{"abc shipped it"}}
 	blocks := r.Blocks()
@@ -117,6 +144,9 @@ func TestResult_Blocks_CarrySameFacts(t *testing.T) {
 	flat := flattenBlocks(blocks)
 	if !strings.Contains(flat, "shipped it") {
 		t.Errorf("blocks missing commit subject; flat=%s", flat)
+	}
+	if strings.Contains(flat, "S/N self-score") {
+		t.Errorf("dispatch blocks should not include noisy S/N footer; flat=%s", flat)
 	}
 }
 

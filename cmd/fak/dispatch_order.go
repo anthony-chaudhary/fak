@@ -48,11 +48,23 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "order":
 		return runDispatchOrder(stdout, stderr, argv[1:])
+	case "route":
+		return runDispatchRoute(stdout, stderr, argv[1:])
+	case "tick":
+		return runDispatchTick(stdout, stderr, argv[1:])
+	case "wave":
+		return runDispatchWave(stdout, stderr, argv[1:])
+	case "sweep":
+		return runDispatchSweep(stdout, stderr, argv[1:])
+	case "progress":
+		return runDispatchProgress(stdout, stderr, argv[1:])
+	case "audit":
+		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, route, tick, wave, sweep, progress, or audit)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -66,6 +78,7 @@ func runDispatchOrder(stdout, stderr io.Writer, argv []string) int {
 	in := fs.String("in", "", "read candidate units from this JSON file (default: stdin)")
 	cooldownMin := fs.Int("cooldown-min", 120, "skip a freshest unit attempted within this many minutes (-1 disables)")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for cooldown math (0 = current time)")
+	preferOldest := fs.Bool("prefer-oldest", false, "order the kept units OLDEST-first (drain the longest-waiting backlog) instead of freshest-first")
 	asJSON := fs.Bool("json", false, "emit the raw Result JSON instead of the human table")
 	if err := fs.Parse(argv); err != nil {
 		return 2 // flag already printed the error
@@ -94,6 +107,7 @@ func runDispatchOrder(stdout, stderr io.Writer, argv []string) int {
 		Candidates:      cands,
 		NowUnix:         now,
 		CooldownSeconds: cooldownSec,
+		PreferOldest:    *preferOldest,
 	})
 
 	if *asJSON {
@@ -204,12 +218,18 @@ func dispAge(now, recency int64) string {
 func dispatchUsage(w io.Writer) {
 	fmt.Fprint(w, `fak dispatch — deterministic dispatch helpers
 
-  fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--json]
+  fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
+  fak dispatch route [--workspace DIR] [--json]
+  fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--live] [--json]
+  fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--live] [--json]
+  fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
+  fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
 recently UPDATED one (the others are SUPERSEDED, not re-attempted), folds in the live-worker
-and cooldown skips, and returns the survivors freshest-first. Pure and deterministic: same
+and cooldown skips, and returns the survivors freshest-first (or oldest-first with
+--prefer-oldest, to drain the longest-waiting backlog). Pure and deterministic: same
 candidates + clock in, same order out.
 
 Candidates are a JSON array (or {"candidates":[...]}), each:
@@ -222,5 +242,12 @@ but any exclusive participant must be tree-disjoint:
 
 example (collapse 25 tasks for the same target to the freshest, then pick):
   fak dispatch order --in candidates.json --json | jq .pick
+
+route is the native issue-lane router: read dos.toml lane trees plus open GitHub issues and emit
+the lanes JSON shape that tick consumes. tick is the native issue-resolution dispatch tick:
+preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. wave allocates
+multiple account seats and drives ticks; sweep repeats ticks until the queue drains or preflight
+refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
+commands are dry-run until --live.
 `)
 }
