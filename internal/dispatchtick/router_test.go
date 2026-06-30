@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 var routerTestTaxonomy = LaneTaxonomy{
 	Concurrent: []string{
@@ -92,6 +95,46 @@ func TestRouterCarriesPathScope(t *testing.T) {
 	}
 }
 
+func TestRouterCarriesAgentSchedulingMetadata(t *testing.T) {
+	body := strings.Join([]string{
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		"5",
+		"## Trigger",
+		"Gateway report crossed the retry-error threshold.",
+		"## Batch policy",
+		"One issue per gateway retry class; reruns update by marker.",
+		"## Path hints",
+		"- `internal/gateway/http.go`",
+	}, "\n\n")
+	issue := routerIssue(12, "gateway: retry class", nil, body)
+	got := routeTestIssue(issue)
+	if got.WorkUnit != "leaf" || got.ExpectedSteps != 5 {
+		t.Fatalf("route metadata = work_unit %q steps %d, want leaf/5 (%+v)", got.WorkUnit, got.ExpectedSteps, got)
+	}
+	if got.Trigger != "Gateway report crossed the retry-error threshold." {
+		t.Fatalf("trigger = %q", got.Trigger)
+	}
+	if got.BatchPolicy != "One issue per gateway retry class; reruns update by marker." {
+		t.Fatalf("batch policy = %q", got.BatchPolicy)
+	}
+
+	p := RouteIssues(RouterInput{
+		Workspace:  "C:/work/fak",
+		Taxonomy:   routerTestTaxonomy,
+		IssueLimit: 1000,
+		Issues:     []Issue{issue},
+	})
+	grp := p.Lanes["gateway"]
+	if p.Counts.RoutedStepBudget != 5 || grp.StepBudget != 5 {
+		t.Fatalf("step budget = counts %d lane %d, want 5/5", p.Counts.RoutedStepBudget, grp.StepBudget)
+	}
+	if grp.WorkUnits[12] != "leaf" || grp.IssueSteps[12] != 5 {
+		t.Fatalf("lane metadata = work_units=%+v issue_steps=%+v, want issue 12 leaf/5", grp.WorkUnits, grp.IssueSteps)
+	}
+}
+
 func TestRouterExclusiveAndAmbiguity(t *testing.T) {
 	excl := routeTestIssue(routerIssue(7, "abi: hoist the public ABI surface", nil, ""))
 	if excl.Lane != "" || excl.Confidence != "none" || excl.UnroutedReason == "" {
@@ -149,12 +192,61 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 			routerIssue(5, "guard complaint [false-positive]", []string{"guard-complaint"}, ""),
 			routerIssue(6, "needs scope", []string{"triage-only"}, ""),
 			routerIssue(7, "dispatch-log-audit: auth wall", []string{"dispatch"}, "- dispatchability: `triage_only`"),
+			routerIssue(8, "gateway: decompose serving follow-ups", nil, "## Work unit\n\nepic\n\n## Working spine\n\nBreak the serving program into leaves."),
+			routerIssue(9, "research: study cache prior art", []string{"research"}, ""),
+			routerIssue(10, "gateway: oversized leaf", nil, "## Work unit\n\nleaf\n\n## Expected steps\n\n12\n\n## Path hints\n\n- `internal/gateway/http.go`"),
 		},
 	})
-	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 6 {
-		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=6", p.Counts, p.SkippedHumanBlocked)
+	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 9 {
+		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=9", p.Counts, p.SkippedHumanBlocked)
+	}
+	wantReasons := map[string]int{
+		"BLOCKED_BY_HUMAN":               1,
+		"ISSUE_NOT_DISPATCH_LEAF":        2,
+		"ISSUE_OVERSIZED_EXPECTED_STEPS": 1,
+		"ISSUE_TRIAGE_ONLY":              5,
+	}
+	if !sameStringIntMap(p.Counts.SkippedByReason, wantReasons) {
+		t.Fatalf("skipped reasons = %#v, want %#v", p.Counts.SkippedByReason, wantReasons)
+	}
+	if strings.Contains(p.Reason, "human-blocked skipped") {
+		t.Fatalf("router reason kept legacy human-blocked wording: %q", p.Reason)
+	}
+	if skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 10); skipped.Reason != "ISSUE_OVERSIZED_EXPECTED_STEPS" || skipped.ExpectedSteps != 12 {
+		t.Fatalf("oversized skipped issue = %+v, want reason ISSUE_OVERSIZED_EXPECTED_STEPS steps=12", skipped)
+	}
+	if skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 8); skipped.Reason != "ISSUE_NOT_DISPATCH_LEAF" || skipped.WorkUnit != "epic" {
+		t.Fatalf("non-leaf skipped issue = %+v, want non-dispatch leaf epic", skipped)
 	}
 	if p.Lanes["gateway"].Issues[0] != 1 {
 		t.Fatalf("gateway issues = %#v, want #1", p.Lanes["gateway"].Issues)
 	}
+}
+
+func TestRouterKeepsSmallExpectedStepLeafDispatchable(t *testing.T) {
+	issue := routerIssue(11, "gateway: scoped leaf", nil, "## Work unit\n\nleaf\n\n## Expected steps\n\n4\n\n## Path hints\n\n- `internal/gateway/http.go`")
+	if !IsDispatchable(issue, BlockedByHumanLabel) {
+		t.Fatalf("small expected-step leaf was not dispatchable")
+	}
+}
+
+func skippedIssueByNumber(skipped []SkippedIssue, number int) SkippedIssue {
+	for _, issue := range skipped {
+		if issue.Number == number {
+			return issue
+		}
+	}
+	return SkippedIssue{}
+}
+
+func sameStringIntMap(got, want map[string]int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, wantValue := range want {
+		if got[key] != wantValue {
+			return false
+		}
+	}
+	return true
 }

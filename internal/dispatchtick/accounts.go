@@ -24,6 +24,8 @@ type AccountRow struct {
 	RouteWeight    int
 	IdentityRole   string
 	AccountUUID    string
+	LoginStatus    string
+	CanServe       *bool
 }
 
 type AccountRouteInput struct {

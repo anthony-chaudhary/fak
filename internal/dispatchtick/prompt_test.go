@@ -36,6 +36,60 @@ func TestIssuePromptEmbedsIssueFacts(t *testing.T) {
 	}
 }
 
+func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
+	in := sampleIssuePrompt()
+	in.Body = strings.Join([]string{
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		"4",
+		"## Working spine",
+		"source row -> scoped issue -> dispatch worker",
+		"## Assumptions",
+		"- Existing marker dedupe is available.",
+		"## Confusion risks",
+		"- Do not turn this leaf into the parent epic.",
+		"## Coordination notes",
+		"- Serialize with issuecontract parser edits.",
+		"## Trigger",
+		"Verified handoff proposed this next leaf.",
+		"## Batch policy",
+		"At most two follow-up issues per handoff; update existing marker.",
+		"## In scope",
+		"Render a compact worker brief.",
+		"## Out of scope",
+		"Do not change route picking.",
+		"## Done condition",
+		"Prompt includes the parsed brief.",
+		"## Witness",
+		"go test ./internal/dispatchtick",
+		"## Acceptance gate",
+		"go test ./internal/dispatchtick",
+	}, "\n")
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"agent issue brief (parsed from standard sections):",
+		"- Work unit: leaf",
+		"- Expected steps: 4",
+		"- Assumptions: Existing marker dedupe is available.",
+		"- Confusion risks: Do not turn this leaf into the parent epic.",
+		"- Coordination: Serialize with issuecontract parser edits.",
+		"- Batch policy: At most two follow-up issues per handoff; update existing marker.",
+		"- Acceptance gate: go test ./internal/dispatchtick",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+}
+
+func TestIssuePromptOmitsAgentBriefWithoutStandardSections(t *testing.T) {
+	p := RenderIssuePrompt(sampleIssuePrompt())
+	if strings.Contains(p, "agent issue brief") {
+		t.Fatalf("prompt should not emit an empty agent brief:\n%s", p)
+	}
+}
+
 func TestIssuePromptStatesGitLawsAndHonestBlock(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
 	for _, want := range []string{"main", "git add -A", "git commit -s", "OFF_TRUNK", "final report", "fabricate"} {

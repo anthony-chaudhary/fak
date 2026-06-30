@@ -47,14 +47,16 @@ type HostCheck struct {
 }
 
 type AccountCheck struct {
-	Available bool     `json:"available"`
-	Tag       string   `json:"tag,omitempty"`
-	Dir       string   `json:"dir,omitempty"`
-	Tier      any      `json:"tier,omitempty"`
-	Model     string   `json:"model,omitempty"`
-	Reason    string   `json:"reason,omitempty"`
-	Error     string   `json:"error,omitempty"`
-	Blocked   []string `json:"blocked,omitempty"`
+	Available   bool     `json:"available"`
+	Tag         string   `json:"tag,omitempty"`
+	Dir         string   `json:"dir,omitempty"`
+	Tier        any      `json:"tier,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	Blocked     []string `json:"blocked,omitempty"`
+	LoginStatus string   `json:"login_status,omitempty"`
+	CanServe    *bool    `json:"can_serve,omitempty"`
 }
 
 type KernelCheck struct {
@@ -267,7 +269,18 @@ func (h HostCheck) Map() map[string]any {
 }
 
 func (a AccountCheck) Map() map[string]any {
-	return map[string]any{"available": a.Available, "tag": a.Tag, "dir": a.Dir, "tier": a.Tier, "model": a.Model}
+	return map[string]any{
+		"available":    a.Available,
+		"tag":          a.Tag,
+		"dir":          a.Dir,
+		"tier":         a.Tier,
+		"model":        a.Model,
+		"reason":       a.Reason,
+		"error":        a.Error,
+		"blocked":      a.Blocked,
+		"login_status": a.LoginStatus,
+		"can_serve":    a.CanServe,
+	}
 }
 
 func (k KernelCheck) Map() map[string]any {
@@ -279,7 +292,11 @@ func (s SeatCheck) Map() map[string]any {
 }
 
 func publicAccount(a AccountCheck) AccountCheck {
-	return AccountCheck{Available: a.Available, Tag: a.Tag, Dir: a.Dir, Tier: a.Tier, Model: a.Model}
+	return AccountCheck{
+		Available: a.Available, Tag: a.Tag, Dir: a.Dir, Tier: a.Tier, Model: a.Model,
+		Reason: a.Reason, Error: a.Error, Blocked: append([]string(nil), a.Blocked...),
+		LoginStatus: a.LoginStatus, CanServe: a.CanServe,
+	}
 }
 
 func ptrAny(p *int) any {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -11,11 +12,14 @@ import (
 const RouterSchema = "fleet-issue-lane-router/1"
 
 const BlockedByHumanLabel = "blocked-by-human"
+const MaxDispatchExpectedSteps = 8
 
 var TriageOnlyLabels = map[string]bool{
 	"guard-complaint": true,
 	"idea-scout":      true,
 	"needs-triage":    true,
+	"needs-scope":     true,
+	"research":        true,
 	"triage-only":     true,
 	"triage_only":     true,
 }
@@ -138,12 +142,20 @@ type IssueRoute struct {
 	Signal         string   `json:"signal"`
 	SignalConflict bool     `json:"signal_conflict"`
 	Paths          []string `json:"paths,omitempty"`
+	WorkUnit       string   `json:"work_unit,omitempty"`
+	ExpectedSteps  int      `json:"expected_steps,omitempty"`
+	Trigger        string   `json:"trigger,omitempty"`
+	BatchPolicy    string   `json:"batch_policy,omitempty"`
 	UnroutedReason string   `json:"unrouted_reason,omitempty"`
 }
 
 type SkippedIssue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	Reason        string `json:"reason,omitempty"`
+	NextAction    string `json:"next_action,omitempty"`
+	WorkUnit      string `json:"work_unit,omitempty"`
+	ExpectedSteps int    `json:"expected_steps,omitempty"`
 }
 
 type RouterCoverage struct {
@@ -160,14 +172,19 @@ type RouterCounts struct {
 	Routed              int            `json:"routed"`
 	Unrouted            int            `json:"unrouted"`
 	UnroutedFrac        float64        `json:"unrouted_frac"`
+	RoutedStepBudget    int            `json:"routed_step_budget,omitempty"`
 	ByConfidence        map[string]int `json:"by_confidence"`
 	SkippedHumanBlocked int            `json:"skipped_human_blocked"`
+	SkippedByReason     map[string]int `json:"skipped_by_reason,omitempty"`
 }
 
 type RouterLaneGroup struct {
-	Tree   []string `json:"tree"`
-	Count  int      `json:"count"`
-	Issues []int    `json:"issues"`
+	Tree       []string       `json:"tree"`
+	Count      int            `json:"count"`
+	StepBudget int            `json:"step_budget,omitempty"`
+	Issues     []int          `json:"issues"`
+	WorkUnits  map[int]string `json:"work_units,omitempty"`
+	IssueSteps map[int]int    `json:"issue_steps,omitempty"`
 	// Priority maps an issue number to its dispatch-priority weight for the
 	// issues that carry a priority/* label (unlabeled issues are omitted and
 	// resolve to PriorityWeightDefault). It is how the picker orders the lane's
@@ -480,6 +497,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		byConf[conf] = 0
 	}
 	lanes := map[string]RouterLaneGroup{}
+	routedStepBudget := 0
 	for _, r := range in.Routes {
 		byConf[r.Confidence] = byConf[r.Confidence] + 1
 		if r.Lane == "" {
@@ -488,7 +506,22 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		grp := lanes[r.Lane]
 		grp.Tree = append([]string(nil), in.Trees[r.Lane]...)
 		grp.Count++
+		stepBudget := routeStepBudget(r)
+		grp.StepBudget += stepBudget
+		routedStepBudget += stepBudget
 		grp.Issues = append(grp.Issues, r.Number)
+		if r.WorkUnit != "" {
+			if grp.WorkUnits == nil {
+				grp.WorkUnits = map[int]string{}
+			}
+			grp.WorkUnits[r.Number] = r.WorkUnit
+		}
+		if r.ExpectedSteps > 0 {
+			if grp.IssueSteps == nil {
+				grp.IssueSteps = map[int]int{}
+			}
+			grp.IssueSteps[r.Number] = r.ExpectedSteps
+		}
 		if w := laneIssueWeight(in.Priority, r.Number); w != PriorityWeightDefault {
 			if grp.Priority == nil {
 				grp.Priority = map[int]int{}
@@ -520,8 +553,13 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 	}
 
 	skipped := make([]SkippedIssue, 0, len(in.SkippedBlocked))
+	skippedByReason := map[string]int{}
 	for _, issue := range in.SkippedBlocked {
-		skipped = append(skipped, SkippedIssue{Number: issue.Number, Title: truncateRunes(issue.Title, 80)})
+		sk := classifySkippedIssue(issue, in.BlockedLabelName)
+		skipped = append(skipped, sk)
+		if sk.Reason != "" {
+			skippedByReason[sk.Reason]++
+		}
 	}
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Number > skipped[j].Number })
 
@@ -546,11 +584,11 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		reason = fmt.Sprintf("%d/%d open issues UNROUTED (frac=%.4g > %.4g)", unrouted, total, frac, maxUnrouted)
 		next = "operator: add scopes/labels or extend SCOPE_ALIAS so workers can target these"
 	default:
-		blockedNote := ""
+		skippedNote := ""
 		if len(skipped) > 0 {
-			blockedNote = fmt.Sprintf("; %d human-blocked skipped", len(skipped))
+			skippedNote = fmt.Sprintf("; %d skipped", len(skipped))
 		}
-		reason = fmt.Sprintf("%d/%d open issues routed to %d lane(s); %d UNROUTED%s", routed, total, len(lanes), unrouted, blockedNote)
+		reason = fmt.Sprintf("%d/%d open issues routed to %d lane(s); %d UNROUTED%s", routed, total, len(lanes), unrouted, skippedNote)
 	}
 
 	issues := append([]IssueRoute(nil), in.Routes...)
@@ -565,7 +603,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		NextAction:          next,
 		Workspace:           in.Workspace,
 		Coverage:            coverage,
-		Counts:              RouterCounts{Open: total, Routed: routed, Unrouted: unrouted, UnroutedFrac: frac, ByConfidence: byConf, SkippedHumanBlocked: len(skipped)},
+		Counts:              RouterCounts{Open: total, Routed: routed, Unrouted: unrouted, UnroutedFrac: frac, RoutedStepBudget: routedStepBudget, ByConfidence: byConf, SkippedHumanBlocked: len(skipped), SkippedByReason: skippedByReason},
 		Lanes:               lanes,
 		Issues:              issues,
 		SkippedHumanBlocked: skipped,
@@ -594,16 +632,121 @@ func IsEpic(issue Issue) bool {
 }
 
 func IsTriageOnly(issue Issue) bool {
-	for _, name := range labelNames(issue) {
-		if TriageOnlyLabels[name] {
-			return true
-		}
+	if triageOnlyLabel(issue) != "" {
+		return true
 	}
-	text := strings.ToLower(issue.Title + "\n" + issue.Body)
-	if strings.Contains(text, "dispatchability") && strings.Contains(text, "triage_only") {
+	if nonDispatchWorkUnit(issueWorkUnit(issue)) {
+		return true
+	}
+	if oversizedWorkUnit(issue) {
+		return true
+	}
+	if bodyTriageOnly(issue) {
 		return true
 	}
 	return false
+}
+
+func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
+	workUnit := issueWorkUnit(issue)
+	expectedSteps := issueExpectedSteps(issue)
+	reason := "ISSUE_NOT_DISPATCHABLE"
+	next := "add dispatch scope or remove the skip condition before sending this issue to a worker"
+	triageLabel := triageOnlyLabel(issue)
+	switch {
+	case IsBlockedByHuman(issue, blockedLabel):
+		reason = "BLOCKED_BY_HUMAN"
+		next = "wait for the human blocker to clear before worker dispatch"
+	case IsEpic(issue):
+		reason = "ISSUE_NOT_DISPATCH_LEAF"
+		next = "decompose the epic into path-scoped leaf issues before dispatch"
+	case triageLabel == "needs-scope":
+		reason = "ISSUE_SCOPE_INCOMPLETE"
+		next = "add working spine, path hints, done condition, witness, and work-unit metadata"
+	case triageLabel != "":
+		reason = "ISSUE_TRIAGE_ONLY"
+		next = "triage or scope the issue into one or more worker-ready leaves"
+	case nonDispatchWorkUnit(workUnit):
+		reason = "ISSUE_NOT_DISPATCH_LEAF"
+		next = "split the non-leaf work unit into worker-ready leaf issues"
+	case expectedSteps > MaxDispatchExpectedSteps:
+		reason = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+		next = fmt.Sprintf("split into child issues with <= %d expected steps each", MaxDispatchExpectedSteps)
+	case bodyTriageOnly(issue):
+		reason = "ISSUE_TRIAGE_ONLY"
+		next = "triage or scope the issue into one or more worker-ready leaves"
+	}
+	return SkippedIssue{
+		Number:        issue.Number,
+		Title:         truncateRunes(issue.Title, 80),
+		Reason:        reason,
+		NextAction:    next,
+		WorkUnit:      workUnit,
+		ExpectedSteps: expectedSteps,
+	}
+}
+
+func triageOnlyLabel(issue Issue) string {
+	for _, name := range labelNames(issue) {
+		if TriageOnlyLabels[name] {
+			return name
+		}
+	}
+	return ""
+}
+
+func bodyTriageOnly(issue Issue) bool {
+	text := strings.ToLower(issue.Title + "\n" + issue.Body)
+	return strings.Contains(text, "dispatchability") && strings.Contains(text, "triage_only")
+}
+
+func issueWorkUnit(issue Issue) string {
+	sections := promptMarkdownSections(issue.Body)
+	value := firstPromptSection(sections, "work unit", "work-unit shape", "issue shape")
+	return promptBriefValue(value)
+}
+
+func issueBriefField(issue Issue, names ...string) string {
+	sections := promptMarkdownSections(issue.Body)
+	return promptBriefValue(firstPromptSection(sections, names...))
+}
+
+func nonDispatchWorkUnit(unit string) bool {
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	unit = strings.Trim(unit, "`*_:. ")
+	switch unit {
+	case "epic", "program", "research", "idea", "triage", "triage-only", "triage_only", "decompose", "umbrella":
+		return true
+	default:
+		return false
+	}
+}
+
+func oversizedWorkUnit(issue Issue) bool {
+	return issueExpectedSteps(issue) > MaxDispatchExpectedSteps
+}
+
+func issueExpectedSteps(issue Issue) int {
+	sections := promptMarkdownSections(issue.Body)
+	value := firstPromptSection(sections, "expected steps", "step budget")
+	return parseIssueStepCount(value)
+}
+
+func parseIssueStepCount(section string) int {
+	for _, tok := range strings.Fields(strings.TrimSpace(section)) {
+		tok = strings.Trim(tok, "`.,;:()[]")
+		if n, err := strconv.Atoi(tok); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func routeStepBudget(r IssueRoute) int {
+	if r.ExpectedSteps > 0 {
+		return r.ExpectedSteps
+	}
+	return 1
 }
 
 func IsDispatchable(issue Issue, blockedLabel string) bool {
@@ -619,6 +762,10 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, paths []
 		Signal:         signal,
 		SignalConflict: conflict,
 		Paths:          normalizeRepoPaths(paths),
+		WorkUnit:       issueWorkUnit(issue),
+		ExpectedSteps:  issueExpectedSteps(issue),
+		Trigger:        issueBriefField(issue, "trigger", "creation trigger"),
+		BatchPolicy:    issueBriefField(issue, "batch policy", "noise control", "spam control"),
 		UnroutedReason: unroutedReason,
 	}
 }
