@@ -77,14 +77,18 @@ class HelperValueTest(unittest.TestCase):
             check_call=base,
             check_output=base,
         )
+        # The wrappers resolve no_window_creationflags() at CALL time, so the
+        # assertions that expect the Windows suppressor value must run while
+        # os.name is still patched to "nt" — otherwise they resolve against the
+        # real host OS and fail on POSIX CI (creationflags=0 != CREATE_NO_WINDOW).
         with mock.patch.object(dispatch_worker.os, "name", "nt"):
             dispatch_worker.install_no_window_subprocess_defaults(module)
 
-        self.assertEqual(module.run(["git"]), "ok")
-        self.assertEqual(captured["kwargs"]["creationflags"], CREATE_NO_WINDOW)
+            self.assertEqual(module.run(["git"]), "ok")
+            self.assertEqual(captured["kwargs"]["creationflags"], CREATE_NO_WINDOW)
 
-        module.Popen(["git"], creationflags=123)
-        self.assertEqual(captured["kwargs"]["creationflags"], 123)
+            module.Popen(["git"], creationflags=123)
+            self.assertEqual(captured["kwargs"]["creationflags"], 123)
 
 
 class ForwardsSuppressorTest(unittest.TestCase):
