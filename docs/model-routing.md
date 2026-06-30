@@ -5,14 +5,16 @@ description: "How fak routes one request by aspect, from tool calls to reasoning
 
 # Model routing — first-class at every level (`fak route`)
 
-fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. Live multi-model dispatch that executes a decision on real engines is still a stub tracked as a GitHub issue series; any "10x" is a categorical capability framing and a target to be measured, never a measured result.
+fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. The served gateway path now executes route decisions on real registered engines via `--route-manifest` for single-model picks and ensembles; any "10x" remains a categorical capability framing and a target to be measured, never a measured result.
 
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
 > single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
-> **live multi-model dispatch** that executes a decision on real engines is
-> [STUB] — tracked as a GitHub issue series. See [`CLAIMS.md`](../CLAIMS.md).
+> **served gateway dispatch** path is [SHIPPED] for single-model picks and
+> ensembles through `--route-manifest`. Standalone `fak agent` route-manifest
+> entry points, scout-model live classification, and learned routing remain
+> follow-ons. See [`CLAIMS.md`](../CLAIMS.md).
 
 ## The one-paragraph version
 
@@ -84,9 +86,9 @@ Subject  ──Route──▶  Decision { Plan }
 
 ## How it works (the data flow)
 
-A routed call moves through the kernel in five steps. Steps 1–2 are the shipped
-pure spine; steps 3–5 are the wiring the epic tracks. The ordering is not
-cosmetic — it is what keeps the default-deny floor intact (see the contract below).
+A routed call moves through the kernel in five steps. The served gateway path runs
+these steps for `--route-manifest`; the ordering is not cosmetic — it is what keeps
+the default-deny floor intact (see the contract below).
 
 ```
    the host (gateway / agent loop)                 the kernel
@@ -121,8 +123,10 @@ cosmetic — it is what keeps the default-deny floor intact (see the contract be
 5. **Reduce (ensemble only).** The host gathers the members' outputs **in member
    order** and folds them with `Combine(Plan.Reduce, votes)` into one `Result`.
 
-Today the spine produces the `Decision` (steps 1–2) and the fold (`Combine`, step
-5's math); steps 3–4 — writing `Engine` and executing — are the [STUB] wiring.
+The model-free `fak route` oracle still produces only the `Decision`, and
+`fak routebench` still replays fixed stand-in outputs. Live gateway dispatch is the
+separate served-path witness: it writes `Engine` before submit, dispatches registered
+engines, and folds ensembles after N adjudicated member calls.
 
 ## Manifest reference (`fak-route/v1`)
 
