@@ -44,6 +44,57 @@ func TestRankCandidatesNoThrash(t *testing.T) {
 	}
 }
 
+// TestRankCandidatesUndateableTouchStaysEligible pins the freshness boundary that
+// keeps the calibration loop from going stale: a cell whose only journal touch
+// carries NO parseable timestamp (empty/corrupt generated_at AND date) cannot be
+// proven fresh, so it must stay eligible (re-checked), never be parked as
+// "saturated/fresh" forever. Before the fix, an undateable touch left Staleness at
+// 0, tripped the Staleness<1 saturation branch, and froze the cell as fresh — the
+// loop silently stopped recalibrating it. A NEVER-touched cell of the same kind is
+// the control: it must still be runnable too.
+func TestRankCandidatesUndateableTouchStaysEligible(t *testing.T) {
+	now := mustSelectTime(t, "2026-06-29T00:00:00Z")
+	undateable := Recal{Lever: "resume-posture", Metric: "cold_write_share", Kind: RecalibrateKind, CalibErr: 0.80}
+	control := Recal{Lever: "compaction", Metric: "token_shed_ratio", Kind: RecalibrateKind, CalibErr: 0.40}
+	// The only touch for `undateable` has neither a generated_at nor a date that
+	// parseStamp can read, so its age is unknowable.
+	rows := []JournalRow{{
+		Schema: JournalSchema, Tick: 1, Lever: undateable.Lever, Metric: undateable.Metric,
+		Kind: undateable.Kind, Decision: "KEEP", GeneratedAt: "", Date: "not-a-date",
+	}}
+
+	ranked := RankCandidates([]Recal{undateable, control}, rows, SelectOptions{Now: now, RecheckDays: 7})
+	byCell := map[string]ScoredCell{}
+	for _, s := range ranked {
+		byCell[s.Candidate.Lever+"/"+s.Candidate.Metric] = s
+	}
+
+	und := byCell["resume-posture/cold_write_share"]
+	if und.Saturated {
+		t.Fatalf("undateable touch must NOT saturate the cell (cannot prove freshness): %+v", und)
+	}
+	if und.Staleness != 1 {
+		t.Fatalf("undateable touch must fail toward stale (Staleness=1), got %v: %+v", und.Staleness, und)
+	}
+	if und.AgeDays >= 0 {
+		t.Fatalf("undateable touch must leave AgeDays<0 (no provable age), got %v", und.AgeDays)
+	}
+	if !strings.Contains(und.Reason, "undateable") {
+		t.Fatalf("reason should explain the undateable touch, got %q", und.Reason)
+	}
+
+	// The loop must still have runnable work — the undateable cell is eligible.
+	next, ok := NextCandidate(ranked)
+	if !ok {
+		t.Fatalf("an undateable-touch cell must keep the loop runnable, got no next candidate: %+v", ranked)
+	}
+	// Both candidates carry real value; whichever ranks first, the undateable cell
+	// must never be the saturated one that stops the loop.
+	if next.Saturated {
+		t.Fatalf("NextCandidate must be unsaturated, got %+v", next)
+	}
+}
+
 func TestTreeChangedWithinDeclaredPaths(t *testing.T) {
 	declared := []string{"internal/resume/", "cmd/fak/dojo.go"}
 	if !TreeChangedWithin([]string{"internal/resume/backtest.go", "cmd/fak/dojo.go"}, declared) {

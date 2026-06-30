@@ -117,9 +117,16 @@ func RankCandidates(candidates []Recal, rows []JournalRow, opts SelectOptions) [
 	for _, c := range candidates {
 		s := ScoredCell{Candidate: c, AgeDays: -1, ValueWeight: valueWeight(c)}
 		last, ok := lastCellTouch(rows, c.Lever, c.Metric)
+		// agedStamp records that the touch's age was actually PROVEN from a parseable
+		// stamp. Saturation (the "fresh, skip to avoid thrash" bit) must rest on a
+		// proven in-window age, never on the absence of a number: a touched cell whose
+		// stamp is missing/corrupt cannot be shown fresh, so it stays eligible (max
+		// staleness) and is revisited rather than silently parked as fresh forever.
+		agedStamp := false
 		if ok {
 			s.LastTouched = last.GeneratedAt
 			if t, valid := parseStamp(last.GeneratedAt, last.Date); valid {
+				agedStamp = true
 				age := now.Sub(t).Hours() / 24
 				if age < 0 {
 					age = 0
@@ -128,12 +135,19 @@ func RankCandidates(candidates []Recal, rows []JournalRow, opts SelectOptions) [
 				next := t.Add(time.Duration(recheck) * 24 * time.Hour)
 				s.NextEligible = next.UTC().Format(time.RFC3339)
 				s.Staleness = clamp01(age / float64(recheck))
+			} else {
+				// Touched, but we cannot date the touch: fail toward stale so the loop
+				// re-checks the cell instead of trusting an unverifiable freshness.
+				s.Staleness = 1
 			}
 		} else {
 			s.Novelty = 1
 		}
 		s.Score = selectWNovelty*s.Novelty + selectWValue*s.ValueWeight + selectWStaleness*s.Staleness
-		if ok && s.Staleness < 1 {
+		// Only a PROVEN in-window age saturates the cell. Requiring agedStamp closes
+		// the boundary where an undateable touch (Staleness left at 0) would otherwise
+		// trip Staleness<1 and freeze the cell as fresh forever.
+		if agedStamp && s.Staleness < 1 {
 			s.Saturated = true
 		}
 		s.Reason = selectReason(s, recheck)
@@ -415,11 +429,19 @@ func valueWeight(c Recal) float64 {
 
 func selectReason(s ScoredCell, recheckDays int) string {
 	cell := s.Candidate.Lever + "/" + s.Candidate.Metric
-	if s.LastTouched == "" {
+	// Novelty==1 is set only for a cell with NO journal touch at all; a touched cell
+	// whose stamp happens to be empty also has LastTouched=="", so key the
+	// never-touched message off Novelty, not the (ambiguous) empty stamp string.
+	if s.Novelty == 1 {
 		return fmt.Sprintf("%s never touched; value %.3f", cell, s.ValueWeight)
 	}
 	if s.Saturated {
 		return fmt.Sprintf("%s touched %s (%.1fd ago, recheck %dd); fresh, skip to avoid thrash", cell, s.LastTouched, s.AgeDays, recheckDays)
+	}
+	// A touched cell whose stamp could not be parsed has no provable age (AgeDays<0);
+	// it is eligible because we cannot show it is fresh, not because it aged out.
+	if s.AgeDays < 0 {
+		return fmt.Sprintf("%s touched but the stamp %q is undateable (recheck %dd); cannot prove freshness, revisit", cell, s.LastTouched, recheckDays)
 	}
 	return fmt.Sprintf("%s touched %s (%.1fd ago, recheck %dd); stale enough to revisit", cell, s.LastTouched, s.AgeDays, recheckDays)
 }
