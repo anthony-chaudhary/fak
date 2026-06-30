@@ -178,8 +178,8 @@ const wholeTreeDiscardLaw = "whole-tree-discard refused: `git checkout .` / `git
 // the OFF_TRUNK escape (`git checkout -b`, `git switch -c`, `git worktree add`). The
 // trunk guard refuses off-trunk commits after the fact; this catches the branch open
 // at the call boundary. Switching to an EXISTING branch needs repo state (is the
-// target main?) and stays deferred — only the unconditional CREATE forms fire here.
-const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / `git worktree add` opens a feature branch or worktree — work directly on the trunk (`main`); never branch or spin a worktree in this repo (AGENTS.md OFF_TRUNK)."
+// target development branch?) and stays deferred — only the unconditional CREATE forms fire here.
+const offTrunkBranchLaw = "off-trunk refused: `git checkout -b` / `git switch -c` / `git worktree add` opens a feature branch or worktree — work directly on the configured development branch; never branch or spin a worktree in this repo (AGENTS.md OFF_TRUNK)."
 
 // historyRewriteLaw fires on a whole-history rewrite subcommand (`git filter-branch`,
 // `git filter-repo`). These rewrite every commit on the shared trunk — the same class
