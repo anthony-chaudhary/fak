@@ -349,6 +349,88 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 }
 
+// dispatchWriteResolveWorker writes a resolver worker's .log + .pid sidecars into a
+// workspace's .dispatch-runs dir so an end-to-end `fak dispatch tick` sees it exactly as a
+// live host would. The pid is the test process's own (alive) -- the recycled-pid case the
+// #1398 reap must survive: an exited opencode worker runs as a `node` image, so its pid can
+// be reused by another live process and pass the weak liveness gate.
+func dispatchWriteResolveWorker(t *testing.T, root, stem, header, body string) {
+	t.Helper()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatalf("mkdir runs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, stem+".log"), []byte(header+body), 0o644); err != nil {
+		t.Fatalf("write worker log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, stem+".pid"), []byte(fmt.Sprint(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write worker pid: %v", err)
+	}
+}
+
+// TestDispatchTickDocsLaneHeldOnlyByDeadNoopReturnsWouldSpawn is the #1398 END-TO-END
+// witness: the full `fak dispatch tick --lane docs` verb -- not just the liveResolutionLanes
+// helper -- must return WOULD_SPAWN, NOT LANE_BUSY, when the docs lane is "held" only by an
+// exited opencode banner-no-op worker whose recycled `node` pid still passes the weak
+// liveness gate. This is the exact repro in the issue ("docs stayed LANE_BUSY behind dead
+// 122-byte no-ops while real docs work could not dispatch"): the helper-level test
+// (TestLiveResolutionLanesDropsDeadBannerNoopWorker) proves the reap drops the lane, this
+// pins that the reap actually clears the LANE_BUSY gate through the real dispatch verb.
+func TestDispatchTickDocsLaneHeldOnlyByDeadNoopReturnsWouldSpawn(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	// header carries lane=docs (what laneFromSpawnHeader keys on); the body is the
+	// documented opencode/glm banner-only no-op, well under the 512-byte stub floor (the
+	// real #1398 holders were 122 bytes). Numbered 1398 (not the docs issue 12) so the
+	// no-op is a lane holder, not the lane's pickable work.
+	dispatchWriteResolveWorker(t, root, "resolve-1398-20260629-101010",
+		"# fak-spawn 20260629-101010 issue=1398 lane=docs backend=opencode argv0=node\n",
+		"> build · glm-4.5-air\n")
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (a dead no-op holder must not wedge the lane) (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["verdict"] != "WOULD_SPAWN" || got["action"] != "would_spawn" || got["lane"] != "docs" || got["target_issue"] != float64(12) {
+		t.Fatalf("dead-no-op docs tick = verdict %v action %v lane %v target %v, want WOULD_SPAWN/would_spawn/docs/12 (not LANE_BUSY)", got["verdict"], got["action"], got["lane"], got["target_issue"])
+	}
+	if held := stringAnySlice(got["held_lanes"]); len(held) != 0 {
+		t.Fatalf("held_lanes = %v, want none (a dead banner no-op holds no lane)", held)
+	}
+}
+
+// TestDispatchTickDocsLaneHeldByLiveStreamingWorkerStaysLaneBusy is the selectivity side of
+// the #1398 end-to-end witness: the reap must NOT free a lane that carries real work. A
+// genuinely live worker streams past the 512-byte stub floor (even though its log opens with
+// the same banner), so the full `fak dispatch tick --lane docs` still returns LANE_BUSY --
+// proving the WOULD_SPAWN above comes from the no-op reap, not from the lane never being held.
+func TestDispatchTickDocsLaneHeldByLiveStreamingWorkerStaysLaneBusy(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	dispatchWriteResolveWorker(t, root, "resolve-1398-20260629-101011",
+		"# fak-spawn 20260629-101011 issue=1398 lane=docs backend=opencode argv0=node\n",
+		"> build · glm-4.5-air\n"+strings.Repeat("streaming real work output line\n", 40))
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (a live worker keeps the lane busy) (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["verdict"] != "LANE_BUSY" || got["action"] != "lane_busy" {
+		t.Fatalf("live-streaming docs tick = verdict %v action %v, want LANE_BUSY/lane_busy (a live worker holds the lane)", got["verdict"], got["action"])
+	}
+	if held := stringAnySlice(got["held_lanes"]); len(held) != 1 || held[0] != "docs" {
+		t.Fatalf("held_lanes = %v, want [docs] (a live streaming worker holds its lane)", held)
+	}
+}
+
 // TestDispatchTickDefaultPicksOldestIssue / WithPreferNewestPicksNewest pin the
 // backlog-draining policy: by default the tick picks the OLDEST open issue on the
 // busiest lane (#1338 here), and --prefer-newest restores the historical newest-first
