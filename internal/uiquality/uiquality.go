@@ -337,8 +337,6 @@ func kpiWidthConsistency(src []source) KPI {
 // explicit line, so a quiet pane reads "no X" rather than a confusing blank.
 // ---------------------------------------------------------------------------
 
-var reRenderFunc = regexp.MustCompile(`func\s+(renderTUI[A-Za-z]+)\s*\(`)
-
 func kpiEmptyState(src []source) KPI {
 	k := newKPI("empty_state")
 	// The list panes (issues, loops, sessions, guard, garden) must have a no-rows
