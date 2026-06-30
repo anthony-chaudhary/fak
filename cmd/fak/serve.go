@@ -279,7 +279,7 @@ func cmdServe(argv []string) {
 	// listener and letting rank r OOM uploading its band. Fail-open on cpu-ref / a non-probing backend
 	// (the load above already gated host/aggregate fit); this adds only the per-rank VRAM check the
 	// rank-count + Caps().Collective gate above does not make (#971).
-	if err := refuseEPPlanIfUnfit(inKernelModel, chatBackend, *expertParallel); err != nil {
+	if err := refuseEPPlanIfUnfit(inKernelModel, chatBackend, *expertParallel, *contextBudgetTokens); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel %d does not fit resident across the GPUs: %v\n", *expertParallel, err)
 		os.Exit(2)
 	}
@@ -779,7 +779,7 @@ const serveGGUFDeviceHeadroom = 0.15
 // unknown (cpu-ref, a non-probing device) all return nil. So it can ONLY turn a KNOWN per-card
 // overflow (e.g. a 434 GiB model at N=4 ≈ 118 GiB/card on 80 GiB GPUs) into a clean pre-serve
 // refusal — instead of an OOM that surfaces minutes in, when rank r uploads its expert band to GPU r.
-func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks int) error {
+func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks, contextBudgetTokens int) error {
 	if m == nil || be == nil || ranks <= 1 {
 		return nil
 	}
@@ -787,7 +787,20 @@ func refuseEPPlanIfUnfit(m *fakmodel.Model, be compute.Backend, ranks int) error
 	if !ok {
 		return nil // nothing accounted (non-MoE / unloaded) -> fail open
 	}
-	plan := compute.ExpertParallelPerRankPlan(replicated, expert, m.Cfg.NumExperts, ranks, nil)
+	// KV is a per-rank cost: pure EP replicates attention, so each rank holds the full KV for the
+	// context it serves. Size it from the model geometry at the context budget — the SAME KV the
+	// load-time fit plan sizes from contextBudgetTokens — so the per-card check is weights + KV, not
+	// weights alone (matching the established serve fit pattern). 0 budget leaves a weights-only plan.
+	var extra compute.MemoryPlan
+	if contextBudgetTokens > 0 {
+		extra = compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
+			NumLayers:  m.Cfg.NumLayers,
+			NumKVHeads: m.Cfg.NumKVHeads,
+			HeadDim:    m.Cfg.HeadDim,
+			RopeTheta:  m.Cfg.RopeTheta,
+		}, contextBudgetTokens)
+	}
+	plan := compute.ExpertParallelPerRankPlan(replicated, expert, m.Cfg.NumExperts, ranks, extra)
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
