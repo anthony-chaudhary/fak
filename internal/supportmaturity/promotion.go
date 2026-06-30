@@ -110,6 +110,45 @@ func WitnessFor(r Rung) WitnessKind {
 // both hold it at current. A cell already at M7BeyondSOTA has no higher witness, so any
 // attempt there is REVERTed.
 func Promote(current Rung, kind WitnessKind, w shipgate.Witness, breaker *shipgate.Gate) (Rung, shipgate.Decision) {
+	rec := PromoteWithRecord(current, kind, w, breaker)
+	return rec.Next, rec.Decision
+}
+
+// PromotionRecord is the auditable form of Promote. Promote keeps the compact API
+// for existing callers; PromoteWithRecord returns this richer payload so RSI-like
+// controls can journal the same score evidence they used to decide the rung move.
+type PromotionRecord struct {
+	Current      Rung
+	Target       Rung
+	Next         Rung
+	WitnessKind  WitnessKind
+	ExpectedKind WitnessKind
+	Decision     shipgate.Decision
+	Kept         bool
+	Witness      shipgate.Witness
+	Score        Scorecard
+}
+
+// Scorecard is the structured score payload for support-maturity promotion. It is
+// evidence only: the promotion authority remains the witness-kind binding plus
+// shipgate's keep-bit.
+type Scorecard struct {
+	Name       string           `json:"name,omitempty"`
+	Value      float64          `json:"value"`
+	Grade      string           `json:"grade,omitempty"`
+	Components []ScoreComponent `json:"components,omitempty"`
+}
+
+// ScoreComponent is one named numeric axis of a Scorecard.
+type ScoreComponent struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit,omitempty"`
+}
+
+// PromoteWithRecord is Promote with structured score telemetry. It advances the
+// rung only under the same rules as Promote, then records the reason shape.
+func PromoteWithRecord(current Rung, kind WitnessKind, w shipgate.Witness, breaker *shipgate.Gate) PromotionRecord {
 	record := func(d shipgate.Decision) shipgate.Decision {
 		if breaker != nil {
 			return breaker.Record(d)
@@ -117,18 +156,85 @@ func Promote(current Rung, kind WitnessKind, w shipgate.Witness, breaker *shipga
 		return d
 	}
 	if !current.Less(M7BeyondSOTA) { // already at the top — nothing higher to witness
-		return current, record(shipgate.REVERT)
+		dec := record(shipgate.REVERT)
+		return promotionRecord(current, current, current, kind, WitnessNone, dec, false, w, "top")
 	}
 	target := current + 1
 	if kind != WitnessFor(target) { // wrong witness for this rung — refuse before shipgate
-		return current, record(shipgate.REVERT)
+		dec := record(shipgate.REVERT)
+		return promotionRecord(current, target, current, kind, WitnessFor(target), dec, false, w, "wrong-witness")
 	}
-	dec, _ := shipgate.Evaluate(w)
+	dec, ev := shipgate.Evaluate(w)
 	dec = record(dec)
 	if dec == shipgate.KEEP {
-		return target, dec
+		return promotionRecord(current, target, target, kind, WitnessFor(target), dec, ev.Kept(), ev, "promoted")
 	}
-	return current, dec
+	return promotionRecord(current, target, current, kind, WitnessFor(target), dec, ev.Kept(), ev, promotionGrade(dec, ev))
+}
+
+func promotionRecord(current, target, next Rung, kind, expected WitnessKind, decision shipgate.Decision, kept bool, w shipgate.Witness, grade string) PromotionRecord {
+	rec := PromotionRecord{
+		Current:      current,
+		Target:       target,
+		Next:         next,
+		WitnessKind:  kind,
+		ExpectedKind: expected,
+		Decision:     decision,
+		Kept:         kept,
+		Witness:      w,
+	}
+	rec.Score = promotionScorecard(rec, grade)
+	return rec
+}
+
+func promotionScorecard(rec PromotionRecord, grade string) Scorecard {
+	bindingOK := 0.0
+	if rec.ExpectedKind != WitnessNone && rec.WitnessKind == rec.ExpectedKind {
+		bindingOK = 1
+	}
+	advanced := 0.0
+	if rec.Next != rec.Current {
+		advanced = 1
+	}
+	return Scorecard{
+		Name:  "support_maturity_promotion",
+		Value: float64(rec.Next),
+		Grade: grade,
+		Components: []ScoreComponent{
+			{Name: "current_rung", Value: float64(rec.Current), Unit: "rung"},
+			{Name: "target_rung", Value: float64(rec.Target), Unit: "rung"},
+			{Name: "next_rung", Value: float64(rec.Next), Unit: "rung"},
+			{Name: "binding_ok", Value: bindingOK, Unit: "bool"},
+			{Name: "metric_before", Value: rec.Witness.Before, Unit: "metric"},
+			{Name: "metric_after", Value: rec.Witness.After, Unit: "metric"},
+			{Name: "metric_delta", Value: rec.Witness.After - rec.Witness.Before, Unit: "metric"},
+			{Name: "suite_green", Value: boolFloat(rec.Witness.SuiteGreen), Unit: "bool"},
+			{Name: "truth_clean", Value: boolFloat(rec.Witness.TruthClean), Unit: "bool"},
+			{Name: "kept", Value: boolFloat(rec.Kept), Unit: "bool"},
+			{Name: "advanced", Value: advanced, Unit: "bool"},
+		},
+	}
+}
+
+func promotionGrade(dec shipgate.Decision, w shipgate.Witness) string {
+	if dec == shipgate.ESCALATE {
+		return "escalated"
+	}
+	switch {
+	case !w.TruthClean:
+		return "truth-dirty"
+	case !w.SuiteGreen && w.Class == shipgate.ClassFull:
+		return "suite-red"
+	default:
+		return "reverted"
+	}
+}
+
+func boolFloat(v bool) float64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // Drop demotes a cell when the witness BOUND to its current rung regresses — the

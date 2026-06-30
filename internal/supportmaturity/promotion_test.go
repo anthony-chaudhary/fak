@@ -93,6 +93,36 @@ func TestPromoteAcceptsNonAuthorBenchWin(t *testing.T) {
 	}
 }
 
+func TestPromoteWithRecordCarriesScore(t *testing.T) {
+	rec := PromoteWithRecord(M4Correct, WitnessBenchCommitted, nonAuthorBenchWin(), nil)
+	if rec.Next != M5Optimized || rec.Decision != shipgate.KEEP || !rec.Kept {
+		t.Fatalf("non-author bench-win record = %+v, want M5/KEEP/kept", rec)
+	}
+	if rec.Score.Name != "support_maturity_promotion" || rec.Score.Grade != "promoted" {
+		t.Fatalf("promotion score = %+v, want support_maturity_promotion/promoted", rec.Score)
+	}
+	if got := promotionScoreComponent(rec.Score, "binding_ok"); got != 1 {
+		t.Fatalf("binding_ok score = %.0f, want 1 in %+v", got, rec.Score)
+	}
+	if got := promotionScoreComponent(rec.Score, "metric_delta"); got != 50 {
+		t.Fatalf("metric_delta score = %.0f, want 50 in %+v", got, rec.Score)
+	}
+	if got := promotionScoreComponent(rec.Score, "advanced"); got != 1 {
+		t.Fatalf("advanced score = %.0f, want 1 in %+v", got, rec.Score)
+	}
+
+	refused := PromoteWithRecord(M4Correct, WitnessPreflight, nonAuthorBenchWin(), nil)
+	if refused.Next != M4Correct || refused.Decision != shipgate.REVERT {
+		t.Fatalf("wrong witness record = %+v, want hold/REVERT", refused)
+	}
+	if refused.Score.Grade != "wrong-witness" {
+		t.Fatalf("wrong-witness grade = %q in %+v", refused.Score.Grade, refused.Score)
+	}
+	if got := promotionScoreComponent(refused.Score, "binding_ok"); got != 0 {
+		t.Fatalf("wrong-witness binding_ok score = %.0f, want 0 in %+v", got, refused.Score)
+	}
+}
+
 // TestPromoteRefusesWrongWitness asserts the BINDING gate: even a flawless non-author
 // witness of the WRONG kind for the target rung cannot promote. To reach M5 you need a
 // committed bench; a preflight verdict — however clean — is refused before shipgate runs.
@@ -147,6 +177,15 @@ func TestPromoteBreakerResetsOnKeep(t *testing.T) {
 	if n := breaker.ConsecutiveNonKeeps(); n != 0 {
 		t.Fatalf("breaker not reset by KEEP: %d consecutive non-keeps remain", n)
 	}
+}
+
+func promotionScoreComponent(score Scorecard, name string) float64 {
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return 0
 }
 
 // TestDropOnOracleRed is the epic's golden POSITIVE drop cell: a planted oracle-red

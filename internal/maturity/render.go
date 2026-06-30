@@ -145,10 +145,13 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("## Run it\n\n```bash\n")
 	b.WriteString("go run ./cmd/fak maturity              # the lifecycle scorecard\n")
 	b.WriteString("go run ./cmd/fak maturity next         # the next-work backlog (ladder-skips first)\n")
+	b.WriteString("go run ./cmd/fak maturity route        # plan deduped public GitHub issues for the top public rows\n")
+	b.WriteString("go run ./cmd/fak maturity route --live # create/update public-routeable issues so dispatch can drain them\n")
 	b.WriteString("go run ./cmd/fak maturity --markdown    # regenerate this doc\n")
 	b.WriteString("go run ./cmd/fak maturity --json        # machine payload (control-pane / dispatch loop)\n")
 	b.WriteString("go test ./internal/maturity/...        # prove the ladder + skip detection + next-work fold\n")
 	b.WriteString("```\n\n")
+	b.WriteString("`maturity route` keeps private-boundary lanes visible in `maturity next`, but reports them as skipped instead of filing public issues.\n\n")
 	b.WriteString("**Next:** " + p.NextAction + "\n")
 	return b.String()
 }

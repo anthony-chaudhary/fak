@@ -165,6 +165,112 @@ docs  = ["docs/**"]
 	}
 }
 
+func TestIssueItemsRenderRoutableStableMaturityIssues(t *testing.T) {
+	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability {
+		return []Capability{
+			{Lane: "alpha", Dir: "internal/alpha", HasCode: true},
+			{Lane: "bravo", Dir: "internal/bravo", HasCode: true, HasTests: true, Dogfooded: true, DefaultSurface: true},
+		}
+	}})
+	items := IssueItems(p, 1, []string{"maturity"})
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	it := items[0]
+	if it.Key != "maturity/alpha/tested" {
+		t.Fatalf("key = %q, want maturity/alpha/tested", it.Key)
+	}
+	if it.Title != "maturity(alpha): add tests for the capability" {
+		t.Fatalf("title = %q", it.Title)
+	}
+	for _, want := range []string{
+		"<!-- fak-maturity-work-key: maturity/alpha/tested -->",
+		"Lane: `alpha`",
+		"Gap: `tested`",
+		"fak maturity route",
+	} {
+		if !strings.Contains(it.Body, want) {
+			t.Fatalf("issue body missing %q:\n%s", want, it.Body)
+		}
+	}
+	if got := MarkerKey(it.Body); got != it.Key {
+		t.Fatalf("MarkerKey = %q, want %q", got, it.Key)
+	}
+}
+
+func TestProjectIssueItemsSkipsPrivateBoundaryLanesBeforeLimit(t *testing.T) {
+	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability {
+		return []Capability{
+			{Lane: "dgxbridge", Dir: "internal/dgxbridge"},
+			{Lane: "alpha", Dir: "internal/alpha", HasCode: true},
+		}
+	}})
+	projection := ProjectIssueItems(p, 1, nil)
+	if len(projection.Skipped) != 1 {
+		t.Fatalf("skipped len = %d, want 1", len(projection.Skipped))
+	}
+	if projection.Skipped[0].Lane != "dgxbridge" || projection.Skipped[0].Key != "maturity/dgxbridge/prototyped" {
+		t.Fatalf("skipped row = %+v", projection.Skipped[0])
+	}
+	if len(projection.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(projection.Items))
+	}
+	if projection.Items[0].Lane != "alpha" || projection.Items[0].Key != "maturity/alpha/tested" {
+		t.Fatalf("routed item = %+v", projection.Items[0])
+	}
+}
+
+func TestBuildIssuePlanUpdatesExistingMaturityIssue(t *testing.T) {
+	item := IssueItem{
+		Key:     "maturity/alpha/tested",
+		Lane:    "alpha",
+		Title:   "maturity(alpha): add tests for the capability",
+		Body:    "<!-- fak-maturity-work-key: maturity/alpha/tested -->\nbody",
+		Gap:     "tested",
+		Witness: "a *_test.go in internal/alpha",
+	}
+	plan := BuildIssuePlan([]IssueItem{item}, []ExistingIssue{{
+		Number: 42,
+		State:  "OPEN",
+		Body:   "<!-- fak-maturity-work-key: maturity/alpha/tested -->",
+	}})
+	if len(plan) != 1 {
+		t.Fatalf("plan len = %d, want 1", len(plan))
+	}
+	row := plan[0]
+	if row.Action != "update" || row.Number == nil || *row.Number != 42 {
+		t.Fatalf("row = %+v, want update #42", row)
+	}
+}
+
+func TestSyncIssuePlanUsesInjectedRunner(t *testing.T) {
+	plan := []IssuePlanRow{
+		{Action: "create", Key: "maturity/a/tested", Lane: "a", Title: "maturity(a): add tests", Body: "body"},
+		{Action: "update", Key: "maturity/b/default", Lane: "b", Title: "maturity(b): default", Body: "body", Number: intPtr(7)},
+	}
+	var calls [][]string
+	rows := SyncIssuePlan(plan, "owner/repo", []string{"maturity"}, func(args []string) (string, string, bool) {
+		calls = append(calls, args)
+		return "ok", "", true
+	})
+	if len(rows) != 2 || !rows[0].OK || !rows[1].OK {
+		t.Fatalf("sync rows = %+v, want two OK rows", rows)
+	}
+	joined := strings.Join([]string{strings.Join(calls[0], " "), strings.Join(calls[1], " ")}, "\n")
+	for _, want := range []string{
+		"issue create",
+		"--label maturity",
+		"--repo owner/repo",
+		"issue edit 7",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("sync argv missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	p := filepath.Join(root, filepath.FromSlash(rel))
