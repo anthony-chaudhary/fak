@@ -70,6 +70,17 @@ func cmdInfo(argv []string) {
 	os.Exit(runInfo(os.Stdout, os.Stderr, argv))
 }
 
+// fetchGuardInfoVars GETs /debug/vars into a guardInfoVars, printing the house error and
+// returning ok=false on failure — the probe the --json and --once paths share.
+func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVars, bool) {
+	var v guardInfoVars
+	if err := c.get("/debug/vars", &v); err != nil {
+		fmt.Fprintf(stderr, "fak info: %v\n", err)
+		return v, false
+	}
+	return v, true
+}
+
 func runInfo(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -99,9 +110,8 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		var v guardInfoVars
-		if err := c.get("/debug/vars", &v); err != nil {
-			fmt.Fprintf(stderr, "fak info: %v\n", err)
+		v, ok := fetchGuardInfoVars(c, stderr)
+		if !ok {
 			return 1
 		}
 		return encodeJSONOrFail(stdout, stderr, v, "fak info")
@@ -137,9 +147,8 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
 	// the standing header is noise when there is no watch loop to head.
 	if once {
-		var v guardInfoVars
-		if err := c.get("/debug/vars", &v); err != nil {
-			fmt.Fprintf(stderr, "fak info: %v\n", err)
+		v, ok := fetchGuardInfoVars(c, stderr)
+		if !ok {
 			return 1
 		}
 		fmt.Fprintf(stdout, "%s\n", renderGuardInfoLine(v))

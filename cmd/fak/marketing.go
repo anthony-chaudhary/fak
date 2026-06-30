@@ -42,6 +42,24 @@ func cmdMarketing(argv []string) {
 // runMarketingEpic handles `fak marketing epic`: announce the ships that closed an epic,
 // grouped under its title. The caller supplies the title and the range it scoped (the
 // gh-poll / issue-close integration lives in the caller, keeping the tier-1 core gh-free).
+// gatherMarketingOrErr gathers the marketing collection, printing the house error and
+// returning ok=false on failure — the Gather+error prelude epic/release share.
+func gatherMarketingOrErr(stderr io.Writer, root, rangeFlag, since, label string) (marketing.Collected, bool) {
+	col, err := marketing.Gather(root, marketingRange(rangeFlag, since))
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		return col, false
+	}
+	return col, true
+}
+
+// postMarketingArt stamps the resolved source onto an artifact and posts it — the
+// Source+slackPostTail tail epic/release share.
+func postMarketingArt(stdout, stderr io.Writer, art marketing.Artifact, source, channel, token string, dryRun bool, label string) int {
+	art.Source = resolveMarketingSource(source)
+	return slackPostTail(stdout, stderr, marketingPostSpec(art, channel, token, dryRun, label))
+}
+
 func runMarketingEpic(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak marketing epic", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -56,14 +74,11 @@ func runMarketingEpic(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	col, err := marketing.Gather(*root, marketingRange(*rangeFlag, *since))
-	if err != nil {
-		fmt.Fprintf(stderr, "fak marketing epic: %v\n", err)
+	col, ok := gatherMarketingOrErr(stderr, *root, *rangeFlag, *since, "fak marketing epic")
+	if !ok {
 		return 1
 	}
-	art := col.EpicFrom(*title)
-	art.Source = resolveMarketingSource(*source)
-	return slackPostTail(stdout, stderr, marketingPostSpec(art, *channel, *token, *dryRun, "fak marketing epic"))
+	return postMarketingArt(stdout, stderr, col.EpicFrom(*title), *source, *channel, *token, *dryRun, "fak marketing epic")
 }
 
 // runMarketingRelease handles `fak marketing release`: announce the ships in a release. The
@@ -88,14 +103,11 @@ func runMarketingRelease(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak marketing release: --version is required (e.g. --version v0.18.0)")
 		return 2
 	}
-	col, err := marketing.Gather(*root, marketingRange(*rangeFlag, *since))
-	if err != nil {
-		fmt.Fprintf(stderr, "fak marketing release: %v\n", err)
+	col, ok := gatherMarketingOrErr(stderr, *root, *rangeFlag, *since, "fak marketing release")
+	if !ok {
 		return 1
 	}
-	art := col.ReleaseFrom(*version, *lead)
-	art.Source = resolveMarketingSource(*source)
-	return slackPostTail(stdout, stderr, marketingPostSpec(art, *channel, *token, *dryRun, "fak marketing release"))
+	return postMarketingArt(stdout, stderr, col.ReleaseFrom(*version, *lead), *source, *channel, *token, *dryRun, "fak marketing release")
 }
 
 // marketingPostSpec builds the shared slackPostSpec for the epic/release post paths (the
