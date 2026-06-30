@@ -248,6 +248,28 @@ Same trunk rules as everything else: commit on `main`, by path, `-s` for DCO; on
 Stable rollback anchors are a separate, slower channel — see
 [`docs/stable-releases/`](docs/stable-releases/).
 
+## Planning: two kinds of work (don't put an ongoing program on a % bar)
+
+Before you track a piece of work as an epic, classify it. The project draws one line,
+encoded in [`internal/worktype`](internal/worktype/worktype.go):
+
+- An **ongoing optimization program** is never "done": **kernel-optimization** (chasing
+  decode/prefill throughput + numeric parity toward and past SOTA) and
+  **cache-optimization** (agent memory + reuse — multi-agent KV reuse, O(1) bounded
+  context, provider-cache preservation, addressable KV deletion). Its honest measure is a
+  **frontier + a trend**, never a completion %. A "60% complete" line on either is a
+  category error — there is always a faster kernel and a better reuse ratio. Track it with
+  `fak program report`; its operating spines are
+  [`docs/perf-parity-rsi-loop.md`](docs/perf-parity-rsi-loop.md) and
+  [`docs/CACHE-FRONTIER-OPERATING-PLAN.md`](docs/CACHE-FRONTIER-OPERATING-PLAN.md).
+- A **discrete deliverable epic** has a definition of done and converges on 100% (the
+  native harness, release-at-agentic-speed, support-maturity). Completion % is the right
+  lens; track it in the `fak milestone report` roadmap.
+
+`fak milestone report` shows both, in separate sections, so a never-done program is never
+read as a stalled deliverable. To mark a new epic as a program, add its number to the
+`epicClass` map in `internal/worktype` (one line) — not a magic number in a report.
+
 ## Where to go next
 
 | If you want to… | Read |
