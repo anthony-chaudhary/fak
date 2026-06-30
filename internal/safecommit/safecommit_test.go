@@ -249,6 +249,68 @@ func TestDecisionRecorderRecordsPathspecRaceFailure(t *testing.T) {
 	}
 }
 
+func TestPathspecAssertionRecorderRunsAfterUnlock(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		diffTree   string
+		wantReason string
+	}{
+		{
+			name:     "pass",
+			diffTree: "internal/foo/bar.go\n",
+		},
+		{
+			name:       "race",
+			diffTree:   "internal/foo/bar.go\ninternal/peer/swept.go\n",
+			wantReason: ReasonPathspecRace,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &fakeGit{reply: onTrunkBase()}
+			g.reply["diff-tree"] = reply{out: tc.diffTree, code: 0}
+			var events []string
+			run := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+				if len(args) > 0 && args[0] == "notes" {
+					events = append(events, "notes")
+				}
+				return g.run(ctx, dir, args...)
+			}
+			lock := func(LockOptions) (func(), error) {
+				events = append(events, "lock")
+				return func() {
+					events = append(events, "unlock")
+				}, nil
+			}
+			opts := baseOpts()
+			opts.Recorder = witness.NewRecorderWithRunner(run, "")
+
+			res, err := CommitWith(context.Background(), run, lock, opts)
+			if err != nil {
+				t.Fatalf("unexpected infra error: %v", err)
+			}
+			if res.Reason != tc.wantReason {
+				t.Fatalf("Reason = %q, want %q", res.Reason, tc.wantReason)
+			}
+			unlockAt, notesAt := eventIndex(events, "unlock"), eventIndex(events, "notes")
+			if unlockAt < 0 || notesAt < 0 {
+				t.Fatalf("events = %v, want both unlock and notes", events)
+			}
+			if notesAt < unlockAt {
+				t.Fatalf("pathspec assertion note ran while lock was held: events=%v", events)
+			}
+		})
+	}
+}
+
+func eventIndex(events []string, want string) int {
+	for i, ev := range events {
+		if ev == want {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestOffTrunk_refusesBeforeCommitting(t *testing.T) {
 	g := &fakeGit{reply: onTrunkBase()}
 	g.reply["symbolic-ref"] = reply{out: "feature/x\n", code: 0}

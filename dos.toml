@@ -157,6 +157,9 @@ concurrent = [
   "maturity",
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine); cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   "codexmcphealth",
+  "commitintent",
+  "commitrollup",
+  "commitlane",
   "operatorbrief",
   "safesync",
   "branchrole",
@@ -232,6 +235,9 @@ autopick = [
   "maturity", # internal/maturity leaf (the feature-maturity lifecycle scorecard), see [lanes].concurrent note
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine), see [lanes].concurrent note
   "codexmcphealth",
+  "commitintent",
+  "commitrollup",
+  "commitlane",
   "operatorbrief",
   "safesync",
   "branchrole",
@@ -389,6 +395,9 @@ opttarget = ["internal/opttarget/**"]
 guardcomplaint = ["internal/guardcomplaint/**"] # agent APPEAL channel (`fak complain`); cmd/fak/complain.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
 loopindex = ["internal/loopindex/**"] # #1152: agentic-coding loop-index spine (cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 codexmcphealth = ["internal/codexmcphealth/**"]
+commitintent = ["internal/commitintent/**"]
+commitrollup = ["internal/commitrollup/**"]
+commitlane = ["internal/commitlane/**"]
 operatorbrief = ["internal/operatorbrief/**"]
 safesync = ["internal/safesync/**"]
 branchrole = ["internal/branchrole/**"]

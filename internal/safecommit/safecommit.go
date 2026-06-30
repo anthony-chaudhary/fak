@@ -214,6 +214,15 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res = r
 	}
 
+	var recordPathspec bool
+	var recordVerdict, recordReason, recordAssertion string
+	// Registered before the lock's defer so Go's LIFO unwind releases the lock first.
+	defer func() {
+		if recordPathspec {
+			recordPathspecAssertion(ctx, opts, res, recordVerdict, recordReason, recordAssertion)
+		}
+	}()
+
 	if reviewEnabled(opts.Review) {
 		review := runPreCommitReview(ctx, run, opts.Dir, paths, opts.Review)
 		res.Review = &review
@@ -300,7 +309,8 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res.Reason = ReasonPathspecRace
 		res.RacedExtra = extra
 		res.Detail = "extra files landed in this commit — a peer raced; commit left intact for review, not pushed"
-		recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertFail, ReasonPathspecRace, "committed-set!=requested-set")
+		recordPathspec = true
+		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonPathspecRace, "committed-set!=requested-set"
 		return res, nil
 	}
 
@@ -315,11 +325,13 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res.Reason = ReasonSymlinkEscape
 		res.RacedExtra = escaped
 		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
-		recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertFail, ReasonSymlinkEscape, "resolved-targets-within-requested-set=false")
+		recordPathspec = true
+		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonSymlinkEscape, "resolved-targets-within-requested-set=false"
 		return res, nil
 	}
 	res.Verified = true
-	recordPathspecAssertion(ctx, opts, res, witness.VerdictAssertPass, "", "committed-set==requested-set")
+	recordPathspec = true
+	recordVerdict, recordReason, recordAssertion = witness.VerdictAssertPass, "", "committed-set==requested-set"
 
 	// (8) Optional push — only a verified commit, plain push (never --force). A rejection
 	// (e.g. non-fast-forward) surfaces honestly; the commit stands for a human to integrate.

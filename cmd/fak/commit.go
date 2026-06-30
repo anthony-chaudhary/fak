@@ -17,7 +17,14 @@ import (
 // is overridden in tests so runCommit is exercised without a real git or repo.
 var commitFn = safecommit.Commit
 
-func cmdCommit(argv []string) { os.Exit(runCommit(os.Stdout, os.Stderr, argv)) }
+func cmdCommit(argv []string) { os.Exit(runCommitCommand(os.Stdout, os.Stderr, argv)) }
+
+func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "status" {
+		return runCommitStatus(stdout, stderr, argv[1:])
+	}
+	return runCommit(stdout, stderr, argv)
+}
 
 // pathList is a repeatable --path flag (the loopKVList shape): each --path appends one
 // repo-relative pathspec.

@@ -25,6 +25,7 @@ func usageCoreVerbs() {
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
+  fak commit status [--dir DIR] [--json]
                 (the SAFE SHARED-TRUNK COMMIT: commit by EXPLICIT pathspec on a
                  multi-session trunk and refuse to report success unless ONLY those
                  paths landed. Lock-guards the commit, writes the message to a file
