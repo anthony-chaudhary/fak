@@ -112,6 +112,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak commit: %v\n", err)
 		return 1
 	}
+	res = safecommit.ScoreResult(res)
 	if res.Review != nil {
 		if err := recordCommitReviewForLoop(res); err != nil {
 			fmt.Fprintf(stderr, "fak commit: record review evidence: %v\n", err)
@@ -189,6 +190,7 @@ func commitExitCode(res safecommit.Result) int {
 func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	if res.Reason == "" {
 		fmt.Fprintf(stdout, "committed %s (%d path(s))%s\n", short(res.SHA), len(res.Paths), pushedSuffix(res))
+		renderCommitScore(stdout, res)
 		renderCommitReview(stdout, res)
 		return
 	}
@@ -197,12 +199,23 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 		fmt.Fprintf(stdout, ": %s", res.Detail)
 	}
 	fmt.Fprintln(stdout)
+	renderCommitScore(stdout, res)
 	renderCommitReview(stdout, res)
 	if len(res.RacedExtra) > 0 {
 		fmt.Fprintf(stdout, "  raced extra paths: %s\n", strings.Join(res.RacedExtra, ", "))
 		if res.SHA != "" {
 			fmt.Fprintf(stdout, "  commit %s left intact for review (was %s)\n", short(res.SHA), short(res.HeadBefore))
 		}
+	}
+}
+
+func renderCommitScore(stdout io.Writer, res safecommit.Result) {
+	if res.Grade == "" && res.Score == 0 {
+		res = safecommit.ScoreResult(res)
+	}
+	fmt.Fprintf(stdout, "  score: %d/100 (%s)\n", res.Score, res.Grade)
+	for _, note := range res.ScoreNotes {
+		fmt.Fprintf(stdout, "    score note: %s\n", note)
 	}
 }
 

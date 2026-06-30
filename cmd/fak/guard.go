@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -1025,10 +1026,11 @@ func guardSubscriptionLoginPresent(tokenEnv string) bool {
 		return true
 	}
 	cfgDir := guardClaudeConfigDir()
-	for _, name := range []string{".credentials.json", ".oauth-token"} {
-		if fi, err := os.Stat(filepath.Join(cfgDir, name)); err == nil && !fi.IsDir() {
-			return true
-		}
+	if accounts.DeriveIdentity(cfgDir).HasCreds {
+		return true
+	}
+	if fi, err := os.Stat(filepath.Join(cfgDir, ".oauth-token")); err == nil && !fi.IsDir() {
+		return true
 	}
 	return false
 }

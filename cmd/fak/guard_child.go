@@ -125,13 +125,16 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 	passthroughFallback := false
 	ambientKeyOverridden := false
 	noTokenAnywhere := false
+	claudeConfigDir := ""
+	loginStatus := accounts.LoginStatus("")
+	canServe := false
 	if forceOAuth && up != "anthropic" {
 		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
 		os.Exit(2)
 	}
 	autoOAuth := up == "anthropic" && apiKey == ""
 	if forceOAuth || autoOAuth {
-		cfgDir, loginStatus, canServe := guardClaudeLoginPosture()
+		claudeConfigDir, loginStatus, canServe = guardClaudeLoginPosture()
 		tok, src, terr := resolveAnthropicOAuthToken(oauthTokenEnv)
 		switch {
 		case terr == nil:
@@ -172,21 +175,34 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			passthroughFallback = true
 			noTokenAnywhere = os.Getenv("ANTHROPIC_API_KEY") == ""
 		}
-		defer func() {
-			// Keep the fields populated for every Anthropic OAuth decision path, including
-			// early pin/fallback branches above.
-			_ = cfgDir
-			_ = loginStatus
-			_ = canServe
-		}()
 	}
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
 		passthroughFallback: passthroughFallback, ambientKeyOverridden: ambientKeyOverridden,
 		noTokenAnywhere: noTokenAnywhere,
-		remoteServe:     remote,
+		claudeConfigDir: claudeConfigDir, loginStatus: loginStatus, canServe: canServe,
+		remoteServe: remote,
 	}
+}
+
+func guardClaudeLoginPosture() (string, accounts.LoginStatus, bool) {
+	dir := guardClaudeConfigDir()
+	h := accounts.Home{
+		Name:     filepath.Base(strings.TrimRight(dir, string(os.PathSeparator))),
+		Dir:      dir,
+		Identity: accounts.DeriveIdentity(dir),
+	}
+	status := h.LoginStatus()
+	return dir, status, h.CanServe()
+}
+
+func guardLoginStatusNote(us guardUpstream) string {
+	if us.loginStatus == "" {
+		return ""
+	}
+	return fmt.Sprintf(" CLAUDE_CONFIG_DIR=%s login=%s can_serve=%t",
+		us.claudeConfigDir, us.loginStatus, us.canServe)
 }
 
 // buildGuardChild constructs the wrapped-agent command with ONLY the gateway URL injected
