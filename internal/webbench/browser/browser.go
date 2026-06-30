@@ -1,5 +1,4 @@
-// browser - web automation layer for webbench
-// Uses Playwright CLI for browser control (cross-platform)
+// Package browser is the webbench browser-control adapter over Playwright CLI.
 package browser
 
 import (
