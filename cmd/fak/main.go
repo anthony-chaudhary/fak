@@ -117,6 +117,8 @@ func main() {
 		cmdClaudeMacFak(os.Args[2:])
 	case "codex":
 		cmdCodex(os.Args[2:])
+	case "codex-mcp-health":
+		cmdCodexMCPHealth(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "bgloop":
