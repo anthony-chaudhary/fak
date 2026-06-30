@@ -57,9 +57,10 @@ For a single package, `go test ./internal/<pkg>/... -count=1` is the direct form
 > **Windows host caveat.** Native `go build` / `go vet` / `go run` work, but native
 > `go test` is blocked by an OS Application-Control policy on the freshly-compiled
 > test binaries. Run the suite under WSL with `./test.ps1` from the repo root (it
-> shells the same `go test` inside WSL). This is an OS quirk, not a code failure;
-> `fak affected` and every `make test*` target above inherit the same "run under
-> WSL on this box" contract. See
+> shells the same `go test` inside WSL and defaults to the ext4 mirror fast path,
+> `FAK_FAST=1`, so test source enumeration does not run from slow `/mnt/c` drvfs).
+> This is an OS quirk, not a code failure; `fak affected` and every `make test*`
+> target above inherit the same "run under WSL on this box" contract. See
 > [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 
 ## Debugging

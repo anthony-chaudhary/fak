@@ -139,42 +139,58 @@ class LaptopRunnerTest(unittest.TestCase):
     def test_wsl_report_records_explicit_distro(self) -> None:
         args = self.parse("check", "--wsl-distro", "Ubuntu")
 
-        self.assertEqual(runner.wsl_report(args, platform="win32"), {
-            "platform": "win32",
-            "source": "explicit",
-            "distro": "Ubuntu",
-        })
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(runner.wsl_report(args, platform="win32"), {
+                "platform": "win32",
+                "source": "explicit",
+                "distro": "Ubuntu",
+                "filesystem": "ext4-mirror",
+                "fast": "true",
+                "mirror_dir": "$HOME/.cache/fak-src",
+            })
 
     def test_wsl_report_records_preferred_distro(self) -> None:
         args = self.parse("check")
-        with mock.patch.object(runner, "list_wsl_distros", return_value=("Ubuntu", "Ubuntu-24.04")):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(runner, "list_wsl_distros", return_value=("Ubuntu", "Ubuntu-24.04")):
             report = runner.wsl_report(args, platform="win32")
 
         self.assertEqual(report, {
             "platform": "win32",
             "source": "preferred",
             "distro": "Ubuntu-24.04",
+            "filesystem": "ext4-mirror",
+            "fast": "true",
+            "mirror_dir": "$HOME/.cache/fak-src",
         })
 
     def test_wsl_report_records_default_distro(self) -> None:
         args = self.parse("check")
-        with mock.patch.object(runner, "list_wsl_distros", return_value=("Ubuntu",)):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(runner, "list_wsl_distros", return_value=("Ubuntu",)):
             report = runner.wsl_report(args, platform="win32")
 
         self.assertEqual(report, {
             "platform": "win32",
             "source": "default",
             "distro": "default",
+            "filesystem": "ext4-mirror",
+            "fast": "true",
+            "mirror_dir": "$HOME/.cache/fak-src",
         })
 
     def test_wsl_report_records_native_non_windows(self) -> None:
         args = self.parse("check")
 
-        self.assertEqual(runner.wsl_report(args, platform="linux"), {
-            "platform": "linux",
-            "source": "native",
-            "distro": "not-applicable",
-        })
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(runner.wsl_report(args, platform="linux"), {
+                "platform": "linux",
+                "source": "native",
+                "distro": "not-applicable",
+                "filesystem": "native",
+                "fast": "false",
+                "mirror_dir": "not-applicable",
+            })
 
     def test_cpu_smoke_uses_existing_posix_test_runner(self) -> None:
         args = self.parse("--smoke", "cpu")
@@ -201,6 +217,23 @@ class LaptopRunnerTest(unittest.TestCase):
         self.assertTrue(str(cmd.argv[5]).replace("/", "\\").endswith(r"fak\test.ps1"))
         self.assertEqual(cmd.env["FAK_FAST"], "1")
         self.assertEqual(cmd.env["FAK_WSL_DISTRO"], "Ubuntu")
+        self.assertIn("FAK_FAST/u", cmd.env["WSLENV"])
+
+    def test_cpu_windows_defaults_to_ext4_fast_path(self) -> None:
+        args = self.parse("cpu")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            cmd = runner.cpu_command(Path(r"C:\work\fleet"), args, platform="win32")
+
+        self.assertEqual(cmd.env["FAK_FAST"], "1")
+        self.assertIn("FAK_FAST/u", cmd.env["WSLENV"])
+
+    def test_cpu_windows_can_opt_out_of_ext4_fast_path(self) -> None:
+        args = self.parse("--no-fast", "cpu")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            cmd = runner.cpu_command(Path(r"C:\work\fleet"), args, platform="win32")
+
+        self.assertEqual(cmd.env["FAK_FAST"], "0")
+        self.assertIn("FAK_FAST/u", cmd.env["WSLENV"])
 
     def test_powershell_wrapper_is_present(self) -> None:
         wrapper = ROOT / "tools" / "fak_laptop_test.ps1"
@@ -230,9 +263,14 @@ class LaptopRunnerTest(unittest.TestCase):
 
         self.assertEqual([cmd.label for cmd in plan], ["nvidia-setup", "nvidia"])
         self.assertEqual(plan[0].argv[:3], ("wsl.exe", "-d", "Ubuntu-24.04"))
-        self.assertIn("cd /mnt/c/work/fleet/fak", plan[0].argv[-1])
+        self.assertIn("FAK_FAST", plan[0].argv[-1])
+        self.assertIn("rsync -a --delete", plan[0].argv[-1])
+        self.assertIn('cd "$FAK_SCRATCH"', plan[0].argv[-1])
+        self.assertIn("FAK_SRC=/mnt/c/work/fleet/fak", plan[0].argv[-1])
         self.assertIn("setup_cuda_wsl.sh", plan[0].argv[-1])
         self.assertIn("build_cuda.sh test", plan[1].argv[-1])
+        self.assertEqual(plan[0].env["FAK_FAST"], "1")
+        self.assertIn("FAK_FAST/u", plan[0].env["WSLENV"])
 
     def test_windows_prefers_ubuntu_2404_when_installed(self) -> None:
         args = self.parse("--setup", "nvidia")

@@ -41,9 +41,10 @@
 # 9p — the big, safe win. Note: 9p `msize`/`cache=` mount tuning does NOT fix the
 # per-op stat latency above; only ext4-resident *source* does.
 #
-# To also get the source onto ext4 (the remaining ~100x lever), run from an ext4
-# checkout — e.g. clone the repo into $HOME and test there. Trade-off: that splits
-# from the Windows/OneDrive editing copy, so it is not the default here.
+# To also get the source onto ext4 (the remaining ~100x lever), this script has
+# the FAK_FAST mirror below. The Windows wrapper (`test.ps1`) enables it by
+# default; call WSL directly with `FAK_FAST=1 bash ./test.sh ...` or set
+# `FAK_FAST=0` when you intentionally need the slower /mnt/c checkout path.
 #
 # USAGE
 # -----
@@ -83,7 +84,7 @@ if [ "${#args[@]}" -eq 0 ]; then
   args=("./...")
 fi
 
-# --- Optional ext4 fast path (FAK_FAST=1) ------------------------------------
+# --- ext4 fast path (FAK_FAST=1; default from test.ps1 on Windows) ------------
 # The source tree lives on /mnt/c (9p), which taxes every run with a ~28s
 # enumerate+parse phase before a test runs (see the FILESYSTEM PERFORMANCE note
 # above). With FAK_FAST=1 we mirror the module to an ext4 scratch tree and run

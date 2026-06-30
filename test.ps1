@@ -13,6 +13,10 @@
 #
 # Pass-through: every argument is forwarded verbatim to `go test` inside WSL.
 #
+# Filesystem default: Windows callers use the ext4 mirror fast path by default
+# (`FAK_FAST=1`). Set `FAK_FAST=0` to force the slower /mnt/c checkout path when
+# you intentionally need writes to land in this working tree.
+#
 # Distro selection: honor FAK_WSL_DISTRO if set; else prefer 'Ubuntu-24.04' when
 # it is actually installed; else fall back to WSL's *default* distro (omit -d).
 # Hardcoding 'Ubuntu-24.04' was a footgun — a node whose distro is just 'Ubuntu'
@@ -21,6 +25,11 @@
 param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest)
 
 $ErrorActionPreference = 'Stop'
+
+$fakFastWasSet = Test-Path Env:FAK_FAST
+if (-not $fakFastWasSet) {
+    $env:FAK_FAST = '1'
+}
 
 $distro = $env:FAK_WSL_DISTRO
 if (-not $distro) {
@@ -53,8 +62,11 @@ function Add-WSLEnvVar([string]$Entry) {
     }
 }
 
-if ($env:FAK_FAST) {
+if (Test-Path Env:FAK_FAST) {
     Add-WSLEnvVar 'FAK_FAST/u'
+}
+if ($env:FAK_FAST_DIR) {
+    Add-WSLEnvVar 'FAK_FAST_DIR/u'
 }
 if ($env:FAK_ORACLE_DIRS) {
     # Keep this as a plain value: oracle directories are normally repo-relative

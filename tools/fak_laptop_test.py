@@ -106,6 +106,8 @@ def git_output(root: Path, *args: str) -> tuple[bool, str]:
             ("git", *args),
             cwd=str(root),
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=10,
@@ -157,10 +159,37 @@ def windows_drive_to_wsl_path(path: str | Path) -> str:
     return f"/mnt/{drive}/{tail}"
 
 
-def host_env(base: dict[str, str], args: argparse.Namespace) -> dict[str, str]:
+def add_wslenv_entry(env: dict[str, str], entry: str) -> None:
+    parts = [part for part in env.get("WSLENV", "").split(":") if part]
+    if entry not in parts:
+        env["WSLENV"] = ":".join((*parts, entry))
+
+
+def truthy_env(value: str | None) -> bool:
+    return value is not None and value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def wsl_fast_enabled(args: argparse.Namespace, platform: str | None = None, base: dict[str, str] | None = None) -> bool:
+    if getattr(args, "no_fast", False):
+        return False
+    env = base or os.environ
+    if getattr(args, "fast", False):
+        return True
+    if "FAK_FAST" in env:
+        return truthy_env(env.get("FAK_FAST"))
+    return is_windows(platform)
+
+
+def host_env(base: dict[str, str], args: argparse.Namespace, platform: str | None = None) -> dict[str, str]:
     env = dict(base)
-    if args.fast:
+    if getattr(args, "no_fast", False):
+        env["FAK_FAST"] = "0"
+    elif wsl_fast_enabled(args, platform, base):
         env["FAK_FAST"] = "1"
+    if "FAK_FAST" in env:
+        add_wslenv_entry(env, "FAK_FAST/u")
+    if env.get("FAK_FAST_DIR"):
+        add_wslenv_entry(env, "FAK_FAST_DIR/u")
     if args.wsl_distro:
         env["FAK_WSL_DISTRO"] = args.wsl_distro
     return env
@@ -176,7 +205,7 @@ def cpu_args(args: argparse.Namespace) -> tuple[str, ...]:
 
 
 def cpu_command(root: Path, args: argparse.Namespace, platform: str | None = None) -> Command:
-    env = host_env(os.environ, args)
+    env = host_env(os.environ, args, platform)
     forwarded = cpu_args(args)
     if is_windows(platform):
         ps1 = module_dir(root) / "test.ps1"
@@ -244,15 +273,46 @@ def wsl_prefix(args: argparse.Namespace, platform: str | None = None) -> tuple[s
 
 def wsl_report(args: argparse.Namespace, platform: str | None = None) -> dict:
     host = platform or sys.platform
+    fast = wsl_fast_enabled(args, host)
+    fs = "ext4-mirror" if fast and is_windows(host) else ("native" if not is_windows(host) else "drvfs")
+    mirror = os.environ.get("FAK_FAST_DIR", "$HOME/.cache/fak-src") if fs == "ext4-mirror" else "not-applicable"
     if not is_windows(host):
-        return {"platform": host, "source": "native", "distro": "not-applicable"}
+        return {
+            "platform": host,
+            "source": "native",
+            "distro": "not-applicable",
+            "filesystem": fs,
+            "fast": "true" if fast else "false",
+            "mirror_dir": mirror,
+        }
     explicit = args.wsl_distro or os.environ.get("FAK_WSL_DISTRO", "")
     selected = preferred_wsl_distro(args, host)
     if explicit:
-        return {"platform": host, "source": "explicit", "distro": selected or explicit}
+        return {
+            "platform": host,
+            "source": "explicit",
+            "distro": selected or explicit,
+            "filesystem": fs,
+            "fast": "true" if fast else "false",
+            "mirror_dir": mirror,
+        }
     if selected:
-        return {"platform": host, "source": "preferred", "distro": selected}
-    return {"platform": host, "source": "default", "distro": "default"}
+        return {
+            "platform": host,
+            "source": "preferred",
+            "distro": selected,
+            "filesystem": fs,
+            "fast": "true" if fast else "false",
+            "mirror_dir": mirror,
+        }
+    return {
+        "platform": host,
+        "source": "default",
+        "distro": "default",
+        "filesystem": fs,
+        "fast": "true" if fast else "false",
+        "mirror_dir": mirror,
+    }
 
 
 def run_probe(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float = 20.0) -> tuple[bool, str]:
@@ -262,6 +322,8 @@ def run_probe(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: fl
             cwd=str(cwd),
             env=env,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -715,7 +777,8 @@ def print_status_report(label: str, path: Path, report: dict, errors: list[str])
         f"[status:{label}] repo=head={short_repo_head(repo)} branch={status_scalar(repo.get('branch'))} "
         f"dirty={status_scalar(repo.get('dirty'))} status_count={status_scalar(repo.get('status_count'))} "
         f"host={status_scalar(host.get('system'))}/{status_scalar(host.get('machine'))} "
-        f"wsl={status_scalar(wsl.get('source'))}/{status_scalar(wsl.get('distro'))}",
+        f"wsl={status_scalar(wsl.get('source'))}/{status_scalar(wsl.get('distro'))}/"
+        f"{status_scalar(wsl.get('filesystem'))}",
         flush=True,
     )
     sample = repo.get("status_sample")
@@ -906,8 +969,38 @@ def wsl_check(args: argparse.Namespace, script: str, platform: str | None = None
     return (*wsl_prefix(args, platform), "bash", "-lc", script)
 
 
+def wsl_repo_command_script(fak_dir: str, argv: tuple[str, ...]) -> str:
+    command = " ".join(shlex.quote(a) for a in argv)
+    return "\n".join(
+        (
+            "set -euo pipefail",
+            "FAK_SRC=" + shlex.quote(fak_dir),
+            'if [ "${FAK_FAST:-}" = "1" ]; then',
+            '  FAK_SCRATCH="${FAK_FAST_DIR:-$HOME/.cache/fak-src}"',
+            '  CACHE_REL="internal/model/.cache"',
+            '  mkdir -p "$FAK_SCRATCH"',
+            '  if command -v rsync >/dev/null 2>&1; then',
+            '    rsync -a --delete --exclude="/$CACHE_REL" "$FAK_SRC/" "$FAK_SCRATCH/"',
+            "  else",
+            '    ( cd "$FAK_SRC" && find . -path "./$CACHE_REL" -prune -o -type f -print ) | tar -C "$FAK_SRC" -cf - -T - | tar -C "$FAK_SCRATCH" -xf -',
+            "  fi",
+            '  if [ -e "$FAK_SRC/$CACHE_REL" ] && [ ! -e "$FAK_SCRATCH/$CACHE_REL" ]; then',
+            '    mkdir -p "$(dirname "$FAK_SCRATCH/$CACHE_REL")"',
+            '    ln -s "$FAK_SRC/$CACHE_REL" "$FAK_SCRATCH/$CACHE_REL"',
+            "  fi",
+            '  echo "fak_laptop_test: FAK_FAST=1 -> ext4 scratch $FAK_SCRATCH"',
+            '  cd "$FAK_SCRATCH"',
+            "else",
+            '  echo "fak_laptop_test: FAK_FAST=0 -> drvfs source $FAK_SRC"',
+            '  cd "$FAK_SRC"',
+            "fi",
+            command,
+        )
+    )
+
+
 def check_cpu(root: Path, args: argparse.Namespace, platform: str | None = None) -> CheckResult:
-    env = host_env(os.environ, args)
+    env = host_env(os.environ, args, platform)
     if is_windows(platform):
         ps1 = module_dir(root) / "test.ps1"
         if not ps1.exists():
@@ -935,7 +1028,7 @@ def check_nvidia(root: Path, args: argparse.Namespace, platform: str | None = No
     if host_platform == "darwin":
         return CheckResult("nvidia", False, "CUDA/NVIDIA lane requires Windows+WSL or Linux; current host is darwin")
 
-    env = host_env(os.environ, args)
+    env = host_env(os.environ, args, host_platform)
     if is_windows(host_platform):
         script = (
             "set -e; "
@@ -962,7 +1055,7 @@ def check_cuda_toolchain(root: Path, args: argparse.Namespace, platform: str | N
     if host_platform == "darwin":
         return CheckResult("cuda-toolchain", False, "CUDA toolkit lane requires Windows+WSL or Linux; current host is darwin")
 
-    env = host_env(os.environ, args)
+    env = host_env(os.environ, args, host_platform)
     script = (
         "set -e; "
         "test -x ${CUDA_HOME:-$HOME/cudaenv}/bin/nvcc; "
@@ -975,6 +1068,24 @@ def check_cuda_toolchain(root: Path, args: argparse.Namespace, platform: str | N
     if ok:
         return CheckResult("cuda-toolchain", True, detail)
     return CheckResult("cuda-toolchain", False, "CUDA toolkit unavailable; run the nvidia lane with --setup: " + detail)
+
+
+def check_wsl_filesystem(root: Path, args: argparse.Namespace, platform: str | None = None) -> CheckResult:
+    host = platform or sys.platform
+    if not is_windows(host):
+        return CheckResult("wsl-filesystem", True, "native POSIX filesystem path; WSL drvfs is not in use")
+    mode = wsl_report(args, host)
+    if mode.get("filesystem") == "ext4-mirror":
+        return CheckResult(
+            "wsl-filesystem",
+            True,
+            f"Windows checkout enters via {windows_drive_to_wsl_path(module_dir(root))}; commands run from ext4 mirror {mode.get('mirror_dir')}",
+        )
+    return CheckResult(
+        "wsl-filesystem",
+        False,
+        f"commands run directly from slow drvfs path {windows_drive_to_wsl_path(module_dir(root))}; set FAK_FAST=1 or omit --no-fast",
+    )
 
 
 def check_required_names(args: argparse.Namespace) -> set[str]:
@@ -1008,7 +1119,12 @@ def check_report(checks: list[CheckResult], args: argparse.Namespace, rc: int, p
 
 
 def run_checks(root: Path, args: argparse.Namespace, platform: str | None = None) -> int:
-    checks = [check_cpu(root, args, platform), check_nvidia(root, args, platform), check_cuda_toolchain(root, args, platform)]
+    checks = [
+        check_cpu(root, args, platform),
+        check_nvidia(root, args, platform),
+        check_cuda_toolchain(root, args, platform),
+        check_wsl_filesystem(root, args, platform),
+    ]
     for check in checks:
         status = "OK" if check.ok else "MISSING"
         print(f"[check:{check.name}] {status} {check.detail}", flush=True)
@@ -1029,7 +1145,7 @@ def nvidia_commands(root: Path, args: argparse.Namespace, platform: str | None =
     if host_platform == "darwin" and not args.dry_run:
         raise SystemExit("nvidia lane requires Windows+WSL or Linux with CUDA; this host is darwin")
 
-    env = host_env(os.environ, args)
+    env = host_env(os.environ, args, host_platform)
     commands: list[Command] = []
     actions: list[tuple[str, tuple[str, ...]]] = []
     if args.setup:
@@ -1050,7 +1166,7 @@ def nvidia_commands(root: Path, args: argparse.Namespace, platform: str | None =
             raise SystemExit(str(exc)) from exc
         prefix = wsl_prefix(args, host_platform)
         for label, argv in actions:
-            script = "set -euo pipefail; cd " + shlex.quote(fak_dir) + "; " + " ".join(shlex.quote(a) for a in argv)
+            script = wsl_repo_command_script(fak_dir, argv)
             commands.append(Command(label, (*prefix, "bash", "-lc", script), root, env))
         return commands
 
@@ -1118,6 +1234,8 @@ def run_command_streamed(cmd: Command) -> tuple[int, str, str]:
             cwd=str(cmd.cwd),
             env=cmd.env,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             bufsize=1,
@@ -1174,7 +1292,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Run fak laptop CPU/Intel and NVIDIA/CUDA test lanes")
     ap.add_argument("lane", nargs="?", choices=("cpu", "nvidia", "all", "check", "verify", "status", "accept"), default="cpu")
     ap.add_argument("--smoke", action="store_true", help="CPU lane: run focused compute/model smoke tests instead of ./...")
-    ap.add_argument("--fast", action="store_true", help="CPU lane: forward FAK_FAST=1 to fak/test.sh via WSL")
+    ap.add_argument("--fast", action="store_true", help="force the ext4 mirror fast path (default on Windows)")
+    ap.add_argument("--no-fast", action="store_true", help="Windows/WSL: run directly from the slower /mnt/c checkout path")
     ap.add_argument("--full-cpu", action="store_true", help="accept lane: run the full CPU ./... suite instead of the focused smoke tests")
     ap.add_argument("--cpu-only", action="store_true", help="accept/verify/status lane: prove only the CPU/Intel lane, without requiring NVIDIA")
     ap.add_argument("--require-nvidia", action="store_true", help="check lane: fail if NVIDIA/WSL GPU passthrough is unavailable")
@@ -1191,6 +1310,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--run-report", default=None, help="verify/status lane: run report path")
     ap.add_argument("--allow-stale-repo", action="store_true", help="verify/status lane: allow reports from a different git HEAD")
     args = ap.parse_args(argv)
+    if args.fast and args.no_fast:
+        ap.error("--fast and --no-fast are mutually exclusive")
     if args.precheck_report is None:
         args.precheck_report = DEFAULT_PRECHECK_REPORT
     if args.check_report is None:

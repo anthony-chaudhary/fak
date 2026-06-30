@@ -90,6 +90,10 @@ lane intentionally refuses to run on macOS except in `--dry-run` mode.
 Use `--wsl-distro NAME` or `FAK_WSL_DISTRO=NAME` to pin a distro; otherwise the Windows
 runner matches `fak/test.ps1` by preferring `Ubuntu-24.04` when it is installed and
 falling back to WSL's default distro.
+On Windows, both the CPU and NVIDIA lanes default to the WSL ext4 mirror fast path
+(`FAK_FAST=1`) and the reports record `wsl.filesystem=ext4-mirror`; use
+`--no-fast` or `FAK_FAST=0` only when intentionally auditing the slower `/mnt/c`
+drvfs path.
 The `accept` lane writes `fak\experiments\gpu\laptop-check.json`,
 `fak\experiments\gpu\laptop-all.json`, and
 `fak\experiments\gpu\laptop-post-setup.json`; relative report paths are resolved from the

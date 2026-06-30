@@ -71,13 +71,15 @@ toolchain the race detector needs:
 ```bash
 # from a WSL Ubuntu shell with gcc installed (apt install build-essential)
 cd /mnt/c/.../fak
-CGO_ENABLED=1 GOTOOLCHAIN=auto go test -race -count=1 ./...
+FAK_FAST=1 CGO_ENABLED=1 bash ./test.sh -race -count=1 ./...
 ```
 
 `GOTOOLCHAIN=auto` lets the distro's older `go` fetch the version pinned in
-`fak/go.mod`. The source lives on the `/mnt/c` 9p mount, so the first run pays an
-enumerate/compile tax; `FAK_FAST=1 bash ./test.sh -race ./...` mirrors the
-sources onto ext4 for a faster inner loop.
+`fak/go.mod`. The Windows wrapper (`./test.ps1`) enables `FAK_FAST=1` by default;
+when calling from WSL yourself, keep that flag so the source is mirrored onto the
+distro's ext4 filesystem instead of running every stat/open through `/mnt/c`
+drvfs. Set `FAK_FAST=0` only when a test intentionally writes back into the
+Windows checkout.
 
 ### CI (the durable witness)
 
