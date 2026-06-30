@@ -14,7 +14,7 @@ and the next steps the data points to.
 
 > **Scope & honesty.** The serving number below is a **real engine on a real
 > checkpoint**; the fak native number is a **synthetic-weights kernel cost** — they are
-> *not* the same category (see §3). Hardware is referred to by class (`a100-40gb-tp8`),
+> *not* the same category (see §3). Hardware is referred to by class (`gpu-server-40gb-tp8`),
 > never by lab host/IP/path, per the public-record scrub discipline.
 
 ## 1. What is actually running on the 40GB node
@@ -124,7 +124,7 @@ column** and a **safety/reuse column**, not tok/s alone:
 # (stage the bench script in chunks, exec backgrounded, read the result file)
 
 # The native fak kernel curve on the idle 80GB node:
-python tools/dgx_witness_fetch.py dgx3 --runner tools/dgx_glm_throughput_run.sh
+<private-witness-fetch> <private-gpu-node> --runner <private-throughput-runner>
 # Local single config on any CUDA node:
 go run -tags cuda ./cmd/glmdsatput -layers 8 -hidden 2048 -backend cuda -decode-steps 64 -json
 ```

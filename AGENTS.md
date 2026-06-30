@@ -186,10 +186,10 @@ binary/tooling is unavailable, and say so in the handoff.
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
   for non-trivial work, default to porting it to Go in the same pass (`REASON_NEW_PYTHON_TOOL`).
-- **GPU-server/Slack control is private; public evidence is scrubbed.** Benchmark results and
-  runbooks can live here once scrubbed to generic GPU-server language, but live Slack
-  control code belongs in `fak-private`: `cmd|internal/*dgx*/`, Slack bridge/control
-  packages, `cmd/slackgc/`, and the sunset `tools/bench_slack.py` path. See
+- **GPU-server private control is private; public evidence is scrubbed.** Benchmark results and
+  runbooks can live here once scrubbed to generic GPU-server language, but live private
+  control code belongs in `fak-private`: private bridge/control packages, private cleanup
+  helpers, and sunset private bridge tooling. See
   [`docs/gpu-server-private-boundary.md`](docs/gpu-server-private-boundary.md). **To actually reach the
   channel** (the private control bridge to the lab GPU servers), start at the public stub
   [`docs/private-comms-channel.md`](docs/private-comms-channel.md) — it points to the live

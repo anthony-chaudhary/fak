@@ -31,7 +31,7 @@ native fak GLM numbers are reduced-scale device-kernel cost.
 | 1 | readiness | can this node serve GLM-5.2 with vLLM at all? | `tools/glm52_serve_preflight.py` -> `preflight.json` |
 | 2 | serving witness | does GLM-5.2 answer direct, through fak, and quarantine a poisoned tool result? | `tools/glm52_serving_witness.py` -> `experiments/glm52/full-size-serving-witness.json` |
 | 3 | vLLM adjudication tax | what latency/decode tax does `fak serve` add over raw vLLM? | `tools/vllm_tax_witness.py` -> `experiments/vllm/adjudication-tax-witness.json` |
-| 4 | SWE-bench Verified 20 | does the agent finish/resolve the same 20 Verified tasks raw-vLLM vs fak-gateway? | `tools/dgx_swebench_compare.py --preflight-only`, then `--verified-count 20` -> `COMPARE-PREFLIGHT.json` + `compare.json` + `COMPARE.md` + `DONE.rc` |
+| 4 | SWE-bench Verified 20 | does the agent finish/resolve the same 20 Verified tasks raw-vLLM vs fak-gateway? | private compare runner preflight, then the 20-task run -> `COMPARE-PREFLIGHT.json` + `compare.json` + `COMPARE.md` + `DONE.rc` |
 | 5 | fak-native agentic floors | what are the deterministic turn-tax/session/fanout/cache-reuse floors independent of live model variance? | `fak swebench compare`, `turntax`, `sessionbench`, `fanbench`, `radixbench` artifacts |
 
 Rungs 0-4 are the GLM-5.2/vLLM live-serving comparison. Rung 5 is the fak-native
@@ -99,7 +99,7 @@ python tools/vllm_tax_witness.py \
 
 # 4a. Fail fast before the long SWE-bench Verified comparison. This checks the
 # runner/grader install, raw endpoint, GPU label, and fak binary.
-python tools/dgx_swebench_compare.py \
+<private-swebench-compare> \
   --engine vllm \
   --model zai-org/GLM-5.2-FP8 \
   --served-model-name glm-5.2 \
@@ -114,7 +114,7 @@ python tools/dgx_swebench_compare.py \
 
 # 4b. Run the 20-task SWE-bench Verified comparison. This reuses raw vLLM and
 # lets the driver start a fresh fak gateway in front of it.
-python tools/dgx_swebench_compare.py \
+<private-swebench-compare> \
   --engine vllm \
   --model zai-org/GLM-5.2-FP8 \
   --served-model-name glm-5.2 \
@@ -155,7 +155,7 @@ go run ./cmd/radixbench -live=false \
 ```
 
 The SWE-bench floor uses the same 20-instance scale as the live run, but it is
-deterministic geometry/adjudication evidence. The live `dgx_swebench_compare.py`
+deterministic geometry/adjudication evidence. The live private compare runner
 artifact is the resolve-rate evidence.
 
 ## Completion Bar

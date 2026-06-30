@@ -39,7 +39,7 @@ Private-only paths and concepts:
 - private bridge commands and support packages
 - private notification cleanup helpers
 - private bridge/control packages
-- the sunset Python bridge paths `tools/bench_slack.py` and `tools/bench_slack_test.py`
+- sunset private Python bridge paths
 - GPU-server machine catalog runs under private machine IDs
 - raw control-plane state, transcripts, tokens, workspace IDs, lab hostnames, and
   operator paths
@@ -68,8 +68,8 @@ not a code import), so the live control plane stays private while the core stays
 See [`fleet.md`](fleet.md).
 
 Existing Python tools are grandfathered only. The allowlist in `internal/pythongate` can
-shrink when a Python tool is ported or sunset, but it must not grow. Restoring
-`tools/bench_slack.py` would violate both rules: it is a new Python path after deletion
+shrink when a Python tool is ported or sunset, but it must not grow. Restoring the removed
+private bridge Python tool would violate both rules: it is a new Python path after deletion
 and it is private GPU-server control-plane code.
 
 ## Enforced by
