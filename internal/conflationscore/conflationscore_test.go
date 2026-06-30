@@ -97,6 +97,54 @@ func TestFaultSignalIsolated_MixedWithNamedFaultIsClean(t *testing.T) {
 	}
 }
 
+func TestCacheHeadlineProvenance_BareCacheWinIsDebt(t *testing.T) {
+	surfaces := map[string][]cacheHeadlineLine{"docs/x.md": {
+		{Line: 12, Text: "The frozen trajectory cache win is obvious."},
+	}}
+	k := kpiCacheHeadlineProvenance(surfaces)
+	if len(k.Defects) == 0 {
+		t.Fatal("bare cache win headline must be provenance debt")
+	}
+	if !strings.Contains(k.Defects[0], "docs/x.md:12") {
+		t.Fatalf("defect should include a stable file:line, got %v", k.Defects)
+	}
+}
+
+func TestCacheHeadlineProvenance_ObservedWithoutOwnerIsDebt(t *testing.T) {
+	surfaces := map[string][]cacheHeadlineLine{"docs/x.md": {
+		{Line: 7, Text: "OBSERVED cache win across the session."},
+	}}
+	k := kpiCacheHeadlineProvenance(surfaces)
+	if len(k.Defects) == 0 {
+		t.Fatal("cache headline with provenance but no owner/plane must be debt")
+	}
+	if !strings.Contains(k.Defects[0], "owner/plane/provenance") {
+		t.Fatalf("defect should name the missing owner/plane/provenance contract, got %v", k.Defects)
+	}
+}
+
+func TestCacheHeadlineProvenance_LabeledProviderCacheHitIsClean(t *testing.T) {
+	surfaces := map[string][]cacheHeadlineLine{"docs/x.md": {
+		{Line: 3, Text: "OBSERVED provider cache-hit 0.99, WITNESSED ctxplan S/N 0.30."},
+		{Line: 4, Text: "Same OBSERVED provider-cache cost/latency win, no trust claim."},
+	}}
+	k := kpiCacheHeadlineProvenance(surfaces)
+	if len(k.Defects) != 0 {
+		t.Fatalf("labeled cache headlines should be clean, got %v", k.Defects)
+	}
+}
+
+func TestExtractCacheHeadlineLinesSkipsCodeFence(t *testing.T) {
+	src := "```text\n99% cache-hit\n```\n\n# OBSERVED provider cache-hit 99%\n"
+	lines := extractCacheHeadlineLines(src)
+	if len(lines) != 1 {
+		t.Fatalf("lines=%v, want one non-fenced cache headline", lines)
+	}
+	if lines[0].Line != 5 || !strings.Contains(lines[0].Text, "OBSERVED provider") {
+		t.Fatalf("line=%+v, want markdown headline outside fence", lines[0])
+	}
+}
+
 func TestExtractHelpAndSummaryStrings(t *testing.T) {
 	src := `writeCounter(b, "n", "OBSERVED provider cache_read_input_tokens relayed", x)` + "\n" +
 		`fmt.Fprintf(&b, "fak guard: compaction -- %d fired", n)` + "\n"
@@ -116,7 +164,7 @@ func TestBuildEnvelopeShape(t *testing.T) {
 	if p.Schema != Schema {
 		t.Errorf("schema=%q want %q", p.Schema, Schema)
 	}
-	for _, key := range []string{DebtKey, "grade", "score", "surfaces", "external_values_seen"} {
+	for _, key := range []string{DebtKey, "grade", "score", "surfaces", "external_values_seen", "cache_headline_claims_seen"} {
 		if _, ok := p.Corpus[key]; !ok {
 			t.Errorf("corpus missing key %q: %v", key, p.Corpus)
 		}

@@ -16,8 +16,11 @@ package conflationscore
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -40,6 +43,14 @@ const CleanFloor = 0
 var ReportingSurfaces = []string{
 	"internal/gateway/metrics.go",
 	"cmd/fak/guard.go",
+}
+
+// CacheHeadlineRoots are docs/claim surfaces where a terse cache headline can
+// become an overclaim. The scan is intentionally limited to public markdown
+// prose and CLAIMS.md, not generated code or fixtures.
+var CacheHeadlineRoots = []string{
+	"CLAIMS.md",
+	"docs",
 }
 
 // externalValueTokens mark a reported value as coming from an EXTERNAL party fak relays. A
@@ -94,6 +105,33 @@ var disambiguationMarkers = []string{
 	"reading a low", "unless", "provider-side", "only bail_reason", "the ONLY fak-fault",
 }
 
+// cacheHeadlineClaimPhrases catch the short, easy-to-overread cache claims that
+// docs and CLAIMS.md must not publish without plane/provenance. They deliberately
+// do not match every "cache hit" mention; the gate is for headline-like claims
+// such as "99% cache-hit" and "cache win".
+var cacheHeadlineClaimPhrases = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b~?\d{1,3}(?:\.\d+)?%\s+(?:\w+\s+){0,2}cache[- ]hit\b`),
+	regexp.MustCompile(`(?i)\bcache[- ]hit\s+(?:0?\.\d+|\d{1,3}%)`),
+	regexp.MustCompile(`(?i)\bcache\s+win(?:s)?\b`),
+}
+
+// cacheHeadlineProvenanceQualifiers name whether fak observed, witnessed, simulated, or
+// forecast a terse cache claim. They are necessary but not sufficient: the same line must
+// also name an owner/plane so "OBSERVED cache win" cannot hide whose cache did the work.
+var cacheHeadlineProvenanceQualifiers = []string{
+	"OBSERVED", "WITNESSED", "SIMULATED", "FORECAST", "modeled", "modelled",
+	"provenance",
+}
+
+// cacheHeadlineOwnerQualifiers name the owner/plane of a terse cache claim. This is the
+// item #1491/#Top-50 rule: a cache headline that does not say provider/fak/kernel/etc.
+// lets the provider prompt-cache masquerade as fak-authored value.
+var cacheHeadlineOwnerQualifiers = []string{
+	"provider", "provider-cache", "provider cache", "cache_read", "cache_creation",
+	"fak", "kernel", "KV", "context", "ctxplan", "resident", "external-engine",
+	"compaction", "vDSO", "cost/latency", "rebate", "plane",
+}
+
 // faultSignalNamed matches prose that names a single fak-fault signal (the "only X>0 is our
 // bug" pattern), ported from the Python re.search with re.I.
 var faultSignalNamed = regexp.MustCompile(`(?i)only\b.{0,40}\bis\s+(?:fak's|the\s+\w+\s+)?bug`)
@@ -119,6 +157,30 @@ func ExtractHelpStrings(text string) []string {
 		low := strings.ToLower(s)
 		if strings.Contains(s, "fak guard:") || strings.Contains(low, "compaction") || strings.Contains(low, "cache") {
 			out = append(out, s)
+		}
+	}
+	return out
+}
+
+type cacheHeadlineLine struct {
+	Line int
+	Text string
+}
+
+func extractCacheHeadlineLines(text string) []cacheHeadlineLine {
+	var out []cacheHeadlineLine
+	inFence := false
+	for i, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || line == "" {
+			continue
+		}
+		if cacheHeadlineClaim(line) {
+			out = append(out, cacheHeadlineLine{Line: i + 1, Text: line})
 		}
 	}
 	return out
@@ -227,6 +289,51 @@ func kpiFaultSignalIsolated(surfaces map[string][]string) scorecard.KPI {
 	}
 }
 
+// kpiCacheHeadlineProvenance (HARD): docs and CLAIMS.md may use compact cache
+// headlines only when the same line names BOTH a provenance marker and an owner/plane.
+// Bare "99% cache-hit", "cache win", or even "OBSERVED cache win" makes a provider
+// rebate read like a fak-owned trust/value claim.
+func kpiCacheHeadlineProvenance(surfaces map[string][]cacheHeadlineLine) scorecard.KPI {
+	var defects []string
+	total := 0
+	for _, path := range sortedCacheSurfaceKeys(surfaces) {
+		for _, line := range surfaces[path] {
+			total++
+			hasProvenance := scorecard.HasAny(line.Text, cacheHeadlineProvenanceQualifiers)
+			hasOwner := scorecard.HasAny(line.Text, cacheHeadlineOwnerQualifiers)
+			if !hasProvenance || !hasOwner {
+				defects = append(defects, fmt.Sprintf("%s:%d cache headline omits owner/plane/provenance: %q",
+					filepath.ToSlash(path), line.Line, scorecard.Clip(line.Text, 90)))
+			}
+		}
+	}
+	score := 100.0
+	if len(defects) > 0 {
+		denom := total
+		if denom < 1 {
+			denom = 1
+		}
+		score = 100.0 * (1 - float64(len(defects))/float64(denom))
+		if score < 0 {
+			score = 0
+		}
+	}
+	return scorecard.KPI{
+		Key: "cache_headline_provenance", Group: "honesty", Score: score,
+		Detail:  detailCounts(total-len(defects), total, "cache headline claims carry owner/plane/provenance"),
+		Defects: defects,
+	}
+}
+
+func cacheHeadlineClaim(line string) bool {
+	for _, re := range cacheHeadlineClaimPhrases {
+		if re.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
 // Build reads the reporting surfaces, runs the three KPIs, and folds them into the
 // control-pane payload via the shared kernel. root is the repo root.
 func Build(root string) scorecard.Payload {
@@ -242,10 +349,16 @@ func Build(root string) scorecard.Payload {
 			}
 		}
 	}
+	cacheSurfaces := cacheHeadlineSurfaces(root)
+	cacheClaimsSeen := 0
+	for _, lines := range cacheSurfaces {
+		cacheClaimsSeen += len(lines)
+	}
 	kpis := []scorecard.KPI{
 		kpiProvenanceLabeled(surfaces),
 		kpiNoFalseAttribution(surfaces),
 		kpiFaultSignalIsolated(surfaces),
+		kpiCacheHeadlineProvenance(cacheSurfaces),
 	}
 	debt := 0
 	for _, k := range kpis {
@@ -264,12 +377,42 @@ func Build(root string) scorecard.Payload {
 		NextAction:      next,
 		NextActionClean: next,
 		ExtraCorpus: map[string]any{
-			"surfaces":             len(ReportingSurfaces),
-			"external_values_seen": externalSeen,
+			"surfaces":                   len(ReportingSurfaces),
+			"external_values_seen":       externalSeen,
+			"cache_headline_claims_seen": cacheClaimsSeen,
 		},
 	})
 	p.Workspace = root
 	return p
+}
+
+func cacheHeadlineSurfaces(root string) map[string][]cacheHeadlineLine {
+	out := map[string][]cacheHeadlineLine{}
+	for _, rel := range CacheHeadlineRoots {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		info, err := os.Stat(full)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			if strings.EqualFold(filepath.Ext(rel), ".md") {
+				out[filepath.FromSlash(rel)] = extractCacheHeadlineLines(scorecard.SafeRead(full))
+			}
+			continue
+		}
+		_ = filepath.WalkDir(full, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".md") {
+				return nil
+			}
+			relPath, err := filepath.Rel(root, path)
+			if err != nil {
+				relPath = path
+			}
+			out[relPath] = extractCacheHeadlineLines(scorecard.SafeRead(path))
+			return nil
+		})
+	}
+	return out
 }
 
 // --- small local helpers (string shaping unique to this card's prose) --------------------
@@ -289,11 +432,37 @@ func sortedKeys(m map[string][]string) []string {
 			seen[rel] = true
 		}
 	}
+	restStart := len(ordered)
 	for _, k := range keys {
 		if !seen[k] {
 			ordered = append(ordered, k)
 		}
 	}
+	sort.Strings(ordered[restStart:])
+	return ordered
+}
+
+func sortedCacheSurfaceKeys(m map[string][]cacheHeadlineLine) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	ordered := make([]string, 0, len(keys))
+	seen := map[string]bool{}
+	for _, root := range CacheHeadlineRoots {
+		rel := filepath.FromSlash(root)
+		if _, ok := m[rel]; ok {
+			ordered = append(ordered, rel)
+			seen[rel] = true
+		}
+	}
+	restStart := len(ordered)
+	for _, k := range keys {
+		if !seen[k] {
+			ordered = append(ordered, k)
+		}
+	}
+	sort.Strings(ordered[restStart:])
 	return ordered
 }
 
