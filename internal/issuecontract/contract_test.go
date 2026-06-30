@@ -48,6 +48,12 @@ func TestReviewCandidateDispatchableScoresFull(t *testing.T) {
 	if review.AgentContext.Total != 100 {
 		t.Fatalf("agent context = %+v, want total 100", review.AgentContext)
 	}
+	if review.WorkUnit != "leaf" || review.ExpectedSteps != 3 ||
+		review.Trigger != "A verified completion handoff proposes this next leaf." ||
+		review.BatchPolicy != "At most two follow-up issues per handoff; update by marker key on rerun." {
+		t.Fatalf("review metadata = work_unit %q expected_steps %d trigger %q batch_policy %q",
+			review.WorkUnit, review.ExpectedSteps, review.Trigger, review.BatchPolicy)
+	}
 	if len(review.Reasons) != 0 || len(review.MissingFields) != 0 {
 		t.Fatalf("unexpected reasons/missing: %+v %+v", review.Reasons, review.MissingFields)
 	}
