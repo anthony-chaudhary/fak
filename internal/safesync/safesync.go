@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -204,6 +206,7 @@ func normalizeOptions(opts Options) Options {
 func RealRunner(ctx context.Context, repo string, args ...string) RunResult {
 	cmdArgs := append([]string{"-C", repo}, args...)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
