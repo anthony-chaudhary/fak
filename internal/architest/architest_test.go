@@ -50,6 +50,7 @@ var tier = map[string]int{
 	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":     1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"branchrole":       1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
 	"benchruns":        1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
