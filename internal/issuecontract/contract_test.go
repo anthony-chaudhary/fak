@@ -54,6 +54,11 @@ func TestReviewCandidateDispatchableScoresFull(t *testing.T) {
 		t.Fatalf("review metadata = work_unit %q expected_steps %d trigger %q batch_policy %q",
 			review.WorkUnit, review.ExpectedSteps, review.Trigger, review.BatchPolicy)
 	}
+	if len(review.Assumptions) != 1 || len(review.ConfusionRisks) != 1 || len(review.Coordination) != 1 ||
+		review.Coordination[0] != "Do not dispatch concurrently with taskmgr handoff body edits." {
+		t.Fatalf("review agent notes = assumptions=%v confusion=%v coordination=%v",
+			review.Assumptions, review.ConfusionRisks, review.Coordination)
+	}
 	if len(review.Reasons) != 0 || len(review.MissingFields) != 0 {
 		t.Fatalf("unexpected reasons/missing: %+v %+v", review.Reasons, review.MissingFields)
 	}

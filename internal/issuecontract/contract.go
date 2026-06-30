@@ -144,6 +144,9 @@ type Review struct {
 	Paths           []string      `json:"paths,omitempty"`
 	WorkUnit        string        `json:"work_unit,omitempty"`
 	ExpectedSteps   int           `json:"expected_steps,omitempty"`
+	Assumptions     []string      `json:"assumptions,omitempty"`
+	ConfusionRisks  []string      `json:"confusion_risks,omitempty"`
+	Coordination    []string      `json:"coordination,omitempty"`
 	Trigger         string        `json:"trigger,omitempty"`
 	BatchPolicy     string        `json:"batch_policy,omitempty"`
 	Score           Score         `json:"score"`
@@ -199,19 +202,22 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	spinePriority := spinePriority(c)
 	agentContext := agentContext(c)
 	out := Review{
-		Schema:        ReviewSchema,
-		Key:           c.Key,
-		Lane:          c.Lane,
-		Paths:         append([]string(nil), c.Paths...),
-		WorkUnit:      c.WorkUnit,
-		ExpectedSteps: c.ExpectedSteps,
-		Trigger:       c.Trigger,
-		BatchPolicy:   c.BatchPolicy,
-		Reasons:       reasons.list(),
-		MissingFields: missing,
-		Score:         score,
-		SpinePriority: spinePriority,
-		AgentContext:  agentContext,
+		Schema:         ReviewSchema,
+		Key:            c.Key,
+		Lane:           c.Lane,
+		Paths:          append([]string(nil), c.Paths...),
+		WorkUnit:       c.WorkUnit,
+		ExpectedSteps:  c.ExpectedSteps,
+		Assumptions:    append([]string(nil), c.Assumptions...),
+		ConfusionRisks: append([]string(nil), c.ConfusionRisks...),
+		Coordination:   append([]string(nil), c.Coordination...),
+		Trigger:        c.Trigger,
+		BatchPolicy:    c.BatchPolicy,
+		Reasons:        reasons.list(),
+		MissingFields:  missing,
+		Score:          score,
+		SpinePriority:  spinePriority,
+		AgentContext:   agentContext,
 	}
 	out.OK = len(out.Reasons) == 0
 	switch {
