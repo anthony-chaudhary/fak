@@ -74,13 +74,18 @@ func TestResolveFromEnvFileWhenEnvUnset(t *testing.T) {
 	}
 }
 
-func TestResolveChannelEmptyWhenUnset(t *testing.T) {
-	// The real channel id is never a tracked default — an unset channel is "" so the
-	// caller requires an explicit --channel and never silently posts to #scoreboard.
+func TestResolveChannelFallsThroughToDefault(t *testing.T) {
+	// With no env / .env.slack.local value, ResolveChannel falls through to the public
+	// built-in ChannelDefault (#1428) so the node-usage surface never resolves to NO channel
+	// and silently dry-runs. The channel id is public; only the token is secret. It still
+	// never falls back to #scoreboard — the default IS the node-usage channel.
 	t.Setenv("FAK_NODE_USAGE_CHANNEL", "")
 	chdir(t, t.TempDir())
-	if got := ResolveChannel(); got != "" {
-		t.Fatalf("ResolveChannel unset = %q, want empty", got)
+	if got := ResolveChannel(); got != ChannelDefault {
+		t.Fatalf("ResolveChannel unset = %q, want the built-in default %q", got, ChannelDefault)
+	}
+	if ChannelDefault == "" {
+		t.Fatal("node-usage ChannelDefault must be a real public channel id, not empty")
 	}
 }
 

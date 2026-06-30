@@ -188,10 +188,21 @@ func TestSlackHealthIncompleteAndAuthFail(t *testing.T) {
 		t.Fatalf("auth-failed surfaces must not be probed for history; saw %d reads", hub.historyHits)
 	}
 
-	// marketing: no channel default and none set => INCOMPLETE regardless of the token.
+	// marketing: an OPTIONAL surface (no #marketing channel exists yet) with no channel set
+	// => DEFERRED, not INCOMPLETE. DEFERRED is an expected, non-actionable state and must NOT
+	// trip the health gate (#1428).
 	mk := healthByName(health, "marketing")
-	if mk == nil || mk.Verdict != verdictIncomplete {
-		t.Fatalf("unresolved marketing should be INCOMPLETE: %+v", mk)
+	if mk == nil || mk.Verdict != verdictDeferred {
+		t.Fatalf("unresolved OPTIONAL marketing should be DEFERRED: %+v", mk)
+	}
+
+	// DEFERRED is gate-exempt: a fleet whose only non-OK surfaces are DEFERRED still exits 0.
+	if got := healthExit([]healthReport{{Name: "marketing", Verdict: verdictDeferred}}); got != 0 {
+		t.Fatalf("an all-DEFERRED fleet must not trip the gate, exit=%d", got)
+	}
+	// A real problem (the AUTH_FAIL above) DOES trip it.
+	if got := healthExit(health); got == 0 {
+		t.Fatal("a fleet with an AUTH_FAIL surface must trip the gate (exit 1)")
 	}
 }
 

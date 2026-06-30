@@ -41,6 +41,7 @@ const (
 	verdictIncomplete healthVerdict = "INCOMPLETE" // token or channel unresolved — the feeder posts nowhere (config drift)
 	verdictAuthFail   healthVerdict = "AUTH_FAIL"  // token resolved but auth.test rejected it (rotated/revoked bot)
 	verdictStale      healthVerdict = "STALE"      // ready + auth OK but no recent post could be witnessed past the budget
+	verdictDeferred   healthVerdict = "DEFERRED"   // an OPTIONAL surface with no channel yet — expected, NOT an alarm (no #channel exists)
 )
 
 // surfaceFreshnessBudget maps a surface to the staleness budget implied by the cadence of
@@ -141,6 +142,13 @@ func foldSlackHealth(reports []*surfaceReport, apiBase string, now time.Time) []
 		}
 
 		switch {
+		case !r.Ready && r.Optional:
+			// An optional surface with no dedicated channel yet (no #marketing / #chatrelay in
+			// the workspace). Reporting it INCOMPLETE would be a permanent false alarm; DEFERRED
+			// says "expected, nothing to fix" and is exempt from the gate. Wiring a channel later
+			// makes it Ready and it promotes to OK automatically.
+			hr.Verdict = verdictDeferred
+			hr.Detail = "optional surface — no dedicated channel yet (wire FAK_" + "*_CHANNEL or a ChannelDefault to enable)"
 		case !r.Ready:
 			hr.Verdict = verdictIncomplete
 			hr.Detail = "token or channel unresolved — the feeder would post nowhere"
@@ -220,7 +228,10 @@ func parseSlackTS(ts string) float64 {
 // INCOMPLETE, which is expected, not a real alarm).
 func healthExit(health []healthReport) int {
 	for _, h := range health {
-		if h.Verdict != verdictOK {
+		// DEFERRED is an expected, non-actionable state (an optional surface with no channel
+		// yet), so it never trips the gate — only a real problem (incomplete/auth-fail/stale)
+		// does.
+		if h.Verdict != verdictOK && h.Verdict != verdictDeferred {
 			return 1
 		}
 	}
@@ -230,7 +241,7 @@ func healthExit(health []healthReport) int {
 // renderHealthReports prints the human table, worst-verdict-first within a stable order so
 // the surfaces that need attention sit at the top.
 func renderHealthReports(w io.Writer, health []healthReport) {
-	var ok, incomplete, authFail, stale int
+	var ok, incomplete, authFail, stale, deferred int
 	for _, h := range health {
 		switch h.Verdict {
 		case verdictOK:
@@ -241,10 +252,12 @@ func renderHealthReports(w io.Writer, health []healthReport) {
 			authFail++
 		case verdictStale:
 			stale++
+		case verdictDeferred:
+			deferred++
 		}
 	}
-	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d\n\n",
-		len(health), ok, stale, authFail, incomplete)
+	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d DEFERRED=%d\n\n",
+		len(health), ok, stale, authFail, incomplete, deferred)
 
 	ordered := make([]healthReport, len(health))
 	copy(ordered, health)
@@ -271,7 +284,9 @@ func verdictRank(v healthVerdict) int {
 		return 1
 	case verdictIncomplete:
 		return 2
-	default: // OK
+	case verdictOK:
 		return 3
+	default: // DEFERRED — expected, sorts last (below OK)
+		return 4
 	}
 }

@@ -72,13 +72,17 @@ func TestResolveFromEnvFileWhenEnvUnset(t *testing.T) {
 	}
 }
 
-func TestResolveChannelEmptyWhenUnset(t *testing.T) {
-	// The real channel id is never a tracked default — an unset channel is "" so the
-	// caller requires an explicit --channel.
+func TestResolveChannelFallsThroughToDefault(t *testing.T) {
+	// With no env / .env.slack.local value, ResolveChannel falls through to the public
+	// built-in ChannelDefault (#1428) — the channel id is public, only the token is secret —
+	// so the bench surface never resolves to NO channel and silently dry-runs.
 	t.Setenv("FAK_BENCH_CHANNEL", "")
 	chdir(t, t.TempDir())
-	if got := ResolveChannel(); got != "" {
-		t.Fatalf("ResolveChannel unset = %q, want empty", got)
+	if got := ResolveChannel(); got != ChannelDefault {
+		t.Fatalf("ResolveChannel unset = %q, want the built-in default %q", got, ChannelDefault)
+	}
+	if ChannelDefault == "" {
+		t.Fatal("bench ChannelDefault must be a real public channel id, not empty")
 	}
 }
 
@@ -275,9 +279,9 @@ func TestBlocksCarrySameFacts(t *testing.T) {
 	if len(b) == 0 {
 		t.Fatal("no blocks")
 	}
-	// Smoke: a non-empty post yields a header + lead + body + context (4 blocks).
-	if len(b) != 4 {
-		t.Fatalf("blocks = %d, want 4 (header/lead/body/context)", len(b))
+	// Smoke: a non-empty post yields a header + lead + body + source context + S/N context.
+	if len(b) != 5 {
+		t.Fatalf("blocks = %d, want 5 (header/lead/body/source-context/sn-context)", len(b))
 	}
 }
 

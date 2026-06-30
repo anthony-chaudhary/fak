@@ -23,9 +23,11 @@
 //	                   one token can serve both channels when they share a workspace.
 //	FAK_BENCH_CHANNEL  then a FAK_BENCH_CHANNEL= line in .env.slack.local.
 //
-// The channel id is NEVER hard-coded in tracked source (a real id is a gitignored
-// value, per the scrubbing convention) — ResolveChannel returns "" when unset so the
-// caller requires an explicit --channel.
+// The channel id is a PUBLIC built-in default (ChannelDefault below) — it grants nothing
+// without the bot token, the same posture dojopost/blockerpost/nodeusagepost/steering take.
+// ResolveChannel falls through to it when no env / .env.slack.local value is set, so the
+// surface never resolves to NO channel and silently dry-runs (was INCOMPLETE in
+// `fak slack health`, #1428). Only the bot token is secret.
 package benchpost
 
 import (
@@ -37,9 +39,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
+// ChannelDefault is #bench in the scoreboard Slack workspace — the public built-in the
+// bench feeder posts to. Mirrors dojopost/nodeusagepost: the channel id is public, only the
+// token is secret. Wiring it stops the surface resolving to NO channel (was INCOMPLETE, #1428).
+const ChannelDefault = "C0BD5JCQZHV"
+
 // tokenEnvs / channelEnvs are the dedicated bench keys. The token resolver adds a
-// scoreboard fallback (below); the channel resolver does not — a bench post must go to
-// the bench channel, never silently to #scoreboard.
+// scoreboard fallback (below); the channel resolver falls through to ChannelDefault — a
+// bench post goes to the bench channel, never silently to #scoreboard.
 var (
 	tokenEnvs   = []string{"FAK_BENCH_TOKEN"}
 	channelEnvs = []string{"FAK_BENCH_CHANNEL"}
@@ -75,7 +82,10 @@ func ResolveChannel() string {
 			return v
 		}
 	}
-	return envFileValue("FAK_BENCH_CHANNEL")
+	if v := envFileValue("FAK_BENCH_CHANNEL"); v != "" {
+		return v
+	}
+	return ChannelDefault
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating

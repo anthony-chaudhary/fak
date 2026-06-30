@@ -29,10 +29,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchpost"
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluepost"
 	"github.com/anthony-chaudhary/fak/internal/dojopost"
 	"github.com/anthony-chaudhary/fak/internal/grafanapost"
+	"github.com/anthony-chaudhary/fak/internal/nodeusagepost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
@@ -53,25 +55,28 @@ type slackSurface struct {
 	TokenEnv       string // its own token key; "" => no own token, uses the scoreboard token
 	ChannelEnv     string // its channel key
 	ChannelDefault string // public built-in channel default; "" => none (channel REQUIRED)
+	Optional       bool   // true => no dedicated channel exists yet; INCOMPLETE here is EXPECTED, not a regression
 }
 
 // slackSurfaces is the registry `fak slack check` walks. The channel defaults reference the
 // PUBLIC, non-secret constants the post packages already expose (blockerpost.ChannelDefault,
 // dojopost.ChannelDefault) and the steering default in this package — never a real id baked
-// in here.
+// in here. Surfaces marked Optional have no dedicated channel yet (no #marketing / #chatrelay
+// in the workspace), so their INCOMPLETE state is expected and does NOT trip the health gate;
+// wiring a channel later (set the var or add a ChannelDefault) promotes them automatically.
 var slackSurfaces = []slackSurface{
-	{"scoreboard", "scorecard / score / run-event status", "FAK_SCOREBOARD_TOKEN", "FAK_SCOREBOARD_CHANNEL", ""},
-	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", ""},
-	{"grafana", "grafana snapshots + dashboard/debug links", "FAK_GRAFANA_TOKEN", "FAK_GRAFANA_CHANNEL", grafanapost.ChannelDefault},
-	{"blockers", "fleet blockers (status vs operator page)", "FAK_BLOCKERS_TOKEN", "FAK_BLOCKERS_CHANNEL", blockerpost.ChannelDefault},
-	{"cachevalue", "cache-value P&L roll-up (WITNESSED kernel reuse trend)", "FAK_CACHEVALUE_TOKEN", "FAK_CACHEVALUE_CHANNEL", cachevaluepost.ChannelDefault},
-	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", ""},
-	{"dispatch", "background code-dispatch results", "FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", ""},
-	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault},
-	{"marketing", "marketing updates feed", "FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL", ""},
-	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", ""},
-	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault},
-	{"chatrelay", "Slack <-> served-model chat bridge", "FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL", ""},
+	{"scoreboard", "scorecard / score / run-event status", "FAK_SCOREBOARD_TOKEN", "FAK_SCOREBOARD_CHANNEL", "", false},
+	{"product", "product direction / persona findings", "", "FAK_PRODUCT_CHANNEL", "", false},
+	{"grafana", "grafana snapshots + dashboard/debug links", "FAK_GRAFANA_TOKEN", "FAK_GRAFANA_CHANNEL", grafanapost.ChannelDefault, false},
+	{"blockers", "fleet blockers (status vs operator page)", "FAK_BLOCKERS_TOKEN", "FAK_BLOCKERS_CHANNEL", blockerpost.ChannelDefault, false},
+	{"cachevalue", "cache-value P&L roll-up (WITNESSED kernel reuse trend)", "FAK_CACHEVALUE_TOKEN", "FAK_CACHEVALUE_CHANNEL", cachevaluepost.ChannelDefault, false},
+	{"bench", "benchmark rollups / run-requests", "FAK_BENCH_TOKEN", "FAK_BENCH_CHANNEL", benchpost.ChannelDefault, false},
+	{"dispatch", "background code-dispatch results", "FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "", false},
+	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault, false},
+	{"marketing", "marketing updates feed", "FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL", "", true},
+	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},
+	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault, false},
+	{"chatrelay", "Slack <-> served-model chat bridge", "FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL", "", true},
 }
 
 // resolvedField is a resolved value plus a human-readable source label.
@@ -125,6 +130,7 @@ type surfaceReport struct {
 	Channel       string          `json:"channel,omitempty"`        //
 	ChannelSource string          `json:"channel_source,omitempty"` //
 	Ready         bool            `json:"ready"`                    // token AND channel resolved
+	Optional      bool            `json:"optional,omitempty"`       // no dedicated channel yet — INCOMPLETE is expected, not a regression
 	Auth          *authReport     `json:"auth,omitempty"`           //
 	SignalNoise   slackmeta.Score `json:"signal_noise"`             // S/N meta self-score
 
@@ -193,6 +199,7 @@ func buildSurfaceReports() []*surfaceReport {
 			Channel:       ch.Value,
 			ChannelSource: ch.Source,
 			Ready:         tok.Value != "" && ch.Value != "",
+			Optional:      s.Optional,
 		}
 		if rep.TokenSet {
 			rep.Token = redactToken(tok.Value)

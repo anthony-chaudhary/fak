@@ -53,18 +53,21 @@ func TestBuildSurfaceReportsScoreboardFallback(t *testing.T) {
 	if !sb.TokenSet || sb.Channel != "C0SCORE" || !sb.Ready {
 		t.Fatalf("scoreboard: %+v", sb)
 	}
+	if sb.SignalNoise.Signal == 0 || sb.SignalNoise.Noise == 0 {
+		t.Fatalf("scoreboard missing S/N self-score: %+v", sb.SignalNoise)
+	}
 	if sb.Token == "bottok-sb-token" {
 		t.Fatalf("token must be redacted in the report, got raw %q", sb.Token)
 	}
 
-	// bench has no own token set => it must fall back to the scoreboard token, and its
-	// channel is unset (no default) => not ready.
+	// bench has no own token set => it must fall back to the scoreboard token, and it now has
+	// a public channel default (#1428) => channel resolves and the surface is ready.
 	bench := reportByName(reports, "bench")
 	if !bench.TokenSet || !strings.Contains(bench.TokenSource, "scoreboard-fallback") {
 		t.Fatalf("bench should fall back to scoreboard token: %+v", bench)
 	}
-	if bench.Channel != "" || bench.Ready {
-		t.Fatalf("bench channel should be unset (no default) => not ready: %+v", bench)
+	if bench.Channel == "" || bench.ChannelSource != "built-in default" || !bench.Ready {
+		t.Fatalf("bench should use its built-in channel default => ready: %+v", bench)
 	}
 
 	// blockers has a public channel default => channel resolves even with nothing set.
@@ -249,5 +252,8 @@ func TestSlackCheckOfflineExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "scoreboard") {
 		t.Fatalf("offline check should list surfaces: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "S/N self-score") {
+		t.Fatalf("offline check should carry S/N metadata: %s", out.String())
 	}
 }

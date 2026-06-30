@@ -70,15 +70,23 @@ func beatGlyph(worst healthVerdict, allOK bool) string {
 	return "⚠️"
 }
 
+// healthy reports whether a surface verdict is a non-alarming state: OK (alive) or DEFERRED
+// (an optional surface with no channel yet — expected). Everything else is a real problem the
+// beat must surface.
+func healthy(v healthVerdict) bool {
+	return v == verdictOK || v == verdictDeferred
+}
+
 // worstVerdict folds the per-surface verdicts into the single worst one for the beat headline,
 // using the same severity order the human health table sorts by (auth-fail > stale > incomplete
-// > ok). An empty set is OK (nothing configured is not an alarm here — the health verb owns that).
+// > ok > deferred). allOK is true when every surface is in a non-alarming state (OK or DEFERRED)
+// — a deferred-but-otherwise-healthy fleet still beats green. An empty set is healthy.
 func worstVerdict(health []healthReport) (healthVerdict, bool) {
 	worst := verdictOK
 	worstRank := verdictRank(verdictOK)
 	allOK := true
 	for _, h := range health {
-		if h.Verdict != verdictOK {
+		if !healthy(h.Verdict) {
 			allOK = false
 		}
 		if r := verdictRank(h.Verdict); r < worstRank {
@@ -98,10 +106,14 @@ func beatLine(health []healthReport, now time.Time) string {
 	ok := 0
 	var down []string
 	freshest := time.Duration(-1)
+	deferred := 0
 	for _, h := range health {
-		if h.Verdict == verdictOK {
+		switch {
+		case h.Verdict == verdictOK:
 			ok++
-		} else {
+		case h.Verdict == verdictDeferred:
+			deferred++ // healthy-but-optional: counted in the denominator, never listed as down
+		default:
 			down = append(down, fmt.Sprintf("%s %s", h.Name, h.Verdict))
 		}
 		if h.LastPostAgeS >= 0 {
@@ -112,7 +124,10 @@ func beatLine(health []healthReport, now time.Time) string {
 		}
 	}
 	glyph := beatGlyph(worst, allOK)
-	headline := fmt.Sprintf("%s *slack surfaces alive* — %d/%d OK", glyph, ok, len(health))
+	// The denominator is the surfaces that SHOULD be alive (total minus deferred), so "7/7 OK"
+	// reads true even when two optional surfaces have no channel yet.
+	want := len(health) - deferred
+	headline := fmt.Sprintf("%s *slack surfaces alive* — %d/%d OK", glyph, ok, want)
 	if freshest >= 0 {
 		headline += fmt.Sprintf(" · freshest feeder post %s ago", freshest.Round(time.Minute))
 	}
@@ -158,9 +173,12 @@ func runSlackBeat(stdout, stderr io.Writer, argv []string) int {
 		Surfaces: health,
 	}
 	for _, h := range health {
-		if h.Verdict == verdictOK {
+		switch {
+		case h.Verdict == verdictOK:
 			res.OKCount++
-		} else {
+		case h.Verdict == verdictDeferred:
+			// healthy-but-optional — neither OK-count nor down
+		default:
 			res.Down = append(res.Down, fmt.Sprintf("%s:%s", h.Name, h.Verdict))
 		}
 	}
