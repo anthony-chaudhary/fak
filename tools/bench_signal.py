@@ -259,7 +259,7 @@ def render_issue(cand: dict[str, Any], today: str) -> dict[str, Any]:
         "bench-signal throughput regression from the benchmark catalog.\n\n"
         "### Current state\n"
         + f"`{model}{prec_s}` on `{machine}` dropped from {base:.1f} to {cur:.1f} tok/s "
-        + f"against the pinned baseline.\n\n"
+        + "against the pinned baseline.\n\n"
         "### Why this is next\n"
         + f"The drop cleared both noise floors ({drop_pct:.1f}% and {drop_abs:.1f} tok/s), "
         "so the working path is slower until this is explained or restored.\n\n"
