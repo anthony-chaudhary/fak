@@ -221,9 +221,60 @@ kernel void q4k_swiglu(device const float* gate [[buffer(0)]],
     float g = gate[i];
     out[i] = (g / (1.0f + exp(-g))) * up[i];
 }
+
+// q6k_block_dot: dot one 210-B Q6_K super-block's 256 dequanted weights against the matching
+// 256-wide activation slice. Byte-for-byte internal/model.q6kDequantSuperBlock: layout is
+// ql(128) + qh(64) + scales(16, SIGNED int8) + d(f16 @ 208); the 6-bit code is
+// (ql nibble | ((qh 2 bits)<<4)) with a −32 zero-point, weight = d*sc*(code−32). The scale field
+// is SIGNED (device const char*), the classic MSL signedness trap — keep it `char`, not `uchar`.
+inline float q6k_block_dot(device const uchar* blk, device const float* xs) {
+    device const uchar* ql = blk + 0;
+    device const uchar* qh = blk + 128;
+    device const char*  sc = (device const char*)(blk + 192); // SIGNED int8 scales
+    float d = (float)(*(device const half*)(blk + 208));
+    float acc = 0.0f;
+    int qlOff = 0, qhOff = 0, scOff = 0;
+    for (int n = 0; n < 256; n += 128) {
+        for (int l = 0; l < 32; l++) {
+            int is = l / 16;
+            int q1 = (int)((ql[qlOff + l +  0] & 0x0f) | (((qh[qhOff + l] >> 0) & 3) << 4)) - 32;
+            int q2 = (int)((ql[qlOff + l + 32] & 0x0f) | (((qh[qhOff + l] >> 2) & 3) << 4)) - 32;
+            int q3 = (int)((ql[qlOff + l +  0] >> 4)   | (((qh[qhOff + l] >> 4) & 3) << 4)) - 32;
+            int q4 = (int)((ql[qlOff + l + 32] >> 4)   | (((qh[qhOff + l] >> 6) & 3) << 4)) - 32;
+            acc += d * (float)sc[scOff + is + 0] * (float)q1 * xs[n + l +  0];
+            acc += d * (float)sc[scOff + is + 2] * (float)q2 * xs[n + l + 32];
+            acc += d * (float)sc[scOff + is + 4] * (float)q3 * xs[n + l + 64];
+            acc += d * (float)sc[scOff + is + 6] * (float)q4 * xs[n + l + 96];
+        }
+        qlOff += 64;
+        qhOff += 32;
+        scOff += 8;
+    }
+    return acc;
+}
+
+// q6k_gemv: the Q6_K decode GEMV, the byte-for-byte twin of q4k_gemv but over 210-B super-blocks.
+// ONE 32-lane SIMD group per output row, the 32 lanes splitting the row's super-blocks and reducing
+// via simd_sum. Used as stage 3 of the Q6_K-down fused MLP (mg_q4k_mlp_q6down).
+kernel void q6k_gemv(device const uchar* W [[buffer(0)]],
+                     device const float* X [[buffer(1)]],
+                     device float*       Y [[buffer(2)]],
+                     constant int&    nblk [[buffer(3)]],
+                     constant int&     out [[buffer(4)]],
+                     uint o   [[threadgroup_position_in_grid]],
+                     uint lid [[thread_index_in_threadgroup]]) {
+    if (o >= (uint)out) return;
+    device const uchar* row = W + (long)o * nblk * 210;
+    float acc = 0.0f;
+    for (int b = (int)lid; b < nblk; b += 32) {
+        acc += q6k_block_dot(row + (long)b * 210, X + (long)b * 256);
+    }
+    acc = simd_sum(acc);
+    if (lid == 0) Y[o] = acc;
+}
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm, psoQ4KSwiGLU;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm, psoQ4KSwiGLU, psoQ6KGemv;
 static int gQ4KReady;
 
 static int q4k_init(void) {
@@ -235,7 +286,8 @@ static int q4k_init(void) {
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
-    if (!psoQ4KGemv || !psoQ4KGemm || !psoQ4KSwiGLU) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
+    psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
+    if (!psoQ4KGemv || !psoQ4KGemm || !psoQ4KSwiGLU || !psoQ6KGemv) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
 }
@@ -338,6 +390,112 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         // (3) y = D·inter
         id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
         [e3 setComputePipelineState:psoQ4KGemv];
+        [e3 setBuffer:gMlpInter offset:0 atIndex:1];
+        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
+        [e3 setBuffer:yb offset:0 atIndex:2];
+        [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
+        [e3 setBytes:&D.out  length:sizeof(int) atIndex:4];
+        [e3 dispatchThreadgroups:MTLSizeMake((NSUInteger)D.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e3 endEncoding];
+
+        [cb commit];
+        [cb waitUntilCompleted];
+        memcpy(y, yb.contents, (size_t)D.out * 4);
+    }
+}
+
+// ---- Q6_K weight table (210-B super-blocks, separate stride from the 144-B Q4_K table) ----
+// The Q6_K resident store backs the fused MLP's down_proj when a q4_k_m GGUF quantizes down to
+// Q6_K. Its handles share gNQ4's id space with NO overlap by living in a separate array indexed by
+// (id - MG_Q6_BASE): a wid >= MG_Q6_BASE means "Q6_K table, index wid-MG_Q6_BASE". Only the fused
+// MLP's stage 3 (mg_q4k_mlp_q6down) consumes a Q6_K wid, so the disjoint id range never collides.
+typedef struct {
+    CFTypeRef buf; // retained id<MTLBuffer>, raw Q6_K bytes [out * nblk * 210]
+    int out;
+    int in;
+    int nblk;
+} Q6KW;
+
+#define MG_MAX_Q6 8192
+#define MG_Q6_BASE 1000000 // Q6_K wids are offset by this so they never alias a Q4_K wid
+static Q6KW gQ6[MG_MAX_Q6];
+static int gNQ6 = 0;
+
+// mg_q6k_upload copies a row-major Q6_K payload (out rows, in == nblk*256, 210 B/super-block)
+// verbatim into a resident device buffer and returns a handle >= MG_Q6_BASE, or -1 on failure.
+int mg_q6k_upload(const unsigned char* raw, int out, int in) {
+    if (raw == NULL || gDev == nil) return -1;
+    if (!q4k_init()) return -1;
+    if (in <= 0 || in % 256 != 0 || out <= 0) return -1;
+    if (gNQ6 >= MG_MAX_Q6) {
+        static int q6CapWarned = 0;
+        if (!q6CapWarned) { q6CapWarned = 1; NSLog(@"mg_q6k_upload: Q6_K weight table full (%d)", MG_MAX_Q6); }
+        return -1;
+    }
+    int nblk = in / 256;
+    long bytes = (long)out * nblk * 210;
+    id<MTLBuffer> b = [gDev newBufferWithLength:(NSUInteger)bytes options:MTLResourceStorageModeShared];
+    if (b == nil) {
+        NSLog(@"mg_q6k_upload: device buffer alloc failed for %.1f MB", (double)bytes / 1e6);
+        return -1;
+    }
+    memcpy(b.contents, raw, (size_t)bytes);
+    int idx = gNQ6++;
+    gQ6[idx].buf = CFBridgingRetain(b);
+    gQ6[idx].out = out;
+    gQ6[idx].in = in;
+    gQ6[idx].nblk = nblk;
+    return MG_Q6_BASE + idx;
+}
+
+// mg_q4k_mlp_q6down is mg_q4k_mlp with a Q6_K down_proj: stages 1 (gate/up GEMV) and 2 (SwiGLU) are
+// IDENTICAL — they run over the resident gMlpGate/gMlpUp/gMlpInter scratch — only stage 3 binds the
+// Q6_K down weight (gQ6[down_wid-MG_Q6_BASE]) and the Q6_K GEMV pipeline. The whole MLP still runs in
+// ONE command buffer. gate_wid/up_wid are Q4_K wids; down_wid is a Q6_K wid (>= MG_Q6_BASE).
+void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y) {
+    if (gate_wid < 0 || up_wid < 0 || gate_wid >= gNQ4 || up_wid >= gNQ4) return;
+    if (down_wid < MG_Q6_BASE || (down_wid - MG_Q6_BASE) >= gNQ6) return;
+    @autoreleasepool {
+        Q4KW G = gQ4[gate_wid], U = gQ4[up_wid];
+        Q6KW D = gQ6[down_wid - MG_Q6_BASE];
+        int H = G.in;
+        int I = G.out;
+        q4k_grow_scratch((long)H, (long)D.out);
+        q4k_grow_mlp((long)I);
+        id<MTLBuffer> xb = gQXBuf, yb = gQYBuf;
+        memcpy(xb.contents, x, (size_t)H * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+
+        // (1) gate = G·x and up = U·x (independent), one encoder — IDENTICAL to mg_q4k_mlp.
+        id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpGate offset:0 atIndex:2];
+        [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:gMlpUp offset:0 atIndex:2];
+        [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+        [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+        [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        [e1 endEncoding];
+
+        // (2) inter = silu(gate) * up — IDENTICAL to mg_q4k_mlp.
+        id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        [e2 setComputePipelineState:psoQ4KSwiGLU];
+        [e2 setBuffer:gMlpGate offset:0 atIndex:0];
+        [e2 setBuffer:gMlpUp offset:0 atIndex:1];
+        [e2 setBuffer:gMlpInter offset:0 atIndex:2];
+        [e2 setBytes:&I length:sizeof(int) atIndex:3];
+        [e2 dispatchThreads:MTLSizeMake((NSUInteger)I,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+        [e2 endEncoding];
+
+        // (3) y = D·inter with the Q6_K GEMV pipeline (the only line that differs from mg_q4k_mlp).
+        id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        [e3 setComputePipelineState:psoQ6KGemv];
         [e3 setBuffer:gMlpInter offset:0 atIndex:1];
         [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
         [e3 setBuffer:yb offset:0 atIndex:2];
@@ -576,6 +734,13 @@ void mg_q4k_reset(void) {
         }
     }
     gNQ4 = 0;
+    for (int i = 0; i < gNQ6; i++) {
+        if (gQ6[i].buf != NULL) {
+            CFBridgingRelease(gQ6[i].buf);
+            gQ6[i].buf = NULL;
+        }
+    }
+    gNQ6 = 0;
     gQXBuf = nil; gQXCap = 0;
     gQYBuf = nil; gQYCap = 0;
     gMlpGate = nil; gMlpUp = nil; gMlpInter = nil; gMlpCap = 0;

@@ -17,6 +17,8 @@ void mg_q4k_gemv(int wid, const float* x, float* y);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
+int  mg_q6k_upload(const unsigned char* raw, int out, int in);
+void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_reset(void);
 */
@@ -152,6 +154,58 @@ func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
 		return false
 	}
 	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	return true
+}
+
+// Q6KWeight is a handle to a raw Q6_K weight matrix [Out, In] resident on the GPU (210-B
+// super-blocks). In must be a multiple of 256; the resident byte cost is Out*(In/256)*210. It
+// backs the fused MLP's down_proj when a q4_k_m GGUF quantizes down_proj to Q6_K. The id is offset
+// by the C side's MG_Q6_BASE so it can never alias a Q4KWeight id.
+type Q6KWeight struct {
+	id      C.int
+	Out, In int
+}
+
+// UploadQ6K makes a row-major Q6_K payload (verbatim GGUF super-block bytes, length
+// out*(in/256)*210) resident for the GPU and returns a handle, or nil if the backend is
+// unavailable, in is not a multiple of 256, or the payload is short / the table is full.
+func UploadQ6K(raw []byte, out, in int) *Q6KWeight {
+	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
+		return nil
+	}
+	need := out * (in / 256) * 210
+	if len(raw) < need {
+		return nil
+	}
+	raw = raw[:need]
+	id := C.mg_q6k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	if id < 0 {
+		return nil
+	}
+	runtime.KeepAlive(raw)
+	return &Q6KWeight{id: id, Out: out, In: in}
+}
+
+// ID returns the backend handle for this matrix.
+func (w *Q6KWeight) ID() int { return int(w.id) }
+
+// FusedMLPQ6Down runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) *
+// (up·x) ) — in ONE Metal command buffer, exactly like FusedMLP, but with a Q6_K down_proj
+// (gate/up stay Q4_K). The intermediate-wide gate/up/inter stays resident (only x and y cross the
+// boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==down.In (=I); len(x)>=H,
+// len(y)>=down.Out. Returns false on a shape mismatch. The activation is silu.
+func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
+	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
+		return false
+	}
+	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
+		return false
+	}
+	if len(x) < gate.In || len(y) < down.Out {
+		return false
+	}
+	C.mg_q4k_mlp_q6down(gate.id, up.id, down.id,
+		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
 	return true
 }
 

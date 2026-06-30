@@ -23,6 +23,9 @@ var (
 	// metalQ4KW caches one GPU q4_k weight handle per (model, weight-name). A nil entry is
 	// cached too (upload failed / table full) so we don't retry the upload every token.
 	metalQ4KW = map[*Model]map[string]*metalgemm.Q4KWeight{}
+	// metalQ6KW caches one GPU Q6_K weight handle per (model, weight-name) for the fused MLP's
+	// Q6_K down_proj. Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
+	metalQ6KW = map[*Model]map[string]*metalgemm.Q6KWeight{}
 	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
 	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
@@ -120,21 +123,61 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
-	gt, ut, dt := s.M.q4kw[gateName], s.M.q4kw[upName], s.M.q4kw[downName]
-	if gt == nil || ut == nil || dt == nil {
+	gt, ut := s.M.q4kw[gateName], s.M.q4kw[upName]
+	if gt == nil || ut == nil {
 		return nil
 	}
 	gw := s.M.metalQ4KWeight(gateName, gt)
 	uw := s.M.metalQ4KWeight(upName, ut)
-	dw := s.M.metalQ4KWeight(downName, dt)
-	if gw == nil || uw == nil || dw == nil {
+	if gw == nil || uw == nil {
 		return nil
 	}
-	y := make([]float32, dt.out)
-	if !metalgemm.FusedMLP(gw, uw, dw, x, y) {
-		return nil
+	// Down is Q4_K-resident → the all-Q4_K fused path (unchanged).
+	if dt := s.M.q4kw[downName]; dt != nil {
+		dw := s.M.metalQ4KWeight(downName, dt)
+		if dw == nil {
+			return nil
+		}
+		y := make([]float32, dt.out)
+		if !metalgemm.FusedMLP(gw, uw, dw, x, y) {
+			return nil
+		}
+		return y
 	}
-	return y
+	// Down is Q6_K-resident (the q4_k_m down_proj case) → the mixed-quant fused path. This is the
+	// Stage B cap-lift: previously a Q6_K down made q4kFusedMLP decline and every such expert fell
+	// to the per-matmul path; now gate/up stay Q4_K and only stage 3 runs the Q6_K GEMV.
+	if dq := s.M.kqw[downName]; dq != nil && dq.kind == kindQ6K {
+		dw := s.M.metalQ6KWeight(downName, dq)
+		if dw == nil {
+			return nil
+		}
+		y := make([]float32, dq.out)
+		if !metalgemm.FusedMLPQ6Down(gw, uw, dw, x, y) {
+			return nil
+		}
+		return y
+	}
+	return nil
+}
+
+// metalQ6KWeight returns this model's GPU Q6_K handle for `name`, uploading the raw 210-B blocks
+// once (cached per *Model, nil cached too). The Q6_K resident store backs the fused MLP's down_proj
+// when a q4_k_m GGUF quantizes down to Q6_K; gate/up stay Q4_K via metalQ4KWeight.
+func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeight {
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	tbl := metalQ6KW[m]
+	if tbl == nil {
+		tbl = map[string]*metalgemm.Q6KWeight{}
+		metalQ6KW[m] = tbl
+	}
+	if w, ok := tbl[name]; ok {
+		return w
+	}
+	w := metalgemm.UploadQ6K(qt.raw, qt.out, qt.in)
+	tbl[name] = w
+	return w
 }
 
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
