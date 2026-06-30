@@ -240,7 +240,10 @@ Acceptance for "true end to end working":
   convention. It also treats an explicit `Expected steps` value above the
   current dispatch threshold (`8`) as a split target, so a nominal leaf that
   declares a large step budget does not enter worker dispatch as one oversized
-  task.
+  task. End-to-end `RouteIssues` admission now also consumes the shared
+  `issuecontract` review, so a label/path-routable issue with missing scope,
+  done condition, witness, route metadata, or private-boundary safety is skipped
+  into the same closed-vocabulary reason buckets the audit command reports.
 - Skipped router rows now carry `reason`, `next_action`, `work_unit`, and
   `expected_steps`, and the router counts skips by reason. That preserves the
   legacy skip bucket while giving agents separate queues for human blockers,
@@ -257,8 +260,9 @@ Acceptance for "true end to end working":
   stay `triage_only` until a human or later port supplies dispatch scope.
 - Phase 4 is partially implemented as default-routing policy: dispatch surfaces
   can carry path-scoped launch plans, default issue views exclude triage-only
-  labels, and the shared review now refuses explicit non-leaves. The remaining
-  gap is to make every picker consume the review result instead of only labels.
+  labels, and dispatch admission consumes the shared review result instead of
+  relying only on labels. The remaining gap is to audit every non-dispatch issue
+  picker/launcher path for the same review boundary.
 - Phase 5 remains open: no single witnessed run has yet proven create/update,
   route, dispatch, commit, audit, close, and status read-back end to end.
 
@@ -268,6 +272,10 @@ Verified on 2026-06-30 with:
 - `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestRunGuardStopHook -count=1`
 - `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestDispatchPrice -count=1`
 - `FAK_FAST=0 ./test.ps1 ./cmd/fak -run TestDispatchScorecard -count=1`
+- `./test.ps1 ./cmd/fak -run TestIssueContract -count=1`
+- `./test.ps1 ./internal/issuecontract -count=1`
+- `./test.ps1 ./internal/dispatchtick -count=1`
+- `./test.ps1 ./cmd/fak -run TestDispatch -count=1`
 
 ## Test plan
 
