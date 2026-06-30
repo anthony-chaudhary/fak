@@ -80,7 +80,7 @@ Clear every item before a network-facing deploy. Sources for each are in
   metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
 - [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
   tag for containers) rather than tracking `latest`. This guide tracks
-  **v0.34.0**.
+  **v0.35.0**.
 
 ---
 
@@ -100,13 +100,13 @@ shell, no package manager, runs as `nonroot`, exposes `8080`.
 
 ```bash
 # From a clone (repo root, where the Dockerfile lives):
-docker build -t fak:0.34.0 .
+docker build -t fak:0.35.0 .
 
 # Stamp a specific version into the binary:
-docker build --build-arg APP_VERSION=0.34.0 -t fak:0.34.0 .
+docker build --build-arg APP_VERSION=0.35.0 -t fak:0.35.0 .
 
 # Without cloning — build straight from the Git remote:
-docker build -t fak:0.34.0 https://github.com/anthony-chaudhary/fak.git
+docker build -t fak:0.35.0 https://github.com/anthony-chaudhary/fak.git
 ```
 
 The default `CMD` is `serve --addr 0.0.0.0:8080` (containers must bind `0.0.0.0`,
@@ -117,7 +117,7 @@ not loopback). The `ENTRYPOINT` is the `fak` binary, so override the command to 
 
 ```bash
 # Reach a model server running on the host (Ollama here) from the container:
-docker run --rm -p 8080:8080 fak:0.34.0 serve --addr 0.0.0.0:8080 \
+docker run --rm -p 8080:8080 fak:0.35.0 serve --addr 0.0.0.0:8080 \
   --base-url http://host.docker.internal:11434/v1 \
   --model qwen2.5:1.5b
 ```
@@ -138,7 +138,7 @@ docker run --rm -p 8080:8080 \
   -e FAK_AUDIT_JOURNAL=/var/lib/fak/audit.jsonl \
   -v "$PWD/policy.json:/etc/fak/policy.json:ro" \
   -v fak-audit:/var/lib/fak \
-  fak:0.34.0 serve --addr 0.0.0.0:8080 \
+  fak:0.35.0 serve --addr 0.0.0.0:8080 \
     --provider openai --base-url https://api.openai.com/v1 \
     --model gpt-4o --api-key-env OPENAI_API_KEY \
     --policy /etc/fak/policy.json \
@@ -164,7 +164,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: fak:0.34.0          # built from the repo Dockerfile, pushed to your registry
+    image: fak:0.35.0          # built from the repo Dockerfile, pushed to your registry
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -260,7 +260,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: REGISTRY/fak:0.34.0
+          image: REGISTRY/fak:0.35.0
           args:
             - serve
             - --addr=0.0.0.0:8080
@@ -356,12 +356,12 @@ SHA-256, installs to PATH — no Go, no clone):
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
-Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.34.0`;
+Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.35.0`;
 default latest release), `FAK_INSTALL_DIR` sets the target (default
 `/usr/local/bin` if writable, else `~/.local/bin`).
 
 ```bash
-FAK_VERSION=0.34.0 FAK_INSTALL_DIR=/usr/local/bin \
+FAK_VERSION=0.35.0 FAK_INSTALL_DIR=/usr/local/bin \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh)"
 fak version
 ```
