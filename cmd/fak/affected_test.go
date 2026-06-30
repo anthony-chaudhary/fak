@@ -103,3 +103,30 @@ func TestParseGoListAndSelectEndToEnd(t *testing.T) {
 		t.Fatalf("docs-only selection = %v, want empty", got)
 	}
 }
+
+// TestAffectedTestCommandRouting pins the host routing: on Windows the fast inner-loop
+// gate must route `go test` through test.ps1 -> WSL (native go test is OS-policy-blocked
+// there), the SAME bridge `fak test` uses; on every other host it runs go test directly.
+func TestAffectedTestCommandRouting(t *testing.T) {
+	args := []string{"test", "-short", "github.com/x/y/internal/foo"}
+
+	// Non-Windows: a direct `go test ...`, unchanged.
+	name, cmdArgs := affectedTestCommand("linux", args)
+	if name != "go" || !reflect.DeepEqual(cmdArgs, args) {
+		t.Fatalf("linux routing = %s %v, want go %v", name, cmdArgs, args)
+	}
+
+	// Windows: powershell -> test.ps1, with the leading "test" verb dropped (test.ps1
+	// re-adds it before `go`), so the OS-blocked native go test is never exec'd.
+	name, cmdArgs = affectedTestCommand("windows", args)
+	want := []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "test.ps1", "-short", "github.com/x/y/internal/foo"}
+	if name != "powershell" || !reflect.DeepEqual(cmdArgs, want) {
+		t.Fatalf("windows routing = %s %v, want powershell %v", name, cmdArgs, want)
+	}
+	// The forwarded args must NOT contain the native "test" verb test.ps1 re-adds.
+	for _, a := range cmdArgs {
+		if a == "test" {
+			t.Errorf("windows routing must not pass the 'test' verb to test.ps1; got %v", cmdArgs)
+		}
+	}
+}

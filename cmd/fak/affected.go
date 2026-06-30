@@ -30,11 +30,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func cmdAffected(argv []string) { os.Exit(runAffected(os.Stdout, os.Stderr, argv)) }
@@ -210,7 +212,9 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (int, error) {
-	cmd := exec.Command("go", args...)
+	name, cmdArgs := affectedTestCommand(runtime.GOOS, args)
+	cmd := exec.Command(name, cmdArgs...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -221,6 +225,24 @@ func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (in
 		return 1, err
 	}
 	return 0, nil
+}
+
+// affectedTestCommand resolves how to run `go <args>` (args[0] == "test") on the host:
+// directly on non-Windows, or routed through the repo-root test.ps1 -> WSL on Windows,
+// where native `go test` is OS-policy-blocked (the SAME host knowledge `fak test`
+// encodes). Without this, the fast inner-loop gate execs a `go test` that the OS blocks
+// on the primary dev platform, so it never ran where agents actually edit. test.ps1
+// forwards its args verbatim to `go test` inside WSL, so the leading "test" verb is
+// dropped (test.ps1 re-adds it). Pure so the routing is unit-testable.
+func affectedTestCommand(goos string, args []string) (name string, cmdArgs []string) {
+	if goos == "windows" {
+		goArgs := args
+		if len(goArgs) > 0 && goArgs[0] == "test" {
+			goArgs = goArgs[1:]
+		}
+		return "powershell", append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "test.ps1"}, goArgs...)
+	}
+	return "go", args
 }
 
 func newAffectedRunReport(base string, changedFiles, changedPkgs, selected []string, total int, command []string, budget, elapsed time.Duration, verdict, reason string) affectedRunReport {
@@ -320,6 +342,7 @@ func gitChangedFiles(root, base string) ([]string, error) {
 
 func gitOut(root string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard
@@ -363,6 +386,7 @@ type goPkg struct {
 // still selects sensibly instead of erroring out.
 func goListGraph(root string) (fileToPkg map[string]string, edges map[string][]string, total int, err error) {
 	cmd := exec.Command("go", "list", "-e", "-json", "./...")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	var out bytes.Buffer
 	cmd.Stdout = &out
