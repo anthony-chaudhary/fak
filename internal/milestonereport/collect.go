@@ -30,12 +30,12 @@ type Runner = epicprogress.Runner
 // Seeded from the live fleet epics; edit this slice (not the logic) to track more.
 // A `--epics-from` JSON file overrides it for ad-hoc tracking.
 var TrackedEpics = []EpicSpec{
-	{Number: 1243, Title: "support-maturity disambiguation", Label: "support-maturity"},
-	{Number: 1315, Title: "native agent harness"},
-	{Number: 1301, Title: "cache-value P&L roll-up"},
-	{Number: 1178, Title: "first-class time horizons"},
-	{Number: 1010, Title: "GLM-5.2 through fak's kernel"},
-	{Number: 1354, Title: "release at agentic speed"},
+	{Number: 1243, Title: "support-maturity disambiguation", Generation: "now", Label: "support-maturity"},
+	{Number: 1315, Title: "native agent harness", Generation: "now"},
+	{Number: 1301, Title: "cache-value P&L roll-up", Generation: "now"},
+	{Number: 1178, Title: "first-class time horizons", Generation: "next"},
+	{Number: 1010, Title: "GLM-5.2 through fak's kernel", Generation: "next"},
+	{Number: 1354, Title: "release at agentic speed", Generation: "now"},
 }
 
 // Collect measures both dimensions. The maturity climb is pure (covmatrix.Grid() is

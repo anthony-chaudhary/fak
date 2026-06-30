@@ -133,14 +133,15 @@ type EpicCounts struct {
 // signal — the report renders it WITHOUT a completion-% framing and excludes it
 // from the roadmap's OverallPct, because an ongoing program has no 100%.
 type EpicRow struct {
-	Number int            `json:"number"`
-	Title  string         `json:"title"`
-	Class  worktype.Class `json:"class"`
-	Closed int            `json:"closed"`
-	Total  int            `json:"total"`
-	Pct    float64        `json:"pct"`
-	Source string         `json:"source,omitempty"`
-	Err    string         `json:"err,omitempty"`
+	Number     int            `json:"number"`
+	Title      string         `json:"title"`
+	Generation string         `json:"generation"`
+	Class      worktype.Class `json:"class"`
+	Closed     int            `json:"closed"`
+	Total      int            `json:"total"`
+	Pct        float64        `json:"pct"`
+	Source     string         `json:"source,omitempty"`
+	Err        string         `json:"err,omitempty"`
 }
 
 // Ongoing reports whether this row is an ongoing optimization program rather than a
@@ -156,17 +157,33 @@ func (r EpicRow) Ongoing() bool { return r.Class.Ongoing() }
 // true unmeasured dimension that gates); a partial failure records a non-gating
 // PartialNote and leaves Err == "", so one flaky `gh` query never reds the report.
 type Epics struct {
-	Rows        []EpicRow `json:"rows"`
-	Tracked     int       `json:"tracked"`
-	Measured    int       `json:"measured"`
-	Programs    int       `json:"programs"`    // count of ongoing-program rows (any read state)
-	Discrete    int       `json:"discrete"`    // count of discrete-epic rows (any read state)
-	Closed      int       `json:"closed"`      // summed over measured DISCRETE rows only
-	Total       int       `json:"total"`       // summed over measured DISCRETE rows only
-	OverallPct  float64   `json:"overall_pct"` // 100 * Closed/Total over measured DISCRETE rows
-	PartialNote string    `json:"partial_note,omitempty"`
-	Err         string    `json:"err,omitempty"`
-	OK          bool      `json:"ok"`
+	Rows        []EpicRow       `json:"rows"`
+	Tracked     int             `json:"tracked"`
+	Measured    int             `json:"measured"`
+	Programs    int             `json:"programs"`    // count of ongoing-program rows (any read state)
+	Discrete    int             `json:"discrete"`    // count of discrete-epic rows (any read state)
+	Closed      int             `json:"closed"`      // summed over measured DISCRETE rows only
+	Total       int             `json:"total"`       // summed over measured DISCRETE rows only
+	OverallPct  float64         `json:"overall_pct"` // 100 * Closed/Total over measured DISCRETE rows
+	Generations []GenerationRow `json:"generations"`
+	PartialNote string          `json:"partial_note,omitempty"`
+	Err         string          `json:"err,omitempty"`
+	OK          bool            `json:"ok"`
+}
+
+// GenerationRow is the roadmap summary by product horizon. It mirrors the
+// discrete-vs-ongoing honesty rule: OverallPct folds measured DISCRETE rows only,
+// while ongoing programs are counted as frontier activity, not completion.
+type GenerationRow struct {
+	Generation string  `json:"generation"`
+	Tracked    int     `json:"tracked"`
+	Measured   int     `json:"measured"`
+	Programs   int     `json:"programs"`
+	Discrete   int     `json:"discrete"`
+	Closed     int     `json:"closed"`
+	Total      int     `json:"total"`
+	OverallPct float64 `json:"overall_pct"`
+	Errored    int     `json:"errored,omitempty"`
 }
 
 // InterpretEpics folds the per-epic child tallies into the roadmap dimension. A
@@ -186,7 +203,7 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 		// work-class lives in one table (internal/worktype) so a reclassification is a
 		// one-line edit there, not a field threaded through the resolver.
 		class := worktype.ClassifyEpic(spec.Number)
-		row := EpicRow{Number: spec.Number, Title: spec.Title, Class: class}
+		row := EpicRow{Number: spec.Number, Title: spec.Title, Generation: normalizeGeneration(spec.Generation), Class: class}
 		if class.Ongoing() {
 			e.Programs++
 		} else {
@@ -218,6 +235,7 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 		e.Rows = append(e.Rows, row)
 	}
 	e.OverallPct = pct(e.Closed, e.Total)
+	e.Generations = summarizeGenerations(e.Rows)
 	switch {
 	case e.Tracked == 0:
 		e.Err = "no epics tracked"
@@ -232,6 +250,70 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 	}
 	e.OK = e.Err == ""
 	return e
+}
+
+var generationOrder = []string{"now", "next", "second-next", "future", "unclassified"}
+
+func normalizeGeneration(g string) string {
+	s := strings.ToLower(strings.TrimSpace(g))
+	s = strings.TrimPrefix(s, "gen/")
+	switch s {
+	case "now", "next", "second-next", "future":
+		return s
+	default:
+		return "unclassified"
+	}
+}
+
+func summarizeGenerations(rows []EpicRow) []GenerationRow {
+	by := make(map[string]*GenerationRow, len(generationOrder))
+	for _, gen := range generationOrder {
+		by[gen] = &GenerationRow{Generation: gen}
+	}
+	for _, row := range rows {
+		gen := normalizeGeneration(row.Generation)
+		lane, ok := by[gen]
+		if !ok {
+			lane = &GenerationRow{Generation: gen}
+			by[gen] = lane
+		}
+		lane.Tracked++
+		if row.Ongoing() {
+			lane.Programs++
+		} else {
+			lane.Discrete++
+		}
+		if row.Err != "" {
+			lane.Errored++
+			continue
+		}
+		lane.Measured++
+		if !row.Ongoing() {
+			lane.Closed += row.Closed
+			lane.Total += row.Total
+		}
+	}
+	out := make([]GenerationRow, 0, len(by))
+	seen := map[string]bool{}
+	for _, gen := range generationOrder {
+		lane := by[gen]
+		lane.OverallPct = pct(lane.Closed, lane.Total)
+		out = append(out, *lane)
+		seen[gen] = true
+	}
+	var extras []string
+	for gen := range by {
+		if !seen[gen] {
+			extras = append(extras, gen)
+		}
+	}
+	sort.Strings(extras)
+	for _, gen := range extras {
+		lane := by[gen]
+		lane.OverallPct = pct(lane.Closed, lane.Total)
+		out = append(out, *lane)
+	}
+	return out
 }
 
 // --- the fold ---------------------------------------------------------------
@@ -540,6 +622,12 @@ func Render(r Report) string {
 	}
 	lines = append(lines, fmt.Sprintf("  %s roadmap     %.1f%% across %d discrete epic(s); %d ongoing program(s)",
 		mark(r.Epics.OK, r.Epics.Err), r.Epics.OverallPct, r.Epics.Discrete, r.Epics.Programs))
+	if len(r.Epics.Generations) > 0 {
+		lines = append(lines, "      generation lanes:")
+		for _, row := range r.Epics.Generations {
+			lines = append(lines, "        "+generationRowLine(row))
+		}
+	}
 	if len(discrete) > 0 {
 		lines = append(lines, "      discrete epics (-> done):")
 		for _, row := range discrete {
@@ -603,6 +691,25 @@ func programRowLine(row EpicRow) string {
 		src = " {" + row.Source + "}"
 	}
 	return fmt.Sprintf("#%d %s%s — %d shipped / %d in-flight%s", row.Number, row.Title, label, row.Closed, open, src)
+}
+
+func generationRowLine(row GenerationRow) string {
+	if row.Tracked == 0 {
+		return fmt.Sprintf("%s: 0 tracked", row.Generation)
+	}
+	parts := []string{fmt.Sprintf("%s: %d tracked", row.Generation, row.Tracked)}
+	if row.Discrete > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f%% over %d discrete", row.OverallPct, row.Discrete))
+	} else {
+		parts = append(parts, "no discrete completion")
+	}
+	if row.Programs > 0 {
+		parts = append(parts, fmt.Sprintf("%d ongoing", row.Programs))
+	}
+	if row.Errored > 0 {
+		parts = append(parts, fmt.Sprintf("%d unreadable", row.Errored))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // CheckGate is the advisory CI gate over a folded report (pure: exit code + message).
