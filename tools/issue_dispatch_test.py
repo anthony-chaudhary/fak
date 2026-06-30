@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -161,7 +163,10 @@ class EvaluateTest(unittest.TestCase):
         # hermetic. Its real behavior (route off fresh evidence) is covered below.
         mod.refresh_registry = lambda root: {"ok": True, "stubbed": True}
         mod.preflight = lambda root, **kw: pre
-        mod.pick_lane = lambda root, explicit: lane_pick
+        # busy_lanes reads .dispatch-runs/ from disk; stub it empty so the tick is
+        # hermetic. Its real behavior (fold + prune inflight markers) is covered below.
+        mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.pick_lane = lambda root, explicit, busy=None: lane_pick
 
     def test_would_spawn_when_preflight_ok_and_lane_chosen(self) -> None:
         mod = load()
@@ -279,8 +284,9 @@ class RefreshRegistryTest(unittest.TestCase):
             return {"verdict": "REFUSE_AT_CAP", "reason": "x", "cap": 2,
                     "live": 2, "account": {}}
         mod.preflight = pre
-        mod.pick_lane = lambda root, explicit: {"lane": "docs", "issues": 1,
-                                                "by_lane": {}}
+        mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.pick_lane = lambda root, explicit, busy=None: {"lane": "docs", "issues": 1,
+                                                           "by_lane": {}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False)
         # refresh happens FIRST (so preflight's switcher reads the fresh roster),
@@ -295,8 +301,9 @@ class RefreshRegistryTest(unittest.TestCase):
         mod.refresh_registry = boom
         mod.preflight = lambda root, **kw: {"verdict": "REFUSE_AT_CAP",
                                             "reason": "x", "account": {}}
-        mod.pick_lane = lambda root, explicit: {"lane": "docs", "issues": 1,
-                                                "by_lane": {}}
+        mod.busy_lanes = lambda runs_dir, **kw: set()
+        mod.pick_lane = lambda root, explicit, busy=None: {"lane": "docs", "issues": 1,
+                                                           "by_lane": {}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
                          lane=None, live=False, refresh=False)
         self.assertTrue(p["registry_refresh"].get("skipped"))
@@ -331,6 +338,7 @@ class WaveTest(unittest.TestCase):
     def _wire(self, mod, *, seats, candidates, pre=None, arbitrate=None,
               no_spawn=True) -> None:
         mod.refresh_registry = lambda root: {"ok": True, "stubbed": True}
+        mod.busy_lanes = lambda runs_dir, **kw: set()
         mod.allocate_seats = lambda root, mw, wk: {
             "granted": len(seats), "requested": 99, "shortfall": 0,
             "wave_id": "wave-test", "lanes": seats}
@@ -457,6 +465,189 @@ class WaveTest(unittest.TestCase):
             self.assertEqual(rec["size"], 2)
             self.assertEqual(rec["lanes"], ["tools", "docs"])
             self.assertEqual(rec["seats"], ["acct-0", "acct-1"])
+
+
+class BusyLanesTest(unittest.TestCase):
+    """busy_lanes folds the inflight markers spawn_detached writes into the set of
+    lanes with a LIVE worker, pruning dead / stale / garbage markers in one pass so
+    the marker set stays bounded without a separate sweeper."""
+
+    def _marker(self, mod, runs: Path, lane: str, pid: int) -> Path:
+        runs.mkdir(parents=True, exist_ok=True)
+        p = runs / f"{mod.INFLIGHT_PREFIX}{lane}-{pid}.json"
+        p.write_text(json.dumps({"lane": lane, "pid": pid}), encoding="utf-8")
+        return p
+
+    def test_live_pid_marks_lane_busy_and_dead_is_pruned(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            live = self._marker(mod, runs, "gateway", 111)
+            dead = self._marker(mod, runs, "docs", 222)
+            busy = mod.busy_lanes(runs, is_alive=lambda pid: pid == 111)
+            self.assertEqual(busy, {"gateway"})
+            self.assertTrue(live.exists())     # live marker kept
+            self.assertFalse(dead.exists())    # dead marker pruned in the same pass
+
+    def test_stale_marker_pruned_even_if_pid_alive(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            m = self._marker(mod, runs, "model", 333)
+            old = os.path.getmtime(m) - (mod.INFLIGHT_TTL_SECONDS + 100)
+            os.utime(m, (old, old))
+            busy = mod.busy_lanes(runs, is_alive=lambda pid: True)
+            self.assertEqual(busy, set())
+            self.assertFalse(m.exists())
+
+    def test_garbage_marker_is_pruned(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            runs.mkdir(parents=True, exist_ok=True)
+            bad = runs / f"{mod.INFLIGHT_PREFIX}x-1.json"
+            bad.write_text("not json{", encoding="utf-8")
+            busy = mod.busy_lanes(runs, is_alive=lambda pid: True)
+            self.assertEqual(busy, set())
+            self.assertFalse(bad.exists())
+
+    def test_missing_runs_dir_yields_empty(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(
+                mod.busy_lanes(Path(d) / "nope", is_alive=lambda pid: True), set())
+
+
+class PickLaneBusyTest(unittest.TestCase):
+    """pick_lane prefers the richest lane NOT already in flight; falls back to the
+    richest overall (flagged ``stacked``) only when every lane is busy."""
+
+    LANES = {"lanes": {"docs": {"issues": [1, 2]},
+                       "gateway": {"issues": [1, 2, 3, 4]},
+                       "recall": {"issues": [9]}}}
+
+    def _router(self, mod) -> None:
+        mod.run_json = lambda cmd, cwd, timeout: json.loads(json.dumps(self.LANES))
+
+    def test_busy_richest_lane_is_skipped_for_next_free(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, busy={"gateway"})
+        self.assertEqual(pick["lane"], "docs")     # gateway (4) busy -> docs (2)
+        self.assertEqual(pick["issues"], 2)
+        self.assertFalse(pick["stacked"])
+        self.assertEqual(pick["busy"], ["gateway"])
+
+    def test_all_busy_falls_back_to_richest_and_flags_stacked(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, busy={"docs", "gateway", "recall"})
+        self.assertEqual(pick["lane"], "gateway")  # all busy -> richest overall
+        self.assertTrue(pick["stacked"])
+
+    def test_no_busy_matches_legacy_richest(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, busy=set())
+        self.assertEqual(pick["lane"], "gateway")
+        self.assertFalse(pick["stacked"])
+
+    def test_explicit_lane_honored_despite_busy(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, "gateway", busy={"gateway"})
+        self.assertEqual(pick["lane"], "gateway")
+        self.assertTrue(pick["explicit"])
+
+
+class SpawnInflightMarkerTest(unittest.TestCase):
+    """spawn_detached stamps an inflight {lane, pid} marker that busy_lanes reads
+    back — the write end of the cross-tick de-confliction signal."""
+
+    def test_spawn_detached_writes_marker_busy_lanes_reads_it(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+
+            class FakeProc:
+                pid = 4242
+
+            # spawn_detached intentionally leaks the log file handle so the detached
+            # child inherits the fd; the fake Popen does not, so ignore the harmless
+            # ResourceWarning the unclosed handle raises under the test's GC.
+            with warnings.catch_warnings(), \
+                 mock.patch.object(mod.subprocess, "Popen", lambda *a, **k: FakeProc()), \
+                 mock.patch.object(mod.shutil, "which", lambda x: x):
+                warnings.simplefilter("ignore", ResourceWarning)
+                out = mod.spawn_detached(["claude", "-p", "x"], {}, Path(d),
+                                         runs, "gateway")
+            self.assertEqual(out["pid"], 4242)
+            marker = runs / f"{mod.INFLIGHT_PREFIX}gateway-4242.json"
+            self.assertTrue(marker.exists())
+            rec = json.loads(marker.read_text(encoding="utf-8"))
+            self.assertEqual(rec["lane"], "gateway")
+            self.assertEqual(rec["pid"], 4242)
+            self.assertEqual(out["inflight"], str(marker))
+            busy = mod.busy_lanes(runs, is_alive=lambda pid: pid == 4242)
+            self.assertEqual(busy, {"gateway"})
+
+
+class EvaluateBusyWiringTest(unittest.TestCase):
+    """The single tick computes busy_lanes, threads it into pick_lane, and surfaces
+    it in the tick payload."""
+
+    def test_busy_threads_into_pick_lane_and_payload(self) -> None:
+        mod = load()
+        mod.refresh_registry = lambda root: {"ok": True}
+        mod.preflight = lambda root, **kw: {
+            "verdict": "SPAWN_OK", "cap": 2, "live": 0,
+            "account": {"tag": "a", "tier": 1, "dir": "/a"}}
+        mod.busy_lanes = lambda runs_dir, **kw: {"gateway"}
+        seen: dict = {}
+
+        def pick(root, explicit, busy=None):
+            seen["busy"] = busy
+            return {"lane": "docs", "issues": 2, "by_lane": {}, "stacked": False}
+        mod.pick_lane = pick
+
+        def boom(*a, **k):
+            raise AssertionError("dry-run must never spawn a worker")
+        mod.spawn_detached = boom
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(seen["busy"], {"gateway"})   # passed verbatim to pick_lane
+        self.assertEqual(p["busy_lanes"], ["gateway"])  # surfaced in the payload
+        self.assertFalse(p["lane_stacked"])
+
+
+class WaveBusySkipTest(unittest.TestCase):
+    """A wave skips a lane a prior tick's worker still holds — the cross-tick
+    de-confliction the within-tick arbiter does not provide."""
+
+    def test_wave_skips_a_busy_lane(self) -> None:
+        mod = load()
+        mod.refresh_registry = lambda root: {"ok": True}
+        mod.allocate_seats = lambda root, mw, wk: {
+            "granted": 2, "requested": 2, "shortfall": 0,
+            "wave_id": "w", "lanes": [_seat(0), _seat(1)]}
+        cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]},
+                 {"lane": "docs", "issues": 7, "tree": ["docs/**"]}]
+        mod.lane_candidates = lambda root: {"candidates": cands, "router_error": None}
+        mod.preflight = lambda root, **kw: {"verdict": "SPAWN_OK", "cap": 10,
+                                            "live": 0, "account": {}}
+        mod.arbitrate_lane = _disjoint_arbitrate
+        mod.busy_lanes = lambda runs_dir, **kw: {"tools"}   # tools already in flight
+
+        def boom(*a, **k):
+            raise AssertionError("dry-run must never spawn a wave worker")
+        mod._spawn_wave_member = boom
+
+        p = mod.evaluate_wave(ROOT, max_workers=2, work_kind="engineering", live=False)
+        self.assertEqual(p["lanes"], ["docs"])         # tools skipped as busy
+        self.assertEqual(p["skipped_busy"], ["tools"])
+        self.assertEqual(p["busy_lanes"], ["tools"])
+        self.assertEqual(p["size"], 1)
 
 
 if __name__ == "__main__":

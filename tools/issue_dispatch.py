@@ -46,8 +46,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -62,6 +63,19 @@ SCHEMA = "fleet-issue-dispatch/1"
 WAVE_SCHEMA = "fleet-issue-dispatch-wave/1"
 RUNS_DIRNAME = ".dispatch-runs"
 USE_SETUP_TOKEN_ENV = "FLEET_CLAUDE_USE_OAUTH_TOKEN"
+
+# An inflight marker is one {lane, pid} record written next to a worker's log the
+# instant it is spawned. It is the missing CROSS-TICK de-confliction: the wave path
+# already prices lanes pairwise-disjoint WITHIN one tick, but nothing stopped a
+# re-ticking cron from picking the same richest lane again and stacking a second
+# worker on a lane the first is still working (the witnessed "tick re-pick churn").
+# busy_lanes() folds these markers (pruning dead/stale ones) so the next tick can
+# prefer a lane NOT already in flight. Markers live in the gitignored .dispatch-runs/
+# scratch dir; they never touch the DoS cap (that stays sourced from resolve-*.pid).
+INFLIGHT_PREFIX = "inflight-"
+# Far longer than any worker run: a backstop that garbage-collects a marker leaked
+# by a tick that crashed before it could prune, even if the pid was since reused.
+INFLIGHT_TTL_SECONDS = 12 * 3600
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -127,8 +141,19 @@ def preflight(root: Path, *, max_workers: int, work_kind: str,
                     root, timeout=120)
 
 
-def pick_lane(root: Path, explicit: str | None) -> dict[str, Any]:
-    """The lane with the most open issues, or an explicit override."""
+def pick_lane(root: Path, explicit: str | None,
+              busy: set[str] | None = None) -> dict[str, Any]:
+    """The lane with the most open issues, or an explicit override.
+
+    When ``busy`` names lanes that already have a live dispatched worker (from
+    ``busy_lanes``), the richest lane NOT already in flight is preferred, so a
+    re-ticking cron spreads across the backlog instead of stacking a second worker
+    on the same lane (the "tick re-pick churn" failure). If EVERY lane with open
+    issues is busy, it falls back to the richest overall and sets ``stacked`` so the
+    stack is surfaced, never silent — the DoS cap, not this hint, is what bounds the
+    live population, so falling back keeps throughput when no free lane is left.
+    An explicit lane is honored verbatim (operator intent overrides the spread)."""
+    busy = busy or set()
     router = run_json([_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
                       root, timeout=130)
     lanes = router.get("lanes") or {}
@@ -138,12 +163,103 @@ def pick_lane(root: Path, explicit: str | None) -> dict[str, Any]:
         counts[ln] = len(iss) if hasattr(iss, "__len__") else 0
     if explicit:
         return {"lane": explicit, "issues": counts.get(explicit, 0), "by_lane": counts,
-                "explicit": True, "router_error": router.get("_error")}
+                "explicit": True, "busy": sorted(busy),
+                "router_error": router.get("_error")}
     if not counts:
-        return {"lane": None, "issues": 0, "by_lane": {}, "router_error": router.get("_error")}
-    lane = max(counts, key=lambda k: counts[k])
+        return {"lane": None, "issues": 0, "by_lane": {}, "busy": sorted(busy),
+                "router_error": router.get("_error")}
+    free = {ln: n for ln, n in counts.items() if ln not in busy}
+    pool = free or counts
+    stacked = not free   # every lane with open issues is already being worked
+    # Highest open-issue count first; lane name as a stable lexicographic tiebreak so
+    # the pick is deterministic across ticks rather than dependent on router order.
+    lane = sorted(pool, key=lambda k: (-pool[k], k))[0]
     return {"lane": lane, "issues": counts[lane], "by_lane": counts,
+            "busy": sorted(busy), "stacked": stacked,
             "router_error": router.get("_error")}
+
+
+def _pid_is_alive(pid: int) -> bool:
+    """Cross-platform live-PID check, mirrored from dispatch_preflight._pid_is_alive.
+
+    ``os.kill(pid, 0)`` *terminates* a process on Windows, so the nt branch shells to
+    Get-Process instead. Mirrored rather than imported: pulling dispatch_preflight in
+    for one helper would drag its whole shell-out surface into the tick."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue | "
+                 "Select-Object -First 1 -ExpandProperty Id"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=dispatch_worker.no_window_creationflags())
+            return proc.returncode == 0 and bool((proc.stdout or "").strip())
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _write_inflight_marker(runs_dir: Path, lane: str, pid: int) -> str | None:
+    """Record {lane, pid} so a LATER tick sees this lane is in flight and spreads to
+    a different one. Best-effort: a write failure never blocks the spawn."""
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        path = runs_dir / f"{INFLIGHT_PREFIX}{lane}-{int(pid)}.json"
+        path.write_text(
+            json.dumps({"lane": lane, "pid": int(pid),
+                        "stamp": dt.datetime.now(dt.timezone.utc).isoformat()}),
+            encoding="utf-8")
+        return str(path)
+    except (OSError, ValueError):
+        return None
+
+
+def busy_lanes(runs_dir: Path, *, is_alive: Callable[[int], bool] | None = None,
+               now: float | None = None,
+               ttl_seconds: int = INFLIGHT_TTL_SECONDS) -> set[str]:
+    """The set of lanes with a currently-live dispatched worker, folded from the
+    inflight markers ``spawn_detached`` writes. Self-healing: a marker whose pid is
+    dead, whose record is unreadable, or whose file is older than ``ttl_seconds`` is
+    pruned in the same pass, so the marker set stays bounded without a separate
+    sweeper. ``is_alive`` / ``now`` are injectable so the fold is hermetically
+    testable without real processes or a real clock."""
+    alive = is_alive or _pid_is_alive
+    if not runs_dir.is_dir():
+        return set()
+    when = now if now is not None else time.time()
+    lanes: set[str] = set()
+    for marker in sorted(runs_dir.glob(f"{INFLIGHT_PREFIX}*.json")):
+        try:
+            rec = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _safe_unlink(marker)
+            continue
+        lane = str((rec or {}).get("lane") or "").strip()
+        raw_pid = (rec or {}).get("pid")
+        pid = int(raw_pid) if isinstance(raw_pid, int) else (
+            int(raw_pid) if isinstance(raw_pid, str) and raw_pid.strip().isdigit() else 0)
+        try:
+            stale = (when - marker.stat().st_mtime) > ttl_seconds
+        except OSError:
+            stale = True
+        if not lane or pid <= 0 or stale or not alive(pid):
+            _safe_unlink(marker)
+            continue
+        lanes.add(lane)
+    return lanes
 
 
 def _truthy_env(value: str | None) -> bool:
@@ -201,7 +317,10 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     fh = open(out_log, "w", encoding="utf-8")
     proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                             stdout=fh, stderr=subprocess.STDOUT, **kwargs)
-    return {"pid": proc.pid, "log": str(out_log)}
+    # Stamp this lane as in flight so a later tick spreads off it (cross-tick
+    # de-confliction). Best-effort and pid-keyed; busy_lanes prunes it on death.
+    marker = _write_inflight_marker(log_dir, lane, proc.pid)
+    return {"pid": proc.pid, "log": str(out_log), "inflight": marker}
 
 
 def _build_launch(root: Path, lane: str | None) -> tuple[list[str], list[str], bool]:
@@ -231,7 +350,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     pre = preflight(root, max_workers=max_workers, work_kind=work_kind)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
-    lane_pick = pick_lane(root, lane)
+    # Lanes already in flight from a prior tick: prefer a different one so the cron
+    # spreads across the backlog rather than re-picking the richest lane every tick.
+    busy = busy_lanes(root / RUNS_DIRNAME)
+    lane_pick = pick_lane(root, lane, busy=busy)
     chosen = lane_pick.get("lane")
     command, launch_command, guarded = _build_launch(root, chosen)
 
@@ -254,6 +376,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen,
         "lane_issue_count": lane_pick.get("issues"),
+        "busy_lanes": sorted(busy),
+        "lane_stacked": bool(lane_pick.get("stacked")),
         "command": command,
         "guarded": guarded,
         "launch_command": launch_command,
@@ -307,7 +431,9 @@ def render(p: dict[str, Any]) -> str:
         + (f", host_cap {pf.get('host_cap')}" if pf.get('host_cap') is not None else "")
         + ")",
         f"  account   : {a.get('tag') or '-'} (t{a.get('tier')})  {a.get('model') or ''}",
-        f"  lane      : {p.get('lane') or '-'}  ({p.get('lane_issue_count')} issues)",
+        f"  lane      : {p.get('lane') or '-'}  ({p.get('lane_issue_count')} issues)"
+        + (f"  [busy: {', '.join(p.get('busy_lanes'))}]" if p.get('busy_lanes') else "")
+        + ("  STACKED (all lanes in flight)" if p.get('lane_stacked') else ""),
         f"  witness   : {(p.get('witness') or {}).get('cmd') or '-'}",
         f"  command   : {' '.join(p.get('command') or []) or '-'}",
         f"  -> {p.get('reason')}",
@@ -468,9 +594,14 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
 
     cand = lane_candidates(root)
     candidates = cand.get("candidates") or []
+    # Lanes a prior tick's worker still holds: skipped here so a wave never re-stacks
+    # a lane already in flight (the within-tick arbiter only de-conflicts THIS wave's
+    # own picks; busy_lanes carries the de-confliction ACROSS ticks).
+    busy = busy_lanes(root / RUNS_DIRNAME)
 
     leases: list[dict[str, Any]] = []   # accumulating disjoint-tree leases (priced)
     members: list[dict[str, Any]] = []
+    skipped_busy: list[str] = []
     baseline_live: int | None = None
     cap_seen: int | None = None
     refusal: str | None = None
@@ -487,6 +618,7 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                   "shortfall": seats.get("shortfall"), "wave_id": seats.get("wave_id"),
                   "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
         "candidate_lanes": [c["lane"] for c in candidates],
+        "busy_lanes": sorted(busy),
         "router_error": cand.get("router_error"),
     }
 
@@ -496,6 +628,11 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
         if len(members) >= free_seats:
             refusal = refusal or "SEATS_EXHAUSTED"
             break
+        # Cross-tick de-confliction: a lane a prior tick's worker still holds is
+        # skipped before it costs a preflight re-check or a seat.
+        if c["lane"] in busy:
+            skipped_busy.append(c["lane"])
+            continue
         # Per-spawn preflight re-check: the live population must never exceed the cap.
         pre = preflight(root, max_workers=max_workers, work_kind=work_kind)
         if pre.get("verdict") != "SPAWN_OK":
@@ -535,7 +672,8 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     lanes_used = [m["lane"] for m in members]
     seats_used = [(m["account"] or {}).get("tag") for m in members]
     payload.update({"size": size, "lanes": lanes_used, "members": members,
-                    "seats_used": seats_used, "cap": cap_seen, "refusal": refusal})
+                    "seats_used": seats_used, "cap": cap_seen, "refusal": refusal,
+                    "skipped_busy": skipped_busy})
 
     if size > 0:
         payload.update({
@@ -570,6 +708,8 @@ def render_wave(p: dict[str, Any]) -> str:
         f"  seats     : {p.get('free_seats')} free  ({', '.join(t for t in seats if t) or '-'})",
         f"  candidates: {len(p.get('candidate_lanes') or [])} lane(s) with open issues",
     ]
+    if p.get("busy_lanes"):
+        lines.append(f"  busy      : {', '.join(p.get('busy_lanes'))} (in flight; skipped)")
     for m in p.get("members") or []:
         sp = m.get("spawned") or {}
         tag = (m.get("account") or {}).get("tag") or "-"
