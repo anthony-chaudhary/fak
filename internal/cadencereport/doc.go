@@ -8,7 +8,8 @@
 //   - SCORES    -- tools/scorecard_control_pane.py folds ~20 scorecards into one
 //     portfolio debt against a single pinned baseline (garden.yml, daily).
 //   - MATURITY  -- fak maturity folds the feature lifecycle ladder: debt,
-//     index, rung distribution, and the ranked next-work backlog.
+//     index, rung distribution, the ranked next-work backlog, and the first
+//     public-routeable issue seed from `fak maturity route`.
 //   - WORK-DONE -- has no durable cadence report at all; derived here from git
 //     (commits + `(fak ` ship-trailer count over a trailing window).
 //   - RELEASES  -- tools/release_status.py folds release readiness

@@ -155,11 +155,11 @@ func (s *Server) writeServingMetrics(b *strings.Builder, inf inferenceSnapshot) 
 	writeServingGaugeFamily(b, "fak_serving_num_requests_waiting",
 		"Requests waiting in the serving worker queue. Name aligns with vLLM num_requests_waiting.",
 		rows, func(r ServingMetricRow) ServingGauge { return r.Waiting })
-	writeServingGaugeFamily(b, "fak_serving_gpu_cache_usage_perc",
-		"KV/GPU cache utilization for the serving worker. Name aligns with vLLM gpu_cache_usage_perc.",
+	writeServingGaugeFamily(b, "fak_serving_kv_cache_usage_perc",
+		"KV-cache utilization for the serving worker. Name aligns with vLLM kv_cache_usage_perc.",
 		rows, func(r ServingMetricRow) ServingGauge { return r.KVUtilization })
-	writeServingGaugeFamily(b, "fak_serving_gpu_prefix_cache_hit_rate",
-		"Prefix-cache hit rate for the serving worker. Name aligns with vLLM gpu_prefix_cache_hit_rate.",
+	writeServingGaugeFamily(b, "fak_serving_prefix_cache_hit_rate",
+		"Prefix-cache hit rate for the serving worker. Scrape emitters derive this from vLLM prefix_cache_hits / prefix_cache_queries counters when a direct hit-rate gauge is absent.",
 		rows, func(r ServingMetricRow) ServingGauge { return r.PrefixCacheHitRate })
 }
 
@@ -478,8 +478,7 @@ func (e *ServingScrapeEmitter) IngestPrometheusAt(text string, at time.Time) err
 		return nil
 	}
 	row := ServingMetricRow{Labels: e.labels}
-	var successTotal float64
-	var haveSuccess bool
+	var counters servingScrapeCounters
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -490,19 +489,22 @@ func (e *ServingScrapeEmitter) IngestPrometheusAt(text string, at time.Time) err
 		if row.Labels.Model == "" {
 			row.Labels.Model = firstNonEmpty(sample.labels["model_name"], sample.labels["model"])
 		}
-		applyServingPromSample(&row, sample, &successTotal, &haveSuccess)
+		applyServingPromSample(&row, sample, &counters)
 	}
 	if err := sc.Err(); err != nil {
 		return err
 	}
+	if counters.prefixQueries > 0 {
+		row.PrefixCacheHitRate = ServingGaugeValue(counters.prefixHits / counters.prefixQueries)
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if haveSuccess && e.havePrevious && at.After(e.previousAt) && successTotal >= e.previousSuccess {
-		row.Goodput = ServingGaugeValue((successTotal - e.previousSuccess) / at.Sub(e.previousAt).Seconds())
+	if counters.haveSuccess && e.havePrevious && at.After(e.previousAt) && counters.successTotal >= e.previousSuccess {
+		row.Goodput = ServingGaugeValue((counters.successTotal - e.previousSuccess) / at.Sub(e.previousAt).Seconds())
 	}
-	if haveSuccess {
-		e.previousSuccess = successTotal
+	if counters.haveSuccess {
+		e.previousSuccess = counters.successTotal
 		e.previousAt = at
 		e.havePrevious = true
 	}
@@ -617,6 +619,13 @@ type promSample struct {
 	value  float64
 }
 
+type servingScrapeCounters struct {
+	successTotal  float64
+	haveSuccess   bool
+	prefixHits    float64
+	prefixQueries float64
+}
+
 func parsePromSample(line string) (promSample, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
@@ -727,7 +736,7 @@ func parsePromQuoted(s string) (string, int, bool) {
 	return "", 0, false
 }
 
-func applyServingPromSample(row *ServingMetricRow, sample promSample, successTotal *float64, haveSuccess *bool) {
+func applyServingPromSample(row *ServingMetricRow, sample promSample, counters *servingScrapeCounters) {
 	base, suffix := promMetricBase(sample.name)
 	switch servingPromMetricKind(base) {
 	case "ttft":
@@ -747,8 +756,12 @@ func applyServingPromSample(row *ServingMetricRow, sample promSample, successTot
 	case "goodput":
 		row.Goodput = ServingGaugeValue(sample.value)
 	case "success_total":
-		*successTotal += sample.value
-		*haveSuccess = true
+		counters.successTotal += sample.value
+		counters.haveSuccess = true
+	case "prefix_hits":
+		counters.prefixHits += sample.value
+	case "prefix_queries":
+		counters.prefixQueries += sample.value
 	}
 }
 
@@ -805,6 +818,12 @@ func servingPromMetricKind(base string) string {
 	case strings.HasSuffix(base, "request_success_total") ||
 		strings.HasSuffix(base, "requests_success_total"):
 		return "success_total"
+	case strings.HasSuffix(base, "prefix_cache_hits") ||
+		strings.HasSuffix(base, "prefix_cache_hits_total"):
+		return "prefix_hits"
+	case strings.HasSuffix(base, "prefix_cache_queries") ||
+		strings.HasSuffix(base, "prefix_cache_queries_total"):
+		return "prefix_queries"
 	}
 	return ""
 }

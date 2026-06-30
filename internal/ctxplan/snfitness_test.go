@@ -50,6 +50,21 @@ func TestWitnessedSNFitnessLearnedBeatsLexical(t *testing.T) {
 	if learnedFit < 0.8 {
 		t.Fatalf("learned forecast kept the attended span; want fitness >= 0.8, got %.4f", learnedFit)
 	}
+
+	score := ScoreWitnessedSN(learned, session)
+	if score.Fitness != learnedFit {
+		t.Fatalf("score fitness %.4f must equal WitnessedSNFitness %.4f", score.Fitness, learnedFit)
+	}
+	if score.Turns != 1 || score.ScoredTurns != 1 {
+		t.Fatalf("score turns = %d/%d, want 1/1", score.ScoredTurns, score.Turns)
+	}
+	if score.SignalTokens != 9 || score.NoiseTokens != 1 || score.ResidentTokens != 10 {
+		t.Fatalf("learned score token split = sig%d noise%d resident%d, want 9/1/10",
+			score.SignalTokens, score.NoiseTokens, score.ResidentTokens)
+	}
+	if score.Grade != "lean" || score.MeanRatio < 0.8 || score.MeanFaultRatio != 0 {
+		t.Fatalf("learned score should be lean with high ratio/no faults: %+v", score)
+	}
 }
 
 // TestWitnessedSNFitnessFaultDiscountBites proves the fitness is NON-GAMEABLE by dropping needed
@@ -80,6 +95,17 @@ func TestWitnessedSNFitnessFaultDiscountBites(t *testing.T) {
 	}
 	if withFault > 0.5 {
 		t.Fatalf("faulted fitness should be discounted to ~0.45, got %.4f", withFault)
+	}
+
+	score := ScoreWitnessedSN(f, []Turn{{Spans: spans, Budget: budget, Attribution: attribution, Faults: []string{"span:d"}}})
+	if score.Fitness != withFault {
+		t.Fatalf("score fitness %.4f must equal WitnessedSNFitness %.4f", score.Fitness, withFault)
+	}
+	if score.FaultTokens != 10 || score.MeanFaultRatio < 0.49 || score.MeanFaultRatio > 0.51 {
+		t.Fatalf("fault pressure missing from score: %+v", score)
+	}
+	if score.Grade != "starving" {
+		t.Fatalf("fault-discounted score must grade starving, got %+v", score)
 	}
 }
 

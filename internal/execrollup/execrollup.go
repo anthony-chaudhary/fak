@@ -121,8 +121,8 @@ type SignalNoise struct {
 
 // Rollup is one folded executive-activity control-pane envelope. It carries the
 // same schema/ok/verdict/finding/reason/next_action spine the rest of the fak
-// control panes use, plus the marquee S/N, the ranked Attention list, and the
-// per-plane coverage table.
+// control panes use, plus the marquee S/N, the ranked Attention list, useful
+// next-work seeds, and the per-plane coverage table.
 type Rollup struct {
 	Schema      string        `json:"schema"`
 	OK          bool          `json:"ok"`
@@ -136,6 +136,7 @@ type Rollup struct {
 	GeneratedAt string        `json:"generated_at,omitempty"`
 	SignalNoise SignalNoise   `json:"signal_noise"`
 	Attention   []Item        `json:"attention"`
+	NextWork    []Item        `json:"next_work,omitempty"`
 	Planes      []PlaneStatus `json:"planes"`
 	Unmeasured  int           `json:"unmeasured"`
 }
@@ -153,7 +154,7 @@ type PlaneInput struct {
 type Inputs struct {
 	Dispatch    PlaneInput // tools/dispatch_status.py --json
 	Loops       PlaneInput // fak loop health --json
-	Cadence     PlaneInput // fak cadence --json (scores + work-done)
+	Cadence     PlaneInput // fak cadence --json (scores + maturity + work-done)
 	Fleet       PlaneInput // fak fleet status --json
 	Workspace   string
 	Commit      string
@@ -189,17 +190,24 @@ func Fold(in Inputs) Rollup {
 		}
 	}
 
-	// Rank: crit before warn; OK never reaches the rendered list. Stable so the
-	// within-level order stays in plane order (dispatch, loops, cadence, fleet).
+	// Rank: crit before warn. OK items are productive next-work seeds, not
+	// attention alarms, so they are rendered separately.
 	attention := make([]Item, 0, len(items))
+	nextWork := make([]Item, 0, len(items))
 	for _, it := range items {
-		if it.Level == LevelCrit || it.Level == LevelWarn {
+		switch it.Level {
+		case LevelCrit, LevelWarn:
 			attention = append(attention, it)
+		case LevelOK:
+			nextWork = append(nextWork, it)
 		}
 	}
 	sort.SliceStable(attention, func(i, j int) bool {
 		return levelRank(attention[i].Level) < levelRank(attention[j].Level)
 	})
+	if len(nextWork) > 3 {
+		nextWork = nextWork[:3]
+	}
 
 	nCrit, nWarn := 0, 0
 	for _, it := range attention {
@@ -228,6 +236,7 @@ func Fold(in Inputs) Rollup {
 		GeneratedAt: in.GeneratedAt,
 		SignalNoise: sn,
 		Attention:   attention,
+		NextWork:    nextWork,
 		Planes:      planeStatuses,
 		Unmeasured:  unmeasured,
 	}
@@ -404,6 +413,36 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 	} else {
 		summary += " (scores not run)"
 	}
+	if maturity, ok := in.Payload["maturity"].(map[string]any); ok && len(maturity) > 0 {
+		if e := asString(maturity["err"]); e != "" {
+			items = append(items, Item{LevelWarn, "cadence",
+				"Maturity scorecard did not measure", e, Observed})
+		}
+		debt := asInt(maturity["debt"])
+		if debt > 0 {
+			items = append(items, Item{LevelWarn, "cadence",
+				fmt.Sprintf("Maturity ladder-skip debt %d", debt),
+				"run `fak maturity next` and retire the skip rows first", Witnessed})
+		}
+		routeLane := asString(maturity["route_lane"])
+		routeItem := asString(maturity["route_item"])
+		routeKey := asString(maturity["route_key"])
+		skipped := asInt(maturity["route_skipped_private"])
+		if routeLane != "" {
+			summary += ", route " + routeLane
+			detail := fmt.Sprintf("run `fak maturity route --fetch-existing --limit 3`; %s", dashIfEmpty(routeKey))
+			if routeItem != "" {
+				detail += ": " + routeItem
+			}
+			if skipped > 0 {
+				detail += fmt.Sprintf("; %d private-boundary row(s) skipped", skipped)
+			}
+			items = append(items, Item{LevelOK, "cadence",
+				"Seed maturity dispatch with " + routeLane, detail, Witnessed})
+		} else if skipped > 0 {
+			summary += fmt.Sprintf(", %d private maturity skip(s)", skipped)
+		}
+	}
 	st := PlaneStatus{Name: "cadence", Measured: true, Summary: summary}
 	st.Verdict = planeVerdict(items)
 	return st, items
@@ -490,6 +529,9 @@ func headline(r Rollup, nCrit, nWarn int) string {
 			r.SignalNoise.Ships, r.SignalNoise.Commits, r.SignalNoise.WindowDays)
 	}
 	fmt.Fprintf(&b, ". %d need-now (%d crit / %d watch)", nCrit+nWarn, nCrit, nWarn)
+	if len(r.NextWork) > 0 {
+		fmt.Fprintf(&b, "; %d next-work seed(s)", len(r.NextWork))
+	}
 	if r.Unmeasured > 0 {
 		fmt.Fprintf(&b, "; %d plane(s) unmeasured", r.Unmeasured)
 	}
@@ -502,6 +544,16 @@ func headline(r Rollup, nCrit, nWarn int) string {
 func narrate(r Rollup, nCrit, nWarn int) (finding, reason, next string) {
 	switch r.Verdict {
 	case VerdictGreen:
+		if len(r.NextWork) > 0 {
+			top := r.NextWork[0]
+			finding = "Fleet healthy — next work is ready."
+			reason = "every plane measured and clean; " + top.Title
+			next = top.Title
+			if top.Detail != "" {
+				next = top.Title + " — " + top.Detail
+			}
+			return
+		}
 		finding = "Fleet healthy — no item needs a human now."
 		reason = "every plane measured and clean"
 		next = "none — keep shipping"
@@ -562,6 +614,22 @@ func Render(r Rollup) string {
 				mark = "🔴"
 			}
 			fmt.Fprintf(&b, "- %s **%s** `%s`", mark, it.Title, it.Plane)
+			if it.Prov != "" {
+				fmt.Fprintf(&b, " _[%s]_", it.Prov)
+			}
+			b.WriteString("\n")
+			if it.Detail != "" {
+				fmt.Fprintf(&b, "  - %s\n", it.Detail)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Productive work: not an alarm, but useful for humans/agents deciding what to pick next.
+	if len(r.NextWork) > 0 {
+		b.WriteString("### Useful next work\n\n")
+		for _, it := range r.NextWork {
+			fmt.Fprintf(&b, "- **%s** `%s`", it.Title, it.Plane)
 			if it.Prov != "" {
 				fmt.Fprintf(&b, " _[%s]_", it.Prov)
 			}

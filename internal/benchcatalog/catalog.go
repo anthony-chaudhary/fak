@@ -112,9 +112,9 @@ var registry = []Bench{
 	},
 	{
 		Name: "agentbenchdemo", Kind: KindCmd, Need: NeedNone,
-		Summary: "Self-tax micro-benchmark for fak's agentic spine: folds a fixed allow/deny tool-call plan through the real kernel and reports per-call adjudication cost.",
+		Summary: "Agentic-spine self-tax micro-benchmark: fixed offline plan over the kernel guard path, reporting allowed/denied tool-call counts and mean cost per call.",
 		Run:     "go run ./cmd/agentbenchdemo -selfcheck",
-		Flags:   []string{"-n  -  iterations to fold", "-json  -  emit measured result as JSON", "-selfcheck  -  assert deterministic counts and sane per-call ceiling"},
+		Flags:   []string{"-selfcheck  -  assert the deterministic self-tax invariants", "-json  -  emit the measured result as JSON", "-n  -  iterations for the timing loop"},
 		Doc:     "cmd/agentbenchdemo/README.md",
 	},
 	{

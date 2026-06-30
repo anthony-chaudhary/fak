@@ -55,6 +55,57 @@ func TestFoldClean(t *testing.T) {
 	}
 }
 
+// Routeable maturity work is useful next work, not an alarm: the fleet can stay
+// GREEN while still telling humans/agents which backlog item to seed into
+// dispatch next.
+func TestMaturityRouteSeedIsNextWorkNotAttention(t *testing.T) {
+	in := Inputs{
+		Dispatch: PlaneInput{Payload: jmap(t, `{
+			"closure": {"na": false, "closure_rate": 0.95, "counts": {"TRUE_RESOLVED": 95, "CLAIMED_CLOSED": 5}},
+			"throughput": {"na": false, "verdict": "ON_TARGET", "completed_rate_per_hour": 12.0, "target_per_hour": 10.0, "primary_window_hours": 6},
+			"backend_health": {"dead_count": 0},
+			"workers": {"silent_count": 0}
+		}`)},
+		Loops: PlaneInput{Payload: jmap(t, `{"rollup": {"loops": 2, "live": 2, "dark": 0}}`)},
+		Cadence: PlaneInput{Payload: jmap(t, `{
+			"scores": {"debt": 0, "trend_direction": "flat"},
+			"work": {"commits": 10, "ships": 10, "window_days": 7},
+			"maturity": {
+				"debt": 0,
+				"route_key": "maturity/advmodel/dogfooded",
+				"route_lane": "advmodel",
+				"route_item": "maturity(advmodel): dogfood the capability in fak",
+				"route_skipped_private": 1
+			}
+		}`)},
+		Fleet: PlaneInput{Payload: jmap(t, `{"total": 1, "reachable": 1, "attention": []}`)},
+	}
+	r := Fold(in)
+	if r.Verdict != VerdictGreen || !r.OK {
+		t.Fatalf("verdict = %s ok=%v, want GREEN/true", r.Verdict, r.OK)
+	}
+	if len(r.Attention) != 0 {
+		t.Fatalf("maturity seed should not be attention: %+v", r.Attention)
+	}
+	if len(r.NextWork) != 1 {
+		t.Fatalf("next_work len = %d, want 1", len(r.NextWork))
+	}
+	if got := r.NextWork[0]; got.Level != LevelOK || got.Plane != "cadence" ||
+		!strings.Contains(got.Title, "advmodel") || !strings.Contains(got.Detail, "fak maturity route") ||
+		!strings.Contains(got.Detail, "private-boundary") {
+		t.Fatalf("next work item = %+v", got)
+	}
+	if !strings.Contains(r.NextAction, "Seed maturity dispatch with advmodel") {
+		t.Fatalf("next action should point at maturity seed, got %q", r.NextAction)
+	}
+	out := Render(r)
+	for _, want := range []string{"Useful next work", "Seed maturity dispatch with advmodel", "fak maturity route --fetch-existing --limit 3"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // Low closure honesty (<0.5) is the loudest signal — volume that is mostly
 // unwitnessed — and must escalate the whole fleet to RED.
 func TestFoldLowHonestyIsCrit(t *testing.T) {

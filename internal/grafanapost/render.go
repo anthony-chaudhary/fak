@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // Post is one #grafana-channel message, decoupled from which fold produced it. The
@@ -39,7 +41,7 @@ func (p Post) Text() string {
 	if p.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", p.Source)
 	}
-	return b.String()
+	return slackmeta.AppendText(b.String(), p.signalNoise())
 }
 
 // Blocks renders the Block Kit payload. It carries the same facts as Text so a
@@ -74,7 +76,13 @@ func (p Post) Blocks() []any {
 			"elements": []any{map[string]any{"type": "mrkdwn", "text": "posted by " + p.Source}},
 		})
 	}
-	return blocks
+	return slackmeta.AppendContext(blocks, p.signalNoise())
+}
+
+func (p Post) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(p.Lead) + len(p.Lines)
+	noise := 1 + slackmeta.NonEmpty(p.Source)
+	return slackmeta.New(signal, noise, "grafana snapshot/link facts vs source/context")
 }
 
 // SnapshotPost folds one exported Grafana snapshot into a Post: the headline, a lead

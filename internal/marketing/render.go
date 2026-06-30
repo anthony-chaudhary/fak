@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // render.go — the marketing Artifact and its Slack render. An Artifact is one rendered
@@ -125,7 +127,7 @@ func (a Artifact) Text() string {
 	if a.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", a.Source)
 	}
-	return b.String()
+	return slackmeta.AppendText(b.String(), a.signalNoise())
 }
 
 // Blocks renders the Block Kit payload, carrying the same facts as Text (sha on every
@@ -155,7 +157,13 @@ func (a Artifact) Blocks() []any {
 		"type":     "context",
 		"elements": []any{map[string]any{"type": "mrkdwn", "text": strings.Join(ctxParts, "  ·  ")}},
 	})
-	return blocks
+	return slackmeta.AppendContext(blocks, a.signalNoise())
+}
+
+func (a Artifact) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(a.Lead, a.footer()) + len(a.Claims) + len(a.Excluded)
+	noise := 1 + slackmeta.NonEmpty(a.Source)
+	return slackmeta.New(signal, noise, "witnessed claim bullets and held-ship disclosure vs source/context")
 }
 
 // sortedClaims returns the claims newest-first by ship date (stable), so the freshest ship

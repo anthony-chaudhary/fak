@@ -424,6 +424,24 @@ type Verdict struct {
 	Dangling     []string // links/commands that no longer resolve (REVERT diagnostic)
 	Decision     string   // KEEP | REVERT | ESCALATE
 	Kept         bool     // the shipgate keep-bit
+	Score        Scorecard
+}
+
+// Scorecard is the structured score payload carried by a docs-freshness verdict.
+// The keep-bit still comes only from shipgate; Scorecard is the audit surface that
+// lets a reader distinguish a real debt drop from a truth-dirty goodhart move.
+type Scorecard struct {
+	Name       string           `json:"name,omitempty"`
+	Value      float64          `json:"value"`
+	Grade      string           `json:"grade,omitempty"`
+	Components []ScoreComponent `json:"components,omitempty"`
+}
+
+// ScoreComponent is one numeric axis of a Scorecard.
+type ScoreComponent struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit,omitempty"`
 }
 
 // EvaluateCandidate measures one candidate against an isolated clone of base and folds
@@ -460,10 +478,62 @@ func EvaluateCandidate(base Corpus, c Candidate, tgt Target) (Verdict, Corpus) {
 		Decision:     d.String(),
 		Kept:         ev.Kept(),
 	}
+	v.Score = scoreVerdict(v)
 	if ev.Kept() {
 		return v, cand
 	}
 	return v, base
+}
+
+func scoreVerdict(v Verdict) Scorecard {
+	improved := 0.0
+	if v.Improved {
+		improved = 1
+	}
+	clean := 0.0
+	if v.Clean {
+		clean = 1
+	}
+	links := 0.0
+	if v.LinksResolve {
+		links = 1
+	}
+	kept := 0.0
+	if v.Kept {
+		kept = 1
+	}
+	return Scorecard{
+		Name:  "doc_freshness_debt",
+		Value: float64(v.DebtAfter),
+		Grade: scoreVerdictGrade(v),
+		Components: []ScoreComponent{
+			{Name: "debt_before", Value: float64(v.DebtBefore), Unit: "defects"},
+			{Name: "debt_after", Value: float64(v.DebtAfter), Unit: "defects"},
+			{Name: "debt_delta", Value: float64(v.DebtBefore - v.DebtAfter), Unit: "defects"},
+			{Name: "improved", Value: improved, Unit: "bool"},
+			{Name: "clean", Value: clean, Unit: "bool"},
+			{Name: "links_resolve", Value: links, Unit: "bool"},
+			{Name: "dangling", Value: float64(len(v.Dangling)), Unit: "refs"},
+			{Name: "kept", Value: kept, Unit: "bool"},
+		},
+	}
+}
+
+func scoreVerdictGrade(v Verdict) string {
+	switch {
+	case v.Kept && v.DebtAfter == 0:
+		return "clear"
+	case v.Kept:
+		return "improved"
+	case !v.LinksResolve:
+		return "truth-dirty"
+	case !v.Clean:
+		return "dirty"
+	case !v.Improved:
+		return "no-gain"
+	default:
+		return "reverted"
+	}
 }
 
 // Refresh runs the whole rung over base: it derives the mechanical-fix candidates and

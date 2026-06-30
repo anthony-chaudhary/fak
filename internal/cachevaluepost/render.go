@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // cardTitle is the fixed headline naming the surface and the track it reports. Track 1 is
@@ -146,7 +147,7 @@ func (c Card) Text() string {
 	if src := strings.TrimSpace(c.Source); src != "" {
 		fmt.Fprintf(&sb, "\n_posted by %s_", src)
 	}
-	return sb.String()
+	return slackmeta.AppendText(sb.String(), c.signalNoise())
 }
 
 // Blocks renders the Block Kit payload for a richer card. It carries the same facts as
@@ -196,5 +197,11 @@ func (c Card) Blocks() []any {
 		"type":     "context",
 		"elements": []any{map[string]any{"type": "mrkdwn", "text": strings.Join(ctxParts, "  ·  ")}},
 	})
-	return blocks
+	return slackmeta.AppendContext(blocks, c.signalNoise())
+}
+
+func (c Card) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(c.Report.Finding, c.trendLine(), c.Report.NextAction, c.fence()) + len(c.bucketLines())
+	noise := 1 + slackmeta.NonEmpty(c.Report.Schema, c.Source)
+	return slackmeta.New(signal, noise, "reuse finding, trend, bucket rows, and honesty fence vs schema/source")
 }

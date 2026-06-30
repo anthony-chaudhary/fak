@@ -20,6 +20,9 @@ gateway = ["internal/gateway/**"]
 session = ["internal/session/**"] # per-session DRIVE state + cost ring
 cmd     = ["cmd/**"]
 version = ["VERSION"]
+docs    = ["docs/**", "README.md", "INDEX.md", "llms.txt", "llms-full.txt", "llms-updates.txt"]
+dos     = ["dos.toml", ".gitignore"]
+tools   = ["tools/**", "scripts/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 
 [other]
@@ -70,7 +73,7 @@ func TestParseLanes(t *testing.T) {
 	if _, ok := c.LeafByName("ignored"); ok {
 		t.Error("leaf from a non-[lanes.trees] section leaked into the catalog")
 	}
-	wantNames := []string{"cmd", "gateway", "session", "version"}
+	wantNames := []string{"cmd", "docs", "dos", "gateway", "session", "tools", "version"}
 	if len(c.Leaves) != len(wantNames) {
 		t.Fatalf("got %d leaves %v, want %d %v", len(c.Leaves), names(c.Leaves), len(wantNames), wantNames)
 	}
@@ -111,9 +114,13 @@ func TestLaneForPath(t *testing.T) {
 		{"./internal/session/x.go", "session"},       // leading ./ trimmed
 		{"cmd/fak/index.go", "cmd"},                  // cmd/** tree
 		{"VERSION", "version"},                       // exact-file entry
+		{"dos.toml", "dos"},                          // exact-file entry
+		{".gitignore", "dos"},                        // exact-file entry
+		{"scripts/gcp-fleet-janitor.sh", "tools"},    // subtree prefix
 		{"internal/unknownleaf/x.go", "unknownleaf"}, // dir convention fallback
 		{"docs/notes/x.md", "docs"},                  // top-level lane dir
-		{"README.md", ""},                            // root file -> no lane
+		{"README.md", "docs"},                        // exact root-doc entry
+		{"llms-updates.txt", "docs"},                 // exact generated root-doc entry
 	}
 	for _, tc := range cases {
 		if got := c.LaneForPath(tc.path); got != tc.want {
@@ -127,8 +134,11 @@ func TestSuggestStamp(t *testing.T) {
 	if got := c.SuggestStamp("internal/session/x.go"); got != "(fak session)" {
 		t.Errorf("SuggestStamp = %q, want (fak session)", got)
 	}
-	if got := c.SuggestStamp("README.md"); got != "" {
-		t.Errorf("SuggestStamp(root file) = %q, want empty", got)
+	if got := c.SuggestStamp("dos.toml"); got != "(fak dos)" {
+		t.Errorf("SuggestStamp(dos.toml) = %q, want (fak dos)", got)
+	}
+	if got := c.SuggestStamp("README.md"); got != "(fak docs)" {
+		t.Errorf("SuggestStamp(README.md) = %q, want (fak docs)", got)
 	}
 }
 
@@ -298,7 +308,7 @@ func TestRealRepoDogfood(t *testing.T) {
 	if err != nil {
 		t.Skipf("no repo root found from test cwd (%v); skipping live dogfood", err)
 	}
-	for _, want := range []string{"devindex", "gateway", "cmd", "docs"} {
+	for _, want := range []string{"devindex", "gateway", "cmd", "docs", "dos"} {
 		l, ok := c.LeafByName(want)
 		if !ok {
 			t.Errorf("live catalog is missing the %q lane", want)

@@ -14,6 +14,10 @@ const (
 	lockfileExclusiveLock   = 0x00000002
 	errSharingViolation     = syscall.Errno(32)
 	errLockViolation        = syscall.Errno(33)
+	// Keep the advisory byte out of the file's metadata prefix. Windows byte-range
+	// locks are mandatory for reads/writes in that range, and gpulease records the
+	// holder pid at offset 0 while the lease is held.
+	lockOffsetLow = 1 << 30
 )
 
 var (
@@ -25,7 +29,7 @@ var (
 // TryLock takes a non-blocking exclusive advisory lock on f. It returns
 // ErrLockBusy when another holder owns the lock, nil on success.
 func TryLock(f *os.File) error {
-	var ol syscall.Overlapped
+	ol := syscall.Overlapped{Offset: lockOffsetLow}
 	r, _, err := procLockFileEx.Call(
 		f.Fd(),
 		lockfileExclusiveLock|lockfileFailImmediately,
@@ -45,7 +49,7 @@ func TryLock(f *os.File) error {
 
 // Unlock releases the advisory lock held on f.
 func Unlock(f *os.File) error {
-	var ol syscall.Overlapped
+	ol := syscall.Overlapped{Offset: lockOffsetLow}
 	r, _, err := procUnlockFileEx.Call(
 		f.Fd(),
 		0,

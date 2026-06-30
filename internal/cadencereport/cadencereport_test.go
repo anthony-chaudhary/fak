@@ -179,11 +179,30 @@ func TestMaturityFromScorecard(t *testing.T) {
 				"dogfooded": 7,
 			},
 		},
-		Backlog: []maturityscore.NextWork{{Lane: "alpha", Title: "dogfood alpha: wire it into fak"}},
+		Backlog: []maturityscore.NextWork{
+			{
+				Lane:     "dgxbridge",
+				FromRung: maturityscore.RungProposed,
+				Gap:      maturityscore.RungPrototyped,
+				Title:    "prototype dgxbridge: land a v1 in internal/dgxbridge",
+				Witness:  "a non-test .go file exists under internal/dgxbridge",
+			},
+			{
+				Lane:     "alpha",
+				FromRung: maturityscore.RungPrototyped,
+				Gap:      maturityscore.RungTested,
+				Title:    "test alpha: add unit tests covering internal/alpha",
+				Witness:  "a *_test.go in internal/alpha",
+			},
+		},
 	})
-	if got.Score != 81 || got.Grade != "B" || got.Backlog != 3 || got.NextLane != "alpha" ||
+	if got.Score != 81 || got.Grade != "B" || got.Backlog != 3 || got.NextLane != "dgxbridge" ||
 		got.Distribution["dogfooded"] != 7 || !got.OK {
 		t.Fatalf("maturity projection = %+v", got)
+	}
+	if got.NextLane != "dgxbridge" || got.RouteLane != "alpha" ||
+		got.RouteKey != "maturity/alpha/tested" || got.RouteSkippedPrivate != 1 {
+		t.Fatalf("maturity route preview = %+v", got)
 	}
 }
 
@@ -204,9 +223,13 @@ func okMaturity() Maturity {
 			"dogfooded":  56,
 			"default":    36,
 		},
-		NextLane: "dgxbridge",
-		NextItem: "prototype dgxbridge: land a v1 in internal/dgxbridge",
-		OK:       true,
+		NextLane:            "dgxbridge",
+		NextItem:            "prototype dgxbridge: land a v1 in internal/dgxbridge",
+		RouteKey:            "maturity/advmodel/dogfooded",
+		RouteLane:           "advmodel",
+		RouteItem:           "maturity(advmodel): dogfood the capability in fak",
+		RouteSkippedPrivate: 1,
+		OK:                  true,
 	}
 }
 func okWork() Work { return Work{WindowDays: 7, Commits: 23, Ships: 18} }
@@ -452,6 +475,8 @@ func TestRowFromReportRoundTrip(t *testing.T) {
 	row := RowFromReport(r)
 	if row.Schema != LedgerSchema || row.Date != "2026-06-26" || row.ScoresDebt != 40 ||
 		row.MaturityScore != 78 || row.MaturityBacklog != 88 || row.MaturityTested != 18 ||
+		row.MaturityRouteKey != "maturity/advmodel/dogfooded" || row.MaturityRouteLane != "advmodel" ||
+		row.MaturityRouteSkipped != 1 ||
 		row.WorkCommits != 23 || row.WorkShips != 18 || row.ReleaseVersion != "v1.2.3" || row.ReleaseAction != "wait" {
 		t.Fatalf("row projection = %+v", row)
 	}
@@ -463,8 +488,24 @@ func TestRowFromReportRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(line), &back); err != nil {
 		t.Fatalf("ledger line not valid JSON: %v", err)
 	}
-	if back.ScoresDebt != 40 || back.ScoresTrend != "improved" || back.MaturityDefault != 36 {
+	if back.ScoresDebt != 40 || back.ScoresTrend != "improved" || back.MaturityDefault != 36 ||
+		back.MaturityRouteLane != "advmodel" {
 		t.Fatalf("round-trip lost fields: %+v", back)
+	}
+}
+
+func TestRenderSurfacesMaturityRoutePreview(t *testing.T) {
+	r := FoldWithMaturity(okScores(), okMaturity(), okWork(), okReleases(), foldOpts())
+	out := Render(r)
+	for _, want := range []string{
+		"next dgxbridge",
+		"route advmodel",
+		"1 private skipped",
+		"fak maturity route --fetch-existing --limit 3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
 	}
 }
 

@@ -190,25 +190,13 @@ func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) a
 		return abi.WitnessAbstain
 	case "grep":
 		out, code, err := r.run(ctx, r.dir, "log", "--grep", arg, "-1", "--format=%H")
-		if err != nil || code != 0 {
-			return abi.WitnessAbstain
-		}
-		if strings.TrimSpace(out) != "" {
-			return abi.WitnessConfirmed
-		}
-		return abi.WitnessRefuted
+		return gitOutputPresenceWitness(out, code, err, true)
 	case "clean":
 		// A clean working tree corroborates a "green-tree" ship: no uncommitted
 		// changes under the pathspec. `git status --porcelain <arg>` empty => clean
 		// (confirmed); any output => dirty (refuted); git unavailable => abstain.
 		out, code, err := r.run(ctx, r.dir, "status", "--porcelain", "--", arg)
-		if err != nil || code != 0 {
-			return abi.WitnessAbstain
-		}
-		if strings.TrimSpace(out) == "" {
-			return abi.WitnessConfirmed
-		}
-		return abi.WitnessRefuted
+		return gitOutputPresenceWitness(out, code, err, false)
 	case "notests":
 		// The reward-hack guard: list the files <ref> touched and REFUTE if any is a
 		// gating test file. `git show --name-only --format=` (empty format) prints the
@@ -265,6 +253,16 @@ func splitClaim(claim string) (kind, arg string, ok bool) {
 		return "", "", false
 	}
 	return strings.ToLower(claim[:i]), strings.TrimSpace(claim[i+1:]), true
+}
+
+func gitOutputPresenceWitness(out string, code int, err error, wantPresent bool) abi.WitnessOutcome {
+	if err != nil || code != 0 {
+		return abi.WitnessAbstain
+	}
+	if (strings.TrimSpace(out) != "") == wantPresent {
+		return abi.WitnessConfirmed
+	}
+	return abi.WitnessRefuted
 }
 
 func isAbs(p string) bool {

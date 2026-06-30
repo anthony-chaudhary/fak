@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +36,8 @@ func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
 		`fak_serving_time_per_output_token_seconds_count{` + labels + `} 5`,
 		`fak_serving_num_requests_running{` + labels + `} 4`,
 		`fak_serving_num_requests_waiting{` + labels + `} 7`,
-		`fak_serving_gpu_cache_usage_perc{` + labels + `} 0.75`,
-		`fak_serving_gpu_prefix_cache_hit_rate{` + labels + `} 0.6`,
+		`fak_serving_kv_cache_usage_perc{` + labels + `} 0.75`,
+		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0.6`,
 		`fak_serving_goodput_requests_per_second{` + labels + `} 2`,
 	} {
 		if !strings.Contains(out, want) {
@@ -50,14 +53,47 @@ func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
 		"fak_serving_goodput_requests_per_second",
 		"fak_serving_num_requests_running",
 		"fak_serving_num_requests_waiting",
-		"fak_serving_gpu_cache_usage_perc",
-		"fak_serving_gpu_prefix_cache_hit_rate",
+		"fak_serving_kv_cache_usage_perc",
+		"fak_serving_prefix_cache_hit_rate",
 	} {
 		if got := strings.Count(out, "# HELP "+family+" "); got != 1 {
 			t.Fatalf("%s HELP count = %d, want 1", family, got)
 		}
 		if got := strings.Count(out, "# TYPE "+family+" "); got != 1 {
 			t.Fatalf("%s TYPE count = %d, want 1", family, got)
+		}
+	}
+}
+
+func TestServingScrapeEmitterScrapesEndpointAndGatewayExposesNonHTTPFamily(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte(vllmServingFixture("10")))
+	}))
+	defer upstream.Close()
+
+	emitter := NewServingScrapeEmitter(ServingMetricLabels{
+		Worker: "vllm-http",
+		Engine: "vllm",
+	})
+	if err := emitter.ScrapeWithClient(context.Background(), upstream.Client(), upstream.URL); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newTestServer(t)
+	srv.SetServingMetricsEmitters(emitter)
+	gateway := httptest.NewServer(srv.Handler())
+	defer gateway.Close()
+
+	out := getMetrics(t, gateway.URL+"/metrics", "")
+	labels := `worker="vllm-http",engine="vllm",model="llama-70b"`
+	for _, want := range []string{
+		`fak_serving_num_requests_running{` + labels + `} 4`,
+		`fak_serving_kv_cache_usage_perc{` + labels + `} 0.75`,
+		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0.6`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("gateway /metrics scrape missing non-HTTP serving metric %q\n--- metrics ---\n%s", want, out)
 		}
 	}
 }
@@ -87,8 +123,8 @@ func TestNativeServingEmitterWritesSameSchema(t *testing.T) {
 		`fak_serving_goodput_requests_per_second{` + labels + `} 3.5`,
 		`fak_serving_num_requests_running{` + labels + `} 2`,
 		`fak_serving_num_requests_waiting{` + labels + `} 5`,
-		`fak_serving_gpu_cache_usage_perc{` + labels + `} 0.81`,
-		`fak_serving_gpu_prefix_cache_hit_rate{` + labels + `} 0.42`,
+		`fak_serving_kv_cache_usage_perc{` + labels + `} 0.81`,
+		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0.42`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("native serving surface missing %q\n--- metrics ---\n%s", want, out)
@@ -116,7 +152,7 @@ func TestGatewayNativeInferenceFeedsServingSchema(t *testing.T) {
 		`fak_serving_goodput_requests_per_second{` + labels + `} 1`,
 		`fak_serving_num_requests_running{` + labels + `} 1`,
 		`fak_serving_num_requests_waiting{` + labels + `} 1`,
-		`fak_serving_gpu_prefix_cache_hit_rate{` + labels + `} 0`,
+		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gateway native serving schema missing %q\n--- metrics ---\n%s", want, out)
@@ -140,7 +176,8 @@ vllm:time_per_output_token_seconds_sum{model_name="llama-70b"} 0.11
 vllm:time_per_output_token_seconds_count{model_name="llama-70b"} 5
 vllm:num_requests_running{model_name="llama-70b"} 4
 vllm:num_requests_waiting{model_name="llama-70b"} 7
-vllm:gpu_cache_usage_perc{model_name="llama-70b"} 0.75
-vllm:gpu_prefix_cache_hit_rate{model_name="llama-70b"} 0.6
+vllm:kv_cache_usage_perc{model_name="llama-70b"} 0.75
+vllm:prefix_cache_queries{model_name="llama-70b"} 10
+vllm:prefix_cache_hits{model_name="llama-70b"} 6
 vllm:request_success_total{model_name="llama-70b"} ` + success + "\n"
 }

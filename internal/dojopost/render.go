@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // Post is one dojo-channel message, decoupled from which fold produced it. The two
@@ -38,7 +39,7 @@ func (p Post) Text() string {
 	if p.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", p.Source)
 	}
-	return b.String()
+	return slackmeta.AppendText(b.String(), p.signalNoise())
 }
 
 // Blocks renders the Block Kit payload. It carries the same facts as Text so a
@@ -73,7 +74,13 @@ func (p Post) Blocks() []any {
 			"elements": []any{map[string]any{"type": "mrkdwn", "text": "posted by " + p.Source}},
 		})
 	}
-	return blocks
+	return slackmeta.AppendContext(blocks, p.signalNoise())
+}
+
+func (p Post) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(p.Lead) + len(p.Lines)
+	noise := 1 + slackmeta.NonEmpty(p.Source)
+	return slackmeta.New(signal, noise, "dojo calibration headline, trend/episode rows vs source/context")
 }
 
 // gradeEmoji maps a dojo letter grade to a status glyph so the channel reads the

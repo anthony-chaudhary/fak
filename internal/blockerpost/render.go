@@ -3,6 +3,8 @@ package blockerpost
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 )
 
 // glyph maps a severity to its leading status emoji so the channel reads a blocker's
@@ -77,7 +79,7 @@ func (b Blocker) Text() string {
 	if src := strings.TrimSpace(b.Source); src != "" {
 		fmt.Fprintf(&sb, "\n_posted by %s_", src)
 	}
-	return sb.String()
+	return slackmeta.AppendText(sb.String(), b.signalNoise())
 }
 
 // actionLine renders the "do this next" affordance as one text line: the label, then
@@ -154,5 +156,11 @@ func (b Blocker) Blocks() []any {
 			"elements": []any{map[string]any{"type": "mrkdwn", "text": strings.Join(ctxParts, "  ·  ")}},
 		})
 	}
-	return blocks
+	return slackmeta.AppendContext(blocks, b.signalNoise())
+}
+
+func (b Blocker) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(b.Detail, b.actionLine(), b.mention()) + len(b.Lines)
+	noise := 1 + slackmeta.NonEmpty(b.Ref, b.Source)
+	return slackmeta.New(signal, noise, "blocker severity, operator mention/action, and issue rows vs refs/source")
 }

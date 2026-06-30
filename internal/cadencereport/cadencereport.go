@@ -51,17 +51,22 @@ type Scores struct {
 // as an on-demand scorecard: debt is the ratcheted ladder-skip count, while
 // score/backlog/distribution are the human/agent work-shaping signals.
 type Maturity struct {
-	Debt         int            `json:"debt"`
-	Score        int            `json:"score"`
-	Grade        string         `json:"grade"`
-	Capabilities int            `json:"capabilities"`
-	LadderSkips  int            `json:"ladder_skips"`
-	Backlog      int            `json:"backlog"`
-	Distribution map[string]int `json:"distribution,omitempty"`
-	NextLane     string         `json:"next_lane,omitempty"`
-	NextItem     string         `json:"next_item,omitempty"`
-	OK           bool           `json:"ok"`
-	Err          string         `json:"err,omitempty"`
+	Debt                int            `json:"debt"`
+	Score               int            `json:"score"`
+	Grade               string         `json:"grade"`
+	Capabilities        int            `json:"capabilities"`
+	LadderSkips         int            `json:"ladder_skips"`
+	Backlog             int            `json:"backlog"`
+	Distribution        map[string]int `json:"distribution,omitempty"`
+	NextLane            string         `json:"next_lane,omitempty"`
+	NextItem            string         `json:"next_item,omitempty"`
+	RouteKey            string         `json:"route_key,omitempty"`
+	RouteLane           string         `json:"route_lane,omitempty"`
+	RouteItem           string         `json:"route_item,omitempty"`
+	RouteWitness        string         `json:"route_witness,omitempty"`
+	RouteSkippedPrivate int            `json:"route_skipped_private,omitempty"`
+	OK                  bool           `json:"ok"`
+	Err                 string         `json:"err,omitempty"`
 }
 
 // Work is the WORK-DONE dimension, derived from git over a trailing window: the
@@ -200,6 +205,9 @@ type LedgerRow struct {
 	MaturityTested          int    `json:"maturity_tested"`
 	MaturityDogfooded       int    `json:"maturity_dogfooded"`
 	MaturityDefault         int    `json:"maturity_default"`
+	MaturityRouteKey        string `json:"maturity_route_key,omitempty"`
+	MaturityRouteLane       string `json:"maturity_route_lane,omitempty"`
+	MaturityRouteSkipped    int    `json:"maturity_route_skipped_private,omitempty"`
 	WorkWindowDays          int    `json:"work_window_days"`
 	WorkCommits             int    `json:"work_commits"`
 	WorkShips               int    `json:"work_ships"`
@@ -263,6 +271,15 @@ func MaturityFromScorecard(payload maturityscore.ScorecardPayload) Maturity {
 		m.NextLane = payload.Backlog[0].Lane
 		m.NextItem = payload.Backlog[0].Title
 	}
+	projection := maturityscore.ProjectIssueItems(payload, 1, nil)
+	if len(projection.Items) > 0 {
+		item := projection.Items[0]
+		m.RouteKey = item.Key
+		m.RouteLane = item.Lane
+		m.RouteItem = item.Title
+		m.RouteWitness = item.Witness
+	}
+	m.RouteSkippedPrivate = len(projection.Skipped)
 	return m
 }
 
@@ -344,6 +361,12 @@ func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Rele
 
 	scoreLine := fmt.Sprintf("scores: debt %d (%s)", scores.Debt, scores.TrendDirection)
 	maturityLine := fmt.Sprintf("maturity: index %d/100, debt %d, backlog %d", maturity.Score, maturity.Debt, maturity.Backlog)
+	if maturity.RouteLane != "" {
+		maturityLine += fmt.Sprintf(", route %s", maturity.RouteLane)
+	}
+	if maturity.RouteSkippedPrivate > 0 {
+		maturityLine += fmt.Sprintf(", %d private skip(s)", maturity.RouteSkippedPrivate)
+	}
 	workLine := fmt.Sprintf("work: %d commit(s)/%d ship(s) in %dd", work.Commits, work.Ships, work.WindowDays)
 	relLine := fmt.Sprintf("releases: %s -> %s", releases.Version, releases.ActionKind)
 	if releases.CommitsBehind > 0 {
@@ -367,11 +390,19 @@ func FoldWithMaturity(scores Scores, maturity Maturity, work Work, releases Rele
 	case maturity.Debt > 0:
 		r.OK, r.Verdict, r.Finding = true, "OK", "cadence_advisory"
 		r.Reason = "cadence recorded; " + summary + " (advisory: maturity ladder-skip debt exists — the scorecard ratchet owns that gate)"
-		r.NextAction = "run `fak maturity next` and retire ladder-skips first; the cadence tick keeps recording the trend"
+		if maturity.RouteLane != "" {
+			r.NextAction = fmt.Sprintf("run `fak maturity route --fetch-existing --limit 3` to seed dispatch with %s; retire ladder-skips first", maturity.RouteLane)
+		} else {
+			r.NextAction = "run `fak maturity next` and retire ladder-skips first; the cadence tick keeps recording the trend"
+		}
 	default:
 		r.OK, r.Verdict, r.Finding = true, "OK", "cadence_recorded"
 		r.Reason = "cadence recorded; " + summary
-		r.NextAction = "hold the line; the scheduled cadence tick keeps scores/maturity/work/releases trended"
+		if maturity.RouteLane != "" {
+			r.NextAction = fmt.Sprintf("run `fak maturity route --fetch-existing --limit 3` to seed dispatch with %s; the scheduled cadence tick keeps the trend", maturity.RouteLane)
+		} else {
+			r.NextAction = "hold the line; the scheduled cadence tick keeps scores/maturity/work/releases trended"
+		}
 	}
 	return r
 }
@@ -407,6 +438,9 @@ func RowFromReport(r Report) LedgerRow {
 		MaturityTested:       dist["tested"],
 		MaturityDogfooded:    dist["dogfooded"],
 		MaturityDefault:      dist["default"],
+		MaturityRouteKey:     r.Maturity.RouteKey,
+		MaturityRouteLane:    r.Maturity.RouteLane,
+		MaturityRouteSkipped: r.Maturity.RouteSkippedPrivate,
 		WorkWindowDays:       r.Work.WindowDays,
 		WorkCommits:          r.Work.Commits,
 		WorkShips:            r.Work.Ships,
@@ -689,7 +723,7 @@ func Render(r Report) string {
 			mark(r.Scores.OK, r.Scores.Err), r.Scores.Debt, r.Scores.GradeDebt, r.Scores.Measured, dashIfEmpty(r.Scores.TrendSummary)),
 		fmt.Sprintf("  %s maturity    index %d/100 [%s]; debt %d; backlog %d%s",
 			mark(r.Maturity.OK, r.Maturity.Err), r.Maturity.Score, dashIfEmpty(r.Maturity.Grade),
-			r.Maturity.Debt, r.Maturity.Backlog, maturityNextSuffix(r.Maturity)),
+			r.Maturity.Debt, r.Maturity.Backlog, maturityNextSuffix(r.Maturity)+maturityRouteSuffix(r.Maturity)),
 		fmt.Sprintf("  %s work        %d commit(s) / %d ship(s) in the last %dd",
 			mark(r.Work.Err == "", r.Work.Err), r.Work.Commits, r.Work.Ships, r.Work.WindowDays),
 		fmt.Sprintf("  %s releases    %s%s; next: %s — %s",
@@ -737,6 +771,20 @@ func maturityNextSuffix(m Maturity) string {
 		return ""
 	}
 	return "; next " + m.NextLane + ": " + m.NextItem
+}
+
+func maturityRouteSuffix(m Maturity) string {
+	skipped := ""
+	if m.RouteSkippedPrivate > 0 {
+		skipped = fmt.Sprintf(" (%d private skipped)", m.RouteSkippedPrivate)
+	}
+	if m.RouteLane == "" || m.RouteItem == "" {
+		if skipped != "" {
+			return "; route none" + skipped
+		}
+		return ""
+	}
+	return "; route " + m.RouteLane + ": " + m.RouteItem + skipped
 }
 
 // CheckGate is the advisory CI gate over a folded report (pure: exit code +

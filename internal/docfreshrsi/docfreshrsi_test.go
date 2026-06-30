@@ -78,6 +78,12 @@ func TestAntiGoodhartDeleteRevertsRewriteKeeps(t *testing.T) {
 	if !vR.Improved || !vR.Clean || !vR.LinksResolve || !vR.Kept || vR.Decision != "KEEP" {
 		t.Fatalf("rewrite should KEEP: %+v", vR)
 	}
+	if vR.Score.Name != "doc_freshness_debt" || vR.Score.Grade != "clear" {
+		t.Fatalf("rewrite score = %+v, want doc_freshness_debt/clear", vR.Score)
+	}
+	if got := scoreComponentValue(vR.Score, "debt_delta"); got != 1 {
+		t.Fatalf("rewrite debt_delta score = %.4g, want 1", got)
+	}
 	if Debt(keptR, tgt) != 0 {
 		t.Fatalf("kept corpus debt = %d, want 0", Debt(keptR, tgt))
 	}
@@ -98,6 +104,15 @@ func TestAntiGoodhartDeleteRevertsRewriteKeeps(t *testing.T) {
 	}
 	if vD.Kept || vD.Decision != "REVERT" {
 		t.Fatalf("delete must REVERT despite the debt drop: %+v", vD)
+	}
+	if vD.Score.Grade != "truth-dirty" {
+		t.Fatalf("delete score grade = %q, want truth-dirty (score=%+v)", vD.Score.Grade, vD.Score)
+	}
+	if got := scoreComponentValue(vD.Score, "debt_delta"); got != 1 {
+		t.Fatalf("delete debt_delta score = %.4g, want 1", got)
+	}
+	if got := scoreComponentValue(vD.Score, "dangling"); got != 1 {
+		t.Fatalf("delete dangling score = %.4g, want 1", got)
 	}
 	if len(vD.Dangling) == 0 || !strings.Contains(vD.Dangling[0], "b.md#deep-dive") {
 		t.Fatalf("REVERT diagnostic must name the dangling link, got %v", vD.Dangling)
@@ -200,6 +215,15 @@ func TestTruthCleanCatchesUnknownCommand(t *testing.T) {
 	if ok, _ := truthClean(c, Target{}); !ok {
 		t.Fatal("an empty command oracle must skip command checking")
 	}
+}
+
+func scoreComponentValue(score Scorecard, name string) float64 {
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return -1
 }
 
 // TestLinkAndSlugResolution locks the resolver's contract the fence depends on.

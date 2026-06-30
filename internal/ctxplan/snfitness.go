@@ -52,6 +52,25 @@ type Turn struct {
 	Faults      []string    `json:"faults,omitempty"`
 }
 
+// WitnessedSNScore is the structured form of WitnessedSNFitness. Fitness is the
+// scalar RSI keep metric (higher is better); the remaining fields are the score
+// surface operators and sibling controls need to understand WHY the scalar moved.
+// A no-evidence session uses the same fail-to-best convention as SignalNoise.Ratio:
+// Fitness=1, MeanRatio=1, MeanFaultRatio=0, Grade="lean".
+type WitnessedSNScore struct {
+	Fitness           float64 `json:"fitness"`
+	MeanRatio         float64 `json:"mean_ratio"`
+	MeanFaultRatio    float64 `json:"mean_fault_ratio"`
+	Grade             string  `json:"grade"`
+	Turns             int     `json:"turns"`
+	ScoredTurns       int     `json:"scored_turns"`
+	SignalTokens      int     `json:"signal_tokens"`
+	NoiseTokens       int     `json:"noise_tokens"`
+	UnaccountedTokens int     `json:"unaccounted_tokens,omitempty"`
+	FaultTokens       int     `json:"fault_tokens"`
+	ResidentTokens    int     `json:"resident_tokens"`
+}
+
 // WitnessedSNFitness is the RSI fitness of a candidate Forecast (which EMBEDS its Weights, so one
 // value captures a whole planner/forecast change) over a recorded session: the MEAN, across the
 // session's turns, of the turn's witnessed attention-S/N Ratio DISCOUNTED by its under-resident
@@ -77,10 +96,29 @@ type Turn struct {
 // fail-to-best convention SignalNoise.Ratio already takes (no evidence, no noise — nothing to
 // curate).
 func WitnessedSNFitness(f Forecast, session []Turn) float64 {
+	return ScoreWitnessedSN(f, session).Fitness
+}
+
+// ScoreWitnessedSN computes the full witnessed S/N scorecard that WitnessedSNFitness
+// projects down to one scalar. It is pure and deterministic; the scalar fitness it
+// returns is exactly the historical WitnessedSNFitness definition:
+//
+//	attention turn: ratio * (1 - fault_ratio)
+//	fault-only turn: 1 - fault_ratio
+//	no-witness/no-fault turn: skipped as neutral evidence
+//
+// The MeanRatio/MeanFaultRatio fields follow the same evidence convention. A
+// fault-only turn has ratio=1 for scoring purposes (ratio evidence is absent, not
+// bad), while its fault pressure still contributes to MeanFaultRatio and can grade
+// the score "starving".
+func ScoreWitnessedSN(f Forecast, session []Turn) WitnessedSNScore {
+	score := WitnessedSNScore{Turns: len(session), Fitness: 1.0, MeanRatio: 1.0, Grade: "lean"}
 	if len(session) == 0 {
-		return 1.0
+		return score
 	}
 	var sum float64
+	var ratioSum float64
+	var faultRatioSum float64
 	scored := 0
 	for _, t := range session {
 		p := PlanCells(t.Spans, f, t.Budget, nil)
@@ -89,18 +127,54 @@ func WitnessedSNFitness(f Forecast, session []Turn) float64 {
 			if len(t.Faults) == 0 {
 				continue
 			}
-			sum += 1 - sn.FaultRatio()
+			ratio := 1.0
+			faultRatio := sn.FaultRatio()
+			sum += ratio * (1 - faultRatio)
+			ratioSum += ratio
+			faultRatioSum += faultRatio
+			score.addSignalNoise(sn)
 			scored++
 			continue
 		}
 		// Ratio is the resident signal share; (1-FaultRatio) is the under-resident discount.
 		// Both are already in [0,1] (Ratio by construction, FaultRatio by definition), so the
 		// product stays in [0,1] and reduces to the pure witnessed S/N when nothing faulted.
-		sum += sn.Ratio() * (1 - sn.FaultRatio())
+		ratio := sn.Ratio()
+		faultRatio := sn.FaultRatio()
+		sum += ratio * (1 - faultRatio)
+		ratioSum += ratio
+		faultRatioSum += faultRatio
+		score.addSignalNoise(sn)
 		scored++
 	}
 	if scored == 0 {
-		return 1.0
+		return score
 	}
-	return sum / float64(scored)
+	score.ScoredTurns = scored
+	score.Fitness = sum / float64(scored)
+	score.MeanRatio = ratioSum / float64(scored)
+	score.MeanFaultRatio = faultRatioSum / float64(scored)
+	score.Grade = gradeWitnessedSNScore(score.MeanRatio, score.MeanFaultRatio)
+	return score
+}
+
+func (s *WitnessedSNScore) addSignalNoise(sn SignalNoise) {
+	s.SignalTokens += sn.SignalTokens
+	s.NoiseTokens += sn.NoiseTokens
+	s.UnaccountedTokens += sn.UnaccountedTokens
+	s.FaultTokens += sn.FaultTokens
+	s.ResidentTokens += sn.ResidentTokens
+}
+
+func gradeWitnessedSNScore(ratio, faultRatio float64) string {
+	if faultRatio > 0.25 {
+		return "starving"
+	}
+	if ratio < 0.5 {
+		return "bloated"
+	}
+	if ratio >= 0.8 && faultRatio <= 0.1 {
+		return "lean"
+	}
+	return "ok"
 }

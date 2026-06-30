@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/slackmeta"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -128,7 +129,7 @@ func (u Update) Text() string {
 	if u.Source != "" {
 		fmt.Fprintf(&b, "\n_posted by %s_", u.Source)
 	}
-	return b.String()
+	return slackmeta.AppendText(b.String(), u.signalNoise())
 }
 
 // Blocks renders the Block Kit payload for a richer card. It carries the same
@@ -185,7 +186,13 @@ func (u Update) Blocks() []any {
 			"elements": []any{map[string]any{"type": "mrkdwn", "text": strings.Join(ctxParts, "  ·  ")}},
 		})
 	}
-	return blocks
+	return slackmeta.AppendContext(blocks, u.signalNoise())
+}
+
+func (u Update) signalNoise() slackmeta.Score {
+	signal := 1 + slackmeta.NonEmpty(u.Grade, u.Score, u.Debt, u.Verdict, u.Detail, u.Notes) + len(u.Lines) + len(u.Actions)
+	noise := 1 + slackmeta.NonEmpty(u.Source)
+	return slackmeta.New(signal, noise, "headline fields, evidence rows, and actions vs source/context")
 }
 
 // actionElements renders u.Actions as Block Kit button elements. Slack caps an

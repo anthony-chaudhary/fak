@@ -45,6 +45,30 @@ func TestAblateBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	}
 }
 
+func TestAgentBenchDemoSelfTaxIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("agentbenchdemo")
+	if !ok {
+		t.Fatal("agentbenchdemo benchmark missing from catalog (tracked cmd/*bench* mains must have registry rows)")
+	}
+	if b.Kind != KindCmd || b.Need != NeedNone {
+		t.Fatalf("agentbenchdemo kind/need = %s/%s, want cmd/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "go run ./cmd/agentbenchdemo -selfcheck") {
+		t.Fatalf("agentbenchdemo run = %q, want selfcheck cmd invocation", b.Run)
+	}
+	for _, want := range []string{"-selfcheck", "-json", "-n"} {
+		if !containsFlag(b.Flags, want) {
+			t.Fatalf("agentbenchdemo flags = %v, missing %s", b.Flags, want)
+		}
+	}
+	if !b.Offline() {
+		t.Fatal("agentbenchdemo is a fixed offline micro-benchmark; it must stay zero-asset/offline")
+	}
+	if b.Doc != "cmd/agentbenchdemo/README.md" {
+		t.Fatalf("agentbenchdemo doc = %q, want cmd/agentbenchdemo/README.md", b.Doc)
+	}
+}
+
 func TestToolSandboxBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	b, ok := Get("toolsandboxbench")
 	if !ok {

@@ -17,6 +17,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -56,9 +57,14 @@ func ScanForDownloadURLs(repoRoot string, allow map[string]bool) ([]Offense, err
 			return err
 		}
 		if d.IsDir() {
-			// Skip VCS, vendored, and dependency trees.
-			if name := d.Name(); name == ".git" || name == "vendor" || name == "node_modules" {
+			// Skip VCS, vendored, dependency, and local scratch trees.
+			if name := d.Name(); name == ".git" || name == ".dos" || name == ".fak" || name == "vendor" || name == "node_modules" {
 				return filepath.SkipDir
+			}
+			if path != repoRoot {
+				if st, serr := os.Stat(filepath.Join(path, ".git")); serr == nil && st.IsDir() {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
