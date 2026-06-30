@@ -381,6 +381,56 @@ func TestCandidateFromIssueDraftParsesAgentContext(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftLiveRejectsPlaceholderAgentContext(t *testing.T) {
+	body := strings.Join([]string{
+		"### Parent context",
+		"issue-catalog",
+		"### Current state",
+		"The feeder can create an issue row.",
+		"### Why this is next",
+		"Live sync would otherwise create an ambiguous worker task.",
+		"### Working spine",
+		"live source -> scoped issue -> worker prompt",
+		"### Work unit",
+		"leaf",
+		"### Expected steps",
+		"3",
+		"### Assumptions",
+		"None named.",
+		"### Confusion risks",
+		"None named.",
+		"### Coordination notes",
+		"No special coordination beyond the lane lease.",
+		"### Trigger",
+		"A live feeder crossed the issue threshold.",
+		"### Batch policy",
+		"One issue per marker key; reruns update in place.",
+		"### In scope",
+		"Reject placeholder context.",
+		"### Out of scope",
+		"Do not sync live.",
+		"### Done condition",
+		"The review names missing agent context.",
+		"### Witness",
+		"go test ./internal/issuecontract",
+		"### Acceptance gate",
+		"go test ./internal/issuecontract",
+		"### Lane",
+		"issuecontract",
+		"### Closure binding",
+		"Commit cites #N.",
+	}, "\n")
+	review := ReviewIssueDraft(IssueDraft{Number: 1444, Title: "issuecontract: reject placeholders", Body: body}, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
+	if review.OK || !has(review.Reasons, ReasonAgentIncomplete) {
+		t.Fatalf("live issue draft review = %+v, want agent-context refusal", review)
+	}
+	for _, want := range []string{"assumptions", "confusion_risks", "coordination"} {
+		if !has(review.MissingFields, want) {
+			t.Fatalf("missing field %q absent: %+v", want, review.MissingFields)
+		}
+	}
+}
+
 func TestReviewIssueDraftFlagsVagueManualIssue(t *testing.T) {
 	review := ReviewIssueDraft(IssueDraft{
 		Number: 1441,
