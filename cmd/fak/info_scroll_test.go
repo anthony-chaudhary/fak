@@ -62,7 +62,7 @@ func TestRunInfoOverlayNarrowTTYNeverWraps(t *testing.T) {
 	const width = 30
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, width)
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, width, 0 /*height*/, "line")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}

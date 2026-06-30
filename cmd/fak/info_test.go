@@ -152,7 +152,7 @@ func healthyThenGoneClient(t *testing.T, serveHealthy int) *claudeMacDebugClient
 func TestRunInfoOverlayNonTTYAppends(t *testing.T) {
 	c := healthyThenGoneClient(t, 1)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/)
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, false /*tty*/, 0 /*width*/, 0 /*height*/, "line")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}
@@ -174,7 +174,7 @@ func TestRunInfoOverlayNonTTYAppends(t *testing.T) {
 func TestRunInfoOverlayTTYRedrawsInPlace(t *testing.T) {
 	c := healthyThenGoneClient(t, 2)
 	var stdout, stderr bytes.Buffer
-	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 0 /*width*/)
+	code := runGuardInfoOverlay(&stdout, &stderr, c, time.Millisecond, false /*once*/, true /*tty*/, 0 /*width*/, 0 /*height*/, "line")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
 	}

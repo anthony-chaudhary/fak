@@ -89,11 +89,18 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	interval := fs.Duration("interval", 2*time.Second, "refresh interval")
 	once := fs.Bool("once", false, "print one snapshot line and exit (no watch loop)")
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
+	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	if *interval <= 0 {
 		fmt.Fprintln(stderr, "fak info: --interval must be positive")
+		return 2
+	}
+	switch strings.ToLower(strings.TrimSpace(*style)) {
+	case "visual", "line":
+	default:
+		fmt.Fprintf(stderr, "fak info: --style must be visual or line, got %q\n", *style)
 		return 2
 	}
 	base, err := normalizeTUIAgentGatewayURL(*gatewayURL)
@@ -125,13 +132,22 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	// second row — the scroll corruptor in a narrow split pane (the --split right column). 0
 	// means the size is unknown (non-TTY, or GetSize failed): "no cap", which is correct since
 	// the off-TTY path appends whole lines anyway.
+	// The pane HEIGHT lets the visual sub-pane block size its layout (full/compact/mini/tiny) so
+	// it always fits the 20% strip without scrolling. 0 means unknown (non-TTY, or GetSize
+	// failed): the visual block then assumes a roomy pane and the in-place redraw still pins it.
 	infoWidth := 0
+	infoHeight := 0
 	if infoTTY {
-		if w, _, gerr := term.GetSize(int(os.Stdout.Fd())); gerr == nil && w > 0 {
-			infoWidth = w
+		if w, h, gerr := term.GetSize(int(os.Stdout.Fd())); gerr == nil {
+			if w > 0 {
+				infoWidth = w
+			}
+			if h > 0 {
+				infoHeight = h
+			}
 		}
 	}
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth)
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style)
 }
 
 // runGuardInfoOverlay polls /debug/vars and shows one live status line until Ctrl-C — the
@@ -143,7 +159,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 // gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
 // pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
 // one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
-func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width int) int {
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string) int {
 	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
 	// the standing header is noise when there is no watch loop to head.
 	if once {
@@ -157,38 +173,59 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	fmt.Fprint(stdout, guardInfoStartupHeader(c.base, interval, width))
 
+	// Visual is the DEFAULT for the live 20% pane: stacked sub-panes (trend sparklines + a
+	// task-manager gauge pane) redrawn in place. It needs a TTY for the cursor control, so off a
+	// TTY (piped/redirected log) and under --style line we keep the single compact status line.
+	visual := tty && strings.EqualFold(strings.TrimSpace(style), "visual")
+	if visual {
+		// A compact intro line scrolls into history above the live block; the block carries its
+		// own labels, so the verbose status-line legend is not printed in visual mode.
+		fmt.Fprint(stdout, guardInfoVisualIntro(c.base, interval, width))
+	} else {
+		fmt.Fprint(stdout, guardInfoStartupHeader(c.base, interval, width))
+	}
+
+	tr := newGuardInfoTrend(guardInfoTrendCap)
 	sawHealthy := false
 	misses := 0
-	dirty := false // a status line is currently parked on the cursor row (TTY in-place mode)
+	dirty := false // a status line / visual block is currently parked on the cursor (TTY in-place mode)
+	prevRows := 0  // rows the last visual frame drew (for the multi-line cursor-up redraw)
 
-	// On a TTY the status line REDRAWS in place: \r returns to column 0 and \033[K clears to
-	// end of line, so each tick overwrites the previous one instead of scrolling — the pane
-	// shows a live single-line dashboard, not an ever-growing log. Off a TTY (piped/redirected)
-	// every tick appends its own line so a captured log stays whole.
-	writeStatus := func(line string) {
+	// writeFrame renders one tick. Visual mode pushes the sample into the trend ring and redraws
+	// the multi-line sub-pane block in place (cursor-up + clear-down). Line mode keeps the exact
+	// single-row \r\033[K redraw on a TTY, and appends one whole line per tick off a TTY so a
+	// captured log stays intact.
+	writeFrame := func(v guardInfoVars) {
+		if visual {
+			tr.push(v)
+			prevRows = writeGuardInfoFrame(stdout, renderGuardInfoVisualBlock(v, tr, width, height), prevRows)
+			dirty = true
+			return
+		}
 		if tty {
 			// Redraw one row in place, capped to the pane width so the line can never wrap
 			// onto a second row (a wrapped status line is the scroll corruptor: the next
 			// tick's \r returns only to the start of the wrapped row, never clearing it).
-			fmt.Fprintf(stdout, "\r\033[K%s", fitGuardInfoStatus(line, width))
+			fmt.Fprintf(stdout, "\r\033[K%s", fitGuardInfoStatus(renderGuardInfoLine(v), width))
 			dirty = true
 			return
 		}
-		fmt.Fprintf(stdout, "  %s\n", line)
+		fmt.Fprintf(stdout, "  %s\n", renderGuardInfoLine(v))
 	}
 	// A note (transient error / closing line) must not be clobbered by, or clobber, the parked
-	// in-place status line: on a TTY, break to a fresh row first.
+	// in-place frame: on a TTY, break to a fresh row first and reset the redraw watermark so the
+	// next frame paints clean below the note.
 	writeNote := func(w io.Writer, line string) {
 		if tty && dirty {
 			fmt.Fprintln(stdout)
 			dirty = false
+			prevRows = 0
 		}
 		fmt.Fprintln(w, line)
 	}
 
-	// emit fetches + renders once. ok is true when a line was rendered; stop is true when the
+	// emit fetches + renders once. ok is true when a frame was rendered; stop is true when the
 	// watch loop should END — the gateway was healthy and has now been unreachable for a few
 	// ticks, i.e. the guarded session exited and tore its in-process gateway down.
 	emit := func() (ok, stop bool) {
@@ -204,7 +241,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 		sawHealthy = true
 		misses = 0
-		writeStatus(renderGuardInfoLine(v))
+		writeFrame(v)
 		return true, false
 	}
 
