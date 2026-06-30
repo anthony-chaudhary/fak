@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -138,8 +139,9 @@ class PrepareTest(unittest.TestCase):
     def test_detached_add_at_trunk_head(self) -> None:
         git = FakeGit(replies={"rev-parse": (0, "feedface\n"),
                                "worktree": (0, "")})
-        res = mod.prepare_worker_worktree(Path("/r"), "tools", "1334",
-                                          wt_root=Path("/wtroot"), git=git)
+        with tempfile.TemporaryDirectory() as d:
+            res = mod.prepare_worker_worktree(Path("/r"), "tools", "1334",
+                                              wt_root=Path(d), git=git)
         self.assertTrue(res["ok"])
         self.assertEqual(res["base_sha"], "feedface")
         # The add MUST be --detach at the resolved sha (the #1334 reconciliation):
@@ -157,9 +159,10 @@ class PrepareTest(unittest.TestCase):
 
     def test_explicit_base_sha_skips_rev_parse(self) -> None:
         git = FakeGit(replies={"worktree": (0, "")})
-        res = mod.prepare_worker_worktree(Path("/r"), "tools", "1",
-                                          base_sha="cafe", wt_root=Path("/wtroot"),
-                                          git=git)
+        with tempfile.TemporaryDirectory() as d:
+            res = mod.prepare_worker_worktree(Path("/r"), "tools", "1",
+                                              base_sha="cafe", wt_root=Path(d),
+                                              git=git)
         self.assertTrue(res["ok"])
         self.assertEqual(res["base_sha"], "cafe")
         self.assertFalse([c for c in git.calls if c and c[0] == "rev-parse"])

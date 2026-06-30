@@ -10,6 +10,7 @@ Run:  python -m pytest tools/fleet_supervisor_watchdog_test.py
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -65,6 +66,64 @@ def test_toast_routes_to_slack_when_module_flag_set(monkeypatch):
 
 
 if __name__ == "__main__":
-    import pytest
+    try:
+        import pytest  # type: ignore
+    except ModuleNotFoundError:
+        import inspect
+
+        class MiniMonkeyPatch:
+            def __init__(self) -> None:
+                self._undo = []
+
+            def setenv(self, key: str, value: str) -> None:
+                old = os.environ.get(key)
+                present = key in os.environ
+                self._undo.append(("env", key, old, present))
+                os.environ[key] = value
+
+            def delenv(self, key: str, *, raising: bool = True) -> None:
+                if key not in os.environ:
+                    if raising:
+                        raise KeyError(key)
+                    return
+                old = os.environ[key]
+                self._undo.append(("env", key, old, True))
+                del os.environ[key]
+
+            def setattr(self, obj, name: str, value) -> None:
+                old = getattr(obj, name)
+                self._undo.append(("attr", obj, name, old))
+                setattr(obj, name, value)
+
+            def undo(self) -> None:
+                while self._undo:
+                    kind, target, name, old = self._undo.pop()
+                    if kind == "env":
+                        if old:
+                            os.environ[target] = name
+                        else:
+                            os.environ.pop(target, None)
+                    else:
+                        setattr(target, name, old)
+
+        failed = 0
+        tests = [(name, fn) for name, fn in sorted(globals().items())
+                 if name.startswith("test_") and callable(fn)]
+        for name, fn in tests:
+            mp = MiniMonkeyPatch()
+            try:
+                params = inspect.signature(fn).parameters
+                if "monkeypatch" in params:
+                    fn(mp)
+                else:
+                    fn()
+                print(f"ok   {name}")
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                print(f"FAIL {name}: {type(exc).__name__}: {exc}")
+            finally:
+                mp.undo()
+        print(f"\n{len(tests) - failed}/{len(tests)} passed")
+        sys.exit(1 if failed else 0)
 
     sys.exit(pytest.main([__file__, "-q"]))

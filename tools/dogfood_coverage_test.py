@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "dogfood_coverage.py"
@@ -48,14 +50,15 @@ class DogfoodCoverageTest(unittest.TestCase):
 
     def test_count_audit_rows_counts_nonblank_jsonl_lines(self) -> None:
         mod = load()
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as cfg:
             root = Path(td)
             jdir = root / ".dispatch-runs" / "guard-audit"
             jdir.mkdir(parents=True)
             (jdir / "gateway-claude.jsonl").write_text(
                 '{"seq":1}\n{"seq":2}\n\n{"seq":3}\n', encoding="utf-8")
             (jdir / "docs-claude.jsonl").write_text('{"seq":1}\n', encoding="utf-8")
-            rows, journals = mod.count_audit_rows(root)
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": cfg}):
+                rows, journals = mod.count_audit_rows(root)
         self.assertEqual(rows, 4)       # 3 + 1 non-blank lines
         self.assertEqual(journals, 2)
 
@@ -83,14 +86,15 @@ class DogfoodCoverageTest(unittest.TestCase):
             self.assertEqual(len({msg_no_dir, msg_empty_dir, msg_blank_files}), 3)
 
         # And when rows exist, there is no gap to explain.
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as cfg:
             root = Path(td)
             jdir = root / ".dispatch-runs" / "guard-audit"
             jdir.mkdir(parents=True)
             (jdir / "g.jsonl").write_text('{"seq":1}\n', encoding="utf-8")
             # diagnose is only consulted when rows==0; here it would report the
             # blank-files branch is NOT hit because the file has a row.
-            self.assertEqual(mod.count_audit_rows(root)[0], 1)
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": cfg}):
+                self.assertEqual(mod.count_audit_rows(root)[0], 1)
 
     def test_grade_ladder(self) -> None:
         mod = load()
