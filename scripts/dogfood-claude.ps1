@@ -167,7 +167,7 @@ $Gguf      = if ($env:FAK_DOGFOOD_GGUF)       { $env:FAK_DOGFOOD_GGUF }       el
 $KeyEnv    = 'FAK_DOGFOOD_KEY'
 $Python    = if ($env:FAK_PYTHON)            { $env:FAK_PYTHON }            else { 'python' }
 $Bin       = Join-Path $Root 'tools\.bin\fak.exe'
-# The account switcher (tools/fleet_accounts.py) globs FLEET_USER_HOME/.claude*.
+# The native account switcher (`fak fleet-accounts`) globs FLEET_USER_HOME/.claude*.
 $env:FLEET_USER_HOME = $UserHome
 
 function Log  { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Cyan }
@@ -220,6 +220,16 @@ function Build-FakBinary {
   } finally {
     Remove-Item -Recurse -Force $head -ErrorAction SilentlyContinue
     Remove-Item -Force $tarball -ErrorAction SilentlyContinue
+  }
+}
+
+function Ensure-FakBinary {
+  if (-not $Bin.ToLowerInvariant().StartsWith($FakDir.ToLowerInvariant())) {
+    Die "refusing to build outside the repo: $Bin (expected under $FakDir)"
+  }
+  if (-not (Test-Path $Bin)) {
+    Log "building fak -> $Bin"
+    Build-FakBinary -out $Bin
   }
 }
 
@@ -284,7 +294,8 @@ if ($Mode -eq 'help') {
   exit 0
 }
 if ($Mode -eq 'list-accounts') {
-  & $Python (Join-Path $Root 'tools\fleet_accounts.py') list
+  Ensure-FakBinary
+  & $Bin fleet-accounts list
   exit $LASTEXITCODE
 }
 if ($Mode -eq 'install') {
@@ -525,13 +536,13 @@ try {
     Log "verified: planner=inkernel; fak in-kernel forward is serving the wire"
   }
 
-  # ---- resolve the account dir through the switcher ------------------------
+  # ---- resolve the account dir through the native switcher -----------------
   # ONE call to the switcher's canonical front door: resolve --faklocal-ok pins the
   # named tag, or synthesizes the isolated .claude-faklocal dogfood account for the
   # faklocal default, returning the config dir in a single flat record.
   function Resolve-AccountDir { param([string]$tag)
-    $r = (& $Python (Join-Path $Root 'tools\fleet_accounts.py') `
-            resolve --faklocal-ok --account $tag | ConvertFrom-Json)
+    Ensure-FakBinary
+    $r = (& $Bin fleet-accounts resolve --faklocal-ok --account $tag | ConvertFrom-Json)
     if (-not $r -or -not $r.ok) {
       $why = if ($r -and $r.reason) { $r.reason } else { 'resolve failed' }
       Die "account tag '$tag' not resolved: $why - run with --list-accounts"
