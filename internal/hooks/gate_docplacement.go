@@ -9,10 +9,11 @@ import (
 // rules: (1) a root-level *.md must be in the front-door allowlist; (2) a newly-added dated
 // note under docs/notes/ must be listed in INDEX.md.
 
-// allowedRootMD — the 37-entry front-door allowlist (check_doc_placement.py L33-57), verbatim.
+// allowedRootMD is the front-door allowlist (check_doc_placement.py), kept in sync with the
+// Python fallback.
 var allowedRootMD = map[string]bool{
 	"README.md": true, "START-HERE.md": true, "INSTALL.md": true, "INDEX.md": true, "LEARNING-PATH.md": true,
-	"CONTRIBUTING.md": true, "CLA.md": true, "AGENTS.md": true, "CLAUDE.md": true,
+	"CONTRIBUTING.md": true, "CLA.md": true, "AGENTS.md": true, "AGENT.md": true, "CLAUDE.md": true, "GEMINI.md": true,
 	"SECURITY.md": true, "PUBLIC-SCRUB-POLICY.md": true,
 	"ARCHITECTURE.md": true, "EXTENDING.md": true, "GETTING-STARTED.md": true, "GPU.md": true,
 	"POLICY.md": true, "PARTITION.md": true, "STATUS.md": true, "CLAIMS.md": true,
