@@ -173,6 +173,69 @@ func TestDecideAndDebitSessionHooks(t *testing.T) {
 	}
 }
 
+func TestDecideAndDebitPersistDurableDescriptor(t *testing.T) {
+	const trace = "durable-decide-debit"
+	ctx := context.Background()
+	now := time.Date(2026, 6, 29, 13, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "registry.json")
+	installDurableSessionTest(t, path, &now, &fakeSessionLeasePublisher{}, session.DescriptorMeta{
+		PID:      12345,
+		Argv:     []string{"claude", "--continue"},
+		StartSHA: "abc123",
+		CacheKey: "cache-key",
+	})
+
+	serveSessions.Restore(trace, session.State{
+		TraceID: trace,
+		Run:     session.Running,
+		Budget: session.Budget{
+			TurnsLeft:         1,
+			TokensLeft:        session.Unbounded,
+			ContextTokensLeft: 20,
+		},
+	})
+	if err := registerServeSessionDurability(ctx, trace); err != nil {
+		t.Fatalf("register durable session: %v", err)
+	}
+
+	now = now.Add(time.Second)
+	v := decideSession(ctx, trace)
+	if !v.Proceed || v.State.Budget.TurnsLeft != 0 {
+		t.Fatalf("decide = %+v, want proceed with debited turn budget", v)
+	}
+	decideDesc := readSessionDescriptor(t, path, trace)
+	if decideDesc.Budget.TurnsLeft != 0 || decideDesc.PCBState != "RUNNING" {
+		t.Fatalf("descriptor after Decide = %+v, want running with turns_left=0", decideDesc)
+	}
+	if !decideDesc.UpdatedAt.Equal(now) || decideDesc.PID != 12345 || decideDesc.CacheKey != "cache-key" || len(decideDesc.Argv) != 2 {
+		t.Fatalf("descriptor after Decide lost metadata/timestamp: %+v", decideDesc)
+	}
+
+	now = now.Add(time.Second)
+	st := debitSession(ctx, trace, gateway.SessionUsage{ContextTokens: 21})
+	if st.Run != "draining" || st.Reason != session.ReasonBudgetContext || st.ContinuationID == "" {
+		t.Fatalf("debit = %+v, want draining with continuation", st)
+	}
+	debitDesc := readSessionDescriptor(t, path, trace)
+	if debitDesc.Run != session.Draining || debitDesc.PCBState != "DRAINING" || debitDesc.Reason != session.ReasonBudgetContext {
+		t.Fatalf("descriptor after DebitUsage = %+v, want draining budget context", debitDesc)
+	}
+	if !debitDesc.UpdatedAt.Equal(now) {
+		t.Fatalf("descriptor UpdatedAt after DebitUsage = %v, want %v", debitDesc.UpdatedAt, now)
+	}
+}
+
+func TestDefaultSessionIDDerivedFromCacheKey(t *testing.T) {
+	key := sessionCacheKey("host-a", `C:\work\fak`, "deadbeef", []string{"claude", "--continue"})
+	id := defaultSessionIDFromMeta(session.DescriptorMeta{CacheKey: key})
+	if id != "guard-"+key[:16] {
+		t.Fatalf("derived session id = %q, want guard-%s", id, key[:16])
+	}
+	if again := defaultSessionIDFromMeta(session.DescriptorMeta{CacheKey: key}); again != id {
+		t.Fatalf("derived session id not stable: %q then %q", id, again)
+	}
+}
+
 func TestDebitSessionHookDebitsContextBudget(t *testing.T) {
 	const trace = "serve-hook-context-1"
 	t.Cleanup(func() { serveSessions.Reset(trace) })
@@ -392,7 +455,7 @@ func (f *fakeSessionLeasePublisher) lastPublished(t *testing.T) leaseref.Session
 	return f.published[len(f.published)-1]
 }
 
-func installDurableSessionTest(t *testing.T, path string, now *time.Time, leases *fakeSessionLeasePublisher) {
+func installDurableSessionTest(t *testing.T, path string, now *time.Time, leases *fakeSessionLeasePublisher, meta ...session.DescriptorMeta) {
 	t.Helper()
 	oldSessions := serveSessions
 	oldDurability := serveSessionDurability
@@ -404,6 +467,7 @@ func installDurableSessionTest(t *testing.T, path string, now *time.Time, leases
 		time.Hour,
 		func() time.Time { return *now },
 		nil,
+		meta...,
 	)
 	if err := serveSessionDurability.restore(serveSessions); err != nil {
 		t.Fatalf("install durable session test: %v", err)

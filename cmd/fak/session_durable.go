@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,6 +31,7 @@ type sessionDurability struct {
 	registry *session.Registry
 	leases   sessionLeasePublisher
 	host     string
+	meta     session.DescriptorMeta
 	ttl      time.Duration
 	now      func() time.Time
 	warnf    func(string, ...any)
@@ -43,24 +47,29 @@ func (e unknownSessionError) Error() string {
 	return fmt.Sprintf("unknown session id %q", e.id)
 }
 
-func newSessionDurability(registry *session.Registry, leases sessionLeasePublisher, host string, ttl time.Duration, now func() time.Time, warnf func(string, ...any)) *sessionDurability {
+func newSessionDurability(registry *session.Registry, leases sessionLeasePublisher, host string, ttl time.Duration, now func() time.Time, warnf func(string, ...any), meta ...session.DescriptorMeta) *sessionDurability {
 	if ttl <= 0 {
 		ttl = session.DefaultDescriptorTTL
 	}
 	if now == nil {
 		now = time.Now
 	}
+	var m session.DescriptorMeta
+	if len(meta) > 0 {
+		m = meta[0]
+	}
 	return &sessionDurability{
 		registry: registry,
 		leases:   leases,
 		host:     strings.TrimSpace(host),
+		meta:     m,
 		ttl:      ttl,
 		now:      now,
 		warnf:    warnf,
 	}
 }
 
-func configureServeSessionDurability(tbl *session.Table, path string, stderr io.Writer) error {
+func configureServeSessionDurability(tbl *session.Table, path string, stderr io.Writer, meta ...session.DescriptorMeta) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		path = defaultSessionRegistryPath()
@@ -82,6 +91,7 @@ func configureServeSessionDurability(tbl *session.Table, path string, stderr io.
 		session.DefaultDescriptorTTL,
 		time.Now,
 		warnf,
+		sessionDurabilityMeta(meta...),
 	)
 	if err := mirror.restore(tbl); err != nil {
 		return err
@@ -106,7 +116,66 @@ func sessionDurabilityHost() string {
 	if host == "" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("%s:%d", host, os.Getpid())
+	return host
+}
+
+func sessionDurabilityMeta(meta ...session.DescriptorMeta) session.DescriptorMeta {
+	if len(meta) > 0 {
+		return meta[0]
+	}
+	return sessionDescriptorMeta(os.Args[1:])
+}
+
+func sessionDescriptorMeta(argv []string) session.DescriptorMeta {
+	copied := append([]string(nil), argv...)
+	startSHA := sessionStartSHA()
+	cacheKey := sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), startSHA, copied)
+	return session.DescriptorMeta{
+		PID:      os.Getpid(),
+		Argv:     copied,
+		StartSHA: startSHA,
+		CacheKey: cacheKey,
+	}
+}
+
+func defaultSessionIDFromMeta(meta session.DescriptorMeta) string {
+	if meta.CacheKey == "" {
+		return "guard"
+	}
+	key := meta.CacheKey
+	if len(key) > 16 {
+		key = key[:16]
+	}
+	return "guard-" + key
+}
+
+func sessionWorkingDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
+func sessionStartSHA() string {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func sessionCacheKey(host, cwd, startSHA string, argv []string) string {
+	h := sha256.New()
+	for _, part := range []string{host, cwd, startSHA} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	for _, arg := range argv {
+		h.Write([]byte(arg))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func registerServeSessionDurability(ctx context.Context, id string) error {
@@ -166,7 +235,7 @@ func (d *sessionDurability) register(ctx context.Context, id string, st session.
 		return errors.New("session id is required")
 	}
 	now := d.now()
-	if _, err := d.registry.Register(id, d.host, st, d.ttl, now); err != nil {
+	if _, err := d.registry.RegisterWithMeta(id, d.host, st, d.ttl, now, d.meta); err != nil {
 		return fmt.Errorf("persist session descriptor: %w", err)
 	}
 	d.publishBestEffort(ctx, id, st, now)
@@ -182,11 +251,23 @@ func (d *sessionDurability) writeThrough(ctx context.Context, id string, st sess
 		return errors.New("session id is required")
 	}
 	now := d.now()
-	if _, err := d.registry.Update(id, st, now); err != nil {
+	if _, err := d.registry.UpdateWithMeta(id, st, now, d.meta); err != nil {
 		return fmt.Errorf("persist session descriptor: %w", err)
 	}
 	d.publishBestEffort(ctx, id, st, now)
 	return nil
+}
+
+func persistServeSessionRevision(ctx context.Context, id string, st session.State) {
+	if serveSessionDurability == nil {
+		return
+	}
+	if strings.TrimSpace(id) == "" {
+		id = st.TraceID
+	}
+	if err := serveSessionDurability.writeThrough(ctx, id, st); err != nil && serveSessionDurability.warnf != nil {
+		serveSessionDurability.warnf("fak: session descriptor update failed for %s: %v", id, err)
+	}
 }
 
 func (d *sessionDurability) requireKnown(tbl *session.Table, id string) error {
