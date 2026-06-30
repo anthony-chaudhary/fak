@@ -19,7 +19,7 @@
   },
   "hostname": "datacenter-gpu-server",
   "machine_id": "a100",
-  "notes": "8-GPU datacenter server (Ampere sm_80), ~320 GB aggregate GPU memory \u2014 the multi-GPU serving / frontier-model readiness lane where single-box memory ceilings stop binding. The eight Ampere GPUs are the spec'd hardware; host CPU/RAM are the standard reference config (verify at onboarding). Benchmark RUNS attach under the private 'dgx' machine id (kept off the public export); this 'a100' record is the public-facing rollup (no operator identity).",
+  "notes": "8-GPU datacenter server (Ampere sm_80), ~320 GB aggregate GPU memory \u2014 the multi-GPU serving / frontier-model readiness lane where single-box memory ceilings stop binding. The eight Ampere GPUs are the spec'd hardware; host CPU/RAM are the standard reference config (verify at onboarding). Benchmark RUNS attach under the private GPU-server machine id (kept off the public export); this public rollup record is the public-facing rollup (no operator identity).",
   "os": {
     "name": "Linux"
   },

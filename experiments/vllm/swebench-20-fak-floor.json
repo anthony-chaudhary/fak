@@ -129,7 +129,7 @@
       "name": "resolve-rate + safety",
       "bench_analog": "agent-stream resolved_count / pass_rate_pct (report.json); safety is fak-native",
       "kind": "comparable",
-      "provenance": "gated_dgx_only",
+      "provenance": "gated_gpu_server_only",
       "metrics": [
         {
           "name": "pass_rate_pct",
