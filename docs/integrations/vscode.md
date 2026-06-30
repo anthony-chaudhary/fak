@@ -404,8 +404,8 @@ Use `--explain` to get a detailed breakdown:
 3. Check the gateway logs:
    ```bash
    # Add --log to fak serve
-   ./fak serve --log /tmp/fak-vscode.log ...
-   tail -f /tmp/fak-vscode.log
+   ./fak serve --log <tmp>/fak-vscode.log ...
+   tail -f <tmp>/fak-vscode.log
    ```
 
 ### Slow code completions

@@ -92,13 +92,13 @@ FAK_DOGFOOD_CLAUDE_DEBUG=api
 For `--probe`, Claude stderr/debug goes to:
 
 ```text
-/tmp/fak-claude.log
+<tmp>/fak-claude.log
 ```
 
 The gateway process log goes to:
 
 ```text
-/tmp/fak-serve.log
+<tmp>/fak-serve.log
 ```
 
 Set `FAK_DOGFOOD_CLAUDE_DEBUG_FILE=/path/to/file` if you want Claude's debug stream
@@ -414,7 +414,7 @@ and side-effect-free on the shared trunk. Seed a deliberately-failing stub, then
 agent to make it pass and add a test — a genuine read → edit → run → iterate loop:
 
 ```bash
-mkdir -p /tmp/fak-coding-witness/strpad && cd /tmp/fak-coding-witness
+mkdir -p <tmp>/fak-coding-witness/strpad && cd <tmp>/fak-coding-witness
 printf 'module witness\n\ngo 1.26\n' > go.mod
 cat > strpad/strpad.go <<'EOF'
 package strpad

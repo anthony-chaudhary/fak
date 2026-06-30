@@ -14,7 +14,7 @@ description: "fak's own in-kernel forward pass runs the Qwen3.5/3.6 hybrid Gated
 ## Witness (reproducible)
 
 ```
-$ /tmp/fakchat --hf ~/.cache/fak-models/qwen3.5-0.8b \
+$ <tmp>/fakchat --hf ~/.cache/fak-models/qwen3.5-0.8b \
     --prompt "What is the capital of France? Answer in one short sentence." --max-new 40
 model=qwen3_5  load=1203ms  prompt_tokens=32  backend=fak in-kernel Gated-DeltaNet (f32, cacheless)
 <think>

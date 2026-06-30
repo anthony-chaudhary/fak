@@ -49,7 +49,7 @@ GOTOOLCHAIN=auto go build -o /tmp/modelbench ./cmd/modelbench
 # fak arm — in-kernel Q8 (quantize-at-load), CPU, decode + prefill@256
 /tmp/modelbench -hf <qwen2.5-1.5b-instruct-hf-dir> -lean \
   -decode-reps 5 -decode-steps 32 -prefill-reps 3 -prefill-sizes 256 \
-  -out /tmp/fak-parity-1p5b.json
+  -out <tmp>/fak-parity-1p5b.json
 
 # llama.cpp arm — CPU (-ngl 0), same thread count, same Q8 GGUF
 llama-bench -m <qwen2.5-1.5b-instruct-q8_0.gguf> -ngl 0 -t 12 -p 256 -n 32 -r 3 -o json \

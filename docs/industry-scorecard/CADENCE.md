@@ -36,9 +36,9 @@ Create `~/Library/LaunchAgents/com.fak.industry-freshness-cadence.plist`:
     <key>StartInterval</key>
     <integer>604800</integer>
     <key>StandardOutPath</key>
-    <string>/tmp/fak-industry-freshness-cadence.log</string>
+    <string><tmp>/fak-industry-freshness-cadence.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/fak-industry-freshness-cadence.err</string>
+    <string><tmp>/fak-industry-freshness-cadence.err</string>
 </dict>
 </plist>
 ```

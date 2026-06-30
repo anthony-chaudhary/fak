@@ -60,7 +60,7 @@ Then prove the safety floor without a live model:
 ./fak preflight \
   --policy examples/dogfood-claude-policy.json \
   --tool Bash \
-  --args '{"command":"rm -rf /tmp/fak-pilot"}'
+  --args '{"command":"rm -rf <tmp>/fak-pilot"}'
 # expected: DENY, reason POLICY_BLOCK
 ```
 

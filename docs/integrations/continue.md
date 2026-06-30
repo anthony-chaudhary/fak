@@ -431,8 +431,8 @@ In VS Code:
 3. Check the gateway logs:
    ```bash
    # Add --log to fak serve
-   ./fak serve --log /tmp/fak-continue.log ...
-   tail -f /tmp/fak-continue.log
+   ./fak serve --log <tmp>/fak-continue.log ...
+   tail -f <tmp>/fak-continue.log
    ```
 
 ### Slow first response

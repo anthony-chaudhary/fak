@@ -838,11 +838,11 @@ Every response includes a `_fak` extension with adjudication details:
 ### Debug logs
 
 ```bash
-# Claude debug → /tmp/fak-claude.log
+# Claude debug → <tmp>/fak-claude.log
 export FAK_DOGFOOD_CLAUDE_DEBUG=api
 
-# Gateway log → /tmp/fak-serve.log
-tail -f /tmp/fak-serve.log
+# Gateway log → <tmp>/fak-serve.log
+tail -f <tmp>/fak-serve.log
 ```
 
 ---

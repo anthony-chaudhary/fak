@@ -409,8 +409,8 @@ In VS Code:
 3. Check the gateway logs:
    ```bash
    # Add --log to fak serve
-   ./fak serve --log /tmp/fak-cline.log ...
-   tail -f /tmp/fak-cline.log
+   ./fak serve --log <tmp>/fak-cline.log ...
+   tail -f <tmp>/fak-cline.log
    ```
 
 ### Slow first response
