@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -284,6 +286,7 @@ func InventoryStaleChildren(root string) ([]ChildProc, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if ctx.Err() == context.DeadlineExceeded {
 		return nil, "inventory probe timed out"
@@ -304,6 +307,7 @@ func ReapChildren(pids []int) []ReapResult {
 		if runtime.GOOS == "windows" {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			cmd := exec.CommandContext(ctx, "taskkill", "/PID", strconv.Itoa(pid), "/F")
+			windowgate.ConfigureBackgroundCommand(cmd)
 			out, err := cmd.CombinedOutput()
 			cancel()
 			detail := strings.TrimSpace(string(out))
