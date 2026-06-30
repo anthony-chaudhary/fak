@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -1326,6 +1327,7 @@ func (s *Server) renderMetrics() string {
 	s.writeServingMetrics(&b, inf)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
+	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheGovernorMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
@@ -2256,6 +2258,40 @@ func (m *gatewayMetrics) writeVCacheMetrics(b *strings.Builder) {
 	}
 	writeHelpType(b, "fak_vcache_proven", "1 when the session's observed cache reads repaid the write premium (NET positive); else 0 (cold/write-dominated). The honest break-even gate.", "gauge")
 	fmt.Fprintf(b, "fak_vcache_proven %d\n", proven)
+}
+
+// writeVCacheWarmthMetrics emits the M1 warmth-belief prediction error over the live
+// rolling provider-cache window. It is derived by the same vcacheobserve engine as
+// `fak vcache observe`: predicted warm/cold is reconciled against the provider's real
+// cache_read feedback, so false-warm is the live "believed warm but provider billed cold"
+// signal. This is an OBSERVATION/DECISION surface only; it never gates correctness.
+func (m *gatewayMetrics) writeVCacheWarmthMetrics(b *strings.Builder) {
+	turns, _ := m.vcacheTurnsSnapshot()
+	if len(turns) == 0 || !vcacheWindowHasCacheActivity(turns) {
+		return
+	}
+	pred := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers()).Prediction
+	if pred.Total == 0 {
+		return
+	}
+	writeHelpType(b, "fak_vcache_warmth_prediction_outcomes", "DECISION (M1 warmth belief): rolling-window count of predicted-warm/cold outcomes reconciled against provider cache_read feedback. false_warm is the lethal believed-warm/provider-missed case; false_cold is benign missed opportunity. Derived by the same vcacheobserve engine as `fak vcache observe`.", "gauge")
+	for _, row := range []struct {
+		class string
+		n     int
+	}{
+		{string(vcachecal.TrueWarm), pred.TrueWarm},
+		{string(vcachecal.FalseWarm), pred.FalseWarm},
+		{string(vcachecal.TrueCold), pred.TrueCold},
+		{string(vcachecal.FalseCold), pred.FalseCold},
+	} {
+		fmt.Fprintf(b, "fak_vcache_warmth_prediction_outcomes{class=%q} %d\n", row.class, row.n)
+	}
+	writeHelpType(b, "fak_vcache_warmth_predictions_total", "DECISION (M1 warmth belief): total predictions reconciled in the rolling provider-cache window. Gauge because the retained window is bounded and rolling.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_warmth_predictions_total %d\n", pred.Total)
+	writeHelpType(b, "fak_vcache_warmth_false_warm_rate", "DECISION (M1 warmth belief): false_warm / predicted_warm over the rolling provider-cache window; this is the Law A1 demote/alarm signal.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_warmth_false_warm_rate %s\n", promFloat(pred.FalseWarmRate()))
+	writeHelpType(b, "fak_vcache_warmth_false_cold_rate", "DECISION (M1 warmth belief): false_cold / predicted_cold over the rolling provider-cache window; a missed warm opportunity, not a correctness risk.", "gauge")
+	fmt.Fprintf(b, "fak_vcache_warmth_false_cold_rate %s\n", promFloat(pred.FalseColdRate()))
 }
 
 // writeVCacheGovernorMetrics emits the low-cardinality live Governor witness: how many

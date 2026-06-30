@@ -199,6 +199,48 @@ func TestVCacheFamiliesNoPhantomAndProvenance(t *testing.T) {
 	}
 }
 
+// TestVCacheWarmthBeliefMetrics proves the M1 warmth-belief estimator is visible on
+// live gateway metrics without phantom idle/no-cache series. The fixture deliberately
+// creates both error classes: first read is false-cold (belief started cold but the
+// provider read cache), then a within-TTL miss is false-warm (the Law A1 signal).
+func TestVCacheWarmthBeliefMetrics(t *testing.T) {
+	idle := newGatewayMetrics(time.Now())
+	var idleOut strings.Builder
+	idle.writeVCacheWarmthMetrics(&idleOut)
+	if idleOut.Len() != 0 {
+		t.Fatalf("idle gateway must not emit warmth phantom metrics:\n%s", idleOut.String())
+	}
+
+	noCache := newGatewayMetrics(time.Now())
+	noCache.observeVCacheTurn("s1", 0, 900, 0, 0)
+	var noCacheOut strings.Builder
+	noCache.writeVCacheWarmthMetrics(&noCacheOut)
+	if noCacheOut.Len() != 0 {
+		t.Fatalf("no-cache workload must not emit warmth metrics:\n%s", noCacheOut.String())
+	}
+
+	srv := newTestServer(t)
+	srv.metrics.observeVCacheTurn("warm", 0, 100, 40000, 0)    // predicted cold, actual warm => false_cold
+	srv.metrics.observeVCacheTurn("warm", 1000, 100, 0, 0)     // predicted warm, actual cold => false_warm
+	srv.metrics.observeVCacheTurn("warm", 2000, 100, 40000, 0) // predicted cold after demote, actual warm => false_cold
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"# TYPE fak_vcache_warmth_prediction_outcomes gauge",
+		`fak_vcache_warmth_prediction_outcomes{class="true_warm"} 0`,
+		`fak_vcache_warmth_prediction_outcomes{class="false_warm"} 1`,
+		`fak_vcache_warmth_prediction_outcomes{class="true_cold"} 0`,
+		`fak_vcache_warmth_prediction_outcomes{class="false_cold"} 2`,
+		`fak_vcache_warmth_predictions_total 3`,
+		`fak_vcache_warmth_false_warm_rate 1`,
+		`fak_vcache_warmth_false_cold_rate 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("warmth scrape missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+}
+
 // TestVCacheGovernorDecisionMetrics proves the M5 Governor verdict is default-visible
 // on live gateway traffic without minting per-family Prometheus labels or phantom idle
 // series. The decisions are re-derived from the same rolling turns as /debug/vars, so a
