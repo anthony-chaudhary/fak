@@ -29,12 +29,100 @@ func LoadModelQ4K(path string) (*model.Model, error) {
 	return LoadModelQ4KProfile(path, nil)
 }
 
+// ExpertShard names the routed expert band [Lo,Hi) a rank owns during an expert-parallel
+// load. Dense, attention, router, embeddings, and shared-expert tensors remain replicated; this
+// band filters only batched routed-expert tensors before they enter the resident store.
+type ExpertShard struct {
+	Lo int
+	Hi int
+}
+
+// ExpertShardForRank derives the contiguous expert band owned by rank under the same tiling as
+// model.ExpertParallelPlan. It is a loader-facing helper so serve code can use the planner and the
+// resident admission filter from one source of truth.
+func ExpertShardForRank(numExperts, ranks, rank int) (ExpertShard, error) {
+	plan, err := model.ExpertParallelPlan(numExperts, ranks)
+	if err != nil {
+		return ExpertShard{}, err
+	}
+	if rank < 0 || rank >= len(plan.Shards) {
+		return ExpertShard{}, fmt.Errorf("gguf: expert-parallel rank %d outside [0,%d)", rank, len(plan.Shards))
+	}
+	shard := plan.Shards[rank]
+	return ExpertShard{Lo: shard.Lo, Hi: shard.Hi}, nil
+}
+
+type q4kLoadOptions struct {
+	expertShardSet bool
+	expertShard    ExpertShard
+}
+
+// Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
+type Q4KLoadOption func(*q4kLoadOptions)
+
+// WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
+// tensors. Use this for expert-parallel per-rank loads; omit it for the historical full load.
+func WithExpertShard(lo, hi int) Q4KLoadOption {
+	return func(o *q4kLoadOptions) {
+		o.expertShardSet = true
+		o.expertShard = ExpertShard{Lo: lo, Hi: hi}
+	}
+}
+
+func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
+	var out q4kLoadOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&out)
+		}
+	}
+	if !out.expertShardSet {
+		return out, nil
+	}
+	if cfg.NumExperts <= 0 {
+		return out, fmt.Errorf("gguf: expert shard requested for non-MoE config (NumExperts=%d)", cfg.NumExperts)
+	}
+	if out.expertShard.Lo < 0 || out.expertShard.Hi <= out.expertShard.Lo || out.expertShard.Hi > cfg.NumExperts {
+		return out, fmt.Errorf("gguf: expert shard [%d,%d) outside [0,%d)", out.expertShard.Lo, out.expertShard.Hi, cfg.NumExperts)
+	}
+	return out, nil
+}
+
+func (o q4kLoadOptions) keepExpert(expert int) bool {
+	if !o.expertShardSet {
+		return true
+	}
+	return expert >= o.expertShard.Lo && expert < o.expertShard.Hi
+}
+
+func (o q4kLoadOptions) keptExperts(total int) int {
+	if !o.expertShardSet {
+		return total
+	}
+	lo, hi := o.expertShard.Lo, o.expertShard.Hi
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > total {
+		hi = total
+	}
+	if hi <= lo {
+		return 0
+	}
+	return hi - lo
+}
+
 // LoadModelQ4KProfile is LoadModelQ4K with an optional load profiler so the direct-resident-Q4_K
 // path streams the same load-progress lines the lean-Q8 path does (a 466 GB GLM-5.2 resident load
 // must not be silent). Nil profiler = no progress, byte-identical to the old LoadModelQ4K.
 func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
+	return LoadModelQ4KProfileOptions(path, p)
+}
+
+// LoadModelQ4KProfileOptions is LoadModelQ4KProfile with explicit load options.
+func LoadModelQ4KProfileOptions(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
 	return loadVia(path, func(ws *WeightSource) (*model.Model, error) {
-		return ws.QuantModelQ4KProfile(p)
+		return ws.QuantModelQ4KProfileOptions(p, opts...)
 	})
 }
 
@@ -56,7 +144,18 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 // every core busy. The collector also records the per-quant-type resident-vs-dequant
 // breakdown (the S4 visibility) so the mixed-quant cost is legible without an external dump.
 func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, error) {
+	return s.QuantModelQ4KProfileOptions(p)
+}
+
+// QuantModelQ4KProfileOptions is QuantModelQ4KProfile with explicit load options. The default
+// option set is byte-compatible with QuantModelQ4KProfile; an expert shard only filters routed
+// expert tensors after the GGUF batched expert split.
+func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
 	cfg, err := s.File.Config()
+	if err != nil {
+		return nil, err
+	}
+	loadOpts, err := resolveQ4KLoadOptions(cfg, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +219,20 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 						return tw
 					}
 					if aligned && model.ResidentKQuantEligible(cfg, kqExperts[0].Name) {
-						tw.pending = make([]pendingTensor, len(kqExperts))
+						kept := loadOpts.keptExperts(len(kqExperts))
+						tw.pending = make([]pendingTensor, 0, kept)
 						for i, ex := range kqExperts {
-							tw.pending[i] = pendingTensor{resident: true, residentType: info.Type, name: ex.Name, shape: ex.Shape, raw: ex.Raw}
+							if !loadOpts.keepExpert(i) {
+								continue
+							}
+							tw.pending = append(tw.pending, pendingTensor{resident: true, residentType: info.Type, name: ex.Name, shape: ex.Shape, raw: ex.Raw})
 						}
-						tw.acctResident, tw.acctTensors = true, len(kqExperts)
+						tw.acctResident, tw.acctTensors = true, kept
+						if loadOpts.expertShardSet {
+							if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(kqExperts)); err == nil {
+								tw.acctBytes = int64(b)
+							}
+						}
 						return tw
 					}
 				}
@@ -138,11 +246,20 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 					tw.err = err
 					return tw
 				}
-				tw.pending = make([]pendingTensor, len(experts))
+				kept := loadOpts.keptExperts(len(experts))
+				tw.pending = make([]pendingTensor, 0, kept)
 				for i, ex := range experts {
-					tw.pending[i] = pendingTensor{resident: false, name: ex.Name, shape: ex.Shape, f32: ex.Data}
+					if !loadOpts.keepExpert(i) {
+						continue
+					}
+					tw.pending = append(tw.pending, pendingTensor{resident: false, name: ex.Name, shape: ex.Shape, f32: ex.Data})
 				}
-				tw.acctResident, tw.acctTensors = false, len(experts)
+				tw.acctResident, tw.acctTensors = false, kept
+				if loadOpts.expertShardSet {
+					if b, err := scaleExpertBandBytes(uint64(tw.acctBytes), kept, len(experts)); err == nil {
+						tw.acctBytes = int64(b)
+					}
+				}
 				return tw
 			}
 		}

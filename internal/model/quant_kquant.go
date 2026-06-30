@@ -258,6 +258,11 @@ func quantizeKQuantFromRaw(raw []byte, out, in int, kind kQuantKind) *kQuantTens
 // hasKQuant reports whether a resident raw expert-quant copy is available for a name.
 func (m *Model) hasKQuant(name string) bool { return m.kqw != nil && m.kqw[name] != nil }
 
+// HasKQuant reports whether a resident raw Q5_K/Q6_K/IQ*/Q8_0 expert-quant copy is available
+// for a name. It is the exported diagnostic twin of hasKQuant, used by loaders/tests that need to
+// prove which expert-band tensors were admitted without reaching into the unexported store.
+func (m *Model) HasKQuant(name string) bool { return m.hasKQuant(name) }
+
 // KQuantCount returns how many tensors hold a resident raw expert-quant copy (loader diagnostic).
 func (m *Model) KQuantCount() int { return len(m.kqw) }
 

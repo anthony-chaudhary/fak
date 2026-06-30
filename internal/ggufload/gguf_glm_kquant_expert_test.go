@@ -69,3 +69,53 @@ func TestGLMMoeDsaQ6KExpertsLoadResident(t *testing.T) {
 		})
 	}
 }
+
+func TestGLMMoeDsaKQuantExpertShardLoadsOnlyResidentBand(t *testing.T) {
+	// Same row-alignment constraints as the full-resident test above, but this fixture proves the
+	// EP-sharded loader admits only one rank's routed expert band into the resident k-quant store.
+	const (
+		H, V                = 256, 8
+		qLora, kvLora       = 32, 32
+		qkNope, qkRope, vHd = 16, 16, 16
+		nH                  = 2
+		idxHeads, idxDim    = 2, 16
+		E, I, sharedI       = 4, 256, 256
+	)
+	gguf := glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHd, nH, idxHeads, idxDim, E, I, sharedI, TensorQ6_K)
+	path := filepath.Join(t.TempDir(), "glm_kq_shard.gguf")
+	if err := os.WriteFile(path, gguf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	shard, err := ExpertShardForRank(E, 2, 1)
+	if err != nil {
+		t.Fatalf("ExpertShardForRank: %v", err)
+	}
+	prof := NewLoadProfiler()
+	m, err := LoadModelQ4KProfileOptions(path, prof, WithExpertShard(shard.Lo, shard.Hi))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions: %v", err)
+	}
+	if got, want := m.KQuantCount(), 2*3; got != want {
+		t.Fatalf("resident k-quant tensors = %d, want %d split tensors for two local GLM experts", got, want)
+	}
+	for x := 0; x < E; x++ {
+		for _, proj := range []string{"gate_proj", "up_proj", "down_proj"} {
+			name := "model.layers.0.mlp.experts." + itoaForTest(x) + "." + proj + ".weight"
+			want := x >= shard.Lo && x < shard.Hi
+			if got := m.HasKQuant(name); got != want {
+				t.Fatalf("HasKQuant(%q)=%v, want %v for shard [%d,%d)", name, got, want, shard.Lo, shard.Hi)
+			}
+		}
+	}
+	var row *LoadPathStat
+	for i := range prof.loadPathRows() {
+		r := prof.loadPathRows()[i]
+		if r.QuantType == "Q6_K" && r.Expert {
+			row = &r
+		}
+	}
+	if row == nil || row.ResidentTensors != 2*3 || row.DequantTensors != 0 {
+		t.Fatalf("load-path breakdown for sharded Q6_K experts = %+v, want resident=%d dequant=0", row, 2*3)
+	}
+}

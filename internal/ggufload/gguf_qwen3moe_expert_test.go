@@ -79,6 +79,48 @@ func TestQwen3MoEGGUFExpertSplitQ4KResident(t *testing.T) {
 	}
 }
 
+func TestQwen3MoEGGUFExpertShardLoadsOnlyResidentBand(t *testing.T) {
+	const E, I, H = 4, 256, 256
+	path := filepath.Join(t.TempDir(), "qwen3moe_q4k_expert_shard.gguf")
+	if err := os.WriteFile(path, qwen3MoEExpertGGUF(E, I, H, TensorQ4_K, nil, nil, nil), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	shard, err := ExpertShardForRank(E, 2, 1)
+	if err != nil {
+		t.Fatalf("ExpertShardForRank: %v", err)
+	}
+	if shard.Lo != 2 || shard.Hi != 4 {
+		t.Fatalf("rank-1 shard = [%d,%d), want [2,4)", shard.Lo, shard.Hi)
+	}
+	prof := NewLoadProfiler()
+	m, err := LoadModelQ4KProfileOptions(path, prof, WithExpertShard(shard.Lo, shard.Hi))
+	if err != nil {
+		t.Fatalf("LoadModelQ4KProfileOptions: %v", err)
+	}
+	if got, want := m.Q4KCount(), 2*3; got != want {
+		t.Fatalf("resident Q4_K tensors = %d, want %d split tensors for two local experts", got, want)
+	}
+	for x := 0; x < E; x++ {
+		for _, proj := range []string{"gate_proj", "up_proj", "down_proj"} {
+			name := "model.layers.0.mlp.experts." + itoaForTest(x) + "." + proj + ".weight"
+			want := x >= shard.Lo && x < shard.Hi
+			if got := m.HasQ4K(name); got != want {
+				t.Fatalf("HasQ4K(%q)=%v, want %v for shard [%d,%d)", name, got, want, shard.Lo, shard.Hi)
+			}
+		}
+	}
+	var row *LoadPathStat
+	for i := range prof.loadPathRows() {
+		r := prof.loadPathRows()[i]
+		if r.QuantType == "Q4_K" && r.Expert {
+			row = &r
+		}
+	}
+	if row == nil || row.ResidentTensors != 2*3 || row.DequantTensors != 0 {
+		t.Fatalf("load-path breakdown for sharded Q4_K experts = %+v, want resident=%d dequant=0", row, 2*3)
+	}
+}
+
 type qwen3MoETestTensor struct {
 	name string
 	dims []uint64
