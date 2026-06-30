@@ -88,6 +88,7 @@ type Intent struct {
 	BaseSHA    string        `json:"base_sha"`
 	Paths      []string      `json:"paths"`
 	PathDigest string        `json:"path_digest"`
+	DiffDigest string        `json:"diff_digest,omitempty"`
 	Subject    string        `json:"subject"`
 	Stamp      Stamp         `json:"stamp"`
 	Metadata   StampMetadata `json:"metadata,omitempty"`
@@ -222,6 +223,12 @@ func NormalizeIntent(in Intent) (Intent, error) {
 	} else if out.PathDigest != digest {
 		return Intent{}, fieldError("path_digest", ErrPathDigestMismatch, fmt.Sprintf("got %s want %s", out.PathDigest, digest))
 	}
+	if strings.TrimSpace(out.DiffDigest) != "" {
+		out.DiffDigest, err = NormalizeHexDigest(out.DiffDigest, "diff_digest")
+		if err != nil {
+			return Intent{}, err
+		}
+	}
 	out.Subject = strings.TrimSpace(out.Subject)
 	if err := ValidateSubject(out.Subject); err != nil {
 		return Intent{}, err
@@ -324,6 +331,22 @@ func NormalizeSHA(sha string) (string, error) {
 		return "", fieldError("base_sha", ErrInvalidField, sha)
 	}
 	return sha, nil
+}
+
+func NormalizeHexDigest(digest, field string) (string, error) {
+	digest = strings.ToLower(strings.TrimSpace(digest))
+	if digest == "" {
+		return "", fieldError(field, ErrMissingField, "digest is required")
+	}
+	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		return "", fieldError(field, ErrInvalidField, digest)
+	}
+	for _, r := range digest[len("sha256:"):] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return "", fieldError(field, ErrInvalidField, digest)
+		}
+	}
+	return digest, nil
 }
 
 func NormalizePaths(paths []string) ([]string, error) {
