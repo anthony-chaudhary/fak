@@ -93,6 +93,46 @@ func TestClaimTextStripsPrefixAndStamp(t *testing.T) {
 	}
 }
 
+func TestClaimTextRelabelsBindingLayerSyncShips(t *testing.T) {
+	cases := []struct {
+		name string
+		ship Ship
+		want string
+	}{
+		{
+			name: "vendor landing",
+			ship: Ship{
+				Subject: "docs(docs): sync shared documentation (fak docs)",
+				Paths:   []string{"docs/vendor/README.md"},
+			},
+			want: "Documented: add binding-layer AEO vendor routing",
+		},
+		{
+			name: "minimum backend example",
+			ship: Ship{
+				Subject: "chore(compute): sync shared worktree (fak compute)",
+				Paths:   []string{"internal/compute/minimal_backend_example_test.go"},
+			},
+			want: "New: add the compiling minimum backend example for vendor backends",
+		},
+		{
+			name: "unrelated sync stays generic",
+			ship: Ship{
+				Subject: "chore(windowgate): sync shared worktree (fak windowgate)",
+				Paths:   []string{"internal/windowgate/windowgate.go"},
+			},
+			want: "Shipped: sync shared worktree",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := claimText(tc.ship); got != tc.want {
+				t.Fatalf("claimText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWeeklyDigestBuildsWitnessedClaims(t *testing.T) {
 	ships := []Ship{
 		{SHA: "aaaa1111", Leaf: "gateway", Kind: "trailer", Subject: "feat(gateway): add x (fak gateway)"},

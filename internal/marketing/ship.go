@@ -39,6 +39,7 @@ type Ship struct {
 	Subject string    // the conventional-commits subject (the claim text source)
 	Kind    string    // "trailer" | "direct" — never "none"/"release" (those aren't ships)
 	Date    time.Time // commit author date, for dated/ordered artifacts; zero if unparsed
+	Paths   []string  // repo-relative paths touched by this ship, used only for AEO relabels
 }
 
 // Activity is the honest counterpart to a Ship: the non-ship commits in a range (merges,
@@ -68,6 +69,7 @@ func CollectShips(root, revRange string) ([]Ship, Activity, error) {
 		return nil, Activity{}, err
 	}
 	ships, act := parseShipLog(out)
+	attachShipPaths(root, ships)
 	sort.SliceStable(ships, func(i, j int) bool { return ships[i].Date.After(ships[j].Date) })
 	return ships, act, nil
 }
@@ -89,6 +91,33 @@ func runGitLog(root, revRange string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func attachShipPaths(root string, ships []Ship) {
+	for i := range ships {
+		paths, err := commitPaths(root, ships[i].SHA)
+		if err == nil {
+			ships[i].Paths = paths
+		}
+	}
+}
+
+func commitPaths(root, sha string) ([]string, error) {
+	cmd := exec.Command("git", "show", "--pretty=format:", "--name-only", "--no-renames", sha)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = root
+	b, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, raw := range strings.Split(string(b), "\n") {
+		p := strings.TrimSpace(raw)
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
 }
 
 // parseShipLog is the pure fold over git-log output: one record per non-merge commit (NUL-

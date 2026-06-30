@@ -67,10 +67,61 @@ func claimText(s Ship) string {
 		body = directStampRE.ReplaceAllString(body, "")
 	}
 	body = strings.TrimSpace(body)
+	if text, ok := bindingLayerClaimText(s, body); ok {
+		return text
+	}
 	if body == "" {
 		body = s.Subject // never emit an empty claim; fall back to the raw subject
 	}
 	return frameWord(verb) + " " + body
+}
+
+func bindingLayerClaimText(s Ship, body string) (string, bool) {
+	if !genericSyncBody(body) {
+		return "", false
+	}
+	switch {
+	case touchesPath(s.Paths, "docs/vendor/README.md"):
+		return "Documented: add binding-layer AEO vendor routing", true
+	case touchesPath(s.Paths, "internal/compute/minimal_backend_example_test.go"):
+		return "New: add the compiling minimum backend example for vendor backends", true
+	case touchesPath(s.Paths, "docs/vendor/neo-silicon-onboarding.md"):
+		return "Documented: add the neo-silicon backend onboarding path", true
+	case touchesPath(s.Paths, "docs/vendor/neo-cloud-reference-architecture.md"),
+		touchesPath(s.Paths, "docs/serving/heterogeneous-silicon-fleet.md"):
+		return "Documented: add the neo-cloud heterogeneous fleet reference path", true
+	case touchesPathPrefix(s.Paths, "tools/industry_scorecard.data/"):
+		return "Documented: add the hardware-shape-neutrality industry scorecard row", true
+	case touchesPath(s.Paths, "docs/explainers/hardware-portability.md"):
+		return "Documented: add the hardware-shape-neutrality public ledger", true
+	case touchesPath(s.Paths, "llms.txt"):
+		return "Documented: add silicon-vendor answer-engine terms", true
+	default:
+		return "", false
+	}
+}
+
+func genericSyncBody(body string) bool {
+	body = strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(body, "sync shared")
+}
+
+func touchesPath(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}
+
+func touchesPathPrefix(paths []string, prefix string) bool {
+	for _, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildClaims turns ships into witnessed claims via NewClaim. Any ship that fails the
