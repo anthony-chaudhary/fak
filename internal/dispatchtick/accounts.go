@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 const SeatPoolSchema = "fleet-seat-pool/1"
@@ -171,7 +173,43 @@ func NormalizeAccountRow(row AccountRow) AccountRow {
 	if row.Model == "" {
 		row.Model = inferredModel(row)
 	}
+	row = applyAccountLoginGate(row)
 	return row
+}
+
+func applyAccountLoginGate(row AccountRow) AccountRow {
+	if row.Product != "claude" {
+		return row
+	}
+	blocked := false
+	if row.CanServe != nil && !*row.CanServe {
+		blocked = true
+	}
+	if row.LoginStatus != "" && row.LoginStatus != string(configaccounts.LoginReady) {
+		blocked = true
+	}
+	if !blocked {
+		return row
+	}
+	row.Available = false
+	if strings.TrimSpace(row.BlockReason) != "" {
+		return row
+	}
+	row.BlockReason = accountLoginBlockReason(row)
+	return row
+}
+
+func accountLoginBlockReason(row AccountRow) string {
+	status := configaccounts.LoginStatus(strings.TrimSpace(row.LoginStatus))
+	if status != "" && status != configaccounts.LoginReady {
+		reason, _ := configaccounts.LoginReasonAction(status,
+			configaccounts.Home{Name: row.Tag, Dir: row.Dir})
+		if reason != "" {
+			return reason
+		}
+		return "account login status is " + string(status)
+	}
+	return "account login cannot serve"
 }
 
 func RouteAccount(in AccountRouteInput) AccountRouteResult {

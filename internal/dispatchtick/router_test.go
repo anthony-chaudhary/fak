@@ -96,18 +96,7 @@ func TestRouterCarriesPathScope(t *testing.T) {
 }
 
 func TestRouterCarriesAgentSchedulingMetadata(t *testing.T) {
-	body := strings.Join([]string{
-		"## Work unit",
-		"leaf",
-		"## Expected steps",
-		"5",
-		"## Trigger",
-		"Gateway report crossed the retry-error threshold.",
-		"## Batch policy",
-		"One issue per gateway retry class; reruns update by marker.",
-		"## Path hints",
-		"- `internal/gateway/http.go`",
-	}, "\n\n")
+	body := scopedGatewayIssueBody("5")
 	issue := routerIssue(12, "gateway: retry class", nil, body)
 	got := routeTestIssue(issue)
 	if got.WorkUnit != "leaf" || got.ExpectedSteps != 5 {
@@ -185,7 +174,7 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 		Taxonomy:   routerTestTaxonomy,
 		IssueLimit: 1000,
 		Issues: []Issue{
-			routerIssue(1, "fix(gateway): a", nil, ""),
+			routerIssue(1, "fix(gateway): a", nil, scopedGatewayIssueBody("3")),
 			routerIssue(2, "epic(gateway): umbrella", []string{"epic"}, ""),
 			routerIssue(3, "needs a filing", []string{BlockedByHumanLabel}, ""),
 			routerIssue(4, "idea: maybe do a thing", []string{"idea-scout"}, ""),
@@ -195,15 +184,17 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 			routerIssue(8, "gateway: decompose serving follow-ups", nil, "## Work unit\n\nepic\n\n## Working spine\n\nBreak the serving program into leaves."),
 			routerIssue(9, "research: study cache prior art", []string{"research"}, ""),
 			routerIssue(10, "gateway: oversized leaf", nil, "## Work unit\n\nleaf\n\n## Expected steps\n\n12\n\n## Path hints\n\n- `internal/gateway/http.go`"),
+			routerIssue(11, "gateway: thin label-routable row", []string{"dispatch"}, "## Path hints\n\n- `internal/gateway/http.go`"),
 		},
 	})
-	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 9 {
-		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=9", p.Counts, p.SkippedHumanBlocked)
+	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 10 {
+		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=10", p.Counts, p.SkippedHumanBlocked)
 	}
 	wantReasons := map[string]int{
 		"BLOCKED_BY_HUMAN":               1,
 		"ISSUE_NOT_DISPATCH_LEAF":        2,
 		"ISSUE_OVERSIZED_EXPECTED_STEPS": 1,
+		"ISSUE_SCOPE_INCOMPLETE":         1,
 		"ISSUE_TRIAGE_ONLY":              5,
 	}
 	if !sameStringIntMap(p.Counts.SkippedByReason, wantReasons) {
@@ -218,16 +209,58 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	if skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 8); skipped.Reason != "ISSUE_NOT_DISPATCH_LEAF" || skipped.WorkUnit != "epic" {
 		t.Fatalf("non-leaf skipped issue = %+v, want non-dispatch leaf epic", skipped)
 	}
+	if skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 11); skipped.Reason != "ISSUE_SCOPE_INCOMPLETE" {
+		t.Fatalf("thin label-routable skipped issue = %+v, want contract scope refusal", skipped)
+	}
 	if p.Lanes["gateway"].Issues[0] != 1 {
 		t.Fatalf("gateway issues = %#v, want #1", p.Lanes["gateway"].Issues)
 	}
 }
 
 func TestRouterKeepsSmallExpectedStepLeafDispatchable(t *testing.T) {
-	issue := routerIssue(11, "gateway: scoped leaf", nil, "## Work unit\n\nleaf\n\n## Expected steps\n\n4\n\n## Path hints\n\n- `internal/gateway/http.go`")
+	issue := routerIssue(11, "gateway: scoped leaf", nil, scopedGatewayIssueBody("4"))
 	if !IsDispatchable(issue, BlockedByHumanLabel) {
 		t.Fatalf("small expected-step leaf was not dispatchable")
 	}
+}
+
+func scopedGatewayIssueBody(expectedSteps string) string {
+	return strings.Join([]string{
+		"## Parent context",
+		"gateway dispatch fixture",
+		"## Current state",
+		"Gateway routing already recognizes the target lane.",
+		"## Why this is next",
+		"The dispatch filter must admit only worker-ready leaves.",
+		"## Working spine",
+		"Scoped gateway issues enter the worker queue with a witness.",
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		expectedSteps,
+		"## Trigger",
+		"Gateway report crossed the retry-error threshold.",
+		"## Batch policy",
+		"One issue per gateway retry class; reruns update by marker.",
+		"## In scope",
+		"Route this gateway leaf and preserve its worker metadata.",
+		"## Out of scope",
+		"Do not alter unrelated lanes or dispatch policy.",
+		"## Done condition",
+		"The dispatch payload admits the scoped gateway issue.",
+		"## Witness",
+		"go test ./internal/dispatchtick",
+		"## Acceptance gate",
+		"go test ./internal/dispatchtick",
+		"## Lane",
+		"gateway",
+		"## Path hints",
+		"- `internal/gateway/http.go`",
+		"## Boundary notes",
+		"Public issue only.",
+		"## Closure binding",
+		"Resolving commit cites #N and carries `(fak gateway)`.",
+	}, "\n\n")
 }
 
 func skippedIssueByNumber(skipped []SkippedIssue, number int) SkippedIssue {

@@ -167,3 +167,37 @@ func TestAccountNormalizeInfersProductTagAndTier(t *testing.T) {
 		t.Fatalf("opencode normalized = %+v", open)
 	}
 }
+
+func TestAccountNormalizeAppliesClaudeLoginGate(t *testing.T) {
+	row := AccountRow{
+		Account:     ".claude-needs",
+		Tag:         "needs",
+		Product:     "claude",
+		Dir:         "C:/Users/u/.claude-needs",
+		Available:   true,
+		ModelTier:   1,
+		LoginStatus: "needs_login",
+		CanServe:    boolPtr(false),
+	}
+	norm := NormalizeAccountRow(row)
+	if norm.Available || norm.BlockReason == "" {
+		t.Fatalf("normalized row = %+v, want blocked with reason", norm)
+	}
+
+	route := RouteAccount(AccountRouteInput{Rows: []AccountRow{row}, Product: "claude", WorkKind: "engineering"})
+	if route.OK || len(route.BlockedTargetAccounts) != 1 ||
+		route.BlockedTargetAccounts[0].LoginStatus != "needs_login" ||
+		route.BlockedTargetAccounts[0].CanServe == nil || *route.BlockedTargetAccounts[0].CanServe {
+		t.Fatalf("route = %+v, want no route and blocked login posture", route)
+	}
+
+	wave := AllocateWave(AccountWaveInput{Rows: []AccountRow{row}, Count: 1, Product: "claude", WorkKind: "engineering"})
+	if wave.OK || wave.Granted != 0 || len(wave.BlockedTargetAccounts) != 1 {
+		t.Fatalf("wave = %+v, want blocked login posture and no granted lane", wave)
+	}
+
+	pool := BuildSeatPool([]AccountRow{row}, nil, "claude")
+	if pool.TotalSeats != 1 || pool.FreeSeats != 0 || pool.BlockedSeats != 1 || pool.Seats[0].State != "blocked" {
+		t.Fatalf("seat pool = %+v, want login-blocked seat", pool)
+	}
+}

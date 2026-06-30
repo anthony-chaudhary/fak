@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
 const RouterSchema = "fleet-issue-lane-router/1"
@@ -650,6 +652,7 @@ func IsTriageOnly(issue Issue) bool {
 func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	workUnit := issueWorkUnit(issue)
 	expectedSteps := issueExpectedSteps(issue)
+	review := issueContractReview(issue)
 	reason := "ISSUE_NOT_DISPATCHABLE"
 	next := "add dispatch scope or remove the skip condition before sending this issue to a worker"
 	triageLabel := triageOnlyLabel(issue)
@@ -675,6 +678,9 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	case bodyTriageOnly(issue):
 		reason = "ISSUE_TRIAGE_ONLY"
 		next = "triage or scope the issue into one or more worker-ready leaves"
+	case !review.OK:
+		reason = firstIssueContractReason(review)
+		next = issueContractNextAction(reason)
 	}
 	return SkippedIssue{
 		Number:        issue.Number,
@@ -750,7 +756,47 @@ func routeStepBudget(r IssueRoute) int {
 }
 
 func IsDispatchable(issue Issue, blockedLabel string) bool {
-	return !IsBlockedByHuman(issue, blockedLabel) && !IsEpic(issue) && !IsTriageOnly(issue)
+	return !IsBlockedByHuman(issue, blockedLabel) &&
+		!IsEpic(issue) &&
+		!IsTriageOnly(issue) &&
+		issueContractReview(issue).OK
+}
+
+func issueContractReview(issue Issue) issuecontract.Review {
+	labels := make([]issuecontract.IssueLabel, 0, len(issue.Labels))
+	for _, label := range issue.Labels {
+		labels = append(labels, issuecontract.IssueLabel{Name: label.Name})
+	}
+	return issuecontract.ReviewIssueDraft(issuecontract.IssueDraft{
+		Number: issue.Number,
+		Title:  issue.Title,
+		Body:   issue.Body,
+		Labels: labels,
+	}, issuecontract.Options{})
+}
+
+func firstIssueContractReason(review issuecontract.Review) string {
+	if len(review.Reasons) == 0 {
+		return "ISSUE_NOT_DISPATCHABLE"
+	}
+	return review.Reasons[0]
+}
+
+func issueContractNextAction(reason string) string {
+	switch reason {
+	case issuecontract.ReasonScopeIncomplete:
+		return "add in-scope, out-of-scope, done condition, witness, and acceptance gate before dispatch"
+	case issuecontract.ReasonUnrouted:
+		return "add a lane or path hints section that maps to a dispatch lane"
+	case issuecontract.ReasonPrivateBoundary:
+		return "remove or redact private/operator-only evidence before public worker dispatch"
+	case issuecontract.ReasonNotDispatchLeaf:
+		return "split the non-leaf work unit into worker-ready leaf issues"
+	case issuecontract.ReasonOversizedSteps:
+		return fmt.Sprintf("split into child issues with <= %d expected steps each", MaxDispatchExpectedSteps)
+	default:
+		return "scope the issue until the shared issue contract marks it dispatchable"
+	}
 }
 
 func route(issue Issue, lane, confidence, signal string, conflict bool, paths []string, unroutedReason string) IssueRoute {

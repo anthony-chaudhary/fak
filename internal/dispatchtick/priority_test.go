@@ -81,8 +81,8 @@ func TestBuildRouterPayloadOrdersLaneByPriority(t *testing.T) {
 		Taxonomy:   routerTestTaxonomy,
 		IssueLimit: 1000,
 		Issues: []Issue{
-			routerIssue(1500, "fix(gateway): newer noise", nil, ""),
-			routerIssue(300, "fix(gateway): old but important", []string{"priority/P1"}, ""),
+			routerIssue(1500, "fix(gateway): newer noise", nil, scopedGatewayIssueBody("2")),
+			routerIssue(300, "fix(gateway): old but important", []string{"priority/P1"}, scopedGatewayIssueBody("2")),
 		},
 	})
 	grp := p.Lanes["gateway"]
