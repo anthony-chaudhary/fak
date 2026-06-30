@@ -210,6 +210,72 @@ func TestPlacementEnablesCompaction(t *testing.T) {
 	}
 }
 
+func TestM2StarAnchorHoistsVolatileSystemBlock(t *testing.T) {
+	rawA := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"trace 11111111-2222-3333-4444-555555555555"},{"type":"text","text":"stable policy"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	rawB := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"trace aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},{"type":"text","text":"stable policy"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+
+	outA, ocA := PlaceAnthropicCacheBreakpointWithOutcome(rawA)
+	if ocA.Reason != BreakpointReasonNone || ocA.Target != "system" || !ocA.Rewritten {
+		t.Fatalf("A outcome = %+v, want rewritten system placement", ocA)
+	}
+	if ocA.MovedVolatile != 1 || ocA.PredictedUplift <= 0 {
+		t.Fatalf("A recommendation = %+v, want one moved volatile block with positive uplift", ocA)
+	}
+	outB, ocB := PlaceAnthropicCacheBreakpointWithOutcome(rawB)
+	if ocB.Reason != BreakpointReasonNone || ocB.Target != "system" || !ocB.Rewritten {
+		t.Fatalf("B outcome = %+v, want rewritten system placement", ocB)
+	}
+	if !bytes.Contains(outA, []byte(`"text":"stable policy","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("stable block did not receive the breakpoint after hoist:\n%s", outA)
+	}
+	if bytes.Contains(outA, []byte(`555555555555","cache_control"`)) {
+		t.Fatalf("volatile UUID block was incorrectly cached:\n%s", outA)
+	}
+	if !bytes.Equal(systemCachePrefix(t, outA), systemCachePrefix(t, outB)) {
+		t.Fatalf("M2 hoist did not stabilize the cache prefix:\nA=%s\nB=%s", systemCachePrefix(t, outA), systemCachePrefix(t, outB))
+	}
+	if _, err := DecodeAnthropicMessagesRequest(outA); err != nil {
+		t.Fatalf("rewritten body A failed to re-decode: %v", err)
+	}
+	if _, err := DecodeAnthropicMessagesRequest(outB); err != nil {
+		t.Fatalf("rewritten body B failed to re-decode: %v", err)
+	}
+}
+
+func TestM2StarAnchorPlacesBeforeVolatileSystemTail(t *testing.T) {
+	rawA := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"stable policy"},{"type":"text","text":"trace 11111111-2222-3333-4444-555555555555"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	rawB := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"stable policy"},{"type":"text","text":"trace aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+
+	outA, ocA := PlaceAnthropicCacheBreakpointWithOutcome(rawA)
+	if ocA.Reason != BreakpointReasonNone || ocA.Target != "system" || ocA.Rewritten {
+		t.Fatalf("A outcome = %+v, want non-rewrite system placement", ocA)
+	}
+	if ocA.MovedVolatile != 1 || ocA.PredictedUplift != 0 {
+		t.Fatalf("A recommendation = %+v, want volatile already at tail with zero uplift", ocA)
+	}
+	outB, ocB := PlaceAnthropicCacheBreakpointWithOutcome(rawB)
+	if ocB.Reason != BreakpointReasonNone || ocB.Target != "system" || ocB.Rewritten {
+		t.Fatalf("B outcome = %+v, want non-rewrite system placement", ocB)
+	}
+	if !bytes.Contains(outA, []byte(`"text":"stable policy","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("stable block did not receive the breakpoint before volatile tail:\n%s", outA)
+	}
+	if bytes.Contains(outA, []byte(`555555555555","cache_control"`)) {
+		t.Fatalf("volatile UUID tail was incorrectly cached:\n%s", outA)
+	}
+	if !bytes.Equal(systemCachePrefix(t, outA), systemCachePrefix(t, outB)) {
+		t.Fatalf("tail-volatile anchor did not stabilize the cache prefix:\nA=%s\nB=%s", systemCachePrefix(t, outA), systemCachePrefix(t, outB))
+	}
+}
+
 // TestVolatileSystemStepsDownToTools is the core #806-bullet-2 case: the maximal head (tools+system)
 // is NOT byte-stable because the system block carries a per-request UUID, so anchoring there would
 // pay the cache-write premium for a prefix doomed to miss. The placer steps DOWN to caching just the
@@ -289,6 +355,25 @@ func TestDateOnlyHeadStillCaches(t *testing.T) {
 	if oc.Reason != BreakpointReasonNone || oc.Target != "system" {
 		t.Fatalf("got reason=%q target=%q, want none/system (date-only is stable, must still cache)", oc.Reason, oc.Target)
 	}
+}
+
+func systemCachePrefix(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal rewritten body: %v", err)
+	}
+	elems, spans, ok := decodeArrayElements(raw, obj["system"])
+	if !ok {
+		t.Fatal("decode system elements failed")
+	}
+	for i, el := range elems {
+		if bytes.Contains(el, []byte("cache_control")) {
+			return raw[:spans[i].end]
+		}
+	}
+	t.Fatal("no system cache_control block found")
+	return nil
 }
 
 // TestHeadValueIsVolatileBoundaries nails the detector's stable/volatile boundary directly: only an

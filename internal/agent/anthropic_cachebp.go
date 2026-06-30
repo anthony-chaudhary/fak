@@ -45,6 +45,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
+
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
 // cacheControlBreakpoint is the byte sequence spliced into a target block to mark it as a
@@ -68,8 +70,11 @@ const (
 // means PLACED — Target ("system" or "tools") then names where the breakpoint landed. Any other
 // Reason means the body was returned unchanged (identity) and Target is empty.
 type BreakpointOutcome struct {
-	Reason string
-	Target string // "system" | "tools" — which head block carries the new breakpoint (on a placement)
+	Reason          string
+	Target          string // "system" | "tools" — which head block carries the new breakpoint (on a placement)
+	Rewritten       bool   // true when M2 hoisted volatile system blocks behind the cacheable anchor
+	MovedVolatile   int
+	PredictedUplift int64
 }
 
 // PlaceAnthropicCacheBreakpoint splices a cache_control breakpoint onto the stable system+tools
@@ -118,16 +123,60 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	toolOK = toolOK && len(toolElems) > 0
 	toolsVolatile := headValueIsVolatile(obj["tools"])
 
+	if toolsVolatile {
+		// The provider prefix order is tools → system → messages. A volatile tools[] value sits
+		// ahead of every possible system anchor, so no system rewrite can make tools+system stable.
+		if sysOK || toolOK {
+			return raw, BreakpointOutcome{Reason: BreakpointReasonVolatileHead}
+		}
+		return raw, BreakpointOutcome{Reason: BreakpointReasonNoStableHead}
+	}
+
+	if sysOK {
+		if plan, ok := planAnthropicSystemAnchor(sysElems); ok {
+			if plan.rewritten {
+				out, ok := rewriteSystemArrayWithBreakpoint(raw, obj["system"], sysElems, plan)
+				if !ok {
+					return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
+				}
+				if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+					return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
+				}
+				return out, BreakpointOutcome{
+					Reason:          BreakpointReasonNone,
+					Target:          "system",
+					Rewritten:       true,
+					MovedVolatile:   plan.recommendation.MovedVolatile,
+					PredictedUplift: plan.recommendation.PredictedUplift,
+				}
+			}
+			out, ok := placeCacheControlAtSpan(raw, sysSpans[plan.anchorOriginal])
+			if !ok {
+				return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
+			}
+			if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+				return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
+			}
+			if !bytes.Equal(raw[:sysSpans[plan.anchorOriginal].start], out[:sysSpans[plan.anchorOriginal].start]) {
+				return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
+			}
+			return out, BreakpointOutcome{
+				Reason:          BreakpointReasonNone,
+				Target:          "system",
+				MovedVolatile:   plan.recommendation.MovedVolatile,
+				PredictedUplift: plan.recommendation.PredictedUplift,
+			}
+		}
+	}
+
 	var target string
 	var spans []elementSpan
 	switch {
-	case sysOK && !toolsVolatile && !headValueIsVolatile(obj["system"]):
-		target, spans = "system", sysSpans // maximal stable head: cache tools+system
-	case toolOK && !toolsVolatile:
-		target, spans = "tools", toolSpans // system absent or volatile, tools stable: cache tools alone
-	case sysOK || toolOK:
-		// There IS an array head, but every cacheable span carries a volatility signature — anchoring
-		// here would bust the prefix it caches, so leave the body unchanged (the fail-safe direction).
+	case toolOK:
+		target, spans = "tools", toolSpans // system absent or fully volatile, tools stable: cache tools alone
+	case sysOK:
+		// There IS a system head, but every system block carries a volatility signature and no
+		// stable tools prefix is available, so leave the body unchanged (the fail-safe direction).
 		return raw, BreakpointOutcome{Reason: BreakpointReasonVolatileHead}
 	default:
 		return raw, BreakpointOutcome{Reason: BreakpointReasonNoStableHead}
@@ -137,16 +186,10 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	// 3. Splice the breakpoint into the last block on the ORIGINAL bytes: everything before the
 	//    block is copied verbatim, the breakpoint key is inserted before the block's closing `}`,
 	//    and the tail is copied verbatim. No other block is re-marshalled.
-	spliced, ok := spliceCacheControlIntoObject(raw[last.start:last.end])
+	out, ok := placeCacheControlAtSpan(raw, last)
 	if !ok {
 		return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
 	}
-	var b bytes.Buffer
-	b.Grow(len(raw) + len(spliced) - (last.end - last.start))
-	b.Write(raw[:last.start])
-	b.Write(spliced)
-	b.Write(raw[last.end:])
-	out := b.Bytes()
 
 	// 4. Prove it: the result must re-decode as a valid Messages request, and every byte before
 	//    the rewritten block must be byte-identical to the input (the cache prefix upstream of the
@@ -159,6 +202,105 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 		return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
 	}
 	return out, BreakpointOutcome{Reason: BreakpointReasonNone, Target: target}
+}
+
+type anthropicSystemAnchorPlan struct {
+	order          []int
+	anchorOriginal int
+	rewritten      bool
+	recommendation cachemeta.LayoutRecommendation
+}
+
+func planAnthropicSystemAnchor(elems []json.RawMessage) (anthropicSystemAnchorPlan, bool) {
+	segs := make([]cachemeta.PromptSegment, 0, len(elems))
+	nonVol := make([]int, 0, len(elems))
+	vol := make([]int, 0, len(elems))
+	for i, el := range elems {
+		kind := cachemeta.SegStable
+		if headValueIsVolatile(el) {
+			kind = cachemeta.SegVolatile
+			vol = append(vol, i)
+		} else {
+			nonVol = append(nonVol, i)
+		}
+		segs = append(segs, cachemeta.PromptSegment{
+			Kind:    kind,
+			Tokens:  estimatedPromptTokens(el),
+			Content: append([]byte(nil), el...),
+		})
+	}
+	if len(nonVol) == 0 {
+		return anthropicSystemAnchorPlan{}, false
+	}
+	order := append(append([]int(nil), nonVol...), vol...)
+	return anthropicSystemAnchorPlan{
+		order:          order,
+		anchorOriginal: nonVol[len(nonVol)-1],
+		rewritten:      !sameIntOrder(order),
+		recommendation: cachemeta.RecommendLayout(segs),
+	}, true
+}
+
+func estimatedPromptTokens(raw json.RawMessage) int64 {
+	n := int64(len(raw) / 4)
+	if n <= 0 {
+		return 1
+	}
+	return n
+}
+
+func sameIntOrder(order []int) bool {
+	for i, v := range order {
+		if i != v {
+			return false
+		}
+	}
+	return true
+}
+
+func placeCacheControlAtSpan(raw []byte, span elementSpan) ([]byte, bool) {
+	spliced, ok := spliceCacheControlIntoObject(raw[span.start:span.end])
+	if !ok {
+		return nil, false
+	}
+	var b bytes.Buffer
+	b.Grow(len(raw) + len(spliced) - (span.end - span.start))
+	b.Write(raw[:span.start])
+	b.Write(spliced)
+	b.Write(raw[span.end:])
+	return b.Bytes(), true
+}
+
+func rewriteSystemArrayWithBreakpoint(raw []byte, systemRaw json.RawMessage, elems []json.RawMessage, plan anthropicSystemAnchorPlan) ([]byte, bool) {
+	start := bytes.Index(raw, systemRaw)
+	if start < 0 {
+		return nil, false
+	}
+	end := start + len(systemRaw)
+	var sys bytes.Buffer
+	sys.WriteByte('[')
+	for pos, idx := range plan.order {
+		if pos > 0 {
+			sys.WriteByte(',')
+		}
+		el := []byte(elems[idx])
+		if idx == plan.anchorOriginal {
+			spliced, ok := spliceCacheControlIntoObject(el)
+			if !ok {
+				return nil, false
+			}
+			el = spliced
+		}
+		sys.Write(el)
+	}
+	sys.WriteByte(']')
+
+	var out bytes.Buffer
+	out.Grow(len(raw) + sys.Len() - len(systemRaw))
+	out.Write(raw[:start])
+	out.Write(sys.Bytes())
+	out.Write(raw[end:])
+	return out.Bytes(), true
 }
 
 // spliceCacheControlIntoObject returns obj with a cache_control breakpoint key inserted before
