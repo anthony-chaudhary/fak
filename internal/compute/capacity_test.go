@@ -67,6 +67,88 @@ func TestCapacityProbeCapGatesTheAssertion(t *testing.T) {
 	}
 }
 
+func TestExpertParallelLargestBandExperts(t *testing.T) {
+	cases := []struct{ experts, ranks, want int }{
+		{160, 1, 160}, // ranks=1: one band owns every expert
+		{160, 8, 20},  // even split
+		{160, 3, 54},  // ceil(160/3)=54 — the BUSIEST band, not the average (53.3)
+		{8, 8, 1},
+		{8, 16, 1}, // ranks clamped to numExperts (a rank with no experts is invalid)
+		{8, 0, 8},  // ranks<1 clamps to 1
+		{0, 4, 0},  // not an MoE config
+	}
+	for _, c := range cases {
+		if got := ExpertParallelLargestBandExperts(c.experts, c.ranks); got != c.want {
+			t.Fatalf("ExpertParallelLargestBandExperts(%d,%d)=%d, want %d", c.experts, c.ranks, got, c.want)
+		}
+	}
+}
+
+func TestExpertParallelPerRankWeightBytes(t *testing.T) {
+	const replicated = int64(10) << 30 // 10 GiB replicated (dense+attn+router+embed)
+	const experts = int64(400) << 30   // 400 GiB total routed experts
+	const E = 160
+	// ranks=1: the whole model is resident on one card (replicated + all experts).
+	if got := ExpertParallelPerRankWeightBytes(replicated, experts, E, 1); got != replicated+experts {
+		t.Fatalf("ranks=1 per-rank=%d, want %d (full model)", got, replicated+experts)
+	}
+	// ranks=8: replicated + busiest band (20/160 of experts) = 10 + 400/8 = 60 GiB.
+	want8 := replicated + experts*20/160
+	if got := ExpertParallelPerRankWeightBytes(replicated, experts, E, 8); got != want8 {
+		t.Fatalf("ranks=8 per-rank=%d, want %d (replicated + experts/8)", got, want8)
+	}
+	// Monotone non-increasing in ranks, never below the replicated floor (experts shard, the
+	// replicated set does not) — the property the EP capacity argument rests on.
+	prev := int64(1) << 62
+	for _, r := range []int{1, 2, 4, 8, 16, 160} {
+		got := ExpertParallelPerRankWeightBytes(replicated, experts, E, r)
+		if got > prev {
+			t.Fatalf("per-rank footprint grew with ranks: ranks=%d got=%d prev=%d", r, got, prev)
+		}
+		if got < replicated {
+			t.Fatalf("per-rank footprint %d below the replicated floor %d (ranks=%d)", got, replicated, r)
+		}
+		prev = got
+	}
+}
+
+// TestExpertParallelPerRankPlanFitsGate is the motivating case: a GLM-5.2-scale MoE on 80 GiB
+// cards. EP-4 OOMs a card (per-card shard exceeds 80 GiB); EP-8 fits. The plan + the existing
+// RefuseMemoryPlanIfTooBig turn that into a typed pre-load refusal instead of a minutes-in OOM —
+// and fail OPEN on cpu-ref (unknown capacity), never blocking the portable floor.
+func TestExpertParallelPerRankPlanFitsGate(t *testing.T) {
+	const replicated = int64(10) << 30 // 10 GiB replicated
+	const experts = int64(424) << 30   // ~424 GiB routed experts (GLM-5.2 Q4_K bulk)
+	const E = 160
+	card := capDevice{total: 80 << 30, free: 80 << 30, known: true}
+
+	// EP-4: 10 + 424*40/160 = 10 + 106 = 116 GiB/card > 80 GiB -> refused before load.
+	plan4 := ExpertParallelPerRankPlan(replicated, experts, E, 4, nil)
+	if v, _ := FitsMemoryPlan(card, plan4, 0); v != FitTooBig {
+		t.Fatalf("EP-4 on an 80 GiB card: verdict=%s, want too_big", v)
+	}
+	if err := RefuseMemoryPlanIfTooBig(card, plan4, 0); err == nil {
+		t.Fatal("EP-4 per-card shard exceeds the card — RefuseMemoryPlanIfTooBig should refuse before load")
+	}
+
+	// EP-8: 10 + 424*20/160 = 10 + 53 = 63 GiB/card -> fits.
+	plan8 := ExpertParallelPerRankPlan(replicated, experts, E, 8, nil)
+	if v, _ := FitsMemoryPlan(card, plan8, 0); v != FitOK {
+		t.Fatalf("EP-8 on an 80 GiB card: verdict=%s, want ok", v)
+	}
+
+	// A per-rank KV/scratch extra rides through and is counted against the same per-card budget.
+	plan8KV := ExpertParallelPerRankPlan(replicated, experts, E, 8, MemoryPlan{{Class: MemoryKVCache, Bytes: 20 << 30}})
+	if v, _ := FitsMemoryPlan(card, plan8KV, 0); v != FitTooBig { // 63 + 20 = 83 GiB > 80
+		t.Fatalf("EP-8 + 20 GiB KV on an 80 GiB card: verdict=%s, want too_big", v)
+	}
+
+	// Fail-open on cpu-ref (capacity unknown): the portable floor is never refused.
+	if v, _ := FitsMemoryPlan(cpu(), plan4, 0); v != FitUnknown {
+		t.Fatalf("cpu-ref EP fit: verdict=%s, want unknown (fail-open)", v)
+	}
+}
+
 func TestDeviceCapacityReportsAndFits(t *testing.T) {
 	dev := capDevice{total: 24 << 30, free: 10 << 30, known: true} // 24 GiB device, 10 GiB free
 	total, free, known := DeviceMemoryInfo(dev)

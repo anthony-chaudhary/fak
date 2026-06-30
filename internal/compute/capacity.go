@@ -197,6 +197,74 @@ func EstimateHALScratchpadBytes(cfg TransformerScratchConfig) int64 {
 	return saturatingMulInt64(elems, 4)                                                     // f32 bytes
 }
 
+// ExpertParallelLargestBandExperts reports how many experts the BUSIEST rank holds when
+// numExperts experts are tiled across `ranks` near-even contiguous bands (the
+// model.ExpertParallelPlan / NewTPPlan tiling): ceil(numExperts/ranks). The per-card residency
+// fit must clear THIS band, not the average — a node fits an EP-N serve only if its tightest card
+// holds the largest band. ranks is clamped to [1, numExperts] (matching ExpertParallelPlan, where
+// a rank with no experts is rejected); numExperts<=0 returns 0 (not an MoE config).
+func ExpertParallelLargestBandExperts(numExperts, ranks int) int {
+	if numExperts <= 0 {
+		return 0
+	}
+	if ranks < 1 {
+		ranks = 1
+	}
+	if ranks > numExperts {
+		ranks = numExperts
+	}
+	return (numExperts + ranks - 1) / ranks
+}
+
+// ExpertParallelPerRankWeightBytes is the resident WEIGHT bytes the busiest rank of an
+// expert-parallel (EP) serve holds: the replicated non-expert weights (dense FFN + attention +
+// router + embeddings — every rank holds the full set, EP shards only the experts) PLUS the
+// largest expert band's bytes (totalExpertWeightBytes scaled by the busiest band's share of the
+// experts). At ranks=1 it is the whole model (replicated + all experts); as ranks grow the expert
+// term shrinks ~1/ranks while the replicated term stays fixed — the exact shape of the EP capacity
+// table (why 8×80GB holds GLM-5.2 by EP-8 but a smaller N would not). ranks is clamped to
+// [1, numExperts]. Saturating arithmetic, so an overflow can only make the estimate MORE
+// conservative (never wrap to a small, falsely-fitting number).
+func ExpertParallelPerRankWeightBytes(replicatedWeightBytes, totalExpertWeightBytes int64, numExperts, ranks int) int64 {
+	if replicatedWeightBytes < 0 {
+		replicatedWeightBytes = 0
+	}
+	if totalExpertWeightBytes < 0 {
+		totalExpertWeightBytes = 0
+	}
+	band := ExpertParallelLargestBandExperts(numExperts, ranks)
+	if band <= 0 || numExperts <= 0 {
+		// Not an MoE config (no experts to shard): the whole weight set is replicated per rank.
+		return saturatingAddInt64(replicatedWeightBytes, totalExpertWeightBytes)
+	}
+	// per-rank expert bytes = totalExpertWeightBytes * band / numExperts (busiest card). Multiply
+	// before the divide so the integer rounding lands on the band SHARE, not the per-expert size.
+	perRankExpert := saturatingMulInt64(totalExpertWeightBytes, int64(band)) / int64(numExperts)
+	return saturatingAddInt64(replicatedWeightBytes, perRankExpert)
+}
+
+// ExpertParallelPerRankPlan is the classed PER-RANK MemoryPlan for an expert-parallel serve: the
+// busiest rank's resident weights (ExpertParallelPerRankWeightBytes) plus any per-rank extra
+// demands the caller supplies (KV cache, activation/scratch — EP does NOT shard these; each rank
+// runs the full attention + dense path replicated, so they are per-rank constants). Feed it to
+// FitsMemoryPlan / RefuseMemoryPlanIfTooBig against the PER-GPU device backend to turn an
+// impossible `--expert-parallel N` (e.g. a 434 GiB model at N=4 → ~118 GiB/card > 80 GiB) into a
+// typed pre-load refusal instead of an OOM that surfaces only minutes into the weight load. It
+// fails OPEN on a backend whose capacity is unknown (cpu-ref, a non-probing device), like every
+// other fit helper here. perRankExtra's positive demands are copied through verbatim.
+func ExpertParallelPerRankPlan(replicatedWeightBytes, totalExpertWeightBytes int64, numExperts, ranks int, perRankExtra MemoryPlan) MemoryPlan {
+	plan := MemoryPlan{}
+	if w := ExpertParallelPerRankWeightBytes(replicatedWeightBytes, totalExpertWeightBytes, numExperts, ranks); w > 0 {
+		plan = append(plan, MemoryDemand{Class: MemoryWeights, Bytes: w, Detail: "ep-per-rank-weights", DType: "mixed"})
+	}
+	for _, d := range perRankExtra {
+		if d.Bytes > 0 {
+			plan = append(plan, d)
+		}
+	}
+	return plan
+}
+
 func saturatingAddInt64(vals ...int64) int64 {
 	const maxInt64 = int64(^uint64(0) >> 1)
 	var acc int64
