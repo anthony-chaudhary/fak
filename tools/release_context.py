@@ -42,9 +42,10 @@ import re
 import subprocess
 import time
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
+
+install_no_window_subprocess_defaults(subprocess)
 
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 RELEASE_FILE_RE = re.compile(r"^docs/releases/v(\d+\.\d+\.\d+)\.md$")
