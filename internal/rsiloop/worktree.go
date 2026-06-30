@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // WorktreeConfig parameterizes the real harness.
@@ -42,8 +43,10 @@ type WorktreeConfig struct {
 // rewrites. Anchored on the const name so it can't match anything else.
 var tunableRewrite = regexp.MustCompile(`(` + TunableConstName + `\s*=\s*)(-?\d+)`)
 
-// tunableRelPath is the module-relative path of the tunable file (forward slashes).
-const tunableRelPath = "internal/rsiloop/tunable.go"
+// TunableRelPath is the module-relative path of the tunable file (forward slashes).
+const TunableRelPath = "internal/rsiloop/tunable.go"
+
+const tunableRelPath = TunableRelPath
 
 // NewWorktreeHarness wires a Harness to the real worktree/probe/suite/truth impls.
 func NewWorktreeHarness(cfg WorktreeConfig) Harness {
@@ -230,6 +233,7 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 	defer os.RemoveAll(parent)
 	wt := filepath.Join(parent, "wt")
 	add := exec.Command("git", "-C", top, "worktree", "add", "--detach", wt, ref)
+	windowgate.ConfigureBackgroundCommand(add)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("worktree add %s: %v: %s", ref, err, out)
 	}
@@ -244,6 +248,7 @@ func withWorktree(cfg WorktreeConfig, ref string, fn func(wtPaths) error) error 
 // runProbe runs the KPI probe in the module dir and parses its `KPI=<float>` line.
 func runProbe(moduleDir, probePkg string) (float64, error) {
 	cmd := exec.Command("go", "run", probePkg)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = moduleDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -291,6 +296,7 @@ func runSuite(moduleDir string, cmds [][]string) (bool, string) {
 			continue
 		}
 		cmd := exec.Command(c[0], c[1:]...)
+		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Dir = moduleDir
 		out, err := cmd.CombinedOutput()
 		if err == nil {
