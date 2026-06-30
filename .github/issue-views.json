@@ -72,6 +72,30 @@
       "note": "The fleet's DEFAULT dispatch focus (`fak dispatch tick` passes --view current). GitHub milestones cannot carry a label, so 'current' is marked TWO ways: (1) slap the `current` label on specific issues (fine-grained) — they surface here; (2) to make a WHOLE milestone current, edit this query to `is:open milestone:\"<title>\" -label:epic no:assignee`. Empty by default, so the tick fail-softs to the full open backlog until you mark something."
     },
     {
+      "slug": "generation-now",
+      "title": "Generation G0 · Now",
+      "query": "is:open label:generation label:gen/now milestone:\"Generation G0 - Now / Immediate\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee sort:created-asc",
+      "note": "Dispatchable now-horizon leaves bound by both label and milestone. Generation is a product horizon, not priority; see docs/generation.md."
+    },
+    {
+      "slug": "generation-next",
+      "title": "Generation G1 · Next",
+      "query": "is:open label:generation label:gen/next milestone:\"Generation G1 - Next Gen\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee sort:created-asc",
+      "note": "Dispatchable next-horizon leaves bound by both label and milestone. Use for gated foundations that should be runnable soon."
+    },
+    {
+      "slug": "generation-second-next",
+      "title": "Generation G2 · Second Next",
+      "query": "is:open label:generation label:gen/second-next milestone:\"Generation G2 - Second Next Gen\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee sort:created-asc",
+      "note": "Dispatchable second-next leaves bound by both label and milestone. Use for architectural options that need compatibility or simulation evidence before promotion."
+    },
+    {
+      "slug": "generation-future",
+      "title": "Generation G3 · Future",
+      "query": "is:open label:generation label:gen/future milestone:\"Generation G3 - Future\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee sort:created-asc",
+      "note": "Dispatchable future-horizon leaves bound by both label and milestone. Future is a horizon label, not a lower-priority bucket."
+    },
+    {
       "slug": "m1-durable-sessions",
       "title": "M1 · Durable sessions",
       "query": "is:open milestone:\"Durable sessions survive 429s, overload & process death\" -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
