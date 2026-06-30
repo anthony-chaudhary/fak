@@ -1,0 +1,1299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak Policy Editor</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #f1f4f8;
+    --line: #d8dee8;
+    --line-strong: #b8c2d1;
+    --ink: #17202f;
+    --muted: #5c6678;
+    --soft: #7b8493;
+    --blue: #2563eb;
+    --green: #047857;
+    --red: #b91c1c;
+    --amber: #b45309;
+    --violet: #6d28d9;
+    --shadow: 0 20px 55px rgba(31, 41, 55, .10);
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { min-width: 320px; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.45;
+  }
+  button, input, select, textarea { font: inherit; }
+  button {
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
+    color: var(--ink);
+    border-radius: 7px;
+    padding: 8px 11px;
+    cursor: pointer;
+    min-height: 36px;
+  }
+  button:hover { border-color: var(--blue); }
+  button.primary {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+  }
+  button.danger {
+    border-color: #fecaca;
+    color: var(--red);
+    padding: 5px 8px;
+    min-height: 30px;
+  }
+  label { color: var(--muted); font-size: 13px; font-weight: 650; }
+  input, select, textarea {
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fff;
+    color: var(--ink);
+    padding: 8px 10px;
+    min-width: 0;
+  }
+  textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 420px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    tab-size: 2;
+  }
+
+  .shell { max-width: 1480px; margin: 0 auto; padding: 20px; }
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) auto;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  h1 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.35rem); letter-spacing: 0; }
+  .eyebrow {
+    margin: 0 0 3px;
+    color: var(--blue);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .file-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+    padding: 8px 11px;
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .file-button:hover { border-color: var(--blue); }
+  .file-button input { display: none; }
+
+  .status-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 12px;
+    min-width: 0;
+  }
+  .stat b { display: block; font-size: 20px; line-height: 1.05; }
+  .stat span {
+    display: block;
+    margin-top: 4px;
+    color: var(--soft);
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(460px, 1fr) minmax(420px, .82fr);
+    gap: 14px;
+    align-items: start;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding: 13px 15px;
+    background: var(--panel-2);
+  }
+  .panel-head h2 { margin: 0; font-size: 16px; letter-spacing: 0; }
+  .panel-head .hint { color: var(--soft); font-size: 12px; font-family: var(--mono); }
+  .panel-body { padding: 15px; }
+  .section {
+    border-top: 1px solid var(--line);
+    padding-top: 15px;
+    margin-top: 15px;
+  }
+  .section:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .section-title h3 { margin: 0; font-size: 14px; letter-spacing: 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .field { display: grid; gap: 5px; min-width: 0; }
+  .checkline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding-top: 20px;
+  }
+  .checkline input { width: 17px; height: 17px; }
+
+  .addline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-bottom: 9px;
+  }
+  .pillbox { display: flex; flex-wrap: wrap; gap: 7px; min-height: 36px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: #eef2ff;
+    color: #3730a3;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    padding: 5px 8px 5px 10px;
+    max-width: 100%;
+    font-size: 13px;
+  }
+  .pill code {
+    font-family: var(--mono);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .pill button {
+    min-height: 22px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: transparent;
+    border-color: transparent;
+    color: inherit;
+  }
+
+  .rows { display: grid; gap: 8px; }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px;
+    background: #fbfcfe;
+  }
+  .row.arg {
+    grid-template-columns: minmax(100px, 1fr) minmax(90px, .8fr) 130px minmax(120px, 1fr) 150px auto;
+  }
+  .row.source, .row.authorize {
+    grid-template-columns: minmax(140px, 1fr) 160px auto;
+  }
+  .row input, .row select { width: 100%; }
+
+  .side-stack { display: grid; gap: 14px; }
+  .validation {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .validation li {
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+    border-radius: 7px;
+    padding: 8px 10px;
+    color: var(--muted);
+    background: #fff;
+    overflow-wrap: anywhere;
+  }
+  .validation li.ok { border-left-color: var(--green); }
+  .validation li.err { border-left-color: var(--red); color: var(--red); background: #fff7f7; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 3px 9px;
+    min-height: 24px;
+    font-size: 12px;
+    font-weight: 750;
+  }
+  .badge.ok { background: #dcfce7; color: var(--green); }
+  .badge.err { background: #fee2e2; color: var(--red); }
+
+  .preview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 9px;
+  }
+  .lane {
+    min-height: 132px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    background: #fff;
+  }
+  .lane h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .lane .meter {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+    margin-bottom: 9px;
+  }
+  .lane .fill { display: block; height: 100%; width: 0%; transition: width .15s ease; }
+  .lane.allow .fill { background: var(--green); }
+  .lane.deny .fill { background: var(--red); }
+  .lane.default .fill { background: var(--amber); }
+  .lane ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+  .lane li { margin: 4px 0; overflow-wrap: anywhere; }
+
+  .json-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .json-head code {
+    color: var(--soft);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .right-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+  .empty {
+    color: var(--soft);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 0;
+  }
+
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .shell { padding: 12px; }
+    .topbar { grid-template-columns: 1fr; }
+    .actions { justify-content: flex-start; }
+    .status-strip { grid-template-columns: 1fr; }
+    .grid-3, .grid-2, .preview { grid-template-columns: 1fr; }
+    .row, .row.arg, .row.source, .row.authorize { grid-template-columns: 1fr; }
+    .checkline { padding-top: 0; }
+  }
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">fak-policy/v1</p>
+      <h1>Policy Editor</h1>
+    </div>
+    <div class="actions">
+      <label class="file-button">Import<input id="import-file" type="file" accept="application/json,.json"></label>
+      <button id="load-json" type="button">Load JSON</button>
+      <button id="copy-json" type="button">Copy JSON</button>
+      <button id="download-json" class="primary" type="button">Download</button>
+    </div>
+  </header>
+
+  <section class="status-strip" aria-label="policy summary">
+    <div class="stat"><b id="stat-allow">0</b><span>allowed tools</span></div>
+    <div class="stat"><b id="stat-prefix">0</b><span>allowed prefixes</span></div>
+    <div class="stat"><b id="stat-deny">0</b><span>explicit denies</span></div>
+    <div class="stat"><b id="stat-arg">0</b><span>argument rules</span></div>
+    <div class="stat"><b id="stat-rate">off</b><span>rate limit</span></div>
+  </section>
+
+  <div class="layout">
+    <section class="panel" aria-label="policy builder">
+      <div class="panel-head">
+        <h2>Builder</h2>
+        <span class="hint">manifest controls</span>
+      </div>
+      <div class="panel-body">
+        <section class="section">
+          <div class="section-title"><h3>Manifest</h3></div>
+          <div class="grid-3">
+            <div class="field">
+              <label for="version">Version</label>
+              <input id="version" data-field="version" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="posture">Posture</label>
+              <select id="posture" data-field="posture">
+                <option value="fail_closed">fail_closed</option>
+                <option value="admit_and_log">admit_and_log</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="secret-posture">Secret posture</label>
+              <select id="secret-posture" data-field="secret_posture">
+                <option value="">default quarantine</option>
+                <option value="quarantine">quarantine</option>
+                <option value="fail_closed">fail_closed</option>
+                <option value="admit_and_log">admit_and_log</option>
+              </select>
+            </div>
+          </div>
+          <label class="checkline" for="lint-writes">
+            <input id="lint-writes" data-field="lint_writes" type="checkbox">
+            <span>lint_writes</span>
+          </label>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><h3>Allowed tools</h3></div>
+          <div class="grid-2">
+            <div>
+              <div class="addline">
+                <input id="allow-input" placeholder="read_customer_record">
+                <button id="add-allow" type="button">Add</button>
+              </div>
+              <div id="allow-list" class="pillbox" aria-label="exact allow list"></div>
+            </div>
+            <div>
+              <div class="addline">
+                <input id="prefix-input" placeholder="read_">
+                <button id="add-prefix" type="button">Add</button>
+              </div>
+              <div id="prefix-list" class="pillbox" aria-label="prefix allow list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h3>Explicit denies</h3>
+            <button id="add-deny" type="button">Add deny</button>
+          </div>
+          <div id="deny-list" class="rows"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h3>Argument rules</h3>
+            <button id="add-arg-rule" type="button">Add rule</button>
+          </div>
+          <div id="arg-rule-list" class="rows"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><h3>Call hygiene</h3></div>
+          <div class="grid-2">
+            <div>
+              <div class="addline">
+                <input id="self-modify-input" placeholder="policy.json">
+                <button id="add-self-modify" type="button">Add</button>
+              </div>
+              <div id="self-modify-list" class="pillbox" aria-label="self modify globs"></div>
+            </div>
+            <div>
+              <div class="addline">
+                <input id="redact-input" placeholder="api_key">
+                <button id="add-redact" type="button">Add</button>
+              </div>
+              <div id="redact-list" class="pillbox" aria-label="redact fields"></div>
+            </div>
+            <div>
+              <div class="addline">
+                <input id="secret-pattern-input" placeholder="ACME-[A-Z0-9]{8}">
+                <button id="add-secret-pattern" type="button">Add</button>
+              </div>
+              <div id="secret-pattern-list" class="pillbox" aria-label="secret patterns"></div>
+            </div>
+            <div>
+              <div class="addline">
+                <input id="egress-input" placeholder="169.254.169.254">
+                <button id="add-egress" type="button">Add</button>
+              </div>
+              <div id="egress-list" class="pillbox" aria-label="egress deny hosts"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title">
+            <h3>IFC sinks and sources</h3>
+          </div>
+          <div class="grid-2">
+            <div>
+              <div class="addline">
+                <input id="safe-sink-input" placeholder="transfer_to_human_agents">
+                <button id="add-safe-sink" type="button">Add</button>
+              </div>
+              <div id="safe-sink-list" class="pillbox" aria-label="safe sinks"></div>
+            </div>
+            <div class="rows">
+              <div class="section-title">
+                <h3>Sources</h3>
+                <button id="add-source" type="button">Add source</button>
+              </div>
+              <div id="source-list" class="rows"></div>
+            </div>
+          </div>
+          <div class="section-title" style="margin-top:12px">
+            <h3>Authorize</h3>
+            <button id="add-authorize" type="button">Add authorization</button>
+          </div>
+          <div id="authorize-list" class="rows"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><h3>Rate limit</h3></div>
+          <div class="grid-3">
+            <label class="checkline" for="rate-enabled">
+              <input id="rate-enabled" type="checkbox">
+              <span>rate_limit</span>
+            </label>
+            <div class="field">
+              <label for="rate-key">Key</label>
+              <select id="rate-key">
+                <option value="trace">trace</option>
+                <option value="tool">tool</option>
+                <option value="global">global</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="rate-retry">retry_after_ms</label>
+              <input id="rate-retry" type="number" min="0" step="1">
+            </div>
+            <div class="field">
+              <label for="rate-calls">max_calls</label>
+              <input id="rate-calls" type="number" min="0" step="1">
+            </div>
+            <div class="field">
+              <label for="rate-cost">max_cost</label>
+              <input id="rate-cost" type="number" min="0" step="1">
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="side-stack">
+      <section class="panel" aria-label="validation">
+        <div class="panel-head">
+          <h2>Validation</h2>
+          <span id="validation-badge" class="badge ok">valid</span>
+        </div>
+        <div class="panel-body">
+          <ul id="validation-list" class="validation"></ul>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="policy preview">
+        <div class="panel-head">
+          <h2>Effect Preview</h2>
+          <span class="hint">name-level floor</span>
+        </div>
+        <div class="panel-body">
+          <div class="preview">
+            <div class="lane allow">
+              <h3>ALLOW</h3>
+              <div class="meter"><span id="allow-meter" class="fill"></span></div>
+              <ul id="allow-preview"></ul>
+            </div>
+            <div class="lane deny">
+              <h3>DENY</h3>
+              <div class="meter"><span id="deny-meter" class="fill"></span></div>
+              <ul id="deny-preview"></ul>
+            </div>
+            <div class="lane default">
+              <h3>DEFAULT</h3>
+              <div class="meter"><span id="default-meter" class="fill"></span></div>
+              <ul id="default-preview"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="json export">
+        <div class="panel-head">
+          <h2>JSON</h2>
+          <span class="hint">fak policy --check FILE</span>
+        </div>
+        <div class="panel-body">
+          <div class="json-head">
+            <code id="json-state">generated manifest</code>
+            <div class="right-actions">
+              <button id="reset-sample" type="button">Sample</button>
+              <button id="empty-policy" type="button">Empty</button>
+            </div>
+          </div>
+          <textarea id="policy-json" spellcheck="false" aria-label="policy JSON"></textarea>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<script type="application/json" id="starter-policy">
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "create_support_ticket",
+    "read_customer_record",
+    "read_corp_kb",
+    "transfer_to_human_agents"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_"
+  ],
+  "deny": {
+    "delete_account": "POLICY_BLOCK",
+    "export_customer_data": "SECRET_EXFIL",
+    "refund_payment": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_agents"
+  ],
+  "sources": {
+    "read_corp_kb": "trusted_local",
+    "read_customer_record": "trusted_local"
+  },
+  "authorize": [
+    {
+      "tool": "transfer_to_human_agents",
+      "sink": "EGRESS"
+    }
+  ],
+  "arg_rules": [
+    {
+      "tool": "create_support_ticket",
+      "arg": "body",
+      "max_bytes": 4000,
+      "reason": "OVERSIZE"
+    }
+  ],
+  "rate_limit": {
+    "max_calls": 50,
+    "key": "trace",
+    "retry_after_ms": 1000
+  }
+}
+</script>
+
+<script>
+(() => {
+  "use strict";
+
+  const REASONS = [
+    "DEFAULT_DENY",
+    "LEASE_HELD",
+    "MALFORMED",
+    "MISROUTE",
+    "OVERSIZE",
+    "POLICY_BLOCK",
+    "RATE_LIMITED",
+    "RESULT_SECRET_DISCOVERED",
+    "SECRET_EXFIL",
+    "SELF_MODIFY",
+    "TRUST_VIOLATION",
+    "UNKNOWN_TOOL",
+    "UNWITNESSED"
+  ];
+  const TOP_FIELDS = new Set([
+    "version", "posture", "allow", "allow_prefix", "deny", "self_modify_globs",
+    "redact_fields", "secret_posture", "secret_patterns", "safe_sinks",
+    "authorize", "sources", "arg_rules", "lint_writes", "rate_limit", "egress"
+  ]);
+  const POSTURES = new Set(["", "fail_closed", "admit_and_log"]);
+  const SECRET_POSTURES = new Set(["", "quarantine", "fail_closed", "admit_and_log"]);
+  const RATE_KEYS = new Set(["", "trace", "tool", "global"]);
+  const SOURCES = ["trusted_local", "untrusted"];
+  const SINKS = ["EGRESS", "EXEC", "DESTRUCTIVE"];
+  const ARG_MATCHERS = ["max_bytes", "deny_regex", "allow_glob"];
+
+  const $ = (id) => document.getElementById(id);
+  const starter = JSON.parse($("starter-policy").textContent);
+  let state = normalize(starter);
+
+  const els = {
+    version: $("version"),
+    posture: $("posture"),
+    secretPosture: $("secret-posture"),
+    lintWrites: $("lint-writes"),
+    policyJSON: $("policy-json"),
+    validationList: $("validation-list"),
+    validationBadge: $("validation-badge")
+  };
+
+  function normalize(raw) {
+    raw = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const deny = raw.deny && typeof raw.deny === "object" && !Array.isArray(raw.deny)
+      ? Object.keys(raw.deny).sort().map((tool) => ({ tool, reason: String(raw.deny[tool] || "POLICY_BLOCK") }))
+      : [];
+    const sources = raw.sources && typeof raw.sources === "object" && !Array.isArray(raw.sources)
+      ? Object.keys(raw.sources).sort().map((tool) => ({ tool, source: String(raw.sources[tool] || "untrusted") }))
+      : [];
+    const rate = raw.rate_limit && typeof raw.rate_limit === "object" && !Array.isArray(raw.rate_limit)
+      ? raw.rate_limit
+      : {};
+    const egressHosts = raw.egress && typeof raw.egress === "object" && Array.isArray(raw.egress.deny_hosts)
+      ? raw.egress.deny_hosts
+      : [];
+
+    return {
+      version: typeof raw.version === "string" && raw.version ? raw.version : "fak-policy/v1",
+      posture: typeof raw.posture === "string" && raw.posture ? raw.posture : "fail_closed",
+      secret_posture: typeof raw.secret_posture === "string" ? raw.secret_posture : "",
+      lint_writes: raw.lint_writes === true,
+      allow: cleanList(raw.allow),
+      allow_prefix: cleanList(raw.allow_prefix),
+      deny,
+      self_modify_globs: cleanList(raw.self_modify_globs),
+      redact_fields: cleanList(raw.redact_fields),
+      secret_patterns: cleanList(raw.secret_patterns),
+      safe_sinks: cleanList(raw.safe_sinks),
+      egress_deny_hosts: cleanList(egressHosts),
+      sources,
+      authorize: Array.isArray(raw.authorize)
+        ? raw.authorize.map((r) => ({
+            tool: typeof r.tool === "string" ? r.tool : "",
+            sink: typeof r.sink === "string" ? r.sink.toUpperCase() : "EGRESS"
+          }))
+        : [],
+      arg_rules: Array.isArray(raw.arg_rules)
+        ? raw.arg_rules.map((r) => ({
+            tool: typeof r.tool === "string" ? r.tool : "",
+            arg: typeof r.arg === "string" ? r.arg : "",
+            matcher: r.allow_glob !== undefined ? "allow_glob" : (r.deny_regex !== undefined ? "deny_regex" : "max_bytes"),
+            value: r.allow_glob !== undefined ? String(r.allow_glob) : (r.deny_regex !== undefined ? String(r.deny_regex) : String(r.max_bytes || "")),
+            reason: typeof r.reason === "string" && r.reason ? r.reason : "POLICY_BLOCK"
+          }))
+        : [],
+      rate_limit: {
+        enabled: !!raw.rate_limit,
+        max_calls: numberText(rate.max_calls),
+        max_cost: numberText(rate.max_cost),
+        key: typeof rate.key === "string" && rate.key ? rate.key : "trace",
+        retry_after_ms: numberText(rate.retry_after_ms)
+      }
+    };
+  }
+
+  function cleanList(value) {
+    if (!Array.isArray(value)) return [];
+    return unique(value.map((v) => String(v).trim()).filter(Boolean));
+  }
+
+  function unique(items) {
+    return Array.from(new Set(items));
+  }
+
+  function splitInput(value) {
+    return unique(String(value || "").split(/[\n,]+/).map((v) => v.trim()).filter(Boolean));
+  }
+
+  function numberText(value) {
+    return value === undefined || value === null || value === "" ? "" : String(value);
+  }
+
+  function positiveIntOrZero(value) {
+    if (value === "" || value === undefined || value === null) return 0;
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 ? n : NaN;
+  }
+
+  function buildManifest() {
+    const out = {};
+    if (state.version) out.version = state.version;
+    if (state.posture && state.posture !== "fail_closed") out.posture = state.posture;
+    setArray(out, "allow", state.allow);
+    setArray(out, "allow_prefix", state.allow_prefix);
+    if (state.deny.length) {
+      out.deny = {};
+      state.deny
+        .filter((r) => r.tool.trim())
+        .sort((a, b) => a.tool.localeCompare(b.tool))
+        .forEach((r) => { out.deny[r.tool.trim()] = r.reason || "POLICY_BLOCK"; });
+    }
+    setArray(out, "self_modify_globs", state.self_modify_globs);
+    setArray(out, "redact_fields", state.redact_fields);
+    if (state.secret_posture) out.secret_posture = state.secret_posture;
+    setArray(out, "secret_patterns", state.secret_patterns);
+    setArray(out, "safe_sinks", state.safe_sinks);
+    if (state.sources.length) {
+      out.sources = {};
+      state.sources
+        .filter((r) => r.tool.trim())
+        .sort((a, b) => a.tool.localeCompare(b.tool))
+        .forEach((r) => { out.sources[r.tool.trim()] = r.source || "untrusted"; });
+    }
+    if (state.authorize.length) {
+      out.authorize = state.authorize
+        .filter((r) => r.tool.trim())
+        .map((r) => ({ tool: r.tool.trim(), sink: (r.sink || "EGRESS").toUpperCase() }));
+    }
+    if (state.arg_rules.length) {
+      out.arg_rules = state.arg_rules
+        .filter((r) => r.tool.trim() || r.arg.trim() || String(r.value).trim())
+        .map((r) => {
+          const rule = { tool: r.tool.trim(), arg: r.arg.trim() };
+          if (r.matcher === "max_bytes") {
+            rule.max_bytes = Number(r.value);
+          } else if (r.matcher === "deny_regex") {
+            rule.deny_regex = String(r.value);
+          } else {
+            rule.allow_glob = String(r.value);
+          }
+          if (r.reason) rule.reason = r.reason;
+          return rule;
+        });
+    }
+    if (state.lint_writes) out.lint_writes = true;
+    if (state.rate_limit.enabled) {
+      const rl = {};
+      const calls = positiveIntOrZero(state.rate_limit.max_calls);
+      const cost = positiveIntOrZero(state.rate_limit.max_cost);
+      const retry = positiveIntOrZero(state.rate_limit.retry_after_ms);
+      if (!Number.isNaN(calls) && calls > 0) rl.max_calls = calls;
+      if (!Number.isNaN(cost) && cost > 0) rl.max_cost = cost;
+      if (state.rate_limit.key) rl.key = state.rate_limit.key;
+      if (!Number.isNaN(retry) && retry > 0) rl.retry_after_ms = retry;
+      out.rate_limit = rl;
+    }
+    if (state.egress_deny_hosts.length) {
+      out.egress = { deny_hosts: state.egress_deny_hosts };
+    }
+    return out;
+  }
+
+  function setArray(out, key, values) {
+    const cleaned = cleanList(values);
+    if (cleaned.length) out[key] = cleaned;
+  }
+
+  function validate(manifest) {
+    const issues = [];
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      return ["manifest must be a JSON object"];
+    }
+    Object.keys(manifest).forEach((key) => {
+      if (!TOP_FIELDS.has(key)) issues.push(`unknown top-level field: ${key}`);
+    });
+    if (manifest.version !== undefined && (typeof manifest.version !== "string" || !manifest.version.startsWith("fak-policy/v1"))) {
+      issues.push("version must be omitted or start with fak-policy/v1");
+    }
+    if (manifest.posture !== undefined && (!POSTURES.has(manifest.posture))) {
+      issues.push("posture must be fail_closed or admit_and_log");
+    }
+    if (manifest.secret_posture !== undefined && (!SECRET_POSTURES.has(manifest.secret_posture))) {
+      issues.push("secret_posture must be quarantine, fail_closed, or admit_and_log");
+    }
+    validateStringArray(issues, manifest, "allow");
+    validateStringArray(issues, manifest, "allow_prefix");
+    validateStringArray(issues, manifest, "self_modify_globs");
+    validateStringArray(issues, manifest, "redact_fields");
+    validateStringArray(issues, manifest, "secret_patterns", true);
+    validateStringArray(issues, manifest, "safe_sinks");
+    validateDeny(issues, manifest.deny);
+    validateSources(issues, manifest.sources);
+    validateAuthorize(issues, manifest.authorize);
+    validateArgRules(issues, manifest.arg_rules);
+    validateRateLimit(issues, manifest.rate_limit);
+    validateEgress(issues, manifest.egress);
+    if (manifest.lint_writes !== undefined && typeof manifest.lint_writes !== "boolean") {
+      issues.push("lint_writes must be boolean");
+    }
+    return issues;
+  }
+
+  function validateStringArray(issues, manifest, key, regexCheck) {
+    if (manifest[key] === undefined) return;
+    if (!Array.isArray(manifest[key]) || manifest[key].some((v) => typeof v !== "string" || !v.trim())) {
+      issues.push(`${key} must be an array of non-empty strings`);
+      return;
+    }
+    if (regexCheck) {
+      manifest[key].forEach((pattern, i) => {
+        try { new RegExp(pattern); } catch (err) { issues.push(`secret_patterns[${i}] is not valid JavaScript regex syntax: ${err.message}`); }
+      });
+    }
+  }
+
+  function validateDeny(issues, deny) {
+    if (deny === undefined) return;
+    if (!deny || typeof deny !== "object" || Array.isArray(deny)) {
+      issues.push("deny must be an object of tool names to reason names");
+      return;
+    }
+    Object.entries(deny).forEach(([tool, reason]) => {
+      if (!tool.trim()) issues.push("deny contains an empty tool name");
+      if (!REASONS.includes(reason)) issues.push(`deny.${tool} uses unknown reason ${reason}`);
+    });
+  }
+
+  function validateSources(issues, sources) {
+    if (sources === undefined) return;
+    if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+      issues.push("sources must be an object of tool names to source classes");
+      return;
+    }
+    Object.entries(sources).forEach(([tool, source]) => {
+      if (!tool.trim()) issues.push("sources contains an empty tool name");
+      if (!SOURCES.includes(source)) issues.push(`sources.${tool} must be trusted_local or untrusted`);
+    });
+  }
+
+  function validateAuthorize(issues, rules) {
+    if (rules === undefined) return;
+    if (!Array.isArray(rules)) {
+      issues.push("authorize must be an array");
+      return;
+    }
+    rules.forEach((rule, i) => {
+      if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
+        issues.push(`authorize[${i}] must be an object`);
+        return;
+      }
+      if (typeof rule.tool !== "string" || !rule.tool.trim()) issues.push(`authorize[${i}].tool is required`);
+      if (!SINKS.includes(String(rule.sink || "").toUpperCase())) issues.push(`authorize[${i}].sink must be EGRESS, EXEC, or DESTRUCTIVE`);
+    });
+  }
+
+  function validateArgRules(issues, rules) {
+    if (rules === undefined) return;
+    if (!Array.isArray(rules)) {
+      issues.push("arg_rules must be an array");
+      return;
+    }
+    rules.forEach((rule, i) => {
+      if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
+        issues.push(`arg_rules[${i}] must be an object`);
+        return;
+      }
+      if (typeof rule.tool !== "string" || !rule.tool.trim()) issues.push(`arg_rules[${i}].tool is required`);
+      if (typeof rule.arg !== "string" || !rule.arg.trim()) issues.push(`arg_rules[${i}].arg is required`);
+      const count = ["allow_glob", "deny_regex", "max_bytes"].filter((key) => rule[key] !== undefined && rule[key] !== "" && rule[key] !== 0).length;
+      if (count !== 1) issues.push(`arg_rules[${i}] must set exactly one matcher`);
+      if (rule.max_bytes !== undefined && (!Number.isInteger(Number(rule.max_bytes)) || Number(rule.max_bytes) <= 0)) {
+        issues.push(`arg_rules[${i}].max_bytes must be a positive integer`);
+      }
+      if (rule.deny_regex !== undefined) {
+        try { new RegExp(String(rule.deny_regex)); } catch (err) { issues.push(`arg_rules[${i}].deny_regex is not valid JavaScript regex syntax: ${err.message}`); }
+      }
+      if (rule.reason !== undefined && rule.reason !== "" && !REASONS.includes(rule.reason)) {
+        issues.push(`arg_rules[${i}].reason uses unknown reason ${rule.reason}`);
+      }
+    });
+  }
+
+  function validateRateLimit(issues, rate) {
+    if (rate === undefined) return;
+    if (!rate || typeof rate !== "object" || Array.isArray(rate)) {
+      issues.push("rate_limit must be an object");
+      return;
+    }
+    const calls = rate.max_calls === undefined ? 0 : Number(rate.max_calls);
+    const cost = rate.max_cost === undefined ? 0 : Number(rate.max_cost);
+    const retry = rate.retry_after_ms === undefined ? 0 : Number(rate.retry_after_ms);
+    if (!Number.isInteger(calls) || calls < 0) issues.push("rate_limit.max_calls must be a non-negative integer");
+    if (!Number.isInteger(cost) || cost < 0) issues.push("rate_limit.max_cost must be a non-negative integer");
+    if (!Number.isInteger(retry) || retry < 0) issues.push("rate_limit.retry_after_ms must be a non-negative integer");
+    if (calls === 0 && cost === 0) issues.push("rate_limit must declare max_calls or max_cost");
+    if (rate.key !== undefined && !RATE_KEYS.has(rate.key)) issues.push("rate_limit.key must be trace, tool, or global");
+  }
+
+  function validateEgress(issues, egress) {
+    if (egress === undefined) return;
+    if (!egress || typeof egress !== "object" || Array.isArray(egress)) {
+      issues.push("egress must be an object");
+      return;
+    }
+    Object.keys(egress).forEach((key) => {
+      if (key !== "deny_hosts") issues.push(`unknown egress field: ${key}`);
+    });
+    if (egress.deny_hosts !== undefined && (!Array.isArray(egress.deny_hosts) || egress.deny_hosts.some((v) => typeof v !== "string" || !v.trim()))) {
+      issues.push("egress.deny_hosts must be an array of non-empty strings");
+    }
+  }
+
+  function render() {
+    els.version.value = state.version;
+    els.posture.value = state.posture;
+    els.secretPosture.value = state.secret_posture;
+    els.lintWrites.checked = state.lint_writes;
+    $("rate-enabled").checked = state.rate_limit.enabled;
+    $("rate-key").value = state.rate_limit.key || "trace";
+    $("rate-calls").value = state.rate_limit.max_calls;
+    $("rate-cost").value = state.rate_limit.max_cost;
+    $("rate-retry").value = state.rate_limit.retry_after_ms;
+
+    renderPills("allow", "allow-list");
+    renderPills("allow_prefix", "prefix-list");
+    renderPills("self_modify_globs", "self-modify-list");
+    renderPills("redact_fields", "redact-list");
+    renderPills("secret_patterns", "secret-pattern-list");
+    renderPills("egress_deny_hosts", "egress-list");
+    renderPills("safe_sinks", "safe-sink-list");
+    renderDenyRows();
+    renderArgRows();
+    renderSourceRows();
+    renderAuthorizeRows();
+    sync();
+  }
+
+  function renderPills(field, targetID) {
+    const target = $(targetID);
+    target.textContent = "";
+    if (!state[field].length) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "empty";
+      target.appendChild(empty);
+      return;
+    }
+    state[field].forEach((value, index) => {
+      const pill = document.createElement("span");
+      pill.className = "pill";
+      pill.innerHTML = `<code></code><button type="button" data-remove-list="${field}" data-index="${index}" aria-label="remove">x</button>`;
+      pill.querySelector("code").textContent = value;
+      target.appendChild(pill);
+    });
+  }
+
+  function optionHTML(options, selected) {
+    return options.map((opt) => `<option value="${escapeAttr(opt)}"${opt === selected ? " selected" : ""}>${escapeHTML(opt)}</option>`).join("");
+  }
+
+  function renderDenyRows() {
+    const target = $("deny-list");
+    target.textContent = "";
+    if (!state.deny.length) return target.appendChild(emptyNode("no explicit denies"));
+    state.deny.forEach((row, i) => {
+      const el = document.createElement("div");
+      el.className = "row";
+      el.innerHTML = `
+        <input aria-label="deny tool" data-deny-index="${i}" data-key="tool" value="${escapeAttr(row.tool)}" placeholder="delete_account">
+        <select aria-label="deny reason" data-deny-index="${i}" data-key="reason">${optionHTML(REASONS, row.reason)}</select>
+        <button class="danger" type="button" data-remove-deny="${i}">Remove</button>`;
+      target.appendChild(el);
+    });
+  }
+
+  function renderArgRows() {
+    const target = $("arg-rule-list");
+    target.textContent = "";
+    if (!state.arg_rules.length) return target.appendChild(emptyNode("no argument rules"));
+    state.arg_rules.forEach((row, i) => {
+      const el = document.createElement("div");
+      el.className = "row arg";
+      el.innerHTML = `
+        <input aria-label="arg rule tool" data-arg-index="${i}" data-key="tool" value="${escapeAttr(row.tool)}" placeholder="create_ticket">
+        <input aria-label="arg name" data-arg-index="${i}" data-key="arg" value="${escapeAttr(row.arg)}" placeholder="body">
+        <select aria-label="matcher" data-arg-index="${i}" data-key="matcher">${optionHTML(ARG_MATCHERS, row.matcher)}</select>
+        <input aria-label="matcher value" data-arg-index="${i}" data-key="value" value="${escapeAttr(row.value)}" placeholder="4000">
+        <select aria-label="arg reason" data-arg-index="${i}" data-key="reason">${optionHTML(REASONS, row.reason)}</select>
+        <button class="danger" type="button" data-remove-arg="${i}">Remove</button>`;
+      target.appendChild(el);
+    });
+  }
+
+  function renderSourceRows() {
+    const target = $("source-list");
+    target.textContent = "";
+    if (!state.sources.length) return target.appendChild(emptyNode("no source overrides"));
+    state.sources.forEach((row, i) => {
+      const el = document.createElement("div");
+      el.className = "row source";
+      el.innerHTML = `
+        <input aria-label="source tool" data-source-index="${i}" data-key="tool" value="${escapeAttr(row.tool)}" placeholder="read_corp_kb">
+        <select aria-label="source class" data-source-index="${i}" data-key="source">${optionHTML(SOURCES, row.source)}</select>
+        <button class="danger" type="button" data-remove-source="${i}">Remove</button>`;
+      target.appendChild(el);
+    });
+  }
+
+  function renderAuthorizeRows() {
+    const target = $("authorize-list");
+    target.textContent = "";
+    if (!state.authorize.length) return target.appendChild(emptyNode("no sink authorizations"));
+    state.authorize.forEach((row, i) => {
+      const el = document.createElement("div");
+      el.className = "row authorize";
+      el.innerHTML = `
+        <input aria-label="authorized tool" data-authorize-index="${i}" data-key="tool" value="${escapeAttr(row.tool)}" placeholder="send_email">
+        <select aria-label="authorized sink" data-authorize-index="${i}" data-key="sink">${optionHTML(SINKS, row.sink)}</select>
+        <button class="danger" type="button" data-remove-authorize="${i}">Remove</button>`;
+      target.appendChild(el);
+    });
+  }
+
+  function emptyNode(text) {
+    const el = document.createElement("div");
+    el.className = "empty";
+    el.textContent = text;
+    return el;
+  }
+
+  function sync() {
+    const manifest = buildManifest();
+    const issues = validate(manifest);
+    els.policyJSON.value = JSON.stringify(manifest, null, 2) + "\n";
+    updateValidation(issues);
+    updateStats(manifest, issues);
+    updatePreview(manifest);
+  }
+
+  function updateValidation(issues) {
+    els.validationList.textContent = "";
+    els.validationBadge.className = `badge ${issues.length ? "err" : "ok"}`;
+    els.validationBadge.textContent = issues.length ? `${issues.length} issue${issues.length === 1 ? "" : "s"}` : "valid";
+    if (!issues.length) {
+      const li = document.createElement("li");
+      li.className = "ok";
+      li.textContent = "Manifest is ready for fak policy --check.";
+      els.validationList.appendChild(li);
+      return;
+    }
+    issues.forEach((issue) => {
+      const li = document.createElement("li");
+      li.className = "err";
+      li.textContent = issue;
+      els.validationList.appendChild(li);
+    });
+  }
+
+  function updateStats(manifest, issues) {
+    $("stat-allow").textContent = (manifest.allow || []).length;
+    $("stat-prefix").textContent = (manifest.allow_prefix || []).length;
+    $("stat-deny").textContent = manifest.deny ? Object.keys(manifest.deny).length : 0;
+    $("stat-arg").textContent = (manifest.arg_rules || []).length;
+    $("stat-rate").textContent = manifest.rate_limit ? "on" : "off";
+    $("json-state").textContent = issues.length ? "generated manifest has issues" : "generated manifest";
+  }
+
+  function updatePreview(manifest) {
+    const allowItems = []
+      .concat((manifest.allow || []).map((v) => `tool ${v}`))
+      .concat((manifest.allow_prefix || []).map((v) => `prefix ${v}*`));
+    const denyItems = manifest.deny ? Object.entries(manifest.deny).map(([tool, reason]) => `${tool} -> ${reason}`) : [];
+    const defaultItems = manifest.posture === "admit_and_log"
+      ? ["read-shaped misses admit and log", "write-shaped misses deny"]
+      : ["unlisted calls deny", "reason DEFAULT_DENY"];
+    fillList("allow-preview", allowItems);
+    fillList("deny-preview", denyItems);
+    fillList("default-preview", defaultItems);
+    const total = Math.max(1, allowItems.length + denyItems.length + defaultItems.length);
+    $("allow-meter").style.width = `${Math.max(7, allowItems.length / total * 100)}%`;
+    $("deny-meter").style.width = `${Math.max(7, denyItems.length / total * 100)}%`;
+    $("default-meter").style.width = `${Math.max(7, defaultItems.length / total * 100)}%`;
+  }
+
+  function fillList(id, values) {
+    const target = $(id);
+    target.textContent = "";
+    (values.length ? values.slice(0, 5) : ["empty"]).forEach((value) => {
+      const li = document.createElement("li");
+      li.textContent = value;
+      target.appendChild(li);
+    });
+  }
+
+  function applyTextarea() {
+    let parsed;
+    try {
+      parsed = JSON.parse(els.policyJSON.value);
+    } catch (err) {
+      updateValidation([`JSON parse error: ${err.message}`]);
+      return;
+    }
+    const issues = validate(parsed);
+    if (issues.length) {
+      updateValidation(issues);
+      return;
+    }
+    state = normalize(parsed);
+    render();
+  }
+
+  function validateTextareaOnly() {
+    let parsed;
+    try {
+      parsed = JSON.parse(els.policyJSON.value);
+    } catch (err) {
+      updateValidation([`JSON parse error: ${err.message}`]);
+      $("json-state").textContent = "edited JSON has issues";
+      return;
+    }
+    const issues = validate(parsed);
+    updateValidation(issues);
+    $("json-state").textContent = issues.length ? "edited JSON has issues" : "edited JSON is valid";
+  }
+
+  function addList(field, inputID) {
+    const input = $(inputID);
+    state[field] = unique(state[field].concat(splitInput(input.value)));
+    input.value = "";
+    render();
+  }
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  }
+
+  function escapeAttr(value) {
+    return escapeHTML(value).replace(/`/g, "&#96;");
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const id = button.id;
+    if (id === "add-allow") addList("allow", "allow-input");
+    if (id === "add-prefix") addList("allow_prefix", "prefix-input");
+    if (id === "add-self-modify") addList("self_modify_globs", "self-modify-input");
+    if (id === "add-redact") addList("redact_fields", "redact-input");
+    if (id === "add-secret-pattern") addList("secret_patterns", "secret-pattern-input");
+    if (id === "add-egress") addList("egress_deny_hosts", "egress-input");
+    if (id === "add-safe-sink") addList("safe_sinks", "safe-sink-input");
+    if (id === "add-deny") { state.deny.push({ tool: "", reason: "POLICY_BLOCK" }); render(); }
+    if (id === "add-arg-rule") { state.arg_rules.push({ tool: "", arg: "", matcher: "max_bytes", value: "", reason: "POLICY_BLOCK" }); render(); }
+    if (id === "add-source") { state.sources.push({ tool: "", source: "trusted_local" }); render(); }
+    if (id === "add-authorize") { state.authorize.push({ tool: "", sink: "EGRESS" }); render(); }
+    if (id === "load-json") applyTextarea();
+    if (id === "reset-sample") { state = normalize(starter); render(); }
+    if (id === "empty-policy") { state = normalize({ version: "fak-policy/v1" }); render(); }
+    if (id === "copy-json") navigator.clipboard && navigator.clipboard.writeText(els.policyJSON.value);
+    if (id === "download-json") {
+      const blob = new Blob([els.policyJSON.value], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "fak-policy.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    if (button.dataset.removeList) {
+      state[button.dataset.removeList].splice(Number(button.dataset.index), 1);
+      render();
+    }
+    if (button.dataset.removeDeny !== undefined) { state.deny.splice(Number(button.dataset.removeDeny), 1); render(); }
+    if (button.dataset.removeArg !== undefined) { state.arg_rules.splice(Number(button.dataset.removeArg), 1); render(); }
+    if (button.dataset.removeSource !== undefined) { state.sources.splice(Number(button.dataset.removeSource), 1); render(); }
+    if (button.dataset.removeAuthorize !== undefined) { state.authorize.splice(Number(button.dataset.removeAuthorize), 1); render(); }
+  });
+
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target === els.policyJSON) return validateTextareaOnly();
+    if (target.dataset.field === "version") state.version = target.value.trim();
+    if (target.dataset.field === "lint_writes") state.lint_writes = target.checked;
+    if (target.dataset.denyIndex !== undefined) state.deny[Number(target.dataset.denyIndex)][target.dataset.key] = target.value;
+    if (target.dataset.argIndex !== undefined) state.arg_rules[Number(target.dataset.argIndex)][target.dataset.key] = target.value;
+    if (target.dataset.sourceIndex !== undefined) state.sources[Number(target.dataset.sourceIndex)][target.dataset.key] = target.value;
+    if (target.dataset.authorizeIndex !== undefined) state.authorize[Number(target.dataset.authorizeIndex)][target.dataset.key] = target.value;
+    if (target.id === "rate-enabled") state.rate_limit.enabled = target.checked;
+    if (target.id === "rate-key") state.rate_limit.key = target.value;
+    if (target.id === "rate-calls") state.rate_limit.max_calls = target.value;
+    if (target.id === "rate-cost") state.rate_limit.max_cost = target.value;
+    if (target.id === "rate-retry") state.rate_limit.retry_after_ms = target.value;
+    sync();
+  });
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target.dataset.field === "posture") state.posture = target.value;
+    if (target.dataset.field === "secret_posture") state.secret_posture = target.value;
+    if (target.dataset.denyIndex !== undefined) state.deny[Number(target.dataset.denyIndex)][target.dataset.key] = target.value;
+    if (target.dataset.argIndex !== undefined) state.arg_rules[Number(target.dataset.argIndex)][target.dataset.key] = target.value;
+    if (target.dataset.sourceIndex !== undefined) state.sources[Number(target.dataset.sourceIndex)][target.dataset.key] = target.value;
+    if (target.dataset.authorizeIndex !== undefined) state.authorize[Number(target.dataset.authorizeIndex)][target.dataset.key] = target.value;
+    if (target.id === "rate-key") state.rate_limit.key = target.value;
+    sync();
+  });
+
+  $("import-file").addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    els.policyJSON.value = await file.text();
+    applyTextarea();
+    event.target.value = "";
+  });
+
+  ["allow-input", "prefix-input", "self-modify-input", "redact-input", "secret-pattern-input", "egress-input", "safe-sink-input"].forEach((id) => {
+    $(id).addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const map = {
+        "allow-input": ["allow", id],
+        "prefix-input": ["allow_prefix", id],
+        "self-modify-input": ["self_modify_globs", id],
+        "redact-input": ["redact_fields", id],
+        "secret-pattern-input": ["secret_patterns", id],
+        "egress-input": ["egress_deny_hosts", id],
+        "safe-sink-input": ["safe_sinks", id]
+      };
+      addList(map[id][0], map[id][1]);
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
