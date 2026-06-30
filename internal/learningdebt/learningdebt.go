@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -20,6 +22,8 @@ const (
 	SeenSchema      = "fak.learning-debt-dispatch.seen.v1"
 	DefaultCacheRel = ".fak/learning-debt-dispatch/seen.json"
 )
+
+var defaultTriageLabels = []string{"needs-triage", "triage-only"}
 
 var markerRE = regexp.MustCompile(`<!--\s*fak-learning-debt-key:\s*([^>\s]+)\s*-->`)
 
@@ -281,6 +285,7 @@ func IssueBody(d Defect, scorecardPath string) string {
 	fmt.Fprintf(&b, "- Source: `%s`\n", d.Source)
 	fmt.Fprintf(&b, "- Doc/topic: `%s`\n", d.Doc)
 	fmt.Fprintf(&b, "- Defect class: `%s`\n", d.Class)
+	b.WriteString("- dispatchability: `triage_only`\n")
 	if d.Score != "" {
 		fmt.Fprintf(&b, "- Doc score: `%s`\n", d.Score)
 	}
@@ -313,7 +318,7 @@ func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow
 	rows := make([]SyncRow, 0, len(plan))
 	for _, row := range plan {
 		args := []string{"issue", "create", "--title", row.Title, "--body", row.Body}
-		for _, label := range labels {
+		for _, label := range mergeLabels(defaultTriageLabels, labels) {
 			if strings.TrimSpace(label) != "" {
 				args = append(args, "--label", label)
 			}
@@ -330,6 +335,22 @@ func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow
 		})
 	}
 	return rows
+}
+
+func mergeLabels(base, extra []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(base)+len(extra))
+	for _, group := range [][]string{base, extra} {
+		for _, label := range group {
+			label = strings.TrimSpace(label)
+			if label == "" || seen[label] {
+				continue
+			}
+			seen[label] = true
+			out = append(out, label)
+		}
+	}
+	return out
 }
 
 func MarkSuccessful(cache *SeenCache, plan []PlanRow, synced []SyncRow, now time.Time) {
@@ -406,6 +427,7 @@ func Render(r Result) string {
 
 func defaultRunner(args []string) (string, string, bool) {
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

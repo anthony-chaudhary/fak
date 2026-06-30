@@ -136,6 +136,7 @@ func TestIssueBodyCitesExactDocClassAndDefect(t *testing.T) {
 	for _, want := range []string{
 		"Doc/topic: `docs/fak/tutorial.md`",
 		"Defect class: `orientation`",
+		"dispatchability: `triage_only`",
 		"orientation: no orientation signpost",
 		"<!-- fak-learning-debt-key: " + defect.Key + " -->",
 	} {
@@ -169,7 +170,7 @@ func TestSyncUsesInjectedRunner(t *testing.T) {
 		t.Fatalf("sync rows = %+v, want one ok", rows)
 	}
 	joined := strings.Join(calls[0], " ")
-	for _, want := range []string{"issue create", "--repo owner/repo", "--label learning-debt", plan[0].Title} {
+	for _, want := range []string{"issue create", "--repo owner/repo", "--label needs-triage", "--label triage-only", "--label learning-debt", plan[0].Title} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("gh args missing %q: %v", want, calls[0])
 		}
