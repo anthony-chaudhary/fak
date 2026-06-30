@@ -35,6 +35,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -173,6 +175,7 @@ type commit struct {
 func gitCommits(root string, window int) []commit {
 	cmd := exec.Command("git", "-C", root, "log",
 		"--format=%s%x1f%b%x1e", "-n", strconv.Itoa(window))
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
