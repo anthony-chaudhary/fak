@@ -16,11 +16,11 @@ import (
 // hardwareTreeTells are prose lines that still carry a private hardware name — residualHardwareDocHits
 // (the --check detector) MUST flag each. Drawn from scrub_hardware_names_test.py.
 var hardwareTreeTells = []string{
-	"ran on the DGX box",               // bare uppercase DGX
-	"ran on the SXM4 board",            // bare SXM4 SKU
-	"we ran the eval on dgx3 today",    // digit-suffixed dgxN node label
-	"we ran the eval on da33 today",    // da33 CPU host
-	"perf: DGX A100 serve 466 tok/s",   // DGX phrase
+	"ran on the DGX box",             // bare uppercase DGX
+	"ran on the SXM4 board",          // bare SXM4 SKU
+	"we ran the eval on dgx3 today",  // digit-suffixed dgxN node label
+	"we ran the eval on da33 today",  // da33 CPU host
+	"perf: DGX A100 serve 466 tok/s", // DGX phrase
 }
 
 // hardwareTreeClean are identifier / fenced / code-span / FQDN forms residual_hits exempts — the
@@ -28,10 +28,10 @@ var hardwareTreeTells = []string{
 // must-not-flag vectors.
 var hardwareTreeClean = []string{
 	"| col | dgx3-control | col |",          // channel name (hyphen boundary)
-	"host dgx1.example.lab",                  // FQDN shortname
+	"host dgx1.example.lab",                 // FQDN shortname
 	"schema dgx3-node-state.v1",             // schema id
-	"the da33-control channel",               // da33 channel name
-	"host da33.example.lab",                  // da33 FQDN
+	"the da33-control channel",              // da33 channel name
+	"host da33.example.lab",                 // da33 FQDN
 	"use `dgxbridge` here",                  // code span identifier
 	"datacenter server (`dgx3`) is the box", // dgx3 masked inside a code span
 	"the FAK_DGX_REQ_ marker",               // underscore identifier
@@ -73,10 +73,10 @@ func TestHardwareTell_FencedBlockExempt(t *testing.T) {
 func TestHardwareTell_GeneratedDocsExcluded(t *testing.T) {
 	dir := t.TempDir()
 	tell := "ran on the DGX box\n"
-	writeFile(t, dir, "docs/bench-plan.md", tell)               // GENERATED_DOCS — skipped
-	writeFile(t, dir, "docs/industry-scorecard/x.md", tell)     // GENERATED_DIR_PREFIX — skipped
-	writeFile(t, dir, "notes.txt", tell)                        // not .md — skipped
-	writeFile(t, dir, "docs/notes/real.md", tell)               // normal doc — flagged
+	writeFile(t, dir, "docs/bench-plan.md", tell)           // GENERATED_DOCS — skipped
+	writeFile(t, dir, "docs/industry-scorecard/x.md", tell) // GENERATED_DIR_PREFIX — skipped
+	writeFile(t, dir, "notes.txt", tell)                    // not .md — skipped
+	writeFile(t, dir, "docs/notes/real.md", tell)           // normal doc — flagged
 	tree := &TrackedTree{
 		Root: dir,
 		Paths: []string{
