@@ -778,16 +778,21 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 			status = "active"
 		}
 		login := string(h.LoginStatus())
+		ident := h.Identity.Email
+		exists := h.Identity.Exists
+		hasCreds := h.Identity.HasCreds
 		if obs, ok := obsByName[h.Name]; ok {
 			login = string(obs.Status)
+			ident = obs.Email
+			exists = obs.Exists
+			hasCreds = obs.HasCreds
 		}
-		ident := h.Identity.Email
 		if ident == "" {
 			ident = "-"
 		}
 		creds := "-"
-		if h.Identity.Exists {
-			if h.Identity.HasCreds {
+		if exists {
+			if hasCreds {
 				creds = "yes"
 			} else {
 				creds = "NO"

@@ -149,6 +149,11 @@ func usageCoreVerbs() {
   fak api-host  readiness|acceptance
                 (native no-spend API-host bridge probes: /models readiness and typed
                  acceptance classification over target specs or an api-host roster)
+  fak llmd-smoke --base-url URL [--model M] [--api-key-env VAR] [--metrics-url URL]
+                 [--timeout 15s] [--json]
+                (LLM-D SMOKE WITNESS: probe an llm-d Gateway API OpenAI-compatible
+                 route through /v1/models plus streamed /v1/chat/completions, and
+                 optionally normalize its vLLM-style metrics under engine=llm-d)
   fak session-audit discover|audit|deep
                 (native transcript audit: discover Claude Code JSONL sessions,
                  fold exact token/cache/tool/cost observability, and render markdown/JSON)

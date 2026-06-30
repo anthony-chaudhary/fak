@@ -246,6 +246,8 @@ func main() {
 		cmdModelLs(os.Args[2:])
 	case "route":
 		cmdRoute(os.Args[2:])
+	case "llmd-smoke", "llm-d-smoke":
+		cmdLLMDSmoke(os.Args[2:])
 	case "routebench":
 		cmdRoutebench(os.Args[2:])
 	case "accounts":

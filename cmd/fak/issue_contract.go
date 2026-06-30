@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
@@ -37,7 +38,19 @@ type issueContractResult struct {
 	Mode    string                 `json:"mode"`
 	File    string                 `json:"file"`
 	OK      bool                   `json:"ok"`
+	Counts  issueContractCounts    `json:"counts"`
 	Reviews []issuecontract.Review `json:"reviews"`
+}
+
+type issueContractCounts struct {
+	Total               int            `json:"total"`
+	Dispatchable        int            `json:"dispatchable"`
+	TriageOnly          int            `json:"triage_only"`
+	Refused             int            `json:"refused"`
+	AgentContextAvg     int            `json:"agent_context_avg"`
+	AgentContextFull    int            `json:"agent_context_full"`
+	AgentContextMissing int            `json:"agent_context_missing"`
+	ByReason            map[string]int `json:"by_reason"`
 }
 
 func runIssueContract(stdout, stderr io.Writer, argv []string) int {
@@ -124,6 +137,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 			result.Reviews = append(result.Reviews, review)
 		}
 	}
+	result.Counts = summarizeIssueContractReviews(result.Reviews)
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, result); err != nil {
@@ -137,6 +151,37 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		return 3
 	}
 	return 0
+}
+
+func summarizeIssueContractReviews(reviews []issuecontract.Review) issueContractCounts {
+	counts := issueContractCounts{
+		Total:    len(reviews),
+		ByReason: map[string]int{},
+	}
+	agentContextSum := 0
+	for _, review := range reviews {
+		switch review.Dispatchability {
+		case issuecontract.Dispatchable:
+			counts.Dispatchable++
+		case issuecontract.TriageOnly:
+			counts.TriageOnly++
+		case issuecontract.Refused:
+			counts.Refused++
+		}
+		if review.AgentContext.Total >= 100 {
+			counts.AgentContextFull++
+		} else {
+			counts.AgentContextMissing++
+		}
+		agentContextSum += review.AgentContext.Total
+		for _, reason := range review.Reasons {
+			counts.ByReason[reason]++
+		}
+	}
+	if len(reviews) > 0 {
+		counts.AgentContextAvg = (agentContextSum + len(reviews)/2) / len(reviews)
+	}
+	return counts
 }
 
 func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
@@ -212,6 +257,12 @@ func renderIssueContract(r issueContractResult) string {
 	lines := []string{
 		fmt.Sprintf("issue-contract: %s  ok=%t  candidate_count=%d", r.Mode, r.OK, len(r.Reviews)),
 		fmt.Sprintf("  file: %s", r.File),
+		fmt.Sprintf("  counts: dispatchable=%d triage_only=%d refused=%d agent_context_avg=%d full=%d missing=%d",
+			r.Counts.Dispatchable, r.Counts.TriageOnly, r.Counts.Refused,
+			r.Counts.AgentContextAvg, r.Counts.AgentContextFull, r.Counts.AgentContextMissing),
+	}
+	if len(r.Counts.ByReason) > 0 {
+		lines = append(lines, "  reasons: "+renderIssueContractReasonCounts(r.Counts.ByReason))
 	}
 	for _, review := range r.Reviews {
 		key := review.Key
@@ -228,6 +279,19 @@ func renderIssueContract(r issueContractResult) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderIssueContractReasonCounts(counts map[string]int) string {
+	reasons := make([]string, 0, len(counts))
+	for reason := range counts {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	parts := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		parts = append(parts, fmt.Sprintf("%s=%d", reason, counts[reason]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func issueUsage(w io.Writer) {

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -85,7 +87,7 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	payload := buildWindowgatePayload(root, rep, *failCandidates)
 	if *liveTasks {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		live, err := windowgate.ScanLiveScheduledTasks(ctx)
+		live, err := scanLiveScheduledTasks(ctx)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "fak windowgate: live tasks: %v\n", err)
@@ -95,7 +97,7 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *visibleWindows {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		visible, err := windowgate.ScanVisibleWindows(ctx)
+		visible, err := scanVisibleWindows(ctx)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "fak windowgate: visible windows: %v\n", err)
@@ -115,6 +117,67 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func scanLiveScheduledTasks(ctx context.Context) (windowgate.LiveTaskReport, error) {
+	if runtime.GOOS != "windows" {
+		return windowgate.LiveTaskReport{}, nil
+	}
+	const ps = `$ErrorActionPreference='SilentlyContinue'
+Get-ScheduledTask | ForEach-Object {
+  $task = $_
+  foreach ($action in $task.Actions) {
+    [pscustomobject]@{
+      task_path = "$($task.TaskPath)"
+      task_name = "$($task.TaskName)"
+      state = "$($task.State)"
+      logon_type = "$($task.Principal.LogonType)"
+      user = "$($task.Principal.UserId)"
+      execute = "$($action.Execute)"
+      arguments = "$($action.Arguments)"
+    }
+  }
+} | ConvertTo-Json -Depth 4`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return windowgate.LiveTaskReport{}, fmt.Errorf("read scheduled tasks: %w", err)
+	}
+	tasks, err := windowgate.ParseLiveScheduledTasks(out)
+	if err != nil {
+		return windowgate.LiveTaskReport{}, err
+	}
+	return windowgate.ClassifyLiveScheduledTasks(tasks), nil
+}
+
+func scanVisibleWindows(ctx context.Context) (windowgate.VisibleWindowReport, error) {
+	if runtime.GOOS != "windows" {
+		return windowgate.VisibleWindowReport{}, nil
+	}
+	const ps = `$ErrorActionPreference='SilentlyContinue'
+$cmds = @{}
+Get-CimInstance Win32_Process | ForEach-Object { $cmds[[int]$_.ProcessId] = "$($_.CommandLine)" }
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) } | ForEach-Object {
+  [pscustomobject]@{
+    pid = [int]$_.Id
+    name = "$($_.ProcessName)"
+    title = "$($_.MainWindowTitle)"
+    path = "$($_.Path)"
+    command_line = "$($cmds[[int]$_.Id])"
+  }
+} | ConvertTo-Json -Depth 4`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return windowgate.VisibleWindowReport{}, fmt.Errorf("read visible windows: %w", err)
+	}
+	windows, err := windowgate.ParseVisibleWindows(out)
+	if err != nil {
+		return windowgate.VisibleWindowReport{}, err
+	}
+	return windowgate.ClassifyVisibleWindows(windows), nil
 }
 
 func buildWindowgatePayload(root string, rep windowgate.Report, failCandidates bool) windowgatePayload {
