@@ -236,6 +236,25 @@ func TestExcludeReasonUsesNote(t *testing.T) {
 	}
 }
 
+func TestPolicyExcludeMatchesClaudeLoginEmail(t *testing.T) {
+	home, cfg, _ := fixture(t)
+	pol := DefaultPolicy()
+	pol.Exclude = append(pol.Exclude, "default@example.com")
+	pol.Notes["default@example.com"] = "retired login identity"
+
+	rows := Discover(home, cfg, pol)
+	def := find(rows, ".claude")
+	if def == nil {
+		t.Fatal("default account not discovered")
+	}
+	if def.Kind != KindExcluded {
+		t.Fatalf("default kind = %q want %q", def.Kind, KindExcluded)
+	}
+	if def.Reason != "retired login identity" {
+		t.Errorf("default reason = %q", def.Reason)
+	}
+}
+
 // TestJSONShapeMatchesPythonContract proves the marshaled worker/non-worker row carries
 // EXACTLY the Python keys in the Python order (captured from fleet_accounts.py json).
 func TestJSONShapeMatchesPythonContract(t *testing.T) {

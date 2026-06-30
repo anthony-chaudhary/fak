@@ -127,15 +127,17 @@ func AccountTag(account string) string {
 }
 
 // excludedMatch returns the matching exclude substring (for the reason text), or "".
-func excludedMatch(tag, account string, exclude []string) string {
-	tl, al := strings.ToLower(tag), strings.ToLower(account)
+func excludedMatch(tag, account string, exclude []string, identityValues ...string) string {
+	haystacks := append([]string{tag, account}, identityValues...)
 	for _, sub := range exclude {
 		if sub == "" {
 			continue
 		}
 		sl := strings.ToLower(sub)
-		if strings.Contains(tl, sl) || strings.Contains(al, sl) {
-			return sub
+		for _, value := range haystacks {
+			if value != "" && strings.Contains(strings.ToLower(value), sl) {
+				return sub
+			}
 		}
 	}
 	return ""

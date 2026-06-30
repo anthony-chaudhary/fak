@@ -139,10 +139,16 @@ func classifyRow(acctDir, product, account string, pol Policy) Account {
 		base.Reason = "tombstoned (.DELETED marker)"
 		return base
 	}
-	if hit := excludedMatch(tag, account, pol.Exclude); hit != "" {
+	id := Identity{}
+	if product == "claude" {
+		id = ReadAccountIdentity(acctDir)
+	}
+	if hit := excludedMatch(tag, account, pol.Exclude, id.LoginEmail); hit != "" {
 		base.Kind = KindExcluded
 		if note != "" {
 			base.Reason = note
+		} else if hitNote := pol.Notes[hit]; hitNote != "" {
+			base.Reason = hitNote
 		} else {
 			base.Reason = "excluded by policy (matches '" + hit + "')"
 		}
@@ -184,7 +190,6 @@ func classifyRow(acctDir, product, account string, pol Policy) Account {
 	row.ProfileSource = strp(prof.ProfileSource)
 	row.RouteWeight = intp(accountRouteWeight(row, pol))
 	if product == "claude" {
-		id := ReadAccountIdentity(acctDir)
 		row.AccountUUID = strp(id.AccountUUID)
 		row.LoginEmail = strp(id.LoginEmail)
 		row.OrgUUID = strp(id.OrgUUID)
