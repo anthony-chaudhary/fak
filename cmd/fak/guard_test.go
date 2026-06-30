@@ -1251,3 +1251,38 @@ func TestGuardLocalModelDecision(t *testing.T) {
 		})
 	}
 }
+
+// TestPrintGuardBannerShowsVersionAndBuild is the render-witness for making the running guard's
+// version USER-VISIBLE: the banner headline carries the version and a dedicated `build` row
+// carries the embedded VCS stamp — the reliable staleness signal (a current-looking version on a
+// stale binary is exactly the reported confusion). It captures the rendered banner and asserts
+// both surfaces, so a future edit that drops either is caught.
+func TestPrintGuardBannerShowsVersionAndBuild(t *testing.T) {
+	var b strings.Builder
+	printGuardBanner(&b,
+		"9.9.9", "abc123def456 +uncommitted  (committed 2026-06-30T00:00:00Z)",
+		"http://127.0.0.1:9", "anthropic", "https://api.anthropic.com", "examples/floor.json",
+		"ANTHROPIC_BASE_URL", "http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
+		false /*remoteServe*/, false /*local*/, "", []string{"claude"})
+	out := b.String()
+
+	if !strings.Contains(out, "fak guard 9.9.9 — kernel-adjudicated: claude") {
+		t.Fatalf("banner headline missing version; got:\n%s", out)
+	}
+	if !strings.Contains(out, "build      : abc123def456 +uncommitted") {
+		t.Fatalf("banner missing build-stamp row (the staleness signal); got:\n%s", out)
+	}
+}
+
+// TestGuardBannerBuildStampIsLabelReady proves the stamp helper hands the banner a value WITHOUT
+// the "build: " prefix (the banner adds its own `build` label) and never an empty string, so the
+// row is always legible — present provenance or an explicit "no stamp" note, never a blank.
+func TestGuardBannerBuildStampIsLabelReady(t *testing.T) {
+	stamp := guardBannerBuildStamp()
+	if strings.TrimSpace(stamp) == "" {
+		t.Fatal("guardBannerBuildStamp returned empty; want provenance or an explicit no-stamp note")
+	}
+	if strings.HasPrefix(stamp, "build: ") {
+		t.Fatalf("guardBannerBuildStamp leaked the 'build: ' prefix; the banner labels the row: %q", stamp)
+	}
+}

@@ -140,7 +140,7 @@ func cmdGuard(argv []string) {
 	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
-	sessionID := fs.String("session-id", "guard", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id")
+	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
@@ -474,11 +474,12 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
 		os.Exit(2)
 	}
+	guardMeta := sessionDescriptorMeta(command)
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
-		guardTraceID = "guard"
+		guardTraceID = defaultSessionIDFromMeta(guardMeta)
 	}
-	if err := configureServeSessionDurability(serveSessions, "", os.Stderr); err != nil {
+	if err := configureServeSessionDurability(serveSessions, "", os.Stderr, guardMeta); err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", err)
 		os.Exit(1)
 	}
@@ -682,7 +683,14 @@ func cmdGuard(argv []string) {
 	// PreCompact hook wrote (preCompactInstall.SettingsPath; "" when PreCompact is off, in which
 	// case the Stop hook writes + injects its own). This is the harness half of the deny-all
 	// false-stop fix: it resumes the agent past a turn the floor refused entirely. See guard_stophook.go.
-	handoffMode, err := normalizeGuardTaskHandoffMode(*taskHandoffMode)
+	// The task-handoff gate (ENFORCE by default) demands a fak.task-handoff.v1 JSON on every clean
+	// Stop and blocks the stop until one is written — right for an unattended `-p` fleet worker,
+	// but on an ATTENDED interactive `fak guard -- claude` it spams the TUI and refuses to hand
+	// control back every turn. So auto-OFF it for an interactive child the operator did not gate
+	// explicitly, while keeping enforce for headless/fleet runs. See guard_handoff_mode.go.
+	handoffMode, err := normalizeGuardTaskHandoffMode(
+		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command)),
+	)
 	if err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: task handoff setup failed: %v\n", err)
@@ -726,7 +734,7 @@ func cmdGuard(argv []string) {
 		if localModel {
 			localLabel = filepath.Base(*ggufPath)
 		}
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, remoteBase != "", localModel, localLabel, command)
+		printGuardBanner(os.Stderr, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, remoteBase != "", localModel, localLabel, command)
 		if preCompactInstall.Applied {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
 		}
@@ -1090,8 +1098,13 @@ func guardClaudeConfigDir() string {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe, local bool, localLabel string, command []string) {
-	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
+func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe, local bool, localLabel string, command []string) {
+	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", version, strings.Join(command, " "))
+	// The embedded build stamp, not the version, is the reliable "is THIS guard binary current?"
+	// signal: the version reads the tree's VERSION file, so a stale binary still looks current
+	// (the screenshot confusion). A +uncommitted marker means the running guard was built from a
+	// dirty tree. See guardBannerBuildStamp.
+	fmt.Fprintf(w, "  build      : %s\n", buildStamp)
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
 	switch {
 	case local:

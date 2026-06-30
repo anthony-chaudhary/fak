@@ -5,6 +5,7 @@ import (
 	"io"
 	"runtime"
 	"runtime/debug"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
@@ -35,6 +36,74 @@ func cmdVersion(w io.Writer) {
 	}
 	fmt.Fprintln(w, buildProvenanceLine(bi))
 	fmt.Fprintf(w, "go: %s  %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
+// guardBannerVersion is the friendly version string for the `fak guard` banner headline. It is
+// appversion.Current() verbatim (the same first line `fak version` prints). On its own it can
+// look current even when the running binary is stale — see guardBannerBuildStamp for why the
+// banner also shows the embedded build stamp.
+func guardBannerVersion() string {
+	return appversion.Current()
+}
+
+// guardBannerBuildStamp is the embedded build provenance for the `fak guard` banner — the
+// reliable "is the fak/guard I'm running actually current?" signal. appversion.Current() reads
+// the TREE's VERSION file, so a STALE binary run from inside an up-to-date checkout still reports
+// the tree's version; the VCS stamp baked into the binary at build does not lie about its own
+// age (a +uncommitted marker even reveals a binary built from a dirty tree). It reuses
+// buildProvenanceLine and strips its "build: " prefix so the banner can label the row itself.
+func guardBannerBuildStamp() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(no embedded build info)"
+	}
+	return strings.TrimPrefix(buildProvenanceLine(bi), "build: ")
+}
+
+// guardShortBuildID is the compact build identity for space-constrained surfaces (the fak info
+// pane header): the short VCS revision plus a "+" marker when the binary was built from a dirty
+// tree, or "" when no VCS stamp is embedded. The FULL stamp (commit time included) is
+// guardBannerBuildStamp — this is the abbreviated tell for places one line is all there is room
+// for.
+func guardShortBuildID() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	var rev string
+	dirty := false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return ""
+	}
+	if len(rev) > 8 {
+		rev = rev[:8]
+	}
+	if dirty {
+		rev += "+"
+	}
+	return rev
+}
+
+// guardInfoVersionTag is the compact "which fak is this pane watching?" identity for the fak info
+// header. The info pane and the guard it sits beside are the SAME fak binary (the split pane runs
+// `fak info` from the same executable), so this is the running guard's identity, persistently
+// visible in the pane for the whole session — where the startup banner has already scrolled off.
+// It pairs the version with the short build id (a "+" flags a dirty-tree build) because the
+// version alone reads as current even on a stale binary; the build id is the staleness tell.
+func guardInfoVersionTag() string {
+	tag := "fak " + appversion.Current()
+	if id := guardShortBuildID(); id != "" {
+		tag += " (" + id + ")"
+	}
+	return tag
 }
 
 // buildProvenanceLine renders the one-line build stamp from a BuildInfo: the VCS revision

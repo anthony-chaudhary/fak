@@ -337,7 +337,11 @@ func fitGuardInfoStatus(line string, width int) string {
 // out the live status row. The header line is trimmed only when the pane width is known.
 func guardInfoStartupHeader(base string, interval time.Duration, width int) string {
 	var b strings.Builder
-	header := fmt.Sprintf("fak info · %s  (every %s, Ctrl-C to stop)", base, interval)
+	// Lead with the running fak's identity (version + short build id) so the version is visible
+	// in the pane for the whole session — the startup banner has scrolled off by then, and a
+	// "+"-marked build id is the staleness tell the version alone cannot give. Putting it first
+	// means a narrow-pane width-trim drops the interval hint, not the version.
+	header := fmt.Sprintf("fak info · %s · %s  (every %s, Ctrl-C to stop)", guardInfoVersionTag(), base, interval)
 	if width > 0 {
 		header = trimTUI(header, width)
 	}
