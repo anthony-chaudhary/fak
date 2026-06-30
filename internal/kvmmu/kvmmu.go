@@ -372,6 +372,20 @@ func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 // ledger so every segment after it shifts down by the evicted length — keeping
 // the ledger consistent with model.KVCache.Evict's own compaction.
 func (c *Context) evict(seg *Segment) int {
+	// A hybrid (Gated-DeltaNet recurrent) cache cannot evict a span in place: its
+	// linear-attention layers hold an accumulated recurrence with no per-token journal,
+	// so model.KVCache.Evict PANICS the typed *RecurrentEvictUnsupportedError (the
+	// loud-boundary convenience form). Every kvmmu eviction path funnels through here,
+	// and the served context planner reaches it (the gateway complete() loop drives the
+	// KVSpanElider → ApplyPlan → evict), so consult the typed CanEvict verdict and SKIP
+	// eviction for such a cache — the span stays fully resident, which is
+	// correctness-safe (it only forgoes O(1)-residency reclaim) where calling Evict
+	// crashes the request goroutine and drops the client connection (#1704). A
+	// softmax-KV / GLM-DSA cache (CanEvict == nil) is unaffected; a backend that does not
+	// expose CanEvict at all is treated as evictable by absence, exactly as before.
+	if ce, ok := c.kv.(interface{ CanEvict() error }); ok && ce.CanEvict() != nil {
+		return 0
+	}
 	n := c.kv.Evict(seg.From, seg.Len)
 	c.external = append(c.external, cachemeta.PlanExternalInvalidations(seg.KV, c.meta)...)
 	c.invalidateReferences(seg.KV)

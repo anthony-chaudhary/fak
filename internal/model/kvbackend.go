@@ -30,6 +30,16 @@ func (b kvBackend) Prefill(ids []int) []float32 { return b.s.Prefill(ids) }
 // returns the number of positions removed.
 func (b kvBackend) Evict(from, n int) int { return b.s.Cache.Evict(from, n) }
 
+// CanEvict reports the cache's span-eviction verdict: nil for a softmax-KV / GLM-DSA
+// cache (eviction supported), and a typed *RecurrentEvictUnsupportedError for a hybrid
+// Gated-DeltaNet cache (recurrent state with no per-token journal). The KV-MMU consults
+// it BEFORE Evict so a recurrent model surfaces the typed limitation at the seam — skip
+// eviction, keep the span resident — instead of letting the convenience Evict panic
+// inside the package and drop the served request's connection (#1704). It is additive to
+// the abi.KVBackend seam (reachable by type assertion), so a backend that does not
+// implement it simply reports "evictable" by absence, exactly as today.
+func (b kvBackend) CanEvict() error { return b.s.Cache.CanEvict() }
+
 // StageSpan is the in-process local-synchronous default: the span is already resident
 // in the kernel-owned cache, so "staging" it off-box is a no-op that returns OK with
 // no bytes moved. The digest addresses the span on a remote tier; the in-process
