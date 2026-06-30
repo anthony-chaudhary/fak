@@ -157,6 +157,12 @@ policy that later code can enforce.
 `gen/future`: research a standards analogue or market-facing narrative, with a
 memo that names the decision it could influence.
 
+## Program Maps
+
+Cache and context work has both immediate reliability value and long-horizon
+architecture value. The active classification and promotion rules are pinned in
+[`docs/notes/GENERATION-CACHE-CONTEXT-PROGRAM-MAP-2026-06-30.md`](notes/GENERATION-CACHE-CONTEXT-PROGRAM-MAP-2026-06-30.md).
+
 ## Anti-Patterns
 
 - Priority laundering: moving low-priority work into `gen/future` so it looks
