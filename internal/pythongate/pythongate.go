@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ReasonNewPythonTool is the closed-vocabulary refusal code for a tools/*.py that is not
@@ -54,6 +56,7 @@ func offensesAgainst(tracked []string, allowed map[string]bool) []Offense {
 // is correctly ignored — only files that would actually ship count.
 func trackedPyTools(repoRoot string) ([]string, error) {
 	cmd := exec.Command("git", "ls-files", "tools/*.py")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
