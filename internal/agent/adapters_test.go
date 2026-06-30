@@ -1088,6 +1088,98 @@ func TestHTTPPlannerFoldsGLMEndpointAndReasoningVaryAxes(t *testing.T) {
 	}
 }
 
+func TestToolSetDigestAndRegionVaryAxisHelpers(t *testing.T) {
+	// Cache-frontier default-enablement item 7 (#1525): tool set and
+	// region/affinity are silent provider-cache breakers, so the derivation
+	// helpers must produce a stable, distinguishing axis where known and stay
+	// empty where not.
+
+	// tool set: a body with tools yields a stable digest; the same tools yield the
+	// same digest; different tools differ; no/empty tools yields "".
+	bodyA := []byte(`{"model":"m","messages":[{"role":"user","content":"a"}],"tools":[{"type":"function","function":{"name":"search"}}]}`)
+	bodyAdiffMsg := []byte(`{"model":"m","messages":[{"role":"user","content":"DIFFERENT turn"}],"tools":[{"type":"function","function":{"name":"search"}}]}`)
+	bodyB := []byte(`{"model":"m","messages":[{"role":"user","content":"a"}],"tools":[{"type":"function","function":{"name":"book"}}]}`)
+	noTools := []byte(`{"model":"m","messages":[{"role":"user","content":"a"}]}`)
+	emptyTools := []byte(`{"model":"m","tools":[]}`)
+	nullTools := []byte(`{"model":"m","tools":null}`)
+
+	dA := toolSetDigest(bodyA)
+	if dA == "" {
+		t.Fatal("a request carrying tools must yield a non-empty tool-set digest")
+	}
+	// The tool-set axis is the cache FAMILY: it must be stable across turns that
+	// share the same tools but differ in their per-turn messages.
+	if got := toolSetDigest(bodyAdiffMsg); got != dA {
+		t.Fatalf("tool-set digest must ignore per-turn message changes: %q != %q", got, dA)
+	}
+	if toolSetDigest(bodyB) == dA {
+		t.Fatal("a different tool set must yield a different digest")
+	}
+	for _, b := range [][]byte{noTools, emptyTools, nullTools, nil, []byte("not json")} {
+		if got := toolSetDigest(b); got != "" {
+			t.Fatalf("absent/empty tools must yield no axis, got %q for %s", got, b)
+		}
+	}
+
+	// region: AWS-style hosts that name a region are recognized; hosted endpoints
+	// that do not name a region stay empty ("where known").
+	regionCases := map[string]string{
+		"https://bedrock-runtime.us-east-1.amazonaws.com/v1":   "us-east-1",
+		"https://bedrock-runtime.ap-southeast-2.amazonaws.com": "ap-southeast-2",
+		"https://api.anthropic.com/v1":                         "",
+		"https://api.openai.com/v1":                            "",
+		"https://open.bigmodel.cn/api/paas/v4":                 "",
+		"":                                                     "",
+	}
+	for url, want := range regionCases {
+		if got := regionFromBaseURL(url); got != want {
+			t.Fatalf("regionFromBaseURL(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
+func TestHTTPPlannerFoldsToolSetVaryAxis(t *testing.T) {
+	// A request that carries tools must fold a stable tool_set label into the
+	// provider-cache telemetry entry (#1525): the tool schema is part of the
+	// provider's cacheable prefix, so a tool change is a distinct cache family.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":2,"total_tokens":42,"prompt_tokens_details":{"cached_tokens":20}}}`))
+	}))
+	defer upstream.Close()
+
+	planner, err := NewProviderHTTPPlanner("openai", upstream.URL, "gpt-4o", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp, err := planner.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, adapterTestTools())
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if comp.ProviderCache == nil {
+		t.Fatal("provider cache telemetry not attached")
+	}
+	if got := comp.ProviderCache.Labels["tool_set"]; got == "" {
+		t.Fatalf("a request with tools must attach a tool_set label: %+v", comp.ProviderCache.Labels)
+	}
+
+	// The same upstream with NO tools must not emit a tool_set label.
+	plain, err := NewProviderHTTPPlanner("openai", upstream.URL, "gpt-4o", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compNoTools, err := plain.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("complete (no tools): %v", err)
+	}
+	if compNoTools.ProviderCache == nil {
+		t.Fatal("provider cache telemetry not attached (no tools)")
+	}
+	if _, ok := compNoTools.ProviderCache.Labels["tool_set"]; ok {
+		t.Fatalf("a request without tools must not attach a tool_set label: %+v", compNoTools.ProviderCache.Labels)
+	}
+}
+
 func TestHTTPPlannerLiftsTextToolCallsBeforeReturn(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
