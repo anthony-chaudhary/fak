@@ -15,6 +15,8 @@ package shipgate
 import (
 	"fmt"
 	"os/exec"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Decision is the typed improve-verdict.
@@ -197,6 +199,7 @@ func (g *Gate) ConsecutiveNonKeeps() int { return g.nonKeeps }
 // silently mutate main).
 func ApplyInWorktree(repo, dir string, apply func(worktree string) error) error {
 	add := exec.Command("git", "-C", repo, "worktree", "add", "--detach", dir)
+	windowgate.ConfigureBackgroundCommand(add)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("worktree add: %v: %s", err, out)
 	}
@@ -210,6 +213,7 @@ func ApplyInWorktree(repo, dir string, apply func(worktree string) error) error 
 // RemoveWorktree tears down an isolated worktree.
 func RemoveWorktree(repo, dir string) error {
 	rm := exec.Command("git", "-C", repo, "worktree", "remove", "--force", dir)
+	windowgate.ConfigureBackgroundCommand(rm)
 	if out, err := rm.CombinedOutput(); err != nil {
 		return fmt.Errorf("worktree remove: %v: %s", err, out)
 	}
