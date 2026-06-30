@@ -4,6 +4,8 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // HeadSHA returns the short HEAD sha of the git repo at dir, or "" if git is
@@ -49,6 +51,7 @@ func CommitsBetween(ctx context.Context, dir, before, after string) []string {
 // renderer with a hand-built Result rather than shelling out.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
