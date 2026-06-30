@@ -32,9 +32,10 @@ import (
 )
 
 func cmdMilestone(argv []string) {
-	dispatchSubcommands("milestone", "report | post", argv,
+	dispatchSubcommands("milestone", "report | post | status-doc", argv,
 		subcommand{"report", runMilestoneReport},
 		subcommand{"post", runMilestonePost},
+		subcommand{"status-doc", runMilestoneStatusDoc},
 	)
 }
 
