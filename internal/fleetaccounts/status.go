@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // Registry is the live session registry (sessions.json) the watchdog produces. The
@@ -441,6 +443,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 		if r.Kind == KindWorker {
 			st := computeRuntimeStatus(r.Account, reg)
 			applyStatus(r, st)
+			applyLoginGate(r)
 		} else {
 			r.Available = boolp(false)
 			r.Blocked = boolp(false)
@@ -499,6 +502,25 @@ func applyStatus(r *Account, st RuntimeStatus) {
 	r.AuthBlockedSessions = intp(st.AuthBlockedSessions)
 	r.StatusSource = strp(st.StatusSource)
 	r.RegistryAgeMin = st.RegistryAgeMin
+}
+
+func applyLoginGate(r *Account) {
+	if r.Product != "claude" || r.Kind != KindWorker || r.LoginStatus == nil {
+		return
+	}
+	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
+	if st == configaccounts.LoginReady && derefBool(r.CanServe) {
+		return
+	}
+	reason, _ := configaccounts.LoginReasonAction(st, configaccounts.Home{Name: r.Tag, Dir: r.Dir})
+	if reason == "" {
+		reason = "account login status is " + string(st)
+	}
+	r.Available = boolp(false)
+	r.Blocked = boolp(true)
+	r.BlockKind = strp("auth")
+	r.BlockReason = strp(reason)
+	r.Throttled = boolp(false)
 }
 
 // AnnotatedRoster is the canonical "give me the live accounts" call: discover + annotate.

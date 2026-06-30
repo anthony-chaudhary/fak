@@ -9,8 +9,9 @@
 // (accounts_policy.json), then folded with live runtime status (usage throttle /
 // auth block / live sessions) read from the watchdog's sessions.json registry.
 //
-// This package preserves the Python contract byte-compatibly for the high-frequency,
-// read-only operators the standalone operators + resume/watchdog paths use:
+// This package preserves the Python contract for the high-frequency read-only operators
+// the standalone operators + resume/watchdog paths use, while adding the shared
+// credential-safe login_status/can_serve fields for Claude switcher rows:
 // roster (Discover/Annotate), list/json rendering, Available, Resolve (pin + route),
 // and the seat pool. The mutating ops (relogin/top-up/launch) and the ACTIVE network
 // probe (account_probe.py) are out of scope here — see the package doc note in

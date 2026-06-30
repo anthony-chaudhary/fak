@@ -104,6 +104,9 @@ func RenderList(rows []Account, home, policyPath string, policyExists bool,
 	fmt.Fprintf(&b, "AVAILABLE (offered to switcher now): %d\n", len(buckets["available"]))
 	for _, r := range buckets["available"] {
 		detail := fmt.Sprintf("%d active, %d live", derefInt(r.ActiveSessions), derefInt(r.LiveSessions))
+		if r.LoginStatus != nil {
+			detail += ", login=" + derefStr(r.LoginStatus)
+		}
 		fmt.Fprintf(&b, "  [%-8s] %-16s %-28s %-3s %-24s %s\n",
 			product(r), r.Tag, r.Account, tierStr(r), derefStr(r.Model), detail)
 	}

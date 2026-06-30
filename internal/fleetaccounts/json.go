@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 )
 
-// MarshalJSON emits an Account as an ordered JSON object whose key order and presence
-// rules match fleet_accounts.py byte-for-byte. The base keys are always present; worker
-// rows additionally carry the profile + route_weight, and Claude worker rows carry the
-// identity + reconciliation verdict; the runtime-status block is appended last (present on
-// every annotated row). A field that the Python row omits structurally (a non-worker row's
-// profile, an opencode worker's Claude-only identity) is omitted here too.
+// MarshalJSON emits an Account as an ordered JSON object. The legacy Python keys retain
+// their order; Claude worker rows additionally carry the shared login readiness verdict
+// before the runtime-status block. The base keys are always present; worker rows carry
+// profile + route_weight, and Claude worker rows carry identity + reconciliation. A field
+// that the Python row omits structurally (a non-worker row's profile, an opencode
+// worker's Claude-only identity) is omitted here too.
 func (a Account) MarshalJSON() ([]byte, error) {
 	o := newOrdered()
 	o.set("dir", a.Dir)
@@ -48,6 +48,10 @@ func (a Account) MarshalJSON() ([]byte, error) {
 		}
 		if a.IdentityRole != nil {
 			o.set("identity_role", *a.IdentityRole)
+		}
+		if a.LoginStatus != nil {
+			o.set("login_status", *a.LoginStatus)
+			o.set("can_serve", derefBool(a.CanServe))
 		}
 	}
 

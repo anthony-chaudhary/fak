@@ -48,11 +48,14 @@ func fixture(t *testing.T) (home, cfg, regPath string) {
 	}
 	write(filepath.Join(home, ".claude", ".claude.json"),
 		`{"oauthAccount":{"accountUuid":"uuid-default","emailAddress":"default@example.com","organizationUuid":"org-1","organizationType":"team","seatTier":"pro"}}`)
+	write(filepath.Join(home, ".claude", ".credentials.json"), `{}`)
 	write(filepath.Join(home, ".claude-gem8-acct", ".claude.json"),
 		`{"oauthAccount":{"accountUuid":"uuid-gem8","emailAddress":"gem8user@example.com","organizationUuid":"org-2","organizationType":"team"}}`)
+	write(filepath.Join(home, ".claude-gem8-acct", ".credentials.json"), `{}`)
 	// dup shares uuid-default with the .claude dir (its tag does NOT match the login)
 	write(filepath.Join(home, ".claude-dup-acct", ".claude.json"),
 		`{"oauthAccount":{"accountUuid":"uuid-default","emailAddress":"default@example.com","organizationUuid":"org-1","organizationType":"team"}}`)
+	write(filepath.Join(home, ".claude-dup-acct", ".credentials.json"), `{}`)
 	// a plain file named .claude.json under home -> non-account
 	write(filepath.Join(home, ".claude.json"), `{}`)
 	write(filepath.Join(cfg, "opencode-glm", "opencode.json"),
@@ -224,6 +227,40 @@ func TestAvailableExcludesBlockedAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestClaudeWorkerWithoutCredentialsIsBlockedByLoginStatus(t *testing.T) {
+	home, cfg, _ := fixture(t)
+	acctDir := filepath.Join(home, ".claude-needslogin-acct")
+	if err := os.MkdirAll(filepath.Join(acctDir, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(acctDir, ".claude.json"),
+		[]byte(`{"oauthAccount":{"accountUuid":"uuid-needs","emailAddress":"needs@example.com"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), Registry{})
+	needs := find(rows, ".claude-needslogin-acct")
+	if needs == nil {
+		t.Fatal("needs-login account not discovered")
+	}
+	if derefStr(needs.LoginStatus) != "needs_login" || derefBool(needs.CanServe) {
+		t.Fatalf("login_status/can_serve = %q/%v, want needs_login/false",
+			derefStr(needs.LoginStatus), derefBool(needs.CanServe))
+	}
+	if derefBool(needs.Available) || !derefBool(needs.Blocked) {
+		t.Fatalf("available/blocked = %v/%v, want false/true", derefBool(needs.Available), derefBool(needs.Blocked))
+	}
+	if derefStr(needs.BlockKind) != "auth" || !strings.Contains(derefStr(needs.BlockReason), "no live credentials") {
+		t.Fatalf("block kind/reason = %q/%q, want auth/no-live-credentials",
+			derefStr(needs.BlockKind), derefStr(needs.BlockReason))
+	}
+	for _, r := range Available(rows) {
+		if r.Account == ".claude-needslogin-acct" {
+			t.Fatalf("needs-login account was offered as available")
+		}
+	}
+}
+
 func TestExcludeReasonUsesNote(t *testing.T) {
 	home, cfg, _ := fixture(t)
 	rows := Discover(home, cfg, DefaultPolicy())
@@ -255,8 +292,8 @@ func TestPolicyExcludeMatchesClaudeLoginEmail(t *testing.T) {
 	}
 }
 
-// TestJSONShapeMatchesPythonContract proves the marshaled worker/non-worker row carries
-// EXACTLY the Python keys in the Python order (captured from fleet_accounts.py json).
+// TestJSONShapeMatchesPythonContract proves the marshaled worker/non-worker row keeps
+// the stable key order, including the Go-only login readiness fields on Claude workers.
 func TestJSONShapeMatchesPythonContract(t *testing.T) {
 	home, cfg, regPath := fixture(t)
 	reg := LoadRegistry(regPath)
@@ -266,7 +303,7 @@ func TestJSONShapeMatchesPythonContract(t *testing.T) {
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
 		"model_tier", "model", "small_model", "model_effort", "agent", "profile_source", "route_weight",
 		"account_uuid", "login_email", "org_uuid", "org_type", "plan",
-		"tag_login_match", "identity_peers", "identity_role",
+		"tag_login_match", "identity_peers", "identity_role", "login_status", "can_serve",
 		"available", "blocked", "block_kind", "block_reason", "reset", "weekly", "throttled",
 		"active_sessions", "live_sessions", "auth_blocked_sessions", "status_source", "registry_age_min",
 	}

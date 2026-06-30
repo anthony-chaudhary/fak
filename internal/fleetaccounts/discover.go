@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // Account is one discovered config dir's roster row. The JSON field names and order
@@ -44,6 +46,9 @@ type Account struct {
 	IdentityRole  *string  `json:"identity_role,omitempty"`
 	IdentityPeers []string `json:"identity_peers,omitempty"`
 	TagLoginMatch *bool    `json:"tag_login_match,omitempty"`
+
+	LoginStatus *string `json:"login_status,omitempty"`
+	CanServe    *bool   `json:"can_serve,omitempty"`
 
 	// Runtime status (attached by Annotate).
 	Available           *bool    `json:"available,omitempty"`
@@ -195,8 +200,21 @@ func classifyRow(acctDir, product, account string, pol Policy) Account {
 		row.OrgUUID = strp(id.OrgUUID)
 		row.OrgType = strp(id.OrgType)
 		row.Plan = strp(id.Plan)
+		st, can := claudeLoginStatus(acctDir, tag)
+		row.LoginStatus = strp(string(st))
+		row.CanServe = boolp(can)
 	}
 	return row
+}
+
+func claudeLoginStatus(acctDir, tag string) (configaccounts.LoginStatus, bool) {
+	h := configaccounts.Home{
+		Name:     tag,
+		Dir:      acctDir,
+		Identity: configaccounts.DeriveIdentity(acctDir),
+	}
+	st := h.LoginStatus()
+	return st, st == configaccounts.LoginReady
 }
 
 func discoverClaude(home string, pol Policy) []Account {
