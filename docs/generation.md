@@ -130,6 +130,37 @@ memo that names the decision it could influence.
 - Hidden demotion: changing labels without recording the evidence that justified
   the move.
 
+## Commits And Releases
+
+Do not put `gen/*` in every commit subject. Subjects stay optimized for the
+existing witness path: Conventional Commits, an issue reference when the commit
+resolves an issue, and the `(fak <leaf>)` ship stamp. Generation metadata is a
+body sidecar when the commit advances a generation issue:
+
+```text
+feat(tools): preserve generation sidecars #1634 (fak tools)
+
+Generation: gen/now
+Closes #1634
+```
+
+`fak commit --preview` preserves that sidecar in text and JSON output. The
+sidecar is normalized from `now`, `next`, `second-next`, or `future` to the
+matching `gen/*` label. A malformed sidecar is advisory so old commits keep
+working, but the fix is to use one of the four labels exactly.
+
+Release notes preserve generation without changing subjects. The release
+context reads the sidecar from git commit bodies, and the release-note renderer
+adds a machine-readable `generations` frontmatter block, a `## Generation`
+summary, and per-commit `[gen/*]` bullet suffixes when metadata exists. A
+release with no generation sidecars keeps the old note shape.
+
+Generation remains orthogonal in these artifacts:
+
+- Priority still comes from issue labels, milestones, and operator decision.
+- Shared trunk rules do not change; every generation lands through `main`.
+- Runtime feature gates still decide exposure, not the generation label.
+
 ## Assumptions To Recheck
 
 - GitHub labels, milestones, and the project Generation field remain available
