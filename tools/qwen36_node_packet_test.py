@@ -75,13 +75,16 @@ def test_packet_contains_launchers_and_manifest():
         assert "bash RUN-MAC.sh --preflight" in mac_start
         assert "qwen36-reports/preflight-mac-" in mac_start
         assert "tee \"$server_log\"" in mac_start
+        assert 'caffeinate -dimsu -w "$$"' in mac_start
         assert "ExecutionPolicy Bypass" in nvidia_start
         assert "qwen36-reports\\preflight-nvidia-" in nvidia_start
         assert "Tee-Object" in nvidia_start
         assert "RUN-VULKAN.ps1" in vulkan_start
         assert "qwen36-reports\\preflight-vulkan-" in vulkan_start
         assert "Tee-Object" in vulkan_start
-        assert "brew install llama.cpp" in (payload / "INSTALL-MAC.command").read_text(encoding="utf-8")
+        mac_install = (payload / "INSTALL-MAC.command").read_text(encoding="utf-8")
+        assert "brew install llama.cpp" in mac_install
+        assert 'caffeinate -dimsu -w "$$"' in mac_install
         assert "winget install llama.cpp" in (payload / "INSTALL-NVIDIA.cmd").read_text(encoding="utf-8")
         nvidia_install = (payload / "INSTALL-NVIDIA.cmd").read_text(encoding="utf-8")
         vulkan_install = (payload / "INSTALL-VULKAN.cmd").read_text(encoding="utf-8")

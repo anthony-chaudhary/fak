@@ -117,12 +117,22 @@ def windows_profile_launcher(profile: str, model: str, port: int) -> str:
     ])
 
 
+def mac_keepawake_lines() -> list[str]:
+    return [
+        "if command -v caffeinate >/dev/null 2>&1; then",
+        '  caffeinate -dimsu -w "$$" >/tmp/fak-qwen36-node-packet-caffeinate.log 2>&1 &',
+        '  echo "macOS wake assertion armed for this Qwen3.6 wrapper"',
+        "fi",
+    ]
+
+
 def mac_start_launcher(report_target: str = "") -> str:
     quoted_target = sh_quote(report_target)
     return "\n".join([
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         'cd "$(dirname "$0")"',
+        *mac_keepawake_lines(),
         f"report_target={quoted_target}",
         "send_reports() {",
         '  if [ -n "$report_target" ]; then',
@@ -198,6 +208,7 @@ def mac_install_launcher() -> str:
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         'cd "$(dirname "$0")"',
+        *mac_keepawake_lines(),
         "if ! command -v llama-server >/dev/null 2>&1; then",
         "  if ! command -v brew >/dev/null 2>&1; then",
         '    echo "Homebrew is required to install llama.cpp automatically." >&2',
