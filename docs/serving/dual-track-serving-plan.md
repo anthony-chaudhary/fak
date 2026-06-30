@@ -1,11 +1,11 @@
 ---
 title: "fak dual-track serving: RIDE + NATIVE over one shared spine"
-description: "fak's authoritative dual-track serving plan: ride best-in-class engines (vLLM, SGLang) plus a native in-kernel engine, over one shared track-neutral spine."
+description: "fak's authoritative dual-track serving plan: ride best-in-class engines (vLLM, SGLang, llm-d) plus a native in-kernel engine, over one shared track-neutral spine."
 ---
 
 # Dual-track serving plan — RIDE + NATIVE over one shared spine
 
-Dual-track serving is fak's plan to reach large-scale disaggregated inference along two first-class tracks over one shared, track-neutral spine: Track A *rides* best-in-class engines (vLLM, SGLang, Dynamo, NIXL) as a governance and trust control plane, while Track B grows fak's own in-kernel engine for the single-node to small-cluster path and its bit-exact KV value-add. This page is the authoritative decision and sequencing contract for that epic — design and scope only; no scheduler, router, transport, or kernel code lands here. It commits fak to both tracks, says exactly where each stands against the live tree today, and asserts no benchmark number — every parity claim is gated on a measured run by the bench-harness sibling.
+Dual-track serving is fak's plan to reach large-scale disaggregated inference along two first-class tracks over one shared, track-neutral spine: Track A *rides* best-in-class engines (vLLM, SGLang, llm-d, Dynamo, NIXL) as a governance and trust control plane, while Track B grows fak's own in-kernel engine for the single-node to small-cluster path and its bit-exact KV value-add. This page is the authoritative decision and sequencing contract for that epic — design and scope only; no scheduler, router, transport, or kernel code lands here. It commits fak to both tracks, says exactly where each stands against the live tree today, and asserts no benchmark number — every parity claim is gated on a measured run by the bench-harness sibling.
 
 > **Authoritative decision doc** for the large-scale disaggregated-serving epic
 > (#50). This is **not** a

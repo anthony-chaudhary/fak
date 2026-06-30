@@ -22,7 +22,7 @@ compose cleanly — the only question is *where fak sits relative to the proxy*.
 ## The one insight: it's one integration, not a hundred
 
 The OpenAI Chat Completions wire is the field's lingua franca. LiteLLM, OpenRouter,
-Together, Groq, Fireworks, vLLM, SGLang, llama.cpp, Ollama, and most clouds all expose
+Together, Groq, Fireworks, vLLM, SGLang, llm-d, llama.cpp, Ollama, and most clouds all expose
 it. So "support LiteLLM" is not a bespoke adapter — it is **the OpenAI wire pointed at a
 different `base_url`**. fak already speaks that wire on both sides (as a server to clients,
 as a client to upstreams), which is why every topology below is a base-URL change, not

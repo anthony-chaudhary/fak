@@ -30,7 +30,7 @@ So the supported model list at this layer is "whatever your upstream serves":
 | If your upstream serves… | fak fronts it because… |
 |---|---|
 | Claude, GPT, Gemini, Grok | the gateway speaks the OpenAI, Anthropic, and Gemini/xAI wires and proxies the request through |
-| Llama, Qwen, DeepSeek, Mistral, GLM, any open-weights model | served behind an OpenAI-compatible engine (Ollama, vLLM, SGLang, llama.cpp, LM Studio), so it is reached over the OpenAI-compatible wire |
+| Llama, Qwen, DeepSeek, Mistral, GLM, any open-weights model | served behind an OpenAI-compatible engine (Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio), so it is reached over the OpenAI-compatible wire |
 | a local GGUF on your own box | served by your local OpenAI-compatible server and fronted the same way |
 
 The mechanism is one fact: the gateway speaks the wires your agent already speaks

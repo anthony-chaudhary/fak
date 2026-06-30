@@ -49,7 +49,7 @@ tool call and proxies the rest upstream. Work top to bottom.
   (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, or download from the
   releases page), or build from a clone: `go build -o fak ./cmd/fak` (Go 1.26+).
 - **An OpenAI-compatible (or Anthropic/Gemini/xAI) model server** already running and
-  reachable — Ollama, vLLM, SGLang, llama-server, LM Studio, or a cloud API. `fak`
+  reachable — Ollama, vLLM, SGLang, llm-d, llama-server, LM Studio, or a cloud API. `fak`
   fronts your engine; it is **not** the fast token engine itself.
 
 ### A.1 — Author the capability floor (`policy.json`)

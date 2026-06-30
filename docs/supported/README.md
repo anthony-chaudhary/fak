@@ -26,6 +26,7 @@ calls. Two facts decide what it supports.
   │ Ollama· │ │ hosted  │ │wires │ │ reference     │
   │ vLLM·   │ │ provider│ │· MCP │ │ engine        │
   │ SGLang· │ │         │ │      │ │ (correctness, │
+  │ llm-d·  │ │         │ │      │ │               │
   │llama.cpp│ │         │ │      │ │  not a server)│
   └─────────┘ └─────────┘ └──────┘ └──────────────┘
    The pages below: Models · Features · Clouds · APIs/MCP ·
@@ -39,7 +40,7 @@ calls. Two facts decide what it supports.
    you set a base URL drops the gate in front with no code change. So the supported set of
    harnesses, clouds, and engines is wide by construction.
 2. **It governs, it does not generate.** For production tokens fak fronts an engine
-   (Ollama, vLLM, SGLang, llama.cpp, a cloud API). It also ships an in-kernel reference
+   (Ollama, vLLM, SGLang, llm-d, llama.cpp, a cloud API). It also ships an in-kernel reference
    engine that runs a model itself, as a correctness reference rather than a fast server.
 
 Each page below is the dedicated list for one category. Every row is grounded in the repo

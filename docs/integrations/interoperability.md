@@ -111,7 +111,7 @@ LlamaIndex, CrewAI, AutoGen, and the rest.
 For the other surveyed tools the short version holds. If a tool sets a base URL on an
 OpenAI- or Anthropic-compatible wire, it is a drop-in or per-wire connect. That covers
 Aider, Cline, Continue, Goose, Zed, OpenHands, Qwen Code, LangChain, LlamaIndex, Pydantic
-AI, smolagents, the Vercel AI SDK, Ollama, vLLM, SGLang, llama.cpp, and most of the field.
+AI, smolagents, the Vercel AI SDK, Ollama, vLLM, SGLang, llm-d, llama.cpp, and most of the field.
 The templated-URL clouds (Azure OpenAI, AWS Bedrock, Google Vertex) are partial: the base
 URL is region- or deployment-locked, and the auth is not a plain static key. The closed
 backends have no first-party path:

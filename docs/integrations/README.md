@@ -47,7 +47,7 @@ agent already speaks.
 
 `fak serve` also fronts **Gemini** and **xAI** upstreams (`--provider gemini` / `xai`),
 so the *same* gate sits in front of whichever model actually serves your tokens. The
-contrast with a fast token engine (vLLM, SGLang, llama.cpp) is **operational surface,
+contrast with a fast token engine (vLLM, SGLang, llm-d, llama.cpp) is **operational surface,
 not throughput** — `fak` is the governance + gateway band, in one static Go binary, in
 front of the engine. → [One binary is the whole surface](../explainers/one-binary-one-surface.md)
 
@@ -92,7 +92,7 @@ adjudicates the tool calls your framework's agent proposes.
 First, start the gate in front of whatever serves your tokens:
 
 ```bash
-# fronts any OpenAI-compatible upstream (Ollama, vLLM, llama-server, a cloud API)
+# fronts any OpenAI-compatible upstream (Ollama, vLLM, llm-d, llama-server, a cloud API)
 fak serve --addr 127.0.0.1:8080 \
   --provider openai \
   --base-url http://localhost:11434/v1 \

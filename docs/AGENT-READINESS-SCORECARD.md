@@ -15,8 +15,8 @@ This is the measuring stick for fak's **agent attractiveness** — the question 
 
 | Metric | Value |
 |---|---|
-| **Experience-frontier (unbounded · higher = better)** | **292** |
-| Frontier by affordance (weight×count) | integration_recipes 160 · harness_configs 30 · refusal_recoveries 48 · machine_consumable 54 |
+| **Experience-frontier (unbounded · higher = better)** | **420** |
+| Frontier by affordance (weight×count) | integration_recipes 208 · harness_configs 110 · refusal_recoveries 48 · machine_consumable 54 |
 | Friction-debt (total HARD defects) | 0 |
 | Baseline coverage score | 100.0/100 (grade A) |
 | Agent journey | discover 100 · adopt 100 · build 100 |

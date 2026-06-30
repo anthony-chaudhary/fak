@@ -37,7 +37,7 @@ Each cloud below serves tokens behind an OpenAI Chat Completions endpoint. You f
 
 Bedrock and Vertex are marked **Partial** because the repoint is templated and the auth is not a plain static key, exactly as the matrix caveats state. The other five expose a custom base URL outright.
 
-If your cloud is not in this table but exposes an OpenAI Chat Completions endpoint, fak fronts it the same way over `--provider openai`. The matrix surveys 44 targets and the rule holds across the field: if your tool or cloud can set a base URL, fak already fronts it.
+If your cloud is not in this table but exposes an OpenAI Chat Completions endpoint, fak fronts it the same way over `--provider openai`. The matrix surveys 47 targets and the rule holds across the field: if your tool or cloud can set a base URL, fak already fronts it.
 
 ## How you point fak at a cloud
 

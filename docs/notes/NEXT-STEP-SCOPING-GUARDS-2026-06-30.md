@@ -236,7 +236,9 @@ Acceptance for "true end to end working":
   `batch_policy`, and lane groups expose a `step_budget` plus per-issue step
   metadata. That lets dispatch supervisors balance lanes by expected work units
   instead of treating a lane with ten one-step leaves the same as ten larger
-  multi-step leaves.
+  multi-step leaves. The native dispatch tick now uses that lane `step_budget`
+  for its default lane pick, falling back to one step per issue when old payloads
+  do not provide explicit step metadata.
 - Phase 3 is partially implemented: the Go issue producers now use the shared
   contract where they create scoped work, while research/complaint/legacy feeders
   stay `triage_only` until a human or later port supplies dispatch scope.

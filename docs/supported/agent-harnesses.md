@@ -12,7 +12,7 @@ agent proposes, and your agent, model, and prompts stay the same.
 
 This page lists the coding agents, IDEs, and frameworks that work this way. Every row is
 drawn from the [compatibility matrix](../integrations/compatibility-matrix.md), which
-surveyed 44 targets and found that **38 of them expose a custom base URL outright** (4 more
+surveyed 47 targets and found that **41 of them expose a custom base URL outright** (4 more
 do so partially). The matrix is the master source — it carries the exact repoint key and a
 source link for each row, so this page links there rather than duplicating long config
 strings.
