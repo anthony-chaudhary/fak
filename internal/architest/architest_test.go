@@ -52,6 +52,7 @@ var tier = map[string]int{
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"branchrole":       1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"dgxbridge":        1, // remote background-job bridge: drives <tag>.sh/<tag>.log/<tag>.done jobs on a remote scratch dir over an ssh/exec shell; stdlib + os/exec only, imports nothing internal, off the hot path.
 	"benchruns":        1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
