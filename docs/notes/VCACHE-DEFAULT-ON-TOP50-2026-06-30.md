@@ -117,6 +117,11 @@ claude` run with **no flags**, the operator sees one attribution line —
     feedback into `vcachecal` per family, decay on the clock, revive on a confirmed
     read. *Where:* `internal/vcachecal/estimator.go` ← `gateway`. *Lever:* on.
     *Witness:* prediction-error rate emitted to `/metrics` from a real session.
+    *Progress:* gateway `/metrics` now emits rolling-window
+    `fak_vcache_warmth_prediction_outcomes`,
+    `fak_vcache_warmth_false_warm_rate`, and
+    `fak_vcache_warmth_false_cold_rate` from live provider-cache turns through the
+    same `vcacheobserve` engine; provider calibration and steering remain open.
 
 17. **Use warmth belief to steer, not just score.** On a believed-warm entry that
     reads 0, demote + byte-diff (localize the invalidator via

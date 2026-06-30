@@ -52,16 +52,17 @@ vCache (epic #715–#720) is the active control loop that would make mechanism #
 
 | Milestone | What it is | Code | Status |
 |-----------|------------|------|--------|
-| **M1 observe & calibrate** | probe each provider for TTL `T`, min-prefix `Mₘᵢₙ`, read discount `r`; build the warmth-belief estimator | `internal/vcachecal/` | partial — estimator + probe types exist; **no live calibration loop** (#716 open) |
+| **M1 observe & calibrate** | probe each provider for TTL `T`, min-prefix `Mₘᵢₙ`, read discount `r`; build the warmth-belief estimator | `internal/vcachecal/`, `internal/gateway/metrics.go` | **partial live metrics** — `/metrics` emits rolling-window warmth prediction-error counters from live provider-cache turns; **no live calibration loop or steering** (#716/#1497 open) |
 | **M2 star anchors** | canonicalize a byte-stable anchor, let the first natural request warm it, fan siblings onto it | `internal/vcachestar/`, `cachemeta.RecommendLayout`, `internal/agent/anthropic_cachebp.go` | **partial live preflight** — the Anthropic raw path now applies the `RecommendLayout` volatile-to-tail rule to top-level system blocks before placing `cache_control`; full star manifests, sibling fan-out, and cross-surface anchoring remain open (#717/#1493) |
 | **M3 dedicated warming** | `max_tokens:0` (explicit) / decode-1 (implicit) under the break-even gate | — | **not built into the live path** (#718 open) |
 | **M4 chains & recall** | prefix DAG, topological replay, cost-gated rebuild | `internal/vcachechain/` | **UP but gated OFF** — `ProveRecall` runs only from the `fak vcache` CLI; `Replay` is never called live |
 | **M5 governor** | pin / lazy / evict, warm budget, affinity routing, secret gate | `internal/vcachegov/`, `internal/gateway/vcache_governor_journal.go` | **decision witness live; actions gated OFF** — the gateway folds live provider-cache families into governor verdicts on `/metrics` and a hash-chained `/debug/vars` journal, but it still does not warm, pin, evict, or route on those verdicts |
 
 So on a normal `fak guard -- claude` run: mechanisms #1–#5 are *observed* and
-owner-attributed, the narrow M2 Anthropic system-anchor preflight can *rewrite*
-volatile-before-stable system heads, M5's governor verdict is *recorded*, and
-**full M2 fan-out plus M3/M4/M5 actions still do not act**. The `fak vcache` subcommands
+owner-attributed, M1 warmth-prediction error is *emitted* on `/metrics`, the
+narrow M2 Anthropic system-anchor preflight can *rewrite* volatile-before-stable
+system heads, M5's governor verdict is *recorded*, and **full M2 fan-out plus
+M3/M4/M5 actions still do not act**. The `fak vcache` subcommands
 (`status/prove/prove-telemetry/prove-recall/observe/score`) remain mostly an
 **offline lens** over real transcripts — they prove the economics and grade a
 recorded session; they do not warm, pin, or recall anything live.
@@ -80,8 +81,9 @@ recorded session; they do not warm, pin, or recall anything live.
   live identity type; the **prefix DAG** that would order vBlocks for recall is
   M4, gated off.
 - **Warmth belief** is modeled (`vcachecal` prediction error, false-warm /
-  false-cold) but **not used to gate anything** — no live run aborts or re-plans
-  on a broken-warmth prediction. It scores; it does not steer.
+  false-cold) and now emitted live as `fak_vcache_warmth_*` metrics, but **not
+  used to gate anything** — no live run aborts or re-plans on a broken-warmth
+  prediction. It scores and observes; it does not steer.
 - **cachemeta** is the tier-1 passive substrate. Live from it: `FromProviderCache`
   (every response), `ShapeGLMTurnSegmentWitnessed` (every GLM turn),
   `RecommendLayout` (star preflight). Offline-only: `Lifecycle`, `manifest`,
