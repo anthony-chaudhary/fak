@@ -45,9 +45,15 @@ func KnownMeasurers() []string {
 // knownKeys is the sorted known-measurer keys joined for an error message.
 func knownKeys() string { return strings.Join(KnownMeasurers(), ", ") }
 
+// worktreeIntSitePath is the module-relative file the worktree harness hard-rewrites
+// (the rewrite target named by internal/rsiloop/worktree.go's unexported tunableRelPath).
+// Naming it here keeps the registry independent of an exported path symbol in rsiloop;
+// the const NAME at that site still comes from the exported rsiloop.TunableConstName.
+const worktreeIntSitePath = "internal/rsiloop/tunable.go"
+
 // newWorktreeIntMeasurer binds the "worktree-int" key to the rsiloop worktree
 // harness via HarnessMeasurer. Scope (Phase 0): the worktree harness rewrites the
-// SINGLE tunable rsiloop.TunableRelPath:rsiloop.TunableConstName regardless of the
+// SINGLE tunable worktreeIntSitePath:rsiloop.TunableConstName regardless of the
 // target's declared Site, so this factory is faithful ONLY for a target whose Site
 // IS that tunable — it guards that match and refuses any other Site rather than
 // silently mis-measure. Lowering an ARBITRARY Site's (path, const) rewrite into the
@@ -57,14 +63,14 @@ func newWorktreeIntMeasurer(t OptTarget, repoRoot string) (Measurer, error) {
 		return nil, fmt.Errorf("opttarget %q: worktree-int needs an int-sweep grammar, got %q", t.Name, t.Grammar.Kind)
 	}
 	// HONESTY GUARD: the worktree harness hard-rewrites
-	// rsiloop.TunableRelPath:rsiloop.TunableConstName regardless of t.Site, so a
+	// worktreeIntSitePath:rsiloop.TunableConstName regardless of t.Site, so a
 	// target pointing at any other Site would SILENTLY mis-measure (the harness would
 	// edit the demo tunable, not the declared one). Refuse it.
-	if t.Site.Path != rsiloop.TunableRelPath || t.Site.Const != rsiloop.TunableConstName {
+	if t.Site.Path != worktreeIntSitePath || t.Site.Const != rsiloop.TunableConstName {
 		return nil, fmt.Errorf(
 			"opttarget %q: worktree-int only rewrites %s:%s, but Site is %s:%s; "+
 				"generalizing to an arbitrary Site is the named Phase 0.1 follow-on",
-			t.Name, rsiloop.TunableRelPath, rsiloop.TunableConstName, t.Site.Path, t.Site.Const)
+			t.Name, worktreeIntSitePath, rsiloop.TunableConstName, t.Site.Path, t.Site.Const)
 	}
 	h := rsiloop.NewWorktreeHarness(rsiloop.WorktreeConfig{
 		Repo:        repoRoot,

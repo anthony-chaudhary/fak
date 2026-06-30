@@ -16,7 +16,7 @@ func matchingTarget() OptTarget {
 		Metric:      "lru_hit_rate",
 		Direction:   HigherBetter,
 		BaselineRef: "main",
-		Site:        Site{Path: rsiloop.TunableRelPath, Const: rsiloop.TunableConstName},
+		Site:        Site{Path: worktreeIntSitePath, Const: rsiloop.TunableConstName},
 		Grammar:     Grammar{Kind: GrammarIntSweep, Ints: []int{4, 6, 8}},
 		Measurer:    "worktree-int",
 	}
@@ -40,7 +40,7 @@ func TestResolveSiteMismatchRefused(t *testing.T) {
 		t.Fatal("Resolve with mismatched Site.Path should error, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, rsiloop.TunableRelPath) && !strings.Contains(msg, "Phase 0.1") {
+	if !strings.Contains(msg, worktreeIntSitePath) && !strings.Contains(msg, "Phase 0.1") {
 		t.Fatalf("Site-mismatch error should mention the tunable path or Phase 0.1, got: %q", msg)
 	}
 }
