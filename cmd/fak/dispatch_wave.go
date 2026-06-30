@@ -874,9 +874,9 @@ func renderDispatchWave(rec map[string]any) string {
 		fmt.Fprintf(&b, "  stop: %s\n", reason)
 	}
 	if price, ok := rec["price"].(dispatchWavePrice); ok {
-		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
+		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
 			price.Action,
-			strings.Join(price.RunLanes, ","), price.CollisionsAvoided, price.LanesUtilized,
+			strings.Join(price.RunLanes, ","), price.RunStepBudget, price.CandidateStepBudget, price.CollisionsAvoided, price.LanesUtilized,
 			price.SerializationWasted, price.SafeConcurrency, price.SafeConcurrencyPct,
 			price.ScopeCoveragePct, price.SameLaneParallelism, len(price.Repartition))
 	}

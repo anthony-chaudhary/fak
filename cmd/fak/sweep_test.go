@@ -71,7 +71,7 @@ func TestScoreSweepGroupSurfacesRiskSignals(t *testing.T) {
 		t.Fatalf("score = %d, want 74", score)
 	}
 	for _, want := range []string{"mixed git statuses", "includes untracked source", "includes deletions"} {
-		if !containsString(reasons, want) {
+		if !containsSweepString(reasons, want) {
 			t.Fatalf("reasons = %v, missing %q", reasons, want)
 		}
 	}
@@ -95,7 +95,7 @@ func TestRenderSweepPlanIncludesScore(t *testing.T) {
 	}
 }
 
-func containsString(xs []string, want string) bool {
+func containsSweepString(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
 			return true

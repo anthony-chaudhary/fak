@@ -595,6 +595,43 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	}
 }
 
+func TestDispatchWavePriceUsesStepBudgetBeforeIssueCount(t *testing.T) {
+	router := dispatchtick.RouterPayload{
+		Schema: dispatchtick.RouterSchema,
+		OK:     true,
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"docs": {
+				Tree:       []string{"docs/**"},
+				Issues:     []int{10, 11, 12},
+				Count:      3,
+				StepBudget: 3,
+			},
+			"gateway": {
+				Tree:       []string{"internal/gateway/**"},
+				Issues:     []int{20, 21},
+				Count:      2,
+				StepBudget: 9,
+			},
+		},
+	}
+	price, err := priceDispatchWavePayload(t.TempDir(), router, 1, 1, "", nil, 0)
+	if err != nil {
+		t.Fatalf("priceDispatchWavePayload: %v", err)
+	}
+	if strings.Join(price.RunLanes, ",") != "gateway" {
+		t.Fatalf("run lanes = %#v, want gateway because it has the larger step budget", price.RunLanes)
+	}
+	if price.RunStepBudget != 9 || price.CandidateStepBudget != 12 {
+		t.Fatalf("step budgets = run %d candidate %d, want 9/12", price.RunStepBudget, price.CandidateStepBudget)
+	}
+	if len(price.RunTargets) != 1 || price.RunTargets[0].StepBudget != 9 {
+		t.Fatalf("run targets = %+v, want one gateway target with step_budget=9", price.RunTargets)
+	}
+	if len(price.Candidates) < 2 || price.Candidates[0].Lane != "gateway" {
+		t.Fatalf("candidate order = %+v, want gateway first by step budget", price.Candidates)
+	}
+}
+
 func TestDispatchWavePriceSerializesCollidingLaneBeforeLaunch(t *testing.T) {
 	oldRoute := dispatchRouteIssues
 	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
