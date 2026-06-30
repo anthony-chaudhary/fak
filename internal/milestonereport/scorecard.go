@@ -100,10 +100,10 @@ func BuildScorecard(m Maturity, e Epics) scorecard.Payload {
 		NextAction:      "retire worst-first: climb the lowest-rung cell to MATURED, then close the most-open discrete epic (see milestone_worklist)",
 		NextActionClean: "hold the line: re-run `fak milestone-scorecard` on every model/backend or epic change; the worklist is empty",
 		ExtraCorpus: map[string]any{
-			"climb_debt":         climbDebt,
-			"roadmap_debt":       roadDebt,
-			"cells":              m.Cells,
-			"matured":            m.Matured,
+			"climb_debt":   climbDebt,
+			"roadmap_debt": roadDebt,
+			"cells":        m.Cells,
+			"matured":      m.Matured,
 			// The two RATCHETED climb KPIs the scorecard control pane pins
 			// (issue #1442): matured_cells must NOT decrease and milestone_progress
 			// (the M0-M7 mean-rank %) must NOT regress vs docs/milestones/baseline.json.

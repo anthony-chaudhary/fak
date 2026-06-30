@@ -25,16 +25,16 @@ func climbCorpus(t *testing.T, cells []covmatrix.Cell) map[string]any {
 // climbHigh has 2 matured cells (M4+); climbLow has 1 — a rung regression.
 func climbHigh() []covmatrix.Cell {
 	return []covmatrix.Cell{
-		{Family: "a", Backend: "cpu", Support: covmatrix.Supported},   // M4 matured
-		{Family: "b", Backend: "cpu", Support: covmatrix.Supported},   // M4 matured
+		{Family: "a", Backend: "cpu", Support: covmatrix.Supported},     // M4 matured
+		{Family: "b", Backend: "cpu", Support: covmatrix.Supported},     // M4 matured
 		{Family: "c", Backend: "cpu", Support: covmatrix.ProofPathOnly}, // M3
 	}
 }
 
 func climbLow() []covmatrix.Cell {
 	return []covmatrix.Cell{
-		{Family: "a", Backend: "cpu", Support: covmatrix.Supported},   // M4 matured
-		{Family: "b", Backend: "cpu", Support: covmatrix.Fenced},      // M1 — DROPPED a rung
+		{Family: "a", Backend: "cpu", Support: covmatrix.Supported},     // M4 matured
+		{Family: "b", Backend: "cpu", Support: covmatrix.Fenced},        // M1 — DROPPED a rung
 		{Family: "c", Backend: "cpu", Support: covmatrix.ProofPathOnly}, // M3
 	}
 }
