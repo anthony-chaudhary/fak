@@ -172,6 +172,9 @@ func cmdMemoryRun(argv []string) {
 	k := fs.Int("k", 0, "limit (driver-specific; 0 = driver default)")
 	budget := fs.Int64("budget", 0, "byte budget (0 = unbounded)")
 	dir := fs.String("dir", "", "recall core image directory (default: the in-memory demo corpus)")
+	backendKind := fs.String("backend", "", "backend: \"\"/auto (recall image at --dir, else demo), or \"codex\" (read external Codex memories as a generated recall layer — NOT an AGENTS.md replacement; every cell is external/untrusted and gated)")
+	codexHome := fs.String("codex-home", "", "Codex home for --backend codex (default: $CODEX_HOME or ~/.codex)")
+	includeChronicle := fs.Bool("include-chronicle", false, "with --backend codex, also include the higher-risk screen-generated chronicle memories")
 	apply := fs.Bool("apply", false, "APPLY durable mutations (default: propose only — fail-closed)")
 	out := fs.String("out", "memory-report.json", "report output path")
 	asJSON := fs.Bool("json", false, "emit the full result as JSON to stdout")
@@ -179,7 +182,15 @@ func cmdMemoryRun(argv []string) {
 	*dir = pathutil.ExpandTilde(*dir)
 
 	q, label := memoryQuery(*driver, *queryFile, *intent, *k, *budget)
-	backend, blabel := memoryBackend(*dir)
+	// --backend codex selects the read-only external Codex memories corpus (#1431, built in
+	// memq_codex.go); anything else keeps the recall-image-else-demo dispatch.
+	var backend memq.Backend
+	var blabel string
+	if *backendKind == "codex" {
+		backend, blabel = codexMemoryBackend(*codexHome, *includeChronicle)
+	} else {
+		backend, blabel = memoryBackend(*dir)
+	}
 	caps := memq.Caps{}
 	if *apply {
 		caps = memq.AllowAll()
