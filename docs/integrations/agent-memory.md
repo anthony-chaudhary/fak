@@ -160,6 +160,22 @@ memory store**, not better recall. For a benign-drift threat model it is overhea
 memory-poisoning, compromised-agent, or `delete_all` threat model it is the refusal an
 attacker can't talk the agent out of.
 
+### Discover fak-native memory tools
+
+If the agent needs to discover fak's own memory surface instead of reading this page,
+query the self-feature catalog:
+
+```bash
+fak feature query memory --detail fak_memory_run --json
+```
+
+Over MCP, call `fak_feature_query` with `{"query":"memory"}`. It returns lightweight
+cards for `fak_memory_drivers`, `fak_memory_explain`, `fak_memory_run`, and the registered
+memory drivers. Discovery is read-only; `fak_memory_run` still defaults to `apply=false`,
+so effectful memory changes remain proposals unless the caller explicitly supplies the
+apply capability. The planning spine is
+[`SELF-FEATURE-QUERY-SPINE-2026-06-30.md`](../notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md).
+
 ---
 
 ## Cross-references
