@@ -113,8 +113,17 @@ if [ "${FAK_FAST:-}" = "1" ]; then
     CACHE_REL="internal/model/.cache"   # generated weights — symlink, never copy
     mkdir -p "$SCRATCH"
     if command -v rsync >/dev/null 2>&1; then
-      # plain --delete (NOT --delete-excluded) so the symlinked cache is preserved.
-      rsync -a --delete --exclude="/$CACHE_REL" "$SCRIPT_DIR/" "$SCRATCH/"
+      # plain --delete (NOT --delete-excluded) so excluded runtime state and the
+      # symlinked cache are preserved. The live dogfood fleet mutates these dirs
+      # while tests start; copying them can make rsync fail before `go test` runs.
+      rsync -a --delete \
+        --exclude="/$CACHE_REL" \
+        --exclude="/.dispatch-runs" \
+        --exclude="/.dos/metrics" \
+        --exclude="/.dos/runs" \
+        --exclude="/.dos/streams" \
+        --exclude="/.fak" \
+        "$SCRIPT_DIR/" "$SCRATCH/"
     else
       # tar fallback (no pruning of stale files, but correct): copy all but the cache.
       ( cd "$SCRIPT_DIR" && find . -path "./$CACHE_REL" -prune -o -type f -print ) \
