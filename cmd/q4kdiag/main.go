@@ -15,6 +15,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -29,12 +30,21 @@ var oraclePrompt = []int{
 func main() {
 	gguf := flag.String("gguf", "", "GGUF path")
 	membw := flag.Float64("membw", 0, "machine memory bandwidth GB/s; if >0, print the bandwidth-bound decode tok/s ceiling")
+	planOnly := flag.Bool("plan-only", false, "print header-only GGUF memory plans and exit before loading tensors")
+	expertParallel := flag.Int("expert-parallel", 1, "expert-parallel ranks for -plan-only per-rank memory plan")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
-		fmt.Fprintln(os.Stderr, "usage: q4kdiag -gguf <model.gguf> [-membw 100]")
+		fmt.Fprintln(os.Stderr, "usage: q4kdiag -gguf <model.gguf> [-membw 100] [-plan-only -expert-parallel N]")
 		os.Exit(2)
+	}
+	if *planOnly {
+		if err := printHeaderMemoryPlans(*gguf, *expertParallel); err != nil {
+			fmt.Fprintln(os.Stderr, "plan:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	t0 := time.Now()
 	m, err := ggufload.LoadModelQ4K(*gguf)
@@ -76,6 +86,53 @@ func main() {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	fmt.Fprintf(os.Stderr, "Go heap=%.2fGB sys=%.2fGB\n", float64(ms.Alloc)/1e9, float64(ms.Sys)/1e9)
+}
+
+func printHeaderMemoryPlans(path string, expertParallel int) error {
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+
+	full, err := ws.EstimateLoadMemoryPlan()
+	if err != nil {
+		return fmt.Errorf("monolith load: %w", err)
+	}
+	ep, err := ws.EstimateExpertParallelLoadMemoryPlan(expertParallel)
+	if err != nil {
+		return fmt.Errorf("expert-parallel load: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "gguf tensors=%d\n", len(ws.File.Tensors))
+	if cfg, err := ws.File.Config(); err == nil {
+		fmt.Fprintf(os.Stdout, "config model_type=%s layers=%d hidden=%d experts=%d\n",
+			cfg.ModelType, cfg.NumLayers, cfg.HiddenSize, cfg.NumExperts)
+	}
+	printMemoryPlan("monolith", full)
+	printMemoryPlan(fmt.Sprintf("expert_parallel_per_rank ranks=%d", expertParallel), ep)
+	return nil
+}
+
+func printMemoryPlan(name string, plan compute.MemoryPlan) {
+	fmt.Fprintf(os.Stdout, "%s device_total=%d bytes (%.2f GiB) total=%d bytes (%.2f GiB)\n",
+		name, plan.DeviceTotal(), bytesGiB(plan.DeviceTotal()), plan.Total(), bytesGiB(plan.Total()))
+	for _, d := range plan {
+		scope := d.ScopeOrDefault()
+		dtype := d.DType
+		if dtype == "" {
+			dtype = "unknown"
+		}
+		fmt.Fprintf(os.Stdout, "  detail=%s class=%s scope=%s dtype=%s bytes=%d (%.2f GiB)\n",
+			d.Detail, d.Class, scope, dtype, d.Bytes, bytesGiB(d.Bytes))
+	}
+}
+
+func bytesGiB(n int64) float64 {
+	if n <= 0 {
+		return 0
+	}
+	return float64(n) / (1024 * 1024 * 1024)
 }
 
 type kv struct {
