@@ -19,7 +19,7 @@ description: "fak serving and coding-agent surfaces on Qwen3.6-27B with an 8-GPU
 ## 1. Used in a coding agent (the headline)
 
 All three fak surfaces **PASS** on the 27B, run on the GPU server
-(`tools/dgx_qwen36_surfaces.py` → `qwen36_surface_smoke.py` against the served endpoint):
+(the private surface runner → `qwen36_surface_smoke.py` against the served endpoint):
 
 | Surface | Status | Note |
 |---|:---:|---|
@@ -31,7 +31,7 @@ Artifact: [`surface-smoke.json`](../../experiments/qwen36/gpu-server-r4-20260622
 
 ## 2. Throughput under a multi-agent concurrency load (fak-gateway vs raw SGLang)
 
-Load: `dgx_run_matrix` concurrency sweep over the `agent-live/production-workload`,
+Load: the private run matrix concurrency sweep over the `agent-live/production-workload`,
 metric = `completion_tokens_per_sec`, 64 requests/concurrency, TP=8.
 
 | Concurrency | fak-gateway tok/s | raw-SGLang tok/s | fak / raw |
@@ -58,7 +58,7 @@ Artifacts: [`compare.json`](../../experiments/qwen36/gpu-server-r4-20260622/comp
   This matches the house bound (`HERO-BENCHMARK`): single-stream/raw throughput is *not*
   fak's axis.
 - **Marker-compliance caveat.** The load harness requires every response to echo a literal
-  `FAK_DGX_REQ_` marker. Qwen3.6 is a reasoning model and echoes it only ~35–66% of the
+  `FAK_GPU_SERVER_REQ_` marker. Qwen3.6 is a reasoning model and echoes it only ~35–66% of the
   time, so `--max-error-rate` was relaxed to 0.9 and throughput is measured over the
   compliant subset. This is a benchmark-harness artifact, **not** a serving failure (the
   model serves tokens fine; see the per-point `ok/requests` in the JSONs).
@@ -69,13 +69,13 @@ Artifacts: [`compare.json`](../../experiments/qwen36/gpu-server-r4-20260622/comp
 ## 4. Reproduce
 
 The GPU server is reached only via the private control bridge (private lab tooling); the 27B rung is
-added to the ladder by `tools/dgx_qwen36_27b_runner.py` (reuses `dgx_ladder_runner.run_rung`,
+added to the ladder by the private 27B runner (reuses the private ladder runner,
 sizes `--mem-fraction-static` to fit the GLM-occupied GPU0, and sets
 `SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0`). On the GPU server:
 
 ```bash
 # throughput sweep (fak-gateway vs raw SGLang)
-python3 tools/dgx_qwen36_27b_runner.py --conc 1,4,8,16,32,64,128 --rpc 64 --rung-id r4
+python3 private 27B runner --conc 1,4,8,16,32,64,128 --rpc 64 --rung-id r4
 # coding-agent + gateway + MCP surfaces on the served 27B
-python3 tools/dgx_qwen36_surfaces.py
+python3 private surface runner
 ```
