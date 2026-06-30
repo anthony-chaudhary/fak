@@ -493,7 +493,14 @@ func cmdServe(argv []string) {
 		srv.PublishSessionRevision(toGatewaySessionState(s))
 	})
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// Graceful drain on ANY terminating signal, not just Ctrl-C (#1359): SIGHUP is "the
+	// terminal was closed" and SIGTERM is "an orchestrator asked us to stop" — both must
+	// route through the same ctx-cancel → ListenAndServe-returns → dumpServeSessions flush
+	// as SIGINT, or the most common "I closed the window" case (SIGHUP) silently loses the
+	// live drive-state that had not been dumped on a prior clean exit. A SIGKILL (kill -9)
+	// is uncatchable and still loses the un-journaled tail — that residue is the write-ahead
+	// journal's job (#1363), not this signal handler's.
+	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
 	defer stop()
 
 	// Hot-reload the routing policy (#842): when a manifest is installed, follow the
