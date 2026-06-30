@@ -275,6 +275,10 @@ func main() {
 		cmdSkillEffectivenessScorecard(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "scorecard":
+		cmdScorecardPane(os.Args[2:])
+	case "repo-hygiene-scorecard":
+		cmdRepoHygieneScorecard(os.Args[2:])
 	case "ui-quality-scorecard":
 		cmdUIQualityScore(os.Args[2:])
 	case "scoreboard":

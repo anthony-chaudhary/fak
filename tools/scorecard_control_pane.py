@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Unified scorecard debt control-pane — fold every *-debt into one tracked trend.
 
+Native port: this fold is ported to Go in ``internal/scorecardpane`` and exposed as
+``fak scorecard control-pane [--json|--check|--pin]`` (issue #1449) — typed contracts,
+one process startup, byte-compatible ``--json`` shapes. This script remains as a
+compatibility shim until the Python baseline can shrink.
+
 The repo has deterministic scorecards, each emitting a debt integer plus a
 control-pane payload (``schema/ok/verdict/finding/reason/next_action``): docs,
 README freshness, code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, the one

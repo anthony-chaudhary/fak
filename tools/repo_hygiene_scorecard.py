@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Repo-hygiene scorecard — the measuring stick for a repo that stays lean as it grows.
 
+Native port: this fold is ported to Go in ``internal/scorecardpane`` and exposed as
+``fak repo-hygiene-scorecard [--json|--markdown|--compare]`` (issue #1449) — the Go
+``--json`` payload and ``--markdown`` body are byte-compatible with this script's. This
+script remains as a compatibility shim until the Python baseline can shrink.
+
 The sibling scorecards each watch ONE surface: ``docs_scorecard`` grades the
 curated core docs, ``doc_appeal_scorecard`` grades one doc's prose,
 ``code_quality_scorecard`` grades the Go module, ``seo_aeo_scorecard`` grades
@@ -744,12 +749,12 @@ def repo_root(start: Path | None = None) -> Path:
 def _git_lines(args: list[str], root: Path) -> list[str]:
     try:
         p = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
-                           text=True, timeout=60)
+                           text=True, encoding="utf-8", errors="replace", timeout=60)
     except (OSError, subprocess.SubprocessError):
         return []
     if p.returncode != 0:
         return []
-    return [ln for ln in p.stdout.splitlines() if ln.strip()]
+    return [ln for ln in (p.stdout or "").splitlines() if ln.strip()]
 
 
 def _safe_read(path: Path) -> str:
