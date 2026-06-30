@@ -678,6 +678,24 @@ def collect(
     )
 
 
+# Short labels for the per-lane confidence tag in the human render.
+_CONF_ABBR = {"path-confirmed": "path", "exact-scope": "scope", "alias": "alias",
+              "label": "label", "keyword": "kw"}
+
+
+def _lane_conf_tag(by_conf: dict[str, int] | None) -> str:
+    """Compact 'how well-aimed is this lane' tag, strongest rung first, zeros omitted
+    (e.g. 'path 3·scope 4·kw 2'). '' when no per-lane confidence is present — so a
+    low-confidence backlog (all keyword routes) is visible to an operator at a glance
+    rather than hidden behind a bare issue count."""
+    if not by_conf:
+        return ""
+    return "·".join(
+        f"{_CONF_ABBR.get(k, k)} {by_conf[k]}"
+        for k in sorted(by_conf, key=lambda x: -CONFIDENCE_RANK.get(x, 0))
+        if by_conf.get(k))
+
+
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("counts") or {}
     lines = [
@@ -697,7 +715,8 @@ def render(payload: dict[str, Any]) -> str:
     lines.append("  lanes with ticket backlog:")
     for lane, grp in list((payload.get("lanes") or {}).items())[:20]:
         nums = ",".join(f"#{n}" for n in grp["issues"][:10])
-        lines.append(f"    {lane:<14} {grp['count']:>2}  {nums}")
+        tag = _lane_conf_tag(grp.get("by_confidence"))
+        lines.append(f"    {lane:<14} {grp['count']:>2}  {nums}" + (f"  [{tag}]" if tag else ""))
     unrouted = [r for r in payload.get("issues", []) if r["lane"] is None]
     if unrouted:
         lines.append(f"  UNROUTED ({len(unrouted)}) — operator triage:")
