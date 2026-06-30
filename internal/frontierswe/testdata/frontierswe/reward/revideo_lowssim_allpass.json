@@ -1,0 +1,14 @@
+{
+  "geometric_mean_speedup": 1.4,
+  "correctness_details": [
+    {
+      "ssim": 0.96
+    },
+    {
+      "ssim": 0.97
+    },
+    {
+      "ssim": 0.98
+    }
+  ]
+}

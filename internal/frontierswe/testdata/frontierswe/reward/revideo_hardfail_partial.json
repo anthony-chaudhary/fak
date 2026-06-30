@@ -1,0 +1,33 @@
+{
+  "correctness_ok": false,
+  "geometric_mean_speedup": 1.5,
+  "correctness_details": [
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    },
+    {
+      "ssim": 0.99
+    }
+  ],
+  "hard_fail_reasons": [
+    "correctness_failed: case1, case2"
+  ]
+}

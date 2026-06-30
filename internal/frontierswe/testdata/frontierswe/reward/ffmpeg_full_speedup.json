@@ -1,0 +1,8 @@
+{
+  "reward": 2.0,
+  "additional_data": {
+    "correctness_passed": 30,
+    "correctness_total": 30,
+    "geometric_mean_speedup": 1.8
+  }
+}

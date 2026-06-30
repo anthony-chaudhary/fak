@@ -1,0 +1,16 @@
+{
+  "correctness_details": [
+    {
+      "ssim": 0.96
+    },
+    {
+      "ssim": 0.9
+    },
+    {
+      "ssim": 0.98
+    },
+    {
+      "ssim": 0.8
+    }
+  ]
+}

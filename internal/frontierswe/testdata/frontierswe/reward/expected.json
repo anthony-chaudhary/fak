@@ -1,0 +1,212 @@
+{
+  "cranelift_correct": {
+    "correctness": 1.0,
+    "score": 1.125,
+    "speedup": 1.25,
+    "ssim": null,
+    "task": "cranelift-codegen-opt"
+  },
+  "cranelift_incorrect": {
+    "correctness": 0.0,
+    "score": 0.0,
+    "speedup": null,
+    "ssim": null,
+    "task": "cranelift-codegen-opt"
+  },
+  "dependent-type-checker_gate": {
+    "correctness": 1.0,
+    "score": 1.3,
+    "speedup": 1.6,
+    "ssim": null,
+    "task": "dependent-type-checker"
+  },
+  "dependent-type-checker_partial": {
+    "correctness": 0.55,
+    "score": 0.275,
+    "speedup": null,
+    "ssim": null,
+    "task": "dependent-type-checker"
+  },
+  "ffmpeg_full_speedup": {
+    "correctness": 1.0,
+    "score": 1.4,
+    "speedup": 1.8,
+    "ssim": null,
+    "task": "ffmpeg-swscale-rewrite"
+  },
+  "ffmpeg_partial": {
+    "correctness": 0.5,
+    "score": 0.25,
+    "speedup": null,
+    "ssim": null,
+    "task": "ffmpeg-swscale-rewrite"
+  },
+  "frogsgame-rl_boardcount": {
+    "correctness": 250.0,
+    "score": 0.5,
+    "speedup": null,
+    "ssim": null,
+    "task": "frogsgame-rl"
+  },
+  "git-to-zig_full": {
+    "correctness": 1.0,
+    "score": 1.0,
+    "speedup": null,
+    "ssim": null,
+    "task": "git-to-zig"
+  },
+  "git-to-zig_partial": {
+    "correctness": 0.42,
+    "score": 0.42,
+    "speedup": null,
+    "ssim": null,
+    "task": "git-to-zig"
+  },
+  "granite_full": {
+    "correctness": 1.0,
+    "score": 1.6,
+    "speedup": 2.2,
+    "ssim": null,
+    "task": "granite-mamba2-inference-optimization"
+  },
+  "granite_zero": {
+    "correctness": 0.0,
+    "score": 0.0,
+    "speedup": null,
+    "ssim": null,
+    "task": "granite-mamba2-inference-optimization"
+  },
+  "inference-system_exact_partial": {
+    "correctness": 0.4,
+    "score": 0.2,
+    "speedup": null,
+    "ssim": null,
+    "task": "inference-system-optimization"
+  },
+  "inference-system_tokenmatch": {
+    "correctness": 1.0,
+    "score": 1.15,
+    "speedup": 1.3,
+    "ssim": null,
+    "task": "inference-system-optimization"
+  },
+  "libexpat_full": {
+    "correctness": 1.0,
+    "score": 0.95,
+    "speedup": 0.9,
+    "ssim": null,
+    "task": "libexpat-to-x86asm"
+  },
+  "libexpat_nomodules": {
+    "correctness": 0.0,
+    "score": 0.0,
+    "speedup": null,
+    "ssim": null,
+    "task": "libexpat-to-x86asm"
+  },
+  "libexpat_partial": {
+    "correctness": 0.45,
+    "score": 0.225,
+    "speedup": 0.5,
+    "ssim": null,
+    "task": "libexpat-to-x86asm"
+  },
+  "lua-native-compiler_subscore": {
+    "correctness": 0.75,
+    "score": 0.75,
+    "speedup": null,
+    "ssim": null,
+    "task": "lua-native-compiler"
+  },
+  "lua-native-compiler_testcount": {
+    "correctness": 0.75,
+    "score": 0.75,
+    "speedup": null,
+    "ssim": null,
+    "task": "lua-native-compiler"
+  },
+  "modular-stack-wan21_correct_speedup": {
+    "correctness": 1.0,
+    "score": 1.0,
+    "speedup": 1.4,
+    "ssim": null,
+    "task": "modular-stack-wan21"
+  },
+  "modular-stack-wan21_reason_frac": {
+    "correctness": 0.7,
+    "score": 0.7,
+    "speedup": null,
+    "ssim": null,
+    "task": "modular-stack-wan21"
+  },
+  "notebook-compression_correct": {
+    "correctness": 1.0,
+    "score": 0.7,
+    "speedup": 0.7,
+    "ssim": null,
+    "task": "notebook-compression"
+  },
+  "notebook-compression_zero": {
+    "correctness": 0.0,
+    "score": 0.0,
+    "speedup": null,
+    "ssim": null,
+    "task": "notebook-compression"
+  },
+  "optimizer-design_raw": {
+    "correctness": 0.83,
+    "score": 0.83,
+    "speedup": null,
+    "ssim": null,
+    "task": "optimizer-design"
+  },
+  "pcqm4mv2_raw": {
+    "correctness": 0.65,
+    "score": 0.65,
+    "speedup": null,
+    "ssim": null,
+    "task": "pcqm4mv2-autoresearch"
+  },
+  "pyright_full": {
+    "correctness": 1.0,
+    "score": 1.25,
+    "speedup": 1.5,
+    "ssim": null,
+    "task": "pyright-type-checking-optimization"
+  },
+  "pyright_parity": {
+    "correctness": 0.6,
+    "score": 0.3,
+    "speedup": null,
+    "ssim": null,
+    "task": "pyright-type-checking-optimization"
+  },
+  "revideo_correct_default_ssim": {
+    "correctness": 1.0,
+    "score": 1.35,
+    "speedup": 1.7,
+    "ssim": null,
+    "task": "revideo-perf-opt"
+  },
+  "revideo_hardfail_partial": {
+    "correctness": 0.75,
+    "score": 0.375,
+    "speedup": null,
+    "ssim": null,
+    "task": "revideo-perf-opt"
+  },
+  "revideo_lowssim_allpass": {
+    "correctness": 1.0,
+    "score": 1.2,
+    "speedup": 1.4,
+    "ssim": 0.95,
+    "task": "revideo-perf-opt"
+  },
+  "revideo_lowssim_partial": {
+    "correctness": 0.5,
+    "score": 0.25,
+    "speedup": null,
+    "ssim": 0.95,
+    "task": "revideo-perf-opt"
+  }
+}

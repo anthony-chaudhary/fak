@@ -1,0 +1,12 @@
+{
+  "reward": 1.6,
+  "additional_data": {
+    "correctness": {
+      "accept_total": 10,
+      "accept_passed": 10,
+      "reject_total": 10,
+      "reject_passed": 10,
+      "gate_passed": true
+    }
+  }
+}

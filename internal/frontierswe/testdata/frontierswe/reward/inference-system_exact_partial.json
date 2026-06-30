@@ -1,0 +1,8 @@
+{
+  "additional_data": {
+    "correctness": {
+      "token_match_rate": 0.5,
+      "exact_match_rate": 0.4
+    }
+  }
+}

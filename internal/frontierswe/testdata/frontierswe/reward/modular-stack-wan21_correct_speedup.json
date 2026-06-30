@@ -1,0 +1,9 @@
+{
+  "reward": 1.4,
+  "subscores": [
+    {
+      "subtask": "correctness_check",
+      "score": 1.0
+    }
+  ]
+}

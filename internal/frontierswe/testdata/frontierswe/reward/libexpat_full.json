@@ -1,0 +1,44 @@
+{
+  "subscores": [
+    {
+      "subtask": "_",
+      "score": 0.0
+    },
+    {
+      "subtask": "perf",
+      "score": 0.9
+    }
+  ],
+  "additional_data": {
+    "modules": {
+      "smoke_tier": {
+        "total": 5,
+        "passed": 5
+      },
+      "basic_tests": {
+        "total": 20,
+        "passed": 20
+      },
+      "ns_tests": {
+        "total": 10,
+        "passed": 10
+      },
+      "misc_tests": {
+        "total": 8,
+        "passed": 8
+      },
+      "alloc_tests": {
+        "total": 6,
+        "passed": 6
+      },
+      "nsalloc_tests": {
+        "total": 4,
+        "passed": 4
+      },
+      "acc_tests": {
+        "total": 3,
+        "passed": 0
+      }
+    }
+  }
+}

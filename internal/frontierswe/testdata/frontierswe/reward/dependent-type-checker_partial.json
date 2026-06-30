@@ -1,0 +1,11 @@
+{
+  "additional_data": {
+    "correctness": {
+      "accept_total": 10,
+      "accept_passed": 6,
+      "reject_total": 10,
+      "reject_passed": 5,
+      "gate_passed": false
+    }
+  }
+}

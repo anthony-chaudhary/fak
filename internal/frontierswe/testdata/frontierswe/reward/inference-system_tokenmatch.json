@@ -1,0 +1,8 @@
+{
+  "reward": 1.3,
+  "additional_data": {
+    "correctness": {
+      "token_match_rate": 0.97
+    }
+  }
+}
