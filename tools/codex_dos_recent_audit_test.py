@@ -912,6 +912,109 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertIn("Requested Upstream Improvement", written)
             self.assertNotIn("rg needle docs", written)
 
+    def test_discovered_codex_threads_without_streams_get_root_caused(self) -> None:
+        """Reproduce issue #1446: threads discovered, zero stream match.
+
+        A repaired hook manifest (PASS) plus discovered Codex sessions whose
+        UUIDs name no .dos/streams file and zero dialect==codex observations is
+        the live "591 discovered, 0 audited" shape. The audit must root-cause it
+        as HOOKS_INSTALLED_NO_CODEX_WITNESS rather than a bare sessions_audited=0.
+        """
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            # Two Codex threads with v7-shaped session UUIDs, like the real store.
+            thread_a = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            thread_b = "019efde3-6794-7401-93a1-e97e6bd72a9c"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread_a}.jsonl", [{"type": "response_item"}])
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread_b}.jsonl", [{"type": "response_item"}])
+            # Hooks installed (native launcher => PASS), but the streams that exist
+            # are keyed by *Claude* session UUIDs, not the Codex thread UUIDs.
+            write_hook_manifest(home, native_bash_hook_command())
+            claude_stream = "0a39c3d5-0702-452a-8eab-2b70882c2892"
+            write_jsonl(
+                root / ".dos" / "streams" / f"{claude_stream}.jsonl",
+                [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
+            )
+            # Observation log exists but carries no dialect==codex rows.
+            write_jsonl(
+                root / ".dos" / "metrics" / "observations.jsonl",
+                [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "ts": "2026-06-29T12:00:10Z"}],
+            )
+
+            report = mod.build_report(root, home, limit=20, since_days=3650)
+
+            self.assertEqual(report["sessions_audited"], 0)
+            self.assertEqual(report["codex_threads_discovered"], 2)
+            corr = report["stream_correlation"]
+            self.assertEqual(corr["reason"], "HOOKS_INSTALLED_NO_CODEX_WITNESS")
+            self.assertEqual(corr["status"], "WARN")
+            self.assertEqual(corr["dos_stream_files"], 1)
+            self.assertEqual(corr["codex_observation_rows"], 0)
+            self.assertTrue(corr["observation_log_present"])
+            self.assertTrue(corr["recovery"])
+            # The bare "0 audited" line is now backed by a specific reason.
+            self.assertTrue(
+                any("HOOKS_INSTALLED_NO_CODEX_WITNESS" in rec for rec in report["recommendations"]),
+                report["recommendations"],
+            )
+            self.assertTrue(any(rec.startswith("recovery for") for rec in report["recommendations"]))
+            rendered = mod.render(report)
+            self.assertIn("stream correlation: WARN HOOKS_INSTALLED_NO_CODEX_WITNESS", rendered)
+            self.assertIn("recovery:", rendered)
+
+    def test_codex_witnessed_but_no_per_thread_stream_is_distinguished(self) -> None:
+        """When dialect==codex rows exist but no thread UUID names a stream,
+        the diagnosis must separate the hook-fired case from the never-fired case."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+            other = "0a39c3d5-0702-452a-8eab-2b70882c2892"
+            write_jsonl(
+                root / ".dos" / "streams" / f"{other}.jsonl",
+                [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
+            )
+            write_jsonl(
+                root / ".dos" / "metrics" / "observations.jsonl",
+                [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "dialect": "codex", "ts": "2026-06-29T12:00:10Z"}],
+            )
+
+            report = mod.build_report(root, home, limit=20, since_days=3650)
+
+            corr = report["stream_correlation"]
+            self.assertEqual(report["sessions_audited"], 0)
+            self.assertEqual(corr["reason"], "CODEX_WITNESSED_NO_PER_THREAD_STREAM")
+            self.assertEqual(corr["codex_observation_rows"], 1)
+
+    def test_matching_stream_reports_matched_correlation(self) -> None:
+        """The healthy path: a discovered Codex thread whose UUID names a stream
+        binds, and the diagnosis reports MATCHED (proves the fix did not break the
+        working join)."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+            write_jsonl(
+                root / ".dos" / "streams" / f"{thread}.jsonl",
+                [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
+            )
+
+            report = mod.build_report(root, home, limit=20, since_days=3650)
+
+            self.assertEqual(report["sessions_audited"], 1)
+            corr = report["stream_correlation"]
+            self.assertEqual(corr["status"], "MATCHED")
+            self.assertEqual(corr["matched_threads"], 1)
+            self.assertIsNone(corr["recovery"])
+
     def test_fail_on_warn_returns_nonzero_for_strict_gate(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:

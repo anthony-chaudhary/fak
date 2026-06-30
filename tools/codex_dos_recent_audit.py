@@ -873,6 +873,147 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
     }
 
 
+def codex_observation_dialect_summary(repo_root: Path) -> dict[str, int]:
+    """Count how many DOS observation rows carry ``dialect == "codex"``.
+
+    This is the witness that the DOS hook actually fired for a Codex tool call,
+    independent of whether a per-thread ``.dos/streams/<id>.jsonl`` exists. A
+    repaired hook manifest (``codex_hook_fast_path`` PASS) only proves the hook
+    is *installed*; a nonzero codex observation count is what proves Codex calls
+    were *witnessed*. The two are reported as separate gates so a green install
+    check can never masquerade as a green witness.
+    """
+    obs_path = repo_root / ".dos" / "metrics" / "observations.jsonl"
+    if not obs_path.exists():
+        return {"total_rows": 0, "codex_rows": 0, "log_present": 0}
+    total = 0
+    codex = 0
+    try:
+        with obs_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                total += 1
+                if row.get("dialect") == "codex":
+                    codex += 1
+    except OSError:
+        return {"total_rows": 0, "codex_rows": 0, "log_present": 0}
+    return {"total_rows": total, "codex_rows": codex, "log_present": 1}
+
+
+def stream_correlation_diagnosis(
+    repo_root: Path,
+    codex_threads: dict[str, Path],
+    matched_streams: list[tuple[str, Path]],
+) -> dict[str, Any]:
+    """Root-cause why discovered Codex threads did or did not bind to DOS streams.
+
+    The join key is the bare thread UUID: a Codex session at
+    ``rollout-<uuid>.jsonl`` matches ``.dos/streams/<uuid>.jsonl``. When the
+    intersection is empty this function decides *why*, distinguishing the cases
+    the bare ``sessions_audited=0`` line cannot:
+
+    - ``NO_CODEX_THREADS``: nothing was discovered, so there is nothing to bind.
+    - ``NO_DOS_STREAM_SUBSTRATE``: ``.dos/streams`` holds no stream files at all.
+    - ``HOOKS_INSTALLED_NO_CODEX_WITNESS``: stream files exist and (when present)
+      the observation log carries *no* ``dialect == "codex"`` rows, so the hook
+      never witnessed a Codex tool call even though it is installed. This is the
+      separate "hooks installed != Codex calls witnessed" gate the audit owes.
+    - ``CODEX_WITNESSED_NO_PER_THREAD_STREAM``: codex observations exist but no
+      discovered thread UUID names a stream file, so the per-thread stream write
+      is the missing link rather than the hook firing.
+    - ``KEY_FORMAT_MISMATCH``: stream files exist whose stems are UUID-shaped but
+      none equals a discovered Codex thread UUID, while codex observations are
+      present -- a genuine join-key drift to investigate before widening anything.
+    - ``MATCHED``: at least one thread bound to a stream (the healthy path).
+
+    It never fabricates a match: every branch reports the absence it measured.
+    """
+    streams_dir = repo_root / ".dos" / "streams"
+    stream_stems: set[str] = set()
+    if streams_dir.exists():
+        stream_stems = {path.stem.lower() for path in streams_dir.glob("*.jsonl")}
+    thread_ids = {tid.lower() for tid in codex_threads}
+    uuid_shaped_stems = {stem for stem in stream_stems if THREAD_RE.fullmatch(stem)}
+    obs = codex_observation_dialect_summary(repo_root)
+    codex_observed = obs["codex_rows"] > 0
+
+    diagnosis: dict[str, Any] = {
+        "codex_threads_discovered": len(codex_threads),
+        "dos_stream_files": len(stream_stems),
+        "uuid_shaped_stream_files": len(uuid_shaped_stems),
+        "matched_threads": len(matched_streams),
+        "codex_observation_rows": obs["codex_rows"],
+        "total_observation_rows": obs["total_rows"],
+        "observation_log_present": bool(obs["log_present"]),
+    }
+
+    if matched_streams:
+        diagnosis["status"] = "MATCHED"
+        diagnosis["reason"] = "CODEX_SESSIONS_BOUND_TO_DOS_STREAMS"
+        diagnosis["detail"] = (
+            f"{len(matched_streams)} discovered Codex thread(s) matched a "
+            ".dos/streams/<thread>.jsonl stream by thread UUID."
+        )
+        diagnosis["recovery"] = None
+        return diagnosis
+
+    if not codex_threads:
+        diagnosis["status"] = "UNKNOWN"
+        diagnosis["reason"] = "NO_CODEX_THREADS"
+        diagnosis["detail"] = "no recent Codex session files were discovered in the window."
+        diagnosis["recovery"] = "widen --since-days or run a Codex session before auditing."
+        return diagnosis
+
+    if not stream_stems:
+        diagnosis["status"] = "UNKNOWN"
+        diagnosis["reason"] = "NO_DOS_STREAM_SUBSTRATE"
+        diagnosis["detail"] = ".dos/streams holds no stream files; no tool-stream substrate exists to bind to."
+        diagnosis["recovery"] = (
+            "confirm the DOS pretool hook writes .dos/streams/<session>.jsonl on this workspace."
+        )
+        return diagnosis
+
+    if not codex_observed:
+        diagnosis["status"] = "WARN"
+        diagnosis["reason"] = "HOOKS_INSTALLED_NO_CODEX_WITNESS"
+        diagnosis["detail"] = (
+            f"{len(codex_threads)} Codex thread(s) discovered and {len(stream_stems)} DOS stream "
+            "file(s) exist, but the observation log has zero dialect==codex rows: the hook is "
+            "installed yet has not witnessed a Codex tool call, so no per-thread Codex stream was written."
+        )
+        diagnosis["recovery"] = (
+            "run one Codex tool call with CODEX_PLUGIN_ROOT/CLAUDE_PLUGIN_ROOT set so bin/dos-hook "
+            "fires, then re-audit; verify hooks via codex_dos_hook_doctor.py."
+        )
+        return diagnosis
+
+    if not (thread_ids & uuid_shaped_stems):
+        diagnosis["status"] = "WARN"
+        diagnosis["reason"] = "CODEX_WITNESSED_NO_PER_THREAD_STREAM"
+        diagnosis["detail"] = (
+            "dialect==codex observations exist but no discovered Codex thread UUID names a "
+            ".dos/streams/<thread>.jsonl file: the hook fired but the per-thread stream write is missing."
+        )
+        diagnosis["recovery"] = (
+            "confirm the Codex dialect hook keys streams by the Codex session UUID under .dos/streams."
+        )
+        return diagnosis
+
+    diagnosis["status"] = "WARN"
+    diagnosis["reason"] = "KEY_FORMAT_MISMATCH"
+    diagnosis["detail"] = (
+        "UUID-shaped stream files and discovered Codex thread UUIDs both exist but never intersect; "
+        "the stream join key has drifted from the Codex thread UUID."
+    )
+    diagnosis["recovery"] = "inspect the Codex stream-naming convention before widening the match window."
+    return diagnosis
+
+
 def codex_observations_since(repo_root: Path, since_text: Any) -> dict[str, Any]:
     since = parse_ts(since_text)
     obs_path = repo_root / ".dos" / "metrics" / "observations.jsonl"
@@ -1339,6 +1480,7 @@ def build_report(
     witness = load_witness_module()
     codex_threads = discover_codex_threads(home, since_days=since_days)
     streams = discover_streams(repo_root, codex_threads, limit)
+    stream_correlation = stream_correlation_diagnosis(repo_root, codex_threads, streams)
     args = argparse.Namespace(repo_root=repo_root)
     hook_fast_path = codex_hook_fast_path(home)
     post_repair = codex_observations_since(repo_root, hook_fast_path.get("repaired_at"))
@@ -1441,8 +1583,13 @@ def build_report(
 
     status = "PASS"
     if not sessions:
-        status = "UNKNOWN"
-        recommendations.append("no recent Codex sessions matched DOS streams")
+        status = stream_correlation.get("status") or "UNKNOWN"
+        reason = stream_correlation.get("reason") or "NO_CODEX_DOS_STREAM_CORRELATION"
+        detail = stream_correlation.get("detail") or "no recent Codex sessions matched DOS streams"
+        recommendations.append(f"no recent Codex sessions matched DOS streams ({reason}): {detail}")
+        recovery = stream_correlation.get("recovery")
+        if recovery:
+            recommendations.append(f"recovery for {reason}: {recovery}")
     if warned or hook_fast_path.get("status") == "WARN" or workspace_stop.get("status") == "WARN":
         status = "WARN"
     stop_total = sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions) + workspace_stop_active_total
@@ -1473,6 +1620,7 @@ def build_report(
         },
         "codex_threads_discovered": len(codex_threads),
         "sessions_audited": len(sessions),
+        "stream_correlation": stream_correlation,
         "summary": {
             "steps": total_steps,
             "tool_counts": {k: tool_counts[k] for k in sorted(tool_counts)},
@@ -1710,6 +1858,16 @@ def render(report: dict[str, Any]) -> str:
     lines = [
         f"codex DOS recent audit: {report.get('status')}",
         f"  sessions audited: {report.get('sessions_audited')} of {report.get('codex_threads_discovered')} discovered Codex threads",
+    ]
+    correlation = report.get("stream_correlation") if isinstance(report.get("stream_correlation"), dict) else {}
+    if correlation and not report.get("sessions_audited"):
+        lines.append(
+            f"  stream correlation: {correlation.get('status')} {correlation.get('reason')}"
+            f" (streams={correlation.get('dos_stream_files')}, codex_obs={correlation.get('codex_observation_rows')})"
+        )
+        if correlation.get("recovery"):
+            lines.append(f"    recovery: {correlation.get('recovery')}")
+    lines += [
         f"  steps: {summary.get('steps')}  tools: {json.dumps(summary.get('tool_counts') or {}, sort_keys=True)}",
         f"  unknown-tree warnings: {summary.get('unknown_tree_admission_warnings')} / {summary.get('pretool_calls')} pretool calls"
         f" ({summary.get('unknown_tree_warning_rate')})",
