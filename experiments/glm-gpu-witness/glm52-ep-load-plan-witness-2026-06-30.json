@@ -1,0 +1,78 @@
+{
+  "schema": "fak.glm52-ep-load-plan-witness.v1",
+  "captured_at": "2026-06-30T22:38:09Z",
+  "issue": 1728,
+  "node": "GPU server (internal 8-GPU sm_80 datacenter server; hostname redacted)",
+  "model": {
+    "name": "GLM-5.2",
+    "gguf_quant": "UD-Q4_K_M",
+    "shards": 11,
+    "tensors": 1809,
+    "config": {
+      "model_type": "glm_moe_dsa",
+      "layers": 79,
+      "hidden": 6144,
+      "experts": 256
+    }
+  },
+  "tool": {
+    "command": "q4kdiag -gguf <redacted GLM-5.2 shard1> -plan-only -expert-parallel <ranks>",
+    "code_under_test": [
+      "internal/ggufload.EstimateExpertParallelLoadMemoryPlan",
+      "cmd/q4kdiag -plan-only"
+    ],
+    "scope": "GGUF header-only load planning; no tensor payloads loaded"
+  },
+  "tests": {
+    "local_wsl": [
+      "go test ./internal/ggufload ./cmd/fak ./cmd/q4kdiag -run \"TestEstimateExpertParallel|TestServeGGUFExpertParallel|^$\" -count=1",
+      "go test ./internal/ggufload ./cmd/fak ./cmd/q4kdiag -count=1"
+    ],
+    "gpu_server": [
+      "go test ./internal/ggufload ./cmd/q4kdiag -run \"TestEstimateExpertParallel|^$\" -count=1"
+    ],
+    "result": "pass"
+  },
+  "monolith": {
+    "device_total_bytes": 465815983104,
+    "device_total_gib": 433.82,
+    "rows": [
+      {"detail": "gguf-load", "dtype": "f32", "bytes": 545227776, "gib": 0.51},
+      {"detail": "gguf-load", "dtype": "q4_k", "bytes": 275414777856, "gib": 256.50},
+      {"detail": "gguf-load", "dtype": "q5_k", "bytes": 161665253376, "gib": 150.56},
+      {"detail": "gguf-load", "dtype": "q6_k", "bytes": 8707829760, "gib": 8.11},
+      {"detail": "gguf-load", "dtype": "q8_0", "bytes": 19482894336, "gib": 18.14}
+    ]
+  },
+  "expert_parallel": {
+    "ranks_7": {
+      "device_total_bytes": 85045883904,
+      "device_total_gib": 79.21,
+      "rows": [
+        {"detail": "gguf-ep-replicated-load", "dtype": "f32", "bytes": 545154048, "gib": 0.51},
+        {"detail": "gguf-ep-replicated-load", "dtype": "q6_k", "bytes": 780595200, "gib": 0.73},
+        {"detail": "gguf-ep-replicated-load", "dtype": "q8_0", "bytes": 19402678272, "gib": 18.07},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q4_k", "bytes": 39806042112, "gib": 37.07},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q5_k", "bytes": 23365681152, "gib": 21.76},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q6_k", "bytes": 1145733120, "gib": 1.07}
+      ]
+    },
+    "ranks_8": {
+      "device_total_bytes": 76354335744,
+      "device_total_gib": 71.11,
+      "rows": [
+        {"detail": "gguf-ep-replicated-load", "dtype": "f32", "bytes": 545154048, "gib": 0.51},
+        {"detail": "gguf-ep-replicated-load", "dtype": "q6_k", "bytes": 780595200, "gib": 0.73},
+        {"detail": "gguf-ep-replicated-load", "dtype": "q8_0", "bytes": 19402678272, "gib": 18.07},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q4_k", "bytes": 34426847232, "gib": 32.06},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q5_k", "bytes": 20208156672, "gib": 18.82},
+        {"detail": "gguf-ep-routed-expert-shard", "dtype": "q6_k", "bytes": 990904320, "gib": 0.92}
+      ]
+    }
+  },
+  "interpretation": {
+    "what_this_proves": "The GGUF load estimator no longer treats GLM-5.2 routed expert tensors as fully replicated on every EP rank. It charges replicated dense/router/shared tensors once per rank and only the busiest rank's routed expert band for batched ffn_*_exps blobs.",
+    "capacity_note": "EP-7 weights alone are 79.21 GiB, leaving too little room on an 80 GiB card for KV and transient headroom; EP-8 weights are 71.11 GiB before KV/transients.",
+    "honesty_boundary": "This is a load-planning witness only. It does not prove rank-resident tensor materialization, quantized expert GEMM on each rank, or GLM-5.2 decode throughput in fak's native EP runtime."
+  }
+}
