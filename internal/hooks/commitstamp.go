@@ -53,6 +53,7 @@ type CommitLintReport struct {
 	Grade          string   `json:"grade"`                     // A-F grade derived from Score
 	IssueRefs      []int    `json:"issue_refs,omitempty"`      // every #N referenced in the message (#312)
 	IssueResolving bool     `json:"issue_resolving"`           // a #N is in a resolving position the closure audit binds (#312)
+	Generation     string   `json:"generation,omitempty"`      // optional body sidecar: Generation: gen/now|gen/next|gen/second-next|gen/future
 	Issues         []string `json:"issues,omitempty"`          // BLOCKING defects, each with a fix
 	Notes          []string `json:"notes,omitempty"`           // advisory observations
 	OK             bool     `json:"ok"`                        // len(Issues)==0
@@ -168,10 +169,50 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 		}
 	}
 
+	if gen, malformed := lintGenerationSidecar(message); gen != "" {
+		r.Generation = gen
+	} else if malformed && !exempt {
+		r.Notes = append(r.Notes, "generation sidecar is not recognized: use `Generation: gen/now`, `gen/next`, `gen/second-next`, or `gen/future` in the commit body")
+	}
+
 	r.OK = len(r.Issues) == 0
 	r.Score = commitLintScore(r)
 	r.Grade = commitLintGrade(r.Score)
 	return r
+}
+
+func lintGenerationSidecar(message string) (label string, malformed bool) {
+	for _, raw := range strings.Split(message, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "Generation") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "gen/now":
+			return "gen/now", false
+		case "gen/next":
+			return "gen/next", false
+		case "gen/second-next":
+			return "gen/second-next", false
+		case "gen/future":
+			return "gen/future", false
+		case "now":
+			return "gen/now", false
+		case "next":
+			return "gen/next", false
+		case "second-next":
+			return "gen/second-next", false
+		case "future":
+			return "gen/future", false
+		default:
+			return "", true
+		}
+	}
+	return "", false
 }
 
 func commitLintScore(r CommitLintReport) int {
