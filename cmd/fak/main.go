@@ -33,6 +33,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
@@ -517,14 +518,13 @@ func cmdBench(argv []string) {
 	rep, err := bench.Run(ctx(), t, opt)
 	must(err)
 
-	must(os.WriteFile(*out, rep.JSON(), 0o644))
+	must(benchcli.WriteReport(*out, rep.JSON()))
 	// also dump the standalone baseline witness (unit 23)
 	if rep.Baseline.Calls > 0 {
-		bj, _ := json.MarshalIndent(map[string]any{
+		must(benchcli.WriteReport(filepath.Join(filepath.Dir(*out), "baseline.json"), map[string]any{
 			"source": rep.Baseline.Source, "p50_ns": rep.Baseline.P50Ns,
 			"p50_ms": float64(rep.Baseline.P50Ns) / 1e6, "calls": rep.Baseline.Calls,
-		}, "", "  ")
-		_ = os.WriteFile(filepath.Join(filepath.Dir(*out), "baseline.json"), bj, 0o644)
+		}))
 	}
 
 	printReport(rep, *out)
@@ -558,7 +558,7 @@ func cmdTurnTax(argv []string) {
 			bePath = "turntax-breakeven.json"
 		}
 		rep := turnbench.RunBreakEvenSweep(ctx(), turnbench.BaseTrace(), nil, nil, cm, *trials, *seed)
-		must(os.WriteFile(bePath, rep.JSON(), 0o644))
+		must(benchcli.WriteReport(bePath, rep.JSON()))
 		printBreakEven(os.Stdout, &rep)
 		fmt.Printf("\nbreak-even curve written    : %s\n", bePath)
 		return
@@ -574,7 +574,7 @@ func cmdTurnTax(argv []string) {
 	rep, err := turnbench.Run(ctx(), t, cm)
 	must(err)
 
-	must(os.WriteFile(*out, rep.JSON(), 0o644))
+	must(benchcli.WriteReport(*out, rep.JSON()))
 	turnbench.PrintReport(os.Stdout, rep)
 	fmt.Printf("\nreport written              : %s\n", *out)
 }
