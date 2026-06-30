@@ -276,3 +276,94 @@ func loopDriveEnvValue(env []string, key string) string {
 	}
 	return ""
 }
+
+// TestLoopDriveGatesWitnessedDoneWithoutHandoffNextStep proves the wiring: a
+// turn that the exit gate witnesses done is still blocked when the agent wrote a
+// task-handoff record with no next step and no no-next-step reason. The handoff
+// file is exposed to the child via FAK_TASK_HANDOFF_FILE.
+func TestLoopDriveGatesWitnessedDoneWithoutHandoffNextStep(t *testing.T) {
+	oldNewCommand := loopDriveNewCommand
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
+
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	handoff := filepath.Join(t.TempDir(), "task-handoff.json")
+	writeLoopDriveGoal(t, goal, true, true)
+
+	loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+		// The child sees the handoff path and writes a verified-done record that
+		// pushes neither a next step nor an explicit no-next-step reason.
+		if got := loopDriveEnvValue(env, "FAK_TASK_HANDOFF_FILE"); got != handoff {
+			t.Fatalf("FAK_TASK_HANDOFF_FILE=%q, want %q", got, handoff)
+		}
+		return &loopDriveFakeCommand{wait: func() error {
+			rec := `{"schema":"fak.task-handoff.v1","task":{"task_id":"t1","state":"done","witness":{"verified_state":"verified_done"}},"current_state":"shipped"}`
+			return os.WriteFile(handoff, []byte(rec), 0o644)
+		}}
+	}
+	loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--task-handoff-file", handoff, "--max-iters", "1", "--", "worker"})
+	if code != 3 {
+		t.Fatalf("drive code=%d, want 3 (handoff-gated) stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "loop drive witnessed done") {
+		t.Fatalf("witnessed-done completion should be gated, not announced: %s", stdout.String())
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundRefusal := false
+	for _, ev := range events {
+		if ev.Kind == loopmgr.EventAdmit && ev.Status == loopmgr.StatusRefused && ev.Reason == loopdrive.ReasonHandoffRefused {
+			foundRefusal = true
+		}
+	}
+	if !foundRefusal {
+		t.Fatalf("ledger missing handoff refusal admit (%s): %+v", loopdrive.ReasonHandoffRefused, events)
+	}
+}
+
+// TestLoopDrivePassesWitnessedDoneWithHandoffReason proves the pass path: a
+// verified-done handoff with an explicit no-next-step reason lets the completion
+// through.
+func TestLoopDrivePassesWitnessedDoneWithHandoffReason(t *testing.T) {
+	oldNewCommand := loopDriveNewCommand
+	oldWitness := loopDriveRunWitness
+	defer func() {
+		loopDriveNewCommand = oldNewCommand
+		loopDriveRunWitness = oldWitness
+	}()
+
+	goal := filepath.Join(t.TempDir(), "GOAL.md")
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	handoff := filepath.Join(t.TempDir(), "task-handoff.json")
+	writeLoopDriveGoal(t, goal, true, true)
+
+	loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
+		return &loopDriveFakeCommand{wait: func() error {
+			rec := `{"schema":"fak.task-handoff.v1","task":{"task_id":"t1","state":"done","witness":{"verified_state":"verified_done"}},"current_state":"shipped","no_next_step_reason":"feature fully shipped; nothing reasonable remains"}`
+			return os.WriteFile(handoff, []byte(rec), 0o644)
+		}}
+	}
+	loopDriveRunWitness = func(spec loopdrive.Spec, headBefore, headAfter string) loopDriveWitnessResult {
+		return loopDriveWitnessResult{Status: loopmgr.StatusWitnessedDone, Reason: "WITNESS_OK", Summary: "done", ExitCode: 0}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"drive", "--goal", goal, "--ledger", ledger, "--task-handoff-file", handoff, "--max-iters", "1", "--", "worker"})
+	if code != 0 {
+		t.Fatalf("drive code=%d, want 0 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "loop drive witnessed done") {
+		t.Fatalf("stdout missing witnessed-done line: %s", stdout.String())
+	}
+}

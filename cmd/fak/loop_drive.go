@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,7 +19,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/loopgate"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
+
+// loopDriveHandoffFileEnv is the model-facing path a wrapped agent writes a
+// fak.task-handoff.v1 record to before a witnessed-done loop-drive completion.
+// It matches the alias the guard Stop hook exposes so an agent that already
+// knows how to hand off under guard needs no new convention here.
+const loopDriveHandoffFileEnv = "FAK_TASK_HANDOFF_FILE"
 
 type loopDriveOptions struct {
 	GoalPath        string
@@ -36,6 +44,10 @@ type loopDriveOptions struct {
 	ReviewModel     string
 	ReviewEndpoint  string
 	ReviewAPIKeyEnv string
+	// HandoffFile is the path the wrapped agent writes a fak.task-handoff.v1
+	// record to before a witnessed-done completion. Empty means the loop driver
+	// allocates a private per-session file and exposes it to the child.
+	HandoffFile string
 }
 
 type loopDriveWitnessResult struct {
@@ -72,6 +84,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 	reviewModel := fs.String("review-model", "", "optional scout model id exported to fak commit for per-turn diff review")
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL exported with --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var name exported with --review-model")
+	handoffFile := fs.String("task-handoff-file", "", "path the wrapped agent writes a fak.task-handoff.v1 record to before a witnessed-done completion; required for the handoff gate (default: a private per-session file exposed as FAK_TASK_HANDOFF_FILE). A missing/empty file is an ordinary non-agent stop and fails open.")
 	template := fs.Bool("template", false, "print a parseable GOAL.md template and exit")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -121,6 +134,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 		ReviewModel:     *reviewModel,
 		ReviewEndpoint:  *reviewEndpoint,
 		ReviewAPIKeyEnv: *reviewAPIKeyEnv,
+		HandoffFile:     *handoffFile,
 	})
 }
 
@@ -133,6 +147,13 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 	if goalPath == "" {
 		goalPath = "GOAL.md"
 	}
+	handoffFile, handoffCleanup, err := loopDriveHandoffFile(opt.HandoffFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
+		return 1
+	}
+	defer handoffCleanup()
+	opt.HandoffFile = handoffFile
 	iterations := 0
 	var tokensUsed int64
 	for {
@@ -318,7 +339,33 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			return 1
 		}
 		if witness.Status == loopmgr.StatusWitnessedDone {
-			fmt.Fprintf(stdout, "loop drive witnessed done: loop=%s turns=%d ledger=%s\n", spec.Loop, iterations, opt.LedgerPath)
+			gate := loopDriveReviewHandoff(opt.HandoffFile)
+			if !gate.OK() {
+				handoffMetrics := loopDriveMetrics(turn, limit, planIndex, unchecked, tokensUsed, tokenLimit)
+				if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
+					LoopID:       spec.Loop,
+					RunID:        runID,
+					Kind:         loopmgr.EventAdmit,
+					Source:       opt.Source,
+					Principal:    opt.Principal,
+					Status:       loopmgr.StatusRefused,
+					Reason:       gate.Reason,
+					Summary:      gate.Summary,
+					EvidenceRefs: []loopmgr.EvidenceRef{{Kind: "task-handoff", Ref: opt.HandoffFile}},
+					Metrics:      handoffMetrics,
+				}); err != nil {
+					fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
+					return 1
+				}
+				scratch := fmt.Sprintf("NOT_YET turn=%d witnessed done but %s", turn, gate.Summary)
+				if scratchErr := appendGoalScratch(goalPath, scratch); scratchErr != nil {
+					fmt.Fprintf(stderr, "fak loop drive: append scratch: %v\n", scratchErr)
+					return 1
+				}
+				fmt.Fprintf(stderr, "fak loop drive: %s\n", scratch)
+				return 3
+			}
+			fmt.Fprintf(stdout, "loop drive witnessed done: loop=%s turns=%d ledger=%s handoff=%s\n", spec.Loop, iterations, opt.LedgerPath, gate.Reason)
 			return 0
 		}
 		scratch := fmt.Sprintf("NOT_YET turn=%d witness=%s reason=%s %s", turn, witness.Status, witness.Reason, witness.Summary)
@@ -379,6 +426,9 @@ func runLoopDriveTurn(opt loopDriveOptions, goalPath string, spec loopdrive.Spec
 	}
 	defer cleanup()
 	env := loopDriveEnv(os.Environ(), goalPath, spec, planIndex, item, iter, limit, tokensUsed, tokenLimit, opt.Deadline, tokenFile)
+	if h := strings.TrimSpace(opt.HandoffFile); h != "" {
+		env = append(env, loopDriveHandoffFileEnv+"="+h)
+	}
 	env = loopDriveReviewEnv(env, opt, spec, iter)
 	cmd := loopDriveNewCommand(opt.Command, env, stdout, stderr)
 	if err := cmd.Start(); err != nil {
@@ -547,6 +597,47 @@ func loopDriveTokenFile(tokenLimit int64) (string, func(), error) {
 		return "", func() {}, fmt.Errorf("close token usage file: %w", err)
 	}
 	return path, func() { _ = os.Remove(path) }, nil
+}
+
+// loopDriveHandoffFile resolves the path the wrapped agent writes its
+// fak.task-handoff.v1 record to. An explicit path is used as-is (and not
+// removed); otherwise a private per-session file is allocated so the child can
+// see a stable path through loopDriveHandoffFileEnv.
+func loopDriveHandoffFile(explicit string) (string, func(), error) {
+	if p := strings.TrimSpace(explicit); p != "" {
+		return p, func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "fak-loop-drive-handoff-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create task handoff dir: %w", err)
+	}
+	path := filepath.Join(dir, "task-handoff.json")
+	return path, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+// loopDriveReviewHandoff reads and grades the task handoff at the witnessed-done
+// completion boundary. A missing or empty file is an ordinary non-agent stop:
+// the gate fails open. A present-but-malformed record is treated as present and
+// refused so a half-written handoff cannot slip a clean completion through.
+func loopDriveReviewHandoff(file string) loopdrive.HandoffGateResult {
+	file = strings.TrimSpace(file)
+	if file == "" {
+		return loopdrive.HandoffGate(false, taskmgr.Handoff{})
+	}
+	b, err := os.ReadFile(file)
+	if err != nil || len(bytes.TrimSpace(b)) == 0 {
+		return loopdrive.HandoffGate(false, taskmgr.Handoff{})
+	}
+	var h taskmgr.Handoff
+	if err := json.Unmarshal(b, &h); err != nil {
+		return loopdrive.HandoffGateResult{
+			Outcome: loopdrive.HandoffGated,
+			Reason:  loopdrive.ReasonHandoffRefused,
+			Summary: "task handoff present but unparseable: " + trimLoopDriveSummary(err.Error()),
+			Reasons: []string{"UNPARSEABLE_HANDOFF"},
+		}
+	}
+	return loopdrive.HandoffGate(true, h)
 }
 
 func readLoopDriveTokenUsage(path string) (int64, error) {
