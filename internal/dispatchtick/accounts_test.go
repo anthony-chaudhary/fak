@@ -2,12 +2,14 @@ package dispatchtick
 
 import "testing"
 
+func boolPtr(v bool) *bool { return &v }
+
 func accountRowsFixture() []AccountRow {
 	return []AccountRow{
 		{Account: ".claude-gem7", Tag: "gem7", Product: "claude", Dir: "C:/Users/u/.claude-gem7", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8},
-		{Account: ".claude-day26", Tag: "day26", Product: "claude", Dir: "C:/Users/u/.claude-day26", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8, RouteWeight: 10},
+		{Account: ".claude-day26", Tag: "day26", Product: "claude", Dir: "C:/Users/u/.claude-day26", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 4, ActiveSessions: 8, RouteWeight: 10, LoginStatus: "ready", CanServe: boolPtr(true)},
 		{Account: ".claude-busy", Tag: "busy", Product: "claude", Dir: "C:/Users/u/.claude-busy", Available: true, ModelTier: 1, Model: "opus", LiveSessions: 12, ActiveSessions: 30},
-		{Account: ".claude-blocked", Tag: "blocked", Product: "claude", Dir: "C:/Users/u/.claude-blocked", Available: false, ModelTier: 1, BlockReason: "usage limit"},
+		{Account: ".claude-blocked", Tag: "blocked", Product: "claude", Dir: "C:/Users/u/.claude-blocked", Available: false, ModelTier: 1, BlockReason: "config directory exists but has no live credentials", LoginStatus: "needs_login", CanServe: boolPtr(false)},
 		{Account: "opencode-zai", Tag: "zai", Product: "opencode", Dir: "C:/Users/u/opencode-zai", Available: true, ModelTier: 2, Model: "zai-coding-plan/glm-5.2"},
 		{Account: ".claude-copy", Tag: "copy", Product: "claude", Dir: "C:/Users/u/.claude-copy", Available: true, ModelTier: 1, IdentityRole: "duplicate"},
 	}
@@ -26,6 +28,9 @@ func TestRouteAccountPicksTierOneByLoadAndWeight(t *testing.T) {
 	}
 	if len(got.BlockedTargetAccounts) != 1 || got.BlockedTargetAccounts[0].Tag != "blocked" {
 		t.Fatalf("blocked target accounts = %+v, want blocked tier-one account", got.BlockedTargetAccounts)
+	}
+	if got.BlockedTargetAccounts[0].LoginStatus != "needs_login" || got.BlockedTargetAccounts[0].CanServe == nil || *got.BlockedTargetAccounts[0].CanServe {
+		t.Fatalf("blocked target readiness = %+v, want needs_login/can_serve=false", got.BlockedTargetAccounts[0])
 	}
 }
 
@@ -67,6 +72,13 @@ func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 	}
 	if got.Lanes[0].Tag != "day26" || got.Lanes[0].Rank != 0 || got.Lanes[0].Size != 3 {
 		t.Fatalf("first lane = %+v, want route-weighted day26 rank 0 size 3", got.Lanes[0])
+	}
+	if got.Lanes[0].LoginStatus != "ready" || got.Lanes[0].CanServe == nil || !*got.Lanes[0].CanServe {
+		t.Fatalf("first lane readiness = %+v, want ready/can_serve=true", got.Lanes[0])
+	}
+	m := got.Lanes[0].Map()
+	if m["login_status"] != "ready" || m["can_serve"] != true {
+		t.Fatalf("first lane map readiness = %+v, want login_status/can_serve", m)
 	}
 	if got.WaveID == "" || got.Lanes[0].WaveID != got.WaveID {
 		t.Fatalf("wave id not stamped consistently: %+v", got)
