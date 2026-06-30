@@ -88,6 +88,41 @@ func TestCapabilityLedger_EvictColdest(t *testing.T) {
 	}
 }
 
+func TestCapabilityLedger_EvictColdestPairsRefsWithSortedRows(t *testing.T) {
+	for iter := 0; iter < 50; iter++ {
+		ledger := NewCapabilityLedger()
+		now := time.Now().UnixNano()
+
+		refCold := CapRef{Name: "cold-skill", Source: "skill"}
+		refMed := CapRef{Name: "med-skill", Source: "skill"}
+		refHot := CapRef{Name: "hot-skill", Source: "skill"}
+
+		ledger.RecordFault(refCold, now)
+		ledger.MarkEvictable(refCold)
+
+		for i := 0; i < 2; i++ {
+			ledger.RecordFault(refMed, now)
+		}
+		ledger.MarkEvictable(refMed)
+
+		for i := 0; i < 3; i++ {
+			ledger.RecordFault(refHot, now)
+		}
+		ledger.MarkEvictable(refHot)
+
+		evicted := ledger.EvictColdest(3)
+		want := []CapRef{refCold, refMed, refHot}
+		if len(evicted) != len(want) {
+			t.Fatalf("iteration %d: got %d evictions, want %d: %v", iter, len(evicted), len(want), evicted)
+		}
+		for i := range want {
+			if evicted[i] != want[i] {
+				t.Fatalf("iteration %d: evicted[%d] = %v, want %v (full order %v)", iter, i, evicted[i], want[i], evicted)
+			}
+		}
+	}
+}
+
 // TestCapabilityLedger_EvictUnderBudget tests pressure-driven eviction.
 func TestCapabilityLedger_EvictUnderBudget(t *testing.T) {
 	ledger := NewCapabilityLedger()

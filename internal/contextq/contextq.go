@@ -984,24 +984,29 @@ func (l *CapabilityLedger) EvictColdest(n int) []CapRef {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	var evictable []*capResidency
-	var refs []CapRef
+	type evictCandidate struct {
+		ref CapRef
+		cr  *capResidency
+	}
+	var evictable []evictCandidate
 	for ref, cr := range l.caps {
 		if cr.state == CapStateEvictable {
-			evictable = append(evictable, cr)
-			refs = append(refs, ref)
+			evictable = append(evictable, evictCandidate{ref: ref, cr: cr})
 		}
 	}
 
 	// Sort by fault count (coldest = fewest faults)
 	sort.Slice(evictable, func(i, j int) bool {
-		return evictable[i].faults < evictable[j].faults
+		if evictable[i].cr.faults != evictable[j].cr.faults {
+			return evictable[i].cr.faults < evictable[j].cr.faults
+		}
+		return evictable[i].ref.Name < evictable[j].ref.Name
 	})
 
 	evicted := make([]CapRef, 0, min(n, len(evictable)))
 	for i := 0; i < min(n, len(evictable)); i++ {
-		evicted = append(evicted, refs[i])
-		evictable[i].state = CapStateHeld
+		evicted = append(evicted, evictable[i].ref)
+		evictable[i].cr.state = CapStateHeld
 	}
 
 	return evicted
@@ -1017,13 +1022,15 @@ func (l *CapabilityLedger) EvictUnderBudget(budgetBytes int) []CapRef {
 
 	// Calculate current total bytes
 	var totalBytes int
-	var evictable []*capResidency
-	var refs []CapRef
+	type evictCandidate struct {
+		ref CapRef
+		cr  *capResidency
+	}
+	var evictable []evictCandidate
 	for ref, cr := range l.caps {
 		totalBytes += cr.bytes
 		if cr.state == CapStateEvictable {
-			evictable = append(evictable, cr)
-			refs = append(refs, ref)
+			evictable = append(evictable, evictCandidate{ref: ref, cr: cr})
 		}
 	}
 
@@ -1033,14 +1040,17 @@ func (l *CapabilityLedger) EvictUnderBudget(budgetBytes int) []CapRef {
 
 	// Sort by fault count (coldest = fewest faults)
 	sort.Slice(evictable, func(i, j int) bool {
-		return evictable[i].faults < evictable[j].faults
+		if evictable[i].cr.faults != evictable[j].cr.faults {
+			return evictable[i].cr.faults < evictable[j].cr.faults
+		}
+		return evictable[i].ref.Name < evictable[j].ref.Name
 	})
 
 	evicted := make([]CapRef, 0, len(evictable))
 	for i := 0; i < len(evictable) && totalBytes > budgetBytes; i++ {
-		totalBytes -= evictable[i].bytes
-		evicted = append(evicted, refs[i])
-		evictable[i].state = CapStateHeld
+		totalBytes -= evictable[i].cr.bytes
+		evicted = append(evicted, evictable[i].ref)
+		evictable[i].cr.state = CapStateHeld
 	}
 
 	return evicted
