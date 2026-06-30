@@ -1,5 +1,5 @@
 {
-  "schema": "fak.dgx-endpoint-bench.v1",
+  "schema": "fak.gpu-server-endpoint-bench.v1",
   "app_version": "0.24.0",
   "generated_at": "2026-06-24T21:13:16.514438Z",
   "benchmark": {
@@ -35,7 +35,7 @@
     "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
     "python": "3.12.3",
     "argv": [
-      "/srv/fleet/tools/dgx_endpoint_load.py",
+      "/srv/fleet/tools/gpu_server_endpoint_load.py",
       "--base-url",
       "http://127.0.0.1:30000/v1",
       "--model",

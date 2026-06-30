@@ -39,11 +39,11 @@ decode; the sweep below is the rigorous throughput measure.
 
 ## Proof 2 — throughput sweep (real benchmark)
 
-`dgx_endpoint_load.py` against the live `:30000` endpoint, replaying the recorded
+`gpu_server_endpoint_load.py` against the live `:30000` endpoint, replaying the recorded
 agentic workload (`production-workload.json`, 6 airline-booking agent cases,
 prompt 1.5k–4.1k tok, completion 184–269 tok). 24 requests minimum per concurrency
 point, **zero errors across the entire sweep**. Full record in
-[`raw-sglang.json`](raw-sglang.json) (`fak.dgx-endpoint-bench.v1`).
+[`raw-sglang.json`](raw-sglang.json) (`fak.gpu-server-endpoint-bench.v1`).
 
 | concurrency | ok | errors | req/s | completion tok/s | total tok/s | p50 ms | p95 ms |
 |---|---|---|---|---|---|---|---|
@@ -72,9 +72,9 @@ sweep on the same box reached ~1.45k completion tok/s at C=128.)
 
 ## Files
 
-- [`raw-sglang.json`](raw-sglang.json) — `fak.dgx-endpoint-bench.v1`, full 6-point sweep + provenance (8-GPU topology, driver, workload hashes).
+- [`raw-sglang.json`](raw-sglang.json) — `fak.gpu-server-endpoint-bench.v1`, full 6-point sweep + provenance (8-GPU topology, driver, workload hashes).
 - [`samples.json`](samples.json) — the three live completions with token counts and excerpts.
 
 Provenance host scrubbed to `gpu-server-lab` per the public-copy policy
 (`tools/scrub_hardware_names.py`); the GPU topology block matches the prior committed
-run `dgx-r4-20260622/`.
+run `gpu-server-r4-20260622/`.

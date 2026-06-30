@@ -92,7 +92,7 @@
   "fak_attributable_witnesses": {
     "gateway_tax_pct": {
       "value": "~3% at saturation (peak C=64 0.75x; C=128 0.97x)",
-      "witness": "experiments/qwen36/dgx-r4-20260622/compare.json (#921 Rung-4, a2559041)",
+      "witness": "experiments/qwen36/gpu-server-r4-20260622/compare.json (#921 Rung-4, a2559041)",
       "label": "WITNESSED"
     },
     "kv_reuse_marginal_over_tuned": {
