@@ -268,6 +268,55 @@ func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	}
 }
 
+// TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue is the second #1397
+// witness: an issue that ROUTED to a safe lane (tools, tree tools/**) but whose own text
+// targets fak's own running source (cmd/** + internal/**) still reports SELF_MODIFY_HOLD
+// rather than would_spawn. This is the exact failure #1338/#1397 name -- a
+// `fix(dispatch):` title aliases to the tools lane carrying ZERO extracted paths, so the
+// lane tree alone never reveals the self-modify hazard; the issue-text arm catches it.
+func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	oldFetch := dispatchFetchIssue
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"tools": {Tree: []string{"tools/**", "scripts/**"}, Issues: []int{1397}, Count: 1},
+			},
+		}, nil
+	}
+	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
+		return dispatchIssueInfo{
+			Number: issue,
+			Title:  "fix(dispatch): pre-route fak-own-code issues away from self-guarded workers",
+			Body:   "most of the backlog lives in `cmd/**` + `internal/**` -- structurally unshippable by a self-guarded worker.",
+			Labels: nil,
+		}
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute; dispatchFetchIssue = oldFetch })
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "tools", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (a self-modify hold is a refuse) (stderr: %s)", code, errb)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["action"] != "self_modify_hold" || got["verdict"] != "SELF_MODIFY_HOLD" || got["ok"] != false {
+		t.Fatalf("mis-routed tools issue = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
+	}
+	if got["lane"] != "tools" || got["self_modify_tree"] != "cmd/**" || got["target_issue"] != float64(1397) {
+		t.Fatalf("lane/tree/target = %v/%v/%v, want tools/cmd-glob/1397", got["lane"], got["self_modify_tree"], got["target_issue"])
+	}
+	if guarded, _ := got["guarded"].(bool); !guarded {
+		t.Fatalf("the hold must still resolve the guard wrapper (that is WHY it holds): %#v", got)
+	}
+}
+
 // TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane pins the OTHER half of #1397:
 // the self-modify hold is SELECTIVE. A guarded worker pinned to a non-self-modify lane
 // (docs) still plans normally -- would_spawn -- because docs/** is shippable under guard.

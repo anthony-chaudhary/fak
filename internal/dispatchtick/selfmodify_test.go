@@ -57,3 +57,53 @@ func TestSelfModifyHoldOnlyHoldsGuardedSelfSourceLanes(t *testing.T) {
 		t.Fatalf("SelfModifyHold(true, nil) held with no tree")
 	}
 }
+
+func TestIssueTextTargetsSelfSourceCatchesBareAndPrefixedRefs(t *testing.T) {
+	selfSource := map[string]string{
+		"most of the backlog lives in `cmd/**` + `internal/**`": "cmd/**",
+		"work in cmd/fak/ where the verb shell lives":           "cmd/fak/",
+		"see ./cmd/fak/dispatch_tick.go":                        "./cmd/fak/dispatch_tick.go",
+		"touches fak/internal/gateway/http.go":                  "fak/internal/gateway/http.go",
+		"the internal/agent stream needs a fix":                 "internal/agent",
+	}
+	for text, want := range selfSource {
+		held, tree := IssueTextTargetsSelfSource(text)
+		if !held || tree != want {
+			t.Errorf("IssueTextTargetsSelfSource(%q) = (%v, %q), want (true, %q)", text, held, tree, want)
+		}
+	}
+	// A bare mention without a cmd/internal path, or a near-miss word, does NOT match --
+	// the dispatcher must not hold a genuinely shippable issue.
+	notSelfSource := []string{
+		"Resolve the issue and keep literal braces like {\"ok\":true} intact.",
+		"first-class fak dispatch verb",
+		"the subcommand/foo helper and internals/x are unrelated",
+		"document the tools/ and docs/ lanes",
+		"",
+	}
+	for _, text := range notSelfSource {
+		if held, tree := IssueTextTargetsSelfSource(text); held {
+			t.Errorf("IssueTextTargetsSelfSource(%q) = (true, %q), want not held", text, tree)
+		}
+	}
+}
+
+func TestSelfModifyHoldForPickCatchesMisroutedSelfSourceIssue(t *testing.T) {
+	// A guarded worker routed to a SAFE lane (tools) whose target issue's text targets
+	// fak's own source is held -- the #1338/#1397 mis-route the lane tree alone hides.
+	if held, tree := SelfModifyHoldForPick(true, []string{"tools/**", "scripts/**"}, "fix(dispatch): the work lives in `cmd/**`"); !held || tree != "cmd/**" {
+		t.Fatalf("SelfModifyHoldForPick(tools lane, cmd/** issue text) = (%v, %q), want held on cmd/**", held, tree)
+	}
+	// The lane-tree arm wins first and names the lane glob when the lane itself is self-source.
+	if held, tree := SelfModifyHoldForPick(true, []string{"internal/gateway/**"}, "no path here"); !held || tree != "internal/gateway/**" {
+		t.Fatalf("SelfModifyHoldForPick(self-source lane) = (%v, %q), want held on internal/gateway/**", held, tree)
+	}
+	// A safe lane + a shippable issue (no self-source ref) is NOT held -- guarded docs work ships.
+	if held, _ := SelfModifyHoldForPick(true, []string{"docs/**"}, "update the README front door"); held {
+		t.Fatalf("SelfModifyHoldForPick held a shippable docs pick")
+	}
+	// An UNGUARDED worker is never held, even when the issue text targets self-source.
+	if held, _ := SelfModifyHoldForPick(false, []string{"tools/**"}, "edit cmd/fak/main.go"); held {
+		t.Fatalf("SelfModifyHoldForPick held an unguarded worker")
+	}
+}

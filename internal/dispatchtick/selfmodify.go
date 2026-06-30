@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // SelfSourceTreePrefixes are the repository sub-trees that compile into the running
 // fak orchestrator binary -- the Go module's own source. A worker spawned under
@@ -55,4 +58,47 @@ func SelfModifyHold(guarded bool, laneTree []string) (held bool, tree string) {
 		}
 	}
 	return false, ""
+}
+
+// selfSourceTextRE matches a reference, in an issue's title or body, to fak's own
+// running Go-module source: a cmd/ or internal/ rooted path or glob, with an optional
+// ./ or fak/ module prefix (cmd/**, internal/agent, ./cmd/fak/dispatch_tick.go,
+// fak/internal/gateway/http.go). A leading boundary (start, or a non-path char) keeps it
+// from matching cmd/ inside a longer word (subcommand/, internals/). It deliberately
+// catches the BARE cmd/ and internal/ forms the router's path extractor (pathRE) misses
+// -- pathRE only recognizes fak/-prefixed or tools|docs paths, which is exactly why a
+// self-source issue (title `fix(dispatch):`, body "lives in cmd/** + internal/**")
+// mis-routes to a safe lane (tools) carrying ZERO extracted paths (#1397).
+var selfSourceTextRE = regexp.MustCompile(`(?:^|[^\w./-])((?:\./|fak/)?(?:cmd|internal)/[\w*][\w*./-]*)`)
+
+// IssueTextTargetsSelfSource reports whether an issue's text (title + body) references
+// fak's own running source -- a cmd/ or internal/ path or glob -- returning the first
+// matched reference as the witness. It is the MIS-ROUTE arm of the #1397 pre-route: the
+// router can send a self-source issue to a SAFE lane by scope/label/keyword alias (a
+// `fix(dispatch):` title aliases to the tools lane) while its real work lives in cmd/**
+// or internal/**, so the lane tree alone never reveals the self-modify hazard -- the
+// exact #1338/#1397 failure (real work in cmd/fak, lane reported as tools).
+func IssueTextTargetsSelfSource(text string) (held bool, tree string) {
+	m := selfSourceTextRE.FindStringSubmatch(text)
+	if m == nil {
+		return false, ""
+	}
+	return true, m[1]
+}
+
+// SelfModifyHoldForPick is the full #1397 pre-route verdict for one dispatch pick: a
+// GUARDED worker is held when EITHER the lane tree is fak's own source (a correctly-
+// routed cmd/internal lane) OR the target issue's own text references cmd/** or
+// internal/** (a MIS-ROUTED issue whose scope/label alias sent it to a safe lane). The
+// lane-tree arm is checked first so a correctly-routed lane names its glob as the
+// witness; the issue-text arm then catches the mis-route the lane tree hides. An
+// UNGUARDED worker is never held (the operator/worktree-isolated escape #1334).
+func SelfModifyHoldForPick(guarded bool, laneTree []string, issueText string) (held bool, tree string) {
+	if !guarded {
+		return false, ""
+	}
+	if held, t := SelfModifyHold(guarded, laneTree); held {
+		return true, t
+	}
+	return IssueTextTargetsSelfSource(issueText)
 }

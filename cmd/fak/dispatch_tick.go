@@ -318,16 +318,22 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	payload["launch_command"] = launchPreview
 	payload["guarded"] = guardedPreview
 
-	// Self-modify pre-route (#1397): a GUARDED worker aimed at a lane rooted in fak's
-	// own running source (cmd/** or internal/**) can investigate but never SHIP -- the
-	// guard refuses an edit to the binary adjudicating it (reason=SELF_MODIFY), so the
-	// worker burns turns and lands 0 commits (#1338's evidence). Hold the pick BEFORE
-	// both the dry-run plan and the live spawn so the loop honest-STOPs and the operator
-	// routes it to an unguarded/operator or worktree-isolated path (#1334) instead. The
-	// guard wrapper and account are already resolved above, so the witness names exactly
-	// why -- this is a pre-route, not a guard/account failure. An unguarded worker
-	// (FLEET_DOGFOOD_GUARD=0, or a worktree-isolated path) never trips this.
-	if held, tree := dispatchtick.SelfModifyHold(guardedPreview, pick.Tree); held {
+	// Self-modify pre-route (#1397): a GUARDED worker aimed at fak's own running source
+	// (cmd/** or internal/**) can investigate but never SHIP -- the guard refuses an edit
+	// to the binary adjudicating it (reason=SELF_MODIFY), so the worker burns turns and
+	// lands 0 commits (#1338's evidence). The hold fires on TWO signals: the lane tree is
+	// self-source (a correctly-routed cmd/internal lane), OR the target issue's own text
+	// references cmd/** or internal/** even though it routed to a SAFE lane -- the
+	// MIS-ROUTE the router's path extractor hides, because it only sees fak/-prefixed
+	// paths, so a `fix(dispatch):` issue whose real work is in cmd/fak aliases to the
+	// tools lane carrying zero extracted paths (#1338/#1397 are themselves this case).
+	// Hold BEFORE both the dry-run plan and the live spawn so the loop honest-STOPs and
+	// the operator routes it to an unguarded/operator or worktree-isolated path (#1334)
+	// instead. The guard wrapper and account are already resolved above, so the witness
+	// names exactly why -- this is a pre-route, not a guard/account failure. An unguarded
+	// worker (FLEET_DOGFOOD_GUARD=0, or a worktree-isolated path) never trips this.
+	issueText := dispatchMapString(promptRec, "title") + "\n" + dispatchMapString(promptRec, "body")
+	if held, tree := dispatchtick.SelfModifyHoldForPick(guardedPreview, pick.Tree, issueText); held {
 		payload["ok"] = false
 		payload["action"] = "self_modify_hold"
 		payload["verdict"] = "SELF_MODIFY_HOLD"
@@ -431,6 +437,7 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[strin
 		"issue":        rec.Issue,
 		"lane":         rec.Lane,
 		"title":        rec.Title,
+		"body":         inf.Body,
 		"fetch_error":  rec.FetchError,
 		"prompt":       rec.Prompt,
 		"prompt_chars": rec.PromptChars,
