@@ -14,14 +14,31 @@ description: One repeatable pass that keeps fak the path of least resistance for
 > and `repo-hygiene` keeps the tree lean.
 
 The shape: **run the scorecard → add every missing affordance (HARD defect) →
-weigh every SOFT signal → re-measure to prove friction-debt dropped → regenerate
-the snapshot → commit only the scorecard lane.**
+weigh every SOFT signal → re-measure to prove friction-debt dropped *and the
+experience-frontier climbed* → regenerate the snapshot → commit only the scorecard
+lane.**
 
-The headline number is **friction-debt**: the count of concrete, re-derivable
-defects that make fak harder for an agent to find, trust, and build on. Drive it
-to zero and "attractive to agents" becomes a number you moved, not a claim you
-made. (The shipped tree is at **0 / grade A** — this pass is what keeps it there,
-and the stick any forked or adopting repo measures its own gap against.)
+There are **two headline numbers**, because agent-readiness is two questions:
+
+- **friction-debt** (the BASELINE gate, lower = better, floor 0): the count of
+  concrete, re-derivable defects that make the expected affordances missing or
+  broken. It **saturates** — drive it to zero and there is nothing left to fix. The
+  shipped tree is at **0 / grade A**; this pass keeps it there.
+- **experience-frontier** (the HEADLINE, higher = better, **unbounded**): the
+  weighted count of real, working agent affordances the tree actually provides — an
+  integration recipe an agent follows, a zero-setup harness config, a kernel refusal
+  an agent can recover from, a tool an agent drives via `--json`. It is deliberately
+  **NOT a 0-100 grade**: agent experience is a *never-done program* (the same
+  category as kernel- and cache-optimization), so it has no ceiling and is tracked as
+  a frontier + a trend, never a completion %. It is the deliberate mirror of
+  `internal/heavinessscore`'s unbounded `heaviness_pressure` (the load an *operator*
+  carries); this is the surface an *agent* gains. You move it by **adding a real
+  affordance** (onboard a harness, map a refusal, expose a `--json` surface) — never
+  by gaming a substring, the same rule the friction-debt gate enforces.
+
+Drive friction-debt to zero and climb the frontier, and "attractive to agents"
+becomes a pair of numbers you moved, not a claim you made. (The stick any forked or
+adopting repo measures its own gap against.)
 
 ---
 
@@ -105,8 +122,13 @@ is the whole method. Capture a before/after baseline so you can prove the drop:
 ```bash
 python tools/agent_readiness_scorecard.py --json > /tmp/before.json   # baseline before the pass
 # … add the affordances …
-python tools/agent_readiness_scorecard.py --compare /tmp/before.json  # prints the friction-debt delta + the 2x verdict
+python tools/agent_readiness_scorecard.py --compare /tmp/before.json  # experience-frontier delta (+35% goal) + friction-debt delta
 ```
+
+`--compare` leads with the **experience-frontier** delta and a percentage: the goal
+is a frontier *climb* (the default target is **+35%**), because the friction-debt
+gate has already bottomed out at 0 — improvement now lives entirely on the unbounded
+frontier. It also still prints the friction-debt 2x gate (held at 0).
 
 ## Step 3 — Weigh the SOFT signals, then stop
 
@@ -115,8 +137,9 @@ token added only to move a metric is the gaming this pass refuses.
 
 ## Step 4 — Re-measure, confirm, regenerate the snapshot
 
-Re-run the scorecard; state the before/after (e.g. "friction-debt 6 → 0, adopt
-67 → 100"). Then regenerate the committed snapshot so the doc matches the tree:
+Re-run the scorecard; state the before/after on BOTH headlines (e.g. "friction-debt
+6 → 0, adopt 67 → 100; experience-frontier 284 → 384, +35%"). Then regenerate the
+committed snapshot so the doc matches the tree:
 
 ```bash
 python tools/agent_readiness_scorecard.py --markdown --stamp $(date +%F) > docs/AGENT-READINESS-SCORECARD.md
