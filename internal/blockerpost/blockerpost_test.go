@@ -115,8 +115,8 @@ func TestParseSeverity(t *testing.T) {
 func TestStatusBlockerIsMutedAndDoesNotPage(t *testing.T) {
 	b := Blocker{
 		Severity: SeverityStatus,
-		Title:    "GPU-gated, waiting on DGX hours",
-		Detail:   "Rungs 1/2/3/5 need the private DGX-A100.",
+		Title:    "GPU-gated, waiting on private GPU-server hours",
+		Detail:   "Rungs 1/2/3/5 need the private GPU server.",
 		Source:   "agent",
 	}
 	got := b.Text()
