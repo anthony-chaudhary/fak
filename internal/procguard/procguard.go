@@ -58,6 +58,31 @@ var DefaultOrphanPatterns = []string{"dos_mcp.server"}
 // with zero live children aged past the floor is a stray launcher.
 var DefaultIdleShellNames = map[string]bool{"pwsh": true, "powershell": true, "bash": true}
 
+// DefaultOrphanConsoleShellNames are shell processes that can remain after their
+// owner exits while keeping only a console-host child alive.
+var DefaultOrphanConsoleShellNames = map[string]bool{"cmd": true}
+
+// DefaultConsoleHostChildNames are console-host processes that do not represent
+// useful child work on their own.
+var DefaultConsoleHostChildNames = map[string]bool{"conhost": true, "openconsole": true}
+
+// DefaultInteractiveParentNames are attended terminal/session parents. Idle
+// shells under these are reported as visible topology, not reaped as abandoned
+// background launcher shells.
+var DefaultInteractiveParentNames = map[string]bool{
+	"windowsterminal": true, "terminal": true, "conhost": true, "openconsole": true,
+	"explorer": true, "cmd": true, "powershell": true, "pwsh": true,
+}
+
+// DefaultConsoleProneNames are background helpers that have historically been
+// associated with user-visible console windows when launched without a no-window
+// creation flag.
+var DefaultConsoleProneNames = map[string]bool{
+	"cmd": true, "powershell": true, "pwsh": true, "bash": true, "sh": true, "zsh": true,
+	"gh": true, "git": true, "go": true, "python": true, "node": true,
+	"conhost": true, "openconsole": true,
+}
+
 // ProtectedNames are OS-critical processes that must NEVER be reaped even with
 // Enact. Reuses the same set the dispatchtick classifier already defines.
 var ProtectedNames = dispatchtick.ProtectedProcessNames
@@ -98,19 +123,20 @@ func DefaultThresholds() Thresholds {
 
 // Finding is one flagged process row, shape-compatible with the Python contract.
 type Finding struct {
-	PID       int      `json:"pid"`
-	Name      string   `json:"name"`
-	Threads   *int     `json:"threads"`
-	Handles   *int     `json:"handles"`
-	WSMB      *int     `json:"ws_mb"`
-	CPUPct    *float64 `json:"cpu_pct,omitempty"`
-	PPID      *int     `json:"ppid,omitempty"`
-	Start     string   `json:"start,omitempty"`
-	Reasons   []string `json:"reasons"`
-	Protected bool     `json:"protected"`
-	Kind      string   `json:"kind,omitempty"`
-	Action    string   `json:"action,omitempty"`
-	CPUStreak *int     `json:"cpu_streak,omitempty"`
+	PID        int      `json:"pid"`
+	Name       string   `json:"name"`
+	Threads    *int     `json:"threads"`
+	Handles    *int     `json:"handles"`
+	WSMB       *int     `json:"ws_mb"`
+	CPUPct     *float64 `json:"cpu_pct,omitempty"`
+	PPID       *int     `json:"ppid,omitempty"`
+	ParentName string   `json:"parent_name,omitempty"`
+	Start      string   `json:"start,omitempty"`
+	Reasons    []string `json:"reasons"`
+	Protected  bool     `json:"protected"`
+	Kind       string   `json:"kind,omitempty"`
+	Action     string   `json:"action,omitempty"`
+	CPUStreak  *int     `json:"cpu_streak,omitempty"`
 }
 
 // Enacted is one reap outcome row in the JSON contract's "enacted" list.
@@ -121,23 +147,40 @@ type Enacted struct {
 	Detail string `json:"detail"`
 }
 
+// ObservationSummary is a non-actionable topology signal. It keeps recurring
+// console/process sprawl visible even when the conservative reaper has nothing
+// old enough or definite enough to kill.
+type ObservationSummary struct {
+	RelationScanned                  int            `json:"relation_scanned"`
+	ConsoleProneCount                int            `json:"console_prone_count"`
+	ConsoleProneByName               map[string]int `json:"console_prone_by_name,omitempty"`
+	ConsoleProneByParent             map[string]int `json:"console_prone_by_parent,omitempty"`
+	BackgroundConsoleProneCount      int            `json:"background_console_prone_count"`
+	ConsoleHostCount                 int            `json:"console_host_count"`
+	IdleShellCandidates              int            `json:"idle_shell_candidates"`
+	AgedIdleShellCandidates          int            `json:"aged_idle_shell_candidates"`
+	OrphanConsoleShellCandidates     int            `json:"orphan_console_shell_candidates"`
+	AgedOrphanConsoleShellCandidates int            `json:"aged_orphan_console_shell_candidates"`
+}
+
 // Payload is the full machine-readable status the control pane folds — the Go
 // mirror of the Python build_payload() dict, field-for-field.
 type Payload struct {
-	Schema                 string         `json:"schema"`
-	OK                     bool           `json:"ok"`
-	Platform               string         `json:"platform"`
-	Thresholds             Thresholds     `json:"thresholds"`
-	CPUReapConfirm         int            `json:"cpu_reap_confirm"`
-	CPUStreaks             map[string]int `json:"cpu_streaks"`
-	Scanned                int            `json:"scanned"`
-	FlaggedCount           int            `json:"flagged_count"`
-	ActionableFlaggedCount int            `json:"actionable_flagged_count"`
-	Flagged                []Finding      `json:"flagged"`
-	Enacted                []Enacted      `json:"enacted"`
-	Enact                  bool           `json:"enact"`
-	CollectError           string         `json:"collect_error,omitempty"`
-	NextAction             string         `json:"next_action"`
+	Schema                 string              `json:"schema"`
+	OK                     bool                `json:"ok"`
+	Platform               string              `json:"platform"`
+	Thresholds             Thresholds          `json:"thresholds"`
+	CPUReapConfirm         int                 `json:"cpu_reap_confirm"`
+	CPUStreaks             map[string]int      `json:"cpu_streaks"`
+	Scanned                int                 `json:"scanned"`
+	FlaggedCount           int                 `json:"flagged_count"`
+	ActionableFlaggedCount int                 `json:"actionable_flagged_count"`
+	Flagged                []Finding           `json:"flagged"`
+	Enacted                []Enacted           `json:"enacted"`
+	Enact                  bool                `json:"enact"`
+	Observations           *ObservationSummary `json:"observations,omitempty"`
+	CollectError           string              `json:"collect_error,omitempty"`
+	NextAction             string              `json:"next_action"`
 }
 
 // Options bundles the classifier knobs build accepts.
@@ -149,6 +192,7 @@ type Options struct {
 	CPUReapConfirm int
 	CPUStreaksPrev map[string]int
 	OrphanRows     []Finding
+	Observations   *ObservationSummary
 	Platform       string
 	CollectError   string
 	// Killer is the destructive reaper, injected so tests never spawn anything.
@@ -221,24 +265,96 @@ func Classify(procs []Proc, th Thresholds, protectedPIDs []int, allowNames []str
 	return out
 }
 
+// RelationTopology is the process-tree view derived from one relation scan.
+type RelationTopology struct {
+	LivePIDs    map[int]bool
+	ChildCounts map[int]int
+	ChildNames  map[int][]string
+	ParentNames map[int]string
+}
+
+// OrphanOptions bundles the orphan-sprawl detector knobs.
+type OrphanOptions struct {
+	Patterns                []string
+	IdleShellNames          map[string]bool
+	OrphanConsoleShellNames map[string]bool
+	ConsoleHostChildNames   map[string]bool
+	InteractiveParentNames  map[string]bool
+	ConsoleProneNames       map[string]bool
+	MinAgeSec               int
+	ReapIdleShells          bool
+	ProtectedPIDs           []int
+	AllowNames              []string
+}
+
+// DefaultOrphanOptions returns the default orphan-sprawl detector settings.
+func DefaultOrphanOptions() OrphanOptions {
+	return OrphanOptions{
+		Patterns:                DefaultOrphanPatterns,
+		IdleShellNames:          DefaultIdleShellNames,
+		OrphanConsoleShellNames: DefaultOrphanConsoleShellNames,
+		ConsoleHostChildNames:   DefaultConsoleHostChildNames,
+		InteractiveParentNames:  DefaultInteractiveParentNames,
+		ConsoleProneNames:       DefaultConsoleProneNames,
+		MinAgeSec:               DefaultIdleShellAgeSec,
+	}
+}
+
+// NewRelationTopology builds the ppid/name indexes shared by the reaper and the
+// non-actionable observation layer.
+func NewRelationTopology(procs []Proc) RelationTopology {
+	live := map[int]bool{}
+	parents := map[int]string{}
+	for _, p := range procs {
+		if p.PID > 0 {
+			live[p.PID] = true
+			parents[p.PID] = p.Name
+		}
+	}
+	return RelationTopology{
+		LivePIDs:    live,
+		ChildCounts: ChildCounts(procs),
+		ChildNames:  ChildNames(procs),
+		ParentNames: parents,
+	}
+}
+
 // ClassifyOrphans flags orphaned sprawl: ephemeral helpers whose owner is gone, and
 // idle launcher shells with no live children. Pure: livePIDs and childCounts are
 // derived from the same relation scan by the caller.
 func ClassifyOrphans(procs []Proc, livePIDs map[int]bool, childCounts map[int]int, orphanPatterns []string, idleShellNames map[string]bool, minAgeSec int, reapIdleShells bool, protectedPIDs []int, allowNames []string) []Finding {
-	patterns := nonEmpty(orphanPatterns)
-	allow := lowerSet(allowNames)
-	protSet := intSet(protectedPIDs)
+	top := RelationTopology{LivePIDs: livePIDs, ChildCounts: childCounts}
+	opt := DefaultOrphanOptions()
+	opt.Patterns = orphanPatterns
+	opt.IdleShellNames = idleShellNames
+	opt.MinAgeSec = minAgeSec
+	opt.ReapIdleShells = reapIdleShells
+	opt.ProtectedPIDs = protectedPIDs
+	opt.AllowNames = allowNames
+	return ClassifyOrphanSprawl(procs, top, opt)
+}
+
+// ClassifyOrphanSprawl is the topology-aware detector used by the native command.
+// It keeps the kill criteria conservative: attended terminal parents are spared,
+// and cmd.exe is only flagged when its owner is gone and its remaining children are
+// console hosts.
+func ClassifyOrphanSprawl(procs []Proc, top RelationTopology, opt OrphanOptions) []Finding {
+	opt = normalizeOrphanOptions(opt)
+	patterns := nonEmpty(opt.Patterns)
+	allow := lowerSet(opt.AllowNames)
+	protSet := intSet(opt.ProtectedPIDs)
 	flagged := []Finding{}
 	for _, p := range procs {
 		name := strings.TrimSpace(p.Name)
-		if allow[strings.ToLower(name)] {
+		stem := stemLower(name)
+		if allow[stem] {
 			continue
 		}
 		reasons := []string{}
 		kind := ""
 
 		// Orphaned ephemeral helper: matches a known pattern AND its owner is gone.
-		if len(patterns) > 0 && !ownerAlive(p.PPID, livePIDs) {
+		if len(patterns) > 0 && !ownerAlive(p.PPID, top.LivePIDs) {
 			hay := name + " " + p.Cmdline
 			for _, pat := range patterns {
 				if strings.Contains(hay, pat) {
@@ -254,10 +370,10 @@ func ClassifyOrphans(procs []Proc, livePIDs map[int]bool, childCounts map[int]in
 		}
 
 		// Idle launcher shell: a wrapper shell with no live children, aged out.
-		if reapIdleShells && idleShellNames[strings.ToLower(name)] {
-			kids := childCounts[p.PID]
-			aged := minAgeSec <= 0 || (p.AgeSec != nil && *p.AgeSec >= minAgeSec)
-			if kids == 0 && aged {
+		if opt.ReapIdleShells && opt.IdleShellNames[stem] {
+			kids := top.ChildCounts[p.PID]
+			aged := opt.MinAgeSec <= 0 || (p.AgeSec != nil && *p.AgeSec >= opt.MinAgeSec)
+			if kids == 0 && aged && !attendedParent(p, top, opt.InteractiveParentNames) {
 				note := ""
 				if p.AgeSec != nil {
 					note = fmt.Sprintf(", age %ds", *p.AgeSec)
@@ -269,13 +385,40 @@ func ClassifyOrphans(procs []Proc, livePIDs map[int]bool, childCounts map[int]in
 			}
 		}
 
+		// Orphaned console shell: cmd.exe can outlive the parent with only its
+		// conhost/openconsole child, so the generic zero-child idle-shell rule
+		// cannot see it. This fires only when the owner is gone and every remaining
+		// child is just the console host.
+		if opt.ReapIdleShells && opt.OrphanConsoleShellNames[stem] {
+			aged := opt.MinAgeSec <= 0 || (p.AgeSec != nil && *p.AgeSec >= opt.MinAgeSec)
+			children := childNameStems(top.ChildNames[p.PID])
+			if !ownerAlive(p.PPID, top.LivePIDs) && aged && onlyConsoleChildren(children, opt.ConsoleHostChildNames) {
+				ppid := 0
+				if p.PPID != nil {
+					ppid = *p.PPID
+				}
+				note := ""
+				if p.AgeSec != nil {
+					note = fmt.Sprintf(", age %ds", *p.AgeSec)
+				}
+				childNote := ", children=none"
+				if len(children) > 0 {
+					childNote = ", children=" + strings.Join(children, ",")
+				}
+				reasons = append(reasons, fmt.Sprintf("orphaned console shell: owner pid %d not alive%s%s", ppid, childNote, note))
+				if kind == "" {
+					kind = "orphan-console-shell"
+				}
+			}
+		}
+
 		if len(reasons) == 0 {
 			continue
 		}
 		flagged = append(flagged, Finding{
-			PID: p.PID, Name: name, PPID: p.PPID, Threads: p.Threads, WSMB: p.WSMB,
+			PID: p.PID, Name: name, PPID: p.PPID, ParentName: parentName(p, top), Threads: p.Threads, WSMB: p.WSMB,
 			Reasons:   reasons,
-			Protected: protSet[p.PID] || ProtectedNames[strings.ToLower(name)],
+			Protected: protSet[p.PID] || ProtectedNames[stem],
 			Kind:      kind,
 		})
 	}
@@ -292,6 +435,68 @@ func ChildCounts(procs []Proc) map[int]int {
 		}
 	}
 	return counts
+}
+
+// ChildNames builds the ppid -> live child process-name map for console-host-only
+// orphan-shell detection.
+func ChildNames(procs []Proc) map[int][]string {
+	out := map[int][]string{}
+	for _, p := range procs {
+		if p.PPID != nil {
+			out[*p.PPID] = append(out[*p.PPID], p.Name)
+		}
+	}
+	return out
+}
+
+// ObserveSprawl summarizes console-prone topology without deciding to kill
+// anything. This is the trend signal for recurring window spam.
+func ObserveSprawl(procs []Proc, top RelationTopology, opt OrphanOptions) ObservationSummary {
+	opt = normalizeOrphanOptions(opt)
+	out := ObservationSummary{
+		RelationScanned:      len(procs),
+		ConsoleProneByName:   map[string]int{},
+		ConsoleProneByParent: map[string]int{},
+	}
+	for _, p := range procs {
+		stem := stemLower(p.Name)
+		aged := opt.MinAgeSec <= 0 || (p.AgeSec != nil && *p.AgeSec >= opt.MinAgeSec)
+		if opt.ConsoleProneNames[stem] {
+			out.ConsoleProneCount++
+			out.ConsoleProneByName[stem]++
+			parent := parentName(p, top)
+			if parent == "" {
+				parent = "unknown"
+			}
+			out.ConsoleProneByParent[parent]++
+			if !attendedParent(p, top, opt.InteractiveParentNames) {
+				out.BackgroundConsoleProneCount++
+			}
+		}
+		if opt.ConsoleHostChildNames[stem] {
+			out.ConsoleHostCount++
+		}
+		if opt.IdleShellNames[stem] && top.ChildCounts[p.PID] == 0 && !attendedParent(p, top, opt.InteractiveParentNames) {
+			out.IdleShellCandidates++
+			if aged {
+				out.AgedIdleShellCandidates++
+			}
+		}
+		children := childNameStems(top.ChildNames[p.PID])
+		if opt.OrphanConsoleShellNames[stem] && !ownerAlive(p.PPID, top.LivePIDs) && onlyConsoleChildren(children, opt.ConsoleHostChildNames) {
+			out.OrphanConsoleShellCandidates++
+			if aged {
+				out.AgedOrphanConsoleShellCandidates++
+			}
+		}
+	}
+	if len(out.ConsoleProneByName) == 0 {
+		out.ConsoleProneByName = nil
+	}
+	if len(out.ConsoleProneByParent) == 0 {
+		out.ConsoleProneByParent = nil
+	}
+	return out
 }
 
 // Build merges the resource-level findings with the orphan rows, applies the
@@ -380,6 +585,7 @@ func Build(procs []Proc, opt Options) Payload {
 		Flagged:                flagged,
 		Enacted:                enacted,
 		Enact:                  opt.Enact,
+		Observations:           opt.Observations,
 		CollectError:           collectError,
 		NextAction:             NextAction(flagged, opt.Enact, collectError),
 	}
@@ -412,7 +618,7 @@ func NextAction(flagged []Finding, enact bool, collectError string) string {
 	}
 	onlySprawl := true
 	for _, r := range flagged {
-		if r.Kind != "orphan-helper" && r.Kind != "idle-shell" {
+		if r.Kind != "orphan-helper" && r.Kind != "idle-shell" && r.Kind != "orphan-console-shell" {
 			onlySprawl = false
 			break
 		}
@@ -563,6 +769,68 @@ func bumpStreaks(prev map[string]int, cpuKeys []string) map[string]int {
 
 func ownerAlive(ppid *int, livePIDs map[int]bool) bool {
 	return ppid != nil && *ppid > 1 && livePIDs[*ppid]
+}
+
+func normalizeOrphanOptions(opt OrphanOptions) OrphanOptions {
+	if opt.Patterns == nil {
+		opt.Patterns = DefaultOrphanPatterns
+	}
+	if opt.IdleShellNames == nil {
+		opt.IdleShellNames = DefaultIdleShellNames
+	}
+	if opt.OrphanConsoleShellNames == nil {
+		opt.OrphanConsoleShellNames = DefaultOrphanConsoleShellNames
+	}
+	if opt.ConsoleHostChildNames == nil {
+		opt.ConsoleHostChildNames = DefaultConsoleHostChildNames
+	}
+	if opt.InteractiveParentNames == nil {
+		opt.InteractiveParentNames = DefaultInteractiveParentNames
+	}
+	if opt.ConsoleProneNames == nil {
+		opt.ConsoleProneNames = DefaultConsoleProneNames
+	}
+	return opt
+}
+
+func attendedParent(p Proc, top RelationTopology, interactive map[string]bool) bool {
+	parent := parentName(p, top)
+	return parent != "" && interactive[stemLower(parent)]
+}
+
+func parentName(p Proc, top RelationTopology) string {
+	if p.PPID == nil {
+		return ""
+	}
+	return top.ParentNames[*p.PPID]
+}
+
+func childNameStems(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if stem := stemLower(n); stem != "" {
+			out = append(out, stem)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func onlyConsoleChildren(children []string, consoleHosts map[string]bool) bool {
+	for _, child := range children {
+		if !consoleHosts[child] {
+			return false
+		}
+	}
+	return true
+}
+
+func stemLower(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if strings.HasSuffix(name, ".exe") {
+		name = strings.TrimSuffix(name, ".exe")
+	}
+	return name
 }
 
 func anyCPUReason(reasons []string) bool {
