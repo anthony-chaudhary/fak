@@ -198,11 +198,21 @@ func openGuardInfoPane(stderr io.Writer, getenv func(string) string, where, gwUR
 	}
 	cmd := execCommand(plan.Spawn[0], plan.Spawn[1:]...)
 	cmd.Stderr = stderr // wt/tmux are thin clients to the running multiplexer; stdout stays clean.
-	if err := cmd.Run(); err != nil {
+	// Open the overlay pane WITHOUT blocking the agent launch. On Windows `wt.exe` is an AppX
+	// execution alias whose cold start alone costs ~200ms, and `tmux split-window` round-trips to
+	// the running server too — cmd.Run() would pay that on the CRITICAL PATH, between the gateway
+	// going healthy and Claude starting, so the operator waits ~200ms longer to reach a working
+	// agent. The pane is pure observability that sits BESIDE the agent; it does not need to be up
+	// first. So fire-and-reap it in the background and return immediately, letting the caller
+	// launch the agent now; the pane appears a beat later. A spawn that fails to even start is
+	// still reported (the multiplexer client itself is missing), but a slow client no longer
+	// gates the launch.
+	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(stderr, "fak guard: --split: opening the fak-info pane failed: %v (continuing without it)\n", err)
 		return
 	}
-	fmt.Fprintf(stderr, "fak guard: --split · opened a 20%% fak-info pane (%s); launching the agent in this pane ...\n", plan.Geometry)
+	go func() { _ = cmd.Wait() }() // reap the multiplexer client so it never lingers as a zombie.
+	fmt.Fprintf(stderr, "fak guard: --split · opening a 20%% fak-info pane (%s) beside the agent ...\n", plan.Geometry)
 }
 
 // guardInfoPaneOverlayArgs is the single source of truth for the `fak info` child argv the
