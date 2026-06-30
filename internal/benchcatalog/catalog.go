@@ -132,6 +132,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "bench-runs", Kind: KindVerb, Need: NeedNone,
+		Summary: "Recorded benchmark-run catalog reader: lists, shows, compares, summarizes, and tables committed benchmark artifacts from experiments/benchmark/catalog.json.",
+		Run:     "fak bench-runs list",
+		Flags:   []string{"list  -  filter recorded runs", "show  -  inspect one run", "compare  -  side-by-side two runs", "best  -  best run for a metric", "table  -  markdown/json table", "summary  -  group by machine or model"},
+		Doc:     "docs/cli-reference.md",
+	},
+	{
 		Name: "benchscore", Kind: KindCmd, Need: NeedNone,
 		Summary: "Aggregates the committed benchmark score.json results into a cross-model score matrix and re-derives every ratio, so a drifted or overclaimed number fails the scan  -  the record-and-verify half of the benchmark loop.",
 		Run:     "go run ./cmd/benchscore -root experiments/benchmark/runs",
