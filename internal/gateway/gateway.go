@@ -816,6 +816,21 @@ func New(cfg Config) (*Server, error) {
 		// lives on the Model, consumed by ffnForLayer); 0/1 is the no-op default.
 		if cfg.ExpertParallelRanks > 1 {
 			cfg.InKernelModel.SetExpertParallelRanks(cfg.ExpertParallelRanks)
+			// Reduce the routed-expert partials through the DEVICE collective the serve
+			// initialized — serve.go gates ranks>1 on a backend advertising Caps().Collective
+			// (the NCCL CollectiveBackend), so the decode AllReduceSum must cross those GPUs,
+			// not the hardcoded single-box LocalCollective glmMoeEPFFN reduced through before.
+			// On cpu-ref the bridge is byte-identical to LocalCollective (collective_bridge_test.go),
+			// so this changes no host-tested bytes; on the NCCL backend the SAME call all-reduces
+			// across the rank fleet. Fail-soft: a backend without the seam leaves the bit-exact
+			// LocalCollective default (the EP output stays correct, just reduced host-side).
+			if cfg.Backend != nil {
+				if err := cfg.InKernelModel.SetExpertParallelDeviceCollective(cfg.Backend); err == nil {
+					logf("gateway: expert-parallel ranks=%d → routed-expert AllReduceSum reduces through device collective %q (Caps().Collective=%v)", cfg.ExpertParallelRanks, cfg.Backend.Name(), cfg.Backend.Caps().Collective)
+				} else {
+					logf("gateway: expert-parallel ranks=%d: backend %q exposes no device collective (%v) — reducing host-side via LocalCollective (correct, single-box)", cfg.ExpertParallelRanks, cfg.Backend.Name(), err)
+				}
+			}
 		}
 		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
 	default:
