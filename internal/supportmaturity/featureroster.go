@@ -131,7 +131,7 @@ var FeatureRoster = []Feature{
 	{ID: "serving-polymodel-core", Name: "Poly-model serving core", Family: FamilyServing, ClaimAnchor: "Poly-model serving core"},
 	{ID: "serving-latency-observability", Name: "Serving-latency observability (TTFT/TPOT histograms)", Family: FamilyServing, ClaimAnchor: "Serving-latency observability"},
 	{ID: "serving-oom-recovery", Name: "Classed runtime device OOM recovery", Family: FamilyServing, ClaimAnchor: "Classed runtime device OOM recovery"},
-	{ID: "serving-multimodel-dispatch", Name: "LIVE multi-model dispatch", Family: FamilyServing, ClaimAnchor: "LIVE multi-model DISPATCH is not wired"},
+	{ID: "serving-multimodel-dispatch", Name: "LIVE multi-model dispatch", Family: FamilyServing, ClaimAnchor: "LIVE gateway route dispatch executes routing decisions"},
 	{ID: "serving-external-kv-transport", Name: "External serving-engine KV transport", Family: FamilyServing, ClaimAnchor: "No LIVE transport attaching a real"},
 }
 
