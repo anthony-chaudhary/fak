@@ -166,6 +166,77 @@ func TestClassifyVisibleWindows(t *testing.T) {
 	}
 }
 
+func TestClassifyLiveProcesses(t *testing.T) {
+	rep := ClassifyLiveProcesses([]LiveProcess{
+		{
+			PID: 10, Name: "gh.exe",
+			CommandLine:       `gh issue list --repo C:\work\fak`,
+			ParentPID:         9,
+			ParentName:        "python.exe",
+			ParentCommandLine: `python.exe C:\work\fak\tools\worker.py`,
+		},
+		{
+			PID: 11, Name: "cmd.exe",
+			CommandLine: "",
+			ParentPID:   8,
+			ParentName:  "python.exe",
+		},
+		{
+			PID: 12, Name: "chrome.exe",
+			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1`,
+			ParentPID:         7,
+			ParentName:        "python.exe",
+			ParentCommandLine: `python.exe C:\work\job\scripts\run_apply_next_xco_tick.py --profile anthony`,
+		},
+		{
+			PID: 13, Name: "chrome.exe",
+			CommandLine: `chrome.exe --type=renderer --remote-debugging-port=9223 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1`,
+		},
+		{
+			PID: 14, Name: "notepad.exe", CommandLine: "notepad.exe",
+		},
+		{
+			PID: 15, Name: "pwsh.exe",
+			CommandLine: `pwsh.exe -Command "go run ./cmd/fak windowgate --live-processes"`,
+		},
+	})
+	if len(rep.Violations) != 0 {
+		t.Fatalf("live process violations = %v, want advisory only", rep.Violations)
+	}
+	if len(rep.Watchlist) != 3 {
+		t.Fatalf("live process watchlist = %d %v, want repo gh + unreadable cmd + browser", len(rep.Watchlist), rep.Watchlist)
+	}
+	if rep.Observed["gh.exe"] != 1 || rep.Observed["cmd.exe"] != 1 || rep.Observed["chrome.exe"] != 2 {
+		t.Fatalf("observed counts = %+v, want gh/cmd/chrome counts", rep.Observed)
+	}
+	if rep.Unreadable["cmd.exe"] != 1 {
+		t.Fatalf("unreadable counts = %+v, want cmd=1", rep.Unreadable)
+	}
+	cats := map[string]int{}
+	for _, finding := range rep.Findings {
+		cats[finding.Category]++
+		if strings.Contains(finding.CommandLine, "https://example.test") {
+			t.Fatalf("unexpected URL leak in live process finding: %+v", finding)
+		}
+	}
+	if cats["repo_console_process"] != 1 || cats["unattributed_console_process"] != 1 || cats["browser_automation_process"] != 1 {
+		t.Fatalf("categories = %+v, want one of each live-process class", cats)
+	}
+	var browser *LiveProcessFinding
+	for i := range rep.Findings {
+		if rep.Findings[i].Category == "browser_automation_process" {
+			browser = &rep.Findings[i]
+			break
+		}
+	}
+	if browser == nil || browser.Browser == nil ||
+		browser.Browser.RemoteDebuggingPort != "9223" ||
+		browser.Browser.Profile != "Chrome-CDP-Apply-anthony-1" ||
+		!browser.Browser.Offscreen {
+		t.Fatalf("browser live-process finding = %+v, want CDP attribution", browser)
+	}
+}
+
 func TestPySpawnRules(t *testing.T) {
 	cases := []struct {
 		name string
