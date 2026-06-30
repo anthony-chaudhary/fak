@@ -52,6 +52,20 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("enhancement, trust-floor", p)  # labels
         self.assertIn("`gateway` lane", p)          # lane routing
 
+    def test_generation_label_shapes_worker_intent(self) -> None:
+        mod = load()
+        issue = dict(self.ISSUE, labels=[{"name": "generation"}, {"name": "gen/now"}])
+        p = mod.render_prompt(issue, "tools", workspace="C:/work/fak")
+        self.assertIn("Generation intent: now", p)
+        self.assertIn("immediate trunk-safe", p)
+        self.assertIn("orthogonal to priority", p)
+
+    def test_unclassified_generation_tells_worker_not_to_guess(self) -> None:
+        mod = load()
+        p = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak")
+        self.assertIn("Generation intent: unclassified", p)
+        self.assertIn("avoid guessing", p)
+
     def test_states_the_git_laws(self) -> None:
         mod = load()
         p = mod.render_prompt(self.ISSUE, "docs", workspace="C:/work/fak")

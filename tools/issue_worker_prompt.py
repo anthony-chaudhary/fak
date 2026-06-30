@@ -98,6 +98,20 @@ def _labels(issue: dict[str, Any]) -> str:
     return ", ".join(names) if names else "(none)"
 
 
+def _generation_intent(issue: dict[str, Any]) -> str:
+    labs = issue.get("labels") or []
+    names = {lab.get("name") for lab in labs if isinstance(lab, dict) and lab.get("name")}
+    if "gen/now" in names:
+        return "now — immediate trunk-safe product/operator work; do not wait for a future architecture bet"
+    if "gen/next" in names:
+        return "next — near-term foundation; keep gated or dogfooded until promotion evidence lands"
+    if "gen/second-next" in names:
+        return "second-next — architectural option; preserve assumptions and compatibility evidence"
+    if "gen/future" in names:
+        return "future — research or long-horizon option; do not treat it as lower priority by default"
+    return "unclassified — read docs/generation.md and avoid guessing; keep needs-triage if the horizon is unclear"
+
+
 def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
     """Render the resolution prompt for ONE issue. Pure: no I/O."""
     n = issue.get("number")
@@ -107,6 +121,7 @@ def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
     if len(body) > 1800:
         body = body[:1800] + "\n…(truncated — read the full issue with `gh issue view`)"
     labels = _labels(issue)
+    generation = _generation_intent(issue)
 
     return f"""your goal: resolve GitHub issue #{n} ({title}) with the smallest correct \
 change that genuinely closes it, then ship it on `main` citing `#{n}` in the \
@@ -120,6 +135,7 @@ quirks, known blockers, host gotchas) — a Claude worker gets this auto-injecte
 an opencode worker does NOT, so this read is how both backends start warm (it is \
 a harmless no-op if the mirror is absent). \
 This issue routed to the `{lane}` lane (its file-tree). Labels: {labels}.
+Generation intent: {generation}. Generation is orthogonal to priority, shared trunk, and runtime feature gates.
 
 issue body (verbatim, may be truncated — re-read live):
 ---
