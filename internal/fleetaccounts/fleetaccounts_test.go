@@ -407,11 +407,18 @@ func TestResolvePinAndRoute(t *testing.T) {
 	if r.SelectedTier == nil || *r.SelectedTier != 1 {
 		t.Errorf("pin default selected_tier = %v want 1", r.SelectedTier)
 	}
+	if r.LoginStatus == nil || *r.LoginStatus != "ready" || r.CanServe == nil || !*r.CanServe {
+		t.Errorf("pin default login_status/can_serve = %v/%v want ready/true", r.LoginStatus, r.CanServe)
+	}
 
 	// pin a throttled account -> blocked
 	rb := Resolve(rows, home, ResolveRequest{Pin: "gem8"}, pol)
 	if rb.OK || !strings.Contains(rb.Reason, "blocked") {
 		t.Errorf("pin gem8: ok=%v reason=%q (want blocked)", rb.OK, rb.Reason)
+	}
+	if rb.LoginStatus == nil || *rb.LoginStatus != "ready" || rb.CanServe == nil || !*rb.CanServe {
+		t.Errorf("pin blocked gem8 login_status/can_serve = %v/%v want ready/true (usage-blocked, not logged out)",
+			rb.LoginStatus, rb.CanServe)
 	}
 
 	// pin a non-existent account
@@ -433,6 +440,28 @@ func TestResolvePinAndRoute(t *testing.T) {
 	rg := Resolve(rows, home, ResolveRequest{WorkKind: "gardening"}, pol)
 	if !rg.OK || rg.Account != "opencode-glm" {
 		t.Errorf("route gardening: ok=%v account=%q want opencode-glm", rg.OK, rg.Account)
+	}
+}
+
+func TestResolveSurfacesLoginBlockedTarget(t *testing.T) {
+	home, cfg, _ := fixture(t)
+	acctDir := filepath.Join(home, ".claude-needslogin-acct")
+	if err := os.MkdirAll(filepath.Join(acctDir, "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(acctDir, ".claude.json"),
+		[]byte(`{"oauthAccount":{"accountUuid":"uuid-needs","emailAddress":"needs@example.com"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), Registry{})
+	got := Resolve(rows, home, ResolveRequest{Pin: "needslogin"}, DefaultPolicy())
+	if got.OK || got.LoginStatus == nil || *got.LoginStatus != "needs_login" ||
+		got.CanServe == nil || *got.CanServe {
+		t.Fatalf("resolve needslogin = %+v, want blocked with login_status=needs_login can_serve=false", got)
+	}
+	if !strings.Contains(got.BlockReason, "no live credentials") {
+		t.Fatalf("block_reason = %q, want no live credentials", got.BlockReason)
 	}
 }
 
