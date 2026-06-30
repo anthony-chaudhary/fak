@@ -105,6 +105,8 @@ concurrent = [
   # referee binds the stamp and the arbiter protects internal/leaseref/** edits.
   "leaseref",
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate); declared so the referee binds a `(fak windowgate)` stamp and the arbiter protects internal/windowgate/** edits.
+  "worktype",   # internal/worktype leaf (the work-class taxonomy: ongoing PROGRAM vs DISCRETE epic) the milestone roadmap + `fak program` report sort by; declared so the referee binds `(fak worktype)` and the arbiter protects internal/worktype/** edits.
+  "programreport", # internal/programreport leaf (the ongoing-program report: kernel-opt + cache-opt frontier+trend, sibling of milestonereport/cadencereport); declared so the referee binds `(fak programreport)` and the arbiter protects internal/programreport/** edits.
   # reconciled 2026-06-27 (#1000): internal/scoreboard is a real committed leaf (the `fak
   # scoreboard` Slack scorecard publisher, shipped 52ed934b with the `(fak scoreboard)`
   # trailer) that had NO declared lane -> a `(fak scoreboard)` ship-stamp bound to a phantom
@@ -191,6 +193,8 @@ autopick = [
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
+  "worktype", # internal/worktype leaf (the work-class taxonomy), see [lanes].concurrent note
+  "programreport", # internal/programreport leaf (the ongoing-program report), see [lanes].concurrent note
   "nightrun", # internal/nightrun leaf (the run-it-all-night data-collection door), see [lanes].concurrent note
   "scoreboard", # #1000: internal/scoreboard leaf (the fak scoreboard Slack publisher), see [lanes].concurrent note
   "ailuminate", # #1070: internal/ailuminate leaf (the AILuminate benchmark-entry scoping contract), see [lanes].concurrent note
@@ -224,6 +228,8 @@ agent = ["internal/agent/**"]
 agentdojo = ["internal/agentdojo/**"]
 architest = ["internal/architest/**"]
 windowgate = ["internal/windowgate/**"]
+worktype = ["internal/worktype/**"]
+programreport = ["internal/programreport/**"]
 nightrun = ["internal/nightrun/**"]
 bench = ["internal/bench/**"]
 blob = ["internal/blob/**"]
