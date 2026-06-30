@@ -39,6 +39,8 @@ jobs:
           text = re.sub(r"\([0-9]+(?:\.[0-9]+)?s\)", "(Xs)", text)
           text = re.sub(r"(?m)^ok(\s+\S+)\s+(?:[0-9]+(?:\.[0-9]+)?s|\(cached\))$", r"ok\1\tXs", text)
           text = re.sub(r"\b(mean|p50)=[0-9]+(?:\.[0-9]+)?[^\s]+", r"\1=Xtime", text)
+          text = re.sub(r"(?m)^# \S+\.test\n", "", text)
+          text = re.sub(r"(?m)^ld: warning: ignoring duplicate libraries: .*\n", "", text)
           p.write_text(text)
           PY
           }
@@ -104,6 +106,8 @@ jobs:
           text = re.sub(r"\([0-9]+(?:\.[0-9]+)?s\)", "(Xs)", text)
           text = re.sub(r"(?m)^ok(\s+\S+)\s+(?:[0-9]+(?:\.[0-9]+)?s|\(cached\))$", r"ok\1\tXs", text)
           text = re.sub(r"\b(mean|p50)=[0-9]+(?:\.[0-9]+)?[^\s]+", r"\1=Xtime", text)
+          text = re.sub(r"(?m)^# \S+\.test\n", "", text)
+          text = re.sub(r"(?m)^ld: warning: ignoring duplicate libraries: .*\n", "", text)
           p.write_text(text)
           PY
           }
