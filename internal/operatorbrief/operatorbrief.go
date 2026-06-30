@@ -159,9 +159,13 @@ type HumanUse struct {
 // It is derived from the milestone report's generation lanes, not from issue-body
 // prose, so the answer stays tied to the same witnessed roadmap fold.
 type Generation struct {
-	Summary   string           `json:"summary"`
-	Attention string           `json:"attention"`
-	Lanes     []GenerationLane `json:"lanes,omitempty"`
+	Summary             string           `json:"summary"`
+	Attention           string           `json:"attention"`
+	Heat                string           `json:"heat,omitempty"`
+	HottestGeneration   string           `json:"hottest_generation,omitempty"`
+	PromotionCandidates int              `json:"promotion_candidates,omitempty"`
+	BlockedAssumptions  int              `json:"blocked_assumptions,omitempty"`
+	Lanes               []GenerationLane `json:"lanes,omitempty"`
 }
 
 // GenerationLane is the operator-brief projection of one product horizon.
@@ -171,13 +175,21 @@ type GenerationLane struct {
 	Measured            int     `json:"measured"`
 	Programs            int     `json:"programs"`
 	Discrete            int     `json:"discrete"`
+	Closed              int     `json:"closed,omitempty"`
+	Total               int     `json:"total,omitempty"`
 	OpenDiscrete        int     `json:"open_discrete"`
 	OverallPct          float64 `json:"overall_pct"`
 	Errored             int     `json:"errored,omitempty"`
 	DebtScore           int     `json:"debt_score,omitempty"`
+	HeatScore           int     `json:"heat_score,omitempty"`
+	HeatReason          string  `json:"heat_reason,omitempty"`
 	StaleIssues         int     `json:"stale_issues,omitempty"`
+	StaleAge            string  `json:"stale_age,omitempty"`
 	MissingWitnesses    int     `json:"missing_witnesses,omitempty"`
 	UnpromotedBets      int     `json:"unpromoted_bets,omitempty"`
+	PromotionCandidates int     `json:"promotion_candidates,omitempty"`
+	BlockedAssumptions  int     `json:"blocked_assumptions,omitempty"`
+	ShipVelocity        string  `json:"ship_velocity,omitempty"`
 	LabelShipMismatches int     `json:"label_ship_mismatches,omitempty"`
 	DebtReason          string  `json:"debt_reason,omitempty"`
 }
@@ -394,6 +406,7 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 	}
 	out := &Generation{}
 	var nowOpen, laterTracked, unreadable, debt int
+	var hottest GenerationLane
 	for _, row := range rows {
 		lane := GenerationLane{
 			Generation:          row.Generation,
@@ -401,6 +414,8 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 			Measured:            row.Measured,
 			Programs:            row.Programs,
 			Discrete:            row.Discrete,
+			Closed:              row.Closed,
+			Total:               row.Total,
 			OpenDiscrete:        maxInt(0, row.Total-row.Closed),
 			OverallPct:          row.OverallPct,
 			Errored:             row.Errored,
@@ -411,6 +426,11 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 			LabelShipMismatches: row.LabelShipMismatches,
 			DebtReason:          row.DebtReason,
 		}
+		lane.PromotionCandidates = generationPromotionCandidates(row)
+		lane.BlockedAssumptions = generationBlockedAssumptions(row)
+		lane.ShipVelocity = generationShipVelocity(row)
+		lane.StaleAge = generationStaleAge(row)
+		lane.HeatScore, lane.HeatReason = generationHeat(row, lane)
 		out.Lanes = append(out.Lanes, lane)
 		if row.Generation == "now" {
 			nowOpen = lane.OpenDiscrete
@@ -419,7 +439,14 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 		}
 		unreadable += lane.Errored
 		debt += lane.DebtScore
+		out.PromotionCandidates += lane.PromotionCandidates
+		out.BlockedAssumptions += lane.BlockedAssumptions
+		if lane.HeatScore > hottest.HeatScore {
+			hottest = lane
+		}
 	}
+	out.HottestGeneration = hottest.Generation
+	out.Heat = generationHeatSummary(hottest, out.PromotionCandidates, out.BlockedAssumptions)
 	switch {
 	case unreadable > 0:
 		out.Summary = fmt.Sprintf("generation lanes have %d unreadable item(s), debt %d; do not promote or demote from this readout yet", unreadable, debt)
@@ -435,6 +462,66 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 		out.Attention = "preserve generation labels and project fields; no attention budget needed"
 	}
 	return out
+}
+
+func generationPromotionCandidates(row milestonereport.GenerationRow) int {
+	if row.Generation == "now" || row.Generation == "unclassified" {
+		return 0
+	}
+	return row.UnpromotedBets
+}
+
+func generationBlockedAssumptions(row milestonereport.GenerationRow) int {
+	return row.MissingWitnesses + row.LabelShipMismatches + row.Errored
+}
+
+func generationShipVelocity(row milestonereport.GenerationRow) string {
+	if row.Total > 0 {
+		return fmt.Sprintf("%d/%d shipped", row.Closed, row.Total)
+	}
+	if row.Programs > 0 && row.Measured > 0 {
+		return fmt.Sprintf("%d ongoing measured", row.Measured)
+	}
+	if row.Measured > 0 {
+		return fmt.Sprintf("%d measured", row.Measured)
+	}
+	return "not measured"
+}
+
+func generationStaleAge(row milestonereport.GenerationRow) string {
+	if row.StaleIssues == 0 {
+		return ""
+	}
+	return fmt.Sprintf("age not measured; %d stale-risk issue(s)", row.StaleIssues)
+}
+
+func generationHeat(row milestonereport.GenerationRow, lane GenerationLane) (int, string) {
+	score := lane.DebtScore + lane.OpenDiscrete + 2*lane.BlockedAssumptions + lane.PromotionCandidates
+	var parts []string
+	if lane.OpenDiscrete > 0 {
+		parts = append(parts, fmt.Sprintf("%d open discrete", lane.OpenDiscrete))
+	}
+	if lane.StaleIssues > 0 {
+		parts = append(parts, fmt.Sprintf("%d stale-risk", lane.StaleIssues))
+	}
+	if lane.BlockedAssumptions > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked assumption", lane.BlockedAssumptions))
+	}
+	if lane.PromotionCandidates > 0 {
+		parts = append(parts, fmt.Sprintf("%d promotion candidate", lane.PromotionCandidates))
+	}
+	if row.DebtScore > 0 {
+		parts = append(parts, fmt.Sprintf("debt %d", row.DebtScore))
+	}
+	return score, strings.Join(parts, ", ")
+}
+
+func generationHeatSummary(hottest GenerationLane, promotionCandidates, blockedAssumptions int) string {
+	if hottest.Generation == "" || hottest.HeatScore == 0 {
+		return "heat clear; no generation lane needs extra attention"
+	}
+	return fmt.Sprintf("hottest=%s score=%d; promotion_candidates=%d blocked_assumptions=%d; stale_age=%s",
+		hottest.Generation, hottest.HeatScore, promotionCandidates, blockedAssumptions, firstNonEmpty(hottest.StaleAge, "no stale-risk issue age to measure"))
 }
 
 func addHeaviness(r *Report, h scorecard.Payload) {
@@ -994,6 +1081,9 @@ func appendGeneration(lines []string, g *Generation) []string {
 	if g.Attention != "" {
 		lines = append(lines, "              "+g.Attention)
 	}
+	if g.Heat != "" {
+		lines = append(lines, "              heat "+g.Heat)
+	}
 	for _, lane := range g.Lanes {
 		if lane.Tracked == 0 {
 			lines = append(lines, fmt.Sprintf("              %s: 0 tracked", lane.Generation))
@@ -1006,6 +1096,19 @@ func appendGeneration(lines []string, g *Generation) []string {
 		}
 		if lane.Programs > 0 {
 			parts = append(parts, fmt.Sprintf("%d ongoing", lane.Programs))
+		}
+		if lane.ShipVelocity != "" {
+			parts = append(parts, "velocity "+lane.ShipVelocity)
+		}
+		if lane.HeatScore > 0 {
+			if lane.HeatReason != "" {
+				parts = append(parts, fmt.Sprintf("heat %d (%s)", lane.HeatScore, lane.HeatReason))
+			} else {
+				parts = append(parts, fmt.Sprintf("heat %d", lane.HeatScore))
+			}
+		}
+		if lane.StaleAge != "" {
+			parts = append(parts, "stale age "+lane.StaleAge)
 		}
 		if lane.Errored > 0 {
 			parts = append(parts, fmt.Sprintf("%d unreadable", lane.Errored))

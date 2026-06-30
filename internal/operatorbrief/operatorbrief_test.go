@@ -163,6 +163,13 @@ func TestFoldCarriesGenerationReadoutFromMilestone(t *testing.T) {
 	if !strings.Contains(got.Generation.Attention, "now lane first") {
 		t.Fatalf("generation attention = %q", got.Generation.Attention)
 	}
+	if got.Generation.HottestGeneration != "now" || got.Generation.PromotionCandidates != 1 || got.Generation.BlockedAssumptions != 0 {
+		t.Fatalf("generation heat summary = hottest %q promotion %d blocked %d",
+			got.Generation.HottestGeneration, got.Generation.PromotionCandidates, got.Generation.BlockedAssumptions)
+	}
+	if !strings.Contains(got.Generation.Heat, "hottest=now") || !strings.Contains(got.Generation.Heat, "stale_age=age not measured") {
+		t.Fatalf("generation heat = %q", got.Generation.Heat)
+	}
 	byGen := map[string]GenerationLane{}
 	for _, lane := range got.Generation.Lanes {
 		byGen[lane.Generation] = lane
@@ -170,17 +177,23 @@ func TestFoldCarriesGenerationReadoutFromMilestone(t *testing.T) {
 	if lane := byGen["now"]; lane.OpenDiscrete != 2 || lane.Discrete != 1 || lane.OverallPct != 33.3 {
 		t.Fatalf("now lane = %+v, want 2 open discrete at 33.3%%", lane)
 	}
+	if lane := byGen["now"]; lane.Closed != 1 || lane.Total != 3 || lane.ShipVelocity != "1/3 shipped" || lane.HeatScore == 0 || !strings.Contains(lane.StaleAge, "age not measured") {
+		t.Fatalf("now lane heat = %+v", lane)
+	}
 	if lane := byGen["now"]; lane.DebtScore != 2 || lane.StaleIssues != 2 {
 		t.Fatalf("now lane debt = %+v, want score 2 from two stale-risk issues", lane)
 	}
 	if lane := byGen["next"]; lane.Programs != 1 || lane.OpenDiscrete != 0 {
 		t.Fatalf("next lane = %+v, want one ongoing program and no discrete open count", lane)
 	}
+	if lane := byGen["next"]; lane.PromotionCandidates != 1 || !strings.Contains(lane.HeatReason, "promotion candidate") || lane.ShipVelocity != "1 ongoing measured" {
+		t.Fatalf("next lane heat = %+v", lane)
+	}
 	if lane := byGen["next"]; lane.DebtScore != 2 || lane.UnpromotedBets != 1 {
 		t.Fatalf("next lane debt = %+v, want score 2 from one unpromoted bet", lane)
 	}
 	rendered := Render(got)
-	for _, want := range []string{"generation ship-now lane", "generation debt 4", "delegate from the now lane first", "now: 1 tracked", "debt 2", "next: 1 tracked", "future: 1 tracked"} {
+	for _, want := range []string{"generation ship-now lane", "generation debt 4", "delegate from the now lane first", "heat hottest=now", "velocity 1/3 shipped", "stale age age not measured", "promotion candidate", "now: 1 tracked", "debt 2", "next: 1 tracked", "future: 1 tracked"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("render missing %q:\n%s", want, rendered)
 		}
