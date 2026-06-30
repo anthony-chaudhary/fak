@@ -17,7 +17,7 @@
   default -- no CLAUDE_CONFIG_DIR, no availability check, no tier. A throttled or
   auth-blocked default account silently failed the dispatch. It now resolves an account
   through the SAME switcher front door every other consumer uses
-  (`fleet_accounts.py resolve` -- one call returns config_dir + oauth_token + tier),
+  (`fak fleet-accounts resolve` -- one call returns config_dir + oauth_token + tier),
   pins `CLAUDE_CONFIG_DIR` to it, and picks the model tier by WORK KIND:
 
     -WorkKind engineering   -> tier 1 (max-quality frontier; the DEFAULT, unchanged)
@@ -52,12 +52,37 @@ param(
   [string]$Tier        = 'auto',
   # Pin a specific account by tag/basename instead of routing (rare; for debugging).
   [string]$Account     = '',
+  # Optional fak binary. Empty probes this repo's tools\.bin/fak.exe, repo-root fak.exe,
+  # then PATH fak.
+  [string]$FakExe      = '',
   # Let an engineering/tier-1 dispatch fall back to tier 2 when no tier-1 account is
   # free, rather than refusing. Off by default so engineering stays max-quality.
   [switch]$AllowTierFallback
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+
+function Resolve-FakExe {
+  param([string]$RepoRoot, [string]$Explicit)
+  if ($Explicit) {
+    if (-not (Test-Path $Explicit)) { throw "fak binary not found: $Explicit" }
+    return (Resolve-Path $Explicit).Path
+  }
+  $candidates = @(
+    (Join-Path $RepoRoot 'tools\.bin\fak.exe'),
+    (Join-Path $RepoRoot 'tools\.bin\fak'),
+    (Join-Path $RepoRoot 'fak.exe'),
+    (Join-Path $RepoRoot 'fak')
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+  }
+  $cmd = Get-Command fak -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  throw "no fak binary found (looked in $RepoRoot\tools\.bin, repo root, and PATH; pass -FakExe)"
+}
+
 Set-Location $Workspace
 
 if (-not (Test-Path $PointerFile)) { throw "pointer file not found: $PointerFile" }
@@ -68,24 +93,30 @@ if ($cond.Length -gt 4000) { throw "goal condition is $($cond.Length) chars (>40
 $claude = (Get-Command claude).Source
 
 # --- Resolve the account + tier through the switcher (the dispatch integration) -------
-# ONE call to the switcher's canonical front door (`fleet_accounts.py resolve`): pin OR
+# ONE call to the switcher's canonical front door (`fak fleet-accounts resolve`): pin OR
 # tier/work-kind route, plus the account's oauth token, in a single flat record. Scoped
 # to claude (this launches Claude Code, not opencode). Capture JSON to a temp file to
 # dodge PS native-exe stdout quirks, then parse. On a refusal we FAIL -- never silently
 # run ambient.
-$py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
+$fak = Resolve-FakExe -RepoRoot $repoRoot -Explicit $FakExe
 $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ("goal-route-{0}.json" -f ([Guid]::NewGuid().ToString('N')))
 
-$resolveArgs = @((Join-Path $Workspace 'tools\fleet_accounts.py'), 'resolve', '--product', 'claude')
+$resolveArgs = @('fleet-accounts', 'resolve', '--product', 'claude')
 if ($Account)          { $resolveArgs += @('--account', $Account) }
 elseif ($WorkKind)     { $resolveArgs += @('--work-kind', $WorkKind) }
-else                   { $resolveArgs += @('--tier', $Tier) }
+else {
+  switch ($Tier) {
+    { $_ -in @('t1','1') } { $resolveArgs += '--t1'; break }
+    { $_ -in @('t2','2') } { $resolveArgs += '--t2'; break }
+    { $_ -in @('t3','3') } { $resolveArgs += '--t3'; break }
+  }
+}
 if ($AllowTierFallback) { $resolveArgs += '--allow-tier-fallback' }
-& $py @resolveArgs > $tmpOut 2>$null
+& $fak @resolveArgs > $tmpOut 2>$null
 $resolveRc = $LASTEXITCODE
 $r = $null
 if (Test-Path $tmpOut) { try { $r = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $r = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
-if (-not $r) { throw "account resolve produced no JSON (python=$py, rc=$resolveRc) -- cannot dispatch" }
+if (-not $r) { throw "account resolve produced no JSON (fak=$fak, rc=$resolveRc) -- cannot dispatch" }
 if (-not $r.ok) {
   $reason = if ($r.reason) { $r.reason } else { 'no available account' }
   throw "account switcher refused dispatch: $reason -- fix the account (re-login / wait for reset) or pass -AllowTierFallback."
