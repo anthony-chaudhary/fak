@@ -124,7 +124,7 @@ func (g Gap) ToActionItem(evidencePath string) dogfoodissues.ActionItem {
 		ParentRef:    "fak propagation-scorecard",
 		CurrentState: fmt.Sprintf("The propagation scorecard found that %d/%d scorecard-family cards %s, but `fak %s` (%s) does not -- the improvement has not fanned out to this sibling.",
 			g.Adopters, g.Total, g.Convention.Short, g.Member.Verb, g.Member.PkgDir),
-		WhyNow: "A scoring concept proven across the family has stalled at this sibling; extending it is mechanical, removes one un-propagated gap, and spares the operator from remembering to do it by hand." + declared,
+		WhyNow:         "A scoring concept proven across the family has stalled at this sibling; extending it is mechanical, removes one un-propagated gap, and spares the operator from remembering to do it by hand." + declared,
 		WorkingSpine:   "Extend the existing, proven convention to `fak " + g.Member.Verb + "` -- copy how the adopters already do it; do not reinvent it.",
 		InScope:        g.inScopeHint(),
 		OutOfScope:     "Do not change this card's KPIs, scores, or grade thresholds, retune the kernel, or touch other family members in the same change.",

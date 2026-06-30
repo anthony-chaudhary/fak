@@ -94,13 +94,13 @@ type Convention struct {
 var Conventions = []Convention{
 	{
 		Key: "kernel", Short: "the shared pkg/scorecard kernel",
-		Label:    "ride the shared pkg/scorecard kernel (Fold/grade/render) instead of a copy-pasted skeleton",
-		Group:    "reuse", Declared: true, Source: "the pkg/scorecard package doc",
+		Label: "ride the shared pkg/scorecard kernel (Fold/grade/render) instead of a copy-pasted skeleton",
+		Group: "reuse", Declared: true, Source: "the pkg/scorecard package doc",
 	},
 	{
 		Key: "json", Short: "the --json control-pane payload",
-		Label:    "expose --json (the control-pane payload every card must emit)",
-		Group:    "surface", Declared: true, Source: "the scorecard skill, law 5",
+		Label: "expose --json (the control-pane payload every card must emit)",
+		Group: "surface", Declared: true, Source: "the scorecard skill, law 5",
 	},
 	{
 		Key: "compare", Short: "the --compare regression gate",

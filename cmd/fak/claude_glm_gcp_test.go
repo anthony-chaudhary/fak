@@ -235,13 +235,13 @@ func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
 	root := repoRootFromTest(t)
 	demo := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-demo.sh")
 	for _, want := range []string{
-		`GCP_TIER="${GCP_TIER:-a3-high-h100}"`, // the 8x H100 demo tier (GLM-5.2 needs 640 GB)
-		`SERVE="${SERVE:-fak}"`,                 // the PURE FAK KERNEL — the goal, and the metric's precondition
-		"scripts/gcp-glm-serve.sh",             // composes the canonical bring-up, never re-implements it
-		"claude-glm-gcp --probe",               // step 2: the cache-warming probe turns
+		`GCP_TIER="${GCP_TIER:-a3-high-h100}"`,      // the 8x H100 demo tier (GLM-5.2 needs 640 GB)
+		`SERVE="${SERVE:-fak}"`,                     // the PURE FAK KERNEL — the goal, and the metric's precondition
+		"scripts/gcp-glm-serve.sh",                  // composes the canonical bring-up, never re-implements it
+		"claude-glm-gcp --probe",                    // step 2: the cache-warming probe turns
 		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the WITNESSED cache-value datum (#1010)
-		"gcloud compute instances delete",      // step 4: teardown — the demo leaves zero cost
-		`MODE="plan"`,                          // plan-by-default
+		"gcloud compute instances delete",           // step 4: teardown — the demo leaves zero cost
+		`MODE="plan"`,                               // plan-by-default
 	} {
 		requireContainsForClaudeGLMGCP(t, demo, want)
 	}
@@ -268,11 +268,11 @@ func TestClaudeGLMGCPDemoPlanRendersWithoutCreds(t *testing.T) {
 	}
 	text := string(out)
 	for _, want := range []string{
-		"gcloud compute instances create", // step 1: provision (from the composed serve plan)
-		"a3-highgpu-8g",                    // the 8x H100 machine type — the default tier resolved
-		"glm52_fak_native_serve.sh",        // SERVE=fak forced the pure kernel even on sm_90
+		"gcloud compute instances create",           // step 1: provision (from the composed serve plan)
+		"a3-highgpu-8g",                             // the 8x H100 machine type — the default tier resolved
+		"glm52_fak_native_serve.sh",                 // SERVE=fak forced the pure kernel even on sm_90
 		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the cache-value witness
-		"gcloud compute instances delete",  // step 4: teardown
+		"gcloud compute instances delete",           // step 4: teardown
 	} {
 		requireContainsForClaudeGLMGCP(t, text, want)
 	}
