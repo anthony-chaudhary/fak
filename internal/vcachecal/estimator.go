@@ -161,6 +161,7 @@ func (b Belief) Observe(policy BeliefPolicy, nowMillis int64, cacheReadTokens in
 		// confirmed read restarts the TTL clock.
 		b.Lifecycle = b.Lifecycle.Touch(nowMillis)
 		b.Lifecycle.State = cachemeta.StateResident
+		b.Lifecycle.Tier = cachemeta.TierProvider
 		b.Lifecycle.StateSinceMillis = nowMillis
 		b.Lifecycle.EnteredTierMillis = nowMillis
 		b.Confirmed++
