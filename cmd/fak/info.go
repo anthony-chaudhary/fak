@@ -111,7 +111,17 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	// dashboard and a spam-filled pane. A redirected/piped stdout keeps append-per-line so a
 	// captured log stays intact. term.IsTerminal is the same probe guard uses (guard.go).
 	infoTTY := !*once && term.IsTerminal(int(os.Stdout.Fd()))
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY)
+	// The pane WIDTH lets the in-place redraw cap the status line so it can never wrap onto a
+	// second row — the scroll corruptor in a narrow split pane (the --split right column). 0
+	// means the size is unknown (non-TTY, or GetSize failed): "no cap", which is correct since
+	// the off-TTY path appends whole lines anyway.
+	infoWidth := 0
+	if infoTTY {
+		if w, _, gerr := term.GetSize(int(os.Stdout.Fd())); gerr == nil && w > 0 {
+			infoWidth = w
+		}
+	}
+	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth)
 }
 
 // runGuardInfoOverlay polls /debug/vars and shows one live status line until Ctrl-C — the
@@ -123,7 +133,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 // gateway was torn down — so the overlay prints a closing line and exits 0, which lets the
 // pane close itself rather than spin forever on a dead port. --once (once=true) is a scripted
 // one-shot: it prints a single line with no header/legend and exits non-zero on a failed fetch.
-func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool) int {
+func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width int) int {
 	// --once is a scripted one-shot probe: print ONE line (or fail), no header, no legend —
 	// the standing header is noise when there is no watch loop to head.
 	if once {
@@ -138,8 +148,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	fmt.Fprintf(stdout, "fak info · %s  (every %s, Ctrl-C to stop)\n", c.base, interval)
-	fmt.Fprint(stdout, guardInfoLegend())
+	fmt.Fprint(stdout, guardInfoStartupHeader(c.base, interval, width))
 
 	sawHealthy := false
 	misses := 0
@@ -151,7 +160,10 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// every tick appends its own line so a captured log stays whole.
 	writeStatus := func(line string) {
 		if tty {
-			fmt.Fprintf(stdout, "\r\033[K  %s", line)
+			// Redraw one row in place, capped to the pane width so the line can never wrap
+			// onto a second row (a wrapped status line is the scroll corruptor: the next
+			// tick's \r returns only to the start of the wrapped row, never clearing it).
+			fmt.Fprintf(stdout, "\r\033[K%s", fitGuardInfoStatus(line, width))
 			dirty = true
 			return
 		}
@@ -294,6 +306,49 @@ func groupThousands(n int64) string {
 		}
 	}
 	return b.String()
+}
+
+// guardInfoNarrowCols is the pane-width threshold below which the verbose multi-line legend
+// is replaced by a single compact line: a narrow split pane (e.g. the --split right column)
+// cannot show the 4-line legend without wrapping it, which crowds out the live status row.
+const guardInfoNarrowCols = 80
+
+// fitGuardInfoStatus formats the live status line for the in-place TTY redraw, capped so it
+// can NEVER wrap the pane. It prefixes the two-space indent and trims the line to the
+// remaining cell budget on a known pane width (width > 0); width <= 0 (size unknown) leaves
+// the line whole — trimTUI returns its input for a non-positive budget. A wrapped status
+// line is the classic single-line-redraw corruptor: once the text overflows, the terminal
+// wraps it to a second row and the next tick's \r returns only to the start of that wrapped
+// row, so the overflow is never cleared and the pane scrolls.
+func fitGuardInfoStatus(line string, width int) string {
+	return "  " + trimTUI(line, width-2)
+}
+
+// guardInfoStartupHeader is the one-time header + legend block, sized to the pane. A wide or
+// unknown pane (width <= 0 or width >= guardInfoNarrowCols) keeps the full multi-line legend;
+// a NARROW split pane gets a single compact legend line so the legend never wraps and crowds
+// out the live status row. The header line is trimmed only when the pane width is known.
+func guardInfoStartupHeader(base string, interval time.Duration, width int) string {
+	var b strings.Builder
+	header := fmt.Sprintf("fak info · %s  (every %s, Ctrl-C to stop)", base, interval)
+	if width > 0 {
+		header = trimTUI(header, width)
+	}
+	b.WriteString(header)
+	b.WriteByte('\n')
+	if width > 0 && width < guardInfoNarrowCols {
+		b.WriteString(trimTUI(guardInfoCompactLegend(), width))
+		b.WriteByte('\n')
+		return b.String()
+	}
+	b.WriteString(guardInfoLegend())
+	return b.String()
+}
+
+// guardInfoCompactLegend is the one-line legend for a narrow pane — the same terms as the
+// full legend, abbreviated so it fits beside the live status row instead of wrapping over it.
+func guardInfoCompactLegend() string {
+	return "legend: cache PROVEN/REFUTED ×mult saved hit · floor blocked/repaired/quarantined · turns/inflight/up"
 }
 
 // guardInfoLegend expands the terms on the info line, printed once in the header so a watcher
