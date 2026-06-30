@@ -64,6 +64,7 @@ TRACKED_DOC_RE = re.compile(r"\.md$|^experiments/|^visuals/|^tools/")
 DEFAULT_BRANCH = "main"
 _GH_TIMEOUT_SECONDS = 8
 _DECISIVE_CI_CONCLUSIONS = {"success", "failure", "timed_out", "startup_failure"}
+GENERATION_LABELS = {"gen/now", "gen/next", "gen/second-next", "gen/future"}
 
 
 def run(cmd: list[str]) -> str:
@@ -78,6 +79,26 @@ def run_status(cmd: list[str]) -> int:
         return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
     except OSError:
         return 127
+
+
+def generation_from_text(text: str) -> str | None:
+    for raw in (text or "").splitlines():
+        key, sep, value = raw.strip().partition(":")
+        if sep != ":" or key.strip().lower() != "generation":
+            continue
+        label = value.strip().lower()
+        if label in GENERATION_LABELS:
+            return label
+        if label in {"now", "next", "second-next", "future"}:
+            return f"gen/{label}"
+        return None
+    return None
+
+
+def commit_generation(sha: str) -> str | None:
+    if not sha:
+        return None
+    return generation_from_text(run(["git", "show", "-s", "--format=%B", sha]))
 
 
 def repo_root() -> Path:
@@ -149,6 +170,10 @@ def commits_since(tag: str | None, limit: int) -> list[dict]:
         cur["files"].append({"path": "\t".join(cols[2:]), "additions": _to_int(cols[0]), "deletions": _to_int(cols[1])})
     if cur is not None:
         out.append(cur)
+    for commit in out:
+        gen = commit_generation(str(commit.get("sha") or ""))
+        if gen:
+            commit["generation"] = gen
     return out
 
 

@@ -73,7 +73,7 @@ FAK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # switcher live under the repo's OWN tools/ dir — tools/ is a CHILD of $FAK_DIR, not a
 # sibling — so ROOT == FAK_DIR. (A previous version set ROOT to $FAK_DIR/.. — one level
 # ABOVE the repo — so the build silently wrote the binary into, and read
-# fleet_accounts.py from, an unrelated SIBLING tools/ dir outside the repo.)
+# account switcher from, an unrelated SIBLING tools/ dir outside the repo.)
 ROOT="$FAK_DIR"
 cd "$FAK_DIR"
 

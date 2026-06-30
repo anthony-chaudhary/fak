@@ -29,6 +29,7 @@ from pathlib import Path
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 VERSION_SUBJECT_RE = re.compile(r"^v\d+\.\d+\.\d+:")
 CC_RE = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?!?:\s*(?P<rest>.*)$")
+GENERATION_ORDER = ("gen/now", "gen/next", "gen/second-next", "gen/future")
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 600) -> tuple[int, str]:
@@ -125,11 +126,58 @@ def ascii_clean(value: str) -> str:
     return out.encode("ascii", errors="replace").decode("ascii")
 
 
+def generation_from_text(text: str) -> str | None:
+    for raw in (text or "").splitlines():
+        key, sep, value = raw.strip().partition(":")
+        if sep != ":" or key.strip().lower() != "generation":
+            continue
+        label = value.strip().lower()
+        if label in GENERATION_ORDER:
+            return label
+        if label in {"now", "next", "second-next", "future"}:
+            return f"gen/{label}"
+        return None
+    return None
+
+
+def commit_generation(commit: dict) -> str | None:
+    raw = str(commit.get("generation") or commit.get("gen") or "").strip().lower()
+    if raw in GENERATION_ORDER:
+        return raw
+    if raw in {"now", "next", "second-next", "future"}:
+        return f"gen/{raw}"
+    for label in commit.get("labels") or []:
+        text = str(label).strip().lower()
+        if text in GENERATION_ORDER:
+            return text
+    return generation_from_text(str(commit.get("body") or ""))
+
+
+def subject_with_generation(commit: dict) -> str:
+    subject = ascii_clean(str(commit.get("subject") or "").strip())
+    gen = commit_generation(commit)
+    if subject and gen:
+        return f"{subject} [{gen}]"
+    return subject
+
+
+def generation_counts(commits: list[dict]) -> dict[str, int]:
+    counts = {gen: 0 for gen in GENERATION_ORDER}
+    for commit in commits:
+        subject = str(commit.get("subject") or "").strip()
+        if not subject or VERSION_SUBJECT_RE.match(subject):
+            continue
+        gen = commit_generation(commit)
+        if gen in counts:
+            counts[gen] += 1
+    return {gen: n for gen, n in counts.items() if n}
+
+
 def grouped_subjects(commits: list[dict]) -> tuple[dict[str, list[str]], list[str]]:
     buckets: dict[str, list[str]] = {}
     order: list[str] = []
     for commit in commits:
-        subject = ascii_clean(str(commit.get("subject") or "").strip())
+        subject = subject_with_generation(commit)
         if not subject or VERSION_SUBJECT_RE.match(subject):
             continue
         m = CC_RE.match(subject)

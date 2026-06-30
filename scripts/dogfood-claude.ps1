@@ -104,7 +104,7 @@ $FakDir = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 # The Go module is the repository root (AGENTS.md). The kernel binary and the account
 # switcher live under the repo's OWN tools/ dir — tools/ is a CHILD of $FakDir, not a
 # sibling — so $Root == $FakDir. (A previous version set $Root to $FakDir\.. — one level
-# ABOVE the repo — so the build silently wrote fak.exe into, and read fleet_accounts.py
+# ABOVE the repo — so the build silently wrote fak.exe into, and read account-switcher files
 # from, an unrelated SIBLING tools\ dir outside the repo, clobbering whatever lived there.)
 $Root = $FakDir
 

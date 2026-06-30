@@ -96,6 +96,18 @@ class ReleaseContextTest(unittest.TestCase):
         self.assertFalse(drift["source_behind_reachable_tag"])
         self.assertIn("outside HEAD", drift["reason"])
 
+    def test_commits_since_preserves_generation_sidecar(self) -> None:
+        rc = load()
+        root = self._repo()
+        write(root / "x.txt", "x\n")
+        git(root, "add", "x.txt")
+        git(root, "commit", "-m", "feat(tools): add x #1634 (fak tools)", "-m", "Generation: next")
+
+        commits = rc.commits_since("v0.1.0", 10)
+
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(commits[0]["generation"], "gen/next")
+
     def test_fold_latest_trunk_ci_skips_indecisive_runs(self) -> None:
         rc = load()
         status, latest, note = rc.fold_latest_trunk_ci([
