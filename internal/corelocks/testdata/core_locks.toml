@@ -1,0 +1,38 @@
+# Declarative core-lock taxonomy (issue #1681).
+#
+# Lock classes and the reason tokens they raise, declared as DATA. The audit
+# reads THIS table instead of a hand-coded map, so the classification stays
+# bound to the workspace contract rather than drifting in code.
+#
+# Most-specific (longest) matching glob wins. A path no glob claims falls
+# through to open-leaf and raises no reason. These reason tokens are data-only:
+# they are returned as classification metadata, never auto-emitted as a refusal.
+
+[[class]]
+name   = "hard-self"
+reason = "CORE_SELF_MODIFY"
+globs  = ["internal/adjudicator/**", "internal/abi/**", "internal/corelocks/**"]
+
+[[class]]
+name   = "serial-core"
+reason = "CORE_SERIAL_REQUIRED"
+globs  = ["dos.toml", "internal/resume/**"]
+
+[[class]]
+name   = "soft-contract"
+reason = "CORE_CONTRACT_WITNESS_MISSING"
+globs  = ["internal/canon/**", "internal/covmatrix/**"]
+
+# shadow-learn: observed/learning surfaces — declared but raising no hard
+# reason; a path here is classified without a self-modify or serial demand.
+[[class]]
+name   = "shadow-learn"
+reason = "CORE_LOCK_UNCLASSIFIED"
+globs  = ["internal/rsiloop/**"]
+
+# open-leaf carries no reason and needs no globs: it is the explicit
+# fall-through class for ordinary leaf paths.
+[[class]]
+name   = "open-leaf"
+reason = ""
+globs  = []
