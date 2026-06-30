@@ -206,8 +206,8 @@ func TestClassifyLiveProcesses(t *testing.T) {
 	if len(rep.Watchlist) != 3 {
 		t.Fatalf("live process watchlist = %d %v, want repo gh + unreadable cmd + browser", len(rep.Watchlist), rep.Watchlist)
 	}
-	if rep.Observed["gh.exe"] != 1 || rep.Observed["cmd.exe"] != 1 || rep.Observed["chrome.exe"] != 2 {
-		t.Fatalf("observed counts = %+v, want gh/cmd/chrome counts", rep.Observed)
+	if rep.Observed["gh.exe"] != 1 || rep.Observed["cmd.exe"] != 1 || rep.Observed["chrome.exe"] != 1 {
+		t.Fatalf("observed counts = %+v, want gh/cmd/top-level-chrome counts", rep.Observed)
 	}
 	if rep.Unreadable["cmd.exe"] != 1 {
 		t.Fatalf("unreadable counts = %+v, want cmd=1", rep.Unreadable)
