@@ -410,12 +410,12 @@ func cmdGuard(argv []string) {
 		// is not interactive: an attended terminal can complete the login, so it keeps today's
 		// behavior.
 		if us.noTokenAnywhere && !cmdGuardStdinInteractive() {
-			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription token found and no ANTHROPIC_API_KEY set, and stdin is not a terminal — refusing to spawn a headless agent that would hang on an interactive login it cannot complete.")
+			fmt.Fprintf(os.Stderr, "fak guard: no Claude subscription token found and no ANTHROPIC_API_KEY set, and stdin is not a terminal — refusing to spawn a headless agent that would hang on an interactive login it cannot complete.%s\n", guardLoginStatusNote(us))
 			fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in, or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or set ANTHROPIC_API_KEY for API billing.")
 			os.Exit(2)
 		}
 		if us.passthroughFallback && !*quiet {
-			fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream. If you hit a 401, run `claude` once or `claude setup-token`.")
+			fmt.Fprintf(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — the wrapped agent's own credential (a subscription login or ANTHROPIC_API_KEY) is forwarded upstream.%s If you hit a 401, run `claude` once or `claude setup-token`.\n", guardLoginStatusNote(us))
 		}
 		if us.ambientKeyOverridden && !*quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: ANTHROPIC_API_KEY is set but fak defaults to your Claude Pro/Max subscription (OAuth); the key is ignored upstream. Pass --api-key-env ANTHROPIC_API_KEY to use API billing instead.")

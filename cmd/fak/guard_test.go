@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/callavoid"
@@ -1140,6 +1141,10 @@ func TestGuardPinsOnIntentWhenLoginPresentButTokenUnreadable(t *testing.T) {
 	if us.apiKey != "" {
 		t.Fatalf("boot apiKey must be empty on the pin-on-intent path (APIKeyFunc resolves per request); got %q", us.apiKey)
 	}
+	if us.claudeConfigDir != dir || us.loginStatus != accounts.LoginReady || !us.canServe {
+		t.Fatalf("pin-on-intent login posture = dir %q status %q canServe %v, want %q/%q/true",
+			us.claudeConfigDir, us.loginStatus, us.canServe, dir, accounts.LoginReady)
+	}
 
 	// The pinned posture must inject the placeholder so the wrapped agent never falls into its
 	// own /login — the actual anti-hang shield.
@@ -1178,6 +1183,14 @@ func TestGuardNoTokenAnywhereFlagsHeadlessHardExit(t *testing.T) {
 	}
 	if !us.noTokenAnywhere {
 		t.Fatalf("want noTokenAnywhere=true so cmdGuard can fail loud before a headless hang; got %+v", us)
+	}
+	if us.claudeConfigDir != bare || us.loginStatus != accounts.LoginNeedsLogin || us.canServe {
+		t.Fatalf("guard login posture = dir %q status %q canServe %v, want %q/%q/false",
+			us.claudeConfigDir, us.loginStatus, us.canServe, bare, accounts.LoginNeedsLogin)
+	}
+	if note := guardLoginStatusNote(us); !strings.Contains(note, "login=needs_login") ||
+		!strings.Contains(note, "can_serve=false") || !strings.Contains(note, bare) {
+		t.Fatalf("guard login status note = %q, want dir/login/can_serve", note)
 	}
 
 	// A real ambient ANTHROPIC_API_KEY is a legitimate API-billing passthrough: the child's own

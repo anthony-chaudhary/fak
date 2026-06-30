@@ -94,6 +94,9 @@ func TestRunCommit_jsonShapeAndRaceExitCode(t *testing.T) {
 	if res.Reason != safecommit.ReasonPathspecRace || len(res.RacedExtra) != 1 {
 		t.Fatalf("json result lost the race evidence: %+v", res)
 	}
+	if res.Score == 0 || res.Grade == "" {
+		t.Fatalf("json result should include scored outcome, got %+v", res)
+	}
 }
 
 func TestRunCommit_offTrunkExit3(t *testing.T) {
@@ -104,6 +107,9 @@ func TestRunCommit_offTrunkExit3(t *testing.T) {
 	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "msg"})
 	if code != 3 {
 		t.Fatalf("a pre-commit refusal should exit 3, got %d", code)
+	}
+	if !strings.Contains(out.String(), "score:") {
+		t.Fatalf("human refusal output should include score, got %q", out.String())
 	}
 }
 
