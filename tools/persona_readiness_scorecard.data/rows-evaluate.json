@@ -41,7 +41,7 @@
       ],
       "verdict": "served",
       "gaps": [
-        "Cross-machine GPU benchmarks need real hardware (DGX/GCP) — the laptop path is CPU-parity + tiny-scale witnesses"
+        "Cross-machine GPU benchmarks need real hardware (GPU-server/GCP) — the laptop path is CPU-parity + tiny-scale witnesses"
       ]
     },
     {

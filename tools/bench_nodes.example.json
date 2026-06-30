@@ -11,13 +11,13 @@
     "Results go to tools/_registry/bench-runs/ (gitignored). Promoting a result to a committed path needs a REAL redaction pass (CPU brand + go/git + hostname) — the shape-only scrub audit does NOT do that."
   ],
   "_onboarding": {
-    "_doc": "Public-safe roster of the bench nodes this runner targets and where each stands (#922). The HARDWARE-CATALOG node roster is private; this block is the committed, sanitized view. 'pending' nodes have a placeholder entry below — onboarding = copy it into the gitignored tools/bench_nodes.json, fill in REAL identity, get the driver pubkey into the node's authorized_keys, pin host_key (ssh-keyscan -t ed25519), then `bench_node.sh <node> tests`. Every 'pending' node carries an 'issue' that tracks its onboarding — a dedicated child issue where one is filed (#10 laptop-from-desktop, #12 GCP GPU VMs), else the umbrella #922 itself (desktop, dgx-a100, which have no dedicated child yet) — so this roster is a navigable decomposition index for the umbrella.",
+    "_doc": "Public-safe roster of the bench nodes this runner targets and where each stands (#922). The HARDWARE-CATALOG node roster is private; this block is the committed, sanitized view. 'pending' nodes have a placeholder entry below — onboarding = copy it into the gitignored tools/bench_nodes.json, fill in REAL identity, get the driver pubkey into the node's authorized_keys, pin host_key (ssh-keyscan -t ed25519), then `bench_node.sh <node> tests`. Every 'pending' node carries an 'issue' that tracks its onboarding — a dedicated child issue where one is filed (#10 laptop-from-desktop, #12 GCP GPU VMs), else the umbrella #922 itself (desktop, GPU server, which have no dedicated child yet) — so this roster is a navigable decomposition index for the umbrella.",
     "roster": [
       { "node": "macbook", "sanitized_name": "node-macos-a",         "status": "onboarded", "verified": "2026-06-21", "note": "Apple M3 Pro arm64 — tests green, BenchmarkDecide ~317 ns idle." },
       { "node": "desktop", "sanitized_name": "node-linux-desktop-a", "status": "pending",   "issue": 922, "blocker": "host-reachability — desktop answers ICMP but ships with no sshd; enable sshd + add driver pubkey, then pin host_key." },
       { "node": "laptop",  "sanitized_name": "node-linux-laptop-a",  "status": "onboarded", "verified": "2026-06-30", "issue": 10, "note": "RTX 4070 Laptop via Windows SSH -> WSL; `bench_node.sh laptop bench` passed from the desktop driver (bench rc=0, BenchmarkDecide ~1.1 us/op)." },
       { "node": "gcp-gpu", "sanitized_name": "node-gcp-gpu-a",       "status": "pending",   "issue": 12,  "blocker": "private-registry-fill — dynamic-IP bridge is wired; copy the resolver entry into gitignored bench_nodes.json, set the real GCP project/zone/instance there or in env, then run bench_node.sh gcp-gpu ping after provisioning." },
-      { "node": "dgx-a100","sanitized_name": "node-dgx-a100",        "status": "pending",   "issue": 922, "blocker": "no-direct-ssh — DGX is reached via a relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
+      { "node": "gpu-server","sanitized_name": "node-gpu-server",        "status": "pending",   "issue": 922, "blocker": "no-direct-ssh — The GPU server is reached via a private relay bridge, not a direct tailnet SSH handshake; needs a reachable sshd path before the driver can poll it." }
     ]
   },
   "nodes": [
@@ -97,10 +97,10 @@
       "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
     },
     {
-      "name": "dgx-a100",
-      "sanitized_name": "node-dgx-a100",
+      "name": "gpu-server",
+      "sanitized_name": "node-gpu-server",
       "tailnet_ip": "203.0.113.40",
-      "magicdns": "node-dgx-a100.example.ts.net",
+      "magicdns": "node-gpu-server.example.ts.net",
       "ssh_user": "user",
       "ssh_key": "~/.ssh/id_ed25519",
       "ssh_port": 22,

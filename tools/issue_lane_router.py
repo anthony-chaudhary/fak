@@ -508,14 +508,32 @@ def build_payload(
         for i in skipped_blocked
     ]
     by_conf: dict[str, int] = {k: 0 for k in CONFIDENCE_RANK}
-    lanes: dict[str, dict[str, Any]] = {}
+    lane_routes: dict[str, list[dict[str, Any]]] = {}
     for r in routes:
         by_conf[r["confidence"]] = by_conf.get(r["confidence"], 0) + 1
         lane = r["lane"]
         if lane:
-            grp = lanes.setdefault(lane, {"tree": trees.get(lane, []), "count": 0, "issues": []})
-            grp["count"] += 1
-            grp["issues"].append(r["number"])
+            lane_routes.setdefault(lane, []).append(r)
+
+    lanes: dict[str, dict[str, Any]] = {}
+    for lane, lane_rs in lane_routes.items():
+        # Order a lane's issues by routing confidence (strongest first), then issue
+        # number desc — the SAME routed-ordering the flat `issues` list uses via
+        # _route_sort_key. A dos-dispatch worker folds lanes[<its lane>].issues into
+        # its dispositions; ordering them best-routed-first steers it at the ticket it
+        # can most confidently target (a path-confirmed hit) instead of whatever gh
+        # returned newest. Also carry the lane's own by_confidence so an operator (and
+        # a future confidence-weighted lane picker) can see how well-aimed a lane is.
+        lane_rs = sorted(lane_rs, key=_lane_issue_sort_key)
+        lane_by_conf: dict[str, int] = {}
+        for r in lane_rs:
+            lane_by_conf[r["confidence"]] = lane_by_conf.get(r["confidence"], 0) + 1
+        lanes[lane] = {
+            "tree": trees.get(lane, []),
+            "count": len(lane_rs),
+            "issues": [r["number"] for r in lane_rs],
+            "by_confidence": lane_by_conf,
+        }
 
     total = len(routes)
     unrouted = by_conf["none"]
@@ -577,6 +595,12 @@ def _route_sort_key(r: dict[str, Any]) -> tuple[int, int, int]:
     # UNROUTED first (operator triage), then by confidence desc, then issue number desc.
     unrouted_first = 0 if r["lane"] is None else 1
     return (unrouted_first, -CONFIDENCE_RANK.get(r["confidence"], 0), -int(r.get("number") or 0))
+
+
+def _lane_issue_sort_key(r: dict[str, Any]) -> tuple[int, int]:
+    # Within a lane every issue is routed, so order by confidence desc then number
+    # desc — the routed tail of _route_sort_key, applied per lane.
+    return (-CONFIDENCE_RANK.get(r["confidence"], 0), -int(r.get("number") or 0))
 
 
 def compute_coverage(*, issues_fetched: int, issue_limit: int) -> dict[str, Any]:
