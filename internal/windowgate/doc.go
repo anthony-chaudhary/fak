@@ -22,22 +22,30 @@
 // CREATE_NO_WINDOW suppresses it. The dispatch family routes every spawn through the
 // shared suppressor dispatch_worker.no_window_creationflags(). The original bug was
 // PARTIAL coverage: the worker Popen passed the flag but the taskkill / mklink / git
-// helper calls did not. ScanTree FAILS any module that opts into the suppressor
-// (references no_window_creationflags) yet leaves a subprocess spawn without a
+// helper calls did not. ScanTree records both Python suppression modes: explicit
+// per-call creationflags via no_window_creationflags, and the shared default
+// installer install_no_window_subprocess_defaults(subprocess). It FAILS any module
+// that opts into explicit call-site flags yet leaves a subprocess spawn without a
 // creationflags hint (a **kwargs splat counts as provided; a POSIX-only tool such as
-// pgrep is exempt since it can never run on Windows).
+// pgrep is exempt since it can never run on Windows). Non-opt-in modules that spawn
+// known console tools are surfaced on the advisory/strict watchlist so the ongoing
+// cleanup can see them before they become a scheduled-background regression.
 //
-// 3. CODE LEVEL (Go dispatch helpers). The native `fak dispatch ...` path shells out
-// to `gh`, `git`, `dos`, `powershell`, and Python helpers before it launches a worker.
-// Those short helper commands need the same Windows no-window hook as the worker
-// spawn, otherwise moving a tick from Python to Go reopens the desktop-flash bug.
-// ScanTree FAILS cmd/fak/dispatch*.go helper execs that reach Output/CombinedOutput/
-// Run/Start before configureDispatchHelperCommand(cmd) or configureDispatchSpawn(cmd).
+// 3. CODE LEVEL (Go background helpers). Native `fak` and internal maintenance
+// paths shell out to `gh`, `git`, `go`, `dos`, PowerShell, Python, taskkill/tasklist,
+// and repo helper binaries from scheduled or otherwise unattended loops. Those
+// short helper commands need the same Windows no-window hook as the worker spawn,
+// otherwise moving a tick from Python to Go reopens the desktop-flash bug.
+// ScanTree FAILS hard-ratcheted helper execs that reach Output/CombinedOutput/Run/
+// Start before configureDispatchHelperCommand(cmd), configureDispatchSpawn(cmd), or
+// windowgate.ConfigureBackgroundCommand(cmd), and it surfaces every other literal
+// console-tool launch as the advisory/strict watchlist.
 //
 // # Why Go, scanning Python and PowerShell
 //
 // The de-Python ratchet (internal/pythongate) bans NEW tools/*.py, so this gate — the
 // checking layer over the fleet's launch hygiene — lives in Go and analyzes the
-// tracked .ps1 / .py / dispatch .go text directly. It scans the git-tracked tree so
-// untracked peer scratch files never affect the verdict.
+// worktree .ps1 / .py / .go text directly. It includes untracked, non-ignored files
+// because a new cmd/fak/*.go helper can compile into the binary before it is
+// committed; ignored scratch stays outside the verdict.
 package windowgate

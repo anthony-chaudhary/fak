@@ -2,6 +2,7 @@ package windowgate
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -91,6 +92,42 @@ func TestEverySpawnConstructorChecked(t *testing.T) {
 	}
 }
 
+func TestPySpawnCandidatesSurfaceNonOptInConsoleTools(t *testing.T) {
+	src := "import subprocess\nsubprocess.run(['gh', 'issue', 'list'])\n"
+	if got := PySpawnCandidates("m.py", src); len(got) != 1 {
+		t.Fatalf("PySpawnCandidates = %d %v, want 1 advisory row", len(got), got)
+	}
+	clean := "import subprocess\nsubprocess.run(['gh', 'issue', 'list'], creationflags=no_window_creationflags())\n"
+	if got := PySpawnCandidates("m.py", clean); len(got) != 0 {
+		t.Fatalf("suppressed candidate should be clean, got %v", got)
+	}
+	optIn := "no_window_creationflags = 1\nimport subprocess\nsubprocess.run(['gh', 'issue', 'list'])\n"
+	if got := PySpawnCandidates("m.py", optIn); len(got) != 0 {
+		t.Fatalf("opt-in module belongs to hard violation path, got advisory %v", got)
+	}
+	if got := PySpawnCandidates("tools/m_test.py", src); len(got) != 0 {
+		t.Fatalf("test fixtures should not enter the operator watchlist, got %v", got)
+	}
+	if got := PySpawnCandidates("examples/demo.py", src); len(got) != 0 {
+		t.Fatalf("manual examples should not enter the operator watchlist, got %v", got)
+	}
+	installed := "import subprocess\nfrom dispatch_worker import install_no_window_subprocess_defaults\ninstall_no_window_subprocess_defaults(subprocess)\nsubprocess.run(['gh'])\n"
+	if got := PySpawnCandidates("tools/m.py", installed); len(got) != 0 {
+		t.Fatalf("installer-covered module should be clean, got %v", got)
+	}
+	spacedInstalled := "import subprocess\ninstall_no_window_subprocess_defaults( subprocess )\nsubprocess.run(['gh'])\n"
+	if got := PySpawnCandidates("tools/m.py", spacedInstalled); len(got) != 0 {
+		t.Fatalf("spaced installer call should be clean, got %v", got)
+	}
+}
+
+func TestPySpawnCandidatesIgnoreStringLiterals(t *testing.T) {
+	src := "cell = '''\nsubprocess.run([\"git\", \"status\"])\n'''\n# subprocess.run(['gh'])\n"
+	if got := PySpawnCandidates("tools/gen.py", src); len(got) != 0 {
+		t.Fatalf("string/comment subprocess text should not be executable watchlist, got %v", got)
+	}
+}
+
 func TestGoDispatchExecRules(t *testing.T) {
 	cases := []struct {
 		name string
@@ -114,6 +151,14 @@ func TestGoDispatchExecRules(t *testing.T) {
 			"cmd/fak/dispatch_tick.go",
 			"package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(exe, args...)\n configureDispatchSpawn(cmd)\n _ = cmd.Start()\n}\n",
 			0},
+		{"gardenbundle-background-helper-missing-hook-flagged",
+			"internal/gardenbundle/gardenbundle.go",
+			"package gardenbundle\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n _, _ = cmd.Output()\n}\n",
+			1},
+		{"generic-background-hook-clean",
+			"internal/gardenbundle/gardenbundle.go",
+			"package gardenbundle\nimport (\n \"os/exec\"\n \"github.com/anthony-chaudhary/fak/internal/windowgate\"\n)\nfunc f(){\n cmd := exec.Command(\"git\", \"rev-parse\", \"HEAD\")\n windowgate.ConfigureBackgroundCommand(cmd)\n _, _ = cmd.Output()\n}\n",
+			0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -125,8 +170,41 @@ func TestGoDispatchExecRules(t *testing.T) {
 	}
 }
 
+func TestGoExecCandidatesSurfaceLiteralConsoleTools(t *testing.T) {
+	src := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
+	got := GoExecCandidates("cmd/fak/feature.go", src)
+	if len(got) != 1 {
+		t.Fatalf("GoExecCandidates = %d %v, want 1 advisory row", len(got), got)
+	}
+	clean := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n windowgate.ConfigureBackgroundCommand(cmd)\n _, _ = cmd.Output()\n}\n"
+	if got := GoExecCandidates("cmd/fak/feature.go", clean); len(got) != 0 {
+		t.Fatalf("configured candidate should be clean, got %v", got)
+	}
+}
+
+func TestScanTreeIncludesUntrackedGoFiles(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	if err := os.MkdirAll(filepath.Join(root, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "package main\nimport \"os/exec\"\nfunc f(){\n cmd := exec.Command(\"gh\", \"issue\", \"list\")\n _, _ = cmd.Output()\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "cmd", "fak", "untracked.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := ScanTree(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(rep.GoCandidates) != 1 {
+		t.Fatalf("GoCandidates = %d %v, want the untracked cmd/fak helper observed", len(rep.GoCandidates), rep.GoCandidates)
+	}
+}
+
 // TestTrackedTreeHasNoPopups is the live trunk guard: the real repo's tracked
-// .ps1 task installers and window-suppressing .py modules must be clean.
+// and untracked worktree .ps1 task installers, window-suppressing .py modules,
+// and hard-ratcheted Go helpers must be clean.
 func TestTrackedTreeHasNoPopups(t *testing.T) {
 	rep, err := ScanTree(repoRoot(t))
 	if err != nil {
@@ -141,9 +219,22 @@ func TestTrackedTreeHasNoPopups(t *testing.T) {
 	for _, v := range rep.GoExecs {
 		t.Errorf("go exec popup: %s", v)
 	}
-	if !rep.OK() {
+	for _, v := range rep.GoCandidates {
+		t.Errorf("go exec watchlist: %s", v)
+	}
+	if !rep.OK() || len(rep.GoCandidates) > 0 {
 		t.Errorf("fix: make the installer off-desktop (S4U) or headless (conhost --headless); " +
-			"flag Python spawns with creationflags=no_window_creationflags(); configure Go dispatch execs")
+			"flag Python spawns with creationflags=no_window_creationflags(); configure Go helper execs")
+	}
+}
+
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	ConfigureBackgroundCommand(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 
