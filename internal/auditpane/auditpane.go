@@ -57,6 +57,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // SCHEMA is the control-pane envelope version this rollup emits.
@@ -394,6 +396,7 @@ func execOnce(root, python string, args []string, timeout time.Duration) RunOutc
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, python, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -423,6 +426,7 @@ func HeadCommit(root string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
