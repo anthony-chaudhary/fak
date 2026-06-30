@@ -34,13 +34,14 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 }
 
 type issueContractResult struct {
-	Schema      string                    `json:"schema"`
-	Mode        string                    `json:"mode"`
-	File        string                    `json:"file"`
-	OK          bool                      `json:"ok"`
-	Counts      issueContractCounts       `json:"counts"`
-	BatchGroups []issueContractBatchGroup `json:"batch_groups,omitempty"`
-	Reviews     []issuecontract.Review    `json:"reviews"`
+	Schema       string                     `json:"schema"`
+	Mode         string                     `json:"mode"`
+	File         string                     `json:"file"`
+	OK           bool                       `json:"ok"`
+	Counts       issueContractCounts        `json:"counts"`
+	RepairQueues []issueContractRepairQueue `json:"repair_queues,omitempty"`
+	BatchGroups  []issueContractBatchGroup  `json:"batch_groups,omitempty"`
+	Reviews      []issuecontract.Review     `json:"reviews"`
 }
 
 type issueContractCounts struct {
@@ -73,6 +74,16 @@ type issueContractBatchGroup struct {
 	ByReason        map[string]int `json:"by_reason,omitempty"`
 	ExampleKeys     []string       `json:"example_keys,omitempty"`
 	MissingMetadata []string       `json:"missing_metadata,omitempty"`
+}
+
+type issueContractRepairQueue struct {
+	Kind          string         `json:"kind"`
+	Count         int            `json:"count"`
+	StepBudget    int            `json:"step_budget"`
+	NextAction    string         `json:"next_action"`
+	ByReason      map[string]int `json:"by_reason,omitempty"`
+	MissingFields map[string]int `json:"missing_fields,omitempty"`
+	ExampleKeys   []string       `json:"example_keys,omitempty"`
 }
 
 func runIssueContract(stdout, stderr io.Writer, argv []string) int {
@@ -160,6 +171,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	result.Counts, result.BatchGroups = summarizeIssueContractReviews(result.Reviews)
+	result.RepairQueues = issueContractRepairQueues(result.Reviews)
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, result); err != nil {
@@ -322,6 +334,130 @@ func issueContractBatchMissingMetadata(review issuecontract.Review) []string {
 	return missing
 }
 
+func issueContractRepairQueues(reviews []issuecontract.Review) []issueContractRepairQueue {
+	queues := map[string]*issueContractRepairQueue{}
+	for _, review := range reviews {
+		kinds := issueContractRepairKinds(review)
+		for _, kind := range kinds {
+			queue := queues[kind]
+			if queue == nil {
+				queue = &issueContractRepairQueue{
+					Kind:          kind,
+					NextAction:    issueContractRepairAction(kind),
+					ByReason:      map[string]int{},
+					MissingFields: map[string]int{},
+				}
+				queues[kind] = queue
+			}
+			queue.Count++
+			queue.StepBudget += issueContractReviewStepBudget(review)
+			for _, reason := range review.Reasons {
+				queue.ByReason[reason]++
+			}
+			for _, missing := range review.MissingFields {
+				queue.MissingFields[missing]++
+			}
+			if review.Key != "" && len(queue.ExampleKeys) < 8 {
+				queue.ExampleKeys = append(queue.ExampleKeys, review.Key)
+			}
+		}
+	}
+	out := make([]issueContractRepairQueue, 0, len(queues))
+	for _, queue := range queues {
+		if len(queue.ByReason) == 0 {
+			queue.ByReason = nil
+		}
+		if len(queue.MissingFields) == 0 {
+			queue.MissingFields = nil
+		}
+		out = append(out, *queue)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ri, rj := issueContractRepairRank(out[i].Kind), issueContractRepairRank(out[j].Kind)
+		if ri != rj {
+			return ri < rj
+		}
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
+func issueContractRepairKinds(review issuecontract.Review) []string {
+	if review.OK && review.Dispatchability == issuecontract.Dispatchable {
+		return []string{"dispatch"}
+	}
+	var kinds []string
+	add := func(kind string) {
+		for _, existing := range kinds {
+			if existing == kind {
+				return
+			}
+		}
+		kinds = append(kinds, kind)
+	}
+	for _, reason := range review.Reasons {
+		switch reason {
+		case issuecontract.ReasonNotDispatchLeaf, issuecontract.ReasonOversizedSteps:
+			add("split")
+		case issuecontract.ReasonScopeIncomplete:
+			add("scope")
+		case issuecontract.ReasonUnrouted:
+			add("route")
+		case issuecontract.ReasonLiveUnarmored, issuecontract.ReasonNoiseIncomplete, issuecontract.ReasonAgentIncomplete:
+			add("noise")
+		case issuecontract.ReasonPrivateBoundary:
+			add("private")
+		default:
+			add("other")
+		}
+	}
+	if len(kinds) == 0 {
+		kinds = append(kinds, "other")
+	}
+	return kinds
+}
+
+func issueContractRepairRank(kind string) int {
+	switch kind {
+	case "dispatch":
+		return 0
+	case "split":
+		return 1
+	case "scope":
+		return 2
+	case "route":
+		return 3
+	case "noise":
+		return 4
+	case "private":
+		return 5
+	default:
+		return 9
+	}
+}
+
+func issueContractRepairAction(kind string) string {
+	switch kind {
+	case "dispatch":
+		return "send these scoped leaves to dispatch lanes, oldest/highest-priority first"
+	case "split":
+		return fmt.Sprintf("decompose each non-leaf or oversized row into child issues with <= %d expected steps", issuecontract.MaxDispatchExpectedSteps)
+	case "scope":
+		return "add the missing parent/current-state/scope/done/witness/closure fields before dispatch"
+	case "route":
+		return "add a lane or path hints section so the issue maps to one dispatch lane"
+	case "noise":
+		return "add trigger, batch policy, agent context, and live dedupe/cap evidence before automated sync"
+	case "private":
+		return "remove private/operator-only evidence or move the work to the private companion repo"
+	default:
+		return "inspect the review reasons and repair the row before dispatch"
+	}
+}
+
 func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
 	var arr []issuecontract.Candidate
 	if err := json.Unmarshal(b, &arr); err == nil {
@@ -424,6 +560,16 @@ func renderIssueContract(r issueContractResult) string {
 			group.Key))
 		if len(group.MissingMetadata) > 0 {
 			lines = append(lines, "    missing_batch_metadata: "+strings.Join(group.MissingMetadata, ", "))
+		}
+	}
+	for _, queue := range r.RepairQueues {
+		lines = append(lines, fmt.Sprintf("  repair_queue[%s]: count=%d steps=%d next=%s",
+			queue.Kind, queue.Count, queue.StepBudget, queue.NextAction))
+		if len(queue.ByReason) > 0 {
+			lines = append(lines, "    reasons: "+renderIssueContractReasonCounts(queue.ByReason))
+		}
+		if len(queue.MissingFields) > 0 {
+			lines = append(lines, "    missing_fields: "+renderIssueContractReasonCounts(queue.MissingFields))
 		}
 	}
 	for _, review := range r.Reviews {
