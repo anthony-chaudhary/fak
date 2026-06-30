@@ -342,16 +342,48 @@ func gatherHygiene(root string) ([]HygieneKPI, []string) {
 	}
 
 	// accessibility
-	var altPerDoc []AltDoc
-	var aiPerDoc []AITellDoc
-	var nakedJargon []string
-	var plainSignals []string
-	nDense, nAcroDocs, nIdiom := 0, 0, 0
+	acc := gatherAccessibility(reader, texts)
+
+	kpis := []HygieneKPI{
+		KPIRedundancy(dupDocs),
+		KPIBloat(bloatDocs),
+		KPIRootHygiene(rootMD, rootOther),
+		KPIPlacement(datedMisplaced),
+		KPIDirDiscipline(trackedDirs),
+		KPIIndexPresence(present),
+		KPIIndexIntegrity(deadByIndex),
+		KPIOrphans(orphans, len(orphanPool)),
+		KPIAltText(acc.altPerDoc),
+		KPIAITells(acc.aiPerDoc),
+		KPIJargon(acc.nakedJargon, len(reader)),
+		KPIPlainLanguage(acc.plainSignals, acc.nDense, acc.nAcroDocs, acc.nIdiom, len(reader)),
+	}
+	return kpis, worktreeClutter(root)
+}
+
+// accessibilitySignals are the per-reader-doc accessibility findings gatherHygiene
+// folds into the alt-text, AI-tell, jargon, and plain-language KPIs.
+type accessibilitySignals struct {
+	altPerDoc    []AltDoc
+	aiPerDoc     []AITellDoc
+	nakedJargon  []string
+	plainSignals []string
+	nDense       int
+	nAcroDocs    int
+	nIdiom       int
+}
+
+// gatherAccessibility scans each reader-facing doc for the accessibility signals:
+// missing image alt text, AI-tell phrasing + em-dash overuse, undefined jargon on
+// the first screen, and plain-language reading-ease / undefined-acronym / literal-idiom
+// defects. Split out of gatherHygiene so each scan phase reads as its own named step.
+func gatherAccessibility(reader []string, texts map[string]string) accessibilitySignals {
+	var s accessibilitySignals
 	for _, f := range reader {
 		prose := proseOnly(texts[f])
 		low := strings.ToLower(prose)
 		if missingAlt := imageAltDefects(prose); len(missingAlt) > 0 {
-			altPerDoc = append(altPerDoc, AltDoc{Path: f, Missing: missingAlt})
+			s.altPerDoc = append(s.altPerDoc, AltDoc{Path: f, Missing: missingAlt})
 		}
 		hits := tellHits(low)
 		words := wordCount(prose)
@@ -365,7 +397,7 @@ func gatherHygiene(root string) ([]HygieneKPI, []string) {
 			if over < 0 {
 				over = 0
 			}
-			aiPerDoc = append(aiPerDoc, AITellDoc{Path: f, Hits: hits, EmdashOver: over})
+			s.aiPerDoc = append(s.aiPerDoc, AITellDoc{Path: f, Hits: hits, EmdashOver: over})
 		}
 		// jargon on the first screen (top 60 lines)
 		headLines := strings.SplitN(texts[f], "\n", -1)
@@ -377,7 +409,7 @@ func gatherHygiene(root string) ([]HygieneKPI, []string) {
 			for _, line := range headLines {
 				if strings.Contains(strings.ToLower(line), termLow) {
 					if !(strings.Contains(line, "(") || strings.Contains(line, "—") || strings.Contains(line, " - ")) {
-						nakedJargon = append(nakedJargon, f+": "+term)
+						s.nakedJargon = append(s.nakedJargon, f+": "+term)
 					}
 					break
 				}
@@ -387,42 +419,27 @@ func gatherHygiene(root string) ([]HygieneKPI, []string) {
 		if words > 120 {
 			ease := flesch(prose)
 			if ease < fleschFloor {
-				nDense++
-				plainSignals = append(plainSignals, fmtDenseSignal(ease, f))
+				s.nDense++
+				s.plainSignals = append(s.plainSignals, fmtDenseSignal(ease, f))
 			}
 		}
 		undefined := undefinedAcronyms(prose)
 		if len(undefined) > 0 {
-			nAcroDocs++
+			s.nAcroDocs++
 			lim := undefined
 			if len(lim) > 6 {
 				lim = lim[:6]
 			}
-			plainSignals = append(plainSignals, "acronym(s) used before definition in "+f+": "+strings.Join(lim, ", "))
+			s.plainSignals = append(s.plainSignals, "acronym(s) used before definition in "+f+": "+strings.Join(lim, ", "))
 		}
 		for _, idiom := range literalIdioms {
 			if strings.Contains(low, idiom) {
-				nIdiom++
-				plainSignals = append(plainSignals, "literal-reader idiom “"+idiom+"” in "+f)
+				s.nIdiom++
+				s.plainSignals = append(s.plainSignals, "literal-reader idiom “"+idiom+"” in "+f)
 			}
 		}
 	}
-
-	kpis := []HygieneKPI{
-		KPIRedundancy(dupDocs),
-		KPIBloat(bloatDocs),
-		KPIRootHygiene(rootMD, rootOther),
-		KPIPlacement(datedMisplaced),
-		KPIDirDiscipline(trackedDirs),
-		KPIIndexPresence(present),
-		KPIIndexIntegrity(deadByIndex),
-		KPIOrphans(orphans, len(orphanPool)),
-		KPIAltText(altPerDoc),
-		KPIAITells(aiPerDoc),
-		KPIJargon(nakedJargon, len(reader)),
-		KPIPlainLanguage(plainSignals, nDense, nAcroDocs, nIdiom, len(reader)),
-	}
-	return kpis, worktreeClutter(root)
+	return s
 }
 
 func fmtDenseSignal(ease float64, f string) string {
