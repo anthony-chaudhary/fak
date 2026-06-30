@@ -589,10 +589,10 @@ func planeLabel(p vcachescore.PlaneValueReport) string {
 
 func defaultVCacheStatus() vcacheStatusReport {
 	return vcacheStatusReport{
-		Status:       "M5 governor up; M4 chains & recall up (gated OFF by default); full vCache provider loop not yet live",
-		Governor:     "up (pin/lazy/evict, warm budget, affinity, secret gate)",
+		Status:       "M5 governor decision witness live; warm/pin/evict actions still gated; full vCache provider loop not yet live",
+		Governor:     "decision witness live (/metrics + /debug/vars journal); pin/lazy/evict actions not registered",
 		Chains:       "up (prefix DAG, topological replay, cost-gated rebuild) — gated OFF by default; off-path",
-		LiveProvider: "not wired; M1-M3 remain open; Codex/OpenAI telemetry #727 proven from replayable artifacts",
+		LiveProvider: "passive provider-cache window wired; M1-M3 remain open; Codex/OpenAI telemetry #727 proven from replayable artifacts",
 		Proof: vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
 			AnchorTokens:    4096,
 			SuffixTokens:    10,

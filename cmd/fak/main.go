@@ -292,6 +292,8 @@ func main() {
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":
 		cmdGuardRSIScorecard(os.Args[2:])
+	case "opt":
+		cmdOpt(os.Args[2:])
 	case "dogfood-score":
 		cmdDogfoodScore(os.Args[2:])
 	case "concept-usage-score":
