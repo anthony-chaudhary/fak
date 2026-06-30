@@ -91,6 +91,8 @@ func main() {
 		cmdResume(os.Args[2:])
 	case "dispatch":
 		cmdDispatch(os.Args[2:])
+	case "process-guard":
+		cmdProcessGuard(os.Args[2:])
 	case "ps":
 		cmdPS(os.Args[2:])
 	case "top":
