@@ -301,80 +301,17 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	cmd := loopNewCommand(childArgv, stdout, stderr)
-	started := time.Now()
-	if err := cmd.Start(); err != nil {
-		m := cloneLoopMetrics(baseMetrics)
-		m["exit_code"] = 127
-		_ = appendLoopRunEvent(*ledger, loopmgr.Event{
-			LoopID:       *loopID,
-			RunID:        *runID,
-			Kind:         loopmgr.EventEnd,
-			Source:       *source,
-			Principal:    *principal,
-			Status:       loopmgr.StatusFailed,
-			Reason:       "START_FAILED",
-			Summary:      err.Error(),
-			EvidenceRefs: baseEvidence,
-			Metrics:      m,
-		})
-		fmt.Fprintf(stderr, "fak loop run: start command: %v\n", err)
-		return 127
-	}
-	mStart := cloneLoopMetrics(baseMetrics)
-	mStart["pid"] = int64(cmd.PID())
-	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
-		LoopID:       *loopID,
-		RunID:        *runID,
-		Kind:         loopmgr.EventStart,
-		Source:       *source,
-		Principal:    *principal,
-		Status:       loopmgr.StatusRunning,
-		Reason:       "STARTED",
-		Summary:      "child process started",
-		EvidenceRefs: baseEvidence,
-		Metrics:      mStart,
-	}); err != nil {
-		_ = cmd.Kill()
-		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-		return 1
-	}
-
-	waitErr := cmd.Wait()
-	durationMS := time.Since(started).Milliseconds()
-	exitCode := 0
-	status := loopmgr.StatusClaimedDone
-	reason := "EXIT_0"
-	if waitErr != nil {
-		status = loopmgr.StatusFailed
-		reason = "EXIT_NONZERO"
-		if ee, ok := waitErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			exitCode = 1
-			reason = "WAIT_FAILED"
-		}
-	}
-	mEnd := cloneLoopMetrics(baseMetrics)
-	mEnd["pid"] = int64(cmd.PID())
-	mEnd["exit_code"] = int64(exitCode)
-	mEnd["duration_ms"] = durationMS
-	if err := appendLoopRunEvent(*ledger, loopmgr.Event{
-		LoopID:       *loopID,
-		RunID:        *runID,
-		Kind:         loopmgr.EventEnd,
-		Source:       *source,
-		Principal:    *principal,
-		Status:       status,
-		Reason:       reason,
-		Summary:      fmt.Sprintf("child exited with code %d", exitCode),
-		EvidenceRefs: baseEvidence,
-		Metrics:      mEnd,
-	}); err != nil {
-		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
-		if exitCode == 0 {
-			return 1
-		}
+	exitCode, durationMS, fatal := loopRunChild(stdout, stderr, childArgv, loopRunChildCtx{
+		ledger:    *ledger,
+		loopID:    *loopID,
+		runID:     *runID,
+		source:    *source,
+		principal: *principal,
+		evidence:  baseEvidence,
+		metrics:   baseMetrics,
+	})
+	if fatal != 0 {
+		return fatal
 	}
 
 	// Post a witnessed dispatch-result card to Slack so a slow background dispatch
@@ -410,6 +347,102 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "loop run %s exit=%d ledger=%s\n", *runID, exitCode, *ledger)
 	}
 	return exitCode
+}
+
+// loopRunChildCtx carries the ledger identity + base evidence/metrics threaded through the
+// START and END loop events that loopRunChild records around the child process.
+type loopRunChildCtx struct {
+	ledger    string
+	loopID    string
+	runID     string
+	source    string
+	principal string
+	evidence  []loopmgr.EvidenceRef
+	metrics   map[string]int64
+}
+
+// loopRunChild starts the child process, records its START and END loop events, and returns
+// the child's exit code + wall-clock duration. fatal != 0 is a terminal code runLoopRun must
+// return directly: 127 when the child fails to start (an END(failed) event is still recorded),
+// or 1 when a ledger append fails in a way that must not be reported as success (the start
+// event, or the end event on an otherwise-clean exit). A non-zero child exit with a failed
+// end-append still returns fatal 0 so the real exit code reaches the caller's report.
+func loopRunChild(stdout, stderr io.Writer, childArgv []string, rc loopRunChildCtx) (exitCode int, durationMS int64, fatal int) {
+	cmd := loopNewCommand(childArgv, stdout, stderr)
+	started := time.Now()
+	if err := cmd.Start(); err != nil {
+		m := cloneLoopMetrics(rc.metrics)
+		m["exit_code"] = 127
+		_ = appendLoopRunEvent(rc.ledger, loopmgr.Event{
+			LoopID:       rc.loopID,
+			RunID:        rc.runID,
+			Kind:         loopmgr.EventEnd,
+			Source:       rc.source,
+			Principal:    rc.principal,
+			Status:       loopmgr.StatusFailed,
+			Reason:       "START_FAILED",
+			Summary:      err.Error(),
+			EvidenceRefs: rc.evidence,
+			Metrics:      m,
+		})
+		fmt.Fprintf(stderr, "fak loop run: start command: %v\n", err)
+		return 0, 0, 127
+	}
+	mStart := cloneLoopMetrics(rc.metrics)
+	mStart["pid"] = int64(cmd.PID())
+	if err := appendLoopRunEvent(rc.ledger, loopmgr.Event{
+		LoopID:       rc.loopID,
+		RunID:        rc.runID,
+		Kind:         loopmgr.EventStart,
+		Source:       rc.source,
+		Principal:    rc.principal,
+		Status:       loopmgr.StatusRunning,
+		Reason:       "STARTED",
+		Summary:      "child process started",
+		EvidenceRefs: rc.evidence,
+		Metrics:      mStart,
+	}); err != nil {
+		_ = cmd.Kill()
+		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
+		return 0, 0, 1
+	}
+
+	waitErr := cmd.Wait()
+	durationMS = time.Since(started).Milliseconds()
+	status := loopmgr.StatusClaimedDone
+	reason := "EXIT_0"
+	if waitErr != nil {
+		status = loopmgr.StatusFailed
+		reason = "EXIT_NONZERO"
+		if ee, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			exitCode = 1
+			reason = "WAIT_FAILED"
+		}
+	}
+	mEnd := cloneLoopMetrics(rc.metrics)
+	mEnd["pid"] = int64(cmd.PID())
+	mEnd["exit_code"] = int64(exitCode)
+	mEnd["duration_ms"] = durationMS
+	if err := appendLoopRunEvent(rc.ledger, loopmgr.Event{
+		LoopID:       rc.loopID,
+		RunID:        rc.runID,
+		Kind:         loopmgr.EventEnd,
+		Source:       rc.source,
+		Principal:    rc.principal,
+		Status:       status,
+		Reason:       reason,
+		Summary:      fmt.Sprintf("child exited with code %d", exitCode),
+		EvidenceRefs: rc.evidence,
+		Metrics:      mEnd,
+	}); err != nil {
+		fmt.Fprintf(stderr, "fak loop run: %v\n", err)
+		if exitCode == 0 {
+			return exitCode, durationMS, 1
+		}
+	}
+	return exitCode, durationMS, 0
 }
 
 func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
