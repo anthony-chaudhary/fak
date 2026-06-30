@@ -12,10 +12,11 @@ Anthropic, Gemini, and local accounts, and mix providers at any level: the cheap
 aspect to a local model, the hard reasoning step to your OpenAI account, and a
 two-model guard ensemble whose halves run on two *different* accounts.
 
-It is the generic, in-product form of the private fleet's account switcher
-(`tools/fleet_accounts.py`): provider-neutral, credential-safe, and composable with
-the routing spine. It lives in `internal/modelroute/account.go` (pure, stdlib-only,
-the same package as the routing decision and the cost lens).
+It is the generic, in-product sibling of the fleet account switcher (`fak fleet-accounts`,
+the native Go successor to the legacy `tools/fleet_accounts.py` shim): provider-neutral,
+credential-safe, and composable with the routing spine. It lives in
+`internal/modelroute/account.go` (pure, stdlib-only, the same package as the routing
+decision and the cost lens).
 
 ## The pieces
 

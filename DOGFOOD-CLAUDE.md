@@ -12,7 +12,7 @@
  │ (the harness)│ ◀──── SSE stream ───  │  adjudicates every tool │ ◀────────────── │ ollama / shim│
  └─────────────┘                        └────────────────────────┘                  └──────────────┘
         ▲ ANTHROPIC_BASE_URL=http://127.0.0.1:8080            kernel drops / repairs proposed tool calls
-        │ CLAUDE_CONFIG_DIR chosen by tools/fleet_accounts.py (the account switcher)
+        │ CLAUDE_CONFIG_DIR chosen by fak fleet-accounts (the account switcher)
 ```
 
 ## First-class: Claude Code on the REAL Claude API, through fak
@@ -122,19 +122,19 @@ unset.
 It builds `fak`, ensures a local model is being served (ollama by default — Metal,
 tool-capable; `FAK_DOGFOOD_BACKEND=shim` uses the in-tree `local_shim.py` instead),
 starts `fak serve` in front of it, resolves the `.claude` config dir through the
-**account switcher** (`tools/fleet_accounts.py`, defaulting to an isolated
+**account switcher** (`fak fleet-accounts`, defaulting to an isolated
 `.claude-faklocal` dogfood account), exports the Claude Code wiring, and launches
 Claude Code (or runs a single headless turn for `--probe`). It tears the kernel down
 on exit.
 
 > **One canonical resolve path.** Every front door (this launcher, `launch_goal_detached.ps1`,
 > `issue_dispatch`) picks its account through the switcher's single subcommand,
-> `fleet_accounts.py resolve` — one call returns the `config_dir`, the long-lived
+> `fak fleet-accounts resolve` — one call returns the `config_dir`, the long-lived
 > `oauth_token`, and the model tier in a flat record (pin a tag with `--account`, take the
 > isolated dogfood account with `--faklocal-ok`). No front door re-implements the
 > roster+route+token dance.
 
-> **Fanning out across accounts?** `fleet_accounts.py wave --count N` hands each lane a
+> **Fanning out across accounts?** `fak fleet-accounts wave --count N` hands each lane a
 > *distinct* account, so a burst doesn't pile onto one rate-limit pool (a single-account
 > `resolve` returns the same account N times in a burst). It's a per-account rate-limit
 > load balancer — operator fleet plumbing, not a kernel feature.
@@ -416,7 +416,7 @@ implementation is the structural inverse of the already-tested client adapter:
 - the Anthropic wire types + client adapter (`internal/agent/adapters.go`),
 - the gateway's planner, kernel, and per-call adjudication (`internal/gateway/`),
 - the local-model serving patterns (`fak serve`, `experiments/agent-live/local_shim.py`),
-- the account switcher (`tools/fleet_accounts.py`, via `CLAUDE_CONFIG_DIR`).
+- the account switcher (`fak fleet-accounts`, via `CLAUDE_CONFIG_DIR`).
 
 ## Required items — each proven by a witness
 
@@ -430,7 +430,7 @@ implementation is the structural inverse of the already-tested client adapter:
 | 6 | A **real local model** completes a live turn through `/v1/messages` | curl → qwen2.5:1.5b emitted a `get_weather` `tool_use` (see below) | ✅ |
 | 7 | The **real Claude Code CLI** completes a live turn against the kernel | `experiments/agent-live/dogfood-claude-probe.json` — includes the Qwen3.6 witness `result:"pong"` and `duration_ms:218024` | ✅ |
 | 8 | One command spins the whole stack up | `scripts/dogfood-claude.sh` (`run`/`probe`/`smoke`/`print-env`/`list-accounts`) | ✅ |
-| 9 | Aligned with the account switcher | default `.claude-faklocal` account shows in `fleet_accounts.py list`; `--account <tag>` resolves any worker | ✅ |
+| 9 | Aligned with the account switcher | default `.claude-faklocal` account shows in `fak fleet-accounts list`; `--account <tag>` resolves any worker | ✅ |
 | 10 | Build + vet clean, suite green for the touched packages | `go build/vet ./...`; `go test ./internal/agent ./internal/gateway` | ✅ |
 
 ### Captured live evidence
