@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -62,6 +63,12 @@ type guardUpstream struct {
 	// fails loud before spawning a headless child that would block on a login it can never
 	// complete. Distinct from passthroughFallback, which still has a path (the child's own key).
 	noTokenAnywhere bool
+	// Claude config-home login posture for the CLAUDE_CONFIG_DIR guard will hand to the
+	// child. This is credential-safe observability only; token routing still follows the
+	// explicit source precedence in resolveAnthropicOAuthToken.
+	claudeConfigDir string
+	loginStatus     accounts.LoginStatus
+	canServe        bool
 }
 
 // resolveGuardUpstream picks the upstream wire and credential posture: an explicit
@@ -124,6 +131,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 	}
 	autoOAuth := up == "anthropic" && apiKey == ""
 	if forceOAuth || autoOAuth {
+		cfgDir, loginStatus, canServe := guardClaudeLoginPosture()
 		tok, src, terr := resolveAnthropicOAuthToken(oauthTokenEnv)
 		switch {
 		case terr == nil:
@@ -164,6 +172,13 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			passthroughFallback = true
 			noTokenAnywhere = os.Getenv("ANTHROPIC_API_KEY") == ""
 		}
+		defer func() {
+			// Keep the fields populated for every Anthropic OAuth decision path, including
+			// early pin/fallback branches above.
+			_ = cfgDir
+			_ = loginStatus
+			_ = canServe
+		}()
 	}
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
