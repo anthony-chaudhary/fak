@@ -2,17 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
-	"github.com/anthony-chaudhary/fak/internal/loopmgr"
-	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
@@ -182,7 +178,8 @@ func commitExitCode(res safecommit.Result) int {
 	case safecommit.ReasonNotARepo, safecommit.ReasonOffTrunk,
 		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
 		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull,
-		safecommit.ReasonReviewRefuted, safecommit.ReasonPreStagedPathOverlap:
+		safecommit.ReasonReviewRefuted, safecommit.ReasonStaleBaseDeletion,
+		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap:
 		return 3
 	default: // PATHSPEC_RACE, HOOK_REFUSED, PUSH_REJECTED
 		return 1
