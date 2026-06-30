@@ -178,7 +178,10 @@ func TestGapActionItemsAreDispatchable(t *testing.T) {
 		c := issuecontract.Candidate{
 			Schema: issuecontract.Schema, Key: item.Key, Title: item.Title,
 			ParentRef: item.ParentRef, CurrentState: item.CurrentState, WhyNow: item.WhyNow,
-			WorkingSpine: item.WorkingSpine, InScope: item.InScope, OutOfScope: item.OutOfScope,
+			WorkingSpine: item.WorkingSpine, WorkUnit: item.WorkUnit, ExpectedSteps: item.ExpectedSteps,
+			Assumptions: item.Assumptions, ConfusionRisks: item.ConfusionRisks, Coordination: item.Coordination,
+			Trigger: item.Trigger, BatchPolicy: item.BatchPolicy,
+			InScope: item.InScope, OutOfScope: item.OutOfScope,
 			DoneCondition: item.DoneCondition, Witness: item.Witness, AcceptanceGate: item.AcceptanceGate,
 			Lane: item.Lane, Paths: item.Paths, Labels: item.Labels, BoundaryNotes: item.BoundaryNotes,
 			ClosureBinding: item.ClosureBinding,
