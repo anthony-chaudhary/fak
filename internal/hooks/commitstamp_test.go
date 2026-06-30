@@ -106,6 +106,30 @@ func TestLintCommitMessageScore(t *testing.T) {
 	}
 }
 
+func TestLintCommitMessage_generationSidecar(t *testing.T) {
+	root := writeLintRepo(t)
+	msg := "feat(gateway): add the slot reclaim path #123 (fak gateway)\n\nGeneration: now"
+	r := LintCommitMessage(msg, []string{"internal/gateway/server.go"}, root)
+	if !r.OK {
+		t.Fatalf("generation sidecar should not block, got issues=%v", r.Issues)
+	}
+	if r.Generation != "gen/now" {
+		t.Fatalf("Generation = %q, want gen/now", r.Generation)
+	}
+
+	bad := LintCommitMessage(
+		"feat(gateway): add the slot reclaim path #123 (fak gateway)\n\nGeneration: someday",
+		[]string{"internal/gateway/server.go"},
+		root,
+	)
+	if !bad.OK {
+		t.Fatalf("bad generation sidecar is advisory only, got issues=%v", bad.Issues)
+	}
+	if !hasNoteContaining(bad, "generation sidecar is not recognized") {
+		t.Fatalf("want malformed generation advisory, got notes=%v", bad.Notes)
+	}
+}
+
 func TestLintCommitMessage_nounLedNoTrailer(t *testing.T) {
 	root := writeLintRepo(t)
 	r := LintCommitMessage("gateway slot reclaim improvements", []string{"internal/gateway/server.go"}, root)
