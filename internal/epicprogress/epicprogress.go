@@ -22,6 +22,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // EpicSpec is one tracked epic: its issue number, a human title, and the optional
@@ -55,6 +57,7 @@ type Runner func(args []string) (stdout, stderr string, ok bool)
 // DefaultRunner shells out to the real `gh` CLI.
 func DefaultRunner(args []string) (string, string, bool) {
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
