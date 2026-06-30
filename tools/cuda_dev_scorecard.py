@@ -89,7 +89,7 @@ GENERATED_SNAPSHOT = "docs/CUDA-DEV-SCORECARD.md"
 # ---- the CUDA seam + dev-process files the KPIs cross-check ----------------------------
 HEADER = cuda_abi_parity.HEADER
 KERNELS = cuda_abi_parity.KERNELS
-BINDING = cuda_abi_parity.BINDING
+BINDING = cuda_abi_parity.BINDINGS[0]  # primary C binding (cuda.go); ABI tool now spans a tuple
 BUILD_SH = "internal/compute/build_cuda.sh"
 BUILD_PS1 = "tools/build_cuda_windows.ps1"
 SETUP_SH = "internal/compute/setup_cuda_wsl.sh"

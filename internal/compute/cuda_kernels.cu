@@ -210,6 +210,50 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d
 extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) { CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)); }
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }
 
+extern "C" int fcuda_set_device(int device) {
+  cudaError_t e = cudaSetDevice(device);
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: cudaSetDevice(%d) failed: %s\n", device, cudaGetErrorString(e));
+    return (int)e + 1000;
+  }
+  return 0;
+}
+
+extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
+  if (bytes == 0) bytes = 1;
+  if (fcuda_set_device(device) != 0) return nullptr;
+  void *d = nullptr;
+  cudaError_t e = cudaMalloc(&d, bytes);
+  if (e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) on device %d failed: %s\n",
+            bytes, device, cudaGetErrorString(e));
+    return nullptr;
+  }
+  return d;
+}
+
+extern "C" void fcuda_free_on(int device, void *d) {
+  if (!d) return;
+  if (fcuda_set_device(device) != 0) return;
+  CK(cudaFree(d));
+}
+
+extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {
+  if (fcuda_set_device(device) != 0) return;
+  CK(cudaMemcpy(d, h, n, cudaMemcpyHostToDevice));
+}
+
+extern "C" void fcuda_d2h_on(int device, void *h, const void *d, size_t n) {
+  if (fcuda_set_device(device) != 0) return;
+  CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost));
+  g_host_bytes += n;
+}
+
+extern "C" void fcuda_d2d_on(int device, void *dst, const void *src, size_t n) {
+  if (fcuda_set_device(device) != 0) return;
+  CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream));
+}
+
 // async host-transfer witness accessors (#482): see g_host_bytes above.
 extern "C" size_t fcuda_hostxfer_bytes(void) { return g_host_bytes; }
 extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }

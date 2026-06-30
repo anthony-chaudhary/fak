@@ -7,7 +7,9 @@
 #
 #   usage:  bash internal/compute/build_cuda.sh [check|build|test|bench]   (default: test)
 #   env:    FAK_CUDA_ARCH=sm_89|sm_90|sm_100  (default sm_89; "89" also accepted)
+#           FAK_CUDA_NCCL=1                    (also compile cuda_nccl.cu; Go tags cuda,nccl)
 #           CUDA_HOME=/usr/local/cuda          (default ~/cudaenv, else system nvcc)
+#           NCCL_HOME=/tmp/nccl-root           (optional user-space nccl.h/libnccl.so root)
 set -euo pipefail
 
 # locate the module root (dir containing go.mod) from this script's location
@@ -76,13 +78,87 @@ INC=""
 for d in "$CUDA_HOME/include" "$CUDA_HOME/targets/x86_64-linux/include"; do
   [ -d "$d" ] && INC="$INC -I$d"
 done
+if [ -n "${NCCL_HOME:-}" ]; then
+  for d in "$NCCL_HOME/include" "$NCCL_HOME/usr/include"; do
+    [ -d "$d" ] && INC="$INC -I$d"
+  done
+fi
+sanitize_ld_path() {
+  local raw="${1:-}" out="" part
+  local oldifs="$IFS"
+  IFS=:
+  for part in $raw; do
+    IFS="$oldifs"
+    [ -z "$part" ] && continue
+    case "$part" in
+      */stubs|*/stubs/*) ;;
+      *) out="${out:+$out:}$part" ;;
+    esac
+    IFS=:
+  done
+  IFS="$oldifs"
+  printf '%s' "$out"
+}
+
+path_contains_libcuda() {
+  local d="$1"
+  compgen -G "$d/libcuda.so*" >/dev/null
+}
+
+append_colon_path() {
+  local cur="$1" add="$2"
+  [ -n "$add" ] || { printf '%s' "$cur"; return; }
+  case ":$cur:" in
+    *":$add:"*) printf '%s' "$cur" ;;
+    *) printf '%s' "${cur:+$cur:}$add" ;;
+  esac
+}
+
+stage_nccl_link_dir() {
+  local src_dir="$1" link_dir="$PKG_DIR/.cuda-nccl-lib" cand=""
+  [ -e "$src_dir/libnccl.so" ] && return 0
+  for cand in "$src_dir"/libnccl.so.*; do
+    [ -e "$cand" ] || continue
+    mkdir -p "$link_dir"
+    ln -sf "$cand" "$link_dir/libnccl.so"
+    printf '%s' "$link_dir"
+    return 0
+  done
+}
+
 LIB="-L$PKG_DIR"; RPATH=""; LDPATH=""
 # WSL keeps libcuda.so under /usr/lib/wsl/lib; only add it where it exists (a DLVM/DGX
 # has no such path, and an rpath to a missing dir is just noise on the link line).
 if [ -d /usr/lib/wsl/lib ]; then RPATH="-Wl,-rpath,/usr/lib/wsl/lib"; LDPATH="/usr/lib/wsl/lib"; fi
-for d in "$CUDA_HOME/lib64" "$CUDA_HOME/lib" "$CUDA_HOME/targets/x86_64-linux/lib"; do
-  if [ -d "$d" ]; then LIB="$LIB -L$d"; RPATH="${RPATH:+$RPATH }-Wl,-rpath,$d"; LDPATH="${LDPATH:+$LDPATH:}$d"; fi
+for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; do
+  [ -e "$d/libcuda.so.1" ] && LDPATH="$(append_colon_path "$LDPATH" "$d")"
 done
+for d in "$CUDA_HOME/lib64" "$CUDA_HOME/lib" "$CUDA_HOME/targets/x86_64-linux/lib"; do
+  if [ -d "$d" ]; then
+    LIB="$LIB -L$d"
+    LDPATH="$(append_colon_path "$LDPATH" "$d")"
+    # CUDA toolkit dirs may carry libcuda stubs beside libcudart/cublas. Keep such dirs in
+    # LD_LIBRARY_PATH after the real driver dirs, but do not bake them into RUNPATH/RPATH.
+    if ! path_contains_libcuda "$d"; then
+      RPATH="${RPATH:+$RPATH }-Wl,-rpath,$d"
+    fi
+  fi
+done
+if [ -n "${NCCL_HOME:-}" ]; then
+  for d in "$NCCL_HOME/lib64" "$NCCL_HOME/lib" "$NCCL_HOME/usr/lib/x86_64-linux-gnu" "$NCCL_HOME/usr/lib"; do
+    if [ -d "$d" ]; then
+      LIB="$LIB -L$d"
+      RPATH="${RPATH:+$RPATH }-Wl,-rpath,$d"
+      LDPATH="$(append_colon_path "$LDPATH" "$d")"
+      link_dir="$(stage_nccl_link_dir "$d")"
+      if [ -n "$link_dir" ]; then
+        LIB="$LIB -L$link_dir"
+        RPATH="${RPATH:+$RPATH }-Wl,-rpath,$link_dir"
+        LDPATH="$(append_colon_path "$LDPATH" "$link_dir")"
+      fi
+    fi
+  done
+fi
 
 # GPU arch: default sm_89 (Ada / L4), override via FAK_CUDA_ARCH for A100 (sm_80),
 # H100/H200 (sm_90), or B200/GB200 (sm_100). Accept either "89" or "sm_89".
@@ -92,7 +168,14 @@ echo "[cuda] nvcc compile kernels ($ARCH) ..."
 ( cd "$PKG_DIR"
   "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
       -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
-  ar rcs libfakcuda.a cuda_kernels.o
+  objs="cuda_kernels.o"
+  if [ "${FAK_CUDA_NCCL:-0}" = "1" ]; then
+    echo "[cuda] nvcc compile NCCL collectives ($ARCH) ..."
+    "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+        -Xcompiler -fPIC -c cuda_nccl.cu -o cuda_nccl.o
+    objs="$objs cuda_nccl.o"
+  fi
+  ar rcs libfakcuda.a $objs
   echo "[cuda] built $(ls -la libfakcuda.a | awk '{print $5}') byte libfakcuda.a" )
 
 export PATH="/usr/local/go/bin:$PATH"
@@ -101,14 +184,23 @@ export CGO_ENABLED=1
 export CC="${CC:-/usr/bin/gcc}"
 export CXX="${CXX:-/usr/bin/g++}"
 export CGO_CFLAGS="$INC"
+GO_TAGS="cuda"
+if [ "${FAK_CUDA_NCCL:-0}" = "1" ]; then
+  GO_TAGS="cuda,nccl"
+  LIB="$LIB -lnccl"
+fi
 export CGO_LDFLAGS="$LIB $RPATH"
-export LD_LIBRARY_PATH="${LDPATH:+$LDPATH:}${LD_LIBRARY_PATH:-}"
+# Keep CUDA stub-driver directories link-only. If an inherited LD_LIBRARY_PATH contains
+# .../stubs, NCCL can resolve the fake libcuda and fail at first collective with
+# "CUDA driver is a stub library" even though cudaMalloc/cudart calls already worked.
+export LD_LIBRARY_PATH
+LD_LIBRARY_PATH="$(sanitize_ld_path "${LDPATH:+$LDPATH:}${LD_LIBRARY_PATH:-}")"
 
 cd "$MOD_DIR"
 case "$cmd" in
   build)
-    echo "[cuda] go build -tags cuda ./internal/compute/ ..."
-    go build -tags cuda ./internal/compute/
+    echo "[cuda] go build -tags $GO_TAGS ./internal/compute/ ..."
+    go build -tags "$GO_TAGS" ./internal/compute/
     echo "[cuda] OK build"
     ;;
   binary)
@@ -121,15 +213,15 @@ case "$cmd" in
     #   usage: build_cuda.sh binary <pkg> <out-abs-path>
     pkg="${2:?usage: build_cuda.sh binary <pkg> <out>}"
     out="${3:?usage: build_cuda.sh binary <pkg> <out>}"
-    echo "[cuda] go build -tags cuda -o $out $pkg ..."
-    go build -tags cuda -o "$out" "$pkg"
+    echo "[cuda] go build -tags $GO_TAGS -o $out $pkg ..."
+    go build -tags "$GO_TAGS" -o "$out" "$pkg"
     echo "[cuda] OK binary $out"
     ;;
   test)
-    echo "[cuda] go test -tags cuda (default: graphs off) ..."
-    go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
-    echo "[cuda] go test -tags cuda (FAK_CUDA_GRAPH=1: graph capture path) ..."
-    FAK_CUDA_GRAPH=1 go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
+    echo "[cuda] go test -tags $GO_TAGS (default: graphs off) ..."
+    go test -tags "$GO_TAGS" -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
+    echo "[cuda] go test -tags $GO_TAGS (FAK_CUDA_GRAPH=1: graph capture path) ..."
+    FAK_CUDA_GRAPH=1 go test -tags "$GO_TAGS" -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
     ;;
   bench)
     # bench the cuda backend's decode throughput on a real model via modelbench.
@@ -137,7 +229,7 @@ case "$cmd" in
     dir="${2:-internal/model/.cache/smollm2-135m}"
     steps="${3:-128}"
     echo "[cuda] modelbench -backend cuda -dir $dir -decode-steps $steps ..."
-    go run -tags cuda ./cmd/modelbench -dir "$dir" -backend cuda \
+    go run -tags "$GO_TAGS" ./cmd/modelbench -dir "$dir" -backend cuda \
         -decode-steps "$steps" -decode-reps 5 -decode-prompt 16 2>&1 \
       | grep -aiE "prefill P=|decode:|tok_per_sec|panic|error|fak-cuda:" | tail -45
     ;;

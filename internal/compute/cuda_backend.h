@@ -37,6 +37,17 @@ void fcuda_d2h(void *h, const void *d, size_t bytes);
 void fcuda_d2d(void *dst, const void *src, size_t bytes);
 void fcuda_sync(void);
 
+/* Device-specific allocation/copy helpers for multi-GPU collectives. The ordinary
+ * fcuda_malloc/fcuda_h2d/fcuda_d2h path is device-0 + pooled. These helpers deliberately use
+ * direct cudaMalloc/cudaFree on the requested device so rank-r collective buffers cannot be
+ * recycled into the device-0 pool. */
+int fcuda_set_device(int device);
+void *fcuda_malloc_on(int device, size_t bytes);
+void fcuda_free_on(int device, void *d);
+void fcuda_h2d_on(int device, void *d, const void *h, size_t bytes);
+void fcuda_d2h_on(int device, void *h, const void *d, size_t bytes);
+void fcuda_d2d_on(int device, void *dst, const void *src, size_t bytes);
+
 /* async host-transfer witness (#482): cumulative bytes copied device->host since the last
  * reset. The two host fences are the only d2h transfers and both add to it — fcuda_d2h (a
  * full Read) adds the vector bytes, fcuda_argmax_f32 adds only sizeof(int) — so an Argmax-only
@@ -204,6 +215,50 @@ void fcuda_graph_abort(void);
  * holds several same-size transients live at once (per-layer RMSNorm outputs, etc.) is served
  * entirely from the free list and never hits an illegal mid-capture cudaMalloc (#969). */
 void fcuda_graph_prewarm(int extra);
+
+/* ---- NCCL device collectives (#971, multi-GPU expert/tensor parallelism) ----------------
+ *
+ * The cross-DEVICE reduction seam the CollectiveBackend interface needs to be REAL: a true
+ * NCCL all-reduce/all-gather/reduce-scatter over distinct GPUs, not a host-staged copy. This
+ * first cut is SINGLE-PROCESS, MULTI-GPU (ncclCommInitAll over the visible devices) — exactly
+ * the shape of the acceptance witness (a device tensor reduced across 2 GPUs matching cpu-ref),
+ * and the in-process form the one-process fak serve drives. (Multi-PROCESS NCCL over a rank
+ * file is the follow-on; this proves the device communicator works first.)
+ *
+ * Build adds NCCL to the link only under `-tags cuda,nccl` (build_cuda.sh:
+ * FAK_CUDA_NCCL=1). Plain `-tags cuda` stays single-device and does not require NCCL headers or
+ * libnccl; the default pure-Go binary never sees any of this.
+ *
+ * fcuda_nccl_init(n): create one communicator per device 0..n-1 in a single process (the
+ * canonical ncclCommInitAll single-process-multi-GPU setup). Returns 0 on success, an NCCL/
+ * CUDA error code otherwise (and registers nothing — Caps().Collective stays false on the Go
+ * side until this returns 0). Idempotent: a second call with the same n is a no-op success. */
+int fcuda_nccl_init(int n);
+
+/* fcuda_nccl_world(): the number of ranks (devices) the communicator was initialized over,
+ * or 0 if fcuda_nccl_init has not succeeded. The Go side reads it to advertise world_size and
+ * to validate that a collective's part count matches the communicator. */
+int fcuda_nccl_world(void);
+
+/* fcuda_nccl_allreduce_f32(dbufs, n, count): in-place NCCL all-reduce-SUM of `count` f32
+ * elements, where dbufs[r] is the device pointer of rank r's buffer RESIDENT ON DEVICE r. All
+ * n buffers must be the same length (count). On return every dbufs[r] holds the element-wise
+ * sum across all ranks (the row-parallel partial-sum collective). Wrapped in ncclGroupStart/
+ * End and fenced (cudaDeviceSynchronize per device) so the result is materialized on return.
+ * Returns 0 on success, the NCCL/CUDA error code otherwise. */
+int fcuda_nccl_allreduce_f32(void **dbufs, int n, int count);
+
+/* fcuda_nccl_allgather_f32(dsend, drecv, n, sendcount): NCCL all-gather. dsend[r] (sendcount
+ * f32 on device r) is gathered into drecv[r] (n*sendcount f32 on device r), rank-ordered
+ * (drecv = send[0]||send[1]||...). Equal shard sizes only (the even-band column-parallel
+ * gather). Returns 0 on success. */
+int fcuda_nccl_allgather_f32(void **dsend, void **drecv, int n, int sendcount);
+
+/* fcuda_nccl_reducescatter_f32(dsend, drecv, n, recvcount): NCCL reduce-scatter-SUM. dsend[r]
+ * (n*recvcount f32 on device r) is reduced element-wise across ranks, then scattered so
+ * drecv[r] (recvcount f32 on device r) holds rank r's 1/n band of the reduced vector — the
+ * dual of all-gather (AllReduceSum == AllGather(ReduceScatter)). Returns 0 on success. */
+int fcuda_nccl_reducescatter_f32(void **dsend, void **drecv, int n, int recvcount);
 
 #ifdef __cplusplus
 }

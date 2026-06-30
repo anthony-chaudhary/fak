@@ -4,8 +4,9 @@
 The CUDA backend is three files that have to agree on one flat C ABI:
 
     internal/compute/cuda_backend.h   the prototypes (`fcuda_*`)  — the typed seam
-    internal/compute/cuda_kernels.cu  the definitions (`extern "C" … fcuda_*`)
-    internal/compute/cuda.go          the cgo call sites (`C.fcuda_*`)
+    internal/compute/cuda_kernels.cu  the base definitions (`extern "C" … fcuda_*`)
+    internal/compute/cuda_nccl.cu     the NCCL definitions (`extern "C" … fcuda_*`)
+    internal/compute/cuda*.go         the cgo call sites (`C.fcuda_*`)
 
 When they DISAGREE — a header prototype with no kernel definition, a `C.fcuda_…`
 call the header never declared, a kernel that exports an `fcuda_*` symbol the header
@@ -54,8 +55,10 @@ from typing import Any
 SCHEMA = "fak-cuda-abi-parity/1"
 
 HEADER = "internal/compute/cuda_backend.h"
-KERNELS = "internal/compute/cuda_kernels.cu"
-BINDING = "internal/compute/cuda.go"
+KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu")
+KERNELS_LABEL = ", ".join(KERNELS)
+BINDINGS = ("internal/compute/cuda.go", "internal/compute/cuda_collective.go")
+BINDINGS_LABEL = ", ".join(BINDINGS)
 
 # A CUDA-seam symbol: the `fcuda_` prefix plus a tail that MAY carry an uppercase
 # suffix (fcuda_f32_to_f16_T). A prefix-only `[a-z0-9_]+` class silently truncates the
@@ -97,6 +100,10 @@ HEADER_TYPE_INCLUDES: dict[str, str] = {
 UNCALLED_OK: dict[str, str] = {
     "fcuda_sync": "device-wide sync utility; the live path fences via Read/Argmax (fcuda_d2h / "
                   "fcuda_argmax_f32), so the explicit barrier is kept for diagnostics / future use",
+    "fcuda_set_device": "C-side helper used by the device-specific allocation/copy helpers; Go calls "
+                        "the higher-level fcuda_*_on wrappers, not cudaSetDevice directly",
+    "fcuda_nccl_world": "diagnostic/world query kept with the NCCL ABI; Go gates Caps().Collective "
+                        "from cudaNCCLWorld after fcuda_nccl_init succeeds",
 }
 
 
@@ -222,20 +229,20 @@ def parity(decls: set[str], defs: set[str], calls: set[str]) -> dict[str, Any]:
     hard: list[str] = []
     for s in undefined:
         hard.append(f"prototype with no definition: {s}() is declared in {HEADER} but never "
-                    f"defined (extern \"C\") in {KERNELS} — a call would link to nothing")
+                    f"defined (extern \"C\") in {KERNELS_LABEL} — a call would link to nothing")
     for s in undeclared_calls:
-        hard.append(f"call with no prototype: cuda.go calls C.{s}() but {HEADER} declares no "
+        hard.append(f"call with no prototype: {BINDINGS_LABEL} calls C.{s}() but {HEADER} declares no "
                     f"such symbol — the cgo build cannot see it")
     for s in undeclared_defs:
-        hard.append(f"definition with no prototype: {KERNELS} exports {s}() (extern \"C\") but "
+        hard.append(f"definition with no prototype: {KERNELS_LABEL} exports {s}() (extern \"C\") but "
                     f"{HEADER} declares no prototype — the seam is undocumented / unreachable")
 
     soft: list[str] = []
     for s in uncalled:
         if s in UNCALLED_OK:
-            soft.append(f"{s}() declared but not called from cuda.go — OK: {UNCALLED_OK[s]}")
+            soft.append(f"{s}() declared but not called from {BINDINGS_LABEL} — OK: {UNCALLED_OK[s]}")
         else:
-            soft.append(f"{s}() declared in {HEADER} but never called from cuda.go — dead ABI "
+            soft.append(f"{s}() declared in {HEADER} but never called from {BINDINGS_LABEL} — dead ABI "
                         "surface? add a caller, drop the prototype, or list it in UNCALLED_OK with a reason")
     return {
         "undefined": undefined,
@@ -278,7 +285,7 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set
     if ok:
         verdict, reason = "OK", (
             f"CUDA header is standalone-portable and ABI is in parity: {len(decls)} prototypes, "
-            f"all defined in {KERNELS} and declared for every C.fcuda_* call in cuda.go "
+            f"all defined in {KERNELS_LABEL} and declared for every C.fcuda_* call in {BINDINGS_LABEL} "
             f"({n_soft} standby symbol(s) advisory)")
     else:
         verdict, reason = "ACTION", (
@@ -303,10 +310,23 @@ def _read(root: Path, rel: str) -> str:
         return ""
 
 
+def _read_many(root: Path, rels: tuple[str, ...]) -> tuple[str, list[str]]:
+    missing: list[str] = []
+    texts: list[str] = []
+    for rel in rels:
+        text = _read(root, rel)
+        if not text:
+            missing.append(rel)
+        texts.append(text)
+    return "\n".join(texts), missing
+
+
 def collect(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    htext, ktext, gtext = _read(root, HEADER), _read(root, KERNELS), _read(root, BINDING)
-    missing = [rel for rel, t in ((HEADER, htext), (KERNELS, ktext), (BINDING, gtext)) if not t]
+    htext = _read(root, HEADER)
+    ktext, kmissing = _read_many(root, KERNELS)
+    gtext, gmissing = _read_many(root, BINDINGS)
+    missing = [rel for rel, t in ((HEADER, htext),) if not t] + kmissing + gmissing
     if missing:
         return build_payload(workspace=str(root), decls=set(), defs=set(), calls=set(),
                              error=f"cannot read CUDA seam file(s): {', '.join(missing)} "

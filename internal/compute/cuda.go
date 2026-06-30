@@ -260,6 +260,7 @@ var cudaDev *cudaBackend
 type cudaBuf struct {
 	ptr     unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
 	n       int            // bytes at ptr
+	device  int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
 	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
 	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
 	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
@@ -477,7 +478,11 @@ func (c *cudaBackend) Caps() Caps {
 	// the report half of the hardware-capacity bridge. It is the one number this backend has
 	// always held (totalGlobalMem) but used to discard.
 	_, _, hostKnown := hostSystemMemory()
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown}
+	// Collective is advertised true ONLY once a real NCCL communicator is up (fcuda_nccl_init
+	// succeeded over >1 device, recorded in cudaNCCLWorld). Until then it stays false so a host
+	// never picks the device collective path before it can actually all-reduce across GPUs — the
+	// honesty line (#971): no multi-GPU claim until a device tensor reduces across 2 GPUs.
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true, HostCapacityProbe: hostKnown, Collective: atomic.LoadInt32(&cudaNCCLWorld) > 1}
 }
 
 // DeviceMemory reports CUDA VRAM total plus the current free bytes from cudaMemGetInfo.
@@ -874,7 +879,11 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	db := t.buf.(*cudaBuf)
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
-		C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		if db.device != 0 {
+			C.fcuda_d2h_on(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		} else {
+			C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		}
 		atomic.AddUint64(&c.fenceGen, 1) // stream drained: prior enqueued work is now materialized
 	}
 	return out
@@ -894,7 +903,11 @@ func (c *cudaBackend) Free(t Tensor) {
 			C.fcuda_free(db.scales)
 			db.scales = nil
 		}
-		C.fcuda_free(db.ptr)
+		if db.device != 0 {
+			C.fcuda_free_on(C.int(db.device), db.ptr)
+		} else {
+			C.fcuda_free(db.ptr)
+		}
 		db.ptr = nil
 		if db.budgetedWeightBytes > 0 {
 			c.dlUsed -= db.budgetedWeightBytes
