@@ -169,3 +169,37 @@ func (s *Server) indexVerbs(req IndexSearchRequest) (IndexVerbsResponse, error) 
 	}
 	return IndexVerbsResponse{Root: cat.Root, Verbs: capResults(cat.SearchVerbs(req.Query), req.Limit)}, nil
 }
+
+// IndexWorkResponse is the MCP result for fak_index_work: the curated selection
+// surface (.github/issue-views.json) — the default view slug, the gh page limit each
+// query should pair with, and the named views (each with its gh issue-search query).
+type IndexWorkResponse struct {
+	Root    string               `json:"root"`
+	Default string               `json:"default,omitempty"`
+	Limit   int                  `json:"limit,omitempty"`
+	Views   []devindex.IssueView `json:"views"`
+}
+
+func (s *Server) indexWork(req IndexSearchRequest) (IndexWorkResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexWorkResponse{}, err
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexWorkResponse{}, err
+	}
+	views, err := cat.IssueViews()
+	if err != nil {
+		return IndexWorkResponse{}, err
+	}
+	hits := views.Views
+	if strings.TrimSpace(req.Query) != "" {
+		hits = views.SearchViews(req.Query)
+	}
+	return IndexWorkResponse{
+		Root:    cat.Root,
+		Default: views.Default,
+		Limit:   views.PageLimit(),
+		Views:   capResults(hits, req.Limit),
+	}, nil
+}

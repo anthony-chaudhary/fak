@@ -28,12 +28,22 @@ docs = ["docs/**"] # documentation
 - [SHIPPED] The ` + "`internal/gateway`" + ` MCP bridge exposes tool calls.
 - [STUB] The ` + "`internal/gateway`" + ` future registry is not complete.
 `
+	viewsJSON := `{
+  "version": 1,
+  "default": "ready-leaves",
+  "limit": 300,
+  "views": [
+    {"slug": "ready-leaves", "title": "Ready leaves", "query": "is:open no:assignee", "note": "the default what-to-work-on surface"},
+    {"slug": "epics", "title": "Epics", "query": "is:open label:epic", "note": "decompose, do not dispatch"}
+  ]
+}`
 	for path, body := range map[string]string{
-		"dos.toml":        dosToml,
-		"INDEX.md":        indexMd,
-		"CLAIMS.md":       claimsMd,
-		"docs/gateway.md": "# Gateway\n",
-		"POLICY.md":       "# Policy\n",
+		"dos.toml":                  dosToml,
+		"INDEX.md":                  indexMd,
+		"CLAIMS.md":                 claimsMd,
+		"docs/gateway.md":           "# Gateway\n",
+		"POLICY.md":                 "# Policy\n",
+		".github/issue-views.json": viewsJSON,
 	} {
 		full := filepath.Join(root, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -75,7 +85,7 @@ func TestMCPIndexToolsMirrorDevIndex(t *testing.T) {
 		tool := raw.(map[string]any)
 		names[tool["name"].(string)] = true
 	}
-	for _, want := range []string{"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs"} {
+	for _, want := range []string{"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs", "fak_index_work"} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s", want)
 		}
@@ -127,6 +137,16 @@ func TestMCPIndexToolsMirrorDevIndex(t *testing.T) {
 	})
 	if len(verbs.Verbs) != 1 || verbs.Verbs[0].Name != "guard" {
 		t.Fatalf("fak_index_verbs response = %+v, want guard verb", verbs)
+	}
+
+	work := callMCPTool[IndexWorkResponse](t, srv, "fak_index_work", map[string]any{
+		"root": root,
+	})
+	if work.Default != "ready-leaves" || work.Limit != 300 || len(work.Views) != 2 {
+		t.Fatalf("fak_index_work response = %+v, want ready-leaves default, limit 300, 2 views", work)
+	}
+	if work.Views[0].Slug != "ready-leaves" || work.Views[0].Query == "" {
+		t.Fatalf("fak_index_work first view = %+v, want ready-leaves with a gh query", work.Views[0])
 	}
 }
 

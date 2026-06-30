@@ -383,6 +383,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_verbs", func(req IndexSearchRequest) (any, error) {
 			return s.indexVerbs(req)
 		})
+	case "fak_index_work":
+		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_work", func(req IndexSearchRequest) (any, error) {
+			return s.indexWork(req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -643,6 +647,11 @@ func toolDescriptors() []map[string]any {
 		{
 			"name":        "fak_index_verbs",
 			"description": "Search CLI verbs from the dev index, including aliases and descriptions, so an MCP client can discover the local fak command surface.",
+			"inputSchema": indexSearchInputSchema,
+		},
+		{
+			"name":        "fak_index_work",
+			"description": "The selection surface: list the repo's named issue views (.github/issue-views.json) with the default 'what should I work on' view and each view's gh issue-search query, so an MCP client can pick the right dispatchable backlog. Optional query filters the views by slug/title/note.",
 			"inputSchema": indexSearchInputSchema,
 		},
 	}
