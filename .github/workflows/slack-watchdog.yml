@@ -115,6 +115,16 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # POST the verdict IN-CHANNEL on a non-OK fold (#1427) — not only as a GitHub issue.
+      # `fak slack beat` renders the same compact verdict line (⚠️/🔴 naming each down surface)
+      # and posts it to the status channel, so an operator watching Slack sees a broken feeder
+      # the same day, not only in the issue tracker. Gated identically to the issue step (token
+      # present, non-OK, not a manual dry-run). The beat exits non-zero only on its OWN misconfig
+      # (no channel), so `|| true` keeps a delivery hiccup from masking the issue-filing below.
+      - name: post verdict in-channel
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && steps.health.outputs.nonok == 'true' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: go run ./cmd/fak slack beat || true
+
       # FILE one deduped issue on a non-OK verdict — only when the token is present (fail
       # open without it) and not a manual dry-run. The fixed `slack-watchdog` label dedups
       # so a steady misconfiguration files exactly ONE open issue (then refreshes it), never
