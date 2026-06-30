@@ -21,10 +21,12 @@ type dispatchWavePrice struct {
 	Requested            int                               `json:"requested"`
 	Granted              int                               `json:"granted"`
 	CandidateCount       int                               `json:"candidate_count"`
+	CandidateStepBudget  int                               `json:"candidate_step_budget,omitempty"`
 	ScopedCount          int                               `json:"scoped_count"`
 	UnscopedCount        int                               `json:"unscoped_count"`
 	ScopeCoveragePct     int                               `json:"scope_coverage_pct"`
 	RunLanes             []string                          `json:"run_lanes"`
+	RunStepBudget        int                               `json:"run_step_budget,omitempty"`
 	RunTargets           []dispatchWaveCandidate           `json:"run_targets"`
 	HeldLanes            []string                          `json:"held_lanes,omitempty"`
 	ExcludedLanes        []string                          `json:"excluded_lanes,omitempty"`
@@ -51,6 +53,7 @@ type dispatchWaveCandidate struct {
 	Lane         string                    `json:"lane"`
 	LeaseID      string                    `json:"lease_id"`
 	Issue        int                       `json:"issue,omitempty"`
+	StepBudget   int                       `json:"step_budget,omitempty"`
 	Tree         []string                  `json:"tree,omitempty"`
 	Scoped       bool                      `json:"scoped"`
 	Disposition  dispatchorder.Disposition `json:"disposition"`
@@ -118,8 +121,8 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
-	lane := fs.String("lane", "", "pin every tick to this repo lane (default: busiest-lane pick)")
-	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the busiest-pick")
+	lane := fs.String("lane", "", "pin every tick to this repo lane (default: largest step-budget lane pick)")
+	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
 	settleS := fs.Float64("settle-s", 2.0, "seconds to wait after each live spawn")
 	noLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for spawned ticks")
 	live := fs.Bool("live", false, "actually spawn workers")
@@ -278,6 +281,10 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		lanes = append(lanes, lane)
 	}
 	sort.Slice(lanes, func(i, j int) bool {
+		bi, bj := dispatchWaveLaneStepBudget(router.Lanes[lanes[i]]), dispatchWaveLaneStepBudget(router.Lanes[lanes[j]])
+		if bi != bj {
+			return bi > bj
+		}
 		ci, cj := router.Lanes[lanes[i]].Count, router.Lanes[lanes[j]].Count
 		if ci != cj {
 			return ci > cj
@@ -312,13 +319,15 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		scopedByLane[lane] = true
 		id := waveCandidateID(lane, route.Number)
 		leaseID := dispatchIssueLeaseID(lane, route.Number)
+		stepBudget := dispatchWaveRouteStepBudget(route)
 		meta[id] = dispatchWaveCandidate{
-			ID:      id,
-			Lane:    lane,
-			LeaseID: leaseID,
-			Issue:   route.Number,
-			Tree:    paths,
-			Scoped:  true,
+			ID:         id,
+			Lane:       lane,
+			LeaseID:    leaseID,
+			Issue:      route.Number,
+			StepBudget: stepBudget,
+			Tree:       paths,
+			Scoped:     true,
 		}
 		cands = append(cands, dispatchorder.Candidate{
 			ID:          id,
@@ -326,6 +335,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			Lane:        leaseID,
 			Tree:        paths,
 			Mode:        "exclusive",
+			UpdatedUnix: int64(stepBudget),
 			CreatedUnix: int64(route.Number),
 		})
 	}
@@ -354,13 +364,15 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			continue
 		}
 		leaseID := dispatchIssueLeaseID(lane, issue)
+		stepBudget := dispatchWaveLaneStepBudget(grp)
 		issueByLane[lane] = issue
 		meta[id] = dispatchWaveCandidate{
-			ID:      id,
-			Lane:    lane,
-			LeaseID: leaseID,
-			Issue:   issue,
-			Tree:    append([]string(nil), grp.Tree...),
+			ID:         id,
+			Lane:       lane,
+			LeaseID:    leaseID,
+			Issue:      issue,
+			StepBudget: stepBudget,
+			Tree:       append([]string(nil), grp.Tree...),
 		}
 		cands = append(cands, dispatchorder.Candidate{
 			ID:          id,
@@ -368,8 +380,8 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			Lane:        leaseID,
 			Tree:        grp.Tree,
 			Mode:        "exclusive",
-			UpdatedUnix: int64(grp.Count),
-			CreatedUnix: int64(len(lanes) - i),
+			UpdatedUnix: int64(stepBudget),
+			CreatedUnix: int64(grp.Count*len(lanes) + (len(lanes) - i)),
 		})
 	}
 
@@ -414,6 +426,8 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 	for _, target := range runTargets {
 		runLaneNames = append(runLaneNames, target.Lane)
 	}
+	candidateStepBudget := dispatchWaveStepBudget(rows)
+	runStepBudget := dispatchWaveStepBudget(runTargets)
 	scopedCount := 0
 	for _, cand := range rows {
 		if cand.Scoped {
@@ -432,10 +446,12 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		Requested:            requested,
 		Granted:              granted,
 		CandidateCount:       len(cands),
+		CandidateStepBudget:  candidateStepBudget,
 		ScopedCount:          scopedCount,
 		UnscopedCount:        unscopedCount,
 		ScopeCoveragePct:     dispatchWavePct(scopedCount, len(rows)),
 		RunLanes:             runLaneNames,
+		RunStepBudget:        runStepBudget,
 		RunTargets:           runTargets,
 		HeldLanes:            sortedStringSet(held),
 		ExcludedLanes:        sortedStringSet(exclude),
@@ -746,6 +762,35 @@ func dispatchWaveLaneSerialWaveCount(candidates []dispatchWaveCandidate) int {
 		keys = append(keys, key)
 	}
 	return dispatchLaneSerialWaveCount(keys)
+}
+
+func dispatchWaveRouteStepBudget(route dispatchtick.IssueRoute) int {
+	if route.ExpectedSteps > 0 {
+		return route.ExpectedSteps
+	}
+	return 1
+}
+
+func dispatchWaveLaneStepBudget(grp dispatchtick.RouterLaneGroup) int {
+	if grp.StepBudget > 0 {
+		return grp.StepBudget
+	}
+	if grp.Count > 0 {
+		return grp.Count
+	}
+	return len(grp.Issues)
+}
+
+func dispatchWaveStepBudget(candidates []dispatchWaveCandidate) int {
+	total := 0
+	for _, cand := range candidates {
+		if cand.StepBudget > 0 {
+			total += cand.StepBudget
+		} else {
+			total++
+		}
+	}
+	return total
 }
 
 func dispatchWavePct(n, d int) int {

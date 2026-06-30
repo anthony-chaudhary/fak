@@ -149,9 +149,15 @@ func runSuperloopWalk(stdout, stderr io.Writer, argv []string) int {
 	rep := superloop.Walk(s, statuses)
 
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, rep, "fak superloop walk")
+		// Emit the machine-readable report, but the exit code must still reflect the
+		// walk's satisfaction — same contract as the human path below, so a CI gate
+		// reading $? is never told "satisfied" when it isn't.
+		if rc := encodeJSONOrFail(stdout, stderr, rep, "fak superloop walk"); rc != 0 {
+			return rc
+		}
+	} else {
+		renderSuperloopWalk(stdout, rep)
 	}
-	renderSuperloopWalk(stdout, rep)
 	if rep.Satisfied {
 		return 0
 	}

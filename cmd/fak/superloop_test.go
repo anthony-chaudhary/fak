@@ -13,9 +13,13 @@ import (
 func TestSuperloopWalkAcceptsFlagsAfterName(t *testing.T) {
 	root := t.TempDir()
 	var out, errb bytes.Buffer
+	// The walk of an empty temp dir is legitimately UNSATISFIED (no baseline, no
+	// ledgers), so an honest exit is 1 — not a flag-parse error (2). This test pins
+	// that flags AFTER the positional name are still parsed: assert it is not a usage
+	// error (2) and that the JSON report was emitted (proof the flags took effect).
 	code := runSuperloop(&out, &errb, []string{"walk", "manage-benchmarks", "--workspace", root, "--json"})
-	if code != 0 {
-		t.Fatalf("walk code=%d stderr=%s", code, errb.String())
+	if code == 2 {
+		t.Fatalf("flags after name were not parsed (usage error): stderr=%s", errb.String())
 	}
 	var rep superloop.WalkReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
@@ -28,8 +32,11 @@ func TestSuperloopWalkAcceptsFlagsAfterName(t *testing.T) {
 	out.Reset()
 	errb.Reset()
 	code = runSuperloop(&out, &errb, []string{"walk", "manage-benchmarks", "--workspace=" + filepath.ToSlash(root), "--json"})
-	if code != 0 {
-		t.Fatalf("walk with --workspace= code=%d stderr=%s", code, errb.String())
+	if code == 2 {
+		t.Fatalf("walk with --workspace= was a usage error: stderr=%s", errb.String())
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("walk with --workspace= json: %v\n%s", err, out.String())
 	}
 }
 

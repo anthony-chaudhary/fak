@@ -79,12 +79,14 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 
 func buildWindowgatePayload(root string, rep windowgate.Report, failCandidates bool) windowgatePayload {
 	violations := append([]string{}, rep.PSInstallers...)
+	violations = append(violations, rep.PSStartProcesses...)
 	violations = append(violations, rep.PySpawns...)
 	violations = append(violations, rep.GoExecs...)
 	watchlist := append([]string{}, rep.PyCandidates...)
 	watchlist = append(watchlist, rep.GoCandidates...)
 	counts := map[string]int{
 		"ps_installers":       len(rep.PSInstallers),
+		"ps_start_processes":  len(rep.PSStartProcesses),
 		"py_spawns":           len(rep.PySpawns),
 		"py_watchlist":        len(rep.PyCandidates),
 		"go_execs":            len(rep.GoExecs),
@@ -137,7 +139,7 @@ func renderWindowgate(p windowgatePayload) string {
 	fmt.Fprintf(&b, "windowgate: %s (%s)\n", status, p.Finding)
 	fmt.Fprintf(&b, "workspace: %s\n", p.Workspace)
 	fmt.Fprintf(&b, "hard: ps=%d py=%d go=%d  watchlist: py=%d go=%d\n",
-		p.Counts["ps_installers"], p.Counts["py_spawns"], p.Counts["go_execs"], p.Counts["py_watchlist"], p.Counts["go_watchlist"])
+		p.Counts["ps_installers"]+p.Counts["ps_start_processes"], p.Counts["py_spawns"], p.Counts["go_execs"], p.Counts["py_watchlist"], p.Counts["go_watchlist"])
 	if len(p.Suppression) > 0 {
 		fmt.Fprintf(&b, "suppression: %s\n", renderToolCounts(p.Suppression))
 	}

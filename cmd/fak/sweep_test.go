@@ -47,6 +47,9 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	if plan.Groups[0].Trailer != "(fak docs)" {
 		t.Fatalf("docs trailer = %q, want (fak docs)", plan.Groups[0].Trailer)
 	}
+	if plan.Groups[0].Score != 100 {
+		t.Fatalf("docs score = %d, want 100", plan.Groups[0].Score)
+	}
 	if len(plan.NoLane) != 1 || plan.NoLane[0].Path != "MISC.txt" {
 		t.Fatalf("NoLane = %v, want [MISC.txt]", plan.NoLane)
 	}
@@ -56,6 +59,49 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	if n := stampableCount(plan); n != 3 {
 		t.Fatalf("stampableCount = %d, want 3", n)
 	}
+}
+
+func TestScoreSweepGroupSurfacesRiskSignals(t *testing.T) {
+	score, reasons := scoreSweepGroup([]dirtyEntry{
+		{Path: "docs/a.md", Status: "M"},
+		{Path: "docs/new.md", Status: "??", Untracked: true},
+		{Path: "docs/old.md", Status: "D"},
+	})
+	if score != 74 {
+		t.Fatalf("score = %d, want 74", score)
+	}
+	for _, want := range []string{"mixed git statuses", "includes untracked source", "includes deletions"} {
+		if !containsString(reasons, want) {
+			t.Fatalf("reasons = %v, missing %q", reasons, want)
+		}
+	}
+}
+
+func TestRenderSweepPlanIncludesScore(t *testing.T) {
+	plan := sweepPlan{TotalDirty: 1, Groups: []sweepGroup{{
+		Lane:         "docs",
+		Trailer:      "(fak docs)",
+		Paths:        []string{"docs/a.md"},
+		Score:        92,
+		ScoreReasons: []string{"includes untracked source"},
+	}}}
+	var out bytes.Buffer
+	renderSweepPlan(&out, plan)
+	got := out.String()
+	for _, want := range []string{"score  92", "score notes: includes untracked source"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered sweep plan missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func containsString(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIsSweepJunk(t *testing.T) {
