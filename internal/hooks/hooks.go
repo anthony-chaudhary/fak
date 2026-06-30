@@ -58,10 +58,15 @@ type Finding struct {
 // it, exactly as the shell `run_gate` consulted them, so the in-process runner reproduces the
 // block/warn/off + one-shot-escape semantics without the shell.
 type Gate struct {
-	Name      string
-	ModeEnv   string // e.g. FLEET_SCRUB_GUARD; default mode is "block"
-	EscapeEnv string // e.g. FLEET_ALLOW_LEAK; "1" => skip this gate once
-	Check     func(d *StagedDiff) ([]Finding, error)
+	Name    string
+	ModeEnv string // e.g. FLEET_SCRUB_GUARD; default mode is "block" (unless DefaultMode says otherwise)
+	// DefaultMode is the mode used when ModeEnv is UNSET. Empty means the historical default of
+	// "block" — every pre-existing gate keeps that. An ADVISORY gate sets this to "warn" so it
+	// only warns out of the box (PRIOR_ART), while its ModeEnv can still be set to "block" to
+	// hard-enforce it.
+	DefaultMode string
+	EscapeEnv   string // e.g. FLEET_ALLOW_LEAK; "1" => skip this gate once
+	Check       func(d *StagedDiff) ([]Finding, error)
 }
 
 // PreCommitGates returns the pre-commit gates in the SAME order tools/githooks/pre-commit
@@ -77,6 +82,10 @@ func PreCommitGates() []Gate {
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
+		// PRIOR_ART is ADVISORY: DefaultMode "warn" so it never blocks a commit out of the box —
+		// it only prints the SOTA reference + a `Prior-art:` suggestion. Set FLEET_PRIORART_GUARD=block
+		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
+		{Name: "PRIOR_ART", ModeEnv: "FLEET_PRIORART_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_PRIOR_ART", Check: gatePriorArt},
 	}
 }
 

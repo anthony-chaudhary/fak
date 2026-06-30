@@ -85,9 +85,21 @@ func runHooksLaneAudit(stdout, stderr io.Writer, argv []string) int {
 // gateMode resolves a gate's FLEET_<NAME>_GUARD env to block (default) / warn / off, and its
 // one-shot escape env. Identical semantics to the shell run_gate.
 func gateMode(modeEnv, escapeEnv string) (mode string, escaped bool) {
+	return gateModeDefault(modeEnv, escapeEnv, "block")
+}
+
+// gateModeDefault is gateMode with an explicit fallback for an UNSET ModeEnv. The historical
+// default is "block"; an ADVISORY gate (Gate.DefaultMode = "warn", e.g. PRIOR_ART) passes
+// "warn" so it only warns out of the box while its ModeEnv can still force "block". An empty
+// def keeps the "block" default. Mirrors the commit-msg path's per-gate warn default for
+// FLEET_MSG_GUARD.
+func gateModeDefault(modeEnv, escapeEnv, def string) (mode string, escaped bool) {
+	if def == "" {
+		def = "block"
+	}
 	mode = strings.TrimSpace(os.Getenv(modeEnv))
 	if mode == "" {
-		mode = "block"
+		mode = def
 	}
 	return mode, strings.TrimSpace(os.Getenv(escapeEnv)) == "1"
 }
@@ -114,7 +126,7 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	var allFindings []hooks.Finding
 	blocked := false
 	for _, g := range hooks.PreCommitGates() {
-		mode, escaped := gateMode(g.ModeEnv, g.EscapeEnv)
+		mode, escaped := gateModeDefault(g.ModeEnv, g.EscapeEnv, g.DefaultMode)
 		if mode == "off" || escaped {
 			continue
 		}

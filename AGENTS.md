@@ -287,6 +287,16 @@ encoded in [`internal/worktype`](internal/worktype/worktype.go):
   `fak program report`; its operating spines are
   [`docs/perf-parity-rsi-loop.md`](docs/perf-parity-rsi-loop.md) and
   [`docs/cache-value-rollup.md`](docs/cache-value-rollup.md).
+
+  **Before you optimize a kernel, check the prior art — don't re-derive known art.** Almost
+  every contraction fak performs (a quantized GEMM, a fused attention, a KV-cache reuse, a
+  MoE dispatch) has a production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM /
+  SGLang / a named paper). Run `fak sota <operation|file>` to surface the reference, route,
+  and oracle *before* writing from scratch; read [`docs/sota/README.md`](docs/sota/README.md)
+  for the map and the process; stamp the kernel commit with a `Prior-art:` trailer naming what
+  you consulted. The source of truth is [`internal/sotamatrix`](internal/sotamatrix/sotamatrix.go);
+  the `PRIOR_ART` advisory gate nudges at commit time and `tools/sota_coverage_scorecard.py`
+  keeps the matrix complete against the tree.
 - A **discrete deliverable epic** has a definition of done and converges on 100% (the
   native harness, release-at-agentic-speed, support-maturity). Completion % is the right
   lens; track it in the `fak milestone report` roadmap.
@@ -305,6 +315,7 @@ read as a stalled deliverable. To mark a new epic as a program, add its number t
 | Put fak in front of *your* agent (Claude Code / Cursor / MCP) | [`docs/integrations/`](docs/integrations/) · [`fak/examples/mcp/`](examples/mcp/) |
 | The deployable capability floor (policy manifests) | [`fak/POLICY.md`](POLICY.md) · [`fak/examples/README.md`](examples/README.md) |
 | Extend the kernel (plug in → prove correct → prove faster) | [`fak/EXTENDING.md`](EXTENDING.md) · [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Optimize a kernel without re-inventing known art (check prior art first) | [`docs/sota/README.md`](docs/sota/README.md) · `fak sota <op>` |
 | What's real vs simulated vs stub | [`fak/CLAIMS.md`](CLAIMS.md) · [`fak/STATUS.md`](STATUS.md) |
 | Every benchmark number (single source of truth) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) |
 | Roll back to a stable version (revert / downgrade / pin) | [`docs/ROLLBACK.md`](docs/ROLLBACK.md) |

@@ -80,6 +80,8 @@ func main() {
 		cmdBench(os.Args[2:])
 	case "benchmarks":
 		cmdBenchmarks(os.Args[2:])
+	case "sota":
+		cmdSota(os.Args[2:])
 	case "bench-runs":
 		cmdBenchRuns(os.Args[2:])
 	case "bench-loop", "benchloop":
@@ -228,8 +230,6 @@ func main() {
 		cmdRungStats(os.Args[2:])
 	case "swebench":
 		cmdSwebench(os.Args[2:])
-	case "frontierswe":
-		cmdFrontierswe(os.Args[2:])
 	case "webbench":
 		cmdWebbench(os.Args[2:])
 	case "ailuminate":

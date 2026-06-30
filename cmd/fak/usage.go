@@ -126,15 +126,23 @@ func usageCoreVerbs() {
   fak benchmarks list [--offline] | describe <name> | run <name>
                 (THE INDEX of every benchmark fak ships -- start with
                  'fak benchmarks list --offline' for the zero-asset set)
+  fak sota      [list] [--json] | <slug> | <file>
+                (PRIOR-ART LOOKUP: read the SOTA reference BEFORE writing a kernel.
+                 'fak sota awq-int4-gemm' or 'fak sota internal/model/awq.go' prints
+                 the production stack to study, the link to open, the borrow/bind/
+                 stay-minimal route, and the verification oracle -- so an op is not
+                 re-derived from scratch when llama.cpp/Marlin/FlashInfer/a paper
+                 already solved it)
   fak bench-runs list|show|compare|best|table|summary
                 (native query surface for experiments/benchmark/catalog.json and run
                  artifacts; the Go replacement for tools/bench_cli.py)
-  fak bench-loop status|next|walk|run [--json]
+  fak bench-loop status|next|walk|drive|run [--json]
                 (BENCHMARK SUPER-LOOP MANAGER: folds the benchmark registry,
                  recorded run catalog, nightrun ledger, local capability-aware
                  next selection, and authority gap into one status/next-action
-                 surface. run delegates to fak nightrun run, dry-run unless
-                 --apply is passed)
+                 surface. drive runs benchmark GOAL.md work through fresh-context
+                 witness/token budgets; run delegates to fak nightrun run,
+                 dry-run unless --apply is passed)
   fak ablate    --sweep vdso[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
                 (self-ablation: replay one frozen trace under N feature configs;
                  one row per arm, deltas off the kernel counters, same-trace guard)

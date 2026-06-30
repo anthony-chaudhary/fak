@@ -50,6 +50,7 @@ var tier = map[string]int{
 	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":     1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"sotamatrix":       1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"branchrole":       1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
 	"dgxbridge":        1, // remote background-job bridge: drives <tag>.sh/<tag>.log/<tag>.done jobs on a remote scratch dir over an ssh/exec shell; stdlib + os/exec only, imports nothing internal, off the hot path.
@@ -232,6 +233,7 @@ var tier = map[string]int{
 	"corelockaudit":   1, // read-only changed-path core-lock audit fold (#1680): classifies changed paths via the corelocks(1) taxonomy into a closed-schema, deterministic Report (measurement-only warnings); imports only corelocks(1), shells to git in a thin off-hot-path I/O layer.
 	"frontierswe":     1, // typed FrontierSWE dataset spine (#1707, epic #1706): the Task model + Category enum + 17-task Catalog + hand-rolled task.toml/job.yaml/oracle.yaml loaders, mirroring internal/swebench's Instance; stdlib-only, imports nothing internal, off the hot path.
 	"fleetcap":        1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
+	"workflowaudit":   1, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
