@@ -9,6 +9,8 @@ package main
 //	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
 //	fak index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
 //	fak index work [<query>]   the selection surface: named issue views + the default's gh query
+//	fak index generation [<query>]
+//	                         the generation taxonomy: labels, milestones, evidence rules
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -87,6 +89,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
 	case "verbs", "verb":
 		return indexVerbs(stdout, stderr, cat, args, *asJSON, *limit)
+	case "generation", "generations", "gen":
+		return indexGeneration(stdout, stderr, cat, args, *asJSON, *limit)
 	case "work", "views", "view":
 		return indexWork(stdout, stderr, cat, args, *asJSON, *limit)
 	default:
@@ -94,6 +98,16 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		writeIndexUsage(stderr)
 		return 2
 	}
+}
+
+func indexGeneration(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	hits := capGenerations(cat.SearchGenerations(joinArgs(args)), limit)
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index generation", "no matching generation",
+		func(tw *tabwriter.Writer, g devindex.Generation) {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\tpromote: %s\tdemote: %s\n",
+				g.Stream, g.Label, g.Milestone, truncRunes(g.Meaning, 88),
+				truncRunes(g.PromotionEvidence, 80), truncRunes(g.DemotionEvidence, 80))
+		})
 }
 
 func indexLane(stdout, stderr io.Writer, cat *devindex.Catalog, paths []string, asJSON bool) int {
@@ -268,6 +282,7 @@ func writeIndexUsage(w io.Writer) {
   fak index docs <query>      the curated doc map (INDEX.md), ranked by relevance
   fak index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
   fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
+  fak index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
   fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
   flags: --json  --limit N  --root DIR
 `)
@@ -310,6 +325,13 @@ func capVerbs(vs []devindex.Verb, limit int) []devindex.Verb {
 		return vs[:limit]
 	}
 	return vs
+}
+
+func capGenerations(gs []devindex.Generation, limit int) []devindex.Generation {
+	if limit > 0 && len(gs) > limit {
+		return gs[:limit]
+	}
+	return gs
 }
 
 func capViews(vs []devindex.IssueView, limit int) []devindex.IssueView {

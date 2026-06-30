@@ -28,6 +28,19 @@ func writeIndexRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	generationMd := "# Generation Contract\n\n" +
+		"| Stream | Label | Milestone | Meaning |\n" +
+		"|---|---|---|---|\n" +
+		"| now | `gen/now` | `Generation G0 - Now / Immediate` | Current product work. |\n" +
+		"| next | `gen/next` | `Generation G1 - Next Gen` | Near-term foundation that needs a gate or dogfood proof. |\n" +
+		"| second-next | `gen/second-next` | `Generation G2 - Second Next Gen` | Architectural option needing simulation. |\n" +
+		"| future | `gen/future` | `Generation G3 - Future` | Long-horizon research. |\n"
+	if err := os.WriteFile(filepath.Join(root, "docs", "generation.md"), []byte(generationMd), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 
@@ -79,5 +92,33 @@ func TestIndexClaimsJSON(t *testing.T) {
 	}
 	if len(claims) != 1 || claims[0].Tag != "SIMULATED" {
 		t.Errorf("session claims = %+v, want exactly one SIMULATED", claims)
+	}
+}
+
+func TestIndexGenerationJSON(t *testing.T) {
+	root := writeIndexRepo(t)
+	var out, errb bytes.Buffer
+	if rc := runIndex(&out, &errb, []string{"generation", "--json", "--root", root, "next"}); rc != 0 {
+		t.Fatalf("runIndex generation --json rc=%d, stderr=%s", rc, errb.String())
+	}
+	var generations []struct {
+		Stream                 string   `json:"stream"`
+		Label                  string   `json:"label"`
+		Milestone              string   `json:"milestone"`
+		IssueBodySignals       []string `json:"issue_body_signals"`
+		PromotionEvidence      string   `json:"promotion_evidence"`
+		DemotionEvidence       string   `json:"demotion_evidence"`
+		InvalidatingAssumption string   `json:"invalidating_assumption"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &generations); err != nil {
+		t.Fatalf("generation --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	if len(generations) != 1 || generations[0].Stream != "next" || generations[0].Label != "gen/next" {
+		t.Fatalf("generation query = %+v, want only gen/next", generations)
+	}
+	if !strings.Contains(generations[0].PromotionEvidence, "dogfood") ||
+		!strings.Contains(strings.Join(generations[0].IssueBodySignals, " "), "milestone") ||
+		!strings.Contains(generations[0].InvalidatingAssumption, "stream label") {
+		t.Fatalf("generation row missing evidence/body contract: %+v", generations[0])
 	}
 }
