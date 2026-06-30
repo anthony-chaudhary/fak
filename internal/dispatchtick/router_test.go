@@ -204,7 +204,7 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	assertRouterRepairQueue(t, p.RepairQueues, "split", 3, 14, map[string]int{
 		"ISSUE_NOT_DISPATCH_LEAF":        2,
 		"ISSUE_OVERSIZED_EXPECTED_STEPS": 1,
-	}, []int{10, 8, 2})
+	}, []int{10, 8, 2}, 4)
 	assertRouterRepairQueue(t, p.RepairQueues, "scope", 6, 6, map[string]int{
 		"ISSUE_SCOPE_INCOMPLETE": 1,
 		"ISSUE_TRIAGE_ONLY":      5,
@@ -284,7 +284,7 @@ func skippedIssueByNumber(skipped []SkippedIssue, number int) SkippedIssue {
 	return SkippedIssue{}
 }
 
-func assertRouterRepairQueue(t *testing.T, queues []RouterRepairQueue, kind string, count, steps int, reasons map[string]int, issues []int) {
+func assertRouterRepairQueue(t *testing.T, queues []RouterRepairQueue, kind string, count, steps int, reasons map[string]int, issues []int, childIssueBudget ...int) {
 	t.Helper()
 	queue := routerRepairQueueByKind(queues, kind)
 	if queue.Kind == "" {
@@ -292,6 +292,9 @@ func assertRouterRepairQueue(t *testing.T, queues []RouterRepairQueue, kind stri
 	}
 	if queue.Count != count || queue.StepBudget != steps || queue.NextAction == "" {
 		t.Fatalf("repair queue %q = %+v, want count=%d steps=%d and next action", kind, queue, count, steps)
+	}
+	if len(childIssueBudget) > 0 && queue.ChildIssueBudget != childIssueBudget[0] {
+		t.Fatalf("repair queue %q child issue budget = %d, want %d", kind, queue.ChildIssueBudget, childIssueBudget[0])
 	}
 	if len(queue.Issues) != len(issues) {
 		t.Fatalf("repair queue %q issues = %+v, want %+v", kind, queue.Issues, issues)

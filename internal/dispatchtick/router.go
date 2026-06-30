@@ -161,12 +161,13 @@ type SkippedIssue struct {
 }
 
 type RouterRepairQueue struct {
-	Kind       string         `json:"kind"`
-	Count      int            `json:"count"`
-	StepBudget int            `json:"step_budget"`
-	NextAction string         `json:"next_action"`
-	ByReason   map[string]int `json:"by_reason,omitempty"`
-	Issues     []int          `json:"issues,omitempty"`
+	Kind             string         `json:"kind"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	NextAction       string         `json:"next_action"`
+	ByReason         map[string]int `json:"by_reason,omitempty"`
+	Issues           []int          `json:"issues,omitempty"`
 }
 
 type RouterCoverage struct {
@@ -626,7 +627,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 
 func routerRepairQueues(routes []IssueRoute, skipped []SkippedIssue) []RouterRepairQueue {
 	queues := map[string]*RouterRepairQueue{}
-	add := func(kind string, issue int, stepBudget int, reason string) {
+	add := func(kind string, issue int, stepBudget int, childIssueBudget int, reason string) {
 		if stepBudget <= 0 {
 			stepBudget = 1
 		}
@@ -641,6 +642,7 @@ func routerRepairQueues(routes []IssueRoute, skipped []SkippedIssue) []RouterRep
 		}
 		queue.Count++
 		queue.StepBudget += stepBudget
+		queue.ChildIssueBudget += childIssueBudget
 		if reason != "" {
 			queue.ByReason[reason]++
 		}
@@ -650,13 +652,14 @@ func routerRepairQueues(routes []IssueRoute, skipped []SkippedIssue) []RouterRep
 	}
 	for _, route := range routes {
 		if route.Lane == "" {
-			add("route", route.Number, routeStepBudget(route), "ISSUE_UNROUTED")
+			add("route", route.Number, routeStepBudget(route), 0, "ISSUE_UNROUTED")
 			continue
 		}
-		add("dispatch", route.Number, routeStepBudget(route), "")
+		add("dispatch", route.Number, routeStepBudget(route), 0, "")
 	}
 	for _, skippedIssue := range skipped {
-		add(routerRepairKind(skippedIssue.Reason), skippedIssue.Number, skippedIssueStepBudget(skippedIssue), skippedIssue.Reason)
+		kind := routerRepairKind(skippedIssue.Reason)
+		add(kind, skippedIssue.Number, skippedIssueStepBudget(skippedIssue), skippedIssueChildIssueBudget(skippedIssue, kind), skippedIssue.Reason)
 	}
 	out := make([]RouterRepairQueue, 0, len(queues))
 	for _, queue := range queues {
@@ -683,6 +686,16 @@ func skippedIssueStepBudget(issue SkippedIssue) int {
 		return issue.ExpectedSteps
 	}
 	return 1
+}
+
+func skippedIssueChildIssueBudget(issue SkippedIssue, kind string) int {
+	if kind != "split" {
+		return 0
+	}
+	if issue.ExpectedSteps <= 0 {
+		return 1
+	}
+	return (issue.ExpectedSteps + MaxDispatchExpectedSteps - 1) / MaxDispatchExpectedSteps
 }
 
 func routerRepairKind(reason string) string {
