@@ -113,6 +113,7 @@ func RollupFromReport(r dojo.Report, maxEpisodes int) Post {
 		Lead: fmt.Sprintf("%d lever(s) · %d episode(s) · %d measured · %d calibrated · mean calib-err %.3f · grade %s · @%s",
 			r.LeverCount, r.EpisodeCount, r.Measured, r.Calibrated, r.MeanCalibErr, r.Grade, shortCommit(r.Commit)),
 	}
+	appendRollupOperatorLines(&p, r)
 	// A run that measured nothing is the dojo's "ACTION" state — surface the reason so
 	// the channel sees the gym needs a corpus, not a silent empty card.
 	if r.Measured == 0 {
@@ -175,6 +176,7 @@ func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 			Emoji: ":dart:",
 			Title: "dojo trend — calibration over time",
 			Lead:  "no dojo history yet — run `fak dojo run --corpus DIR --append-history` to start the series",
+			Lines: []string{"operator: append a measured dojo run before treating the channel as a trend"},
 		}
 	}
 	// Rows are in file (append) order; the latest is the last.
@@ -196,6 +198,10 @@ func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 		Lead: fmt.Sprintf("latest: mean calib-err %.3f · grade %s · %d/%d calibrated · @%s (%s) — %s",
 			latest.MeanCalibErr, latest.Grade, latest.Calibrated, latest.Measured, shortCommit(latest.Commit), latest.Date, trend.Summary),
 	}
+	p.Lines = append(p.Lines,
+		"current: "+coverageSummary(latest.LeverCount, latest.EpisodeCount, latest.Measured, latest.Calibrated),
+		"operator: "+trendOperatorMeaning(trend.Direction),
+	)
 
 	// Show the last n rows, most-recent first, as a compact history strip.
 	if n <= 0 || n > len(rows) {
@@ -208,6 +214,61 @@ func TrendFromLedger(rows []dojo.LedgerRow, n int) Post {
 				row.Date, row.MeanCalibErr, row.Grade, row.Calibrated, row.Measured, shortCommit(row.Commit)))
 	}
 	return p
+}
+
+func appendRollupOperatorLines(p *Post, r dojo.Report) {
+	if r.NextAction != "" {
+		p.Lines = append(p.Lines, "operator: "+r.NextAction)
+	}
+	p.Lines = append(p.Lines, "current: "+coverageSummary(r.LeverCount, r.EpisodeCount, r.Measured, r.Calibrated))
+	if line := worstLeverLine(r.Episodes); line != "" {
+		p.Lines = append(p.Lines, line)
+	}
+}
+
+func coverageSummary(leverCount, episodeCount, measured, calibrated int) string {
+	unmeasured := episodeCount - measured
+	if unmeasured < 0 {
+		unmeasured = 0
+	}
+	return fmt.Sprintf("%d lever(s), %d episode(s), %d measured, %d unmeasured, %d calibrated",
+		leverCount, episodeCount, measured, unmeasured, calibrated)
+}
+
+func worstLeverLine(eps []dojo.Episode) string {
+	board := dojo.BoardFromEpisodes(eps)
+	for _, row := range board.Rows {
+		if row.Measured == 0 {
+			continue
+		}
+		if row.WorstMetric == "" {
+			return fmt.Sprintf("worst lever: `%s` · grade %s · mean calib-err %.3f",
+				row.Lever, row.Grade, row.MeanCalibErr)
+		}
+		return fmt.Sprintf("worst lever: `%s` · grade %s · mean calib-err %.3f · worst metric `%s` (%.3f)",
+			row.Lever, row.Grade, row.MeanCalibErr, row.WorstMetric, row.WorstCalib)
+	}
+	for _, row := range board.Rows {
+		if row.Unmeasured > 0 {
+			return fmt.Sprintf("attention: `%s` has no measured ground truth yet", row.Lever)
+		}
+	}
+	return ""
+}
+
+func trendOperatorMeaning(direction string) string {
+	switch direction {
+	case "improved":
+		return "claims moved closer to billed reality; keep the current theory and watch the next tick"
+	case "regressed":
+		return "claims drifted away from billed reality; inspect the latest rollup's worst lever before changing policy"
+	case "flat":
+		return "no displayable movement; use the latest rollup if you need the current worst lever"
+	case "new":
+		return "first tick only; append another measured run before reading this as a trend"
+	default:
+		return "trend direction unknown; inspect the ledger before acting"
+	}
 }
 
 // shortCommit trims a commit to 12 chars for a compact channel line (mirrors the dojo

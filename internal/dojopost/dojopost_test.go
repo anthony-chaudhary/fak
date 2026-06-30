@@ -103,6 +103,7 @@ func TestRollupFromReportMeasuredRun(t *testing.T) {
 		Calibrated:   1,
 		MeanCalibErr: 0.341,
 		Grade:        "C",
+		NextAction:   "inspect the cold-write regression before changing policy",
 		Episodes: []dojo.Episode{
 			{Lever: "resume-posture", Metric: "cold_write_share", Claimed: 0.85, Realized: 0.40, CalibErr: 0.53, Verdict: dojo.VerdictOverClaim, Grade: "D", Provenance: dojo.Observed, Sample: 40},
 			{Lever: "resume-posture", Metric: "posture_accuracy", Claimed: 1.0, Realized: 0.98, CalibErr: 0.02, Verdict: dojo.VerdictCalibrated, Grade: "A", Provenance: dojo.Observed, Sample: 1000},
@@ -128,6 +129,16 @@ func TestRollupFromReportMeasuredRun(t *testing.T) {
 	if !strings.Contains(got, "OVER_CLAIM") || !strings.Contains(got, "OBSERVED") {
 		t.Fatalf("rollup dropped verdict/provenance:\n%s", got)
 	}
+	for _, want := range []string{
+		"operator: inspect the cold-write regression",
+		"current: 1 lever(s), 2 episode(s), 2 measured, 0 unmeasured, 1 calibrated",
+		"worst lever: `resume-posture`",
+		"worst metric `cold_write_share`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rollup missing operator-friendly line %q:\n%s", want, got)
+		}
+	}
 }
 
 func TestRollupFromReportUnmeasuredSurfacesReason(t *testing.T) {
@@ -144,9 +155,9 @@ func TestRollupFromReportUnmeasuredSurfacesReason(t *testing.T) {
 
 func TestTrendFromLedgerOrdersRecentFirstAndTrends(t *testing.T) {
 	rows := []dojo.LedgerRow{
-		{Schema: dojo.LedgerSchema, Date: "2026-06-25", Commit: "c1", GeneratedAt: "2026-06-25T01:00:00Z", MeanCalibErr: 0.70, Grade: "F", Calibrated: 2, Measured: 3},
-		{Schema: dojo.LedgerSchema, Date: "2026-06-26", Commit: "c2", GeneratedAt: "2026-06-26T01:00:00Z", MeanCalibErr: 0.50, Grade: "D", Calibrated: 2, Measured: 3},
-		{Schema: dojo.LedgerSchema, Date: "2026-06-27", Commit: "c3", GeneratedAt: "2026-06-27T01:00:00Z", MeanCalibErr: 0.34, Grade: "C", Calibrated: 2, Measured: 3},
+		{Schema: dojo.LedgerSchema, Date: "2026-06-25", Commit: "c1", GeneratedAt: "2026-06-25T01:00:00Z", LeverCount: 3, EpisodeCount: 7, MeanCalibErr: 0.70, Grade: "F", Calibrated: 2, Measured: 6},
+		{Schema: dojo.LedgerSchema, Date: "2026-06-26", Commit: "c2", GeneratedAt: "2026-06-26T01:00:00Z", LeverCount: 3, EpisodeCount: 7, MeanCalibErr: 0.50, Grade: "D", Calibrated: 2, Measured: 6},
+		{Schema: dojo.LedgerSchema, Date: "2026-06-27", Commit: "c3", GeneratedAt: "2026-06-27T01:00:00Z", LeverCount: 3, EpisodeCount: 7, MeanCalibErr: 0.34, Grade: "C", Calibrated: 2, Measured: 6},
 	}
 	got := TrendFromLedger(rows, 3).Text()
 
@@ -163,6 +174,14 @@ func TestTrendFromLedgerOrdersRecentFirstAndTrends(t *testing.T) {
 	oldest := strings.Index(got, "2026-06-25")
 	if newest < 0 || oldest < 0 || newest > oldest {
 		t.Fatalf("trend rows not most-recent-first (new=%d old=%d):\n%s", newest, oldest, got)
+	}
+	for _, want := range []string{
+		"current: 3 lever(s), 7 episode(s), 6 measured, 1 unmeasured, 2 calibrated",
+		"operator: claims moved closer to billed reality",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("trend missing operator-friendly line %q:\n%s", want, got)
+		}
 	}
 }
 
