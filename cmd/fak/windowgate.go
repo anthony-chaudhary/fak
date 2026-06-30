@@ -60,6 +60,7 @@ type liveProcessPayload struct {
 	Scanned    int                             `json:"scanned"`
 	Observed   map[string]int                  `json:"observed,omitempty"`
 	Unreadable map[string]int                  `json:"unreadable,omitempty"`
+	Parents    map[string]int                  `json:"parents,omitempty"`
 	Violations []string                        `json:"violations,omitempty"`
 	Watchlist  []string                        `json:"watchlist,omitempty"`
 	Findings   []windowgate.LiveProcessFinding `json:"findings,omitempty"`
@@ -409,6 +410,7 @@ func attachLiveProcessPayload(p *windowgatePayload, processes windowgate.LivePro
 		Scanned:    processes.Scanned,
 		Observed:   copyIntMap(processes.Observed),
 		Unreadable: copyIntMap(processes.Unreadable),
+		Parents:    liveProcessParentCounts(processes.Findings),
 		Violations: append([]string{}, processes.Violations...),
 		Watchlist:  append([]string{}, processes.Watchlist...),
 		Findings:   append([]windowgate.LiveProcessFinding{}, processes.Findings...),
@@ -505,13 +507,19 @@ func renderWindowgate(p windowgatePayload) string {
 		if len(p.Processes.Categories) > 0 {
 			fmt.Fprintf(&b, "live-process categories: %s\n", renderToolCounts(p.Processes.Categories))
 		}
-		for _, row := range p.Processes.Violations {
+		if len(p.Processes.Parents) > 0 {
+			fmt.Fprintf(&b, "live-process parents: %s\n", renderToolCounts(p.Processes.Parents))
+		}
+		for _, row := range limitedRows(p.Processes.Violations, 40) {
 			fmt.Fprintf(&b, "  - %s\n", row)
 		}
 		if len(p.Processes.Watchlist) > 0 {
 			b.WriteString("live-process watchlist:\n")
-			for _, row := range p.Processes.Watchlist {
+			for _, row := range limitedRows(p.Processes.Watchlist, 40) {
 				fmt.Fprintf(&b, "  - %s\n", row)
+			}
+			if extra := len(p.Processes.Watchlist) - 40; extra > 0 {
+				fmt.Fprintf(&b, "  ... %d more live-process rows; use --json for the full list\n", extra)
 			}
 		}
 	}
@@ -545,6 +553,28 @@ func liveProcessCategoryCounts(findings []windowgate.LiveProcessFinding) map[str
 		return nil
 	}
 	return out
+}
+
+func liveProcessParentCounts(findings []windowgate.LiveProcessFinding) map[string]int {
+	out := map[string]int{}
+	for _, finding := range findings {
+		name := strings.TrimSpace(finding.ParentName)
+		if name == "" {
+			name = "unknown"
+		}
+		out[name]++
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func limitedRows(rows []string, limit int) []string {
+	if limit <= 0 || len(rows) <= limit {
+		return rows
+	}
+	return rows[:limit]
 }
 
 func copyIntMap(in map[string]int) map[string]int {

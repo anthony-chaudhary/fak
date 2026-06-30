@@ -146,7 +146,7 @@ func TestAttachLiveProcessPayloadSurfacesWatchlistByDefault(t *testing.T) {
 		Unreadable: map[string]int{"cmd.exe": 1},
 		Watchlist:  []string{"pid=10 name=gh.exe"},
 		Findings: []windowgate.LiveProcessFinding{
-			{Level: "watchlist", Category: "repo_console_process", PID: 10, Name: "gh.exe"},
+			{Level: "watchlist", Category: "repo_console_process", PID: 10, Name: "gh.exe", ParentName: "python.exe"},
 		},
 	}, false)
 	if !p.OK || p.Verdict != "OK" || p.Finding != "no_desktop_popup_live_process_watchlist" {
@@ -154,6 +154,7 @@ func TestAttachLiveProcessPayloadSurfacesWatchlistByDefault(t *testing.T) {
 	}
 	if p.Processes == nil || p.Processes.Scanned != 5 || p.Processes.Observed["gh.exe"] != 1 ||
 		p.Processes.Unreadable["cmd.exe"] != 1 || p.Processes.Categories["repo_console_process"] != 1 ||
+		p.Processes.Parents["python.exe"] != 1 ||
 		len(p.Processes.Findings) != 1 {
 		t.Fatalf("live-process payload not surfaced: %+v", p.Processes)
 	}
