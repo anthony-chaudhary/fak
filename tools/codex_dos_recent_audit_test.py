@@ -238,9 +238,20 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 else:
                     os.environ["FLEET_USER_HOME"] = old_user_home
 
-            self.assertEqual(report["status"], "WARN")
+            # Issue #1447: the StopFailure markers here are Claude-origin / other-origin
+            # (none is a discovered Codex thread), so the Codex health verdict must NOT be
+            # dragged to WARN by them. The workspace-wide totals are still surfaced, but the
+            # Codex-origin verdict (report status) is PASS.
+            self.assertEqual(report["status"], "PASS")
             self.assertEqual(report["summary"]["stop_failures_total"], 0)
             self.assertEqual(report["summary"]["workspace_stop_failures_total"], 4)
+            self.assertEqual(report["summary"]["codex_origin_stop_failures_total"], 0)
+            self.assertEqual(report["summary"]["codex_origin_stop_failure_active_markers"], 0)
+            self.assertEqual(report["summary"]["claude_origin_stop_failures_total"], 1)
+            self.assertEqual(report["summary"]["claude_origin_stop_failure_active_markers"], 1)
+            self.assertEqual(report["summary"]["claude_origin_stop_failure_active_origin_counts"], {"claude_transcript": 1})
+            self.assertEqual(report["summary"]["workspace_stop_failure_provenance_counts"], {"claude": 1, "other": 2})
+            self.assertEqual(report["summary"]["workspace_stop_failure_active_provenance_counts"], {"claude": 1})
             self.assertEqual(report["summary"]["workspace_stop_failure_markers"], 3)
             self.assertEqual(report["summary"]["workspace_stop_failure_zero_markers"], 1)
             self.assertEqual(report["summary"]["workspace_stop_failure_nonzero_markers"], 2)
@@ -259,10 +270,23 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 {"HEALED_NONZERO": 1, "RECENT_REVIEW": 1, "ZERO_TOTAL": 1},
             )
             self.assertEqual(report["summary"]["workspace_stop_failure_active_settlement_action_counts"], {"RECENT_REVIEW": 1})
-            self.assertEqual(report["actionability"]["status"], "WARN")
-            self.assertIn("stop blocks or uncleared StopFailure API-wall breaker markers are present", report["actionability"]["reasons"])
+            # Claude-origin StopFailure markers no longer drive the Codex actionable gate:
+            # the gate's stop_total reflects Codex-origin markers only, which are zero here.
+            self.assertNotIn("stop blocks or uncleared StopFailure API-wall breaker markers are present", report["actionability"]["reasons"])
             stop = report["workspace_stop_failures"]
-            self.assertEqual(stop["status"], "WARN")
+            self.assertEqual(stop["status"], "PASS")
+            self.assertEqual(stop["codex_origin_status"], "PASS")
+            self.assertEqual(stop["claude_origin_status"], "ADVISORY")
+            self.assertEqual(stop["workspace_status"], "WARN")
+            self.assertEqual(stop["provenance_counts"], {"claude": 1, "other": 2})
+            self.assertEqual(stop["active_provenance_counts"], {"claude": 1})
+            self.assertEqual(stop["codex_origin"]["total_failures"], 0)
+            self.assertEqual(stop["codex_origin"]["active_consecutive_markers"], 0)
+            self.assertEqual(stop["claude_origin"]["markers"], 1)
+            self.assertEqual(stop["claude_origin"]["total_failures"], 1)
+            self.assertEqual(stop["claude_origin"]["active_consecutive_total"], 1)
+            self.assertEqual(stop["claude_origin"]["active_origin_counts"], {"claude_transcript": 1})
+            self.assertEqual(stop["other_origin"]["markers"], 2)
             self.assertEqual(stop["total_failures"], 4)
             self.assertEqual(stop["active_consecutive_markers"], 1)
             self.assertEqual(stop["active_consecutive_total"], 1)
@@ -306,19 +330,10 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             self.assertIn("top active StopFailure sessions:", rendered)
             self.assertIn("top StopFailure sessions:", rendered)
             self.assertIn(hot_session, rendered)
-            debt = mod.render_debt_packet(report)
-            self.assertIn("current actionable WARN is workspace StopFailure API-wall breaker state", debt)
-            self.assertIn("workspace_stop_failures_total: `4`", debt)
-            self.assertIn("workspace_stop_failure_active_markers: `1`", debt)
-            self.assertIn("workspace_stop_failure_recent_active_markers: `1`", debt)
-            self.assertIn("workspace_stop_failure_stale_active_markers: `0`", debt)
-            self.assertIn('workspace_stop_failure_recent_active_origin_counts: `{"claude_transcript": 1}`', debt)
-            self.assertIn('workspace_stop_failure_active_settlement_action_counts: `{"RECENT_REVIEW": 1}`', debt)
-            self.assertIn("workspace_stop_failure_top_recent_active_sessions", debt)
-            self.assertIn("workspace_stop_failure_top_active_sessions", debt)
-            self.assertIn("workspace_stop_failure_settlement_plan", debt)
-            self.assertIn("workspace_stop_failure_transcript_evidence_tags", debt)
-            self.assertIn("workspace_stop_failure_top_sessions", debt)
+            # Issue #1447: the separated, clearly-labeled origin sections must be present.
+            self.assertIn("Codex-origin StopFailure (counts toward Codex health): 0 failures", rendered)
+            self.assertIn("Claude-origin StopFailure (advisory only, NOT Codex health): 1 failures", rendered)
+            self.assertIn('StopFailure marker provenance: {"claude": 1, "other": 2}', rendered)
             encoded = json.dumps(report)
             self.assertNotIn("prompt should not leak", encoded)
             self.assertNotIn("secret command should not leak", encoded)
@@ -1060,6 +1075,143 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                     ]
                 )
             self.assertEqual(rc, 1)
+
+    def test_claude_origin_stop_markers_do_not_warn_codex_health(self) -> None:
+        """Reproduce issue #1447: 0 Codex sessions audited + many Claude-origin
+        StopFailure markers must NOT drag the Codex health verdict to WARN, and
+        the Claude-origin count must be surfaced in its own labeled section."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            user_home = root / "user-home"
+            # One Codex thread is discovered, but it has no StopFailure marker and
+            # no DOS stream, so 0 Codex sessions are audited (the live shape).
+            codex_thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{codex_thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            stop_dir = root / ".dos" / "stop-failures"
+            stop_dir.mkdir(parents=True, exist_ok=True)
+            streams_dir = root / ".dos" / "streams"
+            streams_dir.mkdir(parents=True, exist_ok=True)
+
+            # Four claude_transcript-only active markers and twenty-one
+            # dos_stream+claude_transcript active markers: every active marker is
+            # Claude-origin, matching active_origin_counts={"claude_transcript": 4,
+            # "dos_stream+claude_transcript": 21} from the issue.
+            claude_only_ids: list[str] = []
+            for i in range(4):
+                sid = f"c1a1de00-0000-4000-8000-0000000000{i:02d}"
+                claude_only_ids.append(sid)
+                transcript = user_home / ".claude" / "projects" / "C--work-fak" / f"{sid}.jsonl"
+                write_jsonl(transcript, [{"type": "user", "message": {"content": "claude prompt should not leak"}}])
+                (stop_dir / f"{sid}.json").write_text(json.dumps({"total": 5, "consecutive": 5}) + "\n", encoding="utf-8")
+            stream_and_claude_ids: list[str] = []
+            for i in range(21):
+                sid = f"c1a1de01-0000-4000-8000-0000000000{i:02d}"
+                stream_and_claude_ids.append(sid)
+                transcript = user_home / ".claude" / "projects" / "C--work-fak" / f"{sid}.jsonl"
+                write_jsonl(transcript, [{"type": "user", "message": {"content": "claude prompt should not leak"}}])
+                write_jsonl(streams_dir / f"{sid}.jsonl", [{"op": "STEP", "tool_name": "Read", "ts": now}])
+                (stop_dir / f"{sid}.json").write_text(json.dumps({"total": 5, "consecutive": 5}) + "\n", encoding="utf-8")
+
+            old_user_home = os.environ.get("FLEET_USER_HOME")
+            os.environ["FLEET_USER_HOME"] = str(user_home)
+            try:
+                report = mod.build_report(root, home, limit=50, since_days=3650, max_delegates=0)
+            finally:
+                if old_user_home is None:
+                    os.environ.pop("FLEET_USER_HOME", None)
+                else:
+                    os.environ["FLEET_USER_HOME"] = old_user_home
+
+            # No Codex session bound to a stream, and no Codex-origin StopFailure marker.
+            self.assertEqual(report["sessions_audited"], 0)
+            stop = report["workspace_stop_failures"]
+            # The Codex health verdict is NOT dragged to WARN by Claude-origin markers.
+            self.assertEqual(stop["status"], "PASS")
+            self.assertEqual(stop["codex_origin_status"], "PASS")
+            self.assertEqual(stop["codex_origin"]["total_failures"], 0)
+            self.assertEqual(stop["codex_origin"]["active_consecutive_markers"], 0)
+            # The Claude-origin breaker markers are surfaced in their own section.
+            self.assertEqual(stop["claude_origin_status"], "ADVISORY")
+            self.assertEqual(stop["claude_origin"]["markers"], 25)
+            self.assertEqual(stop["claude_origin"]["active_consecutive_markers"], 25)
+            self.assertEqual(
+                stop["claude_origin"]["active_origin_counts"],
+                {"claude_transcript": 4, "dos_stream+claude_transcript": 21},
+            )
+            # Workspace-wide aggregate still shows the friction, but only as advisory.
+            self.assertEqual(stop["workspace_status"], "WARN")
+            self.assertEqual(stop["provenance_counts"], {"claude": 25})
+            self.assertEqual(stop["active_provenance_counts"], {"claude": 25})
+
+            summary = report["summary"]
+            self.assertEqual(summary["codex_origin_stop_failures_total"], 0)
+            self.assertEqual(summary["codex_origin_stop_failure_active_markers"], 0)
+            self.assertEqual(summary["claude_origin_stop_failures_total"], 125)
+            self.assertEqual(summary["claude_origin_stop_failure_active_markers"], 25)
+            self.assertEqual(
+                summary["claude_origin_stop_failure_active_origin_counts"],
+                {"claude_transcript": 4, "dos_stream+claude_transcript": 21},
+            )
+
+            # The actionable gate (Codex-scoped) does not fire on Claude-origin markers.
+            self.assertNotIn(
+                "stop blocks or uncleared StopFailure API-wall breaker markers are present",
+                report["actionability"]["reasons"],
+            )
+
+            # The human render names the Claude-origin markers as outside audited Codex streams.
+            rendered = mod.render(report)
+            self.assertIn("Codex-origin StopFailure (counts toward Codex health): 0 failures", rendered)
+            self.assertIn("Claude-origin StopFailure (advisory only, NOT Codex health): 125 failures", rendered)
+            self.assertIn("note: 0 Codex sessions audited and the active StopFailure markers are Claude-origin", rendered)
+
+            # The Claude-origin advisory recommendation is present and labeled as not-Codex.
+            self.assertTrue(
+                any(
+                    "Claude-origin StopFailure" in rec and "NOT counted toward Codex health" in rec
+                    for rec in report["recommendations"]
+                ),
+                report["recommendations"],
+            )
+
+            # Privacy boundary preserved: no Claude prompt text leaks.
+            encoded = json.dumps(report)
+            self.assertNotIn("claude prompt should not leak", encoded)
+            self.assertNotIn(str(user_home), encoded)
+
+    def test_codex_origin_stop_marker_drives_codex_verdict(self) -> None:
+        """The dual of #1447: a StopFailure marker keyed by a discovered Codex
+        thread IS Codex-origin and MUST drive the Codex verdict to WARN."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            home = root / "codex-home"
+            codex_thread = "019f156d-5600-7ef0-887c-fc5c6cd6dc61"
+            write_jsonl(home / "sessions" / "2026" / "06" / "29" / f"rollout-{codex_thread}.jsonl", [{"type": "response_item"}])
+            write_hook_manifest(home, native_bash_hook_command())
+            stop_dir = root / ".dos" / "stop-failures"
+            stop_dir.mkdir(parents=True, exist_ok=True)
+            (stop_dir / f"{codex_thread}.json").write_text(json.dumps({"total": 3, "consecutive": 3}) + "\n", encoding="utf-8")
+
+            report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0)
+
+            stop = report["workspace_stop_failures"]
+            self.assertEqual(stop["status"], "WARN")
+            self.assertEqual(stop["codex_origin_status"], "WARN")
+            self.assertEqual(stop["codex_origin"]["total_failures"], 3)
+            self.assertEqual(stop["codex_origin"]["active_consecutive_markers"], 1)
+            self.assertEqual(stop["provenance_counts"], {"codex": 1})
+            self.assertEqual(report["status"], "WARN")
+            self.assertIn(
+                "stop blocks or uncleared StopFailure API-wall breaker markers are present",
+                report["actionability"]["reasons"],
+            )
+            self.assertEqual(report["summary"]["codex_origin_stop_failures_total"], 3)
 
 
 if __name__ == "__main__":

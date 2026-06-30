@@ -256,6 +256,38 @@ def stop_failure_origin(entry: dict[str, Any]) -> str:
     return str(entry.get("origin") or "marker_only")
 
 
+def stop_failure_provenance(entry: dict[str, Any]) -> str:
+    """Classify a StopFailure marker by who produced it.
+
+    The Codex audit must not let a Claude-origin breaker marker drag the Codex
+    health verdict to WARN (issue #1447). The provenance is read off evidence
+    the entry already carries:
+
+    - ``codex``: the marker's ``session_id`` matched a discovered Codex thread
+      UUID, so the marker came from a Codex session this audit can attribute to
+      Codex. This is the only class the Codex health verdict may consider.
+    - ``claude``: a Claude transcript was found for the marker (``claude_transcript``
+      in ``origin_labels``) and it is *not* a Codex thread. These are
+      Claude-origin breaker markers, surfaced separately and never folded into
+      the Codex verdict.
+    - ``other``: neither a Codex thread nor a Claude transcript (``marker_only``
+      or a bare ``dos_stream`` with no Codex/Claude attribution).
+    """
+    if bool(entry.get("codex_thread")):
+        return "codex"
+    labels = entry.get("origin_labels")
+    if isinstance(labels, list) and "claude_transcript" in labels:
+        return "claude"
+    return "other"
+
+
+def stop_failure_provenance_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for entry in entries:
+        counts[stop_failure_provenance(entry)] += 1
+    return {key: int(counts[key]) for key in ("codex", "claude", "other") if counts[key]}
+
+
 def stop_failure_origin_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
     counts: Counter[str] = Counter()
     for entry in entries:
@@ -451,7 +483,13 @@ def summarize_claude_transcript_shape(path: Path) -> dict[str, Any]:
     return {"status": "MISSING"}
 
 
-def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int = 20) -> dict[str, Any]:
+def workspace_stop_failure_audit(
+    repo_root: Path,
+    *,
+    since_days: int,
+    limit: int = 20,
+    codex_thread_ids: set[str] | None = None,
+) -> dict[str, Any]:
     stop_dir = repo_root / ".dos" / "stop-failures"
     if not stop_dir.exists():
         return {
@@ -460,6 +498,7 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
             "reason": "no workspace stop-failure directory",
         }
 
+    codex_threads_lower = {tid.lower() for tid in (codex_thread_ids or set())}
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=max(1, since_days))
     active_recent_seconds = ACTIVE_STOP_FAILURE_RECENT_HOURS * 3600
@@ -487,7 +526,10 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
         if transcript_path is not None:
             transcript_paths[session_id] = transcript_path
         stream_path = repo_root / ".dos" / "streams" / f"{session_id}.jsonl"
+        is_codex_thread = session_id.lower() in codex_threads_lower
         origin_labels: list[str] = []
+        if is_codex_thread:
+            origin_labels.append("codex_thread")
         if stream_path.exists():
             origin_labels.append("dos_stream")
         if transcript_path is not None:
@@ -502,6 +544,7 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
             "transcript": public_claude_transcript(transcript_path),
             "origin": "+".join(origin_labels),
             "origin_labels": origin_labels,
+            "codex_thread": is_codex_thread,
         }
         age_seconds = max(0, int((now - mtime).total_seconds()))
         entry["age_seconds"] = age_seconds
@@ -573,6 +616,15 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
             summarized_transcripts += 1
             for tag in summary.get("evidence_tags") or []:
                 transcript_evidence_tags[str(tag)] += 1
+    codex_entries = [entry for entry in entries if stop_failure_provenance(entry) == "codex"]
+    claude_entries = [entry for entry in entries if stop_failure_provenance(entry) == "claude"]
+    other_entries = [entry for entry in entries if stop_failure_provenance(entry) == "other"]
+    codex_active = [entry for entry in active if stop_failure_provenance(entry) == "codex"]
+    claude_active = [entry for entry in active if stop_failure_provenance(entry) == "claude"]
+    codex_total_failures = sum(int(entry.get("total") or 0) for entry in codex_entries)
+    codex_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in codex_active)
+    claude_total_failures = sum(int(entry.get("total") or 0) for entry in claude_entries)
+    claude_active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in claude_active)
     total_failures = sum(int(entry.get("total") or 0) for entry in entries)
     max_consecutive = max((int(entry.get("consecutive") or 0) for entry in entries), default=0)
     active_consecutive_total = sum(int(entry.get("consecutive") or 0) for entry in active)
@@ -616,9 +668,40 @@ def workspace_stop_failure_audit(repo_root: Path, *, since_days: int, limit: int
         bucket["active_consecutive_total"] += consecutive
         bucket["max_consecutive"] = max(bucket["max_consecutive"], consecutive)
     return {
-        "status": "WARN" if total_failures else "PASS",
+        "status": "WARN" if codex_total_failures else "PASS",
+        "codex_origin_status": "WARN" if codex_total_failures else "PASS",
+        "claude_origin_status": "ADVISORY" if claude_total_failures else "CLEAR",
+        "workspace_status": "WARN" if total_failures else "PASS",
         "path": ".dos/stop-failures",
-        "scope": "workspace StopFailure API-wall breaker markers; includes non-Codex hook sessions",
+        "scope": (
+            "Codex health verdict (status) reflects CODEX-origin StopFailure markers only; "
+            "Claude-origin and other-origin markers are surfaced separately and never folded "
+            "into the Codex verdict."
+        ),
+        "provenance_counts": stop_failure_provenance_counts(entries),
+        "active_provenance_counts": stop_failure_provenance_counts(active),
+        "codex_origin": {
+            "markers": len(codex_entries),
+            "total_failures": codex_total_failures,
+            "active_consecutive_markers": len(codex_active),
+            "active_consecutive_total": codex_active_consecutive_total,
+            "origin_counts": stop_failure_origin_counts(codex_entries),
+            "active_origin_counts": stop_failure_origin_counts(codex_active),
+        },
+        "claude_origin": {
+            "scope": "Claude-origin StopFailure markers (advisory only; NOT counted toward Codex health)",
+            "markers": len(claude_entries),
+            "total_failures": claude_total_failures,
+            "active_consecutive_markers": len(claude_active),
+            "active_consecutive_total": claude_active_consecutive_total,
+            "origin_counts": stop_failure_origin_counts(claude_entries),
+            "active_origin_counts": stop_failure_origin_counts(claude_active),
+        },
+        "other_origin": {
+            "scope": "StopFailure markers with neither a Codex thread nor a Claude transcript (advisory only)",
+            "markers": len(other_entries),
+            "total_failures": sum(int(entry.get("total") or 0) for entry in other_entries),
+        },
         "markers": len(entries),
         "zero_total_markers": len(entries) - len(nonzero),
         "nonzero_total_markers": len(nonzero),
@@ -1484,7 +1567,12 @@ def build_report(
     args = argparse.Namespace(repo_root=repo_root)
     hook_fast_path = codex_hook_fast_path(home)
     post_repair = codex_observations_since(repo_root, hook_fast_path.get("repaired_at"))
-    workspace_stop = workspace_stop_failure_audit(repo_root, since_days=since_days, limit=limit)
+    workspace_stop = workspace_stop_failure_audit(
+        repo_root,
+        since_days=since_days,
+        limit=limit,
+        codex_thread_ids=set(codex_threads),
+    )
     audited_codex_threads = {thread_id: codex_threads[thread_id] for thread_id, _path in streams if thread_id in codex_threads}
     git_gate = git_gate_evidence(gate_reports or [])
     if hook_fast_path.get("repaired_at"):
@@ -1574,8 +1662,23 @@ def build_report(
     workspace_stop_active_total = int(workspace_stop.get("active_consecutive_total") or 0)
     workspace_stop_recent_active_total = int(workspace_stop.get("recent_active_consecutive_total") or 0)
     workspace_stop_stale_active_total = int(workspace_stop.get("stale_active_consecutive_total") or 0)
-    if workspace_stop_total:
-        recommendations.append("workspace StopFailure API-wall breaker markers appeared outside the audited Codex streams; inspect .dos/stop-failures")
+    codex_origin_stop = workspace_stop.get("codex_origin") if isinstance(workspace_stop.get("codex_origin"), dict) else {}
+    claude_origin_stop = workspace_stop.get("claude_origin") if isinstance(workspace_stop.get("claude_origin"), dict) else {}
+    codex_origin_stop_total = int(codex_origin_stop.get("total_failures") or 0)
+    codex_origin_stop_active_total = int(codex_origin_stop.get("active_consecutive_total") or 0)
+    claude_origin_stop_total = int(claude_origin_stop.get("total_failures") or 0)
+    claude_origin_stop_active_total = int(claude_origin_stop.get("active_consecutive_total") or 0)
+    if codex_origin_stop_total:
+        recommendations.append("Codex-origin StopFailure API-wall breaker markers are present in audited Codex sessions; inspect .dos/stop-failures for the Codex thread markers")
+    if claude_origin_stop_total:
+        recommendations.append(
+            "Claude-origin StopFailure API-wall breaker markers are present (advisory only): "
+            f"{claude_origin_stop.get('markers')} markers, {claude_origin_stop_active_total} active consecutive — "
+            "these are NOT counted toward Codex health; inspect .dos/stop-failures for the Claude-origin sessions"
+        )
+    other_origin_stop = workspace_stop.get("other_origin") if isinstance(workspace_stop.get("other_origin"), dict) else {}
+    if int(other_origin_stop.get("total_failures") or 0):
+        recommendations.append("other-origin StopFailure markers (no Codex thread, no Claude transcript) appeared in .dos/stop-failures; advisory only, not counted toward Codex health")
     if workspace_stop_recent_active_total:
         recommendations.append("recent workspace StopFailure markers are still consecutive; clear the underlying stop-hook/API-wall failure before treating the seat as healed")
     if workspace_stop_stale_active_total:
@@ -1592,7 +1695,7 @@ def build_report(
             recommendations.append(f"recovery for {reason}: {recovery}")
     if warned or hook_fast_path.get("status") == "WARN" or workspace_stop.get("status") == "WARN":
         status = "WARN"
-    stop_total = sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions) + workspace_stop_active_total
+    stop_total = sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions) + codex_origin_stop_active_total
     actionability = actionable_gate(
         hook_fast_path=hook_fast_path,
         post_repair=post_repair,
@@ -1633,6 +1736,17 @@ def build_report(
             "stop_blocks": sum(s["stop_blocks"] for s in sessions),
             "stop_failures_total": sum(s["stop_failures_total"] for s in sessions),
             "workspace_stop_failures_total": workspace_stop_total,
+            "workspace_stop_failure_provenance_counts": workspace_stop.get("provenance_counts"),
+            "workspace_stop_failure_active_provenance_counts": workspace_stop.get("active_provenance_counts"),
+            "codex_origin_stop_failures_total": codex_origin_stop_total,
+            "codex_origin_stop_failure_markers": codex_origin_stop.get("markers"),
+            "codex_origin_stop_failure_active_markers": codex_origin_stop.get("active_consecutive_markers"),
+            "codex_origin_stop_failure_active_consecutive_total": codex_origin_stop_active_total,
+            "claude_origin_stop_failures_total": claude_origin_stop_total,
+            "claude_origin_stop_failure_markers": claude_origin_stop.get("markers"),
+            "claude_origin_stop_failure_active_markers": claude_origin_stop.get("active_consecutive_markers"),
+            "claude_origin_stop_failure_active_consecutive_total": claude_origin_stop_active_total,
+            "claude_origin_stop_failure_active_origin_counts": claude_origin_stop.get("active_origin_counts"),
             "workspace_stop_failure_markers": workspace_stop.get("markers"),
             "workspace_stop_failure_zero_markers": workspace_stop.get("zero_total_markers"),
             "workspace_stop_failure_nonzero_markers": workspace_stop.get("nonzero_total_markers"),
@@ -1885,7 +1999,28 @@ def render(report: dict[str, Any]) -> str:
         f"{summary.get('workspace_stop_failure_healed_nonzero_markers')} healed nonzero markers; "
         f"recent_origins={json.dumps(summary.get('workspace_stop_failure_recent_active_origin_counts') or {}, sort_keys=True)}; "
         f"settlement={json.dumps(summary.get('workspace_stop_failure_active_settlement_action_counts') or {}, sort_keys=True)})",
+        "  Codex-origin StopFailure (counts toward Codex health): "
+        f"{summary.get('codex_origin_stop_failures_total')} failures across "
+        f"{summary.get('codex_origin_stop_failure_markers')} markers, "
+        f"{summary.get('codex_origin_stop_failure_active_markers')} active",
+        "  Claude-origin StopFailure (advisory only, NOT Codex health): "
+        f"{summary.get('claude_origin_stop_failures_total')} failures across "
+        f"{summary.get('claude_origin_stop_failure_markers')} markers, "
+        f"{summary.get('claude_origin_stop_failure_active_markers')} active "
+        f"(origins={json.dumps(summary.get('claude_origin_stop_failure_active_origin_counts') or {}, sort_keys=True)})",
+        "  StopFailure marker provenance: "
+        f"{json.dumps(summary.get('workspace_stop_failure_provenance_counts') or {}, sort_keys=True)} "
+        f"(active={json.dumps(summary.get('workspace_stop_failure_active_provenance_counts') or {}, sort_keys=True)})",
     ]
+    if summary.get("sessions_audited") == 0 or report.get("sessions_audited") == 0:
+        claude_active = int(summary.get("claude_origin_stop_failure_active_markers") or 0)
+        codex_active = int(summary.get("codex_origin_stop_failure_active_markers") or 0)
+        if claude_active and not codex_active:
+            lines.append(
+                "  note: 0 Codex sessions audited and the active StopFailure markers are Claude-origin; "
+                f"Codex StopFailure posture is {workspace_stop.get('codex_origin_status') or 'PASS'}, "
+                f"{claude_active} Claude-origin StopFailure marker(s) are present but outside the audited Codex streams"
+            )
     top_recent_active_stop = stop_failure_top_sessions(workspace_stop, limit=3, key="top_recent_active")
     if top_recent_active_stop:
         lines.append(
