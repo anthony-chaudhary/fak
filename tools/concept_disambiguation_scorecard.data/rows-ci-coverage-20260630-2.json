@@ -1,0 +1,508 @@
+{
+ "rows": [
+  {
+   "id": "x-ci-coverage-render-materialize-rendercompare",
+   "canonical": "rendercompare (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendercompare is the concrete render-materialize identifier in benchruns: it renders a before/after comparison block for bench runs.",
+   "distinction": "rendercompare renders a before/after comparison block for bench runs; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendercompare",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderlist",
+   "canonical": "renderlist (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderlist is the concrete render-materialize identifier in benchruns: it renders the flat list view of bench runs.",
+   "distinction": "renderlist renders the flat list view of bench runs; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderlist",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderers",
+   "canonical": "renderers (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderers is the concrete render-materialize identifier in render registry: it the collection of pluggable render functions, not any single one.",
+   "distinction": "renderers the collection of pluggable render functions, not any single one; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderers",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderhuman",
+   "canonical": "renderhuman (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderhuman is the concrete render-materialize identifier in covmatrix: it renders the human-readable (non-JSON) coverage-matrix view.",
+   "distinction": "renderhuman renders the human-readable (non-JSON) coverage-matrix view; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderhuman",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendertable",
+   "canonical": "rendertable (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendertable is the concrete render-materialize identifier in codex-mcp-health: it renders the tabular health view.",
+   "distinction": "rendertable renders the tabular health view; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendertable",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderbest",
+   "canonical": "renderbest (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderbest is the concrete render-materialize identifier in benchruns: it renders only the best/winning bench run.",
+   "distinction": "renderbest renders only the best/winning bench run; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderbest",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderchart",
+   "canonical": "renderchart (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderchart is the concrete render-materialize identifier in productscorecard: it renders the product-scorecard chart band.",
+   "distinction": "renderchart renders the product-scorecard chart band; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderchart",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendercritical",
+   "canonical": "rendercritical (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendercritical is the concrete render-materialize identifier in productscorecard: it renders the worst-first critical findings list.",
+   "distinction": "rendercritical renders the worst-first critical findings list; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendercritical",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderdocfolder",
+   "canonical": "renderdocfolder (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderdocfolder is the concrete render-materialize identifier in productscorecard: it renders the per-doc-folder scorecard section.",
+   "distinction": "renderdocfolder renders the per-doc-folder scorecard section; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderdocfolder",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendergaps",
+   "canonical": "rendergaps (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendergaps is the concrete render-materialize identifier in productscorecard: it renders the coverage-gap backlog section.",
+   "distinction": "rendergaps renders the coverage-gap backlog section; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendergaps",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderguardinfoline",
+   "canonical": "renderguardinfoline (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderguardinfoline is the concrete render-materialize identifier in guard info: it renders the single guard-info status line in the info overlay.",
+   "distinction": "renderguardinfoline renders the single guard-info status line in the info overlay; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderguardinfoline",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderguardinfovisualblock",
+   "canonical": "renderguardinfovisualblock (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderguardinfovisualblock is the concrete render-materialize identifier in guard info: it renders the multi-line guard-info visual block, not the one-line status.",
+   "distinction": "renderguardinfovisualblock renders the multi-line guard-info visual block, not the one-line status; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderguardinfovisualblock",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderhygiene",
+   "canonical": "renderhygiene (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderhygiene is the concrete render-materialize identifier in scorecardpane: it renders the repo-hygiene scorecard pane.",
+   "distinction": "renderhygiene renders the repo-hygiene scorecard pane; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderhygiene",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderhygienecompare",
+   "canonical": "renderhygienecompare (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderhygienecompare is the concrete render-materialize identifier in scorecardpane: it renders the hygiene before/after compare, not the plain hygiene pane.",
+   "distinction": "renderhygienecompare renders the hygiene before/after compare, not the plain hygiene pane; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderhygienecompare",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderhygienemarkdown",
+   "canonical": "renderhygienemarkdown (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderhygienemarkdown is the concrete render-materialize identifier in scorecardpane: it renders the hygiene pane as markdown, not the terminal pane.",
+   "distinction": "renderhygienemarkdown renders the hygiene pane as markdown, not the terminal pane; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderhygienemarkdown",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendermarkdowntable",
+   "canonical": "rendermarkdowntable (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendermarkdowntable is the concrete render-materialize identifier in benchruns: it renders a bench table as markdown, not the terminal table.",
+   "distinction": "rendermarkdowntable renders a bench table as markdown, not the terminal table; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendermarkdowntable",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderseats",
+   "canonical": "renderseats (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderseats is the concrete render-materialize identifier in fleetaccounts: it renders the account-seat roster.",
+   "distinction": "renderseats renders the account-seat roster; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderseats",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendershow",
+   "canonical": "rendershow (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendershow is the concrete render-materialize identifier in benchruns: it renders the single-run detail (show) view.",
+   "distinction": "rendershow renders the single-run detail (show) view; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendershow",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderstatus",
+   "canonical": "renderstatus (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderstatus is the concrete render-materialize identifier in benchloop: it renders the bench-loop status line.",
+   "distinction": "renderstatus renders the bench-loop status line; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderstatus",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendersummary",
+   "canonical": "rendersummary (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendersummary is the concrete render-materialize identifier in benchruns: it renders the aggregate summary across runs.",
+   "distinction": "rendersummary renders the aggregate summary across runs; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendersummary",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-rendertwotrackmarkdown",
+   "canonical": "rendertwotrackmarkdown (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "rendertwotrackmarkdown is the concrete render-materialize identifier in scorecard: it renders a two-track (raw+grade) markdown table.",
+   "distinction": "rendertwotrackmarkdown renders a two-track (raw+grade) markdown table; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "rendertwotrackmarkdown",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-render-materialize-renderwalk",
+   "canonical": "renderwalk (render-materialize identifier)",
+   "family": "render-materialize",
+   "kind": "symbol",
+   "definition": "renderwalk is the concrete render-materialize identifier in benchloop: it renders the step-by-step walk of a bench loop.",
+   "distinction": "renderwalk renders the step-by-step walk of a bench loop; it is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+   "distinct_from": [
+    "x2-render-materialize-renderer"
+   ],
+   "aliases": [],
+   "grounding": "renderwalk",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-distinctpools",
+   "canonical": "distinctpools (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "distinctpools is the concrete pool identifier in dispatch: it the set of distinct lane pools, not any single pool.",
+   "distinction": "distinctpools the set of distinct lane pools, not any single pool; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "distinctpools",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-lanepools",
+   "canonical": "lanepools (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "lanepools is the concrete pool identifier in dispatch: it the per-lane worker pools used by dispatch.",
+   "distinction": "lanepools the per-lane worker pools used by dispatch; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "lanepools",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-seatpool",
+   "canonical": "seatpool (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "seatpool is the concrete pool identifier in fleet: it the pool of account seats available to assign.",
+   "distinction": "seatpool the pool of account seats available to assign; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "seatpool",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-seatpoolschema",
+   "canonical": "seatpoolschema (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "seatpoolschema is the concrete pool identifier in fleet: it the schema describing a seat pool, not the pool itself.",
+   "distinction": "seatpoolschema the schema describing a seat pool, not the pool itself; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "seatpoolschema",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-seenpools",
+   "canonical": "seenpools (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "seenpools is the concrete pool identifier in dispatch: it the bookkeeping set of already-seen pools.",
+   "distinction": "seenpools the bookkeeping set of already-seen pools; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "seenpools",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  },
+  {
+   "id": "x-ci-coverage-pool-waveidforpools",
+   "canonical": "waveidforpools (pool identifier)",
+   "family": "pool",
+   "kind": "symbol",
+   "definition": "waveidforpools is the concrete pool identifier in dispatch: it the wave-id keyed by pool, not the pool collection.",
+   "distinction": "waveidforpools the wave-id keyed by pool, not the pool collection; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+   "distinct_from": [
+    "x2-pool-pagedkvpool"
+   ],
+   "aliases": [],
+   "grounding": "waveidforpools",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "",
+   "parent": "",
+   "verdict": "defined",
+   "gaps": []
+  }
+ ]
+}

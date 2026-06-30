@@ -13,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **96.9/100** (grade A) = 9.7/10 |
-| **Coverage** | **95.3%** (880/923 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **43** (clarity 0 + coverage 43) |
-| Crystal-clear concepts | 109 of 683 positioned |
+| **Score** | **98.4/100** (grade A) = 9.8/10 |
+| **Coverage** | **97.6%** (982/1006 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **24** (clarity 0 + coverage 24) |
+| Crystal-clear concepts | 109 of 787 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -24,54 +24,54 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 683 concepts - score 96.9/100 (grade A) - disambiguation-debt 43
+concept-disambiguation chart - 787 concepts - score 98.4/100 (grade A) - disambiguation-debt 24
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 109
-  o defined       ############################ 574
+  o defined       ############################ 678
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
   attention        oooooooooooooooooooooooooooooooooooooooooooooooooo (50 concept(s); 0 crystal)
-  cache            **************ooooooooooooooooooooooooooooooooooooooooooooooooooooooo (69 concept(s); 14 crystal)
-  context-ctx      ********oooooooooooooooooooooooooooooooooooooooooooooooooooo (60 concept(s); 8 crystal)
+  cache            **************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 14 crystal)
+  context-ctx      ********ooooooooooooooooooooooooooooooooooooooooooooooooooooooo (63 concept(s); 8 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ****ooooooooo      (13 concept(s); 4 crystal)
-  evict            ***oooooooooooooo  (17 concept(s); 3 crystal)
-  gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 6 crystal)
-  guard-gate       ***********************ooooooooooooooooooooooooooooooooooo (58 concept(s); 23 crystal)
+  evict            ***ooooooooooooooo (18 concept(s); 3 crystal)
+  gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (85 concept(s); 6 crystal)
+  guard-gate       ***********************oooooooooooooooooooooooooooooooooooooooooooooooo (71 concept(s); 23 crystal)
   layout           ***ooooo           (8 concept(s); 3 crystal)
-  plan             ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (82 concept(s); 3 crystal)
-  policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 6 crystal)
-  pool             **ooooooooooo      (13 concept(s); 2 crystal)
-  render-materialize ***ooooooooooooooooooooooooooooooooooooo (40 concept(s); 3 crystal)
-  score-debt       ***oooooooooooooooo (19 concept(s); 3 crystal)
-  session-runtime  *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooo (63 concept(s); 7 crystal)
-  support-maturity *****ooo           (8 concept(s); 5 crystal)
-  witness-proof    *****ooooooooooooooooooooooooooooooooo (38 concept(s); 5 crystal)
+  plan             ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (102 concept(s); 3 crystal)
+  policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooooo (54 concept(s); 6 crystal)
+  pool             **oooooooooooooooooo (20 concept(s); 2 crystal)
+  render-materialize ***oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (63 concept(s); 3 crystal)
+  score-debt       ***oooooooooooooooooooooooooo (29 concept(s); 3 crystal)
+  session-runtime  *******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (68 concept(s); 7 crystal)
+  support-maturity *****oooo          (9 concept(s); 5 crystal)
+  witness-proof    *****oooooooooooooooooooooooooooooooooooo (41 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ##########################.. 132/141
-  render-materialize #########################... 64/72
-  session-runtime  #########################... 75/83
-  score-debt       ########################.... 33/39
-  guard-gate       ###########################. 89/93
-  pool             ########################.... 18/21
-  support-maturity #######################..... 15/18
-  cache            ############################ 95/96
-  policy-capability ############################ 63/64
-  witness-proof    ###########################. 49/50
+  cache            ###########################. 104/109
+  plan             ###########################. 152/156
+  score-debt       ##########################.. 44/47
+  session-runtime  ###########################. 80/83
+  context-ctx      ###########################. 73/75
+  gateway-engine   ############################ 121/123
+  guard-gate       ###########################. 102/104
+  decision         ###########################. 18/19
+  evict            ###########################. 22/23
+  support-maturity ##########################.. 16/17
+  witness-proof    ###########################. 51/52
   attention        ############################ 57/57
-  context-ctx      ############################ 69/69
   cross-cluster    ............................ 0/0
-  decision         ############################ 15/15
-  evict            ############################ 21/21
-  gateway-engine   ############################ 114/114
   layout           ############################ 9/9
+  policy-capability ############################ 65/65
+  pool             ############################ 25/25
+  render-materialize ############################ 87/87
 
-namespace coverage  [##############################..] 95.3%  (880/923 confusable tokens positioned)
+namespace coverage  [###############################.] 97.6%  (982/1006 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -304,6 +304,16 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | cache | **vBlock** - The unit of cacheable work in vCache: a cachemeta entry whose identity carries every axis that must match for provider reuse (content digest, model, tokenizer, endpoints, position in prefix DAG). |
 | o | defined | symbol | cache | **KVLayout** - The interface abstracting the per-position bytes a given attention variant caches and how to reconstruct per-head K/V from those bytes (standard vs MLA). |
 | o | defined | symbol | cache | **MLAConfig** - The low-rank MLA projection geometry (DeepSeek V2/V3): latent width, RoPE dim, and down/up projection matrices for compressing the K/V cache. |
+| o | defined | symbol | cache | **appendobservedcachesavings (cache identifier)** - appendobservedcachesavings is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **cacherecorder (cache identifier)** - cacherecorder is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **cachewrite (cache identifier)** - cachewrite is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **cachewrite5mmultiplier (cache identifier)** - cachewrite5mmultiplier is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **decisionexplicitcache (cache identifier)** - decisionexplicitcache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **decisionnocache (cache identifier)** - decisionnocache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **filecache (cache identifier)** - filecache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **prefixcachehitratio (cache identifier)** - prefixcachehitratio is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **providerpromptcachereadtokenequiv (cache identifier)** - providerpromptcachereadtokenequiv is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
+| o | defined | symbol | cache | **providerpromptcachewritepremiumtokenequiv (cache identifier)** - providerpromptcachewritepremiumtokenequiv is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts. |
 | o | defined | symbol | context-ctx | **context.Context plumbing helpers (stdlib)** - exec.CommandContext is the Go standard-library constructor that threads a cancellable context.Context into a spawned subprocess, one of the stdlib context-plumbing helpers fak uses to carry deadlines and cancellation through calls. |
 | o | defined | symbol | context-ctx | **BaseContextPlan (syspromptmmu)** - syspromptmmu.BaseContextPlan returns the embedded-PromptSegment projection of the base system context (TierSpine then the TierPolicy floor) as a byte-identical, no-wire-mutation plan. |
 | o | defined | symbol | context-ctx | **AutoSizeContextPlan (compute sizer)** - compute.AutoSizeContextPlan derives the largest context-token count that fits available memory and returns the per-context KV/scratch MemoryPlan for it, reading geometry from a compute.ContextSizeConfig (KV/scratch configs plus the model's declared MaxContext). |
@@ -322,6 +332,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | doc-term | context-ctx | **ContextCite (attribution research method)** - ContextCite is an external 2024 research method (Cohen-Wang et al., "ContextCite: Attributing Model Generation to Context") cited in fak's span-credit research notes as prior art for attributing generation to context spans. |
 | o | defined | symbol | context-ctx | **derived ContextView (cachemeta MemoryView)** - The derived ContextView is the cachemeta materialization view (exercised by TestFromMemoryViewDescribesDerivedContextView) that FromContextPage / FromMemoryView describes for a ContextPage span when deciding cache serveability. |
 | o | defined | subsystem | context-ctx | **ctxtape (portable context-tape renderer)** - ctxtape is the portable context-tape renderer (shipped in v0.33.0) that renders any trajectory, RSI, or education run as a portable context tape. |
+| o | defined | symbol | context-ctx | **contextevents (context-ctx identifier)** - contextevents is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts. |
+| o | defined | symbol | context-ctx | **fakcompactionshedtokens (context-ctx identifier)** - fakcompactionshedtokens is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts. |
+| o | defined | symbol | context-ctx | **prioritycontext (context-ctx identifier)** - prioritycontext is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts. |
 | o | defined | symbol | context-ctx | **ContextTokensLeft (session budget)** - ContextTokensLeft is the session.Budget field holding the remaining prompt/context-token budget a served session has before context-budget exhaustion triggers a reset directive. |
 | o | defined | symbol | context-ctx | **ContextTokens (session usage)** - ContextTokens is the per-turn usage field on gateway.SessionUsage / session.Usage carrying the prompt/context-window token count to debit from the session budget. |
 | o | defined | symbol | context-ctx | **RequestContextChange (recall)** - RequestContextChange is the recall.Session method that applies a safe, negative-only context mutation — recording a tombstone that suppresses one page from future model-visible recall without deleting bytes. |
@@ -372,6 +385,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | evict | **StateEvictable (ctxresidency state)** - ctxresidency.StateEvictable is the residency-state constant ("evictable") marking a span whose K/V is in cache but parented by no live cachemeta entry — a clean candidate the evictor may drop without breaking a dependent. |
 | o | defined | symbol | evict | **CAP_EVICT (journal event kind)** - internal/journal CAP_EVICT is the durable journal event-kind constant recording a capability-eviction lifecycle event in the append-only audit trail. |
 | o | defined | symbol | evict | **EvictedCount (deletion-cert field)** - EvictedCount (cmd/deletioncert) is the self-reported number-of-positions-removed field stamped into the signed KV deletion certificate, explicitly fenced as a self-report whose real proof is the max|delta|=0 parity, not the count. |
+| o | defined | symbol | evict | **decisionevict (evict identifier)** - decisionevict is the concrete evict identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring evict concepts. |
 | o | defined | symbol | evict | **EvictColdest (kvmmu)** - EvictColdest (internal/kvmmu/attention.go) drops the coldest-by-attention-EMA UNPINNED KV spans from a Context until at least targetPositions cache positions are freed (or no unpinned live spans remain), excluding pinned (e.g. system) spans from the candidate set entirely. |
 | o | defined | symbol | evict | **ActionEvict (cachemeta)** - ActionEvict (internal/cachemeta/placement.go) is the PlacementAction constant "evict" — the placement planner's verdict to drop a cache entry entirely and recompute it on demand (FromTier -> TierRecompute), the last resort taken after demote/spill/compress_demote are exhausted or refused. |
 | o | defined | symbol | evict | **evictExcessLocked (bounded-FIFO)** - evictExcessLocked (internal/ctxmmu/mmu.go, and the parallel guards in preflight/normgate/secretgate) drops the OLDEST held entries FIFO until the held set is back within its maxHeld bound, releasing each dropped entry's resource (CAS pin / handle) and bumping an evicted counter — a memory bound on a quarantine / negative-cache, called under the owner's lock. |
@@ -391,6 +405,12 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | gateway-engine | **PureFakKernel (GCP plan test)** - The cmd/fak test TestClaudeGLMGCPA100PlanWiresPureFakKernel, asserting the Claude-GLM-on-GCP-datacenter GPU plan wires the pure in-kernel fak model path (the DRY cuda-binary subcommand) rather than an external upstream. |
 | o | defined | symbol | gateway-engine | **normalizeTUIAgentGatewayURL (URL normalizer)** - The cmd/fak helper that validates and normalizes the gateway base URL a TUI agent / info command is pointed at, returning the canonical base used to build debug and agent requests. |
 | o | defined | symbol | gateway-engine | **HTTPEngine (deleted OpenAI seam)** - The degenerate, never-wired engine.HTTPEngine OpenAI-client seam that was DELETED in v0.7.1 (with an architest invariant keeping the OpenAI client singular), leaving agent.HTTPPlanner as the one OpenAI client. |
+| o | defined | symbol | gateway-engine | **enginedelay (gateway-engine identifier)** - enginedelay is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
+| o | defined | symbol | gateway-engine | **externalengine (gateway-engine identifier)** - externalengine is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
+| o | defined | symbol | gateway-engine | **externalengineobserved (gateway-engine identifier)** - externalengineobserved is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
+| o | defined | symbol | gateway-engine | **fakvdsoavoidedcalls (gateway-engine identifier)** - fakvdsoavoidedcalls is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
+| o | defined | symbol | gateway-engine | **kernelkv (gateway-engine identifier)** - kernelkv is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
+| o | defined | symbol | gateway-engine | **kernelkvevents (gateway-engine identifier)** - kernelkvevents is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts. |
 | o | defined | symbol | gateway-engine | **matKernel (compute)** - The internal/model interface that selects which arithmetic a single decode block's weight matmuls run through — prep turns a normed activation into the kernel's operand form once, and mul applies a named weight to it — so the f32 and Q8 decode blocks share one block skeleton. |
 | o | defined | symbol | gateway-engine | **f32Kernel (compute)** - The matKernel that runs a decode block fully in f32 — prep is the identity and every matmul routes through parMatRows (the in-order row-parallel GEMV), preserving the bit-exact reduction order. |
 | o | defined | symbol | gateway-engine | **q8Kernel (compute)** - The matKernel that runs a decode block in Q8_0, quantizing the activation once per prep into a q8Vec and multiplying it against the prebuilt Q8_0 weight via qMatRows. |
@@ -452,6 +472,19 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | subsystem | gateway-engine | **modelengine** - The binding that wires the in-kernel model into the kernel as a registered EngineDriver under the id 'inkernel'. |
 | o | defined | subsystem | gateway-engine | **modelroute** - The model-routing policy spine: a version-tagged JSON manifest that classifies a tool call by aspect into a plan for which model(s) serve each aspect. |
 | o | defined | subsystem | gateway-engine | **xenginekv** - The cross-engine zero-copy KV co-residence seam: a RegionBackend that maps an external engine's KV cache and fak's args/results into one shared addressable arena. |
+| o | defined | symbol | guard-gate | **acceptancegate (guard-gate identifier)** - acceptancegate is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **evaluateprocguard (guard-gate identifier)** - evaluateprocguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **fakstalebaseguard (guard-gate identifier)** - fakstalebaseguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardchildinteractive (guard-gate identifier)** - guardchildinteractive is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardclaudeconfigdir (guard-gate identifier)** - guardclaudeconfigdir is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guarddebugstatstosharedstderr (guard-gate identifier)** - guarddebugstatstosharedstderr is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardgo (guard-gate identifier)** - guardgo is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardinfoversiontag (guard-gate identifier)** - guardinfoversiontag is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardrsidebt (guard-gate identifier)** - guardrsidebt is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **guardsplitenabled (guard-gate identifier)** - guardsplitenabled is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **precommitgates (guard-gate identifier)** - precommitgates is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **procguard (guard-gate identifier)** - procguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
+| o | defined | symbol | guard-gate | **procguardinput (guard-gate identifier)** - procguardinput is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | subsystem | guard-gate | **guardrsi (guard-verdict-RSI fold)** - The internal/guardrsi package that folds a guarded session's hash-chained decision journal and finds the dominant honesty-hole bucket (WorstBucket) to drive the guard-verdict RSI loop. |
 | o | defined | subsystem | guard-gate | **guardroute (RSI route decision)** - The internal/guardroute bridge that turns guardrsi's worst journal bucket into a routed, idempotent, escalating finding (a queue row and, for a real honesty-hole, a deduped GitHub issue), closing the guard RSI loop. |
 | o | defined | subsystem | guard-gate | **guardcomplaint (agent appeal channel)** - The internal/guardcomplaint package behind `fak complain`: the SUBJECTIVE appeal channel where an agent reports a false-positive DENY, the complement of guardroute's objective journal-fold routing. |
@@ -492,6 +525,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | layout | **mlaKVLayout (model)** - model.mlaKVLayout is the kvLayout implementation for MLA models that caches a compressed latent c_KV plus a pre-RoPE decoupled key per position, then up-projects the latent to full per-head K/V and rotates the shared key on read, shrinking the cache ~10-50x versus the per-head width. |
 | o | defined | symbol | layout | **standardKVLayout (model)** - model.standardKVLayout is the default Llama/Qwen kvLayout: the cache stores post-RoPE K and V directly at width NumKVHeads*HeadDim, so reconstructKV is the identity that splits and hands back the stored rows, keeping the path bit-identical to inline blockStep attention. |
 | o | defined | symbol | layout | **modelLayout (model selector)** - model.Model.modelLayout() is the selector method that returns mlaKVLayout when the model has MLA projection geometry (Model.MLA != nil) and otherwise returns the default standardKVLayout, choosing which KV-cache layout a given model uses. |
+| o | defined | symbol | plan | **blockplan (plan identifier)** - blockplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **dispatchplan (plan identifier)** - dispatchplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **fakplannermaxattempts (plan identifier)** - fakplannermaxattempts is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **gocandidates (plan identifier)** - gocandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **loopcheckplan (plan identifier)** - loopcheckplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **planwalk (plan identifier)** - planwalk is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
+| o | defined | symbol | plan | **pycandidates (plan identifier)** - pycandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
 | o | defined | symbol | plan | **HTTPPlanner (agent client)** - internal/agent's HTTPPlanner is the single outbound chat-completions HTTP client that implements agent.Planner, speaking the OpenAI/Anthropic/Gemini wire to a live upstream model. |
 | o | defined | symbol | plan | **MockPlanner (offline)** - internal/agent/mock.go's MockPlanner is a deterministic, offline agent.Planner that emulates a real planner with a fixed scripted sequence, used in CI and as cmd/fak/main.go's fallback. |
 | o | defined | symbol | plan | **StreamingPlanner (capability)** - internal/agent's StreamingPlanner is the optional interface a Planner advertises (CompleteStream/StreamingSupported) when it can emit completion tokens incrementally. |
@@ -539,6 +579,19 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | plan | **ResolvedPlan (modelroute)** - internal/modelroute's ResolvedPlan binds a routed Plan to concrete targets (the optional Scout plus the resolved roster), produced by Roster.ResolvePlan. |
 | o | defined | symbol | plan | **ReplayPlan (vcachechain)** - internal/vcachechain's ReplayPlan is the topological replay schedule (send-one-then-fan) for warming a set of cache targets, produced by PrefixDAG.TopologicalReplay. |
 | o | defined | symbol | plan | **ToolPlan (promptmmu)** - internal/promptmmu's ToolPlan is the spine's pure, caller-supplied verdict (e.g. a Drop set) over a request's tools, driving inbound tool compaction. |
+| o | defined | symbol | plan | **BuildPlanWithOptions (dogfood issue planner)** - internal/dogfoodissues.BuildPlanWithOptions builds dogfood issue-sync rows while applying the shared issue-candidate contract and dedupe options. |
+| o | defined | symbol | plan | **DefaultBinaryDoctorCandidates (appversion)** - internal/appversion.DefaultBinaryDoctorCandidates returns the ordered binary-name candidates the version doctor should inspect for a fak executable. |
+| o | defined | symbol | plan | **ExpertParallelPerRankPlan (compute)** - internal/compute.ExpertParallelPerRankPlan builds the per-rank MemoryPlan for expert-parallel serving by splitting expert weights across ranks and adding replicated and per-rank extras. |
+| o | defined | symbol | plan | **OrderLaneCandidates (dispatch tick)** - internal/dispatchtick.OrderLaneCandidates sorts candidate issue numbers for a lane using priority tier, optional recency preference, and issue number tie-breaks. |
+| o | defined | symbol | plan | **ReviewCandidate (issue contract)** - internal/issuecontract.ReviewCandidate grades one issue candidate against dispatchability, scope, and live-sync safeguards before it can be posted or synced. |
+| o | defined | metric | plan | **candidate-count (dispatch price)** - The dispatch price and live telemetry CandidateCount field is the number of candidates admitted to the price calculation after routing, held-lane, cooldown, and scope filters. |
+| o | defined | symbol | plan | **LaunchPlan (dispatch price)** - cmd/fak dispatch pricing's LaunchPlan is the wave-grouped list of dispatch launch targets produced from collision-priced candidates. |
+| o | defined | symbol | plan | **ExecutionPlan (dispatch wave)** - cmd/fak dispatch wave's ExecutionPlan binds launch targets to account seats, worker backend, work kind, and the exact dispatch tick command that would run. |
+| o | defined | symbol | plan | **plan-id (dispatch plan digest)** - The dispatch PlanID is the stable short sha256 digest label for a JSON-serialized launch or execution plan. |
+| o | defined | symbol | plan | **execution-plan-id (dispatch wave)** - cmd/fak dispatch wave's execution_plan_id is the stable digest label for the account-bound execution plan checked by the prelaunch gate. |
+| o | defined | symbol | plan | **dispatchWaveExecutionPlans (builder)** - cmd/fak.dispatchWaveExecutionPlans converts priced dispatch wave targets and allocated account lanes into account-bound ExecutionPlan rows. |
+| o | defined | symbol | plan | **dispatchLaunchPlanFromWaves (materializer)** - cmd/fak.dispatchLaunchPlanFromWaves is the shared helper that materializes dispatchLaunchWave rows from priced wave IDs and a target lookup function. |
+| o | defined | symbol | plan | **dispatchStablePlanID (digest helper)** - cmd/fak.dispatchStablePlanID hashes a JSON-serialized dispatch plan payload into the stable plan-* identifier used by price and wave reports. |
 | o | defined | doc-term | plan | **replan (recovery verb)** - In fak's refusal/routing vocabulary (cmd/fak/commit.go, internal/gateway/routing.go) to 'replan' is the recovery action when a commit or route is BLOCKED — discard the attempt and compute a fresh plan rather than retrying it verbatim. |
 | o | defined | symbol | plan | **idxPlan (ctxplan index-bounded view)** - idxPlan is the local ctxplan.Plan produced by index.PlanCells in cmd/ctxplandemo and cmd/ctxplanbench, the O(1) resident view scored over only an index-bounded candidate set rather than the full transcript. |
 | o | defined | symbol | plan | **planAudit (ctxplan faithfulness witness)** - ctxplan.Audit(p Plan) returns the Witness that a planned resident view is faithful (no candidate span destroyed), the same plan-faithfulness check tools/plan_audit_test.py exercises. |
@@ -581,6 +634,8 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | policy-capability | **PolicyFor (loopmgr governor)** - loopmgr.Policies.PolicyFor returns the effective loop-governor Policy for a given loop id — the per-loop override if one is registered, else the default loop policy (pause flags, max-consecutive-refusals, aging). |
 | o | defined | symbol | policy-capability | **PolicyReplayReport (turnbench)** - turnbench.PolicyReplayReport is the artifact scoring K adjudication-policy variants against one recorded trajectory as model-free kernel replays, carrying per-arm divergence witnesses and cube-collapse cost accounting. |
 | o | defined | symbol | policy-capability | **PolicySearch (turnbench genome search)** - turnbench PolicySearch (RunPolicySearch / PolicySearchConfig / PolicySearchReport in policysearch.go) is the model-free replay oracle that hill-climbs the adjudicator deny-set genome over an injection-bearing corpus to find policies that minimize admitted injections at zero model cost. |
+| o | defined | symbol | policy-capability | **accountspolicy (policy-capability identifier)** - accountspolicy is the concrete policy-capability identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring policy-capability concepts. |
+| o | defined | symbol | policy-capability | **executionpolicy (policy-capability identifier)** - executionpolicy is the concrete policy-capability identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring policy-capability concepts. |
 | o | defined | symbol | policy-capability | **RegisterCapability (abi)** - abi.RegisterCapability is the registry writer that adds a negotiable feature token to the kernel's process-global Supported() capability set, called from a driver's init(). |
 | o | defined | symbol | policy-capability | **RegisterAdjudicator (abi)** - abi.RegisterAdjudicator inserts a PDP/PEP adjudicator link into the kernel's pre-call decision chain at a numeric rank (lower rank runs first) and rebuilds the registry snapshot. |
 | o | defined | symbol | policy-capability | **WithAdjudicators (kernel)** - kernel.WithAdjudicators constructs a kernel that folds an EXPLICIT caller-supplied adjudicator chain instead of the process-global registry, so K replay arms each carry their own monitor without colliding. |
@@ -620,6 +675,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | pool | **PagedKVPool (paged KV block pool)** - model.PagedKVPool (internal/model/pagedkv.go) is the shared pool of fixed-size physical KV blocks every paged sequence draws from with reference-counted copy-on-write; NewPagedKVPool builds a 2-plane K/V pool, and NewPagedKVPoolWithRaw builds a 3-plane pool that adds the pre-RoPE Kraw plane so exact-span eviction can re-rotate survivors in a single rotation. |
 | o | defined | symbol | pool | **BuildSeatPool (dispatchtick accounts)** - dispatchtick.BuildSeatPool folds account rows and seat leases for a product into a SeatPoolResult — the available agent-seat capacity by account the dispatcher draws a worker from. |
 | o | defined | symbol | pool | **L3PoolWitness (gateway deletion probe)** - gateway.L3PoolWitness is the minimal control-path probe interface the L3 deletion rung folds — an exists/mget over page keys that returns only presence booleans, never page payload bytes — so a deletion certificate can attest an L3 page pool no longer holds a subject's pages. |
+| o | defined | symbol | pool | **distinctpools (pool identifier)** - distinctpools is the concrete pool identifier in dispatch: it the set of distinct lane pools, not any single pool. |
+| o | defined | symbol | pool | **lanepools (pool identifier)** - lanepools is the concrete pool identifier in dispatch: it the per-lane worker pools used by dispatch. |
+| o | defined | symbol | pool | **seatpool (pool identifier)** - seatpool is the concrete pool identifier in fleet: it the pool of account seats available to assign. |
+| o | defined | symbol | pool | **seatpoolschema (pool identifier)** - seatpoolschema is the concrete pool identifier in fleet: it the schema describing a seat pool, not the pool itself. |
+| o | defined | symbol | pool | **seenpools (pool identifier)** - seenpools is the concrete pool identifier in dispatch: it the bookkeeping set of already-seen pools. |
+| o | defined | symbol | pool | **waveidforpools (pool identifier)** - waveidforpools is the concrete pool identifier in dispatch: it the wave-id keyed by pool, not the pool collection. |
+| o | defined | symbol | pool | **poolkey (pool identifier)** - poolkey is the concrete pool identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring pool concepts. |
 | o | defined | symbol | pool | **Pool (polymodel residency)** - polymodel.NewPool (internal/polymodel/polymodel.go) constructs a model-RESIDENCY pool that keeps many prefill-warm models resident under one weight-byte budget, evicting the coldest UNPINNED model (LRU) when an admission would exceed the cap. |
 | o | defined | symbol | pool | **DefaultPoolProfiles (cachemeta)** - cachemeta.DefaultPoolProfiles returns a representative PoolProfile per residency tier — HBM/DRAM/NUMA-far host-private, CXL the coherent switch-pooled zero-copy tier, disk local, remote reachable-but-copy-only — the order-of-magnitude default an operator overrides with their fabric's measured topology. |
 | o | defined | symbol | pool | **PoolReuseVerdict (cachemeta gate)** - cachemeta.PoolReuseVerdict is the cross-tenant reuse trust GATE for a SHARED pool: it permits a tenant to attend a pooled cell another tenant wrote only when the cell is un-poisoned, declared shareable beyond its agent scope, adjudicated TaintTrusted, and its materialization key matches on every axis. |
@@ -643,6 +705,29 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | render-materialize | **RenderLedgerGapReport (nightrun)** - nightrun.RenderLedgerGapReport writes the benchmark-authority ledger-gap report to a writer: the authority's last-updated date, ledger totals, and the rows newer than or missing from the published benchmark surface. |
 | o | defined | symbol | render-materialize | **RenderReadOut (support table)** - supportmaturityscore.RenderReadOut renders the support-maturity readout rows as a deterministic ASCII table for the human `fak support` view. |
 | o | defined | symbol | render-materialize | **RenderTwoTrack (cache-value P&L)** - cachevaluereport.RenderTwoTrack renders the cache-value profit-and-loss two-track report side by side (the WITNESSED reuse track and its OBSERVED-dollar projection) with the verdict. |
+| o | defined | symbol | render-materialize | **rendercompare (render-materialize identifier)** - rendercompare is the concrete render-materialize identifier in benchruns: it renders a before/after comparison block for bench runs. |
+| o | defined | symbol | render-materialize | **renderlist (render-materialize identifier)** - renderlist is the concrete render-materialize identifier in benchruns: it renders the flat list view of bench runs. |
+| o | defined | symbol | render-materialize | **renderers (render-materialize identifier)** - renderers is the concrete render-materialize identifier in render registry: it the collection of pluggable render functions, not any single one. |
+| o | defined | symbol | render-materialize | **renderhuman (render-materialize identifier)** - renderhuman is the concrete render-materialize identifier in covmatrix: it renders the human-readable (non-JSON) coverage-matrix view. |
+| o | defined | symbol | render-materialize | **rendertable (render-materialize identifier)** - rendertable is the concrete render-materialize identifier in codex-mcp-health: it renders the tabular health view. |
+| o | defined | symbol | render-materialize | **renderbest (render-materialize identifier)** - renderbest is the concrete render-materialize identifier in benchruns: it renders only the best/winning bench run. |
+| o | defined | symbol | render-materialize | **renderchart (render-materialize identifier)** - renderchart is the concrete render-materialize identifier in productscorecard: it renders the product-scorecard chart band. |
+| o | defined | symbol | render-materialize | **rendercritical (render-materialize identifier)** - rendercritical is the concrete render-materialize identifier in productscorecard: it renders the worst-first critical findings list. |
+| o | defined | symbol | render-materialize | **renderdocfolder (render-materialize identifier)** - renderdocfolder is the concrete render-materialize identifier in productscorecard: it renders the per-doc-folder scorecard section. |
+| o | defined | symbol | render-materialize | **rendergaps (render-materialize identifier)** - rendergaps is the concrete render-materialize identifier in productscorecard: it renders the coverage-gap backlog section. |
+| o | defined | symbol | render-materialize | **renderguardinfoline (render-materialize identifier)** - renderguardinfoline is the concrete render-materialize identifier in guard info: it renders the single guard-info status line in the info overlay. |
+| o | defined | symbol | render-materialize | **renderguardinfovisualblock (render-materialize identifier)** - renderguardinfovisualblock is the concrete render-materialize identifier in guard info: it renders the multi-line guard-info visual block, not the one-line status. |
+| o | defined | symbol | render-materialize | **renderhygiene (render-materialize identifier)** - renderhygiene is the concrete render-materialize identifier in scorecardpane: it renders the repo-hygiene scorecard pane. |
+| o | defined | symbol | render-materialize | **renderhygienecompare (render-materialize identifier)** - renderhygienecompare is the concrete render-materialize identifier in scorecardpane: it renders the hygiene before/after compare, not the plain hygiene pane. |
+| o | defined | symbol | render-materialize | **renderhygienemarkdown (render-materialize identifier)** - renderhygienemarkdown is the concrete render-materialize identifier in scorecardpane: it renders the hygiene pane as markdown, not the terminal pane. |
+| o | defined | symbol | render-materialize | **rendermarkdowntable (render-materialize identifier)** - rendermarkdowntable is the concrete render-materialize identifier in benchruns: it renders a bench table as markdown, not the terminal table. |
+| o | defined | symbol | render-materialize | **renderseats (render-materialize identifier)** - renderseats is the concrete render-materialize identifier in fleetaccounts: it renders the account-seat roster. |
+| o | defined | symbol | render-materialize | **rendershow (render-materialize identifier)** - rendershow is the concrete render-materialize identifier in benchruns: it renders the single-run detail (show) view. |
+| o | defined | symbol | render-materialize | **renderstatus (render-materialize identifier)** - renderstatus is the concrete render-materialize identifier in benchloop: it renders the bench-loop status line. |
+| o | defined | symbol | render-materialize | **rendersummary (render-materialize identifier)** - rendersummary is the concrete render-materialize identifier in benchruns: it renders the aggregate summary across runs. |
+| o | defined | symbol | render-materialize | **rendertwotrackmarkdown (render-materialize identifier)** - rendertwotrackmarkdown is the concrete render-materialize identifier in scorecard: it renders a two-track (raw+grade) markdown table. |
+| o | defined | symbol | render-materialize | **renderwalk (render-materialize identifier)** - renderwalk is the concrete render-materialize identifier in benchloop: it renders the step-by-step walk of a bench loop. |
+| o | defined | symbol | render-materialize | **materializedby (render-materialize identifier)** - materializedby is the concrete render-materialize identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring render-materialize concepts. |
 | o | defined | symbol | render-materialize | **Materialize (ctxplan view)** - ctxplan.Materialize re-derives a budgeted View of the lossless context store each turn: PlanCells picks which spans fit the budget, the selected ones are paged in through the trust gate, and a faithfulness Witness reconciles rendered-vs-refused so every elided span stays recoverable. |
 | o | defined | symbol | render-materialize | **MaterializeLayout (ctxplan)** - ctxplan.MaterializeLayout is the layout-aware peer of Materialize: it uses a four-area Layout to choose the bounded candidate set and per-area precision, then renders the selected exact spans through the same trust gate and witness reconciliation as the default path. |
 | o | defined | symbol | render-materialize | **MaterializeVerdict (cachemeta gate)** - cachemeta.MaterializeVerdict is the central cache gate: given the runtime materialization view, the stored Entry, the requested key, and quality evidence, it returns a LookupVerdict deciding whether a cached prefix/KV span may be served (Hit) or must be refused (Miss). |
@@ -667,6 +752,13 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | concept | render-materialize | **render (verb)** - render is the repo-wide convention for a pure projection function that turns a typed value into a human/Markdown/wire/terminal text surface (e.g. the bare `func render` in loophealth and dispatchworker), without mutating its input. |
 | o | defined | metric | score-debt | **per-scorecard *_debt integer** - Each scorecard emits one named debt integer counting its surface's unmet rungs — learning_debt (unwitnessed learning docs), conflation_debt (provenance honesty), growth_debt (silently-undefined coverage cells), loopindex_debt (loop stages not yet witnessed), maturity_debt (support-maturity ladder skips), support_maturity_debt, dogfood_debt, sessionobs_debt — read in delta folds via the DebtKey constant and the baseline/current bDebt/cDebt locals. |
 | o | defined | subsystem | score-debt | **named scorecard surface (payload + baseline)** - These are concrete scorecard surfaces and their plumbing: learning_scorecard, code_quality_scorecard, and product_scorecard are distinct deterministic measurement tools, ScorecardPayload is the per-scorecard struct carrying corpus/KPIs/grade, and tools/scorecard_baseline.json is the pinned baseline the control-pane ratchet reds against. |
+| o | defined | symbol | score-debt | **conceptusagedebt (score-debt identifier)** - conceptusagedebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **debtbygroup (score-debt identifier)** - debtbygroup is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **debtcount (score-debt identifier)** - debtcount is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **debtname (score-debt identifier)** - debtname is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **industryscorecard (score-debt identifier)** - industryscorecard is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **milestonedebt (score-debt identifier)** - milestonedebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
+| o | defined | symbol | score-debt | **productdebt (score-debt identifier)** - productdebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts. |
 | o | defined | subsystem | score-debt | **agent-readiness scorecard** - The scorecard that measures how easy fak is for an AI agent (Claude Code, Codex, Cursor, an MCP client) to discover, adopt, and build on - missing entry points, harness configs, copy-pasteable first commands, per-agent recipes (tools/agent_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **persona-readiness scorecard** - The scorecard that measures whether fak serves its top human personas - the free-tier dev, the infra engineer, the researcher - each with the entry path they need (prebuilt binary, deploy guide, determinism witness) (tools/persona_readiness_scorecard.py). |
 | o | defined | subsystem | score-debt | **doc-appeal scorecard** - The scorecard that measures whether a reader-facing doc reads like a person wrote it: em-dash flood, bold-emphasis flood, run-on sentences, walls of text, LLM-scaffolding phrases (tools/doc_appeal_scorecard.py). |
@@ -678,9 +770,12 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | subsystem | score-debt | **bench-dx scorecard** - The scorecard that measures the developer experience of running benchmarks: whether the bench grid is discoverable, reproducible, and well-documented (tools/bench_dx_scorecard.py). |
 | o | defined | subsystem | score-debt | **build scorecard** - The scorecard that grades the CUDA build/dev process health (standing author, build, validate, gate, onboard) folded into the guard-RSI and cuda-dev surfaces (internal/guardrsi buildScorecard). |
 | o | defined | metric | score-debt | **hygiene-debt** - The single debt integer the repo-hygiene scorecard folds to: noisy artifacts, placement drift, generated junk across the tree. |
-| o | defined | metric | score-debt | **health-debt** - The debt integer for fleet/service health defects: incident, stale, and deferred surfaces the watchdog and health-beat report fold to a single number. |
-| o | defined | metric | score-debt | **ui-quality-debt** - The debt integer the ui-quality scorecard folds to: TUI render defects measured over the pane render source (internal/uiquality), e.g. rune-safety and cell-alignment KPIs. |
-| o | defined | metric | score-debt | **milestone-debt** - The debt integer the milestone report folds to: the gap between the maturity climb plus epic roadmap and where the milestones should stand. |
+| o | defined | metric | score-debt | **heaviness_debt** - The single bounded debt integer emitted by the operator-heaviness scorecard: live operator pressure folded into the control pane by `fak operator heaviness`. |
+| o | defined | subsystem | score-debt | **scorecardpane (native control-pane fold)** - The Go package that ports the scorecard control-pane and repo-hygiene folds into the fak binary for faster local and garden checks. |
+| o | defined | subsystem | score-debt | **repo-hygiene scorecard** - The scorecard that measures repository hygiene debt: noisy artifacts, placement drift, generated junk, and other tree-cleanliness defects. |
+| o | defined | metric | score-debt | **total_debt** - The raw-unit portfolio sum of every scorecard debt integer in the control pane baseline and payload. |
+| o | defined | metric | score-debt | **grade_debt** - The control pane's scale-invariant severity sum, mapping each scorecard's effective letter grade to A=0, B=1, C=2, D=4, F=8. |
+| o | defined | subsystem | score-debt | **concept-disambiguation scorecard** - The scorecard that discovers fak's confusable concept namespace and charges disambiguation debt for unclear positioned rows plus uncovered tree tokens. |
 | o | defined | subsystem | session-runtime | **sessionobs (observability scorer)** - internal/sessionobs is the stdlib-only RSI scorecard that grades how far our own coding-session data has climbed the capture->structure->link->aggregate->learn ladder, the value-side complement to the cost-only tools/session_audit.py; its `fak sessions learn` rung is the registered loop consumer that reads the committed corpus. |
 | o | defined | metric | session-runtime | **SessionObsDebt (ladder-rung debt)** - sessionobs.Corpus.SessionObsDebt is the headline integer the session-observability scorecard emits: the count of HARD ladder rungs (capture/structure/link/aggregate/learn) not yet built, retired only by building the real rung never by weakening a check. |
 | o | defined | config | session-runtime | **taskscheduler (Windows cron target)** - taskscheduler is the `fak cron emit --target taskscheduler` OS-scheduler target that projects a registered fak loop into a Windows Task Scheduler `Register-ScheduledTask` snippet (alongside launchd and systemd), so a job survives reboot; the same family's NewNativeScheduler is an unrelated decode-engine constructor. |
@@ -692,6 +787,11 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | session-runtime | **SessionType (cache-value workload tag)** - SessionType is the cachevaluereport per-observation workload label (run | guard | serve) that splits the cache-value roll-up, rendered as the SessionTypeMix histogram in the cachevalue review. |
 | o | defined | symbol | session-runtime | **SlotFreed (gateway wire event)** - gateway.SlotFreed is the wire-neutral struct the scheduler's SlotEvent crosses into the gateway as (TraceID, Cause, Rev), projected by slotEventToSlotFreed and consumed by Server.ReclaimKVOnSlotFreed to drive real KV reclamation. |
 | o | defined | config | session-runtime | **FakSessionCheckpoint (resume packet task)** - FakSessionCheckpoint is the Windows Task Scheduler task name registered by tools/register_session_checkpoint.ps1 that runs the session-checkpoint job (the verified resumable packet sourced from witnessed state, #636) on a cadence. |
+| o | defined | symbol | session-runtime | **activesessions (session-runtime identifier)** - activesessions is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts. |
+| o | defined | symbol | session-runtime | **authblockedsessions (session-runtime identifier)** - authblockedsessions is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts. |
+| o | defined | symbol | session-runtime | **claudecodesessionid (session-runtime identifier)** - claudecodesessionid is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts. |
+| o | defined | symbol | session-runtime | **configureservesessiondurability (session-runtime identifier)** - configureservesessiondurability is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts. |
+| o | defined | symbol | session-runtime | **limitsession (session-runtime identifier)** - limitsession is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts. |
 | o | defined | subsystem | session-runtime | **sessionbench (value-stack bench)** - cmd/sessionbench is the Go benchmark command that measures the net value-add of fak's fused agent kernel over a synthetic multi-agent, multi-turn session workload (its prefillTokens A/B/C formula). |
 | o | defined | symbol | session-runtime | **DurabilitySession (durability tier)** - DurabilitySession is the ctxplan/ctxmmu durability-tier constant ("session") that marks a stored context span as true only for the current session's lifetime. |
 | o | defined | symbol | session-runtime | **BatchSession (batched decode)** - model.BatchSession decodes B independent user sequences in lockstep over one shared weight stream (continuous-batching decode), built via NewBatchSession. |
@@ -740,6 +840,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | concept | support-maturity | **SupportMaturity Rung (M0-M7 ladder)** - supportmaturity.Rung is the uint8-backed closed M0-M7 support-maturity ladder type (M0 unsupported through M7 beyond-SOTA, with M6Parity the SOTA-local parity rung), and FromSupport lowers a covmatrix Support value onto that ladder (UNDEFINED/FENCED/PROOF-PATH/SUPPORTED to M0/M1/M3/M4). |
 | o | defined | metric | support-maturity | **MaturityScore (cadence maturity fold)** - cadencereport MaturityScore is the LedgerRow integer rating of the feature-lifecycle scorecard, produced by CollectMaturity (which builds and converts the Go-native maturity scorecard in-process) and merged into the cadence envelope by FoldWithMaturity. |
 | o | defined | symbol | support-maturity | **ExactSpanSupported (engine evict capability)** - ExactSpanSupported (enginecache Result field, set by SupportsExactSpan) reports whether a documented serving engine or KV pool can evict exactly the named K/V span instead of resetting the whole prefix cache, the same capability bit SupportsRaw exposes for a paged KV pool that carries the Kraw plane. |
+| o | defined | symbol | support-maturity | **interpretmaturity (support-maturity identifier)** - interpretmaturity is the concrete support-maturity identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring support-maturity concepts. |
 | o | defined | symbol | witness-proof | **loopmgr witnessed run-status set** - The loop/bench witnessed run-status family: loopmgr.StatusWitnessRefused ("witness_refused") and StatusWitnessUnavailable ("witness_unavailable"), bench/loopgate VerdictWitnessed/OutcomeWitnessed ("witnessed") and its witnessed_done promotion, callavoid's WitnessedRedirect and its WitnessedEmpty count, and loopindex's WitnessedIndex health score. |
 | o | defined | symbol | witness-proof | **unwitnessed-claim reason set** - The unwitnessed-claim deny/re-arm reason family: loopgate.ReasonDoneUnwitnessed ("LOOP_DONE_UNWITNESSED", the re-arm reason when a done claim has no witness, as adjudicated for a claim-unwitnessed turn) and the proposed context-safety SAFETY_UNWITNESSED DOS refusal token for a rendered number with no tamper-evident source. |
 | o | defined | symbol | witness-proof | **ReviewRefute (scout review verdict)** - modelroute.ReviewRefute is the scout-review verdict value "refute" returned when an opt-in pre-commit review rejects a diff; safecommit raises it to the ReasonReviewRefuted ("REVIEW_REFUTED") refusal that blocks the commit before it lands. |
@@ -750,6 +851,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | witness-proof | **witnessPrefix (blob-hash label)** - syspromptmmu.witnessPrefix is the constant "blob-sha256:" that labels a syspromptmmu Witness string as a content-blob hash (not a git object id), so a system-prompt span's admitting witness is recognizable as a content digest. |
 | o | defined | doc-term | witness-proof | **TestPrefixReuseFanoutWitness (fanbench soundness proof)** - TestPrefixReuseFanoutWitness is the cmd/fanbench soundness test that grounds the fan-out prefix-reuse GEOMETRY claim: it prefills the master-goal prefix once and proves N cloned sub-agents are bit-identical to an independent full prefill (max|delta|=0). |
 | o | defined | symbol | witness-proof | **TallyFromCountersWitnessed (realized-deny fold)** - callavoid.TallyFromCountersWitnessed is TallyFromCounters with a set of WITNESSED productive denies (each a WitnessedRedirect carrying its enumerated variant set), netting witnessed denies so each deny is counted exactly once and only a non-forgeable, deduplicated fan-out is credited into the graded headline. |
+| o | defined | symbol | witness-proof | **contextwitnessed (witness-proof identifier)** - contextwitnessed is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts. |
+| o | defined | symbol | witness-proof | **kernelwitnessed (witness-proof identifier)** - kernelwitnessed is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts. |
+| o | defined | symbol | witness-proof | **proofwitness (witness-proof identifier)** - proofwitness is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts. |
 | o | defined | symbol | witness-proof | **VerdictRequireWitness (abi verdict)** - abi.VerdictRequireWitness is the kernel verdict kind that leaves a gated call PENDING an independent read-back, so the kernel must corroborate the caller's claimed effect (carried in the WitnessPayload) before the call may dispatch. |
 | o | defined | symbol | witness-proof | **ReasonUnwitnessed (deny reason)** - abi.ReasonUnwitnessed is the deny reason-code the kernel attaches when a require-witness gate found no corroboration, so the fail-closed default turns the pending verdict into a DENY (also surfaced as looprecover's unwitnessed disposition). |
 | o | defined | symbol | witness-proof | **WitnessPayload (verdict claim carrier)** - abi.WitnessPayload is the typed bounded-disclosure verdict payload struct{Claim string} that an adjudicator attaches to a RequireWitness or Deny verdict to carry the single claim string the kernel must corroborate. |
@@ -770,7 +874,7 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | witness-proof | **StatusWitnessRefused (loop run status)** - loopmgr.StatusWitnessRefused is the loop run-status 'witness_refused' (and its WitnessRefused counter) meaning a witness RAN and the evidence contradicted the run's claimed completion. |
 | o | defined | metric | witness-proof | **MissWitnessRevoked (vdso cache-miss)** - vdso.MissWitnessRevoked is the cache-miss reason 'WITNESS_REVOKED' counted when a cached entry was admitted under a now-refuted external witness and therefore fails closed instead of serving stale bytes. |
 | o | defined | symbol | witness-proof | **VerifiedUnavailable (witness unavailable)** - taskmgr.VerifiedUnavailable (and loopmgr.StatusWitnessUnavailable) is the state where a witness was ASKED but could not read the effect back — no network, a missing ref — so the claim is neither confirmed nor refused and must not downgrade to claimed-done. |
-| o | defined | doc-term | witness-proof | **dgxGlmGpuWitness (CUDA GPU proof)** - dgxGlmGpuWitness is the on-GPU server CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via private GPU witness runner), invoked because the win32 build host cannot execute the CUDA path. |
+| o | defined | doc-term | witness-proof | **gpuServerGlmGpuWitness (CUDA GPU proof)** - gpuServerGlmGpuWitness is the on-GPU server CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via private GPU witness runner), invoked because the win32 build host cannot execute the CUDA path. |
 | o | defined | symbol | witness-proof | **WitnessOutcome** - The result of claim corroboration: Confirmed (evidence supports it), Refuted (evidence contradicts it), or Abstain (no definitive evidence). |
 | o | defined | symbol | witness-proof | **TrustEpoch** - A monotonically-increasing integrity clock that increments with each witness refutation, dual to WorldVersion (the consistency clock). |
 
@@ -778,9 +882,9 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 16 kind/grounding mismatch |
-| honesty | `hierarchy_soft` | 76 | 0 | 4 hierarchy issue(s) |
-| well-formed | `well_formed` | 100 | 0 | all 683 rows well-formed |
+| honesty | `kind_grounding_soft` | 60 | 0 | 15 kind/grounding mismatch |
+| honesty | `hierarchy_soft` | 70 | 0 | 8 hierarchy issue(s) |
+| well-formed | `well_formed` | 100 | 0 | all 787 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -792,21 +896,21 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 132 | 141 | 9 |
-| render-materialize | 64 | 72 | 8 |
-| session-runtime | 75 | 83 | 8 |
-| score-debt | 33 | 39 | 6 |
-| guard-gate | 89 | 93 | 4 |
-| pool | 18 | 21 | 3 |
-| support-maturity | 15 | 18 | 3 |
-| cache | 95 | 96 | 1 |
-| policy-capability | 63 | 64 | 1 |
-| witness-proof | 49 | 50 | 1 |
+| cache | 104 | 109 | 5 |
+| plan | 152 | 156 | 4 |
+| score-debt | 44 | 47 | 3 |
+| session-runtime | 80 | 83 | 3 |
+| context-ctx | 73 | 75 | 2 |
+| gateway-engine | 121 | 123 | 2 |
+| guard-gate | 102 | 104 | 2 |
+| decision | 18 | 19 | 1 |
+| evict | 22 | 23 | 1 |
+| support-maturity | 16 | 17 | 1 |
+| witness-proof | 51 | 52 | 1 |
 | attention | 57 | 57 | 0 |
-| context-ctx | 69 | 69 | 0 |
 | cross-cluster | 0 | 0 | 0 |
-| decision | 15 | 15 | 0 |
-| evict | 21 | 21 | 0 |
-| gateway-engine | 114 | 114 | 0 |
 | layout | 9 | 9 | 0 |
+| policy-capability | 65 | 65 | 0 |
+| pool | 25 | 25 | 0 |
+| render-materialize | 87 | 87 | 0 |
 
