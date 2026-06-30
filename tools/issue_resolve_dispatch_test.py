@@ -2022,5 +2022,43 @@ class HeldNoCommitIssuesTest(unittest.TestCase):
                            {"issue": "x", "reason": mod.NO_COMMIT_SELF_MODIFY}]}), set())
 
 
+class TickExitCodeTest(unittest.TestCase):
+    """A scheduled-task LastResult must flag only a genuine malfunction, never a
+    benign no-work / backpressure tick (the chronic-0x1 durability bug)."""
+
+    def test_benign_no_work_and_backpressure_exit_zero(self) -> None:
+        mod = load()
+        for action in ("no_issue", "no_lane", "lane_busy", "lane_leased",
+                       "refused", "weekly_capped", "backend_unhealthy"):
+            with self.subTest(action=action):
+                # ok=False on every benign verdict, yet the tick ran correctly.
+                self.assertEqual(mod.tick_exit_code({"action": action, "ok": False}), 0)
+
+    def test_dispatched_work_exits_zero(self) -> None:
+        mod = load()
+        self.assertEqual(mod.tick_exit_code({"action": "spawned", "ok": True}), 0)
+        self.assertEqual(mod.tick_exit_code({"action": "would_spawn", "ok": True}), 0)
+
+    def test_spawn_failed_exits_nonzero(self) -> None:
+        mod = load()
+        self.assertEqual(mod.tick_exit_code({"action": "spawn_failed", "ok": False}), 1)
+
+    def test_unknown_or_malformed_action_exits_nonzero(self) -> None:
+        mod = load()
+        # An unrecognised/missing action fails loud rather than masking a new mode.
+        self.assertEqual(mod.tick_exit_code({"action": "kaboom"}), 1)
+        self.assertEqual(mod.tick_exit_code({}), 1)
+        self.assertEqual(mod.tick_exit_code(None), 1)  # type: ignore[arg-type]
+
+    def test_benign_actions_cover_every_non_failure_verdict(self) -> None:
+        # Guard against a new evaluate() action silently defaulting to "failure":
+        # spawn_failed is the ONLY emitted action outside the benign set.
+        mod = load()
+        emitted = {"spawned", "would_spawn", "no_issue", "no_lane", "lane_busy",
+                   "lane_leased", "refused", "weekly_capped", "backend_unhealthy",
+                   "spawn_failed"}
+        self.assertEqual(emitted - mod.BENIGN_ACTIONS, {"spawn_failed"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2108,6 +2108,38 @@ def render(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# main()'s return value is a scheduled-task / loop LastResult. It must flag only
+# a genuine MALFUNCTION, never the fleet correctly declining to spawn. These are
+# evaluate()'s "ran correctly" actions: the tick either dispatched work (spawned
+# / would_spawn) or BENIGNLY declined because there was nothing to spawn or the
+# box is at capacity — no eligible issue, no free lane, lane busy/leased, host
+# refused at cap, account weekly-capped, backend unhealthy. All exit 0 so Task
+# Scheduler — and fleet_control_pane.scheduler_result_needs_action, which treats
+# any non-zero LastResult as needs-action — don't read a healthy idle/capped
+# fleet as a crash. Only SPAWN_FAILED (a worker that died on launch), an unknown
+# action, or an unhandled exception (which exits 1 on its own) is a real failure.
+# Before this, a routine NO_ISSUE/WEEKLY_CAPPED tick exited 1, so the always-on
+# FleetIssueDispatch/Codex tasks were chronically 0x1 and indistinguishable from
+# a real crash.
+BENIGN_ACTIONS = frozenset({
+    "spawned", "would_spawn",                            # work dispatched
+    "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
+    "refused",                                           # preflight backpressure (host at cap / no account)
+    "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
+})
+
+
+def tick_exit_code(payload: dict[str, Any]) -> int:
+    """Process exit code for one dispatch tick: 0 when the tick ran correctly
+    (dispatched work, or benignly declined per BENIGN_ACTIONS), non-zero only on
+    a genuine malfunction such as SPAWN_FAILED or an unrecognised action. Keeps a
+    healthy idle/capped tick from reporting failure to Task Scheduler / the
+    control-pane watchdog."""
+    if not isinstance(payload, dict):
+        return 1
+    return 0 if str(payload.get("action") or "") in BENIGN_ACTIONS else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="One guarded tick that spawns an issue-RESOLUTION worker (dry-run by default).")
@@ -2170,7 +2202,7 @@ def main(argv: list[str] | None = None) -> int:
                        loop_ledger=(Path(args.loop_ledger).resolve()
                                     if args.loop_ledger else None))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
-    return 0 if payload.get("ok") else 1
+    return tick_exit_code(payload)
 
 
 if __name__ == "__main__":
