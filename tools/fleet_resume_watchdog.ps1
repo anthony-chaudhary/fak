@@ -76,6 +76,13 @@ function Toast($title, $msg, $level = 'info', $key = '', $minIntervalMinutes = 0
   try { & powershell @args } catch {}
 }
 
+# Per-tick liveness heartbeat, written FIRST -- before the registry refresh / account
+# probe below, any of which can throw. With ErrorActionPreference=Stop and the conhost
+# --headless launcher reporting exit 0, an early throw used to wedge this watchdog
+# silently: this log's mtime (which fleet_bottleneck.py reads as recovery freshness)
+# went stale for hours while the scheduled task kept showing LastResult=0.
+Note ("tick start: Live=$Live probe=$Probe window=${WindowH}h")
+
 $regDir = $RegistryDir
 if (-not (Test-Path $regDir)) { New-Item -ItemType Directory -Path $regDir -Force | Out-Null }
 $env:FLEET_REG_DIR = $regDir
@@ -92,8 +99,15 @@ if ($probeMode -ne 'none') {
   # make the probe use the SAME claude binary this watchdog resumes with
   if ($ClaudeExe -and (Test-Path $ClaudeExe)) { $env:FLEET_CLAUDE_EXE = $ClaudeExe }
 }
-& $py (Join-Path $FleetDir 'tools\fleet_sessions.py') @regArgs | Out-Null
-Note ("  registry refresh: probe=$probeMode")
+try {
+  & $py (Join-Path $FleetDir 'tools\fleet_sessions.py') @regArgs | Out-Null
+  Note ("  registry refresh: probe=$probeMode")
+} catch {
+  # A refresh/probe failure (e.g. the blocked-account probe erroring once accounts go
+  # auth-blocked) must not abort the whole tick before a single resume is considered.
+  # Log it and continue on whatever resume_plan.json already exists on disk.
+  Note ("  registry refresh FAILED: $($_.Exception.Message) -- continuing on existing plan")
+}
 $planPath = Join-Path $regDir 'resume_plan.json'
 $plan = if (Test-Path $planPath) { (Get-Content $planPath -Raw | ConvertFrom-Json).plan } else { @() }
 $mode = if ($Live) { 'LIVE' } else { 'DRY-RUN' }
