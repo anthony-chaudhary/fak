@@ -297,7 +297,7 @@ def write_dgx_completed_run(run_dir: Path) -> None:
     for name in ("PREFLIGHT.static.json", "PREFLIGHT.endpoints.json"):
         (run_dir / name).write_text(json.dumps({"schema": "fak.dgx-preflight.v1", "passed": True}), encoding="utf-8")
     for name in ("raw-sglang.json", "fak-gateway.json"):
-        (run_dir / name).write_text(json.dumps({"schema": "fak.dgx-endpoint-bench.v1", "passed": True}), encoding="utf-8")
+        (run_dir / name).write_text(json.dumps({"schema": "fak.gpu-server-endpoint-bench.v1", "passed": True}), encoding="utf-8")
     (run_dir / "compare.json").write_text(json.dumps([]), encoding="utf-8")
     (run_dir / "COMPARE.md").write_text("# compare\n", encoding="utf-8")
     (run_dir / "MATRIX.json").write_text(json.dumps({"schema": "fak.dgx-run-matrix.v1", "results": []}), encoding="utf-8")

@@ -11,7 +11,7 @@ codename is already normalized in tools/scrub_public_copy.py. But "dgx"/"a100" i
 also baked into code the docs legitimately reference -- the `dgxbridge` command,
 `register_dgx_run()`, the `FAK_DGX_REQ_` response marker, the `"dgx"` machine_id in
 benchmark JSON, the `sm_80` arch constant, artifact paths like
-`experiments/qwen36/dgx-r4-20260622/`. Rewriting those would break the build and the
+`experiments/qwen36/gpu-server-r4-20260622/`. Rewriting those would break the build and the
 bench-data joins. So the rule is: rewrite PROSE, preserve IDENTIFIERS.
 
 The prose/identifier boundary, made mechanical

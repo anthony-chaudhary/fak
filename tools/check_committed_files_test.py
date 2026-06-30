@@ -76,7 +76,7 @@ def test_dgx_token_outside_cmd_internal_is_not_private_only() -> None:
     # not-yet-approved relocation, so they must NOT be classified private-only here
     # (else CI would go red on paths still intentionally present in the tree).
     assert not any(rx.search("tools/dgx_pure_kernel_bench.sh") for rx, _ in cc.PRIVATE_ONLY)
-    assert not any(rx.search("experiments/qwen36/dgx-r4-20260622/compare.json")
+    assert not any(rx.search("experiments/qwen36/gpu-server-r4-20260622/compare.json")
                    for rx, _ in cc.PRIVATE_ONLY)
 
 

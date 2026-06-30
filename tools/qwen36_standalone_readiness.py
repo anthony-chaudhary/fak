@@ -356,7 +356,7 @@ def count_endpoint_reports(run_dir: Path) -> int:
     count = 0
     for path in run_dir.glob("*.json"):
         data = load_json_object(path)
-        if data.get("schema") == "fak.dgx-endpoint-bench.v1":
+        if data.get("schema") == "fak.gpu-server-endpoint-bench.v1":
             count += 1
     return count
 
