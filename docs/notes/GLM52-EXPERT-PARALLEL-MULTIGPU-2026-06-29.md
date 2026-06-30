@@ -130,3 +130,39 @@ A **live resident-EP tok/s witness** does not exist yet. Three things gate it, i
 Until those land, the resident-EP number is `not yet`, and the cpu-offload wall (0.2324 tok/s)
 stands as the baseline. The capacity fit and the EP decomposition are real and on trunk; the
 serving throughput is the multi-month residual.
+
+## Update (later 2026-06-29): gates 1 & 2 closed at the seam — the residual narrows
+
+Two of the three gates above have since landed on trunk (cpu-ref bit-exact; no multi-GPU
+hardware was available, so the live witness is still the residual):
+
+- **Gate 1 — a real cross-DEVICE collective: BUILT.** `internal/compute/cuda_collective.go`
+  (+`cuda_nccl.cu`, `-tags cuda,nccl`) implements `compute.CollectiveBackend` over a real NCCL
+  communicator (`ncclCommInitAll` single-process-multi-GPU): AllReduceSum / AllGather /
+  ReduceScatter across distinct GPUs, with `Caps().Collective` advertised true only after
+  `fcuda_nccl_init` succeeds over >1 device. (Item 1 above — "only the cpu-ref implementation" —
+  is superseded; the device seam now exists, gated behind the NCCL build tag.) `AllToAll` still
+  fails closed (grouped ncclSend/Recv is the follow-on; EP uses AllReduceSum, not AllToAll).
+- **Gate 2 — EP wired into the live decode forward, reducing through the device collective: DONE.**
+  `glmMoeEPFFN` (`internal/model/moe.go`) is dispatched by `ffnForLayer` when `epRanks>1` and now
+  reduces the routed-expert partials through `m.expertParallelCollective()` — the `BackendCollective`
+  the gateway sets over the device NCCL backend when `--expert-parallel N>1`, instead of the
+  hardcoded single-box `LocalCollective` it carried before (commits `24071294` model + `191ae9d6`
+  gateway). So a multi-GPU serve's DECODE now issues a genuine cross-GPU all-reduce per MoE layer —
+  the first live multi-GPU decode path — rather than initializing a communicator it never used.
+  Bit-exact on cpu-ref (`TestGlmMoeEPFFNReducesThroughDeviceCollective`, the EP-decode twin of
+  `TestForwardTPViaBackendCollective`).
+
+**What is STILL `not yet`** (the honest residual to a live tok/s number, none of it host-codeable):
+
+1. **Per-rank resident expert COMPUTE.** `expertParallelPartials` still computes every band's
+   `expertSwiGLU` on the single session kernel; only the REDUCTION is distributed, not the expert
+   GEMMs or their weight residency. The multi-GPU compute win — each rank holding and running only
+   its band's experts on its own GPU — is the next rung. This is what turns the cross-GPU all-reduce
+   from "correct but no speedup" into the cpu-offload-wall escape the capacity table predicts.
+2. **A multi-GPU `-tags cuda,nccl` binary built on the GPU server** (gate 3 above, unchanged — `go`
+   is still absent on the box).
+
+So the device line moved from "the seam is cpu-ref only" to "the seam is real and the decode
+reduction flows through it"; the remaining residual is per-rank expert residency + the on-box
+multi-GPU binary, then the live witness.
