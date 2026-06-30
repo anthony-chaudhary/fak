@@ -223,8 +223,8 @@ func TestInterpretEpicsSplitsProgramsFromDiscrete(t *testing.T) {
 // that an ongoing program is rendered WITHOUT a misleading completion %.
 func TestRenderSplitsSections(t *testing.T) {
 	specs := []EpicSpec{
-		{Number: 1010, Title: "GLM kernel"},     // ongoing
-		{Number: 1315, Title: "native harness"}, // discrete
+		{Number: 1010, Title: "GLM kernel", Generation: "next"},    // ongoing
+		{Number: 1315, Title: "native harness", Generation: "now"}, // discrete
 	}
 	counts := []EpicCounts{
 		{Number: 1010, Closed: 7, Total: 10, Source: "label"},
@@ -240,6 +240,35 @@ func TestRenderSplitsSections(t *testing.T) {
 	// The kernel program must NOT be rendered as "70%" — an ongoing program has no %.
 	if strings.Contains(out, "GLM kernel — 70%") || strings.Contains(out, "GLM kernel [kernel-optimization] — 70%") {
 		t.Fatalf("an ongoing program must never render a completion %%\n%s", out)
+	}
+}
+
+func TestInterpretEpicsSummarizesGenerationLanes(t *testing.T) {
+	specs := []EpicSpec{
+		{Number: 1315, Title: "native harness", Generation: "gen/now"}, // discrete
+		{Number: 1010, Title: "GLM kernel", Generation: "next"},        // ongoing
+		{Number: 7, Title: "future option", Generation: "future"},      // unreadable
+	}
+	counts := []EpicCounts{
+		{Number: 1315, Closed: 2, Total: 4, Source: "label"},
+		{Number: 1010, Closed: 7, Total: 10, Source: "label"},
+	}
+	e := InterpretEpics(specs, counts, "")
+	byGen := map[string]GenerationRow{}
+	for _, row := range e.Generations {
+		byGen[row.Generation] = row
+	}
+	if row := byGen["now"]; row.Tracked != 1 || row.Discrete != 1 || row.Closed != 2 || row.Total != 4 || row.OverallPct != 50 {
+		t.Fatalf("now generation row = %+v, want one 2/4 discrete epic", row)
+	}
+	if row := byGen["next"]; row.Tracked != 1 || row.Programs != 1 || row.Discrete != 0 || row.Total != 0 {
+		t.Fatalf("next generation row = %+v, want one ongoing program with no completion pct", row)
+	}
+	if row := byGen["second-next"]; row.Tracked != 0 {
+		t.Fatalf("second-next generation row = %+v, want seeded zero row", row)
+	}
+	if row := byGen["future"]; row.Tracked != 1 || row.Errored != 1 || row.Measured != 0 {
+		t.Fatalf("future generation row = %+v, want one unreadable row", row)
 	}
 }
 
@@ -350,7 +379,7 @@ func TestRenderCarriesBothDimensions(t *testing.T) {
 	r := Fold(goodMaturity(), goodEpics(), FoldOpts{Date: "2026-06-29", Commit: "abc"})
 	r = r.WithTrend(TrendVsLast(RowFromReport(r), nil))
 	out := Render(r)
-	for _, want := range []string{"milestone report", "climb", "ladder:", "M0:", "roadmap", "#1 x", "->", "trend:"} {
+	for _, want := range []string{"milestone report", "climb", "ladder:", "M0:", "roadmap", "generation lanes:", "now:", "second-next: 0 tracked", "#1 x", "->", "trend:"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q\n%s", want, out)
 		}
