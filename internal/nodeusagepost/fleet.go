@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/fleet"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -44,6 +45,7 @@ const (
 type signals struct {
 	down    int  // boxes that reported "down" (ByState[StateDown]) — a real observation
 	silent  int  // boxes that gave no real word (ByState[StateUnknown]) — silent or errored
+	hasCrit bool // actionable crit attention beyond the down/unreachable visibility bucket
 	hasWarn bool // any warn-level attention item: version skew / staleness AMONG reporters
 }
 
@@ -53,12 +55,20 @@ func readSignals(snap fleet.Snapshot) signals {
 		silent: snap.ByState[fleet.StateUnknown],
 	}
 	for _, it := range snap.Attention {
-		if it.Level == "warn" {
+		switch it.Level {
+		case "crit":
+			if !isVisibilityCrit(it) {
+				s.hasCrit = true
+			}
+		case "warn":
 			s.hasWarn = true
-			break
 		}
 	}
 	return s
+}
+
+func isVisibilityCrit(it fleet.Item) bool {
+	return strings.Contains(it.Title, "down or unreachable")
 }
 
 // classify buckets the snapshot. Order is load-bearing: a REAL problem (down/warn) is
@@ -68,7 +78,7 @@ func classify(snap fleet.Snapshot, sig signals) bucket {
 	switch {
 	case snap.Total == 0:
 		return bucketEmpty
-	case sig.down > 0 || sig.hasWarn:
+	case sig.down > 0 || sig.hasCrit || sig.hasWarn:
 		return bucketProblem
 	case sig.silent == snap.Total: // every box silent (and down==0, by the case above)
 		return bucketNoVisibility
@@ -161,6 +171,9 @@ func detailFor(b bucket, snap fleet.Snapshot, sig signals) string {
 		if sig.down > 0 {
 			return fmt.Sprintf("%d box(es) reported down", sig.down)
 		}
+		if sig.hasCrit {
+			return firstCritTitle(snap)
+		}
 		return firstWarnTitle(snap) // skew/stale, already honestly worded by the fold
 	case bucketNoVisibility:
 		return "no live reports — every box reads unknown/errored (not down)"
@@ -171,6 +184,18 @@ func detailFor(b bucket, snap fleet.Snapshot, sig signals) string {
 		}
 		return "" // fully clean — Verdict OK already renders the check
 	}
+}
+
+// firstCritTitle returns the first actionable crit attention item's title, skipping the
+// visibility bucket ("down or unreachable") because down is named from ByState and
+// unknown/silent is not an outage.
+func firstCritTitle(snap fleet.Snapshot) string {
+	for _, it := range snap.Attention {
+		if it.Level == "crit" && !isVisibilityCrit(it) {
+			return it.Title
+		}
+	}
+	return "compute capacity needs attention"
 }
 
 // firstWarnTitle returns the first warn-level attention item's title, or a generic
@@ -203,15 +228,153 @@ func linesFor(b bucket, snap fleet.Snapshot, sig signals) []string {
 		}
 	}
 
+	lines = append(lines, capacityLine(snap, sig))
+	if line := gpuLine(snap); line != "" {
+		lines = append(lines, line)
+	}
 	lines = append(lines, stateLines(snap)...)
 	lines = append(lines, classLines(snap)...)
+	if line := versionLine(snap); line != "" {
+		lines = append(lines, line)
+	}
 	lines = append(lines, fmt.Sprintf("readiness: %d", snap.Score))
+	lines = append(lines, attentionLines(snap)...)
 
 	if b == bucketNoVisibility {
-		lines = append(lines,
-			"populate liveness: run the private Slack bridge, or `fak lab report --id <box> --state live` on a box that can self-report")
+		lines = append(lines, "next: populate liveness with the private Slack bridge, or `fak lab report --id <box> --state live` from a box that can self-report")
+	} else if next := nextLine(b, snap, sig); next != "" {
+		lines = append(lines, next)
 	}
 	return lines
+}
+
+// capacityLine names usable and unavailable boxes in one line, so the card answers
+// "how much can I schedule onto right now?" instead of only listing raw states.
+func capacityLine(snap fleet.Snapshot, sig signals) string {
+	usable := snap.ByState[fleet.StateLive] + snap.ByState[fleet.StateIdle] + snap.ByState[fleet.StateDraining]
+	parts := []string{fmt.Sprintf("usable capacity: %d/%d boxes", usable, snap.Total)}
+	var state []string
+	for _, kv := range []struct {
+		name string
+		n    int
+	}{
+		{"live", snap.ByState[fleet.StateLive]},
+		{"idle", snap.ByState[fleet.StateIdle]},
+		{"draining", snap.ByState[fleet.StateDraining]},
+	} {
+		if kv.n > 0 {
+			state = append(state, fmt.Sprintf("%s %d", kv.name, kv.n))
+		}
+	}
+	if len(state) > 0 {
+		parts = append(parts, strings.Join(state, ", "))
+	}
+	var unavailable []string
+	if sig.down > 0 {
+		unavailable = append(unavailable, fmt.Sprintf("down %d", sig.down))
+	}
+	if sig.silent > 0 {
+		unavailable = append(unavailable, fmt.Sprintf("unknown %d", sig.silent))
+	}
+	if len(unavailable) > 0 {
+		parts = append(parts, "unavailable "+strings.Join(unavailable, ", "))
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return parts[0] + " (" + strings.Join(parts[1:], "; ") + ")"
+}
+
+func gpuLine(snap fleet.Snapshot) string {
+	g := snap.GPUUtil
+	if g == nil {
+		return ""
+	}
+	return fmt.Sprintf("gpu capacity: busy %d/%d, idle %d (%d%% util)",
+		g.Busy, g.Total, idleGPUs(g), g.UtilPct)
+}
+
+func idleGPUs(g *fleet.GPUStats) int {
+	if g == nil || g.Total <= g.Busy {
+		return 0
+	}
+	return g.Total - g.Busy
+}
+
+func versionLine(snap fleet.Snapshot) string {
+	if snap.ModalVersion == "" {
+		if snap.Reachable > 0 {
+			return "version: none reported"
+		}
+		return ""
+	}
+	off := snap.Reachable - modalVersionCount(snap)
+	if off > 0 {
+		return fmt.Sprintf("version: %s (%d reachable box(es) other/none)", snap.ModalVersion, off)
+	}
+	return "version: " + snap.ModalVersion
+}
+
+func modalVersionCount(snap fleet.Snapshot) int {
+	for _, v := range snap.Versions {
+		if v.Key == snap.ModalVersion {
+			return v.Count
+		}
+	}
+	return 0
+}
+
+func attentionLines(snap fleet.Snapshot) []string {
+	var lines []string
+	total := 0
+	for _, it := range snap.Attention {
+		if it.Level != "ok" {
+			total++
+		}
+	}
+	for _, it := range snap.Attention {
+		if it.Level == "ok" {
+			continue
+		}
+		if len(lines) == 3 {
+			lines = append(lines, fmt.Sprintf("attention: +%d more", total-len(lines)))
+			break
+		}
+		line := fmt.Sprintf("attention[%s]: %s", it.Level, it.Title)
+		if it.Detail != "" {
+			line += " - " + it.Detail
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 && snap.Total > 0 {
+		lines = append(lines, "attention: none")
+	}
+	return lines
+}
+
+func nextLine(b bucket, snap fleet.Snapshot, sig signals) string {
+	switch b {
+	case bucketEmpty:
+		return "next: add roster boxes or disable the capacity feed for this fleet"
+	case bucketProblem:
+		if sig.down > 0 {
+			return "next: remove reported-down boxes from scheduling, then restart or re-report them"
+		}
+		if sig.hasCrit {
+			return "next: repack work onto busy GPUs or stop idle-GPU leases"
+		}
+		return "next: refresh stale/skewed reporters before trusting capacity"
+	case bucketClean:
+		if sig.silent > 0 {
+			return "next: restore reports for silent boxes before counting them as spare capacity"
+		}
+		if g := snap.GPUUtil; idleGPUs(g) > 0 {
+			return "next: schedule new GPU work onto idle capacity"
+		}
+		return "next: no operator action"
+	default:
+		return ""
+	}
 }
 
 // stateLines renders the per-state node counts (live / idle / draining / down /

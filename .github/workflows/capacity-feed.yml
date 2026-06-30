@@ -1,13 +1,11 @@
 name: capacity-feed
 
 # Publish fak's CAPACITY surface to Slack #capacity (C0BDNU04JDP, the scoreboard
-# workspace T0BDEJF1HGB). The capacity memo names three inbound-load signals —
-# (a) active worker accounts (`fak accounts list`), (b) lab node readiness
-# (`fak lab status`), and (c) the open-issue backlog. (a) and (b) need lab/account
-# secrets this CI node does not have; the one signal that is reliable WITHOUT them
-# is the OPEN-ISSUE COUNT, since `gh` is available with the built-in GITHUB_TOKEN.
-# So this daily job posts the open GitHub issue backlog as the capacity KPI
-# (open-issues) — the inbound-load proxy — to #capacity.
+# workspace T0BDEJF1HGB). Lab/account capacity lives on the private bridge and the
+# #node-usage feed; this public CI job reports the GitHub-side demand pressure it can
+# witness with GITHUB_TOKEN: total open issues, urgent P0/P1 load, new 24h arrivals,
+# and stale >7d backlog. Those four numbers make the card an operator triage signal
+# instead of a raw issue-count heartbeat.
 #
 # This is a SLACK STATUS feeder (cadence -> channel post), the dual of
 # steering-guard.yml — NOT an issue feeder like score-/bench-/gate-signal.yml
@@ -63,37 +61,54 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Count the open GitHub issues — the inbound-load signal. `gh` ships on the
-      # runner and authenticates with the built-in GITHUB_TOKEN. NO --search date
-      # filter (documented unreliable / cap-limited); a plain --state open with a
-      # high --limit and a `length` jq is the honest count.
-      - name: count open issues
-        id: count
+      # Summarize open GitHub issues — the public demand-pressure signal. `gh` ships
+      # on the runner and authenticates with the built-in GITHUB_TOKEN. NO --search
+      # date filter (documented unreliable / cap-limited); pull the open list once
+      # and bucket locally.
+      - name: summarize issue load
+        id: load
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          count=$(gh issue list --state open --limit 2000 --json number --jq 'length')
-          # Guard against an empty/failed read so the grade step's integer test is safe.
-          case "$count" in
-            ''|*[!0-9]*) count=0 ;;
-          esac
+          gh issue list --state open --limit 2000 --json number,labels,createdAt > capacity-issues.json
+          now=$(date +%s)
+          count=$(jq 'length' capacity-issues.json)
+          urgent=$(jq '[.[] | select(any(.labels[]?.name; test("^(P0|P1|priority[:/_-]?(0|1)|priority/P[01])$"; "i")))] | length' capacity-issues.json)
+          new24=$(jq --argjson now "$now" '[.[] | select(($now - (.createdAt | fromdateiso8601)) <= 86400)] | length' capacity-issues.json)
+          stale7=$(jq --argjson now "$now" '[.[] | select(($now - (.createdAt | fromdateiso8601)) >= 604800)] | length' capacity-issues.json)
+          for v in count urgent new24 stale7; do
+            eval "x=\$$v"
+            case "$x" in ''|*[!0-9]*) eval "$v=0" ;; esac
+          done
           echo "count=$count" >> "$GITHUB_OUTPUT"
-          echo "open issues: $count"
+          echo "urgent=$urgent" >> "$GITHUB_OUTPUT"
+          echo "new24=$new24" >> "$GITHUB_OUTPUT"
+          echo "stale7=$stale7" >> "$GITHUB_OUTPUT"
+          printf 'open=%s urgent=%s new24=%s stale7=%s\n' "$count" "$urgent" "$new24" "$stale7"
 
-      # Map the backlog size onto a grade/verdict with a small fixed-threshold case.
-      # A growing backlog is rising inbound load: ACTION once it crosses ~200.
+      # Map the public load signals onto a compact grade/verdict. Urgent P0/P1 work
+      # pages first; otherwise backlog size drives the action threshold.
       - name: grade backlog
         id: grade
         run: |
-          n="${{ steps.count.outputs.count }}"
-          if   [ "$n" -lt 50 ];  then g=A; v=OK;
-          elif [ "$n" -lt 120 ]; then g=B; v=OK;
-          elif [ "$n" -lt 200 ]; then g=C; v=ACTION;
-          else                        g=D; v=ACTION;
+          n="${{ steps.load.outputs.count }}"
+          urgent="${{ steps.load.outputs.urgent }}"
+          new24="${{ steps.load.outputs.new24 }}"
+          stale7="${{ steps.load.outputs.stale7 }}"
+          if   [ "$urgent" -ge 10 ]; then g=D; v=ACTION;
+          elif [ "$urgent" -gt 0 ];  then g=C; v=ACTION;
+          elif [ "$n" -lt 50 ];      then g=A; v=OK;
+          elif [ "$n" -lt 120 ];     then g=B; v=OK;
+          elif [ "$n" -lt 200 ];     then g=C; v=ACTION;
+          else                            g=D; v=ACTION;
           fi
+          score="${n} open; ${urgent} urgent; ${new24} new/24h; ${stale7} stale>7d"
+          detail="demand pressure: open=${n}; urgent(P0/P1)=${urgent}; new24h=${new24}; stale>7d=${stale7}; node readiness posts in #node-usage"
           echo "grade=$g" >> "$GITHUB_OUTPUT"
           echo "verdict=$v" >> "$GITHUB_OUTPUT"
-          echo "grade=$g verdict=$v"
+          echo "score=$score" >> "$GITHUB_OUTPUT"
+          echo "detail=$detail" >> "$GITHUB_OUTPUT"
+          echo "grade=$g verdict=$v score=$score"
 
       # Always render the card to the step summary (and as the artifact) so the run
       # is auditable even when nothing posts (missing secret / manual dry-run / fork).
@@ -101,15 +116,15 @@ jobs:
         run: |
           go run ./cmd/fak scoreboard post \
             --channel "$FAK_CAPACITY_CHANNEL" \
-            --kpi open-issues \
-            --value "${{ steps.count.outputs.count }}" \
+            --kpi capacity-demand \
+            --value "${{ steps.grade.outputs.score }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "open GitHub issues (backlog inbound load)" \
+            --detail "${{ steps.grade.outputs.detail }}" \
             --source ci \
             --dry-run | tee capacity-card.txt
           {
-            echo "## capacity-feed — open-issues"
+            echo "## capacity-feed — demand pressure"
             echo '```'
             cat capacity-card.txt
             echo '```'
@@ -121,11 +136,11 @@ jobs:
         run: |
           go run ./cmd/fak scoreboard post \
             --channel "$FAK_CAPACITY_CHANNEL" \
-            --kpi open-issues \
-            --value "${{ steps.count.outputs.count }}" \
+            --kpi capacity-demand \
+            --value "${{ steps.grade.outputs.score }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "open GitHub issues (backlog inbound load)" \
+            --detail "${{ steps.grade.outputs.detail }}" \
             --source ci
 
       - name: note when posting was skipped
@@ -137,5 +152,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: capacity-card
-          path: capacity-card.txt
+          path: |
+            capacity-card.txt
+            capacity-issues.json
           if-no-files-found: ignore

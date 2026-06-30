@@ -138,6 +138,47 @@ func TestFromSnapshotHealthyFleetIsOKAndGraded(t *testing.T) {
 	if !strings.Contains(lines, "readiness: 100") {
 		t.Fatalf("expected readiness line, got: %s", lines)
 	}
+	if !strings.Contains(lines, "usable capacity: 2/2 boxes") {
+		t.Fatalf("expected usable-capacity line, got: %s", lines)
+	}
+	if !strings.Contains(lines, "next: no operator action") {
+		t.Fatalf("expected no-action guidance, got: %s", lines)
+	}
+}
+
+func TestFromSnapshotGPUWasteIsActionableCapacitySignal(t *testing.T) {
+	boxes := []fleet.Box{
+		{ID: "a1", Class: "a100x8"},
+		{ID: "a2", Class: "a100x8"},
+	}
+	reports := []fleet.Report{
+		{State: fleet.StateLive, Version: "v1", GPU: &fleet.GPUStats{Total: 8, Busy: 1, UtilPct: 5}},
+		{State: fleet.StateLive, Version: "v1", GPU: &fleet.GPUStats{Total: 8, Busy: 8, UtilPct: 95}},
+	}
+	snap := foldRoster(boxes, reports)
+	up := FromSnapshot(snap, "lab-bridge")
+
+	if up.Verdict != "ACTION" {
+		t.Fatalf("verdict = %q, want ACTION for wasted GPU capacity", up.Verdict)
+	}
+	if up.Grade == "A" || up.Grade == "B" {
+		t.Fatalf("grade = %q, must be clamped below B for an actionable capacity problem", up.Grade)
+	}
+	if !strings.Contains(up.Detail, "wasting >=4 GPUs") {
+		t.Fatalf("detail = %q, want GPU-waste headline", up.Detail)
+	}
+	lines := strings.Join(up.Lines, " | ")
+	for _, want := range []string{
+		"usable capacity: 2/2 boxes",
+		"gpu capacity: busy 9/16, idle 7",
+		"attention[crit]: 1 box(es) wasting >=4 GPUs",
+		"attention[crit]: 1 box(es) wasting >=4 GPUs - a1(1/8)",
+		"next: repack work onto busy GPUs or stop idle-GPU leases",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Fatalf("expected %q in lines, got: %s", want, lines)
+		}
+	}
 }
 
 // TestFromSnapshotAllSilentIsVisibilityGapNotOutage is the bug regression: a fleet
