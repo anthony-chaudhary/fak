@@ -14,6 +14,9 @@ import (
 // a newer unlabeled #1500 and an older #300 that holds priority/P1; P1 wins.
 func TestDispatchTickPicksPriorityOverNewer(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	// Disable the guard so this test isolates the priority pick-ORDER (#1395) from the
+	// #1397 self-modify hold (cmd/** is fak's own source, so a GUARDED tick would hold).
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	old := dispatchRouteIssues
 	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
 		return dispatchtick.RouterPayload{

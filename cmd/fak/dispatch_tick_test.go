@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -186,11 +187,48 @@ func TestDispatchLiveSeatLeasesReadsLiveAccountSidecars(t *testing.T) {
 	}
 }
 
-func TestDispatchTickDryRunPlansGuardedIssueWorker(t *testing.T) {
+// TestDispatchTickDryRunHoldsGuardedSelfModifyLane is the #1397 witness: a dry-run
+// dispatch that lands on a lane rooted in fak's own running source (here the cmd lane,
+// tree cmd/**) reports the SELF_MODIFY_HOLD rather than would_spawn -- a guarded worker
+// can investigate but never SHIP an edit to cmd/** or internal/**. The guard wrapper and
+// account are still resolved (the hold is a pre-route, not a guard/account failure), so
+// the operator sees exactly why the doomed worker was not launched.
+func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (a self-modify hold is a refuse) (stderr: %s)", code, errb)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["action"] != "self_modify_hold" || got["verdict"] != "SELF_MODIFY_HOLD" || got["ok"] != false {
+		t.Fatalf("dispatch tick result = action %v verdict %v ok %v, want self_modify_hold/SELF_MODIFY_HOLD/false", got["action"], got["verdict"], got["ok"])
+	}
+	if got["lane"] != "cmd" || got["self_modify_tree"] != "cmd/**" || got["target_issue"] != float64(1338) {
+		t.Fatalf("lane/tree/target = %v/%v/%v, want cmd/cmd-tree/1338", got["lane"], got["self_modify_tree"], got["target_issue"])
+	}
+	if guarded, _ := got["guarded"].(bool); !guarded {
+		t.Fatalf("the hold must still resolve the guard wrapper (that is WHY it holds): %#v", got)
+	}
+	launch := stringAnySlice(got["launch_command"])
+	if len(launch) < 6 || launch[1] != "guard" || !containsString(launch, "--audit") || !containsString(launch, "claude") {
+		t.Fatalf("launch command is not guarded claude argv: %#v", launch)
+	}
+}
+
+// TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane pins the OTHER half of #1397:
+// the self-modify hold is SELECTIVE. A guarded worker pinned to a non-self-modify lane
+// (docs) still plans normally -- would_spawn -- because docs/** is shippable under guard.
+func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
 	}
@@ -199,14 +237,11 @@ func TestDispatchTickDryRunPlansGuardedIssueWorker(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out)
 	}
-	if got["action"] != "would_spawn" || got["verdict"] != "WOULD_SPAWN" || got["target_issue"] != float64(1338) {
-		t.Fatalf("dispatch tick result = action %v verdict %v target %v", got["action"], got["verdict"], got["target_issue"])
-	}
-	if got["lane"] != "cmd" || got["issue_title"] != "first-class fak dispatch verb" {
-		t.Fatalf("lane/title = %v/%v, want cmd/title", got["lane"], got["issue_title"])
+	if got["action"] != "would_spawn" || got["verdict"] != "WOULD_SPAWN" || got["lane"] != "docs" || got["target_issue"] != float64(12) {
+		t.Fatalf("docs lane result = action %v verdict %v lane %v target %v, want would_spawn/docs/12", got["action"], got["verdict"], got["lane"], got["target_issue"])
 	}
 	if guarded, _ := got["guarded"].(bool); !guarded {
-		t.Fatalf("dry-run launch should be fak guard-fronted: %#v", got)
+		t.Fatalf("dry-run launch should still be fak guard-fronted on a shippable lane: %#v", got)
 	}
 	launch := stringAnySlice(got["launch_command"])
 	if len(launch) < 6 || launch[1] != "guard" || !containsString(launch, "--audit") || !containsString(launch, "claude") {
@@ -224,6 +259,9 @@ func TestDispatchTickDryRunPlansGuardedIssueWorker(t *testing.T) {
 // pick (#1400). The fixture's cmd lane carries {1400, 1338}.
 func TestDispatchTickDefaultPicksOldestIssue(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	// Disable the guard so this test isolates the pick-ORDER policy from the #1397
+	// self-modify hold (cmd/** is fak's own source, so a GUARDED tick would hold here).
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	root := t.TempDir()
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
@@ -240,6 +278,9 @@ func TestDispatchTickDefaultPicksOldestIssue(t *testing.T) {
 
 func TestDispatchTickPreferNewestPicksNewest(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	// Disable the guard so this test isolates the pick-ORDER policy from the #1397
+	// self-modify hold (cmd/** is fak's own source, so a GUARDED tick would hold here).
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	root := t.TempDir()
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--prefer-newest", "--json")
 	if code != 0 {
@@ -256,6 +297,10 @@ func TestDispatchTickPreferNewestPicksNewest(t *testing.T) {
 
 func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	// Disable the guard so this test exercises account allocation + pricing without the
+	// #1397 self-modify hold firing on the cmd lane (cmd/** is fak's own source); the
+	// hold itself is witnessed by TestDispatchTickDryRunHoldsGuardedSelfModifyLane.
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	root := t.TempDir()
 
 	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "2", "--no-loop-ledger", "--json")
@@ -273,6 +318,18 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	if strings.Contains(out, "should-not-render") || strings.Contains(out, "oauth_token") {
 		t.Fatalf("wave output leaked allocator token material:\n%s", out)
 	}
+	price, _ := got["price"].(map[string]any)
+	runLanes := stringAnySlice(price["run_lanes"])
+	if len(runLanes) != 2 || runLanes[0] != "cmd" || runLanes[1] != "docs" {
+		t.Fatalf("priced run lanes = %#v, want cmd/docs full dry-run plan", runLanes)
+	}
+	if price["collisions_avoided"] != float64(0) || price["lanes_utilized"] != float64(2) {
+		t.Fatalf("price metrics = %#v, want zero collisions and two utilized lanes", price)
+	}
+	if price["action"] != "LAUNCH_ALL" || price["safe_concurrency_pct"] != float64(100) ||
+		price["scope_coverage_pct"] != float64(0) || price["same_lane_parallelism"] != float64(0) {
+		t.Fatalf("price action/score = %#v, want launch-all with full safe concurrency and no scoped same-lane work", price)
+	}
 	ticks, _ := got["ticks"].([]any)
 	if len(ticks) != 1 {
 		t.Fatalf("dry-run wave should plan exactly one tick, got %d", len(ticks))
@@ -281,6 +338,113 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	acct, _ := tick["account"].(map[string]any)
 	if tick["action"] != "would_spawn" || acct["tag"] != "acct-preflight" {
 		t.Fatalf("tick/account = %#v / %#v, want would_spawn/acct-preflight", tick, acct)
+	}
+}
+
+func TestDispatchWavePriceSerializesCollidingLaneBeforeLaunch(t *testing.T) {
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"gateway": {
+					Tree:   []string{"internal/gateway/**"},
+					Issues: []int{10},
+					Count:  3,
+				},
+				"gateway-http": {
+					Tree:   []string{"internal/gateway/http.go"},
+					Issues: []int{11},
+					Count:  2,
+				},
+				"docs": {
+					Tree:   []string{"docs/**"},
+					Issues: []int{12},
+					Count:  1,
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+
+	price, err := priceDispatchWave(t.TempDir(), io.Discard, 3, 3, "", nil, 0)
+	if err != nil {
+		t.Fatalf("priceDispatchWave: %v", err)
+	}
+	if price.CollisionsAvoided != 1 || price.SerializationWasted != 1 || price.SafeConcurrency != 2 {
+		t.Fatalf("price metrics = avoided %d wasted %d safe %d, want 1/1/2",
+			price.CollisionsAvoided, price.SerializationWasted, price.SafeConcurrency)
+	}
+	if price.Action != "LAUNCH_SAFE_SET" || price.SafeConcurrencyPct != 67 ||
+		price.ScopeCoveragePct != 0 || price.SameLaneParallelism != 0 {
+		t.Fatalf("price action/score = action %s safe_pct %d scope_pct %d same_lane %d, want safe-set 67/0/0",
+			price.Action, price.SafeConcurrencyPct, price.ScopeCoveragePct, price.SameLaneParallelism)
+	}
+	if strings.Join(price.RunLanes, ",") != "gateway,docs" {
+		t.Fatalf("run lanes = %#v, want gateway/docs safe set", price.RunLanes)
+	}
+	if len(price.Repartition) != 1 || price.Repartition[0].Action != "narrow_to_issue_paths" {
+		t.Fatalf("repartition advice = %+v, want one narrow_to_issue_paths row", price.Repartition)
+	}
+	var serialized dispatchWaveCandidate
+	for _, cand := range price.Candidates {
+		if cand.Lane == "gateway-http" {
+			serialized = cand
+		}
+	}
+	if serialized.Disposition != dispatchorder.DispCollisionRisk || serialized.Reason != dispatchorder.ReasonCollisionRisk {
+		t.Fatalf("gateway-http candidate = %+v, want collision-risk", serialized)
+	}
+}
+
+func TestDispatchWavePriceAllowsDisjointIssueScopesInsideOneLane(t *testing.T) {
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"gateway": {
+					Tree:   []string{"internal/gateway/**"},
+					Issues: []int{10, 11},
+					Count:  2,
+				},
+			},
+			Issues: []dispatchtick.IssueRoute{
+				{Number: 10, Title: "gateway http", Lane: "gateway", Confidence: "path-confirmed", Paths: []string{"internal/gateway/http.go"}},
+				{Number: 11, Title: "gateway mcp", Lane: "gateway", Confidence: "path-confirmed", Paths: []string{"internal/gateway/mcp.go"}},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+
+	price, err := priceDispatchWave(t.TempDir(), io.Discard, 2, 2, "", nil, 0)
+	if err != nil {
+		t.Fatalf("priceDispatchWave: %v", err)
+	}
+	if price.CollisionsAvoided != 0 || price.SerializationWasted != 0 || price.SafeConcurrency != 2 {
+		t.Fatalf("price metrics = avoided %d wasted %d safe %d, want 0/0/2",
+			price.CollisionsAvoided, price.SerializationWasted, price.SafeConcurrency)
+	}
+	if price.Action != "LAUNCH_ALL" || price.SafeConcurrencyPct != 100 ||
+		price.ScopeCoveragePct != 100 || price.SameLaneParallelism != 1 {
+		t.Fatalf("price action/score = action %s safe_pct %d scope_pct %d same_lane %d, want launch-all 100/100/1",
+			price.Action, price.SafeConcurrencyPct, price.ScopeCoveragePct, price.SameLaneParallelism)
+	}
+	if len(price.RunTargets) != 2 || price.RunTargets[0].Lane != "gateway" || price.RunTargets[1].Lane != "gateway" {
+		t.Fatalf("run targets = %+v, want two gateway issue targets", price.RunTargets)
+	}
+	if len(price.Repartition) != 0 {
+		t.Fatalf("repartition advice = %+v, want none for disjoint scoped targets", price.Repartition)
+	}
+	if price.RunTargets[0].LeaseID == price.RunTargets[1].LeaseID {
+		t.Fatalf("scoped targets share lease id: %+v", price.RunTargets)
+	}
+	for _, target := range price.RunTargets {
+		if !target.Scoped || len(target.Tree) != 1 {
+			t.Fatalf("target = %+v, want scoped one-path target", target)
+		}
 	}
 }
 

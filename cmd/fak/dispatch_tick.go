@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -27,6 +28,9 @@ type dispatchTickOptions struct {
 	MaxWorkers     int
 	WorkKind       string
 	Lane           string
+	TargetIssue    int
+	LeaseID        string
+	LeaseTree      []string
 	Backend        string
 	ExcludeLanes   []string
 	Live           bool
@@ -221,6 +225,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		skip[n] = true
 	}
 	target, hasTarget := dispatchtick.PickTargetIssue(pick.Numbers, skip)
+	if opts.TargetIssue > 0 {
+		target, hasTarget = opts.TargetIssue, true
+		if liveIssues[target] || cooled[target] {
+			hasTarget = false
+		}
+	}
+	if len(opts.LeaseTree) > 0 {
+		pick.Tree = append([]string(nil), opts.LeaseTree...)
+	}
 
 	payload := map[string]any{
 		"schema":           dispatchtick.Schema,
@@ -237,6 +250,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		},
 		"account":          dispatchtick.AccountSidecar(account),
 		"lane":             pick.Lane,
+		"lease_id":         firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)),
+		"lease_tree":       append([]string(nil), pick.Tree...),
 		"lane_issue_count": len(pick.Numbers),
 		"cooled_recently":  sortedSet(cooled),
 		"target_issue":     nil,
@@ -268,7 +283,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["reason"] = "no lane has open issues (router empty/error)"
 		return finish(payload), nil
 	}
-	if opts.Lane != "" && held[pick.Lane] {
+	if opts.Lane != "" && held[pick.Lane] && opts.TargetIssue == 0 {
 		payload["ok"] = false
 		payload["action"] = "lane_busy"
 		payload["verdict"] = "LANE_BUSY"
@@ -303,6 +318,24 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	payload["launch_command"] = launchPreview
 	payload["guarded"] = guardedPreview
 
+	// Self-modify pre-route (#1397): a GUARDED worker aimed at a lane rooted in fak's
+	// own running source (cmd/** or internal/**) can investigate but never SHIP -- the
+	// guard refuses an edit to the binary adjudicating it (reason=SELF_MODIFY), so the
+	// worker burns turns and lands 0 commits (#1338's evidence). Hold the pick BEFORE
+	// both the dry-run plan and the live spawn so the loop honest-STOPs and the operator
+	// routes it to an unguarded/operator or worktree-isolated path (#1334) instead. The
+	// guard wrapper and account are already resolved above, so the witness names exactly
+	// why -- this is a pre-route, not a guard/account failure. An unguarded worker
+	// (FLEET_DOGFOOD_GUARD=0, or a worktree-isolated path) never trips this.
+	if held, tree := dispatchtick.SelfModifyHold(guardedPreview, pick.Tree); held {
+		payload["ok"] = false
+		payload["action"] = "self_modify_hold"
+		payload["verdict"] = "SELF_MODIFY_HOLD"
+		payload["self_modify_tree"] = tree
+		payload["reason"] = fmt.Sprintf("issue #%d targets fak's own running source (lane %q, tree %q): a guarded %s worker can investigate but never SHIP an edit to cmd/** or internal/** (the guard refuses with reason=SELF_MODIFY), so this work is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", target, pick.Lane, tree, opts.Backend)
+		return finish(payload), nil
+	}
+
 	if !opts.Live {
 		payload["ok"] = true
 		payload["action"] = "would_spawn"
@@ -311,7 +344,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
-	lease := acquireDispatchLaneLease(root, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
+	lease := acquireDispatchLaneLease(root, firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)), pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
 	payload["lease"] = lease
 	if refused, _ := lease["refused"].(bool); refused {
 		payload["ok"] = false
@@ -692,11 +725,29 @@ func readPID(path string) (int, bool) {
 	return pid, err == nil && pid > 0
 }
 
-func acquireDispatchLaneLease(root, lane string, tree []string, ttlS int) map[string]any {
+func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int) map[string]any {
 	holder := dispatchLeaseHolder()
-	id := "resolve-" + lane
+	store := leaseref.NewInDir(root)
+	now := time.Now()
+	live, _, liveErr := store.Live(context.Background(), now)
+	if liveErr != nil {
+		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": liveErr.Error(), "tree": tree}
+	}
+	for _, held := range live {
+		if dispatchorder.TreesOverlap(tree, held.TreeGlobs) {
+			return map[string]any{
+				"acquired": false,
+				"refused":  true,
+				"id":       id,
+				"holder":   holder,
+				"reason":   dispatchorder.ReasonCollisionRisk,
+				"detail":   fmt.Sprintf("requested tree %v overlaps live lease %s tree %v", tree, held.ID, held.TreeGlobs),
+				"tree":     tree,
+			}
+		}
+	}
 	rec := leaseref.Record{ID: id, TreeGlobs: tree, Holder: holder, TTLSeconds: int64(ttlS)}
-	written, verdict, err := leaseref.NewInDir(root).AcquireFenced(context.Background(), rec, time.Now())
+	written, verdict, err := store.AcquireFenced(context.Background(), rec, now)
 	if err != nil {
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree}
 	}
