@@ -23,6 +23,27 @@ func (m *Model) q4kHeadName() string {
 	return "model.embed_tokens.weight"
 }
 
+// kqHeadName resolves the LM head when it loaded as a resident k-quant (Q5_K/Q6_K) — the
+// q4_k_m untied lm_head lands in kqw under "lm_head.weight". Returns "" if no k-quant head.
+func (m *Model) kqHeadName() string {
+	if m.kqw != nil && m.kqw["lm_head.weight"] != nil {
+		return "lm_head.weight"
+	}
+	return ""
+}
+
+// headKQuant applies a resident k-quant (Q5_K/Q6_K) LM head to a post-final-norm hidden vector.
+// The k-quant GEMV (kQuantMatRows) is byte-identical to the f32 dequant-then-dot, so logits match
+// the dequant path. Mirrors headQ4K for the kqw store.
+func (s *Session) headKQuant(xf []float32) []float32 {
+	y, t := s.headLogitsBuf()
+	qt := s.M.kqw[s.M.kqHeadName()]
+	kQuantMatRowsInto(qt, xf, y)
+	logitScaleInPlace(y, s.M.Cfg)
+	s.phaseEnd("lm_head_kquant", t)
+	return y
+}
+
 // headQ4K applies the resident Q4_K LM head to a post-final-norm hidden vector.
 func (s *Session) headQ4K(xf []float32) []float32 {
 	y, t := s.headLogitsBuf()
@@ -45,6 +66,12 @@ func (s *Session) headResident(xf []float32) []float32 {
 	m := s.M
 	if m.q4khead != nil || m.q4kw[m.q4kHeadName()] != nil {
 		return s.headQ4K(xf)
+	}
+	// A q4_k_m untied lm_head loads Q6_K into kqw (the resident-k-quant dense fast path); resolve
+	// it here so the head reads from kqw instead of falling through to the tied-embedding f32 head
+	// (which would mis-read). kQuantMatRows is byte-identical to the dequant path.
+	if m.kqHeadName() != "" {
+		return s.headKQuant(xf)
 	}
 	if m.q4head != nil {
 		return s.headQ4(xf)

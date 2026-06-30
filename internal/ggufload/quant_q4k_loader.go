@@ -170,8 +170,23 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 			tw.acctResident = true
 			return tw
 		}
-		// Everything else (normalize-sensitive projections, Q6_K matmul weights, embedding,
-		// norms, biases, fused qkv) follows the standard dequant → normalize → builder path.
+		// Direct-resident-k-quant fast path for a DENSE (non-expert) matmul weight whose GGUF type
+		// is a residentable k-quant — the q4_k_m dense down_proj and lm_head load Q6_K, which the
+		// Q4_K-only fast path above skips. Without this they take the dequant→Q8 path and miss BOTH
+		// the resident int8 kQuantMatRows (Stage A) and the fused Metal Q6_K MLP (Stage B,
+		// FusedMLPQ6Down) — the per-token weight traffic for ~4 GB of Q6_K weights stays on the
+		// slowest route. ResidentKQuantEligible is the SAME identity-normalization gate as the Q4_K
+		// path (it refuses the normalize-sensitive q/k/qkv/linear_attn projections), so skipping
+		// normalizeCanonicalTensorData here is safe for exactly the identity weights (ffn_down,
+		// o_proj, lm_head) it admits. The expert k-quants take the batched resident path above.
+		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
+			info.Type != TensorQ4_K && model.ResidentKQuantEligible(cfg, canon) {
+			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
+			tw.acctResident = true
+			return tw
+		}
+		// Everything else (normalize-sensitive projections, embedding, norms, biases, fused qkv)
+		// follows the standard dequant → normalize → builder path.
 		data, err := dequantF32(info, raw)
 		if err != nil {
 			tw.err = err

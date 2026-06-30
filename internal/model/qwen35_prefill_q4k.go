@@ -98,6 +98,20 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			// s.MetalQ4K set it routes the q4_k-majority GEMM to the Metal q4_k dequant-GEMM.
 			return s.q4kGemmDispatch(name, qt, Xf, P)
 		}
+		if qt := m.kqw[name]; qt != nil {
+			// Resident Q5_K/Q6_K matmul weight (the q4_k_m dense down_proj / lm_head now load
+			// Q6_K into kqw, not the Q8 store). Without this branch m.q8(name) below would panic
+			// ("q8 tensor not built") — the prefill twin of the decode-path kqw consultation in
+			// sessionQ4KKernel.mul. The P token rows are looped SERIALLY because kQuantMatRowsInto
+			// already parallelizes across the qt.out output rows via parFor; wrapping it in an
+			// outer parFor would re-enter parDispatchMu and DEADLOCK (parFor is not re-entrant).
+			in := qt.in
+			Y := make([]float32, P*qt.out)
+			for t := 0; t < P; t++ {
+				kQuantMatRowsInto(qt, Xf[t*in:(t+1)*in], Y[t*qt.out:(t+1)*qt.out])
+			}
+			return Y
+		}
 		return qGemm8(m.q8(name), Xq)
 	}
 	if profile {
