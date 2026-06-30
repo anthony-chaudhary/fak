@@ -116,6 +116,8 @@ const (
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
 	ReasonReviewRefuted   = "REVIEW_REFUTED"    // opt-in scout review refuted the diff before commit
+	// ReasonPreStagedPathOverlap ("PRESTAGED_PATH_OVERLAP") is part of this vocabulary too;
+	// it lives in prestaged.go with the same-file staged-hunk ambiguity guard.
 	// ReasonStaleBaseDeletion ("STALE_BASE_DELETION") is part of this closed vocabulary too;
 	// it lives in stalebase.go with the content-level merge-base guard that emits it.
 	// ReasonSpuriousStagedDeletion ("SPURIOUS_STAGED_DELETION") likewise lives in
@@ -412,7 +414,36 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		}
 	}
 
+	// (4d) PRESTAGED-PATH-OVERLAP guard - same-file ownership, lock-free, before any
+	// `git add`. fak commit owns staging for requested paths. If one of those paths already
+	// has staged hunks, a shared tree cannot tell whether they are this author's work or a
+	// peer's staged same-file work. Refuse by default before folding those hunks into this
+	// commit; the remedy is to unstage just the requested path and keep the worktree bytes.
+	if mode := preStagedPathGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkPreStagedPathOverlap(ctx, run, opts.Dir, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = appendDetail(res.Detail, "PRESTAGED_PATH_OVERLAP (warn): "+detail)
+			} else {
+				res.Reason = ReasonPreStagedPathOverlap
+				res.Detail = detail
+				return res, true, nil
+			}
+		}
+	}
+
 	return res, false, nil
+}
+
+func appendDetail(existing, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	if existing == "" {
+		return next
+	}
+	if next == "" {
+		return existing
+	}
+	return existing + "; " + next
 }
 
 // recordPathspecAssertion appends the post-commit assertion result to the

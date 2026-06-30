@@ -12,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // realRunner is the default Runner: it runs the real git binary. It mirrors
@@ -21,6 +22,7 @@ import (
 // message to surface in Result.Detail, which witness (Stderr = nil) discards.
 func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -190,7 +192,9 @@ func sanitizeIDPart(s string) string {
 
 // gitDir resolves the absolute path of the current repo's .git directory.
 func gitDir() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--absolute-git-dir").Output()
+	cmd := exec.Command("git", "rev-parse", "--absolute-git-dir")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
