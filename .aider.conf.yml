@@ -1,0 +1,16 @@
+# Aider configuration for the fak repo.
+# Aider auto-loads this file from the repo root. It points Aider at the canonical agent
+# orientation so a session starts with the repo's build/test/run, map, and rules in
+# context — and pins conventions that match the guards enforced below the agent layer.
+#
+# This repo is fak, an agent kernel: one Go binary that adjudicates every tool call before
+# it runs. To run Aider's own model behind the kernel, follow docs/integrations/aider.md.
+
+# Read the canonical agent instructions + the contributor contract into every session.
+read:
+  - AGENTS.md
+  - CONTRIBUTING.md
+
+# Match the repo's trunk discipline: Aider should not auto-create commits or branches —
+# commit by explicit path with a DCO sign-off (see AGENTS.md).
+auto-commits: false
