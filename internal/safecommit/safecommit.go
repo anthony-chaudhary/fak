@@ -118,6 +118,8 @@ const (
 	ReasonReviewRefuted   = "REVIEW_REFUTED"    // opt-in scout review refuted the diff before commit
 	// ReasonStaleBaseDeletion ("STALE_BASE_DELETION") is part of this closed vocabulary too;
 	// it lives in stalebase.go with the content-level merge-base guard that emits it.
+	// ReasonSpuriousStagedDeletion ("SPURIOUS_STAGED_DELETION") likewise lives in
+	// spuriousdelete.go with the whole-path stale-index guard that emits it.
 )
 
 // Result is the structured outcome. A non-empty Reason is a refusal/race; a clean commit
@@ -244,6 +246,26 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 				res.Detail = "STALE_BASE_DELETION (warn): " + detail
 			} else {
 				res.Reason = ReasonStaleBaseDeletion
+				res.Detail = detail
+				return res, nil
+			}
+		}
+	}
+
+	// (4c) SPURIOUS-STAGED-DELETION guard — whole-path, lock-free, before any `git add`. A
+	// requested path can be staged as a DELETION (stale index) while an untracked copy of the
+	// same path still sits in the working tree — the shape a peer `git reset`/`git rm` leaves
+	// after the file was recreated on a shared clone. Committing it deletes a file HEAD carries,
+	// only to resurrect it on the next add (a churn commit whose `git show --stat` reports an
+	// unintended deletion). It is the whole-file sibling of the (4b) content guard. Gated by
+	// FAK_SPURIOUS_DELETE_GUARD (block|warn|off, default block); off skips, warn records and
+	// proceeds.
+	if mode := spuriousDeleteGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkSpuriousStagedDeletion(ctx, run, opts.Dir, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = "SPURIOUS_STAGED_DELETION (warn): " + detail
+			} else {
+				res.Reason = ReasonSpuriousStagedDeletion
 				res.Detail = detail
 				return res, nil
 			}
