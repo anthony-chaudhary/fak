@@ -314,6 +314,192 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertNotIn("v0.2.0: failed dry run", self._git(root, "log", "--oneline"))
         self.assertEqual((root / "VERSION").read_text(encoding="utf-8"), "0.2.0\n")
 
+    def test_execute_uses_parent_release_lock_without_releasing_it(self) -> None:
+        rc = load()
+        root = self.tmp / "parentlock"
+        root.mkdir()
+        self._git(root, "init", "-b", "master")
+        self._write(root / "VERSION", "0.1.0\n")
+        self._git(root, "add", "VERSION")
+        self._git(root, "commit", "-m", "seed")
+        tools = root / "tools"
+        tools.mkdir()
+        self._write(tools / "release_bump.py", (
+            "import json, pathlib, sys\n"
+            "pathlib.Path('VERSION').write_text(sys.argv[1] + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'targets': {'version': {'path': 'VERSION', 'ok': True}}}))\n"
+        ))
+        self._write(tools / "release_lock.py", (
+            "import json, pathlib, sys\n"
+            "cmd = sys.argv[1]\n"
+            "p = pathlib.Path('lock.log')\n"
+            "old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+            "p.write_text(old + cmd + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'ok': True, 'cmd': cmd}))\n"
+        ))
+        self._git(root, "add", "tools")
+        self._git(root, "commit", "-m", "test release helpers")
+        plan = {
+            "ok": True,
+            "version": "0.2.0",
+            "tag": "v0.2.0",
+            "headline": "parent lock release",
+            "paths": ["VERSION", "docs/releases/v0.2.0.md"],
+            "notes_file": "docs/releases/v0.2.0.md",
+            "notes_preview": "release notes\n",
+        }
+
+        result = rc.execute_plan(
+            root,
+            plan,
+            includes=[],
+            overwrite_notes=False,
+            skip_dry_run=True,
+            ttl=1800,
+            allow_stale_upstream=False,
+            lock_already_held=True,
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["release_lock"]["held_by_parent"])
+        self.assertEqual(
+            (root / "lock.log").read_text(encoding="utf-8").splitlines(),
+            ["verify", "guard"],
+        )
+        self.assertEqual((root / "VERSION").read_text(encoding="utf-8"), "0.2.0\n")
+
+    def test_execute_refuses_when_parent_release_lock_held_by_another_owner(self) -> None:
+        # AC #1391: the cadence runs the cut under --lock-already-held (a parent
+        # workflow step took the lock). If the lock is actually held by ANOTHER
+        # owner — e.g. a human mid-`/release` when the 2h auto-cut tick fires —
+        # then `release_lock.py verify` fails (this session is not the holder) and
+        # the execute path must REFUSE before any VERSION/tag mutation, deferring
+        # to the next tick instead of racing the human.
+        rc = load()
+        root = self.tmp / "foreignparentlock"
+        root.mkdir()
+        self._git(root, "init", "-b", "master")
+        self._write(root / "VERSION", "0.1.0\n")
+        self._git(root, "add", "VERSION")
+        self._git(root, "commit", "-m", "seed")
+        tools = root / "tools"
+        tools.mkdir()
+        # A bump stub that WOULD mutate VERSION if the refuse were (wrongly) skipped.
+        self._write(tools / "release_bump.py", (
+            "import json, pathlib, sys\n"
+            "pathlib.Path('VERSION').write_text(sys.argv[1] + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'targets': {'version': {'path': 'VERSION', 'ok': True}}}))\n"
+        ))
+        # verify exits 3 (release_lock.py's contended/denied code): the live lock
+        # is owned by another session, so this bot is NOT the holder.
+        self._write(tools / "release_lock.py", (
+            "import json, pathlib, sys\n"
+            "cmd = sys.argv[1]\n"
+            "p = pathlib.Path('lock.log')\n"
+            "old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+            "p.write_text(old + cmd + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'ok': False, 'reason': 'held by another session'}))\n"
+            "sys.exit(3)\n"
+        ))
+        self._git(root, "add", "tools")
+        self._git(root, "commit", "-m", "test release helpers")
+        seed = self._git(root, "rev-parse", "HEAD")
+        plan = {
+            "ok": True,
+            "version": "0.2.0",
+            "tag": "v0.2.0",
+            "headline": "foreign parent lock",
+            "paths": ["VERSION", "docs/releases/v0.2.0.md"],
+            "notes_file": "docs/releases/v0.2.0.md",
+            "notes_preview": "release notes\n",
+        }
+
+        result = rc.execute_plan(
+            root,
+            plan,
+            includes=[],
+            overwrite_notes=False,
+            skip_dry_run=True,
+            ttl=1800,
+            allow_stale_upstream=False,
+            lock_already_held=True,
+        )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["aborted"], "parent release lock not held")
+        # Refused at the verify gate, BEFORE any mutation: no bump, no guard, no commit.
+        self.assertEqual(
+            (root / "lock.log").read_text(encoding="utf-8").splitlines(),
+            ["verify"],
+        )
+        self.assertNotIn("release_lock", result)
+        self.assertEqual((root / "VERSION").read_text(encoding="utf-8"), "0.1.0\n")
+        self.assertEqual(self._git(root, "rev-parse", "HEAD"), seed)
+        self.assertNotIn("v0.2.0", self._git(root, "log", "--oneline"))
+
+    def test_execute_refuses_when_release_lock_acquire_denied(self) -> None:
+        # AC #1391 (symmetric, self-acquired path): when release_cut takes the
+        # lock itself (no parent driver), a denial because another owner already
+        # holds it must REFUSE before any VERSION/tag mutation — the same defer a
+        # concurrent `/release` owes a held cadence lock.
+        rc = load()
+        root = self.tmp / "acquiredenied"
+        root.mkdir()
+        self._git(root, "init", "-b", "master")
+        self._write(root / "VERSION", "0.1.0\n")
+        self._git(root, "add", "VERSION")
+        self._git(root, "commit", "-m", "seed")
+        tools = root / "tools"
+        tools.mkdir()
+        self._write(tools / "release_bump.py", (
+            "import json, pathlib, sys\n"
+            "pathlib.Path('VERSION').write_text(sys.argv[1] + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'targets': {'version': {'path': 'VERSION', 'ok': True}}}))\n"
+        ))
+        # acquire exits 3 (contended/denied): another owner holds the live lock.
+        self._write(tools / "release_lock.py", (
+            "import json, pathlib, sys\n"
+            "cmd = sys.argv[1]\n"
+            "p = pathlib.Path('lock.log')\n"
+            "old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+            "p.write_text(old + cmd + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'ok': False, 'reason': 'held by another session'}))\n"
+            "sys.exit(3)\n"
+        ))
+        self._git(root, "add", "tools")
+        self._git(root, "commit", "-m", "test release helpers")
+        seed = self._git(root, "rev-parse", "HEAD")
+        plan = {
+            "ok": True,
+            "version": "0.2.0",
+            "tag": "v0.2.0",
+            "headline": "acquire denied",
+            "paths": ["VERSION", "docs/releases/v0.2.0.md"],
+            "notes_file": "docs/releases/v0.2.0.md",
+            "notes_preview": "release notes\n",
+        }
+
+        result = rc.execute_plan(
+            root,
+            plan,
+            includes=[],
+            overwrite_notes=False,
+            skip_dry_run=True,
+            ttl=1800,
+            allow_stale_upstream=False,
+        )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["aborted"], "could not acquire release lock")
+        # Only the acquire ran — no guard, no commit; the lock it never got is not released.
+        self.assertEqual(
+            (root / "lock.log").read_text(encoding="utf-8").splitlines(),
+            ["acquire"],
+        )
+        self.assertEqual((root / "VERSION").read_text(encoding="utf-8"), "0.1.0\n")
+        self.assertEqual(self._git(root, "rev-parse", "HEAD"), seed)
+        self.assertNotIn("v0.2.0", self._git(root, "log", "--oneline"))
+
     def test_unwind_failed_release_commit_refuses_when_head_changed(self) -> None:
         rc = load()
         root = self.tmp / "headmoved"

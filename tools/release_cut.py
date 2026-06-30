@@ -8,7 +8,8 @@ dry-run plan with no mutation.
 
 Execute mode is intentionally conservative:
 
-* takes the single-writer release lock;
+* takes the single-writer release lock, unless a parent release driver has
+  already taken it and proves ownership with `--lock-already-held`;
 * refuses dirty paths outside explicit `--include` paths;
 * accepts `--from-manifest` as a structured source of explicit includes;
 * stages only VERSION, the release note, and explicit includes;
@@ -418,8 +419,13 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
     }
 
 
+def verify_release_lock(root: Path) -> tuple[int, str]:
+    return run([sys.executable, str(root / "tools" / "release_lock.py"), "verify"], cwd=root)
+
+
 def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes: bool,
-                 skip_dry_run: bool, ttl: int, allow_stale_upstream: bool) -> dict:
+                 skip_dry_run: bool, ttl: int, allow_stale_upstream: bool,
+                 lock_already_held: bool = False) -> dict:
     upstream = upstream_state(root)
     plan["upstream"] = upstream
     if not allow_stale_upstream and not upstream.get("ok_for_release_cut"):
@@ -440,16 +446,23 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
         plan.update(ok=False, aborted="dirty paths outside release cut", foreign_dirty=foreign_dirty)
         return plan
 
-    lock_cmd = [sys.executable, str(root / "tools" / "release_lock.py"), "acquire", "--ttl", str(ttl)]
-    for path in paths:
-        lock_cmd.extend(["--snapshot", path])
-    code, out = run(lock_cmd, cwd=root)
     lock_acquired = False
     try:
-        if code != 0:
-            plan.update(ok=False, aborted="could not acquire release lock", detail=out[-500:])
-            return plan
-        lock_acquired = True
+        if lock_already_held:
+            code, out = verify_release_lock(root)
+            if code != 0:
+                plan.update(ok=False, aborted="parent release lock not held", detail=out[-500:])
+                return plan
+            plan["release_lock"] = {"ok": True, "held_by_parent": True}
+        else:
+            lock_cmd = [sys.executable, str(root / "tools" / "release_lock.py"), "acquire", "--ttl", str(ttl)]
+            for path in paths:
+                lock_cmd.extend(["--snapshot", path])
+            code, out = run(lock_cmd, cwd=root)
+            if code != 0:
+                plan.update(ok=False, aborted="could not acquire release lock", detail=out[-500:])
+                return plan
+            lock_acquired = True
 
         bump, raw_bump, bump_code = load_json([
             sys.executable, str(root / "tools" / "release_bump.py"), plan["version"],
@@ -533,6 +546,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-dry-run", action="store_true")
     parser.add_argument("--allow-stale-upstream", action="store_true",
                         help="allow execute while behind/diverged/detached (not recommended)")
+    parser.add_argument("--lock-already-held", action="store_true",
+                        help="execute under a parent-held release lock; verifies ownership and does not release it")
     parser.add_argument("--ttl", type=int, default=1800)
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
@@ -563,6 +578,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_dry_run=args.skip_dry_run,
             ttl=args.ttl,
             allow_stale_upstream=args.allow_stale_upstream,
+            lock_already_held=args.lock_already_held,
         )
     else:
         plan["dry_run"] = True
