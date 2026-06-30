@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Schema is the stable control-pane schema identifier for the bundle envelope.
@@ -27,7 +29,7 @@ var offValues = map[string]bool{
 var loopAuditNames = []string{
 	"readme-freshness", // tools/readme_freshness_audit.py -- local tree
 	"gofmt-debt-audit", // tools/gofmt_debt_audit.py -- gofmt over .go, local
-	"public-leak-scan", // tools/scrub_public_copy.py --audit-tree -- local scan
+	"public-leak-scan", // fak public-scrub audit-tree -- local scan
 }
 
 // Member binds a label to the argv that produces its control-pane payload and
@@ -60,6 +62,14 @@ var Members = []Member{
 		Argv:  []string{"tools/scorecard_control_pane.py", "--check", "--json"},
 		Gates: true,
 		Kind:  "envelope",
+	},
+	{
+		Key:   "propagation_scorecard",
+		Label: "propagation scorecard",
+		Argv:  []string{"fak", "propagation-scorecard", "--json"},
+		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
 	},
 	{
 		Key:   "fresh_status",
@@ -131,6 +141,19 @@ var Members = []Member{
 		Label: "stale leases",
 		Argv:  []string{"fak", "leaseref", "audit"},
 		Gates: false,
+		Kind:  "envelope",
+		Exec:  "command",
+	},
+	{
+		// No-desktop-popup rung: the scheduled garden/dispatch/watchdog family must never
+		// flash helper consoles on the operator's desktop. This member is the recurring
+		// control-pane surface over internal/windowgate's hard ratchet plus advisory
+		// watchlist, so a new gh/git/powershell helper launch is visible before it becomes
+		// another round of random windows.
+		Key:   "windowgate",
+		Label: "no desktop popups",
+		Argv:  []string{"fak", "windowgate", "--json"},
+		Gates: true,
 		Kind:  "envelope",
 		Exec:  "command",
 	},
@@ -481,6 +504,7 @@ func RunMember(root string, member Member, python string, timeout time.Duration)
 		cmd = exec.Command(python, args...)
 	}
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -535,6 +559,7 @@ func Collect(root, python string, timeout time.Duration, deep bool) []MemberResu
 func HeadCommit(root string) string {
 	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

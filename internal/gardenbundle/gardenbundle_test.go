@@ -2,6 +2,7 @@ package gardenbundle
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -136,6 +137,50 @@ func TestGuardRouteMemberIsCommandExec(t *testing.T) {
 	}
 	if m.Gates {
 		t.Fatal("guard_route must be non-gating (a routed finding is the pass working, not a broken garden)")
+	}
+}
+
+func TestPropagationScorecardIsGardenMember(t *testing.T) {
+	var m *Member
+	for i := range Members {
+		if Members[i].Key == "propagation_scorecard" {
+			m = &Members[i]
+			break
+		}
+	}
+	if m == nil {
+		t.Fatal("propagation scorecard member missing from the default garden bundle")
+	}
+	if m.Exec != "command" {
+		t.Fatalf("propagation scorecard must run as a command member, got Exec=%q", m.Exec)
+	}
+	if got := strings.Join(m.Argv, " "); got != "fak propagation-scorecard --json" {
+		t.Fatalf("propagation scorecard argv = %q", got)
+	}
+	if m.Gates {
+		t.Fatal("propagation scorecard member should be advisory; the control-pane ratchet is the gate")
+	}
+}
+
+func TestWindowgateIsGatingGardenMember(t *testing.T) {
+	var m *Member
+	for i := range Members {
+		if Members[i].Key == "windowgate" {
+			m = &Members[i]
+			break
+		}
+	}
+	if m == nil {
+		t.Fatal("windowgate member missing from the default garden bundle")
+	}
+	if m.Exec != "command" {
+		t.Fatalf("windowgate must run as a command member, got Exec=%q", m.Exec)
+	}
+	if got := strings.Join(m.Argv, " "); got != "fak windowgate --json" {
+		t.Fatalf("windowgate argv = %q", got)
+	}
+	if !m.Gates {
+		t.Fatal("windowgate should gate: desktop popup regressions are user-visible")
 	}
 }
 
