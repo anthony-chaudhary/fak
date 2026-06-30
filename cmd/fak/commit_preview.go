@@ -51,6 +51,9 @@ func renderPreview(w io.Writer, r hooks.CommitLintReport) {
 		fmt.Fprintf(w, " (refs %s)", strings.Join(refs, ", "))
 	}
 	fmt.Fprintln(w)
+	if r.Generation != "" {
+		fmt.Fprintf(w, "  generation: %s\n", r.Generation)
+	}
 	for _, is := range r.Issues {
 		fmt.Fprintf(w, "  ✗ %s\n", is)
 	}
