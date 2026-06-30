@@ -9,7 +9,8 @@ name: Release cadence
 #
 # Auto-cut carries NO new trust. It executes ONLY what release_decide's blocker
 # taxonomy permits at that instant: NOTHING_TO_SHIP / BELOW_SIGNIFICANCE (the >=1
-# substantive-commit floor that stops empty/noise tags), VERSION_DRIFT,
+# substantive-commit floor that stops empty/noise tags) / BELOW_FLOOR (an all-trivial
+# docs/chore window) / TOO_SOON (the min-interval debounce, below), VERSION_DRIFT,
 # WORKFLOW_UNPARSEABLE, and CI_BASE_RED (the latest decisive main CI run must be
 # green). The cut/tag/publish helpers refuse on their own invariants, and the
 # single-writer concurrency group serializes ticks. "All agentic gates pass" is
@@ -19,6 +20,12 @@ name: Release cadence
 # dry-run-only scheduled ticks (decide + plan, no mutation). Any other value (unset
 # included) keeps auto-cut ON. A manual workflow_dispatch is always gated by its own
 # dry_run input regardless of the variable.
+#
+# DEBOUNCE: set the repo variable FAK_RELEASE_MIN_INTERVAL_HOURS = 'N' to refuse a
+# SCHEDULED auto-cut less than N hours after the previous tag, even on a substantive
+# green window (#1389) — a second floor against 2h-cadence tag-spam, separate from
+# the significance floor. Default off (unset/0). Manual dispatch is never debounced;
+# --force bypasses it.
 on:
   schedule:
     # Every 2 hours — a regular cadence. A tick with no substantive green work simply
@@ -91,6 +98,13 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
+          # Autonomous-cadence debounce (#1389): on a SCHEDULED tick, refuse to mint
+          # a fresh tag less than this many hours after the previous one, even when
+          # the window is substantive — so the 2h cadence cannot tag-spam. Default
+          # off; set the repo variable FAK_RELEASE_MIN_INTERVAL_HOURS (e.g. '6') to
+          # arm it. A manual workflow_dispatch leaves it unset (never debounced);
+          # --force bypasses it.
+          FAK_RELEASE_MIN_INTERVAL_HOURS: ${{ github.event_name == 'schedule' && vars.FAK_RELEASE_MIN_INTERVAL_HOURS || '' }}
         run: |
           set -euo pipefail
           flags=(--json --limit-commits 50)

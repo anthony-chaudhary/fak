@@ -165,6 +165,87 @@ class ReleaseDecideTest(unittest.TestCase):
                 else:
                     os.environ[k] = v
 
+    def test_debounce_holds_recent_tag(self) -> None:
+        rd = load()
+        # A substantive, green window that would otherwise release is HELD when the
+        # last tag is younger than the min interval (issue #1389 AC2). 2h < 6h.
+        recent = payload(last_tag_age_seconds=2 * 3600)
+        verdict = rd.decide(recent, min_interval_hours=6)
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("TOO_SOON", verdict["blockers"])
+        self.assertIn("debounce", verdict["reason"])
+        self.assertEqual(verdict["min_interval_hours"], 6)
+        self.assertEqual(verdict["last_tag_age_seconds"], 2 * 3600)
+
+    def test_debounce_clears_old_tag(self) -> None:
+        rd = load()
+        # The same window cuts once the last tag is older than the interval. 8h > 6h.
+        old = payload(last_tag_age_seconds=8 * 3600)
+        verdict = rd.decide(old, min_interval_hours=6)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("TOO_SOON", verdict["blockers"])
+
+    def test_debounce_off_by_default(self) -> None:
+        rd = load()
+        # min_interval_hours defaults to 0 (off): a freshly-tagged window still cuts,
+        # so manual dispatch (which never arms the env knob) is never debounced.
+        recent = payload(last_tag_age_seconds=60)
+        verdict = rd.decide(recent)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("TOO_SOON", verdict["blockers"])
+
+    def test_debounce_force_bypasses(self) -> None:
+        rd = load()
+        recent = payload(last_tag_age_seconds=60)
+        verdict = rd.decide(recent, min_interval_hours=6, force=True)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("TOO_SOON", verdict["blockers"])
+
+    def test_debounce_unknown_age_fails_open(self) -> None:
+        rd = load()
+        # No tag-age evidence (None / missing) must NOT block — fail-open, like the
+        # significance floor's in-doubt -> significant rule.
+        for age in (None, "garbage", True):
+            window = payload(last_tag_age_seconds=age)
+            verdict = rd.decide(window, min_interval_hours=6)
+            self.assertEqual(verdict["decision"], "release", age)
+            self.assertNotIn("TOO_SOON", verdict["blockers"], age)
+
+    def test_debounce_does_not_override_a_real_blocker(self) -> None:
+        rd = load()
+        # CI red on a recent tag: the real blocker wins the reason; the debounce is
+        # only ever the SOLE reason a would-release window holds.
+        window = payload(last_tag_age_seconds=60, ci_on_head={"status": "red"})
+        verdict = rd.decide(window, min_interval_hours=6)
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertNotIn("TOO_SOON", verdict["blockers"])
+
+    def test_debounce_not_added_when_nothing_to_ship(self) -> None:
+        rd = load()
+        # An empty window holds on NOTHING_TO_SHIP, not the debounce.
+        window = payload(commits_since_tag=[], last_tag_age_seconds=60)
+        verdict = rd.decide(window, min_interval_hours=6)
+        self.assertIn("NOTHING_TO_SHIP", verdict["blockers"])
+        self.assertNotIn("TOO_SOON", verdict["blockers"])
+
+    def test_env_min_interval_hours_default(self) -> None:
+        rd = load()
+        import os
+        keep = os.environ.get("FAK_RELEASE_MIN_INTERVAL_HOURS")
+        try:
+            os.environ["FAK_RELEASE_MIN_INTERVAL_HOURS"] = "6"
+            self.assertEqual(rd._env_float("FAK_RELEASE_MIN_INTERVAL_HOURS", 0.0), 6.0)
+            os.environ["FAK_RELEASE_MIN_INTERVAL_HOURS"] = "notafloat"
+            self.assertEqual(rd._env_float("FAK_RELEASE_MIN_INTERVAL_HOURS", 0.0), 0.0)
+            os.environ.pop("FAK_RELEASE_MIN_INTERVAL_HOURS", None)
+            self.assertEqual(rd._env_float("FAK_RELEASE_MIN_INTERVAL_HOURS", 0.0), 0.0)
+        finally:
+            if keep is None:
+                os.environ.pop("FAK_RELEASE_MIN_INTERVAL_HOURS", None)
+            else:
+                os.environ["FAK_RELEASE_MIN_INTERVAL_HOURS"] = keep
+
     def test_unreachable_newer_tag_is_warning_and_bump_base(self) -> None:
         rd = load()
         verdict = rd.decide(payload(

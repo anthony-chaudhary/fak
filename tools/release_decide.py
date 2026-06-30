@@ -92,6 +92,16 @@ def _env_flag(name: str, default: bool) -> bool:
     return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def is_significant(subject: str, body: str = "") -> bool:
     """Fail-safe significance test for the auto-cut floor.
 
@@ -222,7 +232,8 @@ def effective_ci(payload: dict) -> tuple[dict, str]:
 
 
 def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
-           require_ci_green: bool = False, significance_floor: bool = True) -> dict:
+           require_ci_green: bool = False, significance_floor: bool = True,
+           min_interval_hours: float = 0.0) -> dict:
     commits = payload.get("commits_since_tag") or []
     level, themes = decide_level(commits)
     sig = significance(commits)
@@ -286,6 +297,28 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     for tag in payload.get("unreachable_newer_tags") or []:
         warnings.append(f"newer semver tag {tag} is not reachable from HEAD")
 
+    # Min-interval debounce for the AUTONOMOUS cadence (issue #1389). The
+    # significance floor stops trivial windows; this stops too-frequent tags:
+    # even a substantive, green window must not mint a fresh tag less than
+    # `min_interval_hours` after the previous one, so the 2h auto-cut cadence
+    # cannot tag-spam. It is a SEPARATE, opt-in knob from the significance floor —
+    # off by default (<= 0), armed only on the scheduled auto-cut path. It is
+    # checked LAST and only when nothing else already holds (`not blockers`), so a
+    # real blocker (CI red, drift) always wins the reason. Fail-safe like the
+    # floor: `--force` skips it, and an unknown/missing tag age (None) fails OPEN
+    # (no debounce evidence -> do not block).
+    age_seconds = payload.get("last_tag_age_seconds")
+    if (
+        min_interval_hours > 0
+        and not force
+        and not blockers
+        and (commits or files_ahead)
+        and isinstance(age_seconds, (int, float))
+        and not isinstance(age_seconds, bool)
+        and age_seconds < min_interval_hours * 3600.0
+    ):
+        blockers.append("TOO_SOON")
+
     recover = bool(tag_drift.get("files_ahead_of_tag"))
     if recover:
         next_version = source_version
@@ -300,13 +333,15 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
 
     if blockers:
         reason = _blocker_reason(blockers[0], last_tag, sig, min_substantive,
-                                 tag_drift, ci_source)
+                                 tag_drift, ci_source, age_seconds, min_interval_hours)
 
     return {
         "decision": "hold" if blockers else "release",
         "level": None if blockers else level,
         "next_version": None if blockers else next_version,
         "last_tag": last_tag,
+        "last_tag_age_seconds": age_seconds if isinstance(age_seconds, (int, float)) and not isinstance(age_seconds, bool) else None,
+        "min_interval_hours": min_interval_hours,
         "latest_any_tag": latest_any_tag,
         "n_commits": len(commits),
         "substantive": sig["substantive"],
@@ -322,9 +357,23 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     }
 
 
+def _fmt_age(age_seconds: float | int | None) -> str:
+    """Render a tag age as a compact, human 'Nh'/'Nm'/'Ns' string for diagnostics."""
+    if not isinstance(age_seconds, (int, float)) or isinstance(age_seconds, bool):
+        return "unknown"
+    secs = int(age_seconds)
+    if secs >= 3600:
+        return f"{secs / 3600.0:.1f}h"
+    if secs >= 60:
+        return f"{secs // 60}m"
+    return f"{secs}s"
+
+
 def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
                     min_substantive: int, tag_drift: dict,
-                    ci_source: str = "whole") -> str:
+                    ci_source: str = "whole",
+                    age_seconds: float | int | None = None,
+                    min_interval_hours: float = 0.0) -> str:
     # Name the workflow whose conclusion actually decided the CI gate (#1374):
     # the fast subset (ci-fast.yml) when it was decisive, else the whole ci.yml.
     ci_label = f"{FAST_CI_WORKFLOW} (fast subset)" if ci_source == "fast" else "ci.yml"
@@ -339,6 +388,12 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
             f"trivial (docs/chore/test/style/ci/build); no significant change to ship. "
             f"kinds={sig['kinds']}. Force with --force or set "
             f"FAK_RELEASE_SIGNIFICANCE_FLOOR=0 to disable the floor."
+        ),
+        "TOO_SOON": (
+            f"last release tag {last_tag or '(none)'} is only {_fmt_age(age_seconds)} old; "
+            f"the autonomous min-interval debounce is {min_interval_hours:g}h, so the "
+            f"auto-cut waits before minting another tag. Override with --force or "
+            f"FAK_RELEASE_MIN_INTERVAL_HOURS=0."
         ),
         "VERSION_DRIFT": "version markers disagree",
         "VERSION_BEHIND_REACHABLE_TAG": tag_drift.get("reason") or "VERSION is behind the reachable release tag",
@@ -398,9 +453,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="disable the all-trivial significance floor that "
                              "holds docs/chore-only windows "
                              "(env FAK_RELEASE_SIGNIFICANCE_FLOOR=0)")
+    # The autonomous-cadence debounce (issue #1389): a min interval, in hours,
+    # between autonomous tags. Default 0 (off) — the scheduled auto-cut path arms
+    # it via FAK_RELEASE_MIN_INTERVAL_HOURS so a manual dispatch is never debounced.
+    parser.add_argument("--min-interval-hours", type=float,
+                        default=_env_float("FAK_RELEASE_MIN_INTERVAL_HOURS", 0.0),
+                        help="hold the auto-cut when the last tag is younger than "
+                             "this many hours, even if substantive (0 = off; "
+                             "env FAK_RELEASE_MIN_INTERVAL_HOURS)")
     parser.add_argument("--force", action="store_true",
-                        help="bypass the substantive-commit floor and the "
-                             "significance floor")
+                        help="bypass the substantive-commit floor, the significance "
+                             "floor, and the min-interval debounce")
     parser.add_argument("--require-ci-green", action="store_true",
                         help="block when gh cannot confirm a green main ci.yml base")
     args = parser.parse_args(argv)
@@ -412,6 +475,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             require_ci_green=args.require_ci_green,
             significance_floor=args.significance_floor,
+            min_interval_hours=args.min_interval_hours,
         )
     except Exception as exc:
         print(f"release-decide: could not read context: {exc}", file=sys.stderr)

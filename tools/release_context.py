@@ -18,6 +18,8 @@ Usage:
 
 Top-level JSON keys:
   head_sha, current_branch, last_tag, latest_any_tag, unreachable_newer_tags,
+  last_tag_age_seconds: whole seconds since the last reachable tag landed, or null
+                      (feeds release_decide's auto-cut min-interval debounce, #1389)
   commits_since_tag:  [{sha, subject, files: [{path, additions, deletions}]}, ...]
   files_touched_since_tag: [path, ...]
   clean_tree:         true iff `git status --porcelain` is empty
@@ -38,6 +40,7 @@ import argparse
 import json
 import re
 import subprocess
+import time
 from dispatch_worker import install_no_window_subprocess_defaults
 install_no_window_subprocess_defaults(subprocess)
 import sys
@@ -124,6 +127,38 @@ def latest_tag(*, reachable_only: bool = True) -> str | None:
         if not reachable_only or tag_reachable(tag):
             return tag
     return None
+
+
+def tag_age_seconds(tag: str | None) -> int | None:
+    """Whole seconds since `tag` came to exist, or None when it cannot be dated.
+
+    Feeds release_decide's auto-cut debounce (#1389): on the scheduled cadence we
+    refuse to mint a fresh tag less than N hours after the previous one. We read
+    `%(creatordate:unix)` — the tagger date for an annotated tag, the commit's
+    committer date for a lightweight one — i.e. "when the last release tag landed".
+    Falls back to the target commit's committer date, then None. None means "no
+    debounce evidence", and the debounce fails OPEN (does not block) on None.
+    """
+    if not tag:
+        return None
+    created: int | None = None
+    raw = run(["git", "for-each-ref", "--format=%(creatordate:unix)", f"refs/tags/{tag}"]).strip()
+    for line in raw.splitlines():
+        token = line.strip()
+        if token.isdigit():
+            created = int(token)
+            break
+    if created is None:
+        raw = run(["git", "log", "-1", "--format=%ct", f"{tag}^{{commit}}"]).strip()
+        for line in raw.splitlines():
+            token = line.strip()
+            if token.isdigit():
+                created = int(token)
+                break
+    if created is None:
+        return None
+    age = int(time.time()) - created
+    return age if age >= 0 else 0
 
 
 def unreachable_newer_tags(reachable_tag: str | None) -> list[str]:
@@ -467,6 +502,7 @@ def main() -> int:
         "head_sha": head_sha,
         "current_branch": branch,
         "last_tag": tag,
+        "last_tag_age_seconds": tag_age_seconds(tag),
         "latest_any_tag": any_tag,
         "unreachable_newer_tags": unreachable_newer_tags(tag),
         "commits_since_tag": commits,
