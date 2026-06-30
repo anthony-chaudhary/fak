@@ -202,6 +202,31 @@ type removeParams struct {
 // running session.
 func sameDir(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
 
+// loadRegistryOrErr loads the canonical accounts registry, printing the house error
+// and returning ok=false on failure — the LoadRegistry+error-print prelude the
+// registry-mutating subcommands repeat.
+func loadRegistryOrErr(stderr io.Writer, registryPath string) (accounts.Registry, bool) {
+	reg, err := accounts.LoadRegistry(registryPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return reg, false
+	}
+	return reg, true
+}
+
+// syncViewsUnlessNoSync re-syncs the dos/job views unless noSync is set, returning the
+// nonzero exit code to propagate on a sync failure (0 otherwise). It folds the
+// `if !noSync { syncViews … }` tail the registry-mutating subcommands share.
+func syncViewsUnlessNoSync(stdout, stderr io.Writer, registryPath, dosView, jobView string, noSync bool) int {
+	if noSync {
+		return 0
+	}
+	if _, code := syncViews(stdout, stderr, registryPath, dosView, jobView); code != 0 {
+		return code
+	}
+	return 0
+}
+
 // runAccountsRemove tombstones an account in the canonical registry and regenerates the
 // views — the single-source inverse of add. It sets the home to status=tombstoned with a
 // rehome target (so anything pinned to it falls forward) and records the audit fields
@@ -213,9 +238,8 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintln(stderr, "usage: fak accounts remove --name <name> [--rehome-to <seat>] [--reason <text>] [--archive]")
 		return 2
 	}
-	reg, err := accounts.LoadRegistry(p.registryPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+	reg, ok := loadRegistryOrErr(stderr, p.registryPath)
+	if !ok {
 		return 1
 	}
 	idx := -1
@@ -303,10 +327,8 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
-	if !p.noSync {
-		if _, code := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView); code != 0 {
-			return code
-		}
+	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
+		return code
 	}
 	if p.archive {
 		fmt.Fprintf(stdout, "removed + archived account %q (now %q; dir renamed, tombstoned in registry + views)\n", p.name, reg.Homes[idx].Name)
@@ -338,9 +360,8 @@ func runAccountsSetRole(stdout, stderr io.Writer, p setRoleParams) int {
 		fmt.Fprintln(stderr, "usage: fak accounts set-role <role> --name <name>   (role: active|anchor)")
 		return 2
 	}
-	reg, err := accounts.LoadRegistry(p.registryPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+	reg, ok := loadRegistryOrErr(stderr, p.registryPath)
+	if !ok {
 		return 1
 	}
 	h, ok := homeByName(reg, p.name)
@@ -368,10 +389,8 @@ func runAccountsSetRole(stdout, stderr io.Writer, p setRoleParams) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: role %s -> %s\n", p.role, p.name)
-	if !p.noSync {
-		if _, code := syncViews(stdout, stderr, p.registryPath, p.dosView, p.jobView); code != 0 {
-			return code
-		}
+	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
+		return code
 	}
 	fmt.Fprintf(stdout, "set role %q -> account %q\n", p.role, p.name)
 	return 0

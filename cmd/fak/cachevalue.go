@@ -22,6 +22,9 @@ import (
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
 //	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
+//	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
+//	fak cachevalue review --since 2026-06-22 --json      # inspect cache-frontier review row
+//	fak cachevalue review --date 2026-06-29 --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/cache-frontier/reviews/2026-06-29.md
 //
 // It targets the FAK_CACHEVALUE_* surface (a public channel in the scoreboard Slack
 // workspace, separate from the lab/DGX control bridge); the token falls back to the
@@ -29,10 +32,20 @@ import (
 // renders the card and prints it without posting, matching the scoreboard/bench/blockers
 // "safe by default" idiom.
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "post | feed", argv,
+	dispatchSubcommands("cachevalue", "report | review | post | feed", argv,
+		subcommand{"report", runCachevalueReport},
+		subcommand{"review", runCachevalueReview},
 		subcommand{"post", runCachevaluePost},
 		subcommand{"feed", runCachevalueFeed},
 	)
+}
+
+// foldAndEmitCachevalue folds a report into the post card, stamps the resolved source, and
+// emits it — the shared tail of the feed/post subcommands.
+func foldAndEmitCachevalue(stdout, stderr io.Writer, report cachevaluereport.Report, source, channel, token string, dryRun bool) int {
+	card := cachevaluepost.Fold(report)
+	card.Source = resolveCachevalueSource(source)
+	return emitCachevalue(stdout, stderr, card, channel, token, dryRun)
 }
 
 // runCachevalueFeed handles `fak cachevalue feed` — the cadence roll-up. It reads the
@@ -53,9 +66,7 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 
 	rows := cachevalueledger.ReadLedgerFile(*ledger)
 	report := cachevaluereport.Fold(rows, time.Now())
-	card := cachevaluepost.Fold(report)
-	card.Source = resolveCachevalueSource(*source)
-	return emitCachevalue(stdout, stderr, card, *channel, *token, *dryRun)
+	return foldAndEmitCachevalue(stdout, stderr, report, *source, *channel, *token, *dryRun)
 }
 
 // runCachevaluePost handles `fak cachevalue post` — post a PRE-ROLLED report. It folds a
@@ -78,9 +89,7 @@ func runCachevaluePost(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak cachevalue post: %v\n", err)
 		return 2
 	}
-	card := cachevaluepost.Fold(report)
-	card.Source = resolveCachevalueSource(*source)
-	return emitCachevalue(stdout, stderr, card, *channel, *token, *dryRun)
+	return foldAndEmitCachevalue(stdout, stderr, report, *source, *channel, *token, *dryRun)
 }
 
 // loadCachevalueReport reads a pre-rolled report payload from a file (or stdin for "-").

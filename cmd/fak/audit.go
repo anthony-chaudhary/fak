@@ -47,15 +47,21 @@ func auditUsage() {
 // chain prints the row count and exits 0; ANY edit since it was written (a flipped
 // byte, a dropped row, a resequence) breaks the link and exits 1, naming the first
 // broken row — the property that lets the journal stand in for trust in the process.
-func cmdAuditVerify(args []string) {
-	fs := flag.NewFlagSet("audit verify", flag.ExitOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: fak audit verify <journal.jsonl>") }
+// auditJournalPathArg parses the single <journal.jsonl> positional shared by the audit
+// subcommands, exiting 2 on misuse. name + usage tailor the flag set and the usage line.
+func auditJournalPathArg(name, usage string, args []string) string {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprintln(os.Stderr, usage) }
 	_ = fs.Parse(args)
 	if fs.NArg() != 1 {
 		fs.Usage()
 		os.Exit(2)
 	}
-	path := fs.Arg(0)
+	return fs.Arg(0)
+}
+
+func cmdAuditVerify(args []string) {
+	path := auditJournalPathArg("audit verify", "usage: fak audit verify <journal.jsonl>", args)
 	n, err := journal.Verify(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
@@ -68,14 +74,7 @@ func cmdAuditVerify(args []string) {
 // journal (append mode, recovering the chain head) and streams its durable history
 // re-read from disk, so an export of a sound journal is itself a sound journal.
 func cmdAuditExport(args []string) {
-	fs := flag.NewFlagSet("audit export", flag.ExitOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: fak audit export <journal.jsonl>") }
-	_ = fs.Parse(args)
-	if fs.NArg() != 1 {
-		fs.Usage()
-		os.Exit(2)
-	}
-	path := fs.Arg(0)
+	path := auditJournalPathArg("audit export", "usage: fak audit export <journal.jsonl>", args)
 	j, err := journal.Open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak audit export: %v\n", err)
