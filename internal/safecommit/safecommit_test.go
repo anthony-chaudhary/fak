@@ -266,6 +266,9 @@ func TestOffTrunk_refusesBeforeCommitting(t *testing.T) {
 	if !strings.Contains(res.Detail, "feature/x") {
 		t.Fatalf("detail should name the branch, got %q", res.Detail)
 	}
+	if !strings.Contains(res.Detail, "expected development branch main") {
+		t.Fatalf("detail should name the expected development branch, got %q", res.Detail)
+	}
 }
 
 func TestDetachedHead_isOffTrunk(t *testing.T) {
@@ -279,6 +282,73 @@ func TestDetachedHead_isOffTrunk(t *testing.T) {
 	}
 	if !strings.Contains(res.Detail, "detached") {
 		t.Fatalf("detail should mention detached, got %q", res.Detail)
+	}
+}
+
+func TestConfiguredDevelopmentBranchAllowsDev(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "dev\n", code: 0}
+	opts := baseOpts()
+	opts.Dir = root
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("dev branch should be accepted by configured development branch, got %+v", res)
+	}
+	if !g.sawSubcommand("commit") {
+		t.Fatalf("expected commit on configured development branch; calls=%v", g.calls)
+	}
+}
+
+func TestConfiguredDevelopmentBranchRefusesMainAfterCutover(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "main\n", code: 0}
+	opts := baseOpts()
+	opts.Dir = root
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Reason != ReasonOffTrunk {
+		t.Fatalf("want OFF_TRUNK for main when configured dev branch is dev, got %+v", res)
+	}
+	if !strings.Contains(res.Detail, "expected development branch dev") {
+		t.Fatalf("detail should name configured dev branch, got %q", res.Detail)
+	}
+	if g.sawSubcommand("commit") {
+		t.Fatalf("off-trunk must not attempt commit; calls=%v", g.calls)
+	}
+}
+
+func TestExplicitTrunkOverrideWinsOverBranchRole(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["symbolic-ref"] = reply{out: "main\n", code: 0}
+	opts := baseOpts()
+	opts.Dir = root
+	opts.Trunk = "main"
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("explicit trunk override should accept main, got %+v", res)
 	}
 }
 

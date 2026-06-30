@@ -1,7 +1,7 @@
 // Package safecommit is the EXECUTOR half of the shared-trunk commit discipline that
 // internal/gitgate only declares defensively.
 //
-// On a multi-session shared trunk (the fak `main`), the ordinary sequence
+// On a multi-session shared development branch, the ordinary sequence
 //
 //	git add <paths>   # then, separately
 //	git commit
@@ -41,6 +41,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/witness"
@@ -78,7 +79,7 @@ type Options struct {
 	Dir      string            // repo dir ("" => git discovery from cwd)
 	Paths    []string          // explicit repo-relative pathspec (REQUIRED, >= 1)
 	Message  string            // commit message (already assembled from -m / -F / stdin)
-	Trunk    string            // expected trunk branch ("" => DefaultTrunk)
+	Trunk    string            // expected development branch override ("" => branch_roles.development_branch)
 	SignOff  bool              // add the DCO sign-off (-s)
 	Push     bool              // push, but ONLY after a verified commit
 	Lock     LockOptions       // advisory same-host lock
@@ -95,8 +96,22 @@ type ReviewOptions struct {
 	Reviewer  ReviewFunc
 }
 
-// DefaultTrunk is the branch fak commits land on when Options.Trunk is empty.
+// DefaultTrunk is the fallback branch when branch-role config cannot be read.
 const DefaultTrunk = "main"
+
+// ExpectedTrunk resolves the branch fak commits should land on. An explicit
+// override wins; otherwise the configured development branch is used.
+func ExpectedTrunk(dir, override string) string {
+	trunk := strings.TrimSpace(override)
+	if trunk != "" {
+		return trunk
+	}
+	roles, err := branchrole.Load(dir)
+	if err == nil && strings.TrimSpace(roles.DevelopmentBranch) != "" {
+		return roles.DevelopmentBranch
+	}
+	return DefaultTrunk
+}
 
 // Reason tokens — the closed, checkable vocabulary the executor stamps into Result.Reason
 // and the --json contract a calling loop consumes. Local string constants, the same shape
@@ -166,10 +181,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res = ScoreResult(res)
 	}()
 
-	trunk := strings.TrimSpace(opts.Trunk)
-	if trunk == "" {
-		trunk = DefaultTrunk
-	}
+	trunk := ExpectedTrunk(opts.Dir, opts.Trunk)
 
 	// (0) Normalize + validate — pure, no git. Share gitgate's ONE path rule so the
 	// executor and the policy agree on what a repo path is.
@@ -353,7 +365,7 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		if code != 0 || branch == "" {
 			branch = "detached HEAD"
 		}
-		res.Detail = fmt.Sprintf("on %s, expected %s", branch, trunk)
+		res.Detail = fmt.Sprintf("on %s, expected development branch %s", branch, trunk)
 		return res, true, nil
 	}
 
