@@ -86,6 +86,22 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(by_account[".claude-monitor"]["kind"], "non-account")
         self.assertEqual(by_account[".claude.json"]["kind"], "non-account")
 
+    def test_policy_exclude_matches_claude_login_email(self) -> None:
+        login_dir(self.home, ".claude", uuid="uuid-day28",
+                  email="day28@example.com")
+        pol = {
+            "exclude": ["day28"],
+            "include_only": [],
+            "notes": {"day28": "retired day28 account"},
+        }
+
+        rows = fleet_accounts.discover_accounts(str(self.home), pol,
+                                                config_home=str(self.config_home))
+        row = {r["account"]: r for r in rows}[".claude"]
+
+        self.assertEqual(row["kind"], "excluded")
+        self.assertEqual(row["reason"], "retired day28 account")
+
     def test_policy_file_merges_with_safe_defaults(self) -> None:
         policy_path = self.home / "accounts_policy.json"
         policy_path.write_text(

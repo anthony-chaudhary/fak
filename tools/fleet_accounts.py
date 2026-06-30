@@ -235,12 +235,15 @@ def load_policy(path: str = POLICY_PATH) -> dict:
     return pol
 
 
-def _excluded_match(tag: str, account: str, exclude: list[str]) -> str | None:
+def _excluded_match(tag: str, account: str, exclude: list[str],
+                    *identity_values: str) -> str | None:
     """Return the matching exclude substring (for the reason text), or None."""
+    haystacks = [tag, account, *identity_values]
     for sub in exclude:
         if not sub:
             continue
-        if sub.lower() in tag.lower() or sub.lower() in account.lower():
+        sl = sub.lower()
+        if any(sl in str(value).lower() for value in haystacks if value):
             return sub
     return None
 
@@ -898,9 +901,11 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
     if ".deleted" in account.lower():
         return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
                 "kind": "excluded", "reason": "tombstoned (.DELETED marker)", "notes": note}
-    hit = _excluded_match(tag, account, pol.get("exclude", []))
+    identity = read_account_identity(acct_dir) if product == "claude" else {}
+    hit = _excluded_match(tag, account, pol.get("exclude", []),
+                          str(identity.get("login_email", "")))
     if hit:
-        why = note or f"excluded by policy (matches '{hit}')"
+        why = note or notes.get(hit, "") or f"excluded by policy (matches '{hit}')"
         return {"dir": acct_dir, "product": product, "account": account, "tag": tag,
                 "kind": "excluded", "reason": why, "notes": note}
     include_only = [t for t in pol.get("include_only", []) if t]
@@ -917,7 +922,7 @@ def _classify_row(acct_dir: str, product: str, account: str, pol: dict) -> dict:
     if product == "claude":
         # stamp the logged-in identity so the roster can see WHO a dir really is, not
         # just what it's named -- the seam the duplicate-identity reconciliation rides.
-        row.update(read_account_identity(acct_dir))
+        row.update(identity)
     return row
 
 
