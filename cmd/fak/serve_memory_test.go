@@ -79,6 +79,9 @@ func serveSynthOffloadWeightSource(t *testing.T) *ggufload.WeightSource {
 			"glm-dsa.attention.head_count_kv":          {Type: ggufload.TypeUint64, Value: uint64(2)},
 			"glm-dsa.attention.layer_norm_rms_epsilon": {Type: ggufload.TypeFloat32, Value: float32(1e-5)},
 			"glm-dsa.rope.freq_base":                   {Type: ggufload.TypeFloat32, Value: float32(10000)},
+			"glm-dsa.expert_count":                     {Type: ggufload.TypeUint64, Value: uint64(4)},
+			"glm-dsa.expert_used_count":                {Type: ggufload.TypeUint64, Value: uint64(2)},
+			"glm-dsa.expert_feed_forward_length":       {Type: ggufload.TypeUint64, Value: uint64(64)},
 			"tokenizer.ggml.eos_token_id":              {Type: ggufload.TypeUint32, Value: uint32(2)},
 		},
 		Tensors: []ggufload.TensorInfo{
@@ -246,6 +249,68 @@ func TestServeGGUFCPUOffloadMemoryPlanKeepsExpertsHostScoped(t *testing.T) {
 	if fe.Want != deviceWant {
 		t.Fatalf("FitError Want = %d, want device-only dense+KV+HAL transient side", fe.Want)
 	}
+}
+
+func TestServeGGUFExpertParallelMemoryPlanChargesPerRankExpertBand(t *testing.T) {
+	ws := serveSynthOffloadWeightSource(t)
+	plan, err := serveGGUFExpertParallelMemoryPlan(ws, 4, 8, serveFitBudget{})
+	if err != nil {
+		t.Fatalf("serveGGUFExpertParallelMemoryPlan: %v", err)
+	}
+	by := plan.ByClass()
+	// EP replicates dense/router/attention/shared-expert tensors and shards only the routed
+	// ffn_*_exps blobs. The synthetic routed blob is 4096 B across four experts, so EP-4 charges
+	// one 1024 B expert band instead of the full 4096 B blob to each rank.
+	if got, want := by[compute.MemoryWeights], int64(1024+512+256+2048+1024); got != want {
+		t.Fatalf("EP per-rank weights = %d, want replicated weights + one expert band %d", got, want)
+	}
+	byDetail := serveMemoryBytesByDetail(plan)
+	if got, want := byDetail["gguf-ep-replicated-load"], int64(1024+512+256+2048); got != want {
+		t.Fatalf("EP replicated weight detail = %d, want %d; plan=%+v", got, want, plan)
+	}
+	if got, want := byDetail["gguf-ep-routed-expert-shard"], int64(1024); got != want {
+		t.Fatalf("EP routed shard detail = %d, want %d; plan=%+v", got, want, plan)
+	}
+	if got, want := by[compute.MemoryKVCache], int64(3072); got != want {
+		t.Fatalf("kv_cache = %d, want %d", got, want)
+	}
+	if got, want := by[compute.MemoryActivation], int64(128); got != want {
+		t.Fatalf("activation = %d, want %d", got, want)
+	}
+	if got, want := by[compute.MemoryScratchpad], int64(3584); got != want {
+		t.Fatalf("scratchpad = %d, want %d", got, want)
+	}
+	if got := by[compute.MemoryOffload]; got != 0 {
+		t.Fatalf("EP resident plan must not classify routed experts as host offload, got %d", got)
+	}
+	const deviceWant = int64(1024 + 512 + 256 + 2048 + 1024 + 3072 + 128 + 3584)
+	if got := plan.DeviceTotal(); got != deviceWant {
+		t.Fatalf("DeviceTotal = %d, want per-rank weights + KV + HAL transient %d", got, deviceWant)
+	}
+	fitsPerRank := serveCapBackend{Backend: compute.Default(), total: 14 << 10, free: 14 << 10, known: true}
+	if err := fitServeGGUFExpertParallelOnDevice(ws, fitsPerRank, 4, 8); err != nil {
+		t.Fatalf("EP per-rank plan should fit a backend sized for one expert band: %v", err)
+	}
+	tooSmallForPerRank := serveCapBackend{Backend: compute.Default(), total: 12 << 10, free: 12 << 10, known: true}
+	err = fitServeGGUFExpertParallelOnDevice(ws, tooSmallForPerRank, 4, 8)
+	if err == nil {
+		t.Fatal("EP per-rank plan over device capacity must be refused")
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		t.Fatalf("want *compute.FitError, got %T (%v)", err, err)
+	}
+	if fe.Want != deviceWant {
+		t.Fatalf("FitError Want = %d, want per-rank device side", fe.Want)
+	}
+}
+
+func serveMemoryBytesByDetail(plan compute.MemoryPlan) map[string]int64 {
+	out := map[string]int64{}
+	for _, d := range plan {
+		out[d.Detail] += d.Bytes
+	}
+	return out
 }
 
 // #949: a standard-arch device serve with FAK_Q4K must hold raw Q4_K weights RESIDENT ON THE

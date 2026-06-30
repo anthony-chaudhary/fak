@@ -67,6 +67,24 @@ func synthWeightSource(t *testing.T) *WeightSource {
 	return ws
 }
 
+func synthGLMMeta(experts int) map[string]Value {
+	return map[string]Value{
+		"general.architecture":                     {Type: TypeString, Value: "glm-dsa"},
+		"glm-dsa.context_length":                   {Type: TypeUint64, Value: uint64(16)},
+		"glm-dsa.embedding_length":                 {Type: TypeUint64, Value: uint64(32)},
+		"glm-dsa.block_count":                      {Type: TypeUint64, Value: uint64(2)},
+		"glm-dsa.feed_forward_length":              {Type: TypeUint64, Value: uint64(64)},
+		"glm-dsa.attention.head_count":             {Type: TypeUint64, Value: uint64(4)},
+		"glm-dsa.attention.head_count_kv":          {Type: TypeUint64, Value: uint64(2)},
+		"glm-dsa.attention.layer_norm_rms_epsilon": {Type: TypeFloat32, Value: float32(1e-5)},
+		"glm-dsa.rope.freq_base":                   {Type: TypeFloat32, Value: float32(10000)},
+		"glm-dsa.expert_count":                     {Type: TypeUint64, Value: uint64(experts)},
+		"glm-dsa.expert_used_count":                {Type: TypeUint64, Value: uint64(2)},
+		"glm-dsa.expert_feed_forward_length":       {Type: TypeUint64, Value: uint64(64)},
+		"tokenizer.ggml.eos_token_id":              {Type: TypeUint32, Value: uint32(2)},
+	}
+}
+
 func TestEstimateLoadBytesIsHeaderArithmetic(t *testing.T) {
 	ws := synthWeightSource(t)
 	// 1 MiB (1048576) + 589824 = 1638400, with no tensor read and no model built.
@@ -157,6 +175,62 @@ func TestFitF32OnDeviceUsesExpandedResidentFootprint(t *testing.T) {
 	if len(fe.Demands) != 1 || fe.Demands[0].Detail != "gguf-f32-load" {
 		t.Fatalf("FitF32OnDevice demands = %+v", fe.Demands)
 	}
+}
+
+func TestEstimateExpertParallelLoadMemoryPlanShardsRoutedExperts(t *testing.T) {
+	f := &File{
+		Metadata: synthGLMMeta(4),
+		Tensors: []TensorInfo{
+			{Name: "token_embd.weight", Dims: []uint64{256}, Type: TensorF32},               // replicated, 1024 B
+			{Name: "blk.0.ffn_gate_inp.weight", Dims: []uint64{128}, Type: TensorF32},       // router replicated, 512 B
+			{Name: "blk.0.ffn_gate_shexp.weight", Dims: []uint64{512}, Type: TensorF32},     // shared expert replicated, 2048 B
+			{Name: "blk.0.ffn_gate_exps.weight", Dims: []uint64{1024}, Type: TensorF32},     // routed expert blob, 4096 B total
+			{Name: "blk.78.nextn.eh_proj.weight", Dims: []uint64{1 << 20}, Type: TensorF32}, // skipped, counts nowhere
+		},
+	}
+	ws, err := NewWeightSource(f, nil, 0)
+	if err != nil {
+		t.Fatalf("NewWeightSource: %v", err)
+	}
+
+	full, err := ws.EstimateLoadMemoryPlan()
+	if err != nil {
+		t.Fatalf("EstimateLoadMemoryPlan: %v", err)
+	}
+	if got, want := full.DeviceTotal(), int64(1024+512+2048+4096+(1<<20)*4); got != want {
+		t.Fatalf("full load DeviceTotal = %d, want %d", got, want)
+	}
+
+	ep4, err := ws.EstimateExpertParallelLoadMemoryPlan(4)
+	if err != nil {
+		t.Fatalf("EstimateExpertParallelLoadMemoryPlan: %v", err)
+	}
+	if got, want := ep4.DeviceTotal(), int64(1024+512+2048+1024); got != want {
+		t.Fatalf("EP-4 per-rank DeviceTotal = %d, want replicated + one routed expert band %d", got, want)
+	}
+	byDetail := memoryPlanBytesByDetail(ep4)
+	if got, want := byDetail["gguf-ep-replicated-load"], int64(1024+512+2048); got != want {
+		t.Fatalf("EP replicated bytes = %d, want %d; plan=%+v", got, want, ep4)
+	}
+	if got, want := byDetail["gguf-ep-routed-expert-shard"], int64(1024); got != want {
+		t.Fatalf("EP routed shard bytes = %d, want %d; plan=%+v", got, want, ep4)
+	}
+
+	ep2, err := ws.EstimateExpertParallelLoadMemoryPlan(2)
+	if err != nil {
+		t.Fatalf("EstimateExpertParallelLoadMemoryPlan EP-2: %v", err)
+	}
+	if got, want := ep2.DeviceTotal(), int64(1024+512+2048+2048); got != want {
+		t.Fatalf("EP-2 per-rank DeviceTotal = %d, want replicated + two routed expert bands %d", got, want)
+	}
+}
+
+func memoryPlanBytesByDetail(plan compute.MemoryPlan) map[string]int64 {
+	out := map[string]int64{}
+	for _, d := range plan {
+		out[d.Detail] += d.Bytes
+	}
+	return out
 }
 
 func TestEstimateCPUOffloadExpertsMemoryPlanSplitsDeviceAndHost(t *testing.T) {

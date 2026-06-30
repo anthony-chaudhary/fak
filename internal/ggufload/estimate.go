@@ -96,6 +96,92 @@ func (s *WeightSource) EstimateLoadMemoryPlan() (compute.MemoryPlan, error) {
 	return ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-load", byDType)
 }
 
+// EstimateExpertParallelLoadMemoryPlan estimates the resident per-rank GGUF weight plan for an
+// expert-parallel MoE load. Non-expert tensors are replicated on every rank; batched routed-expert
+// blobs are charged only for the busiest rank's contiguous expert band. The estimate is header-only
+// like EstimateLoadMemoryPlan: it reads no tensor payloads, and it preserves dtype rows so the
+// capacity refusal still names the storage mix.
+func (s *WeightSource) EstimateExpertParallelLoadMemoryPlan(ranks int) (compute.MemoryPlan, error) {
+	if ranks <= 1 {
+		return s.EstimateLoadMemoryPlan()
+	}
+	cfg, err := s.File.Config()
+	if err != nil {
+		return nil, err
+	}
+	if !archUsesGGUFBatchedMoEExperts(cfg.ModelType) || cfg.NumExperts <= 0 {
+		return s.EstimateLoadMemoryPlan()
+	}
+	if _, err := model.ExpertParallelPlan(cfg.NumExperts, ranks); err != nil {
+		return nil, err
+	}
+	band := compute.ExpertParallelLargestBandExperts(cfg.NumExperts, ranks)
+	replicatedByDType := map[string]uint64{}
+	expertByDType := map[string]uint64{}
+	for _, info := range s.File.Tensors {
+		if cfg.ModelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
+			continue
+		}
+		n, err := tensorPayloadBytes(info)
+		if err != nil {
+			return nil, fmt.Errorf("gguf: estimate expert-parallel tensor %s: %w", info.Name, err)
+		}
+		shardedExpert := false
+		if _, _, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+			n, err = scaleExpertBandBytes(n, band, cfg.NumExperts)
+			if err != nil {
+				return nil, fmt.Errorf("gguf: estimate expert-parallel tensor %s: %w", info.Name, err)
+			}
+			shardedExpert = true
+		}
+		dtype := ggufTensorDTypeLabel(info.Type)
+		byDType := replicatedByDType
+		if shardedExpert {
+			byDType = expertByDType
+		}
+		if byDType[dtype] > math.MaxUint64-n {
+			return nil, fmt.Errorf("gguf: estimated expert-parallel load bytes overflow uint64")
+		}
+		byDType[dtype] += n
+	}
+	replicated, err := ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-ep-replicated-load", replicatedByDType)
+	if err != nil {
+		return nil, err
+	}
+	sharded, err := ggufMemoryPlanByDType(compute.MemoryWeights, compute.MemoryScopeDevice, "gguf-ep-routed-expert-shard", expertByDType)
+	if err != nil {
+		return nil, err
+	}
+	return append(replicated, sharded...), nil
+}
+
+func scaleExpertBandBytes(total uint64, band, experts int) (uint64, error) {
+	if band <= 0 || experts <= 0 {
+		return 0, nil
+	}
+	num, den := uint64(band), uint64(experts)
+	q, r := total/den, total%den
+	if q > math.MaxUint64/num {
+		return 0, fmt.Errorf("expert band byte estimate overflows uint64")
+	}
+	out := q * num
+	if r == 0 {
+		return out, nil
+	}
+	if r > math.MaxUint64/num {
+		return 0, fmt.Errorf("expert band byte estimate overflows uint64")
+	}
+	rem := r * num
+	add := rem / den
+	if rem%den != 0 {
+		add++
+	}
+	if out > math.MaxUint64-add {
+		return 0, fmt.Errorf("expert band byte estimate overflows uint64")
+	}
+	return out + add, nil
+}
+
 // EstimateF32LoadMemoryPlan is the classed form of EstimateF32LoadBytes for the f32-resident
 // device load path.
 func (s *WeightSource) EstimateF32LoadMemoryPlan() (compute.MemoryPlan, error) {
