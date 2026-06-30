@@ -155,39 +155,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	close(stopPing)
 	<-pingDone
 	if err != nil {
-		if _, _, _, ok := inKernelOOMObservation(err); ok {
-			s.observePlannerRequestMemory()
-		}
-		// Count + surface the failure on the default --debug-stats stderr line (the s.logf
-		// below only reaches the --log stream, OFF by default). Without this a stalled or
-		// errored streamed turn is a silent freeze.
-		s.metrics.observeUpstreamError(err)
-		s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
-		if !started {
-			// Nothing was written yet — map the error to its distinct status/code (a 429
-			// becomes upstream_rate_limited, a stall 504 upstream_stalled) so the client sees
-			// WHAT failed, not a generic 502, and gets the code + any Retry-After. The metric
-			// was already observed above (observeUpstreamError at the top of this branch), so
-			// classify with the PURE mapper here to avoid double-counting the failure.
-			status, code, msg := upstreamErrorStatus(err)
-			if ra := upstreamRetryAfter(err); ra != "" {
-				w.Header().Set("Retry-After", ra)
-			}
-			s.logf("gateway: upstream model error (messages stream): %v", err)
-			writeErrCode(w, status, code, msg)
-			return true
-		}
-		s.logf("gateway: upstream model error mid-stream (messages): %v", err)
-		closeText()
-		errType := "api_error"
-		if errors.As(err, new(*agent.UpstreamStalledError)) {
-			errType = "upstream_stalled"
-		}
-		sendLocked("error", map[string]any{
-			"type":  "error",
-			"error": map[string]any{"type": errType, "message": "upstream model error"},
-		})
-		return true
+		return s.streamPlannerUpstreamError(w, err, started, reqTrace, began, sendLocked, closeText)
 	}
 	s.accountStreamedTurn(r.Context(), sessionTurn, comp, req.Messages, began)
 
@@ -249,6 +217,40 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)
 	sendAnthropicTerminal(sendLocked, stop, usage)
+	return true
+}
+
+// streamPlannerUpstreamError renders the right failure for a CompleteStream error and
+// returns true (the turn is fully handled). Before any byte is sent (`started` false) it
+// maps the error to its distinct status/code + Retry-After so the client sees WHAT failed
+// (a 429 → upstream_rate_limited, a stall → 504) rather than a generic 502; mid-stream it
+// closes any open text block and emits a terminal SSE error event. The metric is observed
+// here so a stalled or errored streamed turn is a counted failure, not a silent freeze.
+func (s *Server) streamPlannerUpstreamError(w http.ResponseWriter, err error, started bool, reqTrace string, began time.Time, sendLocked func(string, any), closeText func()) bool {
+	if _, _, _, ok := inKernelOOMObservation(err); ok {
+		s.observePlannerRequestMemory()
+	}
+	s.metrics.observeUpstreamError(err)
+	s.renderTurnDebugError(reqTrace, "anthropic_messages", err, time.Since(began))
+	if !started {
+		status, code, msg := upstreamErrorStatus(err)
+		if ra := upstreamRetryAfter(err); ra != "" {
+			w.Header().Set("Retry-After", ra)
+		}
+		s.logf("gateway: upstream model error (messages stream): %v", err)
+		writeErrCode(w, status, code, msg)
+		return true
+	}
+	s.logf("gateway: upstream model error mid-stream (messages): %v", err)
+	closeText()
+	errType := "api_error"
+	if errors.As(err, new(*agent.UpstreamStalledError)) {
+		errType = "upstream_stalled"
+	}
+	sendLocked("error", map[string]any{
+		"type":  "error",
+		"error": map[string]any{"type": errType, "message": "upstream model error"},
+	})
 	return true
 }
 
