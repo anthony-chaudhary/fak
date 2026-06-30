@@ -79,11 +79,14 @@ serving (pure-fak) · M#11 Substrate/interop (half-fak) · dogfood scorecard (#1
   yet *milestone-landed*.
 - **(b) pure-fak** — gated on workstream 1 (no live kernel e2e). `not yet`.
 - **(c) half-fak (sglang/vllm/plugin)** — SGLang serving + fak gateway bridges to the dgx
-  Qwen3.6 box, but the EngineDriver adapters are blocked: **#39 (SGLang) is code-complete but
-  uncommittable**, blocked on sibling **#38 (vLLM)** WIP.
+  Qwen3.6 box. The stale adapter block is cleared: **#39 (SGLang)** is committed under
+  `internal/engine/sglang.go` with `go test ./internal/engine` coverage, and **#38** is the
+  committed Dynamo interop decision. The remaining `not yet` is the witnessed end-to-end value
+  run tied to the dogfood KPI, not an uncommittable adapter.
 
 **Next checkable step:** drive the **dogfood** KPI to A (#1422) by capturing one witnessed
-e2e value run per track (api-only is one commit away; half-fak needs #38/#39 unblocked).
+e2e value run per track (api-only is one commit away; half-fak now needs the value run over the
+shipped adapter/gateway path).
 
 ## 4 — RSI (recursive self-improvement)
 
