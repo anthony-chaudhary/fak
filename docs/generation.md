@@ -80,6 +80,45 @@ Demotion or retirement evidence is equally concrete:
 - A later stream's option cost now exceeds its expected value.
 - A runtime gate or compatibility policy proved the item cannot be safely exposed.
 
+## Debt Metric
+
+The milestone report carries a lightweight `debt_score` for each generation
+lane. It is an operator signal, not a priority score or gate:
+
+```text
+debt_score =
+  stale_issues
+  + 3 * missing_witnesses
+  + 2 * unpromoted_bets
+  + 2 * label_ship_mismatches
+```
+
+The inputs are intentionally cheap:
+
+- `stale_issues`: open discrete child work in that lane. Until the report reads
+  issue age directly, this is a stale-risk proxy, not a calendar-age claim.
+- `missing_witnesses`: tracked generation items whose child signal could not be
+  read. This is weighted highest because an unwitnessed stream cannot be safely
+  promoted or demoted.
+- `unpromoted_bets`: later-horizon in-flight work and ongoing programs that have
+  not moved closer to `now`.
+- `label_ship_mismatches`: unclassified tracked work, meaning the report can see
+  shipped work but cannot bind it to a generation label.
+
+Promotion evidence that should reduce debt: closed witnessed child work, a
+previously unreadable issue becoming measurable, a later-horizon bet moving to a
+nearer stream with evidence, or commit/release sidecars matching issue labels.
+
+Demotion or retirement evidence that should increase or resolve debt: repeated
+missing witnesses, stale-risk work with no owner, a later-horizon bet whose
+assumption failed, or a label/ship mismatch that proves the stream cannot be
+trusted.
+
+Invalidating assumption: the current metric uses tracked epic child counts as a
+cheap proxy for stale issues and promotion state. If GitHub issue age,
+project-field history, or commit sidecar coverage becomes cheap to read, the
+weights should be recalibrated against those stronger witnesses.
+
 ## Intake Rules
 
 At issue creation:
