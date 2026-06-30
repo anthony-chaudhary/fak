@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestIsSelfSourceTreeMatchesGoModuleRoots(t *testing.T) {
 	selfSource := []string{
@@ -85,6 +88,77 @@ func TestIssueTextTargetsSelfSourceCatchesBareAndPrefixedRefs(t *testing.T) {
 		if held, tree := IssueTextTargetsSelfSource(text); held {
 			t.Errorf("IssueTextTargetsSelfSource(%q) = (true, %q), want not held", text, tree)
 		}
+	}
+}
+
+func TestLaneDispatchableUnderGuard(t *testing.T) {
+	// Guarded: a self-source lane tree is NOT dispatchable; a shippable one is.
+	if LaneDispatchableUnderGuard(true, []string{"internal/gateway/**"}) {
+		t.Fatalf("guarded internal/gateway lane reported dispatchable")
+	}
+	if LaneDispatchableUnderGuard(true, []string{"cmd/**"}) {
+		t.Fatalf("guarded cmd lane reported dispatchable")
+	}
+	if !LaneDispatchableUnderGuard(true, []string{"docs/**", "README.md"}) {
+		t.Fatalf("guarded docs lane reported NOT dispatchable")
+	}
+	if !LaneDispatchableUnderGuard(true, []string{"tools/**", "scripts/**"}) {
+		t.Fatalf("guarded tools lane reported NOT dispatchable")
+	}
+	// A mixed tree with any self-source member is held.
+	if LaneDispatchableUnderGuard(true, []string{"docs/**", "internal/agent/**"}) {
+		t.Fatalf("guarded mixed self-source lane reported dispatchable")
+	}
+	// Unguarded: every lane is dispatchable (the operator/worktree escape #1334).
+	if !LaneDispatchableUnderGuard(false, []string{"internal/gateway/**"}) {
+		t.Fatalf("unguarded self-source lane reported NOT dispatchable")
+	}
+	// No declared tree -> fail OPEN (no self-source witness to hold on).
+	if !LaneDispatchableUnderGuard(true, nil) {
+		t.Fatalf("guarded lane with no tree reported NOT dispatchable")
+	}
+}
+
+func TestDispatchableLanesUnderGuardSurfacesShippableLanesWhenBacklogIsSelfSource(t *testing.T) {
+	// The #1397 stall: the backlog routes mostly to internal/** lanes (the busiest by
+	// step budget), so a picker that chooses the single busiest lane and only THEN runs
+	// the self-modify hold refuses every tick and reports an EMPTY plan surface -- even
+	// though docs/tools/ci/examples carry abundant guard-shippable work. The selection-
+	// time partition must keep the surface NON-EMPTY by handing the picker exactly the
+	// shippable lanes and naming the held self-source ones.
+	trees := map[string][]string{
+		"compute":   {"internal/compute/**"},
+		"gateway":   {"internal/gateway/**"},
+		"promptmmu": {"internal/promptmmu/**"},
+		"metrics":   {"internal/metrics/**"},
+		"model":     {"internal/model/**"},
+		"cmd":       {"cmd/**"},
+		"docs":      {"docs/**", "README.md"},
+		"tools":     {"tools/**", "scripts/**"},
+		"ci":        {".github/**"},
+		"examples":  {"examples/**"},
+	}
+
+	dispatchable, held := DispatchableLanesUnderGuard(true, trees)
+	wantDispatchable := []string{"ci", "docs", "examples", "tools"}
+	wantHeld := []string{"cmd", "compute", "gateway", "metrics", "model", "promptmmu"}
+	if !reflect.DeepEqual(dispatchable, wantDispatchable) {
+		t.Fatalf("guarded dispatchable lanes = %v, want %v", dispatchable, wantDispatchable)
+	}
+	if !reflect.DeepEqual(held, wantHeld) {
+		t.Fatalf("guarded held lanes = %v, want %v", held, wantHeld)
+	}
+	// The whole point: the guarded plan surface is NON-EMPTY even though every busiest
+	// (self-source) lane is held -- the stall is a refusal-to-surface, not an absence of
+	// work. A picker filtering on `dispatchable` lands on a shippable lane (#1397).
+	if len(dispatchable) == 0 {
+		t.Fatalf("guarded dispatch surface is EMPTY despite shippable docs/tools/ci/examples work")
+	}
+
+	// Unguarded: every lane is dispatchable and none is held (the operator escape #1334).
+	allDispatchable, noneHeld := DispatchableLanesUnderGuard(false, trees)
+	if len(allDispatchable) != len(trees) || len(noneHeld) != 0 {
+		t.Fatalf("unguarded partition = %d dispatchable / %d held, want %d / 0", len(allDispatchable), len(noneHeld), len(trees))
 	}
 }
 

@@ -2,6 +2,7 @@ package dispatchtick
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -101,4 +102,58 @@ func SelfModifyHoldForPick(guarded bool, laneTree []string, issueText string) (h
 		return true, t
 	}
 	return IssueTextTargetsSelfSource(issueText)
+}
+
+// LaneDispatchableUnderGuard reports whether a lane whose canonical tree is laneTree
+// can be the target of a GUARDED issue-resolution worker -- i.e. the lane is NOT rooted
+// in fak's own running source (cmd/** or internal/**). It is the SELECTION-TIME twin of
+// SelfModifyHold: SelfModifyHold answers "must I HOLD this already-chosen lane?" AFTER a
+// pick, while this answers "should the picker even CONSIDER this lane?" BEFORE one.
+//
+// The motivating failure (#1397/#1338, the empty-dispatch-surface stall): on a guarded
+// trunk the open-issue backlog is dominated by internal/** lanes (compute, gateway,
+// promptmmu, metrics, engine, model, ...), so the busiest-by-step-budget lane is almost
+// always self-source. A picker that chooses the single busiest lane and only THEN runs
+// SelfModifyHoldForPick picks a held lane and refuses with SELF_MODIFY_HOLD every tick --
+// reporting an EMPTY plan surface even though guard-shippable lanes (docs, tools, .github,
+// examples, visuals, .claude) carry abundant work. Filtering the candidate set through
+// this predicate first lets the picker skip the held lanes and surface a shippable one.
+//
+// An UNGUARDED worker can ship anywhere (the operator/worktree-isolated escape #1334), so
+// for guarded=false every lane is dispatchable. A lane with NO declared tree is treated as
+// dispatchable: the picker's own fallback names a tree only when one is chosen, and an
+// empty tree carries no self-source witness to hold on -- failing OPEN here keeps a lane
+// the taxonomy under-declares from silently vanishing from the surface.
+func LaneDispatchableUnderGuard(guarded bool, laneTree []string) bool {
+	if !guarded {
+		return true
+	}
+	for _, t := range laneTree {
+		if IsSelfSourceTree(t) {
+			return false
+		}
+	}
+	return true
+}
+
+// DispatchableLanesUnderGuard partitions a lane->tree map into the lanes a GUARDED worker
+// can SHIP to (dispatchable, sorted) and the lanes it would be HELD on (held, sorted). It
+// is the set-level form of LaneDispatchableUnderGuard the lane picker uses to drop
+// self-source lanes from the busiest-lane search BEFORE choosing, so a guarded tick lands
+// on a shippable lane instead of refusing on the busiest self-source one (#1397).
+//
+// For guarded=false every lane is dispatchable and held is empty (the operator escape
+// #1334). The returned slices are independent copies so a caller can mutate them freely.
+func DispatchableLanesUnderGuard(guarded bool, trees map[string][]string) (dispatchable, held []string) {
+	dispatchable = make([]string, 0, len(trees))
+	for lane, tree := range trees {
+		if LaneDispatchableUnderGuard(guarded, tree) {
+			dispatchable = append(dispatchable, lane)
+		} else {
+			held = append(held, lane)
+		}
+	}
+	sort.Strings(dispatchable)
+	sort.Strings(held)
+	return dispatchable, held
 }
