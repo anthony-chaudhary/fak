@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ChangedPaths returns the repo-relative paths changed between sinceRef and HEAD,
@@ -25,6 +27,9 @@ func ChangedPaths(workspace, sinceRef string) ([]string, error) {
 	if workspace != "" {
 		cmd.Dir = workspace
 	}
+	// Suppress the Windows console-window flash a windowless dispatch parent would
+	// otherwise pop when this git probe runs (windowgate's UNSUPPRESSED_GO_EXEC gate).
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
