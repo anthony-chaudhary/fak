@@ -117,8 +117,71 @@ func watchdogAutohealOnStart(verb string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		results := runWatchdogAutoheal(ctx, opts)
-		logWatchdogAutohealResults(os.Stderr, results)
+		// Pick the sink so the JSON heal lines never land on top of an attended agent's
+		// alternate-screen TUI: an interactive `fak guard -- <agent>` launch routes them to a
+		// log file under the state dir; serve and any headless/piped run keep stderr. See
+		// watchdogAutohealLogSink.
+		w, closeSink := watchdogAutohealLogSink(verb, opts.StateDir, os.Stderr)
+		defer closeSink()
+		logWatchdogAutohealResults(w, results)
 	}()
+}
+
+// watchdogAutohealToSharedStderr decides whether the background heal JSON lines may stream to
+// the SHARED terminal stderr. It mirrors guardDebugStatsToSharedStderr (guard.go): on an
+// ATTENDED interactive `fak guard -- <agent>` launch the wrapped agent (Claude Code) paints a
+// full-screen alternate-screen TUI over THIS same terminal, so an async stderr write lands on
+// top of that UI and strands fragments in the agent pane (the `… for agents` leftover in the
+// bug report). There the heal record belongs in a log file, not bleeding into the agent view.
+// `fak serve` never hands the terminal to an alt-screen child, and a headless / piped guard
+// (`-p`, or a redirected stderr) has no full-screen UI to corrupt — both keep stderr so a
+// captured log stays whole.
+func watchdogAutohealToSharedStderr(verb string, stderrIsTerminal, childInteractive bool) bool {
+	if verb != "guard" {
+		return true
+	}
+	return !(stderrIsTerminal && childInteractive)
+}
+
+// watchdogAutohealLogSink chooses where the background heal results are written and returns a
+// closer for the caller to defer. It does the live probes (real TTY on stderr, os.Args for the
+// wrapped-child interactivity) and delegates the routing to watchdogAutohealSinkFor, which is
+// the pure, injectable core a test can drive without a terminal.
+func watchdogAutohealLogSink(verb, stateDir string, stderr *os.File) (io.Writer, func()) {
+	stderrTTY := stderr != nil && guardFdIsTerminal(int(stderr.Fd()))
+	return watchdogAutohealSinkFor(verb, stateDir, stderr, stderrTTY, guardChildInteractive(os.Args))
+}
+
+// watchdogAutohealSinkFor is the injectable routing core. When streaming to the shared terminal
+// would corrupt an attended agent's TUI (watchdogAutohealToSharedStderr is false), it routes the
+// JSON lines to an append-only `autoheal.log` under the state dir — the heal record is
+// preserved, the agent pane stays clean. Otherwise it writes to the supplied stderr as before. A
+// file that cannot be opened degrades to io.Discard rather than falling back to the terminal it
+// was trying to protect.
+func watchdogAutohealSinkFor(verb, stateDir string, stderr io.Writer, stderrIsTerminal, childInteractive bool) (io.Writer, func()) {
+	if watchdogAutohealToSharedStderr(verb, stderrIsTerminal, childInteractive) {
+		return stderr, func() {}
+	}
+	return watchdogAutohealFileSink(stateDir)
+}
+
+// watchdogAutohealFileSink opens the append-only heal log under the state dir. It is split out
+// so a test can exercise the file path without a real TTY. A directory or file that cannot be
+// created degrades to io.Discard (the heal still ran; only its log line is dropped) — never to
+// the shared terminal, whose corruption is the whole reason we are off stderr.
+func watchdogAutohealFileSink(stateDir string) (io.Writer, func()) {
+	dir := strings.TrimSpace(stateDir)
+	if dir == "" {
+		dir = defaultWatchdogAutohealStateDir()
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return io.Discard, func() {}
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "autoheal.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return io.Discard, func() {}
+	}
+	return f, func() { _ = f.Close() }
 }
 
 func parseWatchdogAutohealMode(v string) watchdogAutohealMode {

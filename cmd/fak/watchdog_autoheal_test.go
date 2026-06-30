@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -184,6 +185,103 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	}
 	if !serviceProjectionHas(linux, "systemd", "fleet-stale-work-garden.timer") {
 		t.Fatalf("linux projection missing systemd stale-work garden timer: %+v", linux)
+	}
+}
+
+// TestWatchdogAutohealToSharedStderr pins the sink decision: an attended interactive `fak
+// guard` launch must NOT stream the heal JSON to the shared terminal (the agent's alt-screen
+// TUI owns it — the bug in the report), while serve and every headless / piped / redirected
+// case keep stderr so a captured log stays whole.
+func TestWatchdogAutohealToSharedStderr(t *testing.T) {
+	cases := []struct {
+		name             string
+		verb             string
+		stderrIsTerminal bool
+		childInteractive bool
+		wantShared       bool
+	}{
+		{"guard interactive terminal suppresses (the bug)", "guard", true, true, false},
+		{"guard headless child keeps stderr", "guard", true, false, true},
+		{"guard redirected stderr keeps stderr", "guard", false, true, true},
+		{"serve always keeps stderr", "serve", true, true, true},
+		{"serve redirected keeps stderr", "serve", false, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := watchdogAutohealToSharedStderr(tc.verb, tc.stderrIsTerminal, tc.childInteractive); got != tc.wantShared {
+				t.Fatalf("watchdogAutohealToSharedStderr(%q, %v, %v) = %v, want %v", tc.verb, tc.stderrIsTerminal, tc.childInteractive, got, tc.wantShared)
+			}
+		})
+	}
+}
+
+// TestWatchdogAutohealKeepsAgentPaneClean is the render/capture witness for the fix: when guard
+// has handed the terminal to an interactive agent, the routing core sends the heal lines to
+// autoheal.log under the state dir and ZERO bytes reach the shared terminal. It captures both
+// surfaces — the would-be agent pane (a writer standing in for the terminal, which must stay
+// empty) and the file (which must hold the full JSON record) — so the proof is the ABSENCE of
+// any agent-pane corruption, exactly the `… for agents` fragment in the bug report.
+func TestWatchdogAutohealKeepsAgentPaneClean(t *testing.T) {
+	dir := t.TempDir()
+	results := []watchdogAutohealResult{{
+		Schema:  watchdogAutohealSchema,
+		Verb:    "guard",
+		ID:      "fleet-supervisor-watchdog",
+		Manager: "taskscheduler",
+		Unit:    "FleetSupervisorWatchdog",
+		Action:  "give_up",
+		Reason:  watchdogReasonExhausted,
+		Summary: "restart attempts exhausted (3/3)",
+		Attempt: 3,
+	}}
+
+	// agentPane stands in for the terminal the interactive agent owns: a single byte written
+	// here is the corruption. Drive the routing core as an interactive guard launch (stderr is
+	// a terminal, child is interactive) and prove nothing lands on it.
+	var agentPane strings.Builder
+	w, closeSink := watchdogAutohealSinkFor("guard", dir, &agentPane, true /*stderrIsTerminal*/, true /*childInteractive*/)
+	logWatchdogAutohealResults(w, results)
+	closeSink()
+
+	if agentPane.Len() != 0 {
+		t.Fatalf("agent pane received %d bytes, want 0 (TUI corruption): %q", agentPane.Len(), agentPane.String())
+	}
+
+	logged, err := os.ReadFile(filepath.Join(dir, "autoheal.log"))
+	if err != nil {
+		t.Fatalf("read autoheal.log: %v", err)
+	}
+	got := string(logged)
+	for _, want := range []string{"fak watchdog-autoheal:", watchdogReasonExhausted, "fleet-supervisor-watchdog"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("autoheal.log missing %q; got:\n%s", want, got)
+		}
+	}
+
+	// The mirror image: a headless guard (non-terminal stderr) keeps the captured-log contract —
+	// the JSON streams to the supplied stderr and NO file is created.
+	headlessDir := t.TempDir()
+	var headlessStderr strings.Builder
+	hw, closeHeadless := watchdogAutohealSinkFor("guard", headlessDir, &headlessStderr, false /*stderrIsTerminal*/, true)
+	logWatchdogAutohealResults(hw, results)
+	closeHeadless()
+	if !strings.Contains(headlessStderr.String(), "fak watchdog-autoheal:") {
+		t.Fatalf("headless guard: stderr missing heal line; got:\n%s", headlessStderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(headlessDir, "autoheal.log")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("headless guard wrote an autoheal.log (stat err=%v); want stderr only", err)
+	}
+
+	// Appends (a second heal in the same interactive session) accumulate rather than truncate.
+	w2, close2 := watchdogAutohealSinkFor("guard", dir, &agentPane, true, true)
+	logWatchdogAutohealResults(w2, results)
+	close2()
+	again, err := os.ReadFile(filepath.Join(dir, "autoheal.log"))
+	if err != nil {
+		t.Fatalf("re-read autoheal.log: %v", err)
+	}
+	if n := strings.Count(string(again), "fak watchdog-autoheal:"); n != 2 {
+		t.Fatalf("autoheal.log heal lines = %d, want 2 (append, not truncate)", n)
 	}
 }
 
