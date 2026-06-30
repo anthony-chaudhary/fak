@@ -138,7 +138,7 @@ func pythonPack() Pack {
 
 // cudaPack lints CUDA kernels (the tensor code that runs ON the GPU) with nvcc in
 // syntax-only mode. nvcc is absent on every host except a CUDA box, so this pack is
-// a no-op there and lints for real on the DGX/GPU host — the same graceful-degrade
+// a no-op there and lints for real on the GPU host — the same graceful-degrade
 // the rest of the GPU surface uses.
 func cudaPack() Pack {
 	return cmdPack(cmdSpec{
