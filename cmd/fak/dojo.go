@@ -158,18 +158,7 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	scenario := dojo.Scenario{
-		Name:   filepath.Base(filepath.Clean(*corpus)),
-		Mode:   "offline",
-		Corpus: *corpus,
-		Note:   "replay of recorded Claude Code transcripts",
-	}
-
-	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, levers, dojo.DefaultCalibBand())
-	dojo.SortEpisodes(episodes)
-	for _, re := range runErrs {
-		fmt.Fprintf(stderr, "fak dojo run: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
-	}
+	episodes := runDojoScenario(stderr, *corpus, levers, "run")
 
 	now := time.Now().UTC()
 	snapDate := *date
@@ -559,18 +548,27 @@ func runDojoPost(stdout, stderr io.Writer, argv []string) int {
 // `fak dojo post --rollup latest` reuses it. Run errors are reported to stderr but do
 // not abort (a partial run still folds the episodes it produced, exactly as `fak dojo
 // run` does).
-func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root string, stderr io.Writer) dojo.Report {
+// runDojoScenario replays a single offline corpus through the given levers, sorting the
+// episodes and draining any per-lever run errors to stderr — the scenario-build + Run +
+// sort + error-drain block the `dojo run` and `dojo post` paths share. label tags the
+// error line ("run" / "post").
+func runDojoScenario(stderr io.Writer, corpus string, levers []dojo.Lever, label string) []dojo.Episode {
 	scenario := dojo.Scenario{
 		Name:   filepath.Base(filepath.Clean(corpus)),
 		Mode:   "offline",
 		Corpus: corpus,
 		Note:   "replay of recorded Claude Code transcripts",
 	}
-	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, registerDojoLevers(ttl, maxFiles), dojo.DefaultCalibBand())
+	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, levers, dojo.DefaultCalibBand())
 	dojo.SortEpisodes(episodes)
 	for _, re := range runErrs {
-		fmt.Fprintf(stderr, "fak dojo post: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
+		fmt.Fprintf(stderr, "fak dojo %s: lever %q on %q: %s\n", label, re.Lever, re.Scenario, re.Err)
 	}
+	return episodes
+}
+
+func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root string, stderr io.Writer) dojo.Report {
+	episodes := runDojoScenario(stderr, corpus, registerDojoLevers(ttl, maxFiles), "post")
 	now := time.Now().UTC()
 	return dojo.Fold(episodes, dojo.FoldOpts{
 		Workspace:   root,
