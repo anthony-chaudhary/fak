@@ -35,6 +35,8 @@ func usageCoreVerbs() {
                  With --review-model, a scout model reviews the diff before commit:
                  refute -> REVIEW_REFUTED; unreachable reviewer -> logged fail-open.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
+                 Text and --json results include score/grade/score_notes so loops can
+                 rank "retry later" refusals above post-commit integrity failures.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
   fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
                 (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
@@ -45,7 +47,9 @@ func usageCoreVerbs() {
                  no inferable lane. It never invents a subject — with --apply --lane L -m S it
                  commits exactly lane L's dirty paths (narrow with --path) through the safe
                  commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
-                 pathspec race / an off-lane stamp). --json feeds a drive-to-zero loop.
+                 pathspec race / an off-lane stamp). Each lane group carries a score and
+                 score notes for batch-size/mixed-status/untracked/deletion risk; --json
+                 feeds a drive-to-zero loop.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit)
   fak sync      [check|apply] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
                 (SAFE FAST-FORWARD SYNC for a dirty shared worktree. check is read-only

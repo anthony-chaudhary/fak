@@ -22,8 +22,8 @@ import (
 //
 // `--gates A,B,...` runs only the named gates (so `make index-sync` can call this for INDEX_SYNC
 // while `make hygiene` runs the rest); the default is every gate HygieneGates() returns. The
-// remaining make-hygiene checkers (demo_* x3, scrub_hardware_names, guard_mcp_status_audit)
-// stay on the Python path until ported (#928 A3/A4/A5).
+// remaining make-hygiene checkers (demo_* x3, guard_mcp_status_audit) stay on the Python path
+// until ported (#928 A3/A4/A5).
 
 func cmdHygiene(argv []string) { os.Exit(runHygiene(os.Stdout, os.Stderr, argv)) }
 
