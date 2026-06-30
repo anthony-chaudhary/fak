@@ -1,0 +1,171 @@
+package gateway
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/devindex"
+)
+
+// IndexLaneRequest is the MCP argument shape for fak_index_lane. It mirrors
+// `fak index lane`: callers may pass one path or a batch.
+type IndexLaneRequest struct {
+	Root  string   `json:"root,omitempty"`
+	Path  string   `json:"path,omitempty"`
+	Paths []string `json:"paths,omitempty"`
+}
+
+// IndexLaneAnswer is one path's resolved lane plus the commit stamp it implies.
+type IndexLaneAnswer struct {
+	Path  string `json:"path"`
+	Lane  string `json:"lane"`
+	Stamp string `json:"stamp,omitempty"`
+}
+
+// IndexLaneResponse is the MCP result for fak_index_lane.
+type IndexLaneResponse struct {
+	Root    string            `json:"root"`
+	Results []IndexLaneAnswer `json:"results"`
+}
+
+var indexLaneInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "root": {"type": "string", "description": "optional repo root; omitted means search upward for dos.toml from the server working directory"},
+    "path": {"type": "string", "description": "single path to resolve to a lane and suggested (fak <leaf>) stamp"},
+    "paths": {"type": "array", "items": {"type": "string"}, "description": "batch of paths to resolve to lanes and suggested stamps"}
+  }
+}`)
+
+// IndexSearchRequest is shared by fak_index_leaves/docs/claims/verbs. It mirrors
+// the query + --limit surface of `fak index`.
+type IndexSearchRequest struct {
+	Root  string `json:"root,omitempty"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+var indexSearchInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "root": {"type": "string", "description": "optional repo root; omitted means search upward for dos.toml from the server working directory"},
+    "query": {"type": "string", "description": "search query; required by fak_index_docs and fak_index_claims, optional for fak_index_leaves and fak_index_verbs"},
+    "limit": {"type": "integer", "description": "maximum result count; 0 or omitted means no cap"}
+  }
+}`)
+
+type IndexLeavesResponse struct {
+	Root   string          `json:"root"`
+	Leaves []devindex.Leaf `json:"leaves"`
+}
+
+type IndexDocsResponse struct {
+	Root string         `json:"root"`
+	Docs []devindex.Doc `json:"docs"`
+}
+
+type IndexClaimsResponse struct {
+	Root   string           `json:"root"`
+	Claims []devindex.Claim `json:"claims"`
+}
+
+type IndexVerbsResponse struct {
+	Root  string          `json:"root"`
+	Verbs []devindex.Verb `json:"verbs"`
+}
+
+func loadDevIndex(root string) (*devindex.Catalog, error) {
+	if strings.TrimSpace(root) == "" {
+		root = devindex.FindRoot(".")
+	}
+	return devindex.Load(root)
+}
+
+func capResults[T any](xs []T, limit int) []T {
+	if limit > 0 && len(xs) > limit {
+		return xs[:limit]
+	}
+	return xs
+}
+
+func validateIndexLimit(limit int) error {
+	if limit < 0 {
+		return errors.New("limit must be non-negative")
+	}
+	return nil
+}
+
+func (s *Server) indexLane(req IndexLaneRequest) (IndexLaneResponse, error) {
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexLaneResponse{}, err
+	}
+	paths := append([]string(nil), req.Paths...)
+	if req.Path != "" {
+		paths = append([]string{req.Path}, paths...)
+	}
+	if len(paths) == 0 {
+		return IndexLaneResponse{}, errors.New("fak_index_lane requires path or paths")
+	}
+	resp := IndexLaneResponse{Root: cat.Root, Results: make([]IndexLaneAnswer, 0, len(paths))}
+	for _, p := range paths {
+		lane := cat.LaneForPath(p)
+		resp.Results = append(resp.Results, IndexLaneAnswer{
+			Path:  p,
+			Lane:  lane,
+			Stamp: cat.SuggestStamp(p),
+		})
+	}
+	return resp, nil
+}
+
+func (s *Server) indexLeaves(req IndexSearchRequest) (IndexLeavesResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexLeavesResponse{}, err
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexLeavesResponse{}, err
+	}
+	return IndexLeavesResponse{Root: cat.Root, Leaves: capResults(cat.SearchLeaves(req.Query), req.Limit)}, nil
+}
+
+func (s *Server) indexDocs(req IndexSearchRequest) (IndexDocsResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexDocsResponse{}, err
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		return IndexDocsResponse{}, errors.New("fak_index_docs requires query")
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexDocsResponse{}, err
+	}
+	return IndexDocsResponse{Root: cat.Root, Docs: capResults(cat.SearchDocs(req.Query), req.Limit)}, nil
+}
+
+func (s *Server) indexClaims(req IndexSearchRequest) (IndexClaimsResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexClaimsResponse{}, err
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		return IndexClaimsResponse{}, errors.New("fak_index_claims requires query")
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexClaimsResponse{}, err
+	}
+	return IndexClaimsResponse{Root: cat.Root, Claims: capResults(cat.SearchClaims(req.Query), req.Limit)}, nil
+}
+
+func (s *Server) indexVerbs(req IndexSearchRequest) (IndexVerbsResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexVerbsResponse{}, err
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexVerbsResponse{}, err
+	}
+	return IndexVerbsResponse{Root: cat.Root, Verbs: capResults(cat.SearchVerbs(req.Query), req.Limit)}, nil
+}

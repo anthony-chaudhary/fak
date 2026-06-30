@@ -363,6 +363,26 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ToolsSearchRequest](p.Arguments, "fak_tools_search", func(req ToolsSearchRequest) (any, error) {
 			return s.toolsSearch(req)
 		})
+	case "fak_index_lane":
+		return mcpDecodeCall[IndexLaneRequest](p.Arguments, "fak_index_lane", func(req IndexLaneRequest) (any, error) {
+			return s.indexLane(req)
+		})
+	case "fak_index_leaves":
+		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_leaves", func(req IndexSearchRequest) (any, error) {
+			return s.indexLeaves(req)
+		})
+	case "fak_index_docs":
+		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_docs", func(req IndexSearchRequest) (any, error) {
+			return s.indexDocs(req)
+		})
+	case "fak_index_claims":
+		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_claims", func(req IndexSearchRequest) (any, error) {
+			return s.indexClaims(req)
+		})
+	case "fak_index_verbs":
+		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_verbs", func(req IndexSearchRequest) (any, error) {
+			return s.indexVerbs(req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -599,6 +619,31 @@ func toolDescriptors() []map[string]any {
     "detail_level": {"type": "string", "enum": ["name", "description", "full"], "description": "level of detail to return: 'name' = just tool names, 'description' = names + descriptions, 'full' = complete schemas including inputSchema"}
   }
 }`),
+		},
+		{
+			"name":        "fak_index_lane",
+			"description": "Resolve one path or a batch of paths to the repo lane that owns them, plus the suggested (fak <leaf>) commit stamp. Mirrors `fak index lane` for MCP clients.",
+			"inputSchema": indexLaneInputSchema,
+		},
+		{
+			"name":        "fak_index_leaves",
+			"description": "List or search the repo's declared leaves/packages from the dev index, including shipped/stub/simulated claim rollups.",
+			"inputSchema": indexSearchInputSchema,
+		},
+		{
+			"name":        "fak_index_docs",
+			"description": "Search indexed docs by query and return matching paths/snippets so an MCP client can load the right local documentation.",
+			"inputSchema": indexSearchInputSchema,
+		},
+		{
+			"name":        "fak_index_claims",
+			"description": "Search CLAIMS.md entries by query and return the tagged shipped/simulated/stub claims with their inferred lanes.",
+			"inputSchema": indexSearchInputSchema,
+		},
+		{
+			"name":        "fak_index_verbs",
+			"description": "Search CLI verbs from the dev index, including aliases and descriptions, so an MCP client can discover the local fak command surface.",
+			"inputSchema": indexSearchInputSchema,
 		},
 	}
 }

@@ -467,6 +467,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// below. Each option is a no-op when its field is absent (bit-exact drop-in).
 		agent.WithResponseFormat(req.ResponseFormat),
 		agent.WithLogitBias(req.LogitBias),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator

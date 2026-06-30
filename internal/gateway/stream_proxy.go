@@ -91,6 +91,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// adjudicated whole. No-op when absent (bit-exact drop-in).
 		agent.WithResponseFormat(req.ResponseFormat),
 		agent.WithLogitBias(req.LogitBias),
+		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 	}
 	lease, err := s.beginServedAdmission(ctx, sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if err != nil {

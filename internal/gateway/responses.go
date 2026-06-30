@@ -30,7 +30,7 @@ import (
 // Streaming is SYNTHESIZED from the buffered turn: the gateway adjudicates the
 // complete proposed-tool-call set, then re-serializes a well-formed SSE stream
 // (response.created → response.output_item.added → response.output_item.done →
-// response.done). This matches the non-tool-path behavior of the chat wire, where
+// response.completed). This matches the non-tool-path behavior of the chat wire, where
 // the kernel's adjudication invariant forces buffering before any byte hits the wire.
 
 // ResponsesRequest is the inbound POST /v1/responses body (the minimal faithful
@@ -508,7 +508,7 @@ func responsesStatusFor(finishReason string) string {
 // writeResponsesStream synthesizes a well-formed Responses SSE stream from a
 // buffered response, matching the request's stream flag. It emits the sequence:
 // response.created → response.output_item.added (per item) → response.output_item.done
-// (per item) → response.done. This is the synthesized-stream analogue of
+// (per item) → response.completed. This is the synthesized-stream analogue of
 // writeChatCompletionStream: the gateway buffers the entire turn, adjudicates the
 // proposed tool calls, then re-serializes the adjudicated turn as SSE.
 func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesResponse) {
@@ -517,66 +517,60 @@ func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesRespo
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	// response.created: initial event with response metadata
-	type responseCreatedData struct {
-		ID        string         `json:"id"`
-		Object    string         `json:"object"`
-		CreatedAt int64          `json:"created_at"`
-		Model     string         `json:"model"`
-		Status    string         `json:"status"`
-		Usage     responsesUsage `json:"usage"`
+	nextSeq := 0
+	type responseEvent struct {
+		Type           string            `json:"type"`
+		SequenceNumber int               `json:"sequence_number"`
+		Response       responsesResponse `json:"response"`
 	}
-	_ = writeSSEEvent(w, "response.created", responseCreatedData{
-		ID:        resp.ID,
-		Object:    resp.Object,
-		CreatedAt: resp.CreatedAt,
-		Model:     resp.Model,
-		Status:    resp.Status,
-		Usage:     resp.Usage,
-	})
+	writeResponseEvent := func(event string, response responsesResponse) {
+		_ = writeSSEEvent(w, event, responseEvent{
+			Type:           event,
+			SequenceNumber: nextSeq,
+			Response:       response,
+		})
+		nextSeq++
+	}
+
+	// response.created: initial event with response metadata. The generated turn is
+	// already buffered, but the stream envelope still mirrors the live Responses API.
+	created := resp
+	created.Status = "in_progress"
+	created.Output = []responsesOutputItem{}
+	created.OutputText = ""
+	created.Usage = responsesUsage{}
+	writeResponseEvent("response.created", created)
 
 	// Emit each output item: added → done
-	for _, item := range resp.Output {
+	for i, item := range resp.Output {
 		// response.output_item.added
-		type outputItemAdded struct {
-			Index int                 `json:"index"`
-			Item  responsesOutputItem `json:"item"`
+		type outputItemEvent struct {
+			Type           string              `json:"type"`
+			SequenceNumber int                 `json:"sequence_number"`
+			OutputIndex    int                 `json:"output_index"`
+			Item           responsesOutputItem `json:"item"`
 		}
-		_ = writeSSEEvent(w, "response.output_item.added", outputItemAdded{Index: len(resp.Output), Item: item})
+		_ = writeSSEEvent(w, "response.output_item.added", outputItemEvent{
+			Type:           "response.output_item.added",
+			SequenceNumber: nextSeq,
+			OutputIndex:    i,
+			Item:           item,
+		})
+		nextSeq++
 
 		// response.output_item.done
-		type outputItemDone struct {
-			Index int    `json:"index"`
-			Item  string `json:"item"`
-		}
-		_ = writeSSEEvent(w, "response.output_item.done", outputItemDone{Index: len(resp.Output), Item: "done"})
+		_ = writeSSEEvent(w, "response.output_item.done", outputItemEvent{
+			Type:           "response.output_item.done",
+			SequenceNumber: nextSeq,
+			OutputIndex:    i,
+			Item:           item,
+		})
+		nextSeq++
 	}
 
-	// response.done: terminal event with optional fak extension and incomplete details
-	type responseDoneData struct {
-		ID                string                `json:"id"`
-		Object            string                `json:"object"`
-		CreatedAt         int64                 `json:"created_at"`
-		Model             string                `json:"model"`
-		Status            string                `json:"status"`
-		Output            []responsesOutputItem `json:"output"`
-		OutputText        string                `json:"output_text,omitempty"`
-		Usage             responsesUsage        `json:"usage"`
-		Fak               *FakExt               `json:"fak,omitempty"`
-		IncompleteDetails *responsesIncomplete  `json:"incomplete_details,omitempty"`
-	}
-	_ = writeSSEEvent(w, "response.done", responseDoneData{
-		ID:                resp.ID,
-		Object:            resp.Object,
-		CreatedAt:         resp.CreatedAt,
-		Model:             resp.Model,
-		Status:            resp.Status,
-		Output:            resp.Output,
-		OutputText:        resp.OutputText,
-		Usage:             resp.Usage,
-		Fak:               resp.Fak,
-		IncompleteDetails: resp.IncompleteDetails,
-	})
+	// response.completed: terminal event with optional fak extension and incomplete details.
+	// Codex 0.142.4 treats a stream that closes before this event as incomplete and retries.
+	writeResponseEvent("response.completed", resp)
 
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -584,7 +578,7 @@ func (s *Server) writeResponsesStream(w http.ResponseWriter, resp responsesRespo
 }
 
 // writeSSEEvent writes a single SSE event with a typed event name. The Responses
-// wire uses named event types (response.created, response.done) rather than the
+// wire uses named event types (response.created, response.completed) rather than the
 // generic data: frames the chat wire uses.
 func writeSSEEvent(w http.ResponseWriter, event string, data interface{}) error {
 	raw, err := json.Marshal(data)

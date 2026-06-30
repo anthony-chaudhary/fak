@@ -300,7 +300,7 @@ func TestResponsesEmptyInputIsBadRequest(t *testing.T) {
 
 // TestResponsesStreamEmitsSSE proves the Responses wire synthesizes a well-formed
 // SSE sequence when stream:true: response.created → response.output_item.added
-// → response.output_item.done → response.done.
+// → response.output_item.done → response.completed.
 func TestResponsesStreamEmitsSSE(t *testing.T) {
 	srv := newTestServer(t)
 	srv.planner = stubPlanner{comp: &agent.Completion{
@@ -335,9 +335,9 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 	events := parseTypedSSE(t, string(body))
 
 	// Should have at least: response.created, response.output_item.added,
-	// response.output_item.done, response.done
+	// response.output_item.done, response.completed
 	if len(events) < 4 {
-		t.Fatalf("got %d SSE events, want at least 4 (created, added, done, done): %v", len(events), events)
+		t.Fatalf("got %d SSE events, want at least 4 (created, added, item done, completed): %v", len(events), events)
 	}
 
 	// response.created should be first
@@ -345,9 +345,14 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 		t.Errorf("first event = %q, want response.created", events[0].Event)
 	}
 
-	// response.done should be last
-	if events[len(events)-1].Event != "response.done" {
-		t.Errorf("last event = %q, want response.done", events[len(events)-1].Event)
+	// response.completed should be last; real Codex treats streams that close before
+	// this event as incomplete and retries.
+	last := events[len(events)-1]
+	if last.Event != "response.completed" {
+		t.Errorf("last event = %q, want response.completed", events[len(events)-1].Event)
+	}
+	if !strings.Contains(last.Data, `"type":"response.completed"`) || !strings.Contains(last.Data, `"response":`) {
+		t.Errorf("response.completed data = %s, want OpenAI-style event envelope with type and response", last.Data)
 	}
 
 	// Verify we have output_item events
@@ -355,9 +360,15 @@ func TestResponsesStreamEmitsSSE(t *testing.T) {
 	for _, ev := range events {
 		if ev.Event == "response.output_item.added" {
 			foundAdded = true
+			if !strings.Contains(ev.Data, `"type":"response.output_item.added"`) || !strings.Contains(ev.Data, `"output_index":0`) {
+				t.Errorf("response.output_item.added data = %s, want type and output_index", ev.Data)
+			}
 		}
 		if ev.Event == "response.output_item.done" {
 			foundDone = true
+			if !strings.Contains(ev.Data, `"type":"response.output_item.done"`) || !strings.Contains(ev.Data, `"output_index":0`) {
+				t.Errorf("response.output_item.done data = %s, want type and output_index", ev.Data)
+			}
 		}
 	}
 	if !foundAdded {

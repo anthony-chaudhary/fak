@@ -37,11 +37,15 @@ func TestChatProxyForwardsStructuredOutputFieldsToRideEngine(t *testing.T) {
 	// it byte-equivalent: a json_schema response_format pinning the tool-call shape.
 	clientResponseFormat := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"tool_call","strict":true,"schema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"required":["name","arguments"]}}}`)
 	clientLogitBias := map[int]float64{50256: -100, 1024: 12.5}
+	clientGuidedGrammar := json.RawMessage(`"root ::= tool_call"`)
+	clientGuidedChoice := json.RawMessage(`["tool_call"]`)
 
 	// The upstream (a stand-in vLLM/SGLang OpenAI surface) captures what the gateway
 	// actually forwarded, so the test asserts the constraint crossed the wire.
 	var gotResponseFormat json.RawMessage
 	var gotLogitBias map[int]float64
+	var gotGuidedGrammar json.RawMessage
+	var gotGuidedChoice json.RawMessage
 	upstreamHits := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamHits++
@@ -52,12 +56,16 @@ func TestChatProxyForwardsStructuredOutputFieldsToRideEngine(t *testing.T) {
 		var req struct {
 			ResponseFormat json.RawMessage `json:"response_format"`
 			LogitBias      map[int]float64 `json:"logit_bias"`
+			GuidedGrammar  json.RawMessage `json:"guided_grammar"`
+			GuidedChoice   json.RawMessage `json:"guided_choice"`
 		}
 		if err := json.Unmarshal(raw, &req); err != nil {
 			t.Fatalf("decode upstream request: %v\n%s", err, raw)
 		}
 		gotResponseFormat = req.ResponseFormat
 		gotLogitBias = req.LogitBias
+		gotGuidedGrammar = req.GuidedGrammar
+		gotGuidedChoice = req.GuidedChoice
 		w.Header().Set("Content-Type", "application/json")
 		// A constrained generation: one allow*, one deny* call — proof the proposed set
 		// reaches the gate AFTER generation, where deny is dropped and allow is kept.
@@ -109,6 +117,8 @@ func TestChatProxyForwardsStructuredOutputFieldsToRideEngine(t *testing.T) {
 		},
 		"response_format": clientResponseFormat,
 		"logit_bias":      clientLogitBias,
+		"guided_grammar":  clientGuidedGrammar,
+		"guided_choice":   clientGuidedChoice,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +147,12 @@ func TestChatProxyForwardsStructuredOutputFieldsToRideEngine(t *testing.T) {
 		if gotLogitBias[tok] != bias {
 			t.Errorf("logit_bias[%d] forwarded = %v, want %v", tok, gotLogitBias[tok], bias)
 		}
+	}
+	if !jsonEqual(t, gotGuidedGrammar, clientGuidedGrammar) {
+		t.Errorf("guided_grammar forwarded to ride engine = %s\nwant (verbatim) = %s", gotGuidedGrammar, clientGuidedGrammar)
+	}
+	if !jsonEqual(t, gotGuidedChoice, clientGuidedChoice) {
+		t.Errorf("guided_choice forwarded to ride engine = %s\nwant (verbatim) = %s", gotGuidedChoice, clientGuidedChoice)
 	}
 
 	// (2) The candidate the constrained generation produced still entered the gate.
@@ -205,6 +221,9 @@ func TestChatProxyOmitsStructuredOutputFieldsWhenAbsent(t *testing.T) {
 	}
 	if _, ok := up["logit_bias"]; ok {
 		t.Errorf("logit_bias present on upstream wire for an unconstrained request: %s", rawUpstream)
+	}
+	if _, ok := up["guided_grammar"]; ok {
+		t.Errorf("guided_grammar present on upstream wire for an unconstrained request: %s", rawUpstream)
 	}
 }
 

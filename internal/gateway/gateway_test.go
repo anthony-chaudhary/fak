@@ -2236,12 +2236,11 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 	if got := resps[0].Result.(map[string]any)["protocolVersion"]; got != "2024-11-05" {
 		t.Errorf("initialize protocolVersion = %v", got)
 	}
-	// tools/list — fak_adjudicate, fak_syscall, fak_read, fak_admit, fak_changes,
-	// fak_revoke, fak_session_reset, fak_context_change, fak_tools_search, plus the memq memory-algebra trio
-	// fak_memory_drivers / fak_memory_explain / fak_memory_run.
+	// tools/list exposes the descriptor table; name-level coverage lives in
+	// TestMCPIndexToolsMirrorDevIndex and the focused MCP tool tests.
 	tools := resps[1].Result.(map[string]any)["tools"].([]any)
-	if len(tools) != 12 {
-		t.Errorf("tools/list returned %d tools, want 12", len(tools))
+	if len(tools) != len(toolDescriptors()) {
+		t.Errorf("tools/list returned %d tools, want %d", len(tools), len(toolDescriptors()))
 	}
 	// tools/call fak_syscall (allow) -> verdict ALLOW in the embedded text
 	sc := unwrapToolResult(t, resps[2])

@@ -318,7 +318,42 @@ type ChatRequest struct {
 	// LogitBias is the OpenAI per-token logit-bias map (token id -> bias, the standard
 	// -100..100 mask), forwarded verbatim to the upstream. Absent => unset on the wire.
 	LogitBias map[int]float64 `json:"logit_bias,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`
+	// Guided* are provider-native guided-decode controls accepted by common
+	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
+	// so the gateway collects only these known keys and threads them through the
+	// planner's guided-decode carrier instead of forwarding arbitrary unknown fields.
+	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
+	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
+	GuidedChoice          json.RawMessage `json:"guided_choice,omitempty"`
+	GuidedGrammar         json.RawMessage `json:"guided_grammar,omitempty"`
+	GuidedDecodingBackend json.RawMessage `json:"guided_decoding_backend,omitempty"`
+	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
+	Regex                 json.RawMessage `json:"regex,omitempty"`
+	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
+	Stream                bool            `json:"stream,omitempty"`
+}
+
+func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
+	fields := map[string]json.RawMessage{}
+	addGuidedDecodeField(fields, "guided_json", r.GuidedJSON)
+	addGuidedDecodeField(fields, "guided_regex", r.GuidedRegex)
+	addGuidedDecodeField(fields, "guided_choice", r.GuidedChoice)
+	addGuidedDecodeField(fields, "guided_grammar", r.GuidedGrammar)
+	addGuidedDecodeField(fields, "guided_decoding_backend", r.GuidedDecodingBackend)
+	addGuidedDecodeField(fields, "json_schema", r.JSONSchema)
+	addGuidedDecodeField(fields, "regex", r.Regex)
+	addGuidedDecodeField(fields, "ebnf", r.EBNF)
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func addGuidedDecodeField(fields map[string]json.RawMessage, key string, raw json.RawMessage) {
+	if len(raw) == 0 {
+		return
+	}
+	fields[key] = append(json.RawMessage(nil), raw...)
 }
 
 // normalizeStop folds the OpenAI `stop` field (a bare string, an array of strings,
