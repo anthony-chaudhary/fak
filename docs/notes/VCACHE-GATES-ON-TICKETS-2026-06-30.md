@@ -19,7 +19,7 @@ witness) and **dogfood** (it ran on our own guard/serve traffic) gate is green.
 | #1491 | per-mechanism + per-owner saving attribution | A — attribution | the "provider P% + fak F%" headline |
 | #1492 | register the M5 governor into a live loop | B — gates | decision witness live; pin/lazy/evict/warm actions still open |
 | #1493 | M2 star-anchor canonicalization as a default pre-flight gate | B — gates | partial live: Anthropic system-anchor rewrite witnessed; full star/fan-out still open |
-| #1497 | M1 warmth-belief estimator + per-provider calibration, live | B — gates | prediction metrics live; calibration/steering still open |
+| #1497 | M1 warmth-belief estimator + per-provider calibration, live | B — gates | prediction metrics + false-warm demotion journal live; calibration/byte-diff/steering still open |
 | #1498 | push the vBlock/anchor abstraction across every serving path | C — cross-path | pure-fak, sglang, vllm, llama, API |
 | #1495 | QA harness — the honesty-test + witness contract | QA | the gate before every default-on |
 | #1496 | dogfood loop — run the live loop on our own sessions + post the P&L | dogfood | the proof on our own traffic |

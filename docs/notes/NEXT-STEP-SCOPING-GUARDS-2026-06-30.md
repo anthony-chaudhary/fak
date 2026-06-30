@@ -231,7 +231,10 @@ Acceptance for "true end to end working":
   failure mode instead of requiring them to read every open issue row first. The
   same audit now also groups by lane, work-unit shape, expected-step bucket, and
   trigger/batch-policy key, with sample issue keys per group, so repeated signal
-  floods can be repaired as one organized batch instead of becoming spam.
+  floods can be repaired as one organized batch instead of becoming spam. It also
+  emits explicit repair queues (`dispatch`, `split`, `scope`, `route`, `noise`,
+  `private`) with next actions, missing-field counts, and sample keys, so agents
+  can batch the correct repair across many rows before launching workers.
 - The native dispatch prompt now parses the standard issue sections into an
   agent-first brief before the raw body, so the worker sees work-unit shape,
   assumptions, confusion risks, coordination notes, trigger, batch policy, scope,

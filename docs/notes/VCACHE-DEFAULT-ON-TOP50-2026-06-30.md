@@ -121,13 +121,18 @@ claude` run with **no flags**, the operator sees one attribution line —
     `fak_vcache_warmth_prediction_outcomes`,
     `fak_vcache_warmth_false_warm_rate`, and
     `fak_vcache_warmth_false_cold_rate` from live provider-cache turns through the
-    same `vcacheobserve` engine; provider calibration and steering remain open.
+    same `vcacheobserve` engine, and false-warm demotions now increment
+    `fak_vcache_warmth_demotions_total` plus the `/debug/vars`
+    `vcache_warmth_demotions` journal. Provider calibration and steering remain
+    open.
 
 17. **Use warmth belief to steer, not just score.** On a believed-warm entry that
     reads 0, demote + byte-diff (localize the invalidator via
     `Diverge`/`FirstDivergeTokenOffset`) and log it. *Why:* the lethal
     "manifest says HIT, provider says MISS" (Law A1). *Witness:* a forced-mismatch
-    test that fires the demote path.
+    test that fires the demote path. *Progress:* the forced false-warm now records
+    a live demotion/alarm witness (`mark_belief_cold`) and hash chain; byte-diff
+    localization and request steering are still open.
 
 18. **Per-provider calibration probe (M1).** A cadence job that probes TTL `T`,
     `Mₘᵢₙ`, `r` per (provider, model) and feeds the constants instead of
