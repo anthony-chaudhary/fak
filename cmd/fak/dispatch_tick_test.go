@@ -316,11 +316,16 @@ func TestLiveResolutionLanesKeepsLiveStreamingWorker(t *testing.T) {
 // can investigate but never SHIP an edit to cmd/** or internal/**. The guard wrapper and
 // account are still resolved (the hold is a pre-route, not a guard/account failure), so
 // the operator sees exactly why the doomed worker was not launched.
+//
+// The lane is named EXPLICITLY (--lane cmd): the #1397 fix skips self-source lanes from the
+// guarded AUTO-pick (so a default tick on this fixture lands on the shippable docs lane), but
+// an operator who explicitly names a self-source lane must still reach the post-pick
+// SELF_MODIFY hold -- that is exactly the safety-net this test pins.
 func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--no-refresh", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "cmd", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (a self-modify hold is a refuse) (stderr: %s)", code, errb)
 	}

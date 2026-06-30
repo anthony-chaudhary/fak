@@ -53,6 +53,13 @@ type dispatchLanePick struct {
 	ExcludedLanes    []string
 	Tree             []string
 	RouterError      string
+	// SelfSourceHeld names the lanes the guarded auto-pick SKIPPED because their
+	// tree is fak's own running source (cmd/** or internal/**). It is populated only
+	// on an auto-pick (no explicit lane) under guard, and is the witness behind the
+	// honest all-self-source surface (#1397): when it is non-empty AND Lane is "" the
+	// backlog was not empty -- every eligible lane was held as self-source -- so the
+	// tick reports SELF_MODIFY_HOLD over the held set, not a silent/empty NO_LANE.
+	SelfSourceHeld []string
 }
 
 type dispatchSpawnResult struct {
@@ -285,6 +292,21 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 	if pick.Lane == "" {
+		// All-self-source edge case (#1397): the auto-pick found candidate lanes but
+		// every one was held as fak's own running source (cmd/** + internal/**) under
+		// guard, so `chosen` stayed "". This is NOT an empty/error router -- the backlog
+		// is real, it is just all structurally unshippable by a self-guarded worker. Say
+		// so honestly with the SELF_MODIFY_HOLD vocabulary (over the whole held set)
+		// instead of the misleading "router empty/error" NO_LANE, so the operator routes
+		// the work to an unguarded/operator or worktree-isolated path (#1334).
+		if len(pick.SelfSourceHeld) > 0 {
+			payload["ok"] = false
+			payload["action"] = "self_modify_hold"
+			payload["verdict"] = "SELF_MODIFY_HOLD"
+			payload["self_modify_held_lanes"] = append([]string(nil), pick.SelfSourceHeld...)
+			payload["reason"] = fmt.Sprintf("every candidate lane (%s) is rooted in fak's own running source (cmd/** or internal/**): a guarded %s worker can investigate but never SHIP such an edit (the guard refuses with reason=SELF_MODIFY), so the whole eligible backlog is operator-gated -- route it to an unguarded/operator or worktree-isolated path (#1334), not a self-guarded worker", strings.Join(pick.SelfSourceHeld, ", "), opts.Backend)
+			return finish(payload), nil
+		}
 		payload["ok"] = false
 		payload["action"] = "no_lane"
 		payload["verdict"] = "NO_LANE"
@@ -538,11 +560,25 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		stepBudgets[lane] = stepBudget
 	}
 	chosen := strings.TrimSpace(explicit)
+	var selfSourceHeld []string
 	if chosen == "" {
+		// #1397: skip fak's own-source lanes (cmd/** + internal/**) BEFORE the
+		// busiest-by-step-budget pick when this tick is guarded. On a guarded trunk the
+		// backlog is dominated by self-source internal/** lanes, so a picker that chose
+		// the busiest lane and only THEN ran SelfModifyHoldForPick would HOLD every tick
+		// and surface nothing -- even though docs/tools/.github/examples carry shippable
+		// work. Skipping them here lets the auto-pick land on a shippable lane. The
+		// EXPLICIT-lane path (explicit != "") is deliberately untouched: an operator who
+		// names a self-source lane must still reach the post-pick SELF_MODIFY hold.
+		guarded := !guardDisabled()
 		bestStepBudget := -1
 		bestCount := -1
 		for lane, nums := range numsByLane {
 			if exclude[lane] {
+				continue
+			}
+			if !dispatchtick.LaneDispatchableUnderGuard(guarded, treesByLane[lane]) {
+				selfSourceHeld = append(selfSourceHeld, lane)
 				continue
 			}
 			stepBudget := stepBudgets[lane]
@@ -554,6 +590,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 				bestCount = len(nums)
 			}
 		}
+		sort.Strings(selfSourceHeld)
 	}
 	excluded := make([]string, 0, len(exclude))
 	for lane := range exclude {
@@ -572,6 +609,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		ExcludedLanes:    excluded,
 		Tree:             tree,
 		RouterError:      dispatchRouterError(router),
+		SelfSourceHeld:   selfSourceHeld,
 	}, nil
 }
 

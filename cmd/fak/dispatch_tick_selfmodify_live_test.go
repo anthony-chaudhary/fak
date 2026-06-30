@@ -5,11 +5,15 @@ import (
 	"testing"
 )
 
+// The cmd lane is named EXPLICITLY (--lane cmd): the #1397 fix skips self-source lanes from
+// the guarded AUTO-pick (a default live tick on this fixture lands on the shippable docs
+// lane), but an operator who explicitly names a self-source lane must still hit the
+// SELF_MODIFY hold BEFORE any lease/spawn -- the live safety-net this test pins.
 func TestDispatchTickLiveHoldsGuardedSelfModifyBeforeSpawn(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--live", "--no-refresh", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--live", "--lane", "cmd", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (a live self-modify hold is a refuse) (stderr: %s)", code, errb)
 	}

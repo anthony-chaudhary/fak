@@ -50,6 +50,11 @@ func TestDispatchTickPicksPriorityOverNewer(t *testing.T) {
 
 func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	old := dispatchRouteIssues
+	// Both lanes are NON-self-source (docs/**, tools/**) so this test exercises the real
+	// default-GUARDED auto-pick and isolates the step-budget>issue-count ordering (#1395)
+	// without the #1397 self-source skip firing -- the prior `gateway` lane (internal/**)
+	// is now skipped under guard, which is a DIFFERENT property; tools/** is shippable
+	// under guard, so the ordering assertion (larger step budget wins) is what's tested.
 	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
 		return dispatchtick.RouterPayload{
 			Schema: dispatchtick.RouterSchema,
@@ -61,8 +66,8 @@ func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 					Count:      3,
 					StepBudget: 3,
 				},
-				"gateway": {
-					Tree:       []string{"internal/gateway/**"},
+				"tools": {
+					Tree:       []string{"tools/**"},
 					Issues:     []int{20, 21},
 					Count:      2,
 					StepBudget: 9,
@@ -76,13 +81,13 @@ func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pickDispatchLane: %v", err)
 	}
-	if pick.Lane != "gateway" {
-		t.Fatalf("lane = %q, want gateway because it has the larger step budget", pick.Lane)
+	if pick.Lane != "tools" {
+		t.Fatalf("lane = %q, want tools because it has the larger step budget", pick.Lane)
 	}
-	if pick.ByLaneStepBudget["gateway"] != 9 || pick.ByLaneStepBudget["docs"] != 3 {
-		t.Fatalf("step budgets = %+v, want gateway=9 docs=3", pick.ByLaneStepBudget)
+	if pick.ByLaneStepBudget["tools"] != 9 || pick.ByLaneStepBudget["docs"] != 3 {
+		t.Fatalf("step budgets = %+v, want tools=9 docs=3", pick.ByLaneStepBudget)
 	}
 	if len(pick.Numbers) != 2 || pick.Numbers[0] != 20 || pick.Numbers[1] != 21 {
-		t.Fatalf("picked numbers = %+v, want gateway issues ordered oldest-first", pick.Numbers)
+		t.Fatalf("picked numbers = %+v, want tools issues ordered oldest-first", pick.Numbers)
 	}
 }
