@@ -159,6 +159,7 @@ func buildDispatchPlanScorecard() dispatchPlanScorecard {
 
 func initDispatchScoreRoot(root string) error {
 	cmd := exec.Command("git", "init", "-q", root)
+	configureDispatchHelperCommand(cmd)
 	return cmd.Run()
 }
 
