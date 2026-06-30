@@ -238,7 +238,7 @@ func witnessTasks() []Task {
 			// to point at the local llama.cpp CUDA build — authoritative no-auto-run marker
 			// so it is surfaced for a human, never exec'd as prose.
 			Manual: true,
-			Doc:    "docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md",
+			Doc:    "docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md",
 		},
 	}
 }
