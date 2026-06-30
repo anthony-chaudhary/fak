@@ -185,32 +185,59 @@ func (c *Catalog) UndeclaredVerbs() []string {
 			known[strings.ToLower(sp)] = true
 		}
 	}
+	var out []string
+	for _, verb := range mainDispatchVerbs(b) {
+		if !known[verb] {
+			out = append(out, verb)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mainDispatchVerbs returns the lowercased quoted verb tokens of the top-level
+// os.Args[1] dispatch switch in the given main.go bytes (sorted, deduped). It tracks
+// brace DEPTH from the `switch os.Args[1] {` line, so a case body that itself contains
+// braces — e.g. the Landlock trampoline's `if err != nil { … }` — does not end the
+// scan early: a verb whose case sits AFTER such a body is still seen (the bug a naive
+// "break on the first `}`" scan had, which silently truncated the verb set at the first
+// brace-bearing case). Cases are read only at the switch's own depth; the scan ends at
+// that switch's `default:` or its closing brace. Shared by UndeclaredVerbs and the
+// freshness test so the detector and its dogfood test cannot disagree.
+func mainDispatchVerbs(b []byte) []string {
 	seen := map[string]bool{}
 	var out []string
 	inSwitch := false
+	depth := 0
 	for _, raw := range strings.Split(string(b), "\n") {
 		t := strings.TrimSpace(raw)
-		// Only scan the top-level os.Args dispatch switch, so a nested switch in a
-		// helper does not feed the verb set.
 		if !inSwitch {
 			if strings.HasPrefix(t, "switch os.Args[1]") {
 				inSwitch = true
+				depth = 1 // the `{` that opens the dispatch switch
 			}
 			continue
 		}
-		if t == "}" || strings.HasPrefix(t, "default:") {
-			break // end of the dispatch switch
-		}
-		if !strings.HasPrefix(t, "case ") || !strings.HasSuffix(t, ":") {
-			continue
-		}
-		for _, m := range mainCaseRE.FindAllStringSubmatch(t, -1) {
-			verb := strings.ToLower(m[1])
-			if verb == "" || known[verb] || seen[verb] {
-				continue
+		// Only the switch's own depth carries dispatch cases; a nested brace body is
+		// skipped. Evaluate the line as a case BEFORE folding in its braces (a case
+		// line carries none anyway).
+		if depth == 1 {
+			if strings.HasPrefix(t, "default:") {
+				break // the dispatch switch's default arm — end of the verb set
 			}
-			seen[verb] = true
-			out = append(out, verb)
+			if strings.HasPrefix(t, "case ") && strings.HasSuffix(t, ":") {
+				for _, m := range mainCaseRE.FindAllStringSubmatch(t, -1) {
+					verb := strings.ToLower(m[1])
+					if verb != "" && !seen[verb] {
+						seen[verb] = true
+						out = append(out, verb)
+					}
+				}
+			}
+		}
+		depth += strings.Count(t, "{") - strings.Count(t, "}")
+		if depth <= 0 {
+			break // the dispatch switch block closed
 		}
 	}
 	sort.Strings(out)

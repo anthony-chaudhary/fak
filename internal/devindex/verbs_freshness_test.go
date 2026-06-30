@@ -53,8 +53,68 @@ func TestVerbManifest(t *testing.T) {
 	}
 }
 
+// TestVerbsDeriveCoversUncuratedDispatch proves the catalog is a LIVE VIEW: Verbs()
+// surfaces every verb the dispatch switch routes — including one with NO curated
+// verbManifest entry (which gets a non-empty fallback synopsis) — so `fak index verbs`
+// can never silently fall behind the binary the way a hand-maintained list does. A
+// curated verb keeps its curated synopsis, and a brace-bearing case body before a later
+// verb does not truncate the scan (the bug the naive "break on first }" scan had).
+func TestVerbsDeriveCoversUncuratedDispatch(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ncmd = [\"cmd/**\"]\n")
+	mustWrite(t, root, "INDEX.md", "# INDEX\n")
+	// A dispatch switch with a curated verb (index), an UNcurated verb (frobnicate),
+	// and a brace-bearing case (tramp) sitting BEFORE frobnicate so the depth scan must
+	// step over its `if … { … }` body to still reach frobnicate.
+	mainGo := "package main\n\nimport \"os\"\n\n" +
+		"func main() {\n" +
+		"\tswitch os.Args[1] {\n" +
+		"\tcase \"index\":\n\t\tcmdIndex(os.Args[2:])\n" +
+		"\tcase \"tramp\":\n\t\tif err := f(); err != nil {\n\t\t\tos.Exit(1)\n\t\t}\n" +
+		"\tcase \"frobnicate\":\n\t\tcmdFrob(os.Args[2:])\n" +
+		"\tdefault:\n\t\tusage()\n\t}\n}\n"
+	mustMkdir(t, root, "cmd", "fak")
+	mustWrite(t, filepath.Join(root, "cmd", "fak"), "main.go", mainGo)
+
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	byName := map[string]Verb{}
+	for _, v := range c.Verbs() {
+		byName[v.Name] = v
+	}
+	// The curated verb is present with its curated synopsis (not the fallback line).
+	idx, ok := byName["index"]
+	if !ok {
+		t.Fatal("derived catalog dropped the curated dispatch verb 'index'")
+	}
+	if idx.Synopsis == "" || strings.Contains(idx.Synopsis, "not yet cataloged") {
+		t.Errorf("curated verb 'index' lost its curated synopsis: %q", idx.Synopsis)
+	}
+	// The uncurated verb is STILL surfaced (the live-view guarantee) with a non-empty
+	// fallback synopsis — coverage no hand-maintained table keeps fresh on its own.
+	fr, ok := byName["frobnicate"]
+	if !ok {
+		t.Fatal("derived catalog dropped the uncurated dispatch verb 'frobnicate' — coverage is not live")
+	}
+	if fr.Synopsis == "" {
+		t.Error("uncurated verb 'frobnicate' has an empty synopsis")
+	}
+	// The brace-bearing 'tramp' case did not end the scan early: frobnicate (after it)
+	// is the proof, and tramp itself is covered.
+	if _, ok := byName["tramp"]; !ok {
+		t.Error("derived catalog missed 'tramp' (a brace-bearing case body)")
+	}
+	// SearchVerbs finds the uncurated verb by name.
+	if hits := c.SearchVerbs("frobnicate"); len(hits) == 0 || hits[0].Name != "frobnicate" {
+		t.Errorf("SearchVerbs(frobnicate) top = %v, want frobnicate", hits)
+	}
+}
+
 // liveMainVerbs returns the lowercased verb tokens of main.go's top-level switch,
-// reusing the same scan the drift detector does, to assert the manifest⊆dispatch.
+// reusing the EXACT scan the drift detector does (mainDispatchVerbs), so the manifest⊆
+// dispatch assertion and the dispatch⊆manifest gate cannot disagree on what a verb is.
 func liveMainVerbs(t *testing.T, root string) map[string]bool {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "main.go"))
@@ -62,24 +122,8 @@ func liveMainVerbs(t *testing.T, root string) map[string]bool {
 		t.Skipf("no cmd/fak/main.go (%v)", err)
 	}
 	out := map[string]bool{}
-	inSwitch := false
-	for _, raw := range strings.Split(string(b), "\n") {
-		ln := strings.TrimSpace(raw)
-		if !inSwitch {
-			if strings.HasPrefix(ln, "switch os.Args[1]") {
-				inSwitch = true
-			}
-			continue
-		}
-		if ln == "}" || strings.HasPrefix(ln, "default:") {
-			break
-		}
-		if !strings.HasPrefix(ln, "case ") || !strings.HasSuffix(ln, ":") {
-			continue
-		}
-		for _, m := range mainCaseRE.FindAllStringSubmatch(ln, -1) {
-			out[strings.ToLower(m[1])] = true
-		}
+	for _, v := range mainDispatchVerbs(b) {
+		out[v] = true
 	}
 	return out
 }
