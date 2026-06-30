@@ -127,7 +127,9 @@ Candidate reasons to add to `dos.toml`:
   expected-step budget is above the dispatch threshold and should be split before
   sync or dispatch.
 - `ISSUE_NOISE_CONTROL_INCOMPLETE`: live sync lacks a creation trigger or batch
-  policy, so repeats cannot be grouped into an existing work item intentionally.
+  policy, or the batch policy does not name a concrete cap, grouping key,
+  update/dedupe marker, or rerun policy, so repeats cannot be grouped into an
+  existing work item intentionally.
 - `ISSUE_AGENT_CONTEXT_INCOMPLETE`: live sync lacks worker-facing work-unit
   shape, expected-step budget, assumptions, confusion risks, or coordination
   notes, so the issue is not yet safe to hand to an autonomous worker.
@@ -218,7 +220,9 @@ Acceptance for "true end to end working":
   `ISSUE_OVERSIZED_EXPECTED_STEPS`, so they stay out of worker dispatch even if
   the prose is otherwise complete. Live sync also refuses
   `ISSUE_NOISE_CONTROL_INCOMPLETE` unless the issue names the trigger and batch
-  policy that keep repeated signals organized, and refuses
+  policy that keep repeated signals organized. A non-empty but vague batch policy
+  is still refused unless it names the concrete cap, grouping key,
+  update/dedupe marker, or rerun behavior. Live sync also refuses
   `ISSUE_AGENT_CONTEXT_INCOMPLETE` unless the issue carries work-unit shape,
   expected-step budget, assumptions, confusion risks, and coordination notes.
 - The native dispatch prompt now parses the standard issue sections into an

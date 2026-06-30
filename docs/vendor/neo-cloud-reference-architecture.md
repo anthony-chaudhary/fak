@@ -112,6 +112,12 @@ Use neutral roles rather than vendor names as architecture terms:
 | Reference floor | `cpu-ref`, used for correctness witnesses and fallback disclosure. |
 | Approx backend | A backend judged by approximate parity gates such as argmax and logit cosine, not byte identity. |
 
+This extends, rather than replaces, the benchmark catalog role model. An existing
+`agent-host` is usually the control-plane host kept for agent work, while a
+`bench-node` is a machine allowed to produce hardware measurements. The fleet
+vocabulary above names what lives inside either role once a run spans mixed
+backend groups.
+
 ## Operator decision
 
 The near-term neo-cloud decision is not "standardize every accelerator." It is:
