@@ -104,6 +104,13 @@ func BuildScorecard(m Maturity, e Epics) scorecard.Payload {
 			"roadmap_debt":       roadDebt,
 			"cells":              m.Cells,
 			"matured":            m.Matured,
+			// The two RATCHETED climb KPIs the scorecard control pane pins
+			// (issue #1442): matured_cells must NOT decrease and milestone_progress
+			// (the M0-M7 mean-rank %) must NOT regress vs docs/milestones/baseline.json.
+			// Surfaced here, on the payload corpus, so the ratchet (RatchetCheck) reads
+			// the SAME witnessed numbers the control pane folds — never a self-report.
+			"matured_cells":      m.Matured,
+			"milestone_progress": m.ProgressPct,
 			"matured_floor":      maturedRung.String(),
 			"epics_tracked":      e.Tracked,
 			"epics_measured":     e.Measured,

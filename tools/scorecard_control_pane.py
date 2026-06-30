@@ -221,6 +221,13 @@ SCORECARDS: list[dict[str, str]] = [
     # support_maturity: that card fences each cell to its regime ceiling, this one
     # scores raw distance-to-matured across the grid as the headline climb + roadmap.
     {"key": "milestone", "debt": "milestone_debt", "script": "", "cmd": "go run ./cmd/fak milestone-scorecard --json", "label": "milestone"},
+    # The milestone CLIMB ratchet (#1442, epic #1436): a DISTINCT gate from
+    # milestone_debt. The two witnessed climb KPIs (matured_cells + milestone_progress)
+    # are pinned in docs/milestones/baseline.json; climb_ratchet_debt is 1 when EITHER
+    # regresses below the pin (else 0), so a same-debt rung swap that lowers the matured
+    # count -- invisible to milestone_debt -- still reds the control pane here. Re-pin on
+    # a real climb improvement with `fak milestone-scorecard --pin`.
+    {"key": "milestone_climb", "debt": "climb_ratchet_debt", "script": "", "cmd": "go run ./cmd/fak milestone-scorecard --ratchet --json", "label": "milestone-climb"},
     # The agentic-coding loop-index (#1152, dev-ex epic #1148 spine): folds the six
     # loop stages (orient->plan->act->verify->ship->learn) into one loopindex_debt.
     # Registered here so a stage UN-WIRING (a regressed default) reds the ratchet —
