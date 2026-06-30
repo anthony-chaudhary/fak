@@ -27,6 +27,8 @@ var (
 	reInteractive    = regexp.MustCompile(`(?i)-LogonType\s+Interactive\b|\s/IT\b`)
 	reITflag         = regexp.MustCompile(`(?i)\s/IT\b`)
 	reSetsPrincipal  = regexp.MustCompile(`(?i)New-ScheduledTaskPrincipal\b|-Principal\b|/RU\b`)
+	reStartProcess   = regexp.MustCompile(`(?i)\bStart-Process\b`)
+	rePSWindowless   = regexp.MustCompile(`(?i)-WindowStyle\s+Hidden\b|-NoNewWindow\b`)
 )
 
 // PSInstallerViolation returns a one-line violation for a task-creating .ps1 that
@@ -59,6 +61,48 @@ func PSInstallerViolation(rel, src string) (string, bool) {
 			rel, ReasonInteractiveTask), true
 	}
 	return "", false
+}
+
+// PSStartProcessViolations returns one row per Start-Process call that does not
+// explicitly choose a hidden or no-new-window launch mode. PowerShell watchdogs
+// are a common source of recurring desktop flashes because Start-Process defaults
+// to a visible window even when the parent task is unattended.
+func PSStartProcessViolations(rel, src string) []string {
+	var out []string
+	lines := strings.Split(src, "\n")
+	inBlockComment := false
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if inBlockComment {
+			if strings.Contains(line, "#>") {
+				inBlockComment = false
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "<#") {
+			if !strings.Contains(line, "#>") {
+				inBlockComment = true
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") || !reStartProcess.MatchString(line) {
+			continue
+		}
+		call := line
+		for j := i + 1; j < len(lines) && j <= i+12; j++ {
+			next := strings.TrimSpace(lines[j])
+			if next == "" {
+				break
+			}
+			call += "\n" + next
+		}
+		if rePSWindowless.MatchString(call) || strings.Contains(call, "windowgate: visible-ok") {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s:%d: Start-Process without -WindowStyle Hidden or -NoNewWindow can flash a visible desktop window from background automation (%s)",
+			rel, i+1, ReasonInteractiveTask))
+	}
+	return out
 }
 
 // ---- Python window-suppression completeness rules ------------------------ //
@@ -430,6 +474,7 @@ func lineOf(src string, off int) int {
 // Report holds the violation and watchlist rows from a tree scan.
 type Report struct {
 	PSInstallers      []string // task installers that flash
+	PSStartProcesses  []string // PowerShell Start-Process launches without hidden/no-new-window mode
 	PySpawns          []string // suppressing modules with an unflagged spawn
 	PyCandidates      []string // advisory console-tool spawns in non-suppressing modules
 	PyExplicitModules []string // Python modules using explicit no_window_creationflags call-site flags
@@ -440,7 +485,7 @@ type Report struct {
 
 // OK reports whether the tree is clean.
 func (r Report) OK() bool {
-	return len(r.PSInstallers) == 0 && len(r.PySpawns) == 0 && len(r.GoExecs) == 0
+	return len(r.PSInstallers) == 0 && len(r.PSStartProcesses) == 0 && len(r.PySpawns) == 0 && len(r.GoExecs) == 0
 }
 
 // ScanTree audits the on-disk worktree .ps1, .py, and Go helper files under repoRoot.
@@ -460,6 +505,7 @@ func ScanTree(repoRoot string) (Report, error) {
 		if v, bad := PSInstallerViolation(rel, src); bad {
 			rep.PSInstallers = append(rep.PSInstallers, v)
 		}
+		rep.PSStartProcesses = append(rep.PSStartProcesses, PSStartProcessViolations(rel, src)...)
 	}
 	py, err := worktreeFiles(repoRoot, "*.py")
 	if err != nil {
@@ -491,6 +537,7 @@ func ScanTree(repoRoot string) (Report, error) {
 		rep.GoCandidates = append(rep.GoCandidates, GoExecCandidates(rel, src)...)
 	}
 	sort.Strings(rep.PSInstallers)
+	sort.Strings(rep.PSStartProcesses)
 	sort.Strings(rep.PySpawns)
 	sort.Strings(rep.PyCandidates)
 	sort.Strings(rep.PyExplicitModules)

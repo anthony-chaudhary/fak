@@ -46,6 +46,25 @@ func TestPSInstallerRules(t *testing.T) {
 	}
 }
 
+func TestPSStartProcessRules(t *testing.T) {
+	src := "Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile'\n"
+	if got := PSStartProcessViolations("tools/x.ps1", src); len(got) != 1 {
+		t.Fatalf("PSStartProcessViolations = %d %v, want 1", len(got), got)
+	}
+	hidden := "Start-Process -FilePath powershell.exe `\n  -ArgumentList '-NoProfile' `\n  -WindowStyle Hidden\n"
+	if got := PSStartProcessViolations("tools/x.ps1", hidden); len(got) != 0 {
+		t.Fatalf("hidden Start-Process should be clean, got %v", got)
+	}
+	noNewWindow := "Start-Process -FilePath curl.exe -ArgumentList '-L' -NoNewWindow\n"
+	if got := PSStartProcessViolations("tools/x.ps1", noNewWindow); len(got) != 0 {
+		t.Fatalf("NoNewWindow Start-Process should be clean, got %v", got)
+	}
+	comment := "<# Start-Process in docs #>\n# Start-Process also ignored\n"
+	if got := PSStartProcessViolations("tools/x.ps1", comment); len(got) != 0 {
+		t.Fatalf("comments should not be executable Start-Process findings, got %v", got)
+	}
+}
+
 func TestPySpawnRules(t *testing.T) {
 	cases := []struct {
 		name string
@@ -220,6 +239,9 @@ func TestTrackedTreeHasNoPopups(t *testing.T) {
 	}
 	for _, v := range rep.PSInstallers {
 		t.Errorf("task-installer popup: %s", v)
+	}
+	for _, v := range rep.PSStartProcesses {
+		t.Errorf("Start-Process popup: %s", v)
 	}
 	for _, v := range rep.PySpawns {
 		t.Errorf("unsuppressed spawn: %s", v)
