@@ -193,9 +193,9 @@ BIN="$ROOT/tools/.bin/fak"
 # Durability guard: never build outside the repo (see ROOT note above). If BIN ever
 # resolves above the module root again, refuse rather than polluting an external dir.
 case "$BIN" in "$FAK_DIR"/*) : ;; *) die "refusing to build outside the repo: $BIN (expected under $FAK_DIR)" ;; esac
-# The account switcher (tools/fleet_accounts.py) globs FLEET_USER_HOME/.claude*; on
-# this Mac the accounts live under $HOME, so point it there (the default is a
-# Windows path). This is the alignment seam with the fleet account switcher.
+# The account switcher globs FLEET_USER_HOME/.claude*; on this Mac the accounts live
+# under $HOME, so point it there (the default is a Windows path). This is the alignment
+# seam with `fak fleet-accounts`, the native switcher front door.
 export FLEET_USER_HOME="${FLEET_USER_HOME:-$HOME}"
 
 CLAUDE_DEBUG_ARGS=()
@@ -271,24 +271,30 @@ if [ "$MODE" = "install" ]; then
 fi
 
 # --- account switcher: pick the .claude config dir Claude Code runs under -----
-# Reuse tools/fleet_accounts.py as the single source of truth for "what is an
-# account". Default to a dedicated, isolated dogfood account so live-model
-# experiments never pollute a real worker account's session history — and so it
-# shows up in `fleet_accounts.py list` as a first-class switchable account.
+# Reuse the native `fak fleet-accounts` front door as the single source of truth for
+# "what is an account". Default to a dedicated, isolated dogfood account so live-model
+# experiments never pollute a real worker account's session history — and so it shows up
+# in the normal account roster as a first-class switchable account.
+ensure_fak_bin() {
+  [ -x "$BIN" ] || build_fak "$BIN"
+}
+
 resolve_account_dir() {
   local tag="${FAK_DOGFOOD_ACCOUNT:-faklocal}"
   # ONE call to the switcher's canonical front door: `resolve --faklocal-ok` pins the
   # named tag (or synthesizes the isolated .claude-faklocal dogfood account for the
   # 'faklocal' default), printing the config dir from a single flat record.
   local dir
-  dir="$(python3 "$ROOT/tools/fleet_accounts.py" resolve --faklocal-ok --account "$tag" 2>/dev/null \
+  ensure_fak_bin
+  dir="$("$BIN" fleet-accounts resolve --faklocal-ok --account "$tag" 2>/dev/null \
     | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['config_dir'] if d.get('ok') else '')" 2>/dev/null || true)"
   [ -n "$dir" ] || die "account tag '$tag' not resolved — run: $0 --list-accounts"
   printf '%s' "$dir"
 }
 
 if [ "$MODE" = "list-accounts" ]; then
-  python3 "$ROOT/tools/fleet_accounts.py" list
+  ensure_fak_bin
+  "$BIN" fleet-accounts list
   exit 0
 fi
 
