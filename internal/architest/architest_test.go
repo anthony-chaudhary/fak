@@ -199,6 +199,7 @@ var tier = map[string]int{
 	"cachevaluepost":  2, // outbound Slack publisher for the cache-value P&L roll-up (twin of benchpost/dojopost/grafanapost); forced to tier 2 by its cachevaluereport(2) import. Imports cachevalueledger(1)+cachevaluereport(2)+scoreboard(1)+slackenv(1), off the hot path.
 	"loopscore":       1, // pure loop scorecard: folds the loopmgr ledger + job registry into a durability/self-report/dogfood score for the agentic background loops; imports loopmgr(1), off the hot path.
 	"loopfleet":       1, // cross-ledger loop-health fold (#1196): pure read-only adapters over the loopmgr/nightrun/dojo/cadence/dispatch journals joined into one per-loop health view in loopmgr's HealthState vocabulary; imports loopmgr(1), off the hot path.
+	"trendreport":     1, // the generic trend-report substrate (#1437): the durable-JSONL ledger plumbing (ParseLedger/LatestBefore/AppendLedgerLine over a Row key), DirectionWord, the embeddable control-pane Envelope+Stamp, and the AdvisoryGate whose only failing finding is the caller's *_unmeasured token. Lifts the machinery cadencereport/milestonereport/the dojo board each re-declare; stdlib+generics only, imports nothing internal, off the hot path. Consumer migration is a documented follow-on.
 	// new-leaf:tier â€” `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
