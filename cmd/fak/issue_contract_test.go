@@ -40,6 +40,13 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 			StepBudget  int      `json:"step_budget"`
 			ExampleKeys []string `json:"example_keys"`
 		} `json:"batch_groups"`
+		RepairQueues []struct {
+			Kind       string   `json:"kind"`
+			Count      int      `json:"count"`
+			StepBudget int      `json:"step_budget"`
+			NextAction string   `json:"next_action"`
+			ExampleKeys []string `json:"example_keys"`
+		} `json:"repair_queues"`
 		Reviews []struct {
 			OK              bool   `json:"ok"`
 			Key             string `json:"key"`
@@ -79,6 +86,11 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 		got.BatchGroups[0].StepBudget != 3 || len(got.BatchGroups[0].ExampleKeys) != 1 {
 		t.Fatalf("batch groups = %+v, want one taskmgr leaf group", got.BatchGroups)
 	}
+	if len(got.RepairQueues) != 1 || got.RepairQueues[0].Kind != "dispatch" ||
+		got.RepairQueues[0].Count != 1 || got.RepairQueues[0].StepBudget != 3 ||
+		!strings.Contains(got.RepairQueues[0].NextAction, "dispatch") {
+		t.Fatalf("repair queues = %+v, want one dispatch queue", got.RepairQueues)
+	}
 	if got.Reviews[0].Key != "task_push_next/strict-scope" ||
 		got.Reviews[0].Dispatchability != issuecontract.Dispatchable ||
 		got.Reviews[0].WorkUnit != "leaf" ||
@@ -111,6 +123,8 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 		"work_units: leaf=1",
 		"step_buckets: 2-3=1",
 		"batch_group[0]: count=1 steps=3 lane=(unrouted) work_unit=leaf",
+		"repair_queue[scope]: count=1 steps=3",
+		"repair_queue[route]: count=1 steps=3",
 		"ISSUE_SCOPE_INCOMPLETE",
 		"ISSUE_UNROUTED",
 		"missing: out_of_scope",
@@ -204,6 +218,12 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			Title:  "make it better",
 			Body:   "### Current state\nExists.\n",
 		},
+		{
+			Number: 1452,
+			Title:  "guardrsi: split oversized block-reason work",
+			Body:   completeIssueDraftBodyWithSteps("12"),
+			Labels: []issuecontract.IssueLabel{{Name: "guardrsi"}},
+		},
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -240,6 +260,15 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			StepBudget      int      `json:"step_budget"`
 			MissingMetadata []string `json:"missing_metadata"`
 		} `json:"batch_groups"`
+		RepairQueues []struct {
+			Kind          string         `json:"kind"`
+			Count         int            `json:"count"`
+			StepBudget    int            `json:"step_budget"`
+			NextAction    string         `json:"next_action"`
+			ByReason      map[string]int `json:"by_reason"`
+			MissingFields map[string]int `json:"missing_fields"`
+			ExampleKeys   []string       `json:"example_keys"`
+		} `json:"repair_queues"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
@@ -247,30 +276,41 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	if got.OK {
 		t.Fatalf("ok = true, want mixed audit to fail")
 	}
-	if got.Counts.Total != 2 || got.Counts.Dispatchable != 1 || got.Counts.TriageOnly != 1 || got.Counts.Refused != 0 {
-		t.Fatalf("dispatch counts = %+v, want one dispatchable and one triage-only", got.Counts)
+	if got.Counts.Total != 3 || got.Counts.Dispatchable != 1 || got.Counts.TriageOnly != 2 || got.Counts.Refused != 0 {
+		t.Fatalf("dispatch counts = %+v, want one dispatchable and two triage-only", got.Counts)
 	}
-	if got.Counts.StepBudget != 4 || got.Counts.MissingExpectedSteps != 1 {
-		t.Fatalf("step counts = %+v, want fallback step budget 4 and one missing expected step", got.Counts)
+	if got.Counts.StepBudget != 16 || got.Counts.MissingExpectedSteps != 1 {
+		t.Fatalf("step counts = %+v, want fallback step budget 16 and one missing expected step", got.Counts)
 	}
-	if got.Counts.AgentContextAvg != 50 || got.Counts.AgentContextFull != 1 || got.Counts.AgentContextMissing != 1 {
-		t.Fatalf("agent context counts = %+v, want one full and one missing", got.Counts)
+	if got.Counts.AgentContextAvg != 67 || got.Counts.AgentContextFull != 2 || got.Counts.AgentContextMissing != 1 {
+		t.Fatalf("agent context counts = %+v, want two full and one missing", got.Counts)
 	}
 	if got.Counts.ByReason[issuecontract.ReasonScopeIncomplete] != 1 ||
-		got.Counts.ByReason[issuecontract.ReasonUnrouted] != 1 {
-		t.Fatalf("reason counts = %+v, want one scope and one unrouted refusal", got.Counts.ByReason)
+		got.Counts.ByReason[issuecontract.ReasonUnrouted] != 1 ||
+		got.Counts.ByReason[issuecontract.ReasonOversizedSteps] != 1 {
+		t.Fatalf("reason counts = %+v, want scope, unrouted, and oversized refusals", got.Counts.ByReason)
 	}
-	if got.Counts.ByLane["guardrsi"] != 1 || got.Counts.ByLane["(unrouted)"] != 1 {
+	if got.Counts.ByLane["guardrsi"] != 2 || got.Counts.ByLane["(unrouted)"] != 1 {
 		t.Fatalf("lane buckets = %+v, want guardrsi and unrouted", got.Counts.ByLane)
 	}
-	if got.Counts.ByWorkUnit["leaf"] != 1 || got.Counts.ByWorkUnit["(missing)"] != 1 {
+	if got.Counts.ByWorkUnit["leaf"] != 2 || got.Counts.ByWorkUnit["(missing)"] != 1 {
 		t.Fatalf("work-unit buckets = %+v, want leaf and missing", got.Counts.ByWorkUnit)
 	}
-	if got.Counts.ByExpectedStepBucket["2-3"] != 1 || got.Counts.ByExpectedStepBucket["(missing)"] != 1 {
+	if got.Counts.ByExpectedStepBucket["2-3"] != 1 ||
+		got.Counts.ByExpectedStepBucket["(missing)"] != 1 ||
+		got.Counts.ByExpectedStepBucket["over-8"] != 1 {
 		t.Fatalf("step buckets = %+v, want 2-3 and missing", got.Counts.ByExpectedStepBucket)
 	}
-	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 1 || got.BatchGroups[0].StepBudget == 0 {
-		t.Fatalf("batch groups = %+v, want one group per audit row with step budgets", got.BatchGroups)
+	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 2 || got.BatchGroups[0].StepBudget != 15 {
+		t.Fatalf("batch groups = %+v, want guardrsi rows grouped under shared trigger/batch", got.BatchGroups)
+	}
+	assertRepairQueue(t, got.RepairQueues, "dispatch", 1, 3, nil)
+	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1})
+	assertRepairQueue(t, got.RepairQueues, "scope", 1, 1, map[string]int{issuecontract.ReasonScopeIncomplete: 1})
+	assertRepairQueue(t, got.RepairQueues, "route", 1, 1, map[string]int{issuecontract.ReasonUnrouted: 1})
+	scopeQueue := repairQueueByKind(got.RepairQueues, "scope")
+	if scopeQueue.MissingFields["parent_ref"] != 1 || scopeQueue.MissingFields["done_condition"] != 1 {
+		t.Fatalf("scope missing fields = %+v, want parent_ref and done_condition", scopeQueue.MissingFields)
 	}
 }
 
@@ -297,6 +337,10 @@ func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 }
 
 func completeIssueDraftBody() string {
+	return completeIssueDraftBodyWithSteps("3")
+}
+
+func completeIssueDraftBodyWithSteps(expectedSteps string) string {
 	return strings.Join([]string{
 		"### Parent context",
 		"guard-verdict-rsi",
@@ -314,7 +358,7 @@ func completeIssueDraftBody() string {
 		"### Work unit",
 		"leaf",
 		"### Expected steps",
-		"3",
+		expectedSteps,
 		"### Assumptions",
 		"- The guard journal fixture can reproduce the blank reason.",
 		"### Confusion risks",
@@ -344,6 +388,41 @@ func completeIssueDraftBody() string {
 		"### Closure binding",
 		"Resolving commit cites #N and carries `(fak guardrsi)`.",
 	}, "\n")
+}
+
+type repairQueueAssertion struct {
+	Kind          string         `json:"kind"`
+	Count         int            `json:"count"`
+	StepBudget    int            `json:"step_budget"`
+	NextAction    string         `json:"next_action"`
+	ByReason      map[string]int `json:"by_reason"`
+	MissingFields map[string]int `json:"missing_fields"`
+	ExampleKeys   []string       `json:"example_keys"`
+}
+
+func assertRepairQueue(t *testing.T, queues []repairQueueAssertion, kind string, count, steps int, reasons map[string]int) {
+	t.Helper()
+	queue := repairQueueByKind(queues, kind)
+	if queue.Kind == "" {
+		t.Fatalf("repair queue %q missing from %+v", kind, queues)
+	}
+	if queue.Count != count || queue.StepBudget != steps || queue.NextAction == "" || len(queue.ExampleKeys) == 0 {
+		t.Fatalf("repair queue %q = %+v, want count=%d steps=%d action/examples", kind, queue, count, steps)
+	}
+	for reason, want := range reasons {
+		if queue.ByReason[reason] != want {
+			t.Fatalf("repair queue %q reasons = %+v, want %s=%d", kind, queue.ByReason, reason, want)
+		}
+	}
+}
+
+func repairQueueByKind(queues []repairQueueAssertion, kind string) repairQueueAssertion {
+	for _, queue := range queues {
+		if queue.Kind == kind {
+			return queue
+		}
+	}
+	return repairQueueAssertion{}
 }
 
 func completeIssueCandidate() issuecontract.Candidate {
