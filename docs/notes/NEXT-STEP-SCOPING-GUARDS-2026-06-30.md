@@ -233,7 +233,10 @@ Acceptance for "true end to end working":
   trigger/batch-policy key, with sample issue keys per group, so repeated signal
   floods can be repaired as one organized batch instead of becoming spam. Batch
   groups also carry a split child-issue budget, so an oversized group shows its
-  likely expansion before any child issues are synced. The audit also emits
+  likely expansion before any child issues are synced. When the batch policy
+  declares a numeric cap (`at most 2`, `max 20`, `limit 5`, etc.), the group also
+  reports the declared cap and the overflow count, so agents can update or split
+  a flood before blindly creating excess GitHub issues. The audit also emits
   `coordination_groups` keyed by the worker-facing coordination note, with step
   budgets, split child-issue budgets, lane/reason buckets, and sample issue keys;
   that gives supervisors a direct view of work that must serialize around the

@@ -38,6 +38,8 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 			WorkUnit    string   `json:"work_unit"`
 			Count       int      `json:"count"`
 			StepBudget  int      `json:"step_budget"`
+			DeclaredCap int      `json:"declared_cap"`
+			OverCap     int      `json:"over_cap"`
 			ExampleKeys []string `json:"example_keys"`
 		} `json:"batch_groups"`
 		RepairQueues []repairQueueAssertion `json:"repair_queues"`
@@ -77,7 +79,8 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 	}
 	if len(got.BatchGroups) != 1 || got.BatchGroups[0].Lane != "taskmgr" ||
 		got.BatchGroups[0].WorkUnit != "leaf" || got.BatchGroups[0].Count != 1 ||
-		got.BatchGroups[0].StepBudget != 3 || len(got.BatchGroups[0].ExampleKeys) != 1 {
+		got.BatchGroups[0].StepBudget != 3 || got.BatchGroups[0].DeclaredCap != 2 ||
+		got.BatchGroups[0].OverCap != 0 || len(got.BatchGroups[0].ExampleKeys) != 1 {
 		t.Fatalf("batch groups = %+v, want one taskmgr leaf group", got.BatchGroups)
 	}
 	if len(got.RepairQueues) != 1 || got.RepairQueues[0].Kind != "dispatch" ||
@@ -116,7 +119,7 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 		"lanes: (unrouted)=1",
 		"work_units: leaf=1",
 		"step_buckets: 2-3=1",
-		"batch_group[0]: count=1 steps=3 lane=(unrouted) work_unit=leaf",
+		"batch_group[0]: count=1 steps=3 cap=2 lane=(unrouted) work_unit=leaf",
 		"coordination_group[0]: count=1 steps=3 key=Do not dispatch concurrently",
 		"repair_queue[scope]: count=1 steps=3",
 		"repair_queue[route]: count=1 steps=3",
@@ -196,6 +199,47 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 		!strings.Contains(out.String(), `"key": "issue/1450"`) ||
 		!strings.Contains(out.String(), `"dispatchability": "dispatchable"`) {
 		t.Fatalf("issue review missing expected fields:\n%s", out.String())
+	}
+}
+
+func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "candidates.json")
+	candidates := make([]issuecontract.Candidate, 0, 3)
+	for _, key := range []string{"cap-batch/one", "cap-batch/two", "cap-batch/three"} {
+		c := completeIssueCandidate()
+		c.Key = key
+		c.BatchPolicy = "At most 2 creates per live wave; update by marker key on rerun."
+		candidates = append(candidates, c)
+	}
+	b, err := json.Marshal(candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		BatchGroups []struct {
+			Count       int `json:"count"`
+			StepBudget  int `json:"step_budget"`
+			DeclaredCap int `json:"declared_cap"`
+			OverCap     int `json:"over_cap"`
+		} `json:"batch_groups"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if len(got.BatchGroups) != 1 ||
+		got.BatchGroups[0].Count != 3 ||
+		got.BatchGroups[0].StepBudget != 9 ||
+		got.BatchGroups[0].DeclaredCap != 2 ||
+		got.BatchGroups[0].OverCap != 1 {
+		t.Fatalf("batch groups = %+v, want count=3 steps=9 cap=2 over_cap=1", got.BatchGroups)
 	}
 }
 

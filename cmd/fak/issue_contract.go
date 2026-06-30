@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
@@ -70,6 +71,8 @@ type issueContractBatchGroup struct {
 	Count            int            `json:"count"`
 	StepBudget       int            `json:"step_budget"`
 	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	DeclaredCap      int            `json:"declared_cap,omitempty"`
+	OverCap          int            `json:"over_cap,omitempty"`
 	Dispatchable     int            `json:"dispatchable"`
 	TriageOnly       int            `json:"triage_only"`
 	Refused          int            `json:"refused"`
@@ -250,6 +253,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 				WorkUnit:    strings.TrimSpace(review.WorkUnit),
 				Trigger:     strings.TrimSpace(review.Trigger),
 				BatchPolicy: strings.TrimSpace(review.BatchPolicy),
+				DeclaredCap: issueContractBatchPolicyCap(review.BatchPolicy),
 				ByReason:    map[string]int{},
 			}
 			group.MissingMetadata = issueContractBatchMissingMetadata(review)
@@ -258,6 +262,9 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		group.Count++
 		group.StepBudget += stepBudget
 		group.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
+		if group.DeclaredCap > 0 && group.Count > group.DeclaredCap {
+			group.OverCap = group.Count - group.DeclaredCap
+		}
 		switch review.Dispatchability {
 		case issuecontract.Dispatchable:
 			group.Dispatchable++
@@ -315,6 +322,12 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		groups = append(groups, *group)
 	}
 	sort.Slice(groups, func(i, j int) bool {
+		if (groups[i].OverCap > 0) != (groups[j].OverCap > 0) {
+			return groups[i].OverCap > 0
+		}
+		if groups[i].OverCap != groups[j].OverCap {
+			return groups[i].OverCap > groups[j].OverCap
+		}
 		if groups[i].Count != groups[j].Count {
 			return groups[i].Count > groups[j].Count
 		}
@@ -410,6 +423,81 @@ func issueContractBucketValue(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func issueContractBatchPolicyCap(policy string) int {
+	tokens := issueContractPolicyTokens(policy)
+	for i, tok := range tokens {
+		switch tok {
+		case "cap", "capped", "limit", "limited", "max", "maximum":
+			if n := firstIssueContractPolicyNumber(tokens[i+1:], 4); n > 0 {
+				return n
+			}
+		case "at":
+			if i+1 < len(tokens) && tokens[i+1] == "most" {
+				if n := firstIssueContractPolicyNumber(tokens[i+2:], 4); n > 0 {
+					return n
+				}
+			}
+		case "no":
+			if i+2 < len(tokens) && tokens[i+1] == "more" && tokens[i+2] == "than" {
+				if n := firstIssueContractPolicyNumber(tokens[i+3:], 4); n > 0 {
+					return n
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func issueContractPolicyTokens(policy string) []string {
+	return strings.FieldsFunc(strings.ToLower(policy), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+	})
+}
+
+func firstIssueContractPolicyNumber(tokens []string, limit int) int {
+	if limit > len(tokens) {
+		limit = len(tokens)
+	}
+	for i := 0; i < limit; i++ {
+		if n := issueContractPolicyNumber(tokens[i]); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func issueContractPolicyNumber(token string) int {
+	if n, err := strconv.Atoi(token); err == nil {
+		return n
+	}
+	switch token {
+	case "one":
+		return 1
+	case "two":
+		return 2
+	case "three":
+		return 3
+	case "four":
+		return 4
+	case "five":
+		return 5
+	case "six":
+		return 6
+	case "seven":
+		return 7
+	case "eight":
+		return 8
+	case "nine":
+		return 9
+	case "ten":
+		return 10
+	case "twenty":
+		return 20
+	default:
+		return 0
+	}
 }
 
 func issueContractBatchKey(review issuecontract.Review) string {
@@ -684,6 +772,12 @@ func renderIssueContract(r issueContractResult) string {
 		)
 		if group.ChildIssueBudget > 0 {
 			line += fmt.Sprintf(" child_issues=%d", group.ChildIssueBudget)
+		}
+		if group.DeclaredCap > 0 {
+			line += fmt.Sprintf(" cap=%d", group.DeclaredCap)
+		}
+		if group.OverCap > 0 {
+			line += fmt.Sprintf(" over_cap=%d", group.OverCap)
 		}
 		line += fmt.Sprintf(" lane=%s work_unit=%s key=%s",
 			issueContractBucketValue(group.Lane, "(unrouted)"),
