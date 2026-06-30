@@ -37,7 +37,10 @@ Generation is independent of runtime feature gates. A generation label says why
 the work exists and what evidence promotes it. A feature gate decides whether
 the code is reachable, default-on, default-off, or operator-only at runtime.
 Next-generation code can land inert behind a gate; now-generation docs can ship
-with no runtime gate at all.
+with no runtime gate at all. The branchless exposure contract is pinned in
+[`docs/notes/GENERATION-BRANCHLESS-FEATURE-GATING-2026-06-30.md`](notes/GENERATION-BRANCHLESS-FEATURE-GATING-2026-06-30.md):
+generation metadata is planning data, while flags, command modes, doc status,
+and no-op scaffolds own runtime exposure.
 
 Generation is independent of completion percentage. Ongoing optimization
 programs still report a frontier and trend. Discrete deliverables can report
