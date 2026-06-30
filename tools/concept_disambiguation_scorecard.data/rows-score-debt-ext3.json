@@ -1,0 +1,396 @@
+{
+  "rows": [
+    {
+      "id": "agent-readiness-scorecard",
+      "canonical": "agent-readiness scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures how easy fak is for an AI agent (Claude Code, Codex, Cursor, an MCP client) to discover, adopt, and build on - missing entry points, harness configs, copy-pasteable first commands, per-agent recipes (tools/agent_readiness_scorecard.py).",
+      "distinction": "The INWARD agent-experience surface - NOT persona-readiness (the go-to-market human personas) and NOT the control pane that folds every scorecard.",
+      "distinct_from": [
+        "persona-readiness scorecard",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "agentreadinessscorecard"
+      ],
+      "grounding": "agentreadinessscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "persona-readiness-scorecard",
+      "canonical": "persona-readiness scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures whether fak serves its top human personas - the free-tier dev, the infra engineer, the researcher - each with the entry path they need (prebuilt binary, deploy guide, determinism witness) (tools/persona_readiness_scorecard.py).",
+      "distinction": "The go-to-market HUMAN-persona surface - NOT agent-readiness (the single AI-agent persona) and NOT the control pane.",
+      "distinct_from": [
+        "agent-readiness scorecard",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "personareadinessscorecard"
+      ],
+      "grounding": "personareadinessscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "doc-appeal-scorecard",
+      "canonical": "doc-appeal scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures whether a reader-facing doc reads like a person wrote it: em-dash flood, bold-emphasis flood, run-on sentences, walls of text, LLM-scaffolding phrases (tools/doc_appeal_scorecard.py).",
+      "distinction": "The prose-VOICE surface (does it sound human) - NOT docs-scorecard (whole-corpus doc coverage) and NOT readme-freshness (is the front page current).",
+      "distinct_from": [
+        "docs scorecard",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "docappealscorecard"
+      ],
+      "grounding": "docappealscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "docs-scorecard",
+      "canonical": "docs scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The whole-corpus documentation scorecard: the 5-KPI doc-debt measure over the reachable doc set, the corpus analogue of the README freshness audit (tools/docs_scorecard.py).",
+      "distinction": "The whole-corpus doc-COVERAGE surface - NOT doc-appeal (per-doc prose voice) and NOT readme-freshness (the single front-page doc).",
+      "distinct_from": [
+        "doc-appeal scorecard",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "docsscorecard"
+      ],
+      "grounding": "docsscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "observability-scorecard",
+      "canonical": "observability scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures observability debt across the metric, dashboard, alert, trace, log, proof, and DOS surfaces - what is and is not measured about the running system (tools/observability_scorecard.py).",
+      "distinction": "Measures WHAT-IS-MEASURED about the system - NOT conflation (whose number a metric reports) and NOT the control pane that folds the scorecards.",
+      "distinct_from": [
+        "scorecard",
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [
+        "observabilityscorecard"
+      ],
+      "grounding": "observabilityscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "steerability-scorecard",
+      "canonical": "steerability scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures how steerable fak is - whether its behavior responds predictably to the configured knobs, flags, and policies (tools/steerability_scorecard.py, cmd/fak steering).",
+      "distinction": "Measures BEHAVIORAL-RESPONSE-TO-KNOBS - NOT token-defaults (whether the shipped defaults are sane) and NOT the control pane.",
+      "distinct_from": [
+        "scorecard",
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [
+        "steerabilityscorecard"
+      ],
+      "grounding": "steerabilityscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "release-readiness-scorecard",
+      "canonical": "release-readiness scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures whether the project is ready to cut a release: version state, release-notes draft, green gate, and the substantive-commit threshold the auto-cut decision reads (tools/release_readiness_scorecard.py).",
+      "distinction": "Measures RELEASE-CUT readiness - NOT build-scorecard (the build/onboard process health) and NOT the control pane.",
+      "distinct_from": [
+        "build scorecard",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "releasereadinessscorecard"
+      ],
+      "grounding": "releasereadinessscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "seo-aeo-scorecard",
+      "canonical": "seo/aeo scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures search-engine and answer-engine optimization debt: structured-data sync, FAQ coverage, and the discoverability content checks over the public surfaces (tools/seo_aeo_scorecard.py).",
+      "distinction": "Measures DISCOVERABILITY by search/answer engines - NOT industry-parity (the competitive field position) and NOT the control pane.",
+      "distinct_from": [
+        "scorecard",
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [
+        "seoaeoscorecard"
+      ],
+      "grounding": "seoaeoscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "bench-dx-scorecard",
+      "canonical": "bench-dx scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that measures the developer experience of running benchmarks: whether the bench grid is discoverable, reproducible, and well-documented (tools/bench_dx_scorecard.py).",
+      "distinction": "Measures the BENCHMARK developer experience (process debt, free to regress vs the ratchet) - NOT industry-parity (the measured competitive numbers) and NOT the control pane.",
+      "distinct_from": [
+        "scorecard",
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [
+        "benchdxscorecard"
+      ],
+      "grounding": "benchdxscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "build-scorecard",
+      "canonical": "build scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The scorecard that grades the CUDA build/dev process health (standing author, build, validate, gate, onboard) folded into the guard-RSI and cuda-dev surfaces (internal/guardrsi buildScorecard).",
+      "distinction": "Grades the BUILD/DEV PROCESS - NOT code-quality (defects in the source) and NOT the control pane that folds every scorecard.",
+      "distinct_from": [
+        "scorecard",
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [
+        "buildscorecard"
+      ],
+      "grounding": "buildscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "hygiene-debt",
+      "canonical": "hygiene-debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The single debt integer the repo-hygiene scorecard folds to: noisy artifacts, placement drift, generated junk across the tree.",
+      "distinction": "One debt INTEGER for tree cleanliness - NOT the repo-hygiene scorecard subsystem that computes it, and NOT total-debt (the portfolio sum across all scorecards).",
+      "distinct_from": [
+        "total-debt",
+        "scorecard",
+        "control-pane"
+      ],
+      "aliases": [
+        "hygienedebt"
+      ],
+      "grounding": "hygienedebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "total-debt",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "health-debt",
+      "canonical": "health-debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The debt integer for fleet/service health defects: incident, stale, and deferred surfaces the watchdog and health-beat report fold to a single number.",
+      "distinction": "One debt INTEGER for service health - NOT hygiene-debt (tree cleanliness) and NOT total-debt (the portfolio sum).",
+      "distinct_from": [
+        "hygiene-debt",
+        "total-debt",
+        "control-pane"
+      ],
+      "aliases": [
+        "healthdebt"
+      ],
+      "grounding": "healthdebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "total-debt",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ui-quality-debt",
+      "canonical": "ui-quality-debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The debt integer the ui-quality scorecard folds to: TUI render defects measured over the pane render source (internal/uiquality), e.g. rune-safety and cell-alignment KPIs.",
+      "distinction": "One debt INTEGER for TUI render quality - NOT hygiene-debt (tree cleanliness) and NOT total-debt (the portfolio sum).",
+      "distinct_from": [
+        "hygiene-debt",
+        "total-debt",
+        "control-pane"
+      ],
+      "aliases": [
+        "uiqualitydebt"
+      ],
+      "grounding": "uiqualitydebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "total-debt",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "milestone-debt",
+      "canonical": "milestone-debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The debt integer the milestone report folds to: the gap between the maturity climb plus epic roadmap and where the milestones should stand.",
+      "distinction": "One debt INTEGER for milestone progress - NOT health-debt (service health) and NOT total-debt (the portfolio sum across all scorecards).",
+      "distinct_from": [
+        "health-debt",
+        "total-debt",
+        "control-pane"
+      ],
+      "aliases": [
+        "milestonedebt"
+      ],
+      "grounding": "milestonedebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "total-debt",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-plantick",
+      "canonical": "PlanTick (gardenbundle)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "gardenbundle.PlanTick(results, dryRun) computes a TickPlan - the decided set of stale-work reap and surface actions for one garden tick from the member results.",
+      "distinction": "The PLANNING step that DECIDES a garden tick's actions - NOT the TickPlan value it returns, and NOT a dispatch wave or lane plan.",
+      "distinct_from": [
+        "TickPlan (gardenbundle)",
+        "dispatchPlan"
+      ],
+      "aliases": [
+        "plantick"
+      ],
+      "grounding": "plantick",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-tickplan",
+      "canonical": "TickPlan (gardenbundle)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "gardenbundle.TickPlan is the value PlanTick returns: the decided reap/surface counts for one garden tick, with Acted() true when the tick will change anything.",
+      "distinction": "The decided-actions VALUE for one garden tick - NOT PlanTick (the function that computes it) and NOT a dispatch plan.",
+      "distinct_from": [
+        "PlanTick (gardenbundle)",
+        "dispatchPlan"
+      ],
+      "aliases": [
+        "tickplan"
+      ],
+      "grounding": "tickplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-lanecandidate",
+      "canonical": "LaneCandidate (dispatchtick)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by.",
+      "distinction": "One candidate ISSUE within a single lane's ordering - NOT a dispatchWaveCandidate (a lane chosen to run in a wave) and NOT the whole dispatchPlan.",
+      "distinct_from": [
+        "dispatchWaveCandidate",
+        "dispatchPlan"
+      ],
+      "aliases": [
+        "lanecandidate"
+      ],
+      "grounding": "lanecandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x3-plan-dispatchwavecandidate",
+      "canonical": "dispatchWaveCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak dispatchWaveCandidate is one lane chosen to run in a dispatch wave - a RunTarget in the wave price, the lane-level unit the wave admits under disjointness.",
+      "distinction": "One LANE selected for a wave's RunTargets - NOT a LaneCandidate (an issue inside a lane) and NOT the dispatchPlan that scores the whole dispatch surface.",
+      "distinct_from": [
+        "LaneCandidate (dispatchtick)",
+        "dispatchPlan"
+      ],
+      "aliases": [
+        "dispatchwavecandidate"
+      ],
+      "grounding": "dispatchwavecandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

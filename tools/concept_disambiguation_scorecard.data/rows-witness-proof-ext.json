@@ -384,7 +384,7 @@
       "canonical": "dgxGlmGpuWitness (CUDA GPU proof)",
       "family": "witness-proof",
       "kind": "doc-term",
-      "definition": "dgxGlmGpuWitness is the on-DGX CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path.",
+      "definition": "dgxGlmGpuWitness is the on-GPU server CUDA GPU correctness witness for the GLM-MoE-DSA backend forward (TestCUDAGLMMoeDsaBackendForward run via tools/dgx_glm_gpu_witness.sh), invoked because the win32 build host cannot execute the CUDA path.",
       "distinction": "It is a hardware-run correctness PROOF artifact for a GPU kernel, not the kernel's require-witness trust rung nor a world-state-witness on the cache coherence bus.",
       "distinct_from": [
         "world-state-witness",

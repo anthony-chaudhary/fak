@@ -5,8 +5,6 @@ description: "Inward naming scorecard: each confusable fak concept positioned on
 
 # Concept-disambiguation scorecard - crystal clarity across similar-sounding names
 
-<!-- concept-disambiguation-scorecard: 2026-06-29 #1257 support-maturity - process: tools/concept_disambiguation_scorecard.py - data: tools/concept_disambiguation_scorecard.data/ -->
-
 The sibling scorecards grade fak's code, docs, and competitive standing. This one asks the question that bites a reader as the system grows: **of the massive, growing set of similar-sounding names (cache, vCache, KV cache, cachemeta, the provider prompt-cache), is each distinct concept crystal-clear - one canonical name, a written definition, and an explicit line drawn against the siblings it is confused with?** Every number below is re-derived by `tools/concept_disambiguation_scorecard.py` and cross-checked against the real tree (the grounding token must appear in the production corpus; the glossary anchor must exist; a `distinct_from` reference must resolve). No verdict is hand-typed.
 
 > Regenerate: `python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard`.
@@ -15,10 +13,10 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **100.0/100** (grade A) = 10.0/10 |
-| **Coverage** | **100.0%** (862/862 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **0** (clarity 0 + coverage 0) |
-| Crystal-clear concepts | 109 of 665 positioned |
+| **Score** | **96.9/100** (grade A) = 9.7/10 |
+| **Coverage** | **95.3%** (880/923 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **43** (clarity 0 + coverage 43) |
+| Crystal-clear concepts | 109 of 683 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
 > **Read this right.** The score is deliberately LOW at birth: it grades the WHOLE confusable namespace discovered in the tree, not the few concepts already catalogued. A low coverage number is the honest statement that most similar-sounding names are not yet disambiguated - which is exactly the debt this scorecard exists to retire.
@@ -26,11 +24,11 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 665 concepts - score 100.0/100 (grade A) - disambiguation-debt 0
+concept-disambiguation chart - 683 concepts - score 96.9/100 (grade A) - disambiguation-debt 43
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####....................... 109
-  o defined       ############################ 556
+  o defined       ############################ 574
   ~ drifting      ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
@@ -45,35 +43,35 @@ clarity mix by family (each cell = one concept):
   gateway-engine   ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (79 concept(s); 6 crystal)
   guard-gate       ***********************ooooooooooooooooooooooooooooooooooo (58 concept(s); 23 crystal)
   layout           ***ooooo           (8 concept(s); 3 crystal)
-  plan             ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (78 concept(s); 3 crystal)
+  plan             ***ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (82 concept(s); 3 crystal)
   policy-capability ******oooooooooooooooooooooooooooooooooooooooooooooo (52 concept(s); 6 crystal)
   pool             **ooooooooooo      (13 concept(s); 2 crystal)
   render-materialize ***ooooooooooooooooooooooooooooooooooooo (40 concept(s); 3 crystal)
-  score-debt       ***oo              (5 concept(s); 3 crystal)
+  score-debt       ***oooooooooooooooo (19 concept(s); 3 crystal)
   session-runtime  *******oooooooooooooooooooooooooooooooooooooooooooooooooooooooo (63 concept(s); 7 crystal)
   support-maturity *****ooo           (8 concept(s); 5 crystal)
   witness-proof    *****ooooooooooooooooooooooooooooooooo (38 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
+  plan             ##########################.. 132/141
+  render-materialize #########################... 64/72
+  session-runtime  #########################... 75/83
+  score-debt       ########################.... 33/39
+  guard-gate       ###########################. 89/93
+  pool             ########################.... 18/21
+  support-maturity #######################..... 15/18
+  cache            ############################ 95/96
+  policy-capability ############################ 63/64
+  witness-proof    ###########################. 49/50
   attention        ############################ 57/57
-  cache            ############################ 95/95
   context-ctx      ############################ 69/69
   cross-cluster    ............................ 0/0
   decision         ############################ 15/15
   evict            ############################ 21/21
   gateway-engine   ############################ 114/114
-  guard-gate       ############################ 89/89
   layout           ############################ 9/9
-  plan             ############################ 128/128
-  policy-capability ############################ 63/63
-  pool             ############################ 18/18
-  render-materialize ############################ 64/64
-  score-debt       ############################ 19/19
-  session-runtime  ############################ 75/75
-  support-maturity ############################ 15/15
-  witness-proof    ############################ 49/49
 
-namespace coverage  [################################] 100.0%  (862/862 confusable tokens positioned)
+namespace coverage  [##############################..] 95.3%  (880/923 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -569,6 +567,10 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | symbol | plan | **RankCandidates (dojocal recalibration ranking)** - internal/dojocal.RankCandidates orders dojo recalibration candidates by candidatePriority, and NextCandidate returns the top-ranked scored candidate for the next tick. |
 | o | defined | symbol | plan | **candidateIDLabel (bench task-count pluralizer)** - candidateIDLabel is the bench-harness helper (cmd/terminalbench, browseractionbench, toolsandboxbench) that pluralizes the count of CandidateTaskIDs in a TaskSelection for the tasks status line. |
 | o | defined | symbol | plan | **candidate_tag (releasestatus promotion candidate)** - internal/releasestatus's candidateTag/candidateSHA name the latest rolling tag (and its commit) being evaluated for stable promotion, with no_candidate the state when no rolling tag exists. |
+| o | defined | symbol | plan | **PlanTick (gardenbundle)** - gardenbundle.PlanTick(results, dryRun) computes a TickPlan - the decided set of stale-work reap and surface actions for one garden tick from the member results. |
+| o | defined | symbol | plan | **TickPlan (gardenbundle)** - gardenbundle.TickPlan is the value PlanTick returns: the decided reap/surface counts for one garden tick, with Acted() true when the tick will change anything. |
+| o | defined | symbol | plan | **LaneCandidate (dispatchtick)** - dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by. |
+| o | defined | symbol | plan | **dispatchWaveCandidate** - cmd/fak dispatchWaveCandidate is one lane chosen to run in a dispatch wave - a RunTarget in the wave price, the lane-level unit the wave admits under disjointness. |
 | o | defined | concept | policy-capability | **adjudicating (the decision act)** - Adjudicating is the act of evaluating a proposed tool call (or a buffered turn of them) against the loaded policy and refusal rungs to produce an admit/refuse verdict, exercised on the gateway's served fast path (adjudicateProposedServed), its full-turn gate (adjudicateProposedTurn), and folded into the deny-all counter by recordAdjudicationOutcome. |
 | o | defined | config | policy-capability | **posture enum value (per-subsystem stance)** - These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed is the default-deny tool-admission stance. |
 | o | defined | symbol | policy-capability | **DispatchPreflight (dispatch admission)** - DispatchPreflight (cmd/fak) folds host safety, account availability, kernel capacity, and seat-pool checks (its PreflightInput) into a verdict on whether a new issue-resolution worker may safely spawn, with PreflightReady the ggufload load-time gate verdict that says a model header parsed and fits. |
@@ -665,6 +667,20 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 | o | defined | concept | render-materialize | **render (verb)** - render is the repo-wide convention for a pure projection function that turns a typed value into a human/Markdown/wire/terminal text surface (e.g. the bare `func render` in loophealth and dispatchworker), without mutating its input. |
 | o | defined | metric | score-debt | **per-scorecard *_debt integer** - Each scorecard emits one named debt integer counting its surface's unmet rungs — learning_debt (unwitnessed learning docs), conflation_debt (provenance honesty), growth_debt (silently-undefined coverage cells), loopindex_debt (loop stages not yet witnessed), maturity_debt (support-maturity ladder skips), support_maturity_debt, dogfood_debt, sessionobs_debt — read in delta folds via the DebtKey constant and the baseline/current bDebt/cDebt locals. |
 | o | defined | subsystem | score-debt | **named scorecard surface (payload + baseline)** - These are concrete scorecard surfaces and their plumbing: learning_scorecard, code_quality_scorecard, and product_scorecard are distinct deterministic measurement tools, ScorecardPayload is the per-scorecard struct carrying corpus/KPIs/grade, and tools/scorecard_baseline.json is the pinned baseline the control-pane ratchet reds against. |
+| o | defined | subsystem | score-debt | **agent-readiness scorecard** - The scorecard that measures how easy fak is for an AI agent (Claude Code, Codex, Cursor, an MCP client) to discover, adopt, and build on - missing entry points, harness configs, copy-pasteable first commands, per-agent recipes (tools/agent_readiness_scorecard.py). |
+| o | defined | subsystem | score-debt | **persona-readiness scorecard** - The scorecard that measures whether fak serves its top human personas - the free-tier dev, the infra engineer, the researcher - each with the entry path they need (prebuilt binary, deploy guide, determinism witness) (tools/persona_readiness_scorecard.py). |
+| o | defined | subsystem | score-debt | **doc-appeal scorecard** - The scorecard that measures whether a reader-facing doc reads like a person wrote it: em-dash flood, bold-emphasis flood, run-on sentences, walls of text, LLM-scaffolding phrases (tools/doc_appeal_scorecard.py). |
+| o | defined | subsystem | score-debt | **docs scorecard** - The whole-corpus documentation scorecard: the 5-KPI doc-debt measure over the reachable doc set, the corpus analogue of the README freshness audit (tools/docs_scorecard.py). |
+| o | defined | subsystem | score-debt | **observability scorecard** - The scorecard that measures observability debt across the metric, dashboard, alert, trace, log, proof, and DOS surfaces - what is and is not measured about the running system (tools/observability_scorecard.py). |
+| o | defined | subsystem | score-debt | **steerability scorecard** - The scorecard that measures how steerable fak is - whether its behavior responds predictably to the configured knobs, flags, and policies (tools/steerability_scorecard.py, cmd/fak steering). |
+| o | defined | subsystem | score-debt | **release-readiness scorecard** - The scorecard that measures whether the project is ready to cut a release: version state, release-notes draft, green gate, and the substantive-commit threshold the auto-cut decision reads (tools/release_readiness_scorecard.py). |
+| o | defined | subsystem | score-debt | **seo/aeo scorecard** - The scorecard that measures search-engine and answer-engine optimization debt: structured-data sync, FAQ coverage, and the discoverability content checks over the public surfaces (tools/seo_aeo_scorecard.py). |
+| o | defined | subsystem | score-debt | **bench-dx scorecard** - The scorecard that measures the developer experience of running benchmarks: whether the bench grid is discoverable, reproducible, and well-documented (tools/bench_dx_scorecard.py). |
+| o | defined | subsystem | score-debt | **build scorecard** - The scorecard that grades the CUDA build/dev process health (standing author, build, validate, gate, onboard) folded into the guard-RSI and cuda-dev surfaces (internal/guardrsi buildScorecard). |
+| o | defined | metric | score-debt | **hygiene-debt** - The single debt integer the repo-hygiene scorecard folds to: noisy artifacts, placement drift, generated junk across the tree. |
+| o | defined | metric | score-debt | **health-debt** - The debt integer for fleet/service health defects: incident, stale, and deferred surfaces the watchdog and health-beat report fold to a single number. |
+| o | defined | metric | score-debt | **ui-quality-debt** - The debt integer the ui-quality scorecard folds to: TUI render defects measured over the pane render source (internal/uiquality), e.g. rune-safety and cell-alignment KPIs. |
+| o | defined | metric | score-debt | **milestone-debt** - The debt integer the milestone report folds to: the gap between the maturity climb plus epic roadmap and where the milestones should stand. |
 | o | defined | subsystem | session-runtime | **sessionobs (observability scorer)** - internal/sessionobs is the stdlib-only RSI scorecard that grades how far our own coding-session data has climbed the capture->structure->link->aggregate->learn ladder, the value-side complement to the cost-only tools/session_audit.py; its `fak sessions learn` rung is the registered loop consumer that reads the committed corpus. |
 | o | defined | metric | session-runtime | **SessionObsDebt (ladder-rung debt)** - sessionobs.Corpus.SessionObsDebt is the headline integer the session-observability scorecard emits: the count of HARD ladder rungs (capture/structure/link/aggregate/learn) not yet built, retired only by building the real rung never by weakening a check. |
 | o | defined | config | session-runtime | **taskscheduler (Windows cron target)** - taskscheduler is the `fak cron emit --target taskscheduler` OS-scheduler target that projects a registered fak loop into a Windows Task Scheduler `Register-ScheduledTask` snippet (alongside launchd and systemd), so a job survives reboot; the same family's NewNativeScheduler is an unrelated decode-engine constructor. |
@@ -762,35 +778,35 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 12 kind/grounding mismatch |
-| well-formed | `well_formed` | 100 | 0 | all 665 rows well-formed |
+| honesty | `kind_grounding_soft` | 60 | 0 | 16 kind/grounding mismatch |
+| honesty | `hierarchy_soft` | 76 | 0 | 4 hierarchy issue(s) |
+| well-formed | `well_formed` | 100 | 0 | all 683 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
-| honesty | `hierarchy_soft` | 100 | 0 | hierarchy parents resolve |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| plan | 132 | 141 | 9 |
+| render-materialize | 64 | 72 | 8 |
+| session-runtime | 75 | 83 | 8 |
+| score-debt | 33 | 39 | 6 |
+| guard-gate | 89 | 93 | 4 |
+| pool | 18 | 21 | 3 |
+| support-maturity | 15 | 18 | 3 |
+| cache | 95 | 96 | 1 |
+| policy-capability | 63 | 64 | 1 |
+| witness-proof | 49 | 50 | 1 |
 | attention | 57 | 57 | 0 |
-| cache | 95 | 95 | 0 |
 | context-ctx | 69 | 69 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 15 | 15 | 0 |
 | evict | 21 | 21 | 0 |
 | gateway-engine | 114 | 114 | 0 |
-| guard-gate | 89 | 89 | 0 |
 | layout | 9 | 9 | 0 |
-| plan | 128 | 128 | 0 |
-| policy-capability | 63 | 63 | 0 |
-| pool | 18 | 18 | 0 |
-| render-materialize | 64 | 64 | 0 |
-| score-debt | 19 | 19 | 0 |
-| session-runtime | 75 | 75 | 0 |
-| support-maturity | 15 | 15 | 0 |
-| witness-proof | 49 | 49 | 0 |
 

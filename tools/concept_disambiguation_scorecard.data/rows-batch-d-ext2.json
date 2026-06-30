@@ -200,7 +200,7 @@
       "canonical": "PureFakKernel (GCP plan test)",
       "family": "gateway-engine",
       "kind": "symbol",
-      "definition": "The cmd/fak test TestClaudeGLMGCPA100PlanWiresPureFakKernel, asserting the Claude-GLM-on-GCP-A100 plan wires the pure in-kernel fak model path (the DRY cuda-binary subcommand) rather than an external upstream.",
+      "definition": "The cmd/fak test TestClaudeGLMGCPA100PlanWiresPureFakKernel, asserting the Claude-GLM-on-GCP-datacenter GPU plan wires the pure in-kernel fak model path (the DRY cuda-binary subcommand) rather than an external upstream.",
       "distinction": "It is a TEST that the GCP plan wires the in-kernel model engine, distinct from fak_kernel_decisions_total (the rung-decision metric) and from the coordinator kernel itself.",
       "distinct_from": [
         "kernel",
