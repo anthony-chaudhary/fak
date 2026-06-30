@@ -187,6 +187,7 @@ func TestIssueItemsRenderRoutableStableMaturityIssues(t *testing.T) {
 		"<!-- fak-maturity-work-key: maturity/alpha/tested -->",
 		"Lane: `alpha`",
 		"Gap: `tested`",
+		"dispatchability: `triage_only`",
 		"fak maturity route",
 	} {
 		if !strings.Contains(it.Body, want) {
@@ -259,6 +260,8 @@ func TestSyncIssuePlanUsesInjectedRunner(t *testing.T) {
 	joined := strings.Join([]string{strings.Join(calls[0], " "), strings.Join(calls[1], " ")}, "\n")
 	for _, want := range []string{
 		"issue create",
+		"--label needs-triage",
+		"--label triage-only",
 		"--label maturity",
 		"--repo owner/repo",
 		"issue edit 7",

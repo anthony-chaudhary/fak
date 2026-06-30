@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // IssueSchema is the machine-readable envelope for the maturity backlog ->
@@ -15,6 +17,7 @@ import (
 const IssueSchema = "fak-maturity-issues/1"
 
 var maturityIssueMarkerRE = regexp.MustCompile(`<!--\s*fak-maturity-work-key:\s*([^>\s]+)\s*-->`)
+var maturityTriageLabels = []string{"needs-triage", "triage-only"}
 
 // IssueItem is one maturity next-work item rendered as a dedupable GitHub issue.
 type IssueItem struct {
@@ -203,6 +206,7 @@ func IssueBody(item IssueItem) string {
 		fmt.Sprintf("- Current rung: `%s`\n", item.FromRung) +
 		fmt.Sprintf("- Gap: `%s`\n", item.Gap) +
 		fmt.Sprintf("- Ladder-skip: `%t`\n", item.Skip) +
+		"- dispatchability: `triage_only`\n" +
 		"- Source: `fak maturity next`\n\n" +
 		"Suggested next action:\n\n" +
 		fmt.Sprintf("%s\n\n", item.Title) +
@@ -259,6 +263,7 @@ type IssueRunner func(args []string) (stdout, stderr string, ok bool)
 
 func defaultIssueRunner(args []string) (string, string, bool) {
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -307,7 +312,7 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 			args = []string{"issue", "edit", num, "--title", row.Title, "--body", row.Body}
 		} else {
 			args = []string{"issue", "create", "--title", row.Title, "--body", row.Body}
-			for _, label := range labels {
+			for _, label := range mergeMaturityLabels(maturityTriageLabels, labels) {
 				if strings.TrimSpace(label) != "" {
 					args = append(args, "--label", strings.TrimSpace(label))
 				}
@@ -326,6 +331,22 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 		})
 	}
 	return rows
+}
+
+func mergeMaturityLabels(base, extra []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(base)+len(extra))
+	for _, group := range [][]string{base, extra} {
+		for _, label := range group {
+			label = strings.TrimSpace(label)
+			if label == "" || seen[label] {
+				continue
+			}
+			seen[label] = true
+			out = append(out, label)
+		}
+	}
+	return out
 }
 
 // RenderIssueResult is the human dry-run/live card for `fak maturity route`.
