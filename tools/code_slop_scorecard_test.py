@@ -913,6 +913,19 @@ def test_claude_worktree_go_files_excluded_from_gather():
     assert not cs._excluded_go("cmd/fak/main.go")
 
 
+def test_mojibake_path_excluded_from_gather():
+    # The git-ls-files walk drops untracked phantoms, but the rglob fallback (git
+    # unavailable) would otherwise count a faulted absolute Windows path — a phantom
+    # dir literally named U+F05C (a backslash-glyph) holding a full repo copy — as a
+    # clone of every real file. Keying on the bytes catches it under any garbage name.
+    f05c = chr(0xF05C)  # the backslash-glyph the faulted path lands under
+    assert cs._corrupt_path(f05c + "/internal/model/arch.go")
+    assert cs._excluded_go(f05c + "/cmd/fak/main.go")
+    # RECALL GUARD: a clean first-party path carries no PUA/control chars.
+    assert not cs._corrupt_path("internal/model/arch.go")
+    assert not cs._excluded_go("internal/model/arch.go")
+
+
 def test_gather_go_prefers_tracked_sources_over_untracked_scratch():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

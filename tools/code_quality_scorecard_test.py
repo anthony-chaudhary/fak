@@ -97,9 +97,26 @@ def test_agent_checkout_go_files_excluded_from_corpus():
     # once inflated the architecture work-list 13 -> 27). Both must be pruned by name.
     assert cq._excluded_go(".claude/worktrees/wt/internal/gateway/metrics.go")
     assert cq._excluded_go(".fak/tmp/issue1155-clean-deadbeef/cmd/fak/guard.go")
+    # `.dos/_dos_park/_iso_build/` is the DOS kernel's parked isolated-build copy —
+    # same class of phantom checkout, must be pruned by name too.
+    assert cq._excluded_go(".dos/_dos_park/_iso_build/cmd/fak/guard.go")
     # first-party kernel paths are still graded
     assert not cq._excluded_go("internal/gateway/metrics.go")
     assert not cq._excluded_go("cmd/fak/guard.go")
+
+
+def test_mojibake_path_excluded_from_corpus():
+    # A faulted absolute Windows path can land as a phantom dir literally named
+    # U+F05C (a backslash-glyph) holding a full repo copy — 2381 such phantom .go
+    # (~47% of one walk) double-graded every KPI. The byte-level guard catches the
+    # junk no matter what garbage name it lands under (the dir-name exclude can't).
+    f05c, f03a = chr(0xF05C), chr(0xF03A)  # backslash- and colon-glyphs
+    assert cq._corrupt_path(f05c + "/internal/auditpane/pane.go")
+    assert cq._corrupt_path("C" + f03a + "Users/foo/bar.go")
+    assert cq._excluded_go(f05c + "/cmd/fak/guard.go")
+    # a clean first-party path carries no PUA/control chars
+    assert not cq._corrupt_path("internal/gateway/metrics.go")
+    assert not cq._excluded_go("internal/gateway/metrics.go")
 
 
 # --- tests ----------------------------------------------------------------

@@ -1372,7 +1372,20 @@ def _safe_read(path: Path) -> str:
         return ""
 
 
+def _corrupt_path(rel: str) -> bool:
+    """A path carrying a Unicode Private-Use-Area char (U+E000–U+F8FF) or a C0
+    control char is a cp1252↔utf-8 mojibake artifact, never real tracked source.
+    The git-ls-files walk already drops these (the phantoms are untracked), but the
+    rglob fallback (git unavailable) would otherwise count a faulted absolute path —
+    e.g. a phantom dir literally named U+F05C (a backslash-glyph) holding a full repo
+    copy — as a clone of every real file. Keying on the bytes catches it regardless
+    of the garbage name the junk lands under."""
+    return any(0xE000 <= ord(c) <= 0xF8FF or ord(c) < 0x20 for c in rel)
+
+
 def _excluded_go(rel: str) -> bool:
+    if _corrupt_path(rel):
+        return True
     parts = set(Path(rel).parts)
     return bool(parts & GO_EXCLUDE_DIRS)
 

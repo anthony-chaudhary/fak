@@ -119,16 +119,19 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code. testdata holds
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
-GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", "node_modules", "testdata", "vendor", "__pycache__"}
-# `.claude` and `.fak` both hold full repo CHECKOUTS created by the agent machinery:
-# `.claude/worktrees/<wt>/` (the worktree-isolation feature) and
-# `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature). Both are
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.claude`, `.fak`, and `.dos` all hold full repo CHECKOUTS / source copies created by
+# the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
+# `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature), and
+# `.dos/_dos_park/_iso_build/` (the DOS kernel's parked isolated-build tree). All are
 # gitignored. Walking them grades every copied .go a second time as phantom debt
 # (a `.claude` worktree inflated this scorecard 13 -> 22; a `.fak/tmp` checkout
-# inflated the architecture work-list 13 -> 27 here), which would make the committed
-# snapshot flap on a transient, gitignored checkout. A worktree copy is identical to
-# its tracked source by construction — so exclude both, matching the code-slop
-# scorecard's already-present `.claude`/`.fak` exclusion.
+# inflated the architecture work-list 13 -> 27 here; a `.dos/_dos_park/_iso_build` tree
+# inflated architecture/format/tests debt — 9 of 10 "unformatted" files were phantom
+# `.dos` copies), which would make the committed snapshot flap on a transient,
+# gitignored checkout. A worktree copy is identical to its tracked source by
+# construction — so exclude all three, matching the code-slop scorecard's
+# already-present `.claude`/`.fak`/`.dos` exclusion.
 
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare
@@ -497,7 +500,20 @@ def _safe_read(path: Path) -> str:
         return ""
 
 
+def _corrupt_path(rel: str) -> bool:
+    """A path whose text carries a Unicode Private-Use-Area char (U+E000–U+F8FF)
+    or a C0 control char is a cp1252↔utf-8 mojibake artifact, never a real tracked
+    source file. The agent machinery has been seen to fault an absolute Windows path
+    into a phantom directory literally named U+F05C (a backslash-glyph) holding a full
+    repo COPY — 2381 such phantom .go (≈47% of the walk) once doubled every KPI by
+    cloning the real tree. A worktree exclude keys on a dir *name*; this keys on the
+    *bytes*, so it catches the junk no matter what garbage name it lands under."""
+    return any(0xE000 <= ord(c) <= 0xF8FF or ord(c) < 0x20 for c in rel)
+
+
 def _excluded_go(rel: str) -> bool:
+    if _corrupt_path(rel):
+        return True
     parts = set(Path(rel).parts)
     return bool(parts & GO_EXCLUDE_DIRS)
 
