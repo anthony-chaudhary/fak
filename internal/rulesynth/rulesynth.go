@@ -122,6 +122,25 @@ type Verdict struct {
 	Decision       shipgate.Decision
 	Kept           bool
 	Witness        shipgate.Witness
+	Score          Scorecard
+}
+
+// Scorecard is the structured audit payload carried by a rulesynth Verdict. It is
+// additive evidence: the keep-bit still comes from shipgate.Evaluate, while the
+// score names the gain, regression, cluster, and self-modify axes for direct
+// callers that do not route through internal/rsiloop's journal.
+type Scorecard struct {
+	Name       string           `json:"name,omitempty"`
+	Value      float64          `json:"value"`
+	Grade      string           `json:"grade,omitempty"`
+	Components []ScoreComponent `json:"components,omitempty"`
+}
+
+// ScoreComponent is one named numeric axis of a Scorecard.
+type ScoreComponent struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit,omitempty"`
 }
 
 // Detect computes the args/command-bearing near-miss for one Call against the REAL
@@ -260,7 +279,52 @@ func Validate(c Candidate, nearMisses []NearMiss, benign []Call) (Verdict, error
 	v.Decision = decision
 	v.Kept = ev.Kept()
 	v.Witness = ev
+	v.Score = scoreVerdict(c, v)
 	return v, nil
+}
+
+func scoreVerdict(c Candidate, v Verdict) Scorecard {
+	catchesCluster := 0.0
+	if v.CatchesCluster {
+		catchesCluster = 1
+	}
+	selfModify := 0.0
+	if c.SelfModify {
+		selfModify = 1
+	}
+	kept := 0.0
+	if v.Kept {
+		kept = 1
+	}
+	return Scorecard{
+		Name:  "near_misses_caught",
+		Value: float64(v.Caught),
+		Grade: scoreVerdictGrade(v),
+		Components: []ScoreComponent{
+			{Name: "caught", Value: float64(v.Caught), Unit: "calls"},
+			{Name: "regressed", Value: float64(v.Regressed), Unit: "calls"},
+			{Name: "support", Value: float64(c.Support), Unit: "calls"},
+			{Name: "guarded_globs", Value: float64(len(c.Globs)), Unit: "globs"},
+			{Name: "catches_cluster", Value: catchesCluster, Unit: "bool"},
+			{Name: "self_modify", Value: selfModify, Unit: "bool"},
+			{Name: "kept", Value: kept, Unit: "bool"},
+		},
+	}
+}
+
+func scoreVerdictGrade(v Verdict) string {
+	switch {
+	case v.Regressed > 0:
+		return "regressing"
+	case !v.CatchesCluster:
+		return "partial"
+	case v.Caught == 0:
+		return "no-catch"
+	case v.Kept:
+		return "clean"
+	default:
+		return "reverted"
+	}
 }
 
 // ManifestDiff renders the candidate as the reviewable policy-manifest fragment to be

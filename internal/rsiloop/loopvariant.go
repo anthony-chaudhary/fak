@@ -114,6 +114,7 @@ type LoopVariantRecord struct {
 	MetricName   string           `json:"metric_name"`
 	Before       SpecFold         `json:"before"`
 	After        SpecFold         `json:"after"`
+	Score        *Scorecard       `json:"score,omitempty"`
 	Witness      shipgate.Witness `json:"witness"`
 	DOSEvidence  []DOSEvidence    `json:"dos_evidence"`
 	Tasks        []TaskWitness    `json:"tasks"`
@@ -171,6 +172,7 @@ func EvaluateLoopVariant(v LoopVariant, baseline, candidate TaskSetWitness) (Loo
 		MetricName:   LoopVariantMetricName,
 		Before:       before,
 		After:        after,
+		Score:        loopVariantScorecard(before, after),
 		Witness:      witness,
 		DOSEvidence:  taskSetEvidence(baseline, candidate),
 		Tasks:        append([]TaskWitness(nil), candidate.Tasks...),
@@ -178,6 +180,48 @@ func EvaluateLoopVariant(v LoopVariant, baseline, candidate TaskSetWitness) (Loo
 		CandidateRef: candidate.Ref,
 	}
 	return rec, nil
+}
+
+func loopVariantScorecard(before, after SpecFold) *Scorecard {
+	specGreen := 0.0
+	if after.SpecGreen {
+		specGreen = 1
+	}
+	truthClean := 0.0
+	if before.TruthClean && after.TruthClean {
+		truthClean = 1
+	}
+	return &Scorecard{
+		Name:  LoopVariantMetricName,
+		Value: after.Points,
+		Grade: loopVariantScoreGrade(before, after),
+		Components: []ScoreComponent{
+			{Name: "before_points", Value: before.Points, Unit: "points"},
+			{Name: "after_points", Value: after.Points, Unit: "points"},
+			{Name: "point_delta", Value: after.Points - before.Points, Unit: "points"},
+			{Name: "before_passed", Value: float64(before.Passed), Unit: "tasks"},
+			{Name: "after_passed", Value: float64(after.Passed), Unit: "tasks"},
+			{Name: "tasks", Value: float64(after.Tasks), Unit: "tasks"},
+			{Name: "spec_green", Value: specGreen, Unit: "bool"},
+			{Name: "truth_clean", Value: truthClean, Unit: "bool"},
+			{Name: "evidence_ids", Value: float64(len(after.EvidenceIDs)), Unit: "ids"},
+		},
+	}
+}
+
+func loopVariantScoreGrade(before, after SpecFold) string {
+	switch {
+	case !before.TruthClean || !after.TruthClean:
+		return "truth-dirty"
+	case !after.SpecGreen:
+		return "spec-red"
+	case after.Points <= before.Points:
+		return "no-gain"
+	case after.Passed == after.Tasks:
+		return "complete"
+	default:
+		return "improved"
+	}
 }
 
 // ArchiveLoopVariant appends a record only when shipgate kept the variant. A REVERT

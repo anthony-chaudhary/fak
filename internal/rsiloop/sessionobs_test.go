@@ -31,6 +31,15 @@ func TestSessionObsHarnessKeepsOnlyClosedS0Gain(t *testing.T) {
 	if second.Candidate_ != 100 {
 		t.Fatalf("closed candidate should drive S0 loop-index to 100, got %.0f", second.Candidate_)
 	}
+	if second.Score == nil || second.Score.Name != "sessionobs_s0" || second.Score.Value != 100 || second.Score.Grade != "A" {
+		t.Fatalf("closed candidate should carry an S0 scorecard, got %+v", second.Score)
+	}
+	if got := scoreComponentValue(second.Score, "sessionobs_debt"); got != 0 {
+		t.Fatalf("closed candidate score should report zero sessionobs debt, got %.0f in %+v", got, second.Score)
+	}
+	if got := scoreComponentValue(second.Score, "loop_consumes"); got != 1 {
+		t.Fatalf("closed candidate score should report loop_consumes=true, got %.0f in %+v", got, second.Score)
+	}
 	if !second.SuiteGreen || !second.TruthClean {
 		t.Fatalf("kept S0 candidate must have non-vacuous suite + clean report witness: %+v", second)
 	}
@@ -73,4 +82,25 @@ func TestSessionObsHarnessRevertsPartialS0GainWithoutCleanReport(t *testing.T) {
 	if row.TruthClean {
 		t.Fatalf("partial proposal should have dirty truth witness: %+v", row)
 	}
+	if row.Score == nil || row.Score.Name != "sessionobs_s0" {
+		t.Fatalf("partial proposal should still carry score telemetry: %+v", row.Score)
+	}
+	if got := scoreComponentValue(row.Score, "sessionobs_debt"); got == 0 {
+		t.Fatalf("partial proposal score should expose remaining sessionobs debt: %+v", row.Score)
+	}
+	if got := scoreComponentValue(row.Score, "corpus_committed"); got != 0 {
+		t.Fatalf("partial proposal should expose missing committed corpus: %.0f in %+v", got, row.Score)
+	}
+}
+
+func scoreComponentValue(score *Scorecard, name string) float64 {
+	if score == nil {
+		return 0
+	}
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return 0
 }

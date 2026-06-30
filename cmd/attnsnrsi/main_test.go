@@ -109,6 +109,22 @@ func TestAttentionSNHarnessKeepsRealGain(t *testing.T) {
 	if len(rows) != 1 || !rows[0].Kept {
 		t.Fatalf("journal did not record the kept S/N gain: %+v", rows)
 	}
+	score := rows[0].Score
+	if score == nil {
+		t.Fatalf("journal row did not carry structured S/N score: %+v", rows[0])
+	}
+	if score.Name != "attention_sn" || score.Grade != "lean" || score.Value != row.Candidate_ {
+		t.Fatalf("unexpected scorecard header: %+v row candidate=%.4f", score, row.Candidate_)
+	}
+	if got := scoreComponent(score, "mean_ratio"); got < 0.8 {
+		t.Fatalf("mean_ratio missing or too low: %.4f in %+v", got, score)
+	}
+	if got := scoreComponent(score, "signal_tokens"); got != 9 {
+		t.Fatalf("signal token split not journaled: got %.0f in %+v", got, score)
+	}
+	if got := scoreComponent(score, "noise_tokens"); got != 1 {
+		t.Fatalf("noise token split not journaled: got %.0f in %+v", got, score)
+	}
 }
 
 // TestAttentionSNHarnessRevertsNoGain proves the gate does NOT fire without a real gain:
@@ -257,4 +273,16 @@ func TestLoadSessionRejectsIncompleteReplayEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func scoreComponent(score *rsiloop.Scorecard, name string) float64 {
+	if score == nil {
+		return 0
+	}
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return 0
 }

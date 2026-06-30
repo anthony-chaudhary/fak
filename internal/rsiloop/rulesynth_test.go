@@ -86,6 +86,18 @@ func TestRuleSynthHarness_KeepsCatchingRule(t *testing.T) {
 	if keptRow.MetricName != RuleSynthMetricName {
 		t.Errorf("metric name = %q, want %q", keptRow.MetricName, RuleSynthMetricName)
 	}
+	if keptRow.Score == nil || keptRow.Score.Name != RuleSynthMetricName || keptRow.Score.Grade != "clean" {
+		t.Fatalf("kept rule should carry a clean rulesynth scorecard: %+v", keptRow.Score)
+	}
+	if got := scoreComponentValue(keptRow.Score, "caught"); got < 1 {
+		t.Fatalf("rulesynth score should expose caught near-misses, got %.0f in %+v", got, keptRow.Score)
+	}
+	if got := scoreComponentValue(keptRow.Score, "regressed"); got != 0 {
+		t.Fatalf("kept rulesynth score should expose zero regressions, got %.0f in %+v", got, keptRow.Score)
+	}
+	if got := scoreComponentValue(keptRow.Score, "catches_cluster"); got != 1 {
+		t.Fatalf("kept rulesynth score should expose catches_cluster=true, got %.0f in %+v", got, keptRow.Score)
+	}
 }
 
 // TestRuleSynthHarness_RevertsRegressingRule proves the keep-bit refuses a candidate
@@ -116,6 +128,12 @@ func TestRuleSynthHarness_RevertsRegressingRule(t *testing.T) {
 	}
 	if res.Rows[0].SuiteGreen {
 		t.Errorf("regressing candidate should be suite-red, got green: %+v", res.Rows[0])
+	}
+	if res.Rows[0].Score == nil || res.Rows[0].Score.Grade != "regressing" {
+		t.Fatalf("regressing candidate should carry a regressing scorecard: %+v", res.Rows[0].Score)
+	}
+	if got := scoreComponentValue(res.Rows[0].Score, "regressed"); got == 0 {
+		t.Fatalf("regressing score should expose benign regressions: %+v", res.Rows[0].Score)
 	}
 }
 

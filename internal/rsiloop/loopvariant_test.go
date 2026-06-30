@@ -165,6 +165,15 @@ func TestLoopVariantArchive_RecordsDOSEvidenceForKeptVariant(t *testing.T) {
 	if row.Before.Points != 1 || row.After.Points != 2 {
 		t.Fatalf("archive objective before/after = %.1f/%.1f, want 1/2", row.Before.Points, row.After.Points)
 	}
+	if row.Score == nil || row.Score.Name != LoopVariantMetricName || row.Score.Grade != "complete" {
+		t.Fatalf("archive row missing loopvariant scorecard: %+v", row.Score)
+	}
+	if got := scoreComponentValue(row.Score, "point_delta"); got != 1 {
+		t.Fatalf("loopvariant point_delta score = %.1f, want 1 (score=%+v)", got, row.Score)
+	}
+	if got := scoreComponentValue(row.Score, "truth_clean"); got != 1 {
+		t.Fatalf("loopvariant truth_clean score = %.1f, want 1 (score=%+v)", got, row.Score)
+	}
 	if len(row.DOSEvidence) != 4 {
 		t.Fatalf("dos evidence count=%d, want 4", len(row.DOSEvidence))
 	}

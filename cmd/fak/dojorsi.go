@@ -407,6 +407,7 @@ type dojoRSILoopResult struct {
 	GeneratedAt string               `json:"generated_at"`
 	Ticks       int                  `json:"ticks"`
 	Rows        []dojocal.JournalRow `json:"rows"`
+	Scores      []*rsiloop.Scorecard `json:"scores,omitempty"`
 	Iterations  []dojocal.Iteration  `json:"iterations,omitempty"`
 	Wakeup      dojocal.Wakeup       `json:"wakeup"`
 	Trend       dojocal.JournalTrend `json:"trend"`
@@ -477,12 +478,14 @@ func runDojoRSITicks(stdout, stderr io.Writer, opts *dojoRSILoopOpts) (dojoRSILo
 			}
 		}
 		row := dojocal.NewJournalRow(len(rows)+1, it, decision, breaker, tickNow, dojoHeadCommit(root), dojocal.Wakeup{})
+		scorecard := dojoRSIScorecard(scored, it)
 		nextRows := append(append([]dojocal.JournalRow(nil), rows...), row)
 		nextRanked := dojocal.RankCandidates(payload.Candidates, nextRows, dojocal.SelectOptions{Now: tickNow})
 		wake := dojocal.ScheduleWakeup(nextRanked, tickNow)
 		row.WakeupAt = wake.At
 		rows = append(rows, row)
 		res.Rows = append(res.Rows, row)
+		res.Scores = append(res.Scores, scorecard)
 		res.Iterations = append(res.Iterations, it)
 		res.Ticks++
 		res.Wakeup = wake
@@ -494,7 +497,7 @@ func runDojoRSITicks(stdout, stderr io.Writer, opts *dojoRSILoopOpts) (dojoRSILo
 			}
 		}
 		if obs != nil {
-			obs(dojoRSIRowToObserverRow(row, it, witnessOKForDojoRSI(witness)))
+			obs(dojoRSIRowToObserverRow(row, it, scored, witnessOKForDojoRSI(witness)))
 		}
 		if decision == "ESCALATE" {
 			code = 3
@@ -624,9 +627,13 @@ func renderDojoRSILoop(w io.Writer, res dojoRSILoopResult) {
 		fmt.Fprintln(w, dojocal.MarshalTrendText(res.Trend))
 		return
 	}
-	for _, r := range res.Rows {
-		fmt.Fprintf(w, "tick %d  %s/%s  %s -> %s  base=%.4g replay=%.4g delta=%.4g breaker=%d\n",
-			r.Tick, r.Lever, r.Metric, r.Kind, r.Decision, r.Baseline, r.Replayed, r.MeasuredDelta, r.BreakerCount)
+	for i, r := range res.Rows {
+		score := (*rsiloop.Scorecard)(nil)
+		if i < len(res.Scores) {
+			score = res.Scores[i]
+		}
+		fmt.Fprintf(w, "tick %d  %s/%s  %s -> %s  base=%.4g replay=%.4g delta=%.4g breaker=%d%s\n",
+			r.Tick, r.Lever, r.Metric, r.Kind, r.Decision, r.Baseline, r.Replayed, r.MeasuredDelta, r.BreakerCount, dojoRSIScoreSuffix(score))
 		if r.Reason != "" {
 			fmt.Fprintf(w, "  %s\n", r.Reason)
 		}
@@ -644,7 +651,7 @@ func saturatedSuffix(v bool) string {
 	return ""
 }
 
-func dojoRSIRowToObserverRow(row dojocal.JournalRow, it dojocal.Iteration, suiteGreen bool) rsiloop.Row {
+func dojoRSIRowToObserverRow(row dojocal.JournalRow, it dojocal.Iteration, scored dojocal.ScoredCell, suiteGreen bool) rsiloop.Row {
 	return rsiloop.Row{
 		Cycle:        row.Tick,
 		Mode:         "improve",
@@ -662,8 +669,113 @@ func dojoRSIRowToObserverRow(row dojocal.JournalRow, it dojocal.Iteration, suite
 		BreakerCount: row.BreakerCount,
 		BaselineRef:  row.Commit,
 		RefName:      "main",
+		Score:        dojoRSIScorecard(scored, it),
 		Note:         row.Reason,
 	}
+}
+
+func dojoRSIScorecard(scored dojocal.ScoredCell, it dojocal.Iteration) *rsiloop.Scorecard {
+	witnessed := 0.0
+	if witnessOKForDojoRSI(it.Witness) {
+		witnessed = 1
+	}
+	kept := 0.0
+	if it.Kept {
+		kept = 1
+	}
+	agentArm := 0.0
+	switch it.Candidate.Kind {
+	case dojocal.ReprojectKind, dojocal.HarvestKind, dojocal.RouteFloor:
+		agentArm = 1
+	}
+	return &rsiloop.Scorecard{
+		Name:  "dojo_calibration",
+		Value: it.ReplayedValue,
+		Grade: dojoRSIScoreGrade(it),
+		Components: []rsiloop.ScoreComponent{
+			{Name: "baseline_value", Value: it.BaselineValue, Unit: "error"},
+			{Name: "replayed_value", Value: it.ReplayedValue, Unit: "error"},
+			{Name: "measured_delta", Value: it.MeasuredDelta, Unit: "error_drop"},
+			{Name: "baseline_estimate_mean_calib_err", Value: it.BaselineFold.EstimateMeanCalibErr, Unit: "error"},
+			{Name: "replayed_estimate_mean_calib_err", Value: it.ReplayedFold.EstimateMeanCalibErr, Unit: "error"},
+			{Name: "baseline_floor_breach_err", Value: it.BaselineFold.FloorBreachErr, Unit: "error"},
+			{Name: "replayed_floor_breach_err", Value: it.ReplayedFold.FloorBreachErr, Unit: "error"},
+			{Name: "estimate_count", Value: float64(it.ReplayedFold.EstimateCount), Unit: "episodes"},
+			{Name: "floor_count", Value: float64(it.ReplayedFold.FloorCount), Unit: "episodes"},
+			{Name: "measured", Value: float64(it.ReplayedFold.Measured), Unit: "episodes"},
+			{Name: "candidate_sample", Value: float64(it.Candidate.Sample), Unit: "episodes"},
+			{Name: "min_sample", Value: float64(it.MinSample), Unit: "episodes"},
+			{Name: "selector_score", Value: scored.Score, Unit: "priority"},
+			{Name: "selector_novelty", Value: scored.Novelty, Unit: "ratio"},
+			{Name: "selector_value_weight", Value: scored.ValueWeight, Unit: "ratio"},
+			{Name: "selector_staleness", Value: scored.Staleness, Unit: "ratio"},
+			{Name: "age_days", Value: scored.AgeDays, Unit: "days"},
+			{Name: "witnessed", Value: witnessed, Unit: "bool"},
+			{Name: "kept", Value: kept, Unit: "bool"},
+			{Name: "agent_arm", Value: agentArm, Unit: "bool"},
+		},
+	}
+}
+
+func dojoRSIScoreGrade(it dojocal.Iteration) string {
+	switch {
+	case it.Candidate.Kind != dojocal.RecalibrateKind:
+		return "routed"
+	case it.Kept:
+		return "kept"
+	case it.ReplayedFold.FloorBreachErr > it.BaselineFold.FloorBreachErr:
+		return "floor-breach"
+	case it.MeasuredDelta <= 0:
+		return "no-gain"
+	case it.Candidate.Sample < it.MinSample:
+		return "thin-sample"
+	case !witnessOKForDojoRSI(it.Witness):
+		return "unwitnessed"
+	default:
+		return "reverted"
+	}
+}
+
+func dojoRSIScoreSuffix(score *rsiloop.Scorecard) string {
+	if score == nil {
+		return ""
+	}
+	return "  [" + dojoRSIScoreSummary(score) + "]"
+}
+
+func dojoRSIScoreSummary(score *rsiloop.Scorecard) string {
+	if score == nil {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("score=%s", score.Name)}
+	if score.Grade != "" {
+		parts = append(parts, "grade="+score.Grade)
+	}
+	for _, name := range []string{"measured_delta", "candidate_sample", "selector_score", "replayed_floor_breach_err"} {
+		if c, ok := dojoRSIScoreComponent(score, name); ok {
+			parts = append(parts, fmt.Sprintf("%s=%s", name, dojoRSIFormatScoreValue(c.Value)))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func dojoRSIScoreComponent(score *rsiloop.Scorecard, name string) (rsiloop.ScoreComponent, bool) {
+	if score == nil {
+		return rsiloop.ScoreComponent{}, false
+	}
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return rsiloop.ScoreComponent{}, false
+}
+
+func dojoRSIFormatScoreValue(v float64) string {
+	if math.Abs(v-math.Round(v)) < 1e-9 {
+		return strconv.FormatInt(int64(math.Round(v)), 10)
+	}
+	return strconv.FormatFloat(v, 'f', 3, 64)
 }
 
 func dojoRSIDOSObserveReceipt(workspace string, maxReverts int) rsiloop.Observer {
@@ -694,7 +806,8 @@ func dojoRSIDOSImproveArgs(workspace string, maxReverts int, r rsiloop.Row) []st
 		"--max-reverts", strconv.Itoa(maxReverts),
 		"--lane", "dojocal",
 		"--subject", fmt.Sprintf("dojo-rsi::%s::tick%d", r.Candidate, r.Cycle),
-		"--narrated", fmt.Sprintf("dojo-rsi verdict=%s candidate=%q improved=%v measured=%v", r.Decision, r.Candidate, r.Improved, r.Measured),
+		"--narrated", strings.TrimSpace(fmt.Sprintf("dojo-rsi verdict=%s candidate=%q improved=%v measured=%v %s",
+			r.Decision, r.Candidate, r.Improved, r.Measured, dojoRSIScoreSummary(r.Score))),
 	}
 	if r.SuiteGreen {
 		args = append(args, "--suite-passed")

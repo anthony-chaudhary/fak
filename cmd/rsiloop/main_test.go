@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/rsiloop"
+)
 
 // TestRegressionDirection locks the track-mode alert rule: for a higher-is-better
 // KPI a DROP is a regression; for a lower-is-better KPI a RISE is. This is the
@@ -52,5 +57,46 @@ func TestSelectHarnessSessionObs(t *testing.T) {
 	if h.MetricName != "s0_loop_index" || h.LowerBetter {
 		t.Fatalf("sessionobs harness should expose higher-better S0 loop-index, got %q lower=%v",
 			h.MetricName, h.LowerBetter)
+	}
+}
+
+func TestScoreSuffixSummarizesStructuredScore(t *testing.T) {
+	score := &rsiloop.Scorecard{
+		Name:  "attention_sn",
+		Value: 0.9,
+		Grade: "lean",
+		Components: []rsiloop.ScoreComponent{
+			{Name: "mean_ratio", Value: 0.9, Unit: "ratio"},
+			{Name: "mean_fault_ratio", Value: 0, Unit: "ratio"},
+			{Name: "signal_tokens", Value: 9, Unit: "tokens"},
+			{Name: "caught", Value: 2, Unit: "calls"},
+			{Name: "regressed", Value: 0, Unit: "calls"},
+			{Name: "cache_size", Value: 8, Unit: "entries"},
+			{Name: "scored_turns", Value: 1, Unit: "turns"},
+		},
+	}
+	got := scoreSuffix(score)
+	for _, want := range []string{
+		"score attention_sn=0.900",
+		"grade=lean",
+		"mean_ratio=0.900",
+		"mean_fault_ratio=0",
+		"signal_tokens=9",
+		"caught=2",
+		"regressed=0",
+		"cache_size=8",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("score suffix missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "scored_turns") {
+		t.Fatalf("score suffix should stay compact and omit non-summary components: %s", got)
+	}
+}
+
+func TestScoreSuffixNilIsEmpty(t *testing.T) {
+	if got := scoreSuffix(nil); got != "" {
+		t.Fatalf("nil score suffix = %q, want empty", got)
 	}
 }

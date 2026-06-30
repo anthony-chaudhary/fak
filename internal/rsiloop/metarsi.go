@@ -243,6 +243,7 @@ type ApplyRunRecord struct {
 	WitnessRef string
 	Applied    bool
 	Policy     KeepPolicy
+	Score      *Scorecard
 	BeforeRows int
 	AfterRows  int
 	BeforeRate float64
@@ -309,6 +310,7 @@ func ApplyProposalWithWitness(cur KeepPolicy, before []Row, p Proposal, allow bo
 		WitnessRef: witnessRef,
 		Applied:    false,
 		Policy:     cur,
+		Score:      metaRSIScorecard(witness, len(before), len(after)),
 		BeforeRows: len(before),
 		AfterRows:  len(after),
 		BeforeRate: witness.Before,
@@ -326,6 +328,51 @@ func ApplyProposalWithWitness(cur KeepPolicy, before []Row, p Proposal, allow bo
 	rec.Log = fmt.Sprintf("KEEP witnessed by %s: %s %.3g->%.3g; %s",
 		witnessRef, witness.Metric, witness.Before, witness.After, applied.Log)
 	return rec, nil
+}
+
+func metaRSIScorecard(w shipgate.Witness, beforeRows, afterRows int) *Scorecard {
+	suiteGreen := 0.0
+	if w.SuiteGreen {
+		suiteGreen = 1
+	}
+	truthClean := 0.0
+	if w.TruthClean {
+		truthClean = 1
+	}
+	kept := 0.0
+	if w.Kept() {
+		kept = 1
+	}
+	return &Scorecard{
+		Name:  MetaMetricName,
+		Value: w.After,
+		Grade: metaRSIScoreGrade(w),
+		Components: []ScoreComponent{
+			{Name: "before_rate", Value: w.Before, Unit: "ratio"},
+			{Name: "after_rate", Value: w.After, Unit: "ratio"},
+			{Name: "rate_delta", Value: w.After - w.Before, Unit: "ratio"},
+			{Name: "before_rows", Value: float64(beforeRows), Unit: "rows"},
+			{Name: "after_rows", Value: float64(afterRows), Unit: "rows"},
+			{Name: "suite_green", Value: suiteGreen, Unit: "bool"},
+			{Name: "truth_clean", Value: truthClean, Unit: "bool"},
+			{Name: "kept", Value: kept, Unit: "bool"},
+		},
+	}
+}
+
+func metaRSIScoreGrade(w shipgate.Witness) string {
+	switch {
+	case !w.TruthClean:
+		return "truth-dirty"
+	case !w.SuiteGreen:
+		return "suite-red"
+	case w.After <= w.Before:
+		return "no-gain"
+	case w.Kept():
+		return "kept"
+	default:
+		return "reverted"
+	}
 }
 
 // ReadJournal loads an rsiloop JSONL journal into rows for the fold. It is CORRUPTION-

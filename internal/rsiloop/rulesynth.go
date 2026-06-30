@@ -89,9 +89,43 @@ func NewRuleSynthHarness(corpus []rulesynth.NearMiss, benign []rulesynth.Call) H
 				Metric:     float64(v.Caught),
 				SuiteGreen: v.Regressed == 0,
 				TruthClean: v.CatchesCluster,
+				Score:      ruleSynthScorecard(cand, v),
 				Note: fmt.Sprintf("verb=%q caught=%d regressed=%d catches_cluster=%v self_modify=%v",
 					cand.Verb, v.Caught, v.Regressed, v.CatchesCluster, cand.SelfModify),
 			}, nil
+		},
+	}
+}
+
+func ruleSynthScorecard(cand rulesynth.Candidate, v rulesynth.Verdict) *Scorecard {
+	catchesCluster := 0.0
+	if v.CatchesCluster {
+		catchesCluster = 1
+	}
+	selfModify := 0.0
+	if cand.SelfModify {
+		selfModify = 1
+	}
+	grade := "clean"
+	switch {
+	case v.Regressed > 0:
+		grade = "regressing"
+	case !v.CatchesCluster:
+		grade = "partial"
+	case v.Caught == 0:
+		grade = "no-catch"
+	}
+	return &Scorecard{
+		Name:  RuleSynthMetricName,
+		Value: float64(v.Caught),
+		Grade: grade,
+		Components: []ScoreComponent{
+			{Name: "caught", Value: float64(v.Caught), Unit: "calls"},
+			{Name: "regressed", Value: float64(v.Regressed), Unit: "calls"},
+			{Name: "support", Value: float64(cand.Support), Unit: "calls"},
+			{Name: "guarded_globs", Value: float64(len(cand.Globs)), Unit: "globs"},
+			{Name: "catches_cluster", Value: catchesCluster, Unit: "bool"},
+			{Name: "self_modify", Value: selfModify, Unit: "bool"},
 		},
 	}
 }

@@ -214,6 +214,12 @@ func TestMetaApplyRunner_KeepIsProposeOnlyByDefault(t *testing.T) {
 	if rec.WitnessRef != "worktree:/tmp/meta-rsi" || !strings.Contains(rec.Log, "propose-only") {
 		t.Fatalf("audit record missing witness/propose-only detail: %+v", rec)
 	}
+	if rec.Score == nil || rec.Score.Name != MetaMetricName || rec.Score.Grade != "kept" {
+		t.Fatalf("meta-RSI apply record missing scorecard: %+v", rec.Score)
+	}
+	if got := scoreComponentValue(rec.Score, "rate_delta"); got <= 0 {
+		t.Fatalf("meta-RSI score should expose positive truth-clean rate delta, got %.3f in %+v", got, rec.Score)
+	}
 }
 
 func TestMetaApplyRunner_ExplicitApplyAfterWitnessKeep(t *testing.T) {

@@ -1,6 +1,7 @@
 package rsiloop
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,6 +142,71 @@ func TestKeepBitNeedsAllThree(t *testing.T) {
 				t.Errorf("kept=%v, want %v (decision=%s)", res.Rows[0].Kept, c.keep, res.Rows[0].Decision)
 			}
 		})
+	}
+}
+
+// TestScorecardIsJournaledButNotAGateInput proves the structured score surface is
+// telemetry, not authority: a candidate with a rich "lean" scorecard but no strict
+// scalar gain still REVERTs, and the exact score travels to both the in-memory row
+// and the durable JSONL journal for downstream RSI-like controls.
+func TestScorecardIsJournaledButNotAGateInput(t *testing.T) {
+	score := &Scorecard{
+		Name:  "attention_sn",
+		Value: 0.90,
+		Grade: "lean",
+		Components: []ScoreComponent{
+			{Name: "mean_ratio", Value: 0.90, Unit: "ratio"},
+			{Name: "mean_fault_ratio", Value: 0.0, Unit: "ratio"},
+			{Name: "signal_tokens", Value: 9, Unit: "tokens"},
+		},
+	}
+	h := Harness{
+		MetricName:      "attention_sn",
+		LowerBetter:     false,
+		BaselineRefName: "test-ref",
+		BaselineMetric: func() (float64, string, error) {
+			return 0.90, "sha-score", nil
+		},
+		Candidates: func() []Candidate {
+			return []Candidate{{Label: "same-score"}}
+		},
+		Measure: func(Candidate) (Measurement, error) {
+			return Measurement{Metric: 0.90, SuiteGreen: true, TruthClean: true, Score: score}, nil
+		},
+	}
+
+	path := filepath.Join(t.TempDir(), "rsi.jsonl")
+	j, err := NewJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(h, j, 3, 0)
+	j.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rows[0].Kept || res.Rows[0].Decision != "REVERT" {
+		t.Fatalf("scorecard must not move the keep-bit without scalar improvement: %+v", res.Rows[0])
+	}
+	if res.Rows[0].Score == nil || res.Rows[0].Score.Name != "attention_sn" || res.Rows[0].Score.Grade != "lean" {
+		t.Fatalf("scorecard not copied to row: %+v", res.Rows[0].Score)
+	}
+	score.Grade = "mutated"
+	score.Components[0].Value = 0.1
+	if res.Rows[0].Score.Grade != "lean" || res.Rows[0].Score.Components[0].Value != 0.90 {
+		t.Fatalf("row scorecard alias mutated by harness after the fact: %+v", res.Rows[0].Score)
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row Row
+	if err := json.Unmarshal(b, &row); err != nil {
+		t.Fatalf("journal row did not decode: %v\n%s", err, string(b))
+	}
+	if row.Score == nil || row.Score.Components[2].Name != "signal_tokens" || row.Score.Components[2].Value != 9 {
+		t.Fatalf("journal lost structured scorecard: %+v", row.Score)
 	}
 }
 
@@ -313,6 +379,25 @@ func TestParseKPI(t *testing.T) {
 	}
 	if _, err := parseKPI("no kpi here"); err == nil {
 		t.Fatal("expected error on missing KPI= line")
+	}
+}
+
+func TestLRUHitRateScorecard(t *testing.T) {
+	score := lruHitRateScorecard(8, HitRate(8))
+	if score.Name != "lru_hit_rate" || score.Value != HitRate(8) {
+		t.Fatalf("lru score header = %+v", score)
+	}
+	if got := scoreComponentValue(score, "cache_size"); got != 8 {
+		t.Fatalf("cache_size component = %.0f, want 8 in %+v", got, score)
+	}
+	if got := scoreComponentValue(score, "trace_len"); got != float64(TraceLen()) {
+		t.Fatalf("trace_len component = %.0f, want %d in %+v", got, TraceLen(), score)
+	}
+	if got := scoreComponentValue(score, "working_set"); got != workingSet {
+		t.Fatalf("working_set component = %.0f, want %d in %+v", got, workingSet, score)
+	}
+	if score.Grade == "" {
+		t.Fatalf("lru score should carry a grade: %+v", score)
 	}
 }
 

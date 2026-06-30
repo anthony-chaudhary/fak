@@ -67,10 +67,40 @@ func NewSessionObsHarness(baseline SessionObsState, proposals []SessionObsPropos
 				Metric:     float64(s0.Corpus.LoopIndex),
 				SuiteGreen: sobs.Corpus.Sessions > 0,
 				TruthClean: s0.OK && sobs.OK,
+				Score:      sessionObsScorecard(s0, sobs, p.State.Pipeline),
 				Note: fmt.Sprintf("loop_index=%d loopindex_debt=%d sessionobs_debt=%d linked=%.0f%% loop_consumes=%v",
 					s0.Corpus.LoopIndex, s0.Corpus.LoopIndexDebt, sobs.Corpus.SessionObsDebt,
 					100*sobs.Corpus.LinkedFrac, p.State.Pipeline.LoopConsumes),
 			}, nil
+		},
+	}
+}
+
+func sessionObsScorecard(s0 loopindex.Report, sobs sessionobs.Report, pipe sessionobs.Pipeline) *Scorecard {
+	loopConsumes := 0.0
+	if pipe.LoopConsumes {
+		loopConsumes = 1.0
+	}
+	corpusCommitted := 0.0
+	if pipe.CorpusCommitted {
+		corpusCommitted = 1.0
+	}
+	return &Scorecard{
+		Name:  "sessionobs_s0",
+		Value: float64(s0.Corpus.LoopIndex),
+		Grade: s0.Corpus.Grade,
+		Components: []ScoreComponent{
+			{Name: "loop_index", Value: float64(s0.Corpus.LoopIndex), Unit: "score"},
+			{Name: "witnessed_index", Value: float64(s0.Corpus.WitnessedIndex), Unit: "score"},
+			{Name: "loopindex_debt", Value: float64(s0.Corpus.LoopIndexDebt), Unit: "debt"},
+			{Name: "sessionobs_score", Value: float64(sobs.Corpus.Score), Unit: "score"},
+			{Name: "sessionobs_debt", Value: float64(sobs.Corpus.SessionObsDebt), Unit: "debt"},
+			{Name: "sessions", Value: float64(sobs.Corpus.Sessions), Unit: "sessions"},
+			{Name: "linked_frac", Value: sobs.Corpus.LinkedFrac, Unit: "ratio"},
+			{Name: "value_frac", Value: sobs.Corpus.ValueFrac, Unit: "ratio"},
+			{Name: "waste_frac", Value: sobs.Corpus.WasteFrac, Unit: "ratio"},
+			{Name: "corpus_committed", Value: corpusCommitted, Unit: "bool"},
+			{Name: "loop_consumes", Value: loopConsumes, Unit: "bool"},
 		},
 	}
 }

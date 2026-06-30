@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/shipgate"
@@ -46,5 +47,23 @@ func TestDecideContract(t *testing.T) {
 				t.Errorf("decision=%s inconsistent with wantKeep=%v", d, c.wantKeep)
 			}
 		})
+	}
+}
+
+func TestScoreLineReportsDirectionalDelta(t *testing.T) {
+	kept := shipgate.Witness{Metric: "hit_rate", Before: 0.2, After: 0.5, SuiteGreen: true, TruthClean: true}
+	line := scoreLine(kept, true)
+	for _, want := range []string{"score=rsicycle", "grade=kept", "value=0.500", "metric_delta=0.300", "truth_clean=true"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("kept score line missing %q:\n%s", want, line)
+		}
+	}
+
+	noGain := shipgate.Witness{Metric: "latency", Before: 5, After: 7, LowerBetter: true, SuiteGreen: true, TruthClean: true}
+	line = scoreLine(noGain, false)
+	for _, want := range []string{"grade=no-gain", "metric_delta=-2.000"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("lower-better score line missing %q:\n%s", want, line)
+		}
 	}
 }

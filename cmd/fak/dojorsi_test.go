@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,9 @@ func TestRunDojoRSILoopKeepsThenFloorEscalates(t *testing.T) {
 	}
 	if rows[1].Kind != dojocal.RouteFloor || rows[1].Decision != "ESCALATE" || !rows[1].AgentArm {
 		t.Fatalf("second tick should be floor ESCALATE route, got %+v", rows[1])
+	}
+	if !strings.Contains(out.String(), "score=dojo_calibration") || !strings.Contains(out.String(), "grade=kept") {
+		t.Fatalf("rendered loop should carry structured score summary, got:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "floor-escalate=1") {
 		t.Fatalf("rendered trend should report floor escalate, got:\n%s", out.String())
@@ -93,6 +97,46 @@ func TestDojoRSIDOSImproveArgsLowerBetter(t *testing.T) {
 	}
 }
 
+func TestDojoRSIScorecardObserverAndNarration(t *testing.T) {
+	report := dojoRSITestReport(t)
+	now := time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC)
+	payload := dojocal.ProposeRecals(report)
+	ranked := dojocal.RankCandidates(payload.Candidates, nil, dojocal.SelectOptions{Now: now})
+	scored, ok := dojocal.NextCandidate(ranked)
+	if !ok {
+		t.Fatal("fixture produced no dojo-RSI candidate")
+	}
+	it := dojocal.RunIteration(report, scored.Candidate, dojocal.DefaultMinSample, map[string]any{"ok": true})
+	row := dojocal.NewJournalRow(1, it, "KEEP", 0, now, "abc123", dojocal.Wakeup{})
+
+	obs := dojoRSIRowToObserverRow(row, it, scored, true)
+	if obs.Score == nil {
+		t.Fatal("observer row missing scorecard")
+	}
+	if obs.Score.Name != "dojo_calibration" || obs.Score.Grade != "kept" {
+		t.Fatalf("scorecard identity = %+v, want dojo_calibration/kept", obs.Score)
+	}
+	for name, want := range map[string]float64{
+		"measured_delta":   it.MeasuredDelta,
+		"selector_score":   scored.Score,
+		"candidate_sample": float64(scored.Candidate.Sample),
+		"witnessed":        1,
+		"kept":             1,
+	} {
+		if got := dojoRSIScoreComponentValue(obs.Score, name); got != want {
+			t.Fatalf("score component %s = %.4g, want %.4g (score=%+v)", name, got, want, obs.Score)
+		}
+	}
+
+	args := dojoRSIDOSImproveArgs("repo", 3, obs)
+	narrated := argAfter(args, "--narrated")
+	for _, want := range []string{"score=dojo_calibration", "grade=kept", "measured_delta=", "selector_score="} {
+		if !strings.Contains(narrated, want) {
+			t.Fatalf("narration missing %q:\n%s\nargs=%v", want, narrated, args)
+		}
+	}
+}
+
 func dojoRSITestReport(t *testing.T) dojo.Report {
 	t.Helper()
 	eps := []dojo.Episode{
@@ -139,6 +183,18 @@ func argAfter(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+func dojoRSIScoreComponentValue(score *rsiloop.Scorecard, name string) float64 {
+	if score == nil {
+		return math.NaN()
+	}
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return math.NaN()
 }
 
 func TestParseDojoRSITime(t *testing.T) {

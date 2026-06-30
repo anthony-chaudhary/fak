@@ -93,6 +93,18 @@ func TestValidateKeepsCatchingRuleNoRegression(t *testing.T) {
 	if v.Decision != shipgate.KEEP || !v.Kept {
 		t.Fatalf("a catching, non-regressing rule must KEEP; got %v kept=%v", v.Decision, v.Kept)
 	}
+	if v.Score.Name != "near_misses_caught" || v.Score.Grade != "clean" {
+		t.Fatalf("clean verdict should carry near_misses_caught/clean scorecard: %+v", v.Score)
+	}
+	if got := scoreComponentValue(v.Score, "caught"); got != 1 {
+		t.Fatalf("score caught = %.0f, want 1 in %+v", got, v.Score)
+	}
+	if got := scoreComponentValue(v.Score, "regressed"); got != 0 {
+		t.Fatalf("score regressed = %.0f, want 0 in %+v", got, v.Score)
+	}
+	if got := scoreComponentValue(v.Score, "kept"); got != 1 {
+		t.Fatalf("score kept = %.0f, want 1 in %+v", got, v.Score)
+	}
 }
 
 // TestValidateRevertsRegressingRule: a rule that DENIES a benign call is REVERTed — the
@@ -117,6 +129,12 @@ func TestValidateRevertsRegressingRule(t *testing.T) {
 	if v.Decision != shipgate.REVERT || v.Kept {
 		t.Fatalf("a regressing rule must REVERT; got %v kept=%v", v.Decision, v.Kept)
 	}
+	if v.Score.Grade != "regressing" {
+		t.Fatalf("regressing verdict should carry regressing scorecard: %+v", v.Score)
+	}
+	if got := scoreComponentValue(v.Score, "regressed"); got == 0 {
+		t.Fatalf("score should expose benign regressions: %+v", v.Score)
+	}
 }
 
 // TestManifestDiffIsReviewableNotLive: the candidate's only output is a reviewable
@@ -137,4 +155,13 @@ func TestManifestDiffIsReviewableNotLive(t *testing.T) {
 	if _, err := m.ToPolicy(); err != nil {
 		t.Fatalf("the synthesized manifest diff must load as a real policy: %v", err)
 	}
+}
+
+func scoreComponentValue(score Scorecard, name string) float64 {
+	for _, c := range score.Components {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return 0
 }

@@ -6,9 +6,10 @@
 // baseline AND the suite is green AND the worktree is truth-clean — a real, dos-verified
 // S/N gain, never a self-report. This is the wiring snfitness.go documents as "a driver
 // wires it in one line", made runnable: it connects ctxplan.WitnessedSNFitness (the
-// #867 fitness scalar, 3227b7a) to the rsiloop Harness whose Journal already tracks the
-// metric against main over time and whose breaker early-exits a bad streak — the
-// multi-session S/N trend #867's acceptance calls for.
+// #867 fitness scalar plus its structured ScoreWitnessedSN readout) to the rsiloop
+// Harness whose Journal already tracks the metric against main over time and whose
+// breaker early-exits a bad streak — the multi-session S/N trend #867's acceptance
+// calls for.
 //
 // SHADOW BY CONSTRUCTION. The replay is a pure offline scoring of recorded turns; it
 // changes no live plan. Adopting a kept forecast into the live planner is the separate
@@ -40,8 +41,9 @@ type sessionDoc struct {
 	BaselineRef string             `json:"baseline_ref,omitempty"`
 }
 
-// attentionSNHarness wires ctxplan.WitnessedSNFitness into an rsiloop.Harness — the
-// one-line driver snfitness.go documents, made real.
+// attentionSNHarness wires ctxplan.ScoreWitnessedSN into an rsiloop.Harness — the
+// one-line driver snfitness.go documents, made real, with the scalar Fitness driving
+// the keep-bit and the structured score traveling in the journal row.
 //
 // MetricName labels the journal KPI; LowerBetter is false because a HIGHER witnessed
 // attention-S/N is better. BaselineMetric scores the baseline forecast; Measure scores a
@@ -60,7 +62,7 @@ func attentionSNHarness(doc sessionDoc, suiteGreen, truthClean bool) rsiloop.Har
 		LowerBetter:     false,
 		BaselineRefName: ref,
 		BaselineMetric: func() (float64, string, error) {
-			return ctxplan.WitnessedSNFitness(doc.Baseline, doc.Session), ref, nil
+			return ctxplan.ScoreWitnessedSN(doc.Baseline, doc.Session).Fitness, ref, nil
 		},
 		Candidates: func() []rsiloop.Candidate {
 			cands := make([]rsiloop.Candidate, len(doc.Candidates))
@@ -74,11 +76,30 @@ func attentionSNHarness(doc sessionDoc, suiteGreen, truthClean bool) rsiloop.Har
 			if !ok {
 				return rsiloop.Measurement{}, fmt.Errorf("attnsnrsi: candidate %q payload is %T, want ctxplan.Forecast", c.Label, c.Payload)
 			}
+			score := ctxplan.ScoreWitnessedSN(f, doc.Session)
 			return rsiloop.Measurement{
-				Metric:     ctxplan.WitnessedSNFitness(f, doc.Session),
+				Metric:     score.Fitness,
 				SuiteGreen: suiteGreen,
 				TruthClean: truthClean,
+				Score:      attentionSNScorecard(score),
 			}, nil
+		},
+	}
+}
+
+func attentionSNScorecard(score ctxplan.WitnessedSNScore) *rsiloop.Scorecard {
+	return &rsiloop.Scorecard{
+		Name:  "attention_sn",
+		Value: score.Fitness,
+		Grade: score.Grade,
+		Components: []rsiloop.ScoreComponent{
+			{Name: "mean_ratio", Value: score.MeanRatio, Unit: "ratio"},
+			{Name: "mean_fault_ratio", Value: score.MeanFaultRatio, Unit: "ratio"},
+			{Name: "signal_tokens", Value: float64(score.SignalTokens), Unit: "tokens"},
+			{Name: "noise_tokens", Value: float64(score.NoiseTokens), Unit: "tokens"},
+			{Name: "fault_tokens", Value: float64(score.FaultTokens), Unit: "tokens"},
+			{Name: "resident_tokens", Value: float64(score.ResidentTokens), Unit: "tokens"},
+			{Name: "scored_turns", Value: float64(score.ScoredTurns), Unit: "turns"},
 		},
 	}
 }

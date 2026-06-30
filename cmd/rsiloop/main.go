@@ -127,9 +127,9 @@ func runImprove(h rsiloop.Harness, j *rsiloop.Journal, k, maxCycles int, obs rsi
 		if !r.Measured {
 			cand = "(not measured)"
 		}
-		fmt.Printf("  cycle %d  %-22s base=%.6f cand=%s improved=%v suite=%v truth=%v -> %s (kept=%v, breaker=%d)%s\n",
+		fmt.Printf("  cycle %d  %-22s base=%.6f cand=%s improved=%v suite=%v truth=%v -> %s (kept=%v, breaker=%d)%s%s\n",
 			r.Cycle, r.Candidate, r.Baseline, cand, r.Improved, r.SuiteGreen, r.TruthClean,
-			r.Decision, r.Kept, r.BreakerCount, noteSuffix(r.Note))
+			r.Decision, r.Kept, r.BreakerCount, scoreSuffix(r.Score), noteSuffix(r.Note))
 	}
 	fmt.Printf("SUMMARY cycles=%d kept=%d final=%s final_baseline=%.6f escalated=%v\n",
 		res.Cycles, res.Kept, res.Final.String(), res.FinalBaseline, res.Escalated)
@@ -205,6 +205,60 @@ func noteSuffix(note string) string {
 		return ""
 	}
 	return "  [" + note + "]"
+}
+
+func scoreSuffix(score *rsiloop.Scorecard) string {
+	if score == nil {
+		return ""
+	}
+	return "  [" + scoreSummary(score) + "]"
+}
+
+func scoreSummary(score *rsiloop.Scorecard) string {
+	name := score.Name
+	if name == "" {
+		name = "score"
+	}
+	parts := []string{fmt.Sprintf("score %s=%s", name, formatScoreValue(score.Value))}
+	if score.Grade != "" {
+		parts = append(parts, "grade="+score.Grade)
+	}
+	for _, c := range score.Components {
+		if scoreSummaryComponent(c.Name) {
+			parts = append(parts, fmt.Sprintf("%s=%s", c.Name, formatScoreValue(c.Value)))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func scoreSummaryComponent(name string) bool {
+	if strings.Contains(name, "ratio") ||
+		strings.Contains(name, "debt") ||
+		strings.HasSuffix(name, "_tokens") {
+		return true
+	}
+	switch name {
+	case "loop_consumes",
+		"caught",
+		"regressed",
+		"support",
+		"catches_cluster",
+		"self_modify",
+		"cache_size",
+		"trace_len",
+		"working_set":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatScoreValue(v float64) string {
+	i := int64(v)
+	if v == float64(i) {
+		return strconv.FormatInt(i, 10)
+	}
+	return fmt.Sprintf("%.3f", v)
 }
 
 func parseInts(s string) []int {

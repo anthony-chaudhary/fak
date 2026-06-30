@@ -47,10 +47,37 @@ type Measurement struct {
 	Metric     float64
 	SuiteGreen bool
 	TruthClean bool
+	// Score carries an optional structured readout for metrics whose useful
+	// operator surface is richer than the single keep-bit scalar. The keep-bit
+	// deliberately ignores it: shipgate.Evaluate reads only Metric, SuiteGreen,
+	// and TruthClean. Score is for audit/UI/observer consumers such as attention
+	// S/N, where the scalar fitness should travel with ratio, fault pressure, and
+	// grade without every harness inventing its own JSON side-channel.
+	Score *Scorecard
 	// Note carries an optional human-readable detail the engine folds into the
 	// journal row (e.g. a suite-red diagnostic) — so a REVERT is diagnosable, not a
 	// silent false with no signal.
 	Note string
+}
+
+// Scorecard is an optional structured score readout attached to a Measurement and
+// journal Row. It is additive telemetry: the RSI keep/revert authority remains the
+// scalar Metric plus the suite/truth witnesses, while Scorecard makes multi-axis
+// controls auditable without overloading Note prose.
+type Scorecard struct {
+	Name       string           `json:"name,omitempty"`
+	Value      float64          `json:"value"`
+	Grade      string           `json:"grade,omitempty"`
+	Components []ScoreComponent `json:"components,omitempty"`
+}
+
+// ScoreComponent is one named axis of a Scorecard. Unit is intentionally free-form
+// but short ("ratio", "tokens", "turns") so independent harnesses can expose
+// their own control signals while downstream consumers still get structured names.
+type ScoreComponent struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit,omitempty"`
 }
 
 // Harness wires the four seams the engine drives. A test supplies in-process fakes;
@@ -90,23 +117,24 @@ type Harness struct {
 // Row is one append-only journal record. The schema is stable so a downstream
 // tracker can diff runs (regression detection vs the last recorded `main` KPI).
 type Row struct {
-	Cycle        int     `json:"cycle"`
-	Mode         string  `json:"mode"` // "improve" | "track"
-	Candidate    string  `json:"candidate"`
-	MetricName   string  `json:"metric_name"`
-	Baseline     float64 `json:"baseline"`
-	Candidate_   float64 `json:"candidate_metric"`
-	Measured     bool    `json:"measured"` // false => candidate_metric is NOT a real measurement (build/probe failed)
-	LowerBetter  bool    `json:"lower_better"`
-	Improved     bool    `json:"improved"`    // strict directional gain vs the running baseline
-	SuiteGreen   bool    `json:"suite_green"` // derived from a real suite run
-	TruthClean   bool    `json:"truth_clean"` // derived from a real truth syscall
-	Decision     string  `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK
-	Kept         bool    `json:"kept"`        // the non-forgeable keep-bit (shipgate)
-	BreakerCount int     `json:"breaker_nonkeeps"`
-	BaselineRef  string  `json:"baseline_ref"`       // the resolved SHA the baseline + every candidate forked from
-	RefName      string  `json:"ref_name,omitempty"` // the symbolic ref that SHA was resolved from (e.g. "main")
-	Note         string  `json:"note,omitempty"`
+	Cycle        int        `json:"cycle"`
+	Mode         string     `json:"mode"` // "improve" | "track"
+	Candidate    string     `json:"candidate"`
+	MetricName   string     `json:"metric_name"`
+	Baseline     float64    `json:"baseline"`
+	Candidate_   float64    `json:"candidate_metric"`
+	Measured     bool       `json:"measured"` // false => candidate_metric is NOT a real measurement (build/probe failed)
+	LowerBetter  bool       `json:"lower_better"`
+	Improved     bool       `json:"improved"`    // strict directional gain vs the running baseline
+	SuiteGreen   bool       `json:"suite_green"` // derived from a real suite run
+	TruthClean   bool       `json:"truth_clean"` // derived from a real truth syscall
+	Decision     string     `json:"decision"`    // KEEP | REVERT | ESCALATE | TRACK
+	Kept         bool       `json:"kept"`        // the non-forgeable keep-bit (shipgate)
+	BreakerCount int        `json:"breaker_nonkeeps"`
+	BaselineRef  string     `json:"baseline_ref"`       // the resolved SHA the baseline + every candidate forked from
+	RefName      string     `json:"ref_name,omitempty"` // the symbolic ref that SHA was resolved from (e.g. "main")
+	Score        *Scorecard `json:"score,omitempty"`    // optional structured score telemetry; not a keep-bit input
+	Note         string     `json:"note,omitempty"`
 }
 
 // Result summarizes a Run.
@@ -263,6 +291,7 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			BreakerCount: gate.ConsecutiveNonKeeps(),
 			BaselineRef:  baseRef,
 			RefName:      h.BaselineRefName,
+			Score:        cloneScorecard(m.Score),
 			Note:         note,
 		}
 		if j != nil {
@@ -326,6 +355,17 @@ func improvedDir(before, after float64, lowerBetter bool) bool {
 		return after < before
 	}
 	return after > before
+}
+
+func cloneScorecard(in *Scorecard) *Scorecard {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if len(in.Components) > 0 {
+		out.Components = append([]ScoreComponent(nil), in.Components...)
+	}
+	return &out
 }
 
 // LastTrack scans a journal file for the most recent "track" row, returning it and

@@ -14,6 +14,7 @@ package rsiloop
 // real, measurable gain to discover (HitRate is monotonically non-decreasing in
 // the cache size — see kpi.go). The Proposer's rewrite target is the integer
 // literal on the next line; keep the form `DefaultCacheSize = <int>` exact.
+// fak:opttarget name=lru-cache-size metric=lru_hit_rate dir=higher sweep=4,5,6,8 measurer=worktree-int
 const DefaultCacheSize = 4
 
 // TunableConstName is the identifier the worktree Proposer rewrites. Exported so a

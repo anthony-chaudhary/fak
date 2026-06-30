@@ -39,6 +39,14 @@ func TestDosImproveArgs_CarriesWitnessesScaledWorkAndVerdict(t *testing.T) {
 		Cycle: 3, MetricName: "near_misses_caught", Baseline: 0, Candidate_: 4,
 		Measured: true, LowerBetter: false, Improved: true,
 		SuiteGreen: true, TruthClean: true, Decision: "KEEP", BreakerCount: 0,
+		Score: &rsiloop.Scorecard{
+			Name:  "attention_sn",
+			Value: 0.9,
+			Grade: "lean",
+			Components: []rsiloop.ScoreComponent{
+				{Name: "mean_ratio", Value: 0.9, Unit: "ratio"},
+			},
+		},
 	}
 	joined := strings.Join(dosImproveArgs("/ws", 3, r), " ")
 	for _, want := range []string{
@@ -53,6 +61,9 @@ func TestDosImproveArgs_CarriesWitnessesScaledWorkAndVerdict(t *testing.T) {
 	// The loop's own verdict rides in --narrated (carried for the operator, gating nothing).
 	if !strings.Contains(joined, "verdict=KEEP") {
 		t.Errorf("--narrated must carry the loop verdict; got: %s", joined)
+	}
+	if !strings.Contains(joined, "score attention_sn=0.900") || !strings.Contains(joined, "mean_ratio=0.900") {
+		t.Errorf("--narrated must carry score telemetry without changing --work; got: %s", joined)
 	}
 }
 

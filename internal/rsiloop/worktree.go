@@ -128,6 +128,7 @@ func NewWorktreeHarness(cfg WorktreeConfig) Harness {
 					return perr
 				}
 				meas.Metric = m
+				meas.Score = lruHitRateScorecard(size, m)
 				green, detail := runSuite(p.module, cfg.SuiteCmds)
 				meas.SuiteGreen = green
 				if !green {
@@ -141,6 +142,31 @@ func NewWorktreeHarness(cfg WorktreeConfig) Harness {
 			})
 			return meas, err
 		},
+	}
+}
+
+func lruHitRateScorecard(size int, metric float64) *Scorecard {
+	return &Scorecard{
+		Name:  "lru_hit_rate",
+		Value: metric,
+		Grade: lruHitRateGrade(metric),
+		Components: []ScoreComponent{
+			{Name: "hit_rate", Value: metric, Unit: "ratio"},
+			{Name: "cache_size", Value: float64(size), Unit: "entries"},
+			{Name: "trace_len", Value: float64(TraceLen()), Unit: "accesses"},
+			{Name: "working_set", Value: float64(workingSet), Unit: "entries"},
+		},
+	}
+}
+
+func lruHitRateGrade(metric float64) string {
+	switch {
+	case metric >= 0.8:
+		return "high"
+	case metric >= 0.5:
+		return "medium"
+	default:
+		return "low"
 	}
 }
 

@@ -58,6 +58,11 @@ func scaleWorkPair(candidate, baseline float64, lowerBetter bool) (work, baselin
 // nothing. Pure and deterministic, so it is unit-tested without spawning dos.
 func dosImproveArgs(workspace string, maxReverts int, r rsiloop.Row) []string {
 	work, baselineWork := scaleWorkPair(r.Candidate_, r.Baseline, r.LowerBetter)
+	narrated := fmt.Sprintf("rsiloop verdict=%s candidate=%q improved=%v measured=%v",
+		r.Decision, r.Candidate, r.Improved, r.Measured)
+	if r.Score != nil {
+		narrated += " " + scoreSummary(r.Score)
+	}
 	args := []string{
 		"improve", "--observe",
 		"--work", strconv.FormatInt(work, 10),
@@ -66,8 +71,7 @@ func dosImproveArgs(workspace string, maxReverts int, r rsiloop.Row) []string {
 		"--max-reverts", strconv.Itoa(maxReverts),
 		"--lane", "rsiloop",
 		"--subject", fmt.Sprintf("rsiloop::%s::cycle%d", r.MetricName, r.Cycle),
-		"--narrated", fmt.Sprintf("rsiloop verdict=%s candidate=%q improved=%v measured=%v",
-			r.Decision, r.Candidate, r.Improved, r.Measured),
+		"--narrated", narrated,
 	}
 	if r.SuiteGreen {
 		args = append(args, "--suite-passed")
