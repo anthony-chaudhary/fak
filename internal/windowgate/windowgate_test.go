@@ -15,8 +15,10 @@ func TestPSInstallerRules(t *testing.T) {
 		{"s4u-clean",
 			"$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U\n" +
 				"Register-ScheduledTask -TaskName T -Action $a -Principal $p\n", false},
-		{"schtasks-without-IT-clean",
-			"schtasks /Create /TN T /SC MINUTE /MO 5 /TR \"python x.py\" /RL LIMITED /F\n", false},
+		{"schtasks-without-IT-fails",
+			"schtasks /Create /TN T /SC MINUTE /MO 5 /TR \"python x.py\" /RL LIMITED /F\n", true},
+		{"schtasks-system-clean",
+			"schtasks /Create /TN T /SC MINUTE /MO 5 /RU SYSTEM /TR \"python x.py\" /RL LIMITED /F\n", false},
 		{"conhost-headless-clean-even-if-interactive",
 			"$a = New-ScheduledTaskAction -Execute conhost.exe -Argument '--headless powershell.exe -File w.ps1'\n" +
 				"$p = New-ScheduledTaskPrincipal -LogonType Interactive\n" +

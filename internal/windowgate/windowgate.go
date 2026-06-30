@@ -22,7 +22,7 @@ const (
 var (
 	reCreatesTask    = regexp.MustCompile(`(?i)Register-ScheduledTask\b|schtasks(\.exe)?\b[^\n]*/Create\b`)
 	reSchtasksCreate = regexp.MustCompile(`(?i)schtasks(\.exe)?\b[^\n]*/Create\b`)
-	reOffDesktop     = regexp.MustCompile(`(?i)-LogonType\s+(S4U|Password|ServiceAccount)\b|-UserId\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)`)
+	reOffDesktop     = regexp.MustCompile(`(?i)-LogonType\s+(S4U|Password|ServiceAccount)\b|-UserId\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)|/RU\s+['"]?(SYSTEM|LOCAL\s+SERVICE|NETWORK\s+SERVICE|NT\s+AUTHORITY)`)
 	reHeadless       = regexp.MustCompile(`(?i)--headless`)
 	reInteractive    = regexp.MustCompile(`(?i)-LogonType\s+Interactive\b|\s/IT\b`)
 	reITflag         = regexp.MustCompile(`(?i)\s/IT\b`)
@@ -40,10 +40,6 @@ func PSInstallerViolation(rel, src string) (string, bool) {
 		return "", false // a fully headless launcher is safe under any principal
 	}
 	offDesktop := reOffDesktop.MatchString(src)
-	// schtasks /Create without /IT runs in session 0 (off-desktop) by default.
-	if reSchtasksCreate.MatchString(src) && !reITflag.MatchString(src) {
-		offDesktop = true
-	}
 	interactive := reInteractive.MatchString(src)
 	// A Register-ScheduledTask call that never sets a principal inherits the
 	// Interactive default — treat as interactive unless it goes headless.
@@ -58,7 +54,7 @@ func PSInstallerViolation(rel, src string) (string, bool) {
 	}
 	if !offDesktop {
 		return fmt.Sprintf("%s: installs a scheduled task with no off-desktop principal "+
-			"(-LogonType S4U / a service account / schtasks without /IT) and no conhost "+
+			"(-LogonType S4U / a service account) and no conhost "+
 			"--headless launcher — it may flash a console window (%s)",
 			rel, ReasonInteractiveTask), true
 	}

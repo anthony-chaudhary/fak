@@ -51,12 +51,12 @@ $runner = Join-Path $regDir 'control_pane_tick.cmd'
   "cd /d `"$repoDir`"",
   "`"$Python`" `"$Pane`" tick$liveArg"
 ) | Set-Content -Path $runner -Encoding ASCII
-$tr = "cmd.exe /c `"`"$runner`"`""
+$tr = "conhost.exe --headless cmd.exe /c `"`"$runner`"`""
 schtasks /Create /TN $TaskName /SC MINUTE /MO $IntervalMin /TR $tr /RL LIMITED /F | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
 schtasks /Change /TN $TaskName /ENABLE | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "schtasks /Change /ENABLE failed ($LASTEXITCODE)" }
 schtasks /Run /TN $TaskName 2>$null | Out-Null
-Write-Output "installed $TaskName (every $IntervalMin min, current-user interactive)"
+Write-Output "installed $TaskName (every $IntervalMin min, current-user interactive, headless)"
 Write-Output "runner: $runner"
 Write-Output "command: $tr"

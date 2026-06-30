@@ -88,11 +88,12 @@ if [ "${INSTALL_TASK:-0}" = "1" ]; then
   SELF_WIN="$(cygpath -w "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" 2>/dev/null || echo "$0")"
   log "registering unattended task 'FakFleetJanitor' (every 15 min, --live) for $SELF_WIN"
   cat <<EOF >&2
-Run this once (elevated PowerShell) to install the operator-free sweep:
+Run this once in PowerShell to install the operator-free sweep:
 
-  \$bash = (Get-Command bash).Source
-  schtasks /Create /TN FakFleetJanitor /SC MINUTE /MO 15 /RL HIGHEST /F ^
-    /TR "\$bash -lc 'PROJECT=$PROJECT IDLE_MINUTES=$IDLE_MINUTES ON_IDLE=$ON_IDLE $SELF_WIN --live'"
+  \$bash = 'C:\Program Files\Git\bin\bash.exe'
+  if (-not (Test-Path \$bash)) { \$bash = (Get-Command bash).Source }
+  \$tr = "conhost.exe --headless `"\$bash`" -lc `"PROJECT=$PROJECT IDLE_MINUTES=$IDLE_MINUTES ON_IDLE=$ON_IDLE $SELF_WIN --live`""
+  schtasks /Create /TN FakFleetJanitor /SC MINUTE /MO 15 /RL LIMITED /F /TR \$tr
 
 It sweeps every 15 min under your logged-in gcloud identity and reaps idle GPU boxes
 per the fak-reaper=keep|stop labels. Remove with:  schtasks /Delete /TN FakFleetJanitor /F

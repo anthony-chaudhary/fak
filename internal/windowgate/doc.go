@@ -11,7 +11,7 @@
 // NOT suppress the conhost flash (the maintainers learned this the hard way; see
 // tools/register_worktree_doctor.ps1 / tools/register_runaway_reaper.ps1). The fix
 // every repo installer already uses is an OFF-DESKTOP principal — S4U / a service
-// account / schtasks without /IT (session 0) — OR a fully headless launcher
+// account — OR a fully headless launcher
 // (conhost.exe --headless ..., the FleetResumeWatchdog pattern). ScanTree FAILS any
 // task-creating .ps1 that is neither.
 //
