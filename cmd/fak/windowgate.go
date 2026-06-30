@@ -18,24 +18,32 @@ import (
 const windowgateSchema = "fak-windowgate/1"
 
 type windowgatePayload struct {
-	Schema      string           `json:"schema"`
-	OK          bool             `json:"ok"`
-	Verdict     string           `json:"verdict"`
-	Finding     string           `json:"finding"`
-	Reason      string           `json:"reason"`
-	NextAction  string           `json:"next_action"`
-	Workspace   string           `json:"workspace"`
-	Counts      map[string]int   `json:"counts"`
-	Suppression map[string]int   `json:"suppression,omitempty"`
-	Violations  []string         `json:"violations"`
-	Watchlist   []string         `json:"watchlist,omitempty"`
-	Tools       map[string]int   `json:"watchlist_tools,omitempty"`
-	Files       map[string]int   `json:"watchlist_files,omitempty"`
-	Dirs        map[string]int   `json:"watchlist_dirs,omitempty"`
-	LiveTasks   *liveTaskPayload `json:"live_tasks,omitempty"`
+	Schema      string             `json:"schema"`
+	OK          bool               `json:"ok"`
+	Verdict     string             `json:"verdict"`
+	Finding     string             `json:"finding"`
+	Reason      string             `json:"reason"`
+	NextAction  string             `json:"next_action"`
+	Workspace   string             `json:"workspace"`
+	Counts      map[string]int     `json:"counts"`
+	Suppression map[string]int     `json:"suppression,omitempty"`
+	Violations  []string           `json:"violations"`
+	Watchlist   []string           `json:"watchlist,omitempty"`
+	Tools       map[string]int     `json:"watchlist_tools,omitempty"`
+	Files       map[string]int     `json:"watchlist_files,omitempty"`
+	Dirs        map[string]int     `json:"watchlist_dirs,omitempty"`
+	LiveTasks   *liveTaskPayload   `json:"live_tasks,omitempty"`
+	Windows     *liveWindowPayload `json:"visible_windows,omitempty"`
 }
 
 type liveTaskPayload struct {
+	OK         bool     `json:"ok"`
+	Scanned    int      `json:"scanned"`
+	Violations []string `json:"violations,omitempty"`
+	Watchlist  []string `json:"watchlist,omitempty"`
+}
+
+type liveWindowPayload struct {
 	OK         bool     `json:"ok"`
 	Scanned    int      `json:"scanned"`
 	Violations []string `json:"violations,omitempty"`
@@ -54,6 +62,7 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	failCandidates := fs.Bool("fail-on-candidates", false, "also exit non-zero when advisory console-tool candidates remain")
 	liveTasks := fs.Bool("live-tasks", false, "also audit already-installed Windows Scheduled Tasks")
+	visibleWindows := fs.Bool("visible-windows", false, "also audit currently visible top-level windows")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -83,6 +92,16 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		attachLiveTaskPayload(&payload, live, *failCandidates)
+	}
+	if *visibleWindows {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		visible, err := windowgate.ScanVisibleWindows(ctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak windowgate: visible windows: %v\n", err)
+			return 1
+		}
+		attachVisibleWindowPayload(&payload, visible, *failCandidates)
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, payload); err != nil {
@@ -175,6 +194,30 @@ func attachLiveTaskPayload(p *windowgatePayload, live windowgate.LiveTaskReport,
 	}
 }
 
+func attachVisibleWindowPayload(p *windowgatePayload, visible windowgate.VisibleWindowReport, failWatchlist bool) {
+	p.Windows = &liveWindowPayload{
+		OK:         visible.OK(),
+		Scanned:    visible.Scanned,
+		Violations: append([]string{}, visible.Violations...),
+		Watchlist:  append([]string{}, visible.Watchlist...),
+	}
+	if len(visible.Violations) > 0 {
+		p.OK = false
+		p.Verdict = "ACTION"
+		p.Finding = "no_desktop_popup_visible_window_regression"
+		p.Reason = fmt.Sprintf("%d visible automation window(s) are currently on the desktop", len(visible.Violations))
+		p.NextAction = "stop or relaunch the named process through a hidden/headless path, then trace its launcher back into windowgate"
+		return
+	}
+	if failWatchlist && len(visible.Watchlist) > 0 {
+		p.OK = false
+		p.Verdict = "ACTION"
+		p.Finding = "no_desktop_popup_visible_window_watchlist"
+		p.Reason = fmt.Sprintf("visible-window hard gate is clean; %d visible console/browser automation window(s) remain on the review watchlist", len(visible.Watchlist))
+		p.NextAction = "review the visible-window watchlist and close, move off-screen, or classify attended windows"
+	}
+}
+
 func renderWindowgate(p windowgatePayload) string {
 	var b strings.Builder
 	status := "OK"
@@ -215,6 +258,19 @@ func renderWindowgate(p windowgatePayload) string {
 		if len(p.LiveTasks.Watchlist) > 0 {
 			b.WriteString("live task watchlist:\n")
 			for _, row := range p.LiveTasks.Watchlist {
+				fmt.Fprintf(&b, "  - %s\n", row)
+			}
+		}
+	}
+	if p.Windows != nil {
+		fmt.Fprintf(&b, "\nvisible windows: scanned=%d violations=%d watchlist=%d\n",
+			p.Windows.Scanned, len(p.Windows.Violations), len(p.Windows.Watchlist))
+		for _, row := range p.Windows.Violations {
+			fmt.Fprintf(&b, "  - %s\n", row)
+		}
+		if len(p.Windows.Watchlist) > 0 {
+			b.WriteString("visible-window watchlist:\n")
+			for _, row := range p.Windows.Watchlist {
 				fmt.Fprintf(&b, "  - %s\n", row)
 			}
 		}

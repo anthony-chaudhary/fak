@@ -79,3 +79,29 @@ func TestAttachLiveTaskPayloadCanFailWatchlist(t *testing.T) {
 		t.Fatalf("payload = ok %v verdict %q finding %q, want live watchlist ACTION", p.OK, p.Verdict, p.Finding)
 	}
 }
+
+func TestAttachVisibleWindowPayloadFailsVisibleAutomation(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachVisibleWindowPayload(&p, windowgate.VisibleWindowReport{
+		Scanned:    3,
+		Violations: []string{"pid=1 powershell C:\\work\\fak"},
+		Watchlist:  []string{"pid=2 WindowsTerminal"},
+	}, false)
+	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_visible_window_regression" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want visible-window ACTION", p.OK, p.Verdict, p.Finding)
+	}
+	if p.Windows == nil || p.Windows.Scanned != 3 || len(p.Windows.Violations) != 1 || len(p.Windows.Watchlist) != 1 {
+		t.Fatalf("visible-window payload not surfaced: %+v", p.Windows)
+	}
+}
+
+func TestAttachVisibleWindowPayloadCanFailWatchlist(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachVisibleWindowPayload(&p, windowgate.VisibleWindowReport{
+		Scanned:   1,
+		Watchlist: []string{"pid=2 WindowsTerminal"},
+	}, true)
+	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_visible_window_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want visible watchlist ACTION", p.OK, p.Verdict, p.Finding)
+	}
+}

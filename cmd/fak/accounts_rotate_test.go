@@ -52,6 +52,9 @@ func TestAccountsNextRoundRobin(t *testing.T) {
 		if !strings.Contains(out, "next: "+c.want) {
 			t.Fatalf("next --after %q = %q, want next: %s", c.after, strings.TrimSpace(out), c.want)
 		}
+		if !strings.Contains(out, "login=ready can_serve=true") {
+			t.Fatalf("next --after %q missing login readiness: %q", c.after, strings.TrimSpace(out))
+		}
 	}
 
 	// --env prints the chosen seat's CLAUDE_CONFIG_DIR for eval/wrappers.
@@ -65,7 +68,10 @@ func TestAccountsNextRoundRobin(t *testing.T) {
 
 	// --json prints the chosen RotationSeat.
 	out, _, rc = run("--after", "alice-seat", "--json")
-	if rc != 0 || !strings.Contains(out, `"name": "bob-seat"`) || !strings.Contains(out, `"status": "included"`) {
+	if rc != 0 || !strings.Contains(out, `"name": "bob-seat"`) ||
+		!strings.Contains(out, `"status": "included"`) ||
+		!strings.Contains(out, `"login_status": "ready"`) ||
+		!strings.Contains(out, `"can_serve": true`) {
 		t.Fatalf("next --json = %q", strings.TrimSpace(out))
 	}
 }
@@ -113,6 +119,9 @@ func TestAccountsLaunchRotate(t *testing.T) {
 	}
 	if !strings.Contains(got, `seat "bob-seat"`) || !strings.Contains(got, "CLAUDE_CONFIG_DIR = "+bDir) {
 		t.Fatalf("rotated launch plan should target bob-seat:\n%s", got)
+	}
+	if !strings.Contains(got, "login             = ready (can_serve=true)") {
+		t.Fatalf("rotated launch plan missing login readiness:\n%s", got)
 	}
 
 	// --rotate --after bob-seat rotates off bob onto alice (wrap).
