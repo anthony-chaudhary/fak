@@ -176,7 +176,12 @@ func Apply(ctx context.Context, r Redactor, body []byte, tool string) (Redaction
 	prev := 0
 	for _, s := range spans {
 		out.Write(body[prev:s.Start])
-		fmt.Fprintf(&out, "[REDACTED:%s]", s.Kind)
+		// Direct WriteString of the placeholder parts avoids the fmt.Fprintf
+		// reflection path (a per-span allocation on the pre-send hot path); the
+		// output bytes are identical to "[REDACTED:<kind>]".
+		out.WriteString("[REDACTED:")
+		out.WriteString(s.Kind)
+		out.WriteByte(']')
 		prev = s.End
 		atomic.AddInt64(&redactions, 1)
 	}
@@ -313,7 +318,9 @@ var ccCandidate = regexp.MustCompile(`(?:\d[ -]?){12,18}\d`)
 
 // Propose returns the disjoint spans in body matching the high-precision PII/secret patterns (keys, tokens, SSN, email, bearer, and Luhn-validated credit cards).
 func (piiRedactor) Propose(_ context.Context, body []byte, _ string) []Span {
-	var spans []Span
+	// Pre-size for the common handful of matches so the append loop does not
+	// repeatedly regrow on the pre-send hot path (the spans are coalesced before return).
+	spans := make([]Span, 0, 8)
 	for _, p := range piiPatterns {
 		for _, idx := range p.re.FindAllIndex(body, -1) {
 			spans = append(spans, Span{Start: idx[0], End: idx[1], Kind: p.kind})
