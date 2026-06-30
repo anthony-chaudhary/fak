@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Schema is the stable schema tag stamped on the machine-readable result.
@@ -34,6 +35,13 @@ type ActionItem struct {
 	CurrentState   string
 	WhyNow         string
 	WorkingSpine   string
+	WorkUnit       string
+	ExpectedSteps  int
+	Assumptions    []string
+	ConfusionRisks []string
+	Coordination   []string
+	Trigger        string
+	BatchPolicy    string
 	InScope        string
 	OutOfScope     string
 	DoneCondition  string
@@ -309,6 +317,17 @@ func IssueBody(item ActionItem) string {
 	issueSection(&b, "Why this is next", c.WhyNow)
 	issueSection(&b, "Working spine", item.WorkingSpine)
 	issueSection(&b, "Priority context", c.PriorityContext)
+	issueSection(&b, "Work unit", c.WorkUnit)
+	if c.ExpectedSteps > 0 {
+		issueSection(&b, "Expected steps", strconv.Itoa(c.ExpectedSteps))
+	} else {
+		issueSection(&b, "Expected steps", "Not specified.")
+	}
+	issueListSection(&b, "Assumptions", c.Assumptions)
+	issueListSection(&b, "Confusion risks", c.ConfusionRisks)
+	issueListSection(&b, "Coordination", c.Coordination)
+	issueSection(&b, "Trigger", c.Trigger)
+	issueSection(&b, "Batch policy", c.BatchPolicy)
 	issueSection(&b, "In scope", item.InScope)
 	issueSection(&b, "Out of scope", item.OutOfScope)
 	issueSection(&b, "Done condition", item.DoneCondition)
@@ -346,17 +365,33 @@ func actionCandidate(item ActionItem) issuecontract.Candidate {
 		WhyNow:          firstNonEmpty(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
 		WorkingSpine:    item.WorkingSpine,
 		PriorityContext: dogfoodPriorityContext(item),
-		InScope:         item.InScope,
-		OutOfScope:      item.OutOfScope,
-		DoneCondition:   item.DoneCondition,
-		Witness:         item.Witness,
-		AcceptanceGate:  item.AcceptanceGate,
-		Lane:            item.Lane,
-		Paths:           append([]string(nil), item.Paths...),
-		Labels:          append([]string(nil), item.Labels...),
-		BoundaryNotes:   append([]string(nil), item.BoundaryNotes...),
-		ClosureBinding:  firstNonEmpty(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
+		WorkUnit:        firstNonEmpty(item.WorkUnit, "leaf"),
+		ExpectedSteps:   firstPositive(item.ExpectedSteps, 4),
+		Assumptions: appendDefault(item.Assumptions,
+			"The source scorecard row is still current when the worker starts."),
+		ConfusionRisks: appendDefault(item.ConfusionRisks,
+			"Do not treat this generated action row as a broad scorecard epic."),
+		Coordination: appendDefault(item.Coordination,
+			"Use the stable marker key before creating siblings so reruns update in place."),
+		Trigger:        firstNonEmpty(item.Trigger, dogfoodIssueTrigger(item)),
+		BatchPolicy:    firstNonEmpty(item.BatchPolicy, "One issue per stable dogfood action key; reruns update the existing marker instead of opening duplicates."),
+		InScope:        item.InScope,
+		OutOfScope:     item.OutOfScope,
+		DoneCondition:  item.DoneCondition,
+		Witness:        item.Witness,
+		AcceptanceGate: item.AcceptanceGate,
+		Lane:           item.Lane,
+		Paths:          append([]string(nil), item.Paths...),
+		Labels:         append([]string(nil), item.Labels...),
+		BoundaryNotes:  append([]string(nil), item.BoundaryNotes...),
+		ClosureBinding: firstNonEmpty(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
 	}
+}
+
+func dogfoodIssueTrigger(item ActionItem) string {
+	probe := firstNonEmpty(item.SourceProbe, "dogfood scorecard")
+	finding := firstNonEmpty(item.Finding, item.Key, "ACTION row")
+	return fmt.Sprintf("Scorecard probe `%s` emitted ACTION finding `%s`.", probe, finding)
 }
 
 func dogfoodPriorityContext(item ActionItem) string {
@@ -368,6 +403,23 @@ func dogfoodPriorityContext(item ActionItem) string {
 		"Unblocks: resolving this ACTION row keeps recent-feature dogfood from hiding a real breakage.",
 		"Not polish: address the named probe row before broad dogfood expansion or optimization.",
 	}, "\n")
+}
+
+func appendDefault(items []string, fallback string) []string {
+	out := append([]string(nil), items...)
+	if len(out) == 0 && strings.TrimSpace(fallback) != "" {
+		out = append(out, fallback)
+	}
+	return out
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func issueSection(b *strings.Builder, title, body string) {
@@ -502,6 +554,7 @@ type Runner func(args []string) (stdout, stderr string, ok bool)
 // defaultRunner shells out to the real `gh` CLI.
 func defaultRunner(args []string) (string, string, bool) {
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

@@ -165,7 +165,7 @@ func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
 	if len(row.Labels) != 1 || row.Labels[0] != "guardrsi" {
 		t.Fatalf("labels = %+v, want guardrsi", row.Labels)
 	}
-	for _, want := range []string{"Working spine", "Priority context", "In scope", "Acceptance gate", "Path hints"} {
+	for _, want := range []string{"Working spine", "Priority context", "Work unit", "Expected steps", "Trigger", "Batch policy", "In scope", "Acceptance gate", "Path hints"} {
 		if !strings.Contains(row.Body, want) {
 			t.Fatalf("body missing %q\n---\n%s", want, row.Body)
 		}
@@ -186,6 +186,12 @@ func TestBodyContainsRequiredActionFields(t *testing.T) {
 		"Evidence path",
 		"Suggested next action",
 		"retire slop-debt",
+		"Work unit",
+		"Expected steps",
+		"Trigger",
+		"Batch policy",
+		"Scorecard probe `code-slop-scorecard` emitted ACTION finding `code_slop`.",
+		"One issue per stable dogfood action key; reruns update the existing marker",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n---\n%s", want, body)
