@@ -75,18 +75,15 @@ def _audit_tree(repo: str, as_json: bool = False):
 def _audit_message(repo: str, text: str):
     """Return (exit_code, combined_output) of the scrubber's --audit-message.
 
-    Roots the scan at the REAL repo (the dir holding this scrubber), not the
-    throwaway temp repo: the commit-msg hook always runs `--audit-message
-    --root <real repo>`, so `_effective_audit_needles` resolves the same needle
-    set a live commit would be gated against. The message file is written under
+    Roots the scan at the throwaway repo so `_effective_audit_needles` reads the
+    test-controlled private sidecar there. The message file is also written under
     the temp repo so nothing touches the real tree.
     """
-    real_root = os.path.dirname(os.path.dirname(os.path.abspath(SCRUB)))
     msg = os.path.join(repo, "_MSG")
     with open(msg, "w", encoding="utf-8") as f:
         f.write(text)
     out = subprocess.run(
-        [sys.executable, SCRUB, "--audit-message", msg, "--root", real_root],
+        [sys.executable, SCRUB, "--audit-message", msg, "--root", repo],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     return out.returncode, out.stdout + out.stderr
@@ -289,6 +286,13 @@ def main() -> int:
         rc, out = _audit_range(repo, f"{import_head}..HEAD")
         check("export-tier gated WITH sidecar (PLAN §6)", rc == 1, out)
         check("export-tier hit names the file", "leak.json" in out, out)
+
+        # The commit-message gate uses the same effective sidecar fold, so make
+        # the message tests hermetic: no dependence on whether this checkout has
+        # real private needles pulled.
+        _write(repo, "tools/_registry/scrub_needles.private.json",
+               '{"schema":"fleet-scrub-needles/1","audit_needles":["%s"],'
+               '"export_audit_needles":["%s","%s"]}\n' % (NEEDLE, export_needle, ORG))
 
         # 7) commit MESSAGE gate (the gap: a leak in the subject/body, not a file)
         rc, out = _audit_message(repo, "fix(x): a clean subject (fak x)\n\nbody\n")
