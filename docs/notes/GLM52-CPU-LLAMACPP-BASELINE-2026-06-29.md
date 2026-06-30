@@ -30,6 +30,17 @@ Host class is scrubbed to its hardware: a 2-socket **AMD EPYC 7742** (Rome/Zen2)
 So the real 753B MoE **decodes at ~1.5 tok/s on a CPU-only AVX2 box** — usable for async/batch
 agent work, not interactive. Prefill is ~11× faster (batched, compute-bound, scales with cores).
 
+**Real-usage cross-check (`llama-server` + a live chat completion).** A `/v1/chat/completions`
+request to the same model produced a coherent, correct answer (GLM-5.2 is a reasoning model, so
+the text arrived in `reasoning_content` — a faithful explanation of MoE sparse activation),
+proving end-to-end *usage*, not just a synthetic bench. The server-side `timings`
+**independently confirm the bench**: `predicted_per_second = 1.45 tok/s` decode (≈ the `tg64=1.47`
+above) over 160 generated tokens, and `prompt_per_second = 0.87` for a *cold single 45-token*
+prompt (single-prompt prefill is far below the batched `pp512=16.1`, as expected). The server
+became ready ~9 min after launch on warm cache — note `/health` returns 200 *before* the model
+finishes loading, so a real-readiness probe must retry the chat through the early `503 "Loading
+model"`.
+
 **Honest scope / category boundary** (carry these with the number):
 - This is the **real** 433 GB checkpoint, real serving — comparable to other *real-serving* CPU
   numbers, NOT to the synthetic reduced-layer `glmdsatput` kernel micro-number.
