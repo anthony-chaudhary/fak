@@ -786,18 +786,24 @@ func listSessions(_ context.Context) []gateway.SessionState {
 // decideSession is the served request-boundary hook: it applies session.Table.Decide
 // to the process-local DRIVE table so served model requests honor run-state,
 // turn-budget, token-budget, and pace controls before the upstream request runs.
-func decideSession(_ context.Context, traceID string) gateway.SessionVerdict {
-	return toGatewaySessionVerdict(serveSessions.Decide(strings.TrimSpace(traceID)))
+func decideSession(ctx context.Context, traceID string) gateway.SessionVerdict {
+	traceID = strings.TrimSpace(traceID)
+	v := serveSessions.Decide(traceID)
+	persistServeSessionRevision(ctx, traceID, v.State)
+	return toGatewaySessionVerdict(v)
 }
 
 // debitSession records post-response token usage for a served request. The next
 // Decide observes normal token-budget exhaustion at the following turn boundary;
 // context-budget exhaustion drains immediately with a continuation id.
-func debitSession(_ context.Context, traceID string, usage gateway.SessionUsage) gateway.SessionState {
-	return toGatewaySessionState(serveSessions.DebitUsage(strings.TrimSpace(traceID), session.Usage{
+func debitSession(ctx context.Context, traceID string, usage gateway.SessionUsage) gateway.SessionState {
+	traceID = strings.TrimSpace(traceID)
+	st := serveSessions.DebitUsage(traceID, session.Usage{
 		OutputTokens:  usage.CompletionTokens,
 		ContextTokens: usage.ContextTokens,
-	}))
+	})
+	persistServeSessionRevision(ctx, traceID, st)
+	return toGatewaySessionState(st)
 }
 
 // resetServedSessionOnBudget is the host-owned "human-like reset" hook the gateway
@@ -808,7 +814,7 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 	if freshContextTokens <= 0 {
 		return nil
 	}
-	return func(_ context.Context, traceID string, messages []agent.Message) (string, []agent.Message, bool) {
+	return func(ctx context.Context, traceID string, messages []agent.Message) (string, []agent.Message, bool) {
 		traceID = strings.TrimSpace(traceID)
 		st := serveSessions.Get(traceID)
 		child := strings.TrimSpace(st.ContinuationID)
@@ -823,11 +829,12 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 		if strings.TrimSpace(seed.Recap) == "" {
 			return "", nil, false
 		}
-		serveSessions.Recontinue(traceID, child, session.Budget{
+		childState := serveSessions.Recontinue(traceID, child, session.Budget{
 			TurnsLeft:         session.Unbounded,
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: freshContextTokens,
 		})
+		persistServeSessionRevision(ctx, child, childState)
 		return child, []agent.Message{{Role: agent.RoleSystem, Content: seed.Recap}}, true
 	}
 }
