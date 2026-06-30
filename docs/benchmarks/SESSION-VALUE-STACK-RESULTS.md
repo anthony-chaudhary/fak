@@ -24,6 +24,14 @@ description: "Measures the fused agent kernel's net work-reuse value-add (60.3x 
 > scaling sweep). Precision Q8_0. Native `go run` (macOS, not the Windows host where WDAC blocks native exes).
 > Harness: `cmd/sessionbench`. Raw JSON under `experiments/session/`.
 
+## Measurement Status
+
+- Dataset: synthetic-but-fixed `cmd/sessionbench` multi-agent workload shapes (headline T=50, C=5, P=2048, D=32, R=64; scaling sweep T=8/16/32, C=4, P=512, D=24, R=48).
+- Model: Qwen2.5-1.5B-Instruct Q8_0 for the headline; SmolLM2-135M Q8_0 for the scaling sweep; Apple M3 Pro host.
+- Runs: live B/C arms and prefill samples were executed by `cmd/sessionbench`; full-scale arm A is computed from measured sampled prefill costs and validated by a smaller fully-live A run.
+- Artifacts: `experiments/session/headline-qwen-50x5.json`, `experiments/session/smoke-smollm2.json`, and the high-T artifacts indexed from `BENCHMARK-AUTHORITY.md`.
+- Status: MEASURED for the live arms and sampled prefill curve; computed-from-measurement for the intractable full-scale arm A, with the validation ratio reported below. Not an unmeasured theoretical headline.
+
 ## The workload (what a 50-turn, 5-agent session is)
 
 `C` concurrent agents share one long **prefix** (system prompt + tool schemas, `P` tokens).
