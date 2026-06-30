@@ -128,12 +128,14 @@ func TestPrefillQwen35HybridQ4KMatchesTokenLoop(t *testing.T) {
 	// wiring bug would diverge O(1), orders of magnitude past either bound). V already passes
 	// the 2e-4 bound on both tiers (≈1.96e-4 on AVX2). The legacy-fallback witness above holds
 	// per-tier: under FAK_QGEMM=legacy every K/Kraw/V layer is bit-identical on AVX2 too.
-	// prefillQ4KKTol is arch-split: on an AVX2-only amd64 host the prefill GEMM (qgemm8tile256)
-	// and decode GEMV use different reduction orders so K/Kraw take a 2e-5 bound; everywhere else
-	// the strict 1e-5 holds. The helper lives in the arch-tagged *_amd64_test / *_other_test files
-	// so this test (and its shared cfg helpers) stays platform-neutral.
+	// The tolerances are arch-split: on an AVX2-only amd64 host the prefill GEMM
+	// (qgemm8tile256) and decode GEMV use different reduction orders so K/Kraw take
+	// a 2e-5 bound; on arm64 the raw V cache carries the same NEON reduction-order
+	// drift just above 2e-4. The helpers live in arch-tagged files so this test
+	// and its shared cfg helpers stay platform-neutral.
 	kTol := prefillQ4KKTol()
-	assertKVCacheQuantCloseTol(t, "hybrid q4k batched prefill", ref.Cache, got.Cache, kTol, 2e-4)
+	vTol := prefillQ4KVTol()
+	assertKVCacheQuantCloseTol(t, "hybrid q4k batched prefill", ref.Cache, got.Cache, kTol, vTol)
 	assertLinearAttnCacheQuantClose(t, "hybrid q4k batched prefill", ref.Cache.linear, got.Cache.linear)
 }
 

@@ -5,6 +5,7 @@ package model
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"testing"
 )
 
@@ -25,6 +26,63 @@ func TestQdot8Unroll4Sane(t *testing.T) {
 			t.Fatalf("in=%d: unroll=%v scalar=%v (too far)", in, got, want)
 		}
 	}
+}
+
+// TestQdot8Unroll4Qwen25OracleArgmaxAndCosine is the real-model gate for issue #6:
+// under the default arm64 Q8 decode tier, qMatRowsRange -> qdot8GEMV dispatches each
+// decode row through qdot8unroll4NEON. The kernel is not scalar-bit-identical, so the
+// production contract is the external HF oracle: every teacher-forced prompt position
+// must keep the HF argmax, and the last-position logit vector must remain high-cosine.
+func TestQdot8Unroll4Qwen25OracleArgmaxAndCosine(t *testing.T) {
+	if !detectDotProd() {
+		t.Skip("FEAT_DotProd (asimddp) not available; qdot8unroll4NEON is inactive")
+	}
+	if qkernelTier != tierNEON {
+		t.Skipf("qkernel tier %d does not select the default qdot8unroll4NEON path", qkernelTier)
+	}
+
+	const minCosine = 0.99
+	m, doc := loadFixtureDir(t, qwen25OracleDir, true)
+	m.Quantize()
+	resolved, _ := resolveOracleDir(qwen25OracleDir)
+	total, matched := 0, 0
+	worstCos := 1.0
+	for _, p := range doc.Prompts {
+		s := m.NewSession()
+		s.Quant = true
+		logits := s.Prefill(p.Ids[:1])
+		var last []float32
+		for pos, want := range p.ArgmaxPos {
+			got := argmax(logits)
+			if got == want {
+				matched++
+			} else {
+				t.Errorf("prompt %d pos %d Q8 argmax=%d, HF oracle=%d", p.Index, pos, got, want)
+			}
+			total++
+			last = logits
+			if pos+1 < len(p.Ids) {
+				logits = s.Step(p.Ids[pos+1])
+			}
+		}
+		allRef := readF32(t, filepath.Join(resolved, "oracle", itoa(p.Index)+".logits.f32"))
+		seq, vocab := len(p.Ids), m.Cfg.VocabSize
+		ref := allRef[(seq-1)*vocab : seq*vocab]
+		cs := cosine(last, ref)
+		if cs < worstCos {
+			worstCos = cs
+		}
+		t.Logf("prompt %d qdot8unroll4NEON Q8-vs-HF last-logit cosine=%.6f argmax=%d",
+			p.Index, cs, p.ArgmaxPos[seq-1])
+		if cs < minCosine {
+			t.Errorf("prompt %d Q8-vs-HF last-logit cosine %.6f < %.4f", p.Index, cs, minCosine)
+		}
+	}
+	if matched != total {
+		t.Fatalf("qdot8unroll4NEON Q8 argmax vs HF oracle matched %d/%d positions", matched, total)
+	}
+	t.Logf("qdot8unroll4NEON Q8 oracle gate: argmax-exact %d/%d, worst last-logit cosine %.6f (floor %.4f)",
+		matched, total, worstCos, minCosine)
 }
 
 // BenchmarkDotKernelSingleCore measures SINGLE-CORE Q8 dot throughput (no parFor) for the current

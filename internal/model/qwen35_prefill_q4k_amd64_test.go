@@ -14,3 +14,5 @@ func prefillQ4KKTol() float64 {
 	}
 	return 1e-5
 }
+
+func prefillQ4KVTol() float64 { return 2e-4 }
