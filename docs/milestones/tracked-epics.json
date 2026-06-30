@@ -4,31 +4,37 @@
     {
       "Number": 1243,
       "Title": "support-maturity disambiguation",
+      "Generation": "now",
       "Label": "support-maturity"
     },
     {
       "Number": 1315,
       "Title": "native agent harness",
+      "Generation": "now",
       "Label": ""
     },
     {
       "Number": 1301,
       "Title": "cache-value P&L roll-up",
+      "Generation": "now",
       "Label": ""
     },
     {
       "Number": 1178,
       "Title": "first-class time horizons",
+      "Generation": "next",
       "Label": ""
     },
     {
       "Number": 1010,
       "Title": "GLM-5.2 through fak's kernel",
+      "Generation": "next",
       "Label": ""
     },
     {
       "Number": 1354,
       "Title": "release at agentic speed",
+      "Generation": "now",
       "Label": ""
     }
   ]
