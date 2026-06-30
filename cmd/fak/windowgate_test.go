@@ -80,6 +80,17 @@ func TestAttachLiveTaskPayloadCanFailWatchlist(t *testing.T) {
 	}
 }
 
+func TestAttachLiveTaskPayloadSurfacesWatchlistByDefault(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachLiveTaskPayload(&p, windowgate.LiveTaskReport{
+		Scanned:   1,
+		Watchlist: []string{"\\Hidden: review child spawns"},
+	}, false)
+	if !p.OK || p.Verdict != "OK" || p.Finding != "no_desktop_popup_live_task_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want advisory live-task watchlist", p.OK, p.Verdict, p.Finding)
+	}
+}
+
 func TestAttachVisibleWindowPayloadFailsVisibleAutomation(t *testing.T) {
 	p := buildWindowgatePayload("root", windowgate.Report{}, false)
 	attachVisibleWindowPayload(&p, windowgate.VisibleWindowReport{
@@ -102,6 +113,17 @@ func TestAttachVisibleWindowPayloadFailsVisibleAutomation(t *testing.T) {
 	}
 	if len(p.Windows.Findings) != 2 || p.Windows.Categories["repo_console_tool"] != 1 || p.Windows.Categories["browser_automation"] != 1 {
 		t.Fatalf("visible-window structured findings not surfaced: %+v", p.Windows)
+	}
+}
+
+func TestAttachVisibleWindowPayloadSurfacesWatchlistByDefault(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachVisibleWindowPayload(&p, windowgate.VisibleWindowReport{
+		Scanned:   1,
+		Watchlist: []string{"pid=2 WindowsTerminal"},
+	}, false)
+	if !p.OK || p.Verdict != "OK" || p.Finding != "no_desktop_popup_visible_window_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want advisory visible-window watchlist", p.OK, p.Verdict, p.Finding)
 	}
 }
 

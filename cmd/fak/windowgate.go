@@ -279,12 +279,14 @@ func attachLiveTaskPayload(p *windowgatePayload, live windowgate.LiveTaskReport,
 		p.NextAction = "re-register or disable the named task with an off-desktop principal, conhost --headless, pythonw.exe, or -WindowStyle Hidden"
 		return
 	}
-	if failWatchlist && len(live.Watchlist) > 0 {
-		p.OK = false
-		p.Verdict = "ACTION"
+	if len(live.Watchlist) > 0 {
 		p.Finding = "no_desktop_popup_live_task_watchlist"
 		p.Reason = fmt.Sprintf("live Scheduled Task hard gate is clean; %d interactive hidden/headless task(s) remain on the review watchlist", len(live.Watchlist))
 		p.NextAction = "review the live task watchlist and keep child subprocesses suppressed or move the task off-desktop"
+		if failWatchlist {
+			p.OK = false
+			p.Verdict = "ACTION"
+		}
 	}
 }
 
@@ -305,12 +307,14 @@ func attachVisibleWindowPayload(p *windowgatePayload, visible windowgate.Visible
 		p.NextAction = "stop or relaunch the named process through a hidden/headless path, then trace its launcher back into windowgate"
 		return
 	}
-	if failWatchlist && len(visible.Watchlist) > 0 {
-		p.OK = false
-		p.Verdict = "ACTION"
+	if len(visible.Watchlist) > 0 {
 		p.Finding = "no_desktop_popup_visible_window_watchlist"
 		p.Reason = fmt.Sprintf("visible-window hard gate is clean; %d visible console/browser automation window(s) remain on the review watchlist", len(visible.Watchlist))
 		p.NextAction = "review the visible-window watchlist and close, move off-screen, or classify attended windows"
+		if failWatchlist {
+			p.OK = false
+			p.Verdict = "ACTION"
+		}
 	}
 }
 

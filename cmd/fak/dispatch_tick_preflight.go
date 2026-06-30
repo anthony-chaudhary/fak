@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -185,39 +184,12 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 		if row.RouteWeight == 0 {
 			row.RouteWeight = dispatchAccountRouteWeight(row, weights)
 		}
-		dispatchApplyLoginGate(&row)
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("account registry %s has no readable account rows", registryPath)
 	}
 	return rows, nil
-}
-
-func dispatchApplyLoginGate(row *dispatchtick.AccountRow) {
-	if row == nil || row.Product != "claude" {
-		return
-	}
-	blocked := false
-	if row.CanServe != nil && !*row.CanServe {
-		blocked = true
-	}
-	if row.LoginStatus != "" && row.LoginStatus != string(configaccounts.LoginReady) {
-		blocked = true
-	}
-	if !blocked {
-		return
-	}
-	row.Available = false
-	if row.BlockReason != "" {
-		return
-	}
-	reason, _ := configaccounts.LoginReasonAction(configaccounts.LoginStatus(row.LoginStatus),
-		configaccounts.Home{Name: row.Tag, Dir: row.Dir})
-	if reason == "" {
-		reason = "account login is not ready"
-	}
-	row.BlockReason = reason
 }
 
 func dispatchAccountRegistryPath(root string) string {
