@@ -167,13 +167,7 @@ func liveTaskConsoleProne(task LiveScheduledTask) bool {
 		exe == "conhost.exe" || exe == "powershell_ise.exe" {
 		return true
 	}
-	text := strings.ToLower(task.Execute + " " + task.Arguments)
-	for tool := range candidateConsoleTools {
-		if strings.Contains(text, tool) {
-			return true
-		}
-	}
-	return strings.Contains(text, "python.exe") || strings.Contains(text, "bash.exe")
+	return false
 }
 
 // PSInstallerViolation returns a one-line violation for a task-creating .ps1 that

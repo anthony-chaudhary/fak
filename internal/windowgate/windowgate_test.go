@@ -87,6 +87,11 @@ func TestClassifyLiveScheduledTasks(t *testing.T) {
 			TaskPath: "\\", TaskName: "OffDesktop", State: "Ready", LogonType: "S4U",
 			Execute: "cmd.exe", Arguments: "/c C:\\work\\fak\\tools\\tick.bat",
 		},
+		{
+			TaskPath: "\\GoogleUserPEH\\", TaskName: "ChromeHelper", State: "Ready", LogonType: "InteractiveToken",
+			Execute:   `"C:\Program Files\Google\Chrome\Application\PlatformExperienceHelper\platform_experience_helper.exe"`,
+			Arguments: "--chrome-upload-metrics",
+		},
 	})
 	if len(rep.Violations) != 1 {
 		t.Fatalf("violations = %d %v, want exactly the visible interactive task", len(rep.Violations), rep.Violations)
