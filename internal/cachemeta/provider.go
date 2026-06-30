@@ -33,6 +33,22 @@ type ProviderCache struct {
 	// They are additive and provider-agnostic (empty = no axis contributed).
 	Endpoint      string // "general" | "coding" | upstream endpoint label
 	ReasoningMode string // "max" | "enabled" | "disabled" | reasoning_effort/thinking label
+
+	// ToolSetID and Region extend the same Vary identity to the two remaining
+	// silent cache-breakers in the cache-frontier default-enablement plan (item 7,
+	// #1525). The tool definitions a request carries are part of the provider's
+	// cacheable PREFIX — Anthropic folds the tool schema into the cached system
+	// block, OpenAI-compatible engines prefix it ahead of the messages — so a
+	// silent tool-set change defeats the implicit cache exactly like an endpoint
+	// switch; a STABLE digest of the tool set (not the per-request body hash in
+	// SerializerID) is the cache-family axis that records the change as a distinct
+	// cache-write. Region/affinity is the provider cache's locality scope: a prompt
+	// cache is warm only in the region/zone that wrote it, so a request routed
+	// elsewhere is a distinct COLD family, not a hit-rate dip. Both are additive
+	// and best-effort: an axis the caller cannot determine stays empty and
+	// contributes nothing to the identity ("where known").
+	ToolSetID string // stable digest/label of the request's tool set ("" = unknown)
+	Region    string // provider cache region/affinity label ("" = unknown)
 }
 
 // FromProviderCache folds provider prompt-cache telemetry into a cachemeta entry.
@@ -46,11 +62,16 @@ func FromProviderCache(p ProviderCache, opts ...Option) Entry {
 	if owner == "" {
 		owner = firstNonEmpty(p.Provider, "provider")
 	}
-	// Endpoint and ReasoningMode join the identity (§A2): switching the Z.AI
-	// Coding-Plan vs general endpoint, or the reasoning/thinking mode, silently
-	// breaks the provider's implicit cache, so they must shape a distinct digest.
+	// Endpoint, ReasoningMode, ToolSetID, and Region join the identity (§A2 +
+	// #1525): switching the Z.AI Coding-Plan vs general endpoint, the
+	// reasoning/thinking mode, the tool set folded into the cached prefix, or the
+	// provider cache region/affinity all silently break the provider's implicit
+	// cache, so each must shape a distinct digest. Empty axes contribute their
+	// separator only, so a caller that knows none of them keeps the prior identity
+	// shape.
 	digest := DigestBytes([]byte(p.Provider + "\x00" + p.ModelID + "\x00" + p.SerializerID +
-		"\x00" + p.Endpoint + "\x00" + p.ReasoningMode))
+		"\x00" + p.Endpoint + "\x00" + p.ReasoningMode +
+		"\x00" + p.ToolSetID + "\x00" + p.Region))
 	length := p.PromptTokens
 	if length == 0 {
 		length = p.CachedTokens
@@ -121,6 +142,12 @@ func providerLabels(p ProviderCache) map[string]string {
 	}
 	if p.ReasoningMode != "" {
 		m["reasoning_mode"] = p.ReasoningMode
+	}
+	if p.ToolSetID != "" {
+		m["tool_set"] = p.ToolSetID
+	}
+	if p.Region != "" {
+		m["region"] = p.Region
 	}
 	if p.Retention != "" {
 		m["retention"] = p.Retention

@@ -87,6 +87,60 @@ func TestProviderCacheEndpointAndReasoningModeAreVaryAxes(t *testing.T) {
 	}
 }
 
+func TestProviderCacheToolSetAndRegionAreVaryAxes(t *testing.T) {
+	// Cache-frontier default-enablement item 7 (#1525): the tool set folded into
+	// the cached prefix and the provider cache region/affinity are the two
+	// remaining silent cache-breakers. Two telemetry events that differ ONLY by
+	// tool set or region must NOT collapse to one entry identity, or a metrics sink
+	// would blend a tool/region switch into one hit rate and report a phantom hit.
+	base := ProviderCache{
+		Provider:     "anthropic",
+		ModelID:      "claude-opus",
+		CachedTokens: 100,
+		PromptTokens: 200,
+		SerializerID: "serde-1",
+	}
+	plain := FromProviderCache(base) // no tool-set/region axes contributed
+	withAxes := base
+	withAxes.ToolSetID = "tools-abc123"
+	withAxes.Region = "us-east-1"
+	withAxesEntry := FromProviderCache(withAxes)
+
+	if plain.ID.Digest == withAxesEntry.ID.Digest {
+		t.Fatalf("tool-set+region axes must change the entry identity; both = %s", plain.ID.Digest)
+	}
+	if withAxesEntry.Labels["tool_set"] != "tools-abc123" || withAxesEntry.Labels["region"] != "us-east-1" {
+		t.Fatalf("tool_set/region labels not surfaced: %+v", withAxesEntry.Labels)
+	}
+	// The base (no-axis) entry must NOT emit the optional labels at all.
+	if _, ok := plain.Labels["tool_set"]; ok {
+		t.Fatalf("empty tool-set axis must not emit a label: %+v", plain.Labels)
+	}
+	if _, ok := plain.Labels["region"]; ok {
+		t.Fatalf("empty region axis must not emit a label: %+v", plain.Labels)
+	}
+	// Tool set alone and region alone are each distinct breakers.
+	toolOnly := base
+	toolOnly.ToolSetID = "tools-xyz"
+	regionOnly := base
+	regionOnly.Region = "eu-west-1"
+	if FromProviderCache(toolOnly).ID.Digest == plain.ID.Digest {
+		t.Fatal("tool-set axis alone must break identity")
+	}
+	if FromProviderCache(regionOnly).ID.Digest == plain.ID.Digest {
+		t.Fatal("region axis alone must break identity")
+	}
+	// A different tool set is a different family from a different region: the two
+	// axes must not alias onto one another.
+	if FromProviderCache(toolOnly).ID.Digest == FromProviderCache(regionOnly).ID.Digest {
+		t.Fatal("tool-set and region axes must be independent, not aliased")
+	}
+	// Still cost-only telemetry, never a serveable local hit.
+	if v := ProviderCacheVerdict(withAxesEntry); v.CanServe() {
+		t.Fatalf("provider entry must not be serveable: %+v", v)
+	}
+}
+
 func TestProviderCacheFoldedIntoMetricsDoesNotImplyLocalHit(t *testing.T) {
 	// A fleet benchmark must be able to tell provider savings apart from local hits:
 	// the two live on different planes, so a metrics sink can split them.
