@@ -65,6 +65,11 @@ type PlanQuery struct {
 	// Weights are the OPTIONAL cost constants the model may retune. The zero value uses
 	// DefaultWeights (relevance dominates), so a query that sets none still scores sensibly.
 	Weights Weights `json:"weights,omitempty"`
+
+	// Assumptions are fact-like inputs the plan may rely on before acting. They are
+	// scored into use/query/refresh classes and carried into PlanView so a low-confidence
+	// or stale item cannot silently enter effect context as if it were fresh.
+	Assumptions []Assumption `json:"assumptions,omitempty"`
 }
 
 // PlanView is the typed result the model inspects and adopts as its fresh history — the
@@ -107,6 +112,9 @@ type PlanView struct {
 	// (objective, pinned-token split, over-budget flag). PlanView is a typed projection of it,
 	// never a divergent re-computation.
 	Plan Plan `json:"plan"`
+	// Assumptions is present when the query supplied assumptions. EffectSafe is false when
+	// any item needs a user query or source refresh before an effectful action.
+	Assumptions *AssumptionReport `json:"assumptions,omitempty"`
 }
 
 // Plan runs the agent's query through the SAME planner the host uses and returns the typed
@@ -131,7 +139,12 @@ func (q PlanQuery) Plan(spans []Span, cost CostModel) PlanView {
 	f := q.forecast()
 	budget := q.resolveBudget(f)
 	p := PlanCells(spans, f, budget, cost)
-	return viewOf(p)
+	view := viewOf(p)
+	if len(q.Assumptions) > 0 {
+		report := AssessAssumptions(q.Assumptions, DefaultAssumptionPolicy())
+		view.Assumptions = &report
+	}
+	return view
 }
 
 // forecast lowers the typed query into the planner's existing Forecast. It is a pure field
