@@ -113,14 +113,23 @@ jobs:
           import sys, re
 
           regressions = []
+          higher_is_better = False
           with open('benchstat-report.txt') as f:
               for line in f:
+                  if 'vs base' in line and '│' in line:
+                      # benchstat groups rows by unit. Most benchmark units are
+                      # lower-is-better, but throughput units such as B/s improve
+                      # when they rise; only a negative delta is a regression.
+                      higher_is_better = any(unit in line for unit in ('B/s', 'ops/s', 'op/s', 'items/s', 'tok/s', 'req/s'))
+                      continue
                   # "~" marks statistically-insignificant changes in both old
                   # and new benchstat output formats; skip them entirely.
                   if '~' in line:
                       continue
-                  # Both output formats represent regressions as "+X.XX%".
-                  m = re.search(r'\+(\d+(?:\.\d+)?)%', line)
+                  # Lower-is-better units regress on +X%; higher-is-better
+                  # throughput units regress on -X%.
+                  pattern = r'-(\d+(?:\.\d+)?)%' if higher_is_better else r'\+(\d+(?:\.\d+)?)%'
+                  m = re.search(pattern, line)
                   if m and float(m.group(1)) >= 20.0:
                       regressions.append(line.rstrip())
 
