@@ -1641,6 +1641,30 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         self.assertIn("witnessed_slots", p)
         self.assertEqual(p["witnessed_slots"]["unwitnessed"][0]["claim"], "CLAIM_UNWITNESSED")
 
+    def test_holds_self_modify_no_commit_issue_and_advances(self) -> None:
+        # #1396 pick-held-invariant: issue 467's last worker FINISHED with a SELF_MODIFY
+        # guard refusal and no commit — a re-blockable structural block. The witness
+        # sweep recorded reason=self_modify, so this tick's picker HOLDS 467 and advances
+        # to 466 instead of re-storming the same un-landable issue (the storm #1396 saw).
+        mod = load()
+        def spawn(*a, **k):
+            return {"pid": 9, "log": "resolve-466.log", "issue": 466,
+                    "lane": "gateway", "backend": "claude"}
+        self._stub(mod, spawn=spawn, numbers=(467, 466))
+        mod.witness_exited_workers = lambda runs_dir, root, **k: {
+            "live": True, "audited": [{"issue": 467, "claim": "CLAIM_NO_COMMIT"}],
+            "witnessed": [], "unwitnessed": [],
+            "no_commit": [{"issue": 467, "claim": "CLAIM_NO_COMMIT",
+                           "reason": "self_modify"}]}
+        def lease_runner(root, args, **k):
+            return {"rc": 0, "verdict": {"verdict": {"ok": True},
+                                         "record": {"id": "resolve-gateway", "generation": 1}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane="gateway",
+                         live=True, lease_runner=lease_runner)
+        self.assertEqual(p["verdict"], "SPAWNED")
+        self.assertEqual(p["target_issue"], 466)     # 467 held (self_modify) -> advanced
+        self.assertEqual(p["held_no_commit"], [467])  # the recorded reason was honored
+
 
 class SubjectCitesIssueTest(unittest.TestCase):
     """The per-worker commit binding key (#1324 proposal #2): a subject is THIS
@@ -1862,6 +1886,114 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
                                              git=boom_git)
             self.assertEqual(out["audited"], [])
+
+
+class ClassifyNoCommitReasonTest(unittest.TestCase):
+    """classify_no_commit_reason tags WHY a finished worker shipped no commit, from
+    the log tail. Each documented terminal-block signature maps to its reason; an
+    unrecognized log stays UNKNOWN (no false positive)."""
+
+    def _write(self, text: str):
+        import tempfile
+        d = tempfile.mkdtemp()
+        p = Path(d) / "resolve-1338-20260629-221102.log"
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_self_modify(self) -> None:
+        mod = load()
+        p = self._write("...\nfinish=end_turn safety=blocked:1 reason=SELF_MODIFY\n"
+                        "[fak] refused 1 tool call(s): Bash (SELF_MODIFY/ESCALATE).\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_SELF_MODIFY)
+
+    def test_policy_block(self) -> None:
+        mod = load()
+        p = self._write("...\nfinish=end_turn safety=blocked:1 reason=POLICY_BLOCK\n"
+                        "[fak] refused 1 tool call(s): Bash (POLICY_BLOCK/TERMINAL).\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_POLICY_BLOCK)
+
+    def test_auth_wall_glm(self) -> None:
+        mod = load()
+        p = self._write("> build · glm-5.2\nWeekly Limit Exhausted. Your limit will "
+                        "reset at 2026-07-01.\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
+
+    def test_auth_wall_claude_cap_banner(self) -> None:
+        mod = load()
+        # _CAP_BANNER_RE: "hit your … limit" (Claude/codex wording).
+        p = self._write("You've hit your weekly usage limit for Claude.\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
+
+    def test_off_trunk(self) -> None:
+        mod = load()
+        p = self._write("git commit refused: OFF_TRUNK — work on main only.\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_OFF_TRUNK)
+
+    def test_banner_noop_small_log(self) -> None:
+        mod = load()
+        # The 122-byte opencode no-op: spawn banner + "> build · glm-…" and nothing.
+        p = self._write("# fak-spawn 20260629-221102 issue=1338 lane=docs backend=opencode\n"
+                        "> build · glm-4.5-air\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_BANNER_NOOP)
+
+    def test_banner_in_large_real_log_is_not_noop(self) -> None:
+        mod = load()
+        # A real worker also prints "> build · …" at startup, but its log is large and
+        # carries real turns — it must NOT be misread as a banner no-op.
+        big = "> build · glm-5.2\n" + ("fak-turn trace=guard ok saved=80k tok\n" * 200)
+        p = self._write(big)
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+
+    def test_unknown_when_no_signature(self) -> None:
+        mod = load()
+        p = self._write("the worker ran a few turns and then exited cleanly\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_UNKNOWN)
+
+    def test_self_modify_wins_over_banner(self) -> None:
+        mod = load()
+        # Priority: a structural guard block is reported even if a startup banner is
+        # also present (the guard refusal is the actionable cause).
+        p = self._write("> build · glm-5.2\n...\nreason=SELF_MODIFY\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_SELF_MODIFY)
+
+
+class HeldNoCommitIssuesTest(unittest.TestCase):
+    """held_no_commit_issues reads the recorded no-commit reason and HOLDS only the
+    re-blockable guard refusals (self_modify / policy_block); a transient auth_wall or
+    an UNKNOWN is left to the time cooldown, not structurally held (#1396)."""
+
+    def test_holds_self_modify_and_policy_block(self) -> None:
+        mod = load()
+        w = {"no_commit": [
+            {"issue": 11, "reason": mod.NO_COMMIT_SELF_MODIFY},
+            {"issue": 22, "reason": mod.NO_COMMIT_POLICY_BLOCK}]}
+        self.assertEqual(mod.held_no_commit_issues(w), {11, 22})
+
+    def test_does_not_hold_auth_wall_banner_offtrunk_or_unknown(self) -> None:
+        mod = load()
+        w = {"no_commit": [
+            {"issue": 33, "reason": mod.NO_COMMIT_AUTH_WALL},
+            {"issue": 44, "reason": mod.NO_COMMIT_BANNER_NOOP},
+            {"issue": 55, "reason": mod.NO_COMMIT_OFF_TRUNK},
+            {"issue": 66, "reason": mod.NO_COMMIT_UNKNOWN}]}
+        self.assertEqual(mod.held_no_commit_issues(w), set())
+
+    def test_mixed_holds_only_reblockable(self) -> None:
+        mod = load()
+        w = {"no_commit": [
+            {"issue": 11, "reason": mod.NO_COMMIT_SELF_MODIFY},
+            {"issue": 33, "reason": mod.NO_COMMIT_AUTH_WALL}]}
+        self.assertEqual(mod.held_no_commit_issues(w), {11})
+
+    def test_failopen_on_skipped_empty_or_odd_record(self) -> None:
+        mod = load()
+        self.assertEqual(mod.held_no_commit_issues(None), set())
+        self.assertEqual(mod.held_no_commit_issues({"skipped": True}), set())
+        self.assertEqual(mod.held_no_commit_issues({"no_commit": []}), set())
+        # an odd record (no issue / wrong type) is skipped, never raised
+        self.assertEqual(mod.held_no_commit_issues(
+            {"no_commit": [{"reason": mod.NO_COMMIT_SELF_MODIFY}, "garbage",
+                           {"issue": "x", "reason": mod.NO_COMMIT_SELF_MODIFY}]}), set())
 
 
 if __name__ == "__main__":

@@ -1337,6 +1337,87 @@ CLAIM_NO_COMMIT = "CLAIM_NO_COMMIT"
 # keep-bit issue_closure_audit / issue_resolve_witnessed grade against.
 _WITNESS_OK = "diff-witnessed"
 
+# Why a FINISHED worker landed no resolving commit. A CLAIM_NO_COMMIT is not one
+# thing: a SELF_MODIFY / POLICY_BLOCK guard refusal is a worker that TRIED and was
+# STRUCTURALLY blocked (re-dispatching it re-blocks identically — an anti-churn
+# cooldown should hold it, not re-storm it); an AUTH_WALL is a transient credit cap
+# (re-probe once the window resets); a BANNER_NOOP is a DOA backend (the
+# check_backend_health DEAD streak's per-spawn evidence). UNKNOWN preserves the prior
+# opaque behavior. The reason is recorded in the .witness sidecar so a downstream
+# picker can route by it instead of re-grepping raw worker logs.
+NO_COMMIT_SELF_MODIFY = "self_modify"
+NO_COMMIT_POLICY_BLOCK = "policy_block"
+NO_COMMIT_AUTH_WALL = "auth_wall"
+NO_COMMIT_OFF_TRUNK = "off_trunk"
+NO_COMMIT_BANNER_NOOP = "banner_noop"
+NO_COMMIT_UNKNOWN = "unknown"
+
+# An opencode/glm worker that prints only its startup banner ("> build · glm-…") and
+# exits — the documented banner-only no-op (#1275).
+_NOOP_BANNER_RE = re.compile(r">\s*build\s*[·:]", re.IGNORECASE)
+# The opencode/GLM (zai-coding-plan) quota wording, distinct from the Claude/codex
+# "hit your … limit" that _CAP_BANNER_RE already matches.
+_GLM_WALL_RE = re.compile(r"Limit Exhausted|limit will reset at|usage limit reached",
+                          re.IGNORECASE)
+
+
+def classify_no_commit_reason(log: Path) -> str:
+    """Why did a finished worker land no resolving commit? Classify from the log TAIL
+    (the guard summary + final turn live at the end) so the witness records a
+    STRUCTURED reason rather than an opaque CLAIM_NO_COMMIT. Lets an anti-churn picker
+    tell a re-blockable guard refusal (self_modify / policy_block) from a transient
+    wall (auth_wall) or a DOA backend (banner_noop). Pure + FAIL-OPEN: any read error
+    or no recognized signature -> UNKNOWN (never a false positive)."""
+    tail = _log_tail_text(log)
+    if "SELF_MODIFY" in tail:
+        return NO_COMMIT_SELF_MODIFY
+    if "POLICY_BLOCK" in tail:
+        return NO_COMMIT_POLICY_BLOCK
+    if _log_is_cap_banner(log) or _GLM_WALL_RE.search(tail):
+        return NO_COMMIT_AUTH_WALL
+    if "OFF_TRUNK" in tail:
+        return NO_COMMIT_OFF_TRUNK
+    try:
+        small = log.stat().st_size <= _STUB_LOG_MAX_BYTES
+    except OSError:
+        small = False
+    if small and _NOOP_BANNER_RE.search(tail):
+        return NO_COMMIT_BANNER_NOOP
+    return NO_COMMIT_UNKNOWN
+
+
+# The RE-BLOCKABLE terminal guard refusals: a worker that TRIED and was STRUCTURALLY
+# blocked by a guard (SELF_MODIFY / POLICY_BLOCK). Re-dispatching the SAME issue
+# re-hits the SAME guard and burns the budget again for no commit (#1396: two ticks
+# re-picked #1338 -> SELF_MODIFY then POLICY_BLOCK, ~4.75M token-equiv, 0 commit). An
+# AUTH_WALL is deliberately NOT in this set -- it is a transient credit cap that the
+# picker SHOULD re-probe after its cooldown window; a BANNER_NOOP is owned by the
+# backend-health self-suppress gate; OFF_TRUNK / UNKNOWN fall through to the plain
+# time cooldown. Only the two re-blockable guard refusals are held by structure.
+_HOLD_NO_COMMIT_REASONS = frozenset({NO_COMMIT_SELF_MODIFY, NO_COMMIT_POLICY_BLOCK})
+
+
+def held_no_commit_issues(witnessed: dict[str, Any] | None) -> set[int]:
+    """Issue numbers to HOLD this tick because their last FINISHED worker landed no
+    resolving commit for a RE-BLOCKABLE structural reason (self_modify / policy_block).
+    Read from the in-memory witness result :func:`witness_exited_workers` just recorded
+    -- the same ``reason`` it stamped into each ``.witness`` sidecar, so the picker
+    routes by the recorded reason instead of re-grepping raw worker logs. This is the
+    pick-held-invariant rung for the bare verb (#1396): a SELF_MODIFY / POLICY_BLOCK
+    exit on issue N is a guard refusal a re-dispatch would hit identically, so the
+    picker must HOLD N this tick rather than re-storm it. An AUTH_WALL is NOT held here
+    (it re-probes after the time cooldown window); a BANNER_NOOP is owned by the
+    backend-health gate. Pure + FAIL-OPEN: a missing/odd record is skipped, never
+    raised, so it can only ever ADD a hold, never wedge the picker."""
+    held: set[int] = set()
+    for rec in ((witnessed or {}).get("no_commit") or []):
+        if isinstance(rec, dict) and rec.get("reason") in _HOLD_NO_COMMIT_REASONS:
+            try:
+                held.add(int(rec["issue"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    return held
+
 
 def _subject_cites_issue(subject: str, issue: int) -> bool:
     """True when a commit ``subject`` names ``#<issue>`` at a word boundary — the
@@ -1463,7 +1544,8 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
         sha = worker_resolving_sha(root, issue, base_sha=base, git=git)
         if not sha:
             rec = {"issue": issue, "log": log.name, "sha": None,
-                   "claim": CLAIM_NO_COMMIT, "verdict": None, "witness": None}
+                   "claim": CLAIM_NO_COMMIT, "verdict": None, "witness": None,
+                   "reason": classify_no_commit_reason(log)}
         else:
             w = audit_commit_witness(root, sha, runner=audit_runner)
             rec = {"issue": issue, "log": log.name, "sha": sha,
@@ -1798,9 +1880,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     chosen_lane = pick.get("lane")
     live_issues = live_resolution_issues(runs_dir)
     cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
-    # Skip both a live worker's issue AND a recently-attempted one (anti-churn), so
-    # the picker advances down the lane instead of re-storming one un-landable issue.
-    skip = live_issues | cooled
+    # Skip a live worker's issue, a recently-attempted one (the time cooldown), AND an
+    # issue whose last finished worker was STRUCTURALLY guard-blocked this tick
+    # (self_modify / policy_block) -- re-dispatching it re-blocks identically, so HOLD
+    # it (the pick-held-invariant rung, #1396) instead of re-storming the same un-
+    # landable drain. The held set is read from the recorded no-commit reason the
+    # witness sweep above just bound, so an auth_wall still re-probes after its window.
+    held_no_commit = held_no_commit_issues(witnessed)
+    skip = live_issues | cooled | held_no_commit
     target = pick_target_issue(pick.get("numbers") or [], skip)
 
     payload: dict[str, Any] = {
@@ -1822,6 +1909,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen_lane, "lane_issue_count": len(pick.get("numbers") or []),
         "cooled_recently": sorted(cooled), "target_issue": target,
+        # Surface the structurally-held issues only when something is actually held, so
+        # the common (nothing held) payload stays byte-identical to before (#1396).
+        **({"held_no_commit": sorted(held_no_commit)} if held_no_commit else {}),
         "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
     }
 
