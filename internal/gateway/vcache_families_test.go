@@ -239,6 +239,35 @@ func TestVCacheGovernorDecisionMetrics(t *testing.T) {
 			t.Fatalf("governor decision scrape missing %q\n--- metrics ---\n%s", want, text)
 		}
 	}
+
+	vars := srv.debugVars(time.Now())
+	records := vars.VCacheGovernor
+	if len(records) < 4 {
+		t.Fatalf("governor journal recorded %d rows, want at least 4: %+v", len(records), records)
+	}
+	seen := map[string]bool{}
+	for i, r := range records {
+		if r.Schema != vcacheGovernorDecisionJournalSchema {
+			t.Fatalf("record %d schema = %q, want %q", i, r.Schema, vcacheGovernorDecisionJournalSchema)
+		}
+		if r.Hash == "" {
+			t.Fatalf("record %d has empty hash: %+v", i, r)
+		}
+		if got := hashVCacheGovernorDecision(r.PrevHash, r); got != r.Hash {
+			t.Fatalf("record %d hash mismatch: got recomputed %q want %q", i, got, r.Hash)
+		}
+		if i == 0 {
+			if r.PrevHash != "" {
+				t.Fatalf("first journal row prev_hash = %q, want genesis", r.PrevHash)
+			}
+		} else if r.PrevHash != records[i-1].Hash {
+			t.Fatalf("record %d prev_hash = %q, want previous hash %q", i, r.PrevHash, records[i-1].Hash)
+		}
+		seen[r.Family+"/"+r.Decision] = true
+	}
+	if !seen["hot/ride_natural"] || !seen["sparse/lazy_rebuild"] {
+		t.Fatalf("governor journal missing expected family decisions, seen=%v records=%+v", seen, records)
+	}
 }
 
 // TestVCacheTurnWindowBounded proves the live window stays flat under a long-running

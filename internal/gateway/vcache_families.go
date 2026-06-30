@@ -71,7 +71,10 @@ func (m *gatewayMetrics) observeVCacheTurn(family string, unixMillis int64, inpu
 		m.vcacheTurns = trimmed
 		m.vcacheTurnsDropped = true
 	}
+	snap := make([]vcacheobserve.Turn, len(m.vcacheTurns))
+	copy(snap, m.vcacheTurns)
 	m.vcacheMu.Unlock()
+	m.observeVCacheGovernorDecision(turn.Family, turn.UnixMillis, snap)
 }
 
 // vcacheTurnsSnapshot returns a copy of the retained per-family window and whether

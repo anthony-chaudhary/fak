@@ -222,6 +222,7 @@ type gatewayMetrics struct {
 	vcacheMu           sync.Mutex
 	vcacheTurns        []vcacheobserve.Turn
 	vcacheTurnsDropped bool
+	vcacheGovernor     *vcacheGovernorDecisionJournal
 
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as
@@ -320,6 +321,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		upstreamErrors:     map[string]uint64{},
 		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
 		routing:            newRoutingMetrics(),
+		vcacheGovernor:     newVCacheGovernorDecisionJournal(),
 		inferTTFTHist:      newLatencyCounter(),
 		inferTPOTHist:      newLatencyCounter(),
 		inferE2EHist:       newLatencyCounter(),
