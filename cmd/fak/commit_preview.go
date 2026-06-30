@@ -10,19 +10,33 @@ import (
 
 // runCommitPreview lints a proposed commit (message + the paths it would touch) and reports the
 // verdict WITHOUT running git. Exit 0 when nothing blocking was found, 1 otherwise.
+//
+// It also surfaces the ADVISORY core-lock fold (issue #1682): the exact paths the commit would
+// touch are classified against the shipped soft-contract taxonomy, and any coherence-bearing
+// surface produces a path-scoped warning naming the witness command that would clear it. The
+// warnings are WARNING MODE — they never change the exit code; only the lint verdict decides it.
 func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root, expectedBranch string, asJSON, requireIssue bool) int {
 	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
+	coreLockWarns := auditCoreLockPaths(paths)
 	if asJSON {
 		payload := struct {
 			hooks.CommitLintReport
-			ExpectedBranch string `json:"expected_branch,omitempty"`
-		}{CommitLintReport: rep, ExpectedBranch: expectedBranch}
+			ExpectedBranch   string            `json:"expected_branch,omitempty"`
+			CoreLockWarnings []coreLockWarning `json:"core_lock_warnings"`
+			CoreLockWarnMode string            `json:"core_lock_warn_mode"`
+		}{
+			CommitLintReport: rep,
+			ExpectedBranch:   expectedBranch,
+			CoreLockWarnings: coreLockWarns,
+			CoreLockWarnMode: coreLockModeWarning,
+		}
 		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", err)
 			return 1
 		}
 	} else {
 		renderPreview(stdout, rep, expectedBranch)
+		renderCoreLockWarnings(stdout, coreLockWarns)
 	}
 	if rep.OK {
 		return 0

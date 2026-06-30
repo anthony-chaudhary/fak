@@ -70,8 +70,15 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	// Advisory core-lock fold (issue #1682): classify what this checkout has changed against the
+	// shipped soft-contract taxonomy and surface coherence-bearing warnings with the witness that
+	// would clear each. WARNING MODE — never blocks: it leaves `blocked` and the exit code alone.
+	coreLockWarns := auditCoreLockPaths(changedTreePaths(r))
+
 	if *asJSON {
-		emitFindingsJSON(stdout, stderr, allFindings)
+		emitHygieneJSON(stdout, stderr, allFindings, coreLockWarns)
+	} else {
+		renderCoreLockWarnings(stderr, coreLockWarns)
 	}
 	if blocked {
 		if !*asJSON {
