@@ -1,18 +1,21 @@
 package devindex
 
-// C3 of epic #1287 (#1290): the structured CLI-verb catalog. Today the `fak` verb
-// list lives as freeform raw strings in cmd/fak/usage.go — unparseable, and it
-// drifts from the main.go dispatch. This file defines the COMMITTED, structured
-// verb manifest (name -> synopsis -> owning lane -> doc link) so `fak index verbs
-// [<query>]` is robust and `usage.go` can be GENERATED from one source.
+// C3 of epic #1287 (#1290): the structured CLI-verb catalog behind `fak index verbs`
+// (CLI + MCP). The committed `fak` verb list used to live only as freeform raw strings
+// in cmd/fak/usage.go — unparseable, and drifting from the main.go dispatch.
 //
-// Lane note: the manifest + its query function live INSIDE internal/devindex (this
-// is the data structure C3 calls for). GENERATING usage.go from it and wiring the
-// `fak index verbs` cmd verb are the cmd/ half — out of this package's lane.
+// Design (post-#1293): the catalog is a LIVE VIEW. COVERAGE is DERIVED from the
+// cmd/fak/main.go dispatch switch (see Verbs()), so it can never fall behind the
+// binary — a newly dispatched verb appears automatically, no hand-maintenance, no
+// drift gate needed. The committed verbManifest below is only a curated QUALITY
+// OVERLAY (synopsis -> owning lane -> aliases -> doc link); a dispatched verb with no
+// overlay entry still appears with a fallback synopsis, and an overlay entry for a
+// verb not (yet) dispatched is simply not emitted. UndeclaredVerbs (freshness.go) is
+// retained as an advisory CURATION-drift signal (which live verbs lack a curated
+// entry), not a coverage gate.
 //
-// Honesty: the manifest is a VIEW the freshness gate (C6 #1293) cross-checks against
-// the live main.go switch — a verb in main.go with no manifest entry, or a manifest
-// entry naming a lane that no leaf declares, is a drift FINDING, never a silent gap.
+// Lane note: this overlay + the query/derive functions live INSIDE internal/devindex;
+// the `fak index verbs` cmd shell is the cmd/ half — out of this package's lane.
 
 import (
 	"os"
