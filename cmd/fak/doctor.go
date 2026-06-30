@@ -73,7 +73,9 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak doctor: resolve executable: %v\n", err)
 			return 1
 		}
-		rep := appversion.DiagnoseBinary(exe, appversion.DefaultBinaryDoctorCandidates(exe))
+		candidates := appversion.DefaultBinaryDoctorCandidates(exe)
+		processes, processScanError := appversion.CollectBinaryProcesses(candidates)
+		rep := appversion.DiagnoseBinaryWithProcesses(exe, candidates, processes, processScanError)
 		if *asJSON {
 			b, _ := json.MarshalIndent(rep, "", "  ")
 			fmt.Fprintln(stdout, string(b))
@@ -123,6 +125,24 @@ func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {
 			suffix = " newer-than-current"
 		}
 		fmt.Fprintf(w, "  [%s] %s size=%d sha=%s%s\n", tag, img.Path, img.Size, shortHash(img.SHA256), suffix)
+	}
+	if rep.ProcessScanError != "" {
+		fmt.Fprintf(w, "processes: %s\n", rep.ProcessScanError)
+	} else if len(rep.Processes) == 0 {
+		fmt.Fprintln(w, "processes: no live candidate fak processes found")
+	} else {
+		fmt.Fprintln(w, "processes:")
+		for _, p := range rep.Processes {
+			tag := "candidate"
+			if p.Current {
+				tag = "current"
+			}
+			suffix := ""
+			if !p.SameCurrent && p.SHA256 != "" {
+				suffix = " different-from-current"
+			}
+			fmt.Fprintf(w, "  [%s] pid=%d %s sha=%s%s\n", tag, p.PID, p.Path, shortHash(p.SHA256), suffix)
+		}
 	}
 	for _, r := range rep.Recommendations {
 		tag := "OK  "

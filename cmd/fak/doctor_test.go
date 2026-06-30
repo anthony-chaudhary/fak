@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/answershape"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 func defLimits() answershape.Limits {
@@ -105,5 +106,30 @@ func TestRunDoctorJSON(t *testing.T) {
 	}
 	if len(rep.Recommendations) != 2 {
 		t.Fatalf("want 2 recommendations (answer-shape + kernel-admit), got %d", len(rep.Recommendations))
+	}
+}
+
+func TestWriteBinaryDoctorHumanShowsLiveDifferentProcess(t *testing.T) {
+	rep := appversion.BinaryReport{
+		Executable: "C:/work/fak/fak-hygiene.exe",
+		Images: []appversion.BinaryImage{
+			{Path: "C:/work/fak/fak-hygiene.exe", Exists: true, Current: true, Size: 10, SHA256: "111111111111abcd"},
+			{Path: "C:/work/fak/fak.exe", Exists: true, Size: 10, SHA256: "222222222222abcd"},
+		},
+		Processes: []appversion.BinaryProcess{
+			{PID: 123, Path: "C:/work/fak/fak.exe", SHA256: "222222222222abcd"},
+		},
+		Recommendations: []appversion.BinaryRecommendation{
+			{Check: "binary-live-process", Severity: appversion.SeverityWarn, Finding: "1 live fak process is running a different sibling image"},
+		},
+		Findings: 1,
+	}
+	var out bytes.Buffer
+	writeBinaryDoctorHuman(&out, rep)
+	text := out.String()
+	for _, want := range []string{"processes:", "pid=123", "different-from-current", "binary-live-process"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("binary doctor human output missing %q:\n%s", want, text)
+		}
 	}
 }
