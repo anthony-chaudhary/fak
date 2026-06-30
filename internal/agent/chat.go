@@ -1015,10 +1015,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				continue
 			}
 			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
-			// retry ONCE. refreshAPIKey returns false (so we fall through to the raw error)
-			// when there is no fresher token to try — a static/passthrough key, or the same
-			// token the upstream just rejected — so a truly-bad credential is not masked.
-			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKey(p) {
+			// retry ONCE. refreshAPIKeyWait returns false (so we fall through to the raw
+			// error) when there is no fresher token to try — a static/passthrough key, or
+			// the same token the upstream just rejected with no re-login landing within the
+			// grace window — so a truly-bad credential is not masked. The wait closes the
+			// re-login race: a user logging back in mid-session has a beat to rewrite the
+			// credential file, and this poll adopts the fresh token so the live session
+			// self-heals in place instead of the 401 surfacing to the wrapped agent.
+			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKeyWait(ctx, p) {
 				triedAuthRefresh = true
 				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
 				lastStatus = resp.StatusCode
@@ -1141,6 +1145,11 @@ type UpstreamStatusError struct {
 	// provider error text, only timing. Empty for every non-rate-limit/overload
 	// status (the header is not set on those), so it is a clean no-op there.
 	RetryAfter string
+	// LimitReason and LimitResetHint are sanitized provider-limit metadata for
+	// HTTP 429 responses. They are operator-readable category/reset hints, not the
+	// raw upstream body; the gateway may use them in downstream-safe messages.
+	LimitReason    string
+	LimitResetHint string
 }
 
 // Error formats the upstream's HTTP status and truncated error body as
@@ -1316,6 +1325,45 @@ func plannerRetryBudget() time.Duration {
 		}
 	}
 	return defaultRetryBudget
+}
+
+// defaultAuthRefreshWindow is how long a 401 on the rotating-subscription path will keep
+// polling the on-disk credential for a FRESH, different token before giving up. It exists
+// for the re-login race: when the OAuth token expires the upstream 401s the instant it
+// dies, but Claude Code (or a user running `claude` / `claude /login` in another terminal)
+// needs a beat to refresh and rewrite .credentials.json. A single boot-time-style read at
+// the 401 instant usually still sees the SAME stale token, so a one-shot refresh gives up
+// and the 401 surfaces to the wrapped agent — which then drops into its OWN /login and the
+// live guarded session is lost. Polling for ~a few seconds lets the re-login land and the
+// session self-heal in place. The common case (token already rotated on disk) returns on
+// the first poll with zero added latency, and a genuinely-dead credential with no re-login
+// coming still fails within this bounded window rather than looping forever.
+const defaultAuthRefreshWindow = 3 * time.Second
+
+// maxAuthRefreshWindow clamps FAK_AUTH_REFRESH_WINDOW so a fat-fingered value cannot wedge
+// a turn waiting on a re-login that is never coming; the caller's context is the real
+// ceiling under it.
+const maxAuthRefreshWindow = 30 * time.Second
+
+// authRefreshPollInterval is how often the 401 wait re-reads the credential within the
+// window. Short enough that a freshly-written token is adopted promptly, long enough not to
+// hammer the disk (the read is a small JSON parse with its own torn-read retries).
+const authRefreshPollInterval = 150 * time.Millisecond
+
+// authRefreshWindow resolves the total wait the 401 auth-recovery polls disk for a fresh
+// token, defaulting to defaultAuthRefreshWindow and honoring FAK_AUTH_REFRESH_WINDOW (any
+// Go duration), clamped to [0, maxAuthRefreshWindow]. A value of 0 restores the historical
+// single-read behavior (one refresh attempt, no wait).
+func authRefreshWindow() time.Duration {
+	if v := os.Getenv("FAK_AUTH_REFRESH_WINDOW"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > maxAuthRefreshWindow {
+				return maxAuthRefreshWindow
+			}
+			return d
+		}
+	}
+	return defaultAuthRefreshWindow
 }
 
 // maxBackoff caps a single exponential backoff wait. The attempt²×600ms schedule would

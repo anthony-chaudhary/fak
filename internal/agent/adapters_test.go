@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -857,6 +859,10 @@ func TestHTTPPlannerComplete401RefreshesAndRetries(t *testing.T) {
 	})
 
 	t.Run("a 401 with no fresher token fails fast (no retry loop)", func(t *testing.T) {
+		// Collapse the re-login grace window to the historical single read: this case has no
+		// re-login coming, so the only thing the window would add is a 3s poll before the
+		// (correct) give-up. The no-wait path proves the cap itself — one hit, no retry.
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "0")
 		var n int
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			n++
@@ -880,6 +886,102 @@ func TestHTTPPlannerComplete401RefreshesAndRetries(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("upstream was hit %d times, want exactly 1 (no fresher token => no retry)", n)
+		}
+	})
+
+	t.Run("401 self-heals when the re-login token lands AFTER the first refresh read", func(t *testing.T) {
+		// The re-login RACE: the OAuth token expires, the upstream 401s the instant it dies,
+		// but the user logging back in (or Claude Code refreshing) rewrites the credential a
+		// beat LATER. The first refresh read at the 401 instant still sees the stale token;
+		// the single-read self-heal would give up here and surface the 401 to the wrapped
+		// agent. The bounded poll must wait for the fresh token to land and self-heal in
+		// place. A short window keeps the test fast while still exercising the wait loop.
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "2s")
+		var gotAuth []string
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			gotAuth = append(gotAuth, auth)
+			if auth != "Bearer "+fresh {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The credential file holds the STALE token until a simulated re-login rewrites the
+		// fresh one in mid-poll. The func reads it under a lock so the test is race-clean.
+		var mu sync.Mutex
+		onDisk := stale
+		planner.APIKeyFunc = func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			return onDisk
+		}
+		// Land the fresh token ~300ms after the 401 — long enough that the first refresh
+		// read (immediately after the 401) misses it, so only the bounded poll can recover.
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			mu.Lock()
+			onDisk = fresh
+			mu.Unlock()
+		}()
+
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+			t.Fatalf("complete should self-heal once the re-login token lands within the window: %v", err)
+		}
+		want := []string{"Bearer " + stale, "Bearer " + fresh}
+		if len(gotAuth) != len(want) {
+			t.Fatalf("got %d upstream requests, want %d (%q) — expected one stale 401 then one fresh-token retry after the re-login landed", len(gotAuth), len(want), gotAuth)
+		}
+		for i := range want {
+			if gotAuth[i] != want[i] {
+				t.Errorf("request %d Authorization = %q, want %q", i, gotAuth[i], want[i])
+			}
+		}
+	})
+
+	t.Run("401 with no re-login gives up at the window edge (bounded, not infinite)", func(t *testing.T) {
+		// A genuinely-dead credential with no re-login coming must still fail — after the
+		// grace window, not before it and not never. A tiny window keeps this fast.
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "100ms")
+		var n int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n++
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error"}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		planner.APIKeyFunc = func() string { return stale } // never rotates
+
+		start := time.Now()
+		_, err = planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools())
+		elapsed := time.Since(start)
+		var statusErr *UpstreamStatusError
+		if !errors.As(err, &statusErr) || statusErr.Status != http.StatusUnauthorized {
+			t.Fatalf("want an UpstreamStatusError 401 after the window, got %v", err)
+		}
+		if n != 1 {
+			t.Errorf("upstream was hit %d times, want exactly 1 (the stale token never re-sends)", n)
+		}
+		// It must have actually WAITED the window (no fresh token ever appeared), not given
+		// up instantly — and must not run away far past it.
+		if elapsed < 80*time.Millisecond {
+			t.Errorf("gave up after %v, want it to poll the ~100ms grace window before failing", elapsed)
+		}
+		if elapsed > 2*time.Second {
+			t.Errorf("took %v, want the bounded window to cap the wait near 100ms", elapsed)
 		}
 	})
 

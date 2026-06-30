@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -97,6 +98,85 @@ func TestStreamAnthropicRaw_Retries529ThenStreams(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&notifyStatus); got != statusOverloaded {
 		t.Fatalf("RetryNotify status = %d, want %d (529)", got, statusOverloaded)
+	}
+}
+
+// TestStreamAnthropicRaw_401SelfHealsOnReloginWithinWindow is the STREAMING witness for the
+// re-login race on the flagship `fak guard -- claude` passthrough. The pinned-subscription
+// stream sends the planner's rotating token (apiKey arg empty -> effectiveAPIKey supplies
+// it). When the token expires the upstream 401s the instant it dies, but the user logging
+// back in (or Claude Code refreshing) rewrites the credential a beat later. A single read at
+// the 401 instant still sees the stale token; the bounded poll must wait for the fresh token
+// to land and self-heal the live stream in place — not surface the 401, which would collapse
+// to the buffered fallback and ultimately strand the wrapped agent on its own /login.
+func TestStreamAnthropicRaw_401SelfHealsOnReloginWithinWindow(t *testing.T) {
+	t.Setenv("FAK_AUTH_REFRESH_WINDOW", "2s")
+	const stale = "sk-ant-oat01-stale"
+	const fresh = "sk-ant-oat01-fresh"
+
+	var mu sync.Mutex
+	var gotAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+fresh {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, anthropicStreamRetrySSE("ok"))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := NewProviderHTTPPlanner("anthropic", srv.URL, "claude-test", stale)
+	if err != nil {
+		t.Fatalf("NewProviderHTTPPlanner: %v", err)
+	}
+	// The credential file holds the stale token until a simulated re-login rewrites the fresh
+	// one in ~300ms after the 401 — after the first refresh read, so only the poll recovers it.
+	var tokMu sync.Mutex
+	onDisk := stale
+	p.APIKeyFunc = func() string {
+		tokMu.Lock()
+		defer tokMu.Unlock()
+		return onDisk
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		tokMu.Lock()
+		onDisk = fresh
+		tokMu.Unlock()
+	}()
+
+	rawBody := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	var sawStop bool
+	// apiKey arg is EMPTY: the pinned-subscription path, where the planner's effectiveAPIKey
+	// (the rotating token) authenticates and the 401 self-heal is armed.
+	err = p.StreamAnthropicRaw(context.Background(), rawBody, "", "", func(ev AnthropicSSEEvent) error {
+		if ev.Event == "message_stop" {
+			sawStop = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamAnthropicRaw should self-heal once the re-login token lands within the window, got: %v", err)
+	}
+	if !sawStop {
+		t.Fatal("did not see message_stop — the recovered stream did not complete")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"Bearer " + stale, "Bearer " + fresh}
+	if len(gotAuth) != len(want) {
+		t.Fatalf("upstream auth headers = %q, want %q (one stale 401 then one fresh-token stream after the re-login landed)", gotAuth, want)
+	}
+	for i := range want {
+		if gotAuth[i] != want[i] {
+			t.Errorf("request %d Authorization = %q, want %q", i, gotAuth[i], want[i])
+		}
 	}
 }
 

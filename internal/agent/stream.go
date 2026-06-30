@@ -98,6 +98,71 @@ func (c *upstreamCall) refreshAPIKey(p *HTTPPlanner) bool {
 	return true
 }
 
+// refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
+// A 401 on the rotating-subscription path means the token fak just sent is dead; the fix
+// is to send the rotated-in replacement. But when the token expired, the upstream 401s the
+// instant it dies while the credential file is only rewritten a beat later — by Claude Code
+// refreshing it, or by a user running `claude` / `claude /login` in another terminal to log
+// back in. A single read at the 401 instant therefore usually still sees the SAME stale
+// token, so refreshAPIKey gives up and the 401 surfaces to the wrapped agent, which then
+// drops into its own /login and the live guarded session is lost — the exact "logging in
+// again does not revive the session" failure. So here we POLL effectiveAPIKey across a
+// short window (authRefreshWindow, default 3s) until a different non-empty token appears,
+// adopt it, and report success so the caller re-sends in place. The common case — the token
+// already rotated on disk — is caught by the first read with zero added latency. A
+// genuinely-dead credential with no re-login coming polls out the window and returns false
+// (fail fast, as before, just after the grace period). The context cancels the wait
+// promptly, so a disconnected client or a cancelled turn never blocks here. A zero window
+// (FAK_AUTH_REFRESH_WINDOW=0) collapses this to the historical single read.
+func (c *upstreamCall) refreshAPIKeyWait(ctx context.Context, p *HTTPPlanner) bool {
+	if !c.authRefreshable {
+		return false
+	}
+	if fresh, ok := waitForFreshAPIKey(ctx, p, c.apiKey); ok {
+		c.apiKey = fresh
+		return true
+	}
+	return false
+}
+
+// waitForFreshAPIKey polls the planner's live APIKeyFunc for a non-empty token DIFFERENT
+// from current, across the bounded re-login grace window (authRefreshWindow). It returns
+// the fresh token the first time one appears, or ("", false) if the window elapses, the
+// context is cancelled, or the planner has no APIKeyFunc. The first read is free (zero
+// latency when the rotated token is already on disk); a zero window collapses to that
+// single read. Shared by the buffered (refreshAPIKeyWait) and streaming (CompleteStream /
+// StreamAnthropicRaw) 401 self-heal paths so all recover an in-session re-login identically.
+func waitForFreshAPIKey(ctx context.Context, p *HTTPPlanner, current string) (string, bool) {
+	if p == nil || p.APIKeyFunc == nil {
+		return "", false
+	}
+	if fresh := p.effectiveAPIKey(); fresh != "" && fresh != current {
+		return fresh, true
+	}
+	window := authRefreshWindow()
+	if window <= 0 {
+		return "", false
+	}
+	deadline := time.Now().Add(window)
+	for {
+		wait := authRefreshPollInterval
+		if rem := time.Until(deadline); rem < wait {
+			wait = rem
+		}
+		if wait <= 0 {
+			return "", false
+		}
+		if err := sleepCtx(ctx, wait); err != nil {
+			// Context cancelled/expired: do not keep an agent waiting on a re-login the
+			// caller has already abandoned. The 401 will surface, correct for an aborted turn.
+			return "", false
+		}
+		if fresh := p.effectiveAPIKey(); fresh != "" && fresh != current {
+			return fresh, true
+		}
+	}
+}
+
 // headers builds the per-request header set, applying the Anthropic-wire beta union
 // (the inbound client's negotiated betas merged with any the auth scheme required).
 // It mirrors the header logic Complete ran inline before the extraction.
@@ -343,7 +408,9 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
 		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring Complete.
-		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKey(p) {
+		// refreshAPIKeyWait polls the on-disk token across the re-login grace window, so a user
+		// logging back in mid-stream is adopted and the live session self-heals in place.
+		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKeyWait(ctx, p) {
 			triedAuthRefresh = true
 			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 			lastStatus = r.StatusCode

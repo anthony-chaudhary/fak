@@ -168,9 +168,12 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
 		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring
-		// Complete/CompleteStream. A no-op (func gone, empty, or the SAME token) falls through.
+		// Complete/CompleteStream. waitForFreshAPIKey polls the on-disk token across the
+		// re-login grace window so a user logging back in mid-stream is adopted and the live
+		// session self-heals; a no-op (func gone, or no fresher token within the window)
+		// falls through to the raw 401.
 		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && authRefreshable {
-			if fresh := p.effectiveAPIKey(); fresh != "" && fresh != key {
+			if fresh, ok := waitForFreshAPIKey(ctx, p, key); ok {
 				key = fresh
 				triedAuthRefresh = true
 				attempt--
