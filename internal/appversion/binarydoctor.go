@@ -1,11 +1,16 @@
 package appversion
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,10 +28,12 @@ type BinaryRecommendation struct {
 }
 
 type BinaryReport struct {
-	Executable      string                 `json:"executable"`
-	Images          []BinaryImage          `json:"images"`
-	Recommendations []BinaryRecommendation `json:"recommendations"`
-	Findings        int                    `json:"findings"`
+	Executable       string                 `json:"executable"`
+	Images           []BinaryImage          `json:"images"`
+	Processes        []BinaryProcess        `json:"processes,omitempty"`
+	ProcessScanError string                 `json:"process_scan_error,omitempty"`
+	Recommendations  []BinaryRecommendation `json:"recommendations"`
+	Findings         int                    `json:"findings"`
 }
 
 type BinaryImage struct {
@@ -41,6 +48,15 @@ type BinaryImage struct {
 	Newer       bool   `json:"newer_than_current,omitempty"`
 }
 
+type BinaryProcess struct {
+	PID         int    `json:"pid"`
+	Path        string `json:"path"`
+	Command     string `json:"command,omitempty"`
+	Current     bool   `json:"current,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	SameCurrent bool   `json:"same_as_current,omitempty"`
+}
+
 func DefaultBinaryDoctorCandidates(exe string) []string {
 	dir := filepath.Dir(exe)
 	return uniqueStrings([]string{
@@ -51,8 +67,12 @@ func DefaultBinaryDoctorCandidates(exe string) []string {
 }
 
 func DiagnoseBinary(exe string, candidates []string) BinaryReport {
+	return DiagnoseBinaryWithProcesses(exe, candidates, nil, "")
+}
+
+func DiagnoseBinaryWithProcesses(exe string, candidates []string, processes []BinaryProcess, processScanError string) BinaryReport {
 	exe, _ = filepath.Abs(exe)
-	rep := BinaryReport{Executable: exe}
+	rep := BinaryReport{Executable: exe, ProcessScanError: strings.TrimSpace(processScanError)}
 	current := readBinaryImage(exe, exe)
 	rep.Images = append(rep.Images, current)
 	for _, c := range uniqueStrings(candidates) {
@@ -105,6 +125,25 @@ func DiagnoseBinary(exe string, candidates []string) BinaryReport {
 			break
 		}
 	}
+	rep.Processes = annotateBinaryProcesses(exe, current.SHA256, rep.Images, processes)
+	staleLive := 0
+	for _, p := range rep.Processes {
+		if p.Current || p.SameCurrent || p.SHA256 == "" || current.SHA256 == "" {
+			continue
+		}
+		if p.SHA256 != current.SHA256 {
+			staleLive++
+		}
+	}
+	if staleLive > 0 {
+		rep.Recommendations = append(rep.Recommendations, BinaryRecommendation{
+			Check:    "binary-live-process",
+			Severity: SeverityWarn,
+			Finding:  fmt.Sprintf("%d live fak process(es) are running a different sibling image", staleLive),
+			Recommend: "let those processes exit or stop them deliberately before replacing the stale image. " +
+				"On Windows a live process can keep fak.exe locked, leaving operators on old commit/sweep logic.",
+		})
+	}
 	if len(rep.Recommendations) == 0 {
 		rep.Recommendations = append(rep.Recommendations, BinaryRecommendation{
 			Check:    "binary-shadow",
@@ -118,6 +157,17 @@ func DiagnoseBinary(exe string, candidates []string) BinaryReport {
 		}
 	}
 	return rep
+}
+
+func CollectBinaryProcesses(candidates []string) ([]BinaryProcess, string) {
+	candidates = uniqueStrings(candidates)
+	if runtime.GOOS == "windows" {
+		return collectBinaryProcessesWindows(candidates)
+	}
+	if runtime.GOOS == "linux" {
+		return collectBinaryProcessesLinux(candidates)
+	}
+	return nil, "process inventory unavailable on " + runtime.GOOS
 }
 
 func readBinaryImage(path, exe string) BinaryImage {
@@ -148,6 +198,156 @@ func readBinaryImage(path, exe string) BinaryImage {
 		}
 	}
 	return img
+}
+
+func annotateBinaryProcesses(exe, currentSHA string, images []BinaryImage, processes []BinaryProcess) []BinaryProcess {
+	if len(processes) == 0 {
+		return nil
+	}
+	byPath := map[string]BinaryImage{}
+	for _, img := range images {
+		byPath[cleanPathKey(img.Path)] = img
+	}
+	out := make([]BinaryProcess, 0, len(processes))
+	for _, p := range processes {
+		if p.PID <= 0 || strings.TrimSpace(p.Path) == "" {
+			continue
+		}
+		abs, _ := filepath.Abs(p.Path)
+		p.Path = abs
+		p.Current = samePath(abs, exe)
+		if img, ok := byPath[cleanPathKey(abs)]; ok {
+			p.SHA256 = img.SHA256
+		}
+		if p.SHA256 == "" {
+			p.SHA256 = hashFile(abs)
+		}
+		p.SameCurrent = p.Current || (p.SHA256 != "" && currentSHA != "" && p.SHA256 == currentSHA)
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].PID < out[j].PID
+	})
+	return out
+}
+
+type winProcRow struct {
+	PID     int    `json:"pid"`
+	Path    string `json:"path"`
+	Command string `json:"command"`
+}
+
+func collectBinaryProcessesWindows(candidates []string) ([]BinaryProcess, string) {
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+	quoted := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		abs, _ := filepath.Abs(c)
+		quoted = append(quoted, "'"+strings.ReplaceAll(abs, "'", "''")+"'")
+	}
+	script := "$paths=@(" + strings.Join(quoted, ",") + "); " +
+		"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | " +
+		"Where-Object { $paths -contains $_.ExecutablePath } | " +
+		"ForEach-Object { [pscustomobject]@{ pid=$_.ProcessId; path=$_.ExecutablePath; command=$_.CommandLine } } | " +
+		"ConvertTo-Json -Compress"
+	out, err := runBinaryDoctorTool(30*time.Second, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	if err != "" {
+		return nil, err
+	}
+	rows := parseBinaryRows[winProcRow](out)
+	procs := make([]BinaryProcess, 0, len(rows))
+	for _, r := range rows {
+		procs = append(procs, BinaryProcess{PID: r.PID, Path: r.Path, Command: r.Command})
+	}
+	return procs, ""
+}
+
+func collectBinaryProcessesLinux(candidates []string) ([]BinaryProcess, string) {
+	wanted := map[string]bool{}
+	for _, c := range candidates {
+		abs, err := filepath.Abs(c)
+		if err != nil {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = real
+		}
+		wanted[cleanPathKey(abs)] = true
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, "read /proc: " + err.Error()
+	}
+	var out []BinaryProcess
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		exePath, err := os.Readlink(filepath.Join("/proc", e.Name(), "exe"))
+		if err != nil {
+			continue
+		}
+		cleanExe := strings.TrimSuffix(exePath, " (deleted)")
+		if real, err := filepath.EvalSymlinks(cleanExe); err == nil {
+			cleanExe = real
+		}
+		if !wanted[cleanPathKey(cleanExe)] {
+			continue
+		}
+		out = append(out, BinaryProcess{PID: pid, Path: cleanExe, Command: readProcCmdline(pid)})
+	}
+	return out, ""
+}
+
+func readProcCmdline(pid int) string {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(b), "\x00", " "))
+}
+
+func runBinaryDoctorTool(timeout time.Duration, name string, args ...string) (string, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return "", err.Error()
+	}
+	return string(out), ""
+}
+
+func parseBinaryRows[T any](text string) []T {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	var rows []T
+	if json.Unmarshal([]byte(text), &rows) == nil {
+		return rows
+	}
+	var one T
+	if json.Unmarshal([]byte(text), &one) == nil {
+		return []T{one}
+	}
+	return nil
+}
+
+func hashFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func uniqueStrings(in []string) []string {

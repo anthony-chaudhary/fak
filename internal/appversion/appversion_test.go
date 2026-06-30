@@ -68,6 +68,47 @@ func TestDiagnoseBinaryCleanWhenSiblingsMatch(t *testing.T) {
 	}
 }
 
+func TestDiagnoseBinaryWarnsOnLiveDifferingProcess(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "fak.exe")
+	extless := filepath.Join(dir, "fak")
+	writeBinaryFixture(t, exe, "current-binary", time.Unix(200, 0))
+	writeBinaryFixture(t, extless, "stale-live-binary", time.Unix(100, 0))
+
+	rep := DiagnoseBinaryWithProcesses(exe, []string{exe, extless}, []BinaryProcess{
+		{PID: 123, Path: extless, Command: extless + " sweep --json"},
+	}, "")
+
+	if severityOfBinary(rep, "binary-live-process") != SeverityWarn {
+		t.Fatalf("binary-live-process severity = %q, want warn (%+v)", severityOfBinary(rep, "binary-live-process"), rep.Recommendations)
+	}
+	if len(rep.Processes) != 1 {
+		t.Fatalf("processes = %d, want 1 (%+v)", len(rep.Processes), rep.Processes)
+	}
+	if rep.Processes[0].SameCurrent {
+		t.Fatalf("live stale process marked same-current: %+v", rep.Processes[0])
+	}
+}
+
+func TestDiagnoseBinaryDoesNotWarnOnLiveMatchingProcess(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "fak.exe")
+	extless := filepath.Join(dir, "fak")
+	writeBinaryFixture(t, exe, "same-binary", time.Unix(100, 0))
+	writeBinaryFixture(t, extless, "same-binary", time.Unix(200, 0))
+
+	rep := DiagnoseBinaryWithProcesses(exe, []string{exe, extless}, []BinaryProcess{
+		{PID: 123, Path: extless, Command: extless + " sweep --json"},
+	}, "")
+
+	if severityOfBinary(rep, "binary-live-process") != "" {
+		t.Fatalf("binary-live-process should not warn for matching image: %+v", rep.Recommendations)
+	}
+	if len(rep.Processes) != 1 || !rep.Processes[0].SameCurrent {
+		t.Fatalf("matching live process not annotated same-current: %+v", rep.Processes)
+	}
+}
+
 func writeBinaryFixture(t *testing.T, path, body string, mod time.Time) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
