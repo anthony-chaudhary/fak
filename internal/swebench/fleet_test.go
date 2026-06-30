@@ -17,7 +17,7 @@ import (
 // temp git repo stands in for the cloned instance. It proves the MECHANICS — tool
 // dispatch, edits applied to a real worktree, the unified-diff capture in the exact
 // harness shape, the step cap, path-escape refusal, and the honest "no planner"
-// error. Whether a REAL model resolves instances is the DGX/GPU residual, not this.
+// error. Whether a REAL model resolves instances is the GPU-server residual, not this.
 
 // fakePlanner is an in-process CodePlanner whose per-turn response is supplied by
 // fn(call, messages). It records the call count so a test can assert turn budget.

@@ -16,7 +16,7 @@ import (
 //
 //	1. wall-time + prefill/KV reuse  — fak's prefill work-elimination is a
 //	   cache-reuse metric directly comparable to bench's SERVER-stream cache-hit /
-//	   KV-reuse (computed deterministically here; live wall-clock on DGX).
+//	   KV-reuse (computed deterministically here; live wall-clock on the GPU server).
 //	2. turns + tokens                — fak geometry Turns maps to bench's
 //	   actual_agent_steps = (len(messages)-2)//2 (AGENT stream).
 //	3. in-process adjudication cost  — fak-native; bench has no analog (the
@@ -38,7 +38,7 @@ const (
 const (
 	ProvComputed = "computed_deterministic" // exact arithmetic, no model (contention-free floor)
 	ProvLive     = "live_measured"          // real wall-clock / real run
-	ProvGated    = "gated_dgx_only"         // needs Docker / a capable model — not produced on this box
+	ProvGated    = "gated_gpu_server_only"  // needs Docker / a capable model — not produced on this box
 )
 
 // Metric is one named number with a unit and an honesty note.
@@ -145,10 +145,10 @@ func BuildComparison(in CompareInputs) Comparison {
 	// head-to-head vs a tuned SGLang/llama server, which also reuses a shared prefix
 	// under seq_cp/kv_unified. Thematically the cache-reuse story bench's server-side
 	// token_hit_ratio also tracks, but a different quantity (an unbounded work-ratio,
-	// not a bounded 0-100% hit %). Live TTFT/wall-clock is the gated DGX number.).
+	// not a bounded 0-100% hit %). Live TTFT/wall-clock is the gated GPU-server number.).
 	fam1 := MetricFamily{
 		Name:        "prefill / KV-reuse work-elimination (deterministic)",
-		BenchAnalog: "related to (NOT the same quantity as) bench's server-stream cache-hit/KV-reuse; live TTFT/wall-clock is the gated DGX number, not produced here",
+		BenchAnalog: "related to (NOT the same quantity as) bench's server-stream cache-hit/KV-reuse; live TTFT/wall-clock is the gated GPU-server number, not produced here",
 		Kind:        KindFakNative,
 		Provenance:  ProvComputed,
 	}
@@ -209,7 +209,7 @@ func BuildComparison(in CompareInputs) Comparison {
 		}
 		c.Resolve = in.Eval
 	} else {
-		reason := "no predictions graded — resolve-rate needs a capable model + Docker (DGX); ~0 with the local 135M model"
+		reason := "no predictions graded — resolve-rate needs a capable model + Docker (GPU server); ~0 with the local 135M model"
 		if in.Eval != nil && in.Eval.Reason != "" {
 			reason = in.Eval.Reason
 		}
@@ -232,7 +232,7 @@ func BuildComparison(in CompareInputs) Comparison {
 	c.Honesty = []string{
 		"prefill work-elimination is a deterministic floor (exact token arithmetic), NOT a measured wall-clock — live timing is the GPU server headline",
 		"cross-worker reuse (B/C) is the value-stack lever; the A/C and turn-tax (A/B) numbers are fak-vs-harness-arms, reported as such, not as a tuned-SGLang head-to-head",
-		"resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on DGX via the same harness",
+		"resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on the GPU server via the same harness",
 		"to be scraped by bench like SGLang, fak serve needs a Prometheus /metrics route exposing kernel.Counters() — gap noted, not yet shipped",
 	}
 	return c
@@ -371,7 +371,7 @@ func provLabel(p string) string {
 	case ProvLive:
 		return "live (measured)"
 	case ProvGated:
-		return "gated (DGX-only)"
+		return "gated (GPU-server-only)"
 	}
 	return p
 }

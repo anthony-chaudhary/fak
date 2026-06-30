@@ -31,7 +31,7 @@ import (
 // the exact harness shape, the step cap, and the honest "no planner" error. What is
 // NOT witnessed here and remains the GPU/DGX residual: whether a real model actually
 // RESOLVES instances (resolve-rate). Drive that with `fak swebench run --agent fleet`
-// against a live `fak serve` on the DGX, then grade with the Docker harness.
+// against a live `fak serve` on the GPU server, then grade with the Docker harness.
 
 const maxToolOutput = 8192 // cap a single tool result fed back to the model
 
@@ -308,7 +308,7 @@ func capturePatch(ctx context.Context, dir string) (string, error) {
 }
 
 // gitCheckoutWorkspace is the production worktree preparer: clone the instance's
-// GitHub repo and check out its base commit. Requires network + git (the DGX
+// GitHub repo and check out its base commit. Requires network + git (the GPU server
 // path). Tests inject a fixture preparer instead.
 func gitCheckoutWorkspace(ctx context.Context, in Instance, dir string) error {
 	repo := in.RepoFull()

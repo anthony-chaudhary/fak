@@ -34,7 +34,7 @@ func evalHarnessTimeout() time.Duration {
 // logs/run_evaluation/<run_id>/report.json (Benchmark repo commands/_swebench_grade.py).
 // We do the same locally when the harness + Docker are present, and otherwise
 // return an HONESTLY GATED result — on this Mac there is no Docker, so resolve-rate
-// is a DGX-only metric and we say so rather than fabricate a number.
+// is a GPU-server-only metric and we say so rather than fabricate a number.
 
 // EvalCapability reports whether the official resolve-rate harness can run on this
 // box. Both Docker and the swebench python module are required; the eval builds a
@@ -70,7 +70,7 @@ func DetectEvalCapability(python string) EvalCapability {
 	cap.Runnable = cap.DockerPresent && cap.HarnessPresent
 	switch {
 	case !cap.DockerPresent && !cap.HarnessPresent:
-		cap.Reason = "no Docker and no swebench harness — resolve-rate is a DGX/Docker-only metric on this box"
+		cap.Reason = "no Docker and no swebench harness — resolve-rate is a GPU-server/Docker-only metric on this box"
 	case !cap.DockerPresent:
 		cap.Reason = "Docker not found — the harness builds a per-repo image to run the tests"
 	case !cap.HarnessPresent:
@@ -106,13 +106,13 @@ type EvalResult struct {
 	ResolveRatePct float64  `json:"resolve_rate_pct"`
 	ResolvedIDs    []string `json:"resolved_ids,omitempty"`
 	ReportPath     string   `json:"report_path,omitempty"`
-	Command        string   `json:"command"` // the exact harness invocation (for reproduction / DGX runs)
+	Command        string   `json:"command"` // the exact harness invocation (for reproduction / GPU-server runs)
 }
 
 var resolvedRe = regexp.MustCompile(`(?i)Resolved\s+(\d+)\s*/\s*(\d+)`)
 
 // RunEval runs the official harness locally if it can, else returns a gated
-// EvalResult. It always populates Command with the exact invocation so a DGX run
+// EvalResult. It always populates Command with the exact invocation so a GPU-server run
 // is one copy-paste away even when this box can't grade.
 func RunEval(cfg EvalConfig) (EvalResult, error) {
 	if cfg.MaxWorkers <= 0 {
@@ -284,7 +284,7 @@ func firstRawInt(m map[string]json.RawMessage, keys ...string) (int, bool) {
 }
 
 // EvalCommandHint returns the copy-pasteable harness command for a predictions
-// file, for running the resolve grade on a Docker-capable box (the DGX) when this
+// file, for running the resolve grade on a Docker-capable box (the GPU server) when this
 // box cannot. Mirrors the invocation bench uses.
 func EvalCommandHint(predictionsPath, runID string, maxWorkers int) string {
 	if runID == "" {

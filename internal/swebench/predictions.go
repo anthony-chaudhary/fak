@@ -12,7 +12,7 @@ import (
 // to `python -m swebench.harness.run_evaluation --predictions_path <dir>/preds.json`
 // (see the Benchmark repo's commands/_swebench_grade.py), so emitting this shape
 // lets a fak `solve` run be graded by the identical harness — the apples-to-apples
-// resolve-rate path on a box with Docker + the dataset (the DGX).
+// resolve-rate path on a box with Docker + the dataset (the GPU server).
 type Prediction struct {
 	InstanceID      string `json:"instance_id"`
 	ModelNameOrPath string `json:"model_name_or_path"`
