@@ -344,6 +344,9 @@ func renderCommitScore(stdout io.Writer, res safecommit.Result) {
 	for _, note := range res.ScoreNotes {
 		fmt.Fprintf(stdout, "    score note: %s\n", note)
 	}
+	if res.LockHoldNS > 0 {
+		fmt.Fprintf(stdout, "  lock hold: %s\n", time.Duration(res.LockHoldNS))
+	}
 }
 
 func renderCommitReview(stdout io.Writer, res safecommit.Result) {

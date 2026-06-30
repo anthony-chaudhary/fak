@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/witness"
@@ -299,6 +300,47 @@ func TestPathspecAssertionRecorderRunsAfterUnlock(t *testing.T) {
 				t.Fatalf("pathspec assertion note ran while lock was held: events=%v", events)
 			}
 		})
+	}
+}
+
+func TestLockHoldDurationMeasuresOnlyAcquiredLockWindow(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	start := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	opts.Now = func() time.Time {
+		defer func() { calls++ }()
+		if calls == 0 {
+			return start
+		}
+		return start.Add(42 * time.Millisecond)
+	}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("happy path should verify, got %+v", res)
+	}
+	if got := time.Duration(res.LockHoldNS); got != 42*time.Millisecond {
+		t.Fatalf("LockHoldNS = %s, want 42ms", got)
+	}
+
+	opts = baseOpts()
+	opts.Now = func() time.Time {
+		t.Fatal("Now must not be called when the lock is never acquired")
+		return start
+	}
+	res, err = CommitWith(context.Background(), g.run, busyLock, opts)
+	if err != nil {
+		t.Fatalf("LOCK_BUSY must be a value, not an error: %v", err)
+	}
+	if res.Reason != ReasonLockBusy {
+		t.Fatalf("Reason = %q, want %q", res.Reason, ReasonLockBusy)
+	}
+	if res.LockHoldNS != 0 {
+		t.Fatalf("LockHoldNS = %d for an unacquired lock, want 0", res.LockHoldNS)
 	}
 }
 

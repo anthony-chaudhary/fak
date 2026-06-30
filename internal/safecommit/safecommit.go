@@ -86,6 +86,7 @@ type Options struct {
 	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
 	Window   *Window           // optional adaptive process-local writer window
 	Review   *ReviewOptions    // optional pre-commit cross-model review rung
+	Now      func() time.Time  // optional test clock for lock-hold measurement
 }
 
 type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
@@ -155,6 +156,7 @@ type Result struct {
 	Detail     string                   `json:"detail,omitempty"`
 	RacedExtra []string                 `json:"raced_extra_paths,omitempty"`
 	HeadBefore string                   `json:"head_before,omitempty"`
+	LockHoldNS int64                    `json:"lock_hold_ns,omitempty"`
 	Review     *modelroute.ReviewResult `json:"review,omitempty"`
 }
 
@@ -242,7 +244,18 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		}
 		return res, fmt.Errorf("safecommit: lock: %w", err)
 	}
-	defer unlock()
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	lockStart := now()
+	defer func() {
+		held := now().Sub(lockStart)
+		if held > 0 {
+			res.LockHoldNS = held.Nanoseconds()
+		}
+		unlock()
+	}()
 
 	// (6) Capture HEAD, then commit by pathspec with the message in a file.
 	if head, code, herr := run(ctx, opts.Dir, "rev-parse", "HEAD"); herr != nil {

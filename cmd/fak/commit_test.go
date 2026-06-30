@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -132,6 +133,7 @@ func TestRunCommit_jsonShapeAndRaceExitCode(t *testing.T) {
 			Reason:     safecommit.ReasonPathspecRace,
 			RacedExtra: []string{"internal/peer/swept.go"},
 			HeadBefore: "0000111122223333",
+			LockHoldNS: 17_000_000,
 		}, nil
 	})
 	var out, errb bytes.Buffer
@@ -149,6 +151,29 @@ func TestRunCommit_jsonShapeAndRaceExitCode(t *testing.T) {
 	}
 	if res.Score == 0 || res.Grade == "" {
 		t.Fatalf("json result should include scored outcome, got %+v", res)
+	}
+	if res.LockHoldNS != 17_000_000 {
+		t.Fatalf("json result lost lock hold duration: %+v", res)
+	}
+}
+
+func TestRunCommit_humanOutputShowsLockHoldDuration(t *testing.T) {
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{
+			Committed:  true,
+			Verified:   true,
+			SHA:        "deadbeefcafe",
+			Paths:      o.Paths,
+			LockHoldNS: int64(23 * time.Millisecond),
+		}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--path", "a.go", "-m", "msg"})
+	if code != 0 {
+		t.Fatalf("want 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "lock hold: 23ms") {
+		t.Fatalf("human output should expose lock hold duration, got %q", out.String())
 	}
 }
 
