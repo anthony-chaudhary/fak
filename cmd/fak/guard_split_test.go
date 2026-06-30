@@ -169,7 +169,10 @@ func TestGuardSplitEnabled(t *testing.T) {
 		{"auto headless child no-ops", "auto", map[string]string{"WT_SESSION": "x"}, true, false, false, false},
 		{"empty defaults to auto", "", map[string]string{"TMUX": "y"}, true, true, true, false},
 		{"on forces enable even bare", "on", nil, false, false, true, false},
+		{"on nested never re-splits", "on", map[string]string{"FAK_GUARD_SPLIT": "1"}, true, true, false, false},
+		{"on-alias true nested never re-splits", "true", map[string]string{"FAK_GUARD_SPLIT": "1"}, true, true, false, false},
 		{"off disables even in WT", "off", map[string]string{"WT_SESSION": "x"}, true, true, false, false},
+		{"off disables even when nested", "off", map[string]string{"FAK_GUARD_SPLIT": "1"}, true, true, false, false},
 		{"bogus errors", "sideways", nil, true, true, false, true},
 	}
 	for _, tc := range cases {

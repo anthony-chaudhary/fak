@@ -121,14 +121,48 @@ func TestGuardHeadlessNoTokenFailsLoudNotHang(t *testing.T) {
 	}
 }
 
+// TestGuardEmptyNamedAPIKeyFailsLoud is the witness for the empty-`--api-key-env` accident:
+// naming --api-key-env ANTHROPIC_API_KEY is the explicit opt-in to API billing, so an EMPTY
+// value (a typo, a sudo-stripped env, a CI secret that did not inject) must EXIT with guidance
+// rather than silently demote to the subscription pin (which bills the wrong account). The run
+// also has no subscription token, so the only way to leave 0/2 is the empty-key gate firing
+// before the headless-no-token path — which is what proves the new gate, not the old one.
+func TestGuardEmptyNamedAPIKeyFailsLoud(t *testing.T) {
+	emptyCfg := t.TempDir()
+	code, out, timedOut := runGuardE2E(t,
+		"--provider anthropic --api-key-env ANTHROPIC_API_KEY -- claude",
+		map[string]string{
+			"CLAUDE_CONFIG_DIR":       emptyCfg,
+			"ANTHROPIC_API_KEY":       "", // named but empty: the accident this gate refuses.
+			"CLAUDE_CODE_OAUTH_TOKEN": "",
+		},
+	)
+	if timedOut {
+		t.Fatalf("guard hung on an empty named --api-key-env instead of failing loud.\noutput:\n%s", out)
+	}
+	if code != 2 {
+		t.Fatalf("want exit 2 (fail loud) on an empty named --api-key-env; got %d.\noutput:\n%s", code, out)
+	}
+	if !strings.Contains(out, "is set but that env var is empty") {
+		t.Fatalf("want the empty-named-key refusal guidance on stderr; got:\n%s", out)
+	}
+}
+
 // TestGuardHeadlessWithAPIKeySpawnsNotRefused is the false-positive guard: a headless run with
 // NO subscription token but a real ANTHROPIC_API_KEY is a legitimate API-billing passthrough
-// (the child's own key flows upstream). guard must NOT fail loud here — it must spawn. The
-// trivial child (`printf`) runs to a clean exit, so a 0 exit proves guard got past the gate.
+// (the child's own key flows upstream). guard must NOT fail loud here — it must spawn the
+// trivial child (`cmd /c exit 0` on Windows, `sh -c true` on Unix) and run it to a clean exit.
+//
+// The witness is NOT a bare 0 exit (a future early-return that never spawns would also exit 0
+// and silently pass). It is the guard EXIT SUMMARY — `fak guard: N kernel decision(s)` — which
+// finishGuardChildAndReport prints ONLY after child.Run() returns. So asserting the summary
+// line appears proves the child actually spawned AND ran to completion past the headless gate,
+// which a 0-exit early-return cannot fake. --quiet is dropped here on purpose so the summary
+// (and the kernel-adjudicated banner) reach the captured output.
 func TestGuardHeadlessWithAPIKeySpawnsNotRefused(t *testing.T) {
 	emptyCfg := t.TempDir()
 	code, out, timedOut := runGuardE2E(t,
-		"--provider anthropic --quiet -- "+guardE2EExitZeroCommand(),
+		"--provider anthropic -- "+guardE2EExitZeroCommand(),
 		map[string]string{
 			"CLAUDE_CONFIG_DIR":       emptyCfg,
 			"ANTHROPIC_API_KEY":       "sk-ant-api03-e2e-test",
@@ -140,5 +174,10 @@ func TestGuardHeadlessWithAPIKeySpawnsNotRefused(t *testing.T) {
 	}
 	if code == 2 || strings.Contains(out, "refusing to spawn a headless agent") {
 		t.Fatalf("REGRESSION: guard wrongly REFUSED a legitimate ANTHROPIC_API_KEY passthrough; want spawn, got exit %d.\noutput:\n%s", code, out)
+	}
+	// The exit summary only prints after the child ran — it is the spawn-and-complete witness a
+	// bare 0 exit is not.
+	if !strings.Contains(out, "kernel decision(s)") {
+		t.Fatalf("want the guard exit summary (proof the child actually spawned and ran), got exit %d.\noutput:\n%s", code, out)
 	}
 }

@@ -114,7 +114,7 @@ func cmdGuard(argv []string) {
 	remoteServe := fs.String("remote-serve", "", "point the guarded turn's INFERENCE at a remote `fak serve` running on a lab box you chose (HOST or HOST:PORT, default port 8080). Forces the OpenAI-compatible wire and upstream base http://HOST:PORT/v1 (the /v1 fak serve serves its chat route under), so the dev turn runs on the lab GPU while the kernel still adjudicates locally. Mutually exclusive with --base-url; preflights GET /healthz AND /v1/models and fails loud if the box is not serving the /v1 surface.")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
-	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
+	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
@@ -431,7 +431,11 @@ func cmdGuard(argv []string) {
 		if pinUpstream {
 			tokenEnv := *oauthTokenEnv
 			apiKeyFunc = func() string {
-				tok, _, err := resolveAnthropicOAuthToken(tokenEnv)
+				// Quiet resolve: this runs on EVERY turn to pick up the rotated token, so a
+				// genuinely-expired credential must not reprint the expiry WARNING per request
+				// (it fired once at boot via resolveGuardUpstream). io.Discard silences only the
+				// warning; the token routing/precedence is identical.
+				tok, _, err := resolveAnthropicOAuthTokenWarn(tokenEnv, io.Discard)
 				if err != nil {
 					return ""
 				}
@@ -998,7 +1002,20 @@ func guardAnthropicOAuthLoader(tokenEnv, cfgDir string, now func() time.Time, wa
 // else ~/.claude. Returns the token and a human source label, or an error that
 // names every place it looked so the operator can fix the setup.
 func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err error) {
-	loader, tried := guardAnthropicOAuthLoader(tokenEnv, guardClaudeConfigDir(), time.Now, os.Stderr)
+	// Boot-time/diagnostic callers want the expired-token WARNING on stderr (it fires at most
+	// once per resolve here). The hot per-request refresh path must pass io.Discard via
+	// resolveAnthropicOAuthTokenWarn so a genuinely-expired credential does not reprint the
+	// multi-line warning every turn and bury the agent's output.
+	return resolveAnthropicOAuthTokenWarn(tokenEnv, os.Stderr)
+}
+
+// resolveAnthropicOAuthTokenWarn is resolveAnthropicOAuthToken with the expired-token warning
+// sink made explicit. The credential file's expiry warning (guardOAuthCredentialsSource.warn)
+// is invaluable ONCE at startup but becomes stderr spam when re-emitted on the per-request
+// rotation re-read (apiKeyFunc in cmdGuard), so that path passes io.Discard while the boot
+// path passes os.Stderr. Routing is unchanged — same loader, same source precedence.
+func resolveAnthropicOAuthTokenWarn(tokenEnv string, warn io.Writer) (token, source string, err error) {
+	loader, tried := guardAnthropicOAuthLoader(tokenEnv, guardClaudeConfigDir(), time.Now, warn)
 	if v, src, ok := loader.LookupSource(guardAnthropicOAuthSecretKey); ok {
 		return v, src, nil
 	}

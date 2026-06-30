@@ -111,6 +111,21 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 		apiKey = os.Getenv(apiKeyEnv)
 	}
 
+	// An explicitly-named --api-key-env that is EMPTY on the Anthropic wire is almost
+	// certainly an accident the operator wants to hear about, not silently absorb: naming
+	// the key is the explicit opt-IN to API billing, so an empty value (a typo, a sudo-
+	// stripped env, a CI secret that did not inject) would otherwise collapse to apiKey=""
+	// and fall straight into subscription OAuth below — billing the WRONG account with no
+	// signal. Fail loud here, mirroring the --require-key-env gate (guard.go), UNLESS
+	// --anthropic-oauth was passed (that flag means "force the subscription regardless", so
+	// an empty named key is not a contradiction there). Scoped to anthropic on purpose: for
+	// the OpenAI-compatible wires an empty named key is documented passthrough convention
+	// (the client's own key flows upstream), so it must NOT exit there.
+	if guardEmptyNamedKeyIsError(up, apiKeyEnv, apiKey, forceOAuth) {
+		fmt.Fprintf(os.Stderr, "fak guard: --api-key-env %s is set but that env var is empty — export it for API billing, drop the flag to use your Claude Pro/Max subscription, or pass --anthropic-oauth to force the subscription.\n", apiKeyEnv)
+		os.Exit(2)
+	}
+
 	// Subscription is the DEFAULT for Claude: whenever the upstream is Anthropic and no
 	// API key was EXPLICITLY configured (--api-key-env), fak sources the Claude Pro/Max
 	// OAuth token and sends it upstream as Authorization: Bearer + the oauth beta (the
@@ -184,6 +199,22 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 		claudeConfigDir: claudeConfigDir, loginStatus: loginStatus, canServe: canServe,
 		remoteServe: remote,
 	}
+}
+
+// guardEmptyNamedKeyIsError is the pure decision behind the empty-`--api-key-env` fail-loud
+// gate: it is an error ONLY when the upstream is the Anthropic wire, an api-key env var was
+// EXPLICITLY named (apiKeyEnv != ""), that var resolved EMPTY (after trimming), and
+// --anthropic-oauth was NOT passed. Naming the key is the explicit opt-in to API billing, so
+// an empty value is an accident worth refusing rather than silently demoting to subscription
+// OAuth (which would bill the wrong account). forceOAuth short-circuits to false: that flag
+// means "force the subscription", so an empty named key beside it is not a contradiction. The
+// non-Anthropic wires treat an empty named key as documented passthrough, so they are never an
+// error here. Pure (no I/O, no exit) so the precedence is unit-tested without standing guard up.
+func guardEmptyNamedKeyIsError(provider, apiKeyEnv, apiKeyValue string, forceOAuth bool) bool {
+	if forceOAuth || provider != "anthropic" {
+		return false
+	}
+	return strings.TrimSpace(apiKeyEnv) != "" && strings.TrimSpace(apiKeyValue) == ""
 }
 
 func guardClaudeLoginPosture() (string, accounts.LoginStatus, bool) {
@@ -521,12 +552,32 @@ func formatVCacheSnapshotPointer(turns int, path string) string {
 		turns, path)
 }
 
+// guardSummaryResetPrefix is the terminal escape the exit summary emits before its first line
+// so it never inherits a dangling SGR style or a hidden cursor the wrapped agent's torn-down
+// alt-screen left. "\x1b[0m" resets all SGR attributes (color, bold, reverse), "\x1b[?25h"
+// re-shows the cursor a TUI may have hidden. It is emitted ONLY to a real terminal (isTTY): a
+// summary piped to a file or a `-p` JSON capture must stay byte-clean, so a non-TTY sink gets
+// the empty string. Pure (string in, string out) so the TTY-gated behavior is unit-tested.
+func guardSummaryResetPrefix(isTTY bool) string {
+	if !isTTY {
+		return ""
+	}
+	return "\x1b[0m\x1b[?25h"
+}
+
 func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
 
 	// Tear the gateway down and report what the kernel decided this session.
 	cancel()
 	serr := <-serveErr
 	if !quiet {
+		// The wrapped agent (Claude Code) paints a full-screen alternate-screen TUI over this
+		// same terminal and, on a crash or an abnormal exit, can tear it down mid-escape-sequence
+		// — leaving a dangling SGR color/style or a hidden cursor. The exit summary then renders
+		// mis-colored or invisible. Emit a soft reset (SGR reset + show-cursor) onto a clean
+		// baseline FIRST, but only when stderr is a real terminal: piping the summary to a file or
+		// a JSON capture must stay byte-clean, so a non-TTY stderr gets no escape bytes.
+		fmt.Fprint(os.Stderr, guardSummaryResetPrefix(guardFdIsTerminal(int(os.Stderr.Fd()))))
 		fmt.Fprintln(os.Stderr)
 		sum := srv.AdjudicationSummary()
 		kc := srv.KernelCounters()

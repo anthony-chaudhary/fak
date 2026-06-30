@@ -161,11 +161,23 @@ func renderGuardSplitPlan(p guardSplitPlan) string {
 // CI / plain-terminal launch falls through to a no-op, so the default is invisible and
 // harmless exactly where a split cannot help — there is zero behavior change for those paths.
 func guardSplitEnabled(mode string, getenv func(string) string, stdinInteractive, childInteractive bool) (bool, error) {
-	switch strings.TrimSpace(strings.ToLower(mode)) {
+	normalized := strings.TrimSpace(strings.ToLower(mode))
+	// The nesting guard applies to EVERY enabling mode, not just auto: the spawned overlay
+	// pane and the inline agent both inherit FAK_GUARD_SPLIT=1 (set in cmdGuard), so a second
+	// `fak guard` launched inside this session — including an explicit --split=on a wrapper or
+	// the agent itself runs — must never re-split an already-split pane. Previously only the
+	// auto branch consulted FAK_GUARD_SPLIT, so --split=on (and its true/1/yes aliases) would
+	// recursively split. off short-circuits before this so a deliberate opt-OUT is honored
+	// even inside a split.
+	switch normalized {
+	case "off", "false", "0", "no":
+		return false, nil
+	}
+	if strings.TrimSpace(getenv("FAK_GUARD_SPLIT")) != "" {
+		return false, nil // already inside a fak split — never nest, regardless of mode.
+	}
+	switch normalized {
 	case "", "auto":
-		if strings.TrimSpace(getenv("FAK_GUARD_SPLIT")) != "" {
-			return false, nil // already inside a fak split — never nest.
-		}
 		if !stdinInteractive || !childInteractive {
 			return false, nil // headless / piped / -p run: nothing to sit beside.
 		}
@@ -173,8 +185,6 @@ func guardSplitEnabled(mode string, getenv func(string) string, stdinInteractive
 		return inMux, nil
 	case "on", "true", "1", "yes":
 		return true, nil
-	case "off", "false", "0", "no":
-		return false, nil
 	default:
 		return false, fmt.Errorf("--split must be auto|on|off, got %q", mode)
 	}

@@ -664,6 +664,23 @@ func TestFormatVCacheSnapshotPointer(t *testing.T) {
 	}
 }
 
+// TestGuardSummaryResetPrefix pins the exit-summary terminal-reset fix: on a real terminal the
+// summary first emits an SGR reset + show-cursor so it never inherits a dangling style or a
+// hidden cursor the wrapped agent's torn-down alt-screen left, but a non-TTY sink (a file or a
+// `-p` JSON capture) must stay byte-clean and get no escape bytes.
+func TestGuardSummaryResetPrefix(t *testing.T) {
+	if got := guardSummaryResetPrefix(false); got != "" {
+		t.Fatalf("a non-TTY summary sink must get no escape bytes; got %q", got)
+	}
+	got := guardSummaryResetPrefix(true)
+	if !strings.Contains(got, "\x1b[0m") {
+		t.Fatalf("a TTY summary must reset SGR attributes; got %q", got)
+	}
+	if !strings.Contains(got, "\x1b[?25h") {
+		t.Fatalf("a TTY summary must re-show the cursor; got %q", got)
+	}
+}
+
 // TestFormatAuditSummaryCompactionStatusAndReasons pins the compaction-line fix: "0 fired,
 // N bailed" must NOT read as an undifferentiated lump. The line must (a) state whether the
 // lever is ENABLED (budget>0) and merely idle vs DISABLED — the two readings of "0 fired"
@@ -1019,6 +1036,51 @@ func TestGuardOAuthCredentialsSourceExpiredIsAbsent(t *testing.T) {
 	}
 }
 
+// TestResolveAnthropicOAuthTokenWarnRoutesWarning proves the per-request de-spam fix: the
+// expired-token WARNING is routed to the caller-supplied writer, so the boot path (os.Stderr)
+// keeps the one-time warning while the hot per-request rotation re-read (io.Discard) stays
+// silent — an expired credential no longer reprints the multi-line warning every turn.
+func TestResolveAnthropicOAuthTokenWarnRoutesWarning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	// An expired .credentials.json is the source whose readOnce emits the expiry warning. No
+	// env token and no .oauth-token, so this is the only source consulted.
+	const tokenEnv = "FAK_TEST_OAUTH_WARN_ENV"
+	t.Setenv(tokenEnv, "")
+	body := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"expiresAt":%d}}`,
+		"sk-ant-oat01-expired", time.Now().Add(-time.Hour).UnixMilli())
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A captured-writer resolve surfaces the expiry warning (the boot path's behavior).
+	var buf bytes.Buffer
+	if _, _, err := resolveAnthropicOAuthTokenWarn(tokenEnv, &buf); err == nil {
+		t.Fatalf("expected no-token error (only an expired credential is present); got nil")
+	}
+	if !strings.Contains(buf.String(), "expired") {
+		t.Fatalf("boot-path resolve must warn about the expired token; got %q", buf.String())
+	}
+
+	// io.Discard resolve (the per-request path) must produce no warning — that is the de-spam.
+	// Re-checking the SAME expired file proves the silencing is the sink choice, not a one-shot.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = pw
+	if _, _, err := resolveAnthropicOAuthTokenWarn(tokenEnv, io.Discard); err == nil {
+		t.Fatalf("expected no-token error on the discard path too; got nil")
+	}
+	os.Stderr = origStderr
+	_ = pw.Close()
+	leaked, _ := io.ReadAll(pr)
+	if len(strings.TrimSpace(string(leaked))) != 0 {
+		t.Fatalf("per-request io.Discard resolve must not write the expiry warning anywhere; leaked %q", string(leaked))
+	}
+}
+
 // TestGuardOAuthCredentialsSourceTornReadRetries proves the mid-rewrite race fix: when
 // .credentials.json EXISTS but a read catches a torn/unparseable body (Claude Code is
 // rewriting it ~hourly), Lookup retries instead of reporting a false miss that would fall
@@ -1259,6 +1321,38 @@ func TestGuardSubscriptionDefaultIgnoresAmbientAPIKey(t *testing.T) {
 	}
 	if us.ambientKeyOverridden {
 		t.Fatalf("ambientKeyOverridden must be false when API billing was explicitly chosen; got %+v", us)
+	}
+}
+
+// guardEmptyNamedKeyIsError is the pure decision behind the empty-`--api-key-env` fail-loud
+// gate: an explicitly-named anthropic api-key env that resolved empty is an accidental opt-in
+// to API billing that would otherwise silently demote to the subscription pin (the wrong
+// account). It must fire ONLY for the Anthropic wire, only when the env was named, only when
+// the value is empty, and never when --anthropic-oauth forces the subscription regardless.
+func TestGuardEmptyNamedKeyIsError(t *testing.T) {
+	cases := []struct {
+		name       string
+		provider   string
+		apiKeyEnv  string
+		apiKey     string
+		forceOAuth bool
+		want       bool
+	}{
+		{"named-but-empty anthropic is an error", "anthropic", "ANTHROPIC_API_KEY", "", false, true},
+		{"named-but-whitespace anthropic is an error", "anthropic", "ANTHROPIC_API_KEY", "   ", false, true},
+		{"named-and-set anthropic is fine", "anthropic", "ANTHROPIC_API_KEY", "sk-ant-api03-real", false, false},
+		{"unnamed anthropic falls into OAuth, not an error", "anthropic", "", "", false, false},
+		{"--anthropic-oauth with empty named key is not a contradiction", "anthropic", "ANTHROPIC_API_KEY", "", true, false},
+		{"openai named-but-empty is documented passthrough, not an error", "openai", "OPENAI_API_KEY", "", false, false},
+		{"openai-responses named-but-empty is not an error", "openai-responses", "OPENAI_API_KEY", "", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := guardEmptyNamedKeyIsError(tc.provider, tc.apiKeyEnv, tc.apiKey, tc.forceOAuth); got != tc.want {
+				t.Fatalf("guardEmptyNamedKeyIsError(%q, %q, %q, %v) = %v, want %v",
+					tc.provider, tc.apiKeyEnv, tc.apiKey, tc.forceOAuth, got, tc.want)
+			}
+		})
 	}
 }
 
