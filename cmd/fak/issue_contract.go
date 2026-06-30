@@ -49,7 +49,7 @@ type issueContractCounts struct {
 	TriageOnly           int            `json:"triage_only"`
 	Refused              int            `json:"refused"`
 	StepBudget           int            `json:"step_budget"`
-	MissingExpectedSteps  int            `json:"missing_expected_steps"`
+	MissingExpectedSteps int            `json:"missing_expected_steps"`
 	AgentContextAvg      int            `json:"agent_context_avg"`
 	AgentContextFull     int            `json:"agent_context_full"`
 	AgentContextMissing  int            `json:"agent_context_missing"`
@@ -60,18 +60,18 @@ type issueContractCounts struct {
 }
 
 type issueContractBatchGroup struct {
-	Key            string         `json:"key"`
-	Lane           string         `json:"lane,omitempty"`
-	WorkUnit       string         `json:"work_unit,omitempty"`
-	Trigger        string         `json:"trigger,omitempty"`
-	BatchPolicy    string         `json:"batch_policy,omitempty"`
-	Count          int            `json:"count"`
-	StepBudget     int            `json:"step_budget"`
-	Dispatchable   int            `json:"dispatchable"`
-	TriageOnly     int            `json:"triage_only"`
-	Refused        int            `json:"refused"`
-	ByReason       map[string]int `json:"by_reason,omitempty"`
-	ExampleKeys    []string       `json:"example_keys,omitempty"`
+	Key             string         `json:"key"`
+	Lane            string         `json:"lane,omitempty"`
+	WorkUnit        string         `json:"work_unit,omitempty"`
+	Trigger         string         `json:"trigger,omitempty"`
+	BatchPolicy     string         `json:"batch_policy,omitempty"`
+	Count           int            `json:"count"`
+	StepBudget      int            `json:"step_budget"`
+	Dispatchable    int            `json:"dispatchable"`
+	TriageOnly      int            `json:"triage_only"`
+	Refused         int            `json:"refused"`
+	ByReason        map[string]int `json:"by_reason,omitempty"`
+	ExampleKeys     []string       `json:"example_keys,omitempty"`
 	MissingMetadata []string       `json:"missing_metadata,omitempty"`
 }
 
