@@ -982,8 +982,10 @@ func fitServeGGUFPathOnHost(ggufPath string, f32Resident bool, contextBudgetToke
 	return compute.RefuseMemoryPlanIfTooBigForHost(plan, serveGGUFHostHeadroom)
 }
 
-func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
-	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
+// refuseIfTooBigOnDevice applies the device-headroom refusal to a freshly-built plan —
+// the err-check + nil-backend passthrough + RefuseMemoryPlanIfTooBig tail the two
+// fitAndPlan…OnDevice helpers share.
+func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backend) (compute.MemoryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -991,41 +993,43 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 		return plan, nil
 	}
 	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+}
+
+// withGGUFWeights opens the GGUF weights at ggufPath (an empty path plans nothing) and runs
+// plan against them, closing the source after — the open+defer-close prelude the
+// serveGGUF…PathMemoryPlan helpers share.
+func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute.MemoryPlan, error)) (compute.MemoryPlan, error) {
+	if ggufPath == "" {
+		return nil, nil
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return plan(ws)
+}
+
+func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
+	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
 func fitAndPlanServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) (compute.MemoryPlan, error) {
 	plan, err := serveGGUFCPUOffloadPathMemoryPlan(ggufPath, contextBudgetTokens, serveDeviceFitBudget(be))
-	if err != nil {
-		return nil, err
-	}
-	if be == nil {
-		return plan, nil
-	}
-	return plan, compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
 func serveGGUFPathMemoryPlan(ggufPath string, f32Resident bool, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
-	if ggufPath == "" {
-		return nil, nil
-	}
-	ws, err := ggufload.OpenWeights(ggufPath)
-	if err != nil {
-		return nil, err
-	}
-	defer ws.Close()
-	return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens, fit)
+	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		return serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens, fit)
+	})
 }
 
 func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int, fit serveFitBudget) (compute.MemoryPlan, error) {
-	if ggufPath == "" {
-		return nil, nil
-	}
-	ws, err := ggufload.OpenWeights(ggufPath)
-	if err != nil {
-		return nil, err
-	}
-	defer ws.Close()
-	return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, fit)
+	return withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
+		return serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens, fit)
+	})
 }
 
 func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
