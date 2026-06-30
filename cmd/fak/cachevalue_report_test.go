@@ -147,3 +147,31 @@ func TestCachevalueReportRejectsBadSince(t *testing.T) {
 		t.Fatalf("bad --since should exit 2, got %d", code)
 	}
 }
+
+// TestCachevalueReportMarkdown is the #1305 witness at the CLI seam: `fak cachevalue report
+// --markdown` emits the visual layer — a mermaid xychart trend block, sparkline glyphs, and
+// the WITNESSED/OBSERVED provenance labels — over the same two-track fold.
+func TestCachevalueReportMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReport(&out, &errb, []string{
+		"--ledger", track1, "--savings-ledger", track2, "--since", "2026-06-01", "--markdown",
+	})
+	if code != 0 {
+		t.Fatalf("report --markdown exit = %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "```mermaid") || !strings.Contains(got, "xychart-beta") {
+		t.Fatalf("--markdown must emit a mermaid xychart block:\n%s", got)
+	}
+	if !strings.ContainsAny(got, "▁▂▃▄▅▆▇█") {
+		t.Fatalf("--markdown must emit sparkline glyphs:\n%s", got)
+	}
+	for _, want := range []string{"WITNESSED", "OBSERVED", "## cache-value P&L"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("--markdown output missing %q:\n%s", want, got)
+		}
+	}
+}
