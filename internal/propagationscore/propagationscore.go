@@ -75,6 +75,7 @@ var Family = []Member{
 	{Verb: "guard-rsi-scorecard", CmdFile: "cmd/fak/guardrsi.go", PkgDir: "internal/guardrsi", DebtKey: "guard_rsi_debt"},
 	{Verb: "loop-index-scorecard", CmdFile: "cmd/fak/loopscore.go", PkgDir: "internal/loopscore", DebtKey: "loopindex_debt"},
 	{Verb: "ui-quality-scorecard", CmdFile: "cmd/fak/uiqualityscore.go", PkgDir: "internal/uiquality", DebtKey: "ui_quality_debt"},
+	{Verb: "propagation-scorecard", CmdFile: "cmd/fak/propagationscore.go", PkgDir: "internal/propagationscore", DebtKey: DebtKey},
 }
 
 // Convention is one "scoring concept" that, once improved in one card, SHOULD fan out to the
@@ -252,10 +253,9 @@ var reScoreVerb = regexp.MustCompile(`case "([a-z][a-z0-9-]*-(?:score|scorecard)
 // excludedVerbs are dispatch verbs that match the -score/-scorecard shape but are NOT debt
 // scorecards (the portfolio pane, the Slack publisher), so roster_complete does not nag for them.
 var excludedVerbs = map[string]bool{
-	"scorecard":             true, // the control-pane pane, not a card
-	"scoreboard":            true, // a Slack publisher, not a card
-	"loop-score":            true, // alias surface of loop-index-scorecard
-	"propagation-scorecard": true, // this card itself -- the measurer, not a measured debt-card
+	"scorecard":  true, // the control-pane pane, not a card
+	"scoreboard": true, // a Slack publisher, not a card
+	"loop-score": true, // alias surface of loop-index-scorecard
 }
 
 // scorecardVerbs lists the dispatch verbs in cmd/fak/main.go that look like scorecards.

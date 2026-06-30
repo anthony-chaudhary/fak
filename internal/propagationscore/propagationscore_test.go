@@ -148,6 +148,24 @@ func cmdHelperCard(a []string){ scorecardCmdSetup("fak helper-card", a, collect)
 	}
 }
 
+func TestPropagationScorecardMeasuresItself(t *testing.T) {
+	found := false
+	for _, m := range Family {
+		if m.Verb == "propagation-scorecard" {
+			found = true
+			if m.DebtKey != DebtKey {
+				t.Fatalf("propagation-scorecard debt key = %q, want %q", m.DebtKey, DebtKey)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("propagation-scorecard must be in Family so roster_complete cannot exclude it")
+	}
+	if excludedVerbs["propagation-scorecard"] {
+		t.Fatal("propagation-scorecard must not be excluded from roster_complete")
+	}
+}
+
 // Every fanned-out gap must produce a dispatchable issuecontract candidate (the dispatcher only
 // syncs OK candidates, so a non-dispatchable mapping would silently drop the issue).
 func TestGapActionItemsAreDispatchable(t *testing.T) {
