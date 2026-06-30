@@ -51,31 +51,36 @@ type HandoffTask struct {
 // HandoffNextStep is one concrete follow-up the next agent can pick up. The CLI
 // can sync each entry to one stable GitHub issue.
 type HandoffNextStep struct {
-	Key             string        `json:"key"`
-	Title           string        `json:"title"`
-	Body            string        `json:"body"`
-	Reason          string        `json:"reason"`
-	WorkingSpine    string        `json:"working_spine,omitempty"`
-	PriorityContext string        `json:"priority_context,omitempty"`
-	WorkUnit        string        `json:"work_unit,omitempty"`
-	ExpectedSteps   int           `json:"expected_steps,omitempty"`
-	Assumptions     []string      `json:"assumptions,omitempty"`
-	ConfusionRisks  []string      `json:"confusion_risks,omitempty"`
-	Coordination    []string      `json:"coordination,omitempty"`
-	Trigger         string        `json:"trigger,omitempty"`
-	BatchPolicy     string        `json:"batch_policy,omitempty"`
-	InScope         string        `json:"in_scope,omitempty"`
-	OutOfScope      string        `json:"out_of_scope,omitempty"`
-	DoneCondition   string        `json:"done_condition,omitempty"`
-	Witness         string        `json:"witness,omitempty"`
-	AcceptanceGate  string        `json:"acceptance_gate,omitempty"`
-	Lane            string        `json:"lane,omitempty"`
-	Paths           []string      `json:"paths,omitempty"`
-	Priority        string        `json:"priority,omitempty"`
-	Labels          []string      `json:"labels,omitempty"`
-	BoundaryNotes   []string      `json:"boundary_notes,omitempty"`
-	ClosureBinding  string        `json:"closure_binding,omitempty"`
-	EvidenceRefs    []EvidenceRef `json:"evidence_refs,omitempty"`
+	Key                     string        `json:"key"`
+	Title                   string        `json:"title"`
+	Body                    string        `json:"body"`
+	Reason                  string        `json:"reason"`
+	Generation              string        `json:"generation,omitempty"`
+	PromotionEvidence       []string      `json:"promotion_evidence,omitempty"`
+	DemotionEvidence        []string      `json:"demotion_evidence,omitempty"`
+	InvalidatingAssumptions []string      `json:"invalidating_assumptions,omitempty"`
+	GenerationNonGoals      []string      `json:"generation_non_goals,omitempty"`
+	WorkingSpine            string        `json:"working_spine,omitempty"`
+	PriorityContext         string        `json:"priority_context,omitempty"`
+	WorkUnit                string        `json:"work_unit,omitempty"`
+	ExpectedSteps           int           `json:"expected_steps,omitempty"`
+	Assumptions             []string      `json:"assumptions,omitempty"`
+	ConfusionRisks          []string      `json:"confusion_risks,omitempty"`
+	Coordination            []string      `json:"coordination,omitempty"`
+	Trigger                 string        `json:"trigger,omitempty"`
+	BatchPolicy             string        `json:"batch_policy,omitempty"`
+	InScope                 string        `json:"in_scope,omitempty"`
+	OutOfScope              string        `json:"out_of_scope,omitempty"`
+	DoneCondition           string        `json:"done_condition,omitempty"`
+	Witness                 string        `json:"witness,omitempty"`
+	AcceptanceGate          string        `json:"acceptance_gate,omitempty"`
+	Lane                    string        `json:"lane,omitempty"`
+	Paths                   []string      `json:"paths,omitempty"`
+	Priority                string        `json:"priority,omitempty"`
+	Labels                  []string      `json:"labels,omitempty"`
+	BoundaryNotes           []string      `json:"boundary_notes,omitempty"`
+	ClosureBinding          string        `json:"closure_binding,omitempty"`
+	EvidenceRefs            []EvidenceRef `json:"evidence_refs,omitempty"`
 }
 
 // HandoffReview is the pure verdict. OK means the handoff has enough witnessed
@@ -191,6 +196,9 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 		if strings.TrimSpace(step.Reason) == "" {
 			reasons = append(reasons, prefix+"MISSING_REASON")
 		}
+		if strings.TrimSpace(step.Generation) != "" && normalizeHandoffGeneration(step.Generation) == "" {
+			reasons = append(reasons, prefix+"BAD_GENERATION")
+		}
 	}
 
 	var issueReviews []issuecontract.Review
@@ -254,7 +262,7 @@ func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuecontract.Candid
 		AcceptanceGate:  strings.TrimSpace(step.AcceptanceGate),
 		Lane:            strings.TrimSpace(step.Lane),
 		Paths:           compactStrings(step.Paths),
-		Labels:          compactStrings(step.Labels),
+		Labels:          compactStrings(append(append([]string{}, step.Labels...), handoffGenerationLabels(step.Generation)...)),
 		Priority:        strings.TrimSpace(step.Priority),
 		BoundaryNotes:   compactStrings(step.BoundaryNotes),
 		ClosureBinding:  strings.TrimSpace(step.ClosureBinding),
@@ -285,7 +293,7 @@ func BuildHandoffIssuePlan(h Handoff, existing []HandoffIssue) []HandoffIssuePla
 			Key:          strings.TrimSpace(step.Key),
 			Title:        strings.TrimSpace(step.Title),
 			Body:         HandoffIssueBody(h, step),
-			Labels:       compactStrings(step.Labels),
+			Labels:       compactStrings(append(append([]string{}, step.Labels...), handoffGenerationLabels(step.Generation)...)),
 			Reason:       strings.TrimSpace(step.Reason),
 			Priority:     strings.TrimSpace(step.Priority),
 			EvidenceRefs: evidenceRefStrings(step.EvidenceRefs),
@@ -329,6 +337,9 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	if p := strings.TrimSpace(step.Priority); p != "" {
 		fmt.Fprintf(&b, "- Priority: `%s`\n", p)
 	}
+	if gen := normalizeHandoffGeneration(step.Generation); gen != "" {
+		fmt.Fprintf(&b, "- Generation: `%s`\n", gen)
+	}
 	fmt.Fprintf(&b, "- Why this is next: %s\n", oneLine(step.Reason))
 	if refs := evidenceRefStrings(append(append([]EvidenceRef{}, h.CompletionEvidence...), step.EvidenceRefs...)); len(refs) > 0 {
 		fmt.Fprintln(&b, "- Evidence:")
@@ -340,6 +351,13 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	writeSection(&b, "Parent context", strings.TrimSpace(h.Task.TaskID), "This handoff did not name the parent task.")
 	writeSection(&b, "Current state", strings.TrimSpace(h.CurrentState), "Not specified by this handoff.")
 	writeSection(&b, "Why this is next", strings.TrimSpace(step.Reason), "Not specified by this handoff.")
+	if gen := normalizeHandoffGeneration(step.Generation); gen != "" {
+		writeSection(&b, "Generation intent", handoffGenerationIntent(gen), "Not specified by this handoff.")
+		writeListSection(&b, "Promotion evidence", step.PromotionEvidence, "None named.")
+		writeListSection(&b, "Demotion or retirement evidence", step.DemotionEvidence, "None named.")
+		writeListSection(&b, "Invalidating assumptions", step.InvalidatingAssumptions, "None named.")
+		writeListSection(&b, "Generation non-goals", step.GenerationNonGoals, "None named.")
+	}
 	writeSection(&b, "Working spine", strings.TrimSpace(step.WorkingSpine), "Not specified by this handoff.")
 	writeSection(&b, "Priority context", strings.TrimSpace(step.PriorityContext), "Not specified by this handoff.")
 	writeSection(&b, "Work unit", firstNonEmpty(step.WorkUnit, "leaf"), "leaf")
@@ -435,6 +453,42 @@ func evidenceRefStrings(refs []EvidenceRef) []string {
 		out = append(out, b.String())
 	}
 	return out
+}
+
+func normalizeHandoffGeneration(g string) string {
+	s := strings.ToLower(strings.TrimSpace(g))
+	s = strings.TrimPrefix(s, "gen/")
+	switch s {
+	case "now", "next", "second-next", "future":
+		return "gen/" + s
+	default:
+		return ""
+	}
+}
+
+func handoffGenerationLabels(g string) []string {
+	gen := normalizeHandoffGeneration(g)
+	if gen == "" {
+		return nil
+	}
+	return []string{"generation", gen}
+}
+
+func handoffGenerationIntent(gen string) string {
+	var intent string
+	switch normalizeHandoffGeneration(gen) {
+	case "gen/now":
+		intent = "now - immediate trunk-safe product/operator work; do not wait for a future architecture bet."
+	case "gen/next":
+		intent = "next - near-term foundation that should become agent-runnable after gates, handoffs, and operator visibility exist."
+	case "gen/second-next":
+		intent = "second-next - architectural option that needs simulation, compatibility policy, or cross-generation dependency management."
+	case "gen/future":
+		intent = "future - research or long-horizon option that should stay visible without pretending it is on the current release train."
+	default:
+		return ""
+	}
+	return intent + " Generation is orthogonal to priority, shared trunk, and runtime feature gates."
 }
 
 func oneLine(s string) string {

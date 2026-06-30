@@ -21,10 +21,23 @@ func verifiedHandoff() Handoff {
 		},
 		CompletionEvidence: []EvidenceRef{{Kind: "commit", Ref: "deadbeef", Note: "diff-witnessed"}},
 		NextSteps: []HandoffNextStep{{
-			Key:             "task_push_next/issue-sync",
-			Title:           "Add live issue sync smoke",
-			Body:            "Wire the dry-run handoff into one live gh smoke on a disposable fixture.",
-			Reason:          "The typed handoff exists; the next useful proof is a live end-to-end issue update.",
+			Key:        "task_push_next/issue-sync",
+			Title:      "Add live issue sync smoke",
+			Body:       "Wire the dry-run handoff into one live gh smoke on a disposable fixture.",
+			Reason:     "The typed handoff exists; the next useful proof is a live end-to-end issue update.",
+			Generation: "next",
+			PromotionEvidence: []string{
+				"Live issue sync can create or update the disposable follow-up issue.",
+			},
+			DemotionEvidence: []string{
+				"The live smoke shows handoff-created issues add more dispatch ambiguity than they remove.",
+			},
+			InvalidatingAssumptions: []string{
+				"Follow-up workers can read the generated issue without reopening the parent task transcript.",
+			},
+			GenerationNonGoals: []string{
+				"Do not create a branch or bypass the shared-trunk handoff gate.",
+			},
 			WorkingSpine:    "A verified task completion can create one scoped follow-up issue.",
 			PriorityContext: "Working path: completed task -> scoped follow-up issue -> dispatch. Current blocker: live sync lacks an operator-owned smoke. Unblocks: task handoffs can feed dispatch safely. Not polish: this proves the minimal live path.",
 			WorkUnit:        "leaf",
@@ -124,6 +137,15 @@ func TestReviewHandoffStrictScopeRejectsVagueNextStep(t *testing.T) {
 	}
 }
 
+func TestReviewHandoffRejectsBadGeneration(t *testing.T) {
+	h := verifiedHandoff()
+	h.NextSteps[0].Generation = "later-ish"
+	review := ReviewHandoff(h)
+	if review.OK || !contains(review.Reasons, "NEXT_STEP_1_BAD_GENERATION") {
+		t.Fatalf("bad generation review = %+v, want NEXT_STEP_1_BAD_GENERATION", review)
+	}
+}
+
 func TestReviewHandoffStrictScopeAcceptsDispatchableNextStep(t *testing.T) {
 	review := ReviewHandoffWithOptions(verifiedHandoff(), HandoffReviewOptions{
 		StrictScope:   true,
@@ -166,8 +188,14 @@ func TestBuildHandoffIssuePlanDedupesByStableMarker(t *testing.T) {
 	if !strings.Contains(row.Body, "Completion witness: `verified_done` via `commit-audit` (`deadbeef`)") {
 		t.Fatalf("body missing witness:\n%s", row.Body)
 	}
-	if len(row.Labels) != 1 || row.Labels[0] != "agent-handoff" {
-		t.Fatalf("labels = %+v, want deduped agent-handoff", row.Labels)
+	wantLabels := map[string]bool{"agent-handoff": true, "generation": true, "gen/next": true}
+	if len(row.Labels) != len(wantLabels) {
+		t.Fatalf("labels = %+v, want %v", row.Labels, wantLabels)
+	}
+	for _, label := range row.Labels {
+		if !wantLabels[label] {
+			t.Fatalf("unexpected label %q in %+v", label, row.Labels)
+		}
 	}
 }
 
@@ -175,6 +203,11 @@ func TestHandoffIssueBodyIncludesStrictScopeSections(t *testing.T) {
 	h := verifiedHandoff()
 	body := HandoffIssueBody(h, h.NextSteps[0])
 	for _, want := range []string{
+		"## Generation intent",
+		"## Promotion evidence",
+		"## Demotion or retirement evidence",
+		"## Invalidating assumptions",
+		"## Generation non-goals",
 		"## Working spine",
 		"## Priority context",
 		"## Work unit",
@@ -195,6 +228,16 @@ func TestHandoffIssueBodyIncludesStrictScopeSections(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	for _, want := range []string{
+		"Generation: `gen/next`",
+		"Generation is orthogonal to priority, shared trunk, and runtime feature gates.",
+		"Live issue sync can create or update the disposable follow-up issue.",
+		"Do not create a branch or bypass the shared-trunk handoff gate.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("generation body missing %q:\n%s", want, body)
 		}
 	}
 }
