@@ -63,11 +63,11 @@ type VisibleWindow struct {
 	Title                  string `json:"title"`
 	Path                   string `json:"path"`
 	CommandLine            string `json:"command_line"`
-	ParentPID             int    `json:"parent_pid,omitempty"`
-	ParentName            string `json:"parent_name,omitempty"`
-	ParentCommandLine     string `json:"parent_command_line,omitempty"`
-	GrandparentPID        int    `json:"grandparent_pid,omitempty"`
-	GrandparentName       string `json:"grandparent_name,omitempty"`
+	ParentPID              int    `json:"parent_pid,omitempty"`
+	ParentName             string `json:"parent_name,omitempty"`
+	ParentCommandLine      string `json:"parent_command_line,omitempty"`
+	GrandparentPID         int    `json:"grandparent_pid,omitempty"`
+	GrandparentName        string `json:"grandparent_name,omitempty"`
 	GrandparentCommandLine string `json:"grandparent_command_line,omitempty"`
 }
 
@@ -84,11 +84,11 @@ type VisibleWindowFinding struct {
 	Title                  string                    `json:"title"`
 	Path                   string                    `json:"path,omitempty"`
 	CommandLine            string                    `json:"command_line,omitempty"`
-	ParentPID             int                       `json:"parent_pid,omitempty"`
-	ParentName            string                    `json:"parent_name,omitempty"`
-	ParentCommandLine     string                    `json:"parent_command_line,omitempty"`
-	GrandparentPID        int                       `json:"grandparent_pid,omitempty"`
-	GrandparentName       string                    `json:"grandparent_name,omitempty"`
+	ParentPID              int                       `json:"parent_pid,omitempty"`
+	ParentName             string                    `json:"parent_name,omitempty"`
+	ParentCommandLine      string                    `json:"parent_command_line,omitempty"`
+	GrandparentPID         int                       `json:"grandparent_pid,omitempty"`
+	GrandparentName        string                    `json:"grandparent_name,omitempty"`
 	GrandparentCommandLine string                    `json:"grandparent_command_line,omitempty"`
 	Browser                *BrowserAutomationDetails `json:"browser,omitempty"`
 }

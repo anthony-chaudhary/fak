@@ -114,7 +114,10 @@ func TestClassifyVisibleWindows(t *testing.T) {
 		},
 		{
 			PID: 3, Name: "chrome", Title: "Apply",
-			CommandLine: `chrome.exe --remote-debugging-port=9223 --single-argument https://example.test/oauth?state=abc&code_challenge=def`,
+			CommandLine:       `chrome.exe --remote-debugging-port=9223 --window-position=-32000,-32000 --user-data-dir=C:\Users\USER\AppData\Local\Chrome-CDP-Apply-anthony-1 --single-argument https://example.test/oauth?state=abc&code_challenge=def`,
+			ParentPID:         26560,
+			ParentName:        "python.exe",
+			ParentCommandLine: `python.exe C:\work\job\scripts\run_apply_next_xco_tick.py --profile anthony --keep-going`,
 		},
 		{
 			PID: 4, Name: "Slack", Title: "fleet-status",
@@ -126,9 +129,39 @@ func TestClassifyVisibleWindows(t *testing.T) {
 	if len(rep.Watchlist) != 2 {
 		t.Fatalf("visible watchlist = %d %v, want terminal + browser automation", len(rep.Watchlist), rep.Watchlist)
 	}
+	if len(rep.Findings) != 3 {
+		t.Fatalf("visible findings = %d %+v, want structured rows for classified windows", len(rep.Findings), rep.Findings)
+	}
+	var browser *VisibleWindowFinding
+	for i := range rep.Findings {
+		if rep.Findings[i].Category == "browser_automation" {
+			browser = &rep.Findings[i]
+			break
+		}
+	}
+	if browser == nil {
+		t.Fatalf("missing browser automation finding: %+v", rep.Findings)
+	}
+	if browser.Browser == nil || browser.Browser.RemoteDebuggingPort != "9223" ||
+		browser.Browser.Profile != "Chrome-CDP-Apply-anthony-1" || !browser.Browser.Offscreen {
+		t.Fatalf("browser details = %+v, want port/profile/offscreen attribution", browser.Browser)
+	}
+	if browser.ParentPID != 26560 || browser.ParentName != "python.exe" ||
+		!strings.Contains(browser.ParentCommandLine, "run_apply_next_xco_tick.py") {
+		t.Fatalf("parent attribution = pid %d name %q cmd %q", browser.ParentPID, browser.ParentName, browser.ParentCommandLine)
+	}
+	if !strings.Contains(browser.Message, "profile=Chrome-CDP-Apply-anthony-1") ||
+		!strings.Contains(browser.Message, "parent=python.exe[26560]") {
+		t.Fatalf("browser message lacks attribution hints: %s", browser.Message)
+	}
 	for _, row := range append(rep.Violations, rep.Watchlist...) {
 		if strings.Contains(row, "state=abc") || strings.Contains(row, "code_challenge=def") || strings.Contains(row, "https://example.test") {
 			t.Fatalf("visible window row leaked URL credentials: %s", row)
+		}
+	}
+	for _, finding := range rep.Findings {
+		if strings.Contains(finding.CommandLine, "state=abc") || strings.Contains(finding.CommandLine, "code_challenge=def") || strings.Contains(finding.CommandLine, "https://example.test") {
+			t.Fatalf("visible window finding leaked URL credentials: %+v", finding)
 		}
 	}
 }
