@@ -375,7 +375,7 @@ func predictFamily(ft []Turn, policy vcachecal.BeliefPolicy) vcachecal.Predictio
 	started := false
 	for _, t := range ft {
 		if started {
-			b = b.Advance(policy, t.UnixMillis)
+			b = advanceBeliefTo(policy, b, t.UnixMillis)
 		}
 		var outcome vcachecal.PredictionOutcome
 		b, outcome = b.Observe(policy, t.UnixMillis, t.CacheRead)
@@ -383,6 +383,13 @@ func predictFamily(ft []Turn, policy vcachecal.BeliefPolicy) vcachecal.Predictio
 		started = true
 	}
 	return pe
+}
+
+func advanceBeliefTo(policy vcachecal.BeliefPolicy, b vcachecal.Belief, nowMillis int64) vcachecal.Belief {
+	if policy.ProviderTTLMillis > 0 && nowMillis-b.Lifecycle.EnteredTierMillis >= policy.ProviderTTLMillis+policy.GraceMillis {
+		b = b.Advance(policy, b.Lifecycle.EnteredTierMillis+policy.ProviderTTLMillis)
+	}
+	return b.Advance(policy, nowMillis)
 }
 
 // classifyFamily projects the family's OBSERVED arrival rate (turns over elapsed) onto
