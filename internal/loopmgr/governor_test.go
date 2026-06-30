@@ -58,6 +58,60 @@ func TestAdmitPausedAndDisabled(t *testing.T) {
 	}
 }
 
+func TestAdmitConcurrencyBudget(t *testing.T) {
+	pol := Policy{MaxConcurrent: 3}
+
+	// Not configured ⇒ admit even when many runs are in flight.
+	saturated := LoopSnapshot{LoopID: "x", Started: 10, Ended: 0}
+	if d := Admit(saturated, Policy{}, time.Unix(0, 0).UTC()); !d.Admit {
+		t.Fatalf("budget unset must admit, got reason=%q", d.Reason)
+	}
+
+	// Under budget (2 in flight, cap 3) ⇒ admit.
+	under := LoopSnapshot{LoopID: "x", Started: 5, Ended: 3} // 2 in flight
+	if d := Admit(under, pol, time.Unix(0, 0).UTC()); !d.Admit {
+		t.Fatalf("under budget must admit, got admit=%v reason=%q", d.Admit, d.Reason)
+	}
+
+	// At budget (3 in flight, cap 3) ⇒ refuse with BUDGET_SPENT.
+	at := LoopSnapshot{LoopID: "x", Started: 3, Ended: 0} // 3 in flight
+	if d := Admit(at, pol, time.Unix(0, 0).UTC()); d.Admit || d.Reason != ReasonBudgetSpent {
+		t.Fatalf("at budget must refuse with BUDGET_SPENT, got admit=%v reason=%q", d.Admit, d.Reason)
+	}
+
+	// Over budget (5 in flight, cap 3) ⇒ refuse with BUDGET_SPENT.
+	over := LoopSnapshot{LoopID: "x", Started: 6, Ended: 1} // 5 in flight
+	if d := Admit(over, pol, time.Unix(0, 0).UTC()); d.Admit || d.Reason != ReasonBudgetSpent {
+		t.Fatalf("over budget must refuse with BUDGET_SPENT, got admit=%v reason=%q", d.Admit, d.Reason)
+	}
+
+	// Defensive: Ended >= Started yields zero in-flight ⇒ admit.
+	drained := LoopSnapshot{LoopID: "x", Started: 3, Ended: 3}
+	if d := Admit(drained, pol, time.Unix(0, 0).UTC()); !d.Admit {
+		t.Fatalf("fully drained loop must admit, got reason=%q", d.Reason)
+	}
+}
+
+func TestAdmitBudgetGateOrder(t *testing.T) {
+	// A loop saturated past its budget. Disabled (and Paused) are hard refuses
+	// checked before the budget gate, so they win deterministically.
+	saturated := LoopSnapshot{LoopID: "x", Started: 9, Ended: 0}
+	if d := Admit(saturated, Policy{MaxConcurrent: 3, Disabled: true}, time.Unix(0, 0).UTC()); d.Reason != ReasonLoopDisabled {
+		t.Fatalf("disabled must win over budget, got %q", d.Reason)
+	}
+	if d := Admit(saturated, Policy{MaxConcurrent: 3, Paused: true}, time.Unix(0, 0).UTC()); d.Reason != ReasonLoopPaused {
+		t.Fatalf("paused must win over budget, got %q", d.Reason)
+	}
+	// Budget is checked before the cadence floor: a loop both inside its cadence
+	// floor AND over budget refuses with BUDGET_SPENT, not CADENCE_FLOOR.
+	last := time.Unix(1000, 0).UTC()
+	tight := LoopSnapshot{LoopID: "x", Started: 4, Ended: 0, LastEventUnixNano: last.UnixNano()}
+	pol := Policy{MaxConcurrent: 3, MinIntervalSeconds: 300}
+	if d := Admit(tight, pol, last.Add(10*time.Second)); d.Admit || d.Reason != ReasonBudgetSpent {
+		t.Fatalf("budget must be checked before cadence, got admit=%v reason=%q", d.Admit, d.Reason)
+	}
+}
+
 func TestAdmitCadenceFloor(t *testing.T) {
 	last := time.Unix(1000, 0).UTC()
 	loop := LoopSnapshot{LoopID: "x", LastEventUnixNano: last.UnixNano()}

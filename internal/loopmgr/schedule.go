@@ -141,11 +141,13 @@ func (s Schedule) JitterOffsetNanos() int64 {
 
 // runInFlight reports whether the loop has an unmatched start — a run that
 // started and has no end yet. This is the overlap-lock predicate, read straight
-// off the fold: a loop snapshot whose Started count exceeds its Ended count has
-// a live run. (Summarize counts start/end events; a witnessed/claimed end both
-// increment Ended via the EventEnd fold.)
+// off the fold: a loop snapshot with a non-zero in-flight count has a live run.
+// It shares LoopSnapshot.Concurrent's Started-Ended definition so the binary
+// overlap-lock and the governor's tunable concurrency budget never drift apart.
+// (Summarize counts start/end events; a witnessed/claimed end both increment
+// Ended via the EventEnd fold.)
 func runInFlight(loop LoopSnapshot) bool {
-	return loop.Started > loop.Ended
+	return loop.Concurrent() > 0
 }
 
 // anchorUnixNano is the schedule's alignment anchor: the last observed event for

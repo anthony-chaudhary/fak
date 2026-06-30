@@ -35,6 +35,16 @@ type Policy struct {
 	// mechanism is the same refusal.
 	Disabled bool `json:"disabled,omitempty"`
 
+	// MaxConcurrent is the in-flight concurrency budget: refuse a fire once this
+	// loop already has this many runs started-but-not-ended. 0 disables the gate
+	// (no concurrency ceiling). This is the tunable form of the schedule's binary
+	// overlap-lock (which caps in-flight at 1): a budget of N lets up to N runs of
+	// the loop overlap and refuses the (N+1)th with REASON_BUDGET_SPENT, so a
+	// super-loop's generations cannot starve the fleet (#1653) and a dispatch loop
+	// can be given a derived ceiling instead of a fixed cap (#1333). The in-flight
+	// count is read straight off the fold (Started-Ended); no live-run probe.
+	MaxConcurrent uint64 `json:"max_concurrent,omitempty"`
+
 	// MinIntervalSeconds is the cadence floor: refuse a fire that lands sooner
 	// than this many seconds after the loop's last event. 0 disables the gate.
 	// Stops a misconfigured scheduler (or two overlapping ones) from storming
@@ -64,6 +74,7 @@ type Policy struct {
 const (
 	ReasonLoopPaused      = "LOOP_PAUSED"
 	ReasonLoopDisabled    = "LOOP_DISABLED"
+	ReasonBudgetSpent     = "BUDGET_SPENT"
 	ReasonCadenceFloor    = "CADENCE_FLOOR"
 	ReasonRefusalStorm    = "REFUSAL_STORM"
 	ReasonWitnessCollapse = "WITNESS_COLLAPSE"
@@ -89,6 +100,20 @@ func Admit(loop LoopSnapshot, policy Policy, now time.Time) Decision {
 	}
 	if policy.Paused {
 		return refuse(loop.LoopID, ReasonLoopPaused, "loop paused by policy")
+	}
+
+	// Budget gate before cadence: a concurrency ceiling is a hard STRUCTURAL
+	// refuse (like the schedule's overlap-lock), not a soft cadence smoothing, so
+	// it is checked alongside the other hard refusals and ahead of the
+	// timing/storm/witness gates. inFlight is read off the fold (Started-Ended);
+	// at or over the budget, the (N+1)th fire is refused.
+	if policy.MaxConcurrent > 0 {
+		inFlight := loop.Concurrent()
+		if inFlight >= policy.MaxConcurrent {
+			return refuse(loop.LoopID, ReasonBudgetSpent,
+				fmt.Sprintf("%d runs in flight at/over the %d concurrency budget — wait for a run to end",
+					inFlight, policy.MaxConcurrent))
+		}
 	}
 
 	if policy.MinIntervalSeconds > 0 && loop.LastEventUnixNano > 0 {

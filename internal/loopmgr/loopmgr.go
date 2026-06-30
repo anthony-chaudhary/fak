@@ -407,6 +407,21 @@ func (s LoopSnapshot) LastActive() dormancy.Stamp {
 	return dormancy.FromUnixNano(s.LastEventUnixNano)
 }
 
+// Concurrent reports the loop's in-flight run count: runs that have started and
+// have no matching end yet, read straight off the fold as Started-Ended. This is
+// the same unmatched-start signal the schedule's overlap-lock keys on, named once
+// so the governor's concurrency budget (Policy.MaxConcurrent) and the binary
+// overlap-lock derive from one definition. Pure: it reads only the already-folded
+// Started/Ended counters and never lets the count go negative (a witnessed or
+// claimed end both increment Ended, so Ended can never exceed Started in a
+// well-formed ledger; the floor is defensive).
+func (s LoopSnapshot) Concurrent() uint64 {
+	if s.Ended >= s.Started {
+		return 0
+	}
+	return s.Started - s.Ended
+}
+
 type RunSnapshot struct {
 	RunID         string        `json:"run_id,omitempty"`
 	Status        RunStatus     `json:"status,omitempty"`
