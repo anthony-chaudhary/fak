@@ -90,6 +90,7 @@ var Cards = []Card{
 	{Key: "growth", Debt: "growth_debt", Cmd: "go run ./cmd/fak coverage-matrix --json", Label: "growth-debt"},
 	{Key: "support_maturity", Debt: "support_maturity_debt", Cmd: "go run ./cmd/fak support-maturity-scorecard --json", Label: "support-maturity"},
 	{Key: "loopindex", Debt: "loopindex_debt", Cmd: "go run ./cmd/fak loop-index-scorecard --json", Label: "loop-index"},
+	{Key: "heaviness", Debt: "heaviness_debt", Cmd: "go run ./cmd/fak operator heaviness --json", Label: "operator-heaviness"},
 	{Key: "claim_repro", Debt: "claim_repro_debt", Script: "claim_repro_scorecard.py", Label: "claim-repro"},
 	{Key: "release", Debt: "release_debt", Script: "release_readiness_scorecard.py", Label: "release-readiness"},
 	{Key: "observability", Debt: "observability_debt", Script: "observability_scorecard.py", Label: "observability"},

@@ -119,6 +119,17 @@ def test_maturity_scorecard_registered() -> None:
     }
 
 
+def test_operator_heaviness_scorecard_registered() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] == "heaviness")
+    assert card == {
+        "key": "heaviness",
+        "debt": "heaviness_debt",
+        "script": "",
+        "cmd": "go run ./cmd/fak operator heaviness --json",
+        "label": "operator-heaviness",
+    }
+
+
 # Every tools/*_scorecard.py on disk must be registered in the fold OR named in a
 # documented exclusion list — the breadth invariant (#1270). Without this an
 # unfolded surface can regress freely and never trip the ratchet, the gap that

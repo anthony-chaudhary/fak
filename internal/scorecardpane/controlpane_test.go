@@ -65,6 +65,28 @@ func TestMetricFromPayloadErrorRow(t *testing.T) {
 	}
 }
 
+func TestOperatorHeavinessScorecardRegistered(t *testing.T) {
+	var got *Card
+	for i := range Cards {
+		if Cards[i].Key == "heaviness" {
+			got = &Cards[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("operator-heaviness card is not registered")
+	}
+	want := Card{
+		Key:   "heaviness",
+		Debt:  "heaviness_debt",
+		Cmd:   "go run ./cmd/fak operator heaviness --json",
+		Label: "operator-heaviness",
+	}
+	if *got != want {
+		t.Fatalf("operator-heaviness card = %+v, want %+v", *got, want)
+	}
+}
+
 func TestFoldSumsPortfolioDebt(t *testing.T) {
 	p := Fold(fixtureMetrics(), nil, "/repo", "abc1234")
 	if p.TotalDebt != 15+535+1+0 {

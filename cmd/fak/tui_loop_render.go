@@ -525,7 +525,6 @@ func shellArgTUI(arg string) string {
 
 func tuiUsage(w io.Writer) {
 	fmt.Fprint(w, `fak console - native terminal control panes
-Alias: fak tui
 
   fak console issues [--issues-json FILE] [--json] [--epic N]
                  [--repo owner/repo] [--state open|closed|all]

@@ -462,6 +462,10 @@ func usageScorecardVerbs() {
                  difficulty fields, so the trend accrues across weeks; --check is
                  advisory (non-zero only if a dimension could not be measured; the
                  scorecard ratchet owns debt regressions))
+  fak operator  heaviness [--json] [--markdown] [--compare FILE]
+                (grades how hard the repo feels to drive: top-level verbs,
+                 front-door guard flags, refusal vocabulary, doc-map discoverability,
+                 and the appeal channel, with heaviness_pressure as the drift number)
   fak release   [status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|stable|stable-context]
                 (the RELEASE front door: one discoverable binary entrypoint over the
                  existing tools/release_*.py and tools/stable_release_*.py helpers.

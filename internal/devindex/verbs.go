@@ -187,7 +187,6 @@ var verbManifest = []Verb{
 	{Name: "top", Synopsis: "= fak ps --watch (the live process-table top mode)", Lane: "cmd"},
 	{Name: "traj", Synopsis: "the trajectory-corpus toolkit (similar/cluster/score/gc/export) over recorded turns", Lane: "cmd"},
 	{Name: "tree-doctor", Synopsis: "the worktree doctor: detect and prune stray / dead git worktrees", Lane: "cmd"},
-	{Name: "tui", Synopsis: "compatibility alias for 'fak console' (the native terminal control pane)", Lane: "cmd"},
 	{Name: "turntax", Synopsis: "turn-tax A/B: price the extra error-code model turns a SOTA loop fires vs fak's one-shot", Lane: "cmd"},
 	{Name: "ui-quality-scorecard", Synopsis: "native terminal UI/UX control-pane payload (ui_quality_debt)", Lane: "cmd"},
 	{Name: "vcache", Synopsis: "the virtual provider-cache status/proof surface (status/prove/prove-telemetry)", Lane: "cmd"},

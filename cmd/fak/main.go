@@ -112,8 +112,6 @@ func main() {
 		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
 	case "console":
 		cmdTUI(os.Args[2:])
-	case "tui":
-		cmdTUI(os.Args[2:])
 	case "chat":
 		cmdChat(os.Args[2:])
 	case "chatrelay":
@@ -238,6 +236,8 @@ func main() {
 		cmdGarden(os.Args[2:])
 	case "cadence":
 		cmdCadence(os.Args[2:])
+	case "operator":
+		cmdOperatorHeaviness(os.Args[2:])
 	case "milestone":
 		cmdMilestone(os.Args[2:])
 	case "milestone-scorecard":

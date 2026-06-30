@@ -267,6 +267,10 @@ SCORECARDS: list[dict[str, str]] = [
     # Registered here so a stage UN-WIRING (a regressed default) reds the ratchet —
     # the spine's "a regression reds the gate" DoD. Go-native, no GPU, deterministic.
     {"key": "loopindex", "debt": "loopindex_debt", "script": "", "cmd": "go run ./cmd/fak loop-index-scorecard --json", "label": "loop-index"},
+    # Operator-heaviness (#1504): folds the operator-facing surface pressure into
+    # the control pane through heaviness_debt while heaviness_pressure stays the
+    # unbounded drift number operators watch over time.
+    {"key": "heaviness", "debt": "heaviness_debt", "script": "", "cmd": "go run ./cmd/fak operator heaviness --json", "label": "operator-heaviness"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},
     {"key": "release", "debt": "release_debt", "script": "release_readiness_scorecard.py", "label": "release-readiness"},
     # Folded #1270: these emit a control-pane-compatible payload (corpus.*_debt +
