@@ -226,6 +226,62 @@ func TestClaudeGLMGCPA100StockEngineFailsClosed(t *testing.T) {
 	}
 }
 
+// TestClaudeGLMGCPDemoPlanWiring locks the one-command demo orchestrator's contract from the
+// script text (runs on every OS, no bash needed): it defaults to the 8x H100 tier, forces the
+// PURE FAK KERNEL serve (so the cache-value metric exists at all), composes the canonical
+// bring-up rather than re-implementing it, and renders the probe -> cache-value -> teardown
+// steps. This is the host-witnessable half of epic #1476 C1 (#1477).
+func TestClaudeGLMGCPDemoPlanWiring(t *testing.T) {
+	root := repoRootFromTest(t)
+	demo := readRepoTextForClaudeGLMGCP(t, root, "scripts", "gcp-glm-demo.sh")
+	for _, want := range []string{
+		`GCP_TIER="${GCP_TIER:-a3-high-h100}"`, // the 8x H100 demo tier (GLM-5.2 needs 640 GB)
+		`SERVE="${SERVE:-fak}"`,                 // the PURE FAK KERNEL — the goal, and the metric's precondition
+		"scripts/gcp-glm-serve.sh",             // composes the canonical bring-up, never re-implements it
+		"claude-glm-gcp --probe",               // step 2: the cache-warming probe turns
+		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the WITNESSED cache-value datum (#1010)
+		"gcloud compute instances delete",      // step 4: teardown — the demo leaves zero cost
+		`MODE="plan"`,                          // plan-by-default
+	} {
+		requireContainsForClaudeGLMGCP(t, demo, want)
+	}
+}
+
+// TestClaudeGLMGCPDemoPlanRendersWithoutCreds runs the demo orchestrator with no creds and
+// asserts the rendered plan resolves the 8x H100 shape, forces the pure fak-kernel native
+// serve even on sm_90 (where the serve script would otherwise pick stock SGLang), and prints
+// the cache-value scrape + teardown. The live turn stays hardware-gated; the plan is proven here.
+func TestClaudeGLMGCPDemoPlanRendersWithoutCreds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash plan rendering is covered under WSL/Unix CI")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not on PATH")
+	}
+	root := repoRootFromTest(t)
+	cmd := exec.Command(bash, filepath.Join(root, "scripts", "gcp-glm-demo.sh"))
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("gcp-glm-demo plan failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	for _, want := range []string{
+		"gcloud compute instances create", // step 1: provision (from the composed serve plan)
+		"a3-highgpu-8g",                    // the 8x H100 machine type — the default tier resolved
+		"glm52_fak_native_serve.sh",        // SERVE=fak forced the pure kernel even on sm_90
+		"fak_gateway_kv_prefix_reused_tokens_total", // step 3: the cache-value witness
+		"gcloud compute instances delete",  // step 4: teardown
+	} {
+		requireContainsForClaudeGLMGCP(t, text, want)
+	}
+	// The cache value only exists because fak itself serves: the stock DSA serve must NOT appear.
+	if strings.Contains(text, "glm52_sglang_vllm_serve.sh") {
+		t.Fatalf("demo rendered the stock SGLang serve instead of the pure fak kernel:\n%s", text)
+	}
+}
+
 func readRepoTextForClaudeGLMGCP(t *testing.T, root string, elems ...string) string {
 	t.Helper()
 	path := filepath.Join(append([]string{root}, elems...)...)
