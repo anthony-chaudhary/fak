@@ -2,6 +2,7 @@ package session
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -64,6 +65,22 @@ type Descriptor struct {
 	ID string `json:"id"`
 	// Host names where the session runs, so an index spanning hosts stays addressable.
 	Host string `json:"host,omitempty"`
+	// PID is the hosting fak process id. The wrapped child may be relaunched under
+	// the same descriptor; the durable owner is the guard/serve process maintaining
+	// the session table.
+	PID int `json:"pid,omitempty"`
+	// Argv is the wrapped command vector the host is driving. It is copied on write
+	// so a caller cannot mutate a stored descriptor by retaining the input slice.
+	Argv []string `json:"argv,omitempty"`
+	// StartSHA is the git HEAD the host observed at registration time, when one was
+	// available. It is a pointer for operators, not a trust decision.
+	StartSHA string `json:"start_sha,omitempty"`
+	// PCBState is the human/index form of Run: RUNNING/THROTTLED/PAUSED/DRAINING/
+	// STOPPED. Run remains the typed field Table.Restore consumes.
+	PCBState string `json:"pcb_state,omitempty"`
+	// CacheKey is the stable prompt/cache lineage key the host derived for this
+	// session. It is opaque to the registry.
+	CacheKey string `json:"cache_key,omitempty"`
 	// Trace is the live Table key (State.TraceID) the descriptor mirrors. It MAY differ
 	// from ID (a re-homed session keeps its ID but takes a new trace), which is why both
 	// are carried — the restart re-attaches the persisted State under this Trace.
@@ -94,6 +111,16 @@ type Descriptor struct {
 	TTL       time.Duration `json:"ttl,omitempty"`
 }
 
+// DescriptorMeta is the host-owned pointer metadata stamped into a Descriptor at
+// register/update time. It deliberately carries no drive state; descriptorFromState
+// remains the only source for the live PCB projection.
+type DescriptorMeta struct {
+	PID      int
+	Argv     []string
+	StartSHA string
+	CacheKey string
+}
+
 // effectiveTTL resolves the staleness window: the per-descriptor TTL when positive,
 // else the package default. A descriptor never has a zero/negative live window — an
 // unset TTL falls back to DefaultDescriptorTTL, so a sweep is always well-defined.
@@ -120,6 +147,7 @@ func descriptorFromState(st State) Descriptor {
 	return Descriptor{
 		Trace:      st.TraceID,
 		Run:        st.Run,
+		PCBState:   pcbState(st.Run),
 		Budget:     st.Budget,
 		Priority:   st.Priority,
 		Pace:       st.Pace,
@@ -137,9 +165,15 @@ func descriptorFromState(st State) Descriptor {
 // bump it), so a Snapshot -> Descriptor -> RestoredState -> Restore round-trip is the
 // identity on the drive fields.
 func (d Descriptor) RestoredState() State {
+	run := d.Run
+	if d.PCBState != "" {
+		if parsed, ok := ParseRunState(strings.ToLower(d.PCBState)); ok {
+			run = parsed
+		}
+	}
 	return State{
 		TraceID:    d.Trace,
-		Run:        d.Run,
+		Run:        run,
 		Budget:     d.Budget,
 		Priority:   d.Priority,
 		Pace:       d.Pace,
@@ -260,6 +294,12 @@ func NewRegistry(store DescriptorStore) *Registry {
 // A nil receiver returns the projected descriptor without persisting, so a loop with no
 // registry wired behaves byte-identically to the pre-registry path.
 func (r *Registry) Register(id, host string, st State, ttl time.Duration, now time.Time) (Descriptor, error) {
+	return r.RegisterWithMeta(id, host, st, ttl, now, DescriptorMeta{})
+}
+
+// RegisterWithMeta is Register plus the host-owned pointer metadata (pid/argv/
+// start_sha/cache_key) needed by a live guard-session descriptor.
+func (r *Registry) RegisterWithMeta(id, host string, st State, ttl time.Duration, now time.Time, meta DescriptorMeta) (Descriptor, error) {
 	d := descriptorFromState(st)
 	d.ID = id
 	d.Host = host
@@ -267,6 +307,7 @@ func (r *Registry) Register(id, host string, st State, ttl time.Duration, now ti
 	d.CreatedAt = now
 	d.UpdatedAt = now
 	d.LastSeen = now
+	applyDescriptorMeta(&d, meta)
 	if r == nil {
 		return d, nil
 	}
@@ -285,6 +326,8 @@ func (r *Registry) Register(id, host string, st State, ttl time.Duration, now ti
 		if d.TTL <= 0 {
 			d.TTL = prev.TTL
 		}
+		preserveDescriptorMeta(&d, prev)
+		applyDescriptorMeta(&d, meta)
 	}
 	if err := r.store.Put(d); err != nil {
 		return d, err
@@ -300,6 +343,13 @@ func (r *Registry) Register(id, host string, st State, ttl time.Duration, now ti
 // treated as a register (idempotent create), so a transition observed before an
 // explicit register still persists. A nil receiver is a no-op.
 func (r *Registry) Update(id string, st State, now time.Time) (Descriptor, error) {
+	return r.UpdateWithMeta(id, st, now, DescriptorMeta{})
+}
+
+// UpdateWithMeta is Update plus host-owned pointer metadata. Existing descriptors
+// preserve their original metadata unless a non-zero field is supplied, so a normal
+// drive transition cannot erase pid/argv/start_sha/cache_key.
+func (r *Registry) UpdateWithMeta(id string, st State, now time.Time, meta DescriptorMeta) (Descriptor, error) {
 	if r == nil {
 		return Descriptor{}, nil
 	}
@@ -316,10 +366,12 @@ func (r *Registry) Update(id string, st State, now time.Time) (Descriptor, error
 		d.Host = prev.Host
 		d.CreatedAt = prev.CreatedAt
 		d.TTL = prev.TTL
+		preserveDescriptorMeta(&d, prev)
 	} else {
 		// Never registered: this Update creates the row, so CreatedAt is now.
 		d.CreatedAt = now
 	}
+	applyDescriptorMeta(&d, meta)
 	if err := r.store.Put(d); err != nil {
 		return d, err
 	}
@@ -407,4 +459,36 @@ func (r *Registry) lookupLocked(id string) (Descriptor, bool) {
 		}
 	}
 	return Descriptor{}, false
+}
+
+func pcbState(run RunState) string {
+	return strings.ToUpper(run.String())
+}
+
+func applyDescriptorMeta(d *Descriptor, meta DescriptorMeta) {
+	if d == nil {
+		return
+	}
+	if meta.PID != 0 {
+		d.PID = meta.PID
+	}
+	if meta.Argv != nil {
+		d.Argv = append([]string(nil), meta.Argv...)
+	}
+	if meta.StartSHA != "" {
+		d.StartSHA = meta.StartSHA
+	}
+	if meta.CacheKey != "" {
+		d.CacheKey = meta.CacheKey
+	}
+}
+
+func preserveDescriptorMeta(d *Descriptor, prev Descriptor) {
+	if d == nil {
+		return
+	}
+	d.PID = prev.PID
+	d.Argv = append([]string(nil), prev.Argv...)
+	d.StartSHA = prev.StartSHA
+	d.CacheKey = prev.CacheKey
 }

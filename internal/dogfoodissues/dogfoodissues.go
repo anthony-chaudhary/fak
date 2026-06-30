@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 )
 
 // Schema is the stable schema tag stamped on the machine-readable result.
@@ -17,32 +19,61 @@ var markerRE = regexp.MustCompile(`<!--\s*fak-dogfood-action-key:\s*([^>\s]+)\s*
 
 // ActionItem is one scorecard ACTION item extracted from a dogfood report.json.
 type ActionItem struct {
-	Key          string
-	Title        string
-	SourceProbe  string
-	ScoreName    string
-	Score        string
-	Grade        string
-	DebtName     string
-	DebtCount    int
-	EvidencePath string
-	NextAction   string
-	Finding      string
+	Key            string
+	Title          string
+	SourceProbe    string
+	ScoreName      string
+	Score          string
+	Grade          string
+	DebtName       string
+	DebtCount      int
+	EvidencePath   string
+	NextAction     string
+	Finding        string
+	ParentRef      string
+	CurrentState   string
+	WhyNow         string
+	WorkingSpine   string
+	InScope        string
+	OutOfScope     string
+	DoneCondition  string
+	Witness        string
+	AcceptanceGate string
+	Lane           string
+	Paths          []string
+	Labels         []string
+	BoundaryNotes  []string
+	ClosureBinding string
 }
 
 // PlanRow is one create/update decision for a single ActionItem.
 type PlanRow struct {
-	Action       string `json:"action"`
-	Key          string `json:"key"`
-	Number       *int   `json:"number"`
-	State        string `json:"state"`
-	Title        string `json:"title"`
-	Body         string `json:"-"`
-	Score        string `json:"score"`
-	Grade        string `json:"grade"`
-	DebtCount    int    `json:"debt_count"`
-	EvidencePath string `json:"evidence_path"`
-	NextAction   string `json:"next_action"`
+	Action       string               `json:"action"`
+	Key          string               `json:"key"`
+	Number       *int                 `json:"number"`
+	State        string               `json:"state"`
+	Title        string               `json:"title"`
+	Body         string               `json:"-"`
+	Score        string               `json:"score"`
+	Grade        string               `json:"grade"`
+	DebtCount    int                  `json:"debt_count"`
+	EvidencePath string               `json:"evidence_path"`
+	NextAction   string               `json:"next_action"`
+	Lane         string               `json:"lane,omitempty"`
+	Paths        []string             `json:"paths,omitempty"`
+	Labels       []string             `json:"labels,omitempty"`
+	Review       issuecontract.Review `json:"review,omitempty"`
+}
+
+// SkippedRow records a scorecard ACTION item that remains visible in the
+// dogfood report, but is not scoped enough to create/update a dispatchable
+// public GitHub issue.
+type SkippedRow struct {
+	Key             string               `json:"key"`
+	Title           string               `json:"title"`
+	Reason          string               `json:"reason"`
+	Dispatchability string               `json:"dispatchability"`
+	Review          issuecontract.Review `json:"review,omitempty"`
 }
 
 // SyncRow is one gh create/edit outcome on a --live run.
@@ -56,11 +87,12 @@ type SyncRow struct {
 
 // Result is the machine-readable plan/result fold.
 type Result struct {
-	Schema  string    `json:"schema"`
-	Mode    string    `json:"mode"`
-	Report  string    `json:"report"`
-	Planned []PlanRow `json:"planned"`
-	Synced  []SyncRow `json:"synced"`
+	Schema  string       `json:"schema"`
+	Mode    string       `json:"mode"`
+	Report  string       `json:"report"`
+	Planned []PlanRow    `json:"planned"`
+	Synced  []SyncRow    `json:"synced"`
+	Skipped []SkippedRow `json:"skipped,omitempty"`
 }
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
@@ -70,6 +102,15 @@ type Issue struct {
 	Body   string `json:"body"`
 	State  string `json:"state"`
 	URL    string `json:"url"`
+}
+
+// BuildOptions carries the producer context needed to turn scorecard ACTION
+// rows into dispatchable issues. The legacy BuildPlan path is left unreviewed
+// for tests and older callers; effectful callers should use BuildPlanWithOptions.
+type BuildOptions struct {
+	Live          bool
+	DedupeChecked bool
+	DedupeCap     int
 }
 
 func toInt(v any, def int) int {
@@ -242,19 +283,125 @@ func ExtractActionItems(report map[string]any, reportPath string) []ActionItem {
 
 // IssueBody renders the stable, marker-stamped issue body for an item.
 func IssueBody(item ActionItem) string {
-	return fmt.Sprintf("<!-- fak-dogfood-action-key: %s -->\n", item.Key) +
-		"# Dogfood scorecard ACTION\n\n" +
-		fmt.Sprintf("- Stable key: `%s`\n", item.Key) +
-		fmt.Sprintf("- Source probe: `%s`\n", item.SourceProbe) +
-		fmt.Sprintf("- Finding: `%s`\n", item.Finding) +
-		fmt.Sprintf("- %s: `%s`\n", item.ScoreName, item.Score) +
-		fmt.Sprintf("- grade: `%s`\n", item.Grade) +
-		fmt.Sprintf("- %s: `%d`\n", item.DebtName, item.DebtCount) +
-		fmt.Sprintf("- Evidence path: `%s`\n\n", item.EvidencePath) +
-		"Suggested next action:\n\n" +
-		fmt.Sprintf("%s\n\n", item.NextAction) +
-		"This issue is managed by `fak dogfood-issues`. Re-running the " +
-		"helper updates this issue in place instead of opening duplicates.\n"
+	c := actionCandidate(item)
+	var b strings.Builder
+	fmt.Fprintf(&b, "<!-- fak-dogfood-action-key: %s -->\n", item.Key)
+	fmt.Fprintln(&b, "# Dogfood scorecard ACTION")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "- Stable key: `%s`\n", item.Key)
+	fmt.Fprintf(&b, "- Source probe: `%s`\n", item.SourceProbe)
+	fmt.Fprintf(&b, "- Finding: `%s`\n", item.Finding)
+	fmt.Fprintf(&b, "- %s: `%s`\n", item.ScoreName, item.Score)
+	fmt.Fprintf(&b, "- grade: `%s`\n", item.Grade)
+	fmt.Fprintf(&b, "- %s: `%d`\n", item.DebtName, item.DebtCount)
+	fmt.Fprintf(&b, "- Evidence path: `%s`\n", item.EvidencePath)
+	if item.Lane != "" {
+		fmt.Fprintf(&b, "- Lane: `%s`\n", item.Lane)
+	}
+	if len(item.Paths) > 0 {
+		fmt.Fprintln(&b, "- Path hints:")
+		for _, p := range item.Paths {
+			fmt.Fprintf(&b, "  - `%s`\n", p)
+		}
+	}
+	fmt.Fprintln(&b)
+	issueSection(&b, "Current state", c.CurrentState)
+	issueSection(&b, "Why this is next", c.WhyNow)
+	issueSection(&b, "Working spine", item.WorkingSpine)
+	issueSection(&b, "Priority context", c.PriorityContext)
+	issueSection(&b, "In scope", item.InScope)
+	issueSection(&b, "Out of scope", item.OutOfScope)
+	issueSection(&b, "Done condition", item.DoneCondition)
+	issueSection(&b, "Witness", item.Witness)
+	issueSection(&b, "Acceptance gate", item.AcceptanceGate)
+	issueListSection(&b, "Boundary notes", item.BoundaryNotes)
+	issueSection(&b, "Closure binding", c.ClosureBinding)
+	fmt.Fprintln(&b, "Suggested next action:")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, firstNonEmpty(item.NextAction, "Triage this scorecard ACTION row into a scoped, witness-backed leaf before dispatch."))
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "This issue is managed by `fak dogfood-issues`. Re-running the helper updates this issue in place instead of opening duplicates.")
+	return b.String()
+}
+
+// ReviewActionItem grades one ACTION item against the shared machine-created
+// issue contract.
+func ReviewActionItem(item ActionItem, opt BuildOptions) issuecontract.Review {
+	return issuecontract.ReviewCandidate(actionCandidate(item), issuecontract.Options{
+		Live:          opt.Live,
+		DedupeChecked: opt.DedupeChecked,
+		DedupeCap:     opt.DedupeCap,
+	})
+}
+
+func actionCandidate(item ActionItem) issuecontract.Candidate {
+	scoreState := fmt.Sprintf("Source probe `%s` reported finding `%s`, grade `%s`, and %s `%d`.",
+		item.SourceProbe, item.Finding, item.Grade, item.DebtName, item.DebtCount)
+	return issuecontract.Candidate{
+		Schema:          issuecontract.Schema,
+		Key:             item.Key,
+		Title:           item.Title,
+		ParentRef:       firstNonEmpty(item.ParentRef, "fak dogfood-issues"),
+		CurrentState:    firstNonEmpty(item.CurrentState, scoreState),
+		WhyNow:          firstNonEmpty(item.WhyNow, "The recent-feature dogfood report emitted an ACTION/debt row for this scorecard."),
+		WorkingSpine:    item.WorkingSpine,
+		PriorityContext: dogfoodPriorityContext(item),
+		InScope:         item.InScope,
+		OutOfScope:      item.OutOfScope,
+		DoneCondition:   item.DoneCondition,
+		Witness:         item.Witness,
+		AcceptanceGate:  item.AcceptanceGate,
+		Lane:            item.Lane,
+		Paths:           append([]string(nil), item.Paths...),
+		Labels:          append([]string(nil), item.Labels...),
+		BoundaryNotes:   append([]string(nil), item.BoundaryNotes...),
+		ClosureBinding:  firstNonEmpty(item.ClosureBinding, "Resolving commit must cite `#N` and carry a matching `(fak <leaf>)` trailer."),
+	}
+}
+
+func dogfoodPriorityContext(item ActionItem) string {
+	spine := firstNonEmpty(item.WorkingSpine, "Retire the scorecard ACTION row on the smallest witnessed path.")
+	current := fmt.Sprintf("Scorecard `%s` reports `%s` with %s `%d`.", item.SourceProbe, item.Finding, item.DebtName, item.DebtCount)
+	return strings.Join([]string{
+		"Working path: " + spine,
+		"Current blocker: " + current,
+		"Unblocks: resolving this ACTION row keeps recent-feature dogfood from hiding a real breakage.",
+		"Not polish: address the named probe row before broad dogfood expansion or optimization.",
+	}, "\n")
+}
+
+func issueSection(b *strings.Builder, title, body string) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	body = strings.TrimSpace(body)
+	if body == "" {
+		body = "Not specified."
+	}
+	fmt.Fprintln(b, body)
+	fmt.Fprintln(b)
+}
+
+func issueListSection(b *strings.Builder, title string, items []string) {
+	fmt.Fprintf(b, "## %s\n\n", title)
+	if len(items) == 0 {
+		fmt.Fprintln(b, "No boundary notes supplied.")
+		fmt.Fprintln(b)
+		return
+	}
+	for _, item := range items {
+		if s := strings.TrimSpace(item); s != "" {
+			fmt.Fprintf(b, "- %s\n", s)
+		}
+	}
+	fmt.Fprintln(b)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if s := strings.TrimSpace(value); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // MarkerKey extracts the stable key from an issue body's HTML-comment marker,
@@ -286,17 +433,7 @@ func BuildPlan(items []ActionItem, existing []Issue) []PlanRow {
 	plan := make([]PlanRow, 0, len(items))
 	for _, item := range items {
 		found, ok := byKey[item.Key]
-		row := PlanRow{
-			Action:       "create",
-			Key:          item.Key,
-			Title:        item.Title,
-			Body:         IssueBody(item),
-			Score:        item.Score,
-			Grade:        item.Grade,
-			DebtCount:    item.DebtCount,
-			EvidencePath: item.EvidencePath,
-			NextAction:   item.NextAction,
-		}
+		row := planRow(item)
 		if ok {
 			row.Action = "update"
 			n := found.Number
@@ -306,6 +443,55 @@ func BuildPlan(items []ActionItem, existing []Issue) []PlanRow {
 		plan = append(plan, row)
 	}
 	return plan
+}
+
+// BuildPlanWithOptions is BuildPlan plus the shared issue-candidate contract.
+// Non-OK candidates are returned as skipped rows instead of being synced as vague
+// public issues.
+func BuildPlanWithOptions(items []ActionItem, existing []Issue, opt BuildOptions) ([]PlanRow, []SkippedRow) {
+	byKey := existingByKey(existing)
+	plan := make([]PlanRow, 0, len(items))
+	skipped := []SkippedRow{}
+	for _, item := range items {
+		review := ReviewActionItem(item, opt)
+		if !review.OK {
+			skipped = append(skipped, SkippedRow{
+				Key:             item.Key,
+				Title:           item.Title,
+				Reason:          strings.Join(review.Reasons, ","),
+				Dispatchability: review.Dispatchability,
+				Review:          review,
+			})
+			continue
+		}
+		row := planRow(item)
+		row.Review = review
+		if found, ok := byKey[item.Key]; ok {
+			row.Action = "update"
+			n := found.Number
+			row.Number = &n
+			row.State = found.State
+		}
+		plan = append(plan, row)
+	}
+	return plan, skipped
+}
+
+func planRow(item ActionItem) PlanRow {
+	return PlanRow{
+		Action:       "create",
+		Key:          item.Key,
+		Title:        item.Title,
+		Body:         IssueBody(item),
+		Score:        item.Score,
+		Grade:        item.Grade,
+		DebtCount:    item.DebtCount,
+		EvidencePath: item.EvidencePath,
+		NextAction:   item.NextAction,
+		Lane:         item.Lane,
+		Paths:        append([]string(nil), item.Paths...),
+		Labels:       append([]string(nil), item.Labels...),
+	}
 }
 
 // Runner runs a `gh` subprocess and returns its stdout, stderr, and an ok flag
@@ -363,7 +549,7 @@ func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow
 			args = []string{"issue", "edit", num, "--title", row.Title, "--body", row.Body}
 		} else {
 			args = []string{"issue", "create", "--title", row.Title, "--body", row.Body}
-			for _, label := range labels {
+			for _, label := range mergeDogfoodIssueLabels(row.Labels, labels) {
 				args = append(args, "--label", label)
 			}
 		}
@@ -382,14 +568,36 @@ func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow
 	return results
 }
 
+func mergeDogfoodIssueLabels(base, extra []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, group := range [][]string{base, extra} {
+		for _, label := range group {
+			label = strings.TrimSpace(label)
+			if label == "" || seen[label] {
+				continue
+			}
+			seen[label] = true
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
 // Render produces the human-readable summary of a plan/result.
 func Render(r Result) string {
 	lines := []string{
 		fmt.Sprintf("dogfood-action-issues: %s  %d item(s)", r.Mode, len(r.Planned)),
 		fmt.Sprintf("  report: %s", r.Report),
 	}
+	if len(r.Skipped) > 0 {
+		lines = append(lines, fmt.Sprintf("  skipped-contract: %d item(s)", len(r.Skipped)))
+		for _, row := range r.Skipped {
+			lines = append(lines, fmt.Sprintf("    key=%s: %s", row.Key, row.Reason))
+		}
+	}
 	if len(r.Planned) == 0 {
-		lines = append(lines, "  no scorecard ACTION items found")
+		lines = append(lines, "  no dispatchable scorecard ACTION items found")
 		return strings.Join(lines, "\n")
 	}
 	for _, row := range r.Planned {

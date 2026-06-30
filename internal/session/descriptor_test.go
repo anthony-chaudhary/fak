@@ -31,15 +31,24 @@ func TestRegistryRegisterOnStart(t *testing.T) {
 		Budget:   Budget{TurnsLeft: 7, TokensLeft: 500},
 		Priority: 3,
 	}
-	d, err := r.Register("sess-1", "host-a", st, time.Minute, now)
+	meta := DescriptorMeta{
+		PID:      4242,
+		Argv:     []string{"claude", "--continue"},
+		StartSHA: "0123456789abcdef",
+		CacheKey: "cache-key-1",
+	}
+	d, err := r.RegisterWithMeta("sess-1", "host-a", st, time.Minute, now, meta)
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if d.ID != "sess-1" || d.Host != "host-a" || d.Trace != "trace-a" {
 		t.Fatalf("descriptor identity wrong: %+v", d)
 	}
-	if d.Run != Running || d.Priority != 3 || d.Budget.TurnsLeft != 7 {
+	if d.Run != Running || d.PCBState != "RUNNING" || d.Priority != 3 || d.Budget.TurnsLeft != 7 {
 		t.Fatalf("descriptor did not project drive state: %+v", d)
+	}
+	if d.PID != 4242 || d.StartSHA != "0123456789abcdef" || d.CacheKey != "cache-key-1" || len(d.Argv) != 2 || d.Argv[0] != "claude" {
+		t.Fatalf("descriptor metadata not stamped: %+v", d)
 	}
 	if !d.CreatedAt.Equal(now) || !d.LastSeen.Equal(now) {
 		t.Fatalf("timestamps not stamped at now: %+v", d)
@@ -121,6 +130,9 @@ func TestRegistryUpdateOnTransition(t *testing.T) {
 	if d.Run != Paused {
 		t.Fatalf("descriptor did not track the live PCB transition: run=%v", d.Run)
 	}
+	if d.PCBState != "PAUSED" {
+		t.Fatalf("descriptor pcb_state = %q, want PAUSED", d.PCBState)
+	}
 	if d.Reason != "operator hold" {
 		t.Fatalf("descriptor did not carry the transition reason: %q", d.Reason)
 	}
@@ -133,6 +145,27 @@ func TestRegistryUpdateOnTransition(t *testing.T) {
 	// CreatedAt is preserved across the update (the row is the same session).
 	if !d.CreatedAt.Equal(t0) {
 		t.Fatalf("Update clobbered CreatedAt: got %v want %v", d.CreatedAt, t0)
+	}
+}
+
+func TestRegistryUpdatePreservesMetadata(t *testing.T) {
+	store := NewMemStore()
+	r := NewRegistry(store)
+	t0 := fixedClock()
+	meta := DescriptorMeta{PID: 77, Argv: []string{"codex", "exec"}, StartSHA: "abc", CacheKey: "ck"}
+
+	if _, err := r.RegisterWithMeta("sess-meta", "host-a", State{TraceID: "trace-a", Run: Running}, time.Minute, t0, meta); err != nil {
+		t.Fatalf("RegisterWithMeta: %v", err)
+	}
+	d, err := r.Update("sess-meta", State{TraceID: "trace-a", Run: Draining, Reason: ReasonBudgetContext}, t0.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if d.PID != 77 || d.StartSHA != "abc" || d.CacheKey != "ck" || len(d.Argv) != 2 || d.Argv[1] != "exec" {
+		t.Fatalf("Update lost descriptor metadata: %+v", d)
+	}
+	if d.PCBState != "DRAINING" {
+		t.Fatalf("Update pcb_state = %q, want DRAINING", d.PCBState)
 	}
 }
 

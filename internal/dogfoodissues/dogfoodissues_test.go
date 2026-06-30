@@ -115,6 +115,63 @@ func TestPlanUpdatesExistingStableKeyInsteadOfDuplicate(t *testing.T) {
 	}
 }
 
+func TestReviewedPlanSkipsAggregateRowsWithoutScope(t *testing.T) {
+	items := ExtractActionItems(fixtureReport(t), "report.json")
+	plan, skipped := BuildPlanWithOptions(items, nil, BuildOptions{})
+	if len(plan) != 0 {
+		t.Fatalf("reviewed plan len = %d, want 0 dispatchable aggregate rows", len(plan))
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped len = %d, want 2; rows=%+v", len(skipped), skipped)
+	}
+	for _, row := range skipped {
+		if row.Dispatchability != "triage_only" {
+			t.Fatalf("skipped dispatchability = %q, want triage_only", row.Dispatchability)
+		}
+		if !strings.Contains(row.Reason, "ISSUE_SCOPE_INCOMPLETE") || !strings.Contains(row.Reason, "ISSUE_UNROUTED") {
+			t.Fatalf("skip reason = %q, want scope+route reasons", row.Reason)
+		}
+	}
+}
+
+func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
+	item := scopedGuardActionItem()
+	existing := []Issue{{
+		Number: 44,
+		State:  "OPEN",
+		Body:   "<!-- fak-dogfood-action-key: guard-rsi-route/guard-journal:blank_reason_on_deny -->",
+	}}
+	plan, skipped := BuildPlanWithOptions([]ActionItem{item}, existing, BuildOptions{
+		Live:          true,
+		DedupeChecked: true,
+		DedupeCap:     300,
+	})
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %+v, want none", skipped)
+	}
+	if len(plan) != 1 {
+		t.Fatalf("plan len = %d, want 1", len(plan))
+	}
+	row := plan[0]
+	if row.Action != "update" || row.Number == nil || *row.Number != 44 {
+		t.Fatalf("row = %+v, want update #44", row)
+	}
+	if !row.Review.OK || row.Review.Dispatchability != "dispatchable" || row.Review.Score.Total != 100 {
+		t.Fatalf("review = %+v, want dispatchable full score", row.Review)
+	}
+	if row.Lane != "guardrsi" || len(row.Paths) != 1 || row.Paths[0] != "internal/guardrsi/**" {
+		t.Fatalf("route = lane %q paths %+v", row.Lane, row.Paths)
+	}
+	if len(row.Labels) != 1 || row.Labels[0] != "guardrsi" {
+		t.Fatalf("labels = %+v, want guardrsi", row.Labels)
+	}
+	for _, want := range []string{"Working spine", "Priority context", "In scope", "Acceptance gate", "Path hints"} {
+		if !strings.Contains(row.Body, want) {
+			t.Fatalf("body missing %q\n---\n%s", want, row.Body)
+		}
+	}
+}
+
 func TestBodyContainsRequiredActionFields(t *testing.T) {
 	items := ExtractActionItems(fixtureReport(t), "report.json")
 	if len(items) == 0 {
@@ -145,6 +202,76 @@ func TestMarkerKeyRoundTrips(t *testing.T) {
 	}
 	if MarkerKey("no marker here") != "" {
 		t.Errorf("MarkerKey on bodiless = %q, want \"\"", MarkerKey("no marker here"))
+	}
+}
+
+func TestRenderReportsSkippedContractRows(t *testing.T) {
+	body := Render(Result{
+		Schema: Schema,
+		Mode:   "dry-run",
+		Report: "report.json",
+		Skipped: []SkippedRow{{
+			Key:    "recent-feature-dogfood/code-slop-scorecard/code_slop",
+			Reason: "ISSUE_SCOPE_INCOMPLETE,ISSUE_UNROUTED",
+		}},
+	})
+	if !strings.Contains(body, "skipped-contract: 1 item(s)") {
+		t.Fatalf("render missing skipped count:\n%s", body)
+	}
+	if !strings.Contains(body, "no dispatchable scorecard ACTION items found") {
+		t.Fatalf("render missing no-dispatchable line:\n%s", body)
+	}
+}
+
+func scopedGuardActionItem() ActionItem {
+	return ActionItem{
+		Key:            "guard-rsi-route/guard-journal:blank_reason_on_deny",
+		Title:          "guardrsi: close guard-unexplained-block honesty hole",
+		SourceProbe:    "guard-verdict-rsi",
+		ScoreName:      "severity",
+		Score:          "P1",
+		Grade:          "P1",
+		DebtName:       "guard_honesty_hole",
+		DebtCount:      1,
+		EvidencePath:   "guard-audit.jsonl",
+		NextAction:     "require a closed-vocabulary reason on every block",
+		Finding:        "guard-journal:blank_reason_on_deny",
+		ParentRef:      "fak guard-verdict-rsi route",
+		WorkingSpine:   "Make the specific guard journal honesty hole impossible before tuning thresholds.",
+		InScope:        "Add a closed-vocabulary classification and a regression fixture for this cause key.",
+		OutOfScope:     "Do not broaden the route queue or refactor unrelated guard journals.",
+		DoneCondition:  "The regression fixture no longer routes this cause as an unexplained honesty hole.",
+		Witness:        "go test ./internal/guardrsi ./internal/guardroute",
+		AcceptanceGate: "go test ./internal/guardrsi ./internal/guardroute",
+		Lane:           "guardrsi",
+		Paths:          []string{"internal/guardrsi/**"},
+		Labels:         []string{"guardrsi"},
+		BoundaryNotes:  []string{"Public guard-journal defect only."},
+	}
+}
+
+func TestSyncUsesPlanLabelsAndGlobalLabels(t *testing.T) {
+	plan, skipped := BuildPlanWithOptions([]ActionItem{scopedGuardActionItem()}, nil, BuildOptions{})
+	if len(skipped) != 0 || len(plan) != 1 {
+		t.Fatalf("plan=%+v skipped=%+v, want one plan row", plan, skipped)
+	}
+	var calls [][]string
+	rows := Sync(plan, "owner/repo", []string{"guardrsi", "backlog"}, func(args []string) (string, string, bool) {
+		calls = append(calls, args)
+		return "https://example/issues/2", "", true
+	})
+	if len(rows) != 1 || !rows[0].OK {
+		t.Fatalf("sync rows = %+v, want one ok", rows)
+	}
+	var labels []string
+	for i := 0; i < len(calls[0])-1; i++ {
+		if calls[0][i] == "--label" {
+			labels = append(labels, calls[0][i+1])
+		}
+	}
+	want := []string{"guardrsi", "backlog"}
+	if strings.Join(labels, ",") != strings.Join(want, ",") {
+		t.Fatalf("labels = %+v, want %+v; args=%+v", labels, want, calls[0])
 	}
 }
 

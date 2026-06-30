@@ -140,6 +140,7 @@ var tier = map[string]int{
 	"vcachewarm":      2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
 	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
+	"issuecontract":   1, // pure spine-first GitHub issue candidate contract; stdlib-only, off the hot path.
 	"stopfailure":     1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dogfoodscore":    1, // pure dogfood-loop scorecard over transcripts/markers; imports stopfailure, off the hot path.
 	"conceptusage":    1, // pure concept-usage scorecard: folds git log + .dos journals into a dogfooding score; stdlib-only, off the hot path.
