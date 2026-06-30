@@ -25,7 +25,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
 		switch argv[0] {
-		case "check", "apply":
+		case "check", "apply", "push":
 			command = argv[0]
 			argv = argv[1:]
 		case "help", "-h", "--help":
@@ -33,7 +33,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitOK
 		default:
 			if !strings.HasPrefix(argv[0], "-") {
-				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check or apply)\n", argv[0])
+				fmt.Fprintf(stderr, "fak sync: unknown command %q (want check, apply, or push)\n", argv[0])
 				syncUsage(stderr)
 				return syncExitUsage
 			}
@@ -46,9 +46,38 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
+	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
 	asJSON := fs.Bool("json", false, "emit the assessment as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
+	}
+
+	// push is the push-side sibling of check/apply: a safe `git push` that retries a
+	// transient non-fast-forward race (a peer landed between fetch and push, but HEAD
+	// already contains origin) and stops with a clear next step when genuinely behind.
+	if command == "push" {
+		res, err := safesync.SafePush(context.Background(), safesync.PushOptions{
+			Repo:       pathutil.ExpandTilde(*repo),
+			Remote:     *remote,
+			Branch:     *branch,
+			MaxRetries: *retries,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak sync: %v\n", err)
+			return syncExitInternal
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak sync: %v\n", err)
+				return syncExitInternal
+			}
+		} else {
+			renderSyncPush(stdout, res)
+		}
+		if res.Pushed {
+			return syncExitOK
+		}
+		return syncExitRefused
 	}
 
 	opts := safesync.Options{
@@ -99,12 +128,29 @@ func syncUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak sync [check] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync apply   [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+  fak sync push    [--repo DIR] [--remote origin] [--branch B] [--retries N] [--json]
 
-Safe fast-forward sync for dirty shared worktrees. check is read-only except for
-optional --fetch. apply runs the fast-forward only when every path Git would write
-is clean at HEAD or already byte-identical to the remote-tracking version. It never
-runs git pull, stash, reset --hard, clean, or add.
+Safe shared-trunk git for dirty worktrees. check is read-only except for optional
+--fetch. apply runs the fast-forward only when every path Git would write is clean at
+HEAD or already byte-identical to the remote-tracking version. push pushes the branch
+and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
+but HEAD already contains origin); on a genuine behind/diverged state it stops with a
+clear integrate-then-push next step. None of these run git pull, stash, reset --hard,
+clean, add, merge, or --force.
 `)
+}
+
+// renderSyncPush is the human view of a SafePush outcome.
+func renderSyncPush(w io.Writer, res safesync.PushResult) {
+	if res.Pushed {
+		attempts := "1 attempt"
+		if res.Attempts != 1 {
+			attempts = fmt.Sprintf("%d attempts", res.Attempts)
+		}
+		fmt.Fprintf(w, "pushed %s -> %s/%s (%s)\n", res.Branch, res.Remote, res.Branch, attempts)
+		return
+	}
+	fmt.Fprintf(w, "[REFUSED] not pushed (%s): %s\n", res.Reason, res.Detail)
 }
 
 func renderSync(w io.Writer, command string, info safesync.Assessment) {
