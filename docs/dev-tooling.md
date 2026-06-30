@@ -11,7 +11,8 @@ practitioner companion to the navigational [Work map](WORK-MAP.md) (which routes
 task to the right front door) and the verb-by-verb [CLI reference](cli-reference.md)
 (which lists every `fak` verb). Read [`AGENTS.md`](../AGENTS.md) first for the build
 commands and the hard rules; this page is the "now I'm in the loop, what do I run?"
-layer.
+layer. For the ranked improvement program behind this loop, see the
+[testing/linting infrastructure scorecard](TESTING-LINTING-INFRA-SCORECARD.md).
 
 > **Honest scope.** `fak debug`, `fak profile`, and `fak test` all ship as CLI
 > surfaces. `fak profile` and `fak test` are host-aware convenience wrappers over
