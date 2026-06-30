@@ -68,3 +68,14 @@ func TestAttachLiveTaskPayloadFailsVisibleTasks(t *testing.T) {
 		t.Fatalf("live task payload not surfaced: %+v", p.LiveTasks)
 	}
 }
+
+func TestAttachLiveTaskPayloadCanFailWatchlist(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachLiveTaskPayload(&p, windowgate.LiveTaskReport{
+		Scanned:   1,
+		Watchlist: []string{"\\Hidden: review child spawns"},
+	}, true)
+	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_live_task_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want live watchlist ACTION", p.OK, p.Verdict, p.Finding)
+	}
+}

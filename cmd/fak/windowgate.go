@@ -169,6 +169,9 @@ func attachLiveTaskPayload(p *windowgatePayload, live windowgate.LiveTaskReport,
 	if failWatchlist && len(live.Watchlist) > 0 {
 		p.OK = false
 		p.Verdict = "ACTION"
+		p.Finding = "no_desktop_popup_live_task_watchlist"
+		p.Reason = fmt.Sprintf("live Scheduled Task hard gate is clean; %d interactive hidden/headless task(s) remain on the review watchlist", len(live.Watchlist))
+		p.NextAction = "review the live task watchlist and keep child subprocesses suppressed or move the task off-desktop"
 	}
 }
 

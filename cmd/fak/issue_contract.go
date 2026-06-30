@@ -242,7 +242,7 @@ The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is
 triage-only or refused with closed reasons such as ISSUE_SCOPE_INCOMPLETE,
 ISSUE_UNROUTED, ISSUE_NOT_DISPATCH_LEAF, ISSUE_OVERSIZED_EXPECTED_STEPS,
-ISSUE_NOISE_CONTROL_INCOMPLETE, ISSUE_PRIVATE_BOUNDARY, or
-ISSUE_LIVE_UNARMORED.
+ISSUE_NOISE_CONTROL_INCOMPLETE, ISSUE_AGENT_CONTEXT_INCOMPLETE,
+ISSUE_PRIVATE_BOUNDARY, or ISSUE_LIVE_UNARMORED.
 `)
 }
