@@ -1,0 +1,65 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "llm-d",
+        "role": "primary"
+      }
+    ],
+    "reason": "default governed tool-call dispatch to the llm-d managed serving pool; the residency gate denies tenant/sensitive routes before dispatch"
+  },
+  "rules": [
+    {
+      "name": "tenant-sensitive-local",
+      "match": {
+        "aspect": "tool_call",
+        "labels": {
+          "sensitivity": "tenant"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "inkernel"
+          }
+        ],
+        "reason": "tenant-scoped payload stays on the local in-kernel engine"
+      }
+    },
+    {
+      "name": "pii-sensitive-local",
+      "match": {
+        "aspect": "tool_call",
+        "labels": {
+          "sensitivity": "pii"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "inkernel"
+          }
+        ],
+        "reason": "PII-tagged payload stays on the local in-kernel engine"
+      }
+    },
+    {
+      "name": "secret-sensitive-local",
+      "match": {
+        "aspect": "tool_call",
+        "labels": {
+          "sensitivity": "secret"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "inkernel"
+          }
+        ],
+        "reason": "secret-tagged payload stays on the local in-kernel engine"
+      }
+    }
+  ]
+}
