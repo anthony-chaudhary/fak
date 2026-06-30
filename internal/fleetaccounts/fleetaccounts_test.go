@@ -263,13 +263,13 @@ func TestClaudeWorkerWithoutCredentialsIsBlockedByLoginStatus(t *testing.T) {
 
 func TestCanServeFalseBlocksSwitcherEvenWithoutLoginStatus(t *testing.T) {
 	rows := []Account{{
-		Dir:        "C:/Users/u/.claude-stale",
-		Product:    "claude",
-		Account:    ".claude-stale",
-		Tag:        "stale",
-		Kind:       KindWorker,
-		Reason:     "real offered account",
-		ModelTier:  intp(1),
+		Dir:       "C:/Users/u/.claude-stale",
+		Product:   "claude",
+		Account:   ".claude-stale",
+		Tag:       "stale",
+		Kind:      KindWorker,
+		Reason:    "real offered account",
+		ModelTier: intp(1),
 		Available: boolp(true),
 		CanServe:  boolp(false),
 	}}
