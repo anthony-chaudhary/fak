@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // prebuild.go — collapse the per-task `go run` compile cost. A full --loop pass was
@@ -195,6 +197,7 @@ func (c *goRunCache) binaryFor(ctx context.Context, root, pkg string) string {
 	buildCtx, cancel := context.WithTimeout(ctx, buildPrebuildBudget)
 	defer cancel()
 	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", out, pkg)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	cmd.Env = c.buildEnv() // nil => inherit os.Environ(); set only when the preflight provisioned a default
 	if err := cmd.Run(); err != nil {
