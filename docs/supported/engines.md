@@ -79,6 +79,11 @@ fak serve --engine llm-d --model "<served-model>"
 uses llm-d's public OpenAI-compatible frontend and Prometheus/vLLM-style worker signals;
 it does not import llm-d internals or claim exact remote KV-span eviction.
 
+Run `fak llmd-smoke --base-url http://<llm-d-gateway>/v1 --model <served-model>` before
+putting traffic behind the route. Add `--metrics-url` when the deployment exposes the
+worker Prometheus endpoint and you want the smoke report to verify fak's `engine="llm-d"`
+metrics normalization too.
+
 The route-manifest preset at
 [`examples/routing-presets/llm-d.json`](../../examples/routing-presets/llm-d.json)
 uses `llm-d` as the default dispatch target while keeping common sensitivity labels on

@@ -225,6 +225,10 @@ Acceptance for "true end to end working":
   update/dedupe marker, or rerun behavior. Live sync also refuses
   `ISSUE_AGENT_CONTEXT_INCOMPLETE` unless the issue carries work-unit shape,
   expected-step budget, assumptions, confusion risks, and coordination notes.
+- `fak issue contract --from-issues` now emits aggregate audit counts alongside
+  per-issue reviews: dispatchability totals, reason buckets, and full/missing
+  `agent_context` totals. That gives agents a high-volume repair queue by
+  failure mode instead of requiring them to read every open issue row first.
 - The native dispatch prompt now parses the standard issue sections into an
   agent-first brief before the raw body, so the worker sees work-unit shape,
   assumptions, confusion risks, coordination notes, trigger, batch policy, scope,

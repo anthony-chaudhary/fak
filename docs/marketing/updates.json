@@ -8,10 +8,10 @@
       "position": 1,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add destructive-op and off-trunk branch/worktree refusals to the git-shape prefilter",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/03861ba6",
-        "dateModified": "2026-06-29",
-        "keywords": "gitgate"
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d4ba89a9",
+        "dateModified": "2026-06-30",
+        "keywords": "windowgate"
       }
     },
     {
@@ -19,10 +19,10 @@
       "position": 2,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: record a night-loop warm Mac point under memory pressure (0.72 tok/s)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/097910db",
-        "dateModified": "2026-06-29",
-        "keywords": "nightrun"
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/3a03db49",
+        "dateModified": "2026-06-30",
+        "keywords": "supportmaturity"
       }
     },
     {
@@ -30,10 +30,10 @@
       "position": 3,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: add in-dashboard first-run explanations for the panels empty until their subsystem is exercised (#309)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/0b56cc9a",
-        "dateModified": "2026-06-29",
-        "keywords": "tools"
+        "name": "Documented: sync shared documentation",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e6758095",
+        "dateModified": "2026-06-30",
+        "keywords": "docs"
       }
     },
     {
@@ -41,10 +41,10 @@
       "position": 4,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: add a passed/degraded outcome enum + RecordRow + ValidateLedger so bridge-folded witnesses go through the typed ledger schema (#1140)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/7f6e2491",
-        "dateModified": "2026-06-29",
-        "keywords": "nightrun"
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/21996096",
+        "dateModified": "2026-06-30",
+        "keywords": "cmd"
       }
     },
     {
@@ -52,10 +52,10 @@
       "position": 5,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: pin visual provenance lanes (#1225)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/7002c5f8",
-        "dateModified": "2026-06-29",
-        "keywords": "cachewitness"
+        "name": "Fixed: cover concept-disambiguation ci gaps",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/fd7e46ef",
+        "dateModified": "2026-06-30",
+        "keywords": "tools"
       }
     },
     {
@@ -63,12 +63,221 @@
       "position": 6,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add the AUTO marketing bgloop on serve",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a18b7cf0",
-        "dateModified": "2026-06-29",
-        "keywords": "gateway"
+        "name": "New: add generation readout (#1633)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e0467ea0",
+        "dateModified": "2026-06-30",
+        "keywords": "operatorbrief"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 7,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a30e8802",
+        "dateModified": "2026-06-30",
+        "keywords": "benchcatalog"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 8,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d7992dca",
+        "dateModified": "2026-06-30",
+        "keywords": "issuecontract"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 9,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Documented: sync shared documentation",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1710137e",
+        "dateModified": "2026-06-30",
+        "keywords": "docs"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 10,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1d82a07d",
+        "dateModified": "2026-06-30",
+        "keywords": "cmd"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 11,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/607aff73",
+        "dateModified": "2026-06-30",
+        "keywords": "accounts"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 12,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/47b882cc",
+        "dateModified": "2026-06-30",
+        "keywords": "windowgate"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 13,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Documented: sync shared documentation",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/0fc84e15",
+        "dateModified": "2026-06-30",
+        "keywords": "docs"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 14,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/8ad4a7c5",
+        "dateModified": "2026-06-30",
+        "keywords": "codelint"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 15,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/be42d9b4",
+        "dateModified": "2026-06-30",
+        "keywords": "cmd"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 16,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared automation",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d85a83b9",
+        "dateModified": "2026-06-30",
+        "keywords": "ci"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 17,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1c8a1516",
+        "dateModified": "2026-06-30",
+        "keywords": "accounts"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 18,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/980b7747",
+        "dateModified": "2026-06-30",
+        "keywords": "swebench"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 19,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/017aefaa",
+        "dateModified": "2026-06-30",
+        "keywords": "nightrun"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 20,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c7db3e6b",
+        "dateModified": "2026-06-30",
+        "keywords": "fleet"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 21,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Documented: sync shared documentation",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/67e0d3dd",
+        "dateModified": "2026-06-30",
+        "keywords": "docs"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 22,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a1c0455d",
+        "dateModified": "2026-06-30",
+        "keywords": "cmd"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 23,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5b9ae984",
+        "dateModified": "2026-06-30",
+        "keywords": "chatrelay"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 24,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/48d7d5b4",
+        "dateModified": "2026-06-30",
+        "keywords": "blockerpost"
+      }
+    },
+    {
+      "@type": "ListItem",
+      "position": 25,
+      "item": {
+        "@type": "SoftwareSourceCode",
+        "name": "Shipped: sync shared worktree",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/6e0b2669",
+        "dateModified": "2026-06-30",
+        "keywords": "hooks"
       }
     }
   ],
-  "dateModified": "2026-06-29T04:19:50Z"
+  "dateModified": "2026-06-30T17:41:08Z"
 }

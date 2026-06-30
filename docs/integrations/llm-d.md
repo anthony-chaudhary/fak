@@ -31,7 +31,37 @@ curl -s http://127.0.0.1:18080/v1/models
 If your cluster terminates TLS or uses a hostname, keep that external route and use its
 `/v1` root as the fak upstream.
 
-## 2. Normal chat proxy mode
+## 2. Prove the route with fak
+
+Before putting agents behind the route, run fak's llm-d smoke witness. It checks the
+OpenAI-compatible model list, sends one streamed Chat Completions request with
+`stream:true`, waits for the `[DONE]` sentinel, and optionally normalizes the metrics
+endpoint as `engine="llm-d"`:
+
+```bash
+fak llmd-smoke \
+  --base-url http://127.0.0.1:18080/v1 \
+  --model <served-model> \
+  --metrics-url http://127.0.0.1:18080/metrics
+```
+
+If the llm-d route requires a bearer token, put it in an env var and pass the env var
+name, not the secret value:
+
+```bash
+export LLMD_ROUTE_TOKEN="<token>"
+fak llmd-smoke \
+  --base-url https://<llm-d-host>/v1 \
+  --model <served-model> \
+  --api-key-env LLMD_ROUTE_TOKEN \
+  --json
+```
+
+`--base-url` defaults to `FAK_LLMD_BASE_URL` / `FAK_LLM_D_BASE_URL`, `--model` defaults
+to `FAK_LLMD_MODEL` / `FAK_LLM_D_MODEL` or the first `/v1/models` id, and `--metrics-url`
+defaults to `FAK_LLMD_METRICS_URL` / `FAK_LLM_D_METRICS_URL` when set.
+
+## 3. Normal chat proxy mode
 
 For agents and SDKs that speak OpenAI Chat Completions, start fak in front of llm-d:
 
@@ -57,7 +87,7 @@ This is the path most deployments want. The request body and model id go through
 except for fak's adjudication/quarantine envelope, and llm-d still owns scheduling behind
 its Gateway API route.
 
-## 3. Registered engine mode
+## 4. Registered engine mode
 
 Use the `llm-d` engine id when a fak route manifest or `fak_syscall` path should dispatch
 an admitted call through llm-d instead of the in-kernel engine:
@@ -91,7 +121,7 @@ The preset defaults governed tool-call dispatch to `llm-d` and keeps common
 sensitivity labels (`tenant`, `pii`, `secret`) on `inkernel`. The residency gate still
 fails closed for any sensitive/tenant-scoped call that reaches the remote `llm-d` route.
 
-## 4. Metrics and KV boundary
+## 5. Metrics and KV boundary
 
 The `llm-d` adapter normalizes vLLM-style Prometheus worker signals under
 `engine="llm-d"` when `FAK_LLMD_METRICS_URL` is set or the metrics endpoint is reachable

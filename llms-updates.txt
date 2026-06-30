@@ -3,11 +3,30 @@
 > A machine-readable feed of fak's most recent shipped changes. Every line cites the
 > commit that witnesses it. Regenerated on each completion by `fak marketing aeo`.
 >
-> Updated: 2026-06-29T04:19:50Z
+> Updated: 2026-06-30T17:41:08Z
 
-- **2026-06-29** — New: add destructive-op and off-trunk branch/worktree refusals to the git-shape prefilter ([`03861ba6`](https://github.com/anthony-chaudhary/fak/commit/03861ba6))
-- **2026-06-29** — New: record a night-loop warm Mac point under memory pressure (0.72 tok/s) ([`097910db`](https://github.com/anthony-chaudhary/fak/commit/097910db))
-- **2026-06-29** — Fixed: add in-dashboard first-run explanations for the panels empty until their subsystem is exercised (#309) ([`0b56cc9a`](https://github.com/anthony-chaudhary/fak/commit/0b56cc9a))
-- **2026-06-29** — Fixed: add a passed/degraded outcome enum + RecordRow + ValidateLedger so bridge-folded witnesses go through the typed ledger schema (#1140) ([`7f6e2491`](https://github.com/anthony-chaudhary/fak/commit/7f6e2491))
-- **2026-06-29** — Shipped: pin visual provenance lanes (#1225) ([`7002c5f8`](https://github.com/anthony-chaudhary/fak/commit/7002c5f8))
-- **2026-06-29** — New: add the AUTO marketing bgloop on serve ([`a18b7cf0`](https://github.com/anthony-chaudhary/fak/commit/a18b7cf0))
+- **2026-06-30** — Shipped: sync shared worktree ([`d4ba89a9`](https://github.com/anthony-chaudhary/fak/commit/d4ba89a9))
+- **2026-06-30** — Shipped: sync shared worktree ([`3a03db49`](https://github.com/anthony-chaudhary/fak/commit/3a03db49))
+- **2026-06-30** — Documented: sync shared documentation ([`e6758095`](https://github.com/anthony-chaudhary/fak/commit/e6758095))
+- **2026-06-30** — Shipped: sync shared worktree ([`21996096`](https://github.com/anthony-chaudhary/fak/commit/21996096))
+- **2026-06-30** — Fixed: cover concept-disambiguation ci gaps ([`fd7e46ef`](https://github.com/anthony-chaudhary/fak/commit/fd7e46ef))
+- **2026-06-30** — New: add generation readout (#1633) ([`e0467ea0`](https://github.com/anthony-chaudhary/fak/commit/e0467ea0))
+- **2026-06-30** — Shipped: sync shared worktree ([`a30e8802`](https://github.com/anthony-chaudhary/fak/commit/a30e8802))
+- **2026-06-30** — Shipped: sync shared worktree ([`d7992dca`](https://github.com/anthony-chaudhary/fak/commit/d7992dca))
+- **2026-06-30** — Documented: sync shared documentation ([`1710137e`](https://github.com/anthony-chaudhary/fak/commit/1710137e))
+- **2026-06-30** — Shipped: sync shared worktree ([`1d82a07d`](https://github.com/anthony-chaudhary/fak/commit/1d82a07d))
+- **2026-06-30** — Shipped: sync shared worktree ([`607aff73`](https://github.com/anthony-chaudhary/fak/commit/607aff73))
+- **2026-06-30** — Shipped: sync shared worktree ([`47b882cc`](https://github.com/anthony-chaudhary/fak/commit/47b882cc))
+- **2026-06-30** — Documented: sync shared documentation ([`0fc84e15`](https://github.com/anthony-chaudhary/fak/commit/0fc84e15))
+- **2026-06-30** — Shipped: sync shared worktree ([`8ad4a7c5`](https://github.com/anthony-chaudhary/fak/commit/8ad4a7c5))
+- **2026-06-30** — Shipped: sync shared worktree ([`be42d9b4`](https://github.com/anthony-chaudhary/fak/commit/be42d9b4))
+- **2026-06-30** — Shipped: sync shared automation ([`d85a83b9`](https://github.com/anthony-chaudhary/fak/commit/d85a83b9))
+- **2026-06-30** — Shipped: sync shared worktree ([`1c8a1516`](https://github.com/anthony-chaudhary/fak/commit/1c8a1516))
+- **2026-06-30** — Shipped: sync shared worktree ([`980b7747`](https://github.com/anthony-chaudhary/fak/commit/980b7747))
+- **2026-06-30** — Shipped: sync shared worktree ([`017aefaa`](https://github.com/anthony-chaudhary/fak/commit/017aefaa))
+- **2026-06-30** — Shipped: sync shared worktree ([`c7db3e6b`](https://github.com/anthony-chaudhary/fak/commit/c7db3e6b))
+- **2026-06-30** — Documented: sync shared documentation ([`67e0d3dd`](https://github.com/anthony-chaudhary/fak/commit/67e0d3dd))
+- **2026-06-30** — Shipped: sync shared worktree ([`a1c0455d`](https://github.com/anthony-chaudhary/fak/commit/a1c0455d))
+- **2026-06-30** — Shipped: sync shared worktree ([`5b9ae984`](https://github.com/anthony-chaudhary/fak/commit/5b9ae984))
+- **2026-06-30** — Shipped: sync shared worktree ([`48d7d5b4`](https://github.com/anthony-chaudhary/fak/commit/48d7d5b4))
+- **2026-06-30** — Shipped: sync shared worktree ([`6e0b2669`](https://github.com/anthony-chaudhary/fak/commit/6e0b2669))
