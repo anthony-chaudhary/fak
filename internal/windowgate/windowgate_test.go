@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,6 +99,37 @@ func TestClassifyLiveScheduledTasks(t *testing.T) {
 	}
 	if len(rep.Watchlist) != 3 {
 		t.Fatalf("watchlist = %d %v, want hidden/headless/pythonw/disabled rows", len(rep.Watchlist), rep.Watchlist)
+	}
+}
+
+func TestClassifyVisibleWindows(t *testing.T) {
+	rep := ClassifyVisibleWindows([]VisibleWindow{
+		{
+			PID: 1, Name: "powershell", Title: "worker", Path: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+			CommandLine: `powershell.exe -File C:\work\fak\tools\tick.ps1`,
+		},
+		{
+			PID: 2, Name: "WindowsTerminal", Title: "dev shell",
+			CommandLine: `"C:\Program Files\WindowsTerminal.exe"`,
+		},
+		{
+			PID: 3, Name: "chrome", Title: "Apply",
+			CommandLine: `chrome.exe --remote-debugging-port=9223 --single-argument https://example.test/oauth?state=abc&code_challenge=def`,
+		},
+		{
+			PID: 4, Name: "Slack", Title: "fleet-status",
+		},
+	})
+	if len(rep.Violations) != 1 {
+		t.Fatalf("visible violations = %d %v, want repo-owned powershell only", len(rep.Violations), rep.Violations)
+	}
+	if len(rep.Watchlist) != 2 {
+		t.Fatalf("visible watchlist = %d %v, want terminal + browser automation", len(rep.Watchlist), rep.Watchlist)
+	}
+	for _, row := range append(rep.Violations, rep.Watchlist...) {
+		if strings.Contains(row, "state=abc") || strings.Contains(row, "code_challenge=def") || strings.Contains(row, "https://example.test") {
+			t.Fatalf("visible window row leaked URL credentials: %s", row)
+		}
 	}
 }
 

@@ -57,6 +57,27 @@ type LiveTaskReport struct {
 // OK reports whether the live task read-back found no active visible-window risk.
 func (r LiveTaskReport) OK() bool { return len(r.Violations) == 0 }
 
+// VisibleWindow is one visible top-level window observed from the desktop.
+type VisibleWindow struct {
+	PID         int    `json:"pid"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Path        string `json:"path"`
+	CommandLine string `json:"command_line"`
+}
+
+// VisibleWindowReport audits what is visible right now. It is intentionally
+// separate from the scheduled-task read-back: a source tree can be clean and task
+// registrations can be headless while a leaked child window is still on screen.
+type VisibleWindowReport struct {
+	Scanned    int
+	Violations []string
+	Watchlist  []string
+}
+
+// OK reports whether the live desktop has no hard visible automation window.
+func (r VisibleWindowReport) OK() bool { return len(r.Violations) == 0 }
+
 // ScanLiveScheduledTasks reads local Windows Scheduled Tasks and classifies any
 // console-prone interactive actions. On non-Windows hosts it returns an empty
 // report so the CLI flag stays portable.
@@ -90,6 +111,143 @@ Get-ScheduledTask | ForEach-Object {
 		return LiveTaskReport{}, err
 	}
 	return ClassifyLiveScheduledTasks(tasks), nil
+}
+
+// ScanVisibleWindows reads visible top-level windows and classifies console/tool
+// windows likely to belong to background automation. On non-Windows hosts it
+// returns an empty report so the CLI flag stays portable.
+func ScanVisibleWindows(ctx context.Context) (VisibleWindowReport, error) {
+	if runtime.GOOS != "windows" {
+		return VisibleWindowReport{}, nil
+	}
+	const ps = `$ErrorActionPreference='SilentlyContinue'
+$cmds = @{}
+Get-CimInstance Win32_Process | ForEach-Object { $cmds[[int]$_.ProcessId] = "$($_.CommandLine)" }
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) } | ForEach-Object {
+  [pscustomobject]@{
+    pid = [int]$_.Id
+    name = "$($_.ProcessName)"
+    title = "$($_.MainWindowTitle)"
+    path = "$($_.Path)"
+    command_line = "$($cmds[[int]$_.Id])"
+  }
+} | ConvertTo-Json -Depth 4`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
+	ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return VisibleWindowReport{}, fmt.Errorf("read visible windows: %w", err)
+	}
+	windows, err := parseVisibleWindows(out)
+	if err != nil {
+		return VisibleWindowReport{}, err
+	}
+	return ClassifyVisibleWindows(windows), nil
+}
+
+func parseVisibleWindows(out []byte) ([]VisibleWindow, error) {
+	text := strings.TrimSpace(string(out))
+	if text == "" || text == "null" {
+		return nil, nil
+	}
+	var many []VisibleWindow
+	if err := json.Unmarshal([]byte(text), &many); err == nil {
+		return many, nil
+	}
+	var one VisibleWindow
+	if err := json.Unmarshal([]byte(text), &one); err != nil {
+		return nil, fmt.Errorf("parse visible windows json: %w", err)
+	}
+	return []VisibleWindow{one}, nil
+}
+
+// ClassifyVisibleWindows folds live top-level windows into hard findings and
+// review-only rows. A visible console/tool process with repo automation markers
+// is hard; visible user terminals and browser automation windows are surfaced for
+// review because they can be intentional or deliberately off-screen.
+func ClassifyVisibleWindows(windows []VisibleWindow) VisibleWindowReport {
+	rep := VisibleWindowReport{Scanned: len(windows)}
+	for _, win := range windows {
+		if visibleWindowIgnored(win) {
+			continue
+		}
+		row := visibleWindowRow(win)
+		switch {
+		case visibleConsoleTool(win) && visibleAutomationOwned(win):
+			rep.Violations = append(rep.Violations, row+" is a visible console/tool window owned by repo automation")
+		case visibleConsoleTool(win):
+			rep.Watchlist = append(rep.Watchlist, row+" is a visible console/tool window; confirm this is user-attended")
+		case visibleBrowserAutomation(win):
+			rep.Watchlist = append(rep.Watchlist, row+" is browser automation with a visible top-level window; keep it off-screen or headless")
+		}
+	}
+	sort.Strings(rep.Violations)
+	sort.Strings(rep.Watchlist)
+	return rep
+}
+
+func visibleWindowRow(win VisibleWindow) string {
+	return fmt.Sprintf("pid=%d name=%s title=%q cmd=%s", win.PID, win.Name, win.Title, redactCommandLine(win.CommandLine))
+}
+
+func visibleWindowIgnored(win VisibleWindow) bool {
+	name := strings.ToLower(strings.TrimSpace(win.Name))
+	switch name {
+	case "", "applicationframehost", "dwm", "systemsettings", "textinputhost", "shellexperiencehost", "searchhost", "startmenuexperiencehost":
+		return true
+	}
+	return false
+}
+
+func visibleConsoleTool(win VisibleWindow) bool {
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe"))
+	switch name {
+	case "cmd", "powershell", "pwsh", "conhost", "openconsole", "windowsterminal",
+		"git", "gh", "dos", "fak", "python", "python3", "pythonw", "bash", "wsl",
+		"node", "npm", "npx", "taskkill", "tasklist", "schtasks":
+		return true
+	}
+	return false
+}
+
+func visibleAutomationOwned(win VisibleWindow) bool {
+	text := strings.ToLower(win.Path + " " + win.CommandLine + " " + win.Title)
+	for _, marker := range []string{
+		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
+		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func visibleBrowserAutomation(win VisibleWindow) bool {
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe"))
+	if name != "chrome" && name != "msedge" && name != "firefox" {
+		return false
+	}
+	text := strings.ToLower(win.CommandLine)
+	return strings.Contains(text, "--remote-debugging-port") ||
+		strings.Contains(text, "chrome-cdp") ||
+		strings.Contains(text, "playwright") ||
+		strings.Contains(text, "selenium")
+}
+
+var (
+	reHTTPURL = regexp.MustCompile(`https?://\S+`)
+	reSecrets = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|state=[^&\s]+|code_challenge=[^&\s]+)`)
+)
+
+func redactCommandLine(s string) string {
+	s = reHTTPURL.ReplaceAllString(s, "[url-redacted]")
+	s = reSecrets.ReplaceAllString(s, "[secret-redacted]")
+	s = strings.TrimSpace(s)
+	if len(s) > 260 {
+		return s[:260] + "..."
+	}
+	return s
 }
 
 func parseLiveScheduledTasks(out []byte) ([]LiveScheduledTask, error) {
