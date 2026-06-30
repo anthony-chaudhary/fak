@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 )
 
@@ -99,18 +100,25 @@ func TestCachevalueReportJSONReproducesFold(t *testing.T) {
 		t.Fatalf("week 2 should cross break-even: %+v", rep.Track2[1])
 	}
 
-	// Re-fold the SAME ledgers and assert the Track-2 economics reproduce exactly.
-	t1rows := cachevaluereport.ReadSavingsLedgerFile(track2)
-	refold := cachevaluereport.FoldTwoTrack(nil, t1rows, twoTrackReportNow())
-	if len(refold.Track2) != len(rep.Track2) {
-		t.Fatalf("re-fold bucket count drift: %d vs %d", len(refold.Track2), len(rep.Track2))
+	// Re-fold the SAME two ledgers and assert the CLI JSON is exactly the pure
+	// fold output, ignoring only the live GeneratedAt clock stamp.
+	refold := cachevaluereport.FoldTwoTrack(
+		cachevalueledger.ReadLedgerFile(track1),
+		cachevaluereport.ReadSavingsLedgerFile(track2),
+		twoTrackReportNow(),
+	)
+	refold.GeneratedAt = rep.GeneratedAt
+	refold.Track1.GeneratedAt = rep.Track1.GeneratedAt
+	want, err := json.Marshal(refold)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for i := range refold.Track2 {
-		if refold.Track2[i].NetUSD != rep.Track2[i].NetUSD ||
-			refold.Track2[i].CumulativeNetUSD != rep.Track2[i].CumulativeNetUSD {
-			t.Fatalf("bucket %d does not reproduce: re-fold %+v vs report %+v",
-				i, refold.Track2[i], rep.Track2[i])
-		}
+	got, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("CLI report does not reproduce from fold(two ledgers):\n got=%s\nwant=%s", got, want)
 	}
 }
 
