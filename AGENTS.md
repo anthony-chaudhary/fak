@@ -64,6 +64,29 @@ go build -o fak ./cmd/fak
 The first `go build` compiles the binary (~30–60s, plus a one-time Go-1.26 toolchain fetch);
 later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-packet.md).
 
+## Proof by default (every issue fix ships its evidence)
+
+This kernel exists because a self-report is not a fact. Hold your own fixes to the same bar:
+**by default, an issue fix ships a captured proof artifact, matched to the failure class** — not
+just a code change and a "looks fixed". Pick the witness the bug actually has:
+
+- **TUI / visual** (a rendering, layout, or terminal-corruption bug — the kind you were sent a
+  *screenshot* of): the proof is a **captured render**. Write a render-witness test that captures
+  the bytes a surface emits and asserts the defect is gone — see
+  [`cmd/fak/watchdog_autoheal_test.go`](cmd/fak/watchdog_autoheal_test.go)
+  `TestWatchdogAutohealKeepsAgentPaneClean`, which captures the would-be agent pane and proves
+  **zero bytes** reach it. When a live on-screen UI is in the loop, also attach a **before/after
+  terminal screenshot** to the issue/PR (the same evidence the reporter gave you). A green unit
+  test that never renders the surface is not proof for a visual bug.
+- **Logic / behavior**: a test that **fails before the fix and passes after** — the repro is the
+  proof. Land it in the same commit as the fix.
+- **"Shipped / done" claims**: a witnessed commit (`dos verify`, the `(fak <leaf>)` trailer) — see
+  the witness rules below. A subject line is forgeable; the diff and the registry are not.
+
+The rule of thumb: reproduce the defect as a captured artifact *first*, then make that artifact
+clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
+witness, don't claim a fix.
+
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
 **Default: ship.** Once the tree is green, **commit AND push** — don't wait to be asked.
