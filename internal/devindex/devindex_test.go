@@ -40,6 +40,19 @@ ignored = ["internal/ignored/**"]
 	if err := os.WriteFile(filepath.Join(root, "INDEX.md"), []byte(indexMd), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	generationMd := "# Generation Contract\n\n" +
+		"| Stream | Label | Milestone | Meaning |\n" +
+		"|---|---|---|---|\n" +
+		"| now | `gen/now` | `Generation G0 - Now / Immediate` | Current product work with a clear witness. |\n" +
+		"| next | `gen/next` | `Generation G1 - Next Gen` | Near-term foundation that needs a gate or dogfood proof. |\n" +
+		"| second-next | `gen/second-next` | `Generation G2 - Second Next Gen` | Architectural option needing simulation or compatibility policy. |\n" +
+		"| future | `gen/future` | `Generation G3 - Future` | Long-horizon research or option value. |\n"
+	if err := os.WriteFile(filepath.Join(root, "docs", "generation.md"), []byte(generationMd), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// A synthetic CLAIMS.md exercising the claim/status join (C2 #1289): the legend
 	// line writes its tag in backticks and MUST be excluded; real claims bind to a
 	// lane via their internal/<pkg> reference; a product claim names no package and
@@ -175,6 +188,34 @@ func TestSearchDocsRanking(t *testing.T) {
 	}
 	if got := c.SearchDocs(""); got != nil {
 		t.Errorf("empty query should return nil, got %v", got)
+	}
+}
+
+func TestGenerationIndexSearch(t *testing.T) {
+	c, _ := Load(writeSyntheticRepo(t))
+	if len(c.Generations) != 4 {
+		t.Fatalf("generations = %d, want 4: %+v", len(c.Generations), c.Generations)
+	}
+	next, ok := c.GenerationByStream("gen/next")
+	if !ok {
+		t.Fatal("gen/next row missing")
+	}
+	if next.Label != "gen/next" || next.Milestone != "Generation G1 - Next Gen" {
+		t.Fatalf("next row = %+v, want label and milestone from docs/generation.md", next)
+	}
+	signals := strings.Join(next.IssueBodySignals, " ")
+	if !strings.Contains(signals, "Generation stream") || !strings.Contains(signals, "promotion evidence") {
+		t.Fatalf("next issue-body signals = %q, want generation stream + promotion evidence", signals)
+	}
+	if !strings.Contains(next.PromotionEvidence, "dogfood") || !strings.Contains(next.DemotionEvidence, "stale") {
+		t.Fatalf("next evidence rules = promote %q demote %q", next.PromotionEvidence, next.DemotionEvidence)
+	}
+	hits := c.SearchGenerations("gen/next gate")
+	if len(hits) == 0 || hits[0].Stream != "next" {
+		t.Fatalf("SearchGenerations(gen/next gate) = %+v, want next first", hits)
+	}
+	if got := c.SearchGenerations(""); len(got) != 4 || got[0].Stream != "now" || got[3].Stream != "future" {
+		t.Fatalf("empty generation search = %+v, want all in now->future order", got)
 	}
 }
 

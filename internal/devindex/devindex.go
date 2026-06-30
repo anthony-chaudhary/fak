@@ -76,10 +76,11 @@ type Doc struct {
 // Catalog is the loaded self-index: the leaf taxonomy and the doc map, plus the
 // path-prefix maps the lane resolver needs. Build it with Load.
 type Catalog struct {
-	Root   string  `json:"root"`
-	Leaves []Leaf  `json:"leaves"`
-	Docs   []Doc   `json:"docs"`
-	Claims []Claim `json:"claims,omitempty"`
+	Root        string       `json:"root"`
+	Leaves      []Leaf       `json:"leaves"`
+	Docs        []Doc        `json:"docs"`
+	Claims      []Claim      `json:"claims,omitempty"`
+	Generations []Generation `json:"generations,omitempty"`
 
 	// prefixes maps a tree prefix ("internal/gateway/") to its lane ("gateway");
 	// exact maps a bare file entry ("version") to its lane. Both lowercased.
@@ -125,6 +126,11 @@ func Load(root string) (*Catalog, error) {
 
 	if idx, err := os.ReadFile(filepath.Join(root, "INDEX.md")); err == nil {
 		c.parseDocs(string(idx))
+	}
+	if gen, err := os.ReadFile(filepath.Join(root, "docs", "generation.md")); err == nil {
+		c.Generations = parseGenerations(string(gen))
+	} else {
+		c.Generations = defaultGenerations()
 	}
 	// CLAIMS.md is parsed AFTER the lanes so the claim->lane join can use the
 	// resolver. A missing ledger degrades to an empty rollup, not an error.
