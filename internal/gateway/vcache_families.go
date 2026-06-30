@@ -75,6 +75,7 @@ func (m *gatewayMetrics) observeVCacheTurn(family string, unixMillis int64, inpu
 	copy(snap, m.vcacheTurns)
 	m.vcacheMu.Unlock()
 	m.observeVCacheGovernorDecision(turn.Family, turn.UnixMillis, snap)
+	m.observeVCacheWarmthDemotion(turn.Family, turn.UnixMillis, snap)
 }
 
 // vcacheTurnsSnapshot returns a copy of the retained per-family window and whether

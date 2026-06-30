@@ -18,6 +18,7 @@ type debugVarsResponse struct {
 	VCache         *debugVCacheVars               `json:"vcache,omitempty"`
 	VCacheFamilies *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
 	VCacheGovernor []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
+	VCacheWarmth   []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
 	ModelLoad      *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory       *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory  *debugRequestMemoryVars        `json:"request_memory,omitempty"`
@@ -368,6 +369,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 		VCache:         vcacheVarsFromSnapshot(infer),
 		VCacheFamilies: vcacheFamiliesVars(vcacheTurns, vcacheCapped),
 		VCacheGovernor: m.vcacheGovernorDecisionRecords(),
+		VCacheWarmth:   m.vcacheWarmthDemotionRecords(),
 		ModelLoad:      debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:       debugKVMemory(s.planner),
 		RequestMemory:  debugRequestMemory(s.planner),

@@ -224,6 +224,7 @@ type gatewayMetrics struct {
 	vcacheTurns        []vcacheobserve.Turn
 	vcacheTurnsDropped bool
 	vcacheGovernor     *vcacheGovernorDecisionJournal
+	vcacheWarmth       *vcacheWarmthDemotionJournal
 
 	// denyAllMu guards the deny-all stop family: a served turn whose EVERY proposed tool
 	// call the capability floor refused (kept==0). The wire MUST report such a turn as
@@ -323,6 +324,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
 		routing:            newRoutingMetrics(),
 		vcacheGovernor:     newVCacheGovernorDecisionJournal(),
+		vcacheWarmth:       newVCacheWarmthDemotionJournal(),
 		inferTTFTHist:      newLatencyCounter(),
 		inferTPOTHist:      newLatencyCounter(),
 		inferE2EHist:       newLatencyCounter(),
@@ -1328,6 +1330,7 @@ func (s *Server) renderMetrics() string {
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
+	m.writeVCacheWarmthDemotionMetrics(&b)
 	m.writeVCacheGovernorMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
