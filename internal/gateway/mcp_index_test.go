@@ -38,11 +38,11 @@ docs = ["docs/**"] # documentation
   ]
 }`
 	for path, body := range map[string]string{
-		"dos.toml":                  dosToml,
-		"INDEX.md":                  indexMd,
-		"CLAIMS.md":                 claimsMd,
-		"docs/gateway.md":           "# Gateway\n",
-		"POLICY.md":                 "# Policy\n",
+		"dos.toml":                 dosToml,
+		"INDEX.md":                 indexMd,
+		"CLAIMS.md":                claimsMd,
+		"docs/gateway.md":          "# Gateway\n",
+		"POLICY.md":                "# Policy\n",
 		".github/issue-views.json": viewsJSON,
 	} {
 		full := filepath.Join(root, filepath.FromSlash(path))
