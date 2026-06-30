@@ -7,8 +7,6 @@
 > [`tools/hero_benchmark.data.json`](tools/hero_benchmark.data.json) by
 > [`tools/hero_benchmark_gen.py`](tools/hero_benchmark_gen.py). Edit the data file and rerun the
 > generator when a benchmark changes — do not hand-edit this doc or the two SVGs.
->
-> **⚠️ 2026-06-27 UPDATE:** This document was hand-edited to resolve GitHub issue #119 by adding platform-specific performance data (AMD Vulkan vs M3 CPU). The generator should be updated to incorporate platform variance into `hero_benchmark.data.json`.
 
 > **The frontier-lab move, done honestly.** When a frontier lab ships a model it leads with one
 > headline number, a hero chart against its top-3 competitors, and a table of benchmarks with
@@ -95,12 +93,9 @@ Six benchmarks, each `fak` against the **best already-shipped SOTA serving syste
 | 3 | **KV-cache hit rate  (FCFS → cache-aware)** | kv reuse | SGLang RadixAttention band: 50–99% (FCFS 62.1%) | **86.7% (= 100% of optimal)** | ✅ |
 | 4 | **RadixAttention live prefill speedup  (Qwen2.5-1.5B)** | kv reuse | Deterministic token-reuse ceiling: 7.50× | **6.95× (93% of the 7.50× ceiling)** | ✅ |
 | 5 | Single-stream decode  (Qwen2.5-7B Q8) | single stream | **llama.cpp Metal: 17.3 tok/s** | 8.7 tok/s  (0.50×) | — |
-| 6 | **Qwen3.6-27B prefill (AMD Vulkan)** | single stream | **llama.cpp Vulkan: 5.20–9.95 tok/s** | **14.86–31.34 tok/s (1.88–3.15×)** | ✅ |
-| 7 | Single-stream prefill  (1.5B–7B Q8, M3) | single stream | **llama.cpp CPU (+ Metal GPU)** | ~0.12× vs llama.cpp CPU, apples-to-apples (0.083× vs Metal GPU) | — |
+| 6 | Single-stream prefill  (1.5B–7B Q8) | single stream | **llama.cpp CPU (+ Metal GPU)** | ~0.12× vs llama.cpp CPU, apples-to-apples (0.083× vs Metal GPU) | — |
 
-> **Every win is in the agent-fleet / KV-reuse regime — `fak`'s actual product category — and every row is against the best already-shipped SOTA, not a naive strawman.** The 3 trailing rows are single-stream raw throughput, which `fak` explicitly does not target. A bolded number means `fak` beat (or reached parity with) the best already-shipped baseline on that axis, stated as the absolute measured number.
-
-> **Platform variance:** `fak`'s single-stream speed varies significantly by hardware platform and backend. On AMD Vulkan (Qwen3.6-27B), `fak` **beats** llama.cpp by **1.88–3.15×** on prefill (measured on RX 7600, b9673). On Apple M3 Pro arm64, `fak` trails at **~0.10–0.12×** due to a missing register-blocked int8 GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues)). Both numbers are real — one on AMD Vulkan, one on M3 CPU — and both trace to committed artifacts. Compare apples-to-apples: same machine, same model, same backend.
+> **Every win is in the agent-fleet / KV-reuse regime — `fak`'s actual product category — and every row is against the best already-shipped SOTA, not a naive strawman.** The 2 trailing rows are single-stream raw throughput, which `fak` explicitly does not target. A bolded number means `fak` beat (or reached parity with) the best already-shipped baseline on that axis, stated as the absolute measured number.
 
 ---
 
@@ -109,7 +104,7 @@ Six benchmarks, each `fak` against the **best already-shipped SOTA serving syste
 The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where it trailed Gemini 3 Pro, here is where `fak` trails the SOTA — stated plainly, not buried:
 
 - **Single-stream decode:** `fak` decodes **8.7 tok/s** on Qwen2.5-7B Q8 vs llama.cpp Metal's **17.3 tok/s** — **0.50×**. Across the ladder the gap is **0.39× → 0.53×** (1.5B → 7B); it *narrows* with model size (decode is bandwidth-bound toward the same ~150 GB/s unified-memory floor) — `fak` trails today, and the gap is actively closing.
-- **Single-stream prefill on Apple M3 Pro:** `fak` trails due to a missing register-blocked int8 GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues)). On M3 Pro arm64, `fak` prefill is **~0.10–0.15× of llama.cpp CPU** (1.5B 0.101×–0.15×, 7B 0.123×; median **~0.12×**). On x86 Zen5, where that tile already exists, the per-token raw-compute *slope* reaches **parity (1.03×)** — the ceiling arm64 inherits once the tile lands. **Against a Metal GPU (NOT apples-to-apples):** **0.083× (7B)** / 0.01× (27B), but the 7B doc attributes ~12× of that gap to the GPU *device* (0.083× × 12 ≈ 1.0×), so it collapses toward the ~0.10–0.12× CPU-vs-CPU figure once the GPU is removed — a device gap, not a kernel gap. **Note:** On AMD Vulkan (Qwen3.6-27B), `fak` **beats** llama.cpp by **1.88–3.15×** on prefill (row 6 in the leaderboard above). The trailing figure is platform-specific to M3 Pro arm64, not a universal `fak` property.
+- **Single-stream prefill:** `fak` trails — and the figure depends entirely on the baseline backend. **Apples-to-apples (both engines on CPU, same machine + Q8 weights):** on Apple M3 Pro arm64 — which still lacks the register-blocked int8 GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues)) — `fak` prefill is **~0.10–0.15× of llama.cpp CPU** (1.5B 0.101×–0.15×, 7B 0.123×; median **~0.12×**). On x86 Zen5, where that tile already exists, the per-token raw-compute *slope* reaches **parity (1.03×)** — the ceiling arm64 inherits once the tile lands. **Against a Metal GPU (NOT apples-to-apples):** **0.083× (7B)** / 0.01× (27B), but the 7B doc attributes ~12× of that gap to the GPU *device* (0.083× × 12 ≈ 1.0×), so it collapses toward the ~0.10–0.12× CPU-vs-CPU figure once the GPU is removed — a device gap, not a kernel gap. Either way `fak` trails single-stream prefill **today** — closing as the arm64 tile lands (x86 slope is already at parity). The honest fence, measured fairly.
 - **Model-size ceiling on this box:** `fak`'s faithful ceiling is **7B** on 36 GB (GGUF dequant-to-f32 OOMs above; two arch families fail at load — [tracked](https://github.com/anthony-chaudhary/fak/issues)). llama.cpp reaches 72B (CPU) / ~32B (Metal). The MoE standout (Qwen3-30B-A3B, **50 tok/s** on llama.cpp) runs because only 3B of 30B params are active per token — sparse activation is the lever, and `fak` doesn't load it yet.
 
 **The synthesis:** *one chat → use llama.cpp; an agent fleet → use `fak`.* Both are true; never cross-compare them.
@@ -127,7 +122,7 @@ The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where 
 | **harnesses** | `cmd/{modelbench,radixbench,sessionbench,fleetbench}` (fak) · `llama-bench` (llama.cpp) |
 | **bit-exactness** | `TestBatchedDecodeMatchesSerial`, `TestBatchFromPrefixMatchesIndependentPrefill`, `internal/radixkv` split-reuse == recompute (max\|Δ\|=0) |
 
-> **Regime rules (per [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)):** the deterministic metrics (token speedup, hit rate, cell counts) are hardware-independent and reproduce the committed JSON exactly; only the live wall-clocks are single-box and authoritative as *within-run ratios*.
+> **Regime rules (per [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)):** the deterministic metrics (token speedup, hit rate, cell counts) are hardware-independent and reproduce the committed JSON bit-for-bit; only the live wall-clocks are single-box and authoritative as *within-run ratios*.
 
 ---
 
@@ -140,8 +135,7 @@ The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where 
 | KV-cache hit rate  (FCFS → cache-aware) | 86.7% (= 100% of optimal) | `92896a4` | experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json |
 | RadixAttention live prefill speedup  (Qwen2.5-1.5B) | 6.95× (93% of the 7.50× ceiling) | `92896a4` | experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json |
 | Single-stream decode  (Qwen2.5-7B Q8) | 8.7 tok/s  (0.50×) | `34c74f4` | model-ladder/modelbench-qwen25-7b-q8.json |
-| **Qwen3.6-27B prefill (AMD Vulkan)** | **14.86–31.34 tok/s (1.88–3.15×)** | `c98eddff` | experiments/qwen36/qwen36-perf-gate-amd-20260619.json · docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md |
-| Single-stream prefill  (1.5B–7B Q8, M3) | ~0.12× vs llama.cpp CPU, apples-to-apples (0.083× vs Metal GPU) | `34c74f4` | fak/MODEL-LADDER-VS-SOTA-2026-06-21.md (Regime A, CPU) · fak/QWEN25-7B-RESULTS.md (Metal) |
+| Single-stream prefill  (1.5B–7B Q8) | ~0.12× vs llama.cpp CPU, apples-to-apples (0.083× vs Metal GPU) | `34c74f4` | fak/MODEL-LADDER-VS-SOTA-2026-06-21.md (Regime A, CPU) · fak/QWEN25-7B-RESULTS.md (Metal) |
 
 ---
 
