@@ -343,6 +343,20 @@ type Backend interface {
 	Argmax(logits Tensor) int
 }
 
+// RankUploader is an OPTIONAL extension for multi-device backends that need a host tensor
+// placed on a specific rank before a CollectiveBackend call. Generic Upload has no rank
+// parameter and remains the single-device path; model.BackendCollective type-asserts this
+// interface and uses it only when present, so cpu-ref and non-collective backends are unchanged.
+type RankUploader interface {
+	UploadRank(t Tensor, as Dtype, rank int) (Tensor, error)
+}
+
+// CollectiveInitializer is an OPTIONAL extension for backends whose collective capability needs
+// an explicit world-size bootstrap before Caps().Collective can honestly report true.
+type CollectiveInitializer interface {
+	InitCollective(world int) error
+}
+
 // ---- CollectiveBackend (the tensor-parallel cross-rank seam) ---------------------
 //
 // CollectiveBackend is the OPTIONAL cross-rank reduction interface a backend implements to
