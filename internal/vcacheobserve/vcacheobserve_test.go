@@ -51,6 +51,31 @@ func TestObserveGroupsFamiliesAndProvesSavings(t *testing.T) {
 	}
 }
 
+func TestObserveOwnerSlicesSeparateProviderFromFak(t *testing.T) {
+	r := Observe(twoFamilies(), DefaultMultipliers())
+	if len(r.OwnerSlices) != 2 {
+		t.Fatalf("owner slice count: got %d want 2", len(r.OwnerSlices))
+	}
+	provider := r.OwnerSlices[0]
+	if provider.Owner != "provider" || provider.Mechanism != "prompt_cache" || provider.Provenance != Observed {
+		t.Fatalf("provider owner slice not explicit: %+v", provider)
+	}
+	if provider.SavedTokenEquiv != r.Aggregate.SavedTokenEquiv {
+		t.Fatalf("provider saved token-equiv: got %.1f want %.1f", provider.SavedTokenEquiv, r.Aggregate.SavedTokenEquiv)
+	}
+	if provider.CacheReadTokens != r.Aggregate.CacheReadTokens || provider.CacheCreationTokens != r.Aggregate.CacheCreationTokens {
+		t.Fatalf("provider raw counters do not reconcile: %+v vs aggregate %+v", provider, r.Aggregate)
+	}
+
+	fak := r.OwnerSlices[1]
+	if fak.Owner != "fak" || fak.Mechanism != "authored_cache" || fak.Provenance != NotObserved {
+		t.Fatalf("fak owner slice should be explicitly not observed: %+v", fak)
+	}
+	if fak.SavedTokenEquiv != 0 {
+		t.Fatalf("fak telemetry slice must not invent savings, got %.1f", fak.SavedTokenEquiv)
+	}
+}
+
 func TestObserveWarmthBeliefNeverFalseWarms(t *testing.T) {
 	r := Observe(twoFamilies(), DefaultMultipliers())
 	// Every read in this fixture is genuine, so the estimator must never predict a

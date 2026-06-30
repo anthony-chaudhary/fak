@@ -61,15 +61,16 @@ func (m Multipliers) normalized() Multipliers {
 	return m
 }
 
-// Provenance labels whether a panel value is OBSERVED (relayed from the provider's
-// own counters — fak does not control it) or a DECISION (fak's deterministic verdict
-// over those counters). The label is what keeps the report from conflating a provider
-// effect with a fak action.
+// Provenance labels whether a value is OBSERVED (relayed from external counters),
+// a DECISION (fak's deterministic verdict over those counters), or NOT_OBSERVED
+// (the input source has no counter for that owner/mechanism). The label is what
+// keeps the report from conflating a provider effect with a fak action.
 type Provenance string
 
 const (
-	Observed Provenance = "OBSERVED"
-	Decision Provenance = "DECISION"
+	Observed    Provenance = "OBSERVED"
+	Decision    Provenance = "DECISION"
+	NotObserved Provenance = "NOT_OBSERVED"
 )
 
 // Family is one prefix family's observed economics and warmth-belief prediction.
@@ -101,6 +102,19 @@ type Panel struct {
 	Detail     string     `json:"detail"`
 }
 
+// OwnerSlice is the report-level attribution ledger. It separates provider prompt
+// cache economics from fak-authored mechanisms even when this telemetry source can
+// only observe the provider side.
+type OwnerSlice struct {
+	Owner               string     `json:"owner"`
+	Mechanism           string     `json:"mechanism"`
+	SavedTokenEquiv     float64    `json:"saved_token_equiv"`
+	CacheReadTokens     float64    `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens float64    `json:"cache_creation_tokens,omitempty"`
+	Provenance          Provenance `json:"provenance"`
+	Evidence            string     `json:"evidence"`
+}
+
 // Report is the full per-sub-concept observability over one real run.
 type Report struct {
 	Schema           string                          `json:"schema"`
@@ -118,6 +132,7 @@ type Report struct {
 	ScoreMeasured    int                             `json:"score_measured"`
 	GradeSynthetic   string                          `json:"grade_synthetic"`
 	ScoreSynthetic   int                             `json:"score_synthetic"`
+	OwnerSlices      []OwnerSlice                    `json:"owner_slices"`
 	Panels           []Panel                         `json:"panels"`
 }
 
@@ -227,8 +242,30 @@ func Observe(turns []Turn, m Multipliers) Report {
 	rep.GradeMeasured, rep.ScoreMeasured = measured.Grade, measured.Score
 	rep.GradeSynthetic, rep.ScoreSynthetic = synthetic.Grade, synthetic.Score
 
+	rep.OwnerSlices = buildOwnerSlices(rep)
 	rep.Panels = buildPanels(rep)
 	return rep
+}
+
+func buildOwnerSlices(r Report) []OwnerSlice {
+	return []OwnerSlice{
+		{
+			Owner:               "provider",
+			Mechanism:           "prompt_cache",
+			SavedTokenEquiv:     r.Aggregate.SavedTokenEquiv,
+			CacheReadTokens:     r.Aggregate.CacheReadTokens,
+			CacheCreationTokens: r.Aggregate.CacheCreationTokens,
+			Provenance:          Observed,
+			Evidence:            "provider usage.cache_read_input_tokens and cache_creation_input_tokens",
+		},
+		{
+			Owner:           "fak",
+			Mechanism:       "authored_cache",
+			SavedTokenEquiv: 0,
+			Provenance:      NotObserved,
+			Evidence:        "transcript/session telemetry has no fak compaction, KV-prefix reuse, or vDSO avoided-call counters",
+		},
+	}
 }
 
 // groupFamilies buckets turns by family preserving first-seen order and records the
