@@ -217,17 +217,19 @@ func writeStopFailureJSON(stdout, stderr io.Writer, v any) int {
 
 func printStopFailurePlan(w io.Writer, plan stopfailure.Plan) {
 	recent := plan.Counts[stopfailure.ActionRecentReview]
+	progress := plan.Counts[stopfailure.ActionProgressAfterMarker]
 	stale := plan.Counts[stopfailure.ActionStaleReset]
 	archive := plan.Counts[stopfailure.ActionStaleMarkerOnlyArchive]
 	status := "OK"
-	if recent > 0 || stale > 0 || archive > 0 || plan.Malformed > 0 {
+	if recent > 0 || progress > 0 || stale > 0 || archive > 0 || plan.Malformed > 0 {
 		status = "WARN"
 	}
-	fmt.Fprintf(w, "fak stopfailure plan: %s markers=%d ignored_old=%d recent_review=%d stale_reset=%d marker_only_archive=%d healed=%d zero=%d malformed=%d\n",
+	fmt.Fprintf(w, "fak stopfailure plan: %s markers=%d ignored_old=%d recent_review=%d progress_reset=%d stale_reset=%d marker_only_archive=%d healed=%d zero=%d malformed=%d\n",
 		status,
 		plan.Markers,
 		plan.IgnoredOld,
 		recent,
+		progress,
 		stale,
 		archive,
 		plan.Counts[stopfailure.ActionHealedNonzero],
@@ -235,9 +237,10 @@ func printStopFailurePlan(w io.Writer, plan stopfailure.Plan) {
 		plan.Malformed,
 	)
 	printStopFailureRows(w, "recent review", plan.Candidates[stopfailure.ActionRecentReview])
+	printStopFailureRows(w, "progress-after-marker reset", plan.Candidates[stopfailure.ActionProgressAfterMarker])
 	printStopFailureRows(w, "stale reset", plan.Candidates[stopfailure.ActionStaleReset])
 	printStopFailureRows(w, "marker-only archive", plan.Candidates[stopfailure.ActionStaleMarkerOnlyArchive])
-	if stale > 0 {
+	if progress > 0 || stale > 0 {
 		fmt.Fprintln(w, "next: fak stopfailure reset-stale --apply")
 	}
 }
@@ -270,8 +273,8 @@ func printStopFailureReset(w io.Writer, result stopfailure.ResetResult) {
 	if result.Applied {
 		rows = result.Updated
 	}
-	printStopFailureSettlement(w, "stale reset",
-		"next: rerun with --apply to set consecutive=0 on stale markers only",
+	printStopFailureSettlement(w, "reset",
+		"next: rerun with --apply to set consecutive=0 on stale/progress-after-marker candidates only",
 		rows, result.Applied, len(result.Candidates) > 0, result.Errors)
 }
 

@@ -25,13 +25,11 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	writeMarker(t, stopDir, "recent2", `{"total":1,"consecutive":1}`, now.Add(-2*time.Hour))
 	writeMarker(t, stopDir, "stale", `{"total":2,"consecutive":2}`, now.Add(-8*time.Hour))
 	writeMarker(t, stopDir, "claudeonly", `{"total":1,"consecutive":1}`, now.Add(-7*time.Hour))
+	writeMarker(t, stopDir, "progressed", `{"total":4,"consecutive":4}`, now.Add(-2*time.Hour))
 	writeMarker(t, stopDir, "markeronly", `{"total":1,"consecutive":1}`, now.Add(-9*time.Hour))
-	if err := os.WriteFile(filepath.Join(streamDir, "stale.jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(claudeProject, "claudeonly.jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeActivity(t, streamDir, "stale", now.Add(-9*time.Hour))
+	writeActivity(t, claudeProject, "claudeonly", now.Add(-8*time.Hour))
+	writeActivity(t, streamDir, "progressed", now.Add(-time.Hour))
 
 	opts := Options{
 		Root:         root,
@@ -50,19 +48,27 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	if got := plan.Counts[ActionStaleReset]; got != 2 {
 		t.Fatalf("stale reset count = %d, want 2", got)
 	}
+	if got := plan.Counts[ActionProgressAfterMarker]; got != 1 {
+		t.Fatalf("progress-after-marker count = %d, want 1", got)
+	}
 	if got := plan.Counts[ActionStaleMarkerOnlyArchive]; got != 1 {
 		t.Fatalf("marker-only archive count = %d, want 1", got)
+	}
+	progressRows := plan.Candidates[ActionProgressAfterMarker]
+	if len(progressRows) != 1 || progressRows[0].SessionID != "progressed" || !progressRows[0].ProgressAfterMark {
+		t.Fatalf("progress-after-marker rows = %#v", progressRows)
 	}
 
 	reset, err := ResetStale(opts, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reset.Updated) != 2 {
-		t.Fatalf("reset updated = %d, want 2", len(reset.Updated))
+	if len(reset.Updated) != 3 {
+		t.Fatalf("reset updated = %d, want 3", len(reset.Updated))
 	}
 	assertConsecutive(t, stopDir, "stale", 0)
 	assertConsecutive(t, stopDir, "claudeonly", 0)
+	assertConsecutive(t, stopDir, "progressed", 0)
 	assertConsecutive(t, stopDir, "recent", 1)
 	assertConsecutive(t, stopDir, "markeronly", 1)
 
@@ -95,6 +101,17 @@ func writeMarker(t *testing.T, dir, session, body string, mtime time.Time) {
 	t.Helper()
 	path := filepath.Join(dir, session+".json")
 	if err := os.WriteFile(path, []byte(body+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeActivity(t *testing.T, dir, session string, mtime time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, session+".jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, mtime, mtime); err != nil {

@@ -13,6 +13,7 @@ import (
 
 const (
 	ActionRecentReview           = "RECENT_REVIEW"
+	ActionProgressAfterMarker    = "PROGRESS_AFTER_MARKER_RESET_CANDIDATE"
 	ActionStaleReset             = "STALE_RESET_CANDIDATE"
 	ActionStaleMarkerOnlyArchive = "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"
 	ActionHealedNonzero          = "HEALED_NONZERO"
@@ -32,17 +33,19 @@ type Options struct {
 }
 
 type Marker struct {
-	SessionID         string    `json:"session_id"`
-	MarkerPath        string    `json:"marker_path"`
-	ArchivePath       string    `json:"archive_path,omitempty"`
-	Total             int       `json:"total"`
-	Consecutive       int       `json:"consecutive"`
-	MTime             time.Time `json:"mtime"`
-	AgeSeconds        int64     `json:"age_seconds"`
-	Origin            string    `json:"origin"`
-	OriginLabels      []string  `json:"origin_labels,omitempty"`
-	TranscriptProject string    `json:"transcript_project,omitempty"`
-	SettlementAction  string    `json:"settlement_action"`
+	SessionID         string     `json:"session_id"`
+	MarkerPath        string     `json:"marker_path"`
+	ArchivePath       string     `json:"archive_path,omitempty"`
+	Total             int        `json:"total"`
+	Consecutive       int        `json:"consecutive"`
+	MTime             time.Time  `json:"mtime"`
+	AgeSeconds        int64      `json:"age_seconds"`
+	Origin            string     `json:"origin"`
+	OriginLabels      []string   `json:"origin_labels,omitempty"`
+	TranscriptProject string     `json:"transcript_project,omitempty"`
+	LatestActivity    *time.Time `json:"latest_activity,omitempty"`
+	ProgressAfterMark bool       `json:"progress_after_marker,omitempty"`
+	SettlementAction  string     `json:"settlement_action"`
 }
 
 type Plan struct {
@@ -148,7 +151,7 @@ func ResetStale(opts Options, apply bool) (ResetResult, error) {
 	if err != nil {
 		return ResetResult{}, err
 	}
-	candidates := append([]Marker(nil), plan.Candidates[ActionStaleReset]...)
+	candidates := resettableCandidates(plan)
 	if opts.Limit > 0 && len(candidates) > opts.Limit {
 		candidates = candidates[:opts.Limit]
 	}
@@ -171,6 +174,13 @@ func ResetStale(opts Options, apply bool) (ResetResult, error) {
 		result.Updated = append(result.Updated, marker)
 	}
 	return result, nil
+}
+
+func resettableCandidates(plan Plan) []Marker {
+	candidates := append([]Marker(nil), plan.Candidates[ActionProgressAfterMarker]...)
+	candidates = append(candidates, plan.Candidates[ActionStaleReset]...)
+	sortMarkers(candidates)
+	return candidates
 }
 
 func ArchiveMarkerOnly(opts Options, apply bool) (ArchiveResult, error) {
@@ -299,12 +309,20 @@ func readMarker(path, name string, opts Options, origins originResolver) (Marker
 	total := intValue(doc["total"])
 	consecutive := intValue(doc["consecutive"])
 	origin := origins.lookup(sessionID)
+	progressAfterMarker := !origin.LatestActivity.IsZero() && origin.LatestActivity.After(mtime)
+	var latestActivity *time.Time
+	if !origin.LatestActivity.IsZero() {
+		latest := origin.LatestActivity
+		latestActivity = &latest
+	}
 	action := ActionStaleReset
 	switch {
 	case total <= 0:
 		action = ActionZeroTotal
 	case consecutive <= 0:
 		action = ActionHealedNonzero
+	case progressAfterMarker:
+		action = ActionProgressAfterMarker
 	case time.Duration(age)*time.Second <= opts.RecentWindow:
 		action = ActionRecentReview
 	case origin.Origin == "marker_only":
@@ -320,6 +338,8 @@ func readMarker(path, name string, opts Options, origins originResolver) (Marker
 		Origin:            origin.Origin,
 		OriginLabels:      origin.Labels,
 		TranscriptProject: origin.TranscriptProject,
+		LatestActivity:    latestActivity,
+		ProgressAfterMark: progressAfterMarker,
 		SettlementAction:  action,
 	}, nil
 }
@@ -401,6 +421,7 @@ type markerOrigin struct {
 	Origin            string
 	Labels            []string
 	TranscriptProject string
+	LatestActivity    time.Time
 }
 
 type originResolver struct {
@@ -417,12 +438,15 @@ func newOriginResolver(root string, opts Options) originResolver {
 
 func (r originResolver) lookup(sessionID string) markerOrigin {
 	labels := []string{}
-	if pathExists(filepath.Join(r.root, ".dos", "streams", sessionID+".jsonl")) {
+	var latest time.Time
+	if mt, ok := fileModTime(filepath.Join(r.root, ".dos", "streams", sessionID+".jsonl")); ok {
 		labels = append(labels, "dos_stream")
+		latest = maxTime(latest, mt)
 	}
 	transcript := r.transcripts[sessionID]
 	if transcript.Origin != "" {
 		labels = append(labels, "claude_transcript")
+		latest = maxTime(latest, transcript.LatestActivity)
 	}
 	if len(labels) == 0 {
 		return markerOrigin{Origin: "marker_only", Labels: []string{"marker_only"}}
@@ -431,6 +455,7 @@ func (r originResolver) lookup(sessionID string) markerOrigin {
 		Origin:            strings.Join(labels, "+"),
 		Labels:            labels,
 		TranscriptProject: transcript.TranscriptProject,
+		LatestActivity:    latest,
 	}
 }
 
@@ -446,13 +471,20 @@ func transcriptIndex(opts Options) map[string]markerOrigin {
 				continue
 			}
 			sessionID := strings.TrimSuffix(entry.Name(), ".jsonl")
-			if _, ok := out[sessionID]; ok {
+			info, err := entry.Info()
+			if err != nil {
 				continue
 			}
-			out[sessionID] = markerOrigin{
+			next := markerOrigin{
 				Origin:            "claude_transcript",
 				TranscriptProject: filepath.Base(root),
+				LatestActivity:    info.ModTime().UTC(),
 			}
+			prev, ok := out[sessionID]
+			if ok && !next.LatestActivity.After(prev.LatestActivity) {
+				continue
+			}
+			out[sessionID] = next
 		}
 	}
 	return out
@@ -489,7 +521,17 @@ func claudeProjectRoots(opts Options) []string {
 	return matches
 }
 
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+func fileModTime(path string) (time.Time, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime().UTC(), true
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }

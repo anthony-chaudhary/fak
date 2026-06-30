@@ -30,16 +30,14 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	writeStopFailureFixture(t, stopDir, "recent2", `{"total":1,"consecutive":1}`, now.Add(-2*time.Hour))
 	writeStopFailureFixture(t, stopDir, "stale", `{"total":3,"consecutive":2}`, now.Add(-8*time.Hour))
 	writeStopFailureFixture(t, stopDir, "claudeonly", `{"total":2,"consecutive":1}`, now.Add(-7*time.Hour))
+	writeStopFailureFixture(t, stopDir, "progressed", `{"total":4,"consecutive":4}`, now.Add(-2*time.Hour))
 	writeStopFailureFixture(t, stopDir, "markeronly", `{"total":1,"consecutive":1}`, now.Add(-9*time.Hour))
 	writeStopFailureFixture(t, stopDir, "healed", `{"total":2,"consecutive":0}`, now.Add(-9*time.Hour))
 	writeStopFailureFixture(t, stopDir, "zero", `{"total":0,"consecutive":0}`, now.Add(-10*time.Hour))
 	writeStopFailureFixture(t, stopDir, "old", `{"total":5,"consecutive":5}`, now.Add(-26*time.Hour))
-	if err := os.WriteFile(filepath.Join(streamDir, "stale.jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(claudeProject, "claudeonly.jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeStopFailureActivity(t, streamDir, "stale", now.Add(-9*time.Hour))
+	writeStopFailureActivity(t, claudeProject, "claudeonly", now.Add(-8*time.Hour))
+	writeStopFailureActivity(t, streamDir, "progressed", now.Add(-time.Hour))
 
 	var stdout, stderr bytes.Buffer
 	code := runStopFailure(&stdout, &stderr, []string{
@@ -59,6 +57,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 			MarkerPath        string `json:"marker_path"`
 			Consecutive       int    `json:"consecutive"`
 			Origin            string `json:"origin"`
+			ProgressAfterMark bool   `json:"progress_after_marker"`
 			TranscriptProject string `json:"transcript_project"`
 			SettlementAction  string `json:"settlement_action"`
 		} `json:"candidates"`
@@ -66,7 +65,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatalf("plan JSON: %v\n%s", err, stdout.String())
 	}
-	if plan.Counts["RECENT_REVIEW"] != 2 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.Counts["ZERO_TOTAL"] != 1 {
+	if plan.Counts["RECENT_REVIEW"] != 2 || plan.Counts["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"] != 1 || plan.Counts["STALE_RESET_CANDIDATE"] != 2 || plan.Counts["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"] != 1 || plan.Counts["HEALED_NONZERO"] != 1 || plan.Counts["ZERO_TOTAL"] != 1 {
 		t.Fatalf("counts = %#v", plan.Counts)
 	}
 	if plan.IgnoredOld != 1 {
@@ -78,6 +77,10 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	}
 	if staleRows[1].MarkerPath != ".dos/stop-failures/claudeonly.json" || staleRows[1].Origin != "claude_transcript" || staleRows[1].TranscriptProject != "C--work-fak" {
 		t.Fatalf("claude stale row = %#v", staleRows[1])
+	}
+	progressRows := plan.Candidates["PROGRESS_AFTER_MARKER_RESET_CANDIDATE"]
+	if len(progressRows) != 1 || progressRows[0].MarkerPath != ".dos/stop-failures/progressed.json" || !progressRows[0].ProgressAfterMark {
+		t.Fatalf("progress rows = %#v", progressRows)
 	}
 	archiveRows := plan.Candidates["STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"]
 	if len(archiveRows) != 1 || archiveRows[0].MarkerPath != ".dos/stop-failures/markeronly.json" {
@@ -95,11 +98,12 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("dry-run code=%d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "DRY-RUN candidates=2 updated=0") {
+	if !strings.Contains(stdout.String(), "DRY-RUN candidates=3 updated=0") {
 		t.Fatalf("dry-run output:\n%s", stdout.String())
 	}
 	assertStopFailureConsecutive(t, stopDir, "stale", 2)
 	assertStopFailureConsecutive(t, stopDir, "claudeonly", 1)
+	assertStopFailureConsecutive(t, stopDir, "progressed", 4)
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
@@ -119,6 +123,7 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	}
 	assertStopFailureConsecutive(t, stopDir, "stale", 0)
 	assertStopFailureConsecutive(t, stopDir, "claudeonly", 0)
+	assertStopFailureConsecutive(t, stopDir, "progressed", 0)
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent2", 1)
@@ -202,6 +207,17 @@ func writeStopFailureFixture(t *testing.T, dir, session, body string, mtime time
 	t.Helper()
 	path := filepath.Join(dir, session+".json")
 	if err := os.WriteFile(path, []byte(body+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeStopFailureActivity(t *testing.T, dir, session string, mtime time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, session+".jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, mtime, mtime); err != nil {
