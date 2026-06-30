@@ -20,6 +20,10 @@
 //     with its own operating spine (docs/CACHE-FRONTIER-OPERATING-PLAN.md) and its
 //     own evidence ledgers (the cache-value roll-up + the cache-frontier review
 //     ledger), NOT a deliverable that completes.
+//   - HUMAN OPERATOR EFFECTIVENESS — keeping fak understandable and steerable as
+//     the agent fleet, CLI surface, refusal vocabulary, and background loops grow.
+//     Its honest measure is a FRONTIER (operator brief, heaviness pressure, source
+//     coherence, change compression), not a done bar.
 //
 // A DISCRETE EPIC, by contrast, is a deliverable with a definition of done — the
 // native agent harness, release-at-agentic-speed, support-maturity disambiguation.
@@ -51,6 +55,9 @@ const (
 	// CacheOptimization is the ONGOING agent-memory-and-reuse program (the cache
 	// frontier). Measured by a frontier + trend, never a completion %.
 	CacheOptimization Class = "cache-optimization"
+	// HumanOperatorEffectiveness is the ONGOING human-steerability program:
+	// attention, learning pace, source coherence, change compression, and surface pressure.
+	HumanOperatorEffectiveness Class = "human-operator-effectiveness"
 	// DiscreteEpic is a deliverable with a definition of done — measured by
 	// child-issue completion percent, which converges on 100% and then closes.
 	DiscreteEpic Class = "discrete-epic"
@@ -62,7 +69,7 @@ const (
 // row. An unknown class is treated as discrete (the conservative default: show the
 // percent, do not invent a frontier we cannot measure).
 func (c Class) Ongoing() bool {
-	return c == KernelOptimization || c == CacheOptimization
+	return c == KernelOptimization || c == CacheOptimization || c == HumanOperatorEffectiveness
 }
 
 // Label is the short human label for a class, for a render line or a Slack card.
@@ -72,6 +79,8 @@ func (c Class) Label() string {
 		return "kernel-optimization"
 	case CacheOptimization:
 		return "cache-optimization"
+	case HumanOperatorEffectiveness:
+		return "human-operator-effectiveness"
 	case DiscreteEpic:
 		return "discrete-epic"
 	default:
@@ -88,6 +97,8 @@ func (c Class) Definition() string {
 		return "ongoing throughput/parity program over the model x backend grid; measured by a frontier + trend, never 'done'"
 	case CacheOptimization:
 		return "ongoing agent-memory-and-reuse program (the cache frontier); measured by a frontier + trend, never 'done'"
+	case HumanOperatorEffectiveness:
+		return "ongoing human-steerability program; measured by operator attention, learning pace, source coherence, change compression, and surface pressure, never 'done'"
 	case DiscreteEpic:
 		return "a deliverable with a definition of done; measured by child-issue completion %, which converges on 100% and closes"
 	default:
@@ -95,10 +106,10 @@ func (c Class) Definition() string {
 	}
 }
 
-// Programs is the ordered list of the ongoing-program classes (kernel-opt then
-// cache-opt). The `fak program` report iterates this so a new program is added by
-// extending this slice (and the registry below), never by editing the report loop.
-var Programs = []Class{KernelOptimization, CacheOptimization}
+// Programs is the ordered list of the ongoing-program classes. The `fak program`
+// report iterates this so a new program is added by extending this slice (and the
+// registry below), never by editing the report loop.
+var Programs = []Class{KernelOptimization, CacheOptimization, HumanOperatorEffectiveness}
 
 // Program is one ongoing-program definition: its class, the GitHub track label that
 // scopes its work, and the canonical doc that operates it. The reports read this to
@@ -131,6 +142,12 @@ var programRegistry = map[Class]Program{
 		TrackLabel:   "agentic-serving",
 		OperatingDoc: "docs/CACHE-FRONTIER-OPERATING-PLAN.md",
 		Blurb:        "agent memory + reuse as a kernel service: multi-agent KV reuse, O(1) bounded context, provider-cache preservation, addressable KV deletion",
+	},
+	HumanOperatorEffectiveness: {
+		Class:        HumanOperatorEffectiveness,
+		TrackLabel:   "human-steerability",
+		OperatingDoc: "docs/human-operator-effectiveness.md",
+		Blurb:        "human attention, learning pace, source coherence, change compression, and operator-surface pressure as the agent fleet grows",
 	},
 }
 

@@ -11,6 +11,7 @@ func TestOngoingPredicate(t *testing.T) {
 	}{
 		{KernelOptimization, true},
 		{CacheOptimization, true},
+		{HumanOperatorEffectiveness, true},
 		{DiscreteEpic, false},
 		{Class("not-a-real-class"), false},
 	}
@@ -87,7 +88,7 @@ func TestProgramsHaveMetadata(t *testing.T) {
 // TestDefinitionsNonEmpty guards that every closed-vocabulary class carries the
 // written definition the disambiguation discipline requires.
 func TestDefinitionsNonEmpty(t *testing.T) {
-	for _, c := range []Class{KernelOptimization, CacheOptimization, DiscreteEpic} {
+	for _, c := range []Class{KernelOptimization, CacheOptimization, HumanOperatorEffectiveness, DiscreteEpic} {
 		if c.Definition() == "" || c.Definition() == "unknown work class" {
 			t.Errorf("class %q has no definition", c)
 		}
