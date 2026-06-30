@@ -22,7 +22,10 @@ source itself is the oracle:
   byte-indexed truncation that can split a multibyte rune; cell-aware width
   helpers present), `width_consistency` (no width-padded `%-Ns` verb consuming a
   bare `trimTUI` column, which would shear every column to its right on a
-  multibyte row), `empty_state` (every list pane has an explicit no-rows branch).
+  multibyte row), `empty_state` (every list pane has an explicit no-rows branch),
+  `header_alignment` (a list pane's literal column header and its row format are a
+  matched pair, pinned aligned — a change to one without the other is flagged as
+  silent header drift).
 - **legibility** — a reader can decode what they see: `legend_coverage` (every
   term on the `fak info` line is expanded in the legend), `help_completeness`
   (every `fak console` subcommand is documented in the usage text).
@@ -53,6 +56,7 @@ display width and added a cell-aware column pad.
 | rune-safe truncation | correctness | 100 | ✓ | truncation accumulates whole runes by display width; columns pad cell-aware |
 | width-budget honored | correctness | 100 | ✓ | no width-padded verb consumes a bare trimTUI column; multibyte rows stay aligned |
 | empty-state branch | correctness | 100 | ✓ | every list pane has an explicit no-rows branch |
+| header/column alignment | correctness | 100 | ✓ | 2 fixed-header pane(s) still aligned to their pinned row format |
 | info legend coverage | legibility | 100 | ✓ | every info-line term is expanded in the legend |
 | console help coverage | legibility | 100 | ✓ | all 7 console subcommands documented in help |
 | ANSI escape discipline | hygiene | 100 |  | raw ANSI confined to the documented redraw path |

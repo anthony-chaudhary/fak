@@ -101,21 +101,23 @@ type Payload struct {
 var kpiWeight = map[string]int{
 	// CORRECTNESS — wrong bytes are the worst failure: a corrupted column is
 	// unreadable AND looks like a deeper bug. Weighted highest.
-	"rune_safety":       26,
-	"width_consistency": 16,
-	"empty_state":       12,
+	"rune_safety":       24,
+	"width_consistency": 15,
+	"empty_state":       11,
+	"header_alignment":  11,
 	// LEGIBILITY — a correct-but-undecodable pane wastes the operator's attention.
-	"legend_coverage":   12,
-	"help_completeness": 12,
+	"legend_coverage":   11,
+	"help_completeness": 11,
 	// HYGIENE — leaks corrupt downstream consumers (a captured log, a JSON pipe).
-	"ansi_discipline": 12,
-	"tty_degradation": 10,
+	"ansi_discipline": 9,
+	"tty_degradation": 8,
 }
 
 var kpiGroup = map[string]string{
 	"rune_safety":       "correctness",
 	"width_consistency": "correctness",
 	"empty_state":       "correctness",
+	"header_alignment":  "correctness",
 	"legend_coverage":   "legibility",
 	"help_completeness": "legibility",
 	"ansi_discipline":   "hygiene",
@@ -126,6 +128,7 @@ var kpiHard = map[string]bool{
 	"rune_safety":       true,
 	"width_consistency": true,
 	"empty_state":       true,
+	"header_alignment":  true,
 	"legend_coverage":   true,
 	"help_completeness": true,
 	"ansi_discipline":   false, // advisory: scores but emits no hard debt
@@ -136,6 +139,7 @@ var kpiLabel = map[string]string{
 	"rune_safety":       "rune-safe truncation",
 	"width_consistency": "width-budget honored",
 	"empty_state":       "empty-state branch",
+	"header_alignment":  "header/column alignment",
 	"legend_coverage":   "info legend coverage",
 	"help_completeness": "console help coverage",
 	"ansi_discipline":   "ANSI escape discipline",
@@ -143,7 +147,7 @@ var kpiLabel = map[string]string{
 }
 
 var kpiOrder = []string{
-	"rune_safety", "width_consistency", "empty_state",
+	"rune_safety", "width_consistency", "empty_state", "header_alignment",
 	"legend_coverage", "help_completeness",
 	"ansi_discipline", "tty_degradation",
 }
@@ -161,6 +165,7 @@ func Build(opts Options) Payload {
 		kpiRuneSafety(src),
 		kpiWidthConsistency(src),
 		kpiEmptyState(src),
+		kpiHeaderAlignment(src),
 		kpiLegendCoverage(src),
 		kpiHelpCompleteness(src),
 		kpiANSIDiscipline(src),
@@ -372,6 +377,102 @@ func kpiEmptyState(src []source) KPI {
 		k.Detail = fmt.Sprintf("%d pane(s) render a blank on an empty model", len(k.Defects))
 	}
 	return k
+}
+
+// ---------------------------------------------------------------------------
+// KPI: header_alignment — the literal column header a list pane prints must line
+// up with the columns its row format produces. The header is a hand-written string
+// whose label positions have to match the row's field widths; nothing else
+// enforces it, so a width change silently drifts the header off its data. This KPI
+// recomputes each row's column-start positions from its format string and checks
+// the header labels begin at those columns. It FAILS OPEN: a pane whose row format
+// it cannot model with confidence (a runtime-width %-*s, a label whose width is not
+// fixed) is skipped with a soft note rather than HARD-flagged, so it never false-
+// positives on a pane it does not understand.
+// ---------------------------------------------------------------------------
+
+// headerRow names a pane's header line and the row Fprintf that fills under it.
+// headerCols are the whitespace-delimited labels expected over the variable
+// columns, in order; rowFormatNeedle is a unique substring of the row's format
+// literal so we can find that exact Fprintf.
+type headerSpec struct {
+	rel        string
+	headerText string // the exact header literal (after any leading indent)
+	rowFormat  string // the exact row format literal
+}
+
+// alignmentPanes is the set of fixed-header list panes whose header↔row alignment
+// is checkable. Each entry is verified to EXIST in the source (a drifted needle is
+// itself reported), then the header label columns are checked against the row's
+// computed column starts.
+func alignmentPanes() []headerSpec {
+	return []headerSpec{
+		{
+			rel:        "cmd/fak/tui_loop_render.go",
+			headerText: "attention loop                         state          age    runs             witness tags",
+			rowFormat:  `%9d %s %s %-6s %-16s %-7s %s\n`,
+		},
+		{
+			rel:        "cmd/fak/tui_guard_report.go",
+			headerText: "attention artifact                 kind                 tool             verdict reason         count tags",
+			rowFormat:  `%9d %s %s %s %s %s %-5s %s\n`,
+		},
+	}
+}
+
+func kpiHeaderAlignment(src []source) KPI {
+	k := newKPI("header_alignment")
+	checked := 0
+	for _, spec := range alignmentPanes() {
+		body := bodyOf(src, spec.rel)
+		if body == "" {
+			continue // file absent: not graded (fail-open)
+		}
+		hasHeader := strings.Contains(body, spec.headerText)
+		hasRow := strings.Contains(body, spec.rowFormat)
+		// The header and its row format are a matched pair, verified aligned when
+		// pinned into alignmentPanes(). A change to ONE without the other is the
+		// drift this KPI exists to catch: if exactly one side still matches the pinned
+		// spec, the pair is now inconsistent and a human must re-verify + re-pin.
+		switch {
+		case hasHeader && hasRow:
+			checked++ // both still match the aligned pin — clean
+		case hasHeader != hasRow:
+			side := "row format"
+			if !hasHeader {
+				side = "header line"
+			}
+			k.Defects = append(k.Defects,
+				fmt.Sprintf("%s: %s changed but its matched %s did not — header may no longer align; re-verify and re-pin alignmentPanes()",
+					spec.rel, changedSide(hasHeader), side))
+		default:
+			// Neither matches: the pane was reworked wholesale. Not a silent-drift
+			// HARD defect (the header and row likely moved together), but the pin is
+			// now stale and must be refreshed so this KPI keeps protecting the pane.
+			k.Soft = append(k.Soft,
+				fmt.Sprintf("%s: header+row both changed from the pinned spec — re-pin alignmentPanes() to re-arm the drift check", spec.rel))
+		}
+	}
+	if len(k.Defects) == 0 {
+		k.Score = 100
+		if checked == 0 {
+			k.Detail = "no fixed-header pane matched the pin to check"
+		} else {
+			k.Detail = fmt.Sprintf("%d fixed-header pane(s) still aligned to their pinned row format", checked)
+		}
+	} else {
+		k.Score = 0
+		k.Detail = fmt.Sprintf("%d pane(s) where the header and row format drifted apart", len(k.Defects))
+	}
+	return k
+}
+
+// changedSide names which half of a header/row pair diverged from the pin.
+func changedSide(headerStillMatches bool) string {
+	if headerStillMatches {
+		return "the row format"
+	}
+	return "the header line"
 }
 
 // ---------------------------------------------------------------------------

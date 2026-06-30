@@ -223,6 +223,48 @@ func TestCompareReportsRetiredDebt(t *testing.T) {
 	}
 }
 
+// TestHeaderAlignmentPassesWhenPinnedPairPresent confirms the drift tripwire reads
+// clean when BOTH the header literal and its matched row format are present.
+func TestHeaderAlignmentPassesWhenPinnedPairPresent(t *testing.T) {
+	f := cleanFixtures()
+	// Inject the exact pinned loop header + row format so the pane matches the pin.
+	f["cmd/fak/tui_loop_render.go"] += "\n" + `var _ = "attention loop                         state          age    runs             witness tags"` + "\n" +
+		`var _ = "%9d %s %s %-6s %-16s %-7s %s\n"` + "\n"
+	f["cmd/fak/tui_guard_report.go"] += "\n" + `var _ = "attention artifact                 kind                 tool             verdict reason         count tags"` + "\n" +
+		`var _ = "%9d %s %s %s %s %s %-5s %s\n"` + "\n"
+	root := writeTree(t, f)
+	p := Build(Options{Root: root})
+	ha := kpiByKey(p, "header_alignment")
+	if len(ha.Defects) != 0 {
+		t.Fatalf("aligned pinned pair flagged as drift: %v", ha.Defects)
+	}
+	if ha.Score != 100 {
+		t.Fatalf("header_alignment score = %d, want 100\n%s", ha.Score, Render(p))
+	}
+}
+
+// TestHeaderAlignmentCatchesOneSidedDrift is the true positive: when the header
+// changes but its matched row format does not (or vice versa), the pair is now
+// inconsistent and MUST be flagged — that is exactly the silent header-drift this
+// KPI exists to catch.
+func TestHeaderAlignmentCatchesOneSidedDrift(t *testing.T) {
+	f := cleanFixtures()
+	// Header present, but the row format is the pinned guard format only — the loop
+	// row format is ABSENT, so the loop pane's header is present without its row.
+	f["cmd/fak/tui_loop_render.go"] += "\n" +
+		`var _ = "attention loop                         state          age    runs             witness tags"` + "\n"
+	// (no loop row format literal injected → one-sided)
+	root := writeTree(t, f)
+	p := Build(Options{Root: root})
+	ha := kpiByKey(p, "header_alignment")
+	if len(ha.Defects) == 0 {
+		t.Fatalf("one-sided header/row drift was NOT flagged (false negative)\n%s", Render(p))
+	}
+	if p.OK {
+		t.Fatalf("payload should be DEBT on a header-drift defect\n%s", Render(p))
+	}
+}
+
 func kpiByKey(p Payload, key string) KPI {
 	for _, k := range p.KPIs {
 		if k.Key == key {
