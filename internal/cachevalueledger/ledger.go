@@ -21,6 +21,8 @@ type Row struct {
 	Schema       string         `json:"schema"`
 	Date         string         `json:"date"`
 	SessionType  string         `json:"session_type"`
+	Provider     string         `json:"provider,omitempty"`
+	Mechanism    string         `json:"mechanism,omitempty"`
 	Context      string         `json:"context"`
 	PID          int            `json:"pid"`
 	UnixMillis   int64          `json:"unix_millis"`
@@ -51,12 +53,14 @@ func ParseLedger(content string) []Row {
 		if row.Date == "" || row.SessionType == "" {
 			continue
 		}
+		normalizeRowDimensions(&row)
 		rows = append(rows, row)
 	}
 	return rows
 }
 
 func AppendLedgerLine(row Row) (string, error) {
+	normalizeRowDimensions(&row)
 	b, err := json.Marshal(row)
 	if err != nil {
 		return "", err
@@ -69,6 +73,8 @@ func NewRow(sessionType, context string, stats cacheobs.Stats, now time.Time) Ro
 		Schema:       Schema,
 		Date:         now.UTC().Format("2006-01-02"),
 		SessionType:  sessionType,
+		Provider:     "fak",
+		Mechanism:    "kv_prefix_reuse",
 		Context:      context,
 		PID:          os.Getpid(),
 		UnixMillis:   now.UnixMilli(),
@@ -81,6 +87,15 @@ func NewRow(sessionType, context string, stats cacheobs.Stats, now time.Time) Ro
 		ReuseRatio:   stats.ReuseRatio,
 		Stats:        stats,
 		GeneratedAt:  now.UTC().Format(time.RFC3339),
+	}
+}
+
+func normalizeRowDimensions(row *Row) {
+	if strings.TrimSpace(row.Provider) == "" {
+		row.Provider = "fak"
+	}
+	if strings.TrimSpace(row.Mechanism) == "" {
+		row.Mechanism = "kv_prefix_reuse"
 	}
 }
 

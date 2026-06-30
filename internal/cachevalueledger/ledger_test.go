@@ -24,6 +24,9 @@ not json
 	if rows[1].SessionType != "run" {
 		t.Errorf("expected session_type 'run', got %s", rows[1].SessionType)
 	}
+	if rows[0].Provider != "fak" || rows[0].Mechanism != "kv_prefix_reuse" {
+		t.Errorf("old ledger row dimensions = provider %q mechanism %q, want fak/kv_prefix_reuse", rows[0].Provider, rows[0].Mechanism)
+	}
 }
 
 func TestAppendLedgerLine(t *testing.T) {
@@ -71,6 +74,9 @@ func TestNewRow(t *testing.T) {
 	}
 	if row.SessionType != "serve" {
 		t.Errorf("expected session_type 'serve', got %s", row.SessionType)
+	}
+	if row.Provider != "fak" || row.Mechanism != "kv_prefix_reuse" {
+		t.Errorf("row dimensions = provider %q mechanism %q, want fak/kv_prefix_reuse", row.Provider, row.Mechanism)
 	}
 	if row.Turns != 10 {
 		t.Errorf("expected turns 10, got %d", row.Turns)
