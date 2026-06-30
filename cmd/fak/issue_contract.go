@@ -34,23 +34,45 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 }
 
 type issueContractResult struct {
-	Schema  string                 `json:"schema"`
-	Mode    string                 `json:"mode"`
-	File    string                 `json:"file"`
-	OK      bool                   `json:"ok"`
-	Counts  issueContractCounts    `json:"counts"`
-	Reviews []issuecontract.Review `json:"reviews"`
+	Schema      string                    `json:"schema"`
+	Mode        string                    `json:"mode"`
+	File        string                    `json:"file"`
+	OK          bool                      `json:"ok"`
+	Counts      issueContractCounts       `json:"counts"`
+	BatchGroups []issueContractBatchGroup `json:"batch_groups,omitempty"`
+	Reviews     []issuecontract.Review    `json:"reviews"`
 }
 
 type issueContractCounts struct {
-	Total               int            `json:"total"`
-	Dispatchable        int            `json:"dispatchable"`
-	TriageOnly          int            `json:"triage_only"`
-	Refused             int            `json:"refused"`
-	AgentContextAvg     int            `json:"agent_context_avg"`
-	AgentContextFull    int            `json:"agent_context_full"`
-	AgentContextMissing int            `json:"agent_context_missing"`
-	ByReason            map[string]int `json:"by_reason"`
+	Total                int            `json:"total"`
+	Dispatchable         int            `json:"dispatchable"`
+	TriageOnly           int            `json:"triage_only"`
+	Refused              int            `json:"refused"`
+	StepBudget           int            `json:"step_budget"`
+	MissingExpectedSteps  int            `json:"missing_expected_steps"`
+	AgentContextAvg      int            `json:"agent_context_avg"`
+	AgentContextFull     int            `json:"agent_context_full"`
+	AgentContextMissing  int            `json:"agent_context_missing"`
+	ByReason             map[string]int `json:"by_reason"`
+	ByLane               map[string]int `json:"by_lane"`
+	ByWorkUnit           map[string]int `json:"by_work_unit"`
+	ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
+}
+
+type issueContractBatchGroup struct {
+	Key            string         `json:"key"`
+	Lane           string         `json:"lane,omitempty"`
+	WorkUnit       string         `json:"work_unit,omitempty"`
+	Trigger        string         `json:"trigger,omitempty"`
+	BatchPolicy    string         `json:"batch_policy,omitempty"`
+	Count          int            `json:"count"`
+	StepBudget     int            `json:"step_budget"`
+	Dispatchable   int            `json:"dispatchable"`
+	TriageOnly     int            `json:"triage_only"`
+	Refused        int            `json:"refused"`
+	ByReason       map[string]int `json:"by_reason,omitempty"`
+	ExampleKeys    []string       `json:"example_keys,omitempty"`
+	MissingMetadata []string       `json:"missing_metadata,omitempty"`
 }
 
 func runIssueContract(stdout, stderr io.Writer, argv []string) int {
@@ -137,7 +159,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 			result.Reviews = append(result.Reviews, review)
 		}
 	}
-	result.Counts = summarizeIssueContractReviews(result.Reviews)
+	result.Counts, result.BatchGroups = summarizeIssueContractReviews(result.Reviews)
 
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, result); err != nil {
@@ -153,11 +175,15 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func summarizeIssueContractReviews(reviews []issuecontract.Review) issueContractCounts {
+func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup) {
 	counts := issueContractCounts{
-		Total:    len(reviews),
-		ByReason: map[string]int{},
+		Total:                len(reviews),
+		ByReason:             map[string]int{},
+		ByLane:               map[string]int{},
+		ByWorkUnit:           map[string]int{},
+		ByExpectedStepBucket: map[string]int{},
 	}
+	batches := map[string]*issueContractBatchGroup{}
 	agentContextSum := 0
 	for _, review := range reviews {
 		switch review.Dispatchability {
@@ -173,15 +199,127 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) issueContract
 		} else {
 			counts.AgentContextMissing++
 		}
+		stepBudget := issueContractReviewStepBudget(review)
+		counts.StepBudget += stepBudget
+		if review.ExpectedSteps <= 0 {
+			counts.MissingExpectedSteps++
+		}
+		counts.ByLane[issueContractBucketValue(review.Lane, "(unrouted)")]++
+		counts.ByWorkUnit[issueContractBucketValue(review.WorkUnit, "(missing)")]++
+		counts.ByExpectedStepBucket[issueContractStepBucket(review.ExpectedSteps)]++
 		agentContextSum += review.AgentContext.Total
 		for _, reason := range review.Reasons {
 			counts.ByReason[reason]++
+		}
+		key := issueContractBatchKey(review)
+		group := batches[key]
+		if group == nil {
+			group = &issueContractBatchGroup{
+				Key:         key,
+				Lane:        strings.TrimSpace(review.Lane),
+				WorkUnit:    strings.TrimSpace(review.WorkUnit),
+				Trigger:     strings.TrimSpace(review.Trigger),
+				BatchPolicy: strings.TrimSpace(review.BatchPolicy),
+				ByReason:    map[string]int{},
+			}
+			group.MissingMetadata = issueContractBatchMissingMetadata(review)
+			batches[key] = group
+		}
+		group.Count++
+		group.StepBudget += stepBudget
+		switch review.Dispatchability {
+		case issuecontract.Dispatchable:
+			group.Dispatchable++
+		case issuecontract.TriageOnly:
+			group.TriageOnly++
+		case issuecontract.Refused:
+			group.Refused++
+		}
+		for _, reason := range review.Reasons {
+			group.ByReason[reason]++
+		}
+		if review.Key != "" && len(group.ExampleKeys) < 5 {
+			group.ExampleKeys = append(group.ExampleKeys, review.Key)
 		}
 	}
 	if len(reviews) > 0 {
 		counts.AgentContextAvg = (agentContextSum + len(reviews)/2) / len(reviews)
 	}
-	return counts
+	groups := make([]issueContractBatchGroup, 0, len(batches))
+	for _, group := range batches {
+		if len(group.ByReason) == 0 {
+			group.ByReason = nil
+		}
+		groups = append(groups, *group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].Count != groups[j].Count {
+			return groups[i].Count > groups[j].Count
+		}
+		if groups[i].StepBudget != groups[j].StepBudget {
+			return groups[i].StepBudget > groups[j].StepBudget
+		}
+		return groups[i].Key < groups[j].Key
+	})
+	return counts, groups
+}
+
+func issueContractReviewStepBudget(review issuecontract.Review) int {
+	if review.ExpectedSteps > 0 {
+		return review.ExpectedSteps
+	}
+	return 1
+}
+
+func issueContractStepBucket(steps int) string {
+	switch {
+	case steps <= 0:
+		return "(missing)"
+	case steps == 1:
+		return "1"
+	case steps <= 3:
+		return "2-3"
+	case steps <= issuecontract.MaxDispatchExpectedSteps:
+		return "4-8"
+	default:
+		return "over-8"
+	}
+}
+
+func issueContractBucketValue(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func issueContractBatchKey(review issuecontract.Review) string {
+	lane := issueContractBucketValue(review.Lane, "unrouted")
+	workUnit := issueContractBucketValue(review.WorkUnit, "missing-work-unit")
+	trigger := issueContractBucketValue(review.Trigger, "missing-trigger")
+	batchPolicy := issueContractBucketValue(review.BatchPolicy, "missing-batch-policy")
+	return lane + "|" + workUnit + "|" + trigger + "|" + batchPolicy
+}
+
+func issueContractBatchMissingMetadata(review issuecontract.Review) []string {
+	var missing []string
+	if strings.TrimSpace(review.Lane) == "" {
+		missing = append(missing, "lane")
+	}
+	if strings.TrimSpace(review.WorkUnit) == "" {
+		missing = append(missing, "work_unit")
+	}
+	if review.ExpectedSteps <= 0 {
+		missing = append(missing, "expected_steps")
+	}
+	if strings.TrimSpace(review.Trigger) == "" {
+		missing = append(missing, "trigger")
+	}
+	if strings.TrimSpace(review.BatchPolicy) == "" {
+		missing = append(missing, "batch_policy")
+	}
+	return missing
 }
 
 func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
@@ -257,12 +395,36 @@ func renderIssueContract(r issueContractResult) string {
 	lines := []string{
 		fmt.Sprintf("issue-contract: %s  ok=%t  candidate_count=%d", r.Mode, r.OK, len(r.Reviews)),
 		fmt.Sprintf("  file: %s", r.File),
-		fmt.Sprintf("  counts: dispatchable=%d triage_only=%d refused=%d agent_context_avg=%d full=%d missing=%d",
+		fmt.Sprintf("  counts: dispatchable=%d triage_only=%d refused=%d steps=%d missing_steps=%d agent_context_avg=%d full=%d missing=%d",
 			r.Counts.Dispatchable, r.Counts.TriageOnly, r.Counts.Refused,
+			r.Counts.StepBudget, r.Counts.MissingExpectedSteps,
 			r.Counts.AgentContextAvg, r.Counts.AgentContextFull, r.Counts.AgentContextMissing),
 	}
 	if len(r.Counts.ByReason) > 0 {
 		lines = append(lines, "  reasons: "+renderIssueContractReasonCounts(r.Counts.ByReason))
+	}
+	if len(r.Counts.ByLane) > 0 {
+		lines = append(lines, "  lanes: "+renderIssueContractReasonCounts(r.Counts.ByLane))
+	}
+	if len(r.Counts.ByWorkUnit) > 0 {
+		lines = append(lines, "  work_units: "+renderIssueContractReasonCounts(r.Counts.ByWorkUnit))
+	}
+	if len(r.Counts.ByExpectedStepBucket) > 0 {
+		lines = append(lines, "  step_buckets: "+renderIssueContractReasonCounts(r.Counts.ByExpectedStepBucket))
+	}
+	for i, group := range r.BatchGroups {
+		if i >= 8 {
+			lines = append(lines, fmt.Sprintf("  batch_groups: ... %d more", len(r.BatchGroups)-i))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("  batch_group[%d]: count=%d steps=%d lane=%s work_unit=%s key=%s",
+			i, group.Count, group.StepBudget,
+			issueContractBucketValue(group.Lane, "(unrouted)"),
+			issueContractBucketValue(group.WorkUnit, "(missing)"),
+			group.Key))
+		if len(group.MissingMetadata) > 0 {
+			lines = append(lines, "    missing_batch_metadata: "+strings.Join(group.MissingMetadata, ", "))
+		}
 	}
 	for _, review := range r.Reviews {
 		key := review.Key

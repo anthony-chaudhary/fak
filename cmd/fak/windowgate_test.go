@@ -137,3 +137,35 @@ func TestAttachVisibleWindowPayloadCanFailWatchlist(t *testing.T) {
 		t.Fatalf("payload = ok %v verdict %q finding %q, want visible watchlist ACTION", p.OK, p.Verdict, p.Finding)
 	}
 }
+
+func TestAttachLiveProcessPayloadSurfacesWatchlistByDefault(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachLiveProcessPayload(&p, windowgate.LiveProcessReport{
+		Scanned:    5,
+		Observed:   map[string]int{"gh.exe": 1, "cmd.exe": 1},
+		Unreadable: map[string]int{"cmd.exe": 1},
+		Watchlist:  []string{"pid=10 name=gh.exe"},
+		Findings: []windowgate.LiveProcessFinding{
+			{Level: "watchlist", Category: "repo_console_process", PID: 10, Name: "gh.exe"},
+		},
+	}, false)
+	if !p.OK || p.Verdict != "OK" || p.Finding != "no_desktop_popup_live_process_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want advisory live-process watchlist", p.OK, p.Verdict, p.Finding)
+	}
+	if p.Processes == nil || p.Processes.Scanned != 5 || p.Processes.Observed["gh.exe"] != 1 ||
+		p.Processes.Unreadable["cmd.exe"] != 1 || p.Processes.Categories["repo_console_process"] != 1 ||
+		len(p.Processes.Findings) != 1 {
+		t.Fatalf("live-process payload not surfaced: %+v", p.Processes)
+	}
+}
+
+func TestAttachLiveProcessPayloadCanFailWatchlist(t *testing.T) {
+	p := buildWindowgatePayload("root", windowgate.Report{}, false)
+	attachLiveProcessPayload(&p, windowgate.LiveProcessReport{
+		Scanned:   1,
+		Watchlist: []string{"pid=10 name=gh.exe"},
+	}, true)
+	if p.OK || p.Verdict != "ACTION" || p.Finding != "no_desktop_popup_live_process_watchlist" {
+		t.Fatalf("payload = ok %v verdict %q finding %q, want live-process watchlist ACTION", p.OK, p.Verdict, p.Finding)
+	}
+}
