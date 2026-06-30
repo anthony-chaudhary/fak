@@ -8,6 +8,7 @@ package main
 //	fak index docs <query>     the curated doc map, ranked by relevance
 //	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
 //	fak index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
+//	fak index work [<query>]   the selection surface: named issue views + the default's gh query
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -86,6 +87,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
 	case "verbs", "verb":
 		return indexVerbs(stdout, stderr, cat, args, *asJSON, *limit)
+	case "work", "views", "view":
+		return indexWork(stdout, stderr, cat, args, *asJSON, *limit)
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -215,6 +218,49 @@ func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 		})
 }
 
+// indexWork answers `fak index work [<query>]` from .github/issue-views.json — the
+// curated DEFAULT selection surface ("what should I work on"), the API-readable
+// mirror of the GitHub saved views. With no query it leads with the default view's
+// ready-to-run `gh issue list --search` command, then lists every named view; a query
+// filters the views (by slug/title/note). --json round-trips the full surface (every
+// view's gh query) for tooling/MCP. This is the work-view #1291 / WORK-MAP's "no
+// single live view of in-flight work" drift, as a one-call query.
+func indexWork(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
+	views, err := cat.IssueViews()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak index work: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		if len(args) == 0 {
+			return encodeJSONOrFail(stdout, stderr, views, "fak index work")
+		}
+		return encodeJSONOrFail(stdout, stderr, capViews(views.SearchViews(joinArgs(args)), limit), "fak index work")
+	}
+	hits := capViews(views.SearchViews(joinArgs(args)), limit)
+	if len(hits) == 0 {
+		fmt.Fprintln(stdout, "no matching view")
+		return 0
+	}
+	// With no query, lead with the default view's ready-to-run command — the literal
+	// "what should I work on" answer an agent can paste.
+	if len(args) == 0 {
+		if def, ok := views.DefaultView(); ok {
+			fmt.Fprintf(stdout, "default: %s — %s\n", def.Slug, def.Title)
+			fmt.Fprintf(stdout, "  gh issue list --search %q --limit %d\n\n", def.Query, views.PageLimit())
+		}
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	for _, iv := range hits {
+		slug := iv.Slug
+		if iv.Slug == views.Default {
+			slug = iv.Slug + " *" // mark the default selection surface
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", slug, iv.Title, truncRunes(iv.Note, 80))
+	}
+	return flushTab(tw, stderr, "fak index work")
+}
+
 func writeIndexUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
@@ -222,6 +268,7 @@ func writeIndexUsage(w io.Writer) {
   fak index docs <query>      the curated doc map (INDEX.md), ranked by relevance
   fak index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
   fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
+  fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
   flags: --json  --limit N  --root DIR
 `)
 }
@@ -259,6 +306,13 @@ func capClaims(cs []devindex.Claim, limit int) []devindex.Claim {
 }
 
 func capVerbs(vs []devindex.Verb, limit int) []devindex.Verb {
+	if limit > 0 && len(vs) > limit {
+		return vs[:limit]
+	}
+	return vs
+}
+
+func capViews(vs []devindex.IssueView, limit int) []devindex.IssueView {
 	if limit > 0 && len(vs) > limit {
 		return vs[:limit]
 	}
