@@ -225,6 +225,32 @@ func TestScanMessageNeedles_skipsTrailersCommentsScissors(t *testing.T) {
 	}
 }
 
+func TestScanMessageHardwareTells_rawCommitMessage(t *testing.T) {
+	if f := ScanMessageHardwareTells("docs(nightrun): add the dgx3 decode (fak nightrun)\n"); len(f) != 1 {
+		t.Fatalf("bare dgxN subject must be flagged, got %+v", f)
+	}
+	if f := ScanMessageHardwareTells("fix(x): clean\n\nbody mentions DGX and SXM4\n"); len(f) != 1 {
+		t.Fatalf("uppercase hard tells in the body must be flagged once per line, got %+v", f)
+	}
+	if f := ScanMessageHardwareTells("fix(x): clean\n# note: ran on dgx3\n"); len(f) != 0 {
+		t.Fatalf("git-stripped comment lines must be ignored, got %+v", f)
+	}
+	scissors := "# ------------------------ >8 ------------------------"
+	if f := ScanMessageHardwareTells("fix(x): clean\n" + scissors + "\ndiff touched dgx3\n"); len(f) != 0 {
+		t.Fatalf("scissors block must be ignored, got %+v", f)
+	}
+	for _, msg := range []string{
+		"fix(x): keep cmd/dgxbridge as an identifier\n",
+		"fix(x): keep dgx3-control as a channel name\n",
+		"fix(x): keep dgx3-node-state schema names\n",
+		"fix(x): keep host dgx1.example.lab\n",
+	} {
+		if f := ScanMessageHardwareTells(msg); len(f) != 0 {
+			t.Fatalf("%q should not be flagged, got %+v", msg, f)
+		}
+	}
+}
+
 func TestParseUnifiedAddedLines_lineNumbers(t *testing.T) {
 	diff := "" +
 		"diff --git a/x.md b/x.md\n" +

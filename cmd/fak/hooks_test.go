@@ -117,3 +117,26 @@ func TestRunHooks_commitMsgVerbShape(t *testing.T) {
 		t.Fatalf("a gradeable subject should pass even in block mode, got %d; %s", code, errb.String())
 	}
 }
+
+func TestRunHooks_commitMsgBlocksHardwareTell(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.txt")
+	_ = os.WriteFile(bad, []byte("docs(nightrun): add the dgx3 decode (fak nightrun)\n"), 0o644)
+
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"commit-msg", bad}); code != 1 {
+		t.Fatalf("hardware tell should block, got %d; stderr=%s", code, errb.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("HARDWARE_TELL")) {
+		t.Fatalf("stderr should name HARDWARE_TELL, got %s", errb.String())
+	}
+
+	t.Setenv("FLEET_ALLOW_HW", "1")
+	errb.Reset()
+	if code := runHooks(&out, &errb, []string{"commit-msg", bad}); code != 0 {
+		t.Fatalf("FLEET_ALLOW_HW should escape the hardware gate, got %d; stderr=%s", code, errb.String())
+	}
+}
