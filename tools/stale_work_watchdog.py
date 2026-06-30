@@ -44,11 +44,11 @@ import json
 import os
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+install_no_window_subprocess_defaults(subprocess)
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_REPO = HERE.parent  # tools/ -> repo root

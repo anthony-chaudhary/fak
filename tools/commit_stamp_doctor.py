@@ -33,9 +33,9 @@ import json
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
+install_no_window_subprocess_defaults(subprocess)
 
 # The two bindable per-leaf ship shapes the oracle recognizes for fleet's stamp
 # convention (dos.toml [stamp]: style=grep, subject_dirs=[], trailer_stamp=true):

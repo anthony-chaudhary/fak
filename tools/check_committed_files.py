@@ -31,8 +31,8 @@ import os
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
+install_no_window_subprocess_defaults(subprocess)
 
 # 10 MiB: large enough to admit the 1440p hero-video.mp4 (~9.4 MiB), which the live
 # Pages hero + README embed by raw URL (so it cannot be dropped), while still refusing

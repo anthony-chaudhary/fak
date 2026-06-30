@@ -16,13 +16,13 @@ import shutil
 import shlex
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+install_no_window_subprocess_defaults(subprocess)
 
 
 DEFAULT_MODEL = "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"

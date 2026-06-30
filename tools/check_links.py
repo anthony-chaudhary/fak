@@ -34,8 +34,8 @@ import posixpath
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
+install_no_window_subprocess_defaults(subprocess)
 
 FRONT_DOOR = [
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "AGENTS.md",

@@ -19,7 +19,6 @@ import shutil
 import socket
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 import tempfile
 import time
@@ -35,6 +34,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 import openai_live_prereq_audit  # noqa: E402
+install_no_window_subprocess_defaults(subprocess)
 
 
 SCHEMA = "fak-openai-hosted-live-pilot/1"

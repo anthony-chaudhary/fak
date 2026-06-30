@@ -45,7 +45,6 @@ import os
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from datetime import datetime, timezone
 
@@ -53,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import fleet_session_signals as sig  # noqa: E402
+install_no_window_subprocess_defaults(subprocess)
 
 HOME = os.path.expanduser("~")
 LEDGER = os.path.join(HERE, "_registry", "resume_ledger.jsonl")

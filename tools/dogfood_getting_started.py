@@ -47,11 +47,11 @@ import os
 import shutil
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 import tarfile
 import threading
 from pathlib import Path
+install_no_window_subprocess_defaults(subprocess)
 
 LANES = ("A", "B", "C", "D")
 DEFAULT_MODEL = "zai-coding-plan/glm-5.2"

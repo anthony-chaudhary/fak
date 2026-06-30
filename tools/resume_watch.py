@@ -34,7 +34,6 @@ import json
 import os
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 from datetime import datetime, timezone
@@ -43,6 +42,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import fleet_session_signals  # noqa: E402  -- shared auth/limit/api signal patterns
+install_no_window_subprocess_defaults(subprocess)
 
 REG = os.path.join(HERE, "_registry")
 MANIFEST = os.path.join(REG, "resume_watch_manifest.json")

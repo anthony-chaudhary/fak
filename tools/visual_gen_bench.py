@@ -44,7 +44,6 @@ import argparse
 import json
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -52,6 +51,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import visual_gen_grade as grade  # noqa: E402
+install_no_window_subprocess_defaults(subprocess)
 
 ROOT = Path(__file__).resolve().parents[1]
 FAK = ROOT / "fak"

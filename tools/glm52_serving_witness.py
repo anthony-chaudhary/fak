@@ -28,12 +28,12 @@ import signal
 import socket
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+install_no_window_subprocess_defaults(subprocess)
 
 
 SCHEMA = "fak.glm52-serving-witness.v1"

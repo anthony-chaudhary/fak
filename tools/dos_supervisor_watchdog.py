@@ -41,12 +41,12 @@ import json
 import os
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
 import dos_supervisor_status as status
+install_no_window_subprocess_defaults(subprocess)
 
 try:  # The cross-node lease transport (issue #21).
     import dos_fleet_lease

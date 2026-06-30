@@ -60,7 +60,6 @@ import argparse
 import json
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +67,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_provenance  # noqa: E402
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-fresh-status/1"
 CATALOG_REL = "experiments/benchmark/catalog.json"

@@ -79,10 +79,10 @@ import json
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-stability-scorecard/1"
 GENERATED_SNAPSHOT = "docs/STABILITY-SCORECARD.md"

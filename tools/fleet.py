@@ -29,9 +29,9 @@ import argparse
 import os
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
+install_no_window_subprocess_defaults(subprocess)
 
 # Verb -> (tool script, fixed leading args). Everything the operator types after the
 # verb is appended, so `fleet status --window 24` becomes fleet_top.py --once --window 24.

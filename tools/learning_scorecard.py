@@ -75,7 +75,6 @@ import json
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 from collections import deque
@@ -85,6 +84,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docs_scorecard as dsc  # noqa: E402  reuse the hygiene scorer's pure helpers
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fleet-learning-scorecard/1"
 DETECT_LATENCY_SCHEMA = "fleet-learning-scorecard.detect-latency-bench/1"

@@ -90,8 +90,8 @@ import json
 import os
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
+install_no_window_subprocess_defaults(subprocess)
 
 DEFAULT_MASTER_REF = "origin/master"  # last-resort fallback; main() AUTO-DETECTS the trunk
 

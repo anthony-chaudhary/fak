@@ -30,9 +30,9 @@ import os
 import shutil
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 from pathlib import Path
 from typing import Any, Callable, Sequence
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fleet-dos-dispatch-watchdog/1"
 DEFAULT_TARGET = 4

@@ -76,10 +76,10 @@ import difflib
 import re
 import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
-install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
+install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-bench-dx-scorecard/1"
 GENERATED_SNAPSHOT = "docs/BENCH-DX-SCORECARD.md"
