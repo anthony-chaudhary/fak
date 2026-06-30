@@ -106,6 +106,54 @@ type BrowserAutomationDetails struct {
 	StartMinimized      bool   `json:"start_minimized,omitempty"`
 }
 
+// LiveProcess is one process row from the local process table, enriched with
+// parent/grandparent attribution while the OS still has it.
+type LiveProcess struct {
+	PID                    int    `json:"pid"`
+	Name                   string `json:"name"`
+	Path                   string `json:"path"`
+	CommandLine            string `json:"command_line"`
+	ParentPID              int    `json:"parent_pid,omitempty"`
+	ParentName             string `json:"parent_name,omitempty"`
+	ParentCommandLine      string `json:"parent_command_line,omitempty"`
+	GrandparentPID         int    `json:"grandparent_pid,omitempty"`
+	GrandparentName        string `json:"grandparent_name,omitempty"`
+	GrandparentCommandLine string `json:"grandparent_command_line,omitempty"`
+}
+
+// LiveProcessFinding is the machine-readable form of a live process finding.
+type LiveProcessFinding struct {
+	Level                  string                    `json:"level"`
+	Category               string                    `json:"category"`
+	Reason                 string                    `json:"reason"`
+	Message                string                    `json:"message"`
+	PID                    int                       `json:"pid"`
+	Name                   string                    `json:"name"`
+	Path                   string                    `json:"path,omitempty"`
+	CommandLine            string                    `json:"command_line,omitempty"`
+	ParentPID              int                       `json:"parent_pid,omitempty"`
+	ParentName             string                    `json:"parent_name,omitempty"`
+	ParentCommandLine      string                    `json:"parent_command_line,omitempty"`
+	GrandparentPID         int                       `json:"grandparent_pid,omitempty"`
+	GrandparentName        string                    `json:"grandparent_name,omitempty"`
+	GrandparentCommandLine string                    `json:"grandparent_command_line,omitempty"`
+	Browser                *BrowserAutomationDetails `json:"browser,omitempty"`
+}
+
+// LiveProcessReport inventories console-prone process families that can flash
+// windows too quickly for a visible-window sample to catch.
+type LiveProcessReport struct {
+	Scanned    int
+	Observed   map[string]int
+	Unreadable map[string]int
+	Violations []string
+	Watchlist  []string
+	Findings   []LiveProcessFinding
+}
+
+// OK reports whether the live process inventory found no hard popup source.
+func (r LiveProcessReport) OK() bool { return len(r.Violations) == 0 }
+
 // VisibleWindowReport audits what is visible right now. It is intentionally
 // separate from the scheduled-task read-back: a source tree can be clean and task
 // registrations can be headless while a leaked child window is still on screen.
@@ -134,6 +182,233 @@ func ParseVisibleWindows(out []byte) ([]VisibleWindow, error) {
 		return nil, fmt.Errorf("parse visible windows json: %w", err)
 	}
 	return []VisibleWindow{one}, nil
+}
+
+// ParseLiveProcesses decodes the JSON emitted by the CLI's live-process collector.
+func ParseLiveProcesses(out []byte) ([]LiveProcess, error) {
+	text := strings.TrimSpace(string(out))
+	if text == "" || text == "null" {
+		return nil, nil
+	}
+	var many []LiveProcess
+	if err := json.Unmarshal([]byte(text), &many); err == nil {
+		return many, nil
+	}
+	var one LiveProcess
+	if err := json.Unmarshal([]byte(text), &one); err != nil {
+		return nil, fmt.Errorf("parse live processes json: %w", err)
+	}
+	return []LiveProcess{one}, nil
+}
+
+// ClassifyLiveProcesses folds a process snapshot into review rows and counts.
+// It is intentionally advisory by default: process presence is weaker evidence
+// than a visible top-level window, but it catches the transient cmd/gh/git/ps
+// children that are otherwise gone before the desktop sampler runs.
+func ClassifyLiveProcesses(processes []LiveProcess) LiveProcessReport {
+	rep := LiveProcessReport{
+		Scanned:    len(processes),
+		Observed:   map[string]int{},
+		Unreadable: map[string]int{},
+	}
+	for _, proc := range processes {
+		if !liveProcessInteresting(proc) {
+			continue
+		}
+		name := liveProcessToolName(proc)
+		if name == "" {
+			name = "unknown"
+		}
+		rep.Observed[name]++
+		if strings.TrimSpace(proc.CommandLine) == "" {
+			rep.Unreadable[name]++
+		}
+		finding, ok := classifyLiveProcess(proc)
+		if !ok {
+			continue
+		}
+		rep.Findings = append(rep.Findings, finding)
+		switch finding.Level {
+		case "violation":
+			rep.Violations = append(rep.Violations, finding.Message)
+		case "watchlist":
+			rep.Watchlist = append(rep.Watchlist, finding.Message)
+		}
+	}
+	sort.Strings(rep.Violations)
+	sort.Strings(rep.Watchlist)
+	sort.Slice(rep.Findings, func(i, j int) bool {
+		a, b := rep.Findings[i], rep.Findings[j]
+		if a.Level != b.Level {
+			return a.Level < b.Level
+		}
+		if a.Category != b.Category {
+			return a.Category < b.Category
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.PID < b.PID
+	})
+	if len(rep.Observed) == 0 {
+		rep.Observed = nil
+	}
+	if len(rep.Unreadable) == 0 {
+		rep.Unreadable = nil
+	}
+	return rep
+}
+
+func classifyLiveProcess(proc LiveProcess) (LiveProcessFinding, bool) {
+	if liveProcessIgnored(proc) {
+		return LiveProcessFinding{}, false
+	}
+	finding := liveProcessFinding(proc)
+	switch {
+	case liveBrowserAutomationProcess(proc):
+		finding.Level = "watchlist"
+		finding.Category = "browser_automation_process"
+		finding.Reason = "browser automation process is alive; verify it is headless, offscreen, or intentionally attended"
+	case liveConsoleTool(proc) && liveProcessAutomationOwned(proc):
+		finding.Level = "watchlist"
+		finding.Category = "repo_console_process"
+		finding.Reason = "console-prone helper process is owned by repo automation"
+	case liveConsoleTool(proc) && strings.TrimSpace(proc.CommandLine) == "" && liveHighSignalConsoleTool(proc):
+		finding.Level = "watchlist"
+		finding.Category = "unattributed_console_process"
+		finding.Reason = "console-prone helper process has an unreadable command line; parent attribution is needed before it can be proved windowless"
+	default:
+		return LiveProcessFinding{}, false
+	}
+	finding.Message = liveProcessRow(proc) + " is " + finding.Reason
+	return finding, true
+}
+
+func liveProcessFinding(proc LiveProcess) LiveProcessFinding {
+	return LiveProcessFinding{
+		PID:                    proc.PID,
+		Name:                   proc.Name,
+		Path:                   proc.Path,
+		CommandLine:            redactCommandLine(proc.CommandLine),
+		ParentPID:              proc.ParentPID,
+		ParentName:             proc.ParentName,
+		ParentCommandLine:      redactCommandLine(proc.ParentCommandLine),
+		GrandparentPID:         proc.GrandparentPID,
+		GrandparentName:        proc.GrandparentName,
+		GrandparentCommandLine: redactCommandLine(proc.GrandparentCommandLine),
+		Browser:                browserAutomationDetailsFor(proc.Name, proc.CommandLine),
+	}
+}
+
+func liveProcessRow(proc LiveProcess) string {
+	parts := []string{fmt.Sprintf("pid=%d name=%s", proc.PID, proc.Name)}
+	if browser := browserAutomationDetailsFor(proc.Name, proc.CommandLine); browser != nil {
+		if browser.RemoteDebuggingPort != "" {
+			parts = append(parts, "port="+browser.RemoteDebuggingPort)
+		}
+		if browser.Profile != "" {
+			parts = append(parts, "profile="+browser.Profile)
+		}
+		if browser.WindowPosition != "" {
+			parts = append(parts, "window_pos="+browser.WindowPosition)
+		}
+		if browser.Offscreen {
+			parts = append(parts, "offscreen=true")
+		}
+		if browser.Headless {
+			parts = append(parts, "headless=true")
+		}
+	}
+	if proc.ParentPID != 0 || proc.ParentName != "" {
+		parts = append(parts, fmt.Sprintf("parent=%s[%d]", emptyDash(proc.ParentName), proc.ParentPID))
+	}
+	parts = append(parts, "cmd="+redactCommandLine(proc.CommandLine))
+	return strings.Join(parts, " ")
+}
+
+func liveProcessInteresting(proc LiveProcess) bool {
+	return liveConsoleTool(proc) || liveBrowserAutomationProcess(proc)
+}
+
+func liveConsoleTool(proc LiveProcess) bool {
+	name := liveProcessToolName(proc)
+	return candidateConsoleTools[name] ||
+		name == "bash" || name == "bash.exe" ||
+		name == "conhost" || name == "conhost.exe" ||
+		name == "openconsole" || name == "openconsole.exe" ||
+		name == "node" || name == "node.exe" ||
+		name == "npm" || name == "npm.cmd" ||
+		name == "npx" || name == "npx.cmd" ||
+		name == "pythonw" || name == "pythonw.exe"
+}
+
+func liveHighSignalConsoleTool(proc LiveProcess) bool {
+	switch liveProcessToolName(proc) {
+	case "cmd", "cmd.exe", "conhost", "conhost.exe", "git", "git.exe", "gh", "gh.exe",
+		"powershell", "powershell.exe", "pwsh", "pwsh.exe", "wsl", "wsl.exe":
+		return true
+	}
+	return false
+}
+
+func liveProcessToolName(proc LiveProcess) string {
+	name := strings.TrimSpace(proc.Name)
+	if name == "" {
+		name = proc.Path
+	}
+	return strings.ToLower(filepath.Base(strings.ReplaceAll(name, "\\", "/")))
+}
+
+func liveProcessAutomationOwned(proc LiveProcess) bool {
+	text := strings.ToLower(strings.Join([]string{
+		proc.Path,
+		proc.CommandLine,
+		proc.ParentName,
+		proc.ParentCommandLine,
+		proc.GrandparentName,
+		proc.GrandparentCommandLine,
+	}, " "))
+	for _, marker := range []string{
+		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
+		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
+		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func liveProcessIgnored(proc LiveProcess) bool {
+	text := strings.ToLower(proc.CommandLine + " " + proc.ParentCommandLine + " " + proc.GrandparentCommandLine)
+	for _, marker := range []string{
+		"fak windowgate",
+		"get-ciminstance win32_process",
+		"go run ./cmd/fak windowgate",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func liveBrowserAutomationProcess(proc LiveProcess) bool {
+	name := liveProcessToolName(proc)
+	switch name {
+	case "chrome", "chrome.exe", "msedge", "msedge.exe", "firefox", "firefox.exe":
+	default:
+		return false
+	}
+	text := strings.ToLower(proc.CommandLine)
+	if strings.Contains(text, "--type=") {
+		return false
+	}
+	return strings.Contains(text, "--remote-debugging-port") ||
+		strings.Contains(text, "chrome-cdp") ||
+		strings.Contains(text, "playwright") ||
+		strings.Contains(text, "selenium")
 }
 
 // ClassifyVisibleWindows folds live top-level windows into hard findings and
@@ -299,12 +574,16 @@ var (
 )
 
 func browserAutomationDetails(win VisibleWindow) *BrowserAutomationDetails {
+	return browserAutomationDetailsFor(win.Name, win.CommandLine)
+}
+
+func browserAutomationDetailsFor(name, cmd string) *BrowserAutomationDetails {
+	win := VisibleWindow{Name: name, CommandLine: cmd}
 	if !visibleBrowserAutomation(win) {
 		return nil
 	}
-	cmd := win.CommandLine
 	d := &BrowserAutomationDetails{
-		Engine:         strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe")),
+		Engine:         strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(name, "\\", "/")), ".exe")),
 		Headless:       strings.Contains(strings.ToLower(cmd), "--headless"),
 		StartMinimized: strings.Contains(strings.ToLower(cmd), "--start-minimized"),
 	}
