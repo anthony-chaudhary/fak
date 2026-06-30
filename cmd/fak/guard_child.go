@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // guard_child.go — the resolved upstream wire/credential posture, building and
@@ -223,7 +224,9 @@ func maybeLandlockCommand(command []string) []string {
 		return command
 	}
 	gitOut := func(args ...string) string {
-		out, err := exec.Command("git", args...).Output()
+		cmd := exec.Command("git", args...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.Output()
 		if err != nil {
 			return ""
 		}

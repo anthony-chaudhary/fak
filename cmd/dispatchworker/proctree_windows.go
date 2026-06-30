@@ -5,6 +5,8 @@ package main
 import (
 	"os/exec"
 	"strconv"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // configureProcTree makes a timed-out launch kill the WHOLE process tree on
@@ -24,7 +26,9 @@ func configureProcTree(cmd *exec.Cmd) {
 			return nil
 		}
 		pid := strconv.Itoa(cmd.Process.Pid)
-		if err := exec.Command("taskkill", "/T", "/F", "/PID", pid).Run(); err != nil {
+		kill := exec.Command("taskkill", "/T", "/F", "/PID", pid)
+		windowgate.ConfigureBackgroundCommand(kill)
+		if err := kill.Run(); err != nil {
 			// taskkill unavailable / process already gone — fall back to the child.
 			return cmd.Process.Kill()
 		}

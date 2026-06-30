@@ -47,3 +47,42 @@ func TestDispatchTickPicksPriorityOverNewer(t *testing.T) {
 		t.Fatalf("priority target = %v, want 300 (priority/P1 beats newer #1500)", got["target_issue"])
 	}
 }
+
+func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
+	old := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"docs": {
+					Tree:       []string{"docs/**"},
+					Issues:     []int{10, 11, 12},
+					Count:      3,
+					StepBudget: 3,
+				},
+				"gateway": {
+					Tree:       []string{"internal/gateway/**"},
+					Issues:     []int{20, 21},
+					Count:      2,
+					StepBudget: 9,
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = old })
+
+	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false)
+	if err != nil {
+		t.Fatalf("pickDispatchLane: %v", err)
+	}
+	if pick.Lane != "gateway" {
+		t.Fatalf("lane = %q, want gateway because it has the larger step budget", pick.Lane)
+	}
+	if pick.ByLaneStepBudget["gateway"] != 9 || pick.ByLaneStepBudget["docs"] != 3 {
+		t.Fatalf("step budgets = %+v, want gateway=9 docs=3", pick.ByLaneStepBudget)
+	}
+	if len(pick.Numbers) != 2 || pick.Numbers[0] != 20 || pick.Numbers[1] != 21 {
+		t.Fatalf("picked numbers = %+v, want gateway issues ordered oldest-first", pick.Numbers)
+	}
+}

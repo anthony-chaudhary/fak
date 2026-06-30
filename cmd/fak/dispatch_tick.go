@@ -46,12 +46,13 @@ type dispatchTickOptions struct {
 }
 
 type dispatchLanePick struct {
-	Lane          string
-	Numbers       []int
-	ByLaneCount   map[string]int
-	ExcludedLanes []string
-	Tree          []string
-	RouterError   string
+	Lane             string
+	Numbers          []int
+	ByLaneCount      map[string]int
+	ByLaneStepBudget map[string]int
+	ExcludedLanes    []string
+	Tree             []string
+	RouterError      string
 }
 
 type dispatchSpawnResult struct {
@@ -98,7 +99,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by dispatch preflight")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
-	lane := fs.String("lane", "", "explicit lane (default: busiest lane with an open issue)")
+	lane := fs.String("lane", "", "explicit lane (default: lane with the largest routed step budget)")
 	targetIssue := fs.Int("target-issue", 0, "explicit issue number for the selected lane")
 	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
 	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
@@ -259,6 +260,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		"lease_id":         firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)),
 		"lease_tree":       append([]string(nil), pick.Tree...),
 		"lane_issue_count": len(pick.Numbers),
+		"lane_step_budget": pick.ByLaneStepBudget[pick.Lane],
 		"cooled_recently":  sortedSet(cooled),
 		"target_issue":     nil,
 		"already_live":     sortedSet(liveIssues),
@@ -504,6 +506,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	numsByLane := map[string][]int{}
 	treesByLane := map[string][]string{}
 	counts := map[string]int{}
+	stepBudgets := map[string]int{}
 	for lane, info := range router.Lanes {
 		nums := append([]int(nil), info.Issues...)
 		treesByLane[lane] = append([]string(nil), info.Tree...)
@@ -528,16 +531,26 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		}
 		numsByLane[lane] = dispatchtick.OrderLaneCandidates(cands, preferNewest)
 		counts[lane] = len(nums)
+		stepBudget := info.StepBudget
+		if stepBudget <= 0 {
+			stepBudget = len(nums)
+		}
+		stepBudgets[lane] = stepBudget
 	}
 	chosen := strings.TrimSpace(explicit)
 	if chosen == "" {
+		bestStepBudget := -1
 		bestCount := -1
 		for lane, nums := range numsByLane {
 			if exclude[lane] {
 				continue
 			}
-			if len(nums) > bestCount || (len(nums) == bestCount && lane < chosen) {
+			stepBudget := stepBudgets[lane]
+			if stepBudget > bestStepBudget ||
+				(stepBudget == bestStepBudget && len(nums) > bestCount) ||
+				(stepBudget == bestStepBudget && len(nums) == bestCount && lane < chosen) {
 				chosen = lane
+				bestStepBudget = stepBudget
 				bestCount = len(nums)
 			}
 		}
@@ -552,12 +565,13 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		tree = []string{fmt.Sprintf("internal/%s/**", chosen)}
 	}
 	return dispatchLanePick{
-		Lane:          chosen,
-		Numbers:       numsByLane[chosen],
-		ByLaneCount:   counts,
-		ExcludedLanes: excluded,
-		Tree:          tree,
-		RouterError:   dispatchRouterError(router),
+		Lane:             chosen,
+		Numbers:          numsByLane[chosen],
+		ByLaneCount:      counts,
+		ByLaneStepBudget: stepBudgets,
+		ExcludedLanes:    excluded,
+		Tree:             tree,
+		RouterError:      dispatchRouterError(router),
 	}, nil
 }
 
@@ -1117,6 +1131,7 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 	metrics := map[string]int64{
 		"live":             boolInt(payload["live"]),
 		"lane_issue_count": int64(dispatchMapInt(payload, "lane_issue_count")),
+		"lane_step_budget": int64(dispatchMapInt(payload, "lane_step_budget")),
 		"max_workers":      int64(dispatchMapInt(payload, "max_workers")),
 		"preflight_live":   int64(dispatchMapInt(pre, "live")),
 		"preflight_cap":    int64(dispatchMapInt(pre, "cap")),
@@ -1196,7 +1211,7 @@ func renderDispatchTick(p map[string]any) string {
 		dispatchMapString(p, "verdict"), okWord(dispatchMapBool(p, "ok")), dispatchMapString(p, "backend"), p["live"])
 	fmt.Fprintf(&b, "  preflight : %s (%v/%v live)\n", dispatchMapString(pf, "verdict"), pf["live"], pf["cap"])
 	fmt.Fprintf(&b, "  account   : %s (t%v)  %s\n", firstString(dispatchMapString(a, "tag"), "-"), a["tier"], dispatchMapString(a, "model"))
-	fmt.Fprintf(&b, "  lane      : %s  (%d issues)\n", firstString(dispatchMapString(p, "lane"), "-"), dispatchMapInt(p, "lane_issue_count"))
+	fmt.Fprintf(&b, "  lane      : %s  (%d issues, %d steps)\n", firstString(dispatchMapString(p, "lane"), "-"), dispatchMapInt(p, "lane_issue_count"), dispatchMapInt(p, "lane_step_budget"))
 	if n := dispatchMapInt(p, "target_issue"); n != 0 {
 		fmt.Fprintf(&b, "  target    : #%d  %.54s\n", n, dispatchMapString(p, "issue_title"))
 	}

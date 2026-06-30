@@ -71,6 +71,9 @@ func TestRunCommitPreview_jsonShape(t *testing.T) {
 	if got["ok"] != true {
 		t.Errorf("want ok=true in JSON, got %v", got["ok"])
 	}
+	if got["score"] == nil || got["grade"] == nil {
+		t.Errorf("preview JSON should carry score and grade, got %v", got)
+	}
 }
 
 func TestRunCommitPreview_doesNotCommit(t *testing.T) {

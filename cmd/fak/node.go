@@ -44,6 +44,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // nodeDefaultPolicyJSON is a copy of examples/dogfood-claude-policy.json baked in
@@ -668,11 +670,17 @@ set "{{.RequireKeyEnv}}={{.GatewayKey}}"
 "{{.FakBin}}" serve --provider anthropic --base-url https://api.anthropic.com --addr {{.Addr}} --policy "{{.PolicyPath}}"{{if .RequireKeyEnv}} --require-key-env {{.RequireKeyEnv}}{{end}} >> "{{.LogDir}}\serve.log" 2>> "{{.LogDir}}\serve.err"
 `
 
+func nodeHelperCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd
+}
+
 func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	addr, uninstall, cfgDir := in.addr, in.uninstall, in.cfgDir
 	if uninstall {
-		_ = exec.Command("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
-		out, err := exec.Command("schtasks", "/Delete", "/TN", nodeWindowsTaskName, "/F").CombinedOutput()
+		_ = nodeHelperCommand("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
+		out, err := nodeHelperCommand("schtasks", "/Delete", "/TN", nodeWindowsTaskName, "/F").CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(stderr, "fak node install: schtasks /Delete: %v\n%s\n", err, out)
 			return 1
@@ -722,7 +730,7 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	// kept the port and answered the health probe, making install falsely report the OLD
 	// process healthy. End the task and wait for the port to free; if a foreign process still
 	// holds it, fail loudly rather than blessing whatever answers the probe.
-	_ = exec.Command("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
+	_ = nodeHelperCommand("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
 	if !nodeWaitPortFree(localPort) {
 		fmt.Fprintf(stderr, "\n[fak node] ERROR: 127.0.0.1:%s is still in use after stopping the task.\n", localPort)
 		fmt.Fprintf(stderr, "           Another process holds the port; the install would falsely report IT healthy.\n")
@@ -740,12 +748,12 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 		fmt.Fprintf(stderr, "fak node install: write task xml: %v\n", err)
 		return 1
 	}
-	if out, err := exec.Command("schtasks", "/Create", "/TN", nodeWindowsTaskName,
+	if out, err := nodeHelperCommand("schtasks", "/Create", "/TN", nodeWindowsTaskName,
 		"/XML", xmlPath, "/F").CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "fak node install: schtasks /Create: %v\n%s\n", err, out)
 		return 1
 	}
-	if out, err := exec.Command("schtasks", "/Run", "/TN", nodeWindowsTaskName).CombinedOutput(); err != nil {
+	if out, err := nodeHelperCommand("schtasks", "/Run", "/TN", nodeWindowsTaskName).CombinedOutput(); err != nil {
 		// Non-fatal: the task is registered and will start at boot even if the immediate
 		// run could not be kicked off.
 		fmt.Fprintf(stderr, "[fak node] note: schtasks /Run did not start the task now (%v): %s\n", err, out)
@@ -840,7 +848,7 @@ func nodeStatus(stdout, stderr io.Writer, _ []string) int {
 		out, _ := exec.Command("systemctl", "--user", "status", "fak-serve-gateway", "--no-pager").Output()
 		fmt.Fprintf(stdout, "[fak node] systemd:\n%s\n", string(out))
 	case "windows":
-		out, _ := exec.Command("schtasks", "/Query", "/TN", nodeWindowsTaskName, "/FO", "LIST").Output()
+		out, _ := nodeHelperCommand("schtasks", "/Query", "/TN", nodeWindowsTaskName, "/FO", "LIST").Output()
 		if len(out) > 0 {
 			fmt.Fprintf(stdout, "[fak node] schtasks %s:\n%s\n", nodeWindowsTaskName, strings.TrimSpace(string(out)))
 		} else {

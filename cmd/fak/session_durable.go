@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const sessionRegistryEnv = "FAK_SESSION_REGISTRY"
@@ -158,7 +159,9 @@ func sessionWorkingDir() string {
 }
 
 func sessionStartSHA() string {
-	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

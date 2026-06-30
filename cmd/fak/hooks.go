@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // cmd/fak/hooks.go — `fak hooks <pre-commit|commit-msg>`: run the repo's commit-boundary gates
@@ -299,7 +300,9 @@ func resolveRoot(explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return explicit
 	}
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
