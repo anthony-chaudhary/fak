@@ -116,6 +116,14 @@ const (
 	glmGGUFExpertsDown = "ffn_down_exps.weight" // -> mlp.experts.<e>.down_proj.weight
 )
 
+func archUsesGGUFBatchedMoEExperts(arch string) bool {
+	switch arch {
+	case "glm_moe_dsa", "qwen3moe":
+		return true
+	}
+	return false
+}
+
 // glmMoeDsaSkipGGUFTensor reports whether a glm_moe_dsa GGUF tensor is part of the Multi-Token-
 // Prediction (MTP / "nextn") speculative-decoding head or a multimodal vision tower — neither read
 // by the text causal-LM forward. llama.cpp likewise ignores these ("model has unused tensor

@@ -222,11 +222,13 @@ func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
 		if glmMoeDsaSkipGGUFTensor(name) {
 			return false, nil
 		}
-		if _, _, ok := glmMoeDsaBatchedExpert(name); ok {
-			return true, nil
-		}
 		if _, _, ok := glmMoeDsaSplitKVB(name); ok {
 			return false, nil
+		}
+	}
+	if archUsesGGUFBatchedMoEExperts(modelType) {
+		if _, _, ok := glmMoeDsaBatchedExpert(name); ok {
+			return true, nil
 		}
 	}
 	canon, ok := CanonicalTensorNameArch(name, modelType)

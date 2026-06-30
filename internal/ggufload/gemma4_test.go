@@ -139,6 +139,19 @@ func TestGemma4GGUFConfigDerivesHeterogeneousGeometryAndRunsForward(t *testing.T
 	}
 }
 
+func TestGemma3PostFFWNormCanonicalMapping(t *testing.T) {
+	mustMap := map[string]string{
+		"blk.0.ffn_norm.weight":      "model.layers.0.pre_feedforward_layernorm.weight",
+		"blk.0.post_ffw_norm.weight": "model.layers.0.post_feedforward_layernorm.weight",
+	}
+	for src, want := range mustMap {
+		got, ok := CanonicalTensorNameArch(src, "gemma3")
+		if !ok || got != want {
+			t.Fatalf("CanonicalTensorNameArch(%q,gemma3) = (%q,%v), want %q", src, got, ok, want)
+		}
+	}
+}
+
 var _ = model.SandwichNorm // model is used via f.Config() return type assertions above
 
 // tinyGemma4GGUF builds a minimal but architecturally faithful gemma4 GGUF: 4 layers

@@ -226,6 +226,9 @@ func (f *File) Config() (model.Config, error) {
 	if canonicalGGUFArch(arch) == "glm_moe_dsa" {
 		applyGLMMoeDsaConfig(f, p, &cfg, ropeDim)
 	}
+	if arch == "qwen3moe" {
+		applyQwen3MoEConfig(f, p, &cfg)
+	}
 	return cfg, nil
 }
 
@@ -241,6 +244,21 @@ func canonicalGGUFArch(arch string) string {
 		return "glm_moe_dsa"
 	}
 	return arch
+}
+
+func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
+	if v := intValueOrZero(f, p+glmKeyExpertCount); v > 0 {
+		cfg.NumExperts = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertUsedCount); v > 0 {
+		cfg.NumExpertsPerTok = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
+		cfg.MoEIntermediateSize = v
+	}
+	if cfg.NumExperts > 0 {
+		cfg.NormTopKProb = true
+	}
 }
 
 // applyGemma4Config derives Google Gemma 4's architecture axes from GGUF metadata into

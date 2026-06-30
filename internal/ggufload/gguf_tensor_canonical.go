@@ -334,6 +334,9 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	// single GGUF name cannot become E per-expert canonical tensors, and two KV-b names
 	// must become one canonical tensor. gguf_weightsource.go handles both before this
 	// one-name-to-one-name map is consulted.
+	if archUsesGGUFBatchedMoEExperts(arch) && suffix == glmGGUFRouter {
+		return "model.layers." + layer + ".mlp.gate.weight", true
+	}
 	if arch == "glm_moe_dsa" {
 		if mapped, ok := glmMoeDsaCanonicalSuffix(suffix); ok {
 			return "model.layers." + layer + "." + mapped, true

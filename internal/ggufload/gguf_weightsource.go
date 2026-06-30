@@ -198,10 +198,10 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 				continue
 			}
 		}
-		// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E into per-expert
+		// GGUF batched routed experts: split the [E,out,in] blob 1->E into per-expert
 		// canonical tensors and add each (the quant builder narrows the 2-D matmul weights as
 		// usual). Handled before CanonicalTensorNameArch, which leaves these unmapped.
-		if cfg.ModelType == "glm_moe_dsa" {
+		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, data, err := s.dequantGGUFShapeF32(info)
 				if err != nil {
@@ -315,7 +315,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 
 // F32Tensors dequantizes every GGUF tensor to float32, mapping each to its canonical
 // HF name and normalizing its data, and returns the model Config plus the named f32
-// tensors (glm_moe_dsa batched experts split 1->E). It is the f32 path's Model builds on.
+// tensors (GGUF batched MoE experts split 1->E). It is the f32 path's Model builds on.
 func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error) {
 	cfg, err := s.File.Config()
 	if err != nil {
@@ -324,11 +324,11 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	tensors := make([]model.NamedTensorF32, 0, len(s.File.Tensors))
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	for _, info := range s.File.Tensors {
-		// glm_moe_dsa batched routed experts: one [E,out,in] blob splits 1->E into per-expert
+		// GGUF batched routed experts: one [E,out,in] blob splits 1->E into per-expert
 		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
-		if cfg.ModelType == "glm_moe_dsa" {
+		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
 			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
-			if glmMoeDsaSkipGGUFTensor(info.Name) {
+			if cfg.ModelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
 				continue
 			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
@@ -344,23 +344,25 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 				continue
 			}
 			// MLA KV-b: buffer attn_k_b/attn_v_b and emit the combined kv_b_proj when both arrive.
-			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-				shape, data, err := s.shapeAndTensorF32(info)
-				if err != nil {
-					return model.Config{}, nil, err
-				}
-				merged, ready, err := bufferGLMKVBHalf(kvbHalf, layer, half, shape, data)
-				if err != nil {
-					return model.Config{}, nil, err
-				}
-				if ready {
-					merged.Data, err = normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
+			if cfg.ModelType == "glm_moe_dsa" {
+				if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
+					shape, data, err := s.shapeAndTensorF32(info)
 					if err != nil {
 						return model.Config{}, nil, err
 					}
-					tensors = append(tensors, merged)
+					merged, ready, err := bufferGLMKVBHalf(kvbHalf, layer, half, shape, data)
+					if err != nil {
+						return model.Config{}, nil, err
+					}
+					if ready {
+						merged.Data, err = normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
+						if err != nil {
+							return model.Config{}, nil, err
+						}
+						tensors = append(tensors, merged)
+					}
+					continue
 				}
-				continue
 			}
 		}
 		name, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)

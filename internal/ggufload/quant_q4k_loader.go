@@ -95,8 +95,10 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				tw.pending = []pendingTensor{{isKVBHalf: true, layer: layer, half: half, shape: shape, f32: append([]float32(nil), data...)}}
 				return tw
 			}
+		}
+		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
 			// Batched routed experts: split the [E,out,in] blob 1->E. A block-aligned raw-quant
-			// blob splits as RAW bytes -> resident (no dequant): the experts are GLM-5.2's bulk
+			// blob splits as RAW bytes -> resident (no dequant): the experts are the MoE bulk,
 			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
 			// Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
