@@ -1,6 +1,7 @@
 package modelroute
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -309,6 +310,52 @@ func TestRosterCarriesNoSecretMaterial(t *testing.T) {
 		if strings.Contains(tg.CredEnv, "sk-") || strings.Contains(tg.EngineRoute(), "sk-") {
 			t.Fatalf("target leaked secret material: %+v route=%q", tg, tg.EngineRoute())
 		}
+	}
+}
+
+func TestRosterReadinessReportsCredentialPresenceWithoutSecrets(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		switch name {
+		case "OPENAI_API_KEY":
+			return "sk-this-must-never-appear", true
+		case "OPENAI_WORK_API_KEY":
+			return "", true
+		default:
+			return "", false
+		}
+	}
+	report := rosterFixture().Readiness(lookup)
+	if report.Schema != AccountReadinessSchema {
+		t.Fatalf("schema = %q, want %q", report.Schema, AccountReadinessSchema)
+	}
+	if report.Summary.Total != 4 || report.Summary.Ready != 2 || report.Summary.NeedsCredential != 2 {
+		t.Fatalf("summary = %+v, want total 4 ready 2 needs_credential 2", report.Summary)
+	}
+	byID := map[string]AccountReadinessObservation{}
+	for _, row := range report.Rows {
+		byID[row.ID] = row
+	}
+	if byID["local"].Credential != CredentialNotRequired || byID["local"].Status != AccountReady {
+		t.Fatalf("local readiness wrong: %+v", byID["local"])
+	}
+	if byID["oa-personal"].Credential != CredentialPresent || byID["oa-personal"].Status != AccountReady {
+		t.Fatalf("present remote credential wrong: %+v", byID["oa-personal"])
+	}
+	if byID["oa-work"].Credential != CredentialMissing || byID["oa-work"].Status != AccountNeedsCredential {
+		t.Fatalf("empty env var should be missing: %+v", byID["oa-work"])
+	}
+	if byID["claude"].Credential != CredentialMissing || byID["claude"].Status != AccountNeedsCredential {
+		t.Fatalf("absent env var should be missing: %+v", byID["claude"])
+	}
+	b, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "sk-this-must-never-appear") {
+		t.Fatalf("readiness report leaked the credential value: %s", b)
+	}
+	if !strings.Contains(string(b), "OPENAI_API_KEY") {
+		t.Fatalf("readiness report should carry env-var names for actionability: %s", b)
 	}
 }
 
