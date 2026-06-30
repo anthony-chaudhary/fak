@@ -962,6 +962,7 @@ func New(cfg Config) (*Server, error) {
 	// is a no-op for them.
 	if hp, ok := planner.(*agent.HTTPPlanner); ok {
 		hp.RetryNotify = s.onUpstreamRetry
+		hp.AuthRefreshNotify = s.onAuthRefresh
 	}
 
 	// Build the in-kernel background-loop supervisor and register the built-in loops
@@ -985,6 +986,26 @@ func (s *Server) onUpstreamRetry(attempt, status int, wait time.Duration) {
 	}
 	if s.debugStatsf != nil {
 		s.debugStatsf("fak-turn retry attempt=%d status=%d wait=%s", attempt, status, wait.Round(100*time.Millisecond))
+	}
+}
+
+// onAuthRefresh is the planner's AuthRefreshNotify hook: surface a 401 token-rotation self-heal
+// on the rotating-subscription path. It is SEPARATE from onUpstreamRetry so a credential expiry
+// is never conflated with a 429/5xx backoff. outcome is "recovered" (a fresh token was adopted
+// mid-session and the call re-sent in place — the live guarded session healed across a re-login)
+// or "exhausted" (no fresher token landed within the grace window, so the 401 is about to surface
+// and the wrapped agent will drop into its own /login). This is the otherwise-INVISIBLE event the
+// "fak guard gets stuck on login sometimes" class hinges on: with this line an operator sees the
+// self-heal happen — or sees it give up — instead of a silent session loss.
+func (s *Server) onAuthRefresh(outcome string, attempt int) {
+	if s == nil {
+		return
+	}
+	if s.metrics != nil {
+		s.metrics.observeUpstreamAuthRefresh(outcome)
+	}
+	if s.debugStatsf != nil {
+		s.debugStatsf("fak-turn auth-refresh outcome=%s attempt=%d", outcome, attempt)
 	}
 }
 

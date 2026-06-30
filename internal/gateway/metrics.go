@@ -199,6 +199,14 @@ type gatewayMetrics struct {
 	// RetryNotify hook, off the request path. The metric twin of the `fak-turn … retry` line.
 	upstreamRetries uint64
 
+	// upstreamAuthRefreshes counts 401 token-rotation self-heals on the rotating-subscription
+	// path, keyed by outcome ("recovered" = a fresh OAuth token was adopted mid-session and the
+	// call re-sent in place; "exhausted" = no fresher token landed within the grace window, so
+	// the 401 surfaced and the agent dropped into its own /login). Guarded by upstreamErrMu (the
+	// same low-frequency off-path family). The metric twin of the `fak-turn auth-refresh` line —
+	// the observability for the "fak guard gets stuck on login sometimes" event class.
+	upstreamAuthRefreshes map[string]uint64
+
 	// servedInline counts read-only tool calls the vDSO served LOCALLY on a served turn
 	// (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded
 	// into the assistant turn and dropped from the kept set, so the client never re-ran it —
@@ -309,25 +317,26 @@ type latencyCounter struct {
 
 func newGatewayMetrics(now time.Time) *gatewayMetrics {
 	return &gatewayMetrics{
-		start:              now,
-		http:               map[httpMetricKey]*latencyCounter{},
-		operations:         map[operationMetricKey]*latencyCounter{},
-		inflightReq:        map[uint64]inflightEntry{},
-		compactAttempts:    map[string]uint64{},
-		compactBailReasons: map[string]uint64{},
-		reqMemoryObserved:  map[string]uint64{},
-		reqMemoryPlan:      map[requestMemoryMetricKey]*requestMemoryMetricStats{},
-		reqMemoryTokens:    map[requestMemoryTokenKey]*requestMemoryTokenStats{},
-		reqMemoryFit:       map[requestMemoryFitKey]*requestMemoryFitStats{},
-		inKernelOOM:        map[string]*inKernelOOMClassStats{},
-		upstreamErrors:     map[string]uint64{},
-		harnessCoherence:   newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
-		routing:            newRoutingMetrics(),
-		vcacheGovernor:     newVCacheGovernorDecisionJournal(),
-		vcacheWarmth:       newVCacheWarmthDemotionJournal(),
-		inferTTFTHist:      newLatencyCounter(),
-		inferTPOTHist:      newLatencyCounter(),
-		inferE2EHist:       newLatencyCounter(),
+		start:                 now,
+		http:                  map[httpMetricKey]*latencyCounter{},
+		operations:            map[operationMetricKey]*latencyCounter{},
+		inflightReq:           map[uint64]inflightEntry{},
+		compactAttempts:       map[string]uint64{},
+		compactBailReasons:    map[string]uint64{},
+		reqMemoryObserved:     map[string]uint64{},
+		reqMemoryPlan:         map[requestMemoryMetricKey]*requestMemoryMetricStats{},
+		reqMemoryTokens:       map[requestMemoryTokenKey]*requestMemoryTokenStats{},
+		reqMemoryFit:          map[requestMemoryFitKey]*requestMemoryFitStats{},
+		inKernelOOM:           map[string]*inKernelOOMClassStats{},
+		upstreamErrors:        map[string]uint64{},
+		upstreamAuthRefreshes: map[string]uint64{},
+		harnessCoherence:      newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
+		routing:               newRoutingMetrics(),
+		vcacheGovernor:        newVCacheGovernorDecisionJournal(),
+		vcacheWarmth:          newVCacheWarmthDemotionJournal(),
+		inferTTFTHist:         newLatencyCounter(),
+		inferTPOTHist:         newLatencyCounter(),
+		inferE2EHist:          newLatencyCounter(),
 	}
 }
 
@@ -406,6 +415,25 @@ func (m *gatewayMetrics) observeUpstreamRetry() {
 		return
 	}
 	atomic.AddUint64(&m.upstreamRetries, 1)
+}
+
+// observeUpstreamAuthRefresh counts one 401 token-rotation self-heal by outcome ("recovered" /
+// "exhausted"), called from the AuthRefreshNotify hook. Off the request path, guarded by the
+// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a
+// junk series.
+func (m *gatewayMetrics) observeUpstreamAuthRefresh(outcome string) {
+	if m == nil {
+		return
+	}
+	if outcome != "recovered" && outcome != "exhausted" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamAuthRefreshes == nil {
+		m.upstreamAuthRefreshes = map[string]uint64{}
+	}
+	m.upstreamAuthRefreshes[outcome]++
+	m.upstreamErrMu.Unlock()
 }
 
 // observeInKernelOOM folds a planner error into the local device-OOM visibility family when
@@ -2094,6 +2122,10 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	for k, v := range m.upstreamErrors {
 		snap[k] = v
 	}
+	authSnap := make(map[string]uint64, len(m.upstreamAuthRefreshes))
+	for k, v := range m.upstreamAuthRefreshes {
+		authSnap[k] = v
+	}
 	m.upstreamErrMu.Unlock()
 	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures, OBSERVED from the provider and relayed by fak (not a fak fault), by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
 	kinds := make([]string, 0, len(snap))
@@ -2105,6 +2137,16 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
 	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
+	// The 401 token-rotation self-heal family: recovered = a fresh subscription OAuth token was
+	// adopted mid-session (the live guarded session healed across a re-login), exhausted = no
+	// fresher token landed within the grace window (the 401 surfaced and the agent dropped into
+	// its own /login). Always emit BOTH series (even at 0) so a dashboard panel exists from the
+	// first scrape — a missing "exhausted" series must not read as "no failures", and a healthy
+	// session's "recovered 0 / exhausted 0" is itself the signal that no token expired.
+	writeHelpType(b, "fak_gateway_upstream_auth_refresh_total", "401 token-rotation self-heals on the rotating Claude subscription path, by outcome: recovered (a fresh OAuth token was adopted mid-session and the call re-sent in place) or exhausted (no fresher token landed within the grace window, so the 401 surfaced).", "counter")
+	for _, outcome := range []string{"recovered", "exhausted"} {
+		fmt.Fprintf(b, "fak_gateway_upstream_auth_refresh_total{outcome=\"%s\"} %d\n", outcome, authSnap[outcome])
+	}
 	writeCounter(b, "fak_gateway_served_inline_total", "Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.", int64(m.servedInlineSnapshot()))
 }
 

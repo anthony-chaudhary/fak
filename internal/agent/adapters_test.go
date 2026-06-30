@@ -1007,6 +1007,103 @@ func TestHTTPPlannerComplete401RefreshesAndRetries(t *testing.T) {
 	})
 }
 
+// TestHTTPPlannerComplete401NotifiesAuthRefresh proves the otherwise-INVISIBLE token-rotation
+// event is now reported: a 401 on the rotating-subscription path fires AuthRefreshNotify with
+// "recovered" when a fresh token is adopted and the call re-sends, and "exhausted" when no
+// fresher token lands within the grace window and the 401 surfaces. This is the agent-side half
+// of the "fak guard gets stuck on login sometimes" observability — the gateway turns these into
+// a metric + a `fak-turn auth-refresh` line.
+func TestHTTPPlannerComplete401NotifiesAuthRefresh(t *testing.T) {
+	const stale = "sk-ant-oat01-stale"
+	const fresh = "sk-ant-oat01-fresh"
+
+	t.Run("recovered when a fresh token is adopted", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+fresh {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq := []string{stale, fresh}
+		call := 0
+		planner.APIKeyFunc = func() string {
+			tok := seq[call]
+			if call < len(seq)-1 {
+				call++
+			}
+			return tok
+		}
+		var outcomes []string
+		planner.AuthRefreshNotify = func(outcome string, _ int) { outcomes = append(outcomes, outcome) }
+
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+			t.Fatalf("complete should self-heal: %v", err)
+		}
+		if len(outcomes) != 1 || outcomes[0] != AuthRefreshRecovered {
+			t.Fatalf("want exactly one %q notification, got %v", AuthRefreshRecovered, outcomes)
+		}
+	})
+
+	t.Run("exhausted when no fresher token lands", func(t *testing.T) {
+		// No re-login coming: collapse the window so the give-up is immediate.
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "0")
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error"}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		planner.APIKeyFunc = func() string { return stale } // never rotates → window exhausts.
+		var outcomes []string
+		planner.AuthRefreshNotify = func(outcome string, _ int) { outcomes = append(outcomes, outcome) }
+
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err == nil {
+			t.Fatal("want a surfaced 401 when no fresher token lands")
+		}
+		if len(outcomes) != 1 || outcomes[0] != AuthRefreshExhausted {
+			t.Fatalf("want exactly one %q notification, got %v", AuthRefreshExhausted, outcomes)
+		}
+	})
+
+	t.Run("static-key 401 fires no auth-refresh notification", func(t *testing.T) {
+		// A non-rotating (static-key) planner is not on the auth-refresh path, so a 401 there
+		// must NOT emit an auth-refresh event (it is a plain credential error, not a rotation).
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error"}}`))
+		}))
+		defer ts.Close()
+
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// No APIKeyFunc => authRefreshable is false (the static-key path).
+		var outcomes []string
+		planner.AuthRefreshNotify = func(outcome string, _ int) { outcomes = append(outcomes, outcome) }
+
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err == nil {
+			t.Fatal("want a 401 error on the static-key path")
+		}
+		if len(outcomes) != 0 {
+			t.Fatalf("a static-key 401 must not fire an auth-refresh notification; got %v", outcomes)
+		}
+	})
+}
+
 func TestHTTPPlannerFoldsProviderCachedTokensIntoCachemeta(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

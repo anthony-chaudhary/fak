@@ -85,6 +85,61 @@ func TestObserveUpstreamError_CountsByKind(t *testing.T) {
 	}
 }
 
+// The 401 token-rotation self-heal counter must (a) count by outcome, (b) ignore an unknown
+// outcome so a caller typo cannot create a junk series, and (c) render BOTH outcome series on
+// /metrics — even at 0 — so a dashboard panel exists from the first scrape and a missing
+// "exhausted" series is never mistaken for "no login failures".
+func TestObserveUpstreamAuthRefresh_CountsAndRenders(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	m.observeUpstreamAuthRefresh("recovered")
+	m.observeUpstreamAuthRefresh("recovered")
+	m.observeUpstreamAuthRefresh("exhausted")
+	m.observeUpstreamAuthRefresh("bogus") // unknown outcome: must be ignored.
+
+	m.upstreamErrMu.Lock()
+	if m.upstreamAuthRefreshes["recovered"] != 2 {
+		t.Fatalf("recovered count = %d, want 2", m.upstreamAuthRefreshes["recovered"])
+	}
+	if m.upstreamAuthRefreshes["exhausted"] != 1 {
+		t.Fatalf("exhausted count = %d, want 1", m.upstreamAuthRefreshes["exhausted"])
+	}
+	if _, ok := m.upstreamAuthRefreshes["bogus"]; ok {
+		t.Fatal("an unknown outcome must not create a junk series")
+	}
+	m.upstreamErrMu.Unlock()
+
+	var b strings.Builder
+	m.writeUpstreamErrorMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		`fak_gateway_upstream_auth_refresh_total{outcome="recovered"} 2`,
+		`fak_gateway_upstream_auth_refresh_total{outcome="exhausted"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/metrics did not render %q:\n%s", want, out)
+		}
+	}
+}
+
+// Both auth-refresh outcome series must render at 0 on a fresh metrics object — the panel must
+// exist before any 401 happens, so an empty "exhausted" series can never read as a missing
+// failure signal.
+func TestUpstreamAuthRefreshRendersBothSeriesAtZero(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	var b strings.Builder
+	m.writeUpstreamErrorMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		`fak_gateway_upstream_auth_refresh_total{outcome="recovered"} 0`,
+		`fak_gateway_upstream_auth_refresh_total{outcome="exhausted"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/metrics must render %q even at zero:\n%s", want, out)
+		}
+	}
+}
+
 // The upstream-error counter splits the operationally-distinct 4xx conditions into named kinds so
 // a /metrics scrape can see a rate-limit storm vs an auth-failure storm vs a permission denial,
 // not just a single status_4xx blob.

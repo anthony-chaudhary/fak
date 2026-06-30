@@ -176,9 +176,11 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			if fresh, ok := waitForFreshAPIKey(ctx, p, key); ok {
 				key = fresh
 				triedAuthRefresh = true
+				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
 				attempt--
 				continue
 			}
+			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
 		}
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}

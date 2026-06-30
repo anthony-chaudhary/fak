@@ -204,6 +204,40 @@ func TestRecordTurnSafety_IsPerTurnNotCumulative(t *testing.T) {
 	}
 }
 
+// TestOnAuthRefresh_CountsAndPrintsDistinctLine proves the 401 token-rotation self-heal hook is
+// observable on BOTH surfaces: it bumps the per-outcome metric and emits a `fak-turn auth-refresh`
+// line DISTINCT from the 429/5xx `fak-turn retry` line, so an operator can tell a credential
+// expiry apart from a rate-limit backoff. A nil hook (no metrics, no sink) must be a safe no-op.
+func TestOnAuthRefresh_CountsAndPrintsDistinctLine(t *testing.T) {
+	s := newResetShadowServer()
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	s.onAuthRefresh("recovered", 2)
+	s.onAuthRefresh("exhausted", 5)
+
+	s.metrics.upstreamErrMu.Lock()
+	if s.metrics.upstreamAuthRefreshes["recovered"] != 1 || s.metrics.upstreamAuthRefreshes["exhausted"] != 1 {
+		s.metrics.upstreamErrMu.Unlock()
+		t.Fatalf("want one recovered + one exhausted counted, got %v", s.metrics.upstreamAuthRefreshes)
+	}
+	s.metrics.upstreamErrMu.Unlock()
+
+	if len(lines) != 2 {
+		t.Fatalf("want 2 auth-refresh lines, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "auth-refresh") || !strings.Contains(lines[0], "outcome=recovered") {
+		t.Fatalf("first line must be a distinct auth-refresh outcome=recovered line: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "fak-turn retry") {
+		t.Fatalf("the auth-refresh line must NOT be the 429/5xx retry line: %q", lines[0])
+	}
+
+	// A nil server / nil metrics must not panic (the planner may fire the hook before wiring).
+	var nilSrv *Server
+	nilSrv.onAuthRefresh("recovered", 1) // must be a safe no-op
+}
+
 func TestRenderTurnDebugStats_GatedOffWhenSinkNil(t *testing.T) {
 	s := newResetShadowServer() // debugStatsf nil, logf nil
 	// Must be a byte-identical no-op: no panic, nothing emitted, no state minted.

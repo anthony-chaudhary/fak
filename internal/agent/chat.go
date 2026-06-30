@@ -775,6 +775,18 @@ type HTTPPlanner struct {
 	// bumps a retry counter and prints a `fak-turn … retry` debug line, so an operator sees the
 	// backoff happening instead of a frozen terminal. nil = behavior byte-for-byte unchanged.
 	RetryNotify func(attempt int, status int, wait time.Duration)
+
+	// AuthRefreshNotify, when non-nil, is called when a 401 on the rotating-subscription path
+	// is handled — separately from RetryNotify so a token-expiry self-heal is never conflated
+	// with a 429/5xx backoff (different cause, different metric). outcome is "recovered" when a
+	// fresh token was adopted and the call re-sent in place (the live session healed across a
+	// re-login), or "exhausted" when no fresher token appeared within the grace window and the
+	// 401 is about to surface to the wrapped agent (the session is about to drop into its own
+	// /login). It is the observability hook for the otherwise-INVISIBLE token-rotation event —
+	// the single most operationally important guard credential signal. The gateway sets it to a
+	// closure that bumps a per-outcome counter and prints a "fak-turn auth-refresh" line. nil =
+	// behavior byte-for-byte unchanged (the self-heal itself is independent of the hook).
+	AuthRefreshNotify func(outcome string, attempt int)
 }
 
 // NewHTTPPlanner builds a live planner with a bounded timeout. The per-request
@@ -1016,15 +1028,23 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// re-login race: a user logging back in mid-session has a beat to rewrite the
 			// credential file, and this poll adopts the fresh token so the live session
 			// self-heals in place instead of the 401 surfacing to the wrapped agent.
-			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKeyWait(ctx, p) {
-				triedAuthRefresh = true
-				lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
-				lastStatus = resp.StatusCode
-				lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
-				// Do not count the credential-refresh retry against the backoff schedule:
-				// rewind so the next iteration re-sends immediately with the fresh token.
-				attempt--
-				continue
+			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
+				if call.refreshAPIKeyWait(ctx, p) {
+					triedAuthRefresh = true
+					notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
+					lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
+					lastStatus = resp.StatusCode
+					lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
+					// Do not count the credential-refresh retry against the backoff schedule:
+					// rewind so the next iteration re-sends immediately with the fresh token.
+					attempt--
+					continue
+				}
+				// On the rotating path we WAITED the grace window and no fresher token landed —
+				// the session is about to drop into its own /login. Surface that distinctly so
+				// the otherwise-silent give-up is visible (counted once: triedAuthRefresh would
+				// gate a second 401, but the window already elapsed so we fail now).
+				notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
 			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 		}

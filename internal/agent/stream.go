@@ -98,6 +98,25 @@ func (c *upstreamCall) refreshAPIKey(p *HTTPPlanner) bool {
 	return true
 }
 
+// Auth-refresh outcomes reported to HTTPPlanner.AuthRefreshNotify. A 401 on the rotating-
+// subscription path either RECOVERED (a fresh token was adopted and the call re-sent in place,
+// so the live session healed across a re-login) or was EXHAUSTED (no fresher token appeared
+// within the grace window, so the 401 is about to surface and the agent drops into its own
+// /login). The two are counted apart so an operator can tell a self-healed blip from a session
+// about to die.
+const (
+	AuthRefreshRecovered = "recovered"
+	AuthRefreshExhausted = "exhausted"
+)
+
+// notifyAuthRefresh fires the planner's AuthRefreshNotify hook if set. Centralized so the three
+// 401 self-heal sites (Complete, CompleteStream, StreamAnthropicRaw) report identically.
+func notifyAuthRefresh(p *HTTPPlanner, outcome string, attempt int) {
+	if p != nil && p.AuthRefreshNotify != nil {
+		p.AuthRefreshNotify(outcome, attempt)
+	}
+}
+
 // refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
 // A 401 on the rotating-subscription path means the token fak just sent is dead; the fix
 // is to send the rotated-in replacement. But when the token expired, the upstream 401s the
@@ -402,13 +421,17 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring Complete.
 		// refreshAPIKeyWait polls the on-disk token across the re-login grace window, so a user
 		// logging back in mid-stream is adopted and the live session self-heals in place.
-		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.refreshAPIKeyWait(ctx, p) {
-			triedAuthRefresh = true
-			lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
-			lastStatus = r.StatusCode
-			lastRetryAfter = ""
-			attempt--
-			continue
+		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
+			if call.refreshAPIKeyWait(ctx, p) {
+				triedAuthRefresh = true
+				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
+				lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+				lastStatus = r.StatusCode
+				lastRetryAfter = ""
+				attempt--
+				continue
+			}
+			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
 		}
 		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
