@@ -398,6 +398,93 @@ class ReleaseStatusTest(unittest.TestCase):
         self.assertEqual(diagnosis["action"], "fix_ci_billing")
         self.assertEqual(diagnosis["jobs"][0]["steps"], 0)
 
+    def test_failed_step_names_picks_real_failures_only(self) -> None:
+        rs = load()
+        job = {"steps": [
+            {"name": "build", "conclusion": "success"},
+            {"name": "gofmt (every committed .go file is gofmt-formatted)", "conclusion": "failure"},
+            {"name": "vet", "conclusion": "skipped"},
+            {"name": "test", "conclusion": None},  # still running, not a culprit
+            {"name": "claims-lint", "conclusion": "cancelled"},
+        ]}
+        self.assertEqual(
+            rs.failed_step_names(job),
+            [
+                "gofmt (every committed .go file is gofmt-formatted)",
+                "claims-lint",
+            ],
+        )
+
+    def test_ci_failure_diagnosis_names_failed_step_without_annotation(self) -> None:
+        rs = load()
+
+        def fake_git(root: Path, args: list[str], *, timeout: int = 120) -> tuple[int, str]:
+            self.assertEqual(args, ["rev-parse", "HEAD"])
+            return 0, "localhead\n"
+
+        def fake_load_json(cmd: list[str], root: Path, *, timeout: int = 300) -> tuple[dict | None, int, str]:
+            if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
+                return {
+                    "value": [{
+                        "databaseId": "run-9",
+                        "conclusion": "failure",
+                        "status": "completed",
+                        "headSha": "localhead",
+                    }],
+                }, 0, "[]"
+            if cmd == ["gh", "run", "view", "run-9", "--json", "jobs"]:
+                return {
+                    "jobs": [{
+                        "databaseId": "job-9",
+                        "name": "build · vet · test · claims-lint",
+                        "conclusion": "failure",
+                        "status": "completed",
+                        "steps": [
+                            {"name": "build", "conclusion": "success"},
+                            {"name": "gofmt (every committed .go file is gofmt-formatted)", "conclusion": "failure"},
+                        ],
+                    }],
+                }, 0, "{}"
+            # No check-run annotations for a plain step failure (the common case).
+            if cmd[:2] == ["gh", "api"]:
+                return {"value": []}, 0, "[]"
+            raise AssertionError(cmd)
+
+        rs.git = fake_git
+        rs.load_json = fake_load_json
+        rs.github_repo_slug = lambda root: "owner/repo"
+
+        diagnosis = rs.ci_failure_diagnosis(Path("repo"))
+
+        # Without annotations the old code returned "undifferentiated"; now the
+        # failed step is the diagnosis.
+        self.assertEqual(diagnosis["status"], "diagnosed")
+        self.assertEqual(diagnosis["kind"], "failed_step")
+        self.assertEqual(diagnosis["action"], "fix_ci")
+        self.assertEqual(
+            diagnosis["failed_steps"],
+            ["gofmt (every committed .go file is gofmt-formatted)"],
+        )
+        self.assertIn("gofmt", diagnosis["detail"])
+        self.assertEqual(
+            diagnosis["jobs"][0]["failed_steps"],
+            ["gofmt (every committed .go file is gofmt-formatted)"],
+        )
+
+    def test_next_action_names_failed_ci_step(self) -> None:
+        rs = load()
+        action = rs.next_action(
+            {"decision": "hold", "blockers": ["CI_BASE_RED"]},
+            {},
+            {"clean": True},
+            {
+                "action": "fix_ci",
+                "failed_steps": ["gofmt (every committed .go file is gofmt-formatted)"],
+            },
+        )
+        self.assertEqual(action["kind"], "fix_ci")
+        self.assertIn("gofmt", action["detail"])
+
     def test_cadence_status_detects_workflow_contract(self) -> None:
         rs = load()
         status = rs.cadence_status(ROOT)

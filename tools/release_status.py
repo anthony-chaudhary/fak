@@ -463,7 +463,29 @@ def github_repo_slug(root: Path) -> str | None:
     return slug if code == 0 and slug and "/" in slug else None
 
 
-def classify_ci_annotations(messages: list[str]) -> dict:
+def failed_step_names(job: dict) -> list[str]:
+    """Names of the steps in one job whose conclusion is a real failure.
+
+    GitHub records a per-step ``conclusion``; anything outside success/skipped/
+    (still-running ``None``) is a culprit. This is the load-bearing pointer for a
+    plain red ci.yml run: the failing STEP name (e.g. ``gofmt (every committed
+    .go file is gofmt-formatted)``) is what tells an operator what to fix, and it
+    is already present in the ``gh run view --json jobs`` payload — the old
+    diagnosis threw it away and only kept the step count.
+    """
+    names: list[str] = []
+    for step in job.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("conclusion") or "").lower() in {"failure", "cancelled", "timed_out", "action_required"}:
+            name = str(step.get("name") or "").strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def classify_ci_annotations(messages: list[str], failed_steps: list[str] | None = None) -> dict:
+    failed_steps = failed_steps or []
     joined = "\n".join(messages).lower()
     if any(pattern in joined for pattern in CI_BILLING_PATTERNS):
         return {
@@ -480,10 +502,21 @@ def classify_ci_annotations(messages: list[str]) -> dict:
             "action": "inspect_ci_annotation",
             "detail": messages[0][:300],
         }
+    # No annotation (the common case for a plain step failure like gofmt or a
+    # failing test): name the failed STEP(s) so the operator gets a pointer to
+    # the culprit instead of an undifferentiated "ci.yml is red".
+    if failed_steps:
+        shown = failed_steps[:3]
+        more = f" (+{len(failed_steps) - len(shown)} more)" if len(failed_steps) > len(shown) else ""
+        return {
+            "kind": "failed_step",
+            "action": "fix_ci",
+            "detail": "ci.yml is red at step(s): " + "; ".join(shown) + more,
+        }
     return {
         "kind": "unknown",
         "action": "inspect_ci",
-        "detail": "ci.yml is red, but no job annotation was available",
+        "detail": "ci.yml is red, but no job annotation or named failed step was available",
     }
 
 
@@ -540,16 +573,20 @@ def ci_failure_diagnosis(root: Path) -> dict:
     repo = github_repo_slug(root)
     annotations: list[dict[str, Any]] = []
     jobs_brief: list[dict[str, Any]] = []
+    all_failed_steps: list[str] = []
     for job in jobs.get("jobs") or []:
         if not isinstance(job, dict):
             continue
         job_id = job.get("databaseId")
+        job_failed_steps = failed_step_names(job)
+        all_failed_steps.extend(job_failed_steps)
         jobs_brief.append({
             "id": job_id,
             "name": job.get("name"),
             "conclusion": job.get("conclusion"),
             "status": job.get("status"),
             "steps": len(job.get("steps") or []),
+            "failed_steps": job_failed_steps,
         })
         if not repo or not job_id:
             continue
@@ -560,13 +597,19 @@ def ci_failure_diagnosis(root: Path) -> dict:
             annotations.extend(item for item in ann["value"] if isinstance(item, dict))
         elif ann_code != 0 and not annotations:
             annotations.append({"message": ann_raw.strip()[-300:] or "could not read check-run annotations"})
+    # Dedupe while preserving order: the same step name can recur across the
+    # matrix legs of one workflow.
+    failed_steps = list(dict.fromkeys(all_failed_steps))
     messages = [str(item.get("message") or "") for item in annotations if item.get("message")]
-    classification = classify_ci_annotations(messages)
+    classification = classify_ci_annotations(messages, failed_steps)
     return {
-        "status": "diagnosed" if messages else "undifferentiated",
+        # A named failed step is a real diagnosis, not "undifferentiated": the
+        # operator now knows which step to fix even when no annotation exists.
+        "status": "diagnosed" if (messages or failed_steps) else "undifferentiated",
         "scope": scope,
         "run": run_doc,
         "jobs": jobs_brief,
+        "failed_steps": failed_steps,
         "annotations": [
             {
                 "level": item.get("annotation_level"),
@@ -721,6 +764,16 @@ def next_action(
             return {
                 "kind": "fix_ci_billing",
                 "detail": str(ci_diagnosis.get("detail")),
+            }
+        # Name the failing step when the diagnosis found it (e.g. gofmt), so the
+        # operator gets a pointer to the culprit instead of a generic "fix CI".
+        failed_steps = (ci_diagnosis or {}).get("failed_steps") or []
+        if failed_steps:
+            shown = "; ".join(failed_steps[:3])
+            more = f" (+{len(failed_steps) - 3} more)" if len(failed_steps) > 3 else ""
+            return {
+                "kind": "fix_ci",
+                "detail": f"fix main ci.yml failure at step(s): {shown}{more} before cutting a release",
             }
         return {"kind": "fix_ci", "detail": "fix current main ci.yml failure before cutting a release"}
     if "CI_RETRY_TO_GREEN" in blockers:
