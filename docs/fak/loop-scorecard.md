@@ -11,6 +11,14 @@ description: "Whether fak's always-on agentic background loops are first-class d
 
 The question: are fak's always-on background loops — the issue dispatchers, the resolve-progress tracker, the freshness cadences, the smoke loops — *first-class durable processes*, or fire-and-forget scripts that vanish on the next reboot and report nothing? Every number is re-derived from the loop ledger (`.fak/loops.jsonl`) and the job registry (`tools/loop-registry.json`) fak's own `fak loop` tooling writes, folded with the same `loopmgr` projection `fak loop status` / `fak loop health` use — so the score moves only when the loops actually become more durable, observable, and fak-native.
 
+## Orientation
+
+Audience: operators and agents responsible for keeping background fak loops durable across
+restarts. Prereq: read [`../dispatch-loop.md`](../dispatch-loop.md) for the dispatch-loop
+contract and [`../../AGENTS.md`](../../AGENTS.md) for the shared-trunk recovery rules. TL;DR:
+this scorecard tells you which loops are registered, observable, and routed through fak's own
+guard/witness path; after running it, fix the named loop gap before claiming loop health.
+
 ## Durability — auto-restart on system restart
 
 | ok | criterion | detail |
@@ -44,9 +52,18 @@ go run ./cmd/fak loop-score --json      # control-pane payload (corpus.loopscore
 go test ./internal/loopscore/...        # prove the fold over a fragile vs durable corpus
 ```
 
+Expected checkpoint:
+
+```text
+loopscore_debt: reports the current loop durability gaps
+durability: shows registered firing loops
+self-report: shows heartbeat/notify coverage
+dogfood: shows guard-wrapped and witnessed loop runs
+```
+
 ## The 3× program — make the loops durable, observable, and fak-native
 
-The debt is concentrated in one structural gap: the loops that actually fire are driven by **external schedulers + ad-hoc logging**, not by `fak loop run`. So they are unregistered (a reboot re-launches nobody), often dark (the registry's own jobs have never been observed ticking), and unguarded (no `guard_enabled=1` run). A 3× is NOT hand-appending events during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the durability + observability a **byproduct of how the loop is driven**, so the score rises structurally:
+The debt is concentrated in one structural gap: the loops that actually fire are driven by **external schedulers + ad-hoc logging**, not by `fak loop run`. This is an OPEN improvement program, not a shipped multiplier claim. So they are unregistered (a reboot re-launches nobody), often dark (the registry's own jobs have never been observed ticking), and unguarded (no `guard_enabled=1` run). A 3× is NOT hand-appending events during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the durability + observability a **byproduct of how the loop is driven**, so the score rises structurally:
 
 1. **Register every firing loop.** Add the issue-dispatch / resolve-progress / smoke loops to `tools/loop-registry.json` with a cadence (`fak loop` registry). A registered job re-arms at boot — that is the auto-restart on system restart. Then `fak cron emit --target launchd|systemd|taskscheduler` projects it to a real OS unit that survives the reboot.
 2. **Drive them through `fak loop run`.** Replacing the raw scheduler call with `fak loop run --loop ID --source cron -- <cmd>` records fire/admit/start/**end** around every run under `fak guard` (guard_enabled=1) and posts a witnessed dispatch-result card — closing the self-report and dogfood gaps in one move.

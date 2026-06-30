@@ -11,6 +11,16 @@ description: "How much the agentic DEVELOPMENT of fak routes through fak's own c
 
 The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.
 
+## Orientation
+
+Audience: release shepherds and agents deciding whether fak development is dogfooding its
+own witness discipline. Prereq: read the agent entry point in
+[`../../AGENTS.md`](../../AGENTS.md) and the net-true claim standard in
+[`../standards/net-true-value.md`](../standards/net-true-value.md). TL;DR: use this page to
+separate automatic commit discipline from evidence-backed witness behavior; after running the
+score, the next step is to improve the witness axis with real `dos verify` / `dos improve`
+events, not a hand-edited score.
+
 ## Usage — does the development OUTPUT carry the fak discipline?
 
 | ok | criterion | detail |
@@ -38,9 +48,17 @@ go run ./cmd/fak concept-usage-score --markdown # regenerate this doc
 go test ./internal/conceptusage/...             # prove the fold over a thin vs healthy corpus
 ```
 
+Expected checkpoint:
+
+```text
+conceptusage_debt: 0
+usage: green
+witness: reports the current verify/improve share from the .dos journal
+```
+
 ## The 3× program — grow the witness axis honestly
 
-The usage axis is already saturated (commit discipline + lane arbitration are fully dogfooded); the witness axis is the lever. It is thin because **witnessing is manual and rare** — `dos verify` / `dos improve --observe` rows accrue only when someone runs them by hand, while passive `memory_recall` rows dominate the journal. So a 3× is NOT firing verify calls by hand during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the witness syscall a **byproduct of real work** so the share rises structurally across sessions:
+The usage axis is already saturated (commit discipline + lane arbitration are fully dogfooded); the witness axis is the lever. This is an OPEN improvement program, not a shipped multiplier claim. It is thin because **witnessing is manual and rare** — `dos verify` / `dos improve --observe` rows accrue only when someone runs them by hand, while passive `memory_recall` rows dominate the journal. So a 3× is NOT firing verify calls by hand during the measurement window (that is the data-gaming pattern every fak scorecard refuses) — it is making the witness syscall a **byproduct of real work** so the share rises structurally across sessions:
 
 1. **Witness every ship.** Run `dos verify <PLAN> <PHASE>` (or `dos improve --observe`) at ship time, not `dos commit-audit` alone — commit-audit is read-only and writes no row; `verify`/`improve` are the syscalls this axis counts.
 2. **Re-verify recalled memory.** When a memory is recalled, re-check it against ground truth (`dos recall <name>`) so it resolves to FRESH/STALE instead of sitting at the 76%-UNVERIFIABLE floor.

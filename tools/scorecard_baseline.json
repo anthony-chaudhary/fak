@@ -1,7 +1,8 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
   "commit": "12dd9468",
-  "total_debt": 1187,
+  "total_debt": 1346,
+  "grade_debt": 46,
   "metrics": {
     "doc": 1,
     "readme": 0,
@@ -19,16 +20,27 @@
     "slop": 535,
     "steer": 2,
     "conflation": 0,
+    "ui_quality": 0,
     "disambiguation": 550,
     "intent_literal": 0,
     "tokendefaults": 0,
     "guard_rsi": 0,
     "dogfood": 4,
     "conceptusage": 0,
+    "maturity": 0,
     "growth": 0,
     "support_maturity": 37,
+    "milestone": 85,
     "loopindex": 0,
-    "claim_repro": 3
+    "claim_repro": 3,
+    "release": 3,
+    "observability": 7,
+    "learning": 0,
+    "rsi_maturity": 0,
+    "tooling_quality": 63,
+    "bench_dx": 0,
+    "cuda_dev": 1,
+    "persona_fit": 0
   },
-  "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"
+  "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. Existing metric floors remain pinned at 12dd9468; scorecards folded after that pin carry their first measured floor here so the raw total compares like-for-like. Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"
 }

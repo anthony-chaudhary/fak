@@ -2,6 +2,10 @@
 
 <!-- readme-verified: 2026-06-29 vs VERSION 0.34.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; the capability-floor / policy material moved down to "For security teams" + the per-domain docs. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
+**fak is a fused agent kernel:** one Go binary that sits in front of an agent's tool calls,
+adjudicates each call, and reuses the stable work in long sessions so the same agent loop is
+safer, cheaper, and faster.
+
 **Put one binary in front of the agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — and the same long session gets cheaper and faster, with nothing else changed.**
 
 `fak guard -- claude` wraps your normal agent in one command. It keeps your model, your IDE,
