@@ -12,8 +12,9 @@ This page re-states fak's caching vocabulary against the tree as it stands on
 > blended win: provider prompt-cache rebate is OBSERVED/provider-authored, while
 > compaction, KV-prefix reuse, and vDSO avoidance are WITNESSED/fak-authored.
 > The remaining gap is activation: fak's authored slice is still often near zero
-> on normal proxy traffic because M2/M3/M4 actions are not live, and M5 now
-> records live decisions but does not yet warm, pin, evict, or route.
+> on normal proxy traffic because only the narrow Anthropic M2 system-anchor
+> preflight now acts, M3/M4 actions are not live, and M5 now records live
+> decisions but does not yet warm, pin, evict, or route.
 
 The companion is the actionable list:
 [`VCACHE-DEFAULT-ON-TOP50-2026-06-30.md`](VCACHE-DEFAULT-ON-TOP50-2026-06-30.md).
@@ -32,7 +33,7 @@ who *authored* the saving — and that owner is what attribution must report.
 | # | Mechanism | What it saves | Owner of the saving | Live by default? | Where |
 |---|-----------|---------------|---------------------|------------------|-------|
 | 1 | **Provider prompt-cache** (Anthropic `cache_read`/`cache_creation`, OpenAI `cached_tokens`, Gemini `cachedContentTokenCount`, SGLang `cached_tokens`, vLLM prefix-cache) | re-prefill of a warm byte-prefix | **PROVIDER** (fak only forwards the breakpoint and relays the counter) | yes — observed every turn | `internal/gateway/cache_pricing.go`, `internal/agent/adapters.go` |
-| 2 | **cache_control preservation + injection** | keeps the provider rebate from being *lost* by a mid-prefix edit; injects a breakpoint a caller forgot | **fak** (the act of not bursting the prefix) | yes (Anthropic path) | `internal/agent/anthropic_cachebp.go`, `anthropic_elide.go` |
+| 2 | **cache_control preservation + injection** | keeps the provider rebate from being *lost* by a mid-prefix edit; injects a breakpoint a caller forgot; hoists volatile Anthropic system blocks behind the stable anchor | **fak** (the act of not bursting/stabilizing the prefix) | yes (Anthropic path) | `internal/agent/anthropic_cachebp.go`, `anthropic_elide.go` |
 | 3 | **Compaction shed** (`--compact-history-budget`) | input tokens dropped from the outbound body *before they are sent* | **fak** (WITNESSED) | yes — default budget on | `internal/gateway/debug.go`, `metrics.go` (`compactShed`) |
 | 4 | **fak KV-prefix reuse** (in-kernel serve: `radixkv.Tree` over `model.KVCache`) | KV recompute avoided when fak serves the model itself | **fak** (WITNESSED, byte-identical) | yes when `fak serve --engine inkernel` | `internal/radixkv/`, `internal/cacheobs/`, `internal/agent/inkernel_planner.go:665` |
 | 5 | **vDSO call-avoidance** (`fak_read`, repeated-call short-circuit) | a whole engine round-trip skipped | **fak** (WITNESSED) | yes | `internal/vdso/`, `internal/gateway/mcp.go` |
@@ -52,14 +53,15 @@ vCache (epic #715–#720) is the active control loop that would make mechanism #
 | Milestone | What it is | Code | Status |
 |-----------|------------|------|--------|
 | **M1 observe & calibrate** | probe each provider for TTL `T`, min-prefix `Mₘᵢₙ`, read discount `r`; build the warmth-belief estimator | `internal/vcachecal/` | partial — estimator + probe types exist; **no live calibration loop** (#716 open) |
-| **M2 star anchors** | canonicalize a byte-stable anchor, let the first natural request warm it, fan siblings onto it | `internal/vcachestar/`, `cachemeta.RecommendLayout` | `RecommendLayout` is **advisory-only** and enforced only inside the star preflight; **not a default pre-flight gate** (#717 open) |
+| **M2 star anchors** | canonicalize a byte-stable anchor, let the first natural request warm it, fan siblings onto it | `internal/vcachestar/`, `cachemeta.RecommendLayout`, `internal/agent/anthropic_cachebp.go` | **partial live preflight** — the Anthropic raw path now applies the `RecommendLayout` volatile-to-tail rule to top-level system blocks before placing `cache_control`; full star manifests, sibling fan-out, and cross-surface anchoring remain open (#717/#1493) |
 | **M3 dedicated warming** | `max_tokens:0` (explicit) / decode-1 (implicit) under the break-even gate | — | **not built into the live path** (#718 open) |
 | **M4 chains & recall** | prefix DAG, topological replay, cost-gated rebuild | `internal/vcachechain/` | **UP but gated OFF** — `ProveRecall` runs only from the `fak vcache` CLI; `Replay` is never called live |
 | **M5 governor** | pin / lazy / evict, warm budget, affinity routing, secret gate | `internal/vcachegov/`, `internal/gateway/vcache_governor_journal.go` | **decision witness live; actions gated OFF** — the gateway folds live provider-cache families into governor verdicts on `/metrics` and a hash-chained `/debug/vars` journal, but it still does not warm, pin, evict, or route on those verdicts |
 
 So on a normal `fak guard -- claude` run: mechanisms #1–#5 are *observed* and
-owner-attributed, M2's layout advice is *computed*, M5's governor verdict is
-*recorded*, and **M2/M3/M4/M5 still do not act**. The `fak vcache` subcommands
+owner-attributed, the narrow M2 Anthropic system-anchor preflight can *rewrite*
+volatile-before-stable system heads, M5's governor verdict is *recorded*, and
+**full M2 fan-out plus M3/M4/M5 actions still do not act**. The `fak vcache` subcommands
 (`status/prove/prove-telemetry/prove-recall/observe/score`) remain mostly an
 **offline lens** over real transcripts — they prove the economics and grade a
 recorded session; they do not warm, pin, or recall anything live.

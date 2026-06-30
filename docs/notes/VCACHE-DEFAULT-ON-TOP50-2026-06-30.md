@@ -102,7 +102,11 @@ claude` run with **no flags**, the operator sees one attribution line —
     to the tail) before send, not just report it. *Where:* `internal/vcachestar/`,
     `cachemeta.RecommendLayout`. *Lever:* `--vcache-anchor=on` default on for the
     Anthropic path. *Witness:* before/after prefix-byte-stability test; a real turn
-    whose anchor was rewritten.
+    whose anchor was rewritten. **Progress 2026-06-30:** the Anthropic raw
+    preflight now applies the volatile-to-tail layout to top-level `system[]`
+    blocks before inserting `cache_control`, and the gateway witness proves two
+    different per-request UUIDs produce the same forwarded cache prefix. Full M2
+    star manifests, sibling fan-out, and cross-surface canonicalization remain open.
 
 15. **First-natural-request warming (M2, no dedicated warm).** Ensure the first
     request of a sibling burst warms the anchor and siblings read it — ordering
