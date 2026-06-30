@@ -70,6 +70,24 @@ Dry-run mode prints the stable GitHub issue create/update plan. `--live` is the
 only mode that calls `gh`, and each next step is deduped by an HTML marker in the
 issue body.
 
+Generation-aware handoffs can also add generation metadata to each `next_steps`
+entry:
+
+- `generation`: one of `gen/now`, `gen/next`, `gen/second-next`, or
+  `gen/future` (bare `now`, `next`, `second-next`, and `future` normalize to
+  labels).
+- `promotion_evidence`: what would move the follow-up closer to `now`.
+- `demotion_evidence`: what would move it farther away or retire it.
+- `invalidating_assumptions`: assumptions that would make the handoff stale.
+- `generation_non_goals`: generation-specific non-goals, especially branch,
+  priority, and runtime-gate confusion.
+
+When present, `fak task handoff` renders those fields into the generated issue
+body and adds `generation` plus the specific `gen/*` label to the planned issue.
+Generation remains orthogonal to priority, shared trunk, and runtime feature
+gates: the label says which product horizon owns the evidence; it never creates
+a branch, changes issue priority, or exposes runtime code.
+
 The planned hardening for generated follow-up issues is tracked in
 [`docs/notes/NEXT-STEP-SCOPING-GUARDS-2026-06-30.md`](notes/NEXT-STEP-SCOPING-GUARDS-2026-06-30.md):
 default issue creation should require explicit current state, in-scope and
@@ -98,6 +116,11 @@ Minimal handoff input:
       "title": "Run live task handoff issue sync smoke",
       "body": "Exercise `fak task handoff --live` against a disposable follow-up issue.",
       "reason": "Dry-run planning is covered; live gh behavior still needs an operator-owned witness.",
+      "generation": "gen/next",
+      "promotion_evidence": ["The live smoke proves task handoffs can feed dispatch safely."],
+      "demotion_evidence": ["Generated follow-ups increase ambiguity or duplicate existing work."],
+      "invalidating_assumptions": ["The generated issue body stops being enough for the next worker to resume."],
+      "generation_non_goals": ["Do not treat gen/next as a branch or runtime exposure flag."],
       "labels": ["agent-handoff"]
     }
   ]

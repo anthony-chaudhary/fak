@@ -253,7 +253,12 @@ Acceptance for "true end to end working":
 - Skipped router rows now carry `reason`, `next_action`, `work_unit`, and
   `expected_steps`, and the router counts skips by reason. That preserves the
   legacy skip bucket while giving agents separate queues for human blockers,
-  scope gaps, non-leaf decomposition, and oversized leaf splitting.
+  scope gaps, non-leaf decomposition, and oversized leaf splitting. The native
+  router payload and `fak dispatch route` text output also expose
+  `repair_queues` (`dispatch`, `split`, `scope`, `route`, `noise`, `private`,
+  `human`) with step budgets, sample issue numbers, reason buckets, and next
+  actions, so supervisors can batch issue-flood cleanup directly from the
+  dispatch surface.
 - Routed rows now preserve `work_unit`, `expected_steps`, `trigger`, and
   `batch_policy`, and lane groups expose a `step_budget` plus per-issue step
   metadata. That lets dispatch supervisors balance lanes by expected work units
