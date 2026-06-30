@@ -26,14 +26,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-// EpicSpec is one tracked epic: its issue number, a human title, and the optional
-// track LABEL whose open/closed child issues measure its completion. When Label is
-// empty the resolver falls back to the epic body's task-list checklist; when
-// neither resolves, the epic is an honest ERRORED row.
+// EpicSpec is one tracked epic: its issue number, a human title, an optional
+// product generation horizon, and the optional track LABEL whose open/closed child
+// issues measure its completion. When Label is empty the resolver falls back to the
+// epic body's task-list checklist; when neither resolves, the epic is an honest
+// ERRORED row.
 type EpicSpec struct {
-	Number int
-	Title  string
-	Label  string
+	Number     int
+	Title      string
+	Generation string
+	Label      string
 }
 
 // EpicCounts is the raw child tally for one epic: how many children, how many
