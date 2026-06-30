@@ -161,6 +161,12 @@ func cmdGuard(argv []string) {
 	}
 	_ = fs.Parse(argv)
 
+	// Which flags did the operator set EXPLICITLY (vs leave at their default)? Used below so
+	// an explicit --debug-stats can win over the interactive auto-suppress that keeps the
+	// per-turn economy line out of an attended agent's full-screen UI.
+	guardSetFlags := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { guardSetFlags[f.Name] = true })
+
 	// --split-dry-run is a pure PREVIEW: render the resolved 80/20 split plan and exit BEFORE
 	// any gateway bind, pane spawn, or agent launch. The live gateway URL is not known yet (the
 	// OS picks the port at bind time), so the preview shows a placeholder loopback URL — the
@@ -234,6 +240,17 @@ func cmdGuard(argv []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
+
+	// Decide whether the per-turn `fak-turn …` economy line streams to the SHARED terminal
+	// stderr. On an attended interactive launch the wrapped agent (Claude Code) paints a
+	// full-screen alternate-screen TUI over THIS terminal, so a per-turn stderr write lands
+	// on top of it and corrupts the session view; there the economy belongs in the `fak info`
+	// split pane (the dedicated fak section) + the exit summary, not the agent pane. An
+	// explicit --debug-stats still streams here; headless/piped runs keep it (no TUI to
+	// corrupt). See guardDebugStatsToSharedStderr.
+	debugStatsStderr := guardDebugStatsToSharedStderr(
+		*debugStats, *quiet, guardSetFlags["debug-stats"],
+		cmdGuardStdinInteractive(), guardChildInteractive(command))
 
 	// Observability sink for the gateway's structured per-request + per-verdict logs
 	// (event=gateway_http_request / event=gateway_operation, each carrying the trace_id).
@@ -577,7 +594,7 @@ func cmdGuard(argv []string) {
 		// The observable debug layer (#793) is ON by default so the cache + token-value
 		// economy of every turn is visible without a flag; --debug-stats=false or --quiet
 		// silences it. The full JSON --log stream stays separate (and off by default).
-		DebugStatsf:          debugStatsSink(*debugStats && !*quiet),
+		DebugStatsf:          debugStatsSink(debugStatsStderr),
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
 		ElideResultBytes:     *elideResultBytes,
@@ -688,8 +705,11 @@ func cmdGuard(argv []string) {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
-		if *debugStats {
+		switch {
+		case debugStatsStderr:
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
+		case *debugStats && !*quiet:
+			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — the per-turn cache/token-value economy is kept OUT of the agent's full-screen UI to avoid corrupting it; read it live in the `fak info` pane and in the exit summary. Pass --debug-stats to also stream it here, --debug-stats=false to disable")
 		}
 		// A LOCAL in-kernel model has no upstream credential to report; the proxy-path auth
 		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
@@ -987,6 +1007,29 @@ func cmdGuardStdinInteractive() bool {
 // (and the real os.Stdin fd swapped in tests) without depending on the test's own stdin.
 func guardFdIsTerminal(fd int) bool {
 	return term.IsTerminal(fd)
+}
+
+// guardDebugStatsToSharedStderr decides whether the per-turn `fak-turn …` economy line
+// streams to the SHARED terminal stderr. The line is invaluable on a headless / piped /
+// scripted run, but on an ATTENDED interactive launch the wrapped agent (Claude Code)
+// paints a full-screen alternate-screen TUI over THIS same terminal — so a per-turn stderr
+// write lands on top of the agent's UI and corrupts the session view. There the economy
+// belongs in the `fak info` split pane (the dedicated fak section), the exit summary, and
+// /metrics, not bleeding into the agent pane.
+//
+// Precedence, highest first: --debug-stats=false / --quiet silence everything (false). An
+// EXPLICIT --debug-stats (userSet) is a knowing opt-in and always streams here (true).
+// Otherwise an attended interactive child sharing this terminal auto-suppresses the
+// shared-stderr stream (false — the pane + exit summary still carry it); a headless / piped
+// launch keeps it (true — there is no full-screen UI to corrupt and a captured log helps).
+func guardDebugStatsToSharedStderr(debugStats, quiet, userSet, stdinInteractive, childInteractive bool) bool {
+	if !debugStats || quiet {
+		return false
+	}
+	if userSet {
+		return true
+	}
+	return !(stdinInteractive && childInteractive)
 }
 
 // guardClaudeConfigDir resolves the directory that holds Claude Code's per-account
