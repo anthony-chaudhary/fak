@@ -15,7 +15,13 @@ set -euo pipefail
 FAK_BIN="${FAK_BIN:-fak}"
 SUITE="${SUITE:-tau2-smoke}"
 N="${BASELINE_N:-100}"
-OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
+if [ -n "${OUT_DIR:-}" ]; then
+  OUT_DIR="$OUT_DIR"
+else
+  OUT_DIR="$(mktemp -d)"
+  cleanup() { rm -rf "$OUT_DIR"; }
+  trap cleanup EXIT
+fi
 OUT="${OUT_DIR}/report.json"
 
 if ! command -v "${FAK_BIN}" >/dev/null 2>&1; then

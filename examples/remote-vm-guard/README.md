@@ -21,6 +21,8 @@ examples/remote-vm-guard/run.sh
 Needs only Go (to build `fak`) — **no model, key, GPU, server, or network**. Each
 witness is a pure function of the destination, so the result is identical on every run
 and finishes in a second or two after the one-time `go build`.
+Expected runtime: the witness run completes in seconds after the build, and the verdicts
+are deterministic for the same destinations.
 
 The demo uses `fak egress check`, which runs the **same kernel floor** a guarded
 session enforces, so what it shows is what `fak guard -- claude` would do to the same

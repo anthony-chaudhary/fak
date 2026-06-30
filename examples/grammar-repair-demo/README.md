@@ -5,7 +5,8 @@ tool call into the named argument object the tool dispatch path expects. The
 repair happens inside the kernel as a `TRANSFORM`; the model never sees an error
 and does not spend a second turn re-emitting the same call with fixed JSON.
 
-Run from the repo root after building `fak` or through `go run`.
+Run from the repo root after building `fak` or through `go run`. Both preflight witnesses
+complete in seconds and are deterministic for the same schema and args.
 
 ## Positional Call Repaired
 
@@ -72,3 +73,17 @@ allowed.
 The grammar registry is content-addressed. Loading the same parameter shape for
 multiple tools stores one grammar by digest and points each tool name at that
 entry, keeping the hot path cheap when many tools share the same argument shape.
+
+## Honest scope
+
+This demo does not claim the grammar rung can infer arbitrary argument intent. It proves the
+mechanical cases only: arity-matched positional values are zipped into required fields, and
+arity mismatches are denied instead of guessed.
+
+## Files
+
+| file | what it is |
+|---|---|
+| `README.md` | this walkthrough |
+| `create-support-ticket.schema.json` | the one-field grammar schema loaded by the preflight command |
+| `EXAMPLE-OUTPUT.md` | a captured repaired call and denied arity-mismatch run |

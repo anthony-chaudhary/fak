@@ -16,6 +16,13 @@ Two ready-to-run traces live here:
 Run the commands from the repo root (`fak/`). Use `go run ./cmd/fak run …` if you
 have not built the `fak` binary yet.
 
+## Honest scope
+
+This demo does not claim a trace proves model quality or live-tool correctness. It proves
+only the kernel replay decision for the calls and mock results recorded in these JSON files.
+Expected runtime: both bundled replays complete in seconds and are deterministic for the
+same trace files.
+
 ## The trace schema
 
 A trace is one JSON object: a `slice_id` and an array of `calls`. Each call is one
@@ -156,3 +163,12 @@ way to author a result-side fixture without a live tool.
   one of the floors in [`../`](../README.md) and re-run the same trace under it.
 - `fak preflight --tool <t> --args <json> --explain` — the full per-rung decision
   trace for a single call.
+
+## Files
+
+| file | what it is |
+|---|---|
+| `README.md` | this authoring walkthrough |
+| `run.sh` | one-command replay of both bundled traces |
+| `minimal.json` | call-side allow/default-deny/policy-block replay fixture |
+| `with-poison.json` | result-side quarantine replay fixture for the mock engine |

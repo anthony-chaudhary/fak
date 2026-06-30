@@ -7,7 +7,8 @@ and shows the part that makes recall more than a snapshot — a tool result the 
 **sealed** at write time stays sealed across the process boundary, and a tampered
 image fails closed at load.
 
-No key, no model, no GPU, no network. Go is the only prerequisite.
+No key, no model, no GPU, no network. Go is the only prerequisite. Expected runtime: the
+sample run completes in seconds and is deterministic over the bundled session fixture.
 
 ```bash
 examples/session-reload/run.sh

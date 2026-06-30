@@ -19,7 +19,7 @@
 #
 # Env knobs:
 #   FAK_BIN   prebuilt fak binary to use   (default: build ./cmd/fak)
-set -u
+set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 FAK_DIR="$(cd "$HERE/../.." && pwd)"           # examples/remote-vm-guard -> fak/
@@ -42,8 +42,10 @@ fi
 #    The destination is passed exactly as an agent's tool arg would carry it.
 witness(){
   local want="$1" desc="$2"; shift 2
+  set +e
   "$BIN" egress check "$@" >/dev/null 2>&1
   local got=$?
+  set -e
   local label="ALLOW"; [ "$want" = 1 ] && label="BLOCK"
   if [ "$got" = "$want" ]; then
     printf '  \033[32m✓\033[0m %-52s -> %s\n' "$desc" "$label"

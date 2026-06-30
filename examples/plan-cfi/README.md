@@ -19,7 +19,8 @@ shape is not on the allow-list*, not because anything read the step and judged i
 
 ## plan-CFI bounds the *shape* of the plan, not its *content*
 
-plan-CFI does **not** read the semantics of a step. It does not ask "is `send_email`
+plan-CFI does **not** read the semantics of a step. This demo does not claim plan-CFI can
+judge whether the content of `send_email` is good or bad. It does not ask "is `send_email`
 dangerous?" or scan the call's arguments. It asks one structural question: **is this tool a
 legal move under the plan the operator approved for this trace?** That is the whole point —
 
@@ -112,6 +113,8 @@ go test -run 'TestConformingCallDefers|TestDeviationEscalates|TestStrictModeDeni
 (CFI has no objection). `TestDeviationEscalates` — the headline — drives `send_email` on that
 trace and asserts the verdict is **`RequireApproval`** with `Meta{plancfi:"deviation",
 tool:"send_email"}`. A captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+Expected runtime: the witness tests complete in seconds and are deterministic for the
+declared Go plan.
 
 ## Files
 

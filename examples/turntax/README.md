@@ -168,11 +168,18 @@ and read the per-lever turns. At low error rates the turn-tax is a modest cost w
 safety floor is the reason to run the kernel** — which is exactly why the report keeps the
 two axes apart.
 
+## Honest scope
+
+This walkthrough does not claim the bundled trace is representative of every production
+agent workload, and it does not prove a safety guarantee by itself. It is a pricing witness
+for turn-tax accounting; the safety-floor witnesses are linked separately below.
+
 ## Files
 
 | file | what it is |
 |---|---|
 | `README.md` | this walkthrough |
+| `run.sh` | one-command replay of the workload trace and the happy-path control |
 | `sample-trace.json` | the bundled 14-call class-labeled session (all four classes fire) |
 | `sample-trace-happy.json` | the clean 3-call control that must save 0 |
 | `EXAMPLE-OUTPUT.md` | the captured `fak turntax` runs (real workload + happy control + break-even) |

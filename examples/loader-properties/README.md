@@ -23,6 +23,7 @@ the empty-manifest case.
 
 The loader is a **pure function of the manifest bytes** — no model, no server, no network,
 no GPU. Every witness below is one `fak policy` invocation with a deterministic exit code.
+Expected runtime: the full loader-property run completes in seconds.
 
 ## Run it
 
@@ -114,6 +115,12 @@ a **file argument**, not stdin (a bare `--check` with no file blocks waiting on 
 runnable round-trip therefore dumps to a temp file and checks the file, which is what
 [`run.sh`](run.sh) does. The guarantee POLICY.md states is exactly the one demonstrated;
 only the plumbing differs from the one-liner.
+
+## Honest scope
+
+This demo does not claim every policy is secure because it parses. It proves loader
+properties only: fail-loud malformed inputs, replace-not-merge semantics, and round-trip
+stability of the dumped default floor.
 
 ## Files
 

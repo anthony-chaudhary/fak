@@ -68,6 +68,8 @@ A captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md). The script assert
 surface structurally (a seal of the right kind exists, the working set is a strict subset,
 the tombstone shrinks the set while the swap device stays byte-for-byte unchanged), so it
 stays green for any well-formed sample.
+Expected runtime: the bundled sample completes in seconds after the binary build, with
+deterministic assertions over the committed transcript fixture.
 
 ## The six surfaces, by hand
 

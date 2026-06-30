@@ -109,7 +109,13 @@ if command -v vulkaninfo >/dev/null 2>&1; then
   fi
 fi
 
-OUT="${FAK_GPU_SMOKE_OUT:-$ROOT/.cache/gpu-smoke/vulkan}"
+if [[ -n "${FAK_GPU_SMOKE_OUT:-}" ]]; then
+  OUT="$FAK_GPU_SMOKE_OUT"
+else
+  OUT="$(mktemp -d "${TMPDIR:-/tmp}/fak-gpu-smoke-vulkan.XXXXXX")"
+  cleanup() { rm -rf "$OUT"; }
+  trap cleanup EXIT
+fi
 mkdir -p "$OUT"
 
 GPUCHECK="$OUT/gpucheck-vulkan.exe"

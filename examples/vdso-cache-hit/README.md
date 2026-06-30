@@ -60,6 +60,8 @@ fak run --trace examples/vdso-cache-hit/invalidating.json
 
 Windows users: run the `.sh` launcher from WSL or Git Bash, or call `fak run --trace`
 directly from any shell.
+Expected runtime: both trace replays complete in seconds and are deterministic for the
+same recorded calls.
 
 ## What you are looking for
 
@@ -132,6 +134,10 @@ These two traces are **deliberately cache-favorable** — they were hand-built s
 repeated read is identical down to the args, which is the best case for the content
 cache. The shipped smoke trace `testdata/tau2/tau2-smoke.json` is favorable in the same
 way (~50% hits).
+
+This demo does not claim most real workloads hit this often. It demonstrates the soundness
+property of a hit and a write invalidation; the measured production-like hit rate remains
+the separate, lower number cited below.
 
 Real agent workloads are not like this. The measured addressable purity on the real
 `tau2-airline` workload is about **0.7%** — far below a useful hit threshold, because

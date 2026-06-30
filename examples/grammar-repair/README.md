@@ -36,6 +36,7 @@ fak agent --offline --log agent-trace.log
 No model, no network, no key — the offline planner is deterministic, so the kernel verdicts
 reproduce exactly. (A prebuilt binary works too: `C:\Users\USER\bin\fak.exe agent --offline`
 on Windows, or build from a clean checkout — see "Building" below.)
+Expected runtime: with a built binary, the offline witness completes in seconds.
 
 ## What you see
 

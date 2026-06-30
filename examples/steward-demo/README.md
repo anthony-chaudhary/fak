@@ -35,6 +35,7 @@ Requires only **Python 3** (stdlib). No model, no network, no Go toolchain. It i
 deterministic — the same `sample-steward.json` always yields the same verdicts. Exit code
 is `0` when every steward matched the witness model and the meta-steward pruned exactly the
 never-firing steward; CI-usable.
+Expected runtime: the Python-only reenactment completes in seconds.
 
 Windows users: run the `.sh` launcher from WSL or Git Bash, or call the script directly
 (`python examples\steward-demo\demo.py --no-color`).
@@ -78,6 +79,8 @@ Each maps directly to a builder in [`../../internal/steward/steward.go`](../../i
 ## What a steward is NOT
 
 A steward is **not a free-form monitor**. The design is *composability over generality*:
+this demo does not claim a steward can detect every bad state, only that each registered
+steward checks one named invariant from an independently-authored witness.
 
 - **The invariant is one sentence.** A steward checks exactly one property. You compose a
   population of narrow checks; you do not write one clever check that "watches everything."

@@ -26,6 +26,7 @@ explicit denials are **untouched** by the posture — they still fail closed.
 This demo runs the **same** read-shaped call under both postures, then shows the two
 calls the posture *won't* relax. No model, no network — the kernel adjudicates a named
 call from a policy file, so the verdict is deterministic.
+Expected runtime: the four `preflight` witnesses complete in seconds.
 
 ## Run it
 

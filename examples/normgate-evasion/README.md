@@ -31,7 +31,8 @@ FAK_NORMGATE=off go run ./cmd/ctxbench -chain -corpus examples/normgate-evasion/
 go run ./cmd/ctxbench -chain -corpus examples/normgate-evasion/sample-battery.jsonl
 ```
 
-It is deterministic and Go-only: no model, no network, no API key, no GPU, no Python.
+It is deterministic and Go-only: no model, no network, no API key, no GPU, no Python, and
+the sample battery completes in seconds.
 Windows users can run the `.sh` launcher from WSL or Git Bash, or run the two `go run`
 commands directly from the repository root.
 
@@ -54,6 +55,12 @@ only the result-admission drivers it benchmarks so `ctxbench` stays lightweight.
 The legacy `trigger bytes still in context` line only checks raw marker bytes after
 admission. Obfuscated payloads do not contain raw markers, so use the `ALLOW` vs
 `QUARANTINE` rows as the before/after witness.
+
+## Honest scope
+
+This demo does not claim normgate understands marker-free semantic paraphrases. It shows the
+normalization families in the public battery; broader containment still comes from the IFC
+and provenance layers.
 
 ## Battery rows
 

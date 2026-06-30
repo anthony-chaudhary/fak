@@ -31,6 +31,7 @@ FAK_BIN=/path/to/fak ./examples/witness-gate/run.sh   # use a prebuilt binary in
 Pure adjudication — no network, no model, no GPU. `run.sh` folds the real chain over one
 tool call three times; the verdicts are deterministic. A full captured run is in
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+Expected runtime: the three preflight checks complete in seconds.
 
 Windows users: run the `.sh` launcher from WSL or Git Bash, or invoke `fak preflight`
 directly (the commands below work verbatim in PowerShell with a prebuilt `fak.exe`).

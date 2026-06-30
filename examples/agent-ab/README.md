@@ -113,6 +113,8 @@ jq '{live, transcript_sha, turns_saved: .turns_saved, blocked: (.baseline.destru
 
 `run.sh` defaults to `--offline` so the demo is safe and reproducible with zero
 setup. A captured offline run is in [`EXAMPLE-OUTPUT.md`](./EXAMPLE-OUTPUT.md).
+Expected runtime: the offline lane completes in seconds and is deterministic; live
+provider runs vary with the model endpoint.
 
 `run.sh` invokes the on-PATH `fak` binary. Install it (see the top-level
 [README](../../README.md#install)) or build it from the repo
@@ -142,6 +144,12 @@ task completed (booked)             YES          YES
 This is the same with-fak / without-fak / trap-reached / task-completed shape the
 top-level README's safety table reports — here you reproduce it on a model you
 control.
+
+## Honest scope
+
+This demo does not claim the offline planner predicts every live model or provider. The
+offline lane is the deterministic safety/cost witness; the live lane is a separate
+provider run and is evidenced by its own `transcript_sha`.
 
 ## See also
 

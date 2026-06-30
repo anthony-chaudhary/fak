@@ -8,6 +8,8 @@ The smoke needs a HuggingFace safetensors snapshot with `config.json` and
 `model.safetensors`. The canonical small model is
 `HuggingFaceTB/SmolLM2-135M-Instruct`; set `FAK_GPU_SMOKE_HF` to that snapshot
 directory. The scripts also look in the local HuggingFace cache for that model.
+Expected runtime: on a configured GPU host, each smoke typically completes in 2-5 minutes
+and is deterministic for a fixed snapshot, backend, and token-count setting.
 
 ## Decision tree
 

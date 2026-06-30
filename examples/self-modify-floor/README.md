@@ -24,7 +24,8 @@ injected instruction). The lever is the path-glob match, full stop.
 ## Run it
 
 No model, no server, no network — the floor is a pure function of the call, so the witness
-is one binary invocation:
+is one binary invocation. Expected runtime: the two preflight witnesses complete in seconds
+and are deterministic for the same policy and args.
 
 ```bash
 ./examples/self-modify-floor/run.sh            # build fak (or use $FAK_BIN), run both witnesses

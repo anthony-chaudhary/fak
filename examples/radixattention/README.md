@@ -36,6 +36,8 @@ script prints the exact command plus the published numbers and exits `0` — see
 [Run it without a Go toolchain](#run-it-without-a-go-toolchain).
 
 Windows: run the `.sh` from WSL or Git Bash, or call `go run` directly from the repo root.
+Expected runtime: the bundled four-shape sweep completes in seconds and is deterministic
+over the committed JSON workloads.
 
 ## What you put in: a workload is a list of token-id requests
 

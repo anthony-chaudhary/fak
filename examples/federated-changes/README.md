@@ -101,6 +101,7 @@ the feed is the "what changed," the revoke is the "stop trusting this," and the
   (stdlib only).
 - **No model.** Both instances run `--engine mock`; the feed and the refutation are
   pure kernel state, so every load-bearing assertion fires deterministically.
+Expected runtime: the mock-engine run completes in seconds after the binary build.
 
 ## Run it
 

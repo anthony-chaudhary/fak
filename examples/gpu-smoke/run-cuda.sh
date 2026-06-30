@@ -93,7 +93,13 @@ else
   echo "gpu-smoke(cuda): nvidia-smi not found; continuing to the CUDA runtime check" >&2
 fi
 
-OUT="${FAK_GPU_SMOKE_OUT:-$ROOT/.cache/gpu-smoke/cuda}"
+if [[ -n "${FAK_GPU_SMOKE_OUT:-}" ]]; then
+  OUT="$FAK_GPU_SMOKE_OUT"
+else
+  OUT="$(mktemp -d "${TMPDIR:-/tmp}/fak-gpu-smoke-cuda.XXXXXX")"
+  cleanup() { rm -rf "$OUT"; }
+  trap cleanup EXIT
+fi
 mkdir -p "$OUT"
 
 GPUCHECK="$OUT/gpucheck-cuda"

@@ -87,6 +87,8 @@ attempt* for an auditor, never to change a verdict.
 - **Go** (to build `fak`) **or** a prebuilt binary via `FAK_BIN`, and **Python 3** (stdlib only).
 - **No model.** The IFC floor is a pure function of the bytes' provenance, so the
   load-bearing verdict fires with the deterministic kernel alone.
+Expected runtime: the deterministic kernel-only run completes in seconds after the binary
+build.
 
 ## Run it
 

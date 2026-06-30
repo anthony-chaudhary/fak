@@ -19,11 +19,10 @@ This is the most concrete "fak is a real thing" demonstration for a Claude-using
 the *actual* Claude Code CLI, talking to *your* kernel, over the *real* Anthropic wire — no
 ollama required, CPU-friendly on the default model.
 
-> **This directory wraps the shipped scripts; it does not reimplement them.** The launcher
-> already lives at [`../../scripts/dogfood-claude.sh`](../../scripts/dogfood-claude.sh)
-> (macOS/Linux) and [`../../scripts/dogfood-claude.ps1`](../../scripts/dogfood-claude.ps1)
-> (Windows), and the full design + caveats are in
-> [`../../DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md). The thin wrappers here
+> **This directory wraps the shipped scripts; it does not reimplement them.** The launchers
+> already live under the repo-level `scripts/` directory for macOS/Linux and Windows, and
+> the full design + caveats are in [`../../DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md).
+> The thin wrappers here
 > ([`run.sh`](run.sh) / [`run.ps1`](run.ps1)) invoke those scripts and print "what to look
 > for" hints, in the adoption shape every other example carries.
 
@@ -61,6 +60,8 @@ Each wrapper is a few lines: it prints what to look for, then `exec`s the shippe
 with your flags. Every flag the launcher takes (`--smoke`, `--probe`, `--print-env`,
 `--list-accounts`, `--install`) passes straight through. The launcher tears down the kernel
 (and the shim/ollama if it started one) on exit.
+Expected runtime: the no-model `--smoke` path completes in seconds; `--probe` and
+interactive runs depend on the selected model and can take tens of seconds.
 
 **It cannot damage your normal `claude`.** Every wiring env var (`ANTHROPIC_BASE_URL`,
 `CLAUDE_CONFIG_DIR`, the model tiers) is exported only into the child `claude` process the
@@ -156,13 +157,11 @@ See [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for the captured turn.
 
 | file | what it is |
 |---|---|
-| [`run.sh`](run.sh) | thin wrapper → `../../scripts/dogfood-claude.sh`, prints "what to look for" hints, passes flags through |
-| [`run.ps1`](run.ps1) | thin wrapper → `../../scripts/dogfood-claude.ps1` (Windows), same hints + passthrough |
+| [`run.sh`](run.sh) | thin wrapper around the repo-level macOS/Linux launcher, prints "what to look for" hints, passes flags through |
+| [`run.ps1`](run.ps1) | thin wrapper around the repo-level Windows launcher, same hints + passthrough |
 | [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) | a captured live Claude Code turn through the kernel |
 | [`../dogfood-claude-policy.json`](../dogfood-claude-policy.json) | the capability floor the kernel enforces |
 
-Related: [`../../DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) (full design + caveats);
-[`../../scripts/dogfood-claude.sh`](../../scripts/dogfood-claude.sh) and
-[`../../scripts/dogfood-claude.ps1`](../../scripts/dogfood-claude.ps1) (the shipped
-launchers); [`adjudication-demo/`](../adjudication-demo/README.md) puts the same kernel +
-floor in front of a Python OpenAI client instead of the Claude Code CLI.
+Related: [`../../DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) (full design + caveats and
+the repo-level launchers); [`adjudication-demo/`](../adjudication-demo/README.md) puts the
+same kernel + floor in front of a Python OpenAI client instead of the Claude Code CLI.

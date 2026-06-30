@@ -12,6 +12,11 @@ Both modes run offline over in-memory backends with no model weights, GPU, API k
 
 Requires Go only from the repository root. Both modes complete in seconds and return exit code 0 only if all checks pass.
 
+## Quickstart
+
+Start here: run `go run ./cmd/deletioncert -selfcheck` for the smallest proof, then
+`go run ./cmd/deletioncert -isolation-bench` for the tenant-isolation corpus.
+
 ## Provable-deletion demo
 
 ```bash

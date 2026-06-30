@@ -29,6 +29,7 @@ concrete loop behavior. (`escalation-demo/` shows the *harness* side of one disp
 A strict subset of [`adjudication-demo/`](../adjudication-demo/README.md): a built `fak`
 binary. **No model, API key, GPU, or network** — every refusal is a pure function of
 `(policy, the proposed call)`, so the demo is deterministic and CI-usable.
+Expected runtime: the four preflight witnesses complete in seconds.
 
 ## Run it
 

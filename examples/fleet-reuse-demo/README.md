@@ -54,6 +54,8 @@ FAK_DEMO_N=1,2,5,10 ./examples/fleet-reuse-demo/run.sh   # choose the worker cou
 runs in front of its **offline mock planner**, because the reuse curve is an exact byte
 accounting, not a model measurement. On Windows, run the `.sh` launcher from WSL or Git
 Bash. The accounting view (`--offline`) needs only Python 3.
+Expected runtime: the offline accounting run completes in seconds and is deterministic;
+the live wiring path is deterministic for the committed N=1/2/5 fixture after the build.
 
 ## The three honesty caveats (reproduced verbatim from the README)
 
@@ -100,6 +102,10 @@ here require self-hosting the engine fak serves in front of.
 - The offline mock planner reports no provider cache-read counter, so the live half
   proves the **wiring** (N workers, one kernel, one shared prefix); the bytes/turns table
   is the exact reuse **accounting**. Neither is projected to scale.
+
+This demo does not claim frontier-provider prompt caching is replaced by fak; it shows the
+self-hosted shared-prefix accounting and the kernel wiring for the small worker counts in
+the captured run.
 
 ## Files
 
