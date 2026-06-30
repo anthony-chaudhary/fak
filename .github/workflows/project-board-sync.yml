@@ -1,0 +1,75 @@
+name: project-board-sync
+
+# Auto-add newly opened / reopened / transferred issues to the operator-configured
+# ProjectsV2 board. The board is the fleet's single work pane; without this it only grows when someone
+# adds an item by hand, so a freshly filed issue silently never lands on it. This
+# closes that gap: every issue that opens (or reopens, or is transferred in) is
+# added to project #1 as it happens. The one-time historical backlog was
+# backfilled separately; this workflow keeps the board current going forward.
+#
+# WHY A PAT (not the built-in GITHUB_TOKEN): the default Actions token is scoped
+# to the repository and CANNOT write to a USER-owned ProjectsV2 board. The
+# add-to-project action therefore needs a personal access token with project
+# write. For a user-owned project the recommended token is a FINE-GRAINED PAT
+# owned by the project owner with **account -> Projects: Read and write** (plus
+# repository **Issues: Read-only**). A classic PAT with the `project` + `repo`
+# scopes also works.
+#
+# OPERATOR STEP (one-time): create that token and store it as the repo secret
+# FAK_PROJECT_TOKEN under Settings -> Secrets and variables -> Actions, and set
+# the repo variable FAK_PROJECT_URL to the target ProjectsV2 URL, e.g.
+#   gh variable set FAK_PROJECT_URL --repo anthony-chaudhary/fak --body <PROJECT_URL>
+#   gh secret set FAK_PROJECT_TOKEN --repo anthony-chaudhary/fak --body <PAT>
+# Scope the PAT to the project only -- do NOT paste a broad, long-lived login /
+# OAuth token here, so a compromised workflow run cannot use it beyond the board.
+#
+# FAIL-OPEN: with the secret absent the add step is skipped and the run records
+# what WOULD happen in the step summary, so a fork or a secret-less repo never
+# hard-fails. KILL SWITCH: set the repo variable FAK_PROJECT_SYNC = '0' to
+# disable the add without deleting this workflow. A manual workflow_dispatch is a
+# token/configuration smoke test (there is no out-of-band issue to add).
+on:
+  issues:
+    types: [opened, reopened, transferred]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-board-sync-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  add-to-board:
+    name: add issue -> fak fleet board
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Map the secret to env so the gate below can test its presence: the
+      # `secrets` context is not usable in `if:` conditions, but `env` is. This
+      # mirrors the fail-open posting gate the cadence feeders use.
+      FAK_PROJECT_TOKEN: ${{ secrets.FAK_PROJECT_TOKEN }}
+      FAK_PROJECT_URL: ${{ vars.FAK_PROJECT_URL }}
+    steps:
+      - name: Add the issue to configured project
+        if: ${{ github.event_name == 'issues' && env.FAK_PROJECT_TOKEN != '' && env.FAK_PROJECT_URL != '' && vars.FAK_PROJECT_SYNC != '0' }}
+        uses: actions/add-to-project@v1
+        with:
+          project-url: ${{ env.FAK_PROJECT_URL }}
+          github-token: ${{ secrets.FAK_PROJECT_TOKEN }}
+
+      - name: Skipped note (fail open)
+        if: ${{ github.event_name == 'issues' && (env.FAK_PROJECT_TOKEN == '' || env.FAK_PROJECT_URL == '') }}
+        run: |
+          echo "FAK_PROJECT_TOKEN or FAK_PROJECT_URL absent -- skipped adding issue #${{ github.event.issue.number }} to the configured project (fail-open)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Set the secret and repo variable (see this workflow's header) to enable auto-add." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Project sync wired? (dispatch smoke test)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [ -n "${FAK_PROJECT_TOKEN}" ] && [ -n "${FAK_PROJECT_URL}" ]; then
+            echo "FAK_PROJECT_TOKEN and FAK_PROJECT_URL are present -- newly opened issues will be added to the configured project." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "FAK_PROJECT_TOKEN or FAK_PROJECT_URL is NOT set -- the add step fails open (skips). See the workflow header for the one-time operator step." >> "$GITHUB_STEP_SUMMARY"
+          fi

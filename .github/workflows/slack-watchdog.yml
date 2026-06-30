@@ -67,6 +67,7 @@ jobs:
       FAK_BACKLOG_CHANNEL: ${{ vars.FAK_BACKLOG_CHANNEL }}
       FAK_MARKETING_TOKEN: ${{ secrets.FAK_MARKETING_TOKEN }}
       FAK_MARKETING_CHANNEL: ${{ vars.FAK_MARKETING_CHANNEL }}
+      FAK_NEWS_CHANNEL: ${{ vars.FAK_NEWS_CHANNEL }}
       FAK_NODE_USAGE_TOKEN: ${{ secrets.FAK_NODE_USAGE_TOKEN }}
       FAK_NODE_USAGE_CHANNEL: ${{ vars.FAK_NODE_USAGE_CHANNEL }}
       FAK_STEERING_CHANNEL: ${{ vars.FAK_STEERING_CHANNEL }}
@@ -137,10 +138,16 @@ jobs:
         run: |
           gh label create slack-watchdog --color B60205 \
             --description "A Slack feeder is silently not posting (auth/config/staleness)" 2>/dev/null || true
+          gh label create needs-triage --color D4C5F9 \
+            --description "Needs human scoping before an agent dispatch can take it" 2>/dev/null || true
+          gh label create triage-only --color D4C5F9 \
+            --description "Useful issue, but not a worker-ready dispatch leaf" 2>/dev/null || true
           title="slack-watchdog: a Slack feeder is not posting (auth/config/staleness)"
           {
             echo "The slack-watchdog health probe found one or more surfaces NOT OK."
             echo "Modes: AUTH_FAIL (token rotated/revoked) · INCOMPLETE (channel var unset) · STALE (no recent post inside cadence)."
+            echo
+            echo "- dispatchability: \`triage_only\`"
             echo
             echo '```'
             cat slack-health.txt
@@ -150,10 +157,11 @@ jobs:
           } > issue-body.md
           existing=$(gh issue list --state open --label slack-watchdog --json number --jq '.[0].number' 2>/dev/null || true)
           if [ -n "${existing}" ]; then
+            gh issue edit "${existing}" --body-file issue-body.md --add-label needs-triage --add-label triage-only >/dev/null
             gh issue comment "${existing}" --body-file issue-body.md
             echo "refreshed #${existing}" >> "$GITHUB_STEP_SUMMARY"
           else
-            gh issue create --title "${title}" --label slack-watchdog --body-file issue-body.md
+            gh issue create --title "${title}" --label slack-watchdog --label needs-triage --label triage-only --body-file issue-body.md
           fi
 
       - name: note when filing was skipped

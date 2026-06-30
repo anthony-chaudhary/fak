@@ -645,7 +645,7 @@ jobs:
           # fall back to the last commit on a shallow checkout where base is absent.
           git rev-parse "${RANGE%%..*}" >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
           echo "leak-scan $RANGE"
-          python tools/scrub_public_copy.py --audit-range "$RANGE" --root .
+          go run ./cmd/fak public-scrub audit-range --root . "$RANGE"
 
       # Bindable ship-stamp coverage (advisory, #517): the per-commit complement to
       # the dos-review gate below. `dos review` witnesses each CLAIMED commit against

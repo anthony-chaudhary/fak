@@ -1,0 +1,206 @@
+name: Worker-ready issue
+description: File a scoped, witness-backed leaf that the dispatch loop can hand to a worker.
+title: ""
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a dispatchable work item. The issue should describe the smallest working path to make true now, not the surrounding polish or optimization.
+
+        Research, adapter fixtures, and unscoped ideas should use the triage templates instead.
+  - type: input
+    id: parent-context
+    attributes:
+      label: Parent context
+      description: Source issue, epic, milestone, scorecard row, failing gate, or other parent signal.
+      placeholder: "Example: maturity route / #1234 / score-signal guard_rsi"
+    validations:
+      required: true
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current state
+      description: What is already true, including any witness provenance.
+      placeholder: "Example: The router already extracts path hints, but dispatch still treats triage-only labels as launchable."
+    validations:
+      required: true
+  - type: textarea
+    id: why-next
+    attributes:
+      label: Why this is next
+      description: Why this leaf matters before adjacent polish, optimization, or broader refactors.
+      placeholder: "Example: Without this gate, workers can spend a cycle on unscoped research instead of the working path."
+    validations:
+      required: true
+  - type: textarea
+    id: working-spine
+    attributes:
+      label: Working spine
+      description: The one spine that should work after this issue is resolved.
+      placeholder: "Example: A generated issue either names scope, route, witness, and closure binding, or stays triage-only."
+    validations:
+      required: true
+  - type: textarea
+    id: priority-context
+    attributes:
+      label: Priority context
+      description: Why this advances the current working path before polish, optimization, or broader cleanup.
+      placeholder: |
+        Working path: guard Stop handoff -> scoped issue -> dispatch.
+        Current blocker: vague follow-ups waste dispatch cycles.
+        Unblocks: live handoff sync can safely run after this.
+        Not polish: this is the smallest leaf before optimizing routing or scorecards.
+    validations:
+      required: true
+  - type: dropdown
+    id: work-unit
+    attributes:
+      label: Work unit
+      description: Agent-facing shape of this issue. Epics/research are useful, but are not dispatch leaves.
+      options:
+        - leaf
+        - step
+        - epic
+        - research
+        - triage-only
+    validations:
+      required: true
+  - type: input
+    id: expected-steps
+    attributes:
+      label: Expected steps
+      description: Approximate number of agent work steps expected before the witness should be green.
+      placeholder: "Example: 3"
+    validations:
+      required: true
+  - type: textarea
+    id: assumptions
+    attributes:
+      label: Assumptions
+      description: Assumptions a worker should verify or preserve. Write "None" if none.
+      placeholder: |
+        - The existing parser already sees the standard issue sections.
+        - The lane lease is enough coordination for this path.
+    validations:
+      required: true
+  - type: textarea
+    id: confusion-risks
+    attributes:
+      label: Confusion risks
+      description: Nearby meanings that a worker might conflate. Write "None" if none.
+      placeholder: |
+        - This is a scoped leaf, not the parent epic.
+        - Do not treat provider-cache value as fak-authored cache activation.
+    validations:
+      required: true
+  - type: textarea
+    id: coordination-notes
+    attributes:
+      label: Coordination notes
+      description: Lane, lease, dependency, or sequencing notes. Write "No special coordination" if none.
+      placeholder: |
+        - Avoid concurrent edits to `internal/issuecontract/**`.
+        - Dispatch after the parent route issue lands.
+    validations:
+      required: true
+  - type: textarea
+    id: trigger
+    attributes:
+      label: Trigger
+      description: The event or threshold that should create/update this issue.
+      placeholder: "Example: A verified handoff proposes this next leaf after the parent witness passes."
+    validations:
+      required: true
+  - type: textarea
+    id: batch-policy
+    attributes:
+      label: Batch policy
+      description: How repeated signals should be grouped, capped, or updated to avoid issue spam.
+      placeholder: "Example: One issue per stable marker key; cap live creates to 20 per wave and update existing issues on rerun."
+    validations:
+      required: true
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In scope
+      description: The smallest expected change surface.
+      placeholder: "Example: Add a contract review before live issue sync in the maturity route producer."
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: Adjacent work this issue deliberately excludes.
+      placeholder: "Example: Do not port every Python feeder or redesign the dispatch router."
+    validations:
+      required: true
+  - type: textarea
+    id: done-condition
+    attributes:
+      label: Done condition
+      description: The concrete state change that proves the issue is resolved.
+      placeholder: "Example: The producer skips unscoped candidates and reports ISSUE_SCOPE_INCOMPLETE."
+    validations:
+      required: true
+  - type: input
+    id: witness
+    attributes:
+      label: Witness
+      description: Command, metric, file, dos check, or read-back that proves the done condition.
+      placeholder: "Example: go test ./internal/issuecontract ./internal/maturity"
+    validations:
+      required: true
+  - type: input
+    id: acceptance-gate
+    attributes:
+      label: Acceptance gate
+      description: The gate a worker should run before committing.
+      placeholder: "Example: go test ./cmd/fak -run TestMaturityRoute"
+    validations:
+      required: true
+  - type: input
+    id: lane
+    attributes:
+      label: Lane
+      description: Owning lane from dos.toml, if known.
+      placeholder: "Example: issuecontract"
+    validations:
+      required: false
+  - type: textarea
+    id: path-hints
+    attributes:
+      label: Path hints
+      description: Repo-relative files or globs the router can confirm.
+      placeholder: |
+        - `internal/issuecontract/**`
+        - `cmd/fak/issue_contract.go`
+    validations:
+      required: true
+  - type: textarea
+    id: boundary-notes
+    attributes:
+      label: Boundary notes
+      description: Private-boundary, hardware, credentials, cost, or human-decision constraints. Write "None" if none.
+      placeholder: "Example: Public issue only; private GPU-server evidence stays out of the body."
+    validations:
+      required: true
+  - type: textarea
+    id: closure-binding
+    attributes:
+      label: Closure binding
+      description: How the resolving commit will bind back to this issue.
+      value: "Resolving commit must cite this issue number (`#N`) and carry a matching `(fak <leaf>)` trailer so the close arm can witness the diff."
+    validations:
+      required: true
+  - type: checkboxes
+    id: final-checks
+    attributes:
+      label: Final checks
+      options:
+        - label: This is a leaf, not an epic or research placeholder.
+          required: true
+        - label: The in-scope work can be verified by the witness above.
+          required: true
+        - label: I have not included secrets, private lab/operator evidence, credentials, or proprietary data.
+          required: true

@@ -5,7 +5,7 @@ name: product-feed
 # heartbeat, the dual of the daily steering-guard.yml feeder:
 #
 #   * Monday 09:23 UTC -> `fak product post --status` — folds the product
-#     scorecard (tools/product_scorecard.py) into a card and posts the
+#     scorecard (fak product-scorecard) into a card and posts the
 #     product-status snapshot to #product. The scorecard EXITS NON-ZERO when
 #     there is debt (verdict ACTION) but still prints valid JSON; `fak product`
 #     handles that internally (runScorecardJSON treats JSON-on-stdout as
@@ -14,7 +14,7 @@ name: product-feed
 #     by default so an operator can preview the card without posting.
 #
 # `fak product post` runs the python scorecard ITSELF (--status ->
-# product_scorecard.py, --persona -> persona_readiness_scorecard.py), so
+# fak product-scorecard, --persona -> persona_readiness_scorecard.py), so
 # actions/setup-python IS needed even though there is no separate generate step.
 #
 # Posting is GATED on BOTH (a) the FAK_SCOREBOARD_TOKEN secret (the shared
@@ -77,7 +77,7 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # `fak product post --status` runs tools/product_scorecard.py (or
+      # `fak product post --status` runs fak product-scorecard (or
       # --persona runs persona_readiness_scorecard.py) itself, so python must
       # be on PATH.
       - uses: actions/setup-python@v5
