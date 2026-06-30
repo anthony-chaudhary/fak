@@ -12,7 +12,7 @@
 // THE PUBLIC/PRIVATE BOUNDARY IS A DATA CONTRACT, NOT A CODE IMPORT. The live control
 // plane — the Slack control-bridge to the lab boxes — is private (it speaks a lab
 // protocol and carries lab identifiers, so it lives in fak-private; see
-// docs/dgx-slack-boundary.md and docs/private-comms-channel.md). The seam between it
+// docs/gpu-server-private-boundary.md and docs/private-comms-channel.md). The seam between it
 // and this public tool is the per-box REPORT JSON (fak.fleet.report/v1, report.go):
 // the private bridge emits one report file per box from live state; fleetctl reads,
 // folds, renders, and scores them. Neither side imports the other, and everything

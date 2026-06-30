@@ -1,9 +1,9 @@
 {
   "schema": "fak.fleet.roster/v1",
   "boxes": [
-    { "id": "dgx-a",  "class": "a100x8", "group": "lab" },
-    { "id": "dgx-b",  "class": "a100x8", "group": "lab" },
-    { "id": "dgx-c",  "class": "a100x8", "group": "lab" },
+    { "id": "box-a",  "class": "a100x8", "group": "lab" },
+    { "id": "box-b",  "class": "a100x8", "group": "lab" },
+    { "id": "box-c",  "class": "a100x8", "group": "lab" },
     { "id": "da-cpu", "class": "cpu",    "group": "lab" },
     { "id": "mac-a",  "class": "metal",  "group": "tailnet" },
     { "id": "mac-b",  "class": "metal",  "group": "tailnet" }

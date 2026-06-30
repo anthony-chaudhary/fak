@@ -94,7 +94,7 @@ usage:
         Grade a predictions file into the SWE-bench Verified resolve-rate via the
         OFFICIAL harness (the identical path bench grades with). Runs locally when
         Docker + the swebench module are present; otherwise prints an honestly
-        GATED result plus the exact command to run on a Docker box (the DGX).
+        GATED result plus the exact command to run on a Docker-capable GPU box.
 
   fak swebench compare [--difficulty FILE | --dataset FILE] [--workers 1,2,4,8]
         [--predictions preds.json] [--bench-result results_RUNID.json]
@@ -586,7 +586,7 @@ func cmdSwebenchEval(argv []string) {
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "GATED on this box: %s\n", res.Reason)
-		fmt.Fprintf(os.Stderr, "run on a Docker box (the DGX):\n  %s\n", res.Command)
+		fmt.Fprintf(os.Stderr, "run on a Docker-capable GPU box:\n  %s\n", res.Command)
 	}
 }
 
@@ -792,7 +792,7 @@ func cmdSwebenchRun(argv []string) {
 		} else {
 			fmt.Fprintf(os.Stderr, "\n== eval gated ==\n")
 			fmt.Fprintf(os.Stderr, "%s\n", evalRes.Reason)
-			fmt.Fprintf(os.Stderr, "run on DGX:\n  %s\n", evalRes.Command)
+			fmt.Fprintf(os.Stderr, "run on a GPU server:\n  %s\n", evalRes.Command)
 		}
 	}
 }

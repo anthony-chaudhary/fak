@@ -21,7 +21,7 @@ package main
 // bridge owns the id->channel map and the live `!sessions` liveness probe on its side
 // and writes one fak.fleet.report/v1 file per box. `fak lab report` is the PUBLIC
 // producer half: a box self-reports its state with no private bridge, closing the
-// loop for that box today. See docs/dgx-slack-boundary.md and docs/fak/lab-dev-loop.md.
+// loop for that box today. See docs/gpu-server-private-boundary.md and docs/fak/lab-dev-loop.md.
 
 import (
 	"bytes"
