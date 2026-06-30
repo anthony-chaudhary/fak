@@ -33,6 +33,21 @@ func TestResidencyGateDeniesSensitiveTagRemoteRoute(t *testing.T) {
 	}
 }
 
+func TestResidencyGateDeniesSensitiveLLMDRoute(t *testing.T) {
+	v := (residencyGate{}).Adjudicate(context.Background(), &abi.ToolCall{
+		Tool:   "summarize",
+		Engine: LLMDEngineID,
+		Args:   abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeFleet},
+		Meta:   map[string]string{"sensitivity": "tenant"},
+	})
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
+		t.Fatalf("sensitive tag to llm-d route: got %v/%s, want Deny/TRUST_VIOLATION", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if v.Meta["engine_route"] != LLMDEngineID {
+		t.Fatalf("llm-d residency witness metadata = %+v", v.Meta)
+	}
+}
+
 func TestResidencyGateDefersLocalAndUnscopedRoutes(t *testing.T) {
 	cases := []abi.ToolCall{
 		{Tool: "summarize", Engine: "local", Args: abi.Ref{Kind: abi.RefInline, Scope: abi.ScopeTenant}},
