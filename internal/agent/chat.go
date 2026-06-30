@@ -345,6 +345,12 @@ type SampleParams struct {
 	// to the upstream so the engine applies the mask at its own logit step; the native
 	// in-kernel mask is a sibling-lane (internal/model) concern, out of this seam.
 	LogitBias map[int]float64
+	// GuidedDecode carries provider-native guided-decode fields that are not part of
+	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
+	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,
+	// `json_schema`, `regex`, `ebnf`). Empty => unset on the wire. The gateway only
+	// populates this map from an allowlist, so client unknowns are still ignored.
+	GuidedDecode map[string]json.RawMessage
 	// RawRequestBody, when non-empty, is sent to the upstream VERBATIM instead of a
 	// freshly-marshalled body — the anthropic→anthropic passthrough path. Forwarding
 	// the client's ORIGINAL bytes preserves its prompt-cache prefix (so the upstream
@@ -460,6 +466,28 @@ func WithLogitBias(bias map[int]float64) SampleOpt {
 	}
 }
 
+// WithGuidedDecode sets the per-request provider-native guided-decode carriers.
+// It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
+// allowlisted structured-output fields parsed from the client request, and the
+// planner merges them into the OpenAI-compatible ride-engine body.
+func WithGuidedDecode(fields map[string]json.RawMessage) SampleOpt {
+	return func(sp *SampleParams) {
+		if len(fields) == 0 {
+			return
+		}
+		sp.GuidedDecode = make(map[string]json.RawMessage, len(fields))
+		for k, v := range fields {
+			if len(v) == 0 {
+				continue
+			}
+			sp.GuidedDecode[k] = append(json.RawMessage(nil), v...)
+		}
+		if len(sp.GuidedDecode) == 0 {
+			sp.GuidedDecode = nil
+		}
+	}
+}
+
 // WithRawRequestBody forwards the client's ORIGINAL request bytes to the upstream
 // verbatim (the anthropic→anthropic passthrough path), preserving its prompt-cache
 // prefix. An empty slice is a no-op (the planner marshals a fresh body as usual).
@@ -567,7 +595,8 @@ type Planner interface {
 	// assistant's next message (tool calls or a final answer). The optional
 	// SampleOpts carry per-request sampling overrides (max_tokens, temperature,
 	// top_p, top_k, stop) plus the structured/guided-decode carriers (response_format,
-	// logit_bias); with none passed, the planner uses its configured defaults.
+	// logit_bias, provider-native guided fields); with none passed, the planner uses
+	// its configured defaults.
 	Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
 	// Model is the model id (for provenance).
 	Model() string
@@ -832,6 +861,38 @@ func ParseExtraBodyJSON(raw string) (json.RawMessage, error) {
 		if reservedExtraBodyKey(k) {
 			return nil, fmt.Errorf("provider extra body must not override %q", k)
 		}
+	}
+	normalized, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func mergeGuidedDecodeExtraBody(extra json.RawMessage, guided map[string]json.RawMessage) (json.RawMessage, error) {
+	if len(guided) == 0 {
+		return extra, nil
+	}
+	obj := map[string]json.RawMessage{}
+	if len(extra) > 0 {
+		if err := json.Unmarshal(extra, &obj); err != nil {
+			return nil, fmt.Errorf("provider extra body: %w", err)
+		}
+	}
+	for k, v := range guided {
+		if len(v) == 0 {
+			continue
+		}
+		if reservedExtraBodyKey(k) {
+			return nil, fmt.Errorf("provider extra body must not override %q", k)
+		}
+		if _, exists := obj[k]; exists {
+			return nil, fmt.Errorf("provider extra body must not override %q", k)
+		}
+		obj[k] = append(json.RawMessage(nil), v...)
+	}
+	if len(obj) == 0 {
+		return nil, nil
 	}
 	normalized, err := json.Marshal(obj)
 	if err != nil {

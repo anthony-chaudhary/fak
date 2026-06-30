@@ -173,6 +173,10 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		// unset, RedactOutboundMessages returns safeMessages unchanged at zero cost.
 		safeMessages, redactions = RedactOutboundMessages(safeMessages)
 		redactedN = len(redactions)
+		extraBody, err := mergeGuidedDecodeExtraBody(p.ExtraBody, sp.GuidedDecode)
+		if err != nil {
+			return nil, err
+		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:          modelID,
 			Messages:       safeMessages,
@@ -184,7 +188,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 			Stop:           sp.Stop,
 			ResponseFormat: sp.ResponseFormat,
 			LogitBias:      sp.LogitBias,
-			ExtraBody:      p.ExtraBody,
+			ExtraBody:      extraBody,
 			Stream:         stream,
 		})
 		if err != nil {

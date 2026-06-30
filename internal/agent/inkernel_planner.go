@@ -432,7 +432,7 @@ type inKernelGenerateResult struct {
 	stopped                 bool
 }
 
-func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -442,7 +442,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContext(ctx, ids, maxNew, temp, topP, topK, stops, emit)
+	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
@@ -456,8 +456,8 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, stops, emit)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
 	if err == nil {
 		return res, nil
 	}
@@ -470,7 +470,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, stops, emit)
+	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -588,6 +588,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.TopK != nil {
 		topK = *sp.TopK
 	}
+	var logitBias model.LogitBias
+	if len(sp.LogitBias) > 0 {
+		logitBias = model.LogitBias(sp.LogitBias)
+	}
 
 	chat := renderChatMLTools(messages, tools)
 	ids, err := p.tok.Encode(chat)
@@ -627,7 +631,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, stops, emit, func() {
+	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit, func() {
 		sb.Reset()
 	})
 	if err != nil {
@@ -1021,6 +1025,10 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 }
 
 func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
+	return p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, stops, emit)
+}
+
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -1106,7 +1114,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 		if err = ctx.Err(); err != nil {
 			break
 		}
-		next := sampleLogits(logits, temp, topP, topK, rng)
+		next := sampleLogitsWithBias(logits, temp, topP, topK, logitBias, rng)
 		if next < 0 || stops[next] {
 			stopped = true
 			break

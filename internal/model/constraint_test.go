@@ -225,3 +225,73 @@ func TestGenerateConstrainedHonorsMaskInLoop(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateBatchConstrainedBitExactOff(t *testing.T) {
+	t.Setenv("FAK_NATIVE_GUIDED_DECODE", "0")
+	m := NewSynthetic(syntheticDecodeCfg())
+	prompts := [][]int{
+		{3, 17, 5},
+		{11, 23, 7, 41},
+		{29, 31, 37},
+	}
+	const n = 8
+	constraints := []*DecodeConstraint{
+		nil,
+		{Bias: LogitBias{}},
+		{Mask: AllowedSetMask{1: true}}, // flag off => dormant
+	}
+
+	want := m.NewBatchSession(len(prompts)).GenerateBatch(prompts, n)
+	got := m.NewBatchSession(len(prompts)).GenerateBatchConstrained(prompts, n, constraints)
+	assertBatchTokens(t, got, want)
+
+	gotNil := m.NewBatchSession(len(prompts)).GenerateBatchConstrained(prompts, n, nil)
+	assertBatchTokens(t, gotNil, want)
+}
+
+func TestGenerateBatchConstrainedHonorsPerLaneMaskAtStepBatch(t *testing.T) {
+	t.Setenv("FAK_NATIVE_GUIDED_DECODE", "1")
+	m := NewSynthetic(syntheticDecodeCfg())
+	prompts := [][]int{
+		{3, 17, 5},
+		{11, 23, 7, 41},
+	}
+	const n = 5
+	natural := m.NewBatchSession(len(prompts)).GenerateBatch(prompts, n)
+	if len(natural[0]) == 0 || len(natural[1]) == 0 {
+		t.Fatal("setup: natural batch decode produced no tokens")
+	}
+	forced0 := (natural[0][0] + 1) % syntheticDecodeCfg().VocabSize
+	forced1 := (natural[1][0] + 2) % syntheticDecodeCfg().VocabSize
+	constraints := []*DecodeConstraint{
+		{Mask: AllowedSetMask{forced0: true}},
+		{Mask: AllowedSetMask{forced1: true}},
+	}
+
+	got := m.NewBatchSession(len(prompts)).GenerateBatchConstrained(prompts, n, constraints)
+	for b, forced := range []int{forced0, forced1} {
+		if eq(got[b], natural[b]) {
+			t.Fatalf("lane %d mask was not load-bearing: constrained=%v natural=%v", b, got[b], natural[b])
+		}
+		if len(got[b]) != n {
+			t.Fatalf("lane %d constrained token count = %d, want %d", b, len(got[b]), n)
+		}
+		for i, tok := range got[b] {
+			if tok != forced {
+				t.Fatalf("lane %d step %d emitted %d, want forced token %d from StepBatch logits", b, i, tok, forced)
+			}
+		}
+	}
+}
+
+func assertBatchTokens(t *testing.T, got, want [][]int) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("batch size = %d, want %d", len(got), len(want))
+	}
+	for b := range want {
+		if !eq(got[b], want[b]) {
+			t.Fatalf("lane %d tokens = %v, want %v", b, got[b], want[b])
+		}
+	}
+}

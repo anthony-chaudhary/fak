@@ -147,6 +147,50 @@ func (s *Session) GenerateConstrained(prompt []int, n int, c *DecodeConstraint) 
 	return out
 }
 
+// GenerateBatchConstrained is GenerateBatch with an optional per-lane native decode
+// constraint. It applies each lane's logit-bias / flagged schema mask at the same
+// token-selection boundary that consumes StepBatchActive's logits. A nil constraints
+// slice, a missing lane entry, or an inert constraint is the identity: selection falls
+// through sampleConstrained's bit-exact-off path and matches GenerateBatch token-for-token.
+func (bs *BatchSession) GenerateBatchConstrained(prompts [][]int, n int, constraints []*DecodeConstraint) [][]int {
+	B := len(bs.Seqs)
+	logits := bs.PrefillEach(prompts)
+	out := make([][]int, B)
+	done := make([]bool, B)
+	next := make([]int, B)
+	active := make([]bool, B)
+	for i := 0; i < n; i++ {
+		anyLive := false
+		for b := 0; b < B; b++ {
+			active[b] = false
+			if done[b] {
+				continue
+			}
+			t := sampleConstrained(out[b], logits[b], constraintForLane(constraints, b))
+			out[b] = append(out[b], t)
+			next[b] = t
+			if bs.M.Cfg.IsEOS(t) {
+				done[b] = true
+			} else {
+				active[b] = true
+				anyLive = true
+			}
+		}
+		if !anyLive {
+			break
+		}
+		logits = bs.StepBatchActive(next, active)
+	}
+	return out
+}
+
+func constraintForLane(constraints []*DecodeConstraint, lane int) *DecodeConstraint {
+	if lane < len(constraints) {
+		return constraints[lane]
+	}
+	return nil
+}
+
 // AllowedSetMask is the minimal concrete LogitMask: it permits only the token ids in
 // the set at EVERY step (a static mask). It is the simplest correct schema constraint
 // — e.g. "the next token must be one of the tool-name `const` tokens" — and the

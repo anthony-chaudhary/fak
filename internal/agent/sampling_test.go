@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // captureUpstream is an OpenAI-compatible stub that records the request body and
@@ -121,6 +123,26 @@ func TestHTTPPlannerOmitsUnsetSamplingParams(t *testing.T) {
 	}
 	if _, present := body["stop"]; present {
 		t.Fatalf("stop must be omitted when unset, got %v", body["stop"])
+	}
+}
+
+func TestSampleLogitsWithBias(t *testing.T) {
+	logits := []float32{0.1, 0.9, 0.3}
+	orig := append([]float32(nil), logits...)
+
+	if got, want := sampleLogitsWithBias(logits, 0, 0, 0, nil, nil), sampleLogits(logits, 0, 0, 0, nil); got != want {
+		t.Fatalf("nil logit_bias changed selection: got %d want %d", got, want)
+	}
+	if got := sampleLogitsWithBias(logits, 0, 0, 0, model.LogitBias{1: -100}, nil); got != 2 {
+		t.Fatalf("logit_bias -100 on winner selected %d, want runner-up 2", got)
+	}
+	if got := sampleLogitsWithBias(logits, 0, 0, 0, model.LogitBias{0: 1000}, nil); got != 0 {
+		t.Fatalf("clamped positive logit_bias selected %d, want forced token 0", got)
+	}
+	for i := range logits {
+		if logits[i] != orig[i] {
+			t.Fatalf("sampleLogitsWithBias mutated logits[%d]: got %v want %v", i, logits[i], orig[i])
+		}
 	}
 }
 

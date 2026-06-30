@@ -451,6 +451,9 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		convOut[c] = silu(acc)
 	}
 	s.phaseEnd("qwen35_linear_step_conv", t)
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, "convOut", convOut)
+	}
 	lst.pushConvRow(mixed, K-1)
 
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
@@ -470,6 +473,9 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		}
 	}
 	s.phaseEnd("qwen35_linear_step_qk_norm", t)
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, "qk_norm", qNorm)
+	}
 	t = s.phaseStart()
 	// Each value head's Gated-DeltaNet update is self-contained — it reads the shared (now
 	// read-only) qNorm/kNorm and v, mutates only its OWN recurrent state lst.recurrent[h], and
@@ -531,13 +537,22 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		})
 	}
 	s.phaseEnd("qwen35_linear_step_recurrent", t)
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, "recurrent", core)
+	}
 	t = s.phaseStart()
 	for h := 0; h < nV; h++ {
 		rmsNormGatedInPlace(core[h*vHd:(h+1)*vHd], normW, zAll[h*vHd:(h+1)*vHd], eps)
 	}
 	s.phaseEnd("qwen35_linear_step_gated_norm", t)
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, "gated_norm", core)
+	}
 	t = s.phaseStart()
 	out := mat.mul(p("linear_attn.out_proj.weight"), mat.prep(core), H, valDim)
 	s.phaseEnd("qwen35_linear_step_out_proj", t)
+	if tap := s.tapActive; tap != nil && tap.ops {
+		tap.dumpOp(l, "out", out)
+	}
 	return out
 }

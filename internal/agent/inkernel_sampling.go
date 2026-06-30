@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // sampleLogits mirrors cmd/fakchat.sample: argmax when temp<=0, else a
@@ -59,6 +61,29 @@ func sampleLogits(logits []float32, temp, topP float64, topK int, rng *rand.Rand
 		}
 	}
 	return len(logits) - 1
+}
+
+// sampleLogitsWithBias applies the OpenAI logit_bias map before the existing in-kernel
+// sampler. The nil/empty map is a strict no-op, preserving the historical argmax /
+// stochastic path byte-for-byte. Biases are clamped to the same [-100, 100] bound the
+// native model constraint sink uses.
+func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias model.LogitBias, rng *rand.Rand) int {
+	if len(bias) == 0 {
+		return sampleLogits(logits, temp, topP, topK, rng)
+	}
+	eff := append([]float32(nil), logits...)
+	for tok, b := range bias {
+		if tok < 0 || tok >= len(eff) {
+			continue
+		}
+		if b > model.LogitBiasClamp {
+			b = model.LogitBiasClamp
+		} else if b < -model.LogitBiasClamp {
+			b = -model.LogitBiasClamp
+		}
+		eff[tok] += float32(b)
+	}
+	return sampleLogits(eff, temp, topP, topK, rng)
 }
 
 // nucleusTruncate zeroes every probability outside the top-p nucleus in place and

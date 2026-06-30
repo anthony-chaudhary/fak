@@ -127,6 +127,11 @@ type Session struct {
 	// time.Now calls.
 	PhaseProfiler *PhaseProfiler
 
+	// tap is an opt-in diagnostic dump hook for a single decode position. Nil on all
+	// normal sessions; tests and FAK_HIDDEN_TAP use it to capture hidden-state probes.
+	tap       *hiddenTap
+	tapActive *hiddenTap
+
 	// glmDsaSharedTopK carries the current token's most recent full-indexer
 	// decision across IndexShare layers while tokenHiddenGLMDsa walks the block stack.
 	glmDsaSharedTopK []int
@@ -280,6 +285,13 @@ func (s *Session) tokenHidden(id, pos int) []float32 {
 	}
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
+	tap := s.activeTap()
+	if tap != nil && tap.pos != pos {
+		tap = nil
+	}
+	prevTap := s.tapActive
+	s.tapActive = tap
+	defer func() { s.tapActive = prevTap }()
 
 	embed := m.embedRows()
 	x := append([]float32(nil), embed[id*H:(id+1)*H]...)
@@ -290,6 +302,9 @@ func (s *Session) tokenHidden(id, pos int) []float32 {
 		x = s.blockStep(l, pos, x, cos, sin, f32Kernel{m})
 	}
 	s.Cache.pos = append(s.Cache.pos, pos)
+	if tap != nil {
+		tap.writeMeta(cfg, H, pos)
+	}
 	return m.finalNorm(x)
 }
 
@@ -333,9 +348,13 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		return x
 	}
 	if cfg.isLinearAttnLayer(l) {
-		return runBlock(func(xn []float32) []float32 {
+		out := runBlock(func(xn []float32) []float32 {
 			return s.linearAttnStep(l, xn, mat)
 		})
+		if tap := s.tapActive; tap != nil {
+			tap.dumpLayer(l, layerKindLabel(cfg, l), out)
+		}
+		return out
 	}
 
 	// attnBody runs attention on an already-normalized input and returns the raw
@@ -426,7 +445,11 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		s.phaseEnd("full_attn_o_proj", t)
 		return out
 	}
-	return runBlock(attnBody)
+	out := runBlock(attnBody)
+	if tap := s.tapActive; tap != nil {
+		tap.dumpLayer(l, layerKindLabel(cfg, l), out)
+	}
+	return out
 }
 
 // ropeRowQK applies RoPE to one position's q (nH heads) and k (nKV heads) in place,

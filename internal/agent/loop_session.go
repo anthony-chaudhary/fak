@@ -28,11 +28,13 @@ type RunOption func(*runConfig)
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
 type runConfig struct {
-	table *session.Table
-	gate  *SessionGate
-	trace string
-	route *modelroute.Manifest
-	spec  *abi.Speculator
+	table                 *session.Table
+	gate                  *SessionGate
+	trace                 string
+	route                 *modelroute.Manifest
+	spec                  *abi.Speculator
+	contextPlanner        *SessionPlanner
+	contextBaselineOutput int
 }
 
 // SessionGate is the FUNCTION-shaped per-turn session-control seam — the same gate
@@ -52,6 +54,10 @@ type SessionGate struct {
 	// Debit reports a completed turn's usage back to the drive state (output + context
 	// tokens), the function-shaped twin of session.Table.DebitUsage.
 	Debit func(trace string, outputTokens, contextTokens int)
+	// Wait parks a non-terminal hold until the session resumes. It is called only for
+	// a PAUSED function-shaped gate; table-based harness callers keep their historical
+	// single-shot "stop this arm" behavior.
+	Wait func(trace string) (resumed bool, reason string)
 }
 
 // WithSessionTable wires a per-session drive-state table and the trace id this run is
@@ -106,6 +112,17 @@ func WithSpeculator(s *abi.Speculator) RunOption {
 	return func(c *runConfig) { c.spec = s }
 }
 
+// WithContextPlanner wires a persistent per-session context planner into RunArm. When
+// the session gate lowers this turn's output cap, RunArm composes that Pace into the
+// planner's resident-context Budget before rendering the prompt. A nil planner is a
+// no-op, preserving the historical loop.
+func WithContextPlanner(sp *SessionPlanner, baselineOutput int) RunOption {
+	return func(c *runConfig) {
+		c.contextPlanner = sp
+		c.contextBaselineOutput = baselineOutput
+	}
+}
+
 // routeToolEngine returns the engine route to bind to abi.ToolCall.Engine for one tool
 // call under this run's optional routing manifest, or "" for the kernel default. It
 // classifies the call into a Subject{Aspect: AspectToolCall, Tool: tool} and returns the
@@ -142,27 +159,39 @@ func resolveRunConfig(opts []RunOption) runConfig {
 // inter-turn gap, gateTurn sleeps it here (respecting ctx cancellation) so a throttled
 // session is paced without the loop body needing to know about timing.
 //
-// PAUSED is a non-terminal hold: gateTurn returns proceed=false with the PAUSED reason
-// so the loop stops THIS run cleanly (the harness loop is single-shot; a long-lived
-// gateway loop would instead wait and re-Decide — that wait belongs to the gateway
-// integration, #555, not the A/B harness). DRAINING/STOPPED/budget-exhausted return
-// proceed=false with a terminal reason.
+// PAUSED is a non-terminal hold. A concrete table still returns proceed=false so the
+// historical harness can stop a single-shot arm cleanly; a function-shaped gate with a
+// Wait hook parks and re-Decides at the resumed boundary. DRAINING/STOPPED/budget-
+// exhausted return proceed=false with a terminal reason.
 func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reason string) {
 	// Function-shaped gate (the gateway native loop): prefer it when wired. It carries
 	// the same Decide semantics as the table, projected onto primitives.
 	if c.gate != nil && c.gate.Decide != nil {
-		mt, proceed, gap, reason := c.gate.Decide(c.trace)
-		if !proceed {
-			return 0, false, reason
-		}
-		if gap > 0 {
-			select {
-			case <-ctx.Done():
-				return 0, false, reason
-			case <-time.After(time.Duration(gap) * time.Millisecond):
+		for {
+			mt, proceed, gap, reason := c.gate.Decide(c.trace)
+			if proceed {
+				if gap > 0 {
+					select {
+					case <-ctx.Done():
+						return 0, false, reason
+					case <-time.After(time.Duration(gap) * time.Millisecond):
+					}
+				}
+				return mt, true, ""
 			}
+			if reason != session.ReasonPaused || c.gate.Wait == nil {
+				return 0, false, reason
+			}
+			resumed, waitReason := c.gate.Wait(c.trace)
+			if !resumed {
+				if waitReason == "" {
+					waitReason = reason
+				}
+				return 0, false, waitReason
+			}
+			// Re-Decide at the resumed boundary so turn/budget debits and pace are
+			// taken from the live state after the operator released the hold.
 		}
-		return mt, true, ""
 	}
 	if c.table == nil {
 		return 0, true, ""
@@ -179,6 +208,29 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 		}
 	}
 	return v.MaxTokens, true, ""
+}
+
+// applyPace composes the session gate's per-turn output cap into the optional
+// persistent context planner. With no planner this is a no-op.
+func (c runConfig) applyPace(maxTokens int) {
+	if c.contextPlanner == nil {
+		return
+	}
+	c.contextPlanner.ApplyPace(session.Pace{MaxTokensPerTurn: maxTokens}, c.contextBaselineOutput)
+}
+
+// promptMessages returns the context-planned prompt for this turn when a persistent
+// planner is wired. The authoritative message history stays lossless in RunArm; only
+// the model-facing prompt is shortened.
+func (c runConfig) promptMessages(ctx context.Context, messages []Message) []Message {
+	if c.contextPlanner == nil {
+		return messages
+	}
+	planned := c.contextPlanner.RenderTurn(ctx, messages)
+	if len(planned) == 0 {
+		return messages
+	}
+	return planned
 }
 
 // drainSteer non-blocking-receives any operator steer enqueued for this run on the

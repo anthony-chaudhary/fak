@@ -298,6 +298,7 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			}
 			return m, nil
 		}
+		cfg.applyPace(perTurnCap)
 
 		// Steer splice (#850): a running session drains any operator steer enqueued on
 		// the a2achan Session-locale bus and folds it into THIS turn's input. With no
@@ -307,7 +308,7 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			messages = append(messages, Message{Role: RoleUser, Content: steer})
 		}
 
-		comp, err := p.Complete(ctx, messages, tools, sampleOptsFor(perTurnCap)...)
+		comp, err := p.Complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
 		}
