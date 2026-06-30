@@ -86,14 +86,20 @@ func snapshotKinds(argv []string) {
 
 // snapshotInfo loads + integrity-verifies a snapshot envelope (.snap / JSON) or a
 // session image (.faksession archive or a bundle dir) and prints its header.
+// requireSnapshotFile exits 2 with the house usage line when --file is empty — the guard
+// the snapshot subcommands share. label tags the usage line ("info" / "restore-fleet").
+func requireSnapshotFile(label, file string) {
+	if file == "" {
+		fmt.Fprintln(os.Stderr, "fak snapshot "+label+": --file is required")
+		os.Exit(2)
+	}
+}
+
 func snapshotInfo(argv []string) {
 	fs := flag.NewFlagSet("snapshot info", flag.ExitOnError)
 	file := fs.String("file", "", "a .snap envelope, a .faksession archive, or a bundle directory")
 	_ = fs.Parse(argv)
-	if *file == "" {
-		fmt.Fprintln(os.Stderr, "fak snapshot info: --file is required")
-		os.Exit(2)
-	}
+	requireSnapshotFile("info", *file)
 	path := pathutil.ExpandTilde(*file)
 
 	// A session image (.faksession or a dir holding image.json) is the rich multi-part
@@ -448,10 +454,7 @@ func snapshotRestoreFleet(argv []string) {
 	key := fs.String("key", defaultGatewayBearerToken(), "bearer credential")
 	file := fs.String("file", "", "the fleet snapshot to restore (required)")
 	_ = fs.Parse(argv)
-	if *file == "" {
-		fmt.Fprintln(os.Stderr, "fak snapshot restore-fleet: --file is required")
-		os.Exit(2)
-	}
+	requireSnapshotFile("restore-fleet", *file)
 	restored, skipped, err := restoreFleetWire(newFleetClient(*addr, *key), pathutil.ExpandTilde(*file), os.Stdout)
 	must(err)
 	fmt.Printf("restored %d session(s) onto %s (%d skipped: terminal/contended)\n", restored, *addr, skipped)
