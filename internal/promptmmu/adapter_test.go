@@ -124,6 +124,38 @@ func TestToolPlanFor_PlanFeedsSpine(t *testing.T) {
 	}
 }
 
+// TestToolPlanForRequest_SelfDropIsAdvertisedOnlyAndFloorMonotonic (#757): the
+// request-shaped planner input unions self-drop with the policy floor, filters
+// unknown names to the advertised surface, and cannot remove a kernel-denied drop.
+func TestToolPlanForRequest_SelfDropIsAdvertisedOnlyAndFloorMonotonic(t *testing.T) {
+	req := ToolPlanRequest{
+		Advertised: []string{"read_file", "write_file", "rm_rf"},
+		SelfDrop:   []string{"write_file", "not_advertised", ""},
+	}
+	plan := ToolPlanForRequest(req, fakeFloor("rm_rf"))
+	if got := sortedKeys(plan.Drop); !eqStrs(got, []string{"rm_rf", "write_file"}) {
+		t.Fatalf("Drop = %v, want [rm_rf write_file]", got)
+	}
+	if plan.Drop["not_advertised"] {
+		t.Fatalf("self-drop must be scoped to the advertised surface")
+	}
+}
+
+// TestToolPlanForRequest_DrivesSelfDropSpinePrune proves the request-level helper
+// is a valid input to the unchanged spine: a purely self-imposed, advertised tool
+// drop removes that post-breakpoint definition.
+func TestToolPlanForRequest_DrivesSelfDropSpinePrune(t *testing.T) {
+	raw := body(t, []map[string]any{tool("read_file", true), tool("write_file", false)}, false)
+	plan := ToolPlanForRequest(ToolPlanRequest{
+		Advertised: []string{"read_file", "write_file"},
+		SelfDrop:   []string{"write_file"},
+	}, fakeFloor())
+	res := CompactInboundTools(raw, plan, okDecode)
+	if !res.Changed || len(res.Pruned) != 1 || res.Pruned[0] != "write_file" {
+		t.Fatalf("self-drop request should prune write_file, got changed=%v pruned=%v reason=%q", res.Changed, res.Pruned, res.SkipReason)
+	}
+}
+
 // TestWithSelfDrop_UnionsAndDoesNotMutate (#757): self-withheld tools augment the
 // policy Drop set as a union, and the input plan is never mutated.
 func TestWithSelfDrop_UnionsAndDoesNotMutate(t *testing.T) {

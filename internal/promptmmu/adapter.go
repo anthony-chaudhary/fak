@@ -21,6 +21,18 @@ package promptmmu
 // a few tokens, a wrong prune removes a real capability — epic invariant 5).
 type DeniesUnconditionally func(tool string) bool
 
+// ToolPlanRequest is the planner-side input for building a prompt-MMU tool plan.
+// Advertised names the MCP/tool definitions currently present in the model-visible
+// surface; SelfDrop names the subset the agent asks to withhold from ITS OWN surface
+// this turn (#757). The request is negative-only: it can add names to Drop, never
+// remove a kernel-denied name from Drop or widen the advertised set.
+type ToolPlanRequest struct {
+	// Advertised is the set of tool names currently advertised in tools[].
+	Advertised []string
+	// SelfDrop is the agent's self-imposed tool-name drop list for this surface.
+	SelfDrop []string
+}
+
 // ToolPlanFor builds the ToolPlan whose Drop set is exactly the advertised tools
 // the policy floor denies UNCONDITIONALLY (denies for all args), so the spine may
 // drop their DEFINITIONS with zero behavioral change. It is the #752 adapter: pure
@@ -51,6 +63,32 @@ func ToolPlanFor(advertised []string, denies DeniesUnconditionally) ToolPlan {
 		}
 	}
 	return plan
+}
+
+// ToolPlanForRequest builds the complete planner-side ToolPlan for one advertised
+// surface: kernel-floor unconditional denials UNION the agent's self-imposed drops
+// (#757). SelfDrop entries are scoped to Advertised, so a request can only shrink
+// the tool definitions it is actually offering this turn; unknown and empty names
+// are ignored. The result is still only a plan — CompactInboundTools owns the
+// cache-safe splice and may refuse a cache-unsafe drop.
+func ToolPlanForRequest(req ToolPlanRequest, denies DeniesUnconditionally) ToolPlan {
+	plan := ToolPlanFor(req.Advertised, denies)
+	if len(req.SelfDrop) == 0 {
+		return plan
+	}
+	advertised := make(map[string]bool, len(req.Advertised))
+	for _, name := range req.Advertised {
+		if name != "" {
+			advertised[name] = true
+		}
+	}
+	self := make([]string, 0, len(req.SelfDrop))
+	for _, name := range req.SelfDrop {
+		if advertised[name] {
+			self = append(self, name)
+		}
+	}
+	return WithSelfDrop(plan, self)
 }
 
 // WithSelfDrop returns a copy of plan augmented with the agent's OWN self-imposed
