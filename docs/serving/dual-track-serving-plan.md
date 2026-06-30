@@ -183,7 +183,7 @@ track. (Shared spine is in [§4](#4-the-shared-spine-built-once-both-tracks-plug
 |---|---|
 | #40 | vLLM-V1 adapter behind the `EngineDriver` seam (HTTP + KV-events) |
 | #39 | SGLang adapter behind the seam (RadixAttention signal + scheduler metrics) |
-| #38 | Dynamo interop — fak router stands beside/in front of Dynamo's P/D router |
+| #38 | Dynamo interop — **resolved as fak-governs / Dynamo-routes**: `engine.DynamoEngine` dispatches through Dynamo's public OpenAI-compatible frontend, normalizes Dynamo P/D worker metrics, and records the trust boundary in [`dynamo-interop.md`](dynamo-interop.md). |
 | #37 | Orchestrate external P/D disaggregation + govern KV-transport bridge (NIXL/Mooncake/LMCache) — governance contract documented, live wiring is a later step |
 | *(rides free)* | Speculative decoding inherited from the ridden engine (native verify/accept is a later Track-B lever; not separately filed in this block) |
 

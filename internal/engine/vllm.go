@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -898,6 +899,9 @@ type metricSumCount struct {
 type ServingMetricsSnapshot struct {
 	Engine   string
 	WorkerID string
+	// WorkerRole is optional. It is set by P/D-aware control planes such as
+	// Dynamo when the upstream exposes prefill/decode role labels.
+	WorkerRole string
 
 	TTFT  metricSumCount
 	TPOT  metricSumCount
@@ -918,6 +922,13 @@ type ServingMetricsSnapshot struct {
 	// engine that reports counters instead (vLLM) leaves it nil and emits NO ratio
 	// line — a literal 0.0 would read as a measured 0% hit rate, which it is not.
 	PrefixCacheHitRatio *float64
+
+	// Optional P/D worker-load gauges. Dynamo exposes these as per-worker signals:
+	// active decode blocks and queued prefill tokens. They are not ratios, so they
+	// stay separate from KVCacheUsage while still rendering in the fak_serving_* L2
+	// namespace with worker labels.
+	ActiveDecodeBlocks  *float64
+	ActivePrefillTokens *float64
 }
 
 // ParseVLLMPrometheus extracts the vLLM metric names used by vLLM V1 and maps
@@ -965,62 +976,192 @@ func ParseVLLMPrometheus(workerID, text string) ServingMetricsSnapshot {
 	return s
 }
 
+type promMetricSample struct {
+	name   string
+	labels map[string]string
+	value  float64
+}
+
 func parsePromSample(line string) (name string, value float64, ok bool) {
+	s, ok := parsePromMetricSample(line)
+	if !ok {
+		return "", 0, false
+	}
+	return s.name, s.value, true
+}
+
+func parsePromMetricSample(line string) (promMetricSample, bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
-		return "", 0, false
+		return promMetricSample{}, false
 	}
 	fields := strings.Fields(line)
 	if len(fields) < 2 {
-		return "", 0, false
+		return promMetricSample{}, false
 	}
-	name = fields[0]
+	name := fields[0]
+	labels := map[string]string{}
 	if i := strings.IndexByte(name, '{'); i >= 0 {
+		if j := strings.LastIndexByte(name, '}'); j > i {
+			if parsed, ok := parsePromSampleLabels(name[i+1 : j]); ok {
+				labels = parsed
+			}
+		}
 		name = name[:i]
 	}
 	v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
 	if err != nil {
-		return "", 0, false
+		return promMetricSample{}, false
 	}
-	return name, v, true
+	return promMetricSample{name: name, labels: labels, value: v}, true
+}
+
+func parsePromSampleLabels(s string) (map[string]string, bool) {
+	labels := map[string]string{}
+	for strings.TrimSpace(s) != "" {
+		s = strings.TrimLeft(s, " \t,")
+		eq := strings.IndexByte(s, '=')
+		if eq <= 0 {
+			return nil, false
+		}
+		key := strings.TrimSpace(s[:eq])
+		s = strings.TrimLeft(s[eq+1:], " \t")
+		if !strings.HasPrefix(s, `"`) {
+			return nil, false
+		}
+		value, n, ok := parsePromQuotedLabel(s)
+		if !ok {
+			return nil, false
+		}
+		labels[key] = value
+		s = s[n:]
+	}
+	return labels, true
+}
+
+func parsePromQuotedLabel(s string) (string, int, bool) {
+	var b strings.Builder
+	escaped := false
+	for i, r := range s {
+		if i == 0 {
+			continue
+		}
+		if escaped {
+			switch r {
+			case 'n':
+				b.WriteByte('\n')
+			case '\\', '"':
+				b.WriteRune(r)
+			default:
+				b.WriteRune(r)
+			}
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			return b.String(), i + 1, true
+		}
+		b.WriteRune(r)
+	}
+	return "", 0, false
 }
 
 // Prometheus renders normalized metrics. The values are relabeled as fak_serving_*
 // so a vLLM worker and future SGLang/native emitters can share one schema.
 func (s ServingMetricsSnapshot) Prometheus() string {
+	return ServingMetricsSnapshots{s}.Prometheus()
+}
+
+// ServingMetricsSnapshots renders one or more worker rows in the normalized
+// fak_serving_* schema without duplicating HELP/TYPE records.
+type ServingMetricsSnapshots []ServingMetricsSnapshot
+
+func (rows ServingMetricsSnapshots) Prometheus() string {
 	var b strings.Builder
-	labels := `engine="` + promLabel(firstNonEmpty(s.Engine, VLLMEngineID)) + `",worker="` + promLabel(firstNonEmpty(s.WorkerID, "vllm")) + `"`
-	writeServingSumCount(&b, "fak_serving_ttft_seconds", "Time to first token normalized from the worker serving metrics.", labels, s.TTFT)
-	writeServingSumCount(&b, "fak_serving_tpot_seconds", "Time per output token normalized from the worker serving metrics.", labels, s.TPOT)
-	writeServingSumCount(&b, "fak_serving_itl_seconds", "Inter-token latency normalized from the worker serving metrics.", labels, s.ITL)
-	writeServingSumCount(&b, "fak_serving_queue_seconds", "Queue time normalized from the worker serving metrics.", labels, s.Queue)
-	writeGauge(&b, "fak_serving_kv_cache_usage_ratio", "Worker KV-cache usage ratio.", labels, s.KVCacheUsage)
-	writeGauge(&b, "fak_serving_requests_running", "Worker running request gauge.", labels, s.RequestsRunning)
-	writeGauge(&b, "fak_serving_requests_waiting", "Worker waiting request gauge.", labels, s.RequestsWaiting)
-	writeGauge(&b, "fak_serving_requests_swapped", "Worker swapped request gauge.", labels, s.RequestsSwapped)
-	writeCounterFloat(&b, "fak_serving_request_success_total", "Worker successful request counter.", labels, s.RequestSuccesses)
-	writeCounterFloat(&b, "fak_serving_prefix_cache_queries_total", "Worker prefix-cache query counter.", labels, s.PrefixQueries)
-	writeCounterFloat(&b, "fak_serving_prefix_cache_hits_total", "Worker prefix-cache hit counter.", labels, s.PrefixHits)
-	if s.PrefixCacheHitRatio != nil {
-		writeGauge(&b, "fak_serving_prefix_cache_hit_ratio", "Directly-reported prefix/radix cache-hit ratio (0..1).", labels, *s.PrefixCacheHitRatio)
-	}
+	rows = sortedServingSnapshots(rows)
+	writeServingSumCountRows(&b, "fak_serving_ttft_seconds", "Time to first token normalized from the worker serving metrics.", rows, func(s ServingMetricsSnapshot) metricSumCount { return s.TTFT })
+	writeServingSumCountRows(&b, "fak_serving_tpot_seconds", "Time per output token normalized from the worker serving metrics.", rows, func(s ServingMetricsSnapshot) metricSumCount { return s.TPOT })
+	writeServingSumCountRows(&b, "fak_serving_itl_seconds", "Inter-token latency normalized from the worker serving metrics.", rows, func(s ServingMetricsSnapshot) metricSumCount { return s.ITL })
+	writeServingSumCountRows(&b, "fak_serving_queue_seconds", "Queue time normalized from the worker serving metrics.", rows, func(s ServingMetricsSnapshot) metricSumCount { return s.Queue })
+	writeGaugeRows(&b, "fak_serving_kv_cache_usage_ratio", "Worker KV-cache usage ratio.", rows, func(s ServingMetricsSnapshot) float64 { return s.KVCacheUsage })
+	writeGaugeRows(&b, "fak_serving_requests_running", "Worker running request gauge.", rows, func(s ServingMetricsSnapshot) float64 { return s.RequestsRunning })
+	writeGaugeRows(&b, "fak_serving_requests_waiting", "Worker waiting request gauge.", rows, func(s ServingMetricsSnapshot) float64 { return s.RequestsWaiting })
+	writeGaugeRows(&b, "fak_serving_requests_swapped", "Worker swapped request gauge.", rows, func(s ServingMetricsSnapshot) float64 { return s.RequestsSwapped })
+	writeCounterFloatRows(&b, "fak_serving_request_success_total", "Worker successful request counter.", rows, func(s ServingMetricsSnapshot) float64 { return s.RequestSuccesses })
+	writeCounterFloatRows(&b, "fak_serving_prefix_cache_queries_total", "Worker prefix-cache query counter.", rows, func(s ServingMetricsSnapshot) float64 { return s.PrefixQueries })
+	writeCounterFloatRows(&b, "fak_serving_prefix_cache_hits_total", "Worker prefix-cache hit counter.", rows, func(s ServingMetricsSnapshot) float64 { return s.PrefixHits })
+	writeOptionalGaugeRows(&b, "fak_serving_prefix_cache_hit_ratio", "Directly-reported prefix/radix cache-hit ratio (0..1).", rows, func(s ServingMetricsSnapshot) *float64 { return s.PrefixCacheHitRatio }, false)
+	writeOptionalGaugeRows(&b, "fak_serving_worker_active_decode_blocks", "P/D worker active decode KV blocks reported by the ridden control plane.", rows, func(s ServingMetricsSnapshot) *float64 { return s.ActiveDecodeBlocks }, true)
+	writeOptionalGaugeRows(&b, "fak_serving_worker_active_prefill_tokens", "P/D worker queued or active prefill tokens reported by the ridden control plane.", rows, func(s ServingMetricsSnapshot) *float64 { return s.ActivePrefillTokens }, true)
 	return b.String()
 }
 
-func writeServingSumCount(b *strings.Builder, name, help, labels string, v metricSumCount) {
+func sortedServingSnapshots(rows []ServingMetricsSnapshot) []ServingMetricsSnapshot {
+	out := append([]ServingMetricsSnapshot(nil), rows...)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		ak := firstNonEmpty(a.Engine, VLLMEngineID) + "\x00" + firstNonEmpty(a.WorkerID, "vllm") + "\x00" + a.WorkerRole
+		bk := firstNonEmpty(b.Engine, VLLMEngineID) + "\x00" + firstNonEmpty(b.WorkerID, "vllm") + "\x00" + b.WorkerRole
+		return ak < bk
+	})
+	return out
+}
+
+func servingSnapshotLabels(s ServingMetricsSnapshot, includeRole bool) string {
+	labels := `engine="` + promLabel(firstNonEmpty(s.Engine, VLLMEngineID)) + `",worker="` + promLabel(firstNonEmpty(s.WorkerID, "vllm")) + `"`
+	if includeRole && s.WorkerRole != "" {
+		labels += `,role="` + promLabel(s.WorkerRole) + `"`
+	}
+	return labels
+}
+
+func writeServingSumCountRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) metricSumCount) {
 	writeHelpType(b, name, help, "summary")
-	fmt.Fprintf(b, "%s_sum{%s} %s\n", name, labels, promFloat(v.Sum))
-	fmt.Fprintf(b, "%s_count{%s} %s\n", name, labels, promFloat(v.Count))
+	for _, row := range rows {
+		labels := servingSnapshotLabels(row, false)
+		v := pick(row)
+		fmt.Fprintf(b, "%s_sum{%s} %s\n", name, labels, promFloat(v.Sum))
+		fmt.Fprintf(b, "%s_count{%s} %s\n", name, labels, promFloat(v.Count))
+	}
 }
 
-func writeGauge(b *strings.Builder, name, help, labels string, value float64) {
+func writeGaugeRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
 	writeHelpType(b, name, help, "gauge")
-	fmt.Fprintf(b, "%s{%s} %s\n", name, labels, promFloat(value))
+	for _, row := range rows {
+		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, false), promFloat(pick(row)))
+	}
 }
 
-func writeCounterFloat(b *strings.Builder, name, help, labels string, value float64) {
+func writeCounterFloatRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
 	writeHelpType(b, name, help, "counter")
-	fmt.Fprintf(b, "%s{%s} %s\n", name, labels, promFloat(value))
+	for _, row := range rows {
+		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, false), promFloat(pick(row)))
+	}
+}
+
+func writeOptionalGaugeRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) *float64, includeRole bool) {
+	var any bool
+	for _, row := range rows {
+		if pick(row) != nil {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return
+	}
+	writeHelpType(b, name, help, "gauge")
+	for _, row := range rows {
+		v := pick(row)
+		if v == nil {
+			continue
+		}
+		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, includeRole), promFloat(*v))
+	}
 }
 
 func writeHelpType(b *strings.Builder, name, help, typ string) {

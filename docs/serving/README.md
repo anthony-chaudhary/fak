@@ -31,7 +31,8 @@ bit-exact KV cache and the default-deny capability floor.*
 
 | Plan | What it covers |
 |---|---|
-| [Dual-track serving](dual-track-serving-plan.md) | The authoritative sequencing contract: **ride** best-in-class engines (vLLM, SGLang) *and* grow a **native** in-kernel engine, over one shared, track-neutral spine. |
+| [Dual-track serving](dual-track-serving-plan.md) | The authoritative sequencing contract: **ride** best-in-class engines (vLLM, SGLang, Dynamo) *and* grow a **native** in-kernel engine, over one shared, track-neutral spine. |
+| [Dynamo interop](dynamo-interop.md) | Issue #38 decision: fak governs in front of Dynamo's public frontend, Dynamo keeps ownership of P/D routing, and fak normalizes Dynamo role/load/KV signals into `fak_serving_*`. |
 | [Poly-model prefill sharing](polymodel-prefill-share-plan.md) | Host tens of models in one kernel, share prefill across them, decode one at a time, and put idle models to work on speculative decoding. |
 | [Hardware-aware KV cache](hardware-aware-cache.md) | Plan where a KV span lives across HBM, DRAM, NUMA-far, CXL, disk, and remote tiers — per-tier TTL and demote-not-evict placement. |
 | [Regenerable KV cache](regenerable-kv-plan.md) | Treat the KV cache as a build artifact rebuilt from durable transcript text, so a model rollout becomes a backfill instead of a cold start. |
