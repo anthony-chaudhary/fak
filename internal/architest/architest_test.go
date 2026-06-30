@@ -84,6 +84,7 @@ var tier = map[string]int{
 	"xenginekv":  1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
 	"secretload": 1, // first-class secret/config loader (#887/#889): SecretSource priority list + os-env/encrypted-file/.env backends + Require checklist + Redact; imports canon(1)+stdlib, off the hot path.
 	"windowgate": 1, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
+	"worktype":   1, // closed work-class taxonomy (ongoing optimization PROGRAM vs DISCRETE deliverable epic) the milestone roadmap + `fak program` report sort by; stdlib-only, imports nothing internal, off the hot path.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
@@ -169,6 +170,7 @@ var tier = map[string]int{
 	"vcacheobserve":   2,
 	"vcachesnapshot":  2, // vCache observed-cache-window snapshot bridge (#827d882f): folds vcacheobserve's realized traffic into the read-side snapshot the score consumes; imports vcacheobserve(2)+stdlib only, off the hot path.
 	"cadencereport":   3, // the consolidated regular-cadence report: a read-only fold-over-folds that distills the scorecard control pane (scores), git (work-done), and release-status (releases) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like gardenbundle): shells to the Python folds + git off the hot path, imports nothing internal.
+	"epicprogress":    1, // the provenance-honest gh epic child-completion resolver (#1438): a track-label -> body-checklist -> honest-errored-row priority chain behind an injectable Runner, returning EpicCounts{Closed,Total,Source,Err} that NEVER fabricates a 0%. Extracted from milestonereport so issue-triage/plan-audit/dogfoodissues can reuse it; stdlib-only, imports nothing internal, off the hot path.
 	"milestonereport": 3, // the milestone tracking report: a read-only fold of the maturity CLIMB (covmatrix x supportmaturity rung distribution) + the epic ROADMAP (tracked-epic child completion read from `gh`) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like cadencereport): shells to `gh` + git off the hot path; imports covmatrix(1)+supportmaturity(2).
 	"milestonepost":   3, // outbound Slack publisher for the milestone report (twin of cachevaluepost): folds a milestonereport.Report into one #milestones channel card. Forced to tier 3 by its milestonereport(3) import; also imports scoreboard(1)+slackenv(1)+slackmeta(1), off the hot path.
 	"dispatchorder":   1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
