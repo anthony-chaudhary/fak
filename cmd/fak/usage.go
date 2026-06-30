@@ -47,6 +47,12 @@ func usageCoreVerbs() {
                  commit path (appends the (fak L) stamp, pre-lints, refuses OFF_TRUNK / a
                  pathspec race / an off-lane stamp). --json feeds a drive-to-zero loop.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/failed commit)
+  fak sync      [check|apply] [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
+                (SAFE FAST-FORWARD SYNC for a dirty shared worktree. check is read-only
+                 except optional --fetch. apply fast-forwards only when every path Git would
+                 write is clean at HEAD or already byte-identical to the remote-tracking
+                 version, preserving unrelated local work. Never uses pull, stash, reset,
+                 clean, or add. Exit 0 safe/applied/in-sync, 2 usage, 3 refused, 4 internal.)
   fak affected  [--base REF] [--file P] [--budget DUR] [--report FILE]
                 [--list] [--json] [--short] [--run RE] [--] [go test args]
                 (the FAST INNER LOOP: run go test for only the packages your

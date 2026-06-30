@@ -149,6 +149,7 @@ concurrent = [
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine); cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint
   "codexmcphealth",
   "operatorbrief",
+  "safesync",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -215,6 +216,7 @@ autopick = [
   "loopindex", # #1152: internal/loopindex leaf (the agentic-coding loop-index spine), see [lanes].concurrent note
   "codexmcphealth",
   "operatorbrief",
+  "safesync",
   # new-leaf:lane
 ]
 
@@ -363,6 +365,7 @@ guardcomplaint = ["internal/guardcomplaint/**"] # agent APPEAL channel (`fak com
 loopindex = ["internal/loopindex/**"] # #1152: agentic-coding loop-index spine (cmd/fak/loopindex.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 codexmcphealth = ["internal/codexmcphealth/**"]
 operatorbrief = ["internal/operatorbrief/**"]
+safesync = ["internal/safesync/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

@@ -68,6 +68,8 @@ func main() {
 		cmdCommit(os.Args[2:])
 	case "sweep":
 		cmdSweep(os.Args[2:])
+	case "sync":
+		cmdSync(os.Args[2:])
 	case "affected":
 		cmdAffected(os.Args[2:])
 	case "preflight":

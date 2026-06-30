@@ -206,6 +206,7 @@ var tier = map[string]int{
 	"loopfleet":       1, // cross-ledger loop-health fold (#1196): pure read-only adapters over the loopmgr/nightrun/dojo/cadence/dispatch journals joined into one per-loop health view in loopmgr's HealthState vocabulary; imports loopmgr(1), off the hot path.
 	"trendreport":     1, // the generic trend-report substrate (#1437): the durable-JSONL ledger plumbing (ParseLedger/LatestBefore/AppendLedgerLine over a Row key), DirectionWord, the embeddable control-pane Envelope+Stamp, and the AdvisoryGate whose only failing finding is the caller's *_unmeasured token. Lifts the machinery cadencereport/milestonereport/the dojo board each re-declare; stdlib+generics only, imports nothing internal, off the hot path. Consumer migration is a documented follow-on.
 	"dispatchaudit":   1, // pure dispatch-worker outcome fold (#1454): classifies each .dispatch-runs worker (shipped/wasted-spawn/quota-walled/retry-storm/no-op/errored), rolls up wasted-spawn + wasted-wall-clock per backend, and emits fingerprinted findings; stdlib-only core + a thin I/O shell, off the hot path.
+	"safesync":        2, // safe fast-forward sync for dirty shared worktrees; shells to git off the hot path.
 	// new-leaf:tier â€” `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
