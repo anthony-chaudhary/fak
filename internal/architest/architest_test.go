@@ -70,6 +70,7 @@ var tier = map[string]int{
 	"guardroute":           4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
+	"heavinessscore":       1,                // operator-heaviness scorecard over the cmd/fak dispatch table + guard flag set + dos.toml reasons + llms.txt doc map; imports pkg/scorecard, off the hot path.
 	"scorecardpane":        1,                // pure Go port of tools/scorecard_control_pane.py (portfolio debt-ratchet fold) + tools/repo_hygiene_scorecard.py (the tree-wide hygiene fold); stdlib-only, off the hot path.
 	"uiquality":            1,                // UI/UX-quality scorecard over the terminal render source (the fak console panes + fak info overlay + guard --split); stdlib-only, off the hot path.
 	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; stdlib-only, off the hot path.
