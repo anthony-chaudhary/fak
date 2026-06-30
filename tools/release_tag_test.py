@@ -205,6 +205,57 @@ class ReleaseTagTest(unittest.TestCase):
             ["acquire:fallback-owner", "release:fallback-owner"],
         )
 
+    def test_execute_uses_parent_release_lock_without_releasing_it(self) -> None:
+        rt = load()
+        root, sha = self._repo()
+        self._write_lock_helper(root)
+        context = rt.build_context(
+            root,
+            version="0.1.0",
+            ref=sha,
+            skip_dry_run=True,
+            skip_ci=True,
+            skip_remote_tag=True,
+        )
+        result = rt.execute_tag(root, context, lock_already_held=True)
+
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertTrue(result["tag_created"])
+        self.assertTrue(result["release_lock"]["held_by_parent"])
+        self.assertEqual(
+            (root / "lock.log").read_text(encoding="utf-8").splitlines(),
+            ["verify:fallback-owner"],
+        )
+
+    def test_execute_refuses_parent_lock_owned_by_another_session(self) -> None:
+        rt = load()
+        root, sha = self._repo()
+        write(root / "tools" / "release_lock.py", (
+            "import json, pathlib, sys\n"
+            "cmd = sys.argv[1]\n"
+            "p = pathlib.Path('lock.log')\n"
+            "old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+            "p.write_text(old + cmd + '\\n', encoding='utf-8')\n"
+            "print(json.dumps({'ok': False, 'reason': 'held by another session'}))\n"
+            "sys.exit(3)\n"
+        ))
+        context = rt.build_context(
+            root,
+            version="0.1.0",
+            ref=sha,
+            skip_dry_run=True,
+            skip_ci=True,
+            skip_remote_tag=True,
+        )
+
+        result = rt.execute_tag(root, context, lock_already_held=True)
+
+        self.assertFalse(result["ok"], result)
+        self.assertIn("release_lock_verify_failed", result["errors"])
+        self.assertFalse(result["tag_created"])
+        self.assertEqual((root / "lock.log").read_text(encoding="utf-8").splitlines(), ["verify"])
+        self.assertNotIn("v0.1.0", git(root, "tag", "-l"))
+
     def _write_lock_helper(self, root: Path) -> None:
         write(root / "tools" / "release_lock.py", (
             "import json, pathlib, sys\n"
@@ -214,7 +265,7 @@ class ReleaseTagTest(unittest.TestCase):
             "old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
             "p.write_text(old + cmd + ':' + owner + '\\n', encoding='utf-8')\n"
             "payload = {'ok': True, 'cmd': cmd}\n"
-            "if cmd == 'acquire':\n"
+            "if cmd in ('acquire', 'verify'):\n"
             "    payload['lock'] = {'owner': owner}\n"
             "print(json.dumps(payload))\n"
         ))

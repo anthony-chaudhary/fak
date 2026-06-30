@@ -357,6 +357,18 @@ def release_release_lock(root: Path, *, owner: str | None = None) -> dict:
     return payload
 
 
+def verify_release_lock(root: Path) -> dict:
+    script = root / "tools" / "release_lock.py"
+    if not script.is_file():
+        return {"ok": False, "held": False, "skipped": True, "reason": "release_lock.py not present"}
+    code, out = run([sys.executable, str(script), "verify"], cwd=root)
+    payload = _json_or_tail(out)
+    payload["exit_code"] = code
+    payload["held"] = code == 0 and bool(payload.get("ok"))
+    payload["held_by_parent"] = payload["held"]
+    return payload
+
+
 def build_context(root: Path, *, version: str | None, ref: str,
                   require_ci: bool = False, skip_ci: bool = False,
                   wait_ci: bool = False, skip_dry_run: bool = False,
@@ -466,7 +478,8 @@ def build_context(root: Path, *, version: str | None, ref: str,
 
 
 def execute_tag(root: Path, context: dict, *, push: bool = False, remote: str = "origin",
-                ttl: int = 1800, use_lock: bool = True) -> dict:
+                ttl: int = 1800, use_lock: bool = True,
+                lock_already_held: bool = False) -> dict:
     result = dict(context)
     result["dry_run"] = False
     result["tag_created"] = False
@@ -479,7 +492,14 @@ def execute_tag(root: Path, context: dict, *, push: bool = False, remote: str = 
     lock_held = False
     lock_owner: str | None = None
     try:
-        if use_lock:
+        if lock_already_held:
+            lock = verify_release_lock(root)
+            result["release_lock"] = lock
+            if not lock.get("held"):
+                result["ok"] = False
+                result.setdefault("errors", []).append("release_lock_verify_failed")
+                return result
+        elif use_lock:
             lock = acquire_release_lock(root, tag=tag, sha=sha, ttl=ttl)
             result["release_lock"] = lock
             if not lock.get("held") and not lock.get("skipped"):
@@ -542,6 +562,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--push", action="store_true", help="push the tag after creating or confirming it locally")
     parser.add_argument("--ttl", type=int, default=1800, help="release lock TTL while tagging")
     parser.add_argument("--no-lock", action="store_true", help="skip release lock during --execute")
+    parser.add_argument("--lock-already-held", action="store_true",
+                        help="execute under a parent-held release lock; verifies ownership and does not release it")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
@@ -567,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
             remote=args.remote,
             ttl=args.ttl,
             use_lock=not args.no_lock,
+            lock_already_held=args.lock_already_held,
         ) if args.execute else context
     except Exception as exc:
         result = {"ok": False, "errors": [str(exc)]}
