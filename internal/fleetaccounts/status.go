@@ -505,22 +505,44 @@ func applyStatus(r *Account, st RuntimeStatus) {
 }
 
 func applyLoginGate(r *Account) {
-	if r.Product != "claude" || r.Kind != KindWorker || r.LoginStatus == nil {
+	if r.Product != "claude" || r.Kind != KindWorker {
 		return
 	}
-	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
-	if st == configaccounts.LoginReady && derefBool(r.CanServe) {
+	if !accountLoginBlocked(*r) {
 		return
-	}
-	reason, _ := configaccounts.LoginReasonAction(st, configaccounts.Home{Name: r.Tag, Dir: r.Dir})
-	if reason == "" {
-		reason = "account login status is " + string(st)
 	}
 	r.Available = boolp(false)
 	r.Blocked = boolp(true)
 	r.BlockKind = strp("auth")
-	r.BlockReason = strp(reason)
+	r.BlockReason = strp(accountLoginBlockReason(*r))
 	r.Throttled = boolp(false)
+}
+
+func accountCanBeOffered(r Account) bool {
+	return derefBool(r.Available) && !accountLoginBlocked(r)
+}
+
+func accountLoginBlocked(r Account) bool {
+	if r.Product != "claude" || r.Kind != KindWorker {
+		return false
+	}
+	if r.CanServe != nil && !*r.CanServe {
+		return true
+	}
+	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
+	return st != "" && st != configaccounts.LoginReady
+}
+
+func accountLoginBlockReason(r Account) string {
+	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
+	if st != "" && st != configaccounts.LoginReady {
+		reason, _ := configaccounts.LoginReasonAction(st, configaccounts.Home{Name: r.Tag, Dir: r.Dir})
+		if reason != "" {
+			return reason
+		}
+		return "account login status is " + string(st)
+	}
+	return "account login cannot serve"
 }
 
 // AnnotatedRoster is the canonical "give me the live accounts" call: discover + annotate.
@@ -533,7 +555,7 @@ func AnnotatedRoster(home, configHome string, pol Policy, reg Registry) []Accoun
 func Available(rows []Account) []Account {
 	var out []Account
 	for _, r := range rows {
-		if RoutableWorker(r) && derefBool(r.Available) {
+		if RoutableWorker(r) && accountCanBeOffered(r) {
 			out = append(out, r)
 		}
 	}

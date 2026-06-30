@@ -114,8 +114,11 @@ func Resolve(rows []Account, home string, req ResolveRequest, pol Policy) Resolv
 			return flattenResolved(Account{}, false,
 				"account '"+req.Pin+"' is not an offered worker", nil, nil, false, "")
 		}
-		if !derefBool(match.Available) && !req.AllowTierFallback {
+		if !accountCanBeOffered(*match) && !req.AllowTierFallback {
 			why := derefStr(match.BlockReason)
+			if why == "" && accountLoginBlocked(*match) {
+				why = accountLoginBlockReason(*match)
+			}
 			if why == "" {
 				why = "blocked"
 			}
@@ -259,7 +262,7 @@ func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 				workers = append(workers, w)
 			}
 		}
-		available := derefBool(row.Available)
+		available := accountCanBeOffered(row)
 		var state string
 		switch {
 		case len(workers) > 0:

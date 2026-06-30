@@ -120,6 +120,9 @@ type BlockedAccount struct {
 
 func publicBlocked(r Account) BlockedAccount {
 	reason := derefStr(r.BlockReason)
+	if reason == "" && accountLoginBlocked(r) {
+		reason = accountLoginBlockReason(r)
+	}
 	if reason == "" {
 		reason = r.Reason
 	}
@@ -173,7 +176,7 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 	}
 	var available []Account
 	for _, r := range workers {
-		if derefBool(r.Available) {
+		if accountCanBeOffered(r) {
 			available = append(available, r)
 		}
 	}
@@ -205,7 +208,7 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 			}
 			var blocked []BlockedAccount
 			for _, r := range workers {
-				if tierOf(r) == target && !derefBool(r.Available) {
+				if tierOf(r) == target && !accountCanBeOffered(r) {
 					blocked = append(blocked, publicBlocked(r))
 				}
 			}
@@ -225,7 +228,7 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 	}
 	var blocked []BlockedAccount
 	for _, r := range workers {
-		if tierSet[tierOf(r)] && !derefBool(r.Available) {
+		if tierSet[tierOf(r)] && !accountCanBeOffered(r) {
 			blocked = append(blocked, publicBlocked(r))
 		}
 	}
