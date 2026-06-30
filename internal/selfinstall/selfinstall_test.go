@@ -173,6 +173,26 @@ func TestSingleFlightSecondCallIsBusy(t *testing.T) {
 	rel2()
 }
 
+func TestWindowsSwapAsidePathUsesPlainOldWhenFree(t *testing.T) {
+	got := windowsSwapAsidePath(`C:\work\fak\fak.exe`, 42, func(string) bool { return false })
+	if got != `C:\work\fak\fak.exe.old` {
+		t.Fatalf("aside path = %q, want plain .old", got)
+	}
+}
+
+func TestWindowsSwapAsidePathSkipsHeldOldName(t *testing.T) {
+	existing := map[string]bool{
+		`C:\work\fak\fak.exe.old`:      true,
+		`C:\work\fak\fak.exe.old.42.0`: true,
+	}
+	got := windowsSwapAsidePath(`C:\work\fak\fak.exe`, 42, func(path string) bool {
+		return existing[path]
+	})
+	if got != `C:\work\fak\fak.exe.old.42.1` {
+		t.Fatalf("aside path = %q, want first free unique old name", got)
+	}
+}
+
 var errSwap = swapErr("swap-fail")
 
 type swapErr string
