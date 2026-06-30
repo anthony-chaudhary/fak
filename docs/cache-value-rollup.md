@@ -23,7 +23,7 @@ it, and what must not be inferred from it.
 | Track | What it answers | Evidence | Current status |
 |---|---|---|---|
 | Track 1: WITNESSED kernel value | Did fak's own kernel reuse KV-prefix work on multi-turn sessions? | `cachevalueledger.Row` fields: `prompt_tokens`, `reused_tokens`, turn regimes, and weekly buckets from `internal/cachevaluereport`. | Shipped for realized reuse trend. |
-| Track 2: OBSERVED net-dollar savings | Did the deployed gateway reduce provider spend after its own costs and provider-cache behavior? | Billing/provider observations joined to the session timeline. | Not yet in this docs rung; tracked by epic #1301 rungs B/C. |
+| Track 2: OBSERVED net-dollar savings | Did the deployed gateway reduce provider spend after its own costs and provider-cache behavior? | `cachevaluereport.SavingsRow` fields: provider/mechanism, cache read/write tokens, compaction shed tokens, rebate/write/spend/net dollars, and weekly buckets. | Shipped as a sibling ledger and two-track fold; live rows appear as sessions append savings evidence. |
 
 The tracks stay unblended because they answer different questions. Track 1 is a mechanism
 proof: fak authored reuse inside the kernel and can witness the token counters. Track 2 is
@@ -63,6 +63,9 @@ A cache-value card should be read top-down:
   from before anyone turns it into a headline.
 - **Next action** names the missing evidence, usually more multi-turn sessions or the
   Track-2 provider-dollar join.
+- **Track 2 current** appears on the Slack feed when OBSERVED-$ rows exist. It names
+  the latest week, net dollars, rebate/compaction/write/spend components, and the
+  provider/mechanism buckets so a provider rebate cannot hide fak-authored compaction.
 
 ## Reproduce
 
@@ -84,6 +87,12 @@ The cachevalue front-door spelling for a dated operator report is:
 
 ```bash
 fak cachevalue report --since 2026-06-22
+```
+
+The Slack/feed spelling uses the same two ledgers and can be previewed without posting:
+
+```bash
+fak cachevalue feed --since 2026-06-22 --dry-run
 ```
 
 For the cache-frontier product review, generate the human note and appendable JSONL row

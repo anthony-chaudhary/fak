@@ -149,6 +149,49 @@ func TestFoldMeasuredCardRendersTrendAndFence(t *testing.T) {
 	}
 }
 
+func TestFoldTwoTrackCardRendersCurrentEconomicsAndNextAction(t *testing.T) {
+	now := time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC)
+	report := cachevaluereport.FoldTwoTrack(multiTurnRows(), []cachevaluereport.SavingsRow{
+		{
+			Date:            "2026-06-22",
+			Provider:        "anthropic",
+			Mechanism:       "provider_prompt_cache",
+			CacheReadTokens: 1000,
+			RebateUSD:       0.9000,
+			WritePremiumUSD: 0.1000,
+			SpendUSD:        0.2500,
+		},
+		{
+			Date:                 "2026-06-22",
+			Provider:             "fak",
+			Mechanism:            "compaction_shed",
+			CompactionShedTokens: 500,
+			CompactionSavedUSD:   0.5000,
+		},
+	}, now)
+	card := FoldTwoTrack(report)
+	got := card.Text()
+
+	for _, want := range []string{
+		"two-track P&L",
+		"Track 1 current: 2026-W26 80.0% reuse",
+		"Track 2 current: 2026-W26 net $1.0500",
+		"anthropic/provider_prompt_cache",
+		"fak/compaction_shed",
+		"next: post the two-track P&L",
+		"Track 1 (WITNESSED) and Track 2 (OBSERVED $) stay side by side",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("two-track card missing %q:\n%s", want, got)
+		}
+	}
+
+	bt := blocksText(card)
+	if !strings.Contains(bt, "Track 2 current: 2026-W26 net $1.0500") {
+		t.Fatalf("Blocks() dropped Track-2 current line:\n%s", bt)
+	}
+}
+
 func TestFoldInsufficientCardIsHonest(t *testing.T) {
 	// A single-turn-only corpus has no multi-turn reuse to trend → INSUFFICIENT, but the
 	// card must still render honestly (no fabricated trend) and carry the fence + next step.

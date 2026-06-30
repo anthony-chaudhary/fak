@@ -12,10 +12,11 @@
 // (cmd/fak/cachevalue.go) collects the report and posts the card via the shared
 // scoreboard chat.postMessage transport.
 //
-// What it renders is TRACK 1 only — the WITNESSED in-kernel KV-prefix reuse trend the
-// report folds. The OBSERVED provider-$ track (epic #1301 Track 2) joins the report
-// upstream and rides through here unchanged once it lands; this package never authors a
-// number, it only renders the report it is handed.
+// The legacy `post --report-json` path still renders TRACK 1 only — the WITNESSED
+// in-kernel KV-prefix reuse trend the report folds. The cadence `feed` path renders the
+// richer two-track report when it has both ledgers: Track 1 WITNESSED reuse plus Track 2
+// OBSERVED-$ economics. This package never authors a number; it only renders the report
+// it is handed.
 //
 // HONESTY FENCE (#1066): the report self-labels its publishable value family
 // (marginal-over-tuned-warm-KV; the vs-naive 1/(1-reuse) multiple is structurally
@@ -72,8 +73,9 @@ var (
 // Source rides in the context line. It satisfies the shared slackCard interface
 // (Text/Blocks), exactly like blockerpost.Blocker and benchpost.Post.
 type Card struct {
-	Report cachevaluereport.Report // the rolled-up Track-1 trend this card renders
-	Source string                  // who posted: "ci" | "agent" | <hostname> (optional)
+	Report   cachevaluereport.Report          // the rolled-up Track-1 trend this card renders
+	TwoTrack *cachevaluereport.TwoTrackReport // optional two-track P&L envelope for feed cards
+	Source   string                           // who posted: "ci" | "agent" | <hostname> (optional)
 }
 
 // Fold builds the channel Card from a rolled-up cache-value report. It is pure: it copies
@@ -82,6 +84,13 @@ type Card struct {
 // a single-argument report→card transform per the issue's `Fold(report) Card` contract.
 func Fold(report cachevaluereport.Report) Card {
 	return Card{Report: report}
+}
+
+// FoldTwoTrack builds the channel Card from the richer two-track report. Report keeps the
+// Track-1 sub-report available to the legacy renderer paths; TwoTrack lets render.go add
+// the OBSERVED-$ economics and current-window lines without blending the two tracks.
+func FoldTwoTrack(report cachevaluereport.TwoTrackReport) Card {
+	return Card{Report: report.Track1, TwoTrack: &report}
 }
 
 // ResolveToken applies the documented order: FAK_CACHEVALUE_TOKEN env, then a

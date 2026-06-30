@@ -2,6 +2,7 @@ package cachevaluepost
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
@@ -13,10 +14,40 @@ import (
 // reuse as the (excluded) vs-naive multiple.
 const cardTitle = "fak cache-value — Track 1 (WITNESSED kernel reuse)"
 
+const twoTrackCardTitle = "fak cache-value — two-track P&L (WITNESSED + OBSERVED)"
+
+func (c Card) title() string {
+	if c.TwoTrack != nil {
+		return twoTrackCardTitle
+	}
+	return cardTitle
+}
+
+func (c Card) verdict() string {
+	if c.TwoTrack != nil {
+		return c.TwoTrack.Verdict
+	}
+	return c.Report.Verdict
+}
+
+func (c Card) finding() string {
+	if c.TwoTrack != nil {
+		return c.TwoTrack.Finding
+	}
+	return c.Report.Finding
+}
+
+func (c Card) nextAction() string {
+	if c.TwoTrack != nil {
+		return c.TwoTrack.NextAction
+	}
+	return c.Report.NextAction
+}
+
 // glyph maps the report verdict to a leading status emoji: MEASURED reads as a chart (a
 // real trend to look at), anything thinner reads as an hourglass (accumulating, no page).
 func (c Card) glyph() string {
-	if c.Report.Verdict == "MEASURED" {
+	if c.verdict() == "MEASURED" {
 		return ":bar_chart:"
 	}
 	return ":hourglass_flowing_sand:"
@@ -117,8 +148,59 @@ func (c Card) bucketLines() []string {
 	return lines
 }
 
+func (c Card) currentLine() string {
+	track1 := "Track 1 current: no weekly rows"
+	if n := len(c.Report.Buckets); n > 0 {
+		b := c.Report.Buckets[n-1]
+		track1 = fmt.Sprintf("Track 1 current: %s %.1f%% reuse, %d session(s), %d multi-turn turn(s)",
+			b.Period, 100*b.RealizedReuseRatio, b.Sessions, b.MultiTurnTurns)
+	}
+	if c.TwoTrack == nil {
+		return track1
+	}
+	return track1 + "\n" + currentTrack2Line(*c.TwoTrack)
+}
+
+func currentTrack2Line(r cachevaluereport.TwoTrackReport) string {
+	if len(r.Track2) == 0 {
+		return "Track 2 current: no OBSERVED-$ rows"
+	}
+	latest := r.Track2[len(r.Track2)-1].Period
+	var sessions, buckets int
+	var rebate, compact, writePremium, spend, net, cumulative float64
+	dims := map[string]struct{}{}
+	for _, b := range r.Track2 {
+		if b.Period != latest {
+			continue
+		}
+		buckets++
+		sessions += b.Sessions
+		rebate += b.RebateUSD
+		compact += b.CompactionSavedUSD
+		writePremium += b.WritePremiumUSD
+		spend += b.SpendUSD
+		net += b.NetUSD
+		cumulative = b.CumulativeNetUSD
+		dims[b.Provider+"/"+b.Mechanism] = struct{}{}
+	}
+	return fmt.Sprintf("Track 2 current: %s net $%.4f (rebate $%.4f + compact $%.4f - write $%.4f - spend $%.4f), cumulative $%.4f, %d session(s), %d provider/mechanism bucket(s): %s",
+		latest, net, rebate, compact, writePremium, spend, cumulative, sessions, buckets, strings.Join(sortedKeys(dims), ", "))
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // fence is the #1066 honesty-fence label the card carries verbatim into the channel.
 func (c Card) fence() string {
+	if c.TwoTrack != nil {
+		return "fence: " + c.TwoTrack.ProjectionFence + "; Track 1 value family: " + cachevaluereport.PublishableValueFamily
+	}
 	return "fence: " + cachevaluereport.PublishableValueFamily
 }
 
@@ -128,20 +210,19 @@ func (c Card) fence() string {
 // the honesty fence.
 func (c Card) Text() string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s *%s* — %s", c.glyph(), cardTitle, c.Report.Verdict)
-	if f := strings.TrimSpace(c.Report.Finding); f != "" {
+	fmt.Fprintf(&sb, "%s *%s* — %s", c.glyph(), c.title(), c.verdict())
+	if f := strings.TrimSpace(c.finding()); f != "" {
 		fmt.Fprintf(&sb, "\n%s", f)
 	}
+	fmt.Fprintf(&sb, "\n%s", c.currentLine())
 	if tl := c.trendLine(); tl != "" {
 		fmt.Fprintf(&sb, "\n%s", tl)
 	}
 	for _, ln := range c.bucketLines() {
 		fmt.Fprintf(&sb, "\n• %s", ln)
 	}
-	if c.Report.Verdict != "MEASURED" {
-		if na := strings.TrimSpace(c.Report.NextAction); na != "" {
-			fmt.Fprintf(&sb, "\nnext: %s", na)
-		}
+	if na := strings.TrimSpace(c.nextAction()); na != "" {
+		fmt.Fprintf(&sb, "\nnext: %s", na)
 	}
 	fmt.Fprintf(&sb, "\n%s", c.fence())
 	if src := strings.TrimSpace(c.Source); src != "" {
@@ -157,27 +238,25 @@ func (c Card) Blocks() []any {
 	blocks := []any{
 		map[string]any{
 			"type": "section",
-			"text": map[string]any{"type": "mrkdwn", "text": fmt.Sprintf("*%s %s* — %s", c.glyph(), cardTitle, c.Report.Verdict)},
+			"text": map[string]any{"type": "mrkdwn", "text": fmt.Sprintf("*%s %s* — %s", c.glyph(), c.title(), c.verdict())},
 		},
 	}
-	if f := strings.TrimSpace(c.Report.Finding); f != "" {
+	if f := strings.TrimSpace(c.finding()); f != "" {
 		blocks = append(blocks, map[string]any{
 			"type": "section",
 			"text": map[string]any{"type": "mrkdwn", "text": f},
 		})
 	}
 
-	var body []string
+	body := []string{c.currentLine()}
 	if tl := c.trendLine(); tl != "" {
 		body = append(body, tl)
 	}
 	for _, ln := range c.bucketLines() {
 		body = append(body, "• "+ln)
 	}
-	if c.Report.Verdict != "MEASURED" {
-		if na := strings.TrimSpace(c.Report.NextAction); na != "" {
-			body = append(body, "next: "+na)
-		}
+	if na := strings.TrimSpace(c.nextAction()); na != "" {
+		body = append(body, "next: "+na)
 	}
 	if len(body) > 0 {
 		blocks = append(blocks, map[string]any{
@@ -201,7 +280,11 @@ func (c Card) Blocks() []any {
 }
 
 func (c Card) signalNoise() slackmeta.Score {
-	signal := 1 + slackmeta.NonEmpty(c.Report.Finding, c.trendLine(), c.Report.NextAction, c.fence()) + len(c.bucketLines())
+	track2 := ""
+	if c.TwoTrack != nil {
+		track2 = currentTrack2Line(*c.TwoTrack)
+	}
+	signal := 1 + slackmeta.NonEmpty(c.finding(), c.currentLine(), c.trendLine(), c.nextAction(), c.fence(), track2) + len(c.bucketLines())
 	noise := 1 + slackmeta.NonEmpty(c.Report.Schema, c.Source)
 	return slackmeta.New(signal, noise, "reuse finding, trend, bucket rows, and honesty fence vs schema/source")
 }

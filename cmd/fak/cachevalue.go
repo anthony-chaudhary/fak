@@ -18,9 +18,9 @@ import (
 // (C0BDSB81XDZ), the one durable place the fleet reads "is fak's cache method paying off,
 // and is it trending up or down?".
 //
-//	fak cachevalue feed                                  # fold the dogfooded ledger → card
+//	fak cachevalue feed                                  # fold both cache-value ledgers → Slack card
 //	fak cachevalue feed --dry-run                        # render the exact card; do not post
-//	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl
+//	fak cachevalue feed --ledger docs/nightrun/cache-value.jsonl --savings-ledger docs/nightrun/cache-savings.jsonl
 //	fak cachevalue post --report-json report.json        # post a pre-rolled report (- for stdin)
 //	fak cachevalue report --since 2026-06-22             # the two-track P&L (WITNESSED + OBSERVED $) + NET (#1304)
 //	fak cachevalue review --since 2026-06-22 --json      # inspect cache-frontier review row
@@ -49,13 +49,15 @@ func foldAndEmitCachevalue(stdout, stderr io.Writer, report cachevaluereport.Rep
 }
 
 // runCachevalueFeed handles `fak cachevalue feed` — the cadence roll-up. It reads the
-// durable kernel cache-value ledger (docs/nightrun/cache-value.jsonl), folds it into the
-// weekly Track-1 trend report (internal/cachevaluereport), and posts ONE card. A missing
-// or empty ledger folds to the honest INSUFFICIENT card rather than failing.
+// durable kernel cache-value ledger (Track 1) and the OBSERVED-$ savings ledger (Track 2),
+// folds them into the two-track P&L report, and posts ONE card. Missing or empty ledgers
+// fold to the honest INSUFFICIENT / missing-track card rather than failing.
 func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue feed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "the durable cache-value ledger to fold (docs/nightrun/cache-value.jsonl)")
+	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "the Track-2 OBSERVED-$ ledger to fold (docs/nightrun/cache-savings.jsonl)")
+	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
@@ -63,10 +65,19 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	if *since != "" {
+		if _, err := time.Parse("2006-01-02", *since); err != nil {
+			fmt.Fprintf(stderr, "fak cachevalue feed: --since must be YYYY-MM-DD: %v\n", err)
+			return 2
+		}
+	}
 
-	rows := cachevalueledger.ReadLedgerFile(*ledger)
-	report := cachevaluereport.Fold(rows, time.Now())
-	return foldAndEmitCachevalue(stdout, stderr, report, *source, *channel, *token, *dryRun)
+	track1 := filterTrack1Since(cachevalueledger.ReadLedgerFile(*ledger), *since)
+	track2 := filterTrack2Since(cachevaluereport.ReadSavingsLedgerFile(*savingsLedger), *since)
+	report := cachevaluereport.FoldTwoTrack(track1, track2, time.Now())
+	card := cachevaluepost.FoldTwoTrack(report)
+	card.Source = resolveCachevalueSource(*source)
+	return emitCachevalue(stdout, stderr, card, *channel, *token, *dryRun)
 }
 
 // runCachevaluePost handles `fak cachevalue post` — post a PRE-ROLLED report. It folds a

@@ -39,6 +39,7 @@ func TestCachevalueFeedDryRunRendersCard(t *testing.T) {
 	clearSlackEnv(t)
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "cache-value.jsonl")
+	savings := filepath.Join(dir, "cache-savings.jsonl")
 	// Two multi-turn weeks, trending up (60% -> 80% realized reuse).
 	body := `{"date":"2026-06-15","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":600}
 {"date":"2026-06-22","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":800}
@@ -46,9 +47,15 @@ func TestCachevalueFeedDryRunRendersCard(t *testing.T) {
 	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	savingsBody := `{"schema":"fak-cache-savings-ledger/1","date":"2026-06-22","provider":"anthropic","mechanism":"provider_prompt_cache","cache_read_tokens":1000,"rebate_usd":0.9,"write_premium_usd":0.1,"spend_usd":0.25}
+{"schema":"fak-cache-savings-ledger/1","date":"2026-06-22","provider":"fak","mechanism":"compaction_shed","compaction_shed_tokens":500,"compaction_saved_usd":0.5}
+`
+	if err := os.WriteFile(savings, []byte(savingsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	var out, errb bytes.Buffer
-	code := runCachevalueFeed(&out, &errb, []string{"--ledger", ledger, "--dry-run", "--source", "agent"})
+	code := runCachevalueFeed(&out, &errb, []string{"--ledger", ledger, "--savings-ledger", savings, "--dry-run", "--source", "agent"})
 	if code != 0 {
 		t.Fatalf("feed --dry-run exit = %d, stderr=%s", code, errb.String())
 	}
@@ -62,8 +69,50 @@ func TestCachevalueFeedDryRunRendersCard(t *testing.T) {
 	if !strings.Contains(got, "marginal-over-tuned-warm-KV") {
 		t.Fatalf("dry-run card dropped the #1066 honesty fence:\n%s", got)
 	}
+	if !strings.Contains(got, "two-track P&L") ||
+		!strings.Contains(got, "Track 2 current: 2026-W26 net $1.0500") ||
+		!strings.Contains(got, "anthropic/provider_prompt_cache") ||
+		!strings.Contains(got, "fak/compaction_shed") {
+		t.Fatalf("dry-run card dropped the Track-2 current economics:\n%s", got)
+	}
 	if !strings.Contains(got, "_posted by agent_") {
 		t.Fatalf("dry-run card dropped the source:\n%s", got)
+	}
+}
+
+func TestCachevalueFeedSinceFiltersBothLedgers(t *testing.T) {
+	clearSlackEnv(t)
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "cache-value.jsonl")
+	savings := filepath.Join(dir, "cache-savings.jsonl")
+	if err := os.WriteFile(ledger, []byte(`{"date":"2026-06-15","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":600}
+{"date":"2026-06-22","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":800}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(savings, []byte(`{"schema":"fak-cache-savings-ledger/1","date":"2026-06-15","provider":"anthropic","mechanism":"provider_prompt_cache","rebate_usd":9}
+{"schema":"fak-cache-savings-ledger/1","date":"2026-06-22","provider":"anthropic","mechanism":"provider_prompt_cache","rebate_usd":1}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runCachevalueFeed(&out, &errb, []string{
+		"--ledger", ledger,
+		"--savings-ledger", savings,
+		"--since", "2026-06-22",
+		"--dry-run",
+	})
+	if code != 0 {
+		t.Fatalf("feed --since exit=%d stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	if strings.Contains(got, "2026-W25") || strings.Contains(got, "$9.0000") {
+		t.Fatalf("--since should filter both Track-1 and Track-2 old rows:\n%s", got)
+	}
+	if !strings.Contains(got, "Track 1 current: 2026-W26") ||
+		!strings.Contains(got, "Track 2 current: 2026-W26 net $1.0000") {
+		t.Fatalf("--since card missing latest filtered data:\n%s", got)
 	}
 }
 
