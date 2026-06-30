@@ -1,0 +1,1084 @@
+{
+  "rows": [
+    {
+      "id": "x-ci-coverage-guard-gate-acceptancegate",
+      "canonical": "acceptancegate (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "acceptancegate is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "acceptancegate is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "acceptancegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-policy-capability-accountspolicy",
+      "canonical": "accountspolicy (policy-capability identifier)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "accountspolicy is the concrete policy-capability identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring policy-capability concepts.",
+      "distinction": "accountspolicy is a specific tree identifier in the policy-capability namespace, not the broader sibling concept referenced by x2-policy-capability-adjudicating.",
+      "distinct_from": [
+        "x2-policy-capability-adjudicating"
+      ],
+      "aliases": [],
+      "grounding": "accountspolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-session-runtime-activesessions",
+      "canonical": "activesessions (session-runtime identifier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "activesessions is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts.",
+      "distinction": "activesessions is a specific tree identifier in the session-runtime namespace, not the broader sibling concept referenced by x2-session-runtime-sessionobs.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "activesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-appendobservedcachesavings",
+      "canonical": "appendobservedcachesavings (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "appendobservedcachesavings is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "appendobservedcachesavings is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "appendobservedcachesavings",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-session-runtime-authblockedsessions",
+      "canonical": "authblockedsessions (session-runtime identifier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "authblockedsessions is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts.",
+      "distinction": "authblockedsessions is a specific tree identifier in the session-runtime namespace, not the broader sibling concept referenced by x2-session-runtime-sessionobs.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "authblockedsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-blockplan",
+      "canonical": "blockplan (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "blockplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "blockplan is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "blockplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-cacherecorder",
+      "canonical": "cacherecorder (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cacherecorder is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "cacherecorder is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "cacherecorder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-cachewrite",
+      "canonical": "cachewrite (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cachewrite is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "cachewrite is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "cachewrite",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-cachewrite5mmultiplier",
+      "canonical": "cachewrite5mmultiplier (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cachewrite5mmultiplier is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "cachewrite5mmultiplier is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "cachewrite5mmultiplier",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-session-runtime-claudecodesessionid",
+      "canonical": "claudecodesessionid (session-runtime identifier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "claudecodesessionid is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts.",
+      "distinction": "claudecodesessionid is a specific tree identifier in the session-runtime namespace, not the broader sibling concept referenced by x2-session-runtime-sessionobs.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "claudecodesessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-conceptusagedebt",
+      "canonical": "conceptusagedebt (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "conceptusagedebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "conceptusagedebt is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "conceptusagedebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-session-runtime-configureservesessiondurability",
+      "canonical": "configureservesessiondurability (session-runtime identifier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "configureservesessiondurability is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts.",
+      "distinction": "configureservesessiondurability is a specific tree identifier in the session-runtime namespace, not the broader sibling concept referenced by x2-session-runtime-sessionobs.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "configureservesessiondurability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-context-ctx-contextevents",
+      "canonical": "contextevents (context-ctx identifier)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "contextevents is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts.",
+      "distinction": "contextevents is a specific tree identifier in the context-ctx namespace, not the broader sibling concept referenced by x2-context-ctx-commandcontext.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextevents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-witness-proof-contextwitnessed",
+      "canonical": "contextwitnessed (witness-proof identifier)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "contextwitnessed is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts.",
+      "distinction": "contextwitnessed is a specific tree identifier in the witness-proof namespace, not the broader sibling concept referenced by x2-witness-proof-witnessstatus.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "contextwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-debtbygroup",
+      "canonical": "debtbygroup (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "debtbygroup is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "debtbygroup is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "debtbygroup",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-debtcount",
+      "canonical": "debtcount (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "debtcount is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "debtcount is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "debtcount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-debtname",
+      "canonical": "debtname (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "debtname is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "debtname is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "debtname",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-evict-decisionevict",
+      "canonical": "decisionevict (evict identifier)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "decisionevict is the concrete evict identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring evict concepts.",
+      "distinction": "decisionevict is a specific tree identifier in the evict namespace, not the broader sibling concept referenced by x2-evict-kvevictionattestation.",
+      "distinct_from": [
+        "x2-evict-kvevictionattestation"
+      ],
+      "aliases": [],
+      "grounding": "decisionevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-decisionexplicitcache",
+      "canonical": "decisionexplicitcache (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "decisionexplicitcache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "decisionexplicitcache is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "decisionexplicitcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-decisionnocache",
+      "canonical": "decisionnocache (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "decisionnocache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "decisionnocache is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "decisionnocache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-dispatchplan",
+      "canonical": "dispatchplan (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "dispatchplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "dispatchplan is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "dispatchplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-enginedelay",
+      "canonical": "enginedelay (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "enginedelay is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "enginedelay is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "enginedelay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-evaluateprocguard",
+      "canonical": "evaluateprocguard (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "evaluateprocguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "evaluateprocguard is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "evaluateprocguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-policy-capability-executionpolicy",
+      "canonical": "executionpolicy (policy-capability identifier)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "executionpolicy is the concrete policy-capability identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring policy-capability concepts.",
+      "distinction": "executionpolicy is a specific tree identifier in the policy-capability namespace, not the broader sibling concept referenced by x2-policy-capability-adjudicating.",
+      "distinct_from": [
+        "x2-policy-capability-adjudicating"
+      ],
+      "aliases": [],
+      "grounding": "executionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-externalengine",
+      "canonical": "externalengine (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "externalengine is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "externalengine is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "externalengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-externalengineobserved",
+      "canonical": "externalengineobserved (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "externalengineobserved is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "externalengineobserved is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "externalengineobserved",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-context-ctx-fakcompactionshedtokens",
+      "canonical": "fakcompactionshedtokens (context-ctx identifier)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "fakcompactionshedtokens is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts.",
+      "distinction": "fakcompactionshedtokens is a specific tree identifier in the context-ctx namespace, not the broader sibling concept referenced by x2-context-ctx-commandcontext.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "fakcompactionshedtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-fakplannermaxattempts",
+      "canonical": "fakplannermaxattempts (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "fakplannermaxattempts is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "fakplannermaxattempts is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "fakplannermaxattempts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-fakstalebaseguard",
+      "canonical": "fakstalebaseguard (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "fakstalebaseguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "fakstalebaseguard is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "fakstalebaseguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-fakvdsoavoidedcalls",
+      "canonical": "fakvdsoavoidedcalls (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "fakvdsoavoidedcalls is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "fakvdsoavoidedcalls is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "fakvdsoavoidedcalls",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-filecache",
+      "canonical": "filecache (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "filecache is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "filecache is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "filecache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-gocandidates",
+      "canonical": "gocandidates (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "gocandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "gocandidates is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "gocandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardchildinteractive",
+      "canonical": "guardchildinteractive (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardchildinteractive is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardchildinteractive is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardchildinteractive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardclaudeconfigdir",
+      "canonical": "guardclaudeconfigdir (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardclaudeconfigdir is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardclaudeconfigdir is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardclaudeconfigdir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guarddebugstatstosharedstderr",
+      "canonical": "guarddebugstatstosharedstderr (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guarddebugstatstosharedstderr is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guarddebugstatstosharedstderr is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guarddebugstatstosharedstderr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardgo",
+      "canonical": "guardgo (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardgo is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardgo is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardgo",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardinfoversiontag",
+      "canonical": "guardinfoversiontag (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardinfoversiontag is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardinfoversiontag is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardinfoversiontag",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardrsidebt",
+      "canonical": "guardrsidebt (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardrsidebt is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardrsidebt is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardrsidebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-guardsplitenabled",
+      "canonical": "guardsplitenabled (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardsplitenabled is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "guardsplitenabled is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guardsplitenabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-industryscorecard",
+      "canonical": "industryscorecard (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "industryscorecard is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "industryscorecard is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "industryscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-support-maturity-interpretmaturity",
+      "canonical": "interpretmaturity (support-maturity identifier)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "interpretmaturity is the concrete support-maturity identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring support-maturity concepts.",
+      "distinction": "interpretmaturity is a specific tree identifier in the support-maturity namespace, not the broader sibling concept referenced by x2-support-maturity-supportmaturity.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity"
+      ],
+      "aliases": [],
+      "grounding": "interpretmaturity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-kernelkv",
+      "canonical": "kernelkv (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "kernelkv is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "kernelkv is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelkv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-gateway-engine-kernelkvevents",
+      "canonical": "kernelkvevents (gateway-engine identifier)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "kernelkvevents is the concrete gateway-engine identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring gateway-engine concepts.",
+      "distinction": "kernelkvevents is a specific tree identifier in the gateway-engine namespace, not the broader sibling concept referenced by x2-gateway-engine-enginecallsavoided.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelkvevents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-witness-proof-kernelwitnessed",
+      "canonical": "kernelwitnessed (witness-proof identifier)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "kernelwitnessed is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts.",
+      "distinction": "kernelwitnessed is a specific tree identifier in the witness-proof namespace, not the broader sibling concept referenced by x2-witness-proof-witnessstatus.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "kernelwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-session-runtime-limitsession",
+      "canonical": "limitsession (session-runtime identifier)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "limitsession is the concrete session-runtime identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring session-runtime concepts.",
+      "distinction": "limitsession is a specific tree identifier in the session-runtime namespace, not the broader sibling concept referenced by x2-session-runtime-sessionobs.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "limitsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-loopcheckplan",
+      "canonical": "loopcheckplan (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "loopcheckplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "loopcheckplan is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "loopcheckplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-render-materialize-materializedby",
+      "canonical": "materializedby (render-materialize identifier)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "materializedby is the concrete render-materialize identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring render-materialize concepts.",
+      "distinction": "materializedby is a specific tree identifier in the render-materialize namespace, not the broader sibling concept referenced by x2-render-materialize-renderer.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "materializedby",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-milestonedebt",
+      "canonical": "milestonedebt (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "milestonedebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "milestonedebt is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "milestonedebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-planwalk",
+      "canonical": "planwalk (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "planwalk is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "planwalk is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "planwalk",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-pool-poolkey",
+      "canonical": "poolkey (pool identifier)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "poolkey is the concrete pool identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring pool concepts.",
+      "distinction": "poolkey is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "poolkey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-precommitgates",
+      "canonical": "precommitgates (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "precommitgates is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "precommitgates is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "precommitgates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-prefixcachehitratio",
+      "canonical": "prefixcachehitratio (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "prefixcachehitratio is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "prefixcachehitratio is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "prefixcachehitratio",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-context-ctx-prioritycontext",
+      "canonical": "prioritycontext (context-ctx identifier)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "prioritycontext is the concrete context-ctx identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring context-ctx concepts.",
+      "distinction": "prioritycontext is a specific tree identifier in the context-ctx namespace, not the broader sibling concept referenced by x2-context-ctx-commandcontext.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "prioritycontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-procguard",
+      "canonical": "procguard (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "procguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "procguard is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "procguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-guard-gate-procguardinput",
+      "canonical": "procguardinput (guard-gate identifier)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "procguardinput is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
+      "distinction": "procguardinput is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "procguardinput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-score-debt-productdebt",
+      "canonical": "productdebt (score-debt identifier)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "productdebt is the concrete score-debt identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring score-debt concepts.",
+      "distinction": "productdebt is a specific tree identifier in the score-debt namespace, not the broader sibling concept referenced by x2-score-debt-debtintegers.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "productdebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-witness-proof-proofwitness",
+      "canonical": "proofwitness (witness-proof identifier)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "proofwitness is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts.",
+      "distinction": "proofwitness is a specific tree identifier in the witness-proof namespace, not the broader sibling concept referenced by x2-witness-proof-witnessstatus.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "proofwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-providerpromptcachereadtokenequiv",
+      "canonical": "providerpromptcachereadtokenequiv (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "providerpromptcachereadtokenequiv is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "providerpromptcachereadtokenequiv is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "providerpromptcachereadtokenequiv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-cache-providerpromptcachewritepremiumtokenequiv",
+      "canonical": "providerpromptcachewritepremiumtokenequiv (cache identifier)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "providerpromptcachewritepremiumtokenequiv is the concrete cache identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring cache concepts.",
+      "distinction": "providerpromptcachewritepremiumtokenequiv is a specific tree identifier in the cache namespace, not the broader sibling concept referenced by x-cache-vcachecal.",
+      "distinct_from": [
+        "x-cache-vcachecal"
+      ],
+      "aliases": [],
+      "grounding": "providerpromptcachewritepremiumtokenequiv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-ci-coverage-plan-pycandidates",
+      "canonical": "pycandidates (plan identifier)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "pycandidates is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts.",
+      "distinction": "pycandidates is a specific tree identifier in the plan namespace, not the broader sibling concept referenced by x-plan-httpplanner.",
+      "distinct_from": [
+        "x-plan-httpplanner"
+      ],
+      "aliases": [],
+      "grounding": "pycandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
