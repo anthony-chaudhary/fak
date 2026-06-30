@@ -248,8 +248,12 @@ func dispatchLaunchPlanID(plan []dispatchLaunchWave) string {
 	if len(plan) == 0 {
 		return ""
 	}
+	return dispatchStablePlanID(plan)
+}
+
+func dispatchStablePlanID(plan any) string {
 	raw, err := json.Marshal(plan)
-	if err != nil {
+	if err != nil || len(raw) == 0 || string(raw) == "null" {
 		return ""
 	}
 	sum := sha256.Sum256(raw)
@@ -264,16 +268,21 @@ func dispatchPriceLaunchPlan(waves []dispatchPriceWave, candidates []dispatchPri
 	for _, cand := range candidates {
 		byName[cand.Name] = cand
 	}
+	return dispatchLaunchPlanFromWaves(waves, func(id string) dispatchLaunchTarget {
+		cand, ok := byName[id]
+		if !ok {
+			return dispatchLaunchTarget{ID: id}
+		}
+		return dispatchPriceLaunchTarget(cand)
+	})
+}
+
+func dispatchLaunchPlanFromWaves(waves []dispatchPriceWave, targetFor func(string) dispatchLaunchTarget) []dispatchLaunchWave {
 	out := make([]dispatchLaunchWave, 0, len(waves))
 	for _, wave := range waves {
 		targets := make([]dispatchLaunchTarget, 0, len(wave.Agents))
-		for _, name := range wave.Agents {
-			cand, ok := byName[name]
-			if !ok {
-				targets = append(targets, dispatchLaunchTarget{ID: name})
-				continue
-			}
-			targets = append(targets, dispatchPriceLaunchTarget(cand))
+		for _, id := range wave.Agents {
+			targets = append(targets, targetFor(id))
 		}
 		out = append(out, dispatchLaunchWave{Index: wave.Index, Size: len(targets), Targets: targets})
 	}
@@ -302,7 +311,7 @@ func dispatchPriceLaneSerialWaveCount(candidates []dispatchPriceCandidate) int {
 	if len(candidates) == 0 {
 		return 0
 	}
-	byLane := map[string]int{}
+	keys := make([]string, 0, len(candidates))
 	for _, cand := range candidates {
 		key := strings.TrimSpace(cand.Lane)
 		if key == "" {
@@ -311,6 +320,14 @@ func dispatchPriceLaneSerialWaveCount(candidates []dispatchPriceCandidate) int {
 		if key == "" {
 			key = cand.Name
 		}
+		keys = append(keys, key)
+	}
+	return dispatchLaneSerialWaveCount(keys)
+}
+
+func dispatchLaneSerialWaveCount(keys []string) int {
+	byLane := map[string]int{}
+	for _, key := range keys {
 		byLane[key]++
 	}
 	max := 0
@@ -333,6 +350,14 @@ func dispatchPriceWaves(candidates []dispatchPriceCandidate, collisions []dispat
 	if len(candidates) == 0 {
 		return nil
 	}
+	ids := make([]string, 0, len(candidates))
+	for _, cand := range candidates {
+		ids = append(ids, cand.Name)
+	}
+	return dispatchWavesForIDs(ids, collisions, safeNow)
+}
+
+func dispatchWavesForIDs(ids []string, collisions []dispatchorder.Collision, safeNow []string) []dispatchPriceWave {
 	collides := map[string]map[string]bool{}
 	for _, c := range collisions {
 		if collides[c.A] == nil {
@@ -345,8 +370,8 @@ func dispatchPriceWaves(candidates []dispatchPriceCandidate, collisions []dispat
 		collides[c.B][c.A] = true
 	}
 	remaining := map[string]bool{}
-	for _, cand := range candidates {
-		remaining[cand.Name] = true
+	for _, id := range ids {
+		remaining[id] = true
 	}
 	var waves []dispatchPriceWave
 	first := append([]string(nil), safeNow...)
@@ -358,25 +383,25 @@ func dispatchPriceWaves(candidates []dispatchPriceCandidate, collisions []dispat
 	}
 	for len(remaining) > 0 {
 		var wave []string
-		for _, cand := range candidates {
-			if !remaining[cand.Name] {
+		for _, id := range ids {
+			if !remaining[id] {
 				continue
 			}
 			ok := true
 			for _, picked := range wave {
-				if collides[cand.Name][picked] {
+				if collides[id][picked] {
 					ok = false
 					break
 				}
 			}
 			if ok {
-				wave = append(wave, cand.Name)
+				wave = append(wave, id)
 			}
 		}
 		if len(wave) == 0 {
-			for _, cand := range candidates {
-				if remaining[cand.Name] {
-					wave = append(wave, cand.Name)
+			for _, id := range ids {
+				if remaining[id] {
+					wave = append(wave, id)
 					break
 				}
 			}

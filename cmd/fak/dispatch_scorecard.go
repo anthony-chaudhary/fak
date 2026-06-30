@@ -183,7 +183,7 @@ func foldDispatchPlanScorecard(probes []dispatchPlanProbe) dispatchPlanScorecard
 		OK:     debt == 0,
 		Corpus: dispatchPlanCorpus{
 			Score:            score,
-			Grade:            dispatchPlanGrade(score),
+			Grade:            gradeFor(float64(score)),
 			DispatchPlanDebt: debt,
 			Probes:           len(probes),
 			Passed:           passed,
@@ -628,7 +628,13 @@ func dispatchScoreRouterPathScope() dispatchPlanProbe {
 		Body:   "touches fak/internal/gateway/http.go and fak/internal/gateway/mcp.go",
 	}, taxonomy, dispatchtick.RouteOptions{})
 	want := []string{"internal/gateway/http.go", "internal/gateway/mcp.go"}
-	pass := route.Lane == "gateway" && route.Confidence == "path-confirmed" && equalStringSlices(route.Paths, want)
+	pathsMatch := len(route.Paths) == len(want)
+	if pathsMatch {
+		for i := range want {
+			pathsMatch = pathsMatch && route.Paths[i] == want[i]
+		}
+	}
+	pass := route.Lane == "gateway" && route.Confidence == "path-confirmed" && pathsMatch
 	return dispatchScoreProbe("router_carries_path_scope", pass,
 		"the issue router carries normalized repo paths into the wave-pricing partition",
 		map[string]any{
@@ -700,31 +706,4 @@ func firstDispatchPlanFailure(probes []dispatchPlanProbe) string {
 		}
 	}
 	return "run dispatch scorecard --live-router for current issue-shape telemetry, or add semantic conflict probes"
-}
-
-func dispatchPlanGrade(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

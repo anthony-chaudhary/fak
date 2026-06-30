@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -491,60 +489,11 @@ func dispatchWaveWaves(candidates []dispatchWaveCandidate, collisions []dispatch
 	if len(candidates) == 0 {
 		return nil
 	}
-	collides := map[string]map[string]bool{}
-	for _, c := range collisions {
-		if collides[c.A] == nil {
-			collides[c.A] = map[string]bool{}
-		}
-		if collides[c.B] == nil {
-			collides[c.B] = map[string]bool{}
-		}
-		collides[c.A][c.B] = true
-		collides[c.B][c.A] = true
-	}
-	remaining := map[string]bool{}
+	ids := make([]string, 0, len(candidates))
 	for _, cand := range candidates {
-		remaining[cand.ID] = true
+		ids = append(ids, cand.ID)
 	}
-	var waves []dispatchPriceWave
-	first := append([]string(nil), safeNow...)
-	if len(first) > 0 {
-		for _, id := range first {
-			delete(remaining, id)
-		}
-		waves = append(waves, dispatchPriceWave{Index: 1, Agents: first, Size: len(first)})
-	}
-	for len(remaining) > 0 {
-		var wave []string
-		for _, cand := range candidates {
-			if !remaining[cand.ID] {
-				continue
-			}
-			ok := true
-			for _, picked := range wave {
-				if collides[cand.ID][picked] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				wave = append(wave, cand.ID)
-			}
-		}
-		if len(wave) == 0 {
-			for _, cand := range candidates {
-				if remaining[cand.ID] {
-					wave = append(wave, cand.ID)
-					break
-				}
-			}
-		}
-		for _, id := range wave {
-			delete(remaining, id)
-		}
-		waves = append(waves, dispatchPriceWave{Index: len(waves) + 1, Agents: wave, Size: len(wave)})
-	}
-	return waves
+	return dispatchWavesForIDs(ids, collisions, safeNow)
 }
 
 func dispatchWaveLaunchPlan(waves []dispatchPriceWave, candidates []dispatchWaveCandidate) []dispatchLaunchWave {
@@ -555,20 +504,13 @@ func dispatchWaveLaunchPlan(waves []dispatchPriceWave, candidates []dispatchWave
 	for _, cand := range candidates {
 		byID[cand.ID] = cand
 	}
-	out := make([]dispatchLaunchWave, 0, len(waves))
-	for _, wave := range waves {
-		targets := make([]dispatchLaunchTarget, 0, len(wave.Agents))
-		for _, id := range wave.Agents {
-			cand, ok := byID[id]
-			if !ok {
-				targets = append(targets, dispatchLaunchTarget{ID: id})
-				continue
-			}
-			targets = append(targets, dispatchWaveLaunchTarget(cand))
+	return dispatchLaunchPlanFromWaves(waves, func(id string) dispatchLaunchTarget {
+		cand, ok := byID[id]
+		if !ok {
+			return dispatchLaunchTarget{ID: id}
 		}
-		out = append(out, dispatchLaunchWave{Index: wave.Index, Size: len(targets), Targets: targets})
-	}
-	return out
+		return dispatchWaveLaunchTarget(cand)
+	})
 }
 
 func dispatchWaveLaunchTarget(cand dispatchWaveCandidate) dispatchLaunchTarget {
@@ -725,12 +667,7 @@ func dispatchWaveExecutionPlanID(plan []dispatchWaveExecutionPlan) string {
 	if len(plan) == 0 {
 		return ""
 	}
-	raw, err := json.Marshal(plan)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("plan-%x", sum[:8])
+	return dispatchStablePlanID(plan)
 }
 
 func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool) []dispatchWaveExecutionPlan {
@@ -797,7 +734,7 @@ func dispatchWaveLaneSerialWaveCount(candidates []dispatchWaveCandidate) int {
 	if len(candidates) == 0 {
 		return 0
 	}
-	byLane := map[string]int{}
+	keys := make([]string, 0, len(candidates))
 	for _, cand := range candidates {
 		key := strings.TrimSpace(cand.Lane)
 		if key == "" {
@@ -806,15 +743,9 @@ func dispatchWaveLaneSerialWaveCount(candidates []dispatchWaveCandidate) int {
 		if key == "" {
 			key = cand.ID
 		}
-		byLane[key]++
+		keys = append(keys, key)
 	}
-	max := 0
-	for _, count := range byLane {
-		if count > max {
-			max = count
-		}
-	}
-	return max
+	return dispatchLaneSerialWaveCount(keys)
 }
 
 func dispatchWavePct(n, d int) int {
@@ -910,17 +841,6 @@ func renderDispatchWave(rec map[string]any) string {
 	return b.String()
 }
 
-func waveAccountLanes(doc map[string]any) []map[string]any {
-	raw, _ := doc["lanes"].([]any)
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
 func accountFromWaveLane(m dispatchtick.AccountWaveLane) dispatchtick.Account {
 	return dispatchtick.Account{
 		Tag:   firstString(m.Tag, m.Account),
@@ -928,15 +848,6 @@ func accountFromWaveLane(m dispatchtick.AccountWaveLane) dispatchtick.Account {
 		Model: m.Model,
 		Dir:   m.ConfigDir,
 	}
-}
-
-func firstAny(vals ...any) any {
-	for _, v := range vals {
-		if v != nil {
-			return v
-		}
-	}
-	return nil
 }
 
 func minInt(a, b int) int {

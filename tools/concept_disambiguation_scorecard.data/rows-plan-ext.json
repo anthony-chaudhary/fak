@@ -896,6 +896,283 @@
       "gaps": []
     },
     {
+      "id": "x-plan-buildplanwithoptions",
+      "canonical": "BuildPlanWithOptions (dogfood issue planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/dogfoodissues.BuildPlanWithOptions builds dogfood issue-sync rows while applying the shared issue-candidate contract and dedupe options.",
+      "distinction": "It builds an issue-sync PLAN from action items, NOT a dispatch launch plan and NOT the generic BuildPlan action planner.",
+      "distinct_from": [
+        "BuildPlan (action planner)",
+        "ReviewCandidate (issue contract)",
+        "LaunchPlan (dispatch price)"
+      ],
+      "aliases": [
+        "buildplanwithoptions"
+      ],
+      "grounding": "buildplanwithoptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-planner",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-defaultbinarydoctorcandidates",
+      "canonical": "DefaultBinaryDoctorCandidates (appversion)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/appversion.DefaultBinaryDoctorCandidates returns the ordered binary-name candidates the version doctor should inspect for a fak executable.",
+      "distinction": "It is a binary-discovery CANDIDATE list, NOT dispatch issue candidates and NOT a launch plan.",
+      "distinct_from": [
+        "candidate-count",
+        "LaunchPlan (dispatch price)"
+      ],
+      "aliases": [
+        "defaultbinarydoctorcandidates"
+      ],
+      "grounding": "defaultbinarydoctorcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-planner",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-expertparallelperrankplan",
+      "canonical": "ExpertParallelPerRankPlan (compute)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute.ExpertParallelPerRankPlan builds the per-rank MemoryPlan for expert-parallel serving by splitting expert weights across ranks and adding replicated and per-rank extras.",
+      "distinction": "It is a MEMORY capacity plan for expert-parallel serving, NOT dispatch wave execution planning and NOT a context plan.",
+      "distinct_from": [
+        "MemoryPlan (compute)",
+        "ExecutionPlan (dispatch wave)"
+      ],
+      "aliases": [
+        "expertparallelperrankplan"
+      ],
+      "grounding": "expertparallelperrankplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "MemoryPlan (compute)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-orderlanecandidates",
+      "canonical": "OrderLaneCandidates (dispatch tick)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick.OrderLaneCandidates sorts candidate issue numbers for a lane using priority tier, optional recency preference, and issue number tie-breaks.",
+      "distinction": "It orders issue CANDIDATES within one lane, NOT worker accounts and NOT the launch wave schedule.",
+      "distinct_from": [
+        "LaunchPlan (dispatch price)",
+        "candidate-count"
+      ],
+      "aliases": [
+        "orderlanecandidates"
+      ],
+      "grounding": "orderlanecandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-planner",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-reviewcandidate",
+      "canonical": "ReviewCandidate (issue contract)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/issuecontract.ReviewCandidate grades one issue candidate against dispatchability, scope, and live-sync safeguards before it can be posted or synced.",
+      "distinction": "It is an issue-candidate REVIEW gate, NOT a dispatch execution plan and NOT a human code review.",
+      "distinct_from": [
+        "BuildPlanWithOptions (dogfood issue planner)",
+        "ExecutionPlan (dispatch wave)"
+      ],
+      "aliases": [
+        "reviewcandidate"
+      ],
+      "grounding": "reviewcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-planner",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-candidatecount",
+      "canonical": "candidate-count (dispatch price)",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "The dispatch price and live telemetry CandidateCount field is the number of candidates admitted to the price calculation after routing, held-lane, cooldown, and scope filters.",
+      "distinction": "It counts PRICED dispatch candidates, NOT safe concurrency, not issue totals, and not binary doctor candidates.",
+      "distinct_from": [
+        "SafeConcurrency (dispatch price)",
+        "DefaultBinaryDoctorCandidates (appversion)"
+      ],
+      "aliases": [
+        "candidatecount"
+      ],
+      "grounding": "candidatecount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "LaunchPlan (dispatch price)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-launchplan",
+      "canonical": "LaunchPlan (dispatch price)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak dispatch pricing's LaunchPlan is the wave-grouped list of dispatch launch targets produced from collision-priced candidates.",
+      "distinction": "It is a DRY launch target schedule, NOT the live execution plan that binds account seats and dispatch tick commands.",
+      "distinct_from": [
+        "ExecutionPlan (dispatch wave)",
+        "dispatchPriceWave"
+      ],
+      "aliases": [
+        "launchplan"
+      ],
+      "grounding": "launchplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-planner",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-executionplan",
+      "canonical": "ExecutionPlan (dispatch wave)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak dispatch wave's ExecutionPlan binds launch targets to account seats, worker backend, work kind, and the exact dispatch tick command that would run.",
+      "distinction": "It is the EXECUTABLE worker plan, NOT the dry LaunchPlan emitted by dispatch price.",
+      "distinct_from": [
+        "LaunchPlan (dispatch price)",
+        "dispatch tick"
+      ],
+      "aliases": [
+        "executionplan"
+      ],
+      "grounding": "executionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "LaunchPlan (dispatch price)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-planid",
+      "canonical": "plan-id (dispatch plan digest)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The dispatch PlanID is the stable short sha256 digest label for a JSON-serialized launch or execution plan.",
+      "distinction": "It is a DIGEST label for a plan payload, NOT the plan body and NOT an issue number.",
+      "distinct_from": [
+        "LaunchPlan (dispatch price)",
+        "ExecutionPlan (dispatch wave)"
+      ],
+      "aliases": [
+        "planid",
+        "dispatchlaunchplanid"
+      ],
+      "grounding": "planid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "LaunchPlan (dispatch price)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-executionplanid",
+      "canonical": "execution-plan-id (dispatch wave)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak dispatch wave's execution_plan_id is the stable digest label for the account-bound execution plan checked by the prelaunch gate.",
+      "distinction": "It identifies the EXECUTION plan, NOT the dry dispatch price PlanID.",
+      "distinct_from": [
+        "plan-id (dispatch plan digest)",
+        "LaunchPlan (dispatch price)"
+      ],
+      "aliases": [
+        "executionplanid",
+        "dispatchwaveexecutionplanid"
+      ],
+      "grounding": "executionplanid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "ExecutionPlan (dispatch wave)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-dispatchwaveexecutionplans",
+      "canonical": "dispatchWaveExecutionPlans (builder)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak.dispatchWaveExecutionPlans converts priced dispatch wave targets and allocated account lanes into account-bound ExecutionPlan rows.",
+      "distinction": "It is the BUILDER for execution-plan rows, NOT the plan ID and NOT the launch-plan materializer.",
+      "distinct_from": [
+        "ExecutionPlan (dispatch wave)",
+        "dispatchLaunchPlanFromWaves"
+      ],
+      "aliases": [
+        "dispatchwaveexecutionplans"
+      ],
+      "grounding": "dispatchwaveexecutionplans",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "ExecutionPlan (dispatch wave)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-dispatchlaunchplanfromwaves",
+      "canonical": "dispatchLaunchPlanFromWaves (materializer)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak.dispatchLaunchPlanFromWaves is the shared helper that materializes dispatchLaunchWave rows from priced wave IDs and a target lookup function.",
+      "distinction": "It materializes LAUNCH plan rows, NOT execution-plan rows and NOT the stable plan digest.",
+      "distinct_from": [
+        "dispatchWaveExecutionPlans (builder)",
+        "dispatchStablePlanID"
+      ],
+      "aliases": [
+        "dispatchlaunchplanfromwaves"
+      ],
+      "grounding": "dispatchlaunchplanfromwaves",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "LaunchPlan (dispatch price)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-plan-dispatchstableplanid",
+      "canonical": "dispatchStablePlanID (digest helper)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmd/fak.dispatchStablePlanID hashes a JSON-serialized dispatch plan payload into the stable plan-* identifier used by price and wave reports.",
+      "distinction": "It computes the DIGEST, NOT the launch plan and NOT the execution plan.",
+      "distinct_from": [
+        "plan-id (dispatch plan digest)",
+        "LaunchPlan (dispatch price)",
+        "ExecutionPlan (dispatch wave)"
+      ],
+      "aliases": [
+        "dispatchstableplanid"
+      ],
+      "grounding": "dispatchstableplanid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "plan-id (dispatch plan digest)",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x-plan-replan",
       "canonical": "replan (recovery verb)",
       "family": "plan",
