@@ -269,6 +269,8 @@ func main() {
 		cmdSkillEffectivenessScorecard(os.Args[2:])
 	case "conflation-scorecard":
 		cmdConflationScorecard(os.Args[2:])
+	case "ui-quality-scorecard":
+		cmdUIQualityScore(os.Args[2:])
 	case "scoreboard":
 		cmdScoreboard(os.Args[2:])
 	case "steering":

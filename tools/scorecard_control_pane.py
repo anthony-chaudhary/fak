@@ -195,12 +195,18 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "slop", "debt": "slop_debt", "script": "code_slop_scorecard.py", "label": "code-slop"},
     {"key": "steer", "debt": "steerability_debt", "script": "steerability_scorecard.py", "label": "steerability"},
     {"key": "conflation", "debt": "conflation_debt", "script": "", "cmd": "go run ./cmd/fak conflation-scorecard --json", "label": "conflation"},
+    # UI/UX-quality of the terminal surface (the `fak console` panes, `fak info`
+    # overlay, `fak guard --split`): rune-safe truncation, cell-aware column pads,
+    # empty-state branches, info-legend + console-help coverage. Go-native, no GPU,
+    # deterministic, graded against the render source (the source IS the oracle).
+    {"key": "ui_quality", "debt": "ui_quality_debt", "script": "", "cmd": "go run ./cmd/fak ui-quality-scorecard --json", "label": "ui-quality"},
     {"key": "disambiguation", "debt": "disambiguation_debt", "script": "concept_disambiguation_scorecard.py", "label": "concept-disambiguation"},
     {"key": "intent_literal", "debt": "intent_literal_debt", "script": "intent_literal_scorecard.py", "label": "intent-literal"},
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak token-defaults-scorecard --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
     {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak dogfood-score --json", "label": "dogfood-loop"},
     {"key": "conceptusage", "debt": "conceptusage_debt", "script": "", "cmd": "go run ./cmd/fak concept-usage-score --json", "label": "concept-usage"},
+    {"key": "maturity", "debt": "maturity_debt", "script": "", "cmd": "go run ./cmd/fak maturity --json", "label": "maturity"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
     # The agentic-coding loop-index (#1152, dev-ex epic #1148 spine): folds the six
