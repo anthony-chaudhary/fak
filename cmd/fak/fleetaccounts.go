@@ -33,6 +33,8 @@ import (
 //	fak fleet-accounts available              the account dirs safe to offer now (one per line)
 //	fak fleet-accounts resolve [--account P] [--work-kind K] [--product P] [--t1|--t2|--t3]
 //	                                          ONE flat record: config_dir + oauth_token + tier
+//	fak fleet-accounts wave [--count N] [--work-kind K] [--product P] [--t1|--t2|--t3]
+//	                                          allocate distinct account pools for fan-out
 //	fak fleet-accounts seats [--product P] [--json]   the explicit seat pool (M distinct seats)
 //	fak fleet-accounts status                 the watchdog status fold (roster + availability)
 //
@@ -64,6 +66,11 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	t3 := fs.Bool("t3", false, "(resolve) pin tier 3")
 	allowFallback := fs.Bool("allow-tier-fallback", false, "(resolve) allow a tier-1 target to fall back to tier 2")
 	faklocalOK := fs.Bool("faklocal-ok", false, "(resolve) synthesize the dogfood .claude-faklocal account when pinned")
+	count := -1
+	fs.IntVar(&count, "count", -1, "(wave) number of distinct account pools to allocate")
+	fs.IntVar(&count, "n", -1, "(wave) shorthand for --count")
+	explain := fs.Bool("explain", false, "(wave) emit the headroom witness projection")
+	waveID := fs.String("wave-id", "", "(wave) override the deterministic wave id")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -98,15 +105,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "resolve":
-		taskClass := "auto"
-		switch {
-		case *t1:
-			taskClass = "t1"
-		case *t2:
-			taskClass = "t2"
-		case *t3:
-			taskClass = "t3"
-		}
+		taskClass := fleetAccountsTaskClass(*t1, *t2, *t3)
 		strict := *t1 || *t2 || *t3
 		req := fleetaccounts.ResolveRequest{
 			Pin: *account, TaskText: *task, TaskClass: taskClass, WorkKind: *workKind,
@@ -121,6 +120,38 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintln(stdout, string(out))
 		if resolved.OK {
+			return 0
+		}
+		return 1
+
+	case "wave":
+		explicitCount := count >= 0
+		waveCount := count
+		if !explicitCount {
+			waveCount = 1_000_000
+		}
+		taskClass := fleetAccountsTaskClass(*t1, *t2, *t3)
+		strict := *t1 || *t2 || *t3
+		wave := fleetaccounts.AllocateWave(rows, fleetaccounts.WaveRequest{
+			Count: waveCount, TaskText: *task, TaskClass: taskClass, WorkKind: *workKind,
+			Product: *product, AllowTierFallback: *allowFallback, StrictTier: strict,
+			WaveID: *waveID,
+		}, pol)
+		if !explicitCount {
+			wave.Requested = wave.Granted
+			wave.Shortfall = 0
+			wave.Reason = fmt.Sprintf("all %d distinct available pool(s)", wave.Granted)
+		}
+		if *explain {
+			return emitWaveExplainJSON(stdout, stderr, wave)
+		}
+		out, err := json.MarshalIndent(wave, "", " ")
+		if err != nil {
+			fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(out))
+		if wave.OK {
 			return 0
 		}
 		return 1
@@ -140,10 +171,58 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	default:
-		fmt.Fprintln(stderr, "usage: fak fleet-accounts <roster|list|json|available|resolve|seats|status> [flags]")
+		fmt.Fprintln(stderr, "usage: fak fleet-accounts <roster|list|json|available|resolve|wave|seats|status> [flags]")
 		fmt.Fprintln(stderr, "note: the active network probe + mutating ops (relogin/top-up/launch) remain on tools/fleet_accounts.py (issue #1415).")
 		return 2
 	}
+}
+
+func fleetAccountsTaskClass(t1, t2, t3 bool) string {
+	switch {
+	case t1:
+		return "t1"
+	case t2:
+		return "t2"
+	case t3:
+		return "t3"
+	default:
+		return "auto"
+	}
+}
+
+func emitWaveExplainJSON(stdout, stderr io.Writer, wave fleetaccounts.WaveResult) int {
+	tags := make([]string, 0, len(wave.Lanes))
+	pools := make([]string, 0, len(wave.Lanes))
+	for _, lane := range wave.Lanes {
+		tags = append(tags, lane.Tag)
+		pools = append(pools, lane.Pool)
+	}
+	doc := map[string]any{
+		"ok":                  wave.OK,
+		"requested":           wave.Requested,
+		"granted":             wave.Granted,
+		"shortfall":           wave.Shortfall,
+		"distinct_pools":      wave.DistinctPools,
+		"target_tier":         wave.TargetTier,
+		"naive_pools":         0,
+		"headroom_multiplier": wave.DistinctPools,
+		"reason":              wave.Reason,
+		"lane_tags":           tags,
+		"lane_pools":          pools,
+	}
+	if wave.Granted > 0 {
+		doc["naive_pools"] = 1
+	}
+	out, err := json.MarshalIndent(doc, "", " ")
+	if err != nil {
+		fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(out))
+	if wave.OK {
+		return 0
+	}
+	return 1
 }
 
 // faFileExists reports whether a path exists (used for the policy/registry provenance
