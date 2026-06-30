@@ -256,9 +256,10 @@ Acceptance for "true end to end working":
   scope gaps, non-leaf decomposition, and oversized leaf splitting. The native
   router payload and `fak dispatch route` text output also expose
   `repair_queues` (`dispatch`, `split`, `scope`, `route`, `noise`, `private`,
-  `human`) with step budgets, sample issue numbers, reason buckets, and next
-  actions, so supervisors can batch issue-flood cleanup directly from the
-  dispatch surface.
+  `human`) with step budgets, split child-issue budgets, sample issue numbers,
+  reason buckets, and next actions, so supervisors can batch issue-flood cleanup
+  directly from the dispatch surface and forecast how many child work-unit issues
+  decomposition will create before syncing a large batch.
 - Routed rows now preserve `work_unit`, `expected_steps`, `trigger`, and
   `batch_policy`, and lane groups expose a `step_budget` plus per-issue step
   metadata. That lets dispatch supervisors balance lanes by expected work units
