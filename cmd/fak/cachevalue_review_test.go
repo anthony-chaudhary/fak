@@ -1,0 +1,233 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCachevalueReviewJSONEmitsAppendableRow(t *testing.T) {
+	dir := t.TempDir()
+	track1 := filepath.Join(dir, "cache-value.jsonl")
+	body := `{"date":"2026-06-28","session_type":"run","turns":1,"prompt_tokens":10,"reused_tokens":0}
+{"date":"2026-06-28","session_type":"run","turns":5,"prompt_tokens":413,"reused_tokens":260}
+`
+	if err := os.WriteFile(track1, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReview(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", filepath.Join(dir, "absent-cache-savings.jsonl"),
+		"--since", "2026-06-22",
+		"--date", "2026-06-29",
+		"--source-markdown", "reviews/2026-06-29.md",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("review --json exit = %d, stderr=%s", code, errb.String())
+	}
+	if strings.Count(strings.TrimSpace(out.String()), "\n") != 0 {
+		t.Fatalf("review --json should emit one JSONL row, got:\n%s", out.String())
+	}
+	var row cacheFrontierReviewRow
+	if err := json.Unmarshal(out.Bytes(), &row); err != nil {
+		t.Fatalf("review --json is not a cache-frontier row: %v\n%s", err, out.String())
+	}
+	if row.Schema != cacheFrontierReviewSchema || row.Date != "2026-06-29" {
+		t.Fatalf("bad row identity: %+v", row)
+	}
+	if row.Track1.TotalSessions != 2 || row.Track1.MultiTurnSessions != 1 || row.Track1.SingleTurnSessions != 1 {
+		t.Fatalf("bad Track-1 session counts: %+v", row.Track1)
+	}
+	if row.Track1.GatePromptTokens != 413 || row.Track1.GateReusedTokens != 260 {
+		t.Fatalf("bad Track-1 gate tokens: %+v", row.Track1)
+	}
+	if row.Track1.SessionTypeMix["run"] != 2 {
+		t.Fatalf("bad session type mix: %+v", row.Track1.SessionTypeMix)
+	}
+	if row.Track2.Present || !strings.Contains(row.Track2.Reason, "no OBSERVED rows") {
+		t.Fatalf("absent Track 2 should be explicit: %+v", row.Track2)
+	}
+	for _, want := range []string{
+		"thin_track1_corpus",
+		"no_guard_serve_dogfood_rows",
+		"no_track2_provider_dollar_rows",
+		"multi_agent_geometry_not_recurring_dogfood",
+		"o1_query_not_yet_real_session_workflow",
+	} {
+		if !stringSliceContains(row.Gaps, want) {
+			t.Fatalf("row gaps missing %q: %+v", want, row.Gaps)
+		}
+	}
+	if row.Verdict != "VISIBLE_BUT_NOT_YET_PRODUCT_DOGFOOD" {
+		t.Fatalf("unexpected verdict: %s", row.Verdict)
+	}
+}
+
+func TestCachevalueReviewMarkdownNamesThreeQuestions(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReview(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", track2,
+		"--since", "2026-06-01",
+		"--date", "2026-06-29",
+	})
+	if code != 0 {
+		t.Fatalf("review markdown exit = %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"1. What did we use ourselves this week?",
+		"2. What can a new person demo this week?",
+		"3. What is the next missing witness or product surface?",
+		"Track 2: OBSERVED-$ rows present",
+		"../run-the-demos.md#cache-frontier-walkthrough",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("review markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCachevalueReviewWritesArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+	ledgerOut := filepath.Join(dir, "docs", "cache-frontier", "review-ledger.jsonl")
+	markdownOut := filepath.Join(dir, "docs", "cache-frontier", "reviews", "2026-06-29.md")
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReview(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", track2,
+		"--since", "2026-06-01",
+		"--date", "2026-06-29",
+		"--source-markdown", "reviews/2026-06-29.md",
+		"--append-ledger", ledgerOut,
+		"--markdown-out", markdownOut,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("review artifact write exit = %d, stderr=%s", code, errb.String())
+	}
+
+	var stdoutRow cacheFrontierReviewRow
+	if err := json.Unmarshal(out.Bytes(), &stdoutRow); err != nil {
+		t.Fatalf("stdout should still contain the review row: %v\n%s", err, out.String())
+	}
+	ledgerBytes, err := os.ReadFile(ledgerOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(strings.TrimSpace(string(ledgerBytes)), "\n") != 0 {
+		t.Fatalf("ledger should contain one JSONL row, got:\n%s", string(ledgerBytes))
+	}
+	var ledgerRow cacheFrontierReviewRow
+	if err := json.Unmarshal(ledgerBytes, &ledgerRow); err != nil {
+		t.Fatalf("ledger row is not JSON: %v\n%s", err, string(ledgerBytes))
+	}
+	if ledgerRow.Date != stdoutRow.Date || ledgerRow.Schema != cacheFrontierReviewSchema {
+		t.Fatalf("ledger row mismatch: stdout=%+v ledger=%+v", stdoutRow, ledgerRow)
+	}
+
+	markdownBytes, err := os.ReadFile(markdownOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdown := string(markdownBytes)
+	for _, want := range []string{
+		"title: \"Cache frontier weekly review - 2026-06-29\"",
+		"Generated by `fak cachevalue review`",
+		"## 1. What did we use ourselves this week?",
+		"`multi_agent_geometry_not_recurring_dogfood`",
+		"`VISIBLE_BUT_NOT_YET_PRODUCT_DOGFOOD`",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("generated markdown missing %q:\n%s", want, markdown)
+		}
+	}
+}
+
+func TestCachevalueReviewCanReachReadyWhenWitnessesPresent(t *testing.T) {
+	dir := t.TempDir()
+	track1 := filepath.Join(dir, "cache-value.jsonl")
+	body := `{"date":"2026-06-28","session_type":"guard","turns":8,"prompt_tokens":1000,"reused_tokens":700}
+{"date":"2026-06-28","session_type":"serve","turns":8,"prompt_tokens":1000,"reused_tokens":750}
+`
+	if err := os.WriteFile(track1, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	track2 := filepath.Join(dir, "cache-savings.jsonl")
+	savings := `{"schema":"fak-cache-savings-ledger/1","date":"2026-06-28","session_type":"guard","input_tokens":1000,"cache_read_tokens":9000,"output_tokens":500,"rebate_usd":5.0,"write_premium_usd":0.1,"spend_usd":0.5}
+`
+	if err := os.WriteFile(track2, []byte(savings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReview(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", track2,
+		"--date", "2026-06-29",
+		"--multi-agent-dogfood",
+		"--o1-query-session",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("review ready --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var row cacheFrontierReviewRow
+	if err := json.Unmarshal(out.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Verdict != "PRODUCT_DOGFOOD_READY" {
+		t.Fatalf("expected ready verdict when all witnesses are present, got %+v", row)
+	}
+	if len(row.Gaps) != 0 || len(row.NextActions) != 0 {
+		t.Fatalf("ready row should have no gaps/actions: %+v", row)
+	}
+}
+
+func TestCachevalueReviewRejectsBadDates(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runCachevalueReview(&out, &errb, []string{"--since", "last-week"}); code != 2 {
+		t.Fatalf("bad --since should exit 2, got %d", code)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runCachevalueReview(&out, &errb, []string{"--date", "June 29"}); code != 2 {
+		t.Fatalf("bad --date should exit 2, got %d", code)
+	}
+}
+
+func TestCachevalueReviewRejectsSameOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "review")
+	var out, errb bytes.Buffer
+	code := runCachevalueReview(&out, &errb, []string{
+		"--append-ledger", outPath,
+		"--markdown-out", outPath,
+	})
+	if code != 2 {
+		t.Fatalf("same output path should exit 2, got %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "must be different paths") {
+		t.Fatalf("same output path stderr should explain refusal, got %q", errb.String())
+	}
+}
+
+func stringSliceContains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
