@@ -1,0 +1,10 @@
+# FrontierSWE job config for git-to-zig.
+agents:
+  - claude-code
+  - codex
+n_attempts: 3
+n_concurrent_trials: 2
+artifacts:
+  - solution.patch
+  - agent.log
+  - reward.json

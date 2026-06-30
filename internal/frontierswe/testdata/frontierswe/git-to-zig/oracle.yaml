@@ -1,0 +1,3 @@
+# FrontierSWE oracle (verifier) config for git-to-zig.
+command: "python -m verifier.run --task git-to-zig"
+reward_key: "fraction_tests_passed"
