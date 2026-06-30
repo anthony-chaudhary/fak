@@ -251,11 +251,11 @@ The math is deliberately rough and **honest by construction**:
 - It is a **price-rate estimate** for choosing a policy, **not** a measured
   speed/quality multiple (the same distinction this page draws above).
 
-## The wiring contract (load-bearing — read before wiring dispatch)
+## The wiring contract (load-bearing)
 
-The decision spine is pure; executing a decision on real engines is the [STUB]
-half. The wiring **must** honor three rules so it cannot regress fak's default-deny
-floor:
+The decision spine is pure; executing a decision on real engines must honor three
+rules so it cannot regress fak's default-deny floor. The served gateway path is the
+reference implementation of this contract:
 
 1. **Route before adjudicate.** Write the chosen model to `abi.ToolCall.Engine`
    **before** `Kernel.Submit`, never as a dispatch-time override. The residency PDP
@@ -347,8 +347,8 @@ model produces for it (a recorded answer, never a live model call) — exactly a
 already-witnessed halves of the package (`Route` + `Combine`) over fixed votes.
 It is **deterministic end to end**: no key, no GPU, no network. It measures what
 the *policy* does to a *recorded workload*, not what a non-bit-exact engine would
-do live (that is the [STUB] dispatch half). Every figure is a **rough lens**, never
-a bill or a measured SLA.
+do live. Live gateway dispatch is tested separately; it is not what `routebench`
+measures. Every figure is a **rough lens**, never a bill or a measured SLA.
 
 ```bash
 # the built-in 8-case demo corpus + DefaultManifest vs a one-frontier-model baseline
@@ -375,19 +375,15 @@ and re-asserts the documented numbers.
 
 ## Roadmap (the GitHub issue series)
 
-The decision spine is the foundation; the offline benchmark (`fak routebench`) is
-shipped; the rest is wiring, each a tracked issue:
+The decision spine, offline benchmark (`fak routebench`), and served gateway
+dispatch for picks/ensembles are shipped. The remaining work is broader product
+surface and learning:
 
-- Wire a single-model route into the kernel/gateway: set `ToolCall.Engine` from
-  `Decision.Plan.Primary()` **pre-submit** (honoring the residency ordering).
-- Execute an ensemble Plan in the gateway: N adjudicated submits + `Combine`.
 - Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
 - Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
 - Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
   policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
   corpus; this is its live, self-improving counterpart).
-- Manifest hot-reload + `fak serve --route-manifest`.
 - Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
-- Routing observability (per-aspect decisions in `/metrics` + the decision journal).
 - Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
 - Industry-scorecard row positioning vs the surveyed routers.
