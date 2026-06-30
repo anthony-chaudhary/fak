@@ -356,6 +356,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
+	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, model, target, promptRec, payload, finish)
+}
+
+// dispatchTickLiveSpawn performs the live spawn once every dry-run gate has passed: acquire
+// the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
+// the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
+// returns the shared payload through finish, mirroring the dry-run return sites it splits off.
+func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, model string, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
 	lease := acquireDispatchLaneLease(root, firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)), pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
 	payload["lease"] = lease
 	if refused, _ := lease["refused"].(bool); refused {
