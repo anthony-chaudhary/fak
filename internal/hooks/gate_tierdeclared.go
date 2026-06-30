@@ -100,7 +100,7 @@ func gateTierDeclaredTree(t *TrackedTree) ([]Finding, error) {
 			Gate: "TIER_DECLARED",
 			File: "internal/" + pkg + "/",
 			Detail: "internal/" + pkg + " has no tier declaration — add a row to the `tier` map in " +
-				tierTableFile + " at the LOWEST tier whose role it fits (or run `python tools/new_leaf.py " +
+				tierTableFile + " at the LOWEST tier whose role it fits (or run `fak new-leaf " +
 				pkg + " --tier <tier>`), so its `(fak " + pkg + ")` ship-stamp binds to a declared layer.",
 		})
 	}

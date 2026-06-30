@@ -23,6 +23,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). Same contract
@@ -83,6 +85,7 @@ func PreCommitGates() []Gate {
 // used errors="replace" — Go's string conversion is already lossless over arbitrary bytes).
 func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}
