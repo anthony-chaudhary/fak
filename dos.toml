@@ -19,6 +19,15 @@
 # lanes co-acquire) before commit.
 workspace = "."
 
+[branch_roles]
+# Current no-cutover regime. #1695 makes the branch-role contract executable;
+# later cutover tickets change these values only after hooks, CI, prompts, and
+# release promotion agree on the same roles.
+development_branch = "main"
+release_branch = "main"
+release_source = "main"
+public_front_door = "main"
+
 # Lane taxonomy -- a concurrent lane may run iff its file-tree is disjoint from
 # every live lease; an exclusive lane runs alone. fak's architecture is a STAR of
 # disjoint leaf trees (PARTITION.md: "dos-arbitrate takes one lease per tree"), and
@@ -150,6 +159,7 @@ concurrent = [
   "codexmcphealth",
   "operatorbrief",
   "safesync",
+  "branchrole",
   "apihostprobe",
   "benchloop",
   "benchruns",
@@ -224,6 +234,7 @@ autopick = [
   "codexmcphealth",
   "operatorbrief",
   "safesync",
+  "branchrole",
   "apihostprobe",
   "benchloop",
   "benchruns",
@@ -380,6 +391,7 @@ loopindex = ["internal/loopindex/**"] # #1152: agentic-coding loop-index spine (
 codexmcphealth = ["internal/codexmcphealth/**"]
 operatorbrief = ["internal/operatorbrief/**"]
 safesync = ["internal/safesync/**"]
+branchrole = ["internal/branchrole/**"]
 apihostprobe = ["internal/apihostprobe/**"]
 benchloop = ["internal/benchloop/**"]
 benchruns = ["internal/benchruns/**"]
@@ -541,8 +553,8 @@ summary  = "request-path logic in an untyped language, or a non-Go package blank
 fix      = "keep the request path Go-only; a non-Go seam must be off-path and cross a typed, re-validated boundary. Floor: architest TestHotPathHasNoExec"
 see_also = ["fak/DIRECTION.md", "fak/internal/architest/architest_test.go"]
 
-# Trunk discipline: work lands directly on `main` as a SINGLE working tree, not on
-# stray feature branches / per-issue worktrees. This is the cross-agent "stay on the trunk"
+# Trunk discipline: work lands directly on [branch_roles].development_branch as a
+# SINGLE working tree, not on stray feature branches / per-issue worktrees. This is the cross-agent "stay on the trunk"
 # policy turned into DOS vocabulary -- the same structured-reason discipline fak imposes
 # on tool results, aimed at the fleet's own git workflow so Claude, Codex, and humans
 # share ONE refusal instead of three doc sentences that only one of them reads. The named
@@ -551,8 +563,8 @@ see_also = ["fak/DIRECTION.md", "fak/internal/architest/architest_test.go"]
 [reasons.OFF_TRUNK]
 category = "OPERATOR_GATE"
 refusal  = true
-summary  = "work landed off the trunk -- a new branch or worktree was created instead of committing directly to main (the single-tree-on-trunk operator law). Every worker MUST stay on main in the main worktree; creating a side branch/worktree to route around a dirty or diverged tree is the specific anti-pattern this reason names."
-fix      = "commit directly to main with small, path-scoped commits; pull/merge frequently, preferring merge or pull --no-rebase when unrelated dirty files are present. `git commit -- <paths>` and merge never need a clean tree, so a worktree is never required to ship -- a dirty/diverged tree means WAIT or merge in place, never escape into a side tree; if you truly cannot proceed on main, STOP and surface the blocker. Floor: tools/githooks/reference-transaction blocks off-trunk branch creation by default; set FLEET_TRUNK_GUARD=warn for advisory mode, or FLEET_ALLOW_BRANCH=1 to override once (release tooling only)."
+summary  = "work landed off the configured development trunk -- a new branch/worktree was created or an everyday commit targeted a branch other than [branch_roles].development_branch. Every worker MUST stay on the configured development branch in the shared worktree; creating a side branch/worktree to route around a dirty or diverged tree is the specific anti-pattern this reason names."
+fix      = "commit directly to [branch_roles].development_branch with small, path-scoped commits; pull/merge frequently, preferring merge or pull --no-rebase when unrelated dirty files are present. `git commit -- <paths>` and merge never need a clean tree, so a worktree is never required to ship -- a dirty/diverged tree means WAIT or merge in place, never escape into a side tree; if you truly cannot proceed on the configured development branch, STOP and surface the blocker. Floor: tools/githooks/reference-transaction blocks off-trunk branch creation by default; set FLEET_TRUNK_GUARD=warn for advisory mode, or FLEET_ALLOW_BRANCH=1 to override once (release tooling only)."
 see_also = ["CLAUDE.md", "AGENTS.md", "tools/githooks/reference-transaction", "tools/install_trunk_guard.py"]
 
 # Stale-base deletion: a `git commit -- <path>` (or `fak commit`) stages the
