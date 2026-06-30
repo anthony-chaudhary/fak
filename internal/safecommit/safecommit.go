@@ -133,6 +133,9 @@ type Result struct {
 	Paths      []string                 `json:"paths"`
 	Verified   bool                     `json:"verified"`
 	Pushed     bool                     `json:"pushed"`
+	Score      int                      `json:"score"`
+	Grade      string                   `json:"grade"`
+	ScoreNotes []string                 `json:"score_notes,omitempty"`
 	Reason     string                   `json:"reason,omitempty"`
 	Detail     string                   `json:"detail,omitempty"`
 	RacedExtra []string                 `json:"raced_extra_paths,omitempty"`
@@ -159,6 +162,10 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 // a fake Runner + fake LockFunc exercise the whole step-ordered algorithm — including the
 // race remedy — with no git and no repo. See the package doc for the discipline it encodes.
 func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (res Result, err error) {
+	defer func() {
+		res = ScoreResult(res)
+	}()
+
 	trunk := strings.TrimSpace(opts.Trunk)
 	if trunk == "" {
 		trunk = DefaultTrunk
