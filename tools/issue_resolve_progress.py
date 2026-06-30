@@ -271,8 +271,8 @@ def record_loop_tick(root: Path, rec: dict[str, Any],
         events: list[dict[str, Any]] = [{
             "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
             "status": "claimed_done", "reason": "TARGET_MET",
-            "summary": (f"target met (remaining=0, witnessed_open=0); quiescent "
-                        f"heartbeat — no closures pending"),
+            "summary": ("target met (remaining=0, witnessed_open=0); quiescent "
+                        "heartbeat — no closures pending"),
             "metrics": metrics, "evidence": evidence,
         }]
     else:

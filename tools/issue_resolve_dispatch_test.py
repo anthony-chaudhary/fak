@@ -163,7 +163,8 @@ class LiveResolutionLanesTest(unittest.TestCase):
         worker runs as a ``node`` image, so a recycled ``node`` pid landing in the
         sidecar's spawn window passes the create-time fallback and would otherwise pin
         ``docs`` at LANE_BUSY forever behind a dead 122-byte no-op."""
-        import os, tempfile
+        import os
+        import tempfile
         mod = load()
         now = 1_000_000.0
         with tempfile.TemporaryDirectory() as d:
