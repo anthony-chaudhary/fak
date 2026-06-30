@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![cross-platform](https://github.com/anthony-chaudhary/fak/actions/workflows/cross-platform.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/cross-platform.yml) [![bench](https://github.com/anthony-chaudhary/fak/actions/workflows/bench.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/bench.yml) [![release cadence](https://github.com/anthony-chaudhary/fak/actions/workflows/release-cadence.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-cadence.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-06-30 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; the capability-floor / policy material moved down to "For security teams" + the per-domain docs. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-30 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; 2026-06-30 added the CI/CD ship-loop front-door note. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
 **fak in one line:** fak is a fused agent kernel: one Go binary that sits in front of an
 agent's tool calls, checks each call, and reuses the stable work in long sessions so the same
@@ -326,7 +326,7 @@ Go 1.26+ is required. With `GOTOOLCHAIN=auto`, Go can fetch the toolchain on fir
 There are no external Go dependencies and no `go.sum`. Prebuilt archives and container
 guidance are in [INSTALL.md](INSTALL.md) and [GETTING-STARTED.md](GETTING-STARTED.md).
 
-## Build and test
+## Build, test, and ship
 
 Run from the repository root:
 
@@ -339,6 +339,13 @@ make ci
 On native Windows, `go build` and `go vet` work normally, but native `go test` can be
 blocked by OS Application Control on freshly compiled test binaries. Use `./test.ps1` under
 WSL for the full suite on that host.
+
+The badges at the top mirror this local loop. Run the cheapest witness that covers your
+change first (`make test-fast` for code, `python tools/readme_freshness_audit.py --json`
+for this page, or the relevant `--dry-run`/`--check` command), then use `make ci` as the
+green bar before delivery. Shipping is continuous but path-scoped: preview the exact
+subject and files with `fak commit --preview -m "<subject>" --path <p>`, commit only those
+paths, and push after the gate is green. No side branch, no `git add -A`, no force-push.
 
 ## Boundaries
 
@@ -373,6 +380,7 @@ substrate).
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
 | Security model | [docs/fak/security.md](docs/fak/security.md) |
 | API reference | [docs/fak/api-reference.md](docs/fak/api-reference.md) |
+| CI/CD and local ship loop | [docs/dev-tooling.md](docs/dev-tooling.md) · [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Model routing | [docs/model-routing.md](docs/model-routing.md) |
 | Benchmark authority | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) |
 | Honesty ledger | [CLAIMS.md](CLAIMS.md) |
