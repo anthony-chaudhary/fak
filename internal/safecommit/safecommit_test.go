@@ -94,6 +94,15 @@ func (f *fakeGit) commitArgv() []string {
 	return nil
 }
 
+func (f *fakeGit) argvFor(sub string) []string {
+	for _, c := range f.calls {
+		if len(c) > 0 && c[0] == sub {
+			return c
+		}
+	}
+	return nil
+}
+
 // okLock is a LockFunc that always grants a no-op lock and records release.
 func okLock(released *bool) LockFunc {
 	return func(LockOptions) (func(), error) {
@@ -488,6 +497,23 @@ func TestDeletionIsNotARace(t *testing.T) {
 	res, _ := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
 	if !res.Verified || res.Reason != "" {
 		t.Fatalf("a deletion of the requested path is exactly-requested, not a race; got %+v", res)
+	}
+}
+
+func TestDeletionStagingUsesPathspecScopedAll(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["status"] = reply{out: " D internal/foo/bar.go\n", code: 0}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified || res.Reason != "" {
+		t.Fatalf("deletion should commit cleanly, got %+v", res)
+	}
+	want := []string{"add", "--all", "--", "internal/foo/bar.go"}
+	if got := g.argvFor("add"); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("add argv = %q, want %q", got, want)
 	}
 }
 

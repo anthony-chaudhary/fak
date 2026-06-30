@@ -279,12 +279,12 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 
 	// Stage EXACTLY the requested paths, inside the lock, with an explicit pathspec — never
-	// `git add -A`/`.` (which would sweep a peer's tree). This is what makes a brand-new
-	// untracked file committable while staying within the requested set; the staging and the
-	// commit happen back-to-back under the lock, so the window the manual two-step left open
-	// (add here, commit much later) is closed. The post-commit assertion (step 7) is still the
-	// authority — a peer who raced between this add and the commit is caught there.
-	addArgs := append([]string{"add", "--"}, paths...)
+	// an unscoped `git add -A`/`.` (which would sweep a peer's tree). `--all` is deliberately
+	// pathspec-scoped here: it stages additions, edits, and deletions for the requested paths,
+	// including a path already removed from the index by `git rm`, without touching any other
+	// dirty file. The post-commit assertion (step 7) remains the authority — a peer who raced
+	// between this add and the commit is caught there.
+	addArgs := append([]string{"add", "--all", "--"}, paths...)
 	if out, code, aerr := run(ctx, opts.Dir, addArgs...); aerr != nil {
 		return res, fmt.Errorf("safecommit: git not executable: %w", aerr)
 	} else if code != 0 {
