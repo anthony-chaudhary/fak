@@ -107,6 +107,17 @@ def test_support_maturity_scorecard_registered() -> None:
     }
 
 
+def test_maturity_scorecard_registered() -> None:
+    card = next(c for c in scp.SCORECARDS if c["key"] == "maturity")
+    assert card == {
+        "key": "maturity",
+        "debt": "maturity_debt",
+        "script": "",
+        "cmd": "go run ./cmd/fak maturity --json",
+        "label": "maturity",
+    }
+
+
 # Every tools/*_scorecard.py on disk must be registered in the fold OR named in a
 # documented exclusion list — the breadth invariant (#1270). Without this an
 # unfolded surface can regress freely and never trip the ratchet, the gap that
@@ -114,7 +125,7 @@ def test_support_maturity_scorecard_registered() -> None:
 # A *_scorecard.py whose metric is folded under a DIFFERENT script name (the go
 # native scorecards) or is intentionally standalone goes here with a reason.
 EXCLUDED_SCORECARDS: dict[str, str] = {
-    # The conflation/token-defaults/guard-rsi/dogfood/growth/support-maturity
+    # The conflation/token-defaults/guard-rsi/dogfood/maturity/growth/support-maturity
     # metrics ARE folded, but via `go run ./cmd/fak ...` (no python script); their
     # python test/helper files (if any) are not the fold entry point.
     "vcache_scorecard_gate.py": "a CI gate wrapper, not a portfolio debt scorecard",
@@ -127,7 +138,8 @@ def _registered_scripts() -> set[str]:
 
 def test_every_scorecard_is_registered_or_excluded() -> None:
     """Breadth invariant: no tools/*_scorecard.py is silently left out of the fold."""
-    import glob, os
+    import glob
+    import os
     on_disk = {
         os.path.basename(p)
         for p in glob.glob(str(scp.repo_root() / "tools" / "*_scorecard.py"))
@@ -524,6 +536,58 @@ def test_main_check_json_ok_reflects_ratchet_not_raw_fold() -> None:
         assert out["gate_exit"] == 1
     finally:
         scp.collect, scp.load_baseline = orig_collect, orig_load
+
+
+# --- build-break vs card-bug triage (B0 #1416) -----------------------------
+
+def _error_card(metrics: list[dict], key: str, error: str = "boom") -> list[dict]:
+    """Replace the folded metric for `key` with an ERRORED one (no payload)."""
+    for i, card in enumerate(scp.SCORECARDS):
+        if card["key"] == key:
+            metrics[i] = scp.metric_from_payload(card, None, error=error)
+            return metrics
+    raise KeyError(key)
+
+
+def test_go_backed_keys_cover_the_go_run_cards() -> None:
+    # Every card folded via `go run ./cmd/fak …` is a Go-backed key; the python
+    # cards are not. This set drives the build-vs-bug triage.
+    assert "maturity" in scp.GO_BACKED_KEYS and "conflation" in scp.GO_BACKED_KEYS
+    assert "loopindex" in scp.GO_BACKED_KEYS and "support_maturity" in scp.GO_BACKED_KEYS
+    assert "doc" not in scp.GO_BACKED_KEYS and "slop" not in scp.GO_BACKED_KEYS
+    # and it is derived from SCORECARDS, never hand-listed.
+    derived = {c["key"] for c in scp.SCORECARDS if "go run" in (c.get("cmd") or "")}
+    assert scp.GO_BACKED_KEYS == derived
+
+
+def test_build_break_hint_empty_for_python_card_error() -> None:
+    # a python card erroring is a genuine card/measurement fault — no build triage.
+    metrics = _error_card(full_metrics(), "doc")
+    errored = [m for m in metrics if not isinstance(m.get("debt"), int)]
+    assert scp.build_break_hint(errored) == ""
+
+
+def test_build_break_hint_fires_for_go_backed_card_error() -> None:
+    metrics = _error_card(full_metrics(), "maturity")
+    errored = [m for m in metrics if not isinstance(m.get("debt"), int)]
+    hint = scp.build_break_hint(errored)
+    assert "go build ./..." in hint and "Go-backed" in hint
+    assert "maturity" in hint and "clean-read recipe" in hint
+
+
+def test_fold_unmeasured_go_card_carries_build_break_hint() -> None:
+    metrics = _error_card(full_metrics(code=2), "conflation")
+    out = scp.fold(metrics, None, workspace=".", commit="c0")
+    assert out["finding"] == "scorecard_unmeasured" and out["errored"] == 1
+    assert "go build ./..." in out["next_action"]
+
+
+def test_check_gate_build_break_hint_in_message() -> None:
+    base = baseline_from(code=2)
+    metrics = _error_card(full_metrics(code=2), "growth")
+    out = scp.fold(metrics, base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 1 and "unmeasured" in msg and "go build ./..." in msg
 
 
 # --- tolerant live smoke ----------------------------------------------------

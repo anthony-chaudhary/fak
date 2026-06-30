@@ -232,6 +232,16 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "persona_fit", "debt": "persona_fit_debt", "script": "persona_fit_scorecard.py", "label": "persona-fit"},
 ]
 
+# The scorecards folded via `go run ./cmd/fak …` (no python script). When one of
+# THESE errors, the cause is almost always a working tree that does not COMPILE —
+# the `go run` build step failed on uncommitted WIP — NOT a bug in the card. This
+# is the B0 #1416 distinction the control pane must make legible: a build-break
+# masquerading as "the scorecard is broken" sends the reader to debug the wrong
+# thing, and an errored card silently drops out of the ratchet's fold.
+GO_BACKED_KEYS: frozenset[str] = frozenset(
+    c["key"] for c in SCORECARDS if "go run" in (c.get("cmd") or "")
+)
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -348,6 +358,28 @@ def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
     }
 
 
+def build_break_hint(errored: list[dict[str, Any]]) -> str:
+    """Guidance that distinguishes a working-tree BUILD BREAK from a real card bug.
+
+    The B0 #1416 regression note, operationalized in the tool (not just the docs):
+    the Go-backed cards shell ``go run ./cmd/fak …``, so uncommitted WIP that does
+    not compile makes EVERY one of them error at once — a build break, not a card
+    bug. Returns "" when no errored card is Go-backed (a python card erroring is a
+    genuine card/measurement fault and needs no build-vs-bug triage)."""
+    go_errs = [m["label"] for m in errored if m.get("key") in GO_BACKED_KEYS]
+    if not go_errs:
+        return ""
+    return (
+        f" — note: {len(go_errs)} Go-backed card(s) errored ({', '.join(sorted(go_errs))}); "
+        "these shell `go run ./cmd/fak …`, so the usual cause is a working tree that "
+        "does NOT compile, not a card bug. Triage with `go build ./...`: if it FAILS, "
+        "commit or stash your WIP (or measure a pristine HEAD checkout that keeps .git, "
+        "e.g. `git worktree add --detach <dir> HEAD`) and re-run; if `go build ./...` "
+        "PASSES yet a card still errors, it is a real card bug — debug that card's "
+        "--json. (clean-read recipe: .claude/skills/scorecard/SKILL.md)"
+    )
+
+
 def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
          *, workspace: str, commit: str) -> dict[str, Any]:
     """Fold per-scorecard metrics into one control-pane payload + trend."""
@@ -392,7 +424,8 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
                   f"({', '.join(m['label'] for m in errors)}); portfolio debt "
                   f"{total_debt} across {len(measured)} measured")
         next_action = ("repair the failing scorecard(s) so the fold is complete; "
-                       "re-run python tools/scorecard_control_pane.py")
+                       "re-run python tools/scorecard_control_pane.py"
+                       + build_break_hint(errors))
     elif regressed:
         ok, verdict, finding = False, "ACTION", "scorecard_regressed"
         reason = (f"portfolio debt rose {trend['total_delta']:+d} to {total_debt} "
@@ -638,8 +671,10 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
       2  unpinned          — no baseline to ratchet against; run --pin first
     """
     if int(payload.get("errored", 0)) > 0:
+        errored = [m for m in payload.get("metrics", [])
+                   if not isinstance(m.get("debt"), int)]
         return 1, (f"RATCHET FAIL: {payload['errored']} scorecard(s) unmeasured — "
-                   f"{payload['reason']}")
+                   f"{payload['reason']}" + build_break_hint(errored))
     trend = payload.get("trend") or {}
     direction = trend.get("direction")
     if direction == "unpinned":
