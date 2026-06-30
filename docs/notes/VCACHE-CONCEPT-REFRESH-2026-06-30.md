@@ -1,6 +1,6 @@
 ---
 title: "Virtual-cache concept refresh: O(1) context, vBlocks, vCache M1-M5, and honest attribution"
-description: "A 2026-06-30 re-grounding of every fak caching concept against the live tree: what fires on a normal run, what is built-but-gated-off, and the one accounting gap that makes the provider's prompt-cache look like fak's win. The companion plan is VCACHE-DEFAULT-ON-TOP50-2026-06-30.md."
+description: "A 2026-06-30 re-grounding of every fak caching concept against the live tree: what fires on a normal run, what is now owner-attributed, what only has a live decision witness, and what is still built-but-gated-off. The companion plan is VCACHE-DEFAULT-ON-TOP50-2026-06-30.md."
 ---
 
 # Virtual-cache concept refresh (2026-06-30)
@@ -8,12 +8,12 @@ description: "A 2026-06-30 re-grounding of every fak caching concept against the
 This page re-states fak's caching vocabulary against the tree as it stands on
 `main` today, and draws the one line that the goal behind it is really about:
 
-> The single cache number `fak guard` shows an operator by default is **100% the
-> provider's prompt-cache**. fak's own caching mechanisms are measured but never
-> folded into that headline, and the agentic loop that would make fak's number
-> large (vCache M2–M5) is **built but gated OFF**. So "cache saved 85%" reads as
-> a fak win when it is, today, almost entirely the provider's — and "our agentic
-> things aren't firing" is literally true.
+> The default cache number now has to be read as an **owner split**, not one
+> blended win: provider prompt-cache rebate is OBSERVED/provider-authored, while
+> compaction, KV-prefix reuse, and vDSO avoidance are WITNESSED/fak-authored.
+> The remaining gap is activation: fak's authored slice is still often near zero
+> on normal proxy traffic because M2/M3/M4 actions are not live, and M5 now
+> records live decisions but does not yet warm, pin, evict, or route.
 
 The companion is the actionable list:
 [`VCACHE-DEFAULT-ON-TOP50-2026-06-30.md`](VCACHE-DEFAULT-ON-TOP50-2026-06-30.md).
@@ -38,10 +38,11 @@ who *authored* the saving — and that owner is what attribution must report.
 | 5 | **vDSO call-avoidance** (`fak_read`, repeated-call short-circuit) | a whole engine round-trip skipped | **fak** (WITNESSED) | yes | `internal/vdso/`, `internal/gateway/mcp.go` |
 
 The honest law fak already follows (glossary): **cost is booked at the full
-uncached price first; a *confirmed* hit refunds part of it.** What is missing is
-not honesty — it is **decomposition**. The five savings are reported on separate,
-unrelated surfaces, so no one number says "of the spend you avoided, this slice
-was the provider and these four slices were fak."
+uncached price first; a *confirmed* hit refunds part of it.** The current tree now
+decomposes that value in the default guard summary, per-turn debug line, `/metrics`,
+`fak vcache observe`, and the Track-2 cache-value ledger. The next problem is no
+longer "which owner got the saving?" but "which fak-authored mechanisms actually
+fired on this run?"
 
 ## The vCache milestones — built vs. firing
 
@@ -54,11 +55,12 @@ vCache (epic #715–#720) is the active control loop that would make mechanism #
 | **M2 star anchors** | canonicalize a byte-stable anchor, let the first natural request warm it, fan siblings onto it | `internal/vcachestar/`, `cachemeta.RecommendLayout` | `RecommendLayout` is **advisory-only** and enforced only inside the star preflight; **not a default pre-flight gate** (#717 open) |
 | **M3 dedicated warming** | `max_tokens:0` (explicit) / decode-1 (implicit) under the break-even gate | — | **not built into the live path** (#718 open) |
 | **M4 chains & recall** | prefix DAG, topological replay, cost-gated rebuild | `internal/vcachechain/` | **UP but gated OFF** — `ProveRecall` runs only from the `fak vcache` CLI; `Replay` is never called live |
-| **M5 governor** | pin / lazy / evict, warm budget, affinity routing, secret gate | `internal/vcachegov/` | **UP but gated OFF** — "deliberately NOT registered into the kernel … adds zero rungs to the request path" (`vcachegov/doc.go:25`) |
+| **M5 governor** | pin / lazy / evict, warm budget, affinity routing, secret gate | `internal/vcachegov/`, `internal/gateway/vcache_governor_journal.go` | **decision witness live; actions gated OFF** — the gateway folds live provider-cache families into governor verdicts on `/metrics` and a hash-chained `/debug/vars` journal, but it still does not warm, pin, evict, or route on those verdicts |
 
-So on a normal `fak guard -- claude` run: mechanisms #1–#5 are *observed*, M2's
-layout advice is *computed*, and **M3–M5 never fire**. The `fak vcache`
-subcommands (`status/prove/prove-telemetry/prove-recall/observe/score`) are an
+So on a normal `fak guard -- claude` run: mechanisms #1–#5 are *observed* and
+owner-attributed, M2's layout advice is *computed*, M5's governor verdict is
+*recorded*, and **M2/M3/M4/M5 still do not act**. The `fak vcache` subcommands
+(`status/prove/prove-telemetry/prove-recall/observe/score`) remain mostly an
 **offline lens** over real transcripts — they prove the economics and grade a
 recorded session; they do not warm, pin, or recall anything live.
 
@@ -83,39 +85,35 @@ recorded session; they do not warm, pin, or recall anything live.
   `RecommendLayout` (star preflight). Offline-only: `Lifecycle`, `manifest`,
   `placement`, `kvresidency`, `kvtransfer`, `pool`, `hardware`.
 
-## The attribution gap, in live code
+## The activation gap, in live code
 
-The default `fak guard` exit prints the provider line and the fak lines
-**separately**, and the per-turn `fak-turn` line's `saved=` is the **provider's**
-net only:
+The old default `fak guard` exit printed the provider line and the fak lines
+separately, and the per-turn `fak-turn` line's `saved=` was the provider net only.
+That conflation is now closed in the live surfaces:
 
 ```go
-// cmd/fak/guard.go:1279 — the ONLY cache-savings headline a default run shows
-"fak guard: prompt-cache saving … the provider cache saved ~%s (%.0f%% off) …
- fak forwarded the cache_control prefix intact; it relays this provider-reported
- value and did not author this saving."
+// cmd/fak/guard.go — one default owner/mechanism headline
+"fak guard: avoided-spend attribution — provider ~P (...) + fak ~F (...) = ~T token-equiv [...]"
 ```
 
 ```go
-// internal/gateway/debug_stats.go:255 — saved= is vcacheProofFromCounters over
-// the PROVIDER's cache_read/cache_creation only
-" saved=%s tok (%s%% of prompt)"
+// internal/gateway/debug_stats.go — per-turn owner split
+" prov=... tok (...% of prompt) fak=... tok"
 ```
 
-Compaction shed (a fak-authored saving) is a *different* line
-(`guard.go:1306`), KV-reuse is in a *different* ledger
-(`docs/nightrun/cache-value.jsonl`), and vDSO avoidance is on `/metrics`. There
-is no single frame that says **"total avoided spend = provider X% + fak Y%,"** and
-nothing tells the operator that Y is small *because M2–M5 are off*, not because
-the workload had no reuse.
+The remaining gap is that the fak-authored side is still usually small on the
+proxy path. The diagnostic now names likely causes (`anchor-starved`, no local
+KV-prefix reuse, no multi-turn reuse, compaction not firing), and the M5 governor
+decision witness appears as `fak_vcache_governor_decision_families{decision=...}`
+plus the `/debug/vars` `vcache_governor_journal` rows. Those rows are evidence of
+classification, not evidence that a warm/pin/evict action ran.
 
 ## Legacy assumptions worth removing
 
-1. **"saved=" means fak's cache.** It means the provider's. Rename/relabel the
-   headline so the provider slice and the fak slice are both visible, always.
-2. **The governor/recall engines are "up."** They are *built and tested* but
-   unregistered. "Up" should mean "fires on a real request"; until then say
-   *implemented, off-path*.
+1. **"saved=" means fak's cache.** Resolved in the live surfaces: use
+   `prov=... fak=...` and the `avoided-spend attribution` headline.
+2. **The governor/recall engines are "up."** Tightened: M5 has a live decision
+   witness, but action remains unregistered; M4 remains implemented/off-path.
 3. **One Zipf forecast as the default score.** `fak vcache score` defaults to a
    synthetic `s=1.74` workload when no live snapshot is present — a forecast
    dressed as a measurement unless the snapshot path is populated. The default

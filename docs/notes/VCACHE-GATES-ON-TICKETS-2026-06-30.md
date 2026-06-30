@@ -17,7 +17,7 @@ witness) and **dogfood** (it ran on our own guard/serve traffic) gate is green.
 |---|-------|-------|----------|
 | **#1490** | epic: turn the vCache gates ON + honest per-mechanism attribution | epic | the whole loop |
 | #1491 | per-mechanism + per-owner saving attribution | A — attribution | the "provider P% + fak F%" headline |
-| #1492 | register the M5 governor into a live loop | B — gates | pin/lazy/evict/warm, live |
+| #1492 | register the M5 governor into a live loop | B — gates | decision witness live; pin/lazy/evict/warm actions still open |
 | #1493 | M2 star-anchor canonicalization as a default pre-flight gate | B — gates | fak's authored slice `F` > 0 |
 | #1497 | M1 warmth-belief estimator + per-provider calibration, live | B — gates | steering (not just scoring) |
 | #1498 | push the vBlock/anchor abstraction across every serving path | C — cross-path | pure-fak, sglang, vllm, llama, API |

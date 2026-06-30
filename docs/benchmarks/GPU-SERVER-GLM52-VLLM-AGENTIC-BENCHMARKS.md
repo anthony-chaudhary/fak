@@ -109,7 +109,7 @@ python tools/vllm_tax_witness.py \
   --require-tool-calls \
   --require-grade \
   --require-gpu-name H200 \
-  --run-dir /tmp/swe-glm52-vllm-20 \
+  --run-dir <private-swebench-run> \
   --preflight-only
 
 # 4b. Run the 20-task SWE-bench Verified comparison. This reuses raw vLLM and
@@ -124,7 +124,7 @@ python tools/vllm_tax_witness.py \
   --require-tool-calls \
   --require-grade \
   --require-gpu-name H200 \
-  --run-dir /tmp/swe-glm52-vllm-20
+  --run-dir <private-swebench-run>
 ```
 
 Use `--require-gpu-name B200` or an empty `--require-gpu-name ""` when the node is

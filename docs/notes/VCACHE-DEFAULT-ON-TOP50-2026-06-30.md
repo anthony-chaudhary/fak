@@ -93,7 +93,9 @@ claude` run with **no flags**, the operator sees one attribution line —
     `cacheobs`/`cachemeta.Lifecycle` and acts on its pin/lazy/evict verdict. *Why:*
     the headline feature exists only on paper. *Lever:* `--vcache-governor=on`
     defaulting **on** once witnessed. *Witness:* a governor decision recorded in a
-    real session journal.
+    real session journal. **Progress 2026-06-30:** the live gateway now records
+    DECISION verdicts from real provider-cache families into `/metrics` and a
+    hash-chained `/debug/vars` journal; acting on pin/lazy/evict remains open.
 
 14. **M2 star-anchor canonicalization as a default pre-flight gate.**
     `RecommendLayout` is advisory-only; make it *apply* the hoist (volatile content
@@ -161,6 +163,9 @@ claude` run with **no flags**, the operator sees one attribution line —
 26. **Governor decisions on the live journal.** Every pin/lazy/evict/warm verdict
     writes a hash-chained journal row (same shape guard-RSI reads). *Why:* makes the
     loop auditable and feeds RSI. *Witness:* journal rows after a real session.
+    **Progress 2026-06-30:** the gateway writes a bounded hash-chained
+    `vcache_governor_journal` tail on `/debug/vars`; durable guard-RSI ingestion is
+    still the follow-on.
 
 27. **`fak vcache status` reflects live state.** Once registered, `status` must
     read the live governor/loop state, not the hard-coded "not wired" string.
