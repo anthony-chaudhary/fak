@@ -261,7 +261,7 @@ encoded in [`internal/worktype`](internal/worktype/worktype.go):
   category error — there is always a faster kernel and a better reuse ratio. Track it with
   `fak program report`; its operating spines are
   [`docs/perf-parity-rsi-loop.md`](docs/perf-parity-rsi-loop.md) and
-  [`docs/CACHE-FRONTIER-OPERATING-PLAN.md`](docs/CACHE-FRONTIER-OPERATING-PLAN.md).
+  [`docs/cache-value-rollup.md`](docs/cache-value-rollup.md).
 - A **discrete deliverable epic** has a definition of done and converges on 100% (the
   native harness, release-at-agentic-speed, support-maturity). Completion % is the right
   lens; track it in the `fak milestone report` roadmap.
