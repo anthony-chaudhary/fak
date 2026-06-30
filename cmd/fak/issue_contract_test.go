@@ -291,7 +291,7 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		t.Fatalf("batch groups = %+v, want guardrsi rows grouped under shared trigger/batch", got.BatchGroups)
 	}
 	assertRepairQueue(t, got.RepairQueues, "dispatch", 1, 3, nil)
-	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1})
+	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1}, 2)
 	assertRepairQueue(t, got.RepairQueues, "scope", 1, 1, map[string]int{issuecontract.ReasonScopeIncomplete: 1})
 	assertRepairQueue(t, got.RepairQueues, "route", 1, 1, map[string]int{issuecontract.ReasonUnrouted: 1})
 	scopeQueue := repairQueueByKind(got.RepairQueues, "scope")
@@ -377,16 +377,17 @@ func completeIssueDraftBodyWithSteps(expectedSteps string) string {
 }
 
 type repairQueueAssertion struct {
-	Kind          string         `json:"kind"`
-	Count         int            `json:"count"`
-	StepBudget    int            `json:"step_budget"`
-	NextAction    string         `json:"next_action"`
-	ByReason      map[string]int `json:"by_reason"`
-	MissingFields map[string]int `json:"missing_fields"`
-	ExampleKeys   []string       `json:"example_keys"`
+	Kind             string         `json:"kind"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget"`
+	NextAction       string         `json:"next_action"`
+	ByReason         map[string]int `json:"by_reason"`
+	MissingFields    map[string]int `json:"missing_fields"`
+	ExampleKeys      []string       `json:"example_keys"`
 }
 
-func assertRepairQueue(t *testing.T, queues []repairQueueAssertion, kind string, count, steps int, reasons map[string]int) {
+func assertRepairQueue(t *testing.T, queues []repairQueueAssertion, kind string, count, steps int, reasons map[string]int, childIssueBudget ...int) {
 	t.Helper()
 	queue := repairQueueByKind(queues, kind)
 	if queue.Kind == "" {
@@ -394,6 +395,9 @@ func assertRepairQueue(t *testing.T, queues []repairQueueAssertion, kind string,
 	}
 	if queue.Count != count || queue.StepBudget != steps || queue.NextAction == "" || len(queue.ExampleKeys) == 0 {
 		t.Fatalf("repair queue %q = %+v, want count=%d steps=%d action/examples", kind, queue, count, steps)
+	}
+	if len(childIssueBudget) > 0 && queue.ChildIssueBudget != childIssueBudget[0] {
+		t.Fatalf("repair queue %q child issue budget = %d, want %d", kind, queue.ChildIssueBudget, childIssueBudget[0])
 	}
 	for reason, want := range reasons {
 		if queue.ByReason[reason] != want {

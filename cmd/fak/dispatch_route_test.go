@@ -40,12 +40,13 @@ func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 				Issues:     []int{10, 11},
 			},
 			{
-				Kind:       "split",
-				Count:      1,
-				StepBudget: 1,
-				NextAction: "decompose non-leaves or oversized rows into child issues",
-				ByReason:   map[string]int{"ISSUE_NOT_DISPATCH_LEAF": 1},
-				Issues:     []int{3},
+				Kind:             "split",
+				Count:            1,
+				StepBudget:       1,
+				ChildIssueBudget: 1,
+				NextAction:       "decompose non-leaves or oversized rows into child issues",
+				ByReason:         map[string]int{"ISSUE_NOT_DISPATCH_LEAF": 1},
+				Issues:           []int{3},
 			},
 		},
 		SkippedHumanBlocked: []dispatchtick.SkippedIssue{
@@ -59,7 +60,7 @@ func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 		"skipped=2",
 		"skipped: 2 (BLOCKED_BY_HUMAN=1, ISSUE_NOT_DISPATCH_LEAF=1)",
 		"repair_queue[dispatch]: 2 issue(s) 7 step(s) issues=10,11 next=launch scoped leaf issues through their routed lanes",
-		"repair_queue[split]: 1 issue(s) 1 step(s) issues=3 next=decompose non-leaves or oversized rows into child issues",
+		"repair_queue[split]: 1 issue(s) 1 step(s) child_issues=1 issues=3 next=decompose non-leaves or oversized rows into child issues",
 		"reasons: ISSUE_NOT_DISPATCH_LEAF=1",
 	} {
 		if !strings.Contains(out, want) {

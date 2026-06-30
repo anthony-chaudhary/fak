@@ -77,13 +77,14 @@ type issueContractBatchGroup struct {
 }
 
 type issueContractRepairQueue struct {
-	Kind          string         `json:"kind"`
-	Count         int            `json:"count"`
-	StepBudget    int            `json:"step_budget"`
-	NextAction    string         `json:"next_action"`
-	ByReason      map[string]int `json:"by_reason,omitempty"`
-	MissingFields map[string]int `json:"missing_fields,omitempty"`
-	ExampleKeys   []string       `json:"example_keys,omitempty"`
+	Kind             string         `json:"kind"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	NextAction       string         `json:"next_action"`
+	ByReason         map[string]int `json:"by_reason,omitempty"`
+	MissingFields    map[string]int `json:"missing_fields,omitempty"`
+	ExampleKeys      []string       `json:"example_keys,omitempty"`
 }
 
 func runIssueContract(stdout, stderr io.Writer, argv []string) int {
@@ -351,6 +352,7 @@ func issueContractRepairQueues(reviews []issuecontract.Review) []issueContractRe
 			}
 			queue.Count++
 			queue.StepBudget += issueContractReviewStepBudget(review)
+			queue.ChildIssueBudget += issueContractReviewChildIssueBudget(review, kind)
 			for _, reason := range review.Reasons {
 				queue.ByReason[reason]++
 			}
@@ -383,6 +385,16 @@ func issueContractRepairQueues(reviews []issuecontract.Review) []issueContractRe
 		return out[i].Kind < out[j].Kind
 	})
 	return out
+}
+
+func issueContractReviewChildIssueBudget(review issuecontract.Review, kind string) int {
+	if kind != "split" {
+		return 0
+	}
+	if review.ExpectedSteps <= 0 {
+		return 1
+	}
+	return (review.ExpectedSteps + issuecontract.MaxDispatchExpectedSteps - 1) / issuecontract.MaxDispatchExpectedSteps
 }
 
 func issueContractRepairKinds(review issuecontract.Review) []string {
@@ -563,8 +575,13 @@ func renderIssueContract(r issueContractResult) string {
 		}
 	}
 	for _, queue := range r.RepairQueues {
-		lines = append(lines, fmt.Sprintf("  repair_queue[%s]: count=%d steps=%d next=%s",
-			queue.Kind, queue.Count, queue.StepBudget, queue.NextAction))
+		line := fmt.Sprintf("  repair_queue[%s]: count=%d steps=%d",
+			queue.Kind, queue.Count, queue.StepBudget)
+		if queue.ChildIssueBudget > 0 {
+			line += fmt.Sprintf(" child_issues=%d", queue.ChildIssueBudget)
+		}
+		line += fmt.Sprintf(" next=%s", queue.NextAction)
+		lines = append(lines, line)
 		if len(queue.ByReason) > 0 {
 			lines = append(lines, "    reasons: "+renderIssueContractReasonCounts(queue.ByReason))
 		}

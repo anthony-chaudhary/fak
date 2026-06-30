@@ -72,6 +72,9 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 	for _, queue := range router.RepairQueues {
 		fmt.Fprintf(&b, "  repair_queue[%s]: %d issue(s) %d step(s)",
 			queue.Kind, queue.Count, queue.StepBudget)
+		if queue.ChildIssueBudget > 0 {
+			fmt.Fprintf(&b, " child_issues=%d", queue.ChildIssueBudget)
+		}
 		if len(queue.Issues) > 0 {
 			fmt.Fprintf(&b, " issues=%s", intList(queue.Issues))
 		}
