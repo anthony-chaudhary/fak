@@ -174,6 +174,7 @@ def build(number: int, lane: str, *, workspace: Path) -> dict[str, Any]:
         "issue": number,
         "lane": lane,
         "title": issue.get("title"),
+        "issue_record": issue,
         "fetch_error": issue.get("_error"),
         "prompt": prompt,
         "prompt_chars": len(prompt),

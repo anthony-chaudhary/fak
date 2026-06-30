@@ -479,6 +479,49 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(mod.proc_worker_count(ROOT, product="opencode"), 2)
         self.assertEqual(seen["product"], "opencode")
 
+    def test_codex_process_rows_collapse_node_wrapper_and_native_child(self) -> None:
+        # Windows Codex shape: node.exe runs @openai/codex/bin/codex.js, then spawns
+        # codex.exe. The ambient-seat count must read that as ONE live Codex session,
+        # not two, while still counting a wrapper whose native child has not appeared.
+        mod = load()
+        rows = [
+            {"pid": 10, "ppid": 1, "name": "node.exe",
+             "cmdline": r"C:\node.exe C:\Users\u\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"},
+            {"pid": 11, "ppid": 10, "name": "codex.exe",
+             "cmdline": r"C:\...\codex.exe"},
+            {"pid": 20, "ppid": 1, "name": "node.exe",
+             "cmdline": "/usr/bin/node /x/node_modules/@openai/codex/bin/codex.js"},
+            {"pid": 30, "ppid": 1, "name": "node.exe",
+             "cmdline": "/usr/bin/node /x/not-codex.js"},
+        ]
+        self.assertEqual(mod._codex_process_pids_from_rows(rows), {11, 20})
+
+    def test_proc_worker_count_codex_includes_ambient_codex_processes(self) -> None:
+        mod = load()
+        mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101}
+        mod.ambient_codex_pids = lambda: {201, 202}
+        self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 3)
+
+    def test_codex_seat_is_single_ambient_login_and_depletes_when_busy(self) -> None:
+        mod = load()
+        mod.ambient_codex_pids = lambda: {201}
+        seat = mod.seat_check(ROOT, product="codex")
+        self.assertEqual(seat["total"], 1)
+        self.assertEqual(seat["free"], 0)
+        self.assertEqual(seat["leased"], 1)
+        self.assertTrue(seat["depleted"])
+        self.assertEqual(seat["ambient_live"], 1)
+
+    def test_codex_busy_ambient_session_refuses_background_spawn(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
+                     procs=1, seat={"total": 1, "free": 0, "leased": 1,
+                                    "depleted": True, "ambient_live": 1})
+        p = run_eval(mod, max_workers=4, product="codex")
+        self.assertEqual(p["cap"], 1)
+        self.assertEqual(p["live"], 1)
+        self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
+
     def test_account_check_codex_uses_ambient_login(self) -> None:
         # Codex has no switcher roster — its availability is read from ~/.codex.
         import tempfile

@@ -15,7 +15,7 @@ Qwen3.6-27B on raw SGLang. The same driver can now be pointed at GLM-5.2 on raw
 vLLM, including the 20-task SWE-bench Verified slice the DGX benchmark plan needs.
 
 Design: self-contained (stdlib only), idempotent, and heavily logged so it can be
-launched DETACHED via the Slack control bridge and polled from a fresh session —
+launched DETACHED via the private control bridge and polled from a fresh session —
 everything lands in a host-shared run dir (default /tmp/swe-cmp-1) plus a DONE.rc
 sentinel written by the launcher.
 

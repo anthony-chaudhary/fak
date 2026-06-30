@@ -180,6 +180,14 @@ def test_newly_wired_scorecards_registered() -> None:
         assert by_key[key]["debt"] == debt
 
 
+def test_propagation_scorecard_registered() -> None:
+    by_key = {c["key"]: c for c in scp.SCORECARDS}
+    card = by_key["propagation"]
+    assert card["debt"] == "propagation_debt"
+    assert card["cmd"] == "go run ./cmd/fak propagation-scorecard --json"
+    assert card["label"] == "propagation"
+
+
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:

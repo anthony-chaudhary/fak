@@ -57,9 +57,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +69,13 @@ try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 # The control pane is a sibling tool; importing it gives the AUTHORITATIVE
 # key -> scorecard metadata (script/cmd/label) so the issue names the right tool to
@@ -312,6 +321,19 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         fix_loc = (f"**Fix location:** this scorecard is a native `fak` subcommand — "
                    f"its debt is retired in Go source (`{source}`), NOT under "
                    f"`tools/`; route to the `cmd` lane.\n\n")
+    lane = "cmd" if source.startswith("fak/cmd/") or source.startswith("cmd/") else "tools"
+    path_hints = []
+    if source:
+        path_hints.append(source)
+    elif remeasure and remeasure.startswith("tools/"):
+        path_hints.append(remeasure)
+    path_hints.extend(["tools/score_signal.py", "tools/scorecard_control_pane.py"])
+    seen_paths = set()
+    path_hint_lines = []
+    for path in path_hints:
+        if path and path not in seen_paths:
+            seen_paths.add(path)
+            path_hint_lines.append(f"- `{path}`")
 
     body = (
         f"> Auto-filed by **score-signal** (`tools/score_signal.py`, {today}) from "
@@ -326,6 +348,49 @@ def render_issue(cand: dict[str, Any], commit: str, today: str,
         + fix_loc
         + "**What to do**\n"
         + "\n".join(do_lines)
+        + "\n\n### Parent context\n"
+        "score-signal scorecard regression from the CI control pane.\n\n"
+        "### Current state\n"
+        + f"`{label}` ({key}) debt rose +{delta} ({frm} -> {to}){grade_note} "
+        + "against the pinned baseline"
+        + (f" @{cand['baseline_commit']}" if cand.get("baseline_commit") else "")
+        + ".\n\n"
+        "### Why this is next\n"
+        "The scorecard debt rose from the pinned baseline, so the working path is "
+        "less trustworthy until the regression is retired or explicitly accepted.\n\n"
+        "### Working spine\n"
+        + f"Retire the `{label}` scorecard regression before unrelated quality work.\n\n"
+        "### Priority context\n"
+        "Working path: control pane -> score-signal issue -> owning RSI/gate -> debt "
+        "back to baseline. Current blocker: the metric debt rose. Unblocks: the "
+        "scorecard ratchet remains trustworthy for this lane. Not polish: this fixes "
+        "a measured regression before cosmetic cleanup.\n\n"
+        "### In scope\n"
+        + f"Run the owning pass for `{label}`, fix the smallest responsible cause, "
+        "and re-measure the scorecard/control pane.\n\n"
+        "### Out of scope\n"
+        "Do not re-pin the baseline, rewrite unrelated scorecards, or change claims "
+        "outside this metric unless the regression is explicitly accepted.\n\n"
+        "### Done condition\n"
+        "The metric debt is back at or below the pinned baseline, or the baseline is "
+        "intentionally re-pinned with the reason recorded.\n\n"
+        "### Witness\n"
+        + (f"`{remeasure}` and " if remeasure else "")
+        + "`python tools/scorecard_control_pane.py --json` show the regression retired "
+        "or accepted.\n\n"
+        "### Acceptance gate\n"
+        + (f"`{remeasure}` followed by " if remeasure else "")
+        + "`python tools/scorecard_control_pane.py --check` passes or the accepted "
+        "trade-off is re-pinned.\n\n"
+        "### Lane\n"
+        + lane + "\n\n"
+        "### Path hints\n"
+        + "\n".join(path_hint_lines)
+        + "\n\n"
+        "### Boundary notes\n"
+        "Public scorecard regression only; do not include private operator telemetry.\n\n"
+        "### Closure binding\n"
+        + f"Resolving commit cites this issue's #N in the subject and carries `(fak {lane})`.\n"
         + "\n\n---\n"
         "_The scorecard family is listed in `tools/scorecard_control_pane.py`. After "
         "this issue is closed, a future regression of the same metric files a FRESH "
@@ -449,7 +514,8 @@ def gh_json(args: list[str], timeout: int = 60) -> Any:
     RuntimeError on non-zero exit / TimeoutExpired on a hang — both caught by the
     caller so a stuck CLI can't wedge the run."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", timeout=timeout)
+                          encoding="utf-8", timeout=timeout,
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
@@ -485,7 +551,8 @@ def ensure_labels() -> None:
             proc = subprocess.run(
                 ["gh", "label", "create", name, "--color", color,
                  "--description", desc, "--force"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                creationflags=_win_creationflags())
         except (OSError, subprocess.TimeoutExpired) as e:
             print(f"warning: could not run `gh label create {name}`: {e}",
                   file=sys.stderr)
@@ -502,11 +569,51 @@ def create_issue(issue: dict[str, Any]) -> str:
     for lab in issue["labels"]:
         args += ["--label", lab]
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8")
+                          encoding="utf-8", creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
     return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+
+
+def issue_contract_draft(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": issue["title"],
+        "body": issue["body"],
+        "labels": [{"name": lab} for lab in issue.get("labels", [])],
+    }
+
+
+def check_issue_contract(issue: dict[str, Any], *, dedupe_cap: int,
+                         runner: Any = subprocess.run,
+                         fak_bin: str | None = None) -> None:
+    """Fail unless the exact issue body passes `fak issue contract` for live sync."""
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                         delete=False) as f:
+            tmp = Path(f.name)
+            json.dump([issue_contract_draft(issue)], f, ensure_ascii=False)
+            f.write("\n")
+        cmd = [
+            fak_bin or os.environ.get("FAK_BIN", "fak"),
+            "issue", "contract",
+            "--from-issues", str(tmp),
+            "--live", "--dedupe-checked", "--dedupe-cap", str(dedupe_cap),
+            "--json",
+        ]
+        proc = runner(cmd, capture_output=True, text=True, encoding="utf-8",
+                      timeout=60)
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else "issue contract refused"
+        raise RuntimeError(f"fak issue contract -> {proc.returncode}: {tail[:300]}")
 
 
 def refresh_issue(refresh: dict[str, Any]) -> None:
@@ -517,13 +624,15 @@ def refresh_issue(refresh: dict[str, Any]) -> None:
     num = str(refresh["number"])
     c = subprocess.run(
         ["gh", "issue", "comment", num, "--body", refresh["comment"]],
-        capture_output=True, text=True, encoding="utf-8")
+        capture_output=True, text=True, encoding="utf-8",
+        creationflags=_win_creationflags())
     if c.returncode != 0:
         raise RuntimeError(f"gh issue comment {num} -> {c.returncode}: "
                            f"{c.stderr.strip()[:300]}")
     e = subprocess.run(
         ["gh", "issue", "edit", num, "--title", refresh["title"]],
-        capture_output=True, text=True, encoding="utf-8")
+        capture_output=True, text=True, encoding="utf-8",
+        creationflags=_win_creationflags())
     if e.returncode != 0:
         raise RuntimeError(f"gh issue edit {num} -> {e.returncode}: "
                            f"{e.stderr.strip()[:300]}")
@@ -647,8 +756,17 @@ def main(argv: list[str] | None = None) -> int:
     filed: list[dict[str, Any]] = []
     refreshed: list[dict[str, Any]] = []
     if args.live and (to_file or refreshes):
-        ensure_labels()
+        checked_to_file = []
         for issue in to_file:
+            try:
+                check_issue_contract(issue, dedupe_cap=DEFAULTS["issue_scan_limit"])
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"contract[{issue['key']}]: {e}")
+                continue
+            checked_to_file.append(issue)
+        if checked_to_file or refreshes:
+            ensure_labels()
+        for issue in checked_to_file:
             try:
                 url = create_issue(issue)
             except Exception as e:  # noqa: BLE001

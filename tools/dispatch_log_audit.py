@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -59,12 +60,20 @@ try:
 except (AttributeError, ValueError):
     pass
 
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 SCHEMA = "fleet-dispatch-log-audit/1"
 RUNS_DIRNAME = ".dispatch-runs"
 LEDGER_FILENAME = "log-audit-seen.json"
 # The candidates are filed under the existing `dispatch` label (the issue this tool
 # implements carries it); a non-existent label would make `gh issue create` fail.
 AUDIT_LABEL = "dispatch"
+TRIAGE_LABELS = ["needs-triage", "triage-only"]
 # Stamped in each filed issue body as the load-bearing dedup anchor (rung 1).
 _SIG_STAMP_RE = re.compile(r"dispatch-log-audit-sig:\s*([^\s>]+)")
 
@@ -310,12 +319,15 @@ def render_issue(cand: dict[str, Any], today: str) -> dict[str, Any]:
         f"**Occurrences:** {cand['count']} across {len(cand['logs'])} session(s)\n\n"
         f"**Where to look** ({len(cand['logs'])} log(s)):\n{ev_logs}\n\n"
         f"**Sample evidence:**\n```\n" + "\n".join(sample[:6]) + "\n```\n\n"
+        f"**Dispatchability:** `triage_only`\n\n"
+        f"This is a diagnostic finding. A human must scope the lane, witness, and "
+        f"acceptance gate before removing the triage labels.\n\n"
         f"---\n"
         f"_Triage hint: is this a real worker-side defect to fix, a flaky "
         f"environment to harden, or noise to suppress? If noise, close it._\n"
         f"<!-- dispatch-log-audit-sig: {cand['signature_key']} -->"
     )
-    return {"title": title, "body": body, "labels": [AUDIT_LABEL],
+    return {"title": title, "body": body, "labels": [AUDIT_LABEL, *TRIAGE_LABELS],
             "signature_key": cand["signature_key"], "detector": cand["detector"],
             "backend": cand["backend"], "count": cand["count"],
             "severity": cand["severity"], "logs": logs}
@@ -404,7 +416,8 @@ def scan_runs(runs_dir: Path, cfg: dict[str, Any], *, now_ts: float | None = Non
 
 def gh_json(args: list[str], timeout: int = 60) -> Any:
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", timeout=timeout)
+                          encoding="utf-8", timeout=timeout,
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
@@ -418,28 +431,35 @@ def fetch_open_issues(limit: int) -> list[dict[str, Any]]:
 
 
 def ensure_label() -> None:
-    """Ensure the `dispatch` label exists so `gh issue create` never fails on a
-    missing label. ``dispatch`` is a SHARED, curated repo label (it predates this
-    tool — #1300 carries it), so unlike idea_scout's own `idea-scout` label this
-    NEVER ``--force``-overwrites an existing label's curated color/description: it
-    only creates the label when absent. Best-effort; warns loudly on a real failure."""
+    """Ensure issue labels exist so `gh issue create` never fails on a missing
+    label. ``dispatch`` is a SHARED, curated repo label (it predates this tool),
+    and the triage labels may also be curated. This NEVER ``--force``-overwrites
+    an existing label's color/description: it only creates missing labels."""
+    ensure_one_label(AUDIT_LABEL, "b60205", "Worker-dispatch defect / log-audit finding")
+    ensure_one_label("needs-triage", "d4c5f9",
+                     "Needs human scoping before an agent dispatch can take it")
+    ensure_one_label("triage-only", "d4c5f9",
+                     "Useful issue, but not a worker-ready dispatch leaf")
+
+
+def ensure_one_label(name: str, color: str, desc: str) -> None:
     try:
-        existing = gh_json(["label", "list", "--search", AUDIT_LABEL, "--json", "name"])
-        if any(str(lab.get("name", "")).lower() == AUDIT_LABEL for lab in existing):
+        existing = gh_json(["label", "list", "--search", name, "--json", "name"])
+        if any(str(lab.get("name", "")).lower() == name for lab in existing):
             return  # already present -> leave its curated color/description untouched
     except Exception:  # noqa: BLE001 — fall through to a best-effort create
         pass
     try:
         proc = subprocess.run(
-            ["gh", "label", "create", AUDIT_LABEL, "--color", "b60205",
-             "--description", "Worker-dispatch defect / log-audit finding"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30)
+            ["gh", "label", "create", name, "--color", color, "--description", desc],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+            creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired) as e:
-        print(f"warning: could not run `gh label create {AUDIT_LABEL}`: {e}",
+        print(f"warning: could not run `gh label create {name}`: {e}",
               file=sys.stderr)
         return
     if proc.returncode != 0:
-        print(f"warning: could not ensure '{AUDIT_LABEL}' label "
+        print(f"warning: could not ensure '{name}' label "
               f"(issue creation may fail): {proc.stderr.strip()[:200]}", file=sys.stderr)
 
 
@@ -447,7 +467,8 @@ def create_issue(issue: dict[str, Any]) -> str:
     args = ["issue", "create", "--title", issue["title"], "--body", issue["body"]]
     for lab in issue["labels"]:
         args += ["--label", lab]
-    proc = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8")
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8",
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")

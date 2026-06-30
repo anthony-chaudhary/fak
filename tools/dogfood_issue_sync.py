@@ -27,6 +27,8 @@ import glob
 import json
 import os
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,7 @@ SCHEMA = "dogfood-issue-sync/1"
 # Hidden marker stamped in each synced issue body; the upsert finds the existing
 # issue by this exact string so a re-run edits rather than duplicates.
 MARKER = "dogfood-issue-sync"
+TRIAGE_LABELS = ["needs-triage", "triage-only"]
 
 
 def _debt_count(payload: dict[str, Any]) -> int | None:
@@ -94,6 +97,7 @@ def render_body(key: str, probe: dict[str, Any], payload: dict[str, Any], out_di
         f"- **suggested next action (worst-first):** {finding}",
         f"- **evidence:** `{evidence}`",
         f"- **reproduce:** `{cmd}`",
+        "- dispatchability: `triage_only`",
         "",
         "Close when the scorecard returns to grade A / zero debt — the sync will not "
         "reopen a healthy scorecard.",
@@ -115,6 +119,7 @@ def plan_issues(report: dict[str, Any]) -> list[dict[str, Any]]:
             "title": f"dogfood: {key} reports scorecard ACTION/debt",
             "body": render_body(key, probe, payload, out_dir),
             "marker": f"<!-- {MARKER}:{key} -->",
+            "labels": list(TRIAGE_LABELS),
         })
     return out
 
@@ -139,16 +144,31 @@ def _find_existing(marker: str) -> int | None:
 
 def _sync_issue(issue: dict[str, Any], label: str) -> dict[str, Any]:
     """Create or update the stable issue via ``gh``. Returns the action taken."""
+    labels = _merge_labels(issue.get("labels") or [], label)
     num = _find_existing(issue["marker"])
     if num is not None:
-        subprocess.run(["gh", "issue", "edit", str(num), "--body", issue["body"]],
-                       check=True, timeout=60)
+        cmd = ["gh", "issue", "edit", str(num), "--body", issue["body"]]
+        for lab in labels:
+            cmd += ["--add-label", lab]
+        subprocess.run(cmd, check=True, timeout=60)
         return {"key": issue["key"], "action": "updated", "number": num}
     cmd = ["gh", "issue", "create", "--title", issue["title"], "--body", issue["body"]]
-    if label:
-        cmd += ["--label", label]
+    for lab in labels:
+        cmd += ["--label", lab]
     r = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
     return {"key": issue["key"], "action": "created", "url": (r.stdout or "").strip()}
+
+
+def _merge_labels(base: list[str], extra: str = "") -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for label in [*base, extra]:
+        label = (label or "").strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+    return out
 
 
 def _newest_report() -> str | None:

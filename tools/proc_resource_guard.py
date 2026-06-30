@@ -58,6 +58,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 SCHEMA = "fleet-proc-resource-guard/1"
 
 # Thread count well above any legitimate process observed on a dev host (the
@@ -580,6 +587,7 @@ def _collect_windows() -> list[dict[str, Any]]:
         text=True,
         timeout=60,
         check=False,
+        creationflags=_win_creationflags(),
     )
     return _parse_windows_json(proc.stdout)
 
@@ -622,6 +630,7 @@ def _collect_posix() -> list[dict[str, Any]]:
         text=True,
         timeout=30,
         check=False,
+        creationflags=_win_creationflags(),
     )
     return _parse_posix_ps(proc.stdout)
 
@@ -680,6 +689,7 @@ def _collect_windows_relations() -> list[dict[str, Any]]:
         text=True,
         timeout=90,
         check=False,
+        creationflags=_win_creationflags(),
     )
     return _parse_windows_relations(proc.stdout)
 
@@ -715,6 +725,7 @@ def _collect_posix_relations() -> list[dict[str, Any]]:
         text=True,
         timeout=30,
         check=False,
+        creationflags=_win_creationflags(),
     )
     return _parse_posix_ps_relations(proc.stdout)
 
@@ -750,6 +761,7 @@ def kill_pid(pid: int | None) -> tuple[bool, str]:
                 text=True,
                 timeout=30,
                 check=False,
+                creationflags=_win_creationflags(),
             )
             return proc.returncode == 0, (proc.stdout or proc.stderr).strip()[:200]
         os.kill(pid, 9)

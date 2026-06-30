@@ -114,8 +114,19 @@ def main(argv=None) -> int:
             "tier": rec.get("selected_tier") or rec.get("model_tier")}
 
     spawned = []
+    held = []
     for issue in p["targets"]:
         rb = issue_worker_prompt.build(issue, p["lane"], workspace=REPO)
+        contract = ird.issue_contract_review(REPO, rb.get("issue_record"), issue)
+        if (contract.get("unavailable") or not contract.get("ok") or
+                int(contract.get("score") or 0) < ird.DEFAULT_ISSUE_CONTRACT_MIN_SCORE):
+            held.append({
+                "issue": issue,
+                "verdict": "ISSUE_CONTRACT_HOLD",
+                "score": int(contract.get("score") or 0),
+                "reason": ird.issue_contract_hold_reason(contract),
+            })
+            continue
         env = issue_dispatch.worker_env(acct_dir, p["lane"], REPO)
         env["FLEET_RESOLVE_ISSUE"] = str(issue)
         cmd = ird.build_worker_command("claude", rb["prompt"], None)
@@ -124,10 +135,10 @@ def main(argv=None) -> int:
         spawned.append({"issue": issue, "pid": res.get("pid")})
 
     out = {"account": args.account, "live_before": p["live"], "target": args.target,
-           "lane": p["lane"], "spawned": len(spawned), "issues": spawned}
+           "lane": p["lane"], "spawned": len(spawned), "issues": spawned, "held": held}
     print(json.dumps(out) if args.json else
           f"topup {args.account}: spawned {len(spawned)} on lane {p['lane']} -> "
-          f"{[s['issue'] for s in spawned]}")
+          f"{[s['issue'] for s in spawned]} (held={len(held)})")
     return 0
 
 

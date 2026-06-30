@@ -204,7 +204,9 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(issue["title"].startswith("idea-scout: "))
         self.assertIn("<!-- idea-scout-source: arxiv:2606.01234 -->", issue["body"])
         self.assertIn("https://arxiv.org/abs/2606.01234", issue["body"])
-        self.assertEqual(issue["labels"], ["idea-scout", "research", "security"])
+        self.assertIn("dispatchability: `triage_only`", issue["body"])
+        self.assertEqual(issue["labels"], ["idea-scout", "needs-triage",
+                                           "triage-only", "research", "security"])
         self.assertIn("Authors:", issue["body"])
 
     def test_long_title_truncated(self) -> None:
@@ -214,6 +216,30 @@ class RenderTest(unittest.TestCase):
         # "idea-scout: " + ≤100 chars
         self.assertLessEqual(len(issue["title"]), len("idea-scout: ") + 100)
         self.assertTrue(issue["title"].endswith("…"))
+
+
+class LabelTest(unittest.TestCase):
+    def test_ensure_scout_label_creates_triage_labels_too(self) -> None:
+        orig_run = M.subprocess.run
+        calls = []
+
+        class Proc:
+            returncode = 0
+            stderr = ""
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return Proc()
+
+        try:
+            M.subprocess.run = fake_run
+            M.ensure_scout_label()
+        finally:
+            M.subprocess.run = orig_run
+
+        self.assertEqual([argv[3] for argv, _ in calls],
+                         [M.SCOUT_LABEL, M.TRIAGE_LABEL, M.TRIAGE_ONLY_LABEL])
+        self.assertTrue(all(kwargs["timeout"] == 30 for _, kwargs in calls))
 
 
 class PlanTest(unittest.TestCase):

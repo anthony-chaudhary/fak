@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 import os
 import re
@@ -226,12 +227,20 @@ def seat_check(root: Path, *, product: str) -> dict[str, Any]:
     cap below as another min() term and a depleted pool yields a typed REFUSE_NO_SEAT —
     distinct from REFUSE_NO_ACCOUNT (a throttled/auth tier). Returns
     ``{total, free, leased, depleted}``. ``total`` is None when the pool view could not
-    run OR the product has no switcher roster (codex's ambient login), in which case the
-    seat fold is SKIPPED and the existing host/account/cap gates govern unchanged —
-    fail-OPEN on the seat shaping (the cap still bounds the fleet), never fail-closed on a
-    missing view."""
+    run, in which case the seat fold is SKIPPED and the existing host/account/cap gates
+    govern unchanged — fail-OPEN on the seat shaping (the cap still bounds the fleet),
+    never fail-closed on a missing view.
+
+    Codex is the one-product exception to the switcher roster: it uses a single ambient
+    ChatGPT login, so the honest pool size is ONE seat, not "no seat pool". Any live
+    Codex CLI process leases that seat, including an attended operator session, so an
+    always-on codex dispatch tick cannot collide with the foreground Codex window/login."""
     if product == "codex":
-        return {"total": None, "skipped": "codex uses ambient login (no seat pool)"}
+        live = len(ambient_codex_pids())
+        leased = 1 if live else 0
+        return {"total": 1, "free": 1 - leased, "leased": leased,
+                "depleted": bool(leased), "ambient_live": live,
+                "reason": "codex uses one ambient login/seat"}
     sw = root / "tools" / "fleet_accounts.py"
     if not sw.exists():
         return {"total": None, "error": f"switcher not found: {sw}"}
@@ -380,6 +389,155 @@ def _cmdline_worker_pids() -> set[int]:
         return pids
     except (OSError, subprocess.TimeoutExpired):
         return set()
+
+
+def _process_name_stem(name: Any) -> str:
+    base = os.path.basename(str(name or "").strip().strip('"')).lower()
+    if base.endswith(".exe") or base.endswith(".cmd") or base.endswith(".bat"):
+        base = base.rsplit(".", 1)[0]
+    return base
+
+
+def _is_codex_native_image(name: Any) -> bool:
+    """True for the native Codex CLI process image (codex/codex.exe)."""
+    return _process_name_stem(name) == "codex"
+
+
+def _is_codex_node_wrapper(name: Any, cmdline: Any) -> bool:
+    """True for the npm node wrapper that launches the native Codex binary."""
+    if _process_name_stem(name) != "node":
+        return False
+    low = str(cmdline or "").replace("\\", "/").lower()
+    return "@openai/codex" in low or "codex/bin/codex.js" in low
+
+
+def _codex_process_pids_from_rows(rows: list[dict[str, Any]]) -> set[int]:
+    """Collapse live Codex process rows to one PID per Codex session.
+
+    On Windows the observed shape is ``node.exe .../@openai/codex/bin/codex.js`` →
+    ``codex.exe``. Count the native child when present, and count the node wrapper
+    only while the native child has not appeared yet. That gives the preflight an
+    honest "ambient Codex seat is in use" signal without double-counting one session.
+    """
+    native: set[int] = set()
+    wrappers: set[int] = set()
+    parent: dict[int, int] = {}
+    for row in rows:
+        try:
+            pid = int(row.get("pid") or row.get("ProcessId") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0:
+            continue
+        try:
+            ppid = int(row.get("ppid") or row.get("ParentProcessId") or 0)
+        except (TypeError, ValueError):
+            ppid = 0
+        name = row.get("name") or row.get("Name") or ""
+        cmdline = row.get("cmdline") or row.get("CommandLine") or ""
+        parent[pid] = ppid
+        if _is_codex_native_image(name):
+            native.add(pid)
+        elif _is_codex_node_wrapper(name, cmdline):
+            wrappers.add(pid)
+    wrappers_with_native_child = {parent.get(pid, 0) for pid in native}
+    return native | (wrappers - wrappers_with_native_child)
+
+
+def _codex_process_rows_psutil() -> list[dict[str, Any]] | None:
+    if os.name == "nt":
+        return None
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return None
+    rows: list[dict[str, Any]] = []
+    for p in psutil.process_iter(["pid", "ppid", "name"]):
+        try:
+            name = str(p.info.get("name") or "")
+            if _is_codex_native_image(name):
+                rows.append({"pid": int(p.pid), "ppid": int(p.info.get("ppid") or 0),
+                             "name": name, "cmdline": ""})
+                continue
+            if _process_name_stem(name) != "node":
+                continue
+            cmdline = " ".join(p.cmdline() or [])
+            if not _is_codex_node_wrapper(name, cmdline):
+                continue
+            rows.append({"pid": int(p.pid), "ppid": int(p.info.get("ppid") or 0),
+                         "name": name, "cmdline": cmdline})
+        except (psutil.Error, TypeError, ValueError):
+            continue
+    return rows
+
+
+def _codex_process_rows_windows() -> list[dict[str, Any]]:
+    if os.name != "nt":
+        return []
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "$rows = @(Get-CimInstance Win32_Process "
+             "-Filter \"Name = 'codex.exe' OR Name = 'node.exe'\" | "
+             "Select-Object @{n='pid';e={$_.ProcessId}},"
+             "@{n='ppid';e={$_.ParentProcessId}},"
+             "@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); "
+             "$rows | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_no_window_creationflags(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    text = (proc.stdout or "").strip()
+    if not text:
+        return []
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return []
+    if isinstance(doc, dict):
+        return [doc]
+    if isinstance(doc, list):
+        return [r for r in doc if isinstance(r, dict)]
+    return []
+
+
+def _codex_process_rows_posix() -> list[dict[str, Any]]:
+    try:
+        proc = subprocess.run(["ps", "-eo", "pid=,ppid=,comm=,args="],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in (proc.stdout or "").splitlines():
+        parts = line.strip().split(None, 3)
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        name = parts[2]
+        cmdline = parts[3] if len(parts) > 3 else name
+        if _is_codex_native_image(name) or _is_codex_node_wrapper(name, cmdline):
+            rows.append({"pid": pid, "ppid": ppid, "name": name, "cmdline": cmdline})
+    return rows
+
+
+@functools.lru_cache(maxsize=1)
+def ambient_codex_pids() -> set[int]:
+    """Live Codex CLI processes sharing the ambient ChatGPT login/seat.
+
+    This intentionally counts attended Codex sessions too. The background codex
+    dispatcher has no separate account pool, so a foreground Codex session consumes
+    the only ambient seat and the dispatch tick must hold instead of starting another
+    codex worker that can fight the user's terminal/window state.
+    """
+    rows = _codex_process_rows_psutil()
+    if rows is None:
+        rows = _codex_process_rows_windows() if os.name == "nt" else _codex_process_rows_posix()
+    return _codex_process_pids_from_rows(rows)
 
 
 def _parse_process_create_time(value: Any) -> float | None:
@@ -668,13 +826,17 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     When ``product`` is given, only workers in that account pool count — a claude
     worker no longer pins the opencode lane's cap and vice versa, so the two lanes
     fill to their independent account headrooms instead of starving one another.
-    The generic cmdline-marked DOS-loop workers carry no backend tag, so they are
-    counted only in the unscoped (global) call; a product-scoped count is the
-    issue-resolver sidecars for that product alone.
+    Codex has a single ambient seat rather than a roster; for that product, every
+    live Codex CLI process also consumes the cap so an attended Codex session blocks
+    background codex dispatch. The generic cmdline-marked DOS-loop workers carry no
+    backend tag, so they are counted only in the unscoped (global) call.
     """
     root = root or repo_root()
     if product is not None:
-        return len(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
+        pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
+        if product == "codex":
+            pids.update(ambient_codex_pids())
+        return len(pids)
     pids = set(_cmdline_worker_pids())
     pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))
     return len(pids)

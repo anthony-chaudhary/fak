@@ -18,6 +18,8 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 from typing import Any, Callable

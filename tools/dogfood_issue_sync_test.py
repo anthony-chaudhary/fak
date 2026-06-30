@@ -52,6 +52,8 @@ class PlanIssuesTest(unittest.TestCase):
         self.assertIn("12", iss["body"])
         self.assertIn("extract the dup clone", iss["body"])
         self.assertIn("/evi/dir", iss["body"])
+        self.assertIn("dispatchability: `triage_only`", iss["body"])
+        self.assertEqual(iss["labels"], ["needs-triage", "triage-only"])
 
     def test_healthy_grade_a_zero_debt_makes_no_issue(self) -> None:
         mod = load()

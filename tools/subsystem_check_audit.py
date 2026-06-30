@@ -7,6 +7,8 @@ import datetime as dt
 import hashlib
 import json
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 from pathlib import Path

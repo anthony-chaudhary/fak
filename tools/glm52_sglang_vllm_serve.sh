@@ -16,7 +16,7 @@
 #   * SGLang GLM-5.2 cookbook: `sglang serve --model-path zai-org/GLM-5.2-FP8 --tp 8`
 #     plus EAGLE speculative decode (MTP). FP8 fits 8x H200 (~1128 GB > ~866 GB).
 #   * DURABILITY: launch under `systemd-run --unit=NAME --collect` on a host where
-#     a Slack control bridge cgroup-kills its sessions (see glm52_serve.sh).
+#     a private control bridge cgroup-kills its sessions (see glm52_serve.sh).
 #
 # Usage (on the serving node):
 #   ENGINE=sglang bash tools/glm52_sglang_vllm_serve.sh

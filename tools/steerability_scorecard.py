@@ -48,7 +48,7 @@ Twelve KPIs in four groups (the four faces of "stays steerable as it grows"):
     dispatch_god_file a cmd/* dispatch file over the hard ceiling   (HARD)
 
   NAVIGABILITY  — can you still find the lever to pull
-    package_doc_frac fraction of packages with a package doc-comment (SOFT)
+    package_doc_frac fraction of packages with a package/command doc-comment (SOFT)
 
   CORRECTION    — can drift be SEEN and REVERTED at constant cost
     ratchet_present  the control-pane baseline + this scorecard are wired (HARD)
@@ -89,6 +89,8 @@ import argparse
 import json
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -209,6 +211,8 @@ def _import_line_re(module: str) -> "re.Pattern[str]":
         r'^\s*(?P<lead>[\w.]+\s+)?"(?P<path>' + esc + r'/(?:internal|pkg|cmd)/[^"]+)"')
 
 _PACKAGE_DOC_RE = re.compile(r"^//\s*Package\s+\w", re.MULTILINE)
+_COMMAND_DOC_RE = re.compile(r"^//\s*Command\s+[\w.-]+", re.MULTILINE)
+_PACKAGE_LINE_RE = re.compile(r"^\s*package\s+(\w+)\b", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +337,24 @@ def package_leaf(pkg_dir: str) -> str:
     return pkg_dir.rsplit("/", 1)[-1] if "/" in pkg_dir else pkg_dir
 
 
+def package_name(text: str) -> str:
+    m = _PACKAGE_LINE_RE.search(text)
+    return m.group(1) if m else ""
+
+
+def has_orientation_doc(text: str) -> bool:
+    """True when a file carries the orientation doc a reader sees first.
+
+    Libraries use the Go package-doc convention (`// Package x ...`). Command
+    directories are `package main`; for those, Go's useful public form is
+    `// Command name ...`, so counting only `Package` silently under-reports
+    documented command surfaces.
+    """
+    if _PACKAGE_DOC_RE.search(text):
+        return True
+    return package_name(text) == "main" and bool(_COMMAND_DOC_RE.search(text))
+
+
 # ---------------------------------------------------------------------------
 # Per-KPI pure checks. Each returns
 #   {kpi, group, score (0-100 int), detail, defects: [str], soft: [str]}
@@ -452,14 +474,16 @@ def kpi_dispatch_god_file(cmd_god_files: list[tuple[str, int]]) -> dict[str, Any
 
 
 def kpi_package_doc_frac(n_documented: int, n_packages: int) -> dict[str, Any]:
-    """SOFT. Fraction of packages carrying a `// Package x ...` doc-comment — the
-    first thing a reader (or an agent) reads to orient in a package. Scored as a
-    fraction (scale-free), but NEVER debt: the cheap move is `// Package x provides
-    x.` spam, which games the metric without aiding navigation (the godoc lesson)."""
+    """SOFT. Fraction of packages carrying an orientation doc-comment: `// Package
+    x ...` for libraries or `// Command x ...` for `package main` command surfaces.
+    That is the first thing a reader (or an agent) reads to orient in a package.
+    Scored as a fraction (scale-free), but NEVER debt: the cheap move is
+    `// Package x provides x.` spam, which games the metric without aiding
+    navigation (the godoc lesson)."""
     frac = n_documented / max(1, n_packages)
     return {"kpi": "package_doc_frac", "group": "navigability",
             "score": _clamp(100 * frac),
-            "detail": f"{n_documented}/{n_packages} packages carry a package doc-comment ({frac:.0%})",
+            "detail": f"{n_documented}/{n_packages} packages carry an orientation doc-comment ({frac:.0%})",
             "defects": [],
             "soft": ([f"{n_packages - n_documented} package(s) without a doc-comment header — "
                       f"a reader/agent has no one-line orientation"] if n_documented < n_packages else [])}
@@ -572,9 +596,22 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
                    for g, v in score_by_group.items()}
     breakdown = sorted(
         ({"kpi": k["kpi"], "group": k["group"], "score": k["score"],
-          "debt": len(k["defects"]), "soft": len(k["soft"]), "detail": k["detail"]}
+          "debt": len(k["defects"]), "soft": len(k["soft"]), "detail": k["detail"],
+          "index_gain_to_clean": round(KPI_WEIGHTS.get(k["kpi"], 0) * max(0, 100 - k["score"]), 1)}
          for k in kpis),
         key=lambda x: (-x["debt"], x["score"]))
+    top_moves = [
+        {
+            "kpi": b["kpi"],
+            "group": b["group"],
+            "score": b["score"],
+            "index_gain_to_clean": b["index_gain_to_clean"],
+            "detail": b["detail"],
+            "why": move_reason(b["kpi"]),
+        }
+        for b in sorted(breakdown, key=lambda x: (-x["index_gain_to_clean"], x["score"]))
+        if b["index_gain_to_clean"] > 0
+    ][:5]
 
     corpus = {
         # the headline: a 0-100 growth-invariant steerability INDEX, not a debt pile
@@ -586,6 +623,7 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
         "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
         "breakdown": breakdown,
+        "top_moves": top_moves,
     }
 
     if steerability_debt == 0:
@@ -608,6 +646,22 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "reason": reason, "next_action": next_action, "workspace": workspace,
         "corpus": corpus, "kpis": kpis,
     }
+
+
+def move_reason(kpi: str) -> str:
+    return {
+        "func_size_dist": "split long routines at tested seams",
+        "package_doc_frac": "add one useful orientation sentence where readers start",
+        "churn_concentration": "spread repeated edits by extracting stable helpers",
+        "god_file_rate": "split oversized files along ownership boundaries",
+        "god_func_rate": "split hard-to-review functions before they become shared chokepoints",
+        "file_size_dist": "keep typical files below the p90 size line",
+        "fan_in_gini": "reduce the few packages every change routes through",
+        "hub_share": "move shared contracts down or split broad hubs",
+        "dispatch_god_file": "split command dispatch so new verbs avoid one monolith",
+        "ratchet_present": "restore the ratchet so regressions are visible",
+        "worst_pkg_drift": "check packages that grew far beyond the pinned baseline",
+    }.get(kpi, "improve this KPI with a structural change")
 
 
 # ---------------------------------------------------------------------------
@@ -715,10 +769,10 @@ def gather(root: Path, *, churn_range: str) -> list[dict[str, Any]]:
         pkg_loc[pkg] = pkg_loc.get(pkg, 0) + n
 
         # package doc-comment: count a package as documented if ANY of its files
-        # carries a `// Package x` header (Go's convention allows it in one file).
+        # carries a `// Package x` header or (for package main) `// Command x`.
         leaf = package_leaf(pkg)
         pkgs_seen_for_doc.add(leaf)
-        if _PACKAGE_DOC_RE.search(text):
+        if has_orientation_doc(text):
             documented_pkgs.add(leaf)
 
         # fan-in edges: this file's package imports these internal leaves
@@ -805,6 +859,12 @@ def render(payload: dict[str, Any]) -> str:
             lines.append(f"      · [{kpi}] {s}")
         if len(soft_all) > 14:
             lines.append(f"      ... and {len(soft_all) - 14} more")
+    top_moves = c.get("top_moves") or []
+    if top_moves:
+        lines.append("")
+        lines.append("highest-index moves:")
+        for m in top_moves[:5]:
+            lines.append(f"      +{m['index_gain_to_clean']:.1f} pts  {m['kpi']} ({m['score']}/100): {m['why']}")
     lines.append("")
     lines.append(f"next: {payload.get('next_action')}")
     return "\n".join(lines)
@@ -857,12 +917,14 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                "`dispatch_god_file` and `ratchet_present` can emit it — everything else is "
                "advisory, because its cheapest fix would be gaming a detector). `god_file_rate` / "
                "`god_func_rate` SCORE the size rate but leave the raw count to `code_quality` "
-               "(no portfolio double-count). `churn_concentration` is HEAD-relative.")
+               "(no portfolio double-count). `package_doc_frac` counts `// Package ...` docs for "
+               "libraries and `// Command ...` docs for command packages. `churn_concentration` "
+               "is HEAD-relative.")
     out.append("")
-    out.append("| Group | KPI | Score | Debt | Detail |")
-    out.append("|---|---|---:|:--:|---|")
+    out.append("| Group | KPI | Score | Debt | Clean-gain | Detail |")
+    out.append("|---|---|---:|:--:|---:|---|")
     for b in c.get("breakdown", []):
-        out.append(f"| {b['group']} | `{b['kpi']}` | {b['score']} | {b['debt']} | {b['detail']} |")
+        out.append(f"| {b['group']} | `{b['kpi']}` | {b['score']} | {b['debt']} | +{b.get('index_gain_to_clean', 0):.1f} | {b['detail']} |")
     out.append("")
     any_defect = any(k["defects"] for k in payload.get("kpis", []))
     if any_defect:
@@ -885,6 +947,15 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         out.append("")
         for kpi, s in soft_all:
             out.append(f"- **`{kpi}`** — {s}")
+        out.append("")
+    top_moves = c.get("top_moves") or []
+    if top_moves:
+        out.append("## Highest-index moves")
+        out.append("")
+        out.append("| Gain if clean | KPI | Why this helps | Current detail |")
+        out.append("|---:|---|---|---|")
+        for m in top_moves:
+            out.append(f"| +{m['index_gain_to_clean']:.1f} | `{m['kpi']}` | {m['why']} | {m['detail']} |")
         out.append("")
     return "\n".join(out)
 

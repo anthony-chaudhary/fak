@@ -41,6 +41,13 @@ import re
 import subprocess
 import sys
 
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 # Each MODELED claim family: a human label, the number-tokens that identify it on
 # a line, and the BENCHMARK-AUTHORITY.md row that establishes it as modeled. A
 # line matches this family if it contains the family's WebVoyager/webbench context
@@ -107,6 +114,7 @@ def _tracked_files(root: str) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "-z", *SCAN_GLOBS],
         cwd=root, capture_output=True, text=True, check=True,
+        creationflags=_win_creationflags(),
     )
     return [p for p in out.stdout.split("\0") if p]
 
@@ -115,6 +123,7 @@ def _staged_files(root: str) -> list[str]:
     out = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=AM", "-z"],
         cwd=root, capture_output=True, text=True, check=True,
+        creationflags=_win_creationflags(),
     )
     files = [p for p in out.stdout.split("\0") if p]
     keep = []
@@ -182,6 +191,7 @@ def _staged_added_lines(root: str, relpath: str) -> list[tuple[int, str]]:
     out = subprocess.run(
         ["git", "diff", "--cached", "--unified=0", "--no-ext-diff", "--", relpath],
         cwd=root, capture_output=True, text=True, check=True,
+        creationflags=_win_creationflags(),
     )
     lines: list[tuple[int, str]] = []
     new_line: int | None = None

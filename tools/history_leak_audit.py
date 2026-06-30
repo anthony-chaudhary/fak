@@ -32,6 +32,8 @@ import importlib.util
 import json
 import os
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))

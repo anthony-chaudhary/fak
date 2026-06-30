@@ -177,7 +177,9 @@ class RenderTest(unittest.TestCase):
         self.assertIn("stale install pin 0.30.0 (VERSION is 0.34.0)", issue["body"])
         # the load-bearing dedup anchor
         self.assertIn(f"<!-- learning-debt-source: {d['source_id']} -->", issue["body"])
-        self.assertEqual(issue["labels"], ["learning-debt", "rsi"])
+        self.assertIn("Dispatchability:** `triage_only`", issue["body"])
+        self.assertEqual(issue["labels"], ["learning-debt", "rsi",
+                                           "needs-triage", "triage-only"])
 
 
 class PlanTest(unittest.TestCase):

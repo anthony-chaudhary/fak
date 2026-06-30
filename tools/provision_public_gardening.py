@@ -13,7 +13,7 @@ state. This wraps the existing tools in order:
   3. install_trunk_guard.py                -- arm the leak-scan + trunk git guards
   4. pull_scan_needles.py                  -- pull the private scan instructions
                                               (skipped, not failed, with no private repo)
-  5. scrub_public_copy.py --audit-tree     -- the proof: tracked tree is clean
+  5. fak public-scrub audit-tree           -- the proof: tracked tree is clean
 
 Report mode (default) runs only the read-only checks (steps 4-status + 5) and the
 control-pane doctor, so it is safe to run anywhere. ``--apply`` runs the full
@@ -77,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Read-only checks (always).
     _step("needle status", [PY, "tools/pull_scan_needles.py", "--check"])
-    ok, _ = _step("leak-scan proof (audit-tree)", [PY, "tools/scrub_public_copy.py",
-                                                   "--audit-tree", "--root", "."])
+    ok, _ = _step("leak-scan proof (audit-tree)", ["go", "run", "./cmd/fak",
+                                                   "public-scrub", "audit-tree", "--root", "."])
     needs += 0 if ok else 1
     ok, _ = _step("control-pane doctor", [PY, "tools/fleet_control_pane.py", "doctor"],
                   ok_codes=(0, 1))  # doctor exit 1 == ACTION, not a hard failure

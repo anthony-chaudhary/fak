@@ -35,7 +35,7 @@ go run ./cmd/fak preflight --policy p.json --tool t --args "{}"
 Work on the trunk; the trunk guard refuses OFF_TRUNK commits.
 Commit by explicit path (`git commit -- <paths>`), never `git add -A`.
 Sign off with `git commit -s` (DCO).
-Each claim in CLAIMS.md carries a tag. Add a feature as a leaf via new_leaf.py.
+Each claim in CLAIMS.md carries a tag. Add a feature as a leaf via fak new-leaf.
 Writes outside the repo are refused by the repo-guard (OUT_OF_TREE_WRITE).
 See CONTRIBUTING.md. Green = `make ci`.
 """
@@ -577,6 +577,144 @@ def test_build_payload_error() -> None:
     assert p["ok"] is False and p["verdict"] == "AUDIT_ERROR"
 
 
+# --- the unbounded experience-frontier (the headline that is NOT a 0-100 grade) ----
+
+def test_frontier_units_are_pinned() -> None:
+    # The per-affordance weights are load-bearing (they set the frontier's units) and
+    # must not drift silently — change one only on purpose. Pin the exact set + values.
+    assert ar.FRONTIER_UNITS == {
+        "integration_recipes": 8,
+        "harness_configs": 10,
+        "refusal_recoveries": 3,
+        "machine_consumable": 2,
+    }
+    # every weight a positive int — a zero/negative weight would make a real affordance
+    # contribute nothing (or subtract), defeating "add the affordance to climb".
+    assert all(isinstance(w, int) and w > 0 for w in ar.FRONTIER_UNITS.values())
+
+
+def test_frontier_harness_configs_supersets_the_required_core() -> None:
+    # the frontier rewards BREADTH (optional, climb it); the gate requires only the core.
+    # The breadth list must CONTAIN the required core so the core is never double-counted
+    # and a core regression still shows up as friction-debt, not just a smaller frontier.
+    core = {label for label, _ in ar.AGENT_CONFIGS}
+    breadth = {label for label, _ in ar.FRONTIER_HARNESS_CONFIGS}
+    assert core <= breadth
+    assert len(breadth) > len(core)  # there is real breadth beyond the core
+
+
+def test_experience_frontier_is_weighted_sum() -> None:
+    facts = {"integration_recipes": 20, "harness_configs": 3,
+             "refusal_recoveries": 16, "machine_consumable": 27}
+    total, by_term = ar.experience_frontier(facts)
+    assert by_term == {"integration_recipes": 160, "harness_configs": 30,
+                       "refusal_recoveries": 48, "machine_consumable": 54}
+    assert total == 292 == sum(by_term.values())
+
+
+def test_experience_frontier_is_unbounded_above_100() -> None:
+    # The whole point: it is NOT a 0-100 grade. A realistic tree blows past 100, and a
+    # bigger tree blows past that — there is no ceiling to saturate against.
+    small, _ = ar.experience_frontier({"integration_recipes": 20, "harness_configs": 3,
+                                        "refusal_recoveries": 16, "machine_consumable": 27})
+    big, _ = ar.experience_frontier({"integration_recipes": 200, "harness_configs": 30,
+                                     "refusal_recoveries": 160, "machine_consumable": 270})
+    assert small > 100
+    assert big > small * 9  # 10x the affordances -> ~10x the frontier, no clamp
+
+
+def test_experience_frontier_is_monotonic() -> None:
+    # Adding ONE real affordance raises the frontier by exactly that dimension's weight —
+    # the property that makes "climb the frontier by adding the affordance" honest.
+    base = {"integration_recipes": 4, "harness_configs": 3,
+            "refusal_recoveries": 16, "machine_consumable": 27}
+    base_total, _ = ar.experience_frontier(base)
+    for dim, w in ar.FRONTIER_UNITS.items():
+        bumped = dict(base)
+        bumped[dim] += 1
+        bumped_total, _ = ar.experience_frontier(bumped)
+        assert bumped_total == base_total + w, dim
+
+
+def test_experience_frontier_missing_fact_is_zero() -> None:
+    # A fact the shell couldn't resolve counts as zero, so the frontier fails LOW,
+    # never high — it can't be inflated by an absent measurement.
+    total, by_term = ar.experience_frontier({})
+    assert total == 0 and all(v == 0 for v in by_term.values())
+    assert set(by_term) == set(ar.FRONTIER_UNITS)  # every dim still reported
+
+
+def test_build_payload_carries_frontier() -> None:
+    facts = {"integration_recipes": 20, "harness_configs": 3,
+             "refusal_recoveries": 16, "machine_consumable": 27}
+    p = ar.build_payload(workspace=".", kpis=_clean_kpis(), facts=facts)
+    c = p["corpus"]
+    assert c["experience_frontier"] == 292
+    assert c["frontier_by_term"]["integration_recipes"] == 160
+    assert c["frontier_units"] == ar.FRONTIER_UNITS
+    # the unbounded headline rides ALONGSIDE the bounded gate (back-compat preserved).
+    assert c["score"] == 100.0 and c["friction_debt"] == 0
+
+
+def test_build_payload_without_facts_is_back_compatible() -> None:
+    # A caller that folds KPIs without the gather shell (the existing call shape) still
+    # gets a well-formed payload: frontier 0, score/grade/friction-debt unchanged.
+    p = ar.build_payload(workspace=".", kpis=_clean_kpis())
+    c = p["corpus"]
+    assert c["experience_frontier"] == 0
+    assert c["score"] == 100.0 and c["grade"] == "A" and c["friction_debt"] == 0
+
+
+def test_render_compare_reports_35pct_frontier_goal() -> None:
+    base_facts = {"integration_recipes": 10, "harness_configs": 2,
+                  "refusal_recoveries": 4, "machine_consumable": 5}
+    base = ar.build_payload(workspace=".", kpis=_clean_kpis(), facts=base_facts)
+    base_total = base["corpus"]["experience_frontier"]
+    # current climbs >= 35% (add recipes until past 1.35x) -> "achieved".
+    up = dict(base_facts, integration_recipes=base_facts["integration_recipes"] + 8)
+    cur_up = ar.build_payload(workspace=".", kpis=_clean_kpis(), facts=up)
+    assert cur_up["corpus"]["experience_frontier"] >= base_total * 1.35
+    out_up = ar.render_compare(base, cur_up)
+    assert "+35% achieved" in out_up, out_up
+    # a smaller climb -> "not yet +35%".
+    small = dict(base_facts, integration_recipes=base_facts["integration_recipes"] + 1)
+    cur_small = ar.build_payload(workspace=".", kpis=_clean_kpis(), facts=small)
+    out_small = ar.render_compare(base, cur_small)
+    assert "not yet +35%" in out_small, out_small
+
+
+def test_is_substantive_recipe_requires_real_content() -> None:
+    # the frontier's top term must be a REAL affordance, never a stub — "add the real
+    # affordance, never game the check", enforced for the unbounded headline too.
+    assert ar._is_substantive_recipe("") is False
+    assert ar._is_substantive_recipe("# Title only\n") is False     # too short
+    assert ar._is_substantive_recipe("x" * 300) is False            # long but no fence/link
+    long_link = "# fak + Foo\n" + ("Point your agent at fak. " * 20) + "\n[setup](./s.md)\n"
+    assert ar._is_substantive_recipe(long_link) is True             # length + a link
+    long_fence = "# fak + Bar\n" + ("Run the proof. " * 20) + "\n```\nfak preflight\n```\n"
+    assert ar._is_substantive_recipe(long_fence) is True            # length + a fence
+
+
+def test_render_compare_zero_baseline_and_gate_line() -> None:
+    cur = ar.build_payload(workspace=".", kpis=_clean_kpis(),
+                           facts={"integration_recipes": 5, "harness_configs": 1,
+                                  "refusal_recoveries": 2, "machine_consumable": 3})
+    base0 = ar.build_payload(workspace=".", kpis=_clean_kpis())  # frontier 0 (no facts)
+    out = ar.render_compare(base0, cur)
+    assert "no prior frontier" in out, out          # the bf == 0 verdict branch
+    assert "(gate)" in out, out                      # the friction-debt 2x gate still reports
+
+
+def test_render_compare_signed_score_delta_on_regression() -> None:
+    # a score regression must render a single-signed delta, never "(+-5.0)".
+    hi = ar.build_payload(workspace=".", kpis=_clean_kpis())  # score 100
+    lo_kpis = [ar.kpi_first_command(False, "") if k["kpi"] == "first_command" else k
+               for k in _clean_kpis()]
+    lo = ar.build_payload(workspace=".", kpis=lo_kpis)        # score < 100
+    out = ar.render_compare(hi, lo)
+    assert "(+-" not in out, out
+
+
 # --- the load-bearing live smoke: the real tree is agent-ready --------------
 
 def test_live_real_tree_is_agent_ready() -> None:
@@ -593,6 +731,12 @@ def test_live_real_tree_is_agent_ready() -> None:
     # all three steps of the agent journey must score full.
     for g in ar.GROUPS:
         assert p["corpus"]["group_scores"][g] == 100, (g, p["corpus"]["group_scores"])
+    # the unbounded headline rides on the live tree too: a real, >100 frontier whose
+    # per-term breakdown sums to it (the surface an agent gains, with headroom to climb).
+    c = p["corpus"]
+    assert isinstance(c["experience_frontier"], int) and c["experience_frontier"] > 100, c
+    assert sum(c["frontier_by_term"].values()) == c["experience_frontier"]
+    assert set(c["frontier_by_term"]) == set(ar.FRONTIER_UNITS)
 
 
 def test_live_payload_is_well_formed() -> None:

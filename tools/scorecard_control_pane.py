@@ -90,6 +90,8 @@ import json
 import os
 import shlex
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -271,6 +273,7 @@ SCORECARDS: list[dict[str, str]] = [
     # the control pane through heaviness_debt while heaviness_pressure stays the
     # unbounded drift number operators watch over time.
     {"key": "heaviness", "debt": "heaviness_debt", "script": "", "cmd": "go run ./cmd/fak operator heaviness --json", "label": "operator-heaviness"},
+    {"key": "propagation", "debt": "propagation_debt", "script": "", "cmd": "go run ./cmd/fak propagation-scorecard --json", "label": "propagation"},
     {"key": "claim_repro", "debt": "claim_repro_debt", "script": "claim_repro_scorecard.py", "label": "claim-repro"},
     {"key": "release", "debt": "release_debt", "script": "release_readiness_scorecard.py", "label": "release-readiness"},
     # Folded #1270: these emit a control-pane-compatible payload (corpus.*_debt +

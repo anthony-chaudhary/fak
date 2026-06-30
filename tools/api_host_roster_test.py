@@ -19,8 +19,8 @@ class APIHostRosterTest(unittest.TestCase):
         self.assertEqual(report["summary"]["invalid_targets"], 0)
         self.assertEqual(report["summary"]["unsupported_wire"], 0)
         self.assertEqual(report["summary"]["duplicate_names"], 0)
-        self.assertIn("api_host_acceptance_probe.py", report["bulk_commands"]["acceptance"])
-        self.assertIn("api_host_readiness_probe.py", report["bulk_commands"]["readiness"])
+        self.assertIn("fak api-host acceptance", report["bulk_commands"]["acceptance"])
+        self.assertIn("fak api-host readiness", report["bulk_commands"]["readiness"])
 
     def test_invalid_target_fails_gate(self) -> None:
         report = roster.build_report([

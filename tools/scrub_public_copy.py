@@ -31,6 +31,13 @@ import sys
 # --check is the repo-wide CI enforcement (tools/scrub_hardware_names.py).
 import scrub_hardware_names
 
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 # Paths (relative to EXPORT_DIR) to delete entirely. Operator-private evidence,
 # operator-machine captures, or the committed memory mirror. These live ONLY on
 # the private side (see PUBLIC-SCRUB-POLICY.md).
@@ -51,7 +58,7 @@ DELETE_PATHS = [
     "fak/experiments/fleet-nodes/anthony",
     "fak/experiments/qwen36/node-reports",  # operator-machine nvidia preflight evidence (real IP, real paths)
     # --- DGX lab-benchmark subsystem (operator's private lab infra: the example.lab
-    # DGX node, Slack control bridge, handoff packets, tied to the private
+    # DGX node, private control bridge, handoff packets, tied to the private
     # Benchmark repo). Excluded from the PUBLIC COPY ONLY -- content stays in
     # the private canonical repo. See PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list. ---
     "fak/experiments/dgx",
@@ -157,7 +164,7 @@ REPLACEMENTS = [
     ("U0EXAMPLE00", "U0EXAMPLE00", "operator Slack bot/user id"),
     ("U0EXAMPLE01", "U0EXAMPLE01", "operator Slack user id"),
     # Operator's PRIVATE control-bridge codename. "control-hub" / "control hub" /
-    # "control_hub" is the operator's internal name for the Slack control bridge
+    # "control_hub" is the operator's internal name for the private control bridge
     # that the (deleted) dgxbridge cluster speaks -- a private concept, not a
     # public surface. The bridge CODE is dropped in DELETE_PATHS, but the codename
     # also leaked into KEPT files: the DGX results/runbook docs and the v0.30/v0.28
@@ -167,9 +174,9 @@ REPLACEMENTS = [
     # first so the bare-token rules below cannot double the trailing "bridge".
     # Export-only -- the PRIVATE repo legitimately carries the real dgxbridge, so
     # the codename is audited at EXPORT (EXPORT_AUDIT_NEEDLES) not at COMMIT.
-    ("Slack control-hub bridge", "Slack control bridge",
+    ("Slack control-hub bridge", "private control bridge",
      "private concept: Slack control-hub bridge -> generic control bridge"),
-    ("Slack control hub", "Slack control bridge",
+    ("Slack control hub", "private control bridge",
      "private concept: Slack control hub -> control bridge"),
     ("control_hub", "control bridge", "private control-bridge codename (underscore form)"),
     ("control-hub", "control bridge", "private control-bridge codename (hyphen form)"),
@@ -642,6 +649,7 @@ def audit_staged(root: str) -> int:
     result = subprocess.run(
         ["git", "-C", root, "diff", "--cached", "--no-color", "-U0"],
         capture_output=True, encoding="utf-8", errors="replace",
+        creationflags=_win_creationflags(),
     )
     if result.returncode != 0:
         print(f"git diff --cached failed: {result.stderr.strip()}", file=sys.stderr)
@@ -737,6 +745,7 @@ def audit_range(root: str, rev_range: str) -> int:
     result = subprocess.run(
         ["git", "-C", root, "diff", "--no-color", "-U0", rev_range],
         capture_output=True, encoding="utf-8", errors="replace",
+        creationflags=_win_creationflags(),
     )
     if result.returncode != 0:
         print(f"git diff {rev_range} failed: {result.stderr.strip()}", file=sys.stderr)
@@ -774,6 +783,7 @@ def audit_tree(root: str, as_json: bool = False) -> int:
     result = subprocess.run(
         ["git", "-C", root, "ls-files"],
         capture_output=True, encoding="utf-8", errors="replace",
+        creationflags=_win_creationflags(),
     )
     if result.returncode != 0:
         msg = f"git ls-files failed in {root}: {result.stderr.strip()}"

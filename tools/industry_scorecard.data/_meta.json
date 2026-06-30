@@ -66,6 +66,11 @@
       "name": "Hardware coverage"
     },
     {
+      "id": "hardware-shape-neutrality",
+      "group": "models",
+      "name": "Hardware shape neutrality"
+    },
+    {
       "id": "structured-output",
       "group": "decoding",
       "name": "Structured output"

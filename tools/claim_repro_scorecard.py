@@ -26,6 +26,8 @@ import fnmatch
 import json
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any

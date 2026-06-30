@@ -111,7 +111,7 @@ def live_smoke_command(target: dict[str, Any], key_env: str) -> str:
 def readiness_command(target: dict[str, Any], key_env: str) -> str:
     spec = readiness_spec(target, key_env)
     return (
-        "python tools/api_host_readiness_probe.py "
+        "fak api-host readiness "
         f"--target {ps_quote(spec)} "
         "--out fak/experiments/api-host-bridge/api-host-readiness.json "
         "--markdown fak/experiments/api-host-bridge/api-host-readiness.md"
@@ -121,7 +121,7 @@ def readiness_command(target: dict[str, Any], key_env: str) -> str:
 def acceptance_command(target: dict[str, Any], key_env: str) -> str:
     spec = target_spec(target, key_env)
     return (
-        "python tools/api_host_acceptance_probe.py "
+        "fak api-host acceptance "
         f"--target {ps_quote(spec)} "
         "--out fak/experiments/api-host-bridge/api-host-acceptance.json "
         "--markdown fak/experiments/api-host-bridge/api-host-acceptance.md"

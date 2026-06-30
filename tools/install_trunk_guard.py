@@ -15,6 +15,8 @@ Run once per clone/node:  ``python tools/install_trunk_guard.py``
 import os
 import stat
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -140,7 +140,7 @@ def readiness_spec(target: dict[str, str]) -> str:
 
 def acceptance_command(target: dict[str, str]) -> str:
     return (
-        "python tools/api_host_acceptance_probe.py "
+        "fak api-host acceptance "
         f"--target {ps_quote(target_spec(target))} "
         "--out fak/experiments/api-host-bridge/api-host-acceptance.json "
         "--markdown fak/experiments/api-host-bridge/api-host-acceptance.md"
@@ -149,7 +149,7 @@ def acceptance_command(target: dict[str, str]) -> str:
 
 def readiness_command(target: dict[str, str]) -> str:
     return (
-        "python tools/api_host_readiness_probe.py "
+        "fak api-host readiness "
         f"--target {ps_quote(readiness_spec(target))} "
         "--out fak/experiments/api-host-bridge/api-host-readiness.json "
         "--markdown fak/experiments/api-host-bridge/api-host-readiness.md"
@@ -157,7 +157,7 @@ def readiness_command(target: dict[str, str]) -> str:
 
 
 def bulk_acceptance_command(targets: list[dict[str, str]]) -> str:
-    parts = ["python tools/api_host_acceptance_probe.py"]
+    parts = ["fak api-host acceptance"]
     for target in targets:
         parts += ["--target", ps_quote(target_spec(target))]
     parts += [
@@ -168,7 +168,7 @@ def bulk_acceptance_command(targets: list[dict[str, str]]) -> str:
 
 
 def bulk_readiness_command(targets: list[dict[str, str]]) -> str:
-    parts = ["python tools/api_host_readiness_probe.py"]
+    parts = ["fak api-host readiness"]
     for target in targets:
         parts += ["--target", ps_quote(readiness_spec(target))]
     parts += [

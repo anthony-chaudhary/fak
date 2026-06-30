@@ -24,6 +24,28 @@
       "qualitative": true
     },
     {
+      "id": "hardware-shape-neutrality",
+      "dim_id": "hardware-shape-neutrality",
+      "axis": "Hardware-shape neutrality: explicit fences for host-CPU assumptions",
+      "category": "hardware-shape-neutrality",
+      "competitor": "vLLM plugin backends; llama.cpp backend matrix; MLC-LLM / TVM compilation",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "docs/explainers/hardware-portability.md (2026-06-30 shape-neutrality ledger)",
+      "fak_value": 7,
+      "unit": "of 7 host-shape assumptions explicitly FENCED in the compute HAL contract",
+      "higher_is_better": true,
+      "verdict": "parity",
+      "status": "shipped",
+      "fak_commit": "",
+      "fak_artifact": "",
+      "fak_doc": "docs/explainers/hardware-portability.md plus internal/compute/compute.go: Dtype/QuantSpec, Tensor/Host, Register/Pick/Tier, Caps.Async/Read/Argmax, whole-op Backend methods, Layout, WeightSource/Upload",
+      "apples_to_apples": false,
+      "comparison_note": "This corrects the GPU-bias in a pure backend-breadth row. fak still TRAILS the mature engines on how many accelerator families it serves, but it has a FENCED contract for the seven host-shape assumptions the HAL explainer names: (1) float32 monoculture -> Dtype/QuantSpec, (2) host-pointer aliasing -> Tensor/Host/Read boundary, (3) x86 build-tag dispatch -> runtime registry and Tier, (4) synchronous return-by-value -> Caps.Async with explicit Read/Argmax fences, (5) goroutine-only parallelism -> whole-op Backend methods, (6) row-major only -> Layout descriptor, and (7) eager full-RAM plus little-endian host -> WeightSource and Upload. Provenance labels: contract FENCED in code and docs; CUDA/Vulkan/Metal/CPU backends WITNESSED where their support rows say so; broad vendor conformance remains not-yet until the BCK/fak-certified work lands. apples_to_apples=false because this dimension measures contract shape, not device count or throughput.",
+      "measured_on": "2026-06-30",
+      "qualitative": true
+    },
+    {
       "id": "max-model-and-moe-coverage",
       "dim_id": "max-model-and-moe-coverage",
       "axis": "Maximum parameter count & frontier-MoE architecture coverage",

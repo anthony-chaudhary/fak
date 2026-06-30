@@ -108,6 +108,12 @@ def test_package_helpers() -> None:
     assert st.package_leaf("abi") == "abi"
 
 
+def test_orientation_doc_accepts_command_docs_for_main() -> None:
+    assert st.has_orientation_doc("// Package thing describes the library.\npackage thing\n")
+    assert st.has_orientation_doc("// Command fak runs the kernel CLI.\npackage main\n")
+    assert not st.has_orientation_doc("// Command helper is not a package doc.\npackage helper\n")
+
+
 # --- per-KPI: clean case + trigger case ------------------------------------
 
 def test_kpi_file_size_dist_clean_and_drift() -> None:
@@ -245,6 +251,19 @@ def test_fold_index_is_weighted_not_count() -> None:
         package_doc_frac={"score": 50, "soft": ["half"]}))
     # only the navigability weight (0.10) of the 50-point drop applies
     assert 94.0 <= p["corpus"]["index"] <= 96.0
+    moves = p["corpus"]["top_moves"]
+    assert moves[0]["kpi"] == "package_doc_frac"
+    assert moves[0]["index_gain_to_clean"] == 5.0
+    assert "orientation" in moves[0]["why"]
+
+
+def test_render_markdown_names_clean_gain_and_top_moves() -> None:
+    p = st.build_payload(workspace="/x", kpis=_kpis(
+        package_doc_frac={"score": 50, "soft": ["half"]}))
+    md = st.render_markdown(p, stamp="2026-06-30")
+    assert "Clean-gain" in md
+    assert "Highest-index moves" in md
+    assert "`// Command ...` docs" in md
 
 
 # --- THE distinguishing property: growth-invariance ------------------------

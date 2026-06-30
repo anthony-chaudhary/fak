@@ -51,6 +51,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +108,7 @@ DEFAULT_SPAWN_PROBE_S = 5.0
 # the healthy backend's cap past what its account can actually serve.
 DEFAULT_REALLOC_CEILING = 2
 LOOP_ID_PREFIX = "issue-resolve-dispatch"
+DEFAULT_ISSUE_CONTRACT_MIN_SCORE = 100
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -123,6 +125,104 @@ def repo_root() -> Path:
 
 def _py() -> str:
     return sys.executable or "python"
+
+
+def _fak_command_prefix(root: Path) -> list[str]:
+    explicit = os.environ.get("FAK_BIN")
+    if explicit:
+        return [explicit]
+    for name in ("fak.exe", "fak"):
+        cand = root / name
+        if cand.is_file():
+            return [str(cand)]
+    return ["go", "run", "./cmd/fak"]
+
+
+def _issue_record_for_contract(issue: dict[str, Any] | None,
+                               number: int | None) -> dict[str, Any]:
+    issue = issue if isinstance(issue, dict) else {}
+    labels = []
+    for lab in issue.get("labels") or []:
+        if isinstance(lab, dict):
+            name = str(lab.get("name") or "").strip()
+        else:
+            name = str(lab or "").strip()
+        if name:
+            labels.append({"name": name})
+    try:
+        num = int(issue.get("number") or number or 0)
+    except (TypeError, ValueError):
+        num = int(number or 0)
+    return {
+        "number": num,
+        "title": str(issue.get("title") or f"issue #{num}").strip(),
+        "body": str(issue.get("body") or ""),
+        "labels": labels,
+    }
+
+
+def issue_contract_review(root: Path, issue: dict[str, Any] | None,
+                          number: int | None,
+                          runner: Any = subprocess.run) -> dict[str, Any]:
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                         delete=False) as f:
+            tmp = Path(f.name)
+            json.dump([_issue_record_for_contract(issue, number)], f, ensure_ascii=False)
+            f.write("\n")
+        cmd = [
+            *_fak_command_prefix(root),
+            "issue", "contract",
+            "--from-issues", str(tmp),
+            "--live", "--dedupe-checked", "--dedupe-cap", "300",
+            "--json",
+        ]
+        proc = runner(
+            cmd, cwd=str(root), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=60, creationflags=no_window_creationflags())
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "unavailable": True, "score": 0, "reason": str(exc)}
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+    try:
+        doc = json.loads(proc.stdout or "{}")
+    except (TypeError, ValueError):
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        reason = tail[-1] if tail else f"fak issue contract failed ({proc.returncode})"
+        return {"ok": False, "unavailable": True, "score": 0, "reason": reason[:300]}
+    reviews = doc.get("reviews") if isinstance(doc, dict) else None
+    review = reviews[0] if isinstance(reviews, list) and reviews else {}
+    score = ((review.get("score") or {}).get("total") if isinstance(review, dict) else 0) or 0
+    spine = ((review.get("spine_priority") or {}).get("total")
+             if isinstance(review, dict) else 0) or 0
+    return {
+        "ok": bool(proc.returncode == 0 and doc.get("ok") and review.get("ok")),
+        "unavailable": False,
+        "score": int(score),
+        "spine_priority": int(spine),
+        "review": review,
+        "returncode": proc.returncode,
+    }
+
+
+def issue_contract_hold_reason(contract: dict[str, Any]) -> str:
+    if contract.get("unavailable"):
+        return str(contract.get("reason") or "issue contract unavailable")
+    review = contract.get("review") if isinstance(contract.get("review"), dict) else {}
+    parts = [str(r) for r in (review.get("reasons") or []) if r]
+    parts.extend(f"missing:{m}" for m in (review.get("missing_fields") or []) if m)
+    score = int(contract.get("score") or 0)
+    if contract.get("ok") and score >= DEFAULT_ISSUE_CONTRACT_MIN_SCORE:
+        return "issue contract passed"
+    if score < DEFAULT_ISSUE_CONTRACT_MIN_SCORE:
+        parts.append(f"score:{score}<floor:{DEFAULT_ISSUE_CONTRACT_MIN_SCORE}")
+    return ", ".join(parts) if parts else "issue contract below spawn floor"
 
 
 def _git_capture(root: Path, args: list[str], *, timeout: int = 30) -> tuple[int, str]:
@@ -1978,6 +2078,24 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
     payload["prompt_chars"] = rec.get("prompt_chars")
     payload["issue_title"] = rec.get("title")
+    contract = issue_contract_review(root, rec.get("issue_record"), target)
+    payload["issue_contract_gate"] = {
+        "ok": bool(contract.get("ok")),
+        "unavailable": bool(contract.get("unavailable")),
+        "score": int(contract.get("score") or 0),
+        "spine_priority": int(contract.get("spine_priority") or 0),
+        "min_score": DEFAULT_ISSUE_CONTRACT_MIN_SCORE,
+        "reason": issue_contract_hold_reason(contract),
+    }
+    if (contract.get("unavailable") or not contract.get("ok") or
+            int(contract.get("score") or 0) < DEFAULT_ISSUE_CONTRACT_MIN_SCORE):
+        payload.update({
+            "ok": False,
+            "action": "issue_contract_hold",
+            "verdict": "ISSUE_CONTRACT_HOLD",
+            "reason": issue_contract_hold_reason(contract),
+        })
+        return finish(payload)
     model = acct.get("model") if backend == "opencode" else None
     preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
     payload["command"] = build_worker_command(backend, preview_prompt, model)
@@ -2124,6 +2242,7 @@ def render(p: dict[str, Any]) -> str:
 BENIGN_ACTIONS = frozenset({
     "spawned", "would_spawn",                            # work dispatched
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
+    "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)
     "weekly_capped", "backend_unhealthy",                # pool unavailable; declined correctly
 })

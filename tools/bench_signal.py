@@ -62,9 +62,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +74,13 @@ try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 SCHEMA = "fak-bench-signal/1"
 BASELINE_SCHEMA = "fak-bench-signal.baseline/1"
@@ -246,6 +255,48 @@ def render_issue(cand: dict[str, Any], today: str) -> dict[str, Any]:
         f"and does not implicate the same benchmark on another node.\n\n"
         f"**What to do**\n"
         + "\n".join(do_lines)
+        + "\n\n### Parent context\n"
+        "bench-signal throughput regression from the benchmark catalog.\n\n"
+        "### Current state\n"
+        + f"`{model}{prec_s}` on `{machine}` dropped from {base:.1f} to {cur:.1f} tok/s "
+        + f"against the pinned baseline.\n\n"
+        "### Why this is next\n"
+        + f"The drop cleared both noise floors ({drop_pct:.1f}% and {drop_abs:.1f} tok/s), "
+        "so the working path is slower until this is explained or restored.\n\n"
+        "### Working spine\n"
+        + f"Restore or explicitly re-floor the `{machine}` benchmark path before optimizing "
+        "unrelated throughput work.\n\n"
+        "### Priority context\n"
+        "Working path: benchmark catalog -> detected regression -> measured recovery. "
+        "Current blocker: the pinned throughput baseline is no longer met. "
+        "Unblocks: future benchmark signal stays trustworthy for this machine/model row. "
+        "Not polish: this addresses a measured regression before cosmetic perf work.\n\n"
+        "### In scope\n"
+        + f"Investigate the `{key}` regression, fix the smallest responsible change, and "
+        "re-measure the benchmark on the named machine.\n\n"
+        "### Out of scope\n"
+        "Do not retune unrelated benchmarks, rewrite the benchmark harness, or change "
+        "the baseline unless the regression is an accepted trade-off.\n\n"
+        "### Done condition\n"
+        "The benchmark is re-measured and either returns to the pinned baseline or the "
+        "baseline is intentionally re-pinned with the reason recorded.\n\n"
+        "### Witness\n"
+        + f"`python {remeasure_path} --json` plus the machine-specific benchmark evidence "
+        "showing the recovered or accepted value.\n\n"
+        "### Acceptance gate\n"
+        + f"`python {remeasure_path} --json`\n\n"
+        "### Lane\n"
+        "tools\n\n"
+        "### Path hints\n"
+        + f"- `{remeasure_path}`\n"
+        f"- `{CATALOG_PATH}`\n"
+        f"- `{BASELINE_PATH}`\n\n"
+        "### Boundary notes\n"
+        "Public benchmark regression only; do not include private operator telemetry or "
+        "unscrubbed machine-control logs.\n\n"
+        "### Closure binding\n"
+        "Resolving commit cites this issue's #N in the subject and carries the matching "
+        "`(fak tools)` trailer.\n"
         + "\n\n---\n"
         f"_bench-signal is the perf dual of score-signal. The corpus is "
         f"`{CATALOG_PATH}`; the pinned baseline is `{BASELINE_PATH}`. After this "
@@ -303,7 +354,8 @@ def build_baseline(current: dict[str, dict[str, Any]], commit: str, today: str,
 # ============================================================================
 def gh_json(args: list[str], timeout: int = 60) -> Any:
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", timeout=timeout)
+                          encoding="utf-8", timeout=timeout,
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
@@ -333,7 +385,8 @@ def ensure_labels() -> None:
             proc = subprocess.run(
                 ["gh", "label", "create", name, "--color", color,
                  "--description", desc, "--force"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                creationflags=_win_creationflags())
         except (OSError, subprocess.TimeoutExpired) as e:
             print(f"warning: could not run `gh label create {name}`: {e}",
                   file=sys.stderr)
@@ -349,11 +402,51 @@ def create_issue(issue: dict[str, Any]) -> str:
     for lab in issue["labels"]:
         args += ["--label", lab]
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8")
+                          encoding="utf-8", creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
     return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+
+
+def issue_contract_draft(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": issue["title"],
+        "body": issue["body"],
+        "labels": [{"name": lab} for lab in issue.get("labels", [])],
+    }
+
+
+def check_issue_contract(issue: dict[str, Any], *, dedupe_cap: int,
+                         runner: Any = subprocess.run,
+                         fak_bin: str | None = None) -> None:
+    """Fail unless the exact issue body passes `fak issue contract` for live sync."""
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                         delete=False) as f:
+            tmp = Path(f.name)
+            json.dump([issue_contract_draft(issue)], f, ensure_ascii=False)
+            f.write("\n")
+        cmd = [
+            fak_bin or os.environ.get("FAK_BIN", "fak"),
+            "issue", "contract",
+            "--from-issues", str(tmp),
+            "--live", "--dedupe-checked", "--dedupe-cap", str(dedupe_cap),
+            "--json",
+        ]
+        proc = runner(cmd, capture_output=True, text=True, encoding="utf-8",
+                      timeout=60)
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else "issue contract refused"
+        raise RuntimeError(f"fak issue contract -> {proc.returncode}: {tail[:300]}")
 
 
 def load_json_file(path: Path) -> dict[str, Any]:
@@ -367,7 +460,8 @@ def load_json_file(path: Path) -> dict[str, Any]:
 def git_commit(root: Path) -> str:
     try:
         proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
-                              capture_output=True, text=True, encoding="utf-8", timeout=15)
+                              capture_output=True, text=True, encoding="utf-8", timeout=15,
+                              creationflags=_win_creationflags())
         return proc.stdout.strip() if proc.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -455,8 +549,17 @@ def main(argv: list[str] | None = None) -> int:
 
     filed: list[dict[str, Any]] = []
     if args.live and to_file:
-        ensure_labels()
+        checked: list[dict[str, Any]] = []
         for issue in to_file:
+            try:
+                check_issue_contract(issue, dedupe_cap=DEFAULTS["issue_scan_limit"])
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"contract[{issue['key']}]: {e}")
+                continue
+            checked.append(issue)
+        if checked:
+            ensure_labels()
+        for issue in checked:
             try:
                 url = create_issue(issue)
             except Exception as e:  # noqa: BLE001

@@ -53,9 +53,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,13 @@ try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 SCHEMA = "fak-gate-signal/1"
 SIGNAL_LABEL = "gate-signal"
@@ -295,6 +304,7 @@ def render_issue(finding: dict[str, Any], today: str) -> dict[str, Any]:
     # ci-owned (workflow-only) finding route AMBIGUOUSLY. The ONLY greppable path in
     # the body is the finding's owning path (the route line), so routing is robust for
     # EVERY lane, not just by a `ci < tools` tie-break.
+    lane = "ci" if owning.startswith(".github/") else "tools"
     body = (
         f"> Auto-filed by **gate-signal** (the `gate_signal.py` feeder, {today}) from "
         f"a non-scorecard CI finding. A red gate — **needs a worker**; close as "
@@ -305,6 +315,41 @@ def render_issue(finding: dict[str, Any], today: str) -> dict[str, Any]:
         + next_line
         + "\n**What to do**\n"
         + "\n".join(do_lines)
+        + "\n\n### Parent context\n"
+        "gate-signal non-scorecard CI finding.\n\n"
+        "### Current state\n"
+        + f"The `{label}` gate is red: {detail}\n\n"
+        "### Why this is next\n"
+        "A red CI/advisory gate blocks trust in the current working path before "
+        "additional polish or optimization work is useful.\n\n"
+        "### Working spine\n"
+        + f"Restore the `{label}` gate for `{owning}` with the smallest change that "
+        "makes the failing check true again.\n\n"
+        "### Priority context\n"
+        "Working path: CI finding -> scoped fix -> green gate. "
+        "Current blocker: the gate is red or reporting a blocking finding. "
+        "Unblocks: dispatch can trust the affected lane again. "
+        "Not polish: this fixes a failing gate before cosmetic work.\n\n"
+        "### In scope\n"
+        + f"Fix the finding rooted at `{owning}` and keep the change limited to the "
+        "failing gate's actual cause.\n\n"
+        "### Out of scope\n"
+        "Do not rewrite unrelated CI, broaden the scope to neighboring gates, or "
+        "mute the finding without recording why it is accepted.\n\n"
+        "### Done condition\n"
+        + f"The `{label}` finding no longer reports red for the same key.\n\n"
+        "### Witness\n"
+        "Rerun the failing gate or the command named by the source envelope.\n\n"
+        "### Acceptance gate\n"
+        "Rerun the failing gate or the command named by the source envelope.\n\n"
+        "### Lane\n"
+        + lane + "\n\n"
+        "### Path hints\n"
+        + f"- `{owning}`\n\n"
+        "### Boundary notes\n"
+        "Public CI/gate finding only; do not include private operator telemetry.\n\n"
+        "### Closure binding\n"
+        + f"Resolving commit cites this issue's #N in the subject and carries `(fak {lane})`.\n"
         + "\n\n---\n"
         "_gate-signal is the non-scorecard sibling of score-signal "
         "(the `score_signal.py` feeder). After this issue is closed, a future "
@@ -351,7 +396,8 @@ def plan_issues(findings: list[dict[str, Any]], open_keys: set[str], *,
 def gh_json(args: list[str], timeout: int = 60) -> Any:
     """Run a `gh` subcommand that emits JSON; return the parsed value."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", timeout=timeout)
+                          encoding="utf-8", timeout=timeout,
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
@@ -381,7 +427,8 @@ def ensure_labels() -> None:
             proc = subprocess.run(
                 ["gh", "label", "create", name, "--color", color,
                  "--description", desc, "--force"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                creationflags=_win_creationflags())
         except (OSError, subprocess.TimeoutExpired) as e:
             print(f"warning: could not run `gh label create {name}`: {e}",
                   file=sys.stderr)
@@ -398,11 +445,51 @@ def create_issue(issue: dict[str, Any]) -> str:
     for lab in issue["labels"]:
         args += ["--label", lab]
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8")
+                          encoding="utf-8", creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
     return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+
+
+def issue_contract_draft(issue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": issue["title"],
+        "body": issue["body"],
+        "labels": [{"name": lab} for lab in issue.get("labels", [])],
+    }
+
+
+def check_issue_contract(issue: dict[str, Any], *, dedupe_cap: int,
+                         runner: Any = subprocess.run,
+                         fak_bin: str | None = None) -> None:
+    """Fail unless the exact issue body passes `fak issue contract` for live sync."""
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                         delete=False) as f:
+            tmp = Path(f.name)
+            json.dump([issue_contract_draft(issue)], f, ensure_ascii=False)
+            f.write("\n")
+        cmd = [
+            fak_bin or os.environ.get("FAK_BIN", "fak"),
+            "issue", "contract",
+            "--from-issues", str(tmp),
+            "--live", "--dedupe-checked", "--dedupe-cap", str(dedupe_cap),
+            "--json",
+        ]
+        proc = runner(cmd, capture_output=True, text=True, encoding="utf-8",
+                      timeout=60)
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else "issue contract refused"
+        raise RuntimeError(f"fak issue contract -> {proc.returncode}: {tail[:300]}")
 
 
 def load_envelope(from_arg: str) -> dict[str, Any]:
@@ -468,8 +555,17 @@ def main(argv: list[str] | None = None) -> int:
 
     filed: list[dict[str, Any]] = []
     if args.live and to_file:
-        ensure_labels()
+        checked: list[dict[str, Any]] = []
         for issue in to_file:
+            try:
+                check_issue_contract(issue, dedupe_cap=DEFAULTS["issue_scan_limit"])
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"contract[{issue['key']}]: {e}")
+                continue
+            checked.append(issue)
+        if checked:
+            ensure_labels()
+        for issue in checked:
             try:
                 url = create_issue(issue)
             except Exception as e:  # noqa: BLE001

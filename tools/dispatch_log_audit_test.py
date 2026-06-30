@@ -187,7 +187,8 @@ class RenderTest(unittest.TestCase):
         self.assertIn("<!-- dispatch-log-audit-sig: "
                       "hook-failure-storm::codex::hook handler failures -->",
                       issue["body"])
-        self.assertEqual(issue["labels"], ["dispatch"])
+        self.assertIn("Dispatchability:** `triage_only`", issue["body"])
+        self.assertEqual(issue["labels"], ["dispatch", "needs-triage", "triage-only"])
         self.assertIn("resolve-1.log", issue["body"])
 
 
@@ -261,11 +262,14 @@ class EnsureLabelTest(unittest.TestCase):
         M.gh_json, M.subprocess.run = self._gh, self._run
 
     def test_skips_create_when_label_exists(self) -> None:
-        M.gh_json = lambda *a, **k: [{"name": "dispatch"}]
+        def fake_gh(args, **_k):
+            name = args[3]
+            return [{"name": name}]
+        M.gh_json = fake_gh
         calls: list = []
         M.subprocess.run = lambda *a, **k: calls.append(a)  # would raise if used as proc
         M.ensure_label()
-        self.assertEqual(calls, [])  # no create attempted -> curated label untouched
+        self.assertEqual(calls, [])  # no create attempted -> curated labels untouched
 
     def test_creates_without_force_when_absent(self) -> None:
         M.gh_json = lambda *a, **k: []
@@ -276,12 +280,15 @@ class EnsureLabelTest(unittest.TestCase):
             stderr = ""
 
         def _run(cmd, **k):
-            captured["cmd"] = cmd
+            captured.setdefault("cmds", []).append(cmd)
             return _Proc()
         M.subprocess.run = _run
         M.ensure_label()
-        self.assertIn("create", captured["cmd"])
-        self.assertNotIn("--force", captured["cmd"])  # never clobber the shared label
+        self.assertEqual([cmd[3] for cmd in captured["cmds"]],
+                         ["dispatch", "needs-triage", "triage-only"])
+        for cmd in captured["cmds"]:
+            self.assertIn("create", cmd)
+            self.assertNotIn("--force", cmd)  # never clobber curated labels
 
 
 class MainHermeticTest(unittest.TestCase):

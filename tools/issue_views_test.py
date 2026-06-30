@@ -15,7 +15,97 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "issue_views.py"
-SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / ".github" / "issue-views.json"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SHIPPED_CONFIG = REPO_ROOT / ".github" / "issue-views.json"
+SLACK_WATCHDOG = REPO_ROOT / ".github" / "workflows" / "slack-watchdog.yml"
+
+TRIAGE_EXCLUDES = ["idea-scout", "needs-triage", "triage-only", "triage_only", "guard-complaint"]
+
+DISPATCH_VIEW_SLUGS = {
+    "ready-leaves",
+    "p0-p1",
+    "help-wanted",
+    "good-first-issue",
+    "agentic-serving",
+    "substrate",
+    "trust-floor",
+    "gpu",
+    "current",
+    "m1-durable-sessions",
+    "m2-kv-cache",
+    "m3-serving",
+    "m4-decode",
+    "m5-benchmarks",
+    "m6-agentic-loop",
+    "m7-release",
+    "m8-observability",
+    "m9-dispatch-fleet",
+    "m10-model-support",
+    "m11-substrate",
+}
+
+ISSUE_CREATE_PRODUCERS = {
+    ".github/workflows/slack-watchdog.yml": [
+        "--label needs-triage --label triage-only",
+        "dispatchability: \\`triage_only\\`",
+    ],
+    "cmd/fak/dispatchaudit.go": [
+        "dispatchability: `triage_only`",
+        '"needs-triage", "triage-only"',
+    ],
+    "cmd/fak/taskmgr.go": [
+        "ReviewHandoffWithOptions",
+        "StrictScope:   true",
+    ],
+    "internal/dogfoodissues/dogfoodissues.go": [
+        "issuecontract.ReviewCandidate",
+        '"Priority context"',
+    ],
+    "internal/ideascout/ideascout.go": [
+        "TriageOnlyLabel = \"triage-only\"",
+        "dispatchability: `triage_only`",
+    ],
+    "internal/issuecatalog/issuecatalog.go": [
+        "issuecontract.ReviewCandidate",
+        "IssueBody",
+    ],
+    "internal/learningdebt/learningdebt.go": [
+        "defaultTriageLabels = []string{\"needs-triage\", \"triage-only\"}",
+        "dispatchability: `triage_only`",
+    ],
+    "internal/maturity/issues.go": [
+        "maturityTriageLabels = []string{\"needs-triage\", \"triage-only\"}",
+        "dispatchability: `triage_only`",
+    ],
+    "tools/bench_signal.py": [
+        "check_issue_contract(",
+        "issue_contract_draft(",
+    ],
+    "tools/dispatch_log_audit.py": [
+        "TRIAGE_LABELS = [\"needs-triage\", \"triage-only\"]",
+        "Dispatchability:** `triage_only`",
+    ],
+    "tools/dogfood_issue_sync.py": [
+        "TRIAGE_LABELS = [\"needs-triage\", \"triage-only\"]",
+        "dispatchability: `triage_only`",
+    ],
+    "tools/gate_signal.py": [
+        "check_issue_contract(",
+        "issue_contract_draft(",
+    ],
+    "tools/idea_scout.py": [
+        "TRIAGE_ONLY_LABEL = \"triage-only\"",
+        "dispatchability: `triage_only`",
+    ],
+    "tools/learning_debt_dispatch.py": [
+        "TRIAGE_LABELS = [\"needs-triage\", \"triage-only\"]",
+        "Dispatchability:** `triage_only`",
+    ],
+    "tools/score_signal.py": [
+        "check_issue_contract(",
+        "issue_contract_draft(",
+    ],
+}
 
 
 def load():
@@ -62,6 +152,52 @@ class ShippedConfig(unittest.TestCase):
     def test_default_is_ready_leaves(self):
         cfg = m.load_config(SHIPPED_CONFIG)
         self.assertEqual(cfg["default"], "ready-leaves")
+
+    def test_dispatch_views_exclude_triage_only_labels(self):
+        cfg = m.load_config(SHIPPED_CONFIG)
+        vm = m.view_map(cfg)
+        self.assertLessEqual(DISPATCH_VIEW_SLUGS, set(vm))
+        for slug in sorted(DISPATCH_VIEW_SLUGS):
+            query = vm[slug]["query"]
+            for label in TRIAGE_EXCLUDES:
+                self.assertIn(f"-label:{label}", query, f"{slug} must exclude {label}")
+
+    def test_slack_watchdog_files_triage_only_issues(self):
+        workflow = SLACK_WATCHDOG.read_text(encoding="utf-8")
+        self.assertIn("gh label create needs-triage", workflow)
+        self.assertIn("gh label create triage-only", workflow)
+        self.assertIn("--label needs-triage --label triage-only", workflow)
+        self.assertIn("--add-label needs-triage --add-label triage-only", workflow)
+        self.assertIn("--body-file issue-body.md --add-label", workflow)
+        self.assertIn("dispatchability: \\`triage_only\\`", workflow)
+
+    def test_issue_create_producers_are_contract_or_triage_gated(self):
+        found = set()
+        for root in [
+            REPO_ROOT / "tools",
+            REPO_ROOT / "cmd" / "fak",
+            REPO_ROOT / "internal",
+            REPO_ROOT / ".github" / "workflows",
+        ]:
+            for path in root.rglob("*"):
+                if path.suffix not in {".py", ".go", ".yml", ".yaml"}:
+                    continue
+                if path.name.endswith("_test.py") or path.name.endswith("_test.go"):
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                creates = False
+                if path.suffix in {".py", ".go"}:
+                    creates = '"issue", "create"' in text or "'issue', 'create'" in text
+                else:
+                    creates = "gh issue create" in text
+                if creates:
+                    found.add(path.relative_to(REPO_ROOT).as_posix())
+
+        self.assertEqual(found, set(ISSUE_CREATE_PRODUCERS))
+        for rel, markers in sorted(ISSUE_CREATE_PRODUCERS.items()):
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+            missing = [marker for marker in markers if marker not in text]
+            self.assertEqual(missing, [], f"{rel} missing issue-create gate markers")
 
 
 class LoadValidation(unittest.TestCase):

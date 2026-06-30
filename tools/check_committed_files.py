@@ -11,7 +11,7 @@ Rules:
     private key must never enter a forever-history public tree; rotate it and keep
     it in a secret store / gitignored dir.
   * PRIVATE-only — the operator's private lab GPU-server *connection* subsystem
-    (the Slack control-bridge client + its lab orchestrator) — ALWAYS refused in
+    (the private control bridge client + its lab orchestrator) — ALWAYS refused in
     the PUBLIC tree; it lives only in the private canonical repo. This includes
     the sunset Python bench_slack bridge path; do not resurrect it here.
   * HARD junk  — caches/compiled/OS-cruft/editor-scratch — ALWAYS refused.
@@ -30,6 +30,8 @@ import argparse
 import os
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 
 # 10 MiB: large enough to admit the 1440p hero-video.mp4 (~9.4 MiB), which the live
@@ -68,7 +70,7 @@ KEEP_EXCEPTIONS = {
 }
 
 # Private-only: paths that must NEVER be tracked in the PUBLIC tree. The operator's
-# lab GPU-server *connection* code — the Slack control-bridge client and its bench
+# lab GPU-server *connection* code — the private control bridge client and its bench
 # orchestrator — speaks a private lab protocol and lives ONLY in the private
 # canonical repo (PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list). Under the hard-cut
 # model the public tree is edited directly, so the export-time scrubber's
@@ -93,7 +95,7 @@ PRIVATE_ONLY = [
     (re.compile(r"^(cmd|internal)/[^/]*dgx[^/]*/"),
      "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"),
     (re.compile(r"^(cmd|internal)/(?=[^/]*slack)(?=[^/]*(bridge|control|gc))[^/]*/"),
-     "private lab Slack control-bridge subsystem — belongs in the private repo, not the public tree"),
+     "private lab private control bridge subsystem — belongs in the private repo, not the public tree"),
     (re.compile(r"^tools/bench_slack(_test)?\.py$"),
      "sunset Python Slack/DGX bridge — belongs in the private repo, not the public tree"),
 ]

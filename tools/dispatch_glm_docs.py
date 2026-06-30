@@ -129,8 +129,19 @@ def main(argv=None) -> int:
 
     acct = {"tag": "zai-coding-plan", "dir": OPENCODE_DIR, "model": GLM_MODEL, "tier": 2}
     spawned = []
+    held = []
     for issue in targets:
         rb = issue_worker_prompt.build(issue, "docs", workspace=REPO)
+        contract = ird.issue_contract_review(REPO, rb.get("issue_record"), issue)
+        if (contract.get("unavailable") or not contract.get("ok") or
+                int(contract.get("score") or 0) < ird.DEFAULT_ISSUE_CONTRACT_MIN_SCORE):
+            held.append({
+                "issue": issue,
+                "verdict": "ISSUE_CONTRACT_HOLD",
+                "score": int(contract.get("score") or 0),
+                "reason": ird.issue_contract_hold_reason(contract),
+            })
+            continue
         env = ird.opencode_worker_env(OPENCODE_DIR, "docs", REPO, RUNS)
         env["FLEET_RESOLVE_ISSUE"] = str(issue)
         cmd = ird.build_worker_command("opencode", rb["prompt"], GLM_MODEL)
@@ -138,9 +149,11 @@ def main(argv=None) -> int:
                                      account=acct, spawn_probe_s=8.0)
         spawned.append({"issue": issue, "pid": res.get("pid"), "log": res.get("log")})
 
-    out = {"pool": "glm-docs", "live_before": have, "spawned": len(spawned), "issues": spawned}
+    out = {"pool": "glm-docs", "live_before": have, "spawned": len(spawned),
+           "issues": spawned, "held": held}
     print(json.dumps(out) if args.json else
-          f"glm-docs: spawned {len(spawned)} on docs -> {[s['issue'] for s in spawned]}")
+          f"glm-docs: spawned {len(spawned)} on docs -> {[s['issue'] for s in spawned]} "
+          f"(held={len(held)})")
     return 0
 
 

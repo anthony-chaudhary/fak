@@ -51,7 +51,7 @@ more prose.
                        an honest Responses-vs-Chat-Completions fence
 
   BUILD         — an agent can contribute effectively and the guards won't ambush it
-    extension_scaffold the additive extension path exists (new_leaf.py + EXTENDING)
+    extension_scaffold the additive extension path exists (fak new-leaf + EXTENDING)
     guardrails_surfaced the enforced rules that WILL bite an agent are documented up
                        front (trunk-only, commit-by-path, DCO sign-off, claim tag,
                        leaf/ABI discipline, the out-of-tree write guard) — an agent
@@ -61,12 +61,35 @@ more prose.
     machine_consumable an agent acts on structure, not prose — how much of the
                        measurement family speaks machine-readable JSON (SOFT)
 
-The headline metric is **friction-debt**: the count of concrete HARD defects above.
+Two headline numbers, because agent-readiness is two questions, not one:
+
+  * **friction-debt** (the HARD gate, lower = better, floor 0): the count of
+    concrete defects that make the BASELINE affordances missing or broken — a dead
+    link, an un-runnable first command, an un-tagged claim. It saturates: drive it
+    to zero and there is nothing left to fix. The 0-100 ``score`` / A-F ``grade`` is
+    the same baseline-coverage question in percent form.
+
+  * **experience_frontier** (the headline, higher = better, *unbounded*): the
+    weighted count of REAL, WORKING agent affordances the tree actually provides —
+    each integration recipe an agent follows, each zero-setup harness config, each
+    kernel refusal an agent can recover from, each tool an agent can drive via
+    ``--json``. It is deliberately **NOT a 0-100 grade**: agent experience is a
+    never-done program (the same category as kernel- and cache-optimization in
+    ``internal/worktype``) — there is always one more agent harness to make fak
+    first-class for, one more refusal to make recoverable. A "100% / done" line on
+    it would be a category error, so it has no ceiling and is tracked as a frontier +
+    a trend. It is the deliberate mirror of ``internal/heavinessscore``'s unbounded
+    ``heaviness_pressure`` (lower = lighter, the load an OPERATOR carries): this is
+    the surface an AGENT gains. You move it by ADDING a real affordance, never by
+    gaming a substring — the same rule the friction-debt gate enforces.
+
 Driving friction-debt to zero means an agent that lands in this repo cold can
 discover what fak is, trust it enough to adopt it, and build on it without tripping
-over an undocumented guard or a dead link. The companion process — the
-``/agent-readiness`` skill — runs this, retires the worst-first defect by adding the
-missing agent affordance, and re-runs to prove the drop. It folds into the unified
+over an undocumented guard or a dead link; climbing the frontier means fak keeps
+getting *more* of an agent's harnesses covered and *more* of its refusals
+recoverable. The companion process — the ``/agent-readiness`` skill — runs this,
+retires the worst-first defect by adding the missing agent affordance, and re-runs to
+prove the drop (and the frontier climb). It folds into the unified
 ``scorecard_control_pane`` alongside the other inward sticks.
 
 Deterministic + read-only by construction: it reads the git-tracked tree (so two
@@ -84,6 +107,8 @@ import argparse
 import json
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -112,7 +137,7 @@ CLAIM_LINE = re.compile(r"^\s*- \[")
 
 # The additive-extension path: a stamper for a conforming skeleton + the doc that
 # teaches "add a leaf, don't edit core".
-LEAF_SCAFFOLD = "tools/new_leaf.py"
+LEAF_SCAFFOLD = "cmd/fak/newleaf.go"
 EXTENDING_FILE = "EXTENDING.md"
 CONTRIBUTING_FILE = "CONTRIBUTING.md"
 
@@ -124,6 +149,25 @@ AGENT_CONFIGS: list[tuple[str, list[str]]] = [
     ("MCP clients (.mcp.json)", [".mcp.json", "examples/mcp/.mcp.json"]),
     ("Cursor (.cursorrules)", [".cursorrules", ".cursor/rules"]),
     ("GitHub Copilot (copilot-instructions)", [".github/copilot-instructions.md"]),
+]
+
+# The frontier rewards BREADTH of harness coverage — every named harness fak ships a
+# zero-setup, auto-loaded config for. This is the experience-frontier's harness_configs
+# term: OPTIONAL surface to climb, distinct from AGENT_CONFIGS (the REQUIRED core the gate
+# enforces). Each entry is a config a real harness auto-loads, so providing one makes that
+# harness first-class with no human step — a real affordance counted toward the unbounded
+# frontier, never required (a fork missing one has a smaller frontier, not friction-debt).
+# It is a superset of AGENT_CONFIGS so the core never double-counts.
+FRONTIER_HARNESS_CONFIGS: list[tuple[str, list[str]]] = [
+    *AGENT_CONFIGS,
+    ("Cline (.clinerules)", [".clinerules"]),
+    ("Windsurf (.windsurfrules)", [".windsurfrules", ".windsurf/rules"]),
+    ("Gemini CLI (GEMINI.md)", ["GEMINI.md"]),
+    ("Amp / AGENT.md convention", ["AGENT.md"]),
+    ("Aider (.aider.conf.yml)", [".aider.conf.yml"]),
+    ("Zed (.rules)", [".rules"]),
+    ("JetBrains Junie (.junie/guidelines.md)", [".junie/guidelines.md"]),
+    ("Continue (.continue/rules)", [".continue/rules/fak.md", ".continue/rules"]),
 ]
 
 # Per-agent integration recipes — one for each family an agent identifies with.
@@ -165,7 +209,7 @@ GUARDRAIL_CLUSTERS: list[tuple[str, list[str]]] = [
     ("commit by explicit path (no add -A)", ["git add -a", "explicit path", "commit -- <", "commit by explicit"]),
     ("DCO sign-off", ["git commit -s", "sign off", "sign-off", "dco"]),
     ("tagged claims ledger", ["claims.md", "claims-lint", "[shipped]"]),
-    ("leaf / frozen-ABI discipline", ["new_leaf", "as a leaf", "frozen abi", "additive-only"]),
+    ("leaf / frozen-ABI discipline", ["new-leaf", "as a leaf", "frozen abi", "additive-only"]),
     # The repo-guard PreToolUse hook denies writes that resolve outside the repo
     # (a ../sibling path, an absolute sibling, even `> /dev/null`). It is on by
     # default and silently bites an agent's Bash/Write/Edit — so the entry point
@@ -368,6 +412,26 @@ KPI_WEIGHTS: dict[str, float] = {
     "refusal_recovery_mapped": 0.05,    # every kernel refusal token has an agent-facing recovery
 }
 
+# The UNBOUNDED frontier (the headline that is NOT a 0-100 grade). Each dimension is a
+# real, WORKING agent affordance the tree provides; the value is points-per-unit — how
+# much agent experience one more of it buys. A recipe or a harness config onboards a
+# whole population of agents (a new harness made first-class), so it is weighted above a
+# refusal-recovery or a --json surface, which DEEPEN the experience for harnesses already
+# reached. Each term is weight*count, so the dimensions are commensurable in the sum (the
+# heaviness H1 lesson, applied upward). The frontier has no ceiling: every count grows
+# without bound (there is always one more harness to support, one more refusal to map), so
+# it is tracked as a frontier + a trend, never a completion %. The weights are pinned by a
+# regression test so they cannot drift silently — change one only on purpose. Crucially,
+# none of these dimensions is "raw CLI verb / flag count": rewarding those would directly
+# fight internal/heavinessscore's operator-load gauge, so the frontier rewards only
+# surfaces an agent strictly GAINS from, never operator surface an agent must navigate.
+FRONTIER_UNITS: dict[str, int] = {
+    "integration_recipes": 8,   # a docs/integrations recipe an agent follows to adopt fak in a context/harness
+    "harness_configs":     10,  # a zero-setup config a harness auto-loads (no human step to start the server)
+    "refusal_recoveries":   3,  # a kernel refusal token mapped to an agent-facing recovery (recover, don't fight)
+    "machine_consumable":   2,  # a measurement tool an agent can drive via --json (act on structure, not prose)
+}
+
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
 _FENCE_RE = re.compile(r"^(```|~~~)")
 
@@ -390,6 +454,26 @@ def grade_letter(score: float) -> str:
     if score >= 60:
         return "D"
     return "F"
+
+
+def experience_frontier(facts: dict[str, int]) -> tuple[int, dict[str, int]]:
+    """The UNBOUNDED agent-experience frontier (higher = better; NOT a 0-100 grade).
+
+    Returns ``(total, by_term)``: the sum of ``weight * count`` over every frontier
+    dimension (``FRONTIER_UNITS``), plus the per-dimension breakdown so a reader sees
+    WHERE the surface concentrates (the heaviness ``pressure_by_term`` move, applied
+    upward). ``facts`` carries the REAL, WORKING affordance counts the gather shell
+    resolved against disk — an integration recipe present, a harness config that
+    auto-loads, a refusal token mapped to a recovery, a tool that speaks ``--json``.
+
+    There is no ceiling and no "done": agent experience is a never-done program, so the
+    number is a frontier to climb, not a percentage to complete. It rises only when a
+    real affordance is ADDED (onboard a harness, map a refusal, expose a ``--json``
+    surface) — never by gaming a substring, the same rule the friction-debt gate
+    enforces. A missing fact counts as zero, so the frontier fails *low*, never high."""
+    by_term = {dim: FRONTIER_UNITS[dim] * max(0, int(facts.get(dim, 0)))
+               for dim in FRONTIER_UNITS}
+    return sum(by_term.values()), by_term
 
 
 def _has(text: str | None, *tokens: str) -> bool:
@@ -860,7 +944,7 @@ def kpi_codex_recipe_current(gaps: list[str]) -> dict[str, Any]:
 
 def kpi_extension_scaffold(scaffold: bool, extending: bool) -> dict[str, Any]:
     """The additive-extension path: a stamper that emits a conforming skeleton
-    (new_leaf.py) and the doc that teaches 'add a leaf, don't edit core'
+    (fak new-leaf) and the doc that teaches 'add a leaf, don't edit core'
     (EXTENDING.md). Both are how an agent contributes without breaking the ABI."""
     defects: list[str] = []
     if not scaffold:
@@ -1115,6 +1199,7 @@ def kpi_toolchain_pinned(has_directive: bool, doc_named: bool) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
+                  facts: dict[str, int] | None = None,
                   error: str | None = None) -> dict[str, Any]:
     if error:
         return {
@@ -1129,6 +1214,9 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     friction_debt = sum(len(k["defects"]) for k in kpis)
     n_soft = sum(len(k["soft"]) for k in kpis)
     grade = grade_letter(score)
+    # The unbounded headline (higher = better, no ceiling). Absent facts -> 0, so a
+    # caller that folds KPIs without the gather shell still gets a well-formed payload.
+    frontier, frontier_by_term = experience_frontier(facts or {})
 
     debt_by_group = {g: 0 for g in GROUPS}
     for k in kpis:
@@ -1148,6 +1236,11 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         key=lambda x: (-x["debt"], x["score"]))
 
     corpus = {
+        # The unbounded headline FIRST: agent experience is a frontier, not a % done.
+        "experience_frontier": frontier,
+        "frontier_by_term": frontier_by_term,
+        "frontier_units": dict(FRONTIER_UNITS),
+        # The bounded baseline-coverage gate (saturates at 0 / 100 / A).
         "score": score, "grade": grade, "friction_debt": friction_debt,
         "soft_signals": n_soft,
         "group_scores": group_scores,
@@ -1162,15 +1255,19 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
                 f"· build {gs['build']:.0f}")
     if friction_debt == 0:
         ok, verdict, finding = True, "OK", "agent_ready"
-        reason = (f"agent-ready: score {score}/100 (grade {grade}), zero friction-debt "
-                  f"across {len(kpis)} KPIs ({standing}; {n_soft} advisory). An agent can "
-                  f"discover, adopt, and build on fak with no missing affordance")
-        next_action = ("hold the line; re-run after a change to an agent surface "
-                       "(AGENTS.md, llms.txt, CLAIMS.md, integration recipes, the guards)")
+        reason = (f"experience-frontier {frontier} (unbounded; higher = better) · baseline "
+                  f"score {score}/100 (grade {grade}), zero friction-debt across {len(kpis)} "
+                  f"KPIs ({standing}; {n_soft} advisory). An agent can discover, adopt, and "
+                  f"build on fak with no missing affordance — and the frontier still has "
+                  f"headroom: onboard a harness, map a refusal, expose a --json surface")
+        next_action = ("climb the frontier — add the next real affordance (a new integration "
+                       "recipe / harness config, a refusal mapped to a recovery, a tool given "
+                       "--json); hold friction-debt at 0; re-run to prove the climb")
     else:
         ok, verdict, finding = False, "ACTION", "friction_debt"
         worst = breakdown[0]
-        reason = (f"{friction_debt} unit(s) of friction-debt; score {score}/100 (grade {grade}); "
+        reason = (f"experience-frontier {frontier} (unbounded) · {friction_debt} unit(s) of "
+                  f"friction-debt; baseline score {score}/100 (grade {grade}); "
                   f"heaviest: {worst['kpi']} ({worst['debt']} defect(s)); standing {standing}")
         next_action = ("retire friction-debt worst-first (see corpus.breakdown + per-KPI defects): "
                        "fix the agents.md entry point, the doc-map, the quotable identity, dead "
@@ -1235,6 +1332,26 @@ def _local_links(text: str, doc_rel: str, root: Path) -> list[tuple[str, bool]]:
 def _tool_has_json(text: str) -> bool:
     """A measurement tool 'speaks JSON' if it wires a --json argparse flag."""
     return '"--json"' in text or "'--json'" in text
+
+
+# A frontier affordance must be REAL, not a stub — the "add the real affordance, never
+# game the check" rule, enforced for the unbounded headline the way friction-debt enforces
+# it for the gate. These cheap content witnesses gate the two highest-weighted frontier
+# terms so an empty docs/integrations/*.md (+8) or a zero-byte harness config (+10) can't
+# inflate the number. (The other two terms are already witnessed: a mapped refusal token
+# must be greppable in a recovery doc, a --json tool must carry the flag string.)
+RECIPE_MIN_CHARS = 200  # a real recipe an agent follows is more than a title line
+CONFIG_MIN_CHARS = 24   # a real harness config has content, not an empty file
+
+
+def _is_substantive_recipe(text: str) -> bool:
+    """A frontier-counting integration recipe must be a doc an agent can actually follow:
+    non-trivial content AND at least one runnable fence or a link to follow — so a stub or
+    empty `docs/integrations/*.md` does not count toward the experience-frontier."""
+    t = (text or "").strip()
+    if len(t) < RECIPE_MIN_CHARS:
+        return False
+    return "```" in t or "](" in t
 
 
 def _bad_fenced_paths(doc_texts: dict[str, str], root: Path) -> list[str]:
@@ -1362,8 +1479,12 @@ def _agent_config_integrity(root: Path) -> list[str]:
     return bad
 
 
-def gather(root: Path) -> list[dict[str, Any]]:
-    """Read the git-tracked tree and run every pure KPI."""
+def gather(root: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Read the git-tracked tree and run every pure KPI.
+
+    Returns ``(kpis, facts)``: the per-KPI results AND the raw working-affordance
+    counts that feed the unbounded ``experience_frontier`` (kept separate so the KPI
+    grades stay independent of the frontier's magnitude)."""
     tracked = set(_git_lines(["ls-files"], root))
 
     def present(rel: str) -> bool:
@@ -1461,7 +1582,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
     go_directive = bool(_GO_DIRECTIVE_RE.search(go_mod_text))
     go_doc_named = any(_GO_VERSION_IN_DOC_RE.search(texts.get(d, "")) for d in TOOLCHAIN_DOCS)
 
-    return [
+    kpis = [
         kpi_agents_entrypoint(agents_text if present(AGENTS_FILE) else None),
         kpi_agent_config(missing_agent_configs(config_present)),
         kpi_llms_map(llms_present),
@@ -1486,6 +1607,27 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_quickstart_success_signal(qs_found, qs_signal),
         kpi_toolchain_pinned(go_directive, go_doc_named),
     ]
+    # The UNBOUNDED frontier's raw counts — every REAL, WORKING affordance the tree
+    # provides, resolved against disk here so experience_frontier() stays pure. Each is a
+    # count an agent strictly benefits from, that grows without bound (one more harness,
+    # one more recovery). The two highest-weighted terms are content-witnessed so the
+    # headline can't be inflated by an empty file: a recipe must be substantive (a doc an
+    # agent can follow), a harness config must be non-empty. (Refusal recoveries are
+    # already witnessed — the token must be greppable in a recovery doc; --json tools must
+    # carry the flag.)
+    substantive_configs = 0
+    for _label, cfg_paths in FRONTIER_HARNESS_CONFIGS:
+        chosen = next((p for p in cfg_paths if present(p)), None)
+        if chosen and len(_safe_read(root / chosen).strip()) >= CONFIG_MIN_CHARS:
+            substantive_configs += 1
+    facts = {
+        "integration_recipes": sum(1 for txt in recipe_texts.values()
+                                   if _is_substantive_recipe(txt)),
+        "harness_configs": substantive_configs,
+        "refusal_recoveries": max(0, len(reason_tokens) - len(unmapped_reasons)),
+        "machine_consumable": json_tools,
+    }
+    return kpis, facts
 
 
 def collect(workspace: Path) -> dict[str, Any]:
@@ -1493,7 +1635,8 @@ def collect(workspace: Path) -> dict[str, Any]:
     if not (root / ".git").exists() and not _git_lines(["rev-parse", "--git-dir"], root):
         return build_payload(workspace=str(root), kpis=[],
                              error=f"not a git repo at {root} — run from the repo ROOT")
-    return build_payload(workspace=str(root), kpis=gather(root))
+    kpis, facts = gather(root)
+    return build_payload(workspace=str(root), kpis=kpis, facts=facts)
 
 
 # ---------------------------------------------------------------------------
@@ -1503,11 +1646,16 @@ def collect(workspace: Path) -> dict[str, Any]:
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("corpus") or {}
     gs = c.get("group_scores") or {}
+    fbt = c.get("frontier_by_term") or {}
+    frontier_terms = "  ".join(f"{dim}:{fbt[dim]}" for dim in FRONTIER_UNITS if dim in fbt)
     lines = [
         f"agent-readiness-scorecard: {payload.get('verdict')} ({payload.get('finding')})",
         f"  {payload.get('reason')}",
         "",
-        (f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
+        (f"EXPERIENCE-FRONTIER {c.get('experience_frontier', 0)}  (unbounded · higher = better · "
+         f"a frontier, not a % — there is always one more harness to serve)"),
+        ("  by affordance: " + frontier_terms) if frontier_terms else "",
+        (f"baseline: score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
          f"· FRICTION-DEBT {c.get('friction_debt', 0)} · {c.get('soft_signals', 0)} advisory"),
         (f"agent journey:  discover {gs.get('discover', 0):.0f}  ·  "
          f"adopt {gs.get('adopt', 0):.0f}  ·  build {gs.get('build', 0):.0f}"),
@@ -1544,13 +1692,13 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     gs = c.get("group_scores") or {}
     out: list[str] = []
     out.append("---")
-    out.append('title: "fak agent-readiness scorecard — the friction-debt measuring stick"')
+    out.append('title: "fak agent-readiness scorecard — the experience-frontier + friction-debt measuring stick"')
     out.append('description: "fak\'s deterministic agent-readiness scorecard: KPIs across '
-               'the three steps an AI agent walks — discover, adopt, build — folded into a '
-               'composite score and the headline friction-debt metric, re-derived from the '
-               'git-tracked tree. Presence KPIs ask does-the-affordance-exist; the '
-               'paste-and-run and Codex-currentness KPIs ask whether the docs work for '
-               'current agents."')
+               'the three steps an AI agent walks — discover, adopt, build — folded into an '
+               'unbounded experience-frontier (higher = better, the surface to grow) and a '
+               'baseline friction-debt gate, re-derived from the git-tracked tree. Presence '
+               'KPIs ask does-the-affordance-exist; the paste-and-run and Codex-currentness '
+               'KPIs ask whether the docs work for current agents."')
     out.append("---")
     out.append("")
     out.append("# Agent-readiness scorecard — can an agent discover, adopt, and build on fak")
@@ -1562,27 +1710,54 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                "agent-first project lives or dies on: can an autonomous coding agent (Claude Code, "
                "OpenAI Codex, Cursor, an MCP client) **discover** fak, **want** to adopt it, and "
                "**build** on it effectively? Every number below is re-derived from the git-tracked "
-               "tree by `tools/agent_readiness_scorecard.py` — no hand-entry. The headline metric "
-               "is **friction-debt**: the count of concrete, mechanical defects that make fak harder "
-               "for an agent to find, trust, and build on — a missing entry point, a dead "
-               "orientation link, no copy-pasteable first command, an un-tagged claim, a guard "
-               "that ambushes instead of teaches. Driving friction-debt to zero is what makes fak "
-               "the path of least resistance for the agent that lands in it cold.")
+               "tree by `tools/agent_readiness_scorecard.py` — no hand-entry. There are two "
+               "headline numbers. **Experience-frontier** (unbounded, higher = better) is the one "
+               "to grow: the weighted count of real, working agent affordances the tree provides — "
+               "a never-done program with no ceiling, the mirror of the operator-heaviness gauge. "
+               "**Friction-debt** (lower = better, floor 0) is the baseline gate: the count of "
+               "concrete, mechanical defects that make fak harder for an agent to find, trust, and "
+               "build on — a missing entry point, a dead orientation link, no copy-pasteable first "
+               "command, an un-tagged claim, a guard that ambushes instead of teaches. Driving "
+               "friction-debt to zero makes fak the path of least resistance for the agent that "
+               "lands in it cold; climbing the frontier keeps widening the set of agents it serves.")
     out.append("")
     out.append("> Regenerate: `python tools/agent_readiness_scorecard.py --markdown --stamp DATE > docs/AGENT-READINESS-SCORECARD.md`")
     out.append("")
     out.append("## Headline")
     out.append("")
+    fbt = c.get("frontier_by_term") or {}
+    funits = c.get("frontier_units") or {}
+    frontier_terms = " · ".join(f"{dim} {fbt[dim]}" for dim in funits if dim in fbt)
     out.append("| Metric | Value |")
     out.append("|---|---|")
-    out.append(f"| **Friction-debt (total HARD defects)** | **{c.get('friction_debt', 0)}** |")
-    out.append(f"| Composite score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
+    out.append(f"| **Experience-frontier (unbounded · higher = better)** | **{c.get('experience_frontier', 0)}** |")
+    if frontier_terms:
+        out.append(f"| Frontier by affordance (weight×count) | {frontier_terms} |")
+    out.append(f"| Friction-debt (total HARD defects) | {c.get('friction_debt', 0)} |")
+    out.append(f"| Baseline coverage score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
     out.append(f"| Agent journey | discover {gs.get('discover', 0):.0f} · adopt {gs.get('adopt', 0):.0f} "
                f"· build {gs.get('build', 0):.0f} |")
     out.append(f"| Advisory (soft) signals | {c.get('soft_signals', 0)} |")
     g = c.get("debt_by_group", {})
     out.append(f"| Debt by step | discover:{g.get('discover',0)} · adopt:{g.get('adopt',0)} "
                f"· build:{g.get('build',0)} |")
+    out.append("")
+    out.append("### The two questions (why two headline numbers)")
+    out.append("")
+    out.append("**Friction-debt** (lower = better, floor 0) is the BASELINE gate — are the "
+               "expected affordances present and working? It saturates: drive it to zero and "
+               "there is nothing left to fix. **Experience-frontier** (higher = better, "
+               "*unbounded*) is the never-done program — the weighted count of real, working "
+               "agent affordances the tree actually provides (an integration recipe an agent "
+               "follows, a zero-setup harness config, a kernel refusal an agent can recover "
+               "from, a tool an agent drives via `--json`). It has **no ceiling**: there is "
+               "always one more agent harness to make fak first-class for, one more refusal to "
+               "make recoverable — so a \"100% / done\" line would be a category error. It is "
+               "the deliberate mirror of `internal/heavinessscore`'s unbounded "
+               "`heaviness_pressure` (the load an operator carries); this is the surface an "
+               "agent gains. You climb it by ADDING a real affordance, never by gaming a "
+               "substring. Per-unit weights: " +
+               ", ".join(f"`{d}`×{w}" for d, w in funits.items()) + ".")
     out.append("")
     out.append("## The three steps an agent walks")
     out.append("")
@@ -1626,22 +1801,44 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
 def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     b = baseline.get("corpus") or {}
     cur = current.get("corpus") or {}
+    bf, cf = b.get("experience_frontier", 0), cur.get("experience_frontier", 0)
+    fdelta = cf - bf
+    fpct = f"{(100.0 * fdelta / bf):+.0f}%" if bf else ("new" if cf else "+0%")
     bd, cd = b.get("friction_debt", 0), cur.get("friction_debt", 0)
     bo, co = b.get("score", 0), cur.get("score", 0)
     ratio = "∞ (zero)" if cd == 0 else f"{bd / cd:.1f}×"
     lines = [
-        f"friction-debt: {bd} -> {cd}   ({ratio} fewer defects)",
-        f"score:         {bo}/100 -> {co}/100   (+{round(co - bo, 1)})",
+        f"experience-frontier: {bf} -> {cf}   ({fdelta:+d}, {fpct})   [unbounded — the headline]",
+        f"friction-debt:       {bd} -> {cd}   ({ratio} fewer defects)",
+        f"baseline score:      {bo}/100 -> {co}/100   ({(co - bo):+.1f})",
     ]
+    bbt = b.get("frontier_by_term") or {}
+    cbt = cur.get("frontier_by_term") or {}
+    for dim in (cur.get("frontier_units") or FRONTIER_UNITS):
+        ov, nv = bbt.get(dim, 0), cbt.get(dim, 0)
+        if ov or nv:
+            lines.append(f"  frontier:{dim:<22} {ov} -> {nv}")
     for gp in GROUPS:
         gb = (b.get("debt_by_group") or {}).get(gp, 0)
         gc = (cur.get("debt_by_group") or {}).get(gp, 0)
-        lines.append(f"  {gp:<10} {gb} -> {gc}")
+        lines.append(f"  debt:{gp:<10} {gb} -> {gc}")
+    # The agent-experience goal is a frontier CLIMB (+35%), not a debt cut: the gate has
+    # already saturated at 0, so improvement now lives entirely on the unbounded frontier.
+    goal = bf * 1.35
+    if bf and cf >= goal:
+        lines.append(f"VERDICT: experience-frontier +35% achieved ({bf} -> {cf}; goal >= {goal:.0f}).")
+    elif bf:
+        lines.append(f"VERDICT: not yet +35% on the frontier — at {cf}, need >= {goal:.0f} "
+                     f"(add ~{goal - cf:.0f} more points: a recipe ×{FRONTIER_UNITS['integration_recipes']}, "
+                     f"a config ×{FRONTIER_UNITS['harness_configs']}, a refusal ×{FRONTIER_UNITS['refusal_recoveries']}).")
+    else:
+        lines.append(f"VERDICT: frontier baseline {cf} (no prior frontier to compare).")
+    # Back-compat: the friction-debt 2x gate still reports (it has bottomed out at 0).
     target = max(0, bd // 2)
     if cd <= target:
-        lines.append(f"VERDICT: >=2x friction-debt reduction achieved ({bd} -> {cd}).")
+        lines.append(f"  (gate) >=2x friction-debt reduction held ({bd} -> {cd}).")
     else:
-        lines.append(f"VERDICT: not yet 2x — need friction-debt <= {target} (now {cd}).")
+        lines.append(f"  (gate) friction-debt not yet 2x — need <= {target} (now {cd}).")
     return "\n".join(lines)
 
 
@@ -1652,7 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--markdown", action="store_true", help="emit the snapshot markdown body")
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
     ap.add_argument("--compare", default="", metavar="BASELINE.json",
-                    help="print the friction-debt delta vs a prior baseline JSON")
+                    help="print the experience-frontier (+35% goal) and friction-debt delta vs a prior baseline JSON")
     args = ap.parse_args(argv)
 
     try:
@@ -1666,7 +1863,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.compare:
         try:
             baseline = json.loads(Path(args.compare).read_text(encoding="utf-8"))
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # ValueError covers json.JSONDecodeError
             print(f"error: cannot read baseline {args.compare}: {exc}", file=sys.stderr)
             return 2
         print(render_compare(baseline, payload))

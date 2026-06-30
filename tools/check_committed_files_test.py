@@ -2,7 +2,7 @@
 """Tests for the file-admission gate (`check_committed_files.py`).
 
 Focuses on the PRIVATE_ONLY guard — the public-tree enforcement that keeps the
-operator's private lab GPU-server *connection* subsystem (the Slack control-bridge
+operator's private lab GPU-server *connection* subsystem (the private control bridge
 client + its orchestrator) out of the public repo. This is the durable backstop
 for the leak that put internal/dgxbridge + cmd/dgxbridge into public once: the
 scrubber's export-time DELETE_PATHS never run as a public gate, and connection

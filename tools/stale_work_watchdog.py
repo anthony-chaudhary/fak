@@ -43,6 +43,8 @@ import argparse
 import json
 import os
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import time
 from dataclasses import dataclass, field
 from pathlib import Path

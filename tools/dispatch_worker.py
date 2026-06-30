@@ -64,6 +64,32 @@ def no_window_creationflags() -> int:
     into every helper ``subprocess.run``/``Popen`` in the dispatch path."""
     return _CREATE_NO_WINDOW if os.name == "nt" else 0
 
+
+def install_no_window_subprocess_defaults(module: Any = subprocess) -> None:
+    """Default subprocess helpers to CREATE_NO_WINDOW on Windows.
+
+    Legacy automation tools have many thin git/gh/powershell probes. Installing
+    this once per script keeps those background helpers from flashing consoles
+    without rewriting every subprocess.run call site. Explicit creationflags still
+    win, so a caller that needs a different process group can opt out locally.
+    """
+    if os.name != "nt" or getattr(module, "_fak_no_window_defaults", False):
+        return
+
+    def with_flags(fn: Any) -> Any:
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("creationflags", no_window_creationflags())
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    module.run = with_flags(module.run)
+    module.Popen = with_flags(module.Popen)
+    module.call = with_flags(module.call)
+    module.check_call = with_flags(module.check_call)
+    module.check_output = with_flags(module.check_output)
+    module._fak_no_window_defaults = True
+
 # Default wall-clock cap on a spawned worker session (seconds). A dispatch worker
 # is a full agentic `claude -p` / `opencode run` session that runs UNATTENDED, so
 # an unbounded run (the old default=None) let a wedged or runaway session burn

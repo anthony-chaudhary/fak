@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -40,6 +41,13 @@ try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
@@ -86,7 +94,7 @@ def run_json(cmd: list[str], cwd: Path, timeout: int,
     ok_codes = ok_codes if ok_codes is not None else set(range(0, 16))
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=timeout)
+                              timeout=timeout, creationflags=_win_creationflags())
     except subprocess.TimeoutExpired:
         return {"_error": f"timed out after {timeout}s", "_cmd": cmd}
     except OSError as exc:
@@ -161,7 +169,8 @@ def dos_status_digest(root: Path, run_id: str) -> dict[str, Any]:
     try:
         proc = subprocess.run(
             ["dos", "status", "--workspace", str(root), "--json", run_id],
-            cwd=root, capture_output=True, text=True, timeout=45)
+            cwd=root, capture_output=True, text=True, timeout=45,
+            creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"run_id": run_id, "_error": str(exc)}
     doc = _last_json(proc.stdout)
@@ -254,7 +263,8 @@ def watchdog_installed() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             ["schtasks", "/Query", "/TN", WATCHDOG_TASK, "/FO", "LIST"],
-            capture_output=True, text=True, timeout=15)
+            capture_output=True, text=True, timeout=15,
+            creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"installed": None, "error": str(exc)}
     if proc.returncode != 0:
@@ -572,7 +582,8 @@ def _total_commits(root: Path) -> int | None:
     closure-audit window to the repo so it never silently scans a stale slice."""
     try:
         proc = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=str(root),
-                              capture_output=True, text=True, timeout=15)
+                              capture_output=True, text=True, timeout=15,
+                              creationflags=_win_creationflags())
     except (OSError, subprocess.TimeoutExpired):
         return None
     out = (proc.stdout or "").strip()
@@ -1442,7 +1453,8 @@ def git_date(root: Path) -> str:
     """The last-commit date (YYYY-MM-DD) — deterministic, no wall-clock in the tool."""
     try:
         proc = subprocess.run(["git", "log", "-1", "--format=%cs"], cwd=str(root),
-                              capture_output=True, text=True, timeout=15)
+                              capture_output=True, text=True, timeout=15,
+                              creationflags=_win_creationflags())
         date = (proc.stdout or "").strip()
         return date or "unknown"
     except (OSError, subprocess.TimeoutExpired):

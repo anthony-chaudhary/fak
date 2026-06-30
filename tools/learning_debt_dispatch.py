@@ -54,6 +54,8 @@ import hashlib
 import json
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,6 +69,7 @@ SCHEMA = "fleet-learning-debt-dispatch/1"
 CACHE_DIRNAME = ".learning-debt-dispatch"
 CACHE_FILENAME = "seen.json"
 DEBT_LABEL = "learning-debt"
+TRIAGE_LABELS = ["needs-triage", "triage-only"]
 # The load-bearing dedup anchor (rung 2): a defect's source_id stamped in an
 # HTML comment in the issue body. Matches `tools/idea_scout.py`'s pattern so the
 # dispatch fleet's tooling treats both feeders the same way.
@@ -263,6 +266,9 @@ def render_issue(defect: dict[str, Any], today: str) -> dict[str, Any]:
         f"**Defect class:** `{defect['defect_class']}`  (bucket: {defect['bucket']})\n\n"
         f"**Scorecard detail (verbatim):**\n\n```\n{defect['detail']}\n```\n\n"
         f"**Priority** (class weight + how broken the doc is): {priority(defect)}\n\n"
+        f"**Dispatchability:** `triage_only`\n\n"
+        f"This is a learning-debt triage item. Add lane, witness, and acceptance "
+        f"criteria before removing the triage labels.\n\n"
         f"---\n"
         f"_Reproduce: `python {SCORECARD_REL} --json` and look for this defect "
         f"under `{doc}`._\n"
@@ -270,7 +276,7 @@ def render_issue(defect: dict[str, Any], today: str) -> dict[str, Any]:
     )
     return {
         "title": issue_title(defect), "body": body,
-        "labels": [DEBT_LABEL, "rsi"],
+        "labels": [DEBT_LABEL, "rsi", *TRIAGE_LABELS],
         "source_id": defect["source_id"], "doc": doc,
         "defect_class": defect["defect_class"], "priority": priority(defect),
     }
@@ -338,23 +344,39 @@ def fetch_existing_issues(limit: int) -> list[dict[str, Any]]:
 
 
 def ensure_debt_label() -> None:
-    """Idempotently create the marker label so `gh issue create` never fails on a
-    missing label. Best-effort, but NOT silent — a real auth/permission failure
-    would otherwise resurface as a confusing per-issue 'label not found'."""
+    """Idempotently create labels so `gh issue create` never fails on a missing
+    label. Best-effort, but NOT silent — a real auth/permission failure would
+    otherwise resurface as a confusing per-issue 'label not found'."""
+    labels = [
+        (DEBT_LABEL, "b60205",
+         "Auto-filed by learning-debt dispatch (tools/learning_debt_dispatch.py); "
+         "a HARD learning-scorecard defect to fix", True),
+        ("needs-triage", "d4c5f9",
+         "Needs human scoping before an agent dispatch can take it", False),
+        ("triage-only", "d4c5f9",
+         "Useful issue, but not a worker-ready dispatch leaf", False),
+    ]
+    for label, color, description, force in labels:
+        _ensure_label(label, color, description, force=force)
+
+
+def _ensure_label(label: str, color: str, description: str, *,
+                  force: bool = False) -> None:
+    args = ["gh", "label", "create", label, "--color", color,
+            "--description", description]
+    if force:
+        args.append("--force")
     try:
-        proc = subprocess.run(
-            ["gh", "label", "create", DEBT_LABEL, "--color", "b60205",
-             "--description",
-             "Auto-filed by learning-debt dispatch (tools/learning_debt_dispatch.py); "
-             "a HARD learning-scorecard defect to fix",
-             "--force"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30)
+        proc = subprocess.run(args, capture_output=True, text=True,
+                              encoding="utf-8", timeout=30)
     except (OSError, subprocess.TimeoutExpired) as e:
-        print(f"warning: could not run `gh label create {DEBT_LABEL}`: {e}",
+        print(f"warning: could not run `gh label create {label}`: {e}",
               file=sys.stderr)
         return
     if proc.returncode != 0:
-        print(f"warning: could not ensure '{DEBT_LABEL}' label "
+        if "already exists" in proc.stderr.lower():
+            return
+        print(f"warning: could not ensure '{label}' label "
               f"(issue creation may fail): {proc.stderr.strip()[:200]}",
               file=sys.stderr)
 

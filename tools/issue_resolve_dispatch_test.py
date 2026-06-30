@@ -26,6 +26,21 @@ def load():
     return mod
 
 
+def passing_issue_contract(*_args, **_kwargs):
+    return {
+        "ok": True,
+        "unavailable": False,
+        "score": 100,
+        "spine_priority": 100,
+        "review": {
+            "ok": True,
+            "reasons": [],
+            "score": {"total": 100},
+            "spine_priority": {"total": 100},
+        },
+    }
+
+
 class PickTargetTest(unittest.TestCase):
     def test_first_not_in_skip(self) -> None:
         mod = load()
@@ -460,6 +475,7 @@ class EvaluateTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
+        mod.issue_contract_review = passing_issue_contract
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
@@ -492,6 +508,31 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 467)
         self.assertIn("467", p["reason"])
 
+    def test_issue_contract_hold_blocks_spawn(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False,
+            "unavailable": False,
+            "score": 40,
+            "spine_priority": 0,
+            "review": {
+                "ok": False,
+                "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                "missing_fields": ["working_spine"],
+                "score": {"total": 40},
+            },
+        }
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["action"], "issue_contract_hold")
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertIn("ISSUE_SCOPE_INCOMPLETE", p["reason"])
+        self.assertEqual(p["issue_contract_gate"]["score"], 40)
+
     def test_reap_runs_before_preflight_and_is_recorded(self) -> None:
         mod = load()
         state = {"reaped": False}
@@ -514,6 +555,12 @@ class EvaluateTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
+        mod.issue_contract_review = passing_issue_contract
+        mod.acquire_lane_lease = lambda root, lane, **k: {
+            "acquired": True, "refused": False, "id": f"resolve-{lane}",
+            "holder": "test", "tree": k.get("tree") or []}
+        mod.reap_expired_leases = lambda root, **k: {"ok": True, "rc": 0}
+        mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
         mod.spawn_issue_worker = lambda *a, **k: {
             "pid": 202, "log": "resolve-467.log", "issue": 467,
             "lane": "gateway", "backend": "claude"}
@@ -794,6 +841,7 @@ class BackendRoutingTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
+        mod.issue_contract_review = passing_issue_contract
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
@@ -1088,6 +1136,7 @@ class EvaluateBackendHealthTest(unittest.TestCase):
     def _common_stubs(self, mod, pre):
         mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
         mod.issue_dispatch.preflight = lambda root, **kw: dict(pre, _seen_max=kw.get("max_workers"))
+        mod.issue_contract_review = passing_issue_contract
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": None, "live": k.get("live"),
@@ -1552,6 +1601,7 @@ class EvaluateLeaseGateTest(unittest.TestCase):
         mod.lane_tree = lambda root, lane: [f"internal/{lane}/**"]
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
+        mod.issue_contract_review = passing_issue_contract
         mod.spawn_issue_worker = spawn
 
     def test_free_lane_acquires_then_spawns(self) -> None:

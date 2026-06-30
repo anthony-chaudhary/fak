@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -61,10 +62,19 @@ try:
 except (AttributeError, ValueError):
     pass
 
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
+
 SCHEMA = "fleet-idea-scout/1"
 CACHE_DIRNAME = ".idea-scout"
 CACHE_FILENAME = "seen.json"
 SCOUT_LABEL = "idea-scout"
+TRIAGE_LABEL = "needs-triage"
+TRIAGE_ONLY_LABEL = "triage-only"
 ARXIV_API = "http://export.arxiv.org/api/query"
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -381,6 +391,10 @@ def render_issue(cand: dict[str, Any], score: int, reasons: list[str],
         + f"**Why surfaced** (topic `{topic['key']}`, score {score}): "
         + ("; ".join(reasons) if reasons else "matched topic query")
         + "\n\n"
+        "### Dispatchability\n"
+        "- dispatchability: `triage_only`\n"
+        "- reason: idea-scout candidates need human scope, lane, witness, and "
+        "acceptance criteria before they become worker-ready leaves.\n\n"
         + (f"**Summary**\n\n{summary}\n\n" if summary else "")
         + "---\n"
         + "_Triage hint: is this a capability fak should adopt, a threat it should "
@@ -388,7 +402,7 @@ def render_issue(cand: dict[str, Any], score: int, reasons: list[str],
         + f"<!-- idea-scout-source: {cand['source_id']} -->"
     )
 
-    labels = [SCOUT_LABEL, "research"]
+    labels = [SCOUT_LABEL, TRIAGE_LABEL, TRIAGE_ONLY_LABEL, "research"]
     area = topic.get("area")
     if area:
         labels.append(area)
@@ -453,7 +467,8 @@ def gh_json(args: list[str], timeout: int = 60) -> Any:
     past `timeout` — both are caught by the caller so a stuck CLI can't wedge the
     daily run (the same defensive bound fetch_arxiv has)."""
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8", timeout=timeout)
+                          encoding="utf-8", timeout=timeout,
+                          creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")
@@ -477,26 +492,33 @@ def fetch_existing_issues(limit: int) -> list[dict[str, Any]]:
 
 
 def ensure_scout_label() -> None:
-    """Idempotently create the marker label so `gh issue create` never fails on a
-    missing label. `--force` updates if it already exists. Best-effort, but NOT
-    silent: a real failure here (auth/permission) would otherwise resurface as a
-    confusing per-issue 'label not found', so warn loudly to stderr."""
-    try:
-        proc = subprocess.run(
-            ["gh", "label", "create", SCOUT_LABEL, "--color", "8a63d2",
-             "--description",
-             "Auto-filed by the daily idea-scout (tools/idea_scout.py); "
-             "needs human triage",
-             "--force"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        print(f"warning: could not run `gh label create {SCOUT_LABEL}`: {e}",
-              file=sys.stderr)
-        return
-    if proc.returncode != 0:
-        print(f"warning: could not ensure '{SCOUT_LABEL}' label "
-              f"(issue creation may fail): {proc.stderr.strip()[:200]}",
-              file=sys.stderr)
+    """Idempotently create marker/triage labels so `gh issue create` never fails on
+    a missing label. Best-effort, but NOT silent: a real failure here
+    (auth/permission) would otherwise resurface as a confusing per-issue 'label
+    not found', so warn loudly to stderr."""
+    wanted = [
+        (SCOUT_LABEL, "8a63d2",
+         "Auto-filed by the daily idea-scout (tools/idea_scout.py); needs human triage"),
+        (TRIAGE_LABEL, "d4c5f9",
+         "Needs human scoping before an agent dispatch can take it"),
+        (TRIAGE_ONLY_LABEL, "d4c5f9",
+         "Useful issue, but not a worker-ready dispatch leaf"),
+    ]
+    for name, color, desc in wanted:
+        try:
+            proc = subprocess.run(
+                ["gh", "label", "create", name, "--color", color,
+                 "--description", desc, "--force"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                creationflags=_win_creationflags())
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"warning: could not run `gh label create {name}`: {e}",
+                  file=sys.stderr)
+            continue
+        if proc.returncode != 0:
+            print(f"warning: could not ensure '{name}' label "
+                  f"(issue creation may fail): {proc.stderr.strip()[:200]}",
+                  file=sys.stderr)
 
 
 def create_issue(issue: dict[str, Any], *, milestone: str = "") -> str:
@@ -512,7 +534,7 @@ def create_issue(issue: dict[str, Any], *, milestone: str = "") -> str:
     if milestone:
         args += ["--milestone", milestone]
     proc = subprocess.run(["gh", *args], capture_output=True, text=True,
-                          encoding="utf-8")
+                          encoding="utf-8", creationflags=_win_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue create -> {proc.returncode}: "
                            f"{proc.stderr.strip()[:300]}")

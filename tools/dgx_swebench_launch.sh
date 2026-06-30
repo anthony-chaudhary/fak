@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch dgx_swebench_compare.py DETACHED on the DGX so the (flaky, ~1-command-
-# per-session) Slack control bridge can fire it once and then poll a host-shared
+# per-session) private control bridge can fire it once and then poll a host-shared
 # log. EVERY shell metachar the Slack bridge escapes (>, <, &) lives in THIS file,
 # never in a command typed through Slack — type only `bash <thisfile> [args]`.
 #

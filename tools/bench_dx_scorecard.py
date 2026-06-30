@@ -47,9 +47,9 @@ flag, an inline provenance line, a record command), not by writing prose.
                      means", so a developer reads intent without opening source
 
   COMPARE       -  run -> record -> compare is a documented, working loop
-    bench_cli_path_ok the result-query CLI (tools/bench_cli.py) points at a path that
+    bench_cli_path_ok the native result-query CLI points at benchmark artifacts that
                      resolves from the repo root (no doubled `fak/` prefix)
-    compare_documented a doc names the run->record->compare sequence (bench_cli.py
+    compare_documented a doc names the run->record->compare sequence (bench-runs
                      list/compare, or a Makefile target)
 
 The headline metric is **bench-DX-debt**: the count of concrete HARD defects above.
@@ -75,6 +75,8 @@ import json
 import difflib
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any
@@ -91,7 +93,8 @@ GROUP_WEIGHT = {"discover": 28, "coldstart": 28, "learn": 16, "read": 14, "compa
 REGISTRY_GO = "internal/benchcatalog/catalog.go"
 CATALOG_VERB_GO = "cmd/fak/benchmarks.go"
 AUTHORITY_DOC = "BENCHMARK-AUTHORITY.md"
-BENCH_CLI = "tools/bench_cli.py"
+BENCH_CLI = "cmd/fak/benchruns.go"
+BENCH_CORE = "internal/benchruns/benchruns.go"
 WEBBENCH_GO = "cmd/fak/webbench.go"
 SWEBENCH_GO = "cmd/fak/swebench.go"
 
@@ -338,24 +341,18 @@ def kpi_bench_cli_path_ok(root: Path) -> tuple[bool, int, str]:
     src = _read(root, BENCH_CLI)
     if src is None:
         return False, 1, f"{BENCH_CLI} (the result-query CLI) is missing"
-    # The doubled-root bug: BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark".
-    m = re.search(r'BENCHMARK_DIR\s*=\s*ROOT\s*/\s*"([^"]+)"', src)
-    if m and m.group(1) == "fak":
-        return False, 1, f'{BENCH_CLI}: BENCHMARK_DIR has a spurious "fak/" prefix (path will not resolve from repo root)'
-    # Confirm the path it points at exists.
-    paths = re.findall(r'ROOT\s*((?:/\s*"[^"]+"\s*)+)', src)
-    if paths:
-        segs = re.findall(r'"([^"]+)"', paths[0])
-        target = root.joinpath(*segs) if segs else root
-        if segs and segs[0] == "fak":
-            return False, 1, f'{BENCH_CLI}: BENCHMARK_DIR starts with "fak/" (doubled module root)'
-        if not target.exists():
-            return False, 1, f"{BENCH_CLI}: BENCHMARK_DIR {'/'.join(segs)} does not exist"
-    return True, 0, f"{BENCH_CLI} BENCHMARK_DIR resolves from the repo root"
+    core = _read(root, BENCH_CORE)
+    if core is None:
+        return False, 1, f"{BENCH_CORE} (the benchmark run catalog reader) is missing"
+    if '"experiments/benchmark/catalog.json"' not in core and '"experiments", "benchmark", "catalog.json"' not in core:
+        return False, 1, f"{BENCH_CORE}: catalog path is not the repo-root experiments/benchmark/catalog.json"
+    if "bench-runs" not in src:
+        return False, 1, f"{BENCH_CLI}: native command does not advertise bench-runs"
+    return True, 0, "fak bench-runs resolves experiments/benchmark/catalog.json from the repo root"
 
 
 def kpi_compare_documented(root: Path, tracked: list[str]) -> tuple[bool, int, str]:
-    # bench_cli.py documents list/compare; or a Makefile target chains run+record.
+    # fak bench-runs documents list/compare; or a Makefile target chains run+record.
     cli = _read(root, BENCH_CLI) or ""
     has_compare = "compare" in cli and "list" in cli
     if has_compare:

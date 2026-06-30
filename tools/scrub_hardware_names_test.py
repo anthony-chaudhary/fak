@@ -86,9 +86,9 @@ class SkuPhraseAccuracyTest(unittest.TestCase):
         self.assertEqual(m.transform("An A100 ran it\n"), "A datacenter GPU ran it\n")
 
     def test_dgx_overnight_link_id_untouched(self):
-        # DGX-OVERNIGHT-PLAN-*.md is a path/link token (masked) — uppercase-suffixed
+        # GPU-SERVER-OVERNIGHT-PLAN-*.md is a path/link token (masked) — uppercase-suffixed
         # DGX-<UPPER> is NOT touched by the DGX-<lowercase-word> rule either way.
-        src = "see [plan](docs/nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md) for detail\n"
+        src = "see [plan](docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md) for detail\n"
         self.assertEqual(m.transform(src), src)
 
     def test_link_display_text_filename_not_flagged(self):
@@ -97,8 +97,8 @@ class SkuPhraseAccuracyTest(unittest.TestCase):
         # (transform) must NOT corrupt it into a broken [GPU server-OVERNIGHT-PLAN](DGX-….md)
         # display/target mismatch. Both halves are now masked, not just the target.
         for src in (
-            "([DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md)). The fix is\n",
-            "[DGX2-CROSS-ENGINE-DATA](DGX2-CROSS-ENGINE-DATA-2026-06-25.md) and\n",
+            "([GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md)). The fix is\n",
+            "[GPU-SERVER-CROSS-ENGINE-DATA](GPU-SERVER-CROSS-ENGINE-DATA-2026-06-25.md) and\n",
         ):
             self.assertEqual(m.residual_hits(src), [], f"--check FP: {src!r}")
             self.assertEqual(m.transform(src), src, f"--apply corruption: {src!r}")

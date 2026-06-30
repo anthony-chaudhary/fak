@@ -21,6 +21,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 TOOLS = Path(__file__).resolve().parent
@@ -61,6 +62,29 @@ class HelperValueTest(unittest.TestCase):
     def test_leaf_helpers(self):
         self._check(dispatch_preflight, dispatch_preflight._no_window_creationflags)
         self._check(issue_worker_prompt, issue_worker_prompt._no_window_creationflags)
+
+    def test_default_installer_adds_hidden_console_flag(self):
+        captured = {}
+
+        def base(*args, **kwargs):
+            captured["kwargs"] = kwargs
+            return "ok"
+
+        module = SimpleNamespace(
+            run=base,
+            Popen=base,
+            call=base,
+            check_call=base,
+            check_output=base,
+        )
+        with mock.patch.object(dispatch_worker.os, "name", "nt"):
+            dispatch_worker.install_no_window_subprocess_defaults(module)
+
+        self.assertEqual(module.run(["git"]), "ok")
+        self.assertEqual(captured["kwargs"]["creationflags"], CREATE_NO_WINDOW)
+
+        module.Popen(["git"], creationflags=123)
+        self.assertEqual(captured["kwargs"]["creationflags"], 123)
 
 
 class ForwardsSuppressorTest(unittest.TestCase):
@@ -115,6 +139,38 @@ class ForwardsSuppressorTest(unittest.TestCase):
 
     def test_issue_resolve_taskkill_reaper(self):
         self._assert_forwards(ird, lambda: ird.terminate_issue_worker_tree(999999))
+
+
+class DirectSpawnerIssueContractTest(unittest.TestCase):
+    """Ad hoc direct spawners must not bypass the worker-ready issue contract."""
+
+    def test_non_test_spawn_calls_are_contract_gated(self):
+        offenders = []
+        for path in sorted(TOOLS.glob("*.py")):
+            if path.name.endswith("_test.py"):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if "spawn_issue_worker(" not in text:
+                continue
+            if path.name == "issue_resolve_dispatch.py":
+                required = [
+                    "def issue_contract_review(",
+                    "issue_contract_gate",
+                    "DEFAULT_ISSUE_CONTRACT_MIN_SCORE",
+                ]
+                missing = [marker for marker in required if marker not in text]
+                if missing:
+                    offenders.append(f"{path.name}: missing {', '.join(missing)}")
+                continue
+
+            review_at = text.find("issue_contract_review(")
+            spawn_at = text.find("spawn_issue_worker(")
+            if review_at < 0 or review_at > spawn_at:
+                offenders.append(f"{path.name}: spawn before issue_contract_review")
+            if "ISSUE_CONTRACT_HOLD" not in text:
+                offenders.append(f"{path.name}: missing ISSUE_CONTRACT_HOLD report")
+
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

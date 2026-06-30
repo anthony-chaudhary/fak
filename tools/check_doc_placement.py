@@ -26,6 +26,8 @@ import argparse
 import os
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 
 # Root-level .md files that are legitimately entry points or project meta.

@@ -32,7 +32,15 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PUBLIC_ROOT = os.path.dirname(HERE)
@@ -184,11 +192,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\nAPPLIED -> {dest}  ({copied} private-only path(s) copied)")
     if args.git:
-        import subprocess
-        subprocess.run(["git", "-C", dest, "init", "-q"], check=False)
-        subprocess.run(["git", "-C", dest, "add", "-A"], check=False)
+        subprocess.run(["git", "-C", dest, "init", "-q"], check=False,
+                       creationflags=_win_creationflags())
+        subprocess.run(["git", "-C", dest, "add", "-A"], check=False,
+                       creationflags=_win_creationflags())
         subprocess.run(["git", "-C", dest, "commit", "-q", "-m",
-                        "Initial private-only commit (hard cut)"], check=False)
+                        "Initial private-only commit (hard cut)"], check=False,
+                       creationflags=_win_creationflags())
         print("  git: initialized + initial commit (no remote; push manually)")
     else:
         print("  (no --git; inspect, then `git init` + push to a PRIVATE remote yourself)")

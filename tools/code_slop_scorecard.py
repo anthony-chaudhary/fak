@@ -61,11 +61,19 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 SCHEMA = "fleet-code-slop-scorecard/1"
 SCORECARD_DOC = "docs/CODE-SLOP-SCORECARD.md"
@@ -1398,6 +1406,7 @@ def _git_tracked_source_paths(root: Path, suffix: str) -> list[Path] | None:
             cwd=str(root),
             capture_output=True,
             timeout=15,
+            creationflags=_win_creationflags(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1462,7 +1471,8 @@ def git_churn(root: Path, rev_range: str) -> tuple[int, int, int]:
             p = subprocess.run(
                 ["git", "log", rev_range, f"--diff-filter={diff_filter}",
                  "--name-only", "--pretty=format:", "--", "*.go"],
-                cwd=str(root), capture_output=True, text=True, timeout=30)
+                cwd=str(root), capture_output=True, text=True, timeout=30,
+                creationflags=_win_creationflags())
         except (OSError, subprocess.SubprocessError):
             return 0
         if p.returncode != 0:
@@ -1471,7 +1481,8 @@ def git_churn(root: Path, rev_range: str) -> tuple[int, int, int]:
 
     try:
         c = subprocess.run(["git", "rev-list", "--count", rev_range],
-                           cwd=str(root), capture_output=True, text=True, timeout=30)
+                           cwd=str(root), capture_output=True, text=True, timeout=30,
+                           creationflags=_win_creationflags())
         n_commits = int(c.stdout.strip()) if c.returncode == 0 and c.stdout.strip() else 0
     except (OSError, subprocess.SubprocessError, ValueError):
         n_commits = 0

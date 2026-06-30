@@ -15,6 +15,8 @@ import platform
 import shutil
 import shlex
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 import time
 import urllib.error

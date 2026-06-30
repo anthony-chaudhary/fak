@@ -22,10 +22,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 PUBLIC_SLUG = "fak"
 OWNER = "anthony-chaudhary"
@@ -78,6 +86,7 @@ def repo_root(start: Path) -> Path:
     out = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         cwd=start, capture_output=True, text=True, check=True,
+        creationflags=_win_creationflags(),
     )
     return Path(out.stdout.strip())
 
@@ -85,6 +94,7 @@ def repo_root(start: Path) -> Path:
 def tracked_files(root: Path) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True,
+        creationflags=_win_creationflags(),
     )
     return [line for line in out.stdout.splitlines() if line]
 
@@ -259,7 +269,8 @@ def check_hooks_armed(root, tracked):
     # removed wholesale (the #78 regression); this catches that class directly.
     out = []
     val = subprocess.run(["git", "config", "--get", "core.hooksPath"],
-                         cwd=root, capture_output=True, text=True).stdout.strip()
+                         cwd=root, capture_output=True, text=True,
+                         creationflags=_win_creationflags()).stdout.strip()
     if val != "tools/githooks":
         out.append(Finding("hooks-armed", "WARN",
                            f"core.hooksPath is '{val or '(unset)'}' — run tools/install_trunk_guard.py", ""))

@@ -43,6 +43,8 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 from typing import Any

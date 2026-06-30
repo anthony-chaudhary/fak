@@ -816,6 +816,24 @@
       "in_scope": true
     },
     {
+      "id": "hardware-shape-neutrality",
+      "category": "hardware-shape-neutrality",
+      "dimension": "Hardware-shape neutrality: explicit fences for host-CPU assumptions",
+      "why_it_matters": "Hardware breadth can be GPU-biased if the score only counts brands or devices. A serving stack also needs to say whether its core execution contract assumes f32-only tensors, host-addressable buffers, x86 dispatch, synchronous execution, goroutine row splitting, row-major layout, or eager host-resident weights. Operators comparing new silicon need these assumptions named as FENCED or UNDEFINED, otherwise a broad backend list can hide a hard host-shape dependency.",
+      "sota_systems": [
+        "vLLM plugin backends",
+        "llama.cpp backend matrix",
+        "MLC-LLM / TVM compilation"
+      ],
+      "sota_bar": "A hardware-neutral stack exposes backend contracts, capability discovery, layout/dtype/residency boundaries, and explicit fallback behavior so new accelerators do not require a fork of the model loop. Mature serving stacks cover more device families, but most public scorecards still report breadth without a seven-assumption shape-neutrality ledger.",
+      "best_value": 7,
+      "metric_unit": "host-shape assumptions explicitly fenced out of 7",
+      "source_url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md",
+      "source_date": "2026-06-30",
+      "notes": "Seven assumptions from fak's hardware-portability explainer: float32 monoculture, host-pointer aliasing, x86 build-tag dispatch, synchronous return-by-value, goroutine-only parallelism, row-major-only layout, eager full-RAM residency plus little-endian host. This dimension is qualitative: FENCED means the contract names a seam and fallback; UNDEFINED means the scorecard cannot tell whether a backend avoids the assumption.",
+      "in_scope": true
+    },
+    {
       "id": "spec-decode-speedup",
       "category": "speculative-decoding",
       "dimension": "Speculative-decoding wall-clock speedup (single-stream / low-concurrency)",

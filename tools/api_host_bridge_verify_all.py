@@ -69,6 +69,10 @@ def py_cmd(script: str, *args: str) -> list[str]:
     return [sys.executable, script, *args]
 
 
+def fak_cmd(*args: str) -> list[str]:
+    return ["go", "run", "./cmd/fak", *args]
+
+
 def generation_steps() -> list[dict[str, Any]]:
     return [
         {
@@ -129,8 +133,8 @@ def generation_steps() -> list[dict[str, Any]]:
         {
             "id": "api_host_readiness",
             "phase": "generate",
-            "argv": py_cmd(
-                "tools/api_host_readiness_probe.py",
+            "argv": fak_cmd(
+                "api-host", "readiness",
                 "--from-roster", "fak/experiments/api-host-bridge/api-host-roster.json",
                 "--out", "fak/experiments/api-host-bridge/api-host-readiness.json",
                 "--markdown", "fak/experiments/api-host-bridge/api-host-readiness.md",
@@ -139,8 +143,8 @@ def generation_steps() -> list[dict[str, Any]]:
         {
             "id": "api_host_acceptance",
             "phase": "generate",
-            "argv": py_cmd(
-                "tools/api_host_acceptance_probe.py",
+            "argv": fak_cmd(
+                "api-host", "acceptance",
                 "--from-roster", "fak/experiments/api-host-bridge/api-host-roster.json",
                 "--out", "fak/experiments/api-host-bridge/api-host-acceptance.json",
                 "--markdown", "fak/experiments/api-host-bridge/api-host-acceptance.md",

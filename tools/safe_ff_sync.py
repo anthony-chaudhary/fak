@@ -44,9 +44,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def _win_creationflags() -> int:
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+
 
 # Exit codes (mirror release_lock.py's vocabulary).
 EXIT_OK, EXIT_USAGE, EXIT_UNSAFE, EXIT_INTERNAL = 0, 2, 3, 4
@@ -62,6 +70,7 @@ def git(args, repo=".", check=True, binary=False):
         ["git", "-C", str(repo), *args],
         capture_output=True,
         check=False,
+        creationflags=_win_creationflags(),
     )
     if check and proc.returncode != 0:
         raise GitError(
@@ -87,6 +96,7 @@ def is_ancestor(repo, a, b):
     proc = subprocess.run(
         ["git", "-C", str(repo), "merge-base", "--is-ancestor", a, b],
         capture_output=True,
+        creationflags=_win_creationflags(),
     )
     if proc.returncode not in (0, 1):
         raise GitError(
@@ -101,6 +111,7 @@ def blob_at(repo, ref, path):
     proc = subprocess.run(
         ["git", "-C", str(repo), "show", f"{ref}:{path}"],
         capture_output=True,
+        creationflags=_win_creationflags(),
     )
     return proc.stdout if proc.returncode == 0 else None
 

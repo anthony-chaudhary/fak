@@ -10,7 +10,7 @@
 # drives this has no CUDA toolkit. So this script fetches the pushed HEAD fresh and runs
 # it on the device — the only place the device numbers can be witnessed.
 #
-# WHY SELF-BACKGROUNDING: the Slack control bridge that fronts the node times out on a
+# WHY SELF-BACKGROUNDING: the private control bridge that fronts the node times out on a
 # multi-minute synchronous exec. This script re-execs itself under nohup on first call
 # (writing /tmp/fakpure/run.log), so the driving `exec 'bash run.sh'` returns at once and
 # the heavy build/test keeps running on the node; the driver then polls the log + the

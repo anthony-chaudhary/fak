@@ -6,7 +6,7 @@ leaving every CODE/DATA IDENTIFIER that happens to contain "dgx"/"a100" untouche
 Why this exists
 ---------------
 The lab's GPU box is a private detail; the public docs should describe it
-generically ("GPU server", "datacenter GPU") the same way the Slack control-bridge
+generically ("GPU server", "datacenter GPU") the same way the private control bridge
 codename is already normalized in tools/scrub_public_copy.py. But "dgx"/"a100" is
 also baked into code the docs legitimately reference -- the `dgxbridge` command,
 `register_dgx_run()`, the `FAK_DGX_REQ_` response marker, the `"dgx"` machine_id in
@@ -45,6 +45,8 @@ import difflib
 import os
 import re
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 
@@ -142,7 +144,7 @@ PROSE_RULES: list[tuple[str, str]] = [
     # --- "DGX-<word>" hyphenated prose ("DGX-fleet readiness") — the hyphen is a word
     # boundary so the bare \bDGX\b rule below would leave "GPU server-fleet"; rewrite the
     # whole "DGX-<lowercaseword>" to "GPU server <word>". Uppercase-suffixed forms
-    # (DGX-OVERNIGHT, DGX-GLM52) are link/heading IDs already masked as path tokens.
+    # (DGX-OVERNIGHT, GPU-SERVER-GLM52) are link/heading IDs already masked as path tokens.
     (r"\bDGX-([a-z]\w*)", r"GPU server \1"),
     # --- plan name (specific lowercase string, safe) --------------------------------
     (r"PLAN-model-ladder-dgx-a100", "PLAN-model-ladder-gpu-server"),
@@ -204,7 +206,7 @@ RESIDUAL_TELLS = [pat for (pat, _repl, _guarded, tell) in HARDWARE_TERMS if tell
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Things a prose rule must NEVER rewrite, masked in this order before the rules run:
 #   1. inline `code` spans (identifiers: cmd/dgxbridge, sm_80, "machine_id": "dgx")
-#   2. markdown link/image DISPLAY TEXT that is itself a filename token (`[DGX-OVERNIGHT-PLAN](…)`)
+#   2. markdown link/image DISPLAY TEXT that is itself a filename token (`[GPU-SERVER-OVERNIGHT-PLAN](…)`)
 #   3. markdown link/image TARGETS `](...)` (paths like ...GPU-DGX-A100-...md)
 #   4. bare URLs
 #   5. bare filename/path tokens with a known extension (so `\bDGX-A100\b` can't mangle a
@@ -216,13 +218,13 @@ FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # corrupted plain markdown links to "...\x000\x00 " on a first --apply.
 #
 # Mask 2 (the link-DISPLAY-TEXT filename) closes a false-positive class: a link whose
-# VISIBLE text is a file reference — `[DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-…md)`
+# VISIBLE text is a file reference — `[GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-…md)`
 # — is an identifier, not prose, exactly like the target the next mask already protects. The
 # old masks shielded the `](target)` half but left the `[text]` half exposed, so `--check`
 # flagged the visible filename and `--apply` corrupted the link to `[GPU server-OVERNIGHT-PLAN]`
 # (a broken display/target mismatch the agent could never clear). The match is scoped to a
 # FILENAME-SHAPED token only — no internal whitespace AND at least one `-`/`/`/`_`/`.` separator
-# — so it masks `[DGX-OVERNIGHT-PLAN]` and `[DGX2-CROSS-ENGINE-DATA]` but NOT real prose link
+# — so it masks `[GPU-SERVER-OVERNIGHT-PLAN]` and `[GPU-SERVER-CROSS-ENGINE-DATA]` but NOT real prose link
 # text like `[the DGX runbook](…)` (has spaces) or a bare `[DGX]` (no separator), which stay
 # prose and are still scrubbed. It excludes the \x00 sentinel for the same nesting reason.
 MASK_RES = [

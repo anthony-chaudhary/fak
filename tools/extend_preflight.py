@@ -28,6 +28,8 @@ import json
 import re
 import shutil
 import subprocess
+from dispatch_worker import install_no_window_subprocess_defaults
+install_no_window_subprocess_defaults(subprocess)
 import sys
 from pathlib import Path
 
@@ -99,22 +101,21 @@ def run_checks() -> list[dict]:
 
     # --- Gate 1: plug in (the registration seams + scaffold + layering gate) ----------
     g1 = (
-        _exists("tools/new_leaf.py")
-        and _exists("fak/internal/architest")
-        and _file_has("fak/internal/compute/compute.go", "func Register(")
+        _exists("cmd/fak/newleaf.go")
+        and _exists("internal/newleaf")
+        and _exists("internal/architest")
+        and _file_has("internal/compute/compute.go", "func Register(")
     )
     checks.append(_check(
         "gate1-plug-in", ERROR, g1,
-        "Register* seams present: new_leaf.py scaffold, internal/architest layering gate, "
+        "Register* seams present: fak new-leaf scaffold, internal/architest layering gate, "
         "compute.Register HAL seam",
         "see fak/EXTENDING.md 'Gate 1' and fak/ARCHITECTURE.md",
     ))
 
     # --- Gate 2: prove correct (the witness pattern + Reference/Approx contract) -------
     witnesses = sorted((ROOT / "fak" / "internal").glob("*/proofs_witness_test.go"))
-    g2 = len(witnesses) > 0 and _file_has(
-        "fak/internal/compute/compute.go", "CorrectnessClass"
-    )
+    g2 = len(witnesses) > 0 and _file_has("internal/compute/compute.go", "CorrectnessClass")
     checks.append(_check(
         "gate2-prove-correct", ERROR, g2,
         f"{len(witnesses)} proofs_witness_test.go witnesses; Reference/Approx correctness "
@@ -123,7 +124,7 @@ def run_checks() -> list[dict]:
     ))
 
     # --- Gate 3: prove faster (the non-forgeable keep-bit) ----------------------------
-    g3 = _exists("fak/cmd/rsicycle") and _exists("fak/internal/shipgate/shipgate.go")
+    g3 = _exists("cmd/rsicycle") and _exists("internal/shipgate/shipgate.go")
     checks.append(_check(
         "gate3-prove-faster", ERROR, g3,
         "keep-bit wired: cmd/rsicycle one-shot + shipgate.Evaluate (KEEP only on "
@@ -161,8 +162,8 @@ def run_checks() -> list[dict]:
 
 
 GOLDEN_PATH = [
-    "Gate 1 - Plug in:  python tools/new_leaf.py <name> --tier <tier> --register   "
-    "(or add a compute.Backend file in fak/internal/compute/); keep architest green: "
+    "Gate 1 - Plug in:  fak new-leaf <name> --tier <tier> --register   "
+    "(or add a compute.Backend file in internal/compute/); keep architest green: "
     ".\\fak\\test.ps1 ./internal/architest/",
     "Gate 2 - Prove correct:  ship a deterministic proofs_witness_test.go; declare your "
     "CorrectnessClass (Reference=max|delta|=0, Approx=argmax-exact+cosine); .\\fak\\test.ps1 "
