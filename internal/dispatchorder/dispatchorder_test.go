@@ -134,6 +134,16 @@ func TestCollisionPricedFanoutSerializesExclusiveOverlapBeforeLaunch(t *testing.
 	if len(r.Collisions) != 1 || r.Collisions[0].Reason != ReasonCollisionRisk {
 		t.Fatalf("collisions = %+v, want one %s edge", r.Collisions, ReasonCollisionRisk)
 	}
+	if len(r.Repartition) != 1 {
+		t.Fatalf("repartition advice = %+v, want one row", r.Repartition)
+	}
+	adv := r.Repartition[0]
+	if adv.Candidate != "gateway-old" || adv.Action != "narrow_to_issue_paths" || adv.Reason != ReasonCollisionRisk {
+		t.Fatalf("repartition advice = %+v, want gateway-old narrow_to_issue_paths %s", adv, ReasonCollisionRisk)
+	}
+	if len(adv.CollidesWith) != 1 || adv.CollidesWith[0] != "gateway-fresh" {
+		t.Fatalf("repartition peers = %#v, want gateway-fresh", adv.CollidesWith)
+	}
 }
 
 func TestCollisionPricedFanoutAllowsSharedSharedOverlap(t *testing.T) {
@@ -159,6 +169,21 @@ func TestCollisionPricedFanoutUnknownTreeCollidesConservatively(t *testing.T) {
 	if dispoOf(r, "unknown") != DispKeep || dispoOf(r, "known") != DispCollisionRisk {
 		t.Fatalf("dispositions unknown=%q known=%q, want keep/collision_risk",
 			dispoOf(r, "unknown"), dispoOf(r, "known"))
+	}
+	if len(r.Repartition) != 1 || r.Repartition[0].Action != "peer_declare_tree_scope" {
+		t.Fatalf("known-tree repartition = %+v, want peer-scope advice for serialized known candidate", r.Repartition)
+	}
+}
+
+func TestTreesOverlapUsesPrefixGeometry(t *testing.T) {
+	if TreesOverlap([]string{"internal/gateway/http.go"}, []string{"internal/gateway/mcp.go"}) {
+		t.Fatalf("sibling files should be disjoint")
+	}
+	if !TreesOverlap([]string{"internal/gateway/**"}, []string{"internal/gateway/http.go"}) {
+		t.Fatalf("parent tree should overlap child file")
+	}
+	if !TreesOverlap(nil, []string{"docs/**"}) {
+		t.Fatalf("unknown tree should collide conservatively")
 	}
 }
 

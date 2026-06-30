@@ -170,6 +170,9 @@ type Result struct {
 	CollisionCount  int `json:"collision_count"`
 	// Collisions is the priced collision graph over otherwise dispatchable fan-out candidates.
 	Collisions []Collision `json:"collisions,omitempty"`
+	// Repartition names the colliding candidates that need narrower scope before a later wave
+	// can admit them. It is geometric advice: declare/narrow the tree and then re-price.
+	Repartition []RepartitionAdvice `json:"repartition,omitempty"`
 	// S0-facing accounting: collisions_avoided is the number of colliding pairs serialized before
 	// launch; lanes_utilized is the count of safe lanes/workers admitted this wave; and
 	// serialization_wasted is the count of otherwise-dispatchable workers held for a later wave.
@@ -187,6 +190,20 @@ type Collision struct {
 	Reason string   `json:"reason"`
 	Lane   []string `json:"lane,omitempty"`
 	Tree   []string `json:"tree,omitempty"`
+}
+
+// RepartitionAdvice is the price's operator-facing "how to clear this collision next" row.
+// It never guesses semantic intent; it tells the caller which geometric scope is too broad
+// or absent, which peers it collides with, and what evidence must be supplied before re-price.
+type RepartitionAdvice struct {
+	Candidate    string   `json:"candidate"`
+	Lane         string   `json:"lane,omitempty"`
+	CollidesWith []string `json:"collides_with,omitempty"`
+	CurrentTree  []string `json:"current_tree,omitempty"`
+	OverlapTree  []string `json:"overlap_tree,omitempty"`
+	Action       string   `json:"action"`
+	Reason       string   `json:"reason"`
+	Detail       string   `json:"detail"`
 }
 
 // Pick is the single unit a worker should take this tick — Keep[0], or "" when nothing is
@@ -277,6 +294,7 @@ func Plan(in Input) Result {
 		}
 	}
 	out.Collisions = collisions
+	out.Repartition = repartitionAdvice(out.Order, collisions)
 	out.CollisionsAvoided = len(collisions)
 	out.LanesUtilized = lanesUtilized(out.Order)
 	out.SerializationWasted = out.CollisionCount
@@ -390,6 +408,63 @@ func applyCollisionPrice(ranked []Ranked, collisions []Collision) {
 	}
 }
 
+func repartitionAdvice(order []Ranked, collisions []Collision) []RepartitionAdvice {
+	if len(collisions) == 0 {
+		return nil
+	}
+	peers := map[string][]string{}
+	trees := map[string][]string{}
+	candidateTrees := map[string][]string{}
+	for _, r := range order {
+		candidateTrees[r.ID] = cleanTree(r.Tree)
+	}
+	for _, c := range collisions {
+		peers[c.A] = appendUniqueString(peers[c.A], c.B)
+		peers[c.B] = appendUniqueString(peers[c.B], c.A)
+		for _, t := range c.Tree {
+			trees[c.A] = appendUniqueString(trees[c.A], t)
+			trees[c.B] = appendUniqueString(trees[c.B], t)
+		}
+	}
+	var out []RepartitionAdvice
+	for _, r := range order {
+		if r.Disposition != DispCollisionRisk {
+			continue
+		}
+		cur := cleanTree(r.Tree)
+		action := "narrow_to_issue_paths"
+		detail := "replace the broad lane tree with path-confirmed issue paths, then re-price"
+		if len(cur) == 0 {
+			action = "declare_tree_scope"
+			detail = "declare this worker's repo-relative tree before launch; unknown scope collides conservatively"
+		} else if anyPeerUnknown(peers[r.ID], candidateTrees) {
+			action = "peer_declare_tree_scope"
+			detail = "a colliding peer has unknown scope; declare that peer's tree and re-price before running together"
+		}
+		adv := RepartitionAdvice{
+			Candidate:    r.ID,
+			Lane:         strings.TrimSpace(r.Lane),
+			CollidesWith: sortedStrings(peers[r.ID]),
+			CurrentTree:  cur,
+			OverlapTree:  sortedStrings(trees[r.ID]),
+			Action:       action,
+			Reason:       ReasonCollisionRisk,
+			Detail:       detail,
+		}
+		out = append(out, adv)
+	}
+	return out
+}
+
+func anyPeerUnknown(peers []string, trees map[string][]string) bool {
+	for _, peer := range peers {
+		if len(trees[peer]) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // maxSafeSet returns the largest collision-free subset for normal fan-out widths, preferring
 // fresher candidates when several subsets have the same size. Very large candidate lists fall
 // back to the same deterministic freshest-first admission rule so a planning helper never turns
@@ -466,6 +541,23 @@ func candidatePriced(c Candidate) bool {
 	return strings.TrimSpace(c.Lane) != "" || len(cleanTree(c.Tree)) > 0 || strings.TrimSpace(c.Mode) != ""
 }
 
+// TreesOverlap reports whether any tree in a and b overlaps under the same prefix geometry the
+// fan-out price uses. An empty side is unknown blast radius and collides conservatively.
+func TreesOverlap(a, b []string) bool {
+	ta, tb := cleanTree(a), cleanTree(b)
+	if len(ta) == 0 || len(tb) == 0 {
+		return true
+	}
+	for _, x := range ta {
+		for _, y := range tb {
+			if treeOverlap(x, y) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func collisionOf(a, b Candidate) (Collision, bool) {
 	ma, mb := lockMode(a), lockMode(b)
 	if ma == "shared" && mb == "shared" {
@@ -478,17 +570,16 @@ func collisionOf(a, b Candidate) (Collision, bool) {
 			return c, true
 		}
 	}
-	ta, tb := cleanTree(a.Tree), cleanTree(b.Tree)
-	if len(ta) == 0 || len(tb) == 0 {
-		return c, true
-	}
-	for _, x := range ta {
-		for _, y := range tb {
-			if treeOverlap(x, y) {
-				c.Tree = []string{x, y}
-				return c, true
+	if TreesOverlap(a.Tree, b.Tree) {
+		for _, x := range cleanTree(a.Tree) {
+			for _, y := range cleanTree(b.Tree) {
+				if treeOverlap(x, y) {
+					c.Tree = []string{x, y}
+					return c, true
+				}
 			}
 		}
+		return c, true
 	}
 	return Collision{}, false
 }
@@ -548,4 +639,23 @@ func lanesUtilized(order []Ranked) int {
 		return len(lanes)
 	}
 	return kept
+}
+
+func appendUniqueString(xs []string, s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return xs
+	}
+	for _, x := range xs {
+		if x == s {
+			return xs
+		}
+	}
+	return append(xs, s)
+}
+
+func sortedStrings(xs []string) []string {
+	out := append([]string(nil), xs...)
+	sort.Strings(out)
+	return out
 }

@@ -75,6 +75,23 @@ func TestRouterRungs(t *testing.T) {
 	}
 }
 
+func TestRouterCarriesPathScope(t *testing.T) {
+	got := routeTestIssue(routerIssue(6, "fix(gateway): split handlers", nil,
+		"touches fak/internal/gateway/http.go and fak/internal/gateway/mcp.go"))
+	if got.Lane != "gateway" || got.Confidence != "path-confirmed" {
+		t.Fatalf("route = %+v, want path-confirmed gateway", got)
+	}
+	want := []string{"internal/gateway/http.go", "internal/gateway/mcp.go"}
+	if len(got.Paths) != len(want) {
+		t.Fatalf("paths = %#v, want %#v", got.Paths, want)
+	}
+	for i := range want {
+		if got.Paths[i] != want[i] {
+			t.Fatalf("paths = %#v, want %#v", got.Paths, want)
+		}
+	}
+}
+
 func TestRouterExclusiveAndAmbiguity(t *testing.T) {
 	excl := routeTestIssue(routerIssue(7, "abi: hoist the public ABI surface", nil, ""))
 	if excl.Lane != "" || excl.Confidence != "none" || excl.UnroutedReason == "" {
@@ -128,10 +145,14 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 			routerIssue(1, "fix(gateway): a", nil, ""),
 			routerIssue(2, "epic(gateway): umbrella", []string{"epic"}, ""),
 			routerIssue(3, "needs a filing", []string{BlockedByHumanLabel}, ""),
+			routerIssue(4, "idea: maybe do a thing", []string{"idea-scout"}, ""),
+			routerIssue(5, "guard complaint [false-positive]", []string{"guard-complaint"}, ""),
+			routerIssue(6, "needs scope", []string{"triage-only"}, ""),
+			routerIssue(7, "dispatch-log-audit: auth wall", []string{"dispatch"}, "- dispatchability: `triage_only`"),
 		},
 	})
-	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 2 {
-		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=2", p.Counts, p.SkippedHumanBlocked)
+	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 6 {
+		t.Fatalf("route issues counts = %+v skipped=%+v, want routed=1 skipped=6", p.Counts, p.SkippedHumanBlocked)
 	}
 	if p.Lanes["gateway"].Issues[0] != 1 {
 		t.Fatalf("gateway issues = %#v, want #1", p.Lanes["gateway"].Issues)

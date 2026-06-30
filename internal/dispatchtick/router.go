@@ -12,6 +12,14 @@ const RouterSchema = "fleet-issue-lane-router/1"
 
 const BlockedByHumanLabel = "blocked-by-human"
 
+var TriageOnlyLabels = map[string]bool{
+	"guard-complaint": true,
+	"idea-scout":      true,
+	"needs-triage":    true,
+	"triage-only":     true,
+	"triage_only":     true,
+}
+
 var (
 	scopeRE      = regexp.MustCompile(`\b(\w+)\(([^)]+)\)`)
 	barePrefixRE = regexp.MustCompile(`^([A-Za-z][\w-]*):\s`)
@@ -123,13 +131,14 @@ type Issue struct {
 }
 
 type IssueRoute struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	Lane           string `json:"lane"`
-	Confidence     string `json:"confidence"`
-	Signal         string `json:"signal"`
-	SignalConflict bool   `json:"signal_conflict"`
-	UnroutedReason string `json:"unrouted_reason,omitempty"`
+	Number         int      `json:"number"`
+	Title          string   `json:"title"`
+	Lane           string   `json:"lane"`
+	Confidence     string   `json:"confidence"`
+	Signal         string   `json:"signal"`
+	SignalConflict bool     `json:"signal_conflict"`
+	Paths          []string `json:"paths,omitempty"`
+	UnroutedReason string   `json:"unrouted_reason,omitempty"`
 }
 
 type SkippedIssue struct {
@@ -289,9 +298,10 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 		laneSet[lane] = true
 	}
 
+	paths := ExtractRepoPaths(title + "\n" + body)
 	pathLanes := []string{}
 	seenPathLane := map[string]bool{}
-	for _, p := range ExtractRepoPaths(title + "\n" + body) {
+	for _, p := range paths {
 		for _, lane := range PathMatchesLane(p, taxonomy.Trees) {
 			if laneSet[lane] && !seenPathLane[lane] {
 				seenPathLane[lane] = true
@@ -341,7 +351,7 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 	}
 
 	if ExclusiveRouterLanes[scope] {
-		return route(issue, "", "none", "exclusive-scope:"+scope, false,
+		return route(issue, "", "none", "exclusive-scope:"+scope, false, paths,
 			fmt.Sprintf("exclusive-lane scope '%s'; operator-gated", scope))
 	}
 	if pathLane != "" {
@@ -351,7 +361,7 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 		if conflict {
 			signal += " (overrode " + weaker + ")"
 		}
-		return route(issue, pathLane, "path-confirmed", signal, conflict, "")
+		return route(issue, pathLane, "path-confirmed", signal, conflict, paths, "")
 	}
 	if pathAmbiguous {
 		prefer := ""
@@ -362,26 +372,26 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 		}
 		sort.Strings(pathLanes)
 		pick := firstNonEmptyString(prefer, pathLanes[0])
-		return route(issue, pick, "path-confirmed", "path-ambiguous:"+strings.Join(pathLanes, "|"), true, "")
+		return route(issue, pick, "path-confirmed", "path-ambiguous:"+strings.Join(pathLanes, "|"), true, paths, "")
 	}
 	if scopeLane != "" {
 		token := scope
 		if !(laneSet[scope] || scopeAlias[scope] != "") {
 			token = typ
 		}
-		return route(issue, scopeLane, scopeConf, "scope:"+token+"->"+scopeLane, false, "")
+		return route(issue, scopeLane, scopeConf, "scope:"+token+"->"+scopeLane, false, nil, "")
 	}
 	if labelLane != "" {
-		return route(issue, labelLane, "label", "label->"+labelLane, false, "")
+		return route(issue, labelLane, "label", "label->"+labelLane, false, nil, "")
 	}
 	if keywordLane != "" {
-		return route(issue, keywordLane, "keyword", "keyword:"+keyword+"->"+keywordLane, false, "")
+		return route(issue, keywordLane, "keyword", "keyword:"+keyword+"->"+keywordLane, false, nil, "")
 	}
 	reason := "no scope/path/label signal"
 	if scope != "" {
 		reason = "no scope, no repo-path, no aliasable label"
 	}
-	return route(issue, "", "none", "unrouted", false, reason)
+	return route(issue, "", "none", "unrouted", false, nil, reason)
 }
 
 func ExtractRepoPaths(text string) []string {
@@ -583,11 +593,24 @@ func IsEpic(issue Issue) bool {
 	return epicTitleRE.MatchString(issue.Title)
 }
 
-func IsDispatchable(issue Issue, blockedLabel string) bool {
-	return !IsBlockedByHuman(issue, blockedLabel) && !IsEpic(issue)
+func IsTriageOnly(issue Issue) bool {
+	for _, name := range labelNames(issue) {
+		if TriageOnlyLabels[name] {
+			return true
+		}
+	}
+	text := strings.ToLower(issue.Title + "\n" + issue.Body)
+	if strings.Contains(text, "dispatchability") && strings.Contains(text, "triage_only") {
+		return true
+	}
+	return false
 }
 
-func route(issue Issue, lane, confidence, signal string, conflict bool, unroutedReason string) IssueRoute {
+func IsDispatchable(issue Issue, blockedLabel string) bool {
+	return !IsBlockedByHuman(issue, blockedLabel) && !IsEpic(issue) && !IsTriageOnly(issue)
+}
+
+func route(issue Issue, lane, confidence, signal string, conflict bool, paths []string, unroutedReason string) IssueRoute {
 	return IssueRoute{
 		Number:         issue.Number,
 		Title:          truncateRunes(issue.Title, 80),
@@ -595,8 +618,26 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, unrouted
 		Confidence:     confidence,
 		Signal:         signal,
 		SignalConflict: conflict,
+		Paths:          normalizeRepoPaths(paths),
 		UnroutedReason: unroutedReason,
 	}
+}
+
+func normalizeRepoPaths(paths []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range paths {
+		p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+		p = strings.TrimPrefix(p, "./")
+		p = strings.TrimPrefix(p, "fak/")
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func globToRegexp(glob string) *regexp.Regexp {
