@@ -61,19 +61,20 @@ type issueContractCounts struct {
 }
 
 type issueContractBatchGroup struct {
-	Key             string         `json:"key"`
-	Lane            string         `json:"lane,omitempty"`
-	WorkUnit        string         `json:"work_unit,omitempty"`
-	Trigger         string         `json:"trigger,omitempty"`
-	BatchPolicy     string         `json:"batch_policy,omitempty"`
-	Count           int            `json:"count"`
-	StepBudget      int            `json:"step_budget"`
-	Dispatchable    int            `json:"dispatchable"`
-	TriageOnly      int            `json:"triage_only"`
-	Refused         int            `json:"refused"`
-	ByReason        map[string]int `json:"by_reason,omitempty"`
-	ExampleKeys     []string       `json:"example_keys,omitempty"`
-	MissingMetadata []string       `json:"missing_metadata,omitempty"`
+	Key              string         `json:"key"`
+	Lane             string         `json:"lane,omitempty"`
+	WorkUnit         string         `json:"work_unit,omitempty"`
+	Trigger          string         `json:"trigger,omitempty"`
+	BatchPolicy      string         `json:"batch_policy,omitempty"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	Dispatchable     int            `json:"dispatchable"`
+	TriageOnly       int            `json:"triage_only"`
+	Refused          int            `json:"refused"`
+	ByReason         map[string]int `json:"by_reason,omitempty"`
+	ExampleKeys      []string       `json:"example_keys,omitempty"`
+	MissingMetadata  []string       `json:"missing_metadata,omitempty"`
 }
 
 type issueContractRepairQueue struct {
@@ -240,6 +241,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		}
 		group.Count++
 		group.StepBudget += stepBudget
+		group.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
 		switch review.Dispatchability {
 		case issuecontract.Dispatchable:
 			group.Dispatchable++
@@ -271,6 +273,9 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		}
 		if groups[i].StepBudget != groups[j].StepBudget {
 			return groups[i].StepBudget > groups[j].StepBudget
+		}
+		if groups[i].ChildIssueBudget != groups[j].ChildIssueBudget {
+			return groups[i].ChildIssueBudget > groups[j].ChildIssueBudget
 		}
 		return groups[i].Key < groups[j].Key
 	})
@@ -395,6 +400,15 @@ func issueContractReviewChildIssueBudget(review issuecontract.Review, kind strin
 		return 1
 	}
 	return (review.ExpectedSteps + issuecontract.MaxDispatchExpectedSteps - 1) / issuecontract.MaxDispatchExpectedSteps
+}
+
+func issueContractReviewSplitChildIssueBudget(review issuecontract.Review) int {
+	for _, kind := range issueContractRepairKinds(review) {
+		if kind == "split" {
+			return issueContractReviewChildIssueBudget(review, kind)
+		}
+	}
+	return 0
 }
 
 func issueContractRepairKinds(review issuecontract.Review) []string {
@@ -565,11 +579,17 @@ func renderIssueContract(r issueContractResult) string {
 			lines = append(lines, fmt.Sprintf("  batch_groups: ... %d more", len(r.BatchGroups)-i))
 			break
 		}
-		lines = append(lines, fmt.Sprintf("  batch_group[%d]: count=%d steps=%d lane=%s work_unit=%s key=%s",
+		line := fmt.Sprintf("  batch_group[%d]: count=%d steps=%d",
 			i, group.Count, group.StepBudget,
+		)
+		if group.ChildIssueBudget > 0 {
+			line += fmt.Sprintf(" child_issues=%d", group.ChildIssueBudget)
+		}
+		line += fmt.Sprintf(" lane=%s work_unit=%s key=%s",
 			issueContractBucketValue(group.Lane, "(unrouted)"),
 			issueContractBucketValue(group.WorkUnit, "(missing)"),
-			group.Key))
+			group.Key)
+		lines = append(lines, line)
 		if len(group.MissingMetadata) > 0 {
 			lines = append(lines, "    missing_batch_metadata: "+strings.Join(group.MissingMetadata, ", "))
 		}

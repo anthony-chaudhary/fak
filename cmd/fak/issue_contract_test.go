@@ -249,10 +249,11 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
 		} `json:"counts"`
 		BatchGroups []struct {
-			Key             string   `json:"key"`
-			Count           int      `json:"count"`
-			StepBudget      int      `json:"step_budget"`
-			MissingMetadata []string `json:"missing_metadata"`
+			Key              string   `json:"key"`
+			Count            int      `json:"count"`
+			StepBudget       int      `json:"step_budget"`
+			ChildIssueBudget int      `json:"child_issue_budget"`
+			MissingMetadata  []string `json:"missing_metadata"`
 		} `json:"batch_groups"`
 		RepairQueues []repairQueueAssertion `json:"repair_queues"`
 	}
@@ -287,8 +288,9 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 		got.Counts.ByExpectedStepBucket["over-8"] != 1 {
 		t.Fatalf("step buckets = %+v, want 2-3 and missing", got.Counts.ByExpectedStepBucket)
 	}
-	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 2 || got.BatchGroups[0].StepBudget != 15 {
-		t.Fatalf("batch groups = %+v, want guardrsi rows grouped under shared trigger/batch", got.BatchGroups)
+	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 2 || got.BatchGroups[0].StepBudget != 15 ||
+		got.BatchGroups[0].ChildIssueBudget != 2 {
+		t.Fatalf("batch groups = %+v, want guardrsi rows grouped under shared trigger/batch with two child issues", got.BatchGroups)
 	}
 	assertRepairQueue(t, got.RepairQueues, "dispatch", 1, 3, nil)
 	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1}, 2)
