@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -15,28 +17,35 @@ import (
 )
 
 type dispatchWavePrice struct {
-	Schema              string                            `json:"schema"`
-	Action              string                            `json:"action"`
-	ActionReason        string                            `json:"action_reason"`
-	Requested           int                               `json:"requested"`
-	Granted             int                               `json:"granted"`
-	CandidateCount      int                               `json:"candidate_count"`
-	ScopedCount         int                               `json:"scoped_count"`
-	UnscopedCount       int                               `json:"unscoped_count"`
-	ScopeCoveragePct    int                               `json:"scope_coverage_pct"`
-	RunLanes            []string                          `json:"run_lanes"`
-	RunTargets          []dispatchWaveCandidate           `json:"run_targets"`
-	HeldLanes           []string                          `json:"held_lanes,omitempty"`
-	ExcludedLanes       []string                          `json:"excluded_lanes,omitempty"`
-	Candidates          []dispatchWaveCandidate           `json:"candidates"`
-	Collisions          []dispatchorder.Collision         `json:"collisions,omitempty"`
-	Repartition         []dispatchorder.RepartitionAdvice `json:"repartition,omitempty"`
-	CollisionsAvoided   int                               `json:"collisions_avoided"`
-	LanesUtilized       int                               `json:"lanes_utilized"`
-	SerializationWasted int                               `json:"serialization_wasted"`
-	SafeConcurrency     int                               `json:"safe_concurrency"`
-	SafeConcurrencyPct  int                               `json:"safe_concurrency_pct"`
-	SameLaneParallelism int                               `json:"same_lane_parallelism"`
+	Schema               string                            `json:"schema"`
+	Action               string                            `json:"action"`
+	ActionReason         string                            `json:"action_reason"`
+	Requested            int                               `json:"requested"`
+	Granted              int                               `json:"granted"`
+	CandidateCount       int                               `json:"candidate_count"`
+	ScopedCount          int                               `json:"scoped_count"`
+	UnscopedCount        int                               `json:"unscoped_count"`
+	ScopeCoveragePct     int                               `json:"scope_coverage_pct"`
+	RunLanes             []string                          `json:"run_lanes"`
+	RunTargets           []dispatchWaveCandidate           `json:"run_targets"`
+	HeldLanes            []string                          `json:"held_lanes,omitempty"`
+	ExcludedLanes        []string                          `json:"excluded_lanes,omitempty"`
+	Candidates           []dispatchWaveCandidate           `json:"candidates"`
+	Collisions           []dispatchorder.Collision         `json:"collisions,omitempty"`
+	Repartition          []dispatchorder.RepartitionAdvice `json:"repartition,omitempty"`
+	CollisionsAvoided    int                               `json:"collisions_avoided"`
+	LanesUtilized        int                               `json:"lanes_utilized"`
+	SerializationWasted  int                               `json:"serialization_wasted"`
+	SafeConcurrency      int                               `json:"safe_concurrency"`
+	SafeConcurrencyPct   int                               `json:"safe_concurrency_pct"`
+	SameLaneParallelism  int                               `json:"same_lane_parallelism"`
+	WaveCount            int                               `json:"wave_count"`
+	Waves                []dispatchPriceWave               `json:"waves,omitempty"`
+	LaunchPlan           []dispatchLaunchWave              `json:"launch_plan,omitempty"`
+	LaneSerialWaveCount  int                               `json:"lane_serial_wave_count"`
+	ScopedParallelGain   int                               `json:"scoped_parallelism_gain"`
+	CollisionWavePenalty int                               `json:"collision_wave_penalty"`
+	ExpectedRework       int                               `json:"expected_rework"`
 }
 
 type dispatchWaveCandidate struct {
@@ -51,6 +60,56 @@ type dispatchWaveCandidate struct {
 	CollidesWith []string                  `json:"collides_with,omitempty"`
 	Rank         int                       `json:"rank"`
 	Selected     bool                      `json:"selected"`
+}
+
+type dispatchWaveExecutionPlan struct {
+	Rank                int                  `json:"rank"`
+	WaveID              string               `json:"wave_id"`
+	WaveSize            int                  `json:"wave_size"`
+	Shortfall           int                  `json:"shortfall"`
+	Backend             string               `json:"backend"`
+	WorkKind            string               `json:"work_kind"`
+	Target              dispatchLaunchTarget `json:"target"`
+	Account             map[string]any       `json:"account"`
+	RecordLoop          bool                 `json:"record_loop"`
+	DispatchTickArgs    []string             `json:"dispatch_tick_args"`
+	DispatchTickCommand []string             `json:"dispatch_tick_command"`
+}
+
+type dispatchWaveExecutionAudit struct {
+	Rank          int                  `json:"rank"`
+	Target        dispatchLaunchTarget `json:"target"`
+	Account       map[string]any       `json:"account,omitempty"`
+	OK            bool                 `json:"ok"`
+	Action        string               `json:"action"`
+	Verdict       string               `json:"verdict"`
+	Reason        string               `json:"reason,omitempty"`
+	TargetIssue   any                  `json:"target_issue,omitempty"`
+	LeaseID       string               `json:"lease_id,omitempty"`
+	LeaseTree     []string             `json:"lease_tree,omitempty"`
+	Guarded       bool                 `json:"guarded"`
+	LaunchCommand []string             `json:"launch_command,omitempty"`
+	Error         string               `json:"error,omitempty"`
+}
+
+type dispatchWavePrelaunchGate struct {
+	OK              bool                           `json:"ok"`
+	Action          string                         `json:"action"`
+	ExecutionPlanID string                         `json:"execution_plan_id,omitempty"`
+	TargetCount     int                            `json:"target_count"`
+	ReadyCount      int                            `json:"ready_count"`
+	RefusedCount    int                            `json:"refused_count"`
+	Reason          string                         `json:"reason,omitempty"`
+	Refused         []dispatchWavePrelaunchRefusal `json:"refused,omitempty"`
+}
+
+type dispatchWavePrelaunchRefusal struct {
+	Rank    int    `json:"rank"`
+	Target  string `json:"target"`
+	Action  string `json:"action,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
@@ -135,47 +194,42 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	}
 	rec["price"] = price
 	rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
+	executionPlan := dispatchWaveExecutionPlans(root, backendNorm, wk, waveID, shortfall, price.RunTargets, lanes, !*noLedger)
+	executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
+	rec["execution_plan_id"] = executionPlanID
+	rec["execution_plan"] = executionPlan
 	if len(price.RunLanes) == 0 {
 		rec["stop_reason"] = "priced fan-out found no launchable lane"
+		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	}
+	executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, dispatchSplitCSV(*excludeLane), executionPlan)
+	rec["execution_plan_audit"] = executionAudit
+	prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
+	rec["prelaunch_gate"] = prelaunchGate
+	if *live && !prelaunchGate.OK {
+		rec["stop_reason"] = "prelaunch execution audit refused: " + prelaunchGate.Reason
+		rec["ticks"] = []any{}
+		rec["spawned"] = 0
+		rec["ok"] = false
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
 	ticks := []any{}
 	spawned := 0
-	limit := len(price.RunLanes)
+	limit := len(executionPlan)
 	if !*live {
 		limit = 1
 	}
 	for i := 0; i < limit; i++ {
-		target := price.RunTargets[i]
-		acct := accountFromWaveLane(lanes[i])
-		mem := dispatchtick.Membership{Rank: i, WaveID: waveID, Size: len(price.RunLanes), Shortfall: shortfall}
-		payload, err := evaluateDispatchTick(dispatchTickOptions{
-			Workspace:      root,
-			MaxWorkers:     *maxWorkers,
-			WorkKind:       wk,
-			Lane:           target.Lane,
-			TargetIssue:    target.Issue,
-			LeaseID:        target.LeaseID,
-			LeaseTree:      append([]string(nil), target.Tree...),
-			Backend:        backendNorm,
-			ExcludeLanes:   dispatchSplitCSV(*excludeLane),
-			Live:           *live,
-			Refresh:        i == 0,
-			CooldownMin:    dispatchtick.DefaultCooldownMinutes,
-			WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
-			SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
-			RecordLoop:     !*noLedger,
-			Account:        &acct,
-			Membership:     &mem,
-		}, stderr)
+		row := executionPlan[i]
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, dispatchSplitCSV(*excludeLane), row, *live, i == 0), stderr)
 		if err != nil {
 			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
 			rec["stop_reason"] = err.Error()
 			break
 		}
-		payload["wave_rank"] = i
-		payload["wave_target"] = target
+		payload["wave_rank"] = row.Rank
+		payload["wave_target"] = row.Target
 		ticks = append(ticks, payload)
 		if dispatchMapString(payload, "action") == "spawned" {
 			spawned++
@@ -301,7 +355,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		if _, exists := meta[id]; exists {
 			continue
 		}
-		leaseID := dispatchLaneLeaseID(lane)
+		leaseID := dispatchIssueLeaseID(lane, issue)
 		issueByLane[lane] = issue
 		meta[id] = dispatchWaveCandidate{
 			ID:      id,
@@ -369,30 +423,40 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		}
 	}
 	unscopedCount := len(rows) - scopedCount
+	waves := dispatchWaveWaves(rows, res.Collisions, res.Keep)
+	launchPlan := dispatchWaveLaunchPlan(waves, rows)
+	laneSerialWaves := dispatchWaveLaneSerialWaveCount(rows)
 	action, actionReason := dispatchWaveAction(len(rows), len(runTargets), res.CollisionsAvoided, res.SerializationWasted)
 	return dispatchWavePrice{
-		Schema:              "fleet-issue-dispatch-wave-price/1",
-		Action:              action,
-		ActionReason:        actionReason,
-		Requested:           requested,
-		Granted:             granted,
-		CandidateCount:      len(cands),
-		ScopedCount:         scopedCount,
-		UnscopedCount:       unscopedCount,
-		ScopeCoveragePct:    dispatchWavePct(scopedCount, len(rows)),
-		RunLanes:            runLaneNames,
-		RunTargets:          runTargets,
-		HeldLanes:           sortedStringSet(held),
-		ExcludedLanes:       sortedStringSet(exclude),
-		Candidates:          rows,
-		Collisions:          res.Collisions,
-		Repartition:         res.Repartition,
-		CollisionsAvoided:   res.CollisionsAvoided,
-		LanesUtilized:       len(runLanes),
-		SerializationWasted: res.SerializationWasted,
-		SafeConcurrency:     res.SafeConcurrency,
-		SafeConcurrencyPct:  dispatchWavePct(len(runTargets), len(rows)),
-		SameLaneParallelism: sameLaneParallelism(runTargets),
+		Schema:               "fleet-issue-dispatch-wave-price/1",
+		Action:               action,
+		ActionReason:         actionReason,
+		Requested:            requested,
+		Granted:              granted,
+		CandidateCount:       len(cands),
+		ScopedCount:          scopedCount,
+		UnscopedCount:        unscopedCount,
+		ScopeCoveragePct:     dispatchWavePct(scopedCount, len(rows)),
+		RunLanes:             runLaneNames,
+		RunTargets:           runTargets,
+		HeldLanes:            sortedStringSet(held),
+		ExcludedLanes:        sortedStringSet(exclude),
+		Candidates:           rows,
+		Collisions:           res.Collisions,
+		Repartition:          res.Repartition,
+		CollisionsAvoided:    res.CollisionsAvoided,
+		LanesUtilized:        len(runLanes),
+		SerializationWasted:  res.SerializationWasted,
+		SafeConcurrency:      res.SafeConcurrency,
+		SafeConcurrencyPct:   dispatchWavePct(len(runTargets), len(rows)),
+		SameLaneParallelism:  sameLaneParallelism(runTargets),
+		WaveCount:            len(waves),
+		Waves:                waves,
+		LaunchPlan:           launchPlan,
+		LaneSerialWaveCount:  laneSerialWaves,
+		ScopedParallelGain:   positiveDelta(laneSerialWaves, len(waves)),
+		CollisionWavePenalty: positiveDelta(len(waves), laneSerialWaves),
+		ExpectedRework:       res.CollisionsAvoided + res.SerializationWasted,
 	}, nil
 }
 
@@ -421,6 +485,336 @@ func sameLaneParallelism(targets []dispatchWaveCandidate) int {
 		}
 	}
 	return extra
+}
+
+func dispatchWaveWaves(candidates []dispatchWaveCandidate, collisions []dispatchorder.Collision, safeNow []string) []dispatchPriceWave {
+	if len(candidates) == 0 {
+		return nil
+	}
+	collides := map[string]map[string]bool{}
+	for _, c := range collisions {
+		if collides[c.A] == nil {
+			collides[c.A] = map[string]bool{}
+		}
+		if collides[c.B] == nil {
+			collides[c.B] = map[string]bool{}
+		}
+		collides[c.A][c.B] = true
+		collides[c.B][c.A] = true
+	}
+	remaining := map[string]bool{}
+	for _, cand := range candidates {
+		remaining[cand.ID] = true
+	}
+	var waves []dispatchPriceWave
+	first := append([]string(nil), safeNow...)
+	if len(first) > 0 {
+		for _, id := range first {
+			delete(remaining, id)
+		}
+		waves = append(waves, dispatchPriceWave{Index: 1, Agents: first, Size: len(first)})
+	}
+	for len(remaining) > 0 {
+		var wave []string
+		for _, cand := range candidates {
+			if !remaining[cand.ID] {
+				continue
+			}
+			ok := true
+			for _, picked := range wave {
+				if collides[cand.ID][picked] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				wave = append(wave, cand.ID)
+			}
+		}
+		if len(wave) == 0 {
+			for _, cand := range candidates {
+				if remaining[cand.ID] {
+					wave = append(wave, cand.ID)
+					break
+				}
+			}
+		}
+		for _, id := range wave {
+			delete(remaining, id)
+		}
+		waves = append(waves, dispatchPriceWave{Index: len(waves) + 1, Agents: wave, Size: len(wave)})
+	}
+	return waves
+}
+
+func dispatchWaveLaunchPlan(waves []dispatchPriceWave, candidates []dispatchWaveCandidate) []dispatchLaunchWave {
+	if len(waves) == 0 {
+		return nil
+	}
+	byID := map[string]dispatchWaveCandidate{}
+	for _, cand := range candidates {
+		byID[cand.ID] = cand
+	}
+	out := make([]dispatchLaunchWave, 0, len(waves))
+	for _, wave := range waves {
+		targets := make([]dispatchLaunchTarget, 0, len(wave.Agents))
+		for _, id := range wave.Agents {
+			cand, ok := byID[id]
+			if !ok {
+				targets = append(targets, dispatchLaunchTarget{ID: id})
+				continue
+			}
+			targets = append(targets, dispatchWaveLaunchTarget(cand))
+		}
+		out = append(out, dispatchLaunchWave{Index: wave.Index, Size: len(targets), Targets: targets})
+	}
+	return out
+}
+
+func dispatchWaveLaunchTarget(cand dispatchWaveCandidate) dispatchLaunchTarget {
+	scopeSource := "lane"
+	if cand.Scoped {
+		scopeSource = "issue"
+	}
+	if len(cand.Tree) == 0 {
+		scopeSource = "unknown"
+	}
+	return dispatchLaunchTarget{
+		ID:          cand.ID,
+		Lane:        cand.Lane,
+		LeaseID:     cand.LeaseID,
+		Issue:       cand.Issue,
+		Tree:        append([]string(nil), cand.Tree...),
+		Mode:        "exclusive",
+		Scoped:      cand.Scoped,
+		ScopeSource: scopeSource,
+		Disposition: cand.Disposition,
+		Reason:      cand.Reason,
+		TickArgs:    dispatchTickArgsForLaunchTarget(cand),
+	}
+}
+
+func dispatchTickArgsForLaunchTarget(cand dispatchWaveCandidate) []string {
+	if cand.Lane == "" || cand.Issue <= 0 {
+		return nil
+	}
+	args := []string{"--lane", cand.Lane, "--target-issue", fmt.Sprint(cand.Issue)}
+	if cand.LeaseID != "" {
+		args = append(args, "--lease-id", cand.LeaseID)
+	}
+	if len(cand.Tree) > 0 {
+		args = append(args, "--lease-tree", strings.Join(cand.Tree, ","))
+	}
+	return args
+}
+
+func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan) []dispatchWaveExecutionAudit {
+	if len(plan) == 0 {
+		return nil
+	}
+	out := make([]dispatchWaveExecutionAudit, 0, len(plan))
+	for _, row := range plan {
+		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, maxWorkers, exclude, row, false, false), io.Discard)
+		audit := dispatchWaveExecutionAudit{
+			Rank:    row.Rank,
+			Target:  row.Target,
+			Account: row.Account,
+		}
+		if err != nil {
+			audit.Error = err.Error()
+			out = append(out, audit)
+			continue
+		}
+		audit.OK = dispatchMapBool(payload, "ok")
+		audit.Action = dispatchMapString(payload, "action")
+		audit.Verdict = dispatchMapString(payload, "verdict")
+		audit.Reason = dispatchMapString(payload, "reason")
+		audit.TargetIssue = payload["target_issue"]
+		audit.LeaseID = dispatchMapString(payload, "lease_id")
+		audit.LeaseTree = stringSlice(payload["lease_tree"])
+		audit.Guarded = dispatchMapBool(payload, "guarded")
+		audit.LaunchCommand = stringSlice(payload["launch_command"])
+		out = append(out, audit)
+	}
+	return out
+}
+
+func dispatchWaveExecutionTickOptions(root string, maxWorkers int, exclude []string, row dispatchWaveExecutionPlan, live bool, refresh bool) dispatchTickOptions {
+	acct := dispatchWaveAccountFromPlan(row.Account)
+	mem := dispatchtick.Membership{
+		Rank:      row.Rank,
+		WaveID:    row.WaveID,
+		Size:      row.WaveSize,
+		Shortfall: row.Shortfall,
+	}
+	return dispatchTickOptions{
+		Workspace:      root,
+		MaxWorkers:     maxWorkers,
+		WorkKind:       row.WorkKind,
+		Lane:           row.Target.Lane,
+		TargetIssue:    row.Target.Issue,
+		LeaseID:        row.Target.LeaseID,
+		LeaseTree:      append([]string(nil), row.Target.Tree...),
+		Backend:        row.Backend,
+		ExcludeLanes:   append([]string(nil), exclude...),
+		Live:           live,
+		Refresh:        refresh,
+		CooldownMin:    dispatchtick.DefaultCooldownMinutes,
+		WorkerTimeoutS: dispatchtick.DefaultWorkerTimeoutS,
+		SpawnProbeS:    dispatchtick.DefaultSpawnProbeS,
+		RecordLoop:     live && row.RecordLoop,
+		Account:        &acct,
+		Membership:     &mem,
+	}
+}
+
+func dispatchWaveAccountFromPlan(m map[string]any) dispatchtick.Account {
+	return dispatchtick.Account{
+		Tag:   dispatchMapString(m, "tag"),
+		Tier:  m["tier"],
+		Model: dispatchMapString(m, "model"),
+		Dir:   dispatchMapString(m, "dir"),
+	}
+}
+
+func dispatchWavePrelaunchGateFromAudit(executionPlanID string, rows []dispatchWaveExecutionAudit) dispatchWavePrelaunchGate {
+	gate := dispatchWavePrelaunchGate{
+		OK:              true,
+		Action:          "LAUNCH",
+		ExecutionPlanID: executionPlanID,
+		TargetCount:     len(rows),
+	}
+	for _, row := range rows {
+		if row.Error != "" {
+			gate.OK = false
+			gate.RefusedCount++
+			gate.Refused = append(gate.Refused, dispatchWavePrelaunchRefusal{
+				Rank:   row.Rank,
+				Target: firstString(row.Target.ID, "target"),
+				Error:  row.Error,
+				Reason: "audit errored: " + row.Error,
+			})
+			continue
+		}
+		if !row.OK {
+			reason := firstString(row.Reason, row.Verdict, row.Action, "not ok")
+			gate.OK = false
+			gate.RefusedCount++
+			gate.Refused = append(gate.Refused, dispatchWavePrelaunchRefusal{
+				Rank:    row.Rank,
+				Target:  firstString(row.Target.ID, "target"),
+				Action:  row.Action,
+				Verdict: row.Verdict,
+				Reason:  reason,
+			})
+			continue
+		}
+		gate.ReadyCount++
+	}
+	if !gate.OK {
+		gate.Action = "HOLD"
+		if len(gate.Refused) > 0 {
+			first := gate.Refused[0]
+			gate.Reason = strings.TrimSpace(first.Target + " " + firstString(first.Reason, first.Error, first.Verdict, first.Action, "not ok"))
+		}
+	}
+	return gate
+}
+
+func dispatchWaveExecutionPlanID(plan []dispatchWaveExecutionPlan) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("plan-%x", sum[:8])
+}
+
+func dispatchWaveExecutionPlans(root, backend, workKind, waveID string, shortfall int, targets []dispatchWaveCandidate, lanes []dispatchtick.AccountWaveLane, recordLoop bool) []dispatchWaveExecutionPlan {
+	limit := minInt(len(targets), len(lanes))
+	if limit <= 0 {
+		return nil
+	}
+	out := make([]dispatchWaveExecutionPlan, 0, limit)
+	for i := 0; i < limit; i++ {
+		target := targets[i]
+		acct := accountFromWaveLane(lanes[i])
+		mem := dispatchtick.Membership{Rank: i, WaveID: waveID, Size: limit, Shortfall: shortfall}
+		args := dispatchWaveExecutionTickArgs(root, backend, workKind, target, acct, mem, recordLoop)
+		out = append(out, dispatchWaveExecutionPlan{
+			Rank:                i,
+			WaveID:              waveID,
+			WaveSize:            limit,
+			Shortfall:           shortfall,
+			Backend:             backend,
+			WorkKind:            workKind,
+			Target:              dispatchWaveLaunchTarget(target),
+			Account:             dispatchtick.AccountSidecar(acct),
+			RecordLoop:          recordLoop,
+			DispatchTickArgs:    args,
+			DispatchTickCommand: append([]string{"fak", "dispatch", "tick"}, args...),
+		})
+	}
+	return out
+}
+
+func dispatchWaveExecutionTickArgs(root, backend, workKind string, target dispatchWaveCandidate, account dispatchtick.Account, membership dispatchtick.Membership, recordLoop bool) []string {
+	args := []string{"--workspace", root, "--backend", backend}
+	if strings.TrimSpace(workKind) != "" {
+		args = append(args, "--work-kind", workKind)
+	}
+	args = append(args, dispatchTickArgsForLaunchTarget(target)...)
+	if !recordLoop {
+		args = append(args, "--no-loop-ledger")
+	}
+	if account.Tag != "" {
+		args = append(args, "--account-tag", account.Tag)
+	}
+	if account.Tier != nil {
+		args = append(args, "--account-tier", fmt.Sprint(account.Tier))
+	}
+	if account.Model != "" {
+		args = append(args, "--account-model", account.Model)
+	}
+	if account.Dir != "" {
+		args = append(args, "--account-dir", account.Dir)
+	}
+	if membership.WaveID != "" {
+		args = append(args,
+			"--wave-id", membership.WaveID,
+			"--wave-rank", fmt.Sprint(membership.Rank),
+			"--wave-size", fmt.Sprint(membership.Size),
+			"--wave-shortfall", fmt.Sprint(membership.Shortfall),
+		)
+	}
+	return args
+}
+
+func dispatchWaveLaneSerialWaveCount(candidates []dispatchWaveCandidate) int {
+	if len(candidates) == 0 {
+		return 0
+	}
+	byLane := map[string]int{}
+	for _, cand := range candidates {
+		key := strings.TrimSpace(cand.Lane)
+		if key == "" {
+			key = strings.TrimSpace(cand.LeaseID)
+		}
+		if key == "" {
+			key = cand.ID
+		}
+		byLane[key]++
+	}
+	max := 0
+	for _, count := range byLane {
+		if count > max {
+			max = count
+		}
+	}
+	return max
 }
 
 func dispatchWavePct(n, d int) int {

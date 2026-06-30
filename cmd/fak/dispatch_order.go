@@ -48,6 +48,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "order":
 		return runDispatchOrder(stdout, stderr, argv[1:])
+	case "price":
+		return runDispatchPrice(stdout, stderr, argv[1:])
 	case "route":
 		return runDispatchRoute(stdout, stderr, argv[1:])
 	case "tick":
@@ -60,11 +62,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchProgress(stdout, stderr, argv[1:])
 	case "audit":
 		return runDispatchAudit(stdout, stderr, argv[1:])
+	case "scorecard":
+		return runDispatchScorecard(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, route, tick, wave, sweep, progress, or audit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, or scorecard)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -219,11 +223,14 @@ func dispatchUsage(w io.Writer) {
 	fmt.Fprint(w, `fak dispatch — deterministic dispatch helpers
 
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
+  fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
   fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
+  fak dispatch audit [--workspace DIR] [--json]
+  fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -245,7 +252,8 @@ example (collapse 25 tasks for the same target to the freshest, then pick):
 
 route is the native issue-lane router: read dos.toml lane trees plus open GitHub issues and emit
 the lanes JSON shape that tick consumes. tick is the native issue-resolution dispatch tick:
-preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. wave allocates
+preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. price quotes a proposed
+fan-out before launch and emits plan_id, launch_plan, wave metrics, and repartition advice. wave allocates
 multiple account seats and drives ticks; sweep repeats ticks until the queue drains or preflight
 refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
 commands are dry-run until --live.

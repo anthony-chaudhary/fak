@@ -99,6 +99,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by dispatch preflight")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
 	lane := fs.String("lane", "", "explicit lane (default: busiest lane with an open issue)")
+	targetIssue := fs.Int("target-issue", 0, "explicit issue number for the selected lane")
+	leaseID := fs.String("lease-id", "", "explicit lane/issue lease id")
+	leaseTree := fs.String("lease-tree", "", "comma-separated lease tree globs for the explicit lease")
 	backend := fs.String("backend", "claude", "worker backend (claude|opencode|codex)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the busiest pick")
 	live := fs.Bool("live", false, "actually spawn the issue-resolution worker")
@@ -146,6 +149,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		MaxWorkers:     *maxWorkers,
 		WorkKind:       wk,
 		Lane:           strings.TrimSpace(*lane),
+		TargetIssue:    *targetIssue,
+		LeaseID:        strings.TrimSpace(*leaseID),
+		LeaseTree:      dispatchSplitCSV(*leaseTree),
 		Backend:        b,
 		ExcludeLanes:   dispatchSplitCSV(*excludeLane),
 		Live:           *live,
@@ -567,6 +573,13 @@ func dispatchRouteIssuesNative(root string, _ io.Writer) (dispatchtick.RouterPay
 	}), nil
 }
 
+var dispatchLoadLaneTaxonomy = func(root string) (dispatchtick.LaneTaxonomy, error) {
+	if taxonomy, err := dispatchLaneTaxonomy(root); err == nil && len(taxonomy.Trees) > 0 {
+		return taxonomy, nil
+	}
+	return dispatchLaneTaxonomyFromFile(root)
+}
+
 func dispatchLaneTaxonomy(root string) (dispatchtick.LaneTaxonomy, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -592,6 +605,60 @@ func dispatchLaneTaxonomy(root string) (dispatchtick.LaneTaxonomy, error) {
 		}
 	}
 	return taxonomy, nil
+}
+
+func dispatchLaneTaxonomyFromFile(root string) (dispatchtick.LaneTaxonomy, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "dos.toml"))
+	if err != nil {
+		return dispatchtick.LaneTaxonomy{}, err
+	}
+	taxonomy := dispatchtick.LaneTaxonomy{Trees: map[string][]string{}}
+	section := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		values := parseDispatchTomlStringArray(parts[1])
+		switch section {
+		case "lanes":
+			if key == "concurrent" {
+				taxonomy.Concurrent = values
+			}
+		case "lanes.trees":
+			if key != "" {
+				taxonomy.Trees[key] = values
+			}
+		}
+	}
+	return taxonomy, nil
+}
+
+func parseDispatchTomlStringArray(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.Trim(strings.TrimSpace(part), `"`)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func dispatchFetchOpenIssues(root string, limit int) ([]dispatchtick.Issue, error) {
