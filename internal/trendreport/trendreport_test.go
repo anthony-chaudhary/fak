@@ -20,10 +20,10 @@ func (r row) Key() (string, string) { return r.Date, r.GeneratedAt }
 func TestParseLedgerToleratesBlankBadAndDatelessLines(t *testing.T) {
 	content := strings.Join([]string{
 		`{"date":"2026-06-01","generated_at":"2026-06-01T00:00:00Z","debt":5}`,
-		``,                       // blank line skipped
-		`   `,                    // whitespace-only skipped
-		`{not json}`,             // unparseable skipped
-		`{"generated_at":"x"}`,   // no Date skipped (can't order it)
+		``,                     // blank line skipped
+		`   `,                  // whitespace-only skipped
+		`{not json}`,           // unparseable skipped
+		`{"generated_at":"x"}`, // no Date skipped (can't order it)
 		`{"date":"2026-06-02","generated_at":"2026-06-02T00:00:00Z","debt":3}`,
 	}, "\n")
 

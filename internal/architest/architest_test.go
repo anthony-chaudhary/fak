@@ -82,10 +82,10 @@ var tier = map[string]int{
 	"fleet":                1,                // fleet-roster snapshot fold for the #node-usage feeder; stdlib-only, imports nothing internal, off the hot path.
 	"nodeusagepost":        1,                // outbound Slack publisher for the #node-usage feeder; folds fleet(1), reuses scoreboard(1) transport, off the hot path.
 	"blobfs":               1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
-	"xenginekv":  1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
-	"secretload": 1, // first-class secret/config loader (#887/#889): SecretSource priority list + os-env/encrypted-file/.env backends + Require checklist + Redact; imports canon(1)+stdlib, off the hot path.
-	"windowgate": 1, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
-	"worktype":   1, // closed work-class taxonomy (ongoing optimization PROGRAM vs DISCRETE deliverable epic) the milestone roadmap + `fak program` report sort by; stdlib-only, imports nothing internal, off the hot path.
+	"xenginekv":     1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
+	"secretload":    1, // first-class secret/config loader (#887/#889): SecretSource priority list + os-env/encrypted-file/.env backends + Require checklist + Redact; imports canon(1)+stdlib, off the hot path.
+	"windowgate":    1, // no-desktop-popup ratchet: scans tracked .ps1 task installers + window-suppressing .py for console-window flashes; stdlib-only, off the hot path.
+	"worktype":      1, // closed work-class taxonomy (ongoing optimization PROGRAM vs DISCRETE deliverable epic) the milestone roadmap + `fak program` report sort by; stdlib-only, imports nothing internal, off the hot path.
 	"programreport": 1, // ongoing-program report (kernel-opt + cache-opt frontier+trend; the sibling of milestonereport that measures never-'done' programs); imports worktype(1)+cachevalueledger(1)+hooks(1), off the hot path.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
