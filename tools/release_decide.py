@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +38,57 @@ TYPE_LEVEL = {
     "test": "patch",
 }
 SUBSTANTIVE_TYPES = {"feat", "fix", "perf", "revert"}
+
+# The significance floor (issue #1389). With auto-cut default-on at a 2h cadence,
+# the floor is the only thing between a docs-typo commit and a public release
+# every 2h. A window whose substantive commits are ALL trivial (docs/chore/test/
+# style/ci/build) is BELOW the floor and must not mint a release.
+#
+# TRIVIAL_TYPES are the Conventional-Commits types that, on their own, never
+# justify a release. Any other type — feat/fix/perf/refactor/revert, OR a type
+# we do not recognize — is treated as significant. The fail-safe is deliberate:
+# when in doubt about a commit's significance we count it as significant, so the
+# floor can only ever SUPPRESS a window we are confident is trivial, never a real
+# release. (refactor is significant here: it touches shippable code.)
+TRIVIAL_TYPES = {"docs", "chore", "test", "style", "ci", "build"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    return default
+
+
+def is_significant(subject: str, body: str = "") -> bool:
+    """Fail-safe significance test for the auto-cut floor.
+
+    True (significant, count it) unless the commit's Conventional-Commits type is
+    a recognized TRIVIAL type. A breaking change is always significant; an
+    unrecognized type is counted as significant (in-doubt -> significant) so the
+    floor never suppresses a real release.
+    """
+    m = CC_RE.match(subject.strip())
+    if (m and m.group("bang")) or (body and BREAKING_RE.search(body)):
+        return True
+    if not m:
+        # No Conventional-Commits prefix at all: cannot prove it is trivial.
+        return True
+    return m.group("type").lower() not in TRIVIAL_TYPES
 
 
 def semver_tuple(s: str | None) -> tuple[int, int, int] | None:
@@ -80,6 +132,7 @@ def decide_level(commits: list[dict]) -> tuple[str, list[str]]:
 
 def significance(commits: list[dict]) -> dict:
     substantive = 0
+    significant = 0
     total = 0
     kinds: dict[str, int] = {}
     for commit in commits:
@@ -94,7 +147,16 @@ def significance(commits: list[dict]) -> dict:
         breaking = bool(m and m.group("bang")) or bool(BREAKING_RE.search(body))
         if breaking or kind in SUBSTANTIVE_TYPES:
             substantive += 1
-    return {"substantive": substantive, "total": total, "kinds": kinds}
+        if is_significant(subject, body):
+            significant += 1
+    return {
+        "substantive": substantive,
+        # `significant` is the fail-safe floor count: every non-trivial commit,
+        # plus any commit whose triviality we cannot prove (issue #1389).
+        "significant": significant,
+        "total": total,
+        "kinds": kinds,
+    }
 
 
 def next_version_from_base(base: tuple[int, int, int], level: str) -> str:
@@ -120,7 +182,7 @@ def _ci_attempt(ci_on_head: dict) -> int | None:
 
 
 def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
-           require_ci_green: bool = False) -> dict:
+           require_ci_green: bool = False, significance_floor: bool = True) -> dict:
     commits = payload.get("commits_since_tag") or []
     level, themes = decide_level(commits)
     sig = significance(commits)
@@ -133,10 +195,24 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
     latest_any_tag = payload.get("latest_any_tag")
     source_version = version_files.get("version")
 
-    if not commits and not tag_drift.get("files_ahead_of_tag"):
+    files_ahead = bool(tag_drift.get("files_ahead_of_tag"))
+    if not commits and not files_ahead:
         blockers.append("NOTHING_TO_SHIP")
-    elif not force and sig["substantive"] < min_substantive and not tag_drift.get("files_ahead_of_tag"):
+    elif not force and sig["substantive"] < min_substantive and not files_ahead:
         blockers.append("BELOW_SIGNIFICANCE")
+    # Significance floor (issue #1389): a window with commits but ZERO significant
+    # ones (all docs/chore/test/style/ci/build, none breaking, none unrecognized)
+    # is below the floor and must not mint a release on the 2h auto-cut cadence.
+    # Fail-safe: any commit whose triviality we cannot prove counts as significant,
+    # so this gate only fires when the whole window is provably trivial.
+    elif (
+        significance_floor
+        and not force
+        and commits
+        and sig["significant"] == 0
+        and not files_ahead
+    ):
+        blockers.append("BELOW_FLOOR")
 
     if version_files.get("drift") is True:
         blockers.append("VERSION_DRIFT")
@@ -188,6 +264,7 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         "latest_any_tag": latest_any_tag,
         "n_commits": len(commits),
         "substantive": sig["substantive"],
+        "significant": sig["significant"],
         "themes": themes,
         "blockers": blockers,
         "warnings": warnings,
@@ -203,6 +280,12 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
         "BELOW_SIGNIFICANCE": (
             f"{sig['substantive']} substantive commit(s) of {sig['total']} since "
             f"{last_tag or '(no reachable tag)'}; floor is {min_substantive}"
+        ),
+        "BELOW_FLOOR": (
+            f"all {sig['total']} commit(s) since {last_tag or '(no reachable tag)'} are "
+            f"trivial (docs/chore/test/style/ci/build); no significant change to ship. "
+            f"kinds={sig['kinds']}. Force with --force or set "
+            f"FAK_RELEASE_SIGNIFICANCE_FLOOR=0 to disable the floor."
         ),
         "VERSION_DRIFT": "version markers disagree",
         "VERSION_BEHIND_REACHABLE_TAG": tag_drift.get("reason") or "VERSION is behind the reachable release tag",
@@ -249,9 +332,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Decide whether fleet should cut a release now.")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--limit-commits", type=int, default=300)
-    parser.add_argument("--min-substantive", type=int, default=1)
+    # Defaults read from env so the CI auto-cut path can tune the floor without
+    # editing the workflow: FAK_RELEASE_MIN_SUBSTANTIVE (int, default 1) and
+    # FAK_RELEASE_SIGNIFICANCE_FLOOR (0/1, default on) — issue #1389.
+    parser.add_argument("--min-substantive", type=int,
+                        default=_env_int("FAK_RELEASE_MIN_SUBSTANTIVE", 1),
+                        help="minimum substantive commits to clear the floor "
+                             "(env FAK_RELEASE_MIN_SUBSTANTIVE)")
+    parser.add_argument("--no-significance-floor", dest="significance_floor",
+                        action="store_false",
+                        default=_env_flag("FAK_RELEASE_SIGNIFICANCE_FLOOR", True),
+                        help="disable the all-trivial significance floor that "
+                             "holds docs/chore-only windows "
+                             "(env FAK_RELEASE_SIGNIFICANCE_FLOOR=0)")
     parser.add_argument("--force", action="store_true",
-                        help="bypass only the substantive-commit floor")
+                        help="bypass the substantive-commit floor and the "
+                             "significance floor")
     parser.add_argument("--require-ci-green", action="store_true",
                         help="block when gh cannot confirm a green main ci.yml base")
     args = parser.parse_args(argv)
@@ -262,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
             min_substantive=args.min_substantive,
             force=args.force,
             require_ci_green=args.require_ci_green,
+            significance_floor=args.significance_floor,
         )
     except Exception as exc:
         print(f"release-decide: could not read context: {exc}", file=sys.stderr)

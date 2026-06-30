@@ -76,6 +76,95 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertEqual(forced["decision"], "release")
         self.assertEqual(forced["level"], "patch")
 
+    def test_is_significant_failsafe(self) -> None:
+        rd = load()
+        # Trivial types never justify a release.
+        for subj in ("docs: tidy", "chore(deps): bump", "test: add case",
+                     "style: gofmt", "ci: pin runner", "build: retag"):
+            self.assertFalse(rd.is_significant(subj), subj)
+        # Real, shippable change types are significant.
+        for subj in ("feat(x): add", "fix(x): repair", "perf(x): speed",
+                     "refactor(x): reshape", "revert: undo"):
+            self.assertTrue(rd.is_significant(subj), subj)
+        # Fail-safe: an unrecognized type, a bare subject, and a breaking docs
+        # commit all count as significant (in-doubt -> significant).
+        self.assertTrue(rd.is_significant("wip: scratch"))
+        self.assertTrue(rd.is_significant("just some words"))
+        self.assertTrue(rd.is_significant("docs!: drop a public guide"))
+        self.assertTrue(rd.is_significant("chore: x", "BREAKING CHANGE: gone"))
+
+    def test_docs_chore_only_window_held_below_floor(self) -> None:
+        rd = load()
+        # min_substantive=0 disables the older substantive gate, so ONLY the
+        # significance floor can hold this all-trivial window (issue #1389).
+        churn = payload(commits_since_tag=[
+            {"subject": "docs: tidy readme"},
+            {"subject": "chore(deps): bump x"},
+            {"subject": "test: add a case"},
+        ])
+        verdict = rd.decide(churn, min_substantive=0)
+        self.assertEqual(verdict["decision"], "hold")
+        self.assertIn("BELOW_FLOOR", verdict["blockers"])
+        self.assertEqual(verdict["significant"], 0)
+        self.assertIn("trivial", verdict["reason"])
+
+    def test_one_fix_in_trivial_window_clears_floor(self) -> None:
+        rd = load()
+        mixed = payload(commits_since_tag=[
+            {"subject": "docs: tidy"},
+            {"subject": "chore: bump"},
+            {"subject": "fix(gateway): repair a real bug"},
+        ])
+        verdict = rd.decide(mixed, min_substantive=0)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("BELOW_FLOOR", verdict["blockers"])
+        self.assertEqual(verdict["significant"], 1)
+
+    def test_floor_override_forces_a_cut(self) -> None:
+        rd = load()
+        churn = payload(commits_since_tag=[{"subject": "docs: tidy"}])
+        forced = rd.decide(churn, min_substantive=0, force=True)
+        self.assertEqual(forced["decision"], "release")
+        self.assertNotIn("BELOW_FLOOR", forced["blockers"])
+        disabled = rd.decide(churn, min_substantive=0, significance_floor=False)
+        self.assertEqual(disabled["decision"], "release")
+        self.assertNotIn("BELOW_FLOOR", disabled["blockers"])
+
+    def test_unknown_type_window_failsafe_cuts(self) -> None:
+        rd = load()
+        # A window of only unrecognized-type commits is NOT provably trivial, so
+        # the floor must NOT suppress it (fail-safe).
+        unknown = payload(commits_since_tag=[
+            {"subject": "wip: scratch work"},
+            {"subject": "frobnicate the thing"},
+        ])
+        verdict = rd.decide(unknown, min_substantive=0)
+        self.assertEqual(verdict["decision"], "release")
+        self.assertNotIn("BELOW_FLOOR", verdict["blockers"])
+        self.assertEqual(verdict["significant"], 2)
+
+    def test_env_knobs_drive_floor_defaults(self) -> None:
+        rd = load()
+        # FAK_RELEASE_SIGNIFICANCE_FLOOR=0 turns the floor off via main()'s parser.
+        import os
+        keep = {k: os.environ.get(k) for k in
+                ("FAK_RELEASE_SIGNIFICANCE_FLOOR", "FAK_RELEASE_MIN_SUBSTANTIVE")}
+        try:
+            os.environ["FAK_RELEASE_SIGNIFICANCE_FLOOR"] = "0"
+            self.assertFalse(rd._env_flag("FAK_RELEASE_SIGNIFICANCE_FLOOR", True))
+            os.environ["FAK_RELEASE_SIGNIFICANCE_FLOOR"] = "1"
+            self.assertTrue(rd._env_flag("FAK_RELEASE_SIGNIFICANCE_FLOOR", False))
+            os.environ["FAK_RELEASE_MIN_SUBSTANTIVE"] = "3"
+            self.assertEqual(rd._env_int("FAK_RELEASE_MIN_SUBSTANTIVE", 1), 3)
+            os.environ["FAK_RELEASE_MIN_SUBSTANTIVE"] = "notanint"
+            self.assertEqual(rd._env_int("FAK_RELEASE_MIN_SUBSTANTIVE", 1), 1)
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
     def test_unreachable_newer_tag_is_warning_and_bump_base(self) -> None:
         rd = load()
         verdict = rd.decide(payload(

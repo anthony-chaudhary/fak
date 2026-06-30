@@ -1,0 +1,194 @@
+name: Milestone tick
+
+# The recurring milestone tick — the "tracking" half of the milestone tracking
+# report (#1440, epic #1436). `fak milestone report|post` ships as on-demand verbs
+# but rode no schedule, so the durable trend (docs/milestones/history.jsonl) only
+# grew when a human remembered to run it. This scheduled tick closes that gap: on a
+# weekly cadence it (a) appends a dated row to the trend ledger so the trend actually
+# accrues across weeks, (b) refreshes the generated STATUS.md climb block, (c) posts
+# the milestone card to #milestones, and (d) commits the trend + status updates back
+# to the trunk.
+#
+# Mirrors release-cadence.yml: AUTO-ON BY DEFAULT for scheduled ticks. A tick appends
+# one ledger row and posts the card with no human in the loop. Same-day re-runs are
+# idempotent — the report's latestBefore already excludes a same-generated_at row, so
+# a second tick on the same date adds an honest second row only if the snapshot moved.
+#
+# KILL SWITCH: set the repo variable FAK_MILESTONE_TICK = '0' to fall back to a
+# dry-run-only tick (report + render, but no commit, push, or Slack post). Any other
+# value (unset included) keeps the tick armed. A manual workflow_dispatch is always
+# gated by its own dry_run input regardless of the variable.
+#
+# POSTING: the Slack card is posted only when the milestone-channel token/channel are
+# wired (FAK_MILESTONE_TOKEN + FAK_MILESTONE_CHANNEL, mirroring the cadence feeders).
+# Without them the post fails OPEN — the card renders to the step summary and the tick
+# still commits the ledger — so a secret-less fork is not a hard failure.
+on:
+  schedule:
+    # Mondays 08:41 UTC — an off-the-hour minute clear of the other scheduled jobs
+    # (cadence 08:17 Mon, garden 06:23, dogfood 06:41, release-cadence :37) so the
+    # weekly milestone tick does not pile onto them.
+    - cron: "41 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report and render the card, but do not commit, push, or post"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: milestone-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: append trend, refresh status, post card
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GOTOOLCHAIN: auto
+      # Slack token is a secret; channel id is a repo variable — same keys the cadence
+      # feeders read. Absent ⇒ the post fails open (renders to the summary, no error).
+      FAK_MILESTONE_TOKEN: ${{ secrets.FAK_MILESTONE_TOKEN }}
+      FAK_MILESTONE_CHANNEL: ${{ vars.FAK_MILESTONE_CHANNEL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          # The roadmap dimension reads gh and the climb reads the in-process grid;
+          # a full checkout keeps trend math and commit-back honest.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The fold/trend logic FIRST: a green tick below is only meaningful if the fold
+      # that produced it is itself proven correct.
+      - name: milestone fold self-test
+        run: go test ./internal/milestonereport/
+
+      # Arm the execute decision. execute = a manual dispatch with dry_run=false, OR a
+      # scheduled tick with the kill switch not set to '0'. Anything else reports only.
+      - name: Arm execute decision
+        id: arm
+        env:
+          MILESTONE_TICK: ${{ vars.FAK_MILESTONE_TICK }}
+        run: |
+          set -euo pipefail
+          execute=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            execute=true
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${MILESTONE_TICK:-}" != "0" ]; then
+            execute=true
+          fi
+          echo "execute=$execute" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Execute decision"
+            echo ""
+            echo "event=${{ github.event_name }} · milestone_tick=${MILESTONE_TICK:-unset(=on)} · execute=$execute"
+            echo ""
+            echo "The milestone tick is DEFAULT-ON for scheduled runs; set repo var FAK_MILESTONE_TICK=0 to fall back to dry-run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Append the durable trend row and refresh the generated STATUS.md climb block.
+      # Tolerate a non-zero exit from the report (the ACTION verdict it returns when the
+      # roadmap dimension is partial must not suppress the ledger append) — the verdict
+      # is surfaced to the summary, not swallowed.
+      - name: Append trend row + refresh status
+        id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          go run ./cmd/fak milestone report --json --append-history > milestone-report.json
+          echo "report-exit=$?"
+          go run ./cmd/fak milestone status-doc --write-doc > status-doc.txt 2>&1
+          echo "status-exit=$?"
+          set -e
+          test -s milestone-report.json || echo '{}' > milestone-report.json
+          python3 - <<'PY' > milestone-report.txt || echo "(report unreadable)" > milestone-report.txt
+          import json
+          d = json.load(open("milestone-report.json"))
+          print(f"{d.get('verdict','?')} ({d.get('finding','')}) @{d.get('commit','')} {d.get('date','')}")
+          PY
+          cat milestone-report.txt
+
+      # Render the card. --dry-run renders the exact card without posting; the live post
+      # is gated below on execute + a wired token.
+      - name: Render milestone card
+        run: go run ./cmd/fak milestone post --dry-run --report-json milestone-report.json > milestone-card.txt 2>&1 || true
+
+      - name: Dry-run stop
+        if: steps.arm.outputs.execute != 'true'
+        run: |
+          echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
+          echo "This run stops after appending the ledger locally (a manual dispatch with dry_run=true, or a scheduled tick with FAK_MILESTONE_TICK=0). It does not commit, push, or post." >> "$GITHUB_STEP_SUMMARY"
+
+      # POST the card in-channel — only on execute and only when the token is wired
+      # (fail open without it). The post exits non-zero only on its OWN misconfig, so
+      # `|| true` keeps a delivery hiccup from failing the tick before the commit.
+      - name: Post milestone card
+        if: ${{ steps.arm.outputs.execute == 'true' && env.FAK_MILESTONE_TOKEN != '' }}
+        run: go run ./cmd/fak milestone post --report-json milestone-report.json || true
+
+      # Commit the trend + status updates back to the trunk on execute. The ledger is the
+      # durable accrual; STATUS.md is the generated snapshot. Commit by explicit path —
+      # never `git add -A` on the shared trunk.
+      - name: Commit and push ledger + status
+        if: steps.arm.outputs.execute == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "fleet-milestone-tick[bot]"
+          git config user.email "fleet-milestone-tick@users.noreply.github.com"
+          git add docs/milestones/history.jsonl docs/milestones/STATUS.md
+          if git diff --staged --quiet; then
+            echo "No milestone changes to commit"
+          else
+            git commit -s -m "docs(milestones): record milestone tick (fak docs)"
+            git push
+          fi
+
+      - name: payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## milestone tick"
+            echo '```'
+            cat milestone-report.txt 2>/dev/null || echo "(no report)"
+            echo '```'
+            echo '<details><summary>rendered card</summary>'
+            echo
+            echo '```'
+            cat milestone-card.txt 2>/dev/null || echo "(no card)"
+            echo '```'
+            echo '</details>'
+            echo '<details><summary>control-pane payload</summary>'
+            echo
+            echo '```json'
+            cat milestone-report.json 2>/dev/null || echo "{}"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-tick
+          path: |
+            milestone-report.json
+            milestone-report.txt
+            milestone-card.txt
+          if-no-files-found: ignore
