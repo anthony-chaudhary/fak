@@ -118,12 +118,18 @@ if [ "${FAK_FAST:-}" = "1" ]; then
       # while tests start; copying them can make rsync fail before `go test` runs.
       rsync -a --delete \
         --exclude="/$CACHE_REL" \
+        --exclude="/.git/*.lock" \
+        --exclude="/.git/**/*.lock" \
+        --exclude="/.codex-tmp" \
         --exclude="/.dispatch-runs" \
         --exclude="/.dos/metrics" \
         --exclude="/.dos/runs" \
         --exclude="/.dos/streams" \
         --exclude="/.fak" \
         "$SCRIPT_DIR/" "$SCRATCH/"
+      if [ -d "$SCRATCH/.git" ]; then
+        find "$SCRATCH/.git" -type f -name '*.lock' -delete
+      fi
     else
       # tar fallback (no pruning of stale files, but correct): copy all but the cache.
       ( cd "$SCRIPT_DIR" && find . -path "./$CACHE_REL" -prune -o -type f -print ) \
