@@ -167,6 +167,14 @@ type gatewayMetrics struct {
 	// is configured and a tool call routes.
 	routing *routingMetrics
 
+	// servingEmitters are host-injected serving-metric producers that already speak
+	// the normalized fak_serving_* schema rows: a scrape relabeler for ridden
+	// vLLM/SGLang workers and native step-loop emitters as they come online. The
+	// gateway renders HELP/TYPE once for the merged row set, so many workers do not
+	// duplicate Prometheus family headers.
+	servingMu       sync.Mutex
+	servingEmitters []ServingMetricsEmitter
+
 	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
 	// exhaustion faults: either recovered compute.DeviceAllocError allocations or a request
 	// capacity precheck that refused a known-too-large plan before allocation, never provider
@@ -1300,6 +1308,7 @@ func (s *Server) renderMetrics() string {
 	s.writeRequestMemoryMetrics(&b)
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
+	s.writeServingMetrics(&b, inf)
 	m.writeVCacheMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
