@@ -16,10 +16,10 @@
 //     endpoint and posts back TEXT.
 //
 // Those three properties keep it on the PUBLIC side of the GPU-server/Slack boundary
-// (docs/dgx-slack-boundary.md): the private piece is the lab *control* bridge (it runs
+// (docs/gpu-server-private-boundary.md): the private piece is the lab *control* bridge (it runs
 // commands on lab boxes and speaks a private protocol); this is *chat*. The path-based
 // commit gate (tools/check_committed_files.py) refuses a package whose name carries the
-// dgx token or slack+{bridge,control,gc}; "chatrelay" is neither, the same way
+// private GPU-server token or slack+{bridge,control,gc}; "chatrelay" is neither, the same way
 // internal/blockerpost holds a chat.postMessage client in the public tree.
 package chatrelay
 
