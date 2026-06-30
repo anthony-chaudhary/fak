@@ -159,9 +159,11 @@ def fak_bench_verbs(root: Path, tracked: list[str]) -> set[str]:
     cases = set(re.findall(r'case\s+"([a-z0-9-]+)":', main_go))
     # Bench verbs whose name lacks the substring 'bench' but which expose a
     # benchmark: `turntax` (the turn-tax A/B), `vcache` (its `bench`/`score`
-    # subcommand), and `ablate` (the N-arm self-ablation sweep, the generalization
-    # of `fak bench`). Kept as a small named allowlist so the detector stays structural.
-    known_non_bench_named = {"turntax", "vcache", "ablate"}
+    # subcommand), `ablate` (the N-arm self-ablation sweep, the generalization
+    # of `fak bench`), and `frontierswe` (the FrontierSWE time-to-solution
+    # describe surface). Kept as a small named allowlist so the detector stays
+    # structural.
+    known_non_bench_named = {"turntax", "vcache", "ablate", "frontierswe"}
     verbs = {c for c in cases if "bench" in c} | (cases & known_non_bench_named)
     # The catalog verb itself is not a benchmark; drop it.
     verbs.discard("benchmarks")

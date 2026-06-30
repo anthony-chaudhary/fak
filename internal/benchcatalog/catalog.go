@@ -198,6 +198,13 @@ var registry = []Bench{
 		Doc: "docs/explainers/fleet-benchmarks.md",
 	},
 	{
+		Name: "frontierswe", Kind: KindVerb, Need: NeedNone, Level: LevelE2E,
+		Summary: "FrontierSWE time-to-solution surface: the 17 long-horizon tasks with their 20h [agent] budget, resource envelope, and scoring gate class. describe is offline (catalog + committed fixtures).",
+		Run:     "fak frontierswe describe",
+		Flags:   []string{"describe  -  offline catalog (the 17 tasks, 20h budgets, resources, gates)", "--tasks  -  task tree to overlay budgets/resources from", "--json  -  JSON only on stdout", "--out  -  write the describe JSON here"},
+		Doc:     "docs/benchmarks/FRONTIERSWE-SCORING-PARITY.md",
+	},
+	{
 		Name: "longctxbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Renders the exact contention-free work floor for the long-context regime.",
 		Run:     "go run ./cmd/longctxbench",

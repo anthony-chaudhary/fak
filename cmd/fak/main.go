@@ -228,6 +228,8 @@ func main() {
 		cmdRungStats(os.Args[2:])
 	case "swebench":
 		cmdSwebench(os.Args[2:])
+	case "frontierswe":
+		cmdFrontierswe(os.Args[2:])
 	case "webbench":
 		cmdWebbench(os.Args[2:])
 	case "ailuminate":
