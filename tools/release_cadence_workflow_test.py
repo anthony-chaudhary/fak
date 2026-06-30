@@ -67,6 +67,12 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertIn("steps.release_lock.outputs.acquired == 'true'", text)
         self.assertIn("--lock-already-held", text)
 
+        # The auto-cut owns the lock under a DISTINCT cadence-bot owner id (per-run),
+        # so its ownership is cross-checkable against — and exclusive with — a human
+        # owner; that distinct owner is what makes the shared single-writer lock keep
+        # the unattended tick out of a hand-cut's way (#1391's "bot session id owner").
+        self.assertIn("FAK_RELEASE_OWNER: release-cadence-", text)
+
         # Release on EVERY exit (success or failure) but only if we acquired — a
         # deferred tick that never took the lock must not drop a peer's lock.
         self.assertIn("always() && steps.release_lock.outputs.acquired == 'true'", text)
