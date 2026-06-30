@@ -13,7 +13,7 @@ import (
 //  2. Session.glmDsaWeightHAL (the seam that previously PANICKED on a resident Q4_K weight —
 //     "q4_k device GLM-DSA upload is a follow-up") now stages it onto the backend and its MatMul
 //     equals the host q4kMatRows. That closes the residual: a memory-lean Q4_K GLM-5.2 can run its
-//     dense projections on the device (k_q4k_gemm on the DGX, cpu-ref here), not just q8/f32.
+//     dense projections on the device (k_q4k_gemm on the GPU server, cpu-ref here), not just q8/f32.
 
 // buildRawQ4K returns a valid raw Q4_K weight [out,in] (in a multiple of 256): out*(in/256)
 // random-but-finite super-blocks, using the shared randQ4KBlock generator (constrains the f16

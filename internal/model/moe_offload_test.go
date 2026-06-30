@@ -169,7 +169,7 @@ func TestGLMDsaCPUOffloadPlacementInvariance(t *testing.T) {
 // proof is differential: an all-device session (offload off) records the expert shapes; the hybrid
 // session (offload on) does NOT — the experts moved to host — while both record the dense shapes.
 // The hybrid forward stays argmax-exact and within the f32-reduction-order floor vs the all-host
-// reference, so the offload is correct, not just present. On the DGX the device side is the cuda
+// reference, so the offload is correct, not just present. On the GPU server the device side is the cuda
 // Q4_K kernel and the host side is the resident Q4_K GEMM; here both are cpu-ref, which is what
 // makes the routing — the only new logic — witnessable without the A100s.
 func TestGLMDsaCPUOffloadHybridOverBackend(t *testing.T) {
