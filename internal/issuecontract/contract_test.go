@@ -64,6 +64,49 @@ func TestReviewCandidateDispatchableScoresFull(t *testing.T) {
 	}
 }
 
+func TestReviewCandidateScoresGenerationFit(t *testing.T) {
+	c := completeCandidate()
+	c.Generation = "gen/next"
+	c.Title = "generation(next): add branchless feature gating"
+	c.Labels = []string{"generation", "gen/next"}
+	c.WhyNow = "Next gen near-term foundation work needs a gate, handoff, and operator visibility before it is agent-runnable."
+	c.InScope = "Add the generation checklist with promotion evidence, demotion evidence, and runtime feature gate boundaries."
+	c.OutOfScope = "Do not create a branch per generation; priority, shared trunk, and runtime feature gates remain orthogonal."
+	c.DoneCondition = "The issue names promotion evidence, demotion/retirement evidence, and an invalidating assumption."
+	c.Witness = "Captured command witness from fak issue contract."
+	c.Assumptions = []string{"Invalidating assumption: generation labels stay available during issue grooming."}
+	review := ReviewCandidate(c, Options{})
+	if !review.OK {
+		t.Fatalf("review = %+v, want scoped generation issue to remain dispatchable", review)
+	}
+	if review.GenerationFit.Stream != "gen/next" || review.GenerationFit.Total != 100 || len(review.GenerationFit.Flags) != 0 {
+		t.Fatalf("generation fit = %+v, want clean gen/next score", review.GenerationFit)
+	}
+}
+
+func TestReviewCandidateFlagsGenerationMismatch(t *testing.T) {
+	c := completeCandidate()
+	c.Generation = "gen/next"
+	c.Title = "generation(next): add branchless feature gating"
+	c.Labels = []string{"generation", "gen/future"}
+	c.WhyNow = "Next gen near-term foundation work needs a gate, handoff, and operator visibility before it is agent-runnable."
+	c.InScope = "Add the generation checklist with promotion evidence, demotion evidence, and runtime feature gate boundaries."
+	c.OutOfScope = "Priority, shared trunk, and runtime feature gates remain orthogonal."
+	c.DoneCondition = "The issue names promotion evidence, demotion/retirement evidence, and an invalidating assumption."
+	c.Witness = "Captured command witness from fak issue contract."
+	c.Assumptions = []string{"Invalidating assumption: generation labels stay available during issue grooming."}
+	review := ReviewCandidate(c, Options{})
+	if !review.OK {
+		t.Fatalf("generation mismatch is advisory, got refused review: %+v", review)
+	}
+	if review.GenerationFit.Stream != "gen/future" || !has(review.GenerationFit.Flags, "generation_body_mismatch") {
+		t.Fatalf("generation fit = %+v, want body mismatch on gen/future label", review.GenerationFit)
+	}
+	if review.GenerationFit.Total >= 100 {
+		t.Fatalf("generation fit = %+v, want mismatch below full score", review.GenerationFit)
+	}
+}
+
 func TestReviewCandidateScoresGoldPlatingBelowSpineWork(t *testing.T) {
 	c := completeCandidate()
 	c.PriorityContext = "Nice later: polish helper names after the workflow already works."

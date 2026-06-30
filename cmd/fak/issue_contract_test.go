@@ -204,6 +204,63 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 	}
 }
 
+func TestIssueContractReportsGenerationFit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "generation-candidates.json")
+	clean := completeIssueCandidate()
+	clean.Generation = "gen/next"
+	clean.Title = "generation(next): add branchless feature gating"
+	clean.Labels = []string{"generation", "gen/next"}
+	clean.WhyNow = "Next gen near-term foundation work needs a gate, handoff, and operator visibility before it is agent-runnable."
+	clean.InScope = "Add the generation checklist with promotion evidence, demotion evidence, and runtime feature gate boundaries."
+	clean.OutOfScope = "Do not create a branch per generation; priority, shared trunk, and runtime feature gates remain orthogonal."
+	clean.DoneCondition = "The issue names promotion evidence, demotion/retirement evidence, and an invalidating assumption."
+	clean.Witness = "Captured command witness from fak issue contract."
+	clean.Assumptions = []string{"Invalidating assumption: generation labels stay available during issue grooming."}
+
+	mismatch := clean
+	mismatch.Key = "generation/mismatch"
+	mismatch.Labels = []string{"generation", "gen/future"}
+	body := []issuecontract.Candidate{clean, mismatch}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--file", path, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		Counts struct {
+			GenerationFitMeasured int            `json:"generation_fit_measured"`
+			GenerationMismatches  int            `json:"generation_mismatches"`
+			ByGeneration          map[string]int `json:"by_generation"`
+		} `json:"counts"`
+		Reviews []struct {
+			GenerationFit struct {
+				Stream string   `json:"stream"`
+				Total  int      `json:"total"`
+				Flags  []string `json:"flags"`
+			} `json:"generation_fit"`
+		} `json:"reviews"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.Counts.GenerationFitMeasured != 2 || got.Counts.GenerationMismatches != 1 ||
+		got.Counts.ByGeneration["gen/next"] != 1 || got.Counts.ByGeneration["gen/future"] != 1 {
+		t.Fatalf("generation counts = %+v, want two measured rows with one mismatch", got.Counts)
+	}
+	if len(got.Reviews) != 2 || got.Reviews[0].GenerationFit.Total != 100 ||
+		got.Reviews[1].GenerationFit.Stream != "gen/future" ||
+		!hasString(got.Reviews[1].GenerationFit.Flags, "generation_body_mismatch") {
+		t.Fatalf("generation reviews = %+v, want clean first row and mismatched second row", got.Reviews)
+	}
+}
+
 func TestIssueContractFlagsBatchGroupsOverDeclaredCap(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "candidates.json")
 	candidates := make([]issuecontract.Candidate, 0, 3)
@@ -578,6 +635,15 @@ func repairQueueByKind(queues []repairQueueAssertion, kind string) repairQueueAs
 		}
 	}
 	return repairQueueAssertion{}
+}
+
+func hasString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func completeIssueCandidate() issuecontract.Candidate {

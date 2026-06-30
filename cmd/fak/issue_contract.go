@@ -50,23 +50,23 @@ type issueContractResult struct {
 }
 
 type issueContractCounts struct {
-	Total                int            `json:"total"`
-	Dispatchable         int            `json:"dispatchable"`
-	TriageOnly           int            `json:"triage_only"`
-	Refused              int            `json:"refused"`
-	StepBudget           int            `json:"step_budget"`
-	MissingExpectedSteps int            `json:"missing_expected_steps"`
-	AgentContextAvg      int            `json:"agent_context_avg"`
-	AgentContextFull     int            `json:"agent_context_full"`
-	AgentContextMissing  int            `json:"agent_context_missing"`
-	GenerationFitAvg     int            `json:"generation_fit_avg,omitempty"`
-	GenerationFitMeasured int           `json:"generation_fit_measured,omitempty"`
-	GenerationMismatches int            `json:"generation_mismatches,omitempty"`
-	ByReason             map[string]int `json:"by_reason"`
-	ByLane               map[string]int `json:"by_lane"`
-	ByWorkUnit           map[string]int `json:"by_work_unit"`
-	ByExpectedStepBucket map[string]int `json:"by_expected_step_bucket"`
-	ByGeneration         map[string]int `json:"by_generation,omitempty"`
+	Total                 int            `json:"total"`
+	Dispatchable          int            `json:"dispatchable"`
+	TriageOnly            int            `json:"triage_only"`
+	Refused               int            `json:"refused"`
+	StepBudget            int            `json:"step_budget"`
+	MissingExpectedSteps  int            `json:"missing_expected_steps"`
+	AgentContextAvg       int            `json:"agent_context_avg"`
+	AgentContextFull      int            `json:"agent_context_full"`
+	AgentContextMissing   int            `json:"agent_context_missing"`
+	GenerationFitAvg      int            `json:"generation_fit_avg,omitempty"`
+	GenerationFitMeasured int            `json:"generation_fit_measured,omitempty"`
+	GenerationMismatches  int            `json:"generation_mismatches,omitempty"`
+	ByReason              map[string]int `json:"by_reason"`
+	ByLane                map[string]int `json:"by_lane"`
+	ByWorkUnit            map[string]int `json:"by_work_unit"`
+	ByExpectedStepBucket  map[string]int `json:"by_expected_step_bucket"`
+	ByGeneration          map[string]int `json:"by_generation,omitempty"`
 }
 
 type issueContractBatchGroup struct {
