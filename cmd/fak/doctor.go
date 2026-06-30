@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/answershape"
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -60,9 +61,29 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	maxRepeat := fs.Float64("max-repeat", answershape.DefaultMaxRepeat, "largest in-shape repeat fraction (0..1); <=0 disables the repeat check")
 	maxChars := fs.Int("max-chars", 0, "largest in-shape rune count; 0 disables the length check")
 	ngram := fs.Int("ngram", answershape.DefaultNGram, "word n-gram width for the repeat metric")
+	binary := fs.Bool("binary", false, "diagnose the running fak executable and sibling fak/fak.exe binaries for stale shadowing")
 	asJSON := fs.Bool("json", false, "emit the doctor report as JSON")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+
+	if *binary {
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak doctor: resolve executable: %v\n", err)
+			return 1
+		}
+		rep := appversion.DiagnoseBinary(exe, appversion.DefaultBinaryDoctorCandidates(exe))
+		if *asJSON {
+			b, _ := json.MarshalIndent(rep, "", "  ")
+			fmt.Fprintln(stdout, string(b))
+		} else {
+			writeBinaryDoctorHuman(stdout, rep)
+		}
+		if rep.Findings > 0 {
+			return 1
+		}
+		return 0
 	}
 
 	input, err := readShapeInput(*text, *file, stdin)
@@ -83,6 +104,51 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {
+	fmt.Fprintln(w, "== fak doctor: binary freshness ==")
+	fmt.Fprintf(w, "executable: %s\n", rep.Executable)
+	for _, img := range rep.Images {
+		tag := "candidate"
+		if img.Current {
+			tag = "current"
+		}
+		if !img.Exists {
+			fmt.Fprintf(w, "  [%s] %s (missing)\n", tag, img.Path)
+			continue
+		}
+		suffix := ""
+		if img.Newer {
+			suffix = " newer-than-current"
+		}
+		fmt.Fprintf(w, "  [%s] %s size=%d sha=%s%s\n", tag, img.Path, img.Size, shortHash(img.SHA256), suffix)
+	}
+	for _, r := range rep.Recommendations {
+		tag := "OK  "
+		if r.Severity == appversion.SeverityWarn {
+			tag = "WARN"
+		}
+		fmt.Fprintf(w, "[%s] %-14s %s\n", tag, r.Check, r.Finding)
+		if r.Recommend != "" {
+			fmt.Fprintf(w, "       recommend: %s\n", r.Recommend)
+		}
+	}
+	if rep.Findings == 0 {
+		fmt.Fprintln(w, "doctor: healthy (0 findings)")
+	} else {
+		fmt.Fprintf(w, "doctor: %d finding(s)\n", rep.Findings)
+	}
+}
+
+func shortHash(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	if h == "" {
+		return "-"
+	}
+	return h
 }
 
 // diagnose runs both checks over input and assembles the recommendations. It is
