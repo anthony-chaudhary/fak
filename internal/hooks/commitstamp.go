@@ -301,6 +301,9 @@ func laneForPath(path string, tax laneTaxonomy) string {
 	if bestLane != "" {
 		return bestLane
 	}
+	if !strings.Contains(p, "/") && allowedRootMD[p] {
+		return "docs"
+	}
 	seg := strings.Split(p, "/")
 	if len(seg) >= 2 {
 		switch seg[0] {

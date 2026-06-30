@@ -166,7 +166,7 @@ func TestLintCommitMessage_releaseExempt(t *testing.T) {
 
 func TestLintCommitMessage_rootDocsResolveToDocsLane(t *testing.T) {
 	root := writeLintRepo(t)
-	r := LintCommitMessage("docs(readme): update the entrypoint (fak docs)", []string{"README.md", "INDEX.md", "llms.txt"}, root)
+	r := LintCommitMessage("docs(readme): update the entrypoint (fak docs)", []string{"README.md", "INDEX.md", "llms.txt", "BENCHMARK-TEMPLATE.md"}, root)
 	if !r.OK {
 		t.Fatalf("expected root docs to lint cleanly, got issues=%v notes=%v", r.Issues, r.Notes)
 	}
@@ -371,7 +371,9 @@ func TestLaneForPath_conventionFallback(t *testing.T) {
 		"internal/gateway/server.go": "gateway",
 		"cmd/fak/serve.go":           "cmd",
 		"docs/x.md":                  "docs",
-		"README.md":                  "", // root file: no lane
+		"README.md":                  "docs", // allowed root doc -> docs lane
+		"BENCHMARK-TEMPLATE.md":      "docs", // allowed root doc -> docs lane
+		"MISC.txt":                   "",     // ordinary root file: no lane
 	}
 	for path, want := range cases {
 		if got := laneForPath(path, empty); got != want {
