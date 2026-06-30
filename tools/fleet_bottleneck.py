@@ -60,6 +60,7 @@ import threading
 import time
 import html
 import math
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_DIR = os.path.dirname(HERE)
@@ -145,6 +146,39 @@ def _file_age_min(path):
         return (NOW().timestamp() - os.stat(path).st_mtime) / 60.0
     except OSError:
         return None
+
+
+def _fleet_state_dir():
+    """Host state root the LIVE PowerShell watchdogs write under, resolved exactly
+    like fleet_resume_watchdog.ps1 / fleet_supervisor_watchdog.ps1 / fleet_status.ps1:
+    $FLEET_STATE_DIR, else %LOCALAPPDATA%\\Fleet, else <temp>/Fleet. The scheduled
+    recovery watchdogs append their per-tick heartbeat to <state>/watchdog/ — NOT the
+    in-repo tools/_watchdog/ — so a freshness probe that ignores it is structurally
+    blind to the live recovery plumbing."""
+    base = os.environ.get("FLEET_STATE_DIR")
+    if base:
+        return base
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        return os.path.join(local, "Fleet")
+    return os.path.join(tempfile.gettempdir(), "Fleet")
+
+
+def _recovery_watchdog_age_min():
+    """Minutes since the freshest recovery-watchdog heartbeat, or None if none found.
+
+    The recovery watchdogs append a heartbeat line every tick: the resume watchdog
+    (FleetResumeWatchdog) -> resume_watchdog.log, the supervisor (FleetSupervisorWatchdog)
+    -> watchdog.log. Each writes to the LIVE host state dir (<state>/watchdog/) under the
+    scheduled task and, on the dev/.py path, to the in-repo tools/_watchdog/. Read the
+    freshest across both locations so a healthy live watchdog is not misreported as
+    "no recovery activity on disk" (which falsely fired CRITICAL crash-resume/recovery
+    bottlenecks whenever the supervisor was disabled but the resume watchdog was live)."""
+    names = ("resume_watchdog.log", "watchdog.log")
+    dirs = (os.path.join(_fleet_state_dir(), "watchdog"), WATCH_DIR)
+    ages = [a for a in (_file_age_min(os.path.join(d, n)) for d in dirs for n in names)
+            if a is not None]
+    return min(ages) if ages else None
 
 
 def _resumed_set():
@@ -317,10 +351,13 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
             key=lambda x: -(x.get("age_min") or 0))[:8],
     }
 
-    # recovery-plumbing freshness (best-effort, on-disk only — no cross-repo subprocess)
-    wlog = os.path.join(WATCH_DIR, "watchdog.log")
+    # recovery-plumbing freshness (best-effort, on-disk only — no cross-repo subprocess).
+    # The live watchdogs heartbeat into %FLEET_STATE_DIR%/watchdog, not tools/_watchdog,
+    # and the resume watchdog's log is resume_watchdog.log (not watchdog.log) — reading
+    # only the in-repo watchdog.log reported recovery DEAD even while a watchdog was
+    # ticking, so read the freshest heartbeat across both locations and both names.
     snap["recovery"] = {
-        "watchdog_log_age_min": _file_age_min(wlog),
+        "watchdog_log_age_min": _recovery_watchdog_age_min(),
         "resumed_ever": len(resumed),
         "transitions_log_present": os.path.exists(os.path.join(REG_DIR, "transitions.log")),
     }

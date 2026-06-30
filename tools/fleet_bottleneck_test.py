@@ -9,8 +9,10 @@ from __future__ import annotations
 import os
 import re
 import json
+import time
 import tempfile
 import unittest
+from unittest import mock
 
 import fleet_bottleneck as fb
 
@@ -366,6 +368,58 @@ class CrossSurfaceContractTest(unittest.TestCase):
         prom = _read(PROMETHEUS)
         self.assertIn("job_name: fak_gateway", prom)
         self.assertIn('targets: ["host.docker.internal:8080"]', prom)
+
+
+class RecoveryFreshnessTest(unittest.TestCase):
+    """collect()'s recovery-freshness probe must read the LIVE watchdog heartbeat
+    (resume_watchdog.log under %FLEET_STATE_DIR%/watchdog), not just the in-repo
+    tools/_watchdog/watchdog.log. The old probe read one in-repo file written only by
+    the supervisor watchdog, so whenever the supervisor was disabled but the resume
+    watchdog was the live recovery plumbing it returned None -> two false CRITICAL
+    bottlenecks (crash-resume backlog boost + recovery-plumbing-stale)."""
+
+    def _age(self, state_dir, repo_watch_dir):
+        with mock.patch.dict(os.environ, {"FLEET_STATE_DIR": state_dir}, clear=False), \
+                mock.patch.object(fb, "WATCH_DIR", repo_watch_dir):
+            return fb._recovery_watchdog_age_min()
+
+    def test_reads_live_resume_watchdog_heartbeat(self):
+        # The bug case: the live resume watchdog heartbeats into the host state dir
+        # under resume_watchdog.log; the old probe (in-repo watchdog.log) saw nothing.
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            wd = os.path.join(state, "watchdog")
+            os.makedirs(wd)
+            open(os.path.join(wd, "resume_watchdog.log"), "w").close()
+            age = self._age(state, repo)
+            self.assertIsNotNone(age)   # old probe returned None here
+            self.assertLess(age, 5.0)
+
+    def test_freshest_across_names_and_dirs_wins(self):
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            wd = os.path.join(state, "watchdog")
+            os.makedirs(wd)
+            stale = os.path.join(wd, "watchdog.log")
+            fresh = os.path.join(repo, "resume_watchdog.log")
+            open(stale, "w").close()
+            os.utime(stale, (time.time() - 3600, time.time() - 3600))  # 60m old
+            open(fresh, "w").close()                                    # now
+            self.assertLess(self._age(state, repo), 5.0)
+
+    def test_none_when_no_heartbeat_anywhere(self):
+        with tempfile.TemporaryDirectory() as state, tempfile.TemporaryDirectory() as repo:
+            os.makedirs(os.path.join(state, "watchdog"))
+            self.assertIsNone(self._age(state, repo))
+
+    def test_fresh_recovery_suppresses_false_recovery_stale(self):
+        # End-to-end contract: a fresh probe value clears the recovery-plumbing-stale
+        # bottleneck; a None value (the old blind probe) raises it falsely.
+        snap = make_snap()
+        snap["recovery"]["watchdog_log_age_min"] = 5.0
+        self.assertNotIn("recovery_stale",
+                         {b["id"] for b in fb.rank_bottlenecks(snap)["bottlenecks"]})
+        snap["recovery"]["watchdog_log_age_min"] = None
+        self.assertIn("recovery_stale",
+                      {b["id"] for b in fb.rank_bottlenecks(snap)["bottlenecks"]})
 
 
 if __name__ == "__main__":
