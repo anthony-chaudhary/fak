@@ -235,6 +235,8 @@ func main() {
 		cmdCadence(os.Args[2:])
 	case "milestone":
 		cmdMilestone(os.Args[2:])
+	case "milestone-scorecard":
+		cmdMilestoneScorecard(os.Args[2:])
 	case "program":
 		cmdProgram(os.Args[2:])
 	case "rollup":

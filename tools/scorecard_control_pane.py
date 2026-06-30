@@ -214,6 +214,13 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "maturity", "debt": "maturity_debt", "script": "", "cmd": "go run ./cmd/fak maturity --json", "label": "maturity"},
     {"key": "growth", "debt": "growth_debt", "script": "", "cmd": "go run ./cmd/fak coverage-matrix --json", "label": "growth-debt"},
     {"key": "support_maturity", "debt": "support_maturity_debt", "script": "", "cmd": "go run ./cmd/fak support-maturity-scorecard --json", "label": "support-maturity"},
+    # The milestone scorecard (#1444, epic #1436): folds the milestone report's own
+    # two dimensions (the maturity CLIMB distance-to-MATURED + the epic ROADMAP open
+    # children) into one milestone_debt with a worst-first retire worklist, so the RSI
+    # loop retires milestones like every other surface. Composes -- not duplicates --
+    # support_maturity: that card fences each cell to its regime ceiling, this one
+    # scores raw distance-to-matured across the grid as the headline climb + roadmap.
+    {"key": "milestone", "debt": "milestone_debt", "script": "", "cmd": "go run ./cmd/fak milestone-scorecard --json", "label": "milestone"},
     # The agentic-coding loop-index (#1152, dev-ex epic #1148 spine): folds the six
     # loop stages (orient->plan->act->verify->ship->learn) into one loopindex_debt.
     # Registered here so a stage UN-WIRING (a regressed default) reds the ratchet —
