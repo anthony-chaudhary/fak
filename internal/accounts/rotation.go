@@ -57,6 +57,7 @@ type RotationSeat struct {
 	Account   string         `json:"account,omitempty"`
 	Status    RotationStatus `json:"status"`
 	Login     LoginStatus    `json:"login_status,omitempty"`
+	CanServe  bool           `json:"can_serve"`
 	Email     string         `json:"email,omitempty"`
 	Canonical string         `json:"canonical,omitempty"` // for a duplicate, the pool seat it collapses onto
 }
@@ -212,6 +213,7 @@ func seatStatus(h Home, st RotationStatus) RotationSeat {
 		Account: h.Identity.AccountKey(),
 		Status:  st,
 		Login:   h.LoginStatus(),
+		CanServe: h.CanServe(),
 		Email:   h.Identity.Email,
 	}
 }
