@@ -50,6 +50,59 @@ func TestRunCommit_dashMAndDashFAreExclusive(t *testing.T) {
 	}
 }
 
+func TestRunCommitSubmit_jsonPersistsIntentWithoutGit(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"submit",
+		"--json",
+		"--queue-dir", queueDir,
+		"--id", "issue-1788-cli",
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--diff-digest", "SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"--path", `internal\commitintent\store.go`,
+		"-m", "feat(commitintent): add submit cli (#1788) (fak commitintent)",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	var res commitSubmitResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("submit --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if !res.Queued || res.IntentID != "issue-1788-cli" || res.Sequence != 1 || res.QueueSize != 1 {
+		t.Fatalf("submit result = %+v", res)
+	}
+	if got := res.Record.Intent.Paths; len(got) != 1 || got[0] != "internal/commitintent/store.go" {
+		t.Fatalf("paths not normalized: %+v", got)
+	}
+	if got := res.Record.Intent.DiffDigest; got != "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("diff digest = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(queueDir, "queue.json")); err != nil {
+		t.Fatalf("queue file was not written: %v", err)
+	}
+}
+
+func TestRunCommitSubmit_refusesMissingStampBeforeWritingQueue(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"submit",
+		"--queue-dir", queueDir,
+		"--id", "issue-1788-cli",
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"--path", "internal/commitintent/store.go",
+		"-m", "feat(commitintent): add submit cli",
+	})
+	if code != 3 {
+		t.Fatalf("want validation refusal exit 3, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	if _, err := os.Stat(filepath.Join(queueDir, "queue.json")); !os.IsNotExist(err) {
+		t.Fatalf("queue should not be written on refusal, stat err=%v", err)
+	}
+}
+
 func TestRunCommit_positionalPathsAfterDashDash(t *testing.T) {
 	var gotOpts safecommit.Options
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {

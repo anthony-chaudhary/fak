@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/commitintent"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // commitFn is the seam the CLI shim calls; it defaults to the real safecommit.Commit and
@@ -20,8 +24,14 @@ var commitFn = safecommit.Commit
 func cmdCommit(argv []string) { os.Exit(runCommitCommand(os.Stdout, os.Stderr, argv)) }
 
 func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "status" {
+	if len(argv) == 0 {
+		return runCommit(stdout, stderr, argv)
+	}
+	switch argv[0] {
+	case "status":
 		return runCommitStatus(stdout, stderr, argv[1:])
+	case "submit":
+		return runCommitSubmit(stdout, stderr, argv[1:])
 	}
 	return runCommit(stdout, stderr, argv)
 }
@@ -139,6 +149,115 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		renderCommitResult(stdout, res)
 	}
 	return commitExitCode(res)
+}
+
+type commitSubmitResult struct {
+	Queued    bool                      `json:"queued"`
+	QueueDir  string                    `json:"queue_dir"`
+	IntentID  string                    `json:"intent_id"`
+	Sequence  int64                     `json:"sequence"`
+	BaseSHA   string                    `json:"base_sha"`
+	Paths     []string                  `json:"paths"`
+	Subject   string                    `json:"subject"`
+	Stamp     commitintent.Stamp        `json:"stamp"`
+	QueueSize int                       `json:"queue_size"`
+	Record    commitintent.SubmitRecord `json:"record"`
+}
+
+func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("commit submit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var paths pathList
+	fs.Var(&paths, "path", "a repo-relative path for the future commit (repeatable); paths may also be given after --")
+	msg := fs.String("m", "", "commit subject for the intent (mutually exclusive with -F)")
+	msgFile := fs.String("F", "", "read the commit subject from this file ('-' = stdin)")
+	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
+	queueDir := fs.String("queue-dir", "", "commit-intent queue dir (default: <repo>/.fak/commit-intents)")
+	id := fs.String("id", "", "stable intent id (default: generated intent-<unix-nanos>)")
+	base := fs.String("base", "", "base SHA the intent was authored against (default: git rev-parse HEAD)")
+	diffDigest := fs.String("diff-digest", "", "optional sha256:<hex> digest of the authored diff")
+	asJSON := fs.Bool("json", false, "emit the submitted record as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	*dir = pathutil.ExpandTilde(*dir)
+	*queueDir = pathutil.ExpandTilde(*queueDir)
+	paths = append(paths, fs.Args()...)
+	if len(paths) == 0 {
+		fmt.Fprintln(stderr, "fak commit submit: at least one --path (or a path after --) is required")
+		return 2
+	}
+	subject, code := assembleMessage(stdin(), *msg, *msgFile, stderr)
+	if code != 0 {
+		return code
+	}
+	root := resolveRoot(*dir)
+	if *queueDir == "" {
+		*queueDir = commitintent.DefaultQueueDir(root)
+	}
+	baseSHA := strings.TrimSpace(*base)
+	if baseSHA == "" {
+		var err error
+		baseSHA, err = commitSubmitHeadSHA(root)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak commit submit: resolve base sha: %v\n", err)
+			return 1
+		}
+	}
+	intentID := strings.TrimSpace(*id)
+	if intentID == "" {
+		intentID = fmt.Sprintf("intent-%d", time.Now().UTC().UnixNano())
+	}
+	intent := commitintent.Intent{
+		ID:         intentID,
+		BaseSHA:    baseSHA,
+		Paths:      paths,
+		DiffDigest: *diffDigest,
+		Subject:    subject,
+	}
+	store := commitintent.Store{Dir: *queueDir}
+	queue, rec, err := store.Submit(intent)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak commit submit: %v\n", err)
+		return 3
+	}
+	res := commitSubmitResult{
+		Queued:    true,
+		QueueDir:  *queueDir,
+		IntentID:  rec.Intent.ID,
+		Sequence:  rec.Sequence,
+		BaseSHA:   rec.Intent.BaseSHA,
+		Paths:     rec.Intent.Paths,
+		Subject:   rec.Intent.Subject,
+		Stamp:     rec.Intent.Stamp,
+		QueueSize: len(queue.Records),
+		Record:    rec,
+	}
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, res); err != nil {
+			fmt.Fprintf(stderr, "fak commit submit: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "queued %s as #%d (%d path(s)) in %s\n", res.IntentID, res.Sequence, len(res.Paths), res.QueueDir)
+	fmt.Fprintf(stdout, "  base: %s\n", short(res.BaseSHA))
+	fmt.Fprintf(stdout, "  stamp: %s %s\n", res.Stamp.Kind, res.Stamp.Text)
+	return 0
+}
+
+func commitSubmitHeadSHA(root string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // stdin is overridable in tests; defaults to os.Stdin.
