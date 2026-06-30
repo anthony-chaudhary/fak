@@ -22,6 +22,10 @@ func sampleTwoTrack() TwoTrackReport {
 			{Period: "2026-W25", NetUSD: -0.50, CumulativeNetUSD: -0.50},
 			{Period: "2026-W26", NetUSD: 1.00, CumulativeNetUSD: 0.50},
 		},
+		OwnerAttribution: []OwnerAttributionBucket{
+			{Period: "2026-W25", ProviderPromptCacheTokenEquiv: 100, FakAuthoredTokenEquiv: 50, FakKVPrefixReusedTokens: 50},
+			{Period: "2026-W26", ProviderPromptCacheTokenEquiv: 900, FakAuthoredTokenEquiv: 1100, FakKVPrefixReusedTokens: 800, FakCompactionShedTokens: 300},
+		},
 		LatestNetUSD:     1.00,
 		CumulativeNetUSD: 0.50,
 		BrokeEven:        true,
@@ -40,6 +44,9 @@ func TestRenderTwoTrackMarkdown_hasMermaidSparklineAndProvenance(t *testing.T) {
 	}
 	if !strings.Contains(md, "WITNESSED") || !strings.Contains(md, "OBSERVED") {
 		t.Fatalf("markdown must label both provenances (WITNESSED + OBSERVED):\n%s", md)
+	}
+	if !strings.Contains(md, "provider prompt-cache token-equiv") || !strings.Contains(md, "fak-authored token-equiv") {
+		t.Fatalf("markdown must carry the owner attribution token split:\n%s", md)
 	}
 	// A mermaid chart per track (Track 1 reuse + Track 2 net).
 	if n := strings.Count(md, "```mermaid"); n != 2 {

@@ -115,6 +115,12 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 	fmt.Fprintf(&sb, "| latest realized reuse | %.3f (%s) | WITNESSED (kernel) |\n", r.Track1.LatestReuseRatio, r.Track1.LatestTrend)
 	fmt.Fprintf(&sb, "| latest net | $%.4f | OBSERVED ($ projection) |\n", r.LatestNetUSD)
 	fmt.Fprintf(&sb, "| cumulative net | $%.4f (%s) | OBSERVED ($ projection) |\n", r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
+	if len(r.OwnerAttribution) > 0 {
+		last := r.OwnerAttribution[len(r.OwnerAttribution)-1]
+		fmt.Fprintf(&sb, "| provider prompt-cache token-equiv | %.0f | OBSERVED (provider-relayed) |\n", last.ProviderPromptCacheTokenEquiv)
+		fmt.Fprintf(&sb, "| fak-authored token-equiv | %.0f (kv %d, compaction %d, vDSO calls %d) | WITNESSED (fak-authored) |\n",
+			last.FakAuthoredTokenEquiv, last.FakKVPrefixReusedTokens, last.FakCompactionShedTokens, last.FakVDSOAvoidedCalls)
+	}
 	return sb.String()
 }
 
@@ -134,7 +140,11 @@ func savingsSeries(buckets []SavingsBucket) ([]string, []float64) {
 	periods := make([]string, 0, len(buckets))
 	vals := make([]float64, 0, len(buckets))
 	for _, b := range buckets {
-		periods = append(periods, b.Period)
+		label := b.Period
+		if b.Provider != "" || b.Mechanism != "" {
+			label = fmt.Sprintf("%s/%s/%s", b.Period, b.Provider, b.Mechanism)
+		}
+		periods = append(periods, label)
 		vals = append(vals, b.CumulativeNetUSD)
 	}
 	return periods, vals

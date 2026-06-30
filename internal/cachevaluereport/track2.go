@@ -17,8 +17,8 @@ package cachevaluereport
 // billable token axes the provider reports (input / cache_read / cache_creation /
 // output), the compaction token-shed (`--compact-history-budget`, #745), and the
 // $ duals priced from the model's base input/output $/MTok. This package defines
-// the row + reader so the fold has a stable shape to read; the LIVE per-session
-// append (wiring the guard/serve/run exit points) is rung B's own deliverable.
+// the row, reader, and append helper; the CLI front doors wire live session summaries
+// into those rows.
 
 import (
 	"bufio"
@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
 // SavingsLedgerSchema tags each durable OBSERVED-$ row (rung B, #1303). It is
@@ -42,10 +43,37 @@ const SavingsLedgerSchema = "fak-cache-savings-ledger/1"
 // per the #1303 "sibling file" option, so the two provenances never share a row.
 const DefaultSavingsLedgerRel = "docs/nightrun/cache-savings.jsonl"
 
-// SavingsRow is one durable, append-only OBSERVED-$ cache-economics row — Track 2
-// of epic #1301, the per-session shape rung B (#1303) persists. Every field is
-// OBSERVED (provider-relayed or priced from a supplied base rate), NEVER a
-// fak-WITNESSED claim.
+const providerCacheReadMultiplier = 0.1
+
+// SavingsPricing is the caller-supplied base price for the model in play. Zero
+// values keep the row token-observed but dollar-neutral, which is honest when the
+// live session has provider counters but no trusted price table.
+type SavingsPricing struct {
+	InputPerMTokUSD  float64
+	OutputPerMTokUSD float64
+}
+
+// SavingsObservation is the live-session input that becomes one or more durable
+// Track-2 rows. The provider prompt-cache and fak compaction mechanisms are emitted
+// as separate rows so owner/mechanism roll-ups never blend them.
+type SavingsObservation struct {
+	SessionType string
+	Provider    string
+	Context     string
+
+	InputTokens          uint64
+	CacheReadTokens      uint64
+	CacheCreationTokens  uint64
+	OutputTokens         uint64
+	CompactionShedTokens uint64
+
+	Pricing SavingsPricing
+}
+
+// SavingsRow is one durable, append-only cache-economics row — Track 2 of epic #1301,
+// the per-session shape rung B (#1303) persists. Provider prompt-cache token axes are
+// OBSERVED/provider-relayed; fak compaction rows carry a WITNESSED fak-authored shed-token
+// axis whose dollar value is still only a projection from supplied base rates.
 //
 // The token axes are the four the Anthropic usage block reports (mirroring
 // gateway.CacheUsage). The $ axes are priced from the session's base input/output
@@ -57,6 +85,8 @@ type SavingsRow struct {
 	Schema      string `json:"schema"`
 	Date        string `json:"date"` // YYYY-MM-DD (UTC), the bucketing key
 	SessionType string `json:"session_type,omitempty"`
+	Provider    string `json:"provider,omitempty"`
+	Mechanism   string `json:"mechanism,omitempty"`
 	Context     string `json:"context,omitempty"`
 	GeneratedAt string `json:"generated_at,omitempty"`
 
@@ -67,7 +97,7 @@ type SavingsRow struct {
 	OutputTokens        uint64 `json:"output_tokens"`
 
 	// CompactionShedTokens is the input tokens `--compact-history-budget` (#745)
-	// dropped before the turn was sent — a saving on the spend side, OBSERVED.
+	// dropped before the turn was sent — a fak-authored token saving on the spend side.
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens,omitempty"`
 
 	// Saved-token-equivalents (OBSERVED), the read rebate minus the write premium,
@@ -105,15 +135,20 @@ func (r SavingsRow) NetUSDComputed() float64 {
 // component dollar accounts separate (so the NET is always re-derivable) plus the
 // running cumulative NET, which is what crosses break-even.
 type SavingsBucket struct {
-	Period   string `json:"period"` // ISO week, e.g. "2026-W26"
-	Start    string `json:"start"`  // earliest row date in the bucket (YYYY-MM-DD)
-	Sessions int    `json:"sessions"`
+	Period    string `json:"period"` // ISO week, e.g. "2026-W26"
+	Start     string `json:"start"`  // earliest row date in the bucket (YYYY-MM-DD)
+	Provider  string `json:"provider"`
+	Mechanism string `json:"mechanism"`
+	Sessions  int    `json:"sessions"`
 
 	InputTokens          uint64 `json:"input_tokens"`
 	CacheReadTokens      uint64 `json:"cache_read_tokens"`
 	CacheCreationTokens  uint64 `json:"cache_creation_tokens"`
 	OutputTokens         uint64 `json:"output_tokens"`
 	CompactionShedTokens uint64 `json:"compaction_shed_tokens"`
+
+	SavedTokenEquiv    float64 `json:"saved_token_equiv"`
+	NetSavedTokenEquiv float64 `json:"net_saved_token_equiv"`
 
 	RebateUSD          float64 `json:"rebate_usd"`
 	WritePremiumUSD    float64 `json:"write_premium_usd"`
@@ -126,6 +161,85 @@ type SavingsBucket struct {
 	// crosses break-even. BrokeEven is true once it first turns non-negative.
 	CumulativeNetUSD float64 `json:"cumulative_net_usd"`
 	BrokeEven        bool    `json:"broke_even"`
+}
+
+// OwnerAttributionBucket is the report-level owner split, in token-equivalent
+// units. Provider prompt-cache savings stay separate from fak-authored savings;
+// vDSO is currently counted as avoided calls because no token axis exists for it.
+type OwnerAttributionBucket struct {
+	Period                        string  `json:"period"`
+	ProviderPromptCacheTokenEquiv float64 `json:"provider_prompt_cache_token_equiv"`
+	FakAuthoredTokenEquiv         float64 `json:"fak_authored_token_equiv"`
+	FakKVPrefixReusedTokens       uint64  `json:"fak_kv_prefix_reused_tokens"`
+	FakCompactionShedTokens       uint64  `json:"fak_compaction_shed_tokens"`
+	FakVDSOAvoidedCalls           uint64  `json:"fak_vdso_avoided_calls"`
+}
+
+// NewSavingsRows converts one live session observation into the durable Track-2 row shape.
+// Provider prompt-cache and fak-authored compaction are split into separate mechanisms while
+// preserving the same session/date/context labels. The dollar fields are projections from the
+// caller-supplied base $/MTok; with zero pricing they remain zero rather than fabricating a
+// provider-specific price.
+func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
+	now = now.UTC()
+	base := SavingsRow{
+		Schema:      SavingsLedgerSchema,
+		Date:        now.Format("2006-01-02"),
+		SessionType: obs.SessionType,
+		Context:     obs.Context,
+		GeneratedAt: now.Format(time.RFC3339),
+	}
+	var rows []SavingsRow
+	if obs.CacheReadTokens > 0 || obs.CacheCreationTokens > 0 {
+		row := base
+		row.Provider = strings.TrimSpace(obs.Provider)
+		row.Mechanism = "provider_prompt_cache"
+		row.InputTokens = obs.InputTokens
+		row.CacheReadTokens = obs.CacheReadTokens
+		row.CacheCreationTokens = obs.CacheCreationTokens
+		row.OutputTokens = obs.OutputTokens
+		row.SavedTokenEquiv = providerSavedTokenEquiv(obs.CacheReadTokens, obs.CacheCreationTokens)
+		row.NetSavedTokenEquiv = row.SavedTokenEquiv
+		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
+		row.OutputPerMTokUSD = obs.Pricing.OutputPerMTokUSD
+		row.RebateUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CacheReadTokens)*(1-providerCacheReadMultiplier))
+		row.WritePremiumUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CacheCreationTokens)*(vcachegov.WriteMult5Minutes-1))
+		row.SpendUSD = providerSpendUSD(obs)
+		row.NetUSD = row.NetUSDComputed()
+		normalizeSavingsDimensions(&row)
+		rows = append(rows, row)
+	}
+	if obs.CompactionShedTokens > 0 {
+		row := base
+		row.Provider = "fak"
+		row.Mechanism = "compaction_shed"
+		row.CompactionShedTokens = obs.CompactionShedTokens
+		row.SavedTokenEquiv = float64(obs.CompactionShedTokens)
+		row.NetSavedTokenEquiv = row.SavedTokenEquiv
+		row.InputPerMTokUSD = obs.Pricing.InputPerMTokUSD
+		row.OutputPerMTokUSD = obs.Pricing.OutputPerMTokUSD
+		row.CompactionSavedUSD = perMTok(obs.Pricing.InputPerMTokUSD, float64(obs.CompactionShedTokens))
+		row.NetUSD = row.NetUSDComputed()
+		normalizeSavingsDimensions(&row)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func providerSavedTokenEquiv(read, creation uint64) float64 {
+	return float64(read)*(1-providerCacheReadMultiplier) + float64(creation)*(1-vcachegov.WriteMult5Minutes)
+}
+
+func providerSpendUSD(obs SavingsObservation) float64 {
+	inTok := float64(obs.InputTokens) +
+		float64(obs.CacheReadTokens)*providerCacheReadMultiplier +
+		float64(obs.CacheCreationTokens)*vcachegov.WriteMult5Minutes
+	outTok := float64(obs.OutputTokens)
+	return perMTok(obs.Pricing.InputPerMTokUSD, inTok) + perMTok(obs.Pricing.OutputPerMTokUSD, outTok)
+}
+
+func perMTok(price, tokens float64) float64 {
+	return price * tokens / 1_000_000
 }
 
 // ParseSavingsLedger reads OBSERVED-$ rows (Track 2) from JSONL content. Like the
@@ -147,6 +261,7 @@ func ParseSavingsLedger(content string) []SavingsRow {
 		if row.Date == "" {
 			continue
 		}
+		normalizeSavingsDimensions(&row)
 		rows = append(rows, row)
 	}
 	return rows
@@ -168,6 +283,7 @@ func AppendSavingsLine(row SavingsRow) (string, error) {
 	if row.Schema == "" {
 		row.Schema = SavingsLedgerSchema
 	}
+	normalizeSavingsDimensions(&row)
 	b, err := json.Marshal(row)
 	if err != nil {
 		return "", err
@@ -175,10 +291,43 @@ func AppendSavingsLine(row SavingsRow) (string, error) {
 	return string(b), nil
 }
 
-// foldSavings buckets Track-2 rows by ISO week and computes each period's NET plus
-// the running cumulative that crosses break-even. It is pure (no clock, no I/O):
-// bucketing comes from each row's own Date. Rows with an unparseable date are
-// skipped, mirroring the Track-1 fold.
+// AppendSavings appends one durable Track-2 row to the configured JSONL ledger.
+func AppendSavings(ledgerPath string, row SavingsRow) error {
+	line, err := AppendSavingsLine(row)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(ledgerPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeSavingsDimensions(row *SavingsRow) {
+	if strings.TrimSpace(row.Provider) == "" {
+		row.Provider = "unknown_provider"
+	}
+	if strings.TrimSpace(row.Mechanism) == "" {
+		switch {
+		case row.CacheReadTokens > 0 || row.CacheCreationTokens > 0:
+			row.Mechanism = "provider_prompt_cache"
+		case row.CompactionShedTokens > 0:
+			row.Mechanism = "compaction_shed"
+		default:
+			row.Mechanism = "unknown_mechanism"
+		}
+	}
+}
+
+// foldSavings buckets Track-2 rows by ISO week, provider, and mechanism, then computes each
+// bucket's NET plus the running cumulative that crosses break-even. It is pure (no clock, no
+// I/O): bucketing comes from each row's own Date. Rows with an unparseable date are skipped,
+// mirroring the Track-1 fold.
 func foldSavings(rows []SavingsRow) []SavingsBucket {
 	type agg struct {
 		b     SavingsBucket
@@ -186,14 +335,16 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 	}
 	byPeriod := map[string]*agg{}
 	for _, row := range rows {
+		normalizeSavingsDimensions(&row)
 		d, err := time.Parse("2006-01-02", row.Date)
 		if err != nil {
 			continue
 		}
-		key := isoWeek(d)
+		period := isoWeek(d)
+		key := period + "\x00" + row.Provider + "\x00" + row.Mechanism
 		a := byPeriod[key]
 		if a == nil {
-			a = &agg{b: SavingsBucket{Period: key}, start: d}
+			a = &agg{b: SavingsBucket{Period: period, Provider: row.Provider, Mechanism: row.Mechanism}, start: d}
 			byPeriod[key] = a
 		}
 		if d.Before(a.start) {
@@ -206,6 +357,8 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		b.CacheCreationTokens += row.CacheCreationTokens
 		b.OutputTokens += row.OutputTokens
 		b.CompactionShedTokens += row.CompactionShedTokens
+		b.SavedTokenEquiv += row.SavedTokenEquiv
+		b.NetSavedTokenEquiv += row.NetSavedTokenEquiv
 		b.RebateUSD += row.RebateUSD
 		b.WritePremiumUSD += row.WritePremiumUSD
 		b.SpendUSD += row.SpendUSD
@@ -250,6 +403,8 @@ type TwoTrackReport struct {
 	Track1 Report          `json:"track1_witnessed_kernel"`
 	Track2 []SavingsBucket `json:"track2_observed_usd"`
 
+	OwnerAttribution []OwnerAttributionBucket `json:"owner_attribution"`
+
 	// LatestNetUSD / CumulativeNetUSD are the most-recent period's net and the
 	// running total through it — the P&L headline. BrokeEven is whether the running
 	// total has crossed zero.
@@ -269,7 +424,7 @@ type TwoTrackReport struct {
 }
 
 // projectionFence is the #1301 / #1304 honesty fence string.
-const projectionFence = "OBSERVED cost projection (provider-relayed cache_read/cache_creation priced from a supplied base $/MTok), never a fak-WITNESSED claim; Track 1 (WITNESSED) and Track 2 (OBSERVED $) stay side by side, never blended"
+const projectionFence = "cost projection over labelled sources (OBSERVED provider cache_read/cache_creation plus WITNESSED fak-authored token axes priced from supplied base $/MTok), never blended into one cache claim; Track 1 (WITNESSED) and Track 2 (OBSERVED/projected $) stay side by side"
 
 // FoldTwoTrack is the #1304 two-track P&L fold: it folds the WITNESSED kernel rows
 // (Track 1) and the OBSERVED-$ rows (Track 2) into one report that shows both
@@ -282,13 +437,14 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 	t2 := foldSavings(track2)
 
 	rep := TwoTrackReport{
-		Schema:          Schema,
-		GeneratedAt:     now.UTC().Format(time.RFC3339),
-		Track1:          t1,
-		Track2:          t2,
-		ProjectionFence: projectionFence,
-		OK:              true,
-		Verdict:         "INSUFFICIENT",
+		Schema:           Schema,
+		GeneratedAt:      now.UTC().Format(time.RFC3339),
+		Track1:           t1,
+		Track2:           t2,
+		OwnerAttribution: foldOwnerAttribution(t1.Buckets, t2),
+		ProjectionFence:  projectionFence,
+		OK:               true,
+		Verdict:          "INSUFFICIENT",
 	}
 	if n := len(t2); n > 0 {
 		last := t2[n-1]
@@ -322,6 +478,57 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 	return rep
 }
 
+func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttributionBucket {
+	byPeriod := map[string]*OwnerAttributionBucket{}
+	ensure := func(period string) *OwnerAttributionBucket {
+		b := byPeriod[period]
+		if b == nil {
+			b = &OwnerAttributionBucket{Period: period}
+			byPeriod[period] = b
+		}
+		return b
+	}
+	for _, b := range track1 {
+		if b.Period == "" {
+			continue
+		}
+		dst := ensure(b.Period)
+		dst.FakKVPrefixReusedTokens += b.ReusedTokens
+		dst.FakAuthoredTokenEquiv += float64(b.ReusedTokens)
+	}
+	for _, b := range track2 {
+		if b.Period == "" {
+			continue
+		}
+		dst := ensure(b.Period)
+		switch {
+		case b.Provider == "fak" || strings.HasPrefix(b.Mechanism, "compaction"):
+			dst.FakCompactionShedTokens += b.CompactionShedTokens
+			if b.NetSavedTokenEquiv != 0 {
+				dst.FakAuthoredTokenEquiv += b.NetSavedTokenEquiv
+			} else {
+				dst.FakAuthoredTokenEquiv += float64(b.CompactionShedTokens)
+			}
+		case b.Mechanism == "provider_prompt_cache":
+			if b.NetSavedTokenEquiv != 0 {
+				dst.ProviderPromptCacheTokenEquiv += b.NetSavedTokenEquiv
+			} else {
+				dst.ProviderPromptCacheTokenEquiv += b.SavedTokenEquiv
+			}
+		}
+	}
+	keys := make([]string, 0, len(byPeriod))
+	for k := range byPeriod {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]OwnerAttributionBucket, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, *byPeriod[k])
+	}
+	return out
+}
+
 func breakEvenLabel(broke bool) string {
 	if broke {
 		return "broke even"
@@ -349,16 +556,28 @@ func RenderTwoTrack(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "  no OBSERVED-$ rows yet (Track-2 ledger empty)\n")
 		return sb.String()
 	}
-	fmt.Fprintf(&sb, "  %-9s  %5s  %10s  %10s  %10s  %10s  %12s  %s\n",
-		"week", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "cumulative$ (break-even)")
+	fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5s  %10s  %10s  %10s  %10s  %12s  %s\n",
+		"week", "provider", "mechanism", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "cumulative$ (break-even)")
 	for _, b := range r.Track2 {
 		be := ""
 		if b.BrokeEven {
 			be = "  >= break-even"
 		}
-		fmt.Fprintf(&sb, "  %-9s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %12.4f%s\n",
-			b.Period, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
+		fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %12.4f%s\n",
+			b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
 			b.NetUSD, b.CumulativeNetUSD, be)
+	}
+	fmt.Fprintf(&sb, "\nOwner attribution (token-equiv; provider prompt-cache vs fak-authored)\n")
+	if len(r.OwnerAttribution) == 0 {
+		fmt.Fprintf(&sb, "  no owner-attribution rows yet\n")
+		return sb.String()
+	}
+	fmt.Fprintf(&sb, "  %-9s  %13s  %10s  %10s  %11s  %s\n",
+		"week", "provider_teq", "fak_teq", "kv_tok", "compact_tok", "vdso_calls")
+	for _, b := range r.OwnerAttribution {
+		fmt.Fprintf(&sb, "  %-9s  %13.0f  %10.0f  %10d  %11d  %d\n",
+			b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv,
+			b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 	}
 	return sb.String()
 }
