@@ -59,12 +59,29 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("Generation intent: now", p)
         self.assertIn("immediate trunk-safe", p)
         self.assertIn("orthogonal to priority", p)
+        self.assertIn("Generation frame: stream=gen/now", p)
+        self.assertIn("allowed risk=low", p)
+        self.assertIn("proof bar=focused test", p)
+
+    def test_next_generation_frame_routes_prompt_shape(self) -> None:
+        mod = load()
+        issue = dict(self.ISSUE, labels=[{"name": "generation"}, {"name": "gen/next"}])
+        p = mod.render_prompt(issue, "tools", workspace="C:/work/fak")
+        self.assertIn("Generation intent: next", p)
+        self.assertIn("Generation frame: stream=gen/next", p)
+        self.assertIn("allowed risk=moderate only behind a gate", p)
+        self.assertIn("proof bar=contract test plus promotion evidence", p)
+        self.assertIn("scope width=near-term foundation", p)
+        self.assertIn("expected artifact=agent-runnable schema", p)
+        self.assertIn("name promotion evidence, demotion/retirement evidence", p)
 
     def test_unclassified_generation_tells_worker_not_to_guess(self) -> None:
         mod = load()
         p = mod.render_prompt(self.ISSUE, "tools", workspace="C:/work/fak")
         self.assertIn("Generation intent: unclassified", p)
         self.assertIn("avoid guessing", p)
+        self.assertIn("Generation frame: stream=unclassified", p)
+        self.assertIn("label/milestone repair", p)
 
     def test_states_the_git_laws(self) -> None:
         mod = load()

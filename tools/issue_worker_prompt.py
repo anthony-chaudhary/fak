@@ -112,6 +112,35 @@ def _generation_intent(issue: dict[str, Any]) -> str:
     return "unclassified — read docs/generation.md and avoid guessing; keep needs-triage if the horizon is unclear"
 
 
+def _generation_frame(issue: dict[str, Any]) -> str:
+    labs = issue.get("labels") or []
+    names = {lab.get("name") for lab in labs if isinstance(lab, dict) and lab.get("name")}
+    if "gen/now" in names:
+        return ("stream=gen/now; allowed risk=low, trunk-safe, reversible; "
+                "proof bar=focused test or captured command output before closing; "
+                "scope width=one leaf or one operator surface; "
+                "expected artifact=shipped code, doc, report, or configuration on main")
+    if "gen/next" in names:
+        return ("stream=gen/next; allowed risk=moderate only behind a gate, dogfood path, or handoff contract; "
+                "proof bar=contract test plus promotion evidence that names what moves it toward now; "
+                "scope width=near-term foundation, one prompt/dispatch/report seam; "
+                "expected artifact=agent-runnable schema, prompt frame, gated behavior, or operator readout")
+    if "gen/second-next" in names:
+        return ("stream=gen/second-next; allowed risk=architectural exploration, never default exposure; "
+                "proof bar=simulation, compatibility policy, or dependency edge with demotion criteria; "
+                "scope width=cross-generation option or interface boundary; "
+                "expected artifact=design memo, compatibility test, lifecycle model, or prototype behind an explicit gate")
+    if "gen/future" in names:
+        return ("stream=gen/future; allowed risk=research and option valuation only, not current-product commitment; "
+                "proof bar=sourced memo, kill criteria, or decision model with assumptions stated; "
+                "scope width=long-horizon market, standards, benchmark, or portfolio option; "
+                "expected artifact=research note, scorecard, simulator spec, or narrative that preserves non-goals")
+    return ("stream=unclassified; allowed risk=triage only; "
+            "proof bar=classify the horizon from issue evidence before implementation; "
+            "scope width=label/milestone repair or a clarification note; "
+            "expected artifact=updated labels, milestone, or final report naming why classification is blocked")
+
+
 def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
     """Render the resolution prompt for ONE issue. Pure: no I/O."""
     n = issue.get("number")
@@ -122,6 +151,7 @@ def render_prompt(issue: dict[str, Any], lane: str, *, workspace: str) -> str:
         body = body[:1800] + "\n…(truncated — read the full issue with `gh issue view`)"
     labels = _labels(issue)
     generation = _generation_intent(issue)
+    generation_frame = _generation_frame(issue)
 
     return f"""your goal: resolve GitHub issue #{n} ({title}) with the smallest correct \
 change that genuinely closes it, then ship it on `main` citing `#{n}` in the \
@@ -136,6 +166,8 @@ an opencode worker does NOT, so this read is how both backends start warm (it is
 a harmless no-op if the mirror is absent). \
 This issue routed to the `{lane}` lane (its file-tree). Labels: {labels}.
 Generation intent: {generation}. Generation is orthogonal to priority, shared trunk, and runtime feature gates.
+Generation frame: {generation_frame}.
+When closing generation work, name promotion evidence, demotion/retirement evidence, and at least one invalidating assumption in the artifact or final report.
 
 issue body (verbatim, may be truncated — re-read live):
 ---
