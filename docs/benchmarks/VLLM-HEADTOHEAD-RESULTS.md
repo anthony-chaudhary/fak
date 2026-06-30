@@ -170,7 +170,7 @@ SGLang, completion tok/s at 64 requests/concurrency:
 adjudication / coherence / measurement plane, **not raw tok/s** — single-stream/raw
 throughput is *not* fak's axis. Source:
 [`QWEN36-27B-GPU-SERVER-RESULTS.md`](QWEN36-27B-GPU-SERVER-RESULTS.md) §2 and
-`experiments/qwen36/dgx-r4-20260622/compare.json`. The vLLM tax (§3) is *expected* to behave
+`experiments/qwen36/gpu-server-r4-20260622/compare.json`. The vLLM tax (§3) is *expected* to behave
 similarly and is **to be measured, not assumed**.
 
 ## 5. Honest fences
@@ -208,7 +208,7 @@ python tools/vllm_tax_witness.py \
 
 Every shipped number from such a run must land a committed artifact (the gcp_bench run dir,
 `experiments/vllm/adjudication-tax-witness.json`) — exactly as the SGLang run did under
-`experiments/qwen36/dgx-r4-20260622/`.
+`experiments/qwen36/gpu-server-r4-20260622/`.
 
 ## Related
 

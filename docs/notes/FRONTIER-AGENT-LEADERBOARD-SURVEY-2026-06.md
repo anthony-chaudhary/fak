@@ -29,7 +29,7 @@ controls it**:
 
 | Number | Value | Witness artifact / row |
 |---|---|---|
-| Gateway tax at saturation | **~3 %** (peak C=64 0.75×; C=128 0.97×) | `experiments/qwen36/dgx-r4-20260622/compare.json` ([#921](https://github.com/anthony-chaudhary/fak/issues/921) Rung-4, commit `a2559041`); `BENCHMARK-AUTHORITY.md` row "Qwen3.6-27B 8-GPU SGLang serving"; `docs/benchmarks/VLLM-HEADTOHEAD-RESULTS.md` §4 |
+| Gateway tax at saturation | **~3 %** (peak C=64 0.75×; C=128 0.97×) | `experiments/qwen36/gpu-server-r4-20260622/compare.json` ([#921](https://github.com/anthony-chaudhary/fak/issues/921) Rung-4, commit `a2559041`); `BENCHMARK-AUTHORITY.md` row "Qwen3.6-27B 8-GPU SGLang serving"; `docs/benchmarks/VLLM-HEADTOHEAD-RESULTS.md` §4 |
 | KV-reuse cost saving (marginal-over-TUNED) | **~1.0–1.31× single-session; 4.1× on a 50×5 fleet** (`net_value_add_vs_tuned=4.125`) | `experiments/session/headline-qwen-50x5.json` (commit `2bbda6f`); `BENCHMARK-AUTHORITY.md` rows L35/L367/L376 |
 | Injection / refusal floor (model-free) | **full-stack ASR 0.000 vs detection-only 0.763**, 38-case corpus (29/38 reach context detection-only, 0/38 full-stack) | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` (`asr_fullstack=0`, `asr_detection=0.763…`) |
 | Drop-in decide cost floor | **~0.55 ns/op · 0 allocs** registry read; 362 ns full allow | `internal/abi/registry_scaling_test.go`; `BENCHMARK-AUTHORITY.md` row "Adjudication overhead… [#451]" |
@@ -63,7 +63,7 @@ that number's `WITNESSED`/`OBSERVED` label · verdict.
 **BFCL V4 is the only board in this family that carries *both* a USD-cost and a
 latency-seconds column.** That is what makes a *held-accuracy-constant, fak-in-vs-fak-out*
 delta directly postable against an **existing public column** — the ~3 % gateway tax at
-saturation (WITNESSED, `dgx-r4-20260622/compare.json`) and the KV-reuse marginal-over-TUNED
+saturation (WITNESSED, `gpu-server-r4-20260622/compare.json`) and the KV-reuse marginal-over-TUNED
 saving (1.0–1.31× single / 4.1× on a 50×5 fleet, WITNESSED, `headline-qwen-50x5.json`) — with
 **no invented metric**. The alternatives each fail the cost-axis test in a specific way: AA
 and Galileo expose a cost column but only via *self-reproduce* (no controlled board slot);
