@@ -49,6 +49,8 @@ type CommitLintReport struct {
 	PathLanes      []string `json:"path_lanes,omitempty"`      // the lanes the paths fall in (deduped, sorted)
 	LeafMatches    bool     `json:"leaf_matches"`              // <leaf> is an acceptable stamp for those lanes
 	SuggestTrailer string   `json:"suggest_trailer,omitempty"` // the trailer the paths imply, e.g. "(fak gateway)"
+	Score          int      `json:"score"`                     // 0-100 commit-readiness score; notes lower it, issues crater it
+	Grade          string   `json:"grade"`                     // A-F grade derived from Score
 	IssueRefs      []int    `json:"issue_refs,omitempty"`      // every #N referenced in the message (#312)
 	IssueResolving bool     `json:"issue_resolving"`           // a #N is in a resolving position the closure audit binds (#312)
 	Issues         []string `json:"issues,omitempty"`          // BLOCKING defects, each with a fix
@@ -167,7 +169,41 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 	}
 
 	r.OK = len(r.Issues) == 0
+	r.Score = commitLintScore(r)
+	r.Grade = commitLintGrade(r.Score)
 	return r
+}
+
+func commitLintScore(r CommitLintReport) int {
+	score := 100 - 35*len(r.Issues) - 6*len(r.Notes)
+	if !r.Gradeable {
+		score -= 10
+	}
+	if r.StampKind == "none" {
+		score -= 10
+	}
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
+}
+
+func commitLintGrade(score int) string {
+	switch {
+	case score >= 90:
+		return "A"
+	case score >= 80:
+		return "B"
+	case score >= 70:
+		return "C"
+	case score >= 60:
+		return "D"
+	default:
+		return "F"
+	}
 }
 
 // StampOf is the exported wrapper over stampOf: it returns the ship-stamp

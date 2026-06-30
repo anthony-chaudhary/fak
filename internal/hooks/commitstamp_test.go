@@ -75,6 +75,35 @@ func TestLintCommitMessage_cleanLeafAndShim(t *testing.T) {
 	if !r.LeafRecognized {
 		t.Fatalf("gateway should be a recognized declared lane")
 	}
+	if r.Score <= 0 || r.Grade == "" {
+		t.Fatalf("preview should include a readiness score and grade, got score=%d grade=%q", r.Score, r.Grade)
+	}
+}
+
+func TestLintCommitMessageScore(t *testing.T) {
+	root := writeLintRepo(t)
+	clean := LintCommitMessage(
+		"feat(gateway): add the slot reclaim path #123 (fak gateway)",
+		[]string{"internal/gateway/server.go", "cmd/fak/serve.go"},
+		root,
+	)
+	if clean.Score != 100 || clean.Grade != "A" {
+		t.Fatalf("clean score = %d/%s, want 100/A (notes=%v issues=%v)", clean.Score, clean.Grade, clean.Notes, clean.Issues)
+	}
+
+	advisory := LintCommitMessage(
+		"feat(gateway): add the slot reclaim path (fak gateway)",
+		[]string{"internal/gateway/server.go"},
+		root,
+	)
+	if !advisory.OK || advisory.Score >= clean.Score || advisory.Score < 90 {
+		t.Fatalf("advisory score = %d ok=%v notes=%v, want A-range below clean", advisory.Score, advisory.OK, advisory.Notes)
+	}
+
+	bad := LintCommitMessage("gateway slot reclaim improvements", []string{"internal/gateway/server.go"}, root)
+	if bad.OK || bad.Score >= advisory.Score || bad.Grade == "A" {
+		t.Fatalf("bad score = %d/%s ok=%v issues=%v, want lower non-A", bad.Score, bad.Grade, bad.OK, bad.Issues)
+	}
 }
 
 func TestLintCommitMessage_nounLedNoTrailer(t *testing.T) {
