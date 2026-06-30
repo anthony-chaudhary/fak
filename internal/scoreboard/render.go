@@ -26,6 +26,16 @@ type Update struct {
 	Actions []Action // "do this next" affordances (e.g. an alert -> owning skill)
 }
 
+// ChangeKey is the stable dedupe key for a scoreboard metric. The title names
+// the visible card; DebtKey splits scorecards that intentionally post more than
+// one headline number under the same title.
+func (u Update) ChangeKey() string {
+	if strings.TrimSpace(u.DebtKey) == "" {
+		return strings.TrimSpace(u.Title)
+	}
+	return strings.TrimSpace(u.Title) + ":" + strings.TrimSpace(u.DebtKey)
+}
+
 // Action is a "do this next" affordance attached to a card — e.g. an alert that
 // points the heaviest drift signal at the skill that retires it. A URL renders a
 // Slack link-button (a button with a `url` needs NO interactivity endpoint, so the
