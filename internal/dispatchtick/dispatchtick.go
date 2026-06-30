@@ -108,7 +108,10 @@ func BuildWorkerCommand(backend, prompt, model string) ([]string, error) {
 	case "claude":
 		return []string{"claude", "-p", "--permission-mode", "bypassPermissions", prompt}, nil
 	case "opencode":
-		cmd := []string{"opencode", "run", "--dangerously-skip-permissions"}
+		// --print-logs is required for unattended workers: opencode writes run-level
+		// failures such as GLM quota walls to its logger, and without this flag #1275
+		// degrades into a banner-only no-op log.
+		cmd := []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions"}
 		if strings.TrimSpace(model) != "" {
 			cmd = append(cmd, "-m", model)
 		}

@@ -136,9 +136,14 @@ def build_command(lane: str, backend: str) -> list[str]:
             CLAUDE_AGENT_PROMPT.format(lane=lane),
         ]
     if backend == "opencode":
+        # --print-logs surfaces opencode's run-level failures (quota wall, unreachable
+        # model) — which `run` routes to its logger on STDERR, not stdout — into the
+        # worker log instead of leaving a silent banner-only no-op (#1275). Mirrors the
+        # detached spawn arm in issue_resolve_dispatch.build_worker_command.
         return [
             "opencode",
             "run",
+            "--print-logs",
             "--dangerously-skip-permissions",
             "--agent",
             OPENCODE_AGENT,

@@ -104,7 +104,9 @@ func buildCommand(lane, backend string) ([]string, error) {
 	case "claude":
 		return []string{"claude", "-p", "--permission-mode", "bypassPermissions", fmt.Sprintf(claudeAgentPrompt, lane)}, nil
 	case "opencode":
-		return []string{"opencode", "run", "--dangerously-skip-permissions", "--agent", opencodeAgent, fmt.Sprintf(opencodeMessage, lane)}, nil
+		// --print-logs surfaces opencode run-level failures in unattended logs;
+		// otherwise a GLM quota wall can look like a banner-only no-op (#1275).
+		return []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "--agent", opencodeAgent, fmt.Sprintf(opencodeMessage, lane)}, nil
 	}
 	return nil, fmt.Errorf("unknown backend %q; expected one of %v", backend, backends)
 }

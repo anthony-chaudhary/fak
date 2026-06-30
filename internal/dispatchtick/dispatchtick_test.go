@@ -21,7 +21,7 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			name:    "opencode pins model",
 			backend: "opencode",
 			model:   "glm-5.2",
-			want:    []string{"opencode", "run", "--dangerously-skip-permissions", "-m", "glm-5.2", "resolve it"},
+			want:    []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "-m", "glm-5.2", "resolve it"},
 		},
 		{
 			name:    "codex exec",

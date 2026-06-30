@@ -51,6 +51,9 @@ class DispatchWorkerTest(unittest.TestCase):
         cmd = mod.build_command("agent", "opencode")
         self.assertEqual(cmd[0], "opencode")
         self.assertIn("--dangerously-skip-permissions", cmd)
+        # --print-logs surfaces opencode's run-level failures into the worker log
+        # instead of a silent banner-only no-op (#1275).
+        self.assertIn("--print-logs", cmd)
         self.assertEqual(cmd[cmd.index("--agent") + 1], "dos-dispatch")
         self.assertEqual(cmd[-1], "dispatch lane agent")
 

@@ -63,6 +63,9 @@ func TestOpencodeCommandUsesDispatchAgentAndSkipPermissions(t *testing.T) {
 	if !contains(cmd, "--dangerously-skip-permissions") {
 		t.Error("opencode must skip permissions")
 	}
+	if !contains(cmd, "--print-logs") {
+		t.Error("opencode must print run logs for unattended quota/error diagnosis")
+	}
 	if idx := indexOf(cmd, "--agent"); idx < 0 || cmd[idx+1] != "dos-dispatch" {
 		t.Errorf("opencode agent wrong: %v", cmd)
 	}
