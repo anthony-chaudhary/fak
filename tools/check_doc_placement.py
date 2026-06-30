@@ -36,7 +36,7 @@ ALLOWED_ROOT_MD = {
     # entry points
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "LEARNING-PATH.md",
     # contributor + agent contract
-    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "CLAUDE.md",
+    "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md",
     # policy / security
     "SECURITY.md", "PUBLIC-SCRUB-POLICY.md",
     # public front-door docs: deliberately at the root because README.md and
@@ -161,7 +161,7 @@ def main() -> int:
             f"  fix: git mv <doc> {NOTES_DIR}/  &&  add an entry to INDEX.md.\n"
             f"  the root holds only entry-point/meta files "
             f"(README, START-HERE, INSTALL, INDEX, CONTRIBUTING, CLA, SECURITY, "
-            f"PUBLIC-SCRUB-POLICY, AGENTS, CLAUDE).",
+            f"PUBLIC-SCRUB-POLICY, AGENTS, AGENT, CLAUDE, GEMINI).",
             file=sys.stderr,
         )
     if unindexed:
