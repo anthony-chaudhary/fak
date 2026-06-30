@@ -69,6 +69,7 @@ var tier = map[string]int{
 	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
 	"guardroute":           4,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       4,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
+	"propagationscore":     4,                // convention-propagation scorecard + fan-out: measures how far a proven scorecard convention (shared kernel/--compare/--markdown) has fanned across the family, files one deduped issue per laggard via dogfoodissues(3); imports dogfoodissues(3)+pkg/scorecard+stdlib, off the hot path.
 	"conflationscore":      1,                // pure Go port of tools/conflation_scorecard.py (provenance-honesty stick); stdlib-only, off the hot path.
 	"heavinessscore":       1,                // operator-heaviness scorecard over the cmd/fak dispatch table + guard flag set + dos.toml reasons + llms.txt doc map; imports pkg/scorecard, off the hot path.
 	"scorecardpane":        1,                // pure Go port of tools/scorecard_control_pane.py (portfolio debt-ratchet fold) + tools/repo_hygiene_scorecard.py (the tree-wide hygiene fold); stdlib-only, off the hot path.

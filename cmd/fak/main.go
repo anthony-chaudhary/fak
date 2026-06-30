@@ -274,6 +274,10 @@ func main() {
 		cmdDogfoodScore(os.Args[2:])
 	case "concept-usage-score":
 		cmdConceptUsageScore(os.Args[2:])
+	case "propagation-scorecard":
+		cmdPropagationScorecard(os.Args[2:])
+	case "propagation-debt-dispatch":
+		cmdPropagationDebtDispatch(os.Args[2:])
 	case "maturity":
 		cmdMaturity(os.Args[2:])
 	case "token-defaults-scorecard":
