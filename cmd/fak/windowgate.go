@@ -46,12 +46,12 @@ type liveTaskPayload struct {
 }
 
 type liveWindowPayload struct {
-	OK         bool                                `json:"ok"`
-	Scanned    int                                 `json:"scanned"`
-	Violations []string                            `json:"violations,omitempty"`
-	Watchlist  []string                            `json:"watchlist,omitempty"`
-	Findings   []windowgate.VisibleWindowFinding   `json:"findings,omitempty"`
-	Categories map[string]int                      `json:"categories,omitempty"`
+	OK         bool                              `json:"ok"`
+	Scanned    int                               `json:"scanned"`
+	Violations []string                          `json:"violations,omitempty"`
+	Watchlist  []string                          `json:"watchlist,omitempty"`
+	Findings   []windowgate.VisibleWindowFinding `json:"findings,omitempty"`
+	Categories map[string]int                    `json:"categories,omitempty"`
 }
 
 func cmdWindowgate(argv []string) { os.Exit(runWindowgate(os.Stdout, os.Stderr, argv)) }
