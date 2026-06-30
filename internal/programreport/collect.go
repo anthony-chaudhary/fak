@@ -1,6 +1,6 @@
 package programreport
 
-// Live runners for `fak program`: the impure reads behind the two ongoing programs'
+// Live runners for `fak program`: the impure reads behind the ongoing programs'
 // frontier signals. Kept separate from the pure fold (programreport.go) so the
 // interpreter/fold/ledger stay unit-testable with no process and no repo.
 //
@@ -18,6 +18,10 @@ package programreport
 //     tolerance; ADVANCING when it rose; HOLDING/INSUFFICIENT otherwise. The honesty
 //     fence (the marginal-over-tuned-warm-KV value family) is carried onto the signal
 //     so a reader can never mistake it for the forbidden vs-naive multiple.
+//   - HUMAN OPERATOR EFFECTIVENESS — the frontier is "can a human still steer the
+//     system without rereading every transcript?". The first deterministic proxy is
+//     operator-heaviness pressure from the source-reading scorecard. Metric is
+//     max(0, 100-pressure), forced to zero when hard heaviness_debt exists.
 
 import (
 	"fmt"
@@ -25,7 +29,9 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/heavinessscore"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 )
 
@@ -62,6 +68,7 @@ func Collect(root, cacheLedgerPath string, windowDays int) Programs {
 	signals := []Signal{
 		kernelSignal(root, windowDays),
 		cacheSignal(cacheLedgerPath),
+		humanOperatorSignal(root),
 	}
 	return InterpretPrograms(signals)
 }
@@ -136,6 +143,42 @@ func cacheSignal(ledgerPath string) Signal {
 	return s
 }
 
+// humanOperatorSignal witnesses the human-operator-effectiveness frontier from the
+// source-reading operator-heaviness scorecard. It is intentionally conservative:
+// hard heaviness debt is a regression, non-zero pressure is holding (visible but not
+// red), and zero pressure is advancing because the operator surface is light today.
+func humanOperatorSignal(root string) Signal {
+	p, _ := worktype.ProgramFor(worktype.HumanOperatorEffectiveness)
+	s := Signal{
+		Class: worktype.HumanOperatorEffectiveness,
+		Label: worktype.HumanOperatorEffectiveness.Label(),
+		Doc:   p.OperatingDoc,
+		Note:  "operator-heaviness proxy: 100 - heaviness_pressure; hard heaviness_debt means the human steering surface has real debt",
+	}
+	payload := heavinessscore.Build(root)
+	pressure := corpusInt(payload.Corpus, "heaviness_pressure")
+	debt := corpusInt(payload.Corpus, heavinessscore.DebtKey)
+	lightness := 100 - pressure
+	if lightness < 0 {
+		lightness = 0
+	}
+	s.Metric = float64(lightness)
+	s.OK = true
+	switch {
+	case debt > 0 || !payload.OK:
+		s.Direction = "regressed"
+		s.Metric = 0
+		s.Frontier = fmt.Sprintf("operator-heaviness debt %d, pressure %d", debt, pressure)
+	case pressure == 0:
+		s.Direction = "advancing"
+		s.Frontier = "operator surface at zero heaviness pressure"
+	default:
+		s.Direction = "holding"
+		s.Frontier = fmt.Sprintf("operator-heaviness pressure %d (lightness %d/100)", pressure, lightness)
+	}
+	return s
+}
+
 // perfShipsInWindow counts non-merge commits in the trailing window whose subject
 // carries a real per-leaf ship-stamp (hooks.StampOf grades trailer|direct) on a perf
 // leaf. It reuses the SAME grammar the pre-commit lint + the cadence work dimension
@@ -143,6 +186,7 @@ func cacheSignal(ledgerPath string) Signal {
 func perfShipsInWindow(root string, windowDays int) (int, string) {
 	since := windowSince(windowDays)
 	cmd := exec.Command("git", "log", "--no-merges", "--since="+since, "--format=%s", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -167,6 +211,7 @@ func perfShipsInWindow(root string, windowDays int) (int, string) {
 // pattern).
 func HeadCommit(root string) string {
 	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -189,6 +234,31 @@ func windowLabel(windowDays int) string {
 
 func ratioFrontier(prefix string, from, to float64) string {
 	return fmt.Sprintf("%s %.3f -> %.3f", prefix, from, to)
+}
+
+func corpusInt(c map[string]any, key string) int {
+	return anyInt(c[key])
+}
+
+func anyInt(v any) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case float64:
+		if x < 0 {
+			return int(x - 0.5)
+		}
+		return int(x + 0.5)
+	case float32:
+		if x < 0 {
+			return int(x - 0.5)
+		}
+		return int(x + 0.5)
+	default:
+		return 0
+	}
 }
 
 func gitErr(err error) string {

@@ -1,6 +1,8 @@
 package programreport
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,14 +17,18 @@ func cacheHolding() Signal {
 	return Signal{Class: worktype.CacheOptimization, Label: "cache-optimization", Frontier: "realized reuse 0.600 -> 0.620", Metric: 0.62, Direction: "holding", OK: true, Note: "marginal-over-tuned-warm-KV"}
 }
 
+func humanHolding() Signal {
+	return Signal{Class: worktype.HumanOperatorEffectiveness, Label: "human-operator-effectiveness", Frontier: "operator-heaviness pressure 14", Metric: 86, Direction: "holding", OK: true}
+}
+
 // TestInterpretProgramsTally folds clean signals and pins the tally + verdict.
 func TestInterpretProgramsTally(t *testing.T) {
-	p := InterpretPrograms([]Signal{kernelAdvancing(), cacheHolding()})
+	p := InterpretPrograms([]Signal{kernelAdvancing(), cacheHolding(), humanHolding()})
 	if p.Err != "" || !p.OK {
-		t.Fatalf("two measured programs must fold cleanly, got err=%q ok=%v", p.Err, p.OK)
+		t.Fatalf("measured programs must fold cleanly, got err=%q ok=%v", p.Err, p.OK)
 	}
-	if p.Tracked != 2 || p.Measured != 2 {
-		t.Fatalf("tracked/measured = %d/%d, want 2/2", p.Tracked, p.Measured)
+	if p.Tracked != 3 || p.Measured != 3 {
+		t.Fatalf("tracked/measured = %d/%d, want 3/3", p.Tracked, p.Measured)
 	}
 	if p.Advancing != 1 || p.Regressed != 0 {
 		t.Fatalf("advancing/regressed = %d/%d, want 1/0", p.Advancing, p.Regressed)
@@ -87,11 +93,11 @@ func TestFoldRegressedFrontierIsAdvisoryNotGated(t *testing.T) {
 // TestLedgerRoundTripAndPerClassColumns proves the durable row round-trips and that
 // the per-class metric columns are stamped from the right signal regardless of order.
 func TestLedgerRoundTripAndPerClassColumns(t *testing.T) {
-	p := InterpretPrograms([]Signal{cacheHolding(), kernelAdvancing()}) // cache first on purpose
+	p := InterpretPrograms([]Signal{cacheHolding(), humanHolding(), kernelAdvancing()}) // cache first on purpose
 	r := Fold(p, FoldOpts{Date: "2026-06-29", Commit: "abc", GeneratedAt: "2026-06-29T00:00:00Z"})
 	row := RowFromReport(r)
-	if row.KernelMetric != 3 || row.CacheMetric != 0.62 {
-		t.Fatalf("per-class columns mis-stamped: kernel=%.3f cache=%.3f, want 3/0.62", row.KernelMetric, row.CacheMetric)
+	if row.KernelMetric != 3 || row.CacheMetric != 0.62 || row.HumanMetric != 86 {
+		t.Fatalf("per-class columns mis-stamped: kernel=%.3f cache=%.3f human=%.3f, want 3/0.62/86", row.KernelMetric, row.CacheMetric, row.HumanMetric)
 	}
 	line, err := AppendLedgerLine(row)
 	if err != nil {
@@ -106,19 +112,23 @@ func TestLedgerRoundTripAndPerClassColumns(t *testing.T) {
 // TestTrendDirections pins the trend math: a rise in either metric is improved, a fall
 // (with no rise) is regressed, equal is flat, no prior is new.
 func TestTrendDirections(t *testing.T) {
-	base := LedgerRow{Date: "2026-06-28", KernelMetric: 2, CacheMetric: 0.60, Advancing: 1, GeneratedAt: "t0"}
+	base := LedgerRow{Date: "2026-06-28", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 90, Advancing: 1, GeneratedAt: "t0"}
 	if d := TrendVsLast(base, nil).Direction; d != "new" {
 		t.Fatalf("first tick must be new, got %q", d)
 	}
-	up := LedgerRow{Date: "2026-06-29", KernelMetric: 4, CacheMetric: 0.60, GeneratedAt: "t1"}
+	up := LedgerRow{Date: "2026-06-29", KernelMetric: 4, CacheMetric: 0.60, HumanMetric: 90, GeneratedAt: "t1"}
 	if d := TrendVsLast(up, []LedgerRow{base}).Direction; d != "improved" {
 		t.Fatalf("a higher kernel metric must be improved, got %q", d)
 	}
-	down := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.40, GeneratedAt: "t1"}
+	down := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.40, HumanMetric: 90, GeneratedAt: "t1"}
 	if d := TrendVsLast(down, []LedgerRow{base}).Direction; d != "regressed" {
 		t.Fatalf("a lower cache metric must be regressed, got %q", d)
 	}
-	flat := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, GeneratedAt: "t1"}
+	humanDown := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 89, GeneratedAt: "t1"}
+	if tr := TrendVsLast(humanDown, []LedgerRow{base}); tr.Direction != "regressed" || tr.HumanMetricDelta != -1 {
+		t.Fatalf("a lower human metric must be regressed with signed delta, got %+v", tr)
+	}
+	flat := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 90, GeneratedAt: "t1"}
 	if d := TrendVsLast(flat, []LedgerRow{base}).Direction; d != "flat" {
 		t.Fatalf("equal metrics must be flat, got %q", d)
 	}
@@ -127,16 +137,67 @@ func TestTrendDirections(t *testing.T) {
 // TestRenderNoCompletionPercent is the key honesty test: the program render must NEVER
 // show a completion % — an ongoing program has no 100%.
 func TestRenderNoCompletionPercent(t *testing.T) {
-	p := InterpretPrograms([]Signal{kernelAdvancing(), cacheHolding()})
+	p := InterpretPrograms([]Signal{kernelAdvancing(), cacheHolding(), humanHolding()})
 	r := Fold(p, FoldOpts{Date: "2026-06-29", Commit: "abc"})
 	r = r.WithTrend(TrendVsLast(RowFromReport(r), nil))
 	out := Render(r)
-	for _, want := range []string{"program report", "kernel-optimization", "cache-optimization", "frontier:", "trend:", "never 'done'"} {
+	for _, want := range []string{"program report", "kernel-optimization", "cache-optimization", "human-operator-effectiveness", "frontier:", "trend:", "never 'done'"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "% complete") || strings.Contains(out, "100%") {
 		t.Fatalf("a program report must never render a completion %%\n%s", out)
+	}
+}
+
+func TestHumanOperatorSignalReadsHeavinessPressure(t *testing.T) {
+	root := writeHumanOperatorWorkspace(t)
+	s := humanOperatorSignal(root)
+	if s.Class != worktype.HumanOperatorEffectiveness || s.Label != worktype.HumanOperatorEffectiveness.Label() {
+		t.Fatalf("human signal identity = %+v", s)
+	}
+	if s.Metric != 100 || s.Direction != "advancing" || !strings.Contains(s.Frontier, "zero heaviness pressure") {
+		t.Fatalf("clean human signal = %+v, want metric 100 advancing zero-pressure frontier", s)
+	}
+
+	bad := humanOperatorSignal(t.TempDir())
+	if bad.Direction != "regressed" || bad.Metric != 0 {
+		t.Fatalf("missing steering surfaces should be hard human-operator debt, got %+v", bad)
+	}
+}
+
+func writeHumanOperatorWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeProgramFile(t, root, "cmd/fak/main.go", `package main
+
+func dispatch(name string) {
+	switch name {
+	case "run":
+	case "operator":
+	case "complain":
+	}
+}
+`)
+	writeProgramFile(t, root, "cmd/fak/guard.go", `package main
+
+func guardFlags(fs interface{ Bool(string, bool, string) *bool }) {
+	fs.Bool("safe", false, "")
+}
+`)
+	writeProgramFile(t, root, "dos.toml", "[reasons.OFF_TRUNK]\nsummary='stay on trunk'\n")
+	writeProgramFile(t, root, "llms.txt", "- [Steerability scorecard](docs/STEERABILITY-SCORECARD.md): the steerability-scorecard surfaced via `fak steering`.\n- [Operator-heaviness scorecard](docs/OPERATOR-HEAVINESS.md): the operator-heaviness `heaviness_pressure` surface via `fak operator heaviness`.\n")
+	return root
+}
+
+func writeProgramFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

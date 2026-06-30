@@ -8,10 +8,11 @@ package programreport
 //
 // This report is the ongoing-program sibling of internal/milestonereport. Where the
 // milestone roadmap measures DISCRETE epics by completion %, this report measures the
-// two ONGOING optimization PROGRAMS (worktype.KernelOptimization,
-// worktype.CacheOptimization) the way they actually move: by a FRONTIER (the best
-// number / state witnessed so far) and a TREND (is the frontier still advancing?).
-// There is no completion % here on purpose — an optimization program has no 100%.
+// ONGOING PROGRAMS (worktype.KernelOptimization, worktype.CacheOptimization, and
+// worktype.HumanOperatorEffectiveness) the way they actually move: by a FRONTIER
+// (the best number / state witnessed so far) and a TREND (is the frontier still
+// advancing?). There is no completion % here on purpose — an ongoing program has no
+// 100%.
 
 import (
 	"bufio"
@@ -116,6 +117,9 @@ type Trend struct {
 	CacheMetricFrom   float64 `json:"cache_metric_from"`
 	CacheMetricTo     float64 `json:"cache_metric_to"`
 	CacheMetricDelta  float64 `json:"cache_metric_delta"`
+	HumanMetricFrom   float64 `json:"human_metric_from"`
+	HumanMetricTo     float64 `json:"human_metric_to"`
+	HumanMetricDelta  float64 `json:"human_metric_delta"`
 	AdvancingFrom     int     `json:"advancing_from"`
 	AdvancingTo       int     `json:"advancing_to"`
 	Summary           string  `json:"summary"`
@@ -243,6 +247,8 @@ type LedgerRow struct {
 	KernelDir    string  `json:"kernel_dir,omitempty"`
 	CacheMetric  float64 `json:"cache_metric"`
 	CacheDir     string  `json:"cache_dir,omitempty"`
+	HumanMetric  float64 `json:"human_metric"`
+	HumanDir     string  `json:"human_dir,omitempty"`
 }
 
 // RowFromReport projects a folded report into one durable ledger row.
@@ -261,6 +267,8 @@ func RowFromReport(r Report) LedgerRow {
 		KernelDir:    dirFor(r.Programs, worktype.KernelOptimization),
 		CacheMetric:  metricFor(r.Programs, worktype.CacheOptimization),
 		CacheDir:     dirFor(r.Programs, worktype.CacheOptimization),
+		HumanMetric:  metricFor(r.Programs, worktype.HumanOperatorEffectiveness),
+		HumanDir:     dirFor(r.Programs, worktype.HumanOperatorEffectiveness),
 	}
 }
 
@@ -315,18 +323,20 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 			Direction:      "new",
 			KernelMetricTo: row.KernelMetric,
 			CacheMetricTo:  row.CacheMetric,
+			HumanMetricTo:  row.HumanMetric,
 			AdvancingTo:    row.Advancing,
-			Summary: fmt.Sprintf("first program tick (kernel metric %.3f %s, cache metric %.3f %s; %d advancing)",
-				row.KernelMetric, dashIfEmpty(row.KernelDir), row.CacheMetric, dashIfEmpty(row.CacheDir), row.Advancing),
+			Summary: fmt.Sprintf("first program tick (kernel metric %.3f %s, cache metric %.3f %s, human metric %.3f %s; %d advancing)",
+				row.KernelMetric, dashIfEmpty(row.KernelDir), row.CacheMetric, dashIfEmpty(row.CacheDir), row.HumanMetric, dashIfEmpty(row.HumanDir), row.Advancing),
 		}
 	}
 	kDelta := round3(row.KernelMetric - last.KernelMetric)
 	cDelta := round3(row.CacheMetric - last.CacheMetric)
+	hDelta := round3(row.HumanMetric - last.HumanMetric)
 	dir := "flat"
 	switch {
-	case kDelta > 0 || cDelta > 0:
+	case kDelta > 0 || cDelta > 0 || hDelta > 0:
 		dir = "improved"
-	case kDelta < 0 || cDelta < 0:
+	case kDelta < 0 || cDelta < 0 || hDelta < 0:
 		dir = "regressed"
 	}
 	return Trend{
@@ -339,10 +349,13 @@ func TrendVsLast(row LedgerRow, prior []LedgerRow) Trend {
 		CacheMetricFrom:   last.CacheMetric,
 		CacheMetricTo:     row.CacheMetric,
 		CacheMetricDelta:  cDelta,
+		HumanMetricFrom:   last.HumanMetric,
+		HumanMetricTo:     row.HumanMetric,
+		HumanMetricDelta:  hDelta,
 		AdvancingFrom:     last.Advancing,
 		AdvancingTo:       row.Advancing,
-		Summary: fmt.Sprintf("programs %s; kernel metric %+.3f (%.3f->%.3f), cache metric %+.3f (%.3f->%.3f) vs %s",
-			dir, kDelta, last.KernelMetric, row.KernelMetric, cDelta, last.CacheMetric, row.CacheMetric, last.Date),
+		Summary: fmt.Sprintf("programs %s; kernel metric %+.3f (%.3f->%.3f), cache metric %+.3f (%.3f->%.3f), human metric %+.3f (%.3f->%.3f) vs %s",
+			dir, kDelta, last.KernelMetric, row.KernelMetric, cDelta, last.CacheMetric, row.CacheMetric, hDelta, last.HumanMetric, row.HumanMetric, last.Date),
 	}
 }
 
@@ -386,7 +399,7 @@ func Render(r Report) string {
 		"",
 		fmt.Sprintf("  %s programs    %d/%d measured; %d advancing, %d regressed",
 			mark(r.Programs.OK, r.Programs.Err), r.Programs.Measured, r.Programs.Tracked, r.Programs.Advancing, r.Programs.Regressed),
-		"      (ongoing optimization programs — frontier + trend, never 'done')",
+		"      (ongoing programs — frontier + trend, never 'done')",
 	}
 	for _, s := range r.Programs.Signals {
 		lines = append(lines, "      "+signalLine(s))
@@ -455,5 +468,8 @@ func dashIfEmpty(s string) string {
 }
 
 func round3(f float64) float64 {
+	if f < 0 {
+		return float64(int64(f*1000-0.5)) / 1000
+	}
 	return float64(int64(f*1000+0.5)) / 1000
 }
