@@ -117,6 +117,7 @@ func TestIssueContractRefusesVagueCandidate(t *testing.T) {
 		"work_units: leaf=1",
 		"step_buckets: 2-3=1",
 		"batch_group[0]: count=1 steps=3 lane=(unrouted) work_unit=leaf",
+		"coordination_group[0]: count=1 steps=3 key=Do not dispatch concurrently",
 		"repair_queue[scope]: count=1 steps=3",
 		"repair_queue[route]: count=1 steps=3",
 		"ISSUE_SCOPE_INCOMPLETE",
@@ -255,6 +256,15 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 			ChildIssueBudget int      `json:"child_issue_budget"`
 			MissingMetadata  []string `json:"missing_metadata"`
 		} `json:"batch_groups"`
+		CoordinationGroups []struct {
+			Key              string         `json:"key"`
+			Count            int            `json:"count"`
+			StepBudget       int            `json:"step_budget"`
+			ChildIssueBudget int            `json:"child_issue_budget"`
+			ByLane           map[string]int `json:"by_lane"`
+			ByReason         map[string]int `json:"by_reason"`
+			ExampleKeys      []string       `json:"example_keys"`
+		} `json:"coordination_groups"`
 		RepairQueues []repairQueueAssertion `json:"repair_queues"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -291,6 +301,16 @@ func TestIssueContractSummarizesMixedIssueAuditCounts(t *testing.T) {
 	if len(got.BatchGroups) != 2 || got.BatchGroups[0].Count != 2 || got.BatchGroups[0].StepBudget != 15 ||
 		got.BatchGroups[0].ChildIssueBudget != 2 {
 		t.Fatalf("batch groups = %+v, want guardrsi rows grouped under shared trigger/batch with two child issues", got.BatchGroups)
+	}
+	if len(got.CoordinationGroups) != 1 ||
+		got.CoordinationGroups[0].Count != 2 ||
+		got.CoordinationGroups[0].StepBudget != 15 ||
+		got.CoordinationGroups[0].ChildIssueBudget != 2 ||
+		got.CoordinationGroups[0].ByLane["guardrsi"] != 2 ||
+		got.CoordinationGroups[0].ByReason[issuecontract.ReasonOversizedSteps] != 1 ||
+		len(got.CoordinationGroups[0].ExampleKeys) != 2 ||
+		!strings.Contains(got.CoordinationGroups[0].Key, "Avoid concurrent edits") {
+		t.Fatalf("coordination groups = %+v, want shared guardrsi coordination group with split budget", got.CoordinationGroups)
 	}
 	assertRepairQueue(t, got.RepairQueues, "dispatch", 1, 3, nil)
 	assertRepairQueue(t, got.RepairQueues, "split", 1, 12, map[string]int{issuecontract.ReasonOversizedSteps: 1}, 2)

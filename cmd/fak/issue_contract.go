@@ -34,14 +34,15 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 }
 
 type issueContractResult struct {
-	Schema       string                     `json:"schema"`
-	Mode         string                     `json:"mode"`
-	File         string                     `json:"file"`
-	OK           bool                       `json:"ok"`
-	Counts       issueContractCounts        `json:"counts"`
-	RepairQueues []issueContractRepairQueue `json:"repair_queues,omitempty"`
-	BatchGroups  []issueContractBatchGroup  `json:"batch_groups,omitempty"`
-	Reviews      []issuecontract.Review     `json:"reviews"`
+	Schema             string                           `json:"schema"`
+	Mode               string                           `json:"mode"`
+	File               string                           `json:"file"`
+	OK                 bool                             `json:"ok"`
+	Counts             issueContractCounts              `json:"counts"`
+	RepairQueues       []issueContractRepairQueue       `json:"repair_queues,omitempty"`
+	BatchGroups        []issueContractBatchGroup        `json:"batch_groups,omitempty"`
+	CoordinationGroups []issueContractCoordinationGroup `json:"coordination_groups,omitempty"`
+	Reviews            []issuecontract.Review           `json:"reviews"`
 }
 
 type issueContractCounts struct {
@@ -85,6 +86,20 @@ type issueContractRepairQueue struct {
 	NextAction       string         `json:"next_action"`
 	ByReason         map[string]int `json:"by_reason,omitempty"`
 	MissingFields    map[string]int `json:"missing_fields,omitempty"`
+	ExampleKeys      []string       `json:"example_keys,omitempty"`
+}
+
+type issueContractCoordinationGroup struct {
+	Key              string         `json:"key"`
+	Count            int            `json:"count"`
+	StepBudget       int            `json:"step_budget"`
+	ChildIssueBudget int            `json:"child_issue_budget,omitempty"`
+	Dispatchable     int            `json:"dispatchable"`
+	TriageOnly       int            `json:"triage_only"`
+	Refused          int            `json:"refused"`
+	ByLane           map[string]int `json:"by_lane,omitempty"`
+	ByWorkUnit       map[string]int `json:"by_work_unit,omitempty"`
+	ByReason         map[string]int `json:"by_reason,omitempty"`
 	ExampleKeys      []string       `json:"example_keys,omitempty"`
 }
 
@@ -172,7 +187,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 			result.Reviews = append(result.Reviews, review)
 		}
 	}
-	result.Counts, result.BatchGroups = summarizeIssueContractReviews(result.Reviews)
+	result.Counts, result.BatchGroups, result.CoordinationGroups = summarizeIssueContractReviews(result.Reviews)
 	result.RepairQueues = issueContractRepairQueues(result.Reviews)
 
 	if *asJSON {
@@ -189,7 +204,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup) {
+func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContractCounts, []issueContractBatchGroup, []issueContractCoordinationGroup) {
 	counts := issueContractCounts{
 		Total:                len(reviews),
 		ByReason:             map[string]int{},
@@ -198,6 +213,7 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		ByExpectedStepBucket: map[string]int{},
 	}
 	batches := map[string]*issueContractBatchGroup{}
+	coordinationGroups := map[string]*issueContractCoordinationGroup{}
 	agentContextSum := 0
 	for _, review := range reviews {
 		switch review.Dispatchability {
@@ -256,6 +272,37 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		if review.Key != "" && len(group.ExampleKeys) < 5 {
 			group.ExampleKeys = append(group.ExampleKeys, review.Key)
 		}
+		for _, key := range issueContractCoordinationKeys(review) {
+			coordinationGroup := coordinationGroups[key]
+			if coordinationGroup == nil {
+				coordinationGroup = &issueContractCoordinationGroup{
+					Key:        key,
+					ByLane:     map[string]int{},
+					ByWorkUnit: map[string]int{},
+					ByReason:   map[string]int{},
+				}
+				coordinationGroups[key] = coordinationGroup
+			}
+			coordinationGroup.Count++
+			coordinationGroup.StepBudget += stepBudget
+			coordinationGroup.ChildIssueBudget += issueContractReviewSplitChildIssueBudget(review)
+			switch review.Dispatchability {
+			case issuecontract.Dispatchable:
+				coordinationGroup.Dispatchable++
+			case issuecontract.TriageOnly:
+				coordinationGroup.TriageOnly++
+			case issuecontract.Refused:
+				coordinationGroup.Refused++
+			}
+			coordinationGroup.ByLane[issueContractBucketValue(review.Lane, "(unrouted)")]++
+			coordinationGroup.ByWorkUnit[issueContractBucketValue(review.WorkUnit, "(missing)")]++
+			for _, reason := range review.Reasons {
+				coordinationGroup.ByReason[reason]++
+			}
+			if review.Key != "" && len(coordinationGroup.ExampleKeys) < 5 {
+				coordinationGroup.ExampleKeys = append(coordinationGroup.ExampleKeys, review.Key)
+			}
+		}
 	}
 	if len(reviews) > 0 {
 		counts.AgentContextAvg = (agentContextSum + len(reviews)/2) / len(reviews)
@@ -279,7 +326,8 @@ func summarizeIssueContractReviews(reviews []issuecontract.Review) (issueContrac
 		}
 		return groups[i].Key < groups[j].Key
 	})
-	return counts, groups
+	coordination := issueContractSortedCoordinationGroups(coordinationGroups)
+	return counts, groups, coordination
 }
 
 func issueContractReviewStepBudget(review issuecontract.Review) int {
@@ -287,6 +335,58 @@ func issueContractReviewStepBudget(review issuecontract.Review) int {
 		return review.ExpectedSteps
 	}
 	return 1
+}
+
+func issueContractCoordinationKeys(review issuecontract.Review) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, note := range review.Coordination {
+		key := issueContractCoordinationKey(note)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func issueContractCoordinationKey(note string) string {
+	note = strings.TrimSpace(note)
+	note = strings.TrimLeft(note, "-* \t")
+	note = strings.TrimSpace(note)
+	note = strings.Trim(note, "`")
+	return note
+}
+
+func issueContractSortedCoordinationGroups(groups map[string]*issueContractCoordinationGroup) []issueContractCoordinationGroup {
+	out := make([]issueContractCoordinationGroup, 0, len(groups))
+	for _, group := range groups {
+		if len(group.ByLane) == 0 {
+			group.ByLane = nil
+		}
+		if len(group.ByWorkUnit) == 0 {
+			group.ByWorkUnit = nil
+		}
+		if len(group.ByReason) == 0 {
+			group.ByReason = nil
+		}
+		out = append(out, *group)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		if out[i].StepBudget != out[j].StepBudget {
+			return out[i].StepBudget > out[j].StepBudget
+		}
+		if out[i].ChildIssueBudget != out[j].ChildIssueBudget {
+			return out[i].ChildIssueBudget > out[j].ChildIssueBudget
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
 }
 
 func issueContractStepBucket(steps int) string {
@@ -592,6 +692,25 @@ func renderIssueContract(r issueContractResult) string {
 		lines = append(lines, line)
 		if len(group.MissingMetadata) > 0 {
 			lines = append(lines, "    missing_batch_metadata: "+strings.Join(group.MissingMetadata, ", "))
+		}
+	}
+	for i, group := range r.CoordinationGroups {
+		if i >= 8 {
+			lines = append(lines, fmt.Sprintf("  coordination_groups: ... %d more", len(r.CoordinationGroups)-i))
+			break
+		}
+		line := fmt.Sprintf("  coordination_group[%d]: count=%d steps=%d",
+			i, group.Count, group.StepBudget)
+		if group.ChildIssueBudget > 0 {
+			line += fmt.Sprintf(" child_issues=%d", group.ChildIssueBudget)
+		}
+		line += fmt.Sprintf(" key=%s", group.Key)
+		lines = append(lines, line)
+		if len(group.ByLane) > 0 {
+			lines = append(lines, "    lanes: "+renderIssueContractReasonCounts(group.ByLane))
+		}
+		if len(group.ByReason) > 0 {
+			lines = append(lines, "    reasons: "+renderIssueContractReasonCounts(group.ByReason))
 		}
 	}
 	for _, queue := range r.RepairQueues {
