@@ -153,10 +153,12 @@ const Unbounded = -1
 // (slow down / the priority-queue "let an urgent one pass" move). Unbounded (-1)
 // means no limit for the turn/output axes; context 0 means off.
 type Budget struct {
-	TurnsLeft         int `json:"turns_left"`                    // remaining model round-trips; Unbounded = no cap
-	TokensLeft        int `json:"tokens_left"`                   // remaining output tokens; Unbounded = no cap
-	ContextTokensLeft int `json:"context_tokens_left,omitempty"` // remaining prompt/context tokens; 0 = not configured
-	ContextTokensCap  int `json:"context_tokens_cap,omitempty"`  // the configured context-budget size; the denominator the pre-exhaustion warning measures consumed-share against (0 = no context budget)
+	TurnsLeft                int `json:"turns_left"`                           // remaining model round-trips; Unbounded = no cap
+	TokensLeft               int `json:"tokens_left"`                          // remaining output tokens; Unbounded = no cap
+	ContextTokensLeft        int `json:"context_tokens_left,omitempty"`        // remaining prompt/context tokens; 0 = not configured
+	ContextTokensCap         int `json:"context_tokens_cap,omitempty"`         // the configured context-budget size; the denominator the pre-exhaustion warning measures consumed-share against (0 = no context budget)
+	ClarificationQueriesLeft int `json:"clarification_queries_left,omitempty"` // remaining clarification/self-query asks; 0 with no cap = not configured
+	ClarificationQueriesCap  int `json:"clarification_queries_cap,omitempty"`  // configured clarification-query budget; positive cap with 0 left = exhausted
 }
 
 // withContextCap stamps the context-budget capacity (the denominator the pre-exhaustion
@@ -169,6 +171,12 @@ func (b Budget) withContextCap() Budget {
 	if b.ContextTokensCap <= 0 && b.ContextTokensLeft > 0 {
 		b.ContextTokensCap = b.ContextTokensLeft
 	}
+	if b.ClarificationQueriesLeft < 0 {
+		b.ClarificationQueriesCap = 0
+	}
+	if b.ClarificationQueriesCap <= 0 && b.ClarificationQueriesLeft > 0 {
+		b.ClarificationQueriesCap = b.ClarificationQueriesLeft
+	}
 	return b
 }
 
@@ -177,6 +185,9 @@ func (b Budget) withContextCap() Budget {
 func (b Budget) turnsUnbounded() bool  { return b.TurnsLeft < 0 }
 func (b Budget) tokensUnbounded() bool { return b.TokensLeft < 0 }
 func (b Budget) contextBounded() bool  { return b.ContextTokensLeft > 0 }
+func (b Budget) clarificationQueriesBounded() bool {
+	return b.ClarificationQueriesCap > 0 || b.ClarificationQueriesLeft > 0
+}
 
 // Pace is the per-turn throttle — how to slow a session WITHOUT pausing it. It is
 // admission control's cooperative twin: lowering MaxTokensPerTurn gives a shared

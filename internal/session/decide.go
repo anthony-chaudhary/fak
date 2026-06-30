@@ -22,6 +22,17 @@ type Verdict struct {
 	Reason    string
 }
 
+// QueryBudgetVerdict is the clarification/self-query budget gate. It is separate
+// from Verdict because a query-budget miss should degrade the clarification path,
+// not stop the main session.
+type QueryBudgetVerdict struct {
+	Proceed   bool
+	Stop      bool
+	Reason    string
+	Remaining int
+	State     State
+}
+
 // Stop reason tokens — the closed vocabulary Decide stamps, so "why did this turn
 // not run" is a checkable field, never free text. They mirror the refusal-reason
 // discipline the kernel uses elsewhere.
@@ -29,6 +40,7 @@ const (
 	ReasonBudgetTurns     = "BUDGET_TURNS_EXHAUSTED"   // TurnsLeft hit zero
 	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
 	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
+	ReasonBudgetQueries   = "BUDGET_QUERIES_EXHAUSTED" // ClarificationQueriesLeft hit zero
 	ReasonPaused          = "PAUSED"                   // operator hold; not terminal, the loop waits
 	ReasonDrained         = "DRAINING"                 // operator stop, taken at this boundary
 	ReasonStopped         = "STOPPED"                  // already terminal
@@ -118,6 +130,39 @@ func (t *Table) Decide(trace string) Verdict {
 // is taken at a boundary" invariant.
 func (t *Table) Debit(trace string, tokensUsed int) State {
 	return t.DebitUsage(trace, Usage{OutputTokens: tokensUsed})
+}
+
+// DebitClarificationQuery spends one clarification/self-query ask from the
+// session's query budget. Unconfigured budgets are permissive and do not create a
+// session record. Exhaustion refuses only the clarification path: the main
+// session remains live so the caller can continue with known context or ask the
+// user through a different governed path.
+func (t *Table) DebitClarificationQuery(trace string) QueryBudgetVerdict {
+	if t == nil {
+		return QueryBudgetVerdict{Proceed: true, Remaining: Unbounded, State: DefaultState(trace)}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+
+	switch cur.Run {
+	case Stopped:
+		return QueryBudgetVerdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
+	case Draining:
+		return QueryBudgetVerdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonDrained), Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
+	case Paused:
+		return QueryBudgetVerdict{Proceed: false, Reason: ReasonPaused, Remaining: cur.Budget.ClarificationQueriesLeft, State: cur}
+	}
+
+	if !cur.Budget.clarificationQueriesBounded() {
+		return QueryBudgetVerdict{Proceed: true, Remaining: Unbounded, State: cur}
+	}
+	if cur.Budget.ClarificationQueriesLeft <= 0 {
+		return QueryBudgetVerdict{Proceed: false, Reason: ReasonBudgetQueries, Remaining: 0, State: cur}
+	}
+	cur.Budget.ClarificationQueriesLeft--
+	out := t.putLocked(cur)
+	return QueryBudgetVerdict{Proceed: true, Remaining: out.Budget.ClarificationQueriesLeft, State: out}
 }
 
 // finalizeDrainLocked writes a budget-exhausted record straight to Stopped (the

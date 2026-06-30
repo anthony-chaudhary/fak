@@ -276,6 +276,89 @@ func TestDecideTokenBudgetExhaustion(t *testing.T) {
 	}
 }
 
+func TestQueryBudgetDebitsSeparatelyFromTokenBudgets(t *testing.T) {
+	tbl := NewTable()
+	tbl.SetBudget("s", Budget{
+		TurnsLeft:                Unbounded,
+		TokensLeft:               100,
+		ContextTokensLeft:        200,
+		ClarificationQueriesLeft: 2,
+	})
+
+	first := tbl.DebitClarificationQuery("s")
+	if !first.Proceed || first.Remaining != 1 {
+		t.Fatalf("first query budget verdict = %+v, want proceed with 1 remaining", first)
+	}
+	if first.State.Budget.TokensLeft != 100 || first.State.Budget.ContextTokensLeft != 200 {
+		t.Fatalf("clarification debit changed model budgets: %+v", first.State.Budget)
+	}
+	if first.State.Budget.ClarificationQueriesCap != 2 {
+		t.Fatalf("query budget cap = %d, want 2", first.State.Budget.ClarificationQueriesCap)
+	}
+
+	second := tbl.DebitClarificationQuery("s")
+	if !second.Proceed || second.Remaining != 0 {
+		t.Fatalf("second query budget verdict = %+v, want proceed with 0 remaining", second)
+	}
+	third := tbl.DebitClarificationQuery("s")
+	if third.Proceed || third.Stop || third.Reason != ReasonBudgetQueries {
+		t.Fatalf("exhausted query budget verdict = %+v, want non-stop refusal %s", third, ReasonBudgetQueries)
+	}
+	if third.State.Run != Running {
+		t.Fatalf("query budget exhaustion must not stop the session, got run=%v", third.State.Run)
+	}
+	if third.State.Budget.TokensLeft != 100 || third.State.Budget.ContextTokensLeft != 200 {
+		t.Fatalf("exhausted query budget changed other budgets: %+v", third.State.Budget)
+	}
+}
+
+func TestQueryBudgetZeroValueIsPermissive(t *testing.T) {
+	var nilTable *Table
+	if v := nilTable.DebitClarificationQuery("nil"); !v.Proceed || v.Remaining != Unbounded {
+		t.Fatalf("nil table query budget verdict = %+v, want permissive", v)
+	}
+
+	tbl := NewTable()
+	for i := 0; i < 3; i++ {
+		if v := tbl.DebitClarificationQuery("unconfigured"); !v.Proceed || v.Remaining != Unbounded {
+			t.Fatalf("unconfigured query budget verdict %d = %+v, want permissive", i, v)
+		}
+	}
+	if tbl.Len() != 0 {
+		t.Fatalf("unconfigured query budget should not create session records, Len=%d", tbl.Len())
+	}
+}
+
+func TestQueryBudgetPausedStoppedDoNotBurn(t *testing.T) {
+	tbl := NewTable()
+	tbl.SetBudget("s", Budget{
+		TurnsLeft:                Unbounded,
+		TokensLeft:               Unbounded,
+		ClarificationQueriesLeft: 2,
+	})
+	tbl.Transition("s", Paused, "")
+	paused := tbl.DebitClarificationQuery("s")
+	if paused.Proceed || paused.Stop || paused.Reason != ReasonPaused {
+		t.Fatalf("paused query budget verdict = %+v, want paused hold", paused)
+	}
+	if paused.State.Budget.ClarificationQueriesLeft != 2 {
+		t.Fatalf("paused session burned query budget: %+v", paused.State.Budget)
+	}
+
+	tbl.Transition("s", Running, "")
+	if v := tbl.DebitClarificationQuery("s"); !v.Proceed || v.Remaining != 1 {
+		t.Fatalf("resumed query budget verdict = %+v, want one query spent", v)
+	}
+	tbl.Transition("s", Stopped, ReasonStopped)
+	stopped := tbl.DebitClarificationQuery("s")
+	if stopped.Proceed || !stopped.Stop || stopped.Reason != ReasonStopped {
+		t.Fatalf("stopped query budget verdict = %+v, want stopped refusal", stopped)
+	}
+	if stopped.State.Budget.ClarificationQueriesLeft != 1 {
+		t.Fatalf("stopped session burned query budget: %+v", stopped.State.Budget)
+	}
+}
+
 func TestContextBudgetMintsContinuationAndDrains(t *testing.T) {
 	tbl := NewTable()
 	tbl.SetBudget("s", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 150})
