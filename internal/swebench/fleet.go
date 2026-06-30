@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/codelint"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // fleet.go is the fak-native SWE-bench solver: the "fleet" runner drives a real
@@ -389,6 +390,7 @@ func safeJoin(root, p string) (string, error) {
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(c)
 	if dir != "" {
 		c.Dir = dir
 	}
@@ -398,6 +400,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 
 func runShell(ctx context.Context, dir, cmd string) string {
 	c := exec.CommandContext(ctx, "bash", "-c", cmd)
+	windowgate.ConfigureBackgroundCommand(c)
 	c.Dir = dir
 	out, err := c.CombinedOutput()
 	s := string(out)
