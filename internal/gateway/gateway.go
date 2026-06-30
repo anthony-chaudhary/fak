@@ -748,6 +748,12 @@ type Server struct {
 	// native scheduler only after a positive paged-KV block budget arms preemption.
 	preemptionMu      sync.RWMutex
 	preemptionMetrics KVPreemptionMetricWriter
+
+	// nativePDMetrics is the optional native prefill/decode role-split metrics writer (#28).
+	// nil leaves fak_native_pd_* absent; a host attaches the live NativePDCluster once the
+	// split prefill/decode pool is on the serving path.
+	nativePDMu      sync.RWMutex
+	nativePDMetrics NativePDMetricsProvider
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is

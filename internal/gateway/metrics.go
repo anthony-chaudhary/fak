@@ -1309,6 +1309,7 @@ func (s *Server) renderMetrics() string {
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	s.writeServingMetrics(&b, inf)
+	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
