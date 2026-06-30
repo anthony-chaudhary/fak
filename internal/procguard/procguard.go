@@ -33,14 +33,14 @@ const Schema = "fleet-proc-resource-guard/1"
 
 // Defaults mirror proc_resource_guard.py's module-level constants exactly.
 const (
-	DefaultMaxThreads     = dispatchtick.ProcGuardDefaultMaxThreads // 2000
-	DefaultMaxHandles     = 0                                       // 0 == dimension disabled
-	DefaultMaxWorkingSetMB = 0                                      // 0 == dimension disabled
+	DefaultMaxThreads      = dispatchtick.ProcGuardDefaultMaxThreads // 2000
+	DefaultMaxHandles      = 0                                       // 0 == dimension disabled
+	DefaultMaxWorkingSetMB = 0                                       // 0 == dimension disabled
 
-	DefaultMaxCPUPct     = 0.0 // 0 == CPU dimension disabled (default)
-	DefaultCPUWindowSec  = 3.0 // seconds between consecutive CPU samples
-	DefaultCPUSamples    = 2   // 2 == one window; >2 requires the pin to hold every window
-	DefaultCPUReapConfirm = 1  // 1 == reap a CPU-only pin on first detection (manual run)
+	DefaultMaxCPUPct      = 0.0 // 0 == CPU dimension disabled (default)
+	DefaultCPUWindowSec   = 3.0 // seconds between consecutive CPU samples
+	DefaultCPUSamples     = 2   // 2 == one window; >2 requires the pin to hold every window
+	DefaultCPUReapConfirm = 1   // 1 == reap a CPU-only pin on first detection (manual run)
 
 	DefaultIdleShellAgeSec = 1800 // 30 min: well past any session-launch transient
 

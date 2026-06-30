@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func ip(n int) *int       { return &n }
+func ip(n int) *int         { return &n }
 func fp(f float64) *float64 { return &f }
 
 func TestClassifyResourceLevel(t *testing.T) {
@@ -58,7 +58,7 @@ func TestClassifyProtectedBit(t *testing.T) {
 
 func TestCPUDimensionFlagsCorePin(t *testing.T) {
 	procs := []Proc{
-		{PID: 20, Name: "spin", Threads: ip(2), CPUPct: fp(99)},  // single-threaded core pin
+		{PID: 20, Name: "spin", Threads: ip(2), CPUPct: fp(99)}, // single-threaded core pin
 		{PID: 21, Name: "idle", Threads: ip(2), CPUPct: fp(3)},
 	}
 	th := Thresholds{MaxThreads: 2000, MaxCPUPct: 90}
