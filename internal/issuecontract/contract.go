@@ -142,6 +142,10 @@ type Review struct {
 	Key             string        `json:"key,omitempty"`
 	Lane            string        `json:"lane,omitempty"`
 	Paths           []string      `json:"paths,omitempty"`
+	WorkUnit        string        `json:"work_unit,omitempty"`
+	ExpectedSteps   int           `json:"expected_steps,omitempty"`
+	Trigger         string        `json:"trigger,omitempty"`
+	BatchPolicy     string        `json:"batch_policy,omitempty"`
 	Score           Score         `json:"score"`
 	SpinePriority   SpinePriority `json:"spine_priority"`
 	AgentContext    AgentContext  `json:"agent_context"`
@@ -199,6 +203,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		Key:           c.Key,
 		Lane:          c.Lane,
 		Paths:         append([]string(nil), c.Paths...),
+		WorkUnit:      c.WorkUnit,
+		ExpectedSteps: c.ExpectedSteps,
+		Trigger:       c.Trigger,
+		BatchPolicy:   c.BatchPolicy,
 		Reasons:       reasons.list(),
 		MissingFields: missing,
 		Score:         score,
