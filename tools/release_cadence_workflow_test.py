@@ -47,6 +47,36 @@ class ReleaseCadenceWorkflowTest(unittest.TestCase):
         self.assertIn("python tools/release_publish.py", text)
         self.assertIn("--execute", text)
 
+    def test_cadence_cut_shares_the_release_lock(self) -> None:
+        # #1391: a SCHEDULED auto-cut and a human `/release` must share the SAME
+        # single-writer lock so the unattended tick cannot race VERSION / the tag
+        # against a hand-cut. Pin the mutual-exclusion contract beyond mere
+        # string-presence — the ORDER, the GATE, the parent-lock handoff, the
+        # release-on-every-exit guard, and the defer.
+        text = WORKFLOW.read_text(encoding="utf-8")
+
+        acquire = text.index("python tools/release_lock.py acquire")
+        cut = text.index("python tools/release_cut.py --execute")
+        release = text.index("python tools/release_lock.py release")
+        # The lock is taken BEFORE the cut mutates VERSION / the tag, and dropped last.
+        self.assertLess(acquire, cut)
+        self.assertLess(cut, release)
+
+        # The cut only runs when the lock was actually acquired, and runs under the
+        # parent-held lock (--lock-already-held verifies ownership, does not re-acquire).
+        self.assertIn("steps.release_lock.outputs.acquired == 'true'", text)
+        self.assertIn("--lock-already-held", text)
+
+        # Release on EVERY exit (success or failure) but only if we acquired — a
+        # deferred tick that never took the lock must not drop a peer's lock.
+        self.assertIn("always() && steps.release_lock.outputs.acquired == 'true'", text)
+
+        # A lock held by another owner DEFERS this tick (a note + exit 0); it does
+        # not error the cadence run.
+        defer = text.index("this cadence tick defers to the next run")
+        self.assertLess(acquire, defer)
+        self.assertIn("exit 0", text[defer:])
+
     def test_workflow_does_not_bypass_tag_helper(self) -> None:
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("git push --tags", text)
