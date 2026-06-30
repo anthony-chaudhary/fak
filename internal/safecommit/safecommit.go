@@ -182,94 +182,15 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		defer func() { release(res) }()
 	}
 
-	// (1) In a work tree?
-	if _, code, err := run(ctx, opts.Dir, "rev-parse", "--git-dir"); err != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", err)
-	} else if code != 0 {
-		res.Reason = ReasonNotARepo
-		return res, nil
-	}
-
-	// (2) On the expected trunk? symbolic-ref exits non-zero on a detached HEAD rather
-	// than printing the literal "HEAD", so this rejects detached state too.
-	branch, code, err := run(ctx, opts.Dir, "symbolic-ref", "--short", "HEAD")
-	if err != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", err)
-	}
-	branch = strings.TrimSpace(branch)
-	if code != 0 || branch != trunk {
-		res.Reason = ReasonOffTrunk
-		// A non-zero symbolic-ref is a detached HEAD; the captured output is git's stderr
-		// ("fatal: ref HEAD is not a symbolic ref"), not a branch name — don't echo it.
-		if code != 0 || branch == "" {
-			branch = "detached HEAD"
-		}
-		res.Detail = fmt.Sprintf("on %s, expected %s", branch, trunk)
-		return res, nil
-	}
-
-	// (3) A merge mid-flight makes a partial path-scoped commit fail ("cannot do a partial
-	// commit during a merge"). Refuse with a clear reason rather than block on the lock —
-	// the flock guards fak writers, not a peer's raw merge.
-	if out, _, err := run(ctx, opts.Dir, "rev-parse", "-q", "--verify", "MERGE_HEAD"); err != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", err)
-	} else if strings.TrimSpace(out) != "" {
-		res.Reason = ReasonMergeInProgress
-		res.Detail = "a merge is in progress (MERGE_HEAD present); resolve it before committing by path"
-		return res, nil
-	}
-
-	// (4) Does the pathspec actually have a change? Fail fast, lock-free; never
-	// --allow-empty. Advisory only — step 7 is the authoritative check.
-	statusArgs := append([]string{"status", "--porcelain", "--"}, paths...)
-	if out, _, err := run(ctx, opts.Dir, statusArgs...); err != nil {
-		return res, fmt.Errorf("safecommit: git not executable: %w", err)
-	} else if strings.TrimSpace(out) == "" {
-		res.Reason = ReasonNothingStaged
-		return res, nil
-	}
-
-	// (4b) STALE-BASE-DELETION guard — content-level, lock-free, before any `git add`. The
-	// pathspec commit lands the WORKING-TREE blob of each requested path; if that blob predates
-	// a block a peer already pushed to origin/<trunk>, the commit SILENTLY deletes the peer's
-	// lines (the #1073 incident). PATHSPEC_RACE (step 7) is structurally blind to this — the
-	// stale file is one of MY OWN requested paths, inside the set it filters out. This guard
-	// reads the already-present-locally origin/<trunk> ref (no network fetch) and refuses if
-	// committing P would drop a contiguous peer-added run absent from the working tree. It runs
-	// before the lock and before any add, so a refusal stages and commits NOTHING — strictly
-	// cleaner than PATHSPEC_RACE, which leaves a commit behind. Gated by FAK_STALE_BASE_GUARD
-	// (block|warn|off, default block); off skips entirely, warn records the would-be refusal in
-	// Detail and proceeds.
-	if mode := staleBaseGuardMode(); mode != staleBaseOff {
-		if detail, fired := checkStaleBaseDeletion(ctx, run, opts.Dir, trunk, paths); fired {
-			if mode == staleBaseWarn {
-				res.Detail = "STALE_BASE_DELETION (warn): " + detail
-			} else {
-				res.Reason = ReasonStaleBaseDeletion
-				res.Detail = detail
-				return res, nil
-			}
-		}
-	}
-
-	// (4c) SPURIOUS-STAGED-DELETION guard — whole-path, lock-free, before any `git add`. A
-	// requested path can be staged as a DELETION (stale index) while an untracked copy of the
-	// same path still sits in the working tree — the shape a peer `git reset`/`git rm` leaves
-	// after the file was recreated on a shared clone. Committing it deletes a file HEAD carries,
-	// only to resurrect it on the next add (a churn commit whose `git show --stat` reports an
-	// unintended deletion). It is the whole-file sibling of the (4b) content guard. Gated by
-	// FAK_SPURIOUS_DELETE_GUARD (block|warn|off, default block); off skips, warn records and
-	// proceeds.
-	if mode := spuriousDeleteGuardMode(); mode != staleBaseOff {
-		if detail, fired := checkSpuriousStagedDeletion(ctx, run, opts.Dir, paths); fired {
-			if mode == staleBaseWarn {
-				res.Detail = "SPURIOUS_STAGED_DELETION (warn): " + detail
-			} else {
-				res.Reason = ReasonSpuriousStagedDeletion
-				res.Detail = detail
-				return res, nil
-			}
-		}
+	// (1)-(4c) Pure, lock-free refusal checks before any lock or `git add`: in a work tree,
+	// on the expected trunk, no merge mid-flight, the pathspec has a change, and the stale-base
+	// / spurious-staged-deletion content guards. A refusal returns the annotated Result as-is
+	// (the window-release defer above still fires); the rationale lives on precommitGates.
+	if r, refused, gerr := precommitGates(ctx, run, opts, trunk, paths, res); gerr != nil || refused {
+		res = r
+		return res, gerr
+	} else {
+		res = r
 	}
 
 	if reviewEnabled(opts.Review) {
@@ -394,6 +315,104 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 
 	return res, nil
+}
+
+// precommitGates runs the pure, lock-free refusal checks before any lock or `git add`
+// (steps 1-4c) and returns the (possibly Detail-annotated, for warn modes) Result with
+// refused=true when a gate declined — the caller then returns res unchanged. A git
+// executable failure surfaces as a non-nil error.
+func precommitGates(ctx context.Context, run Runner, opts Options, trunk string, paths []string, res Result) (Result, bool, error) {
+	// (1) In a work tree?
+	if _, code, err := run(ctx, opts.Dir, "rev-parse", "--git-dir"); err != nil {
+		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
+	} else if code != 0 {
+		res.Reason = ReasonNotARepo
+		return res, true, nil
+	}
+
+	// (2) On the expected trunk? symbolic-ref exits non-zero on a detached HEAD rather
+	// than printing the literal "HEAD", so this rejects detached state too.
+	branch, code, err := run(ctx, opts.Dir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
+	}
+	branch = strings.TrimSpace(branch)
+	if code != 0 || branch != trunk {
+		res.Reason = ReasonOffTrunk
+		// A non-zero symbolic-ref is a detached HEAD; the captured output is git's stderr
+		// ("fatal: ref HEAD is not a symbolic ref"), not a branch name — don't echo it.
+		if code != 0 || branch == "" {
+			branch = "detached HEAD"
+		}
+		res.Detail = fmt.Sprintf("on %s, expected %s", branch, trunk)
+		return res, true, nil
+	}
+
+	// (3) A merge mid-flight makes a partial path-scoped commit fail ("cannot do a partial
+	// commit during a merge"). Refuse with a clear reason rather than block on the lock —
+	// the flock guards fak writers, not a peer's raw merge.
+	if out, _, err := run(ctx, opts.Dir, "rev-parse", "-q", "--verify", "MERGE_HEAD"); err != nil {
+		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
+	} else if strings.TrimSpace(out) != "" {
+		res.Reason = ReasonMergeInProgress
+		res.Detail = "a merge is in progress (MERGE_HEAD present); resolve it before committing by path"
+		return res, true, nil
+	}
+
+	// (4) Does the pathspec actually have a change? Fail fast, lock-free; never
+	// --allow-empty. Advisory only — step 7 is the authoritative check.
+	statusArgs := append([]string{"status", "--porcelain", "--"}, paths...)
+	if out, _, err := run(ctx, opts.Dir, statusArgs...); err != nil {
+		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
+	} else if strings.TrimSpace(out) == "" {
+		res.Reason = ReasonNothingStaged
+		return res, true, nil
+	}
+
+	// (4b) STALE-BASE-DELETION guard — content-level, lock-free, before any `git add`. The
+	// pathspec commit lands the WORKING-TREE blob of each requested path; if that blob predates
+	// a block a peer already pushed to origin/<trunk>, the commit SILENTLY deletes the peer's
+	// lines (the #1073 incident). PATHSPEC_RACE (step 7) is structurally blind to this — the
+	// stale file is one of MY OWN requested paths, inside the set it filters out. This guard
+	// reads the already-present-locally origin/<trunk> ref (no network fetch) and refuses if
+	// committing P would drop a contiguous peer-added run absent from the working tree. It runs
+	// before the lock and before any add, so a refusal stages and commits NOTHING — strictly
+	// cleaner than PATHSPEC_RACE, which leaves a commit behind. Gated by FAK_STALE_BASE_GUARD
+	// (block|warn|off, default block); off skips entirely, warn records the would-be refusal in
+	// Detail and proceeds.
+	if mode := staleBaseGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkStaleBaseDeletion(ctx, run, opts.Dir, trunk, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = "STALE_BASE_DELETION (warn): " + detail
+			} else {
+				res.Reason = ReasonStaleBaseDeletion
+				res.Detail = detail
+				return res, true, nil
+			}
+		}
+	}
+
+	// (4c) SPURIOUS-STAGED-DELETION guard — whole-path, lock-free, before any `git add`. A
+	// requested path can be staged as a DELETION (stale index) while an untracked copy of the
+	// same path still sits in the working tree — the shape a peer `git reset`/`git rm` leaves
+	// after the file was recreated on a shared clone. Committing it deletes a file HEAD carries,
+	// only to resurrect it on the next add (a churn commit whose `git show --stat` reports an
+	// unintended deletion). It is the whole-file sibling of the (4b) content guard. Gated by
+	// FAK_SPURIOUS_DELETE_GUARD (block|warn|off, default block); off skips, warn records and
+	// proceeds.
+	if mode := spuriousDeleteGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkSpuriousStagedDeletion(ctx, run, opts.Dir, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = "SPURIOUS_STAGED_DELETION (warn): " + detail
+			} else {
+				res.Reason = ReasonSpuriousStagedDeletion
+				res.Detail = detail
+				return res, true, nil
+			}
+		}
+	}
+
+	return res, false, nil
 }
 
 // recordPathspecAssertion appends the post-commit assertion result to the
