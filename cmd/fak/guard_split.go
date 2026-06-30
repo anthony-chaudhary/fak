@@ -70,15 +70,18 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 	}
 
 	// 1. Inside tmux: split the current window for the 20% overlay pane. -v stacks panes
-	// (bottom strip), -h splits side-by-side (right column). The agent then launches inline
-	// in the current (80%) pane.
+	// (bottom strip), -h splits side-by-side (right column). -d creates the overlay pane
+	// WITHOUT making it the active one, so keyboard focus stays on the agent pane the
+	// operator actually types into — the fak-info pane is read-only observability that
+	// should never steal the cursor. The agent then launches inline in the current (80%)
+	// pane, which is still the focused one.
 	if strings.TrimSpace(getenv("TMUX")) != "" {
 		orient := "-v"
 		if where == "right" {
 			orient = "-h"
 		}
 		plan.Host = "tmux"
-		plan.Spawn = append([]string{"tmux", "split-window", orient, "-l", "20%", "--"}, overlayCmd...)
+		plan.Spawn = append([]string{"tmux", "split-window", orient, "-d", "-l", "20%", "--"}, overlayCmd...)
 		return plan, nil
 	}
 
@@ -87,15 +90,24 @@ func buildGuardSplitPlan(goos string, getenv func(string) string, lookPath func(
 	// CURRENT window, so split-pane adds the overlay beside this session rather than opening a
 	// new window (which would orphan guard's in-process gateway). -H makes a bottom strip, -V a
 	// right column; -s 0.2 sizes the new (overlay) pane to 20%.
+	//
+	// split-pane focuses the NEW (overlay) pane, which would leave the cursor on the read-only
+	// fak-info pane instead of the agent. wt has no "don't focus" flag, but it runs a chain of
+	// `;`-separated subcommands against the same -w 0 window, so we append `move-focus` back to
+	// the agent pane: it sits ABOVE a bottom strip (-H) so focus returns UP, and to the LEFT of
+	// a right column (-V) so focus returns LEFT. The agent then launches inline in that focused
+	// pane.
 	if goos == "windows" && strings.TrimSpace(getenv("WT_SESSION")) != "" {
 		if _, err := lookPath("wt"); err == nil {
-			orient := "-H"
+			orient, focusBack := "-H", "up"
 			if where == "right" {
-				orient = "-V"
+				orient, focusBack = "-V", "left"
 			}
 			plan.Host = "wt"
 			spawn := []string{"wt", "-w", "0", "split-pane", orient, "-s", "0.2"}
-			plan.Spawn = append(spawn, overlayCmd...)
+			spawn = append(spawn, overlayCmd...)
+			spawn = append(spawn, ";", "move-focus", focusBack)
+			plan.Spawn = spawn
 			return plan, nil
 		}
 	}

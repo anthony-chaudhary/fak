@@ -27,7 +27,8 @@ func TestBuildGuardSplitPlanTmuxBottom(t *testing.T) {
 	if plan.Host != "tmux" {
 		t.Fatalf("host = %q, want tmux", plan.Host)
 	}
-	want := []string{"tmux", "split-window", "-v", "-l", "20%", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s"}
+	// -d keeps the agent pane active (the overlay never steals focus).
+	want := []string{"tmux", "split-window", "-v", "-d", "-l", "20%", "--", "fak", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s"}
 	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
 		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
 	}
@@ -44,6 +45,10 @@ func TestBuildGuardSplitPlanTmuxRightIsHorizontalSplit(t *testing.T) {
 	if plan.Spawn[2] != "-h" {
 		t.Fatalf("right column should use tmux -h, got %v", plan.Spawn)
 	}
+	// The overlay must not steal focus from the agent pane regardless of orientation.
+	if plan.Spawn[3] != "-d" {
+		t.Fatalf("tmux split must pass -d to keep the agent pane focused, got %v", plan.Spawn)
+	}
 }
 
 func TestBuildGuardSplitPlanWindowsTerminalCurrentWindow(t *testing.T) {
@@ -54,7 +59,9 @@ func TestBuildGuardSplitPlanWindowsTerminalCurrentWindow(t *testing.T) {
 	if plan.Host != "wt" {
 		t.Fatalf("host = %q, want wt", plan.Host)
 	}
-	want := []string{"wt", "-w", "0", "split-pane", "-H", "-s", "0.2", "fak.exe", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s"}
+	// `; move-focus up` returns the cursor to the agent pane (above the bottom strip) after
+	// split-pane focuses the new overlay pane.
+	want := []string{"wt", "-w", "0", "split-pane", "-H", "-s", "0.2", "fak.exe", "info", "--gateway-url", "http://127.0.0.1:5000", "--interval", "2s", ";", "move-focus", "up"}
 	if strings.Join(plan.Spawn, " ") != strings.Join(want, " ") {
 		t.Fatalf("spawn = %v\nwant   %v", plan.Spawn, want)
 	}
@@ -67,6 +74,10 @@ func TestBuildGuardSplitPlanWindowsTerminalRightColumn(t *testing.T) {
 	}
 	if plan.Spawn[4] != "-V" {
 		t.Fatalf("right column should use wt -V, got %v", plan.Spawn)
+	}
+	// A right-column overlay sits to the RIGHT of the agent, so focus returns LEFT.
+	if got := strings.Join(plan.Spawn, " "); !strings.HasSuffix(got, "; move-focus left") {
+		t.Fatalf("right column should return focus with `; move-focus left`, got %v", plan.Spawn)
 	}
 }
 
