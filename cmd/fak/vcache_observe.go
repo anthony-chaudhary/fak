@@ -73,7 +73,7 @@ func runVCacheObserve(stdout, stderr io.Writer, argv []string) int {
 	rep := vcacheobserve.ObserveWithOptions(turns, vcacheobserve.Options{
 		Calibration: cal,
 		Multipliers: vcacheobserve.Multipliers{
-		Read: *readMult, Write5m: *write5mMult, Write1h: *write1hMult,
+			Read: *readMult, Write5m: *write5mMult, Write1h: *write1hMult,
 		},
 	})
 	if *asJSON {

@@ -105,10 +105,10 @@ func TestObserveWithCalibrationFeedsTTLAndReadMultiplier(t *testing.T) {
 
 	calibrated := ObserveWithOptions(turns, Options{
 		Calibration: vcachecal.Calibration{
-			TTLMillis:       20 * min,
-			TTLMeasured:     true,
-			MinPrefixTokens: 1024,
-			ReadMult:        0.25,
+			TTLMillis:        20 * min,
+			TTLMeasured:      true,
+			MinPrefixTokens:  1024,
+			ReadMult:         0.25,
 			ReadMultMeasured: true,
 		},
 	})
