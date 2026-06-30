@@ -200,6 +200,9 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		qGemm8legacyInto(qt, qp, Y)
 		return
 	}
+	if qgemmMode == qgemmModeAccel && qGemm8AccelInto(qt, qp, Y) {
+		return
+	}
 	if qtier == tierAVX2 {
 		// AVX2-only host (the EPYC-7742 CPU-server floor): the register-blocked AVX2 tile, with
 		// lanes=8 scalar-ref remainders so the whole path is bit-identical to qGemm8scalar(...,8).
@@ -313,7 +316,7 @@ func qGemm8IntoMany(qp *q8Panel, targets ...qgemm8Target) {
 	if len(targets) == 0 {
 		return
 	}
-	if !qgemmGroup || qp.P > qgemmGroupMaxP || qgemmMode == qgemmModeLegacy || qtier != tierAVX512 || len(targets) > 4 {
+	if !qgemmGroup || qp.P > qgemmGroupMaxP || qgemmMode == qgemmModeLegacy || qgemmMode == qgemmModeAccel || qtier != tierAVX512 || len(targets) > 4 {
 		for _, tg := range targets {
 			qGemm8Into(tg.qt, qp, tg.Y)
 		}

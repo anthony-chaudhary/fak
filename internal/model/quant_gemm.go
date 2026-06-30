@@ -9,12 +9,14 @@ import (
 const (
 	qgemmModeLegacy = "legacy"
 	qgemmModeTile   = "tile"
+	qgemmModeAccel  = "accel"
 )
 
 // qgemmMode pins the prefill-GEMM path for A/B measurement: "legacy" forces the old
-// per-element qdot8 sweep (qGemm8legacy), anything else uses the register-blocked tile
-// kernel. The tile kernel's SIMD tier follows qtier, so FAK_QKERNEL still selects
-// AVX-512/AVX2/scalar consistently with decode.
+// per-element qdot8 sweep (qGemm8legacy), "accel" selects the opt-in Accelerate SGEMM
+// build when present, and everything else uses the register-blocked tile kernel. The
+// tile kernel's SIMD tier follows qtier, so FAK_QKERNEL still selects AVX-512/AVX2/scalar
+// consistently with decode.
 var qgemmMode = initQGemmMode()
 
 func initQGemmMode() string {
@@ -41,6 +43,9 @@ var qgemmGroupMaxP = envIntMin("FAK_QGEMM_GROUP_MAXP", 1, 1024)
 func resolveQGemmMode(env string, envSet bool, goarch string) string {
 	if envSet {
 		return env
+	}
+	if goarch == "arm64" && qgemmAccelDefault() {
+		return qgemmModeAccel
 	}
 	return qgemmModeTile
 }
@@ -88,6 +93,7 @@ func resolveQGemmMode(env string, envSet bool, goarch string) string {
 type q8Panel struct {
 	q           []int8    // P*in codes: token t, block b, byte i at q[t*in + b*qBlk + i]
 	d           []float32 // P*nblk scales: token t, block b at d[t*nblk + b]
+	f32         []float32 // original f32 panel, used only by the opt-in Accelerate path
 	P, in, nblk int
 }
 
@@ -116,6 +122,7 @@ func quantizeBatchPanelInto(qp *q8Panel, X []float32, P, width int) {
 	if width%qBlk != 0 {
 		panic("model: Q8_0 activation width not a multiple of 32")
 	}
+	q8RememberAccelPanel(qp, X[:P*width])
 	nblk := width / qBlk
 	if cap(qp.q) < P*width {
 		qp.q = make([]int8, P*width)

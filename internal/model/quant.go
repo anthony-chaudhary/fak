@@ -1,5 +1,7 @@
 package model
 
+import "sync"
+
 // quant.go — the Q8_0 quantized inference lane: close the raw-throughput gap to
 // llama.cpp on its OWN terms (same quantization format), in pure Go, without spending
 // a single bit of the proven f32 path.
@@ -49,6 +51,8 @@ type q8Tensor struct {
 	out, in, nblk int
 	q             []int8    // out*in codes, row-major
 	d             []float32 // out*nblk per-block scales
+	accelOnce     sync.Once
+	accelF32      []float32 // optional Accelerate/SGEMM cache of code*scale weights
 }
 
 // q8Vec is a Q8_0-quantized activation vector (len == nblk*qBlk). Activations are
@@ -141,6 +145,7 @@ func quantizeQ8(w []float32, out, in int) *q8Tensor {
 			}
 		}
 	})
+	q8PrepareAccelWeight(qt)
 	return qt
 }
 

@@ -39,6 +39,9 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		qGemm8legacyInto(qt, qp, Y)
 		return
 	}
+	if qgemmMode == qgemmModeAccel && qGemm8AccelInto(qt, qp, Y) {
+		return
+	}
 	qGemm8scalarInto(qt, qp, 16, Y)
 }
 
