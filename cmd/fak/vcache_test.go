@@ -315,7 +315,7 @@ func TestRunVCacheProveTelemetryRefutesFirstThreeClaudeProbeTurns(t *testing.T) 
 
 func TestRunVCacheScoreDefaultPassesTwoXGate(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := runVCache(&out, &errb, []string{"score", "--json"}); code != 0 {
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--snapshot", "off"}); code != 0 {
 		t.Fatalf("score exit=%d stderr=%s output=%s", code, errb.String(), out.String())
 	}
 	var rep vcachescore.Report

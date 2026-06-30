@@ -742,7 +742,13 @@ var serveSessions = session.NewTable()
 // unseen trace reads its default  -  Running, unbounded budget  -  the table's own safe
 // default, never a phantom Stopped.
 func observeSession(_ context.Context, traceID string) gateway.SessionState {
-	return toGatewaySessionState(serveSessions.Get(strings.TrimSpace(traceID)))
+	traceID = strings.TrimSpace(traceID)
+	if serveSessionDurability != nil && !sessionTableHas(serveSessions, traceID) {
+		if st, ok, err := serveSessionDurability.lookupState(traceID); err == nil && ok {
+			return toGatewaySessionState(st)
+		}
+	}
+	return toGatewaySessionState(serveSessions.Get(traceID))
 }
 
 // listSessions is the multi-session read side of the /v1/fak/session control surface:
@@ -753,8 +759,20 @@ func observeSession(_ context.Context, traceID string) gateway.SessionState {
 func listSessions(_ context.Context) []gateway.SessionState {
 	snap := serveSessions.Snapshot()
 	out := make([]gateway.SessionState, 0, len(snap))
+	seen := make(map[string]bool, len(snap))
 	for _, s := range snap {
 		out = append(out, toGatewaySessionState(s))
+		seen[s.TraceID] = true
+	}
+	if serveSessionDurability != nil {
+		if persisted, err := serveSessionDurability.snapshotStates(); err == nil {
+			for _, s := range persisted {
+				if seen[s.TraceID] {
+					continue
+				}
+				out = append(out, toGatewaySessionState(s))
+			}
+		}
 	}
 	return out
 }
@@ -844,9 +862,9 @@ func budgetWebhookObserver(rawURL string) session.BudgetObserver {
 // err is a malformed verb/body (the route maps it to 400). if_rev, when non-zero,
 // is an optimistic-concurrency guard: the write is taken only if the session's
 // current Rev matches (read-then-CompareAndSet; a lost race returns ok=false).
-func controlSession(_ context.Context, traceID, verb string, req gateway.SessionControlRequest) (gateway.SessionState, bool, error) {
+func controlSession(ctx context.Context, traceID, verb string, req gateway.SessionControlRequest) (gateway.SessionState, bool, error) {
 	traceID = strings.TrimSpace(traceID)
-	st, ok, err := applySessionControl(serveSessions, traceID, verb, req)
+	st, ok, err := applySessionControlDurable(ctx, serveSessions, serveSessionDurability, traceID, verb, req)
 	if err != nil {
 		return gateway.SessionState{}, false, err
 	}

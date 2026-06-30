@@ -9,11 +9,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -228,6 +232,208 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Generation != 1 || fresh.Budget.ContextTokensLeft != 50 {
 		t.Fatalf("fresh child state = %+v, want running child with parent/generation/context budget", fresh)
 	}
+}
+
+func TestSessionPauseResumeDurableWriteThrough(t *testing.T) {
+	const trace = "durable-pause-resume"
+	ctx := context.Background()
+	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "registry.json")
+	leases := &fakeSessionLeasePublisher{}
+	installDurableSessionTest(t, path, &now, leases)
+
+	serveSessions.Restore(trace, session.State{
+		TraceID:  trace,
+		Run:      session.Running,
+		Budget:   session.Budget{TurnsLeft: 3, TokensLeft: 99, ContextTokensLeft: 500, ContextTokensCap: 500},
+		Priority: 7,
+		Pace:     session.Pace{MaxTokensPerTurn: 256, MinTurnGapMs: 25},
+		Rev:      4,
+	})
+	if err := registerServeSessionDurability(ctx, trace); err != nil {
+		t.Fatalf("register durable session: %v", err)
+	}
+
+	now = now.Add(time.Second)
+	paused, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{
+		Run: "paused", Reason: "operator-hold",
+	})
+	if err != nil || !ok {
+		t.Fatalf("pause control: state=%+v ok=%v err=%v", paused, ok, err)
+	}
+	if paused.Run != "paused" || paused.Reason != "operator-hold" {
+		t.Fatalf("paused state = %+v, want paused with reason", paused)
+	}
+	pausedDesc := readSessionDescriptor(t, path, trace)
+	if pausedDesc.Run != session.Paused || pausedDesc.Reason != "operator-hold" {
+		t.Fatalf("descriptor after pause = %+v, want paused with reason", pausedDesc)
+	}
+	if pausedDesc.Budget.TurnsLeft != 3 || pausedDesc.Budget.TokensLeft != 99 || pausedDesc.Priority != 7 {
+		t.Fatalf("descriptor lost drive axes after pause: %+v", pausedDesc)
+	}
+	if last := leases.lastPublished(t); last.PCBState != "PAUSED" {
+		t.Fatalf("side-ref publish after pause = %+v, want PAUSED", last)
+	}
+
+	// Simulate a fresh process table over the same registry: ls/status read the
+	// persisted row, then resume restores it and flips it back to RUNNING.
+	serveSessions = session.NewTable()
+	row, ok := findGatewaySession(listSessions(ctx), trace)
+	if !ok || row.Run != "paused" {
+		t.Fatalf("list after restart = %+v ok=%v, want persisted paused row", row, ok)
+	}
+	if got := observeSession(ctx, trace); got.Run != "paused" {
+		t.Fatalf("status after restart = %+v, want persisted paused", got)
+	}
+
+	now = now.Add(time.Second)
+	resumed, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{Run: "running"})
+	if err != nil || !ok {
+		t.Fatalf("resume control: state=%+v ok=%v err=%v", resumed, ok, err)
+	}
+	if resumed.Run != "running" || resumed.Reason != "" {
+		t.Fatalf("resumed state = %+v, want running with cleared reason", resumed)
+	}
+	if resumed.Budget.TurnsLeft != 3 || resumed.Budget.TokensLeft != 99 || resumed.Priority != 7 || resumed.Pace.MaxTokensPerTurn != 256 {
+		t.Fatalf("resume lost drive axes: %+v", resumed)
+	}
+	resumedDesc := readSessionDescriptor(t, path, trace)
+	if resumedDesc.Run != session.Running || resumedDesc.Budget.ContextTokensLeft != 500 {
+		t.Fatalf("descriptor after resume = %+v, want running with context budget", resumedDesc)
+	}
+	if last := leases.lastPublished(t); last.PCBState != "RUNNING" {
+		t.Fatalf("side-ref publish after resume = %+v, want RUNNING", last)
+	}
+}
+
+func TestSessionStopDurableWriteThroughReleasesSideRef(t *testing.T) {
+	const trace = "durable-stop"
+	ctx := context.Background()
+	now := time.Date(2026, 6, 29, 11, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "registry.json")
+	leases := &fakeSessionLeasePublisher{}
+	installDurableSessionTest(t, path, &now, leases)
+
+	serveSessions.Restore(trace, session.State{
+		TraceID: trace,
+		Run:     session.Running,
+		Budget:  session.Budget{TurnsLeft: 2, TokensLeft: 20},
+		Rev:     2,
+	})
+	if err := registerServeSessionDurability(ctx, trace); err != nil {
+		t.Fatalf("register durable session: %v", err)
+	}
+
+	now = now.Add(time.Second)
+	stopped, ok, err := controlSession(ctx, trace, "run", gateway.SessionControlRequest{
+		Run: "stopped", Reason: session.ReasonStopped,
+	})
+	if err != nil || !ok {
+		t.Fatalf("stop control: state=%+v ok=%v err=%v", stopped, ok, err)
+	}
+	if stopped.Run != "stopped" || stopped.Reason != session.ReasonStopped {
+		t.Fatalf("stopped state = %+v, want stopped with reason", stopped)
+	}
+	desc := readSessionDescriptor(t, path, trace)
+	if desc.Run != session.Stopped || desc.Reason != session.ReasonStopped {
+		t.Fatalf("descriptor after stop = %+v, want stopped with reason", desc)
+	}
+	if len(leases.removed) != 1 || leases.removed[0] != trace {
+		t.Fatalf("side-ref removes = %+v, want [%s]", leases.removed, trace)
+	}
+
+	restarted := session.NewTable()
+	mirror := newSessionDurability(session.NewRegistry(session.NewFileStore(path)), leases, "test-host", time.Hour, func() time.Time { return now }, nil)
+	if err := mirror.restore(restarted); err != nil {
+		t.Fatalf("restore after stop: %v", err)
+	}
+	if got := restarted.Get(trace); got.Run != session.Stopped || got.Reason != session.ReasonStopped {
+		t.Fatalf("restart restored = %+v, want stopped with reason", got)
+	}
+}
+
+func TestSessionStopUnknownIDTypedError(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	installDurableSessionTest(t, filepath.Join(t.TempDir(), "registry.json"), &now, &fakeSessionLeasePublisher{})
+
+	st, ok, err := controlSession(ctx, "missing-session", "run", gateway.SessionControlRequest{
+		Run: "stopped", Reason: session.ReasonStopped,
+	})
+	if err == nil || ok {
+		t.Fatalf("unknown stop must fail with typed error: state=%+v ok=%v err=%v", st, ok, err)
+	}
+	var unknown unknownSessionError
+	if !errors.As(err, &unknown) || unknown.id != "missing-session" {
+		t.Fatalf("unknown stop error = %T %v, want unknownSessionError for missing-session", err, err)
+	}
+}
+
+type fakeSessionLeasePublisher struct {
+	published []leaseref.SessionDescriptor
+	removed   []string
+}
+
+func (f *fakeSessionLeasePublisher) PublishSession(_ context.Context, d leaseref.SessionDescriptor) (string, error) {
+	f.published = append(f.published, d)
+	return d.Ref(), nil
+}
+
+func (f *fakeSessionLeasePublisher) RemoveSession(_ context.Context, id string) error {
+	f.removed = append(f.removed, id)
+	return nil
+}
+
+func (f *fakeSessionLeasePublisher) lastPublished(t *testing.T) leaseref.SessionDescriptor {
+	t.Helper()
+	if len(f.published) == 0 {
+		t.Fatalf("expected at least one side-ref publish")
+	}
+	return f.published[len(f.published)-1]
+}
+
+func installDurableSessionTest(t *testing.T, path string, now *time.Time, leases *fakeSessionLeasePublisher) {
+	t.Helper()
+	oldSessions := serveSessions
+	oldDurability := serveSessionDurability
+	serveSessions = session.NewTable()
+	serveSessionDurability = newSessionDurability(
+		session.NewRegistry(session.NewFileStore(path)),
+		leases,
+		"test-host",
+		time.Hour,
+		func() time.Time { return *now },
+		nil,
+	)
+	if err := serveSessionDurability.restore(serveSessions); err != nil {
+		t.Fatalf("install durable session test: %v", err)
+	}
+	t.Cleanup(func() {
+		serveSessions = oldSessions
+		serveSessionDurability = oldDurability
+	})
+}
+
+func readSessionDescriptor(t *testing.T, path, id string) session.Descriptor {
+	t.Helper()
+	reg := session.NewRegistry(session.NewFileStore(path))
+	d, ok, err := reg.Get(id)
+	if err != nil {
+		t.Fatalf("read descriptor %s: %v", id, err)
+	}
+	if !ok {
+		t.Fatalf("descriptor %s not found", id)
+	}
+	return d
+}
+
+func findGatewaySession(rows []gateway.SessionState, trace string) (gateway.SessionState, bool) {
+	for _, row := range rows {
+		if row.TraceID == trace {
+			return row, true
+		}
+	}
+	return gateway.SessionState{}, false
 }
 
 // intPtr is a small helper so the pointer-typed Priority field reads cleanly.

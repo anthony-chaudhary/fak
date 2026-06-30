@@ -10,7 +10,7 @@ import (
 )
 
 // prefixResolver is a test laneResolver: the first path segment is the lane, but a root-level
-// file (no "/") has no lane — mirroring laneForPath's "" return for an unplaceable path.
+// file (no "/") has no lane, exercising the classifier's unplaceable-path bucket.
 func prefixResolver(path string) string {
 	p := strings.ReplaceAll(path, "\\", "/")
 	if i := strings.IndexByte(p, '/'); i >= 0 {
@@ -24,7 +24,7 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 		{Path: "docs/b.md", Status: "M"},
 		{Path: "docs/a.md", Status: "M"},
 		{Path: "gateway/http.go", Status: "M"},
-		{Path: "README.md", Status: "M"},                                       // root-level -> no-lane
+		{Path: "MISC.txt", Status: "M"},                                        // root-level -> no-lane
 		{Path: "experiments/x/.run.err", Status: "??", Untracked: true},        // junk
 		{Path: "stray-scratchpad-in-Temp.json", Status: "??", Untracked: true}, // junk (flattened temp)
 	}
@@ -47,8 +47,8 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	if plan.Groups[0].Trailer != "(fak docs)" {
 		t.Fatalf("docs trailer = %q, want (fak docs)", plan.Groups[0].Trailer)
 	}
-	if len(plan.NoLane) != 1 || plan.NoLane[0].Path != "README.md" {
-		t.Fatalf("NoLane = %v, want [README.md]", plan.NoLane)
+	if len(plan.NoLane) != 1 || plan.NoLane[0].Path != "MISC.txt" {
+		t.Fatalf("NoLane = %v, want [MISC.txt]", plan.NoLane)
 	}
 	if len(plan.Junk) != 2 {
 		t.Fatalf("len(Junk) = %d, want 2", len(plan.Junk))
@@ -67,9 +67,13 @@ func TestIsSweepJunk(t *testing.T) {
 		{"flattened temp scratchpad", dirtyEntry{Path: "CUsersUSERAppDataLocalTempclaudeFOOscratchpadaudit_output.json", Untracked: true}, true},
 		{"run err log", dirtyEntry{Path: "experiments/x/.run.err", Untracked: true}, true},
 		{"run out log", dirtyEntry{Path: "experiments/x/y.run.out", Untracked: true}, true},
+		{"root coverage file", dirtyEntry{Path: "coverage", Untracked: true}, true},
+		{"root coverprofile", dirtyEntry{Path: "unit.coverprofile", Untracked: true}, true},
+		{"private-use glyph root dir", dirtyEntry{Path: "\uf05c/", Untracked: true}, true},
 		{"tracked file with run.err suffix is not junk", dirtyEntry{Path: "experiments/x/.run.err", Untracked: false}, false},
 		{"ordinary untracked source", dirtyEntry{Path: "internal/foo/bar.go", Untracked: true}, false},
 		{"scratchpad but inside a real tree (has slash) is not junk", dirtyEntry{Path: "tools/scratchpad/temp.json", Untracked: true}, false},
+		{"ordinary root doc is not junk", dirtyEntry{Path: "README.md", Untracked: true}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

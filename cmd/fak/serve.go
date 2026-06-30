@@ -326,6 +326,10 @@ func cmdServe(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak serve:", err)
 		os.Exit(1)
 	}
+	if err := configureServeSessionDurability(serveSessions, "", os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(1)
+	}
 
 	defaultTraceID := strings.TrimSpace(*sessionID)
 	if *contextBudgetTokens > 0 {
@@ -337,6 +341,10 @@ func cmdServe(argv []string) {
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: *contextBudgetTokens,
 		})
+	}
+	if err := registerServeSessionDurability(context.Background(), defaultTraceID); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(1)
 	}
 	// Wire the optional operator webhook (#743) and the tiered stop-reason push notifier
 	// (#761). The #743 budget webhook stays byte-identical when it is the only thing set:

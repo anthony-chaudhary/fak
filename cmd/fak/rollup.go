@@ -14,7 +14,7 @@ package main
 //
 //   - dispatch: shells tools/dispatch_status.py --json (closure honesty + throughput)
 //   - loops:    folds the cross-ledger loop-health view in-process (loopfleet.Fold)
-//   - cadence:  WORK-DONE from git (always, cheap) + the SCORES pane (optional)
+//   - cadence:  WORK-DONE from git + MATURITY route seed (always, cheap) + the SCORES pane (optional)
 //   - fleet:    folds the lab roster against its reports dir in-process (fleet.Fold)
 //
 // Every plane degrades honestly: a collector that fails (or is skipped with
@@ -130,9 +130,13 @@ func collectRollup(stderr io.Writer, root, python string, fast bool, window, tim
 		in.Loops = execrollup.PlaneInput{Payload: structToMap(rep)}
 	}
 
-	// cadence — WORK-DONE (git, always) feeds the ship-stamp marquee; SCORES is an
-	// optional overlay (the ~4-minute pane), skipped by --fast.
-	cad := map[string]any{"work": structToMap(cadencereport.WorkFromGit(root, window))}
+	// cadence — WORK-DONE (git, always) feeds the ship-stamp marquee; MATURITY is
+	// Go-native and cheap enough to keep in --fast; SCORES is an optional overlay
+	// (the ~4-minute pane), skipped by --fast.
+	cad := map[string]any{
+		"work":     structToMap(cadencereport.WorkFromGit(root, window)),
+		"maturity": structToMap(cadencereport.CollectMaturity(root)),
+	}
 	switch {
 	case from.scores != "":
 		cad["scores"] = structToMap(cadencereport.InterpretScoresFromFile(from.scores, os.Stdin))

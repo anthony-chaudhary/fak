@@ -24,8 +24,9 @@ import (
 // probes pass (the mechanism exists AND it is the default), and in DEBT when it is
 // unwired or below its floor. This is the SPINE: every other dev-ex child (#1153 the
 // tool map, #1154 priced fan-out, #1155 the green-gate budget, #1157 false-done
-// refused, #1158 recall re-verify, #1161 the session→outcome loop) flips one of these
-// probes, and its before/after delta is the move in this number.
+// refused, #1158 recall re-verify, #1161 the session→outcome loop, and the task
+// handoff next-step push) flips one of these probes, and its before/after delta is the
+// move in this number.
 //
 //	fak loop-index-scorecard            human headline + per-stage work-list
 //	fak loop-index-scorecard --json     the control-pane Report (corpus.loopindex_debt)
@@ -193,6 +194,12 @@ func collectLoopIndex(root string) loopindex.Loop {
 				false, mainCase("sessions") && exists("cmd/fak/sessions.go")),
 			liProbe("outcome_link", "the value-vs-waste outcome link is classified (sessionobs.ClassifyOutcome)",
 				false, has("internal/sessionobs/sessionobs.go", "ClassifyOutcome")),
+			liProbe("task_handoff_next_step", "`fak task handoff` requires witnessed completion plus current state, then plans/syncs 1-2 stable follow-up issues",
+				false,
+				hasAllFold("internal/taskmgr/handoff.go",
+					"SchemaHandoff", "ReviewHandoff", "VerifiedDone", "BuildHandoffIssuePlan", "TOO_MANY_NEXT_STEPS") &&
+					hasAllFold("cmd/fak/taskmgr.go",
+						`case "handoff"`, "syncTaskHandoffPlan", "--live", "--existing-json")),
 		},
 	}
 
@@ -215,7 +222,7 @@ description: "fak's deterministic loop-index scorecard: it folds the six stages 
 
 <!-- loop-index-scorecard · process: fak loop-index-scorecard --markdown -->
 
-The agentic-coding loop is **Orient → Plan → Act → Verify → Ship → Learn**. "The loop got faster / more self-correcting" is a vibe until it is a number you can move and prove you moved. This scorecard folds each stage's **witnessed** signal into one **loop-index** (0–100) plus **loopindex_debt** (the count of stages not yet witnessed at their floor) — every value re-derived from the tracked tree by ` + "`fak loop-index-scorecard`" + `, so a clean clone reproduces it. It is the **spine** of the 10x dev-experience epic ([#1148](../../)): every other lever (the tool map, priced fan-out, the green-gate budget, false-done-refused, recall re-verify, the session→outcome loop) flips one of the probes below, and its before/after delta is the move in this number.
+The agentic-coding loop is **Orient → Plan → Act → Verify → Ship → Learn**. "The loop got faster / more self-correcting" is a vibe until it is a number you can move and prove you moved. This scorecard folds each stage's **witnessed** signal into one **loop-index** (0–100) plus **loopindex_debt** (the count of stages not yet witnessed at their floor) — every value re-derived from the tracked tree by ` + "`fak loop-index-scorecard`" + `, so a clean clone reproduces it. It is the **spine** of the 10x dev-experience epic ([#1148](../../)): every other lever (the tool map, priced fan-out, the green-gate budget, false-done-refused, recall re-verify, the session→outcome loop, and task handoff next-step push) flips one of the probes below, and its before/after delta is the move in this number.
 
 > Regenerate: ` + "`go run ./cmd/fak loop-index-scorecard --markdown > docs/fak/loop-index-scorecard.md`" + `
 

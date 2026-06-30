@@ -196,7 +196,7 @@ func benchmarksRun(stdout, stderr io.Writer, argv []string) int {
 func runBuiltInBenchmark(name string, stdout, stderr io.Writer, extra []string) (int, bool) {
 	switch name {
 	case "vcache":
-		args := []string{"bench", "--json"}
+		args := []string{"bench", "--json", "--snapshot", "off"}
 		args = append(args, extra...)
 		return runVCache(stdout, stderr, args), true
 	default:
