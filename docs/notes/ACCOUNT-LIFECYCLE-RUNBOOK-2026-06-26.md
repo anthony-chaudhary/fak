@@ -133,6 +133,10 @@ and the multi-step retire — both now closed.
 - **Generated view login fields** — `fak accounts sync` writes `login_status` and `can_serve` into
   the dos/job roster rows, so `claude-as`, `u`, and other switcher consumers can read the same
   readiness surface without reimplementing the registry's login rules.
+- **Switcher and guard login posture** — `fak fleet-accounts roster/resolve`, `fak dispatch
+  tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak guard` now carry or print the
+  same `login_status`/`can_serve` posture instead of inferring readiness from config dir names or
+  raw credential booleans.
 - **`fak accounts remove --archive`** — the one-command retire (tombstone + dir-rename + registry
   repoint + resync) that replaces the manual dance this note was written about.
 
@@ -143,5 +147,6 @@ and the multi-step retire — both now closed.
   on every binary bump). Decide the determinism rule before shipping it.
 - **Stale-binary guard in `claude-as` / `u`.** When the installed `fak.exe` lacks a verb the
   registry needs, warn with the fix (`go install …/cmd/fak@latest`) instead of a raw flag error.
-- **Session-start seat banner.** `c` already prints `[c] account: <name>`; extend it to flag a
-  tombstoned / slated-for-removal seat (this session ran on a retiring seat with no banner).
+- **Session-start seat banner in `c`.** The fak-facing launch, next, and guard paths now expose
+  login posture; `c` still only prints `[c] account: <name>`. Extend that banner to flag a
+  tombstoned / slated-for-removal seat before the session starts.

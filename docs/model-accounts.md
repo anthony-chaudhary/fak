@@ -74,6 +74,10 @@ Use `fak accounts status --json` for the observable config-home login report. It
 shows the same status in its `LOGIN` column, and `fak accounts sync` materializes
 `login_status` plus `can_serve` into the generated dos/job roster rows. That keeps the account
 switcher from guessing at login readiness from directory names or scattered credential booleans.
+The same vocabulary is carried through `fak fleet-accounts roster/resolve`, `fak dispatch
+tick/wave`, `fak accounts launch`, `fak accounts next`, and `fak guard` auth warnings, so callers
+can gate on `can_serve` and surface the closed login status instead of re-deriving readiness from
+raw credential files.
 
 ## Mix and match at any level
 

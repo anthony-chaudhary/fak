@@ -48,8 +48,12 @@ The vendor product surface is still being filled in:
 
 - Backend Conformance Kit: planned in issue #1684.
 - `fak backend scaffold <name>` generator: planned in issue #1685.
-- Hardware-shape-neutral scorecard dimension: planned in issue #1688.
-- AEO/marketing generator wiring for these vendor terms: planned in issue #1689.
+- Hardware-shape-neutral scorecard dimension: shipped in issue #1688; see the
+  shape-neutrality ledger in [hardware portability](../explainers/hardware-portability.md).
+- AEO/marketing generator wiring for these vendor terms: refreshed by
+  `fak marketing aeo`, which writes `docs/marketing/updates.json`,
+  `llms-updates.txt`, and the fenced `llms.txt` What's-new block from
+  witnessed commits.
 
-Until those land, these pages are routing and integration guidance, not a
-`fak-certified` mark.
+Until the conformance kit and scaffold generator land, these pages are routing
+and integration guidance, not a `fak-certified` mark.
