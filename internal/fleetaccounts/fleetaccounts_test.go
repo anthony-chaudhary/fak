@@ -500,6 +500,59 @@ func TestResolveSurfacesLoginBlockedTarget(t *testing.T) {
 	}
 }
 
+func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
+	home, cfg, regPath := fixture(t)
+	reg := LoadRegistry(regPath)
+	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), reg)
+
+	wave := AllocateWave(rows, WaveRequest{
+		Count:             3,
+		WorkKind:          "engineering",
+		AllowTierFallback: true,
+	}, DefaultPolicy())
+	if !wave.OK || wave.Requested != 3 || wave.Granted != 2 || wave.Shortfall != 1 ||
+		wave.DistinctPools != 2 || wave.Size != 2 || wave.WaveID == "" {
+		t.Fatalf("wave = %+v, want 2 distinct granted pools and 1 shortfall", wave)
+	}
+	if len(wave.Lanes) != 2 || wave.Lanes[0].Rank != 0 || wave.Lanes[1].Rank != 1 ||
+		wave.Lanes[0].WaveID != wave.WaveID || wave.Lanes[1].Size != 2 {
+		t.Fatalf("lane membership = %+v, want rank-stamped shared wave", wave.Lanes)
+	}
+	if wave.Lanes[0].Pool == wave.Lanes[1].Pool {
+		t.Fatalf("wave reused one pool: %+v", wave.Lanes)
+	}
+	for _, lane := range wave.Lanes {
+		if lane.Tag == "dup" || lane.Tag == "gem8" {
+			t.Fatalf("wave allocated duplicate or blocked lane: %+v", wave.Lanes)
+		}
+	}
+	if len(wave.BlockedTargetAccounts) != 1 || wave.BlockedTargetAccounts[0].Tag != "gem8" {
+		t.Fatalf("blocked target accounts = %+v, want throttled gem8", wave.BlockedTargetAccounts)
+	}
+}
+
+func TestAllocateWaveSkipsCanServeFalse(t *testing.T) {
+	rows := []Account{{
+		Dir:       "C:/Users/u/.claude-stale",
+		Product:   "claude",
+		Account:   ".claude-stale",
+		Tag:       "stale",
+		Kind:      KindWorker,
+		Reason:    "real offered account",
+		ModelTier: intp(1),
+		Available: boolp(true),
+		CanServe:  boolp(false),
+	}}
+
+	wave := AllocateWave(rows, WaveRequest{Count: 1, WorkKind: "engineering", Product: "claude"}, DefaultPolicy())
+	if wave.OK || wave.Granted != 0 || len(wave.Lanes) != 0 || len(wave.BlockedTargetAccounts) != 1 {
+		t.Fatalf("wave = %+v, want no lane and one blocked target", wave)
+	}
+	if wave.BlockedTargetAccounts[0].CanServe == nil || *wave.BlockedTargetAccounts[0].CanServe {
+		t.Fatalf("blocked target can_serve = %+v, want false", wave.BlockedTargetAccounts[0])
+	}
+}
+
 func TestSeatPoolBindingAndHeadroom(t *testing.T) {
 	home, cfg, regPath := fixture(t)
 	reg := LoadRegistry(regPath)

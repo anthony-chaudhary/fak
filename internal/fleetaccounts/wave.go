@@ -189,4 +189,3 @@ func waveIDForPools(pools []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(pools, ",")))
 	return "wave-" + fmt.Sprintf("%x", sum[:6])
 }
-
