@@ -1855,10 +1855,12 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 //   - "localtools" â€” agent: the local tool-call engine cmd/fak wires directly.
 //   - "fakread"    â€” agent: the read-only engine for fak_read gateway calls.
 //   - "mock"       â€” engine: the routing/mock engine used by the engine-route capability.
+//   - "dynamo"     â€” engine: the Dynamo EngineDriver adapter for ridden P/D pools.
 //
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
 var engineDriverRole = map[string]map[string]string{
+	"dynamo":     {"engine": "the Dynamo EngineDriver adapter for ridden P/D serving pools"},
 	"inkernel":   {"modelengine": "the in-kernel Go model-fusion engine (dogfood default)"},
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
