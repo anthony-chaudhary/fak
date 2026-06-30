@@ -166,14 +166,20 @@ type Generation struct {
 
 // GenerationLane is the operator-brief projection of one product horizon.
 type GenerationLane struct {
-	Generation   string  `json:"generation"`
-	Tracked      int     `json:"tracked"`
-	Measured     int     `json:"measured"`
-	Programs     int     `json:"programs"`
-	Discrete     int     `json:"discrete"`
-	OpenDiscrete int     `json:"open_discrete"`
-	OverallPct   float64 `json:"overall_pct"`
-	Errored      int     `json:"errored,omitempty"`
+	Generation          string  `json:"generation"`
+	Tracked             int     `json:"tracked"`
+	Measured            int     `json:"measured"`
+	Programs            int     `json:"programs"`
+	Discrete            int     `json:"discrete"`
+	OpenDiscrete        int     `json:"open_discrete"`
+	OverallPct          float64 `json:"overall_pct"`
+	Errored             int     `json:"errored,omitempty"`
+	DebtScore           int     `json:"debt_score,omitempty"`
+	StaleIssues         int     `json:"stale_issues,omitempty"`
+	MissingWitnesses    int     `json:"missing_witnesses,omitempty"`
+	UnpromotedBets      int     `json:"unpromoted_bets,omitempty"`
+	LabelShipMismatches int     `json:"label_ship_mismatches,omitempty"`
+	DebtReason          string  `json:"debt_reason,omitempty"`
 }
 
 // Strength is evidence-backed work the operator can trust or delegate. It keeps
@@ -387,17 +393,23 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 		return nil
 	}
 	out := &Generation{}
-	var nowOpen, laterTracked, unreadable int
+	var nowOpen, laterTracked, unreadable, debt int
 	for _, row := range rows {
 		lane := GenerationLane{
-			Generation:   row.Generation,
-			Tracked:      row.Tracked,
-			Measured:     row.Measured,
-			Programs:     row.Programs,
-			Discrete:     row.Discrete,
-			OpenDiscrete: maxInt(0, row.Total-row.Closed),
-			OverallPct:   row.OverallPct,
-			Errored:      row.Errored,
+			Generation:          row.Generation,
+			Tracked:             row.Tracked,
+			Measured:            row.Measured,
+			Programs:            row.Programs,
+			Discrete:            row.Discrete,
+			OpenDiscrete:        maxInt(0, row.Total-row.Closed),
+			OverallPct:          row.OverallPct,
+			Errored:             row.Errored,
+			DebtScore:           row.DebtScore,
+			StaleIssues:         row.StaleIssues,
+			MissingWitnesses:    row.MissingWitnesses,
+			UnpromotedBets:      row.UnpromotedBets,
+			LabelShipMismatches: row.LabelShipMismatches,
+			DebtReason:          row.DebtReason,
 		}
 		out.Lanes = append(out.Lanes, lane)
 		if row.Generation == "now" {
@@ -406,16 +418,17 @@ func generationReadout(rows []milestonereport.GenerationRow) *Generation {
 			laterTracked += lane.Tracked
 		}
 		unreadable += lane.Errored
+		debt += lane.DebtScore
 	}
 	switch {
 	case unreadable > 0:
-		out.Summary = fmt.Sprintf("generation lanes have %d unreadable item(s); do not promote or demote from this readout yet", unreadable)
+		out.Summary = fmt.Sprintf("generation lanes have %d unreadable item(s), debt %d; do not promote or demote from this readout yet", unreadable, debt)
 		out.Attention = "repair the unreadable generation lane signal before changing dispatch focus"
 	case nowOpen > 0:
-		out.Summary = fmt.Sprintf("ship-now lane has %d open discrete item(s); %d later-horizon item(s) stay visible", nowOpen, laterTracked)
+		out.Summary = fmt.Sprintf("ship-now lane has %d open discrete item(s); %d later-horizon item(s) stay visible; generation debt %d", nowOpen, laterTracked, debt)
 		out.Attention = "delegate from the now lane first; review later lanes only when promotion evidence changes"
 	case laterTracked > 0:
-		out.Summary = fmt.Sprintf("ship-now lane is clear; %d later-horizon item(s) remain as bets or foundations", laterTracked)
+		out.Summary = fmt.Sprintf("ship-now lane is clear; %d later-horizon item(s) remain as bets or foundations; generation debt %d", laterTracked, debt)
 		out.Attention = "no extra human attention unless a later item asks for promotion into now"
 	default:
 		out.Summary = "generation lanes are clear or unclassified only"
@@ -996,6 +1009,13 @@ func appendGeneration(lines []string, g *Generation) []string {
 		}
 		if lane.Errored > 0 {
 			parts = append(parts, fmt.Sprintf("%d unreadable", lane.Errored))
+		}
+		if lane.DebtScore > 0 {
+			if lane.DebtReason != "" {
+				parts = append(parts, fmt.Sprintf("debt %d (%s)", lane.DebtScore, lane.DebtReason))
+			} else {
+				parts = append(parts, fmt.Sprintf("debt %d", lane.DebtScore))
+			}
 		}
 		lines = append(lines, "              "+strings.Join(parts, "; "))
 	}

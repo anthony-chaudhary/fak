@@ -170,11 +170,17 @@ func TestFoldCarriesGenerationReadoutFromMilestone(t *testing.T) {
 	if lane := byGen["now"]; lane.OpenDiscrete != 2 || lane.Discrete != 1 || lane.OverallPct != 33.3 {
 		t.Fatalf("now lane = %+v, want 2 open discrete at 33.3%%", lane)
 	}
+	if lane := byGen["now"]; lane.DebtScore != 2 || lane.StaleIssues != 2 {
+		t.Fatalf("now lane debt = %+v, want score 2 from two stale-risk issues", lane)
+	}
 	if lane := byGen["next"]; lane.Programs != 1 || lane.OpenDiscrete != 0 {
 		t.Fatalf("next lane = %+v, want one ongoing program and no discrete open count", lane)
 	}
+	if lane := byGen["next"]; lane.DebtScore != 2 || lane.UnpromotedBets != 1 {
+		t.Fatalf("next lane debt = %+v, want score 2 from one unpromoted bet", lane)
+	}
 	rendered := Render(got)
-	for _, want := range []string{"generation ship-now lane", "delegate from the now lane first", "now: 1 tracked", "next: 1 tracked", "future: 1 tracked"} {
+	for _, want := range []string{"generation ship-now lane", "generation debt 4", "delegate from the now lane first", "now: 1 tracked", "debt 2", "next: 1 tracked", "future: 1 tracked"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("render missing %q:\n%s", want, rendered)
 		}
