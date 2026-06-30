@@ -496,6 +496,35 @@ def test_make_ci_runs_portfolio_ratchet() -> None:
     assert "tools/scorecard_control_pane.py --check" in makefile
 
 
+def test_ci_posts_scorecards_to_scoreboard_without_lab_token() -> None:
+    """#997: CI must produce #scoreboard cards from the control-pane scorecard family.
+
+    This is a workflow contract test, not a Slack integration test: it pins the
+    dedicated scoreboard secrets, the always-on no-network dry-run path, the
+    control-pane registry source, and the `--from <payload> --debt-key <key>` post
+    route. It also guards against accidentally authenticating with the lab
+    `SLACK_BOT_TOKEN` instead of the scoreboard workspace token.
+    """
+    ci = (scp.repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    marker = "- name: scorecard scoreboard producer (dry-run + optional post)"
+    assert marker in ci
+    block = ci.split(marker, 1)[1].split("# Learning-docs scorecard", 1)[0]
+
+    assert "FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}" in block
+    assert "FAK_SCOREBOARD_CHANNEL: ${{ secrets.FAK_SCOREBOARD_CHANNEL }}" in block
+    assert "FAK_SCOREBOARD_SOURCE: ci:${{ github.run_id }}" in block
+    assert "SLACK_BOT_TOKEN" not in block
+
+    assert "import scorecard_control_pane as scp" in block
+    assert "for card in scp.SCORECARDS" in block
+    assert "--from \"$payload\"" in block
+    assert "--debt-key \"$debt_key\"" in block
+    assert "--source \"$FAK_SCOREBOARD_SOURCE\"" in block
+    assert "--dry-run | tee \"$card_text\"" in block
+    assert "GITHUB_EVENT_NAME" in block and "GITHUB_REF_NAME" in block
+    assert "Live posting requires a push to main/master plus FAK_SCOREBOARD_TOKEN and FAK_SCOREBOARD_CHANNEL CI secrets." in block
+
+
 # --- the CI ratchet gate (--check) -----------------------------------------
 
 def test_check_gate_green_when_flat() -> None:

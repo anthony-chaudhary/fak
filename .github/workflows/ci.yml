@@ -476,6 +476,116 @@ jobs:
           python tools/scorecard_control_pane_test.py
           python tools/scorecard_control_pane.py --check
 
+      # Scoreboard producer (#997): publish EACH folded scorecard payload to the
+      # #scoreboard Slack workspace after the control-pane family runs. This uses
+      # the dedicated CI secrets FAK_SCOREBOARD_TOKEN / FAK_SCOREBOARD_CHANNEL —
+      # never the lab SLACK_BOT_TOKEN — and always exercises the no-network
+      # --dry-run renderer before any live post. Live posts are limited to trunk
+      # pushes with both secrets set; PRs and unprovisioned repos still render
+      # auditable cards in the step summary/artifact.
+      - name: scorecard scoreboard producer (dry-run + optional post)
+        working-directory: ${{ github.workspace }}
+        env:
+          FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+          FAK_SCOREBOARD_CHANNEL: ${{ secrets.FAK_SCOREBOARD_CHANNEL }}
+          FAK_SCOREBOARD_SOURCE: ci:${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          go build -o fak ./cmd/fak
+          mkdir -p scorecard-payloads scorecard-cards
+
+          python - <<'PY' > scorecard-post-plan.tsv
+          import shlex
+          import sys
+
+          sys.path.insert(0, "tools")
+          import scorecard_control_pane as scp
+
+          for card in scp.SCORECARDS:
+              if card.get("cmd"):
+                  cmd = card["cmd"]
+                  if cmd.startswith("go run ./cmd/fak "):
+                      cmd = "./fak " + cmd[len("go run ./cmd/fak "):]
+              else:
+                  cmd = shlex.join([sys.executable, "tools/" + card["script"], "--json"])
+              print("\t".join([card["key"], card["label"], card["debt"], cmd]))
+          PY
+
+          live_post=false
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] &&
+             { [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; } &&
+             [ -n "${FAK_SCOREBOARD_TOKEN:-}" ] &&
+             [ -n "${FAK_SCOREBOARD_CHANNEL:-}" ]; then
+            live_post=true
+          fi
+
+          rendered=0
+          posted=0
+          skipped=0
+          failed=0
+          while IFS=$'\t' read -r key label debt_key cmd; do
+            payload="scorecard-payloads/${key}.json"
+            card_text="scorecard-cards/${key}.txt"
+            echo "::group::scoreboard dry-run ${label}"
+            set +e
+            bash -lc "$cmd" > "$payload"
+            rc=$?
+            set -e
+            if ! python -m json.tool "$payload" >/dev/null 2>&1; then
+              echo "::warning title=scoreboard-producer::${label} emitted no valid JSON; skipped (exit ${rc})"
+              failed=$((failed + 1))
+              echo "::endgroup::"
+              continue
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "::notice title=scoreboard-producer::${label} exited ${rc} after emitting JSON; posting the reported result"
+            fi
+            ./fak scoreboard post \
+              --from "$payload" \
+              --debt-key "$debt_key" \
+              --title "$label" \
+              --source "$FAK_SCOREBOARD_SOURCE" \
+              --dry-run | tee "$card_text"
+            rendered=$((rendered + 1))
+            echo "::endgroup::"
+
+            if [ "$live_post" = "true" ]; then
+              ./fak scoreboard post \
+                --from "$payload" \
+                --debt-key "$debt_key" \
+                --title "$label" \
+                --source "$FAK_SCOREBOARD_SOURCE"
+              posted=$((posted + 1))
+            else
+              skipped=$((skipped + 1))
+            fi
+          done < scorecard-post-plan.tsv
+
+          {
+            echo "## scorecard scoreboard producer"
+            echo "- dry-run rendered: ${rendered}"
+            echo "- live posted: ${posted}"
+            echo "- live skipped: ${skipped}"
+            echo "- payload failures skipped: ${failed}"
+            echo
+            echo "Live posting requires a push to main/master plus FAK_SCOREBOARD_TOKEN and FAK_SCOREBOARD_CHANNEL CI secrets."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: upload scorecard scoreboard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-scoreboard-cards
+          path: |
+            scorecard-post-plan.tsv
+            scorecard-payloads/
+            scorecard-cards/
+          if-no-files-found: ignore
+
       # Learning-docs scorecard: the pedagogy measuring stick for the teaching
       # corpus (the university, the how-to set, the explainers). It had `--json` /
       # `--markdown` / `--stamp` but no gate — which is why the corpus drifted 34
