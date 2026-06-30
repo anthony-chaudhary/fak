@@ -101,6 +101,167 @@ func TestEconomicsBlockReportsHitReadRebateCostFromTelemetry(t *testing.T) {
 	}
 }
 
+func TestProviderTelemetryDoesNotCountAsAgenticActivation(t *testing.T) {
+	in := DefaultInput()
+	in.TelemetryRows = []vcachegov.TelemetryRow{
+		{InputTokens: 86, CacheReadInputTokens: 1920},
+	}
+	rep := Score(in)
+	if rep.AgenticActivation.Active || rep.AgenticActivation.Total != 0 {
+		t.Fatalf("provider telemetry must not count as fak-authored activation: %+v", rep.AgenticActivation)
+	}
+	if !rep.Planes.ProviderObserved.Available || rep.Planes.ProviderObserved.Provenance != "OBSERVED" {
+		t.Fatalf("provider plane=%+v, want observed provider evidence", rep.Planes.ProviderObserved)
+	}
+	if rep.Planes.KernelWitnessed.Available || rep.Planes.ContextWitnessed.Available {
+		t.Fatalf("kernel/context planes must stay missing without witnesses: %+v", rep.Planes)
+	}
+	if rep.DefaultUsefulness.Schema != "fak.cache.default_usefulness.v1" {
+		t.Fatalf("default-usefulness schema=%q", rep.DefaultUsefulness.Schema)
+	}
+	if rep.DefaultUsefulness.Facets.AgenticActivation != 0 {
+		t.Fatalf("agentic activation facet=%d, want 0 for provider-only telemetry", rep.DefaultUsefulness.Facets.AgenticActivation)
+	}
+	if !strings.Contains(rep.DefaultUsefulness.Reason, "provider rebate observed") {
+		t.Fatalf("reason=%q, want provider-only caveat", rep.DefaultUsefulness.Reason)
+	}
+	if !rep.ColdPathCorrect || !rep.DefaultUsefulness.ColdPathCorrect {
+		t.Fatalf("cold path must remain correct even when provider cache misses: report=%v default=%v", rep.ColdPathCorrect, rep.DefaultUsefulness.ColdPathCorrect)
+	}
+}
+
+func TestSuppliedAgenticActivationIsScoredSeparately(t *testing.T) {
+	in := DefaultInput()
+	in.TelemetryRows = []vcachegov.TelemetryRow{
+		{InputTokens: 86, CacheReadInputTokens: 1920},
+	}
+	in.AgenticActivation = AgenticActivationInput{
+		KernelKVEvents:          2,
+		ContextEvents:           1,
+		ProviderVCacheDecisions: 3,
+		ExternalEngineEvents:    4,
+	}
+	rep := Score(in)
+	if !rep.AgenticActivation.Active || rep.AgenticActivation.Total != 10 {
+		t.Fatalf("activation=%+v, want supplied fak-authored events counted", rep.AgenticActivation)
+	}
+	if rep.DefaultUsefulness.Facets.AgenticActivation != 20 {
+		t.Fatalf("activation facet=%d, want full 20 when any fak-authored cache events fired", rep.DefaultUsefulness.Facets.AgenticActivation)
+	}
+	if !strings.Contains(rep.DefaultUsefulness.Reason, "fak-authored cache activation") {
+		t.Fatalf("reason=%q, want activation-present reason", rep.DefaultUsefulness.Reason)
+	}
+}
+
+func TestKernelKVWitnessPopulatesSeparatePlane(t *testing.T) {
+	in := DefaultInput()
+	in.KernelKV = PlaneEvidenceInput{
+		Available:          true,
+		BaselineTokenEquiv: 1000,
+		SavedTokenEquiv:    900,
+		CostTokenEquiv:     100,
+		Reason:             "test kernel KV reuse",
+	}
+	in.AgenticActivation = AgenticActivationInput{KernelKVEvents: 2}
+
+	rep := Score(in)
+	if rep.Observed != nil || rep.Planes.ProviderObserved.Available {
+		t.Fatalf("kernel-only witness must not invent provider telemetry: observed=%+v provider=%+v", rep.Observed, rep.Planes.ProviderObserved)
+	}
+	kernel := rep.Planes.KernelWitnessed
+	if !kernel.Available || kernel.Provenance != "WITNESSED" {
+		t.Fatalf("kernel plane=%+v, want WITNESSED available", kernel)
+	}
+	if kernel.SavedTokenEquiv != 900 || kernel.BaselineTokenEquiv != 1000 || kernel.CostTokenEquiv != 100 {
+		t.Fatalf("kernel economics=%+v, want 900 saved / 1000 baseline / 100 cost", kernel)
+	}
+	if kernel.Multiplier != 10 {
+		t.Fatalf("kernel multiplier=%g, want 10", kernel.Multiplier)
+	}
+	if rep.DefaultUsefulness.Facets.NetRealizedValue == 0 {
+		t.Fatalf("default-usefulness should credit realized kernel KV value: %+v", rep.DefaultUsefulness)
+	}
+	if rep.DefaultUsefulness.Facets.DefaultCoverage <= 1 {
+		t.Fatalf("default coverage=%d, want kernel plane to add coverage beyond forecast", rep.DefaultUsefulness.Facets.DefaultCoverage)
+	}
+}
+
+func TestContextWitnessPopulatesSeparatePlane(t *testing.T) {
+	in := DefaultInput()
+	in.Context = PlaneEvidenceInput{
+		Available:          true,
+		BaselineTokenEquiv: 1800,
+		SavedTokenEquiv:    800,
+		CostTokenEquiv:     1000,
+		Reason:             "test O(1) context shed",
+	}
+	in.AgenticActivation = AgenticActivationInput{ContextEvents: 1}
+
+	rep := Score(in)
+	if rep.Observed != nil || rep.Planes.ProviderObserved.Available || rep.Planes.KernelWitnessed.Available {
+		t.Fatalf("context-only witness must not invent provider/kernel planes: observed=%+v planes=%+v", rep.Observed, rep.Planes)
+	}
+	context := rep.Planes.ContextWitnessed
+	if !context.Available || context.Provenance != "WITNESSED" {
+		t.Fatalf("context plane=%+v, want WITNESSED available", context)
+	}
+	if context.SavedTokenEquiv != 800 || context.BaselineTokenEquiv != 1800 || context.CostTokenEquiv != 1000 {
+		t.Fatalf("context economics=%+v, want 800 saved / 1800 baseline / 1000 cost", context)
+	}
+	if rep.AgenticActivation.ContextEvents != 1 || !rep.AgenticActivation.Active {
+		t.Fatalf("context activation=%+v, want one active context event", rep.AgenticActivation)
+	}
+	if rep.DefaultUsefulness.Facets.NetRealizedValue == 0 {
+		t.Fatalf("default-usefulness should credit realized context value: %+v", rep.DefaultUsefulness)
+	}
+}
+
+func TestSavedOnlyWitnessDoesNotEarnNetValueCredit(t *testing.T) {
+	in := DefaultInput()
+	in.Context = PlaneEvidenceInput{
+		Available:       true,
+		SavedTokenEquiv: 800,
+		Reason:          "shed tokens without resident denominator",
+	}
+	in.AgenticActivation = AgenticActivationInput{ContextEvents: 1}
+
+	rep := Score(in)
+	if !rep.Planes.ContextWitnessed.Available || rep.Planes.ContextWitnessed.BaselineTokenEquiv != 0 {
+		t.Fatalf("saved-only context plane=%+v, want available without inferred baseline", rep.Planes.ContextWitnessed)
+	}
+	if rep.DefaultUsefulness.Facets.NetRealizedValue != 0 {
+		t.Fatalf("saved-only evidence must not earn net-value credit: %+v", rep.DefaultUsefulness)
+	}
+}
+
+func TestExternalEngineHitRateIsPlaneEvidenceNotValue(t *testing.T) {
+	in := DefaultInput()
+	in.ExternalEngine = PlaneEvidenceInput{
+		Available:  true,
+		Provenance: "OBSERVED",
+		HitRate:    0.72,
+		Reason:     "vLLM prefix cache hit rate observed",
+	}
+
+	rep := Score(in)
+	external := rep.Planes.ExternalEngineObserved
+	if !external.Available || external.Provenance != "OBSERVED" {
+		t.Fatalf("external plane=%+v, want OBSERVED available", external)
+	}
+	if external.HitRate != 0.72 {
+		t.Fatalf("external hit rate=%g, want 0.72", external.HitRate)
+	}
+	if rep.DefaultUsefulness.Facets.NetRealizedValue != 0 {
+		t.Fatalf("hit-rate-only evidence must not earn token-value credit: %+v", rep.DefaultUsefulness)
+	}
+	if rep.DefaultUsefulness.Facets.DefaultCoverage <= 1 {
+		t.Fatalf("default coverage=%d, want external plane to add coverage beyond forecast", rep.DefaultUsefulness.Facets.DefaultCoverage)
+	}
+	if !strings.Contains(rep.DefaultUsefulness.Reason, "no realized value witness") {
+		t.Fatalf("reason=%q, want hit-rate-only caveat", rep.DefaultUsefulness.Reason)
+	}
+}
+
 func TestFalseWarmRateFailsTwoXGate(t *testing.T) {
 	in := DefaultInput()
 	in.Prediction = vcachecal.PredictionError{Total: 100, TrueWarm: 90, FalseWarm: 10}
