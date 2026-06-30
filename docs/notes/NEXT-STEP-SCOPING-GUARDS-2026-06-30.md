@@ -234,6 +234,10 @@ Acceptance for "true end to end working":
   floods can be repaired as one organized batch instead of becoming spam. Batch
   groups also carry a split child-issue budget, so an oversized group shows its
   likely expansion before any child issues are synced. The audit also emits
+  `coordination_groups` keyed by the worker-facing coordination note, with step
+  budgets, split child-issue budgets, lane/reason buckets, and sample issue keys;
+  that gives supervisors a direct view of work that must serialize around the
+  same assumption, lease, dependency, or sibling-file risk. It also emits
   explicit repair queues (`dispatch`, `split`, `scope`, `route`, `noise`,
   `private`) with next actions, missing-field counts, and sample keys, so agents
   can batch the correct repair across many rows before launching workers.
