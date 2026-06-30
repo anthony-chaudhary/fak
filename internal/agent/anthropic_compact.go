@@ -60,6 +60,11 @@ const (
 	CompactReasonSpliceFailed   = "splice_failed"
 	CompactReasonRedecodeFail   = "redecode_failed" // the spliced body failed to re-decode
 	CompactReasonPrefixMismatch = "prefix_mismatch" // the splice changed the protected prefix bytes
+	// CompactReasonBurstUnprofitable is the head-anchored bail (CompactAnchorHead only): the drop
+	// would fire, but bursting the recent breakpoint's cached suffix does not repay within the
+	// remaining session horizon (CacheBurstPaysBack == false), so the warm cache hit is kept over a
+	// smaller prompt. The firstbp default never returns this (it never bursts) — see #1407/#1408.
+	CompactReasonBurstUnprofitable = "burst_unprofitable"
 )
 
 // CompactOutcome is the observable verdict of one compaction attempt. Reason==CompactReasonNone
@@ -83,6 +88,48 @@ type CompactOutcome struct {
 	AnchorStarved         bool
 }
 
+// CompactAnchor selects where the protected (verbatim-copied) prefix ends.
+type CompactAnchor int
+
+const (
+	// CompactAnchorFirstBP protects every message THROUGH the first messages[] cache_control
+	// breakpoint (the warm-cache-safe default): only the middle after it is compactible. On real
+	// Claude Code traffic whose only message breakpoint is RECENT, this anchors near the end and
+	// the lever stays idle — the #1407 dormancy, surfaced by the AnchorStarved diagnostic (#1409).
+	CompactAnchorFirstBP CompactAnchor = iota
+	// CompactAnchorHead re-anchors the protected prefix on the stable provider head — a top-level
+	// system/tools cache_control breakpoint serialized BEFORE messages[] — making the WHOLE message
+	// array compactible. This is what lets compaction fire on real traffic (#1407), but a fire
+	// bursts the recent message breakpoint's cached suffix, so it is gated on CacheBurstPaysBack
+	// economics (#1408). Opt-in: a warm-cache session must keep CompactAnchorFirstBP's byte-identical
+	// body, so the firing path only chooses this when the operator asks AND the burst repays.
+	CompactAnchorHead
+)
+
+// defaultCacheReadMult / defaultCacheWriteMult mirror the gateway cache_pricing multipliers
+// (CacheReadMultiplier / CacheWrite5mMultiplier) for the head-anchored burst gate, WITHOUT
+// importing the gateway (the agent package must not depend on it — that would be an import
+// cycle). Used when CompactOptions leaves the multipliers unset.
+const (
+	defaultCacheReadMult  = 0.1
+	defaultCacheWriteMult = 1.25
+)
+
+// CompactOptions parameterizes CompactAnthropicHistoryWithOptions. The zero value (Anchor
+// CompactAnchorFirstBP, no horizon) reproduces CompactAnthropicHistoryWithOutcome exactly, so
+// the default firing path is byte-for-byte unchanged.
+type CompactOptions struct {
+	Budget int          // resident-token target for the compactible span (<=0 ⇒ identity)
+	Anchor CompactAnchor // where the protected prefix ends (default: first breakpoint)
+	// Session horizon for the head-anchored burst gate. Consulted only when Anchor==CompactAnchorHead
+	// AND the head re-anchor actually engages (a stable head precedes messages[]). TotalTurns<=0 ⇒
+	// unknown horizon ⇒ CacheBurstPaysBack is conservative (no fire unless the burst has no penalty).
+	TotalTurns  int
+	CurrentTurn int
+	ReadMult    float64 // provider cache-read price multiplier (<=0 ⇒ defaultCacheReadMult)
+	WriteMult   float64 // provider cache-write price multiplier (<=0 ⇒ defaultCacheWriteMult)
+}
+
 // CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
 // from the start through the protected prefix (the FIRST cache_control breakpoint message — the
 // stable cached head) is copied VERBATIM, and whole middle messages between it and the recent
@@ -103,14 +150,29 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 // (fired vs the labeled bail reason, and the dropped-turn / shed-token counts on a fire). The
 // gateway uses it to emit the compaction metric family; the byte-level guarantees are identical.
 // anchorCompactablePrefix is the shared front half of both byte-level rewrites
-// (CompactAnthropicHistoryWithOutcome and CompactAnthropicHistoryToView): it
-// decodes the request object, finds the messages[] array (with exact byte spans),
-// requires at least minElems elements, and anchors the protected prefix on the
-// FIRST cache_control breakpoint message (or a system-level breakpoint). On any
-// ambiguity it returns ok=false with the labeled fail-safe CompactOutcome the
-// caller should return verbatim. pfxEnd is the index of the last protected message
-// (-1 when only `system` carries the cache, so every message is compactible).
+// (CompactAnthropicHistoryWithOutcome and CompactAnthropicHistoryToView), anchoring on the
+// warm-cache-safe default (the FIRST messages[] breakpoint). It is anchorCompactablePrefixMode
+// with CompactAnchorFirstBP, so the ctxview twin and the byte-only wrapper are unchanged.
 func anchorCompactablePrefix(raw []byte, minElems int) (elems []json.RawMessage, spans []elementSpan, pfxEnd int, bail CompactOutcome, ok bool) {
+	return anchorCompactablePrefixMode(raw, minElems, CompactAnchorFirstBP)
+}
+
+// anchorCompactablePrefixMode decodes the request object, finds the messages[] array (with exact
+// byte spans), requires at least minElems elements, and anchors the protected prefix. On any
+// ambiguity it returns ok=false with the labeled fail-safe CompactOutcome the caller should
+// return verbatim. pfxEnd is the index of the last protected message (-1 when no message is
+// protected, so every message is compactible).
+//
+// In CompactAnchorFirstBP (the default) pfxEnd is the FIRST messages[] cache_control breakpoint
+// (or -1 when only a top-level `system` breakpoint exists). In CompactAnchorHead, when the stable
+// provider head — a top-level system/tools cache_control breakpoint serialized BEFORE messages[]
+// — exists, pfxEnd is forced to -1 so the WHOLE message array is compactible (#1407/#1408). Head
+// re-anchoring engages ONLY when the head genuinely precedes messages[] in the byte stream: that
+// is exactly what keeps the dominant cached head's byte prefix stable across the drop. A head
+// serialized AFTER messages[] would have its prefix shifted by the drop (bursting the dominant
+// cache), so head mode falls back to the first-breakpoint anchor there — never silently bursting
+// the head. The firstbp condition below is left byte-identical to the pre-#1408 behavior.
+func anchorCompactablePrefixMode(raw []byte, minElems int, anchor CompactAnchor) (elems []json.RawMessage, spans []elementSpan, pfxEnd int, bail CompactOutcome, ok bool) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNonJSON}, false // not a JSON object — leave it alone
@@ -124,21 +186,69 @@ func anchorCompactablePrefix(raw []byte, minElems int) (elems []json.RawMessage,
 		return nil, nil, 0, CompactOutcome{Reason: CompactReasonTooFewMsgs}, false // nothing safe to compact
 	}
 	pfxEnd = firstBreakpointMessage(elems)
-	if pfxEnd < 0 && !rawHasCacheControl(obj["system"]) {
+	headReanchored := false
+	if anchor == CompactAnchorHead && stableHeadBeforeMessages(raw, obj, spans) {
+		pfxEnd = -1 // whole message array compactible; the stable cached head is the top-level system/tools block
+		headReanchored = true
+	}
+	// firstbp / fallback condition, unchanged from pre-#1408: a pfxEnd<0 that did NOT come from a
+	// proven head re-anchor needs a `system` breakpoint to be a valid anchor, else there is none.
+	if pfxEnd < 0 && !headReanchored && !rawHasCacheControl(obj["system"]) {
 		return nil, nil, 0, CompactOutcome{Reason: CompactReasonNoBreakpoint}, false // no anchor — identity
 	}
 	return elems, spans, pfxEnd, CompactOutcome{}, true
 }
 
+// stableHeadBeforeMessages reports whether a top-level system/tools cache_control breakpoint —
+// the stable cached head the provider reuses every turn — is serialized BEFORE the messages[]
+// array in raw. Only then does dropping middle messages leave the head's byte prefix unchanged,
+// so the dominant cache read survives a head-anchored fire (a head serialized after messages[]
+// would have its prefix shifted by the drop). The value bytes of obj[key] are a verbatim slice
+// of raw, so bytes.Index locates them — the same anchor technique decodeArrayElements uses.
+func stableHeadBeforeMessages(raw []byte, obj map[string]json.RawMessage, spans []elementSpan) bool {
+	if len(spans) == 0 {
+		return false
+	}
+	msgsStart := spans[0].start
+	for _, key := range []string{"system", "tools"} {
+		v, ok := obj[key]
+		if !ok || !rawHasCacheControl(v) {
+			continue
+		}
+		if off := bytes.Index(raw, v); off >= 0 && off < msgsStart {
+			return true
+		}
+	}
+	return false
+}
+
+// CompactAnthropicHistoryWithOutcome is the observable form on the default (warm-cache-safe)
+// first-breakpoint anchor. It is CompactAnthropicHistoryWithOptions with CompactAnchorFirstBP and
+// no horizon — byte-for-byte identical to the pre-#1408 behavior, so every existing caller and
+// test is unchanged. The gateway uses it to emit the compaction metric family.
 func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, CompactOutcome) {
+	return CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: budget, Anchor: CompactAnchorFirstBP})
+}
+
+// CompactAnthropicHistoryWithOptions is the parameterized core of the cache-prefix-preserving
+// history rewrite. With CompactAnchorFirstBP (the default) it protects through the first messages[]
+// breakpoint and only sheds the middle after it — the warm-cache-safe behavior every existing
+// caller relies on. With CompactAnchorHead it re-anchors on the stable system/tools head (when that
+// head precedes messages[]), making the whole message array compactible so the lever can fire on
+// real Claude Code traffic (#1407); because such a fire bursts the recent breakpoint's cached
+// suffix, it is gated on CacheBurstPaysBack economics and only fires when the burst repays within
+// the session horizon (#1408). All byte-level guarantees (verbatim protected prefix, re-decode +
+// prefix-equality proof, fail-safe identity on any ambiguity) are identical across both anchors.
+func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte, CompactOutcome) {
+	budget := opts.Budget
 	if budget <= 0 || len(raw) == 0 {
 		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
 	}
-	// The protected prefix is anchored on the FIRST cache_control breakpoint message (the
-	// stable cached head the provider reuses every turn) — see anchorCompactablePrefix and
-	// firstBreakpointMessage for why the FIRST breakpoint, not the last, lets compaction fire
-	// on real Claude Code traffic that marks both the static head AND recent turns.
-	elems, spans, pfxEnd, bail, ok := anchorCompactablePrefix(raw, 3)
+	// Anchor the protected prefix per opts.Anchor: the FIRST cache_control breakpoint message (the
+	// warm-cache-safe default that lets compaction fire on multi-breakpoint traffic marking BOTH the
+	// static head and recent turns), or — in head mode when a stable system/tools head precedes
+	// messages[] — the empty prefix (pfxEnd=-1, whole array compactible). See anchorCompactablePrefixMode.
+	elems, spans, pfxEnd, bail, ok := anchorCompactablePrefixMode(raw, 3, opts.Anchor)
 	if !ok {
 		return raw, bail
 	}
@@ -243,6 +353,28 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 		shedTokens = 0
 	}
 
+	// 3c. Head-anchored economics gate (#1407/#1408): when head re-anchoring engaged (pfxEnd<0 under
+	//     CompactAnchorHead), the drop deliberately bursts the recent breakpoint's cached suffix — the
+	//     stable head itself stays byte-stable because it precedes messages[] (see
+	//     anchorCompactablePrefixMode). Fire only when CacheBurstPaysBack approves: the cached middle we
+	//     shed forever (a per-turn read saving) must repay the one-time cold re-write of the invalidated
+	//     suffix within the remaining session horizon. An unknown horizon (TotalTurns<=0) returns false,
+	//     so a caller that cannot supply the horizon never bursts the cache. The firstbp default never
+	//     reaches this branch (pfxEnd>=0 there, or Anchor!=Head), so its body is unchanged.
+	if opts.Anchor == CompactAnchorHead && pfxEnd < 0 {
+		readMult, writeMult := opts.ReadMult, opts.WriteMult
+		if readMult <= 0 {
+			readMult = defaultCacheReadMult
+		}
+		if writeMult <= 0 {
+			writeMult = defaultCacheWriteMult
+		}
+		droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
+		if !CacheBurstPaysBack(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult) {
+			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
+		}
+	}
+
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
@@ -253,6 +385,29 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 		return raw, outcome
 	}
 	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
+}
+
+// headBurstEconomics prices a head-anchored drop for the CacheBurstPaysBack gate.
+// droppedCachedTokens is the cached middle [dropStart, keepStart) we shed for good — each future
+// turn no longer re-reads it (the per-turn saving). invalidatedSuffixTokens is the cached span the
+// drop bursts ONCE: from the first kept message through the last SURVIVING cache_control breakpoint,
+// whose byte prefix the drop shifts so the provider must cold-write it again. Bytes beyond the last
+// breakpoint were never cached, so they are not counted as invalidated. Same ~4-chars/token currency
+// as the budget and the provider input_tokens. dropStart is pfxEnd+1 (0 in head mode).
+func headBurstEconomics(elems []json.RawMessage, dropStart, keepStart int) (droppedCachedTokens, invalidatedSuffixTokens int) {
+	if dropStart < 0 {
+		dropStart = 0
+	}
+	for i := dropStart; i < keepStart && i < len(elems); i++ {
+		droppedCachedTokens += len(elems[i]) / 4
+	}
+	lastBp := lastBreakpointMessage(elems)
+	if lastBp >= keepStart {
+		for i := keepStart; i <= lastBp && i < len(elems); i++ {
+			invalidatedSuffixTokens += len(elems[i]) / 4
+		}
+	}
+	return droppedCachedTokens, invalidatedSuffixTokens
 }
 
 // elementSpan is the [start,end) byte range of one messages[] element within the original

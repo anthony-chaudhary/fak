@@ -526,6 +526,141 @@ func TestCacheBurstPaysBackOnKnownSessionHorizon(t *testing.T) {
 	}
 }
 
+// headOrderedBody models REAL Claude Code traffic for the head anchor (#1407/#1408): the stable
+// cache_control head is a top-level `system` block serialized BEFORE messages[] (Go struct field
+// order is the JSON key order), and the ONLY messages[] breakpoint sits on a RECENT turn
+// (recentBpBack from the end). This is the #1407 dormant shape — firstBreakpointMessage anchors
+// near the end — but because the head genuinely precedes messages[], CompactAnchorHead can
+// re-anchor on it and (economics permitting) fire. Contrast recentOnlyBreakpointBody, whose
+// alphabetical json.Marshal(map) order puts `system` AFTER messages[], so head mode must fall back.
+func headOrderedBody(t *testing.T, nMsgs, recentBpBack int) []byte {
+	t.Helper()
+	type block map[string]any
+	recentBpIdx := nMsgs - 1 - recentBpBack
+	msgs := make([]map[string]any, 0, nMsgs)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		blk := block{"type": "text", "text": strings.Repeat("conversation turn body words. ", 12) + itoa(i)}
+		if i == recentBpIdx {
+			blk["cache_control"] = map[string]any{"type": "ephemeral"}
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": []block{blk}})
+	}
+	ordered := struct {
+		Model     string           `json:"model"`
+		MaxTokens int              `json:"max_tokens"`
+		System    []block          `json:"system"`
+		Messages  []map[string]any `json:"messages"`
+	}{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 1024,
+		System: []block{
+			{"type": "text", "text": "You are a coding agent."},
+			{"type": "text", "text": strings.Repeat("policy text. ", 40), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		Messages: msgs,
+	}
+	raw, err := json.Marshal(ordered)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// messagesArrayContentStart returns the byte offset just inside the messages `[` — the verbatim
+// head region [0, start) that a head-anchored (pfxEnd=-1) fire must keep byte-identical, which for
+// headOrderedBody includes the entire stable `system` cache head (it precedes messages[]).
+func messagesArrayContentStart(t *testing.T, raw []byte) int {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	_, spans, ok := decodeArrayElements(raw, obj["messages"])
+	if !ok {
+		t.Fatalf("decodeArrayElements failed")
+	}
+	return arrayContentStart(spans)
+}
+
+// TestCompactHeadAnchorFiresOnDormantShape is the #1407/#1408 witness: on the real-traffic dormant
+// shape (a recent-only message breakpoint with the stable head in `system` before messages[]), the
+// DEFAULT first-breakpoint anchor stays idle (under_budget + AnchorStarved — the bug), while the
+// opt-in CompactAnchorHead with a paying session horizon FIRES, sheds the middle, and keeps the
+// stable `system` head byte-identical so the dominant cache read survives.
+func TestCompactHeadAnchorFiresOnDormantShape(t *testing.T) {
+	raw := headOrderedBody(t, 120, 2) // recent breakpoint kept in the tail; head in system[] before messages[]
+
+	// 1. The default first-breakpoint anchor is dormant on this shape (the #1407 bug, unchanged).
+	if out, outcome := CompactAnthropicHistoryWithOutcome(raw, 1200); !bytes.Equal(out, raw) ||
+		outcome.Reason != CompactReasonUnderBudget || !outcome.AnchorStarved {
+		t.Fatalf("firstbp must stay dormant (identity + under_budget + AnchorStarved); got changed=%v reason=%q starved=%v",
+			!bytes.Equal(out, raw), outcome.Reason, outcome.AnchorStarved)
+	}
+
+	// 2. Head anchor + a generous horizon: FIRES.
+	opts := CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 1000, CurrentTurn: 1}
+	out, outcome := CompactAnthropicHistoryWithOptions(raw, opts)
+	if outcome.Reason != CompactReasonNone {
+		t.Fatalf("head anchor with a paying horizon must FIRE, got reason=%q (%+v)", outcome.Reason, outcome)
+	}
+	if bytes.Equal(out, raw) || len(out) >= len(raw) {
+		t.Fatalf("a head-anchored fire must shrink the body, got %d (in %d)", len(out), len(raw))
+	}
+	if outcome.Dropped <= 0 || outcome.ShedTokens <= 0 {
+		t.Fatalf("a fire must report dropped/shed work, got %+v", outcome)
+	}
+	// The verbatim head region (through the messages `[`, which includes the system cache head) is
+	// byte-identical → the dominant provider cache read survives the fire.
+	start := messagesArrayContentStart(t, raw)
+	if start > len(out) || !bytes.Equal(raw[:start], out[:start]) {
+		t.Fatalf("head-anchored fire changed the stable head bytes [0,%d) — would burst the dominant cache", start)
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("head-anchored body failed to decode: %v", err)
+	}
+	assertAlternation(t, out)
+}
+
+// TestCompactHeadAnchorRespectsBurstEconomics proves the firing path is economics-gated, not
+// unconditional: head mode bails CompactReasonBurstUnprofitable when bursting the recent
+// breakpoint cannot repay within the remaining horizon — including an UNKNOWN horizon
+// (TotalTurns<=0), which is the safe default for a caller that cannot supply the session length.
+func TestCompactHeadAnchorRespectsBurstEconomics(t *testing.T) {
+	raw := headOrderedBody(t, 120, 2)
+
+	// Unknown horizon → conservative no-fire (the burst has a one-time penalty here).
+	if out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead}); !bytes.Equal(out, raw) || outcome.Reason != CompactReasonBurstUnprofitable {
+		t.Fatalf("unknown horizon must bail burst_unprofitable (identity); got changed=%v reason=%q",
+			!bytes.Equal(out, raw), outcome.Reason)
+	}
+	// Known but exhausted horizon (no future turns left) → cannot repay → no fire.
+	if out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 10, CurrentTurn: 10}); !bytes.Equal(out, raw) || outcome.Reason != CompactReasonBurstUnprofitable {
+		t.Fatalf("exhausted horizon must bail burst_unprofitable (identity); got changed=%v reason=%q",
+			!bytes.Equal(out, raw), outcome.Reason)
+	}
+}
+
+// TestCompactHeadAnchorFallsBackWhenHeadAfterMessages proves head mode is byte-safe regardless of
+// key order: when the stable head is serialized AFTER messages[] (so a drop would shift its prefix
+// and burst the dominant cache), head mode must NOT engage — it falls back to the first-breakpoint
+// anchor, which on the recent-only shape stays dormant (identity), even with a generous horizon.
+func TestCompactHeadAnchorFallsBackWhenHeadAfterMessages(t *testing.T) {
+	// recentOnlyBreakpointBody uses json.Marshal(map) → alphabetical keys → `system` AFTER messages[].
+	raw := recentOnlyBreakpointBody(t, 120, 2)
+	out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 1000, CurrentTurn: 1})
+	if !bytes.Equal(out, raw) {
+		t.Fatalf("head must fall back to firstbp (identity) when the head is serialized after messages[]; body changed")
+	}
+	if outcome.Reason != CompactReasonUnderBudget || !outcome.AnchorStarved {
+		t.Fatalf("the fallback firstbp anchor must report the dormant under_budget+AnchorStarved diagnostic, got reason=%q starved=%v",
+			outcome.Reason, outcome.AnchorStarved)
+	}
+}
+
 // assertAlternation fails if any two consecutive messages share a role — Anthropic rejects
 // that with a 400, and the splice's synthetic stub must not introduce it (F7).
 func assertAlternation(t *testing.T, out []byte) {
