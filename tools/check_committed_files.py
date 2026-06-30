@@ -45,6 +45,7 @@ HARD_JUNK = [
     re.compile(r"(^|/)node_modules/"),
     re.compile(r"\.(pyc|pyo|class|o|a|obj)$"),
     re.compile(r"\.(exe|dll|so|dylib)$"),
+    re.compile(r"^coverage$"),
     re.compile(r"(^|/)coverage\.out$"),
     re.compile(r"\.coverprofile$"),
     re.compile(r"(^|/)\.DS_Store$"),

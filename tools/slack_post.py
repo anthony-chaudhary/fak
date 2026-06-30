@@ -327,6 +327,7 @@ def send(
     timeout: float = 30.0,
     transport: Transport | None = None,
     start: Path | None = None,
+    include_signal_noise: bool = True,
 ) -> dict[str, Any]:
     """Resolve token + channel like the Go ``dispatch`` surface and post ``text``.
 
@@ -345,7 +346,8 @@ def send(
     chan, chan_src = resolve_channel(channel, channel_key, default_channel, start=start)
     body = wrap_code(text) if code else text
     sn = signal_noise_score(body)
-    body = append_signal_noise(body, sn)
+    if include_signal_noise:
+        body = append_signal_noise(body, sn)
 
     base = {
         "schema": SCHEMA,

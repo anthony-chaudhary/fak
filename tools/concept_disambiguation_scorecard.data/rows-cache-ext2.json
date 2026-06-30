@@ -1,0 +1,363 @@
+{
+  "rows": [
+    {
+      "id": "x2-cache-cacheumbrella",
+      "canonical": "cache (overloaded umbrella term)",
+      "family": "cache",
+      "kind": "concept",
+      "definition": "\"cache\" is the bare umbrella word fak uses for several distinct reuse mechanisms at once: the in-kernel KV tensor store, the page-table virtualization (vCache), the provider prompt-cache fak only relays, the cachemeta metadata sidecar, and the cache-value P&L roll-up.",
+      "distinction": "It is the un-qualified family word that resolves to nothing on its own; every specific meaning (KV cache vs vCache vs cachemeta vs provider prompt-cache vs cachevalue P&L) is a different concept the more specific rows draw the line for.",
+      "distinct_from": [
+        "KV cache",
+        "vCache",
+        "cachemeta",
+        "Provider cache"
+      ],
+      "aliases": [],
+      "grounding": "cache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachevaluepnl",
+      "canonical": "cachevalue (cache P&L rollup)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "The cachevalue stack (`fak cachevalue`, internal/cachevalueledger, internal/cachevaluereport, internal/cachevaluepost) is epic #1301's cache-effectiveness profit-and-loss roll-up: a durable append-only ledger of per-session reuse observations, folded into a by-week/by-session_type trend report, then posted as one Slack \"cache-value\" channel card configured by the FAK_CACHEVALUE_TOKEN/FAK_CACHEVALUE_CHANNEL resolution order.",
+      "distinction": "It is the off-path P&L accounting and reporting of whether the cache method is paying off over time, not the provider prompt-cache it measures nor the live KV cache that produces the reuse it tallies.",
+      "distinct_from": [
+        "Provider cache",
+        "KV cache"
+      ],
+      "aliases": [
+        "cachevalueledger",
+        "cachevaluereport",
+        "cachevaluepost",
+        "fakcachevaluechannel",
+        "fakcachevaluetoken",
+        "writevcachemetrics"
+      ],
+      "grounding": "cachevalue",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-vcacheobservewindow",
+      "canonical": "vcacheTurns (observed provider-cache window)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "vcacheTurns is the gateway's bounded in-memory window of per-turn OBSERVED provider-cache counters (filled by metrics.observeVCacheTurn on every streamed passthrough turn, copied out via Server.VCacheTurnsSnapshot), which internal/vcachesnapshot persists to a JSONL file so a separate `fak vcache score`/observe process and the fak_vcache_* metric family can read the realized cache window a finished session saw.",
+      "distinction": "It is the read-only OBSERVED provider-cache telemetry window the gateway records and snapshots, not the cachevalue P&L roll-up that scores ledgered reuse nor the in-kernel KV cache that authors fak's own reuse.",
+      "distinct_from": [
+        "Provider cache",
+        "vCache"
+      ],
+      "aliases": [
+        "vcacheturnssnapshot",
+        "vcachesnapshot",
+        "observevcacheturn",
+        "fakvcache"
+      ],
+      "grounding": "vcacheturns",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-providercachemetrics",
+      "canonical": "provider-cache read/savings metrics",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "ProviderCacheReadTokens (from the fak_gateway_inference_cached_prompt_tokens_total counter), ProviderCacheNetSavings, and the serving-engine PrefixCacheHitRate/cache_hit_rate ratios are the OBSERVED provider-and-engine cache numbers fak relays verbatim — the upstream provider's cache_read and the self-hosted engine's prefix hit rate, never numbers fak itself authored.",
+      "distinction": "Every number here is OBSERVED provider/engine telemetry relayed by fak, not the WITNESSED in-kernel KV-prefix reuse fak controls nor the price coefficient (CacheReadMultiplier) applied to value it.",
+      "distinct_from": [
+        "Provider cache",
+        "cache_read",
+        "CacheReadMultiplier (price coeff)"
+      ],
+      "aliases": [
+        "providercachenetsavings",
+        "prefixcachehitrate",
+        "cachehitrate",
+        "inferencecachedprompttokenstotal"
+      ],
+      "grounding": "providercachereadtokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-lmcachemlcache",
+      "canonical": "LMCache/MLCache (external KV-cache study refs)",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "lmcache references the external LMCache KV-cache layer (GPU->DRAM->disk->Redis cross-query non-prefix reuse) that fak positions against and governs without moving KV bytes, while MLCACHE1..MLCACHE6 are the plan/phase rung labels of fak's own docs/serving/multilevel-default-cache-epic.md multilevel-default-cache epic that lands the DRAM/disk/CXL pressure-aware placement those external systems motivate.",
+      "distinction": "These are positioning/study and epic-rung reference tokens, not the live in-kernel KV cache nor the cachemeta metadata plane through which external KV-transport systems report their events to fak.",
+      "distinct_from": [
+        "L3 disaggregated cache (study)",
+        "KV cache",
+        "cachemeta"
+      ],
+      "aliases": [
+        "mlcache1",
+        "mlcache2",
+        "mlcache3",
+        "mlcache4",
+        "mlcache5",
+        "mlcache6"
+      ],
+      "grounding": "lmcache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cacheeventrecorder",
+      "canonical": "CacheEventRecorder (engine event seam)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "engine.CacheEventRecorder (built by NewCacheEventRecorder) is the live serving-engine cache-event seam: the routing/offload path calls Record for each KV residency transition, which normalizes it into the shared cachemeta entry stream, derives the typed verdict, folds fak_engine_cache_* metrics, and returns a CacheEventResult.",
+      "distinction": "It is the engine-side recorder that normalizes residency transitions into the metric stream, not the cachemeta.Entry shape it emits nor the in-kernel vDSO CacheEventSink that observes tier-2 lifecycle events.",
+      "distinct_from": [
+        "cachemeta",
+        "enginecache"
+      ],
+      "aliases": [
+        "newcacheeventrecorder",
+        "cacheeventresult"
+      ],
+      "grounding": "cacheeventrecorder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-kvcachetopaged",
+      "canonical": "KVCacheToPaged (paged materialize)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "model.KVCacheToPaged snapshots a dense softmax KVCache into a fresh 3-plane paged sequence (the P/D-disaggregation and preemption swap path), and PagedKV.ToKVCache is its inverse that reconstructs a live contiguous *KVCache from a paged sequence's K/V pages.",
+      "distinction": "These are the dense-to-paged and paged-to-dense converters for moving KV between contiguous and page-table layouts, not the dense KVCache itself nor the page-table virtualization concept (vCache).",
+      "distinct_from": [
+        "KV cache",
+        "vCache"
+      ],
+      "aliases": [
+        "tokvcache"
+      ],
+      "grounding": "kvcachetopaged",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachepricing",
+      "canonical": "CachePricing (USD cost model)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "gateway.CachePricing is a model's base per-million-token input/output price whose CostUSD prices one turn's CacheUsage (uncached input at 1.0x, cache read at 0.1x, the provider's cache-create write at its TTL multiplier, output at the output rate), where CacheUsage is the four-axis token accounting (input/cacheRead/cacheCreate/output) the Anthropic usage block reports.",
+      "distinction": "It is the dollar cost model over a turn's billable token axes, not the provider prompt-cache it prices nor the cachevalue P&L roll-up that aggregates priced savings over time.",
+      "distinct_from": [
+        "Provider cache",
+        "cache_read"
+      ],
+      "aliases": [
+        "cacheusage",
+        "cachecreate"
+      ],
+      "grounding": "cachepricing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachewitness",
+      "canonical": "cachewitness (provenance evidence fold)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/cachewitness reads a live fak gateway's /metrics and folds the cache numbers into ONE provenance-labeled Record, splitting the WITNESSED in-kernel KV-prefix reuse fak controls from the OBSERVED provider cache_read it only relays, so a reader can never mistake fak's own reuse for the provider's.",
+      "distinction": "It is the provenance-labeled evidence fold over /metrics that keeps WITNESSED and OBSERVED cache numbers in separate fields, not the cachevalue ledger that persists ledgered observations nor the provider cache it observes.",
+      "distinct_from": [
+        "vCache",
+        "Provider cache"
+      ],
+      "aliases": [],
+      "grounding": "cachewitness",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachedspan",
+      "canonical": "CompactReasonCachedSpan (compaction guard)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "agent.CompactReasonCachedSpan (\"cached_span\") is the conservative compaction outcome reason returned when a candidate history drop would delete cache_control-marked content, so the agent refuses to shed a span the provider prompt-cache is keyed on.",
+      "distinction": "It is the refuse-to-compact reason protecting a provider cache_control breakpoint span, not the provider cache itself nor the in-kernel KV span an evictor would reclaim.",
+      "distinct_from": [
+        "cache_control",
+        "Provider cache"
+      ],
+      "aliases": [],
+      "grounding": "cachedspan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cacheability",
+      "canonical": "cacheability (CapRef resolution)",
+      "family": "cache",
+      "kind": "concept",
+      "definition": "In contextq, cacheability is the property that the same CapRef must resolve to the same Capability across a body, so a capability reference is stable enough to be reused/cached rather than re-resolved.",
+      "distinction": "It is the resolution-stability property of capability references in contextq, not any actual cache store nor the cachemeta metadata sidecar.",
+      "distinct_from": [
+        "cachemeta",
+        "KV cache"
+      ],
+      "aliases": [],
+      "grounding": "cacheability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cacheoptimization",
+      "canonical": "CacheOptimization (worktype class)",
+      "family": "cache",
+      "kind": "concept",
+      "definition": "worktype.CacheOptimization (\"cache-optimization\") is the ongoing agent-memory-and-reuse program work class the epic classifier assigns to cache epics (e.g. #1301/#1351/#1217), labeling them as a continuous program rather than a discrete one-off.",
+      "distinction": "It is a work-classification label for cache-program epics, not any runtime cache nor the cachevalue P&L roll-up that one such epic produces.",
+      "distinct_from": [
+        "KV cache",
+        "vCache"
+      ],
+      "aliases": [],
+      "grounding": "cacheoptimization",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachesize",
+      "canonical": "DefaultCacheSize (LRU capacity tunable)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "DefaultCacheSize is the baseline LRU capacity integer literal the RSI loop tunes (internal/rsiloop and internal/vdso each declare one): the tier-2/vDSO cache slot count kpiprobe reports a hit-rate for and the worktree harness rewrites to measure a candidate.",
+      "distinction": "It is the LRU slot-count tunable knob the RSI loop sweeps, not the KV tensor store it bounds nor the cachevalue ledger that measures realized reuse.",
+      "distinct_from": [
+        "KV cache",
+        "vCache"
+      ],
+      "aliases": [],
+      "grounding": "cachesize",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-cachepath",
+      "canonical": "learningdebt --cache path (seen-cache flag)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "cachePath is the `fak learningdebt --cache` flag value, the path to the learning-debt dispatch seen-cache JSON (default <workspace>/.fak/learning-debt-dispatch/seen.json) that records already-dispatched items.",
+      "distinction": "It is a CLI path flag for the learning-debt seen-cache file, not a KV or provider cache nor the cachevalue ledger path.",
+      "distinct_from": [
+        "KV cache",
+        "Provider cache"
+      ],
+      "aliases": [],
+      "grounding": "cachepath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-defaultprovidercachettl",
+      "canonical": "DefaultProviderCacheTTL (idle expiry)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "compactcohere.DefaultProviderCacheTTL (5 minutes) is the idle-expiry the harness-coherence coordinator assumes for the provider's prompt cache, used to decide when a provider cache entry has aged out between turns.",
+      "distinction": "It is the assumed idle TTL of the external provider prompt-cache, not the in-kernel KV cache's own lifetime nor the CacheReadMultiplier price coefficient.",
+      "distinct_from": [
+        "Provider cache",
+        "CacheReadMultiplier (price coeff)"
+      ],
+      "aliases": [],
+      "grounding": "defaultprovidercachettl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-newviewcache",
+      "canonical": "NewViewCache (contextq ViewCache ctor)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "contextq.NewViewCache returns an empty, concurrency-safe ViewCache that backs a context request's resolved-view reuse across recall/skill-memory/workflow-memory paths.",
+      "distinction": "It is the constructor for contextq's ViewCache (resolved context-view reuse), not the in-kernel KV cache nor the page-table vCache.",
+      "distinct_from": [
+        "ViewCache",
+        "KV cache"
+      ],
+      "aliases": [],
+      "grounding": "newviewcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-placeanthropiccachebreakpoint",
+      "canonical": "PlaceAnthropicCacheBreakpoint (breakpoint placer)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "agent.PlaceAnthropicCacheBreakpoint rewrites a raw Anthropic request to place the cache_control breakpoint marker on the prompt prefix so the provider caches that span, returning a BreakpointOutcome describing what it did.",
+      "distinction": "It is the request rewriter that sets the provider cache_control breakpoint, not the cache_control marker concept itself nor rawHasCacheControl which only detects an existing one.",
+      "distinct_from": [
+        "cache_control",
+        "Provider cache"
+      ],
+      "aliases": [],
+      "grounding": "placeanthropiccachebreakpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

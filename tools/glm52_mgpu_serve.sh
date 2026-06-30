@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # glm52_mgpu_serve.sh - stand GLM-5.2 UD-Q4_K_M up FULLY GPU-RESIDENT across a
-# multi-GPU sm_80 box (e.g. dgx3: 8x 80GB). The PERFORMANT counterpart to the
-# cpu-offload path in tools/glm52_stage_serve_dgx3.sh.
+# multi-GPU sm_80 box (e.g. an 8x 80GB datacenter GPU server). The PERFORMANT
+# counterpart to the cpu-offload staging sibling in tools/ (the --n-cpu-moe path).
 #
 # WHY THIS EXISTS (the "use the full GPUs and RAM" overcome):
-#   glm52_stage_serve_dgx3.sh pins ALL MoE experts to host RAM (--n-cpu-moe 999) so
-#   the 753B/~466GB checkpoint serves at all on a single GPU's worth of VRAM. That
-#   path is host-expert-GEMM-bound: only 1 of 8 GPUs does work and decode crawls
-#   (~0.23 tok/s steady-state — slower than pure-CPU llama.cpp; the #971 wall).
-#   But UD-Q4_K_M is ~434 GiB and 7x80GB = 560 GiB of VRAM, so the WHOLE model fits
-#   resident across the GPUs. This script does exactly that: it OMITS --n-cpu-moe, so
-#   -ngl 999 keeps every expert on GPU HBM, layer-split across the visible devices.
+#   The cpu-offload staging sibling pins ALL MoE experts to host RAM
+#   (--n-cpu-moe 999) so the 753B/~466GB checkpoint serves at all on a single
+#   GPU's worth of VRAM. That path is host-expert-GEMM-bound: only 1 of 8 GPUs
+#   does work and decode crawls (~0.23 tok/s steady-state — slower than pure-CPU
+#   llama.cpp; the #971 wall). But UD-Q4_K_M is ~434 GiB and 7x80GB = 560 GiB of
+#   VRAM, so the WHOLE model fits resident across the GPUs. This script does
+#   exactly that: it OMITS --n-cpu-moe, so -ngl 999 keeps every expert on GPU HBM,
+#   layer-split across the visible devices.
 #
-# WITNESSED (dgx3, 2026-06-29, GPUs 1-7, llama.cpp build 9801, NVMe-staged shards):
+# WITNESSED (8-GPU server, 2026-06-29, GPUs 1-7, llama.cpp build 9801, NVMe-staged):
 #   decode 23.4 tok/s steady-state (~100x the cpu-offload 0.2324 tok/s; ~26x the
 #   0.89 tok/s pure-CPU llama.cpp baseline), prefill ~54 tok/s, ~433 GiB resident
-#   across the 7 GPUs. See experiments/glm-gpu-witness/dgx3-mgpu-glm52-serve-witness-2026-06-29.json.
+#   across the 7 GPUs. See experiments/glm-gpu-witness/mgpu-glm52-fullgpu-serve-witness-2026-06-29.json.
 #
 # By DEFAULT it serves on GPUs 1-7 and leaves GPU0 for a peer serve on a shared box;
 # set DEVICES=0,1,2,3,4,5,6,7 to use all 8 on a dedicated box.
@@ -48,7 +49,7 @@ if [ -z "$SHARD1" ]; then
   done
 fi
 
-[ -x "$SERVER" ] || { ph "NO_SERVER $SERVER (build llama.cpp CUDA sm_80 first — see glm52_stage_serve_dgx3.sh)"; exit 10; }
+[ -x "$SERVER" ] || { ph "NO_SERVER $SERVER (build llama.cpp CUDA sm_80 first — see the cpu-offload staging sibling)"; exit 10; }
 [ -n "$SHARD1" ] && [ -f "$SHARD1" ] || { ph "NO_SHARD (no 11-shard UD-Q4_K_M set found; stage it first)"; exit 11; }
 if ss -ltn 2>/dev/null | grep -q ":$PORT "; then ph "PORT_BUSY $PORT (already serving — not relaunching)"; exit 0; fi
 

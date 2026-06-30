@@ -1207,6 +1207,173 @@ def _rate_str(v: Any) -> str:
     return str(v)
 
 
+def _join_limited(rows: list[str], *, limit: int = 3) -> str:
+    kept = rows[:limit]
+    if len(rows) > limit:
+        kept.append(f"+{len(rows) - limit} more")
+    return "; ".join(kept)
+
+
+def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
+    d = payload.get("dispatcher") or {}
+    a = d.get("account") or {}
+    b = payload.get("backlog") or {}
+    c = payload.get("closure") or {}
+
+    parts: list[str] = []
+    if d.get("live") is not None or d.get("cap") is not None:
+        hr = d.get("headroom")
+        parts.append(f"worker slots {d.get('live')}/{d.get('cap')} active"
+                     + (f" ({hr} free)" if isinstance(hr, int) else ""))
+    if a.get("tag"):
+        parts.append(f"next account {a.get('tag')} t{a.get('tier')}"
+                     + ("" if a.get("available") else " unavailable"))
+    if not d.get("host_safe"):
+        parts.append("host flagged")
+    if not b.get("na") and b.get("open_issues") is not None:
+        ur = b.get("unrouted")
+        parts.append(f"backlog {b.get('open_issues')}"
+                     + (f" ({ur} unrouted)" if ur else ""))
+    if not c.get("na") and c.get("closure_rate") is not None:
+        hk = c.get("honest_close_rate")
+        parts.append(f"closure {_rate_str(c.get('closure_rate'))}"
+                     + (f"/{_rate_str(hk)}" if hk is not None else ""))
+    return "capacity: " + " · ".join(parts) if parts else ""
+
+
+def _dispatch_trend_line(tp: dict[str, Any]) -> str:
+    if tp.get("na"):
+        return ""
+    per_window = tp.get("per_window") or {}
+    rates: list[str] = []
+    for key in ("1h", "3h", "6h", "24h"):
+        row = per_window.get(key) or {}
+        rate = row.get("completed_rate_per_hour")
+        if rate is not None:
+            rates.append(f"{key} {_rate_str(rate)}/h")
+    if not rates:
+        rate = tp.get("completed_rate_per_hour")
+        if rate is None:
+            return ""
+        rates.append(f"{tp.get('primary_window_hours')}h {_rate_str(rate)}/h")
+
+    bits = ["completed " + " · ".join(rates)]
+    target = tp.get("target_per_hour")
+    if target is not None:
+        bits.append(f"target {_rate_str(target)}/h")
+    loop_windows = tp.get("loop_per_window") or {}
+    primary = f"{tp.get('primary_window_hours')}h"
+    loop_primary = loop_windows.get(primary) or {}
+    if loop_primary.get("loop_rate_per_hour") is not None:
+        bits.append(f"loop {primary} {_rate_str(loop_primary.get('loop_rate_per_hour'))}/h")
+    last = tp.get("last_loop_close_age_min")
+    if last is not None:
+        bits.append(f"last loop close {_rate_str(last)}m ago")
+    return "trend: " + "; ".join(bits)
+
+
+def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
+    d = payload.get("dispatcher") or {}
+    a = d.get("account") or {}
+    wd = d.get("watchdog") or {}
+    sup = payload.get("supervisor") or {}
+    tp = payload.get("throughput") or {}
+    buckets = {"expected": [], "auto-solving": [], "action": []}
+
+    verdict = str(payload.get("verdict") or "")
+    preflight = str(d.get("preflight_verdict") or "")
+    cap = payload.get("weekly_cap") or {}
+    if cap:
+        buckets["expected"].append(
+            f"{a.get('tag') or 'account'} weekly-capped until "
+            f"{cap.get('reset_text') or cap.get('until') or '?'}; scheduler waits")
+    if verdict == "AT_CAP" or preflight == "REFUSE_AT_CAP":
+        buckets["expected"].append("at configured worker-slot cap")
+    if verdict == "BLOCKED_ON_ACCOUNT" or preflight == "REFUSE_NO_ACCOUNT":
+        buckets["expected"].append("no free worker account; switcher resumes when one frees")
+    if verdict == "STALLED" and payload.get("ok"):
+        buckets["expected"].append("scheduler liveness says STALLED but gate marks it ok; see auto/action below")
+
+    sup_verdict = str(sup.get("verdict") or "")
+    if sup_verdict == "PLAN_SURFACE_EMPTY" and not sup.get("alive") and not sup.get("target"):
+        buckets["expected"].append(
+            "supervisor PLAN_SURFACE_EMPTY: expected for issue-driven dispatch; not session health")
+    elif sup_verdict and sup_verdict not in ("READY", "OK", "READY_TO_CANARY"):
+        buckets["action"].append(
+            f"supervisor {sup_verdict} (alive {sup.get('alive')}/{sup.get('target')})")
+
+    if wd.get("installed") is False:
+        buckets["action"].append("always-on watchdog not installed; register FleetIssueDispatch")
+    if not d.get("host_safe"):
+        buckets["action"].append("host resource guard flagged a process; inspect before growing")
+    if preflight == "REFUSE_INSPECT":
+        buckets["action"].append("spawn preflight could not run; inspect the preflight error")
+
+    workers = payload.get("workers") or {}
+    if workers.get("silent_count"):
+        nums = " ".join(f"#{s.get('issue')}" for s in (workers.get("silent") or [])[:5])
+        buckets["auto-solving"].append(
+            f"{workers.get('silent_count')} no-output worker(s) skipped by cooldown"
+            + (f" ({nums})" if nums else "")
+            + "; inspect only if the same issue repeats")
+
+    bh = payload.get("backend_health") or {}
+    stub_by_product = {
+        str(r.get("product") or ""): r
+        for r in (bh.get("stub_rate") or [])
+        if r.get("majority_stub")
+    }
+    dead_products: set[str] = set()
+    for r in (bh.get("dead") or [])[:4]:
+        product = str(r.get("product") or "backend")
+        dead_products.add(product)
+        stub = stub_by_product.get(product)
+        why = ""
+        if stub:
+            why = f"; evidence {stub.get('stub')}/{stub.get('total')} recent logs are stubs"
+        reprobe = r.get("reprobe_min")
+        buckets["auto-solving"].append(
+            f"{product} held dead; lane {r.get('abandoned_lane') or '?'} reallocated"
+            + (f"; re-probe every {reprobe}m" if reprobe else "")
+            + why)
+    for product, r in stub_by_product.items():
+        if product in dead_products:
+            continue
+        buckets["action"].append(
+            f"{product} majority-stub ({r.get('stub')}/{r.get('total')} recent logs); inspect backend output")
+
+    hh = payload.get("hook_health") or {}
+    for r in [x for x in (hh.get("by_backend") or []) if x.get("all_sessions_unhooked")][:4]:
+        buckets["action"].append(
+            f"{r.get('product')} guard hooks unbound "
+            f"({r.get('sessions_with_hook_failures')}/{r.get('sessions')} sessions, "
+            f"{r.get('hook_failures')} failures); workers ran unhooked")
+
+    if not tp.get("na") and tp.get("verdict") in ("BELOW_TARGET", "AUDIT_ERROR"):
+        buckets["action"].append(
+            f"throughput {tp.get('verdict')}: {_rate_str(tp.get('completed_rate_per_hour'))}/h "
+            f"vs target {_rate_str(tp.get('target_per_hour'))}/h")
+
+    rs = payload.get("run_status") or {}
+    if rs.get("errors"):
+        buckets["action"].append(f"dos status had {rs.get('errors')} digest error(s)")
+
+    return buckets
+
+
+def _dispatch_headline_state(payload: dict[str, Any]) -> str:
+    buckets = _dispatch_slack_buckets(payload)
+    if buckets["action"]:
+        return "ACTION"
+    if buckets["auto-solving"]:
+        return "auto-solving"
+    if buckets["expected"]:
+        return "expected"
+    if payload.get("ok"):
+        return "healthy"
+    return "ACTION"
+
+
 def render_slack(payload: dict[str, Any]) -> str:
     r"""The COMPACT Slack body for the dispatch card — the signal-dense peer of
     ``render`` (which keeps the box-drawn rails for the terminal + committed doc).
@@ -1223,72 +1390,24 @@ def render_slack(payload: dict[str, Any]) -> str:
     worker, a majority-stub or unhooked backend, a held backend, an uninstalled
     watchdog, a weekly cap). A healthy steady state collapses to the summary line plus
     a single ``✓`` — no restated footer, no rails, no fence. Pure given the payload."""
-    d = payload.get("dispatcher") or {}
-    a = d.get("account") or {}
-    b = payload.get("backlog") or {}
-    c = payload.get("closure") or {}
     tp = payload.get("throughput") or {}
-    wd = d.get("watchdog") or {}
+    lines: list[str] = [
+        "plane: scheduler/backlog, not session health",
+    ]
+    cap_line = _dispatch_capacity_line(payload)
+    if cap_line:
+        lines.append(cap_line)
+    trend = _dispatch_trend_line(tp)
+    if trend:
+        lines.append(trend)
 
-    # --- one dense summary line: only the state an operator reads at a glance ---
-    parts: list[str] = []
-    if d.get("live") is not None or d.get("cap") is not None:
-        hr = d.get("headroom")
-        parts.append(f"{d.get('live')}/{d.get('cap')} live"
-                     + (f" (hr {hr})" if isinstance(hr, int) else ""))
-    if a.get("tag"):
-        parts.append(f"{a.get('tag')} t{a.get('tier')}"
-                     + ("" if a.get("available") else " ✗avail"))
-    if not d.get("host_safe"):
-        parts.append("host ⚠FLAGGED")
-    if not b.get("na") and b.get("open_issues") is not None:
-        ur = b.get("unrouted")
-        parts.append(f"backlog {b.get('open_issues')}"
-                     + (f" ({ur} unrouted)" if ur else ""))
-    if not c.get("na") and c.get("closure_rate") is not None:
-        hk = c.get("honest_close_rate")
-        parts.append(f"closure {_rate_str(c.get('closure_rate'))}"
-                     + (f"/{_rate_str(hk)}" if hk is not None else ""))
-    if not tp.get("na") and tp.get("verdict"):
-        below = tp.get("verdict") in ("BELOW_TARGET", "AUDIT_ERROR")
-        parts.append((" ⚠ " if below else " ").strip()
-                     + f"rate {_rate_str(tp.get('completed_rate_per_hour'))}"
-                     f"/{_rate_str(tp.get('target_per_hour'))}·h")
-    lines = [" · ".join(parts)] if parts else []
-
-    # --- one targeted action line per problem (replaces the restated footer) ---
-    actions: list[str] = []
-    cap = payload.get("weekly_cap") or {}
-    if cap:
-        actions.append(f"🔴 {a.get('tag')} weekly-capped — resets "
-                       f"{cap.get('reset_text') or cap.get('until') or '?'}")
-    if wd.get("installed") is False:
-        actions.append("⚠ always-on watchdog NOT installed "
-                       "(register_dos_dispatch_watchdog.ps1)")
-    w = payload.get("workers") or {}
-    if w.get("silent_count"):
-        nums = " ".join(f"#{s.get('issue')}" for s in (w.get("silent") or [])[:8])
-        actions.append(f"⚠ {w.get('silent_count')} worker(s) silent (produced nothing): {nums}")
-    bh = payload.get("backend_health") or {}
-    for r in [x for x in (bh.get("stub_rate") or []) if x.get("majority_stub")][:4]:
-        actions.append(f"⚠ {r.get('product')} majority-stub {r.get('stub')}/{r.get('total')} recent logs")
-    for r in (bh.get("dead") or [])[:4]:
-        actions.append(f"🔴 {r.get('product')} backend held dead → lane "
-                       f"{r.get('abandoned_lane') or '?'} reallocated")
-    hh = payload.get("hook_health") or {}
-    for r in [x for x in (hh.get("by_backend") or []) if x.get("all_sessions_unhooked")][:4]:
-        actions.append(f"⚠ {r.get('product')} guard-hooks UNBOUND "
-                       f"{r.get('sessions')}/{r.get('sessions')} sess "
-                       f"({r.get('hook_failures')} fails) — running unhooked")
-    sup = payload.get("supervisor") or {}
-    if sup.get("verdict") and sup.get("verdict") not in ("READY", "OK", None):
-        actions.append(f"⚠ supervisor {sup.get('verdict')} "
-                       f"(alive {sup.get('alive')}/{sup.get('target')})")
-
-    if actions:
-        lines.extend(actions)
-    elif payload.get("ok"):
-        lines.append("✓ healthy — nothing needs an operator")
+    buckets = _dispatch_slack_buckets(payload)
+    for label in ("expected", "auto-solving", "action"):
+        rows = buckets[label]
+        if rows:
+            lines.append(f"{label}: {_join_limited(rows)}")
+    if not any(buckets.values()) and payload.get("ok"):
+        lines.append("healthy: nothing needs an operator")
     return "\n".join(lines) if lines else "(no dispatcher signal)"
 
 
@@ -1298,12 +1417,11 @@ def slack_text(payload: dict[str, Any]) -> str:
     (``render_slack``). The boxed ``render`` stays the terminal / committed-doc surface;
     Slack gets mrkdwn, not a monospace box, so the channel/phone reader scans state,
     not chrome (see the fleet-slack signal scorecard in tools/fleet_slack_status.py)."""
-    import slack_post  # sibling module in tools/
 
     verdict = payload.get("verdict")
-    ok = payload.get("ok")
-    headline = f"*dispatch status:* `{verdict}` ({'ok' if ok else 'ACTION'})"
-    return slack_post.append_signal_noise(headline + "\n" + render_slack(payload))
+    state = _dispatch_headline_state(payload)
+    headline = f"*dispatch scheduler:* `{verdict}` ({state})"
+    return headline + "\n" + render_slack(payload)
 
 
 def post_to_slack(payload: dict[str, Any], *, channel: str = "",
@@ -1317,7 +1435,7 @@ def post_to_slack(payload: dict[str, Any], *, channel: str = "",
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
     return slack_post.send(slack_text(payload), channel=channel, dry_run=dry_run,
-                           transport=transport)
+                           transport=transport, include_signal_noise=False)
 
 
 def git_date(root: Path) -> str:

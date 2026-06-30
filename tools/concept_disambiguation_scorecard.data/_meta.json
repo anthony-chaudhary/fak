@@ -13,7 +13,8 @@
       "roots": ["cache"],
       "ignore": ["cached", "caches", "cacheable", "cacheless", "uncached", "caching",
                  "cachedir", "cachelen", "cachettl", "flushcache", "defaultcachesize",
-                 "cachecreation", "cacheentry", "cacheevent", "cachedecay", "cachestream", "cacherevoke"],
+                 "cachecreation", "cacheentry", "cacheevent", "cachedecay", "cachestream", "cacherevoke",
+                 "usercachedir"],
       "min_files": 3,
       "note": "The headline confusable space: raw KV tensor storage vs the page-table virtualization (vCache) vs the provider prompt-cache vs the metadata sidecar (cachemeta)."
     },
@@ -21,7 +22,7 @@
       "id": "attention",
       "name": "Attention family",
       "roots": ["attention", "attn"],
-      "ignore": ["attentions", "attentive"],
+      "ignore": ["attentions", "attentive", "tattn"],
       "min_files": 3,
       "note": "Attention compute vs the attention-witness accumulation (Attended/EMA/Cumulative) vs the DSA AttentionIndex metadata."
     },
@@ -29,8 +30,9 @@
       "id": "guard-gate",
       "name": "Guard / gate family",
       "roots": ["guard", "gate"],
-      "exclude": ["gateway"],
-      "ignore": ["gated", "gates", "guarded", "guards", "gating", "ungated"],
+      "exclude": ["gateway", "aggregat", "delegat", "propagat", "navigat", "investigat"],
+      "ignore": ["gated", "gates", "guarded", "guards", "gating", "ungated",
+                 "unguarded", "guarding", "guardrails", "gatew"],
       "min_files": 3,
       "note": "The kernel (guard) vs the many decision points (gate): adjudicators pre-call, result admitters post-call, git-hook gates, promotion gates."
     },
@@ -38,7 +40,7 @@
       "id": "session-runtime",
       "name": "Session / scheduling family",
       "roots": ["session", "slot", "scheduler"],
-      "ignore": ["sessions", "scheduling", "scheduled"],
+      "ignore": ["sessions", "scheduling", "scheduled", "slots"],
       "min_files": 3,
       "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner)."
     },
@@ -46,7 +48,7 @@
       "id": "witness-proof",
       "name": "Witness / evidence family",
       "roots": ["witness", "refut", "revoc", "trustepoch"],
-      "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations"],
+      "ignore": ["witnessing", "witnessable", "witnessed", "witnesses", "refuted", "refutes", "revocations", "refutations"],
       "min_files": 3,
       "note": "A world-state witness (a cache's external binding) vs a measurement witness (RSI proof) vs a Claim (self-report) vs the WitnessResolver that corroborates claims."
     },
@@ -54,7 +56,7 @@
       "id": "gateway-engine",
       "name": "Gateway / engine family",
       "roots": ["gateway", "engine", "vdso", "kernel"],
-      "ignore": [],
+      "ignore": ["engineering", "engineer", "gateways", "kernels", "kernel32"],
       "min_files": 3,
       "note": "Kernel (coordinator) vs gateway (the wire) vs engine (the dispatch seam) vs vDSO (the local fast path) vs model (the in-kernel forward pass)."
     },
@@ -70,7 +72,8 @@
       "id": "context-ctx",
       "name": "Context-management family",
       "roots": ["ctx", "context", "recall", "compaction"],
-      "ignore": ["contexts", "recalling", "recalled"],
+      "ignore": ["contexts", "recalling", "recalled",
+                 "context", "ctx", "cctx", "compactions", "recalls"],
       "min_files": 3,
       "note": "context-MMU (gates result bytes) vs KV-MMU (evicts K/V spans) vs recall (the persisted core dump) vs compaction (provider prefix reuse) vs the ctx* planners."
     },
@@ -78,7 +81,7 @@
       "id": "score-debt",
       "name": "Scorecard / debt family",
       "roots": ["scorecard", "debt"],
-      "ignore": [],
+      "ignore": ["scorecards"],
       "min_files": 3,
       "note": "The meta-family: the scorecard machine vs each *_debt integer vs the control pane that folds them - this very scorecard is one member."
     },
@@ -89,7 +92,8 @@
       "ignore": ["supported", "unsupported", "supports", "supporting", "errmmapunsupported",
                  "errstreamingunsupported", "streamingsupported", "recurrentevictunsupportederror",
                  "sourcecoverage", "targetcoverage", "correctnessclass", "correctnessdependson",
-                 "paritybench", "parityreport", "supportmaturityscore", "supportmaturitydebt"],
+                 "paritybench", "parityreport", "supportmaturityscore", "supportmaturitydebt",
+                 "immaturity"],
       "min_files": 3,
       "note": "The support-maturity ladder vocabulary: support says a path exists, coverage says how much of the declared/discovered space is exercised or positioned, correctness says the behavior is right, parity compares to a named peer/baseline, and maturity summarizes production readiness."
     },
@@ -105,7 +109,7 @@
       "id": "evict",
       "name": "Eviction family",
       "roots": ["evict", "evicted", "eviction"],
-      "ignore": ["evictable", "evictSupported"],
+      "ignore": ["evictable", "evictSupported", "eviction", "evicts", "evicting"],
       "min_files": 3,
       "note": "Three disjoint eviction planes: physical KV tensor span removal, logical playbook pruning under token budget, and model instance LRU eviction from a session pool."
     },
@@ -121,7 +125,7 @@
       "id": "render-materialize",
       "name": "Render / materialize family",
       "roots": ["render", "RenderPlan", "RenderItem", "Rendered", "materialize"],
-      "ignore": ["rendered", "rendering"],
+      "ignore": ["rendered", "rendering", "renders", "materializes", "materialized", "materializers"],
       "min_files": 2,
       "note": "Three disjoint render/materialize concepts: prompt-assembly layout (RenderPlan), memq cell materialization (RenderItem), and ctxplan span paging (Rendered)."
     },
@@ -129,7 +133,10 @@
       "id": "plan",
       "name": "Plan family",
       "roots": ["plan", "Plan", "Candidate"],
-      "ignore": ["planner", "plans", "planning", "Candidates", "candidates"],
+      "exclude": ["plane", "plank", "explanat"],
+      "ignore": ["planner", "plans", "planning", "Candidates", "candidates",
+                 "planned", "notplanned", "planted", "planners",
+                 "plannedcumtok", "plannedcumtokens"],
       "min_files": 2,
       "note": "Two disjoint Plan types: ctxplanner's chosen resident view selection vs memq's static pre-execution explain output. Candidate is scored span input to ctxplanner."
     },
@@ -137,6 +144,7 @@
       "id": "pool",
       "name": "Pool family",
       "roots": ["pool", "Pool", "PoolProfile"],
+      "exclude": ["spool"],
       "ignore": [],
       "min_files": 2,
       "note": "Two disjoint pool concepts: session bounded-LRU container vs cachemeta pooling character profile describing a tier's host/coherence/share properties."
@@ -145,7 +153,7 @@
       "id": "layout",
       "name": "Layout family",
       "roots": ["layout", "Layout", "kvLayout"],
-      "ignore": [],
+      "ignore": ["layouts"],
       "min_files": 2,
       "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout)."
     }

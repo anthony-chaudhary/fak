@@ -443,6 +443,8 @@ class DogfoodWitnessTest(unittest.TestCase):
                     str(gate),
                     "--gate-report",
                     str(deny_gate),
+                    "--target-shell",
+                    "bash",
                 ]
             )
             args.repo_root = args.repo_root.resolve()
@@ -476,6 +478,7 @@ class DogfoodWitnessTest(unittest.TestCase):
             self.assertEqual(saved["summary"]["local_fak_gate"]["expected_denied"], 1)
             self.assertEqual(saved["summary"]["local_fak_gate"]["tools"], ["git_push", "run_tests"])
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["status"], "PASS")
+            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["target_command_mode"], "native_launcher")
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_native_launcher_hooks"], 1)
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_powershell_native_hooks"], 0)
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_python_cli_hooks"], 0)

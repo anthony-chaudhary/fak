@@ -1,0 +1,428 @@
+{
+  "rows": [
+    {
+      "id": "x2-session-runtime-sessionobs",
+      "canonical": "sessionobs (observability scorer)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "internal/sessionobs is the stdlib-only RSI scorecard that grades how far our own coding-session data has climbed the capture->structure->link->aggregate->learn ladder, the value-side complement to the cost-only tools/session_audit.py; its `fak sessions learn` rung is the registered loop consumer that reads the committed corpus.",
+      "distinction": "Not a live runtime Session: it is an offline analysis primitive measuring whether session transcripts are RSI-learnable, never a served or scheduled request, and its sessionsLearn consumer reads a committed corpus rather than driving a turn.",
+      "distinct_from": [
+        "Session",
+        "Scheduler"
+      ],
+      "aliases": [
+        "sessionslearn",
+        "sessionaudit"
+      ],
+      "grounding": "sessionobs",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-sessionobsdebt",
+      "canonical": "SessionObsDebt (ladder-rung debt)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "sessionobs.Corpus.SessionObsDebt is the headline integer the session-observability scorecard emits: the count of HARD ladder rungs (capture/structure/link/aggregate/learn) not yet built, retired only by building the real rung never by weakening a check.",
+      "distinction": "Not a Session's own budget: it is the deterministic debt COUNT over the whole session corpus's observability ladder, a scorecard verdict rather than a per-session runtime field.",
+      "distinct_from": [
+        "Session",
+        "session.State"
+      ],
+      "aliases": [],
+      "grounding": "sessionobsdebt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-taskscheduler",
+      "canonical": "taskscheduler (Windows cron target)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "taskscheduler is the `fak cron emit --target taskscheduler` OS-scheduler target that projects a registered fak loop into a Windows Task Scheduler `Register-ScheduledTask` snippet (alongside launchd and systemd), so a job survives reboot; the same family's NewNativeScheduler is an unrelated decode-engine constructor.",
+      "distinction": "Not the session.Scheduler (the DRIVE-state slot picker) nor the NativeScheduler engine loop: taskscheduler is an OS cron-emission target string, while modelengine.NewNativeScheduler is the constructor that builds a continuous-batching decode scheduler over a model.",
+      "distinct_from": [
+        "Scheduler",
+        "NativeScheduler (modelengine)"
+      ],
+      "aliases": [
+        "newnativescheduler"
+      ],
+      "grounding": "taskscheduler",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-sessioncountmetrics",
+      "canonical": "TotalSessions (cache-value session counts)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "TotalSessions, MultiTurnSessions and SingleTurnSessions are the cachevalueledger/cachevaluereport roll-up counters splitting the observed cache-value corpus by turn count, alongside the gateway's LiveSessions tally, the fleet's FleetSessions/tools snapshot, the resetHealth reaper bound maxResetHealthSessions, the dojo cross_session_warm_hit_rate posture metric, and the cachewitness honesty-fence SingleSessionMarginalX.",
+      "distinction": "Not the Session record itself nor ListSessions's live snapshot: these are aggregate session-population COUNTERS and ratios folded for cache-value/health reporting, not the per-session control state or its read query.",
+      "distinct_from": [
+        "Session",
+        "ListSessions"
+      ],
+      "aliases": [
+        "multiturnsessions",
+        "singleturnsessions",
+        "livesessions",
+        "fleetsessions",
+        "maxresethealthsessions",
+        "crosssessionwarmhitrate",
+        "singlesessionmarginalx"
+      ],
+      "grounding": "totalsessions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-requireglmdsasession",
+      "canonical": "requireGLMDsaSession (model fence)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "requireGLMDsaSession is a generated model-layer fence (sibling of requirePreNorm) asserting that a model.Session uses the GLM DSA attention path, recorded in the regenerated snapshot the harness commits.",
+      "distinction": "Not the gateway DRIVE-state session: it is a per-model-Session capability assertion guarding the GLM DSA forward path, not a run-state/budget control record.",
+      "distinct_from": [
+        "session.State"
+      ],
+      "aliases": [],
+      "grounding": "requireglmdsasession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-withsessiongate",
+      "canonical": "WithSessionGate (agent run option)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "agent.WithSessionGate is the RunOption that threads a live session gate plus its trace into the native agent turn loop (loop_session.go), so each turn is admitted/throttled and can drain operator steers at its boundary like a served request.",
+      "distinction": "Not WithSessionTable (which binds the DRIVE-state table itself): WithSessionGate wires the per-turn gate+trace seam in the native harness, and no production caller currently passes the table behind it.",
+      "distinct_from": [
+        "session.State",
+        "SessionPlanner"
+      ],
+      "aliases": [],
+      "grounding": "withsessiongate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-faksessionreset",
+      "canonical": "FakSessionReset (checkpoint sibling task)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "FakSessionReset is a Windows Task Scheduler task-name label in the fak ops registration scripts, the reset sibling of the FakSessionCheckpoint scheduled task that keeps headless session state fresh.",
+      "distinction": "Not the in-table SessionReset directive: it is the OS scheduled-task NAME for the reset job, not the run-state clear-to-baseline control applied to a live session.",
+      "distinct_from": [
+        "Session",
+        "session.State"
+      ],
+      "aliases": [],
+      "grounding": "faksessionreset",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-loopsession",
+      "canonical": "loop_session.go (agent session seam)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "loop_session.go is the agent package's session-control seam for the turn loop: it threads the session gate (WithSessionGate/gateTurn), the operator steer splice (drainSteer), and per-tool-call routing into agent.Run's native loop.",
+      "distinction": "Not the runtime Session object: it is the source seam in internal/agent that BINDS session-control behavior into a turn loop, several of whose hooks have no production caller yet.",
+      "distinct_from": [
+        "Session",
+        "Turn"
+      ],
+      "aliases": [],
+      "grounding": "loopsession",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-sessiontype",
+      "canonical": "SessionType (cache-value workload tag)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SessionType is the cachevaluereport per-observation workload label (run | guard | serve) that splits the cache-value roll-up, rendered as the SessionTypeMix histogram in the cachevalue review.",
+      "distinction": "Not the runtime Session nor its session.State: it is a coarse WORKLOAD-class tag on a cache-value observation row, used only for reporting breakdowns.",
+      "distinct_from": [
+        "Session",
+        "session.State"
+      ],
+      "aliases": [],
+      "grounding": "sessiontype",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-slotfreed",
+      "canonical": "SlotFreed (gateway wire event)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "gateway.SlotFreed is the wire-neutral struct the scheduler's SlotEvent crosses into the gateway as (TraceID, Cause, Rev), projected by slotEventToSlotFreed and consumed by Server.ReclaimKVOnSlotFreed to drive real KV reclamation.",
+      "distinction": "Not the Slot signal itself nor the OnSlotFreed scheduler callback: SlotFreed is the gateway-boundary wire form of a freed slot, kept session-internals-blind so the gateway never imports internal/session.",
+      "distinct_from": [
+        "Slot",
+        "OnSlotFreed (scheduler callback)"
+      ],
+      "aliases": [],
+      "grounding": "slotfreed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-session-runtime-sessioncheckpoint",
+      "canonical": "FakSessionCheckpoint (resume packet task)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "FakSessionCheckpoint is the Windows Task Scheduler task name registered by tools/register_session_checkpoint.ps1 that runs the session-checkpoint job (the verified resumable packet sourced from witnessed state, #636) on a cadence.",
+      "distinction": "Not SessionImage (the loaded portable archive): the checkpoint task is the scheduled JOB that periodically writes a resume packet, not the persisted image format it produces.",
+      "distinct_from": [
+        "sessionimage.Image",
+        "Session"
+      ],
+      "aliases": [],
+      "grounding": "sessioncheckpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-witnessstatus",
+      "canonical": "loopmgr witnessed run-status set",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The loop/bench witnessed run-status family: loopmgr.StatusWitnessRefused (\"witness_refused\") and StatusWitnessUnavailable (\"witness_unavailable\"), bench/loopgate VerdictWitnessed/OutcomeWitnessed (\"witnessed\") and its witnessed_done promotion, callavoid's WitnessedRedirect and its WitnessedEmpty count, and loopindex's WitnessedIndex health score.",
+      "distinction": "These are operational loop-run/coverage STATUS labels and counters, not the abi.WitnessOutcome enum the in-process gate folds: WitnessRefused/WitnessUnavailable are run-level dispositions, WitnessedRedirect/WitnessedEmpty are realized-fan-out evidence rows, and WitnessedIndex is a wired-stage health number.",
+      "distinct_from": [
+        "StatusWitnessRefused (loop run status)",
+        "StatusWitnessedDone (loop run status)",
+        "WitnessOutcome"
+      ],
+      "aliases": [
+        "statuswitnessunavailable",
+        "witnesseddone",
+        "verdictwitnessed",
+        "outcomewitnessed",
+        "witnessedredirect",
+        "witnessedempty",
+        "witnessedindex"
+      ],
+      "grounding": "statuswitnessrefused",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-unwitnessed",
+      "canonical": "unwitnessed-claim reason set",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The unwitnessed-claim deny/re-arm reason family: loopgate.ReasonDoneUnwitnessed (\"LOOP_DONE_UNWITNESSED\", the re-arm reason when a done claim has no witness, as adjudicated for a claim-unwitnessed turn) and the proposed context-safety SAFETY_UNWITNESSED DOS refusal token for a rendered number with no tamper-evident source.",
+      "distinction": "These name the 'a claim arrived with NO corroboration' case, distinct from abi WitnessRefuted (evidence actively contradicts): an unwitnessed claim re-arms or refuses for ABSENCE of proof, not for disproof.",
+      "distinct_from": [
+        "Claim",
+        "WitnessResolver"
+      ],
+      "aliases": [
+        "reasondoneunwitnessed",
+        "safetyunwitnessed"
+      ],
+      "grounding": "claimunwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-reviewrefute",
+      "canonical": "ReviewRefute (scout review verdict)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "modelroute.ReviewRefute is the scout-review verdict value \"refute\" returned when an opt-in pre-commit review rejects a diff; safecommit raises it to the ReasonReviewRefuted (\"REVIEW_REFUTED\") refusal that blocks the commit before it lands.",
+      "distinction": "Not a world-state Refutation of a cached witness: ReviewRefute is a reviewer's reject verdict on a proposed DIFF, and ReasonReviewRefuted is the commit-gate refusal it produces, neither touches the cache coherence bus.",
+      "distinct_from": [
+        "Refutation",
+        "refute (revocation trigger)"
+      ],
+      "aliases": [
+        "reviewrefuted"
+      ],
+      "grounding": "reviewrefute",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-witnessfor",
+      "canonical": "WitnessFor (support-maturity prover)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "supportmaturity.WitnessFor returns the exact non-author WitnessKind that must PROVE a given support-maturity rung, the binding the promotion check enforces (the evidence kind must be precisely the witness WitnessFor names).",
+      "distinction": "Not the WitnessResolver engine nor a generic claim: WitnessFor is a pure rung->required-witness-kind MAPPING in the support-maturity ladder, naming what evidence a promotion demands.",
+      "distinct_from": [
+        "WitnessResolver",
+        "Claim"
+      ],
+      "aliases": [],
+      "grounding": "witnessfor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-eventwitness",
+      "canonical": "EventWitness (loop ledger event kind)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "loopmgr.EventWitness is the loop-ledger event KIND carrying a run's external verdict (witnessed_done / witness_refused / witness_unavailable), the row that supplies the independent done-evidence the loopverify corpus folds beside each self-reported EventEnd.",
+      "distinction": "Not the WitnessOutcome verdict value it carries: EventWitness is the ledger EVENT type appended to the run journal, the transport for a verdict rather than the verdict enum itself.",
+      "distinct_from": [
+        "WitnessOutcome",
+        "WitnessResolver"
+      ],
+      "aliases": [],
+      "grounding": "eventwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-cachewitness",
+      "canonical": "cachewitness (KV-prefix value seam)",
+      "family": "witness-proof",
+      "kind": "subsystem",
+      "definition": "internal/cachewitness is the observation seam that folds the WITNESSED kv_prefix metric family (KVPrefixWitness.ReuseRatio over fak_gateway_kv_prefix_reused_tokens_total) into a provenance-labeled Record, keeping WITNESSED reuse strictly distinct from OBSERVED provider cache_read and exposing the honesty-fence SingleSessionMarginalX.",
+      "distinction": "Not a world-state witness on the coherence bus: cachewitness measures realized KV-prefix REUSE value with WITNESSED/OBSERVED provenance discipline, never admitting or refuting a cache entry's correctness.",
+      "distinct_from": [
+        "World-state witness",
+        "WitnessResolver"
+      ],
+      "aliases": [],
+      "grounding": "cachewitness",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-witnessresult",
+      "canonical": "WitnessResult (loopgate evidence summary)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "loopgate.WitnessResult is the witness adapter's evidence summary struct (Outcome, Reason, Detail, RawVerdict, Rung) that Adjudicate consumes to accept a done claim only on OutcomeWitnessed, parsed from the dos commit-audit/verify JSON.",
+      "distinction": "Not the WitnessOutcome enum it embeds nor the WitnessResolver that fills it: WitnessResult is the full adapter RESULT record carrying the outcome plus its evidence rung and detail.",
+      "distinct_from": [
+        "WitnessOutcome",
+        "WitnessResolver"
+      ],
+      "aliases": [],
+      "grounding": "witnessresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-witnessprefix",
+      "canonical": "witnessPrefix (blob-hash label)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "syspromptmmu.witnessPrefix is the constant \"blob-sha256:\" that labels a syspromptmmu Witness string as a content-blob hash (not a git object id), so a system-prompt span's admitting witness is recognizable as a content digest.",
+      "distinction": "Not a World-state witness value itself: witnessPrefix is the fixed STRING TAG prepended to a content-hash witness, marking its kind rather than carrying world state.",
+      "distinct_from": [
+        "World-state witness"
+      ],
+      "aliases": [],
+      "grounding": "witnessprefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-prefixreusefanoutwitness",
+      "canonical": "TestPrefixReuseFanoutWitness (fanbench soundness proof)",
+      "family": "witness-proof",
+      "kind": "doc-term",
+      "definition": "TestPrefixReuseFanoutWitness is the cmd/fanbench soundness test that grounds the fan-out prefix-reuse GEOMETRY claim: it prefills the master-goal prefix once and proves N cloned sub-agents are bit-identical to an independent full prefill (max|delta|=0).",
+      "distinction": "Not a runtime witness verdict: it is a TEST-time correctness PROOF artifact for the fan-out KV-prefix reuse claim, not a kernel require-witness gate or a coherence-bus witness.",
+      "distinct_from": [
+        "World-state witness",
+        "WitnessOutcome"
+      ],
+      "aliases": [],
+      "grounding": "testprefixreusefanoutwitness",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-witness-proof-tallyfromcounterswitnessed",
+      "canonical": "TallyFromCountersWitnessed (realized-deny fold)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "callavoid.TallyFromCountersWitnessed is TallyFromCounters with a set of WITNESSED productive denies (each a WitnessedRedirect carrying its enumerated variant set), netting witnessed denies so each deny is counted exactly once and only a non-forgeable, deduplicated fan-out is credited into the graded headline.",
+      "distinction": "Not a witness verdict: it is the FOLD that turns enumerated-variant deny evidence into a realized amplification tally, crediting nothing for an empty witness (WitnessedEmpty) so a claim can never inflate the score.",
+      "distinct_from": [
+        "WitnessOutcome",
+        "Claim"
+      ],
+      "aliases": [],
+      "grounding": "tallyfromcounterswitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

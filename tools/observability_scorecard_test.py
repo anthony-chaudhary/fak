@@ -83,6 +83,25 @@ def test_extract_family_literals_precise_emitters():
             "fak_gateway_inflight_requests_by_route"} <= fams
 
 
+def test_extract_family_literals_bare_buffer_arg():
+    # The writer helpers in internal/gateway/metrics.go pass the exposition buffer
+    # by value (`writeCounter(b, "fak_x", ...)`), not only by pointer (`&b,`). Both
+    # forms emit the family; a regex that recognized only `&b,` silently dropped the
+    # by-value emitters and flagged every dashboard panel that read them as a phantom
+    # (the dashboard_integrity false positive this test pins shut).
+    go = (
+        'writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "...", n)\n'
+        'writeCounter(b, "fak_gateway_upstream_retries_total", "...", n)\n'
+        'writeHelpType(b, "fak_gateway_context_pollutions_blocked_total", "...", "counter")\n'
+        'writeServingGaugeFamily(b, "fak_serving_x", "...", v)\n'
+    )
+    fams = obs.extract_family_literals(go)
+    assert {"fak_gateway_compaction_shed_tokens_total",
+            "fak_gateway_upstream_retries_total",
+            "fak_gateway_context_pollutions_blocked_total",
+            "fak_serving_x"} <= fams
+
+
 def test_extract_family_literals_excludes_tool_names():
     # MCP tool names and struct fields share the fak_ prefix but are NOT metrics:
     # they are not declared via a help/write helper, nor written as exposition.

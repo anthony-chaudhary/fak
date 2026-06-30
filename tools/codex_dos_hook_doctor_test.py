@@ -26,6 +26,7 @@ def write_manifest(home: Path) -> Path:
     launcher = root / "bin" / "dos-hook"
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text("# launcher\n", encoding="utf-8")
+    (launcher.parent / "dos-hook.ps1").write_text("# launcher\n", encoding="utf-8")
     manifest = root / "hooks" / "hooks.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(
@@ -70,7 +71,7 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             home = Path(td) / "codex-home"
             write_manifest(home)
 
-            report = mod.build_report(home, apply=False)
+            report = mod.build_report(home, apply=False, target_shell="bash")
 
             self.assertEqual(report["status"], "WARN")
             self.assertFalse(report["applied"])
@@ -92,7 +93,7 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             home = Path(td) / "codex-home"
             manifest = write_manifest(home)
 
-            report = mod.build_report(home, apply=True)
+            report = mod.build_report(home, apply=True, target_shell="bash")
 
             self.assertEqual(report["status"], "CHANGED")
             self.assertTrue(report["applied"])
@@ -116,7 +117,7 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             self.assertNotIn("dos-hook.ps1", json.dumps(rewritten))
             self.assertEqual(shells, ["bash", "bash"])
 
-            second = mod.build_report(home, apply=False)
+            second = mod.build_report(home, apply=False, target_shell="bash")
             self.assertEqual(second["status"], "PASS")
             self.assertEqual(second["summary"]["command_modes"], {"native_launcher": 2})
             self.assertEqual(second["summary"]["codex_command_modes"], {"native_launcher": 1})
@@ -135,19 +136,83 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             )
             manifest.write_text(json.dumps(data) + "\n", encoding="utf-8")
 
-            report = mod.build_report(home, apply=False)
+            report = mod.build_report(home, apply=False, target_shell="bash")
 
             self.assertEqual(report["status"], "WARN")
             self.assertEqual(report["summary"]["command_modes"], {"powershell_native_launcher": 1, "python_cli": 1})
             self.assertEqual(report["summary"]["projected_command_modes"], {"native_launcher": 2})
 
-            applied = mod.build_report(home, apply=True)
+            applied = mod.build_report(home, apply=True, target_shell="bash")
             self.assertEqual(applied["status"], "CHANGED")
             rewritten = json.loads(manifest.read_text(encoding="utf-8"))
             hook = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]
             self.assertEqual(hook["shell"], "bash")
             self.assertIn("bin/dos-hook", hook["command"])
             self.assertNotIn("dos-hook.ps1", hook["command"])
+
+    def test_powershell_target_rewrites_bash_native_launcher_for_windows_codex(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "codex-home"
+            manifest = write_manifest(home)
+            mod.build_report(home, apply=True, target_shell="bash")
+
+            dry = mod.build_report(home, apply=False, target_shell="powershell")
+            self.assertEqual(dry["status"], "WARN")
+            self.assertEqual(dry["target_command_mode"], "powershell_native_launcher")
+            self.assertEqual(dry["summary"]["command_modes"], {"native_launcher": 2})
+            self.assertEqual(dry["summary"]["codex_command_modes"], {"native_launcher": 1})
+            self.assertEqual(dry["summary"]["projected_command_modes"], {"powershell_native_launcher": 2})
+            self.assertEqual(dry["summary"]["projected_codex_command_modes"], {"powershell_native_launcher": 1})
+
+            applied = mod.build_report(home, apply=True, target_shell="powershell")
+            self.assertEqual(applied["status"], "CHANGED")
+            rewritten = json.loads(manifest.read_text(encoding="utf-8"))
+            commands = [
+                hook["command"]
+                for entries in rewritten["hooks"].values()
+                for entry in entries
+                for hook in entry["hooks"]
+            ]
+            shells = [
+                hook.get("shell")
+                for entries in rewritten["hooks"].values()
+                for entry in entries
+                for hook in entry["hooks"]
+            ]
+            self.assertEqual(shells, ["powershell", "powershell"])
+            self.assertTrue(all("dos-hook.ps1" in command for command in commands))
+            self.assertTrue(all("dos.cli hook" in command for command in commands))
+            self.assertFalse(any("'2>/dev/null'" in command or '"2>/dev/null"' in command for command in commands))
+
+            second = mod.build_report(home, apply=False, target_shell="powershell")
+            self.assertEqual(second["status"], "PASS")
+            self.assertEqual(second["summary"]["command_modes"], {"powershell_native_launcher": 2})
+            self.assertEqual(second["summary"]["codex_command_modes"], {"powershell_native_launcher": 1})
+
+    def test_powershell_target_repairs_quoted_redirect_argument(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "codex-home"
+            manifest = write_manifest(home)
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["hooks"]["PreToolUse"][0]["hooks"][0]["shell"] = "powershell"
+            data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = (
+                "$dosHook = 'C:\\Users\\USER\\.codex\\plugins\\cache\\dos\\dos-kernel\\0.28.0\\bin\\dos-hook.ps1'; "
+                "& $dosHook 'pretool' '--workspace' '.' '--dialect' 'codex' '2>/dev/null' 2>$null; exit 0"
+            )
+            manifest.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+            dry = mod.build_report(home, apply=False, target_shell="powershell")
+            self.assertEqual(dry["status"], "WARN")
+            self.assertEqual(dry["summary"]["codex_replacements_available"], 1)
+
+            applied = mod.build_report(home, apply=True, target_shell="powershell")
+            self.assertEqual(applied["status"], "CHANGED")
+            rewritten = json.loads(manifest.read_text(encoding="utf-8"))
+            command = rewritten["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            self.assertIn("dos-hook.ps1", command)
+            self.assertNotIn("'2>/dev/null'", command)
 
     def test_unparseable_python_hook_stays_unrepairable(self) -> None:
         mod = load()
@@ -160,7 +225,7 @@ class CodexDosHookDoctorTest(unittest.TestCase):
             )
             manifest.write_text(json.dumps(data) + "\n", encoding="utf-8")
 
-            report = mod.build_report(home, apply=False)
+            report = mod.build_report(home, apply=False, target_shell="bash")
 
             self.assertEqual(report["status"], "WARN")
             self.assertEqual(report["summary"]["replacements_available"], 1)
@@ -173,7 +238,7 @@ class CodexDosHookDoctorTest(unittest.TestCase):
     def test_missing_manifest_is_unknown(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:
-            report = mod.build_report(Path(td) / "codex-home", apply=False)
+            report = mod.build_report(Path(td) / "codex-home", apply=False, target_shell="bash")
             self.assertEqual(report["status"], "UNKNOWN")
             self.assertEqual(report["manifest_count"], 0)
 

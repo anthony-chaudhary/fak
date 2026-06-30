@@ -1,0 +1,526 @@
+{
+  "rows": [
+    {
+      "id": "x2-plan-idxplan",
+      "canonical": "idxPlan (ctxplan index-bounded view)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "idxPlan is the local ctxplan.Plan produced by index.PlanCells in cmd/ctxplandemo and cmd/ctxplanbench, the O(1) resident view scored over only an index-bounded candidate set rather than the full transcript.",
+      "distinction": "It is one concrete materialized resident view returned by PlanCells, NOT the PlanCells selection primitive itself nor the agent.Planner client that drives a model.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [
+        "rehydrateplannedview"
+      ],
+      "grounding": "idxplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planaudit",
+      "canonical": "planAudit (ctxplan faithfulness witness)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ctxplan.Audit(p Plan) returns the Witness that a planned resident view is faithful (no candidate span destroyed), the same plan-faithfulness check tools/plan_audit_test.py exercises.",
+      "distinction": "It judges whether an already-built resident Plan is recoverable, NOT how the Plan's cells are selected (PlanCells) nor how layout is laid down (PlanLayout).",
+      "distinct_from": [
+        "PlanLayout (ctxplan)"
+      ],
+      "aliases": [
+        "applyplan",
+        "segelisionplan"
+      ],
+      "grounding": "planaudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planof",
+      "canonical": "PlanOf (syspromptmmu prompt-segment plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "syspromptmmu.PlanOf folds a base Segment list into the []cachemeta.PromptSegment system-prompt plan that BuildSystemValue realizes, and BaseContextPlan seeds the resident spine-plus-policy floor of that plan.",
+      "distinction": "It plans the cacheable SYSTEM-PROMPT prefix segments, NOT the per-turn history resident view (ctxplan PlanCells) nor a routed model roster.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [
+        "basecontextplan",
+        "maybeplananthropicraw"
+      ],
+      "grounding": "planof",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-autosizecontextplan",
+      "canonical": "AutoSizeContextPlan (compute headroom sizer)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "compute.AutoSizeContextPlan takes a ContextSizeConfig and a MemoryPlan weight set plus available bytes and returns the auto-sized context token budget and the fitted MemoryPlan for a serve.",
+      "distinction": "It SIZES a compute MemoryPlan against host headroom, NOT a ctxplan resident view of conversation history nor a routed model plan.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "autosizecontextplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-vulkanplan",
+      "canonical": "vulkan_plan (Vulkan command-buffer compute plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute/vulkan_plan.go is the host-tractable scaffold for issue #10's Vulkan command-buffer wiring, the compute-side plan of which cold weights spill on a discrete GPU.",
+      "distinction": "It is a GPU compute/command-buffer plan, NOT a ctxplan conversation resident view nor a compute MemoryPlan headroom fit.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "vulkanplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-expertparallelplan",
+      "canonical": "ExpertParallelPlan (MoE expert partition plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ExpertParallelPlan(numExperts, ranks) is the named GLM-5.2 expert-parallel partition that splits the Mixture-of-Experts experts across ranks, per docs/notes/GLM52-EXPERT-PARALLEL-MULTIGPU.",
+      "distinction": "It plans how MoE experts are sharded across GPU ranks, NOT a host-RAM compute MemoryPlan nor a conversation resident view.",
+      "distinct_from": [
+        "MemoryPlan (compute)"
+      ],
+      "aliases": [],
+      "grounding": "expertparallelplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-scriptedplanner",
+      "canonical": "ScriptedPlanner (agenttest fixture)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agenttest's ScriptedPlanner is a deterministic agent.Planner test fixture that emits a fixed sequence of turns, built by NewScriptedPlanner and used by RunSession.",
+      "distinction": "It is an in-test scripted planner, NOT the offline MockPlanner production fallback nor a live network HTTPPlanner.",
+      "distinct_from": [
+        "MockPlanner (offline)"
+      ],
+      "aliases": [
+        "newscriptedplanner"
+      ],
+      "grounding": "scriptedplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-replayplanner",
+      "canonical": "ReplayPlanner (agenttest transcript replay)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/agenttest's ReplayPlanner is a deterministic agent.Planner that re-emits the assistant turns of a recorded transcript, built by NewReplayPlanner.",
+      "distinction": "It replays a captured transcript deterministically, NOT a fresh scripted sequence (ScriptedPlanner) nor a live model call.",
+      "distinct_from": [
+        "MockPlanner (offline)"
+      ],
+      "aliases": [],
+      "grounding": "replayplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-newinkernelplanner",
+      "canonical": "NewInKernelPlanner (local GGUF planner ctor)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "agent.NewInKernelPlanner builds the in-kernel agent.Planner that decodes a local GGUF model in-process (used by run_model.go and the gateway's --gguf in-kernel generation path).",
+      "distinction": "It constructs the LOCAL in-process generation planner, NOT the outbound network HTTPPlanner nor an offline test planner.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [],
+      "grounding": "newinkernelplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-plannertimeout",
+      "canonical": "plannerTimeout (agent HTTP per-call timeout)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "internal/agent/chat.go's plannerTimeout is the per-request upstream-model HTTP timeout (60s default, FAK_PLANNER_TIMEOUT_S override, clamped to [5,3600]), and plannerMaxAttempts is the total upstream try count for that same path.",
+      "distinction": "It is the timeout/retry config of a network planner's HTTP call, NOT a planner implementation like the in-kernel or HTTP planner.",
+      "distinct_from": [
+        "HTTPPlanner (agent client)"
+      ],
+      "aliases": [
+        "plannermaxattempts",
+        "fakplannertimeouts"
+      ],
+      "grounding": "plannertimeout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-buildissueplan",
+      "canonical": "BuildIssuePlan (maturity issue create/update plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/maturity.BuildIssuePlan decides whether each maturity item creates a new GitHub issue or updates an existing one, and SyncIssuePlan applies that planned create/update set via gh.",
+      "distinction": "It plans GitHub-issue create-vs-update for maturity items, NOT a conversation resident view nor an action-item BuildPlan.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [
+        "syncissueplan"
+      ],
+      "grounding": "buildissueplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-buildhandoffissueplan",
+      "canonical": "BuildHandoffIssuePlan (taskmgr handoff issue plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/taskmgr.BuildHandoffIssuePlan decides create vs update for every next step of a Handoff, emitting HandoffIssuePlanRow rows that syncTaskHandoffPlan applies via gh.",
+      "distinction": "It plans handoff next-step issues from a taskmgr Handoff, distinct from maturity's BuildIssuePlan and from a generic action-item BuildPlan.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [
+        "handoffissueplanrow",
+        "synctaskhandoffplan"
+      ],
+      "grounding": "buildhandoffissueplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planrow",
+      "canonical": "PlanRow (issue create/update decision row)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "PlanRow is the one-issue create/update decision struct emitted by BuildPlan in internal/dogfoodissues and internal/learningdebt (and guardcomplaint.PlanRow), one row per ActionItem or Defect.",
+      "distinction": "It is a single row of a GitHub-issue sync plan, NOT the whole BuildPlan that produces the slice nor a ctxplan resident view.",
+      "distinct_from": [
+        "BuildPlan (action planner)"
+      ],
+      "aliases": [],
+      "grounding": "planrow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planitem",
+      "canonical": "PlanItem (loopdrive goal step)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/loopdrive.PlanItem is one parsed step of a loop-drive goal plan (produced by parsePlan), carrying the Text the loop drives toward turn by turn.",
+      "distinction": "It is a single step of a fak-loop goal plan, NOT a ctxplan resident-view cell nor an issue-sync PlanRow.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [
+        "parseplan"
+      ],
+      "grounding": "planitem",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planindex",
+      "canonical": "PlanIndex (vcachescore hot-anchor index)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/vcachescore.PlanIndex chooses the smallest hot-anchor index reaching a target coverage from a vcachecal.Concentration, returning an IndexPlan.",
+      "distinction": "It plans a value-cache hot-anchor index size, NOT loopdrive's goal-step index nor a ctxplan resident view.",
+      "distinct_from": [
+        "PlanCells (ctxplan)"
+      ],
+      "aliases": [],
+      "grounding": "planindex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-benchplan",
+      "canonical": "benchpost.RequestFromPlan (bench_plan fold)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/benchpost folds a bench_plan.py --json payload into a run-request Post via RequestFromPlan, with LoadPlan/ParsePlan decoding the payload and formatPlanRow rendering each planRow.",
+      "distinction": "It plans benchmark RUN REQUESTS from a bench_plan payload, NOT a ctxplan resident view nor loopdrive's ParsePlan goal steps.",
+      "distinct_from": [
+        "PlanReport (nightrun)"
+      ],
+      "aliases": [
+        "requestfromplan",
+        "loadplan"
+      ],
+      "grounding": "benchplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-resolveplan",
+      "canonical": "Roster.ResolvePlan (modelroute member resolver)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/modelroute's Roster.ResolvePlan and Registry.ResolvePlan bind every member of a routed Plan (the optional Scout plus the roster) to concrete resolved targets, producing a ResolvedPlan.",
+      "distinction": "It resolves a routed model Plan into concrete model targets, NOT a ctxplan resident view nor an issue-sync plan.",
+      "distinct_from": [
+        "ResolvedPlan (modelroute)"
+      ],
+      "aliases": [],
+      "grounding": "resolveplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-rotationplan",
+      "canonical": "RotationPlan (accounts seat rotation)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/accounts.Registry.RotationPlan classifies every home and returns the rotation pool of eligible seats with its policy, driving account/seat rotation.",
+      "distinction": "It plans which account SEATS rotate, NOT a routed model plan (ResolvedPlan) nor a conversation resident view.",
+      "distinct_from": [
+        "ResolvedPlan (modelroute)"
+      ],
+      "aliases": [],
+      "grounding": "rotationplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-stageplan",
+      "canonical": "StagePlan (loopindex collision-priced stage)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "loopindex.StagePlan is the named loop-index stage whose signal is collision-priced fan-out coverage with a fitness floor, used in cmd/fak/loopindex.go.",
+      "distinction": "It names a maturity/loop-index STAGE, NOT a ctxplan resident view nor an issue-sync PlanRow.",
+      "distinct_from": [
+        "PlanReport (nightrun)"
+      ],
+      "aliases": [],
+      "grounding": "stageplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-planplacementforhost",
+      "canonical": "PlanPlacementForHost (engine host placement)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/engine.PlanPlacementForHost (and PlanPlacementForDeviceAndHost) plans a cachemeta placement against the host that actually exists, the host-DRAM-pressure half of issue #1073's wire.",
+      "distinction": "It plans KV/cache PLACEMENT on host vs device, distinct from the compute MemoryPlan host-fit refusals and from a conversation resident view.",
+      "distinct_from": [
+        "RefuseMemoryPlanIfTooBig (compute)"
+      ],
+      "aliases": [
+        "planplacementfordeviceandhost"
+      ],
+      "grounding": "planplacementforhost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-refusehostscopedplan",
+      "canonical": "RefuseHostScopedPlanIfTooBigForHost (cpu-offload host fit)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute.RefuseHostScopedPlanIfTooBigForHost is the --cpu-offload-experts counterpart of RefuseMemoryPlanIfTooBigForHost: on a device serve with cpu-offloaded MoE it refuses a MemoryPlan that will not fit host RAM (#974, #971).",
+      "distinction": "It refuses only the HOST-SCOPED slice of a MemoryPlan on an offloaded serve, where RefuseMemoryPlanIfTooBigForHost refuses the whole no-backend host plan.",
+      "distinct_from": [
+        "RefuseMemoryPlanIfTooBig (compute)"
+      ],
+      "aliases": [
+        "refusememoryplaniftoobigforhost"
+      ],
+      "grounding": "refusehostscopedplaniftoobigforhost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-candidatebound",
+      "canonical": "CandidateBound (ctxplan index-bounded set size)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/ctxplan's CandidateBound is the index-bounded candidate-set size c the Planned regime priced each turn, defaulting to DefaultMaxCandidates and feeding IndexBoundedPlannerCompute.",
+      "distinction": "It bounds how many Candidate spans the planner scores per turn, NOT the Candidate input itself nor the MaxCandidates probe knob.",
+      "distinct_from": [
+        "MaxCandidates (ctxplan probe)"
+      ],
+      "aliases": [],
+      "grounding": "candidatebound",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-kvpressurecandidate",
+      "canonical": "KVPressureCandidate (gateway wire-neutral evict candidate)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "gateway.KVPressureCandidate is a wire-neutral KV span the post-turn pressure relief may evict, supplied by a KVPressureCandidateProvider and lowered into engine.CapacityPressureCandidate.",
+      "distinction": "It is the gateway-side evict candidate for KV pressure relief, NOT a ctxplan resident-view Candidate span nor the engine-side lowered form.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [
+        "kvpressurecandidateprovider",
+        "capacitypressurecandidate"
+      ],
+      "grounding": "kvpressurecandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-prewarmcandidate",
+      "canonical": "PrewarmCandidate (compute prewarm admission input)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/compute.PrewarmCandidate is one tool-call boundary the scheduler decides about for tool-latency prewarm admission (DecidePrewarmAdmission), carrying the WarmPoolFree pollution gate.",
+      "distinction": "It is the prewarm admission input boundary, NOT a KV-pressure evict candidate nor a ctxplan resident-view Candidate span.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [],
+      "grounding": "prewarmcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-rankcandidates",
+      "canonical": "RankCandidates (dojocal recalibration ranking)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/dojocal.RankCandidates orders dojo recalibration candidates by candidatePriority, and NextCandidate returns the top-ranked scored candidate for the next tick.",
+      "distinction": "It ranks DOJO recalibration candidates by kind priority, NOT ctxplan resident-view Candidate spans nor KV-pressure evict candidates.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [
+        "nextcandidate",
+        "candidatepriority",
+        "nocandidate"
+      ],
+      "grounding": "rankcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-candidateidlabel",
+      "canonical": "candidateIDLabel (bench task-count pluralizer)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "candidateIDLabel is the bench-harness helper (cmd/terminalbench, browseractionbench, toolsandboxbench) that pluralizes the count of CandidateTaskIDs in a TaskSelection for the tasks status line.",
+      "distinction": "It labels how many candidate TASK IDs a bench selected, NOT a ctxplan resident-view Candidate span nor a scored recalibration candidate.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [],
+      "grounding": "candidateidlabel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-plan-candidatetag",
+      "canonical": "candidate_tag (releasestatus promotion candidate)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/releasestatus's candidateTag/candidateSHA name the latest rolling tag (and its commit) being evaluated for stable promotion, with no_candidate the state when no rolling tag exists.",
+      "distinction": "It is a RELEASE promotion candidate tag/sha, NOT a ctxplan Candidate span nor a KV-pressure evict candidate.",
+      "distinct_from": [
+        "Candidate"
+      ],
+      "aliases": [
+        "candidatesha"
+      ],
+      "grounding": "candidatetag",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

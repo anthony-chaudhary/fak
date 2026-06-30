@@ -602,14 +602,57 @@ class SlackPostTest(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_slack_text_has_headline_and_fenced_card(self) -> None:
+    def test_slack_text_has_headline_and_compact_card(self) -> None:
         mod = load()
         p = build(mod, pre=pre("SPAWN_OK"))
         text = mod.slack_text(p)
-        self.assertIn("*dispatch status:* `READY_TO_GROW` (ok)", text)
-        self.assertIn("0/2 live", text)
-        self.assertIn("S/N self-score", text)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (healthy)", text)
+        self.assertIn("plane: scheduler/backlog, not session health", text)
+        self.assertIn("worker slots 0/2 active", text)
+        self.assertNotIn("S/N self-score", text)
         self.assertNotIn("```", text)         # Slack uses compact mrkdwn, not a terminal box.
+
+    def test_slack_text_buckets_expected_auto_and_action(self) -> None:
+        mod = load()
+        p = build(
+            mod,
+            pre=pre("SPAWN_OK", live=0),
+            sup={"verdict": "PLAN_SURFACE_EMPTY", "supervise": {"target": 0, "alive": 0}},
+            weekly_cap={"reset_text": "tomorrow", "until": "2026-06-30T00:00:00Z"},
+            backend_health=[{"product": "claude", "abandoned_lane": "docs", "reprobe_min": 30}],
+            backend_stub_rate=[{"product": "claude", "total": 14, "stub": 14, "majority_stub": True}],
+            hook_failures=[{
+                "product": "codex",
+                "sessions": 2,
+                "sessions_with_hook_failures": 2,
+                "hook_failures": 63,
+                "all_sessions_unhooked": True,
+            }],
+        )
+        text = mod.slack_text(p)
+        self.assertIn("(ACTION)", text)
+        self.assertIn("expected: worker-a weekly-capped until tomorrow", text)
+        self.assertIn("supervisor PLAN_SURFACE_EMPTY: expected", text)
+        self.assertIn("auto-solving: claude held dead; lane docs reallocated", text)
+        self.assertIn("evidence 14/14 recent logs are stubs", text)
+        self.assertIn("action: codex guard hooks unbound", text)
+        # The dead-backend line carries the stub evidence, so it must not also emit
+        # a second majority-stub action for the same backend.
+        self.assertNotIn("claude majority-stub", text)
+
+    def test_slack_text_explains_stalled_ok(self) -> None:
+        mod = load()
+        p = build(
+            mod,
+            pre=pre("SPAWN_OK", live=0),
+            sup={"verdict": "PLAN_SURFACE_EMPTY", "supervise": {"target": 0, "alive": 0}},
+        )
+        p["verdict"] = "STALLED"
+        p["ok"] = True
+        text = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `STALLED` (expected)", text)
+        self.assertIn("scheduler liveness says STALLED but gate marks it ok", text)
+        self.assertNotIn("*dispatch status:* `STALLED` (ok)", text)
 
     def test_post_to_slack_posts_via_injected_transport(self) -> None:
         import json as _json
@@ -632,7 +675,7 @@ class SlackPostTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
         self.assertIn("READY_TO_GROW", calls[0]["body"]["text"])
-        self.assertEqual(calls[0]["body"]["text"].count("S/N self-score"), 1)
+        self.assertNotIn("S/N self-score", calls[0]["body"]["text"])
 
     def test_post_to_slack_dry_run_does_not_call_transport(self) -> None:
         import os

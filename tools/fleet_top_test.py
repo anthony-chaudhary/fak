@@ -192,17 +192,29 @@ class SlackPostTest(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def test_slack_text_headline_and_fenced_frame(self):
+    def test_slack_text_headline_and_compact_card(self):
         snap = fleet_top.build_snapshot(
             _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
         text = fleet_top.slack_text(snap)
-        self.assertIn("*fleet status:*", text)
+        self.assertIn("*agent session health:*", text)
         self.assertIn("session(s)", text)
         self.assertIn("accounts usable", text)
-        self.assertIn("sessions:", text)
+        self.assertIn("plane: sessions/accounts, not dispatch slots", text)
+        self.assertIn("session states:", text)
         self.assertIn("accounts:", text)
-        self.assertIn("S/N self-score", text)
+        self.assertIn("action:", text)
+        self.assertIn("review:", text)
+        self.assertNotIn("S/N self-score", text)
         self.assertNotIn("```", text)             # Slack uses compact mrkdwn.
+
+    def test_slack_text_omits_overlong_resume_command(self):
+        doc = _doc()
+        doc["rows"][2]["resume_cmd"] = "x" * 400
+        snap = fleet_top.build_snapshot(
+            doc, workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
+        text = fleet_top.slack_text(snap)
+        self.assertIn("command omitted from Slack summary", text)
+        self.assertNotIn("x" * 300, text)
 
     def test_post_to_slack_via_injected_transport(self):
         import json as _json
@@ -223,8 +235,8 @@ class SlackPostTest(unittest.TestCase):
         self.assertTrue(verdict["posted"])
         self.assertEqual(verdict["channel"], "C0FLEET")
         self.assertEqual(calls[0]["auth"], "Bearer xoxb-test-tok")
-        self.assertIn("fleet status", calls[0]["body"]["text"])
-        self.assertEqual(calls[0]["body"]["text"].count("S/N self-score"), 1)
+        self.assertIn("agent session health", calls[0]["body"]["text"])
+        self.assertNotIn("S/N self-score", calls[0]["body"]["text"])
 
     def test_post_to_slack_dry_run_does_not_call_transport(self):
         import os

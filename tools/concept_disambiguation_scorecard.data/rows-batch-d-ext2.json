@@ -1,0 +1,313 @@
+{
+  "rows": [
+    {
+      "id": "x2-gateway-engine-enginecallsavoided",
+      "canonical": "EngineCallsAvoided (tokendemo proof)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cmd/tokendemo served-read proof field (RawEngineCalls - FakEngineCalls) counting how many raw engine dispatches the kernel collapsed, alongside RawEngineCalls (the calls a stateless baseline would make), FakEngineCalls (the calls that actually ran the engine), EngineRanFak (the per-row flag that a call hit the real fak engine rather than the vDSO), and EngineDelayMs (the synthetic per-engine-call latency knob the timing proof injects).",
+      "distinction": "It is the demo-side ARITHMETIC of avoided dispatches over a replayed trace, distinct from the live coordinator-kernel counter EngineCalls that tallies real dispatches in flight.",
+      "distinct_from": [
+        "EngineCalls (counter)",
+        "engine"
+      ],
+      "aliases": [
+        "fakenginecalls",
+        "rawenginecalls",
+        "engineranfak",
+        "enginedelayms"
+      ],
+      "grounding": "enginecallsavoided",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-inkernelchat",
+      "canonical": "inkernelchat (chat-serving wiring)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The servewiring/serve-config seam (`inkernelchat`) by which a gateway started with --gguf/--tokenizer and no --base-url serves /v1/chat/completions and /v1/messages from the in-kernel model, built by loadServeInKernelModel (which also returns the InKernelQ4K resident-Q4_K flag) and run through NewInKernelPlanner's greedy decode.",
+      "distinction": "It is the CHAT-endpoint wiring that exposes the in-kernel model over HTTP, distinct from the InKernelPlanner that performs the actual in-process decode.",
+      "distinct_from": [
+        "InKernelPlanner",
+        "model (in-kernel model)"
+      ],
+      "aliases": [
+        "inkernelq4k",
+        "loadserveinkernelmodel",
+        "newinkernelplanner"
+      ],
+      "grounding": "inkernelchat",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-evvdsohit",
+      "canonical": "EvVDSOHit (vDSO event)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The abi.Event kind emitted when a tool call is served locally by the vDSO fast path (no adjudication, By=\"vdso\"), counted distinctly by observers; it names the same fast-path serve that VDSOOffNet ablates away, that FromVDSOKey describes as a tier-2 tool-result cache entry, and that VDSOProxyFill warms from admitted inbound tool_result blocks.",
+      "distinction": "It is the EVENT signalling one vDSO serve, distinct from the cumulative VDSOHits counter that tallies how many such events fired.",
+      "distinct_from": [
+        "VDSOHits (counter)",
+        "vDSO (tool vDSO)"
+      ],
+      "aliases": [
+        "vdsooffnet",
+        "fromvdsokey",
+        "vdsoproxyfill"
+      ],
+      "grounding": "evvdsohit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-glmdsamatkernel",
+      "canonical": "glmDsaMatKernel (GLM-DSA compute selector)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The internal/model Session method (moe_offload.go) that selects which matKernel the GLM-DSA forward runs its dense GEMMs through in one place, where the underlying compute knobs include FAK_QKERNEL (the SIMD quant-GEMM tier pin), LinearConvKernelDim (the Gated-DeltaNet short-conv kernel width), the CUDA pure kernels in cuda_kernels.cu, and the worktype KernelOptimization throughput program.",
+      "distinction": "It is the GLM-DSA-specific COMPUTE-kernel selector inside the model forward, NOT the coordinator kernel (internal/kernel) that adjudicates and routes tool calls.",
+      "distinct_from": [
+        "matKernel (compute)",
+        "kernel"
+      ],
+      "aliases": [
+        "fakqkernel",
+        "linearconvkerneldim",
+        "cudakernels",
+        "kerneloptimization"
+      ],
+      "grounding": "glmdsamatkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-fakgatewayoperationdurationseconds",
+      "canonical": "fak_gateway_operation_duration_seconds",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus histogram of gateway operation latency labeled by operation type (adjudicate, syscall, admit), verdict, and deciding adjudicator, whose bucket cutoffs come from the package-level gatewayLatencyBuckets slice.",
+      "distinction": "It measures per-operation LATENCY, distinct from fak_gateway_operations_total which only counts adjudicated operations by verdict.",
+      "distinct_from": [
+        "fak_gateway_operations_total",
+        "gateway"
+      ],
+      "aliases": [
+        "gatewaylatencybuckets"
+      ],
+      "grounding": "fakgatewayoperationdurationseconds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-fakgatewaykvprefix",
+      "canonical": "fak_gateway_kv_prefix_* (KV-prefix reuse family)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway's witnessed KV-prefix reuse metric family (fak_gateway_kv_prefix_turns_total, _prompt_tokens_total, _reuse_ratio, _turns_by_regime_total) that measures realized RadixAttention prompt-prefix reuse per in-kernel turn, with fak_gateway_kv_prefix_reused_tokens_total as the specific counter of prefix tokens the kernel did NOT re-prefill.",
+      "distinction": "It measures fak's OWN realized prompt-prefix KV reuse, distinct from fak_gateway_operations_total which counts adjudicated kernel operations.",
+      "distinct_from": [
+        "fak_gateway_operations_total",
+        "gateway"
+      ],
+      "aliases": [
+        "fakgatewaykvprefixreusedtokenstotal"
+      ],
+      "grounding": "fakgatewaykvprefix",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-routeengine",
+      "canonical": "routeEngine (per-call engine router)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The gateway Server method that consults the optional per-call routing policy on every buildCall and returns the engine id to stamp onto abi.ToolCall.Engine (returning \"\" for the kernel-default path or an unset ensemble).",
+      "distinction": "It is the per-call SELECTION of which engine to dispatch to, distinct from EngineID which is the static registry key it returns and from the engine itself.",
+      "distinct_from": [
+        "EngineID (registry)",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "routeengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-engineids",
+      "canonical": "EngineIDs (registry listing)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "abi.EngineIDs() returns the id-sorted list of registered inference-engine drivers from the engine registry snapshot, used for forensics, gateway validation, and engine selection.",
+      "distinction": "It LISTS every registered engine id, distinct from a single EngineID (one registry key) and from the engines registry struct that holds the drivers.",
+      "distinct_from": [
+        "EngineID (registry)",
+        "engines registry"
+      ],
+      "aliases": [],
+      "grounding": "engineids",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-enginesglang",
+      "canonical": "SGLangEngineID (sglang adapter)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The internal/engine SGLang adapter registered under the engine id \"sglang\" (SGLangEngineID), a lifecycle-capable EngineDriver in the dispatchable registry; the external vLLM/SGLang serve harness is configured separately through the ENGINE_ARGS env var passed to the serve script.",
+      "distinction": "It is one concrete REGISTERED engine driver (sglang), distinct from the abi engines registry that holds all drivers and from the generic EngineID key.",
+      "distinct_from": [
+        "engines registry",
+        "EngineID (registry)"
+      ],
+      "aliases": [
+        "engineargs"
+      ],
+      "grounding": "enginesglang",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-fakkernel",
+      "canonical": "PureFakKernel (GCP plan test)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cmd/fak test TestClaudeGLMGCPA100PlanWiresPureFakKernel, asserting the Claude-GLM-on-GCP-A100 plan wires the pure in-kernel fak model path (the DRY cuda-binary subcommand) rather than an external upstream.",
+      "distinction": "It is a TEST that the GCP plan wires the in-kernel model engine, distinct from fak_kernel_decisions_total (the rung-decision metric) and from the coordinator kernel itself.",
+      "distinct_from": [
+        "kernel",
+        "modelengine"
+      ],
+      "aliases": [],
+      "grounding": "fakkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-normalizetuiagentgatewayurl",
+      "canonical": "normalizeTUIAgentGatewayURL (URL normalizer)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The cmd/fak helper that validates and normalizes the gateway base URL a TUI agent / info command is pointed at, returning the canonical base used to build debug and agent requests.",
+      "distinction": "It NORMALIZES a gateway URL string for the TUI/agent client, distinct from the gateway subsystem it addresses and from the bearer-credential resolver defaultGatewayBearerToken.",
+      "distinct_from": [
+        "gateway",
+        "EngineID (registry)"
+      ],
+      "aliases": [],
+      "grounding": "normalizetuiagentgatewayurl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-gateway-engine-httpengine",
+      "canonical": "HTTPEngine (deleted OpenAI seam)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The degenerate, never-wired engine.HTTPEngine OpenAI-client seam that was DELETED in v0.7.1 (with an architest invariant keeping the OpenAI client singular), leaving agent.HTTPPlanner as the one OpenAI client.",
+      "distinction": "It is the REMOVED duplicate engine HTTP seam, distinct from the live engine driver registry and the surviving single OpenAI planner.",
+      "distinct_from": [
+        "engine",
+        "EngineID (registry)"
+      ],
+      "aliases": [],
+      "grounding": "httpengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-attention-glmdsaattentionkstride",
+      "canonical": "glmDsaAttentionKStride (DSA key stride)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The internal/model helper returning the GLM-DSA per-position key stride (NumHeads * (QKNopeHeadDim + QKRopeHeadDim)) used to size and index the K cache and paged GLM-DSA attention.",
+      "distinction": "It is the KEY-cache stride sizing for GLM-DSA's MLA attention, NOT the dense attention body attnSeq that runs the SDPA compute.",
+      "distinct_from": [
+        "attnSeq (dense attention body)",
+        "AttentionIndex"
+      ],
+      "aliases": [],
+      "grounding": "glmdsaattentionkstride",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-attention-glmdsaattnseqshared",
+      "canonical": "glmDsaAttnSeqShared (replicated DSA attention body)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The internal/model Model method running the GLM-DSA MLA + dynamic-sparse whole-sequence attention sublayer, replicated across expert-parallel ranks and optionally sharing a top-k selection across layers.",
+      "distinction": "It is GLM-DSA's REPLICATED sparse-attention sequence body, NOT the standard dense softmax attention body attnSeq.",
+      "distinct_from": [
+        "attnSeq (dense attention body)",
+        "isMiniMaxSparseAttn (MiniMax sparse path)"
+      ],
+      "aliases": [],
+      "grounding": "glmdsaattnseqshared",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-attention-numattentionheads",
+      "canonical": "num_attention_heads (HF head-count key)",
+      "family": "attention",
+      "kind": "config",
+      "definition": "The HuggingFace config key `num_attention_heads` that benchcli/batchbench read into cfg.NumHeads (and from which HeadDim is derived as hidden_size/num_attention_heads when head_dim is absent).",
+      "distinction": "It is the COUNT of query attention heads from the model config, NOT the self_attn projection-weight namespace those heads use.",
+      "distinct_from": [
+        "self_attn (projection namespace)",
+        "Attention (softmax token-mixer)"
+      ],
+      "aliases": [],
+      "grounding": "numattentionheads",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

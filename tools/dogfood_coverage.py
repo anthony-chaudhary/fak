@@ -66,14 +66,18 @@ def count_audit_rows(root: Path) -> tuple[int, int]:
     fleet_dir = root / ".dispatch-runs" / "guard-audit"
     if fleet_dir.is_dir():
         candidates.extend(sorted(fleet_dir.glob("*.jsonl")))
-    # The interactive front door's per-user default journal (best-effort).
-    cfg = os.environ.get("XDG_CONFIG_HOME") or os.environ.get("APPDATA")
-    if not cfg:
-        home = os.environ.get("HOME") or os.path.expanduser("~")
-        cfg = str(Path(home) / ".config")
-    user_journal = Path(cfg) / "fak" / "guard-audit.jsonl"
-    if user_journal.is_file():
-        candidates.append(user_journal)
+    # The interactive front door's per-user default journal is host-global, so
+    # include it only for real repo roots. Temp fixture roots should count only
+    # the journals they create, otherwise a developer's live audit history makes
+    # hermetic tests nondeterministic.
+    if (root / ".git").exists():
+        cfg = os.environ.get("XDG_CONFIG_HOME") or os.environ.get("APPDATA")
+        if not cfg:
+            home = os.environ.get("HOME") or os.path.expanduser("~")
+            cfg = str(Path(home) / ".config")
+        user_journal = Path(cfg) / "fak" / "guard-audit.jsonl"
+        if user_journal.is_file():
+            candidates.append(user_journal)
     for jp in candidates:
         try:
             text = jp.read_text(encoding="utf-8", errors="replace")

@@ -12,6 +12,8 @@ Dual-runnable (the repo runs the suite pytest-free in CI):
 from __future__ import annotations
 
 import builtins
+import tempfile
+from pathlib import Path
 
 import code_slop_scorecard as cs
 
@@ -909,6 +911,28 @@ def test_claude_worktree_go_files_excluded_from_gather():
     # RECALL GUARD: a first-party kernel file is still gathered.
     assert not cs._excluded_go("internal/model/arch.go")
     assert not cs._excluded_go("cmd/fak/main.go")
+
+
+def test_gather_go_prefers_tracked_sources_over_untracked_scratch():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tracked = root / "cmd" / "fak" / "main.go"
+        tracked.parent.mkdir(parents=True)
+        tracked.write_text("package main\nfunc tracked() {}\n", encoding="utf-8")
+        scratch = root / "scratch" / "cmd" / "fak" / "main.go"
+        scratch.parent.mkdir(parents=True)
+        scratch.write_text("package main\nfunc scratch() {}\n", encoding="utf-8")
+
+        old = cs._git_tracked_source_paths
+        try:
+            cs._git_tracked_source_paths = lambda _root, suffix: [tracked] if suffix == ".go" else []
+            files, test_files = cs.gather_go(root)
+        finally:
+            cs._git_tracked_source_paths = old
+
+    assert list(files) == ["cmd/fak/main.go"]
+    assert "tracked" in files["cmd/fak/main.go"]
+    assert test_files == {}
 
 
 def main() -> int:

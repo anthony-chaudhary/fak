@@ -68,10 +68,23 @@ DISP_CAUSE = {
 }
 
 CHIP = {"green": "🟢", "red": "🔴", "yellow": "🟡", "white": "⚪", "blue": "🔵"}
+CAUSE_SHORT = {
+    "live": "",
+    "completed": "done",
+    "crash_mid_tool": "crash",
+    "killed_mid_turn": "killed",
+    "user_stopped": "stopped",
+    "rate_limit": "rate",
+    "api_error": "api",
+    "auth": "auth",
+    "parked_on_task": "parked",
+    "ambiguous_quiet": "quiet",
+}
 # A HANGING session older than this many minutes is worth an operator glance (it has
 # been parked / ambiguously quiet long enough that it probably is not coming back on
 # its own). Tunable so a host with slower background tasks can raise the floor.
 HANGING_ATTENTION_MIN = float(os.environ.get("FLEET_TOP_HANGING_MIN", "30"))
+_COMMAND_INLINE_LIMIT = 220
 
 
 def _tag(account: str) -> str:
@@ -203,6 +216,8 @@ def _attention(
     if resumable:
         first = resumable[0]
         items.append({
+            "kind": "resume",
+            "count": len(resumable),
             "level": "crit",
             "title": f"{len(resumable)} session(s) resumable on an available account",
             "detail": f"[{first.get('disp')}] {first.get('project')} "
@@ -215,6 +230,8 @@ def _attention(
     auth = [a for a in accounts if a.get("blocked") and a.get("block_kind") == "auth"]
     for a in auth:
         items.append({
+            "kind": "login",
+            "tag": a.get("tag"),
             "level": "crit",
             "title": f"account {a.get('tag')} needs /login",
             "detail": str(a.get("block_reason") or "auth blocked"),
@@ -225,6 +242,8 @@ def _attention(
     access = [a for a in accounts if a.get("blocked") and a.get("block_kind") == "access"]
     for a in access:
         items.append({
+            "kind": "access",
+            "tag": a.get("tag"),
             "level": "warn",
             "title": f"account {a.get('tag')} access wall (not fixed by /login)",
             "detail": str(a.get("block_reason") or "access disabled"),
@@ -234,6 +253,7 @@ def _attention(
     # 4. No usable account but work wants to resume — every resume would instantly re-die.
     if resumable and not available:
         items.append({
+            "kind": "wait",
             "level": "warn",
             "title": "no account available — resumes will re-die on the throttle",
             "detail": "all worker accounts are throttled or blocked; wait for a reset",
@@ -249,6 +269,8 @@ def _attention(
     ]
     if stuck:
         items.append({
+            "kind": "quiet",
+            "count": len(stuck),
             "level": "warn",
             "title": f"{len(stuck)} session(s) parked/quiet >{HANGING_ATTENTION_MIN:.0f}m",
             "detail": ", ".join(
@@ -384,7 +406,9 @@ def _sess_summary(sess: dict[str, Any]) -> str:
         chip = CHIP[CATEGORY_CHIP.get(cat, "white")]
         cz = causes.get(cat) or {}
         top = max(cz.items(), key=lambda kv: kv[1])[0] if cz else ""
-        bits.append(f"{chip}{n} {cat.lower()}" + (f"({top})" if top and top != cat.lower() else ""))
+        top = CAUSE_SHORT.get(top, top)
+        label = "running" if cat == "LIVE" else cat.lower()
+        bits.append(f"{chip}{n} {label}" + (f"({top})" if top and top != label else ""))
     return " · ".join(bits)
 
 
@@ -408,6 +432,32 @@ def _acct_summary(acc: dict[str, Any]) -> str:
     return " · ".join(bits)
 
 
+def _attention_summary(item: dict[str, Any]) -> str:
+    kind = item.get("kind")
+    if kind == "resume":
+        line = f"resume {item.get('count') or '?'}"
+    elif kind == "login":
+        line = f"login {item.get('tag') or '?'}"
+    elif kind == "access":
+        line = f"access {item.get('tag') or '?'}"
+    elif kind == "quiet":
+        line = f"quiet {item.get('count') or '?'}>{HANGING_ATTENTION_MIN:.0f}m"
+    elif kind == "wait":
+        line = "wait"
+    else:
+        line = f"{item.get('title', '')}"
+    detail = item.get("detail")
+    if detail:
+        line += f" — {detail}"
+    cmd = str(item.get("command") or "")
+    if cmd:
+        if len(cmd) <= _COMMAND_INLINE_LIMIT:
+            line += f" → `{cmd}`"
+        else:
+            line += " → command omitted from Slack summary; run `python tools/fleet_top.py --once` for the copyable resume command"
+    return line
+
+
 def slack_compact(snap: dict[str, Any]) -> str:
     r"""The COMPACT Slack body for a fleet-top snapshot — the signal-dense peer of
     ``render_frame`` (which keeps the boxed live-dashboard chrome for the terminal).
@@ -429,26 +479,31 @@ def slack_compact(snap: dict[str, Any]) -> str:
     sess = snap.get("sessions") or {}
     acc = snap.get("accounts") or {}
     attn = snap.get("attention") or []
-    lines: list[str] = []
+    lines: list[str] = [
+        "plane: sessions/accounts, not dispatch slots",
+    ]
     ssum = _sess_summary(sess)
     if ssum:
-        lines.append("sessions: " + ssum)
+        lines.append("session states: " + ssum)
     asum = _acct_summary(acc)
     if asum:
         lines.append("accounts: " + asum)
-    for item in attn:
-        chip = CHIP["red"] if item.get("level") == "crit" else CHIP["yellow"]
-        line = f"{chip} {item.get('title', '')}"
-        detail = item.get("detail")
-        if detail:
-            line += f" — {detail}"
-        cmd = item.get("command")
-        if cmd:
-            line += f" → `{cmd}`"
-        lines.append(line)
-    if not attn:
-        lines.append("✓ no attention — fleet is quiet")
+    actions = [i for i in attn if i.get("level") == "crit"]
+    review = [i for i in attn if i.get("level") != "crit"]
+    if actions:
+        lines.append("action: " + _join_attention(actions))
+    if review:
+        lines.append("review: " + _join_attention(review))
+    if not actions and not review:
+        lines.append("healthy: no session/account action")
     return "\n".join(lines) if lines else "(no fleet signal)"
+
+
+def _join_attention(items: list[dict[str, Any]], *, limit: int = 2) -> str:
+    rows = [_attention_summary(i) for i in items[:limit]]
+    if len(items) > limit:
+        rows.append(f"+{len(items) - limit} more")
+    return "; ".join(rows)
 
 
 def slack_text(snap: dict[str, Any]) -> str:
@@ -458,16 +513,15 @@ def slack_text(snap: dict[str, Any]) -> str:
     ``render_frame`` stays the terminal surface; Slack gets mrkdwn, not a monospace
     box, so the channel/phone reader scans state, not chrome (see the fleet-slack
     signal scorecard in tools/fleet_slack_status.py)."""
-    import slack_post  # sibling module in tools/
 
     sess = snap.get("sessions") or {}
     acc = snap.get("accounts") or {}
     attn = snap.get("attention") or []
     crit = sum(1 for a in attn if a.get("level") == "crit")
-    headline = (f"*fleet status:* {sess.get('total', 0)} session(s), "
+    headline = (f"*agent session health:* {sess.get('total', 0)} session(s), "
                 f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable, "
-                f"{len(attn)} attention" + (f" ({crit} critical)" if crit else ""))
-    return slack_post.append_signal_noise(headline + "\n" + slack_compact(snap))
+                f"{len(attn)} attention" + (f" ({crit} action)" if crit else ""))
+    return headline + "\n" + slack_compact(snap)
 
 
 def post_to_slack(snap: dict[str, Any], *, channel: str = "",
@@ -482,7 +536,7 @@ def post_to_slack(snap: dict[str, Any], *, channel: str = "",
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
     return slack_post.send(slack_text(snap), channel=channel, dry_run=dry_run,
-                           transport=transport)
+                           transport=transport, include_signal_noise=False)
 
 
 # ----- runtime ---------------------------------------------------------------

@@ -36,6 +36,7 @@ def write_hook_manifest(home: Path, command: str) -> Path:
     launcher = root / "bin" / "dos-hook"
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text("# launcher\n", encoding="utf-8")
+    (launcher.parent / "dos-hook.ps1").write_text("# launcher\n", encoding="utf-8")
     manifest = root / "hooks" / "hooks.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(
@@ -151,7 +152,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             old_home = os.environ.get("CODEX_HOME")
             os.environ["CODEX_HOME"] = str(home)
             try:
-                report = mod.build_report(root, home, limit=10, since_days=3650)
+                report = mod.build_report(root, home, limit=10, since_days=3650, target_shell="bash")
             finally:
                 if old_home is None:
                     os.environ.pop("CODEX_HOME", None)
@@ -231,7 +232,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             old_user_home = os.environ.get("FLEET_USER_HOME")
             os.environ["FLEET_USER_HOME"] = str(user_home)
             try:
-                report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0)
+                report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0, target_shell="bash")
             finally:
                 if old_user_home is None:
                     os.environ.pop("FLEET_USER_HOME", None)
@@ -344,13 +345,13 @@ class RecentCodexDosAuditTest(unittest.TestCase):
         mod = load()
         with tempfile.TemporaryDirectory() as td:
             home = Path(td) / "codex-home"
-            self.assertEqual(mod.codex_hook_fast_path(home)["status"], "UNKNOWN")
+            self.assertEqual(mod.codex_hook_fast_path(home, target_shell="bash")["status"], "UNKNOWN")
 
             write_hook_manifest(
                 home,
                 "$py = Get-Command python; & $py.Source -m dos.cli hook pretool --workspace . --dialect codex",
             )
-            python_report = mod.codex_hook_fast_path(home)
+            python_report = mod.codex_hook_fast_path(home, target_shell="bash")
             self.assertEqual(python_report["status"], "WARN")
             self.assertEqual(python_report["codex_python_cli_hooks"], 1)
             self.assertEqual(python_report["codex_native_launcher_hooks"], 0)
@@ -369,7 +370,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 home,
                 native_bash_hook_command(),
             )
-            native_report = mod.codex_hook_fast_path(home)
+            native_report = mod.codex_hook_fast_path(home, target_shell="bash")
             self.assertEqual(native_report["status"], "PASS")
             self.assertEqual(native_report["codex_command_modes"], {"native_launcher": 1})
             self.assertEqual(native_report["codex_powershell_native_hooks"], 0)
@@ -380,13 +381,20 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 home,
                 "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
             )
-            powershell_report = mod.codex_hook_fast_path(home)
+            powershell_report = mod.codex_hook_fast_path(home, target_shell="bash")
             self.assertEqual(powershell_report["status"], "WARN")
             self.assertEqual(powershell_report["codex_command_modes"], {"powershell_native_launcher": 1})
             self.assertEqual(powershell_report["codex_powershell_native_hooks"], 1)
             self.assertEqual(
                 powershell_report["repair_projection"]["projected_codex_command_modes"],
                 {"native_launcher": 1},
+            )
+            windows_target = mod.codex_hook_fast_path(home, target_shell="powershell")
+            self.assertEqual(windows_target["status"], "PASS")
+            self.assertEqual(windows_target["target_command_mode"], "powershell_native_launcher")
+            self.assertEqual(
+                windows_target["repair_projection"]["projected_codex_command_modes"],
+                {"powershell_native_launcher": 1},
             )
 
     def test_shell_family_parses_git_subcommands(self) -> None:
@@ -537,7 +545,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 ],
             )
 
-            report = mod.build_report(root, home, limit=10, since_days=3650)
+            report = mod.build_report(root, home, limit=10, since_days=3650, target_shell="bash")
 
             shapes = report["codex_hook_fast_path"]["post_repair_command_shapes"]
             self.assertEqual(shapes["scope"], "audited_dos_streams")
@@ -596,7 +604,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 ],
             )
 
-            report = mod.build_report(root, home, limit=10, since_days=3650)
+            report = mod.build_report(root, home, limit=10, since_days=3650, target_shell="bash")
 
             shapes = report["codex_hook_fast_path"]["post_repair_command_shapes"]
             self.assertEqual(shapes["shell_family_counts"], {"git_write": 1})
@@ -669,7 +677,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             write_gate_report(gates[1], tool="git_commit", reason="DEFAULT_DENY", created_at="2026-06-25T12:10:01Z")
             write_gate_report(gates[2], tool="git_push", reason="POLICY_BLOCK", created_at="2026-06-25T12:10:02Z")
 
-            report = mod.build_report(root, home, limit=10, since_days=3650, gate_reports=gates)
+            report = mod.build_report(root, home, limit=10, since_days=3650, gate_reports=gates, target_shell="bash")
 
             self.assertEqual(report["git_gate_evidence"]["status"], "PASS")
             self.assertEqual(report["git_gate_evidence"]["proved_at"], "2026-06-25T12:10:02Z")
@@ -838,7 +846,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 ],
             )
 
-            report = mod.build_report(root, home, limit=10, since_days=3650)
+            report = mod.build_report(root, home, limit=10, since_days=3650, target_shell="bash")
 
             post = report["codex_hook_fast_path"]["post_repair_observations"]
             self.assertEqual(post["status"], "PASS")
@@ -903,6 +911,8 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                         "--fail-on-actionable-warn",
                         "--max-delegates",
                         "0",
+                        "--target-shell",
+                        "bash",
                     ]
                 )
             self.assertEqual(rc, 0)
@@ -919,6 +929,8 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                         "3650",
                         "--out-debt",
                         str(debt_path),
+                        "--target-shell",
+                        "bash",
                     ]
                 )
             self.assertEqual(rc, 0)
@@ -958,7 +970,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "ts": "2026-06-29T12:00:10Z"}],
             )
 
-            report = mod.build_report(root, home, limit=20, since_days=3650)
+            report = mod.build_report(root, home, limit=20, since_days=3650, target_shell="bash")
 
             self.assertEqual(report["sessions_audited"], 0)
             self.assertEqual(report["codex_threads_discovered"], 2)
@@ -999,7 +1011,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 [{"verb": "pretool", "outcome": "passthrough", "rung": "provenance", "dialect": "codex", "ts": "2026-06-29T12:00:10Z"}],
             )
 
-            report = mod.build_report(root, home, limit=20, since_days=3650)
+            report = mod.build_report(root, home, limit=20, since_days=3650, target_shell="bash")
 
             corr = report["stream_correlation"]
             self.assertEqual(report["sessions_audited"], 0)
@@ -1022,7 +1034,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
                 [{"op": "STEP", "tool_name": "Bash", "ts": "2026-06-29T12:00:00Z"}],
             )
 
-            report = mod.build_report(root, home, limit=20, since_days=3650)
+            report = mod.build_report(root, home, limit=20, since_days=3650, target_shell="bash")
 
             self.assertEqual(report["sessions_audited"], 1)
             corr = report["stream_correlation"]
@@ -1120,7 +1132,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             old_user_home = os.environ.get("FLEET_USER_HOME")
             os.environ["FLEET_USER_HOME"] = str(user_home)
             try:
-                report = mod.build_report(root, home, limit=50, since_days=3650, max_delegates=0)
+                report = mod.build_report(root, home, limit=50, since_days=3650, max_delegates=0, target_shell="bash")
             finally:
                 if old_user_home is None:
                     os.environ.pop("FLEET_USER_HOME", None)
@@ -1198,7 +1210,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             stop_dir.mkdir(parents=True, exist_ok=True)
             (stop_dir / f"{codex_thread}.json").write_text(json.dumps({"total": 3, "consecutive": 3}) + "\n", encoding="utf-8")
 
-            report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0)
+            report = mod.build_report(root, home, limit=10, since_days=3650, max_delegates=0, target_shell="bash")
 
             stop = report["workspace_stop_failures"]
             self.assertEqual(stop["status"], "WARN")

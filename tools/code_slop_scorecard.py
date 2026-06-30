@@ -1377,12 +1377,46 @@ def _excluded_go(rel: str) -> bool:
     return bool(parts & GO_EXCLUDE_DIRS)
 
 
+def _git_tracked_source_paths(root: Path, suffix: str) -> list[Path] | None:
+    """Tracked source paths for a git checkout, or None when git is unavailable."""
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--"],
+            cwd=str(root),
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+
+    paths: list[Path] = []
+    for raw in proc.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "surrogateescape")
+        if rel.endswith(suffix) and not _excluded_go(rel):
+            p = root / rel
+            if p.is_file():
+                paths.append(p)
+    return sorted(paths)
+
+
+def _source_paths(root: Path, suffix: str) -> list[Path]:
+    tracked = _git_tracked_source_paths(root, suffix)
+    if tracked is not None:
+        return tracked
+    return sorted(p for p in root.rglob(f"*{suffix}") if p.is_file())
+
+
 def gather_go(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     """(files, test_files): rel-path -> source text for first-party .go, split into
-    non-test and _test.go. Walks the tree (not git) so an uncommitted change scores."""
+    non-test and _test.go. In a git checkout this scores tracked source paths only,
+    reading working-tree bytes so edits to tracked files still count."""
     files: dict[str, str] = {}
     test_files: dict[str, str] = {}
-    for p in root.rglob("*.go"):
+    for p in _source_paths(root, ".go"):
         rel = p.relative_to(root).as_posix()
         if _excluded_go(rel):
             continue
@@ -1399,7 +1433,7 @@ def gather_asm(root: Path) -> dict[str, str]:
     trees `gather_go` excludes. Used only to mark Go symbols referenced from hand-written
     asm (`·name(SB)`) as live so the dead-code scan never retires a SIMD kernel."""
     asm: dict[str, str] = {}
-    for p in root.rglob("*.s"):
+    for p in _source_paths(root, ".s"):
         rel = p.relative_to(root).as_posix()
         if _excluded_go(rel):
             continue

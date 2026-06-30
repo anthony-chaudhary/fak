@@ -1,0 +1,635 @@
+{
+  "rows": [
+    {
+      "id": "x2-context-ctx-commandcontext",
+      "canonical": "context.Context plumbing helpers (stdlib)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "exec.CommandContext is the Go standard-library constructor that threads a cancellable context.Context into a spawned subprocess, one of the stdlib context-plumbing helpers fak uses to carry deadlines and cancellation through calls.",
+      "distinction": "Not the fak context-management plane (context-MMU, recall, ctxplan); these are Go-runtime cancellation/deadline plumbing, unrelated to model-visible context bytes.",
+      "distinct_from": [
+        "context-MMU (ctxmmu)",
+        "recall (session core dump)"
+      ],
+      "aliases": [
+        "newrequestwithcontext",
+        "notifycontext",
+        "dialcontext",
+        "sleepctx"
+      ],
+      "grounding": "commandcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-basecontextplan",
+      "canonical": "BaseContextPlan (syspromptmmu)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "syspromptmmu.BaseContextPlan returns the embedded-PromptSegment projection of the base system context (TierSpine then the TierPolicy floor) as a byte-identical, no-wire-mutation plan.",
+      "distinction": "Not the ctxplan context planner that materializes a turn's history view (ctxplan); BaseContextPlan only projects the fixed system-prompt spine into prompt segments.",
+      "distinct_from": [
+        "ctxplan (context planner)",
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "basecontextplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-autosizecontextplan",
+      "canonical": "AutoSizeContextPlan (compute sizer)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "compute.AutoSizeContextPlan derives the largest context-token count that fits available memory and returns the per-context KV/scratch MemoryPlan for it, reading geometry from a compute.ContextSizeConfig (KV/scratch configs plus the model's declared MaxContext).",
+      "distinction": "Not the ctxplan turn-history planner (ctxplan); this sizes the KV/scratch memory budget at serve time and emits a MemoryPlan, not a model-visible context view.",
+      "distinct_from": [
+        "ctxplan (context planner)",
+        "context window"
+      ],
+      "aliases": [
+        "contextsizeconfig"
+      ],
+      "grounding": "autosizecontextplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-putctx",
+      "canonical": "putCtx (modelengine pipeline)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "putCtx is the context.Context carried through the modelengine PipelineEngine.run / lifecycle adapter for one put (decode) request, scoping cancellation of that pipeline step.",
+      "distinction": "Not the model-visible context plane (context-MMU, ctxplan); putCtx is per-request engine cancellation plumbing on the decode pipeline.",
+      "distinct_from": [
+        "context-MMU (ctxmmu)",
+        "ctxplan (context planner)"
+      ],
+      "aliases": [],
+      "grounding": "putctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-ctxparts",
+      "canonical": "ctxParts (Slack post builder)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ctxParts is the local string slice that the Slack-post render functions (blockerpost, cachevaluepost, milestonepost, marketing) accumulate into a single Slack context block's text (ref, posted-by, etc.).",
+      "distinction": "Not the model-context plane; ctxParts assembles human-facing text for a Slack message's context block, unrelated to recall or KV context.",
+      "distinct_from": [
+        "recall (session core dump)",
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "ctxparts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-appendcontext",
+      "canonical": "AppendContext (slackmeta block)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "slackmeta.AppendContext appends a Slack context block carrying the signal-to-noise line to a message's blocks, unless an existing block already includes one.",
+      "distinction": "Not the ctxParts text builder for a single block (ctxParts (Slack post builder)) and not the model-context plane; AppendContext adds a whole S/N context block to a Slack post.",
+      "distinct_from": [
+        "recall (session core dump)",
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "appendcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-dosrecall",
+      "canonical": "dos_recall (MCP recall-check tool)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "dos_recall is the DOS MCP tool (named across loopmap/rehydrate/accounts comments as the kernel-side equivalent) that re-verifies a recalled memory against the tree at read time before it is trusted, since a memory reflects only what was true when written.",
+      "distinction": "Not fak's own recall core-dump subsystem (recall); dos_recall is the external DOS re-checkable-fact tool for re-verifying recalled memory, not fak's persisted session image.",
+      "distinct_from": [
+        "recall (session core dump)"
+      ],
+      "aliases": [],
+      "grounding": "dosrecall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-maxctx",
+      "canonical": "maxCtx (ctxdemo peak length)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "maxCtx is the local running maximum the ctxdemo / longctxbench / sessionbench tools track as they scan scenarios for the largest context length any scenario reaches.",
+      "distinction": "Not the model's fixed context-window limit (context window); maxCtx is a measured per-run peak context length accumulated in a demo/bench loop.",
+      "distinct_from": [
+        "context window"
+      ],
+      "aliases": [],
+      "grounding": "maxctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-tombstonedbycontextcontrol",
+      "canonical": "tombstoned_by_context_control (page-in refusal reason)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "tombstoned_by_context_control is the ctxplan/contextq/memq refusal reason string returned when a span is denied page-in because it was suppressed by a context-control tombstone (recall.ErrTombstoned).",
+      "distinction": "Not the recall apply-side ContextActionTombstone that records the suppression; this is the read-side refusal reason emitted when a tombstoned page is skipped during materialization.",
+      "distinct_from": [
+        "recall (session core dump)",
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "tombstonedbycontextcontrol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-budgetcontextexhausted",
+      "canonical": "BUDGET_CONTEXT_EXHAUSTED (session reset reason)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "BUDGET_CONTEXT_EXHAUSTED is the session/gateway reset reason constant (session.ReasonBudgetContext, gateway.sessionReasonBudgetContext) emitted when ContextTokensLeft hits zero, returning a managed reset directive.",
+      "distinction": "Not the live remaining budget field (ContextTokensLeft (session budget)); this is the closed reason-code string a session emits at the moment that budget is exhausted.",
+      "distinct_from": [
+        "ContextTokensLeft (session budget)",
+        "context window"
+      ],
+      "aliases": [],
+      "grounding": "budgetcontextexhausted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-compactionbudget",
+      "canonical": "CompactionBudget (history-rewrite threshold)",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionBudget is the gateway exit-summary field (Config.CompactHistoryBudget) holding the resident-token threshold the history rewrite fires past (0 means the compaction lever is OFF and the body is forwarded byte-for-byte).",
+      "distinction": "Not the compaction mechanism itself (compaction); CompactionBudget is the operator threshold knob, and CompactionShedTokens (aliased here) is the input-token count actually shed under it.",
+      "distinct_from": [
+        "compaction"
+      ],
+      "aliases": [
+        "compactionshedtokens"
+      ],
+      "grounding": "compactionbudget",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-contextbudget",
+      "canonical": "ContextBudget (TUI session field)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextBudget is the cmd/fak TUI report field (json context_budget) carrying a session's configured context-token budget for display in the overview/sessions panes.",
+      "distinction": "Not the runtime remaining count (ContextTokensLeft (session budget)); ContextBudget is the configured budget surfaced in the console report shape.",
+      "distinct_from": [
+        "ContextTokensLeft (session budget)",
+        "context window"
+      ],
+      "aliases": [],
+      "grounding": "contextbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-ctxwith",
+      "canonical": "CtxWith / CtxWithout (tokendemo counters)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "CtxWith and CtxWithout are the cmd/tokendemo per-scenario counters of the model tokens added to context with fak's gate engaged (a refused/cached path) versus without it (the tool re-runs and its full result lands), used to show fak only saves on a refused bad call or a re-read.",
+      "distinction": "Not a runtime budget; CtxWith/CtxWithout are paired demo measurements of model tokens added to context under the two arms.",
+      "distinct_from": [
+        "ContextTokensLeft (session budget)",
+        "ctxbench (security-gate corpus cmd)"
+      ],
+      "aliases": [
+        "ctxwithout"
+      ],
+      "grounding": "ctxwith",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-skillcontextrecord",
+      "canonical": "SkillContextRecord (contextq descriptor)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "contextq.SkillContextRecord is the procedural-memory descriptor for one skill invocation, naming the producer and view-cache producer for that skill's context entry.",
+      "distinction": "Not the contextq materializer engine broadly (contextq); SkillContextRecord is a single skill-invocation descriptor row consumed by it.",
+      "distinct_from": [
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "skillcontextrecord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-contextbench",
+      "canonical": "ContextBench (academic context-retrieval benchmark)",
+      "family": "context-ctx",
+      "kind": "doc-term",
+      "definition": "ContextBench is an external academic code-agent context-retrieval benchmark (separate repo, Nanjing University + UCL research) named in docs/benchmarking/README.md as a context-retrieval comparison surface.",
+      "distinction": "Not fak's in-tree security-gate corpus benchmark (ctxbench (security-gate corpus cmd)); ContextBench is a third-party academic retrieval benchmark, not a fak command.",
+      "distinct_from": [
+        "ctxbench (security-gate corpus cmd)"
+      ],
+      "aliases": [],
+      "grounding": "contextbench",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-contextcite",
+      "canonical": "ContextCite (attribution research method)",
+      "family": "context-ctx",
+      "kind": "doc-term",
+      "definition": "ContextCite is an external 2024 research method (Cohen-Wang et al., \"ContextCite: Attributing Model Generation to Context\") cited in fak's span-credit research notes as prior art for attributing generation to context spans.",
+      "distinction": "Not a fak subsystem; ContextCite is a cited third-party attribution method, distinct from fak's own recall/context machinery.",
+      "distinct_from": [
+        "recall (session core dump)"
+      ],
+      "aliases": [],
+      "grounding": "contextcite",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-contextview",
+      "canonical": "derived ContextView (cachemeta MemoryView)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The derived ContextView is the cachemeta materialization view (exercised by TestFromMemoryViewDescribesDerivedContextView) that FromContextPage / FromMemoryView describes for a ContextPage span when deciding cache serveability.",
+      "distinction": "Not the ctxplan planned turn-history View; this is cachemeta's per-span materialization view used by the cache-serve gate.",
+      "distinct_from": [
+        "ctxplan (context planner)",
+        "contextq (materializer)"
+      ],
+      "aliases": [],
+      "grounding": "contextview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-context-ctx-ctxtape",
+      "canonical": "ctxtape (portable context-tape renderer)",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "ctxtape is the portable context-tape renderer (shipped in v0.33.0) that renders any trajectory, RSI, or education run as a portable context tape.",
+      "distinction": "Not a context PLANNER or security-gate bench (ctxplan, ctxbench); ctxtape is a presentation renderer that turns a trajectory into a portable tape artifact.",
+      "distinct_from": [
+        "ctxplan (context planner)",
+        "ctxbench (security-gate corpus cmd)"
+      ],
+      "aliases": [],
+      "grounding": "ctxtape",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderer",
+      "canonical": "renderer (scorecard markdown projector)",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "renderer is the pkg/scorecard term for the Jekyll-front-matter markdown projector half of a scorecard's shape (raw shape, control-pane JSON fold, markdown renderer, and the CLI), turning a scored corpus into a published doc.",
+      "distinction": "Not a model-context renderer (RenderPlan, Rendered); this renderer projects a scorecard corpus into Jekyll markdown for publishing.",
+      "distinct_from": [
+        "RenderPlan",
+        "render (verb)"
+      ],
+      "aliases": [],
+      "grounding": "renderer",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderchatmltools",
+      "canonical": "renderChatMLTools (agent ChatML prompt)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "agent.renderChatMLTools renders the message history plus tool schemas as Qwen2.5 canonical <tool_call>/<tool_response> ChatML and terminates with an open assistant turn for generation, delegating to renderTranscriptTools; renderTranscript is the zero-tools, no-open-turn form used by the poison-eviction path.",
+      "distinction": "Not the ctxplan span-paging Rendered view; these render an agent message history into the literal ChatML prompt string handed to the model.",
+      "distinct_from": [
+        "Rendered",
+        "RenderItem"
+      ],
+      "aliases": [
+        "rendertranscript",
+        "rendertranscripttools"
+      ],
+      "grounding": "renderchatmltools",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-rendertext",
+      "canonical": "RenderText (agentdemo transcript)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "agentdemo.Transcript.RenderText writes a plain-text walkthrough of an agent loop to a writer (the prompt, one line per step, the outcome), the human view of a demo transcript.",
+      "distinction": "Not the ChatML prompt renderers (renderChatMLTools) that build a model prompt; RenderText emits a human-readable demo walkthrough.",
+      "distinct_from": [
+        "RenderTrace (agent)",
+        "Rendered"
+      ],
+      "aliases": [],
+      "grounding": "rendertext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderturndebugerror",
+      "canonical": "renderTurnDebugError (gateway failed-turn line)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "gateway Server.renderTurnDebugError emits one per-turn --debug-stats line for a FAILED turn (the trace, wire, error, and elapsed wall-clock), the failure-path counterpart that renderTurnDebugStats (which fires only on success) does not cover.",
+      "distinction": "Not the bench RenderMarkdown reports; this formats a single failed-turn debug telemetry line for the gateway's debug-stats sink.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)",
+        "renderMetrics (gateway)"
+      ],
+      "aliases": [],
+      "grounding": "renderturndebugerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-rendercontrast",
+      "canonical": "RenderContrast (sessionobs report)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "sessionobs.RenderContrast writes the value-vs-waste session-observation contrast report to a writer (value/waste counts, separability, and per-feature discriminators ranked worst-first).",
+      "distinction": "Not the bench RenderMarkdown reports; RenderContrast emits the session-obs learn contrast view, not a benchmark comparison.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "rendercontrast",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-rendersmokearmstable",
+      "canonical": "renderSmoke* (swebench contract sections)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The renderSmoke* family writes the shared markdown sections of a SWE-bench smoke contract (renderSmokeArmsTable the Arm/Harness/Model table, renderSmokeGatesTable the Gate/OK/Detail table, renderSmokeEvidenceLink the compare-evidence-link block, renderRequiredBeforeClaim the required-before-any-result-claim bullet list).",
+      "distinction": "Not the post-run measured RenderMarkdown report; these render the pre-run smoke CONTRACT sections (the credentialed promise) before any number exists.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [
+        "rendersmokegatestable",
+        "rendersmokeevidencelink",
+        "renderrequiredbeforeclaim"
+      ],
+      "grounding": "rendersmokearmstable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderautodecision",
+      "canonical": "renderAutoDecision (compute target table)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cmd/fak renderAutoDecision writes the `fak c --auto` ranked-decision table: cost-ordered compute targets, each with witnessed health/fit and an honestly-labeled quota stub, the winner, and the policy line.",
+      "distinction": "Not the bench RenderMarkdown reports; renderAutoDecision prints the compute-auto target ranking for the CLI, with [stub]/[n/a] tags so no placeholder reads as truth.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderautodecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderboard",
+      "canonical": "RenderBoard (dojo leaderboard)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "dojo.RenderBoard produces the human cross-lever calibration leaderboard table (worst-first) from a dojo Board.",
+      "distinction": "Not the bench RenderMarkdown reports; RenderBoard renders the dojo calibration leaderboard, not a benchmark result document.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderboard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-rendercommitresult",
+      "canonical": "renderCommitResult (fak commit output)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cmd/fak renderCommitResult prints the outcome of a safecommit run (the short SHA, path count, push suffix, and review), while renderPreview prints the `fak commit --preview` lint verdict (OK when the subject is witness-gradeable and bindable, else the blocking issues).",
+      "distinction": "Not the bench RenderMarkdown reports; these render the human result/preview surfaces of the commit CLI verb.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)",
+        "render (verb)"
+      ],
+      "aliases": [
+        "renderpreview"
+      ],
+      "grounding": "rendercommitresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderdist",
+      "canonical": "RenderDist (milestone ladder line)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "milestonereport.RenderDist renders the M0..M7 maturity-rung distribution as a compact one-liner (\"M0:2 M1:0 ...\") in ladder order, exported so the Slack milestone card renders the same ladder line.",
+      "distinction": "Not the bench RenderMarkdown reports; RenderDist emits the milestone-distribution one-liner over the support-maturity rungs.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderdist",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderguardinfopanedryrun",
+      "canonical": "renderGuardInfoPaneDryRun (guard --split preview)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cmd/fak renderGuardInfoPaneDryRun resolves the `fak guard --split` plan and renders it WITHOUT spawning anything (the multiplexer, the 80/20 geometry, and the exact `fak info` pane command) so an operator can preview the split before launching it.",
+      "distinction": "Not the live console renderTUI* panes or bench reports; this only previews the resolved guard-split plan as text for --split-dry-run.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderguardinfopanedryrun",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderissueresult",
+      "canonical": "RenderIssueResult (maturity route card)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "maturity.RenderIssueResult is the human dry-run/live card for `fak maturity route`, summarizing the mode and the planned issue items.",
+      "distinction": "Not the bench RenderMarkdown reports; RenderIssueResult renders the maturity-route planning card, not a benchmark document.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderissueresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderledgergapreport",
+      "canonical": "RenderLedgerGapReport (nightrun)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "nightrun.RenderLedgerGapReport writes the benchmark-authority ledger-gap report to a writer: the authority's last-updated date, ledger totals, and the rows newer than or missing from the published benchmark surface.",
+      "distinction": "Not the bench RenderMarkdown reports themselves; RenderLedgerGapReport renders the nightrun gap between the local ledger and the published benchmark authority.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderledgergapreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-renderreadout",
+      "canonical": "RenderReadOut (support table)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "supportmaturityscore.RenderReadOut renders the support-maturity readout rows as a deterministic ASCII table for the human `fak support` view.",
+      "distinction": "Not the bench RenderMarkdown reports; RenderReadOut renders the support-maturity readout table for the support CLI.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "renderreadout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-render-materialize-rendertwotrack",
+      "canonical": "RenderTwoTrack (cache-value P&L)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "cachevaluereport.RenderTwoTrack renders the cache-value profit-and-loss two-track report side by side (the WITNESSED reuse track and its OBSERVED-dollar projection) with the verdict.",
+      "distinction": "Not the bench RenderMarkdown reports; RenderTwoTrack renders the cache-value P&L two-track view, not a benchmark comparison.",
+      "distinct_from": [
+        "RenderMarkdown (bench report)"
+      ],
+      "aliases": [],
+      "grounding": "rendertwotrack",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

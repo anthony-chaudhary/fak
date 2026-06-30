@@ -1,0 +1,593 @@
+{
+  "rows": [
+    {
+      "id": "x2-policy-capability-adjudicating",
+      "canonical": "adjudicating (the decision act)",
+      "family": "policy-capability",
+      "kind": "concept",
+      "definition": "Adjudicating is the act of evaluating a proposed tool call (or a buffered turn of them) against the loaded policy and refusal rungs to produce an admit/refuse verdict, exercised on the gateway's served fast path (adjudicateProposedServed), its full-turn gate (adjudicateProposedTurn), and folded into the deny-all counter by recordAdjudicationOutcome.",
+      "distinction": "It is the verb/process of reaching a verdict, NOT the enforcer object (adjudicator) that performs it nor the reason code that labels a denial.",
+      "distinct_from": [
+        "adjudicator",
+        "reason code"
+      ],
+      "aliases": [
+        "adjudicateproposedserved",
+        "adjudicateproposedturn",
+        "recordadjudicationoutcome"
+      ],
+      "grounding": "adjudicating",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-posturecluster",
+      "canonical": "posture enum value (per-subsystem stance)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "These are named stance constants on different subsystems' Posture enums: resume's PostureCold/PostureWarm/PostureUnknown classify whether a session's provider prefix is still cache-warm, compactcohere's PostureBlock is the PreCompact-hook stance that exits 2 to block harness auto-compaction, and adjudicator's PostureFailClosed is the default-deny tool-admission stance.",
+      "distinction": "Each is a single concrete enum VALUE on its subsystem's stance type, NOT the general tool-admission posture concept that selects fail-closed vs admit-and-log behavior.",
+      "distinct_from": [
+        "posture (tool admission)",
+        "ResetPolicy (gateway)"
+      ],
+      "aliases": [
+        "posturewarm",
+        "postureunknown",
+        "postureblock",
+        "posturefailclosed"
+      ],
+      "grounding": "posturecold",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-dispatchpreflight",
+      "canonical": "DispatchPreflight (dispatch admission)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "DispatchPreflight (cmd/fak) folds host safety, account availability, kernel capacity, and seat-pool checks (its PreflightInput) into a verdict on whether a new issue-resolution worker may safely spawn, with PreflightReady the ggufload load-time gate verdict that says a model header parsed and fits.",
+      "distinction": "It is the SPAWN admission preflight that decides if a worker may launch, NOT the per-call tool-admission preflight ladder that schema-checks one tool call before the kernel runs it.",
+      "distinct_from": [
+        "preflight ladder",
+        "adjudicator"
+      ],
+      "aliases": [
+        "preflightinput",
+        "preflightready"
+      ],
+      "grounding": "dispatchpreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-fetchpolicy",
+      "canonical": "fetch_policy (benchmark refund-doc tool)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "fetch_policy (internal/agent toolFetchDoc) and its sibling read_refund_policy are the agent-benchmark tool names for fetching an airline refund document whose body carries an indirect prompt injection, the call the context-MMU quarantines at result admission to prove the floor.",
+      "distinction": "It is a NAMED demo tool that retrieves a (poisoned) policy document, NOT a policy manifest of authorization rules nor any compiled adjudication policy.",
+      "distinct_from": [
+        "policy manifest",
+        "Policy (loaded)"
+      ],
+      "aliases": [
+        "readrefundpolicy"
+      ],
+      "grounding": "fetchpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-tierpolicy",
+      "canonical": "TierPolicy (ctxresidency tier)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "TierPolicy (internal/ctxresidency) is the always-resident context-residency tier holding the versioned deny/allow and safety-critical floor spans, which are never paged out under budget pressure during context compression.",
+      "distinction": "It is a CONTEXT-RESIDENCY tier label that pins policy spans in the prompt, NOT the loaded adjudication policy itself nor a manifest of rules.",
+      "distinct_from": [
+        "Policy (loaded)",
+        "policy manifest"
+      ],
+      "aliases": [],
+      "grounding": "tierpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-defaultadmissionpolicy",
+      "canonical": "DefaultAdmissionPolicy (gateway scheduling)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "gateway.DefaultAdmissionPolicy returns the shipping AdmissionPolicy defaults for the request scheduler — a 256-sequence running cap, a token budget, a bounded waiting queue, and per-round aging — bounding how many sequences the engine admits concurrently.",
+      "distinction": "It governs CONCURRENCY/throughput admission of inference sequences, NOT tool-call security admission — unlike the adjudicator floor that decides whether a tool call is allowed.",
+      "distinct_from": [
+        "adjudicator",
+        "Policy (loaded)"
+      ],
+      "aliases": [],
+      "grounding": "defaultadmissionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-nativepreemptionpolicy",
+      "canonical": "NativePreemptionPolicy (modelengine scheduler)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "modelengine.NativePreemptionPolicy configures the scheduler's opt-in paged-KV block-pressure preemption path — its mode (swap or recompute), max blocks, and tokens per block — that decides how a running sequence yields KV blocks under memory pressure.",
+      "distinction": "It is a KV-memory scheduling/preemption policy for the engine, NOT a tool-authorization policy — unlike the loaded adjudication Policy that decides tool admission.",
+      "distinct_from": [
+        "Policy (loaded)",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "nativepreemptionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-policyfor",
+      "canonical": "PolicyFor (loopmgr governor)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "loopmgr.Policies.PolicyFor returns the effective loop-governor Policy for a given loop id — the per-loop override if one is registered, else the default loop policy (pause flags, max-consecutive-refusals, aging).",
+      "distinction": "It SELECTS a loop-governor policy by loop id (pacing/pausing a recurring loop), NOT a tool-admission policy — unlike the adjudicator's loaded Policy that gates tool calls.",
+      "distinct_from": [
+        "Policy (loaded)",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "policyfor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-policyreplayreport",
+      "canonical": "PolicyReplayReport (turnbench)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "turnbench.PolicyReplayReport is the artifact scoring K adjudication-policy variants against one recorded trajectory as model-free kernel replays, carrying per-arm divergence witnesses and cube-collapse cost accounting.",
+      "distinction": "It is the REPORT comparing many policies over a single trace, NOT the policy being enforced nor the live adjudicator — unlike the loaded Policy a single arm swaps in.",
+      "distinct_from": [
+        "Policy (loaded)",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "policyreplayreport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-policy-capability-policysearch",
+      "canonical": "PolicySearch (turnbench genome search)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "turnbench PolicySearch (RunPolicySearch / PolicySearchConfig / PolicySearchReport in policysearch.go) is the model-free replay oracle that hill-climbs the adjudicator deny-set genome over an injection-bearing corpus to find policies that minimize admitted injections at zero model cost.",
+      "distinction": "It SEARCHES for a better adjudication policy by evolving deny-sets, NOT the single compiled policy it discovers nor the enforcer that runs it.",
+      "distinct_from": [
+        "Policy (loaded)",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "policysearch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-score-debt-debtintegers",
+      "canonical": "per-scorecard *_debt integer",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "Each scorecard emits one named debt integer counting its surface's unmet rungs — learning_debt (unwitnessed learning docs), conflation_debt (provenance honesty), growth_debt (silently-undefined coverage cells), loopindex_debt (loop stages not yet witnessed), maturity_debt (support-maturity ladder skips), support_maturity_debt, dogfood_debt, sessionobs_debt — read in delta folds via the DebtKey constant and the baseline/current bDebt/cDebt locals.",
+      "distinction": "These are the single *_debt INTEGER outputs of individual scorecards, NOT this scorecard's own disambiguation-debt and NOT the control pane that sums every scorecard's debt into one portfolio number.",
+      "distinct_from": [
+        "disambiguation-debt",
+        "scorecard control pane"
+      ],
+      "aliases": [
+        "conflationdebt",
+        "growthdebt",
+        "loopindexdebt",
+        "maturitydebt",
+        "supportmaturitydebt",
+        "dogfooddebt",
+        "sessionobsdebt",
+        "bdebt",
+        "cdebt",
+        "debtkey"
+      ],
+      "grounding": "learningdebt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-score-debt-scorecardvariants",
+      "canonical": "named scorecard surface (payload + baseline)",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "These are concrete scorecard surfaces and their plumbing: learning_scorecard, code_quality_scorecard, and product_scorecard are distinct deterministic measurement tools, ScorecardPayload is the per-scorecard struct carrying corpus/KPIs/grade, and tools/scorecard_baseline.json is the pinned baseline the control-pane ratchet reds against.",
+      "distinction": "These are SPECIFIC scorecard instances and their payload/baseline artifacts, NOT the generic scorecard concept and NOT the control pane that folds them all together.",
+      "distinct_from": [
+        "scorecard",
+        "scorecard control pane"
+      ],
+      "aliases": [
+        "codequalityscorecard",
+        "productscorecard",
+        "scorecardpayload",
+        "scorecardbaseline"
+      ],
+      "grounding": "learningscorecard",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-kvevictionattestation",
+      "canonical": "KVEvictionAttestation (cachemeta receipt)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "cachemeta.KVEvictionAttestation is the payload-free receipt both eviction tracks produce after a governed K/V eviction — carrying the target entry id, the enforcement scope (KVEvictionScopeExactSpan vs whole-prefix), a degradation bit, and the governance descriptor — minted by the referee's AttestEviction, with EvictBlastRadius the read-only projection of how many positions and dependents one eviction touches.",
+      "distinction": "It is the governance RECEIPT that an eviction occurred under policy, NOT the routine that actually removes spans (EvictColdest) nor the policy purge of a poisoned node (EvictNode).",
+      "distinct_from": [
+        "EvictNode (radixkv policy)",
+        "EvictColdest (kvmmu)"
+      ],
+      "aliases": [
+        "attesteviction",
+        "kvevictionscopeexactspan",
+        "evictblastradius"
+      ],
+      "grounding": "kvevictionattestation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-pagedevict",
+      "canonical": "PagedKV.Evict (paged exact-span removal)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "PagedKV.Evict (internal/model/paged_evict.go) removes a contiguous logical span from a paged/block KV sequence and re-derives each shifted survivor's K in one rotation from its pre-RoPE Kraw plane so the result is bit-for-bit what a sequence that never saw the span would hold, rebuilding into fresh private blocks (copy-on-write); the agent's InKernelPlanner.EvictKVSpan drives the contiguous twin to quarantine a poisoned per-message span.",
+      "distinction": "It is the PAGED-layout exact-span span remover (and EvictKVSpan its in-kernel driver), NOT the attention-pressure coldest-span evictor (EvictColdest) nor the radix policy subtree purge (EvictNode).",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "EvictNode (radixkv policy)"
+      ],
+      "aliases": [
+        "evictkvspan"
+      ],
+      "grounding": "pagedevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-tryevict",
+      "canonical": "KVCache.TryEvict (fallible exact-span evict)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "model.KVCache.TryEvict performs a middle-span eviction that surfaces a no-go as a typed RecurrentEvictUnsupportedError (returned for hybrid Gated-DeltaNet caches whose accumulated recurrent state makes mid-span eviction formally unsupported) and leaves the cache unchanged, rather than panicking.",
+      "distinction": "It is the FALLIBLE form of exact-span eviction that reports the unsupported case as an error value, NOT the budget-pressure EvictColdest nor the policy EvictNode that always proceed.",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "ActionEvict (cachemeta)"
+      ],
+      "aliases": [
+        "recurrentevictunsupportederror"
+      ],
+      "grounding": "tryevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-evictunderbudget",
+      "canonical": "EvictUnderBudget (budget-gated evictor)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictUnderBudget (kvmmu Context and contextq CapabilityLedger) applies coldest-first eviction ONLY when live residency exceeds the configured budget, freeing positions or capabilities until the held set is back under budget, and is a no-op otherwise.",
+      "distinction": "It is the budget GUARD that triggers eviction conditionally on overage, NOT the unconditional EvictColdest drop it calls nor the policy EvictNode purge.",
+      "distinct_from": [
+        "EvictColdest (kvmmu)",
+        "Evictions (radixkv LRU counter)"
+      ],
+      "aliases": [],
+      "grounding": "evictunderbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-stateevictable",
+      "canonical": "StateEvictable (ctxresidency state)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "ctxresidency.StateEvictable is the residency-state constant (\"evictable\") marking a span whose K/V is in cache but parented by no live cachemeta entry — a clean candidate the evictor may drop without breaking a dependent.",
+      "distinction": "It is a residency STATE label naming an eviction candidate, NOT an eviction routine (EvictColdest) nor the placement enum value that decides to evict (ActionEvict).",
+      "distinct_from": [
+        "ActionEvict (cachemeta)",
+        "EvictColdest (kvmmu)"
+      ],
+      "aliases": [],
+      "grounding": "stateevictable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-capevict",
+      "canonical": "CAP_EVICT (journal event kind)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "internal/journal CAP_EVICT is the durable journal event-kind constant recording a capability-eviction lifecycle event in the append-only audit trail.",
+      "distinction": "It is a JOURNAL audit-record kind for an eviction event, NOT the KV-span eviction routine itself (EvictColdest) nor the LRU eviction counter (Evictions).",
+      "distinct_from": [
+        "Evictions (radixkv LRU counter)",
+        "EvictColdest (kvmmu)"
+      ],
+      "aliases": [],
+      "grounding": "capevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-evict-evictedcount",
+      "canonical": "EvictedCount (deletion-cert field)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "EvictedCount (cmd/deletioncert) is the self-reported number-of-positions-removed field stamped into the signed KV deletion certificate, explicitly fenced as a self-report whose real proof is the max|delta|=0 parity, not the count.",
+      "distinction": "It is a self-reported COUNT in a deletion receipt, NOT the radix LRU Evictions memory-pressure counter nor a policy EvictNode purge.",
+      "distinct_from": [
+        "Evictions (radixkv LRU counter)",
+        "EvictNode (radixkv policy)"
+      ],
+      "aliases": [],
+      "grounding": "evictedcount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-support-maturity-supportmaturity",
+      "canonical": "SupportMaturity Rung (M0-M7 ladder)",
+      "family": "support-maturity",
+      "kind": "concept",
+      "definition": "supportmaturity.Rung is the uint8-backed closed M0-M7 support-maturity ladder type (M0 unsupported through M7 beyond-SOTA, with M6Parity the SOTA-local parity rung), and FromSupport lowers a covmatrix Support value onto that ladder (UNDEFINED/FENCED/PROOF-PATH/SUPPORTED to M0/M1/M3/M4).",
+      "distinction": "It is the explicit ordinal LADDER type quantizing readiness into rungs, distinct from the prose concept of maturity and from raw support, which only says a path exists without a rung.",
+      "distinct_from": [
+        "maturity",
+        "support"
+      ],
+      "aliases": [
+        "fromsupport",
+        "m6parity"
+      ],
+      "grounding": "supportmaturity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-support-maturity-maturityscore",
+      "canonical": "MaturityScore (cadence maturity fold)",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "cadencereport MaturityScore is the LedgerRow integer rating of the feature-lifecycle scorecard, produced by CollectMaturity (which builds and converts the Go-native maturity scorecard in-process) and merged into the cadence envelope by FoldWithMaturity.",
+      "distinction": "It is the cadence report's numeric maturity RATING (and the collect/fold plumbing that produces it), distinct from the maturity concept it scores and from coverage, which measures exercised space rather than readiness.",
+      "distinct_from": [
+        "maturity",
+        "coverage"
+      ],
+      "aliases": [
+        "collectmaturity",
+        "foldwithmaturity"
+      ],
+      "grounding": "maturityscore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-support-maturity-exactspansupported",
+      "canonical": "ExactSpanSupported (engine evict capability)",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ExactSpanSupported (enginecache Result field, set by SupportsExactSpan) reports whether a documented serving engine or KV pool can evict exactly the named K/V span instead of resetting the whole prefix cache, the same capability bit SupportsRaw exposes for a paged KV pool that carries the Kraw plane.",
+      "distinction": "It witnesses a CONCRETE evict capability of one engine/pool (an instance of support), distinct from the general support concept and from correctness, which would prove the eviction is bit-exact rather than merely available.",
+      "distinct_from": [
+        "support",
+        "correctness"
+      ],
+      "aliases": [
+        "supportsexactspan",
+        "supportsraw"
+      ],
+      "grounding": "exactspansupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-decision-decisionjournal",
+      "canonical": "DecisionJournal (modelroute)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "modelroute.DecisionJournal is the append-only record of model-routing decisions; each entry is a DecisionRecord (rule, strategy, members, scout calls, overhead, digest) built by RecordDecision after a route is chosen, exported to metrics and audit.",
+      "distinction": "It is the MODEL-ROUTING decision log and its per-decision record/recorder, NOT the witness journal of adjudication Decisions (decisions ref).",
+      "distinct_from": [
+        "decisions ref (witness journal)",
+        "Decision (kernel)"
+      ],
+      "aliases": [
+        "decisionrecord",
+        "recorddecision"
+      ],
+      "grounding": "decisionjournal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-decision-routedecision",
+      "canonical": "RouteDecision (guardroute)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "guardroute.RouteDecision is the pure verdict over a guard session's RSI fold and worst bucket — whether to route a finding to a queue row or a GitHub issue, at what severity, with a stable cause-key — while cmd/fak guardLocalModelDecision separately decides whether `fak guard` runs a local in-kernel model versus an upstream proxy.",
+      "distinction": "It is a guard ROUTING/operational verdict (where a finding goes, or which model backs guard), NOT the kernel's per-tool-call admit/refuse Decision.",
+      "distinct_from": [
+        "Decision (kernel)",
+        "Decision (scheduler)"
+      ],
+      "aliases": [
+        "guardlocalmodeldecision"
+      ],
+      "grounding": "routedecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-decision-editdecision",
+      "canonical": "EditDecision (prompt-mutation schema)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "EditDecision (docs/standards system-prompt-mutation schema) is the reviewable admit|refuse|demote verdict a check yields for a PromptEdit, paired in the schema with OverlayDecision, the reviewable fault|hit|refuse verdict that resolving an OverlayQuery yields.",
+      "distinction": "These are SCHEMA output-shape verdicts over prompt edits / overlay queries reviewed as data, NOT the kernel's runtime tool-call Decision nor the witness adjudication Decision.",
+      "distinct_from": [
+        "Decision (kernel)",
+        "Decision (witness)"
+      ],
+      "aliases": [
+        "overlaydecision"
+      ],
+      "grounding": "editdecision",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-pool-pagedkvpool",
+      "canonical": "PagedKVPool (paged KV block pool)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "model.PagedKVPool (internal/model/pagedkv.go) is the shared pool of fixed-size physical KV blocks every paged sequence draws from with reference-counted copy-on-write; NewPagedKVPool builds a 2-plane K/V pool, and NewPagedKVPoolWithRaw builds a 3-plane pool that adds the pre-RoPE Kraw plane so exact-span eviction can re-rotate survivors in a single rotation.",
+      "distinction": "It is the physical PAGED KV block allocator for inference, NOT the polymodel model-residency LRU Pool nor the cachemeta per-tier PoolProfile.",
+      "distinct_from": [
+        "Pool (polymodel residency)",
+        "PoolProfile"
+      ],
+      "aliases": [
+        "newpagedkvpool",
+        "newpagedkvpoolwithraw"
+      ],
+      "grounding": "pagedkvpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-pool-buildseatpool",
+      "canonical": "BuildSeatPool (dispatchtick accounts)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "dispatchtick.BuildSeatPool folds account rows and seat leases for a product into a SeatPoolResult — the available agent-seat capacity by account the dispatcher draws a worker from.",
+      "distinction": "It is a fleet ACCOUNT-SEAT capacity pool for dispatch admission, NOT a KV/memory block pool (PagedKVPool family) nor the polymodel model-residency Pool.",
+      "distinct_from": [
+        "Pool (session)",
+        "Pool (polymodel residency)"
+      ],
+      "aliases": [],
+      "grounding": "buildseatpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-pool-l3poolwitness",
+      "canonical": "L3PoolWitness (gateway deletion probe)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "gateway.L3PoolWitness is the minimal control-path probe interface the L3 deletion rung folds — an exists/mget over page keys that returns only presence booleans, never page payload bytes — so a deletion certificate can attest an L3 page pool no longer holds a subject's pages.",
+      "distinction": "It is a presence-only WITNESS interface over an L3 page pool for deletion proof, NOT a session bounded-LRU Pool nor the cachemeta PoolProfile describing a tier's pooling character.",
+      "distinct_from": [
+        "Pool (session)",
+        "PoolProfile"
+      ],
+      "aliases": [],
+      "grounding": "l3poolwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

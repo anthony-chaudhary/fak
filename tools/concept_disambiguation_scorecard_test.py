@@ -272,7 +272,7 @@ def test_bar_proportional_and_sliver() -> None:
     assert cd._bar(5, 0, width=4) == "." * 4
 
 
-# --- the load-bearing live smoke: the committed catalog is clean + honestly incomplete ---
+# --- the load-bearing live smoke: the committed catalog is clean + substantially mapped ---
 
 def test_live_real_data_is_clean_and_in_band() -> None:
     root = cd.repo_root()
@@ -288,12 +288,15 @@ def test_live_real_data_is_clean_and_in_band() -> None:
     for k in p["kpis"]:
         if k["group"] != "honesty" or k["kpi"] == "clarity_consistent":
             assert k["defects"] == [], f"{k['kpi']}: {k['defects'][:3]}"
-    # The namespace is only partly mapped: coverage-debt is the honest birth state.
-    assert c["coverage_debt"] > 0, "a born-clean coverage means the discovery found nothing - check the corpus"
+    # Discovery must still be working: a large confusable universe is found in the tree.
+    # (A trivially-100% coverage from a BROKEN/empty discovery would fail the floor below.)
     assert c["coverage"]["discovered"] >= 100, "the confusable universe should be large"
-    # The scorecard is no longer birth-low, but it must stay honest: enough of the
-    # namespace is positioned to be useful, and remaining coverage-debt keeps it below A.
-    assert 50 <= c["score"] < 90, f"score {c['score']} out of the honest-incomplete band"
+    # The coverage-debt has been RETIRED: the namespace is substantially positioned. A small
+    # band is allowed so a peer landing a few new confusable tokens does not red the gate
+    # before they are catalogued - the catalog stays useful, not perfect-or-bust.
+    assert c["coverage"]["coverage_pct"] >= 95.0, f"coverage {c['coverage']['coverage_pct']}% regressed - position new confusable tokens"
+    # Clean + substantially-mapped lands an A-grade score; the band tolerates minor drift.
+    assert c["score"] >= 90, f"score {c['score']} below the clean+mapped A-band"
     # A credible foundation: a real spread of crystal + defined concepts is positioned.
     assert c["standing"]["crystal"] >= 20, "real crystal-clear concepts (the cache family is the exemplar)"
     assert c["standing"]["defined"] >= 5, "honest defined-but-not-yet-anchored concepts"

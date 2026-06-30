@@ -40,6 +40,7 @@ SELF_REF = {
     "PUBLIC-SCRUB-POLICY.md",
     "tools/scrub_public_copy.py",
     "tools/check_secret_shapes.py",
+    "tools/check_secret_shapes_test.py",
     "tools/operator_path_needle_test.py",
 }
 TEXT_EXT = (".md", ".txt", ".go", ".py", ".json", ".jsonl", ".sh", ".ps1",

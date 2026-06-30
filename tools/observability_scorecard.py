@@ -160,13 +160,15 @@ KPI_GROUP: dict[str, str] = {
 }
 
 # A metric family is DECLARED two ways in the Go source: as the first string arg
-# of a HELP/TYPE writer helper (`help("fak_x", ...)`, `writeCounter(&b, "fak_x", ...)`,
+# of a HELP/TYPE writer helper (`help("fak_x", ...)`, `writeCounter(b, "fak_x", ...)`,
 # `writeHelpType(&b, "fak_x", ...)`), or written as a raw exposition literal where
 # the name is immediately followed by `{` (labels) or a space (value). Both are
 # emitted-metric signals; an MCP tool name (`case "fak_syscall":`) or a struct
 # field (`"fak_native": v`) matches NEITHER, so the source of truth stays clean.
+# The optional first arg is the exposition buffer the helper writes into — a Go
+# identifier passed by value (`b,`) or by pointer (`&b,`); both forms are emitted.
 _METRIC_DECL_RE = re.compile(
-    r'(?:help|write[A-Za-z]*)\(\s*(?:&b\s*,\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
+    r'(?:help|write[A-Za-z]*)\(\s*(?:&?[A-Za-z_]\w*\s*,\s*)?"(' + METRIC_PREFIX + r'[a-z0-9_]+)"')
 _METRIC_EXPO_RE = re.compile(r'"(' + METRIC_PREFIX + r'[a-z0-9_]+)(?:\{| )')
 _FAK_FAMILY_TOKEN_RE = re.compile(r'\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\b')
 # Every quoted "fak_..." literal in Go source, metric or not. Subtracting the

@@ -854,7 +854,31 @@ def hook_command_mode(command: str) -> str:
     return "other"
 
 
-def codex_hook_fast_path(home: Path) -> dict[str, Any]:
+def command_has_codex_dialect(command: str) -> bool:
+    normalized = command.lower().replace("'", "").replace('"', "")
+    return "--dialect codex" in normalized
+
+
+def normalize_target_shell(target_shell: str) -> str:
+    target = (target_shell or "auto").strip().lower()
+    if target == "auto":
+        return "powershell" if os.name == "nt" else "bash"
+    if target in {"bash", "powershell"}:
+        return target
+    raise ValueError(f"invalid target shell {target_shell!r} (want auto, bash, or powershell)")
+
+
+def target_command_mode(target_shell: str) -> str:
+    return "powershell_native_launcher" if normalize_target_shell(target_shell) == "powershell" else "native_launcher"
+
+
+def native_projected_total(projected: dict[str, Any]) -> int:
+    return int(projected.get("native_launcher") or 0) + int(projected.get("powershell_native_launcher") or 0)
+
+
+def codex_hook_fast_path(home: Path, *, target_shell: str = "auto") -> dict[str, Any]:
+    target = normalize_target_shell(target_shell)
+    target_mode = target_command_mode(target)
     plugin_root = home / "plugins" / "cache" / "dos" / "dos-kernel"
     manifests = sorted(plugin_root.glob("*/hooks/hooks.json"))
     if not manifests:
@@ -895,37 +919,39 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
         for command in hook_commands(manifest):
             mode = hook_command_mode(command)
             command_modes[mode] += 1
-            if "--dialect codex" in command.lower():
+            if command_has_codex_dialect(command):
                 codex_command_modes[mode] += 1
 
     codex_python = int(codex_command_modes.get("python_cli") or 0)
     codex_powershell = int(codex_command_modes.get("powershell_native_launcher") or 0)
     codex_native = int(codex_command_modes.get("native_launcher") or 0)
+    codex_native_total = codex_powershell + codex_native
     if codex_python:
         status = "WARN"
         reason = "Codex hook commands route through the Python CLI hook instead of the bundled native launcher"
-    elif codex_powershell:
-        status = "WARN"
-        reason = "Codex hook commands route through the PowerShell native launcher; use shell:bash and bin/dos-hook to avoid Windows launch-window side effects"
-    elif codex_native:
+    elif codex_native_total:
         status = "PASS"
-        reason = "Codex hook commands use the native launcher"
+        reason = "Codex hook commands use a native launcher"
     else:
         status = "UNKNOWN"
         reason = "no Codex-dialect hook commands were found in the cached manifest"
 
     try:
-        doctor_report = load_hook_doctor_module().build_report(home, apply=False)
+        doctor_report = load_hook_doctor_module().build_report(home, apply=False, target_shell=target)
         doctor_summary = doctor_report.get("summary") if isinstance(doctor_report.get("summary"), dict) else {}
         projected_codex = doctor_summary.get("projected_codex_command_modes") or {}
+        codex_replacements = int(doctor_summary.get("codex_replacements_available") or 0)
+        if doctor_report.get("status") == "WARN" and codex_replacements:
+            status = "WARN"
+            reason = f"Codex hook commands do not use the host-preferred {target} native launcher"
         repair_projection = {
             "status": doctor_report.get("status"),
-            "codex_replacements_available": int(doctor_summary.get("codex_replacements_available") or 0),
+            "codex_replacements_available": codex_replacements,
             "codex_unrepairable_python_cli_hooks": int(doctor_summary.get("codex_unrepairable_python_cli_hooks") or 0),
             "projected_codex_command_modes": projected_codex,
             "would_clear_codex_python_cli": (
                 int(projected_codex.get("python_cli") or 0) == 0
-                and int(projected_codex.get("native_launcher") or 0) > 0
+                and native_projected_total(projected_codex) > 0
             ),
         }
     except (OSError, RuntimeError, ValueError, AttributeError) as exc:
@@ -938,6 +964,8 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
     return {
         "status": status,
         "reason": reason,
+        "target_shell": target,
+        "target_command_mode": target_mode,
         "manifests": manifest_paths,
         "backups": backup_paths,
         "repaired_at": repaired_at.isoformat().replace("+00:00", "Z") if repaired_at is not None else None,
@@ -948,6 +976,7 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
         "codex_python_cli_hooks": codex_python,
         "codex_powershell_native_hooks": codex_powershell,
         "codex_native_launcher_hooks": codex_native,
+        "codex_native_total_hooks": codex_native_total,
         "doctor": {
             "dry_run": "python tools/codex_dos_hook_doctor.py --codex-home <codex-home>",
             "apply": "python tools/codex_dos_hook_doctor.py --codex-home <codex-home> --apply",
@@ -1559,13 +1588,15 @@ def build_report(
     max_unknown_tree_rate: float | None = None,
     max_delegates: int | None = None,
     gate_reports: list[Path] | None = None,
+    target_shell: str = "auto",
 ) -> dict[str, Any]:
     witness = load_witness_module()
     codex_threads = discover_codex_threads(home, since_days=since_days)
     streams = discover_streams(repo_root, codex_threads, limit)
     stream_correlation = stream_correlation_diagnosis(repo_root, codex_threads, streams)
     args = argparse.Namespace(repo_root=repo_root)
-    hook_fast_path = codex_hook_fast_path(home)
+    target = normalize_target_shell(target_shell)
+    hook_fast_path = codex_hook_fast_path(home, target_shell=target)
     post_repair = codex_observations_since(repo_root, hook_fast_path.get("repaired_at"))
     workspace_stop = workspace_stop_failure_audit(
         repo_root,
@@ -1627,8 +1658,8 @@ def build_report(
             recommendations.append("native DOS hook delegates are present; inspect fallback reasons upstream")
     if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_python_cli_hooks"):
         recommendations.append("Codex hook manifest uses the Python hook path; track native-fast-path wiring separately from package freshness")
-    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_powershell_native_hooks"):
-        recommendations.append("Codex hook manifest uses the PowerShell native launcher; rerun the hook doctor so Codex starts through shell:bash and bin/dos-hook")
+    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("repair_projection", {}).get("codex_replacements_available"):
+        recommendations.append(f"Codex hook manifest is not on the host-preferred {target} native launcher; rerun the hook doctor with --apply")
     if post_repair.get("status") == "WARN":
         if post_repair.get("unknown_tree_admission_warnings") and not post_repair.get("delegate_count"):
             recommendations.append("fast path is repaired; remaining post-repair issue is unknown-tree admission for opaque Codex host calls")
@@ -1711,6 +1742,7 @@ def build_report(
         "status": status,
         "workspace": repo_root.name,
         "codex_home": home.name,
+        "target_shell": target,
         "since_days": since_days,
         "limit": limit,
         "dos_version": local_dos_version(repo_root, check_latest=check_latest),
@@ -2117,6 +2149,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--check-latest", action="store_true", help="query PyPI JSON and compare the local dos-kernel version")
     p.add_argument("--max-unknown-tree-rate", type=float, help="budget for aggregate unknown-tree warning rate")
     p.add_argument("--max-delegates", type=int, help="budget for aggregate native-hook delegate count")
+    p.add_argument(
+        "--target-shell",
+        choices=("auto", "bash", "powershell"),
+        default="auto",
+        help="native hook launcher expected for Codex manifests; auto uses powershell on native Windows and bash elsewhere",
+    )
     p.add_argument("--fail-on-warn", action="store_true", help="exit 1 when the report status is WARN")
     p.add_argument("--fail-on-actionable-warn", action="store_true", help="exit nonzero when the post-repair actionable gate is not PASS")
     p.add_argument("--json", action="store_true")
@@ -2134,6 +2172,7 @@ def main(argv: list[str] | None = None) -> int:
         max_unknown_tree_rate=args.max_unknown_tree_rate,
         max_delegates=args.max_delegates,
         gate_reports=args.gate_report,
+        target_shell=args.target_shell,
     )
     if args.out:
         write_report(args.out, report)

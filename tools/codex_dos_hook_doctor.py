@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 from typing import Any
 
@@ -27,13 +28,14 @@ PYTHON_HOOK_RE = re.compile(
     re.IGNORECASE,
 )
 NATIVE_HOOK_RE = re.compile(
-    r"dos-hook(?:\.ps1)?(?:['\"])?\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
+    r"dos-hook(?:\.ps1)?(?:['\"])?\s+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>.*?)(?:;|$)",
     re.IGNORECASE,
 )
 PS_NATIVE_HOOK_RE = re.compile(
-    r"&\s+\$dosHook\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
+    r"&\s+\$[A-Za-z_][A-Za-z0-9_]*\s+['\"]?(?P<verb>[a-z0-9-]+)['\"]?(?P<flags>.*?)(?:;|$)",
     re.IGNORECASE,
 )
+REDIRECT_TOKEN_RE = re.compile(r"^(?:\d?>|\d?>&|>&)")
 
 
 def default_codex_home(env: dict[str, str] = os.environ) -> Path:
@@ -75,6 +77,35 @@ def hook_command_mode(command: str) -> str:
     return "other"
 
 
+def command_has_codex_dialect(command: str) -> bool:
+    normalized = command.lower().replace("'", "").replace('"', "")
+    return "--dialect codex" in normalized
+
+
+def command_has_quoted_redirect_arg(command: str) -> bool:
+    lower = command.lower()
+    return any(token in lower for token in ("'2>/dev/null'", '"2>/dev/null"', "'2>$null'", '"2>$null"'))
+
+
+def normalize_target_shell(target_shell: str) -> str:
+    target = (target_shell or "auto").strip().lower()
+    if target == "auto":
+        return "powershell" if os.name == "nt" else "bash"
+    if target in {"bash", "powershell"}:
+        return target
+    raise ValueError(f"invalid target shell {target_shell!r} (want auto, bash, or powershell)")
+
+
+def target_command_mode(target_shell: str) -> str:
+    return "powershell_native_launcher" if normalize_target_shell(target_shell) == "powershell" else "native_launcher"
+
+
+def launcher_for_mode(path: Path, mode: str) -> Path:
+    if mode == "powershell_native_launcher":
+        return path.parent.parent / "bin" / "dos-hook.ps1"
+    return path.parent.parent / "bin" / "dos-hook"
+
+
 def iter_hook_nodes(manifest: dict[str, Any]):
     hooks = manifest.get("hooks")
     if not isinstance(hooks, dict):
@@ -93,21 +124,32 @@ def iter_hook_nodes(manifest: dict[str, Any]):
                     yield str(event), hook
 
 
-def parse_python_hook(command: str) -> tuple[str, str] | None:
+def split_flags(flags: str) -> list[str]:
+    flags = flags.strip()
+    if not flags:
+        return []
+    try:
+        parts = shlex.split(flags, posix=True)
+    except ValueError:
+        parts = flags.split()
+    return [part for part in parts if not REDIRECT_TOKEN_RE.match(part)]
+
+
+def parse_python_hook(command: str) -> tuple[str, list[str]] | None:
     match = PYTHON_HOOK_RE.search(command)
     if match is None:
         return None
     verb = match.group("verb").strip()
-    flags = " ".join(match.group("flags").split())
+    flags = split_flags(match.group("flags"))
     return verb, flags
 
 
-def parse_native_launcher(command: str) -> tuple[str, str] | None:
+def parse_native_launcher(command: str) -> tuple[str, list[str]] | None:
     match = PS_NATIVE_HOOK_RE.search(command) or NATIVE_HOOK_RE.search(command)
     if match is None:
         return None
     verb = match.group("verb").strip()
-    flags = " ".join(match.group("flags").split())
+    flags = split_flags(match.group("flags"))
     return verb, flags
 
 
@@ -115,9 +157,13 @@ def bash_single_quoted(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def native_command(verb: str, flags: str) -> str:
-    hook_args = f"{verb} {flags}".strip()
-    quoted_hook_args = " ".join(bash_single_quoted(arg) for arg in hook_args.split())
+def powershell_single_quoted(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def bash_native_command(verb: str, flags: list[str]) -> str:
+    hook_args = [verb, *flags]
+    quoted_hook_args = " ".join(bash_single_quoted(arg) for arg in hook_args)
     return (
         'root="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}"; '
         'if [ -n "$root" ]; then '
@@ -127,18 +173,44 @@ def native_command(verb: str, flags: str) -> str:
         f"python -m dos.cli hook {quoted_hook_args} 2>/dev/null || "
         f"python3 -m dos.cli hook {quoted_hook_args} 2>/dev/null || "
         f"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
-        f"{bash_single_quoted('python -m dos.cli hook ' + hook_args)} 2>/dev/null || true"
+        f"{bash_single_quoted('python -m dos.cli hook ' + ' '.join(hook_args))} 2>/dev/null || true"
     )
 
 
-def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
+def powershell_native_command(verb: str, flags: list[str]) -> str:
+    quoted_hook_args = " ".join(powershell_single_quoted(arg) for arg in [verb, *flags])
+    return (
+        "$root = if ($env:CLAUDE_PLUGIN_ROOT) { $env:CLAUDE_PLUGIN_ROOT } "
+        "elseif ($env:CODEX_PLUGIN_ROOT) { $env:CODEX_PLUGIN_ROOT } else { '' }; "
+        "if ($root) { "
+        "$dosHook = Join-Path $root 'bin\\dos-hook.ps1'; "
+        f"if (Test-Path $dosHook) {{ & $dosHook {quoted_hook_args} 2>$null; "
+        "$rc = $LASTEXITCODE; if ($rc -eq 0) { exit 0 } } "
+        "}; "
+        "$py = Get-Command python -ErrorAction SilentlyContinue; "
+        "if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }; "
+        f"if ($py) {{ & $py.Source -m dos.cli hook {quoted_hook_args} 2>$null; "
+        "if ($LASTEXITCODE -eq 0) { exit 0 } }; "
+        "exit 0"
+    )
+
+
+def native_command(verb: str, flags: list[str], target_shell: str) -> str:
+    if normalize_target_shell(target_shell) == "powershell":
+        return powershell_native_command(verb, flags)
+    return bash_native_command(verb, flags)
+
+
+def inspect_manifest(path: Path, home: Path, *, apply: bool, target_shell: str = "auto") -> dict[str, Any]:
     manifest_rel = home_relpath(path, home)
-    launcher = path.parent.parent / "bin" / "dos-hook"
+    target_mode = target_command_mode(target_shell)
+    target = normalize_target_shell(target_shell)
+    launcher = launcher_for_mode(path, target_mode)
     if not launcher.exists():
         return {
             "manifest": manifest_rel,
             "status": "UNKNOWN",
-            "reason": "native POSIX launcher missing beside cached DOS hook manifest",
+            "reason": f"native {target} launcher missing beside cached DOS hook manifest",
             "command_modes": {},
             "codex_command_modes": {},
             "projected_command_modes": {},
@@ -198,11 +270,16 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
             continue
         mode = hook_command_mode(command)
         command_modes[mode] += 1
-        is_codex = "--dialect codex" in command.lower()
+        is_codex = command_has_codex_dialect(command)
         if is_codex:
             codex_command_modes[mode] += 1
         projected_mode = mode
-        if mode not in {"python_cli", "powershell_native_launcher"}:
+        if mode == target_mode and not command_has_quoted_redirect_arg(command):
+            projected_command_modes[projected_mode] += 1
+            if is_codex:
+                projected_codex_command_modes[projected_mode] += 1
+            continue
+        if mode not in {"python_cli", "native_launcher", "powershell_native_launcher"}:
             projected_command_modes[projected_mode] += 1
             if is_codex:
                 projected_codex_command_modes[projected_mode] += 1
@@ -220,13 +297,13 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
         replacements += 1
         if is_codex:
             codex_replacements += 1
-        projected_mode = "native_launcher"
+        projected_mode = target_mode
         projected_command_modes[projected_mode] += 1
         if is_codex:
             projected_codex_command_modes[projected_mode] += 1
         if apply:
-            hook["shell"] = "bash"
-            hook["command"] = native_command(verb, flags)
+            hook["shell"] = target
+            hook["command"] = native_command(verb, flags, target)
 
     applied = False
     backup_rel = None
@@ -240,13 +317,13 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
 
     if replacements:
         status = "CHANGED" if applied else "WARN"
-        reason = "hook commands can be routed through the bundled POSIX native launcher"
-    elif int(codex_command_modes.get("native_launcher") or 0):
+        reason = f"hook commands can be routed through the bundled {target} native launcher"
+    elif int(codex_command_modes.get(target_mode) or 0):
         status = "PASS"
-        reason = "Codex hook commands already use the native launcher"
+        reason = "Codex hook commands already use the host-preferred native launcher"
     else:
         status = "UNKNOWN"
-        reason = "no Python hook commands or Codex native hook commands were found"
+        reason = "no repairable hook commands or host-preferred Codex native hook commands were found"
 
     return {
         "manifest": manifest_rel,
@@ -265,9 +342,11 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
     }
 
 
-def build_report(home: Path, *, apply: bool) -> dict[str, Any]:
+def build_report(home: Path, *, apply: bool, target_shell: str = "auto") -> dict[str, Any]:
+    target = normalize_target_shell(target_shell)
+    target_mode = target_command_mode(target)
     manifests = discover_manifests(home)
-    manifest_reports = [inspect_manifest(path, home, apply=apply) for path in manifests]
+    manifest_reports = [inspect_manifest(path, home, apply=apply, target_shell=target) for path in manifests]
     command_modes: Counter[str] = Counter()
     codex_command_modes: Counter[str] = Counter()
     projected_command_modes: Counter[str] = Counter()
@@ -295,7 +374,7 @@ def build_report(home: Path, *, apply: bool) -> dict[str, Any]:
         status = "CHANGED"
     elif replacements:
         status = "WARN"
-    elif int(codex_command_modes.get("native_launcher") or 0):
+    elif int(codex_command_modes.get(target_mode) or 0):
         status = "PASS"
     else:
         status = "UNKNOWN"
@@ -305,6 +384,8 @@ def build_report(home: Path, *, apply: bool) -> dict[str, Any]:
         "status": status,
         "applied": bool(applied),
         "codex_home": home.name,
+        "target_shell": target,
+        "target_command_mode": target_mode,
         "manifest_count": len(manifests),
         "manifests": manifest_reports,
         "summary": {
@@ -346,13 +427,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--codex-home", type=Path, default=default_codex_home())
     p.add_argument("--apply", action="store_true", help="rewrite cached manifests; dry-run is the default")
+    p.add_argument(
+        "--target-shell",
+        choices=("auto", "bash", "powershell"),
+        default="auto",
+        help="native launcher shell to project; auto uses powershell on native Windows and bash elsewhere",
+    )
     p.add_argument("--json", action="store_true")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    report = build_report(args.codex_home.resolve(), apply=args.apply)
+    report = build_report(args.codex_home.resolve(), apply=args.apply, target_shell=args.target_shell)
     print(json.dumps(report, indent=2, sort_keys=True) if args.json else render(report))
     if report["status"] in {"PASS", "CHANGED"}:
         return 0

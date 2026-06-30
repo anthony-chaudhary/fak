@@ -118,6 +118,11 @@ def test_ordinary_json_not_secret() -> None:
         assert not any(rx.search(p) for rx, _ in cc.SECRET_FILES), p
 
 
+def test_root_coverage_refused_as_hard_junk() -> None:
+    r = cc._classify("coverage", ROOT, MAX)
+    assert r is not None and "build artifact" in r.lower()
+
+
 # --- live regression guard: the real tree is clean --------------------------
 
 def test_tracked_tree_has_no_private_only_path() -> None:

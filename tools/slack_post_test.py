@@ -147,6 +147,17 @@ class SendTests(unittest.TestCase):
             self.assertIn("│ card │", rec.calls[0]["body"]["text"])
             self.assertIn("S/N self-score", rec.calls[0]["body"]["text"])
 
+    def test_send_can_suppress_signal_noise_footer(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d, _EnvGuard():
+            root = _write_env(Path(d), ["FAK_SCOREBOARD_TOKEN=t", "FAK_DISPATCH_CHANNEL=C0X"])
+            rec = _Recorder()
+            res = sp.send("dispatch card", transport=rec, start=root,
+                          include_signal_noise=False)
+            self.assertTrue(res["posted"])
+            self.assertIn("signal_noise", res)
+            self.assertNotIn("S/N self-score", rec.calls[0]["body"]["text"])
+
     def test_dry_run_resolves_but_never_calls_transport(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d, _EnvGuard():

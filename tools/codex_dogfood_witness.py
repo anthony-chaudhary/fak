@@ -898,7 +898,7 @@ def codex_hook_fast_path(
     try:
         audit_mod = load_codex_recent_audit()
         home = Path(args.codex_home) if args.codex_home else extract_mod.codex_home(env)
-        report = audit_mod.codex_hook_fast_path(home)
+        report = audit_mod.codex_hook_fast_path(home, target_shell=getattr(args, "target_shell", "auto"))
         if isinstance(report, dict) and report.get("repaired_at"):
             report["post_repair_observations"] = audit_mod.codex_observations_since(args.repo_root, report.get("repaired_at"))
             if thread_id:
@@ -917,6 +917,8 @@ def codex_hook_fast_path(
         "reason": report.get("reason"),
         "manifest_count": report.get("manifest_count"),
         "malformed_manifests": report.get("malformed_manifests"),
+        "target_shell": report.get("target_shell"),
+        "target_command_mode": report.get("target_command_mode"),
         "manifests": report.get("manifests") if isinstance(report.get("manifests"), list) else [],
         "backups": report.get("backups") if isinstance(report.get("backups"), list) else [],
         "repaired_at": report.get("repaired_at"),
@@ -1140,6 +1142,8 @@ def dogfood_summary(
             "codex_python_cli_hooks": hook_fast_path.get("codex_python_cli_hooks"),
             "codex_powershell_native_hooks": hook_fast_path.get("codex_powershell_native_hooks"),
             "codex_native_launcher_hooks": hook_fast_path.get("codex_native_launcher_hooks"),
+            "target_shell": hook_fast_path.get("target_shell"),
+            "target_command_mode": hook_fast_path.get("target_command_mode"),
             "codex_command_modes": hook_fast_path.get("codex_command_modes") or {},
             "post_repair_status": post_repair.get("status"),
             "post_repair_observations": post_repair.get("observations"),
@@ -1305,6 +1309,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--run-codex-exec", action="store_true", help="run a nested codex exec --json MCP probe and sanitize its event stream")
     p.add_argument("--codex-bin", help="Codex executable for --run-codex-exec (default: codex on PATH)")
     p.add_argument("--gate-report", action="append", help="JSON report from tools/codex_fak_gate.py; repeat for multiple commands")
+    p.add_argument(
+        "--target-shell",
+        choices=("auto", "bash", "powershell"),
+        default="auto",
+        help="native hook launcher expected for Codex manifests; auto uses powershell on native Windows and bash elsewhere",
+    )
     return p.parse_args(argv)
 
 
