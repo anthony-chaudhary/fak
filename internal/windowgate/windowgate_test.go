@@ -182,6 +182,14 @@ func TestGoExecCandidatesSurfaceLiteralConsoleTools(t *testing.T) {
 	}
 }
 
+func TestGoExecCandidatesSurfaceInlineConsoleTools(t *testing.T) {
+	src := "package main\nimport \"os/exec\"\nfunc f(){\n _, _ = exec.Command(\"git\", \"rev-parse\", \"HEAD\").Output()\n}\n"
+	got := GoExecCandidates("internal/x/x.go", src)
+	if len(got) != 1 {
+		t.Fatalf("GoExecCandidates inline = %d %v, want 1 advisory row", len(got), got)
+	}
+}
+
 func TestScanTreeIncludesUntrackedGoFiles(t *testing.T) {
 	root := t.TempDir()
 	runGit(t, root, "init", "-q")
