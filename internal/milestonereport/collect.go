@@ -42,15 +42,23 @@ var TrackedEpics = []EpicSpec{
 // via epicprogress.Counts. A nil runner uses the real `gh`. The repo defaults to the
 // current checkout's `gh` context, so `repo` is "" unless an override is wired.
 func Collect(repo string, runner Runner) (Maturity, Epics) {
+	return CollectSpecs(repo, runner, TrackedEpics)
+}
+
+// CollectSpecs is Collect over an EXPLICIT tracked-epic set — the `--epics-from`
+// override path. The maturity climb is unchanged (pure); the roadmap resolves the
+// passed specs' children live via epicprogress.Counts. Collect is the back-compat
+// shim that passes the in-code TrackedEpics default.
+func CollectSpecs(repo string, runner Runner, specs []EpicSpec) (Maturity, Epics) {
 	if runner == nil {
 		runner = epicprogress.DefaultRunner
 	}
 	maturity := InterpretMaturity(covmatrix.Grid())
-	counts := make([]EpicCounts, 0, len(TrackedEpics))
-	for _, spec := range TrackedEpics {
+	counts := make([]EpicCounts, 0, len(specs))
+	for _, spec := range specs {
 		counts = append(counts, asEpicCounts(epicprogress.Counts(runner, repo, spec)))
 	}
-	return maturity, InterpretEpics(TrackedEpics, counts, "")
+	return maturity, InterpretEpics(specs, counts, "")
 }
 
 // asEpicCounts adapts the resolver's epicprogress.EpicCounts into the report-local

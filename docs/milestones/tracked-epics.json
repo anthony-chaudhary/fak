@@ -1,0 +1,35 @@
+{
+  "schema": "fak-milestone-tracked-epics/1",
+  "specs": [
+    {
+      "Number": 1243,
+      "Title": "support-maturity disambiguation",
+      "Label": "support-maturity"
+    },
+    {
+      "Number": 1315,
+      "Title": "native agent harness",
+      "Label": ""
+    },
+    {
+      "Number": 1301,
+      "Title": "cache-value P&L roll-up",
+      "Label": ""
+    },
+    {
+      "Number": 1178,
+      "Title": "first-class time horizons",
+      "Label": ""
+    },
+    {
+      "Number": 1010,
+      "Title": "GLM-5.2 through fak's kernel",
+      "Label": ""
+    },
+    {
+      "Number": 1354,
+      "Title": "release at agentic speed",
+      "Label": ""
+    }
+  ]
+}

@@ -50,6 +50,7 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	check := fs.Bool("check", false, "advisory gate: exit non-zero only if a dimension failed to measure")
 	appendHistory := fs.Bool("append-history", false, "append a dated row to the durable ledger (docs/milestones/history.jsonl)")
+	epicsFrom := fs.String("epics-from", "", "load the tracked-epic set from a JSON data file (default: the in-code TrackedEpics; seed at "+milestonereport.DefaultTrackedEpicsRel+"). A file carrying a pre-resolved `counts` block folds fully offline (no gh).")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+milestonereport.DefaultLedgerRel+")")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
 	if err := fs.Parse(argv); err != nil {
@@ -74,7 +75,25 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	}
 	commit := milestonereport.HeadCommit(root)
 
+	// The tracked-epic set: the in-code default, OR an `--epics-from` data file. A
+	// file carrying a pre-resolved `counts` block folds hermetically (no `gh`); a
+	// specs-only file resolves each epic's children live. The maturity climb is the
+	// same pure grid fold in every path.
 	maturity, epics := milestonereport.Collect(*repo, nil)
+	if *epicsFrom != "" {
+		f, err := milestonereport.LoadEpicsFile(*epicsFrom)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak milestone report: %v\n", err)
+			return 2
+		}
+		if f.HasCounts() {
+			// Hermetic: the maturity climb is the pure grid fold already collected
+			// above (no `gh`); only the roadmap is replaced by the pre-resolved counts.
+			epics = f.FoldOffline()
+		} else {
+			maturity, epics = milestonereport.CollectSpecs(*repo, nil, f.Specs)
+		}
+	}
 	report := milestonereport.Fold(maturity, epics, milestonereport.FoldOpts{
 		Workspace:   root,
 		Commit:      commit,
