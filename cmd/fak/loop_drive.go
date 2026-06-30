@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopgate"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // loopDriveHandoffFileEnv is the model-facing path a wrapped agent writes a
@@ -60,6 +61,7 @@ type loopDriveWitnessResult struct {
 
 var loopDriveNewCommand = func(argv []string, env []string, stdout, stderr io.Writer) loopCommand {
 	cmd := exec.Command(argv[0], argv[1:]...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -782,6 +784,7 @@ func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Crite
 
 func runDOSLoopGateWitness(ctx context.Context, req loopgate.Request) (loopgate.WitnessResult, error) {
 	cmd := exec.CommandContext(ctx, "dos", req.Argv()...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut

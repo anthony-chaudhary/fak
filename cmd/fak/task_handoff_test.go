@@ -60,6 +60,27 @@ func TestTaskHandoffRefusesUnwitnessedCompletion(t *testing.T) {
 	}
 }
 
+func TestTaskHandoffRefusesUnscopedFollowUp(t *testing.T) {
+	dir := t.TempDir()
+	handoffPath := writeTaskHandoffFixtureWithScope(t, dir, true, false)
+
+	var out, errb bytes.Buffer
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--json"})
+	if code != 3 {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	var got taskHandoffResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("parse output: %v\n%s", err, out.String())
+	}
+	if got.Review.OK || len(got.Review.IssueReviews) != 1 {
+		t.Fatalf("review = %+v, want one refused issue review", got.Review)
+	}
+	if !taskHandoffReason(got.Review.Reasons, "NEXT_STEP_1_ISSUE_SCOPE_INCOMPLETE") {
+		t.Fatalf("scope reason absent: %+v", got.Review.Reasons)
+	}
+}
+
 func TestTaskHandoffSyncUsesInjectedRunner(t *testing.T) {
 	row := taskmgr.HandoffIssuePlanRow{
 		Action: "create",
@@ -86,6 +107,11 @@ func TestTaskHandoffSyncUsesInjectedRunner(t *testing.T) {
 
 func writeTaskHandoffFixture(t *testing.T, dir string, witnessed bool) string {
 	t.Helper()
+	return writeTaskHandoffFixtureWithScope(t, dir, witnessed, true)
+}
+
+func writeTaskHandoffFixtureWithScope(t *testing.T, dir string, witnessed, scoped bool) string {
+	t.Helper()
 	handoff := taskmgr.Handoff{
 		Schema:       taskmgr.SchemaHandoff,
 		CurrentState: "The implementation is committed; the remaining proof is a live issue sync smoke.",
@@ -101,6 +127,27 @@ func writeTaskHandoffFixture(t *testing.T, dir string, witnessed bool) string {
 			Reason: "Dry-run planning is covered; live gh behavior still needs an operator-owned witness.",
 			Labels: []string{"agent-handoff"},
 		}},
+	}
+	if scoped {
+		step := &handoff.NextSteps[0]
+		step.WorkingSpine = "A verified task handoff creates one scoped follow-up issue."
+		step.PriorityContext = "Working path: task completion -> worker-ready follow-up -> dispatch. Current blocker: live sync lacks smoke coverage. Unblocks: task handoffs can feed the issue queue. Not polish: this proves the smallest live path."
+		step.WorkUnit = "leaf"
+		step.ExpectedSteps = 4
+		step.Assumptions = []string{"The disposable issue fixture can be updated by marker key."}
+		step.ConfusionRisks = []string{"A live smoke is not a broad redesign of task storage."}
+		step.Coordination = []string{"Do not run concurrently with other taskmgr issue-body edits."}
+		step.Trigger = "Verified task handoff proposes one follow-up after the dry-run path passed."
+		step.BatchPolicy = "At most two follow-up issues per handoff; reruns update by marker."
+		step.InScope = "Run the live issue sync smoke and keep the generated body parseable by issuecontract."
+		step.OutOfScope = "Do not change task storage, scheduling, or unrelated issue producers."
+		step.DoneCondition = "The smoke creates or updates the disposable follow-up issue."
+		step.Witness = "go test ./cmd/fak -run TestTaskHandoff"
+		step.AcceptanceGate = "go test ./cmd/fak -run TestTaskHandoff"
+		step.Lane = "taskmgr"
+		step.Paths = []string{"cmd/fak/taskmgr.go", "internal/taskmgr/**"}
+		step.BoundaryNotes = []string{"Public task handoff issue only."}
+		step.ClosureBinding = "Resolving commit cites the issue and carries `(fak taskmgr)`."
 	}
 	if witnessed {
 		handoff.Task.Witness = &taskmgr.WitnessRecord{

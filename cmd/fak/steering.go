@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -66,7 +67,9 @@ type steeringSnapshot struct {
 type steeringDrift struct {
 	KPI    string
 	Group  string
+	Score  int
 	Soft   int
+	Gain   float64
 	Detail string
 }
 
@@ -179,6 +182,7 @@ func runSteerabilityScorecard() ([]byte, error) {
 	var lastErr error
 	for _, py := range interps {
 		cmd := exec.Command(py, "tools/steerability_scorecard.py", "--json")
+		windowgate.ConfigureBackgroundCommand(cmd)
 		var out, errb bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		runErr := cmd.Run()
@@ -248,7 +252,9 @@ func corpusDrift(c map[string]any) []steeringDrift {
 		out = append(out, steeringDrift{
 			KPI:    toString(m["kpi"]),
 			Group:  toString(m["group"]),
+			Score:  int(toFloat(m["score"])),
 			Soft:   soft,
+			Gain:   toFloat(m["index_gain_to_clean"]),
 			Detail: toString(m["detail"]),
 		})
 	}
@@ -345,7 +351,7 @@ func buildSteeringUpdate(snap steeringSnapshot, mode, source, reason string) sco
 			lines = append(lines, g)
 		}
 		for _, d := range snap.drift {
-			lines = append(lines, fmt.Sprintf("%s (%s): %s", d.KPI, d.Group, d.Detail))
+			lines = append(lines, steeringDriftLine(d))
 		}
 		if len(lines) > 0 {
 			up.Lines = lines
@@ -353,6 +359,14 @@ func buildSteeringUpdate(snap steeringSnapshot, mode, source, reason string) sco
 		up.Actions = steeringActions(snap)
 	}
 	return up
+}
+
+func steeringDriftLine(d steeringDrift) string {
+	if d.Gain > 0 {
+		return fmt.Sprintf("%s (%s): score %d, +%.1f index pts if clean - %s",
+			d.KPI, d.Group, d.Score, d.Gain, d.Detail)
+	}
+	return fmt.Sprintf("%s (%s): %s", d.KPI, d.Group, d.Detail)
 }
 
 // groupLine renders the per-group index from corpus.index_by_group, e.g.

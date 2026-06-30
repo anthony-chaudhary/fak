@@ -91,6 +91,9 @@ func usageCoreVerbs() {
                  git-ls-files read instead of spawning a Python interpreter per checker.
                  Exit 0 clean, 1 a gate fired, 2 could-not-run (make/CI then falls back to
                  the Python path — fail-open). make hygiene / make index-sync prefer this.)
+  fak public-scrub audit-staged|audit-range|audit-tree|audit-message
+                (native PUBLIC_LEAK audit surface: scans staged diffs, ranges, tracked trees,
+                 or commit messages with the same needle/shape rules the hooks enforce)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak egress    check (--url URL | --command CMD | --host HOST | --tool T --args JSON)
                 (prove the NETWORK-EGRESS floor on one destination: the cloud-metadata /
@@ -110,11 +113,23 @@ func usageCoreVerbs() {
                 (resolve an hf:// URI to a locally cached file path: Hub download with
                  HF_TOKEN auth and SHA256 verification against the Hub LFS oid. The
                  cached path is printed on stdout; --gguf and the loaders accept it)
+  fak new-leaf  NAME --tier foundation|mechanism|composer|integrator [--register]
+                (native conforming-leaf scaffolder: writes internal/<name>/, arch tier,
+                 optional registration, and dos lane/tree declarations)
   fak bench     --suite NAME [--out report.json] [--baseline-n 30]
                 (transport A/B: in-process adjudication p50 vs spawned-hook p50)
   fak benchmarks list [--offline] | describe <name> | run <name>
                 (THE INDEX of every benchmark fak ships -- start with
                  'fak benchmarks list --offline' for the zero-asset set)
+  fak bench-runs list|show|compare|best|table|summary
+                (native query surface for experiments/benchmark/catalog.json and run
+                 artifacts; the Go replacement for tools/bench_cli.py)
+  fak bench-loop status|next|walk|run [--json]
+                (BENCHMARK SUPER-LOOP MANAGER: folds the benchmark registry,
+                 recorded run catalog, nightrun ledger, local capability-aware
+                 next selection, and authority gap into one status/next-action
+                 surface. run delegates to fak nightrun run, dry-run unless
+                 --apply is passed)
   fak ablate    --sweep vdso[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
                 (self-ablation: replay one frozen trace under N feature configs;
                  one row per arm, deltas off the kernel counters, same-trace guard)
@@ -127,6 +142,12 @@ func usageCoreVerbs() {
   fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
                 [--max-turns N] [--out agent-report.json] [--policy FILE]   (LIVE turn-count A/B)
+  fak api-host  readiness|acceptance
+                (native no-spend API-host bridge probes: /models readiness and typed
+                 acceptance classification over target specs or an api-host roster)
+  fak session-audit discover|audit|deep
+                (native transcript audit: discover Claude Code JSONL sessions,
+                 fold exact token/cache/tool/cost observability, and render markdown/JSON)
   fak policy    --dump | --check FILE
                 (--dump writes the built-in DefaultPolicy as a manifest you edit;
                  --check validates a manifest and prints the floor it admits. The
@@ -135,6 +156,7 @@ func usageCoreVerbs() {
   fak route     [--manifest FILE] [--aspect request|tool_call|query|state|step|scout]
                 [--tool NAME --prompt-tokens N --latency interactive|batch --complexity low|medium|high --labels k=v,...]
                 [--simulate "<out>[@score],..."] [--json] | --dump | --check FILE
+                [--accounts FILE | --accounts-dump | --accounts-check FILE | --accounts-status FILE]
                 (the MODEL-ROUTING oracle  -  first-class per-aspect + ensemble model
                  routing. For one classified SUBJECT (an aspect of a request: the
                  whole request, a tool call, a sub-query, a state, a reasoning step)
@@ -143,7 +165,10 @@ func usageCoreVerbs() {
                  routing policy is a deployable JSON manifest: --dump -> edit ->
                  --check -> --manifest, mirroring 'fak policy'. --simulate folds
                  stand-in member outputs through the plan's reduction so the
-                 ensemble half runs end to end with no model in the loop)
+                 ensemble half runs end to end with no model in the loop. The account
+                 switcher is a separate roster: --accounts-check validates it, and
+                 --accounts-status reports credential-env readiness without printing
+                 secret values or probing the network)
   fak routebench [--corpus FILE] [--routed FILE] [--single FILE] [--frontier MODEL]
                  [--prices ...] [--latencies ...] [--json] | --dump-corpus
                  (the OFFLINE ROUTING BENCHMARK: run a corpus of recorded cases
@@ -186,6 +211,11 @@ func usageCoreVerbs() {
                  cross-check the real kernel admit verdict (would the context-MMU
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
+  fak feature   query <intent> [--json] [--plane dev|live|all] [--detail NAME]
+                (the SELF-FEATURE QUERY: ask fak what dev facts, live tools, memory
+                 strategies, and capability cards are available. The answer is a
+                 lightweight FeatureCard set with guarded request shapes; --detail faults
+                 only the selected schema, doc snippet, or memory explain plan.)
   fak index     lane <path>... | leaf [<query>] | docs <query>   [--json] [--limit N] [--root DIR]
                 (the QUERYABLE SELF-INDEX: query fak's own dev facts instead of
                  re-surveying prose. 'lane' resolves which lane/leaf owns a path
@@ -263,6 +293,10 @@ func usageOpsVerbs() {
                 (the READ-ONLY PROCESS TABLE: one aligned row per live session folded
                  from GET /v1/fak/sessions; --watch is the top mode. Issues no control
                  verb - control a session with fak session)
+  fak windowgate [scan|report] [--workspace DIR] [--json] [--fail-on-candidates]
+                (NO-DESKTOP-POPUP audit: hard-ratcheted scheduled-task, Python, and
+                 Go background helper launches must suppress Windows console windows;
+                 also surfaces advisory gh/git/powershell/cmd launch candidates)
   fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."
                 (JOB CONTROL for a running session - the OS process-model names over the
                  control plane; steer sends INPUT to a running agent, taken at its next
@@ -376,6 +410,13 @@ func usageScorecardVerbs() {
                  --policy FILE enforces your own. --split (auto) opens a 20% 'fak info'
                  pane beside the agent in a multiplexer terminal so the live cache
                  economy + floor safety stay visible during the session)
+  fak codex     [--dry-run] [--policy FILE] [--api-key-env VAR] [--base-url URL]
+                [--model MODEL] [--local|--gguf PATH] [--split auto|on|off] -- <codex args...>
+                (CODEX LAUNCHER: the short dogfood front door for OpenAI Codex CLI.
+                 Expands to 'fak guard ... -- codex', passes Codex's bypass flag by
+                 default so fak's floor is the permission system, and lets guard inject
+                 per-run Codex -c model_provider=fak / wire_api=responses overrides.
+                 Use --dry-run first to print the exact launch command)
   fak guard-verdict-rsi fold|run|--check
                 (the GUARD VERDICT RSI loop: folds the real guard decision journal,
                  scores verdict-quality, and keeps only on rows + strict gain + witness)
@@ -434,6 +475,9 @@ func usageScorecardVerbs() {
                  posts free-form product prose (persona items, direction calls). Same
                  workspace as #scoreboard but resolves FAK_PRODUCT_CHANNEL -- never falls
                  back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN, not the lab token)
+  fak product-scorecard [--json|--chart|--critical|--gaps|--compare FILE|--markdown-dir DIR]
+                (native product-readiness scorecard over CLAIMS.md and
+                 tools/product_scorecard.data; emits the product_debt control-pane payload)
   fak nodeusage post [--fleet snap.json | --kpi NAME --value V --grade G --verdict OK|ACTION |
                 --from FILE] [--detail D] [--title T] [--channel ID] [--source WHO] [--dry-run]
                 (the COMPUTE-NODE-USAGE Slack surface for #node-usage: --fleet folds a
@@ -443,14 +487,24 @@ func usageScorecardVerbs() {
                  Same workspace as #scoreboard but resolves FAK_NODE_USAGE_CHANNEL --
                  never falls back to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN
                  (node-usage token fallback), not the lab token)
-  fak slack     check [--auth] [--json] | send --channel ID --text MSG [--token T] [--dry-run]
+  fak news      post --title T (--notes BODY | --notes-file FILE) [--channel ID] [--source WHO] [--dry-run]
+                (the NEWS Slack surface for source-linked external industry/SOTA/OSS
+                 updates. Same workspace as #scoreboard but resolves FAK_NEWS_CHANNEL --
+                 no fallback to #scoreboard. Posts via FAK_SCOREBOARD_TOKEN, not the lab token)
+  fak slack     check [--auth] [--json] | health [--json] | beat [--dry-run] |
+                walk [--json] | refresh [--surface LIST] [--live] [--continue-on-error]
+                [--news-title T --news-file FILE] [--json] |
+                send --channel ID --text MSG [--token T] [--dry-run]
                 (DEBUG + USE the whole Slack surface from one place. 'check' reports, for
                  every surface (scoreboard/blockers/bench/dispatch/dojo/marketing/
-                 node-usage/product/steering/chatrelay), the bot token + channel it would
+                 news/node-usage/product/steering/chatrelay), the bot token + channel it would
                  use and WHERE each resolved from (env / .env.slack.local / fallback /
                  default); --auth runs Slack auth.test per distinct token to prove it
                  actually works (exit 1 on any failure, so it gates CI); --json for tooling.
-                 'send' posts an ad-hoc message to ANY channel (token defaults to
+                 'walk' prints the durable per-surface refresh map. 'refresh' dry-runs
+                 locally refreshable feeds by default and posts only with --live; the news
+                 surface requires --news-title plus --news-file because it needs an editorial
+                 digest. 'send' posts an ad-hoc message to ANY channel (token defaults to
                  FAK_SCOREBOARD_TOKEN), --text - reads the body from stdin, --dry-run previews)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the four dimensions

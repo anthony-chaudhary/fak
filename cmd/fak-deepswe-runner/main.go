@@ -1,3 +1,5 @@
+// Command fak-deepswe-runner emits deterministic DeepSWE adapter fixtures for
+// SWE-bench runner-contract tests.
 package main
 
 import (

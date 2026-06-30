@@ -358,6 +358,85 @@ func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
 	}
 }
 
+func TestRunVCacheScoreAgenticActivationFlags(t *testing.T) {
+	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
+	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runVCache(&out, &errb, []string{
+		"score", "--json", "--telemetry", telemetry,
+		"--kernel-kv-events", "2",
+		"--kernel-kv-prompt-tokens", "1000",
+		"--kernel-kv-reused-tokens", "900",
+		"--context-events", "1",
+		"--context-shed-tokens", "800",
+		"--context-resident-tokens", "1200",
+		"--provider-vcache-decisions", "3",
+		"--external-engine-events", "4",
+		"--external-engine-hit-rate", "0.67",
+	})
+	if code != 0 {
+		t.Fatalf("score activation exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if !rep.AgenticActivation.Active || rep.AgenticActivation.Total != 10 {
+		t.Fatalf("activation report=%+v, want supplied fak-authored events counted", rep.AgenticActivation)
+	}
+	if rep.AgenticActivation.KernelKVEvents != 2 ||
+		rep.AgenticActivation.ContextEvents != 1 ||
+		rep.AgenticActivation.ProviderVCacheDecisions != 3 ||
+		rep.AgenticActivation.ExternalEngineEvents != 4 {
+		t.Fatalf("activation counters=%+v, want exact CLI values", rep.AgenticActivation)
+	}
+	if rep.DefaultUsefulness.Facets.AgenticActivation != 20 {
+		t.Fatalf("agentic activation facet=%d, want full credit when fak-authored activation is supplied", rep.DefaultUsefulness.Facets.AgenticActivation)
+	}
+	if !rep.Planes.ProviderObserved.Available || !rep.Planes.KernelWitnessed.Available || !rep.Planes.ContextWitnessed.Available {
+		t.Fatalf("provider, kernel, and context planes should be available: %+v", rep.Planes)
+	}
+	if rep.Planes.KernelWitnessed.Provenance != "WITNESSED" || rep.Planes.KernelWitnessed.SavedTokenEquiv != 900 {
+		t.Fatalf("kernel plane=%+v, want witnessed 900-token pure-fak reuse", rep.Planes.KernelWitnessed)
+	}
+	if rep.Planes.ContextWitnessed.Provenance != "WITNESSED" ||
+		rep.Planes.ContextWitnessed.SavedTokenEquiv != 800 ||
+		rep.Planes.ContextWitnessed.BaselineTokenEquiv != 2000 ||
+		rep.Planes.ContextWitnessed.CostTokenEquiv != 1200 {
+		t.Fatalf("context plane=%+v, want 800 saved / 2000 baseline / 1200 cost", rep.Planes.ContextWitnessed)
+	}
+	if !rep.Planes.ExternalEngineObserved.Available || rep.Planes.ExternalEngineObserved.HitRate != 0.67 {
+		t.Fatalf("external plane=%+v, want observed 0.67 hit-rate evidence", rep.Planes.ExternalEngineObserved)
+	}
+}
+
+func TestRunVCacheScoreContextSavedOnlyDoesNotInferBaseline(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runVCache(&out, &errb, []string{
+		"score", "--json", "--snapshot", "off",
+		"--context-shed-tokens", "800",
+	})
+	if code != 0 {
+		t.Fatalf("score context exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if !rep.Planes.ContextWitnessed.Available || rep.Planes.ContextWitnessed.BaselineTokenEquiv != 0 {
+		t.Fatalf("context plane=%+v, want saved-only witness without inferred baseline", rep.Planes.ContextWitnessed)
+	}
+	if rep.DefaultUsefulness.Facets.NetRealizedValue != 0 {
+		t.Fatalf("saved-only context evidence must not earn net-value credit: %+v", rep.DefaultUsefulness)
+	}
+	if rep.AgenticActivation.ContextEvents != 1 {
+		t.Fatalf("context events=%d, want auto event when shed tokens supplied", rep.AgenticActivation.ContextEvents)
+	}
+}
+
 func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
 	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
 	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
@@ -377,6 +456,10 @@ func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
 		"rebate 1728.0 (86.14%)",
 		"cost 278.0 / 2006.0 baseline",
 		"7.22x",
+		"planes: provider=OBSERVED kernel=MISSING context=MISSING external=MISSING forecast=FORECAST",
+		"agentic activation: 0 events",
+		"default usefulness: partial",
+		"provider rebate observed",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("score telemetry output missing %q:\n%s", want, s)

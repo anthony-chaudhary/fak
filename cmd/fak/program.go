@@ -1,11 +1,12 @@
 package main
 
 // fak program -- the ongoing-program report: one read-only fold over the project's
-// never-"done" optimization PROGRAMS (kernel-optimization + cache-optimization, the
-// classes internal/worktype marks as ongoing). It is the sibling of `fak milestone`:
+// never-"done" PROGRAMS (kernel-optimization, cache-optimization, and
+// human-operator-effectiveness; the classes internal/worktype marks as ongoing). It
+// is the sibling of `fak milestone`:
 // where the milestone roadmap measures DISCRETE epics by completion %, this measures
-// the ongoing programs by a FRONTIER + a TREND, because an optimization program has no
-// 100%. The two together give the operator the right lens for each kind of work.
+// the ongoing programs by a FRONTIER + a TREND, because an ongoing program has no 100%.
+// The two together give the operator the right lens for each kind of work.
 //
 //	fak program report                     # fold + render the snapshot
 //	fak program report --json              # the machine-readable envelope

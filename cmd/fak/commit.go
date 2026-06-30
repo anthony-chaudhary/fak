@@ -182,7 +182,7 @@ func commitExitCode(res safecommit.Result) int {
 	case safecommit.ReasonNotARepo, safecommit.ReasonOffTrunk,
 		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
 		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull,
-		safecommit.ReasonReviewRefuted:
+		safecommit.ReasonReviewRefuted, safecommit.ReasonPreStagedPathOverlap:
 		return 3
 	default: // PATHSPEC_RACE, HOOK_REFUSED, PUSH_REJECTED
 		return 1

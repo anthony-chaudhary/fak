@@ -75,7 +75,11 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	plan := dogfoodissues.BuildPlan(items, existing)
+	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
+		Live:          *live,
+		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
+		DedupeCap:     issueSyncScanLimit(*limit),
+	})
 	mode := "dry-run"
 	if *live {
 		mode = "live"
@@ -86,6 +90,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		Report:  reportPath,
 		Planned: plan,
 		Synced:  []dogfoodissues.SyncRow{},
+		Skipped: skipped,
 	}
 	if *live && len(plan) > 0 {
 		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)

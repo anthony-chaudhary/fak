@@ -23,6 +23,7 @@ func clearSlackEnv(t *testing.T) {
 		"FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL",
 		"FAK_BACKLOG_CHANNEL",
 		"FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL",
+		"FAK_NEWS_CHANNEL",
 		"FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL",
 		"FAK_STEERING_CHANNEL",
 		"FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL",
@@ -93,6 +94,24 @@ func TestBuildSurfaceReportsBacklogUsesScoreboardTokenAndChannelVar(t *testing.T
 	}
 	if bl.Channel != "C0BACKLOG" || !strings.Contains(bl.ChannelSource, "FAK_BACKLOG_CHANNEL") || !bl.Ready {
 		t.Fatalf("backlog should resolve FAK_BACKLOG_CHANNEL and be ready: %+v", bl)
+	}
+}
+
+func TestBuildSurfaceReportsNewsUsesScoreboardTokenAndChannelVar(t *testing.T) {
+	clearSlackEnv(t)
+	t.Setenv("FAK_SCOREBOARD_TOKEN", "bottok-sb")
+	t.Setenv("FAK_NEWS_CHANNEL", "C0NEWS")
+
+	reports := buildSurfaceReports()
+	news := reportByName(reports, "news")
+	if news == nil {
+		t.Fatal("news surface must be registered")
+	}
+	if !news.TokenSet || !strings.Contains(news.TokenSource, "scoreboard-fallback") {
+		t.Fatalf("news should fall back to scoreboard token: %+v", news)
+	}
+	if news.Channel != "C0NEWS" || !strings.Contains(news.ChannelSource, "FAK_NEWS_CHANNEL") || !news.Ready {
+		t.Fatalf("news should resolve FAK_NEWS_CHANNEL and be ready: %+v", news)
 	}
 }
 

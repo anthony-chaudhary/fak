@@ -235,6 +235,14 @@ func renderObserveReport(w io.Writer, r vcacheobserve.Report) {
 			f.Economics.SavedPct, f.Economics.FirstPositiveRequest, string(f.GovernorDecision))
 	}
 
+	fmt.Fprintln(w, "\nowner split (provider cache is not fak-authored savings):")
+	fmt.Fprintf(w, "%-10s %-15s %-13s %12s %s\n",
+		"owner", "mechanism", "provenance", "saved_teq", "evidence")
+	for _, s := range r.OwnerSlices {
+		fmt.Fprintf(w, "%-10s %-15s %-13s %12.0f %s\n",
+			s.Owner, s.Mechanism, string(s.Provenance), s.SavedTokenEquiv, s.Evidence)
+	}
+
 	fmt.Fprintln(w, "\nsub-concept panels (OBSERVED = provider's counters · DECISION = fak verdict):")
 	for _, p := range r.Panels {
 		fmt.Fprintf(w, "\n[%s] %s  (%s · %s)\n", p.Verdict, p.Name, p.Milestone, p.Provenance)

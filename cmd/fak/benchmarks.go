@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcatalog"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // `fak benchmarks`  -  the single discoverable door over every benchmark fak ships.
@@ -184,6 +185,7 @@ func benchmarksRun(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "note: %s needs %s  -  see `fak benchmarks describe %s` for the asset flags.\n", b.Name, b.Need, b.Name)
 	}
 	cmd := exec.Command("go", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {

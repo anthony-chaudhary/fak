@@ -80,22 +80,32 @@ func main() {
 		cmdBench(os.Args[2:])
 	case "benchmarks":
 		cmdBenchmarks(os.Args[2:])
+	case "bench-runs":
+		cmdBenchRuns(os.Args[2:])
+	case "bench-loop", "benchloop":
+		cmdBenchLoop(os.Args[2:])
 	case "ablate":
 		cmdAblate(os.Args[2:])
 	case "turntax":
 		cmdTurnTax(os.Args[2:])
 	case "agent":
 		cmdAgent(os.Args[2:])
+	case "api-host":
+		cmdAPIHost(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
+	case "session-audit":
+		cmdSessionAudit(os.Args[2:])
 	case "resume":
 		cmdResume(os.Args[2:])
 	case "dispatch":
 		cmdDispatch(os.Args[2:])
 	case "process-guard":
 		cmdProcessGuard(os.Args[2:])
+	case "windowgate":
+		cmdWindowgate(os.Args[2:])
 	case "ps":
 		cmdPS(os.Args[2:])
 	case "top":
@@ -154,6 +164,8 @@ func main() {
 		cmdClaimCheck(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
+	case "feature":
+		cmdFeature(os.Args[2:])
 	case "index":
 		cmdIndex(os.Args[2:])
 	case "workflow":
@@ -166,6 +178,8 @@ func main() {
 		cmdSlack(os.Args[2:])
 	case "release":
 		cmdRelease(os.Args[2:])
+	case "release-lock":
+		cmdReleaseLock(os.Args[2:])
 	case "release-staleness":
 		cmdReleaseStaleness(os.Args[2:])
 	case "serve":
@@ -208,6 +222,8 @@ func main() {
 		cmdHooks(os.Args[2:])
 	case "hygiene":
 		cmdHygiene(os.Args[2:])
+	case "public-scrub":
+		cmdPublicScrub(os.Args[2:])
 	case "rungstats":
 		cmdRungStats(os.Args[2:])
 	case "swebench":
@@ -220,6 +236,8 @@ func main() {
 		cmdModel(os.Args[2:])
 	case "new-model":
 		cmdNewModel(os.Args[2:])
+	case "new-leaf":
+		cmdNewLeaf(os.Args[2:])
 	case "pull":
 		// Top-level alias for `fak model pull`: the Ollama-style run-by-name download.
 		cmdModelPull(os.Args[2:])
@@ -256,6 +274,8 @@ func main() {
 		cmdLoopIndexScorecard(os.Args[2:])
 	case "loop-map":
 		cmdLoopMap(os.Args[2:])
+	case "superloop":
+		cmdSuperloop(os.Args[2:])
 	case "experiments":
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":
@@ -302,12 +322,16 @@ func main() {
 		cmdBlockers(os.Args[2:])
 	case "product":
 		cmdProduct(os.Args[2:])
+	case "product-scorecard":
+		os.Exit(runProductScorecard(os.Stdout, os.Stderr, os.Args[2:]))
 	case "grafana":
 		cmdGrafana(os.Args[2:])
 	case "cachevalue":
 		cmdCachevalue(os.Args[2:])
 	case "marketing":
 		cmdMarketing(os.Args[2:])
+	case "news":
+		cmdNews(os.Args[2:])
 	case "nodeusage":
 		cmdNodeUsage(os.Args[2:])
 	case "callavoid":

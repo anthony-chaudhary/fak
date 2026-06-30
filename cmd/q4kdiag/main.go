@@ -1,6 +1,7 @@
+// Command q4kdiag runs the P1 Q4_K correctness diagnostic for a GGUF model.
 package main
 
-// q4kdiag — P1 correctness diagnostic. Loads Qwen3.6-27B-Q4_K_M via LoadModelQ4K, reports
+// It loads Qwen3.6-27B-Q4_K_M via LoadModelQ4K, reports
 // resident-q4k population/shapes, prefills the exact 22-token "Say OK." oracle prompt, and
 // prints the top-5 first-token logits. The llama.cpp q4_k_m oracle (and fak's Q8 path) put
 // 248068 (<think>) first at logit ~28.3; a sane resident-Q4_K path must agree closely.

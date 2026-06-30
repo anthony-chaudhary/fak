@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -39,7 +40,8 @@ import (
 //	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
 //	                                   default): cache/vCache ON + the kernel as the permission system
 //	                                   (--dangerously-skip-permissions). --guard=false / --skip-permissions=false opt out
-//	fak accounts list                  table of every seat: name, status, TRUE identity, creds, rehome, flags
+//	fak accounts list                  table of every seat: name, lifecycle, LOGIN status, TRUE identity, creds, rehome, flags
+//	fak accounts status [--json]       observable login report: closed status, can_serve, warnings, next action
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
 //	fak accounts sync                  project the registry into the dos + job roster views
@@ -50,7 +52,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -130,6 +132,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		}
 		printAccountsTable(stdout, reg)
 		return 0
+
+	case "status":
+		return accountsStatus(stdout, stderr, *registryPath, *homeDir, *asJSON)
 
 	case "resolve":
 		return accountsResolve(stdout, stderr, positional, *registryPath, *homeDir, *pin, *asEnv)
@@ -275,7 +280,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|list|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -286,7 +291,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "remove", "set-role", "set-default", "launch", "next", "list", "resolve", "pull",
+		"add", "remove", "set-role", "set-default", "launch", "next", "list", "status", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {
@@ -398,6 +403,26 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 	return 0
 }
 
+// accountsStatus emits the first-class login-status report. It is the machine-readable
+// sibling of `accounts list`: closed statuses, can_serve, warnings, and next actions live in
+// internal/accounts, not in table-rendering guesses.
+func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJSON bool) int {
+	reg, err := loadOrDiscover(registryPath, homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	reg = reg.Refresh()
+	report := reg.LoginReport()
+	if asJSON {
+		stdout.Write(mustJSON(report))
+		fmt.Fprintln(stdout)
+		return 0
+	}
+	printAccountsStatus(stdout, report)
+	return 0
+}
+
 // accountsReportHome prints the rehoming-chain notes for a resolved serving home and
 // warns when it carries no live credentials, returning the derived identity for any
 // further use. Shared by `accounts resolve`/`serve` and `accounts launch`.
@@ -409,9 +434,14 @@ func accountsReportHome(stderr io.Writer, home accounts.Home, chain []string) ac
 		}
 		fmt.Fprintf(stderr, "note: %q can't serve -> rehoming to %q\n", hop, to)
 	}
-	id := accounts.DeriveIdentity(home.Dir)
-	if !id.HasCreds {
-		fmt.Fprintf(stderr, "warning: %q (%s) has no live credentials — claude will prompt for /login\n", home.Name, home.Dir)
+	id := home.Identity
+	if st := home.LoginStatus(); st != accounts.LoginReady {
+		reason, action := accounts.LoginReasonAction(st, home)
+		if action != "" {
+			fmt.Fprintf(stderr, "warning: %q (%s) login=%s — %s; %s\n", home.Name, home.Dir, st, reason, action)
+		} else {
+			fmt.Fprintf(stderr, "warning: %q (%s) login=%s — %s\n", home.Name, home.Dir, st, reason)
+		}
 	}
 	return id
 }
@@ -731,8 +761,10 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 	// flag a seat that is really a duplicate of another (one rate-limit bucket presented
 	// as several) and a seat whose setup token belongs to a different login than its own.
 	rec := reg.Reconcile()
+	report := reg.LoginReport()
+	obsByName := loginObservationsByName(report)
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tSTATUS\tIDENTITY\tCREDS\tREHOME\tFLAG")
+	fmt.Fprintln(tw, "NAME\tSTATUS\tLOGIN\tIDENTITY\tCREDS\tREHOME\tFLAG")
 	dupes, twins := 0, 0
 	accountSet := map[string]bool{}
 	for _, h := range reg.Homes {
@@ -743,6 +775,10 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 		status := string(h.Status)
 		if status == "" {
 			status = "active"
+		}
+		login := string(h.LoginStatus())
+		if obs, ok := obsByName[h.Name]; ok {
+			login = string(obs.Status)
 		}
 		ident := h.Identity.Email
 		if ident == "" {
@@ -782,9 +818,10 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 				flags = append(flags, "token-twin -> "+strings.Join(si.TokenTwin, ","))
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", name, status, ident, creds, rehome, strings.Join(flags, "; "))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, status, login, ident, creds, rehome, strings.Join(flags, "; "))
 	}
 	tw.Flush()
+	printLoginSummary(w, report, "login")
 	// A one-line reconcile summary when there is anything to collapse or warn about, so
 	// the operator sees "N seats are really M accounts" instead of inferring it per row.
 	if dupes > 0 || twins > 0 {
@@ -798,4 +835,83 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 		}
 		fmt.Fprintln(w)
 	}
+}
+
+func printAccountsStatus(w io.Writer, report accounts.LoginReport) {
+	fmt.Fprintf(w, "# %s\n", report.Schema)
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tLOGIN\tCAN_SERVE\tACCOUNT\tIDENTITY\tROLES\tNEXT_ACTION\tWARNING")
+	for _, obs := range report.Seats {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			obs.Name,
+			obs.Status,
+			yesNo(obs.CanServe),
+			dash(obs.Account),
+			dash(obs.Email),
+			dash(strings.Join(obs.Roles, ",")),
+			dash(obs.NextAction),
+			dash(loginWarningsText(obs.Warnings)),
+		)
+	}
+	tw.Flush()
+	printLoginSummary(w, report, "summary")
+}
+
+func loginObservationsByName(report accounts.LoginReport) map[string]accounts.LoginObservation {
+	out := make(map[string]accounts.LoginObservation, len(report.Seats))
+	for _, obs := range report.Seats {
+		out[obs.Name] = obs
+	}
+	return out
+}
+
+func printLoginSummary(w io.Writer, report accounts.LoginReport, prefix string) {
+	fmt.Fprintf(w, "%s: %d/%d can serve; %d distinct account(s)",
+		prefix, report.Summary.CanServe, report.Summary.Total, report.Summary.DistinctAccounts)
+	for _, part := range sortedLoginStatusParts(report.Summary.ByStatus) {
+		fmt.Fprintf(w, "; %s", part)
+	}
+	if report.Summary.WarningSeats > 0 {
+		fmt.Fprintf(w, "; %d warning seat(s)", report.Summary.WarningSeats)
+	}
+	fmt.Fprintln(w)
+}
+
+func sortedLoginStatusParts(by map[string]int) []string {
+	keys := make([]string, 0, len(by))
+	for k := range by {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, by[k]))
+	}
+	return parts
+}
+
+func loginWarningsText(ws []accounts.LoginWarning) string {
+	if len(ws) == 0 {
+		return ""
+	}
+	out := make([]string, len(ws))
+	for i, w := range ws {
+		out[i] = string(w)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }

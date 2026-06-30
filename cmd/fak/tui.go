@@ -1091,7 +1091,7 @@ func filterTUIAgentGatewayNotes(notes []string) []string {
 	}
 	out := notes[:0]
 	for _, note := range notes {
-		if strings.Contains(note, "has no live credentials; Claude may prompt for login") {
+		if strings.Contains(note, "Claude may prompt for login") {
 			continue
 		}
 		out = append(out, note)
@@ -1138,26 +1138,49 @@ func resolveTUIAgentClaudeConfig(opt tuiAgentOptions, getenv func(string) string
 			}
 			notes = append(notes, fmt.Sprintf("%q can't serve; rehomed to %q", hop, to))
 		}
-		id := acct.DeriveIdentity(home.Dir)
-		if !id.HasCreds {
-			notes = append(notes, fmt.Sprintf("%q (%s) has no live credentials; Claude may prompt for login", home.Name, home.Dir))
+		if note := tuiLoginNote(home); note != "" {
+			notes = append(notes, note)
 		}
 		env = append(env, tuiAgentEnv{Name: "CLAUDE_CONFIG_DIR", Value: home.Dir, Source: "account:" + home.Name})
-		return env, home.Dir, "account:" + home.Name, home.Name, id.Email, notes, nil
+		return env, home.Dir, "account:" + home.Name, home.Name, home.Identity.Email, notes, nil
 	}
 	if dir := strings.TrimSpace(opt.ClaudeConfigDir); dir != "" {
 		id := acct.DeriveIdentity(dir)
-		if !id.HasCreds {
-			notes = append(notes, fmt.Sprintf("%s has no live credentials; Claude may prompt for login", dir))
+		if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
+			notes = append(notes, note)
 		}
 		env = append(env, tuiAgentEnv{Name: "CLAUDE_CONFIG_DIR", Value: dir, Source: "flag"})
 		return env, dir, "flag", "", id.Email, notes, nil
 	}
 	if dir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR")); dir != "" {
 		id := acct.DeriveIdentity(dir)
+		if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
+			notes = append(notes, note)
+		}
 		return nil, dir, "inherited-env", "", id.Email, notes, nil
 	}
-	return nil, guardClaudeConfigDir(), "default", "", "", notes, nil
+	dir := guardClaudeConfigDir()
+	id := acct.DeriveIdentity(dir)
+	if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
+		notes = append(notes, note)
+	}
+	return nil, dir, "default", "", id.Email, notes, nil
+}
+
+func tuiLoginNote(home acct.Home) string {
+	status := home.LoginStatus()
+	if status == acct.LoginReady {
+		return ""
+	}
+	reason, action := acct.LoginReasonAction(status, home)
+	subject := home.Dir
+	if home.Name != "" {
+		subject = fmt.Sprintf("%q (%s)", home.Name, home.Dir)
+	}
+	if action != "" {
+		return fmt.Sprintf("%s login=%s - %s; %s; Claude may prompt for login", subject, status, reason, action)
+	}
+	return fmt.Sprintf("%s login=%s - %s; Claude may prompt for login", subject, status, reason)
 }
 
 func tuiExecutable() string {

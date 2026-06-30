@@ -51,8 +51,8 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "dispatch route: %s (%s)\n", router.Verdict, okWord(router.OK))
 	fmt.Fprintf(&b, "  %s\n", router.Reason)
-	fmt.Fprintf(&b, "  routed=%d unrouted=%d skipped-human=%d coverage=%s\n",
-		router.Counts.Routed, router.Counts.Unrouted, router.Counts.SkippedHumanBlocked, coverageWord(router.Coverage))
+	fmt.Fprintf(&b, "  routed=%d steps=%d unrouted=%d skipped=%d coverage=%s\n",
+		router.Counts.Routed, router.Counts.RoutedStepBudget, router.Counts.Unrouted, router.Counts.SkippedHumanBlocked, coverageWord(router.Coverage))
 	lanes := make([]string, 0, len(router.Lanes))
 	for lane := range router.Lanes {
 		lanes = append(lanes, lane)
@@ -60,12 +60,32 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 	sort.Strings(lanes)
 	for _, lane := range lanes {
 		grp := router.Lanes[lane]
-		fmt.Fprintf(&b, "  %-16s %3d issue(s): %s\n", lane, grp.Count, intList(grp.Issues))
+		fmt.Fprintf(&b, "  %-16s %3d issue(s) %3d step(s): %s\n", lane, grp.Count, grp.StepBudget, intList(grp.Issues))
 	}
 	if len(router.SkippedHumanBlocked) > 0 {
-		fmt.Fprintf(&b, "  skipped-human-blocked: %d\n", len(router.SkippedHumanBlocked))
+		fmt.Fprintf(&b, "  skipped: %d", len(router.SkippedHumanBlocked))
+		if summary := skippedReasonSummary(router.Counts.SkippedByReason); summary != "" {
+			fmt.Fprintf(&b, " (%s)", summary)
+		}
+		fmt.Fprintln(&b)
 	}
 	return b.String()
+}
+
+func skippedReasonSummary(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	reasons := make([]string, 0, len(counts))
+	for reason := range counts {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	parts := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		parts = append(parts, fmt.Sprintf("%s=%d", reason, counts[reason]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func coverageWord(c dispatchtick.RouterCoverage) string {

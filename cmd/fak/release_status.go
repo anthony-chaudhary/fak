@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const releaseStatusSchema = "fleet-release-status/1"
@@ -198,6 +200,7 @@ func releaseStatusRunPythonJSON(root string, timeout time.Duration, script strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, python, append([]string{scriptPath}, args...)...)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -660,6 +663,7 @@ func releaseStatusRunExternalJSON(root string, timeout time.Duration, name strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w (%s)", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -688,6 +692,7 @@ func releaseStatusGitOutput(root string, args ...string) string {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

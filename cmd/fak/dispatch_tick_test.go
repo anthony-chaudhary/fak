@@ -108,6 +108,70 @@ func dispatchHappyHelper(t *testing.T) func(root string, args ...string) (map[st
 	}
 }
 
+func TestDispatchCodexProcessPIDsCollapseNodeWrapperAndNativeChild(t *testing.T) {
+	rows := []dispatchCodexProcessRow{
+		{
+			PID:     10,
+			PPID:    1,
+			Name:    "node.exe",
+			Cmdline: `C:\Program Files\nodejs\node.exe C:\Users\USER\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js`,
+		},
+		{PID: 11, PPID: 10, Name: "codex.exe", Cmdline: `C:\...\codex.exe`},
+		{
+			PID:     20,
+			PPID:    1,
+			Name:    "node",
+			Cmdline: "/usr/bin/node /x/node_modules/@openai/codex/bin/codex.js",
+		},
+		{PID: 30, PPID: 1, Name: "node", Cmdline: "/usr/bin/node /x/not-codex.js"},
+	}
+	got := dispatchCodexProcessPIDs(rows)
+	if len(got) != 2 || !got[11] || !got[20] {
+		t.Fatalf("codex pids = %v, want native child 11 and orphan wrapper 20", got)
+	}
+}
+
+func TestDispatchCodexSeatIsSingleAmbientLogin(t *testing.T) {
+	old := dispatchProbeCodexProcessRows
+	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{{PID: 42, Name: "codex.exe"}}, nil
+	}
+	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
+
+	seat := dispatchPreflightSeat(t.TempDir(), io.Discard, "codex")
+	if seat.Total == nil || *seat.Total != 1 {
+		t.Fatalf("codex seat total = %v, want 1", seat.Total)
+	}
+	if seat.Free == nil || *seat.Free != 0 || seat.Leased == nil || *seat.Leased != 1 || !seat.Depleted {
+		t.Fatalf("codex seat = %+v, want free=0 leased=1 depleted", seat)
+	}
+	if got := dispatchProductWorkerCount(t.TempDir(), "codex"); got != 1 {
+		t.Fatalf("codex product worker count = %d, want ambient process to consume cap", got)
+	}
+}
+
+func TestDispatchCodexBusyAmbientSeatRefusesSpawn(t *testing.T) {
+	withDispatchJSONHelper(t, func(root string, args ...string) (map[string]any, error) {
+		return map[string]any{"ok": true}, nil
+	})
+	old := dispatchProbeCodexProcessRows
+	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{{PID: 42, Name: "codex.exe"}}, nil
+	}
+	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
+
+	got, err := dispatchPreflight(t.TempDir(), io.Discard, 4, "engineering", "codex")
+	if err != nil {
+		t.Fatalf("dispatchPreflight: %v", err)
+	}
+	if got["verdict"] != dispatchtick.PreflightRefuseNoSeat {
+		t.Fatalf("verdict = %v, want REFUSE_NO_SEAT; payload=%v", got["verdict"], got)
+	}
+	if got["cap"] != 1 {
+		t.Fatalf("cap = %v, want 1", got["cap"])
+	}
+}
+
 func TestDispatchReadAccountRosterNativeLoadsRegistryAndPolicyWeights(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLEET_REG_DIR", "")
@@ -135,6 +199,14 @@ func TestDispatchReadAccountRosterNativeLoadsRegistryAndPolicyWeights(t *testing
 				"config_dir": "C:\\Users\\U\\.claude-hidden",
 				"available":  true,
 			},
+			map[string]any{
+				"account":      ".claude-needslogin",
+				"tag":          "needslogin",
+				"config_dir":   "C:\\Users\\U\\.claude-needslogin",
+				"available":    true,
+				"login_status": "needs_login",
+				"can_serve":    false,
+			},
 		},
 	})
 	writeDispatchJSONFixture(t, filepath.Join(root, "tools", "_registry", "accounts_policy.json"), map[string]any{
@@ -157,6 +229,10 @@ func TestDispatchReadAccountRosterNativeLoadsRegistryAndPolicyWeights(t *testing
 	}
 	if byTag["zai2"].RouteWeight != 5 || byTag["zai2"].Product != "opencode" || byTag["zai2"].ModelTier != 2 {
 		t.Fatalf("zai2 row = %+v, want policy-weighted inferred opencode tier 2", byTag["zai2"])
+	}
+	if byTag["needslogin"].Available || byTag["needslogin"].LoginStatus != "needs_login" ||
+		byTag["needslogin"].BlockReason == "" {
+		t.Fatalf("needslogin row = %+v, want login-gated blocked row", byTag["needslogin"])
 	}
 	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
 	if !route.OK || route.Account.Tag != "day26" {

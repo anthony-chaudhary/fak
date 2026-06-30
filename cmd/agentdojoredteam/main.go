@@ -50,6 +50,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agentdojo"
 	"github.com/anthony-chaudhary/fak/internal/harvest"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func main() {
@@ -412,7 +413,9 @@ func buildProvenance() buildMetadata {
 		}
 	}
 	if meta.FakCommit == "unknown" {
-		if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
+		cmd := exec.Command("git", "rev-parse", "HEAD")
+		windowgate.ConfigureBackgroundCommand(cmd)
+		if out, err := cmd.Output(); err == nil {
 			meta.FakCommit = strings.TrimSpace(string(out))
 		}
 	}
@@ -427,6 +430,7 @@ func buildProvenance() buildMetadata {
 
 func gitTreeModifiedIn(dir string) string {
 	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = dir
 	if out, err := cmd.Output(); err == nil {
 		if strings.TrimSpace(string(out)) == "" {
@@ -436,6 +440,7 @@ func gitTreeModifiedIn(dir string) string {
 	}
 
 	cmd = exec.Command("git", "diff-index", "--quiet", "HEAD", "--")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	cmd.Dir = dir
 	switch err := cmd.Run(); {
 	case err == nil:

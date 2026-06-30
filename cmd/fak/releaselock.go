@@ -16,14 +16,6 @@ import (
 // must take. It exists so the scheduled auto-cut and the human /release wrap
 // their critical section in the SAME lock (issue #1391), and so an operator can
 // diagnose a stuck lock.
-//
-// Wiring residual: register this in cmd/fak/main.go's switch with one line —
-//
-//	case "release-lock":
-//		cmdReleaseLock(os.Args[2:])
-//
-// (main.go is outside this lane's commit set; the wiring line lands in a
-// follow-up once main.go is quiescent.)
 func cmdReleaseLock(argv []string) { os.Exit(runReleaseLock(os.Stdout, os.Stderr, argv)) }
 
 func runReleaseLock(stdout, stderr io.Writer, argv []string) int {

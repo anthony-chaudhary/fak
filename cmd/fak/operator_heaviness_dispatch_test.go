@@ -72,8 +72,8 @@ summary = "stay on trunk"
 [reasons.PUBLIC_LEAK]
 summary = "scrub public copy"
 `)
-	writeHeavinessDispatchFile(t, root, "llms.txt", `- Steerability scorecard: run fak steering.
-- Operator-heaviness scorecard: heaviness_pressure via fak operator heaviness.
+	writeHeavinessDispatchFile(t, root, "llms.txt", `- [Steerability scorecard](docs/STEERABILITY-SCORECARD.md): run fak steering.
+- [Operator-heaviness scorecard](docs/OPERATOR-HEAVINESS.md): heaviness_pressure via fak operator heaviness.
 `)
 	return root
 }

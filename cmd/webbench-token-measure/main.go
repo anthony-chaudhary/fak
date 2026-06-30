@@ -1,4 +1,4 @@
-// webbench-token-measure measures actual token usage from model API runs.
+// Command webbench-token-measure measures actual token usage from model API runs.
 // This is the real measurement counterpart to the theoretical cost arm calculations.
 //
 // Usage:

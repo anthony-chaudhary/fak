@@ -69,6 +69,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	accounts := fs.String("accounts", "", "load an account roster (the switcher) and bind each routed model id to a provider/account/upstream target")
 	accountsDump := fs.Bool("accounts-dump", false, "write the built-in DefaultRoster (the account-switcher starter) to stdout")
 	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
+	accountsStatus := fs.String("accounts-status", "", "validate an account roster and print credential readiness (env presence only; no network, no secret values)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -105,7 +106,21 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "OK  %s  (roster valid; %d account(s), %d binding(s), default -> %s)\n\n%s",
-			*accountsCheck, len(r.Accounts), len(r.Bindings), orDash(r.Default), accountSurface(r))
+			*accountsCheck, len(r.Accounts), len(r.Bindings), orDash(r.Default), accountSurface(r, r.Readiness(nil)))
+		return 0
+	case *accountsStatus != "":
+		r, err := modelroute.LoadRoster(*accountsStatus)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		report := r.Readiness(nil)
+		if *asJSON {
+			b, _ := json.MarshalIndent(report, "", "  ")
+			fmt.Fprintln(stdout, string(b))
+			return 0
+		}
+		fmt.Fprint(stdout, accountReadinessSurface(report))
 		return 0
 	}
 
@@ -285,7 +300,8 @@ func printTarget(w io.Writer, role string, t modelroute.Target) {
 // accountSurface renders a roster's accounts + bindings as an operator-readable table
 // for `--accounts-check`, resolving each binding so the whole switch is visible at a
 // glance. It never prints a secret - only the credential env-var name.
-func accountSurface(r modelroute.Roster) string {
+func accountSurface(r modelroute.Roster, report modelroute.AccountReadinessReport) string {
+	readyByID := readinessByAccount(report)
 	var sb strings.Builder
 	sb.WriteString("accounts:\n")
 	for _, a := range r.Accounts {
@@ -301,7 +317,13 @@ func accountSurface(r modelroute.Roster) string {
 		if cred == "" {
 			cred = "-"
 		}
-		sb.WriteString(fmt.Sprintf("  %-16s %-16s [%s] key=$%-20s %s\n", a.ID, string(a.Kind), loc, cred, base))
+		status, credState := "-", "-"
+		if obs, ok := readyByID[a.ID]; ok {
+			status = string(obs.Status)
+			credState = string(obs.Credential)
+		}
+		sb.WriteString(fmt.Sprintf("  %-16s %-16s status=%-18s credential=%-12s [%s] key=$%-20s %s\n",
+			a.ID, string(a.Kind), status, credState, loc, cred, base))
 	}
 	sb.WriteString("\nbindings (model id -> account / upstream wire model):\n")
 	for _, b := range r.Bindings {
@@ -315,10 +337,48 @@ func accountSurface(r modelroute.Roster) string {
 	if r.Default != "" {
 		sb.WriteString(fmt.Sprintf("\n  (any unbound id) -> default account %q\n", r.Default))
 	}
+	sb.WriteString(fmt.Sprintf("\ncredential readiness: %d/%d ready; needs_credential=%d; local=%d remote=%d\n",
+		report.Summary.Ready, report.Summary.Total, report.Summary.NeedsCredential,
+		report.Summary.Local, report.Summary.Remote))
 	sb.WriteString("\nresidency: a 'local' route is residency-exempt (on-box); a 'remote' route is gated " +
 		"by the engine-residency floor (a tenant/sensitive payload bound for it is denied). The credential is the\n" +
 		"named env var, dereferenced only at dispatch - never stored here.\n")
 	return sb.String()
+}
+
+func accountReadinessSurface(report modelroute.AccountReadinessReport) string {
+	var sb strings.Builder
+	sb.WriteString("== fak route accounts status ==\n")
+	sb.WriteString(fmt.Sprintf("schema: %s\n", report.Schema))
+	sb.WriteString("accounts:\n")
+	for _, row := range report.Rows {
+		models := strings.Join(row.BoundModels, ",")
+		if models == "" {
+			models = "-"
+		}
+		def := ""
+		if row.Default {
+			def = " default"
+		}
+		next := row.NextAction
+		if next == "" {
+			next = "-"
+		}
+		sb.WriteString(fmt.Sprintf("  %-16s %-16s status=%-18s credential=%-12s models=%-24s%s next=%s\n",
+			row.ID, string(row.Kind), string(row.Status), string(row.Credential), models, def, next))
+	}
+	sb.WriteString(fmt.Sprintf("summary: %d/%d ready; needs_credential=%d; local=%d remote=%d\n",
+		report.Summary.Ready, report.Summary.Total, report.Summary.NeedsCredential,
+		report.Summary.Local, report.Summary.Remote))
+	return sb.String()
+}
+
+func readinessByAccount(report modelroute.AccountReadinessReport) map[string]modelroute.AccountReadinessObservation {
+	out := make(map[string]modelroute.AccountReadinessObservation, len(report.Rows))
+	for _, row := range report.Rows {
+		out[row.ID] = row
+	}
+	return out
 }
 
 // routeJSON renders the decision (and any reduction) as a stable JSON object.

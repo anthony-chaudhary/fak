@@ -110,12 +110,15 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 
 	rc := 0
 	for _, f := range fresh {
-		body := fmt.Sprintf("Auto-filed by `fak dispatch audit`.\n\n- outcome: `%s`\n- backend: `%s`\n- code-site: `%s`\n- fingerprint: `%s`\n- first log: `%s`\n\n%s",
+		body := fmt.Sprintf("Auto-filed by `fak dispatch audit`.\n\n- dispatchability: `triage_only`\n- outcome: `%s`\n- backend: `%s`\n- code-site: `%s`\n- fingerprint: `%s`\n- first log: `%s`\n\n%s",
 			f.Outcome, f.Backend, f.CodeSite, f.Fingerprint, f.Log, f.Detail)
-		cmd := exec.Command("gh", "issue", "create",
+		args := []string{"issue", "create",
 			"--title", f.Title,
-			"--body", body,
-			"--label", "dispatch", "--label", "observability")
+			"--body", body}
+		for _, label := range dispatchAuditIssueLabels() {
+			args = append(args, "--label", label)
+		}
+		cmd := exec.Command("gh", args...)
 		configureDispatchHelperCommand(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -130,6 +133,10 @@ func fileAuditFindings(stdout, stderr io.Writer, runsDir string, rep dispatchaud
 		}
 	}
 	return rc
+}
+
+func dispatchAuditIssueLabels() []string {
+	return []string{"dispatch", "observability", "needs-triage", "triage-only"}
 }
 
 // openIssueTitles scans `gh issue list` for open titles so the dedup can avoid a

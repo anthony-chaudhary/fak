@@ -388,25 +388,25 @@ func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
 // prints the session's adjudication + journal summary (unless quiet), flushes the durable
 // trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
 // a non-silent error so a clean child exit never hides a downed adjudication boundary.
-func runGuardChildAndReport(child *exec.Cmd, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
+func runGuardChildAndReport(child *exec.Cmd, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
 	runErr := child.Run()
-	finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+	finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
 	var extraEnv [][2]string
 	restarts := 0
 	for {
 		child := buildGuardChild(command, injected, pinUpstream, extraEnv...)
 		wait := make(chan error, 1)
 		if err := child.Start(); err != nil {
-			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
 			return
 		}
 		go func() { wait <- child.Wait() }()
 		select {
 		case runErr := <-wait:
-			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
 			return
 		case ev := <-restarter.events:
 			if restarter.limit > 0 && restarts >= restarter.limit {
@@ -414,7 +414,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintf(restarter.stderr, "fak guard: restart limit %d reached; leaving child on drained session %s\n", restarter.limit, ev.FromTraceID)
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
 				return
 			}
 			restarts++
@@ -487,7 +487,7 @@ func formatVCacheSnapshotPointer(turns int, path string) string {
 		turns, path)
 }
 
-func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
+func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
 
 	// Tear the gateway down and report what the kernel decided this session.
 	cancel()
@@ -495,8 +495,9 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	if !quiet {
 		fmt.Fprintln(os.Stderr)
 		sum := srv.AdjudicationSummary()
-		fmt.Fprint(os.Stderr, formatAuditSummary(sum))
-		fmt.Fprint(os.Stderr, formatAmplification(srv.KernelCounters(), sum))
+		kc := srv.KernelCounters()
+		fmt.Fprint(os.Stderr, formatAuditSummary(sum, kc))
+		fmt.Fprint(os.Stderr, formatAmplification(kc, sum))
 		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
@@ -504,6 +505,7 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 	if stats.Turns > 0 {
 		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
 	}
+	appendObservedCacheSavings("guard", provider, agentName, srv.AdjudicationSummary())
 	// Persist this session's OBSERVED provider-cache window so a later `fak vcache score`
 	// (a separate process) reports the REALIZED multiplier from real traffic instead of the
 	// synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session,

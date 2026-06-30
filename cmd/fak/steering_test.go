@@ -111,9 +111,9 @@ const sampleSteerJSON = `{
     "soft_signals": 5,
     "index_by_group": {"modularity": 81.5, "coupling": 99.0, "navigability": 68.0, "correction": 97.3},
     "breakdown": [
-      {"kpi": "func_size_dist", "group": "modularity", "score": 49, "debt": 0, "soft": 0, "detail": "no soft"},
-      {"kpi": "package_doc_frac", "group": "navigability", "score": 68, "debt": 0, "soft": 1, "detail": "146/214 packages documented"},
-      {"kpi": "god_file_rate", "group": "modularity", "score": 83, "debt": 0, "soft": 1, "detail": "3/858 files > 1500 lines"}
+      {"kpi": "func_size_dist", "group": "modularity", "score": 49, "debt": 0, "soft": 0, "detail": "no soft", "index_gain_to_clean": 5.1},
+      {"kpi": "package_doc_frac", "group": "navigability", "score": 68, "debt": 0, "soft": 1, "detail": "146/214 packages documented", "index_gain_to_clean": 3.2},
+      {"kpi": "god_file_rate", "group": "modularity", "score": 83, "debt": 0, "soft": 1, "detail": "3/858 files > 1500 lines", "index_gain_to_clean": 1.2}
     ]
   },
   "kpis": [
@@ -198,6 +198,9 @@ func TestBuildSteeringUpdateModes(t *testing.T) {
 	}
 	if !foundGroup {
 		t.Fatalf("report should include the per-group index line; lines=%v", rp.Lines)
+	}
+	if !strings.Contains(strings.Join(rp.Lines, "\n"), "+3.2 index pts") {
+		t.Fatalf("report should include clean-gain guidance; lines=%v", rp.Lines)
 	}
 
 	// alert: ACTION verdict, reason folded into Detail, actions present.

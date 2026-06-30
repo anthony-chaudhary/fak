@@ -32,6 +32,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/sessionobs"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func cmdSessions(argv []string) { os.Exit(runSessions(os.Stdout, os.Stderr, argv)) }
@@ -474,6 +475,7 @@ func (g *gitWitness) survived(sha string) bool {
 	// `git merge-base --is-ancestor <sha> HEAD` exits 0 iff sha is reachable from HEAD.
 	// A bad/ambiguous short SHA errors (non-zero) and is treated as not-survived.
 	cmd := exec.Command("git", "-C", g.root, "merge-base", "--is-ancestor", sha, "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	err := cmd.Run()
 	v := err == nil
 	g.cache[sha] = v
@@ -502,6 +504,7 @@ func writeCorpus(path string, corpus []sessionobs.Record) error {
 // (the CorpusCommitted pipeline fact). Reads `git ls-files` for the conventional path.
 func corpusIsCommitted(root string) bool {
 	cmd := exec.Command("git", "-C", root, "ls-files", "experiments/sessionobs/")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	return err == nil && len(strings.TrimSpace(string(out))) > 0
 }

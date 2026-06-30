@@ -33,7 +33,7 @@ func TestRunVCacheObserveTelemetry(t *testing.T) {
 		t.Fatalf("exit %d, stderr=%s", code, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"base provider cache", "M5 governor", "OBSERVED", "DECISION", "false-warm"} {
+	for _, want := range []string{"owner split", "provider", "prompt_cache", "fak", "NOT_OBSERVED", "base provider cache", "M5 governor", "OBSERVED", "DECISION", "false-warm"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("output missing %q:\n%s", want, got)
 		}
@@ -62,6 +62,15 @@ func TestRunVCacheObserveJSONReconciles(t *testing.T) {
 	}
 	if len(rep.Panels) != 9 {
 		t.Fatalf("want 9 panels, got %d", len(rep.Panels))
+	}
+	if len(rep.OwnerSlices) != 2 {
+		t.Fatalf("want provider/fak owner slices, got %d", len(rep.OwnerSlices))
+	}
+	if rep.OwnerSlices[0].Owner != "provider" || rep.OwnerSlices[0].Mechanism != "prompt_cache" || rep.OwnerSlices[0].Provenance != vcacheobserve.Observed {
+		t.Fatalf("provider owner slice not explicit: %+v", rep.OwnerSlices[0])
+	}
+	if rep.OwnerSlices[1].Owner != "fak" || rep.OwnerSlices[1].Provenance != vcacheobserve.NotObserved || rep.OwnerSlices[1].SavedTokenEquiv != 0 {
+		t.Fatalf("fak owner slice should be unobserved zero, got %+v", rep.OwnerSlices[1])
 	}
 }
 

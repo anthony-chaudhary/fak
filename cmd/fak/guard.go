@@ -778,10 +778,10 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
 		return
 	}
-	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
+	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
@@ -1244,7 +1244,7 @@ func formatJournalSummary(j *journal.Journal, seq0 uint64) string {
 // is a kernel decision about a result the agent already ran, not a proposed call). It
 // is one honest count: every number came from the same operation counters /metrics
 // exposes, so the line can never overstate the protection.
-func formatAuditSummary(sum gateway.AdjudicationSummary) string {
+func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counters) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak guard: %d kernel decision(s) — %d allowed, %d denied, %d repaired, %d quarantined",
 		sum.Total, sum.Allowed, sum.Denied, sum.Transformed, sum.Quarantined)
@@ -1261,27 +1261,15 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		fmt.Fprintf(&b, ", %d errored", sum.Errored)
 	}
 	b.WriteByte('\n')
-	// Make the provider prompt-cache reuse legible AND honest. This is ANTHROPIC's cache:
-	// `fak guard` forwards the client's cache_control prefix byte-for-byte, so the rebate
-	// would land with or without fak — fak's contribution is PRESERVING it (not bursting the
-	// prefix) plus the separate tool-floor-prune line, never AUTHORING the saving. So we name
-	// the baseline explicitly on the line — the same turns billed with NO cache, every prompt
-	// token at the full input price — which answers "saved vs WHAT?" instead of leaving the
-	// reader to know "uncached cost" by heart. NET of the write premium (a cold cache write
-	// bills ABOVE an uncached read), so a write-dominated session reads "not yet repaid" until
-	// the reads catch up. Same engine /metrics (fak_vcache_saved_token_equiv) and `fak vcache
-	// observe` report; raw cache_read/cache_creation counts stay on /metrics and --log.
-	if sum.CachedPromptTokens > 0 || sum.CacheCreationTokens > 0 {
-		net := sum.ProviderCacheNetSavings()
-		billed := gateway.HumanTokenEquiv(net.ActualTokenEquiv)
-		baseline := gateway.HumanTokenEquiv(net.BaselineTokenEquiv)
-		if net.SavedTokenEquiv > 0 {
-			fmt.Fprintf(&b, "fak guard: prompt-cache saving — input billed ~%s of ~%s token-equiv (the no-cache price) → the provider cache saved ~%s (%.0f%% off), net of the cache-write premium, across %d cached turn(s). fak forwarded the cache_control prefix intact; it relays this provider-reported value and did not author this saving.\n",
-				billed, baseline, gateway.HumanTokenEquiv(net.SavedTokenEquiv), net.SavedPct, sum.CachedTurns)
-		} else {
-			fmt.Fprintf(&b, "fak guard: prompt-cache saving — input billed ~%s of ~%s token-equiv (the no-cache price); the cache has not yet repaid its write premium (net ~%s so far — a cold write the later reads have not paid back), across %d cached turn(s). fak forwarded the cache_control prefix intact.\n",
-				billed, baseline, gateway.HumanTokenEquiv(net.SavedTokenEquiv), sum.CachedTurns)
-		}
+	cacheSavings := sum.MechanismSavings()
+	if len(kcOpt) > 0 && kcOpt[0].VDSOHits > 0 {
+		cacheSavings.FakVDSOAvoidedCalls = uint64(kcOpt[0].VDSOHits)
+	}
+	if line := formatCacheAttribution(cacheSavings); line != "" {
+		b.WriteString(line)
+	}
+	if line := formatFakSliceDiagnostic(sum); line != "" {
+		b.WriteString(line)
 	}
 	if sum.CompactionFired > 0 || sum.CompactionBailed > 0 || sum.CompactionOff > 0 {
 		// WITNESSED half only: what fak attempted and removed. The OBSERVED post-fire cache_read
@@ -1367,6 +1355,74 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		}
 	}
 	return b.String()
+}
+
+func formatCacheAttribution(s gateway.MechanismSavings) string {
+	if !s.HasAnyTokenActivity() && s.FakVDSOAvoidedCalls == 0 {
+		return ""
+	}
+	provider := s.ProviderTokenEquiv()
+	fak := s.FakTokenEquiv()
+	total := s.TotalTokenEquiv()
+	var b strings.Builder
+	if total > 0 {
+		fmt.Fprintf(&b, "fak guard: avoided-spend attribution — provider ~%s (%.0f%%) + fak ~%s (%.0f%%) = ~%s token-equiv",
+			gateway.HumanTokenEquiv(provider), provider/total*100,
+			gateway.HumanTokenEquiv(fak), fak/total*100,
+			gateway.HumanTokenEquiv(total))
+	} else {
+		fmt.Fprintf(&b, "fak guard: cache attribution — provider net ~%s + fak ~%s = ~%s token-equiv (not yet positive)",
+			gateway.HumanTokenEquiv(provider),
+			gateway.HumanTokenEquiv(fak),
+			gateway.HumanTokenEquiv(total))
+	}
+	fmt.Fprintf(&b, " [provider read rebate %s, write premium %s; fak compaction %s, KV-prefix %s",
+		gateway.HumanTokenEquiv(s.ProviderPromptCacheReadTokenEquiv),
+		gateway.HumanTokenEquiv(s.ProviderPromptCacheWritePremiumTokenEquiv),
+		gateway.HumanTokenEquiv(float64(s.FakCompactionShedTokens)),
+		gateway.HumanTokenEquiv(float64(s.FakKVPrefixReusedTokens)))
+	if s.FakVDSOAvoidedCalls > 0 {
+		fmt.Fprintf(&b, "; vDSO %d avoided call(s)", s.FakVDSOAvoidedCalls)
+	}
+	b.WriteString("]. provider is OBSERVED/provider-relayed; fak is WITNESSED/fak-authored.\n")
+	return b.String()
+}
+
+func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
+	savings := sum.MechanismSavings()
+	if savings.FakTokenEquiv() > 0 || !fakSliceDiagnosticRelevant(sum) {
+		return ""
+	}
+	reasons := make([]string, 0, 3)
+	if sum.CompactionAnchorStarved > 0 {
+		reasons = append(reasons, fmt.Sprintf("anchor-starved x%d (protected prefix exceeds the %d-tok compaction budget; re-anchor/M2 needed)", sum.CompactionAnchorStarved, sum.CompactionBudget))
+	}
+	switch {
+	case sum.KVPrefixPromptTokens == 0:
+		reasons = append(reasons, "no in-kernel KV-prefix multi-turn traffic observed")
+	case sum.KVPrefixReusedTokens == 0:
+		reasons = append(reasons, "no multi-turn KV-prefix reuse observed")
+	}
+	if sum.CompactionBudget <= 0 && sum.CompactionOff > 0 {
+		reasons = append(reasons, "compaction disabled")
+	}
+	if (sum.CachedPromptTokens > 0 || sum.CacheCreationTokens > 0) && sum.CompactionAnchorStarved == 0 {
+		reasons = append(reasons, "M2/default anchor gate did not produce a fak-authored saving on this provider-cache session")
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "M2/default-on cache gates did not fire on this traffic")
+	}
+	return fmt.Sprintf("fak guard: fak-slice diagnostic — F is ~0 because %s.\n", strings.Join(reasons, "; "))
+}
+
+func fakSliceDiagnosticRelevant(sum gateway.AdjudicationSummary) bool {
+	return sum.CachedPromptTokens > 0 ||
+		sum.CacheCreationTokens > 0 ||
+		sum.CompactionFired > 0 ||
+		sum.CompactionBailed > 0 ||
+		sum.CompactionOff > 0 ||
+		sum.CompactionAnchorStarved > 0 ||
+		sum.KVPrefixPromptTokens > 0
 }
 
 // formatAmplification renders the avoided-call amplification headline for the guard

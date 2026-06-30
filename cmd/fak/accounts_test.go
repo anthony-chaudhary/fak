@@ -53,8 +53,50 @@ func TestRunAccountsDiscoverAndList(t *testing.T) {
 	if !strings.Contains(got, "gem8@example.test") {
 		t.Fatalf("list missing identity:\n%s", got)
 	}
+	if !strings.Contains(got, "LOGIN") || !strings.Contains(got, "ready") {
+		t.Fatalf("list should expose the login status column:\n%s", got)
+	}
 	if !strings.Contains(got, "WARN name<>identity") {
 		t.Fatalf("list should flag the q-seat name-lie:\n%s", got)
+	}
+}
+
+func TestRunAccountsStatusReport(t *testing.T) {
+	home := t.TempDir()
+	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
+	needsLogin := mkHome(t, home, ".claude-needs-seat", "needs@example.test", false)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"ready-seat","dir":"` + jsonPath(ready) + `"},` +
+		`{"name":"needs-seat","dir":"` + jsonPath(needsLogin) + `"},` +
+		`{"name":"old","status":"tombstoned","rehome_to":"ready-seat"}` +
+		`],"roles":{"active":"ready-seat","anchor":"ready-seat"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"status", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("status rc=%d stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"fak.accounts.login.v1", "ready-seat", "needs_login", "tombstoned", "summary:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status output missing %q:\n%s", want, got)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	if rc := runAccounts(&out, &errb, []string{"status", "--json", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("status --json rc=%d stderr=%s", rc, errb.String())
+	}
+	j := out.String()
+	for _, want := range []string{`"schema": "fak.accounts.login.v1"`, `"status": "needs_login"`, `"can_serve": 1`} {
+		if !strings.Contains(j, want) {
+			t.Fatalf("status --json missing %q:\n%s", want, j)
+		}
 	}
 }
 
@@ -182,7 +224,7 @@ func TestRunAccountsVersion(t *testing.T) {
 		t.Fatalf("version rc=%d stderr=%s", rc, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"fak ", "fak-config-homes/v1", "remove", "version"} {
+	for _, want := range []string{"fak ", "fak-config-homes/v1", "remove", "status", "version"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("version output missing %q:\n%s", want, got)
 		}

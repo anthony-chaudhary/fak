@@ -2,8 +2,8 @@ package main
 
 // `fak slack` — the one place to DEBUG and USE fak's Slack surface.
 //
-// fak posts to ~ten Slack channels (scoreboard, blockers, bench, dispatch, dojo,
-// marketing, node-usage, product, steering) and bridges one (chatrelay). Each resolves a
+// fak posts to Slack channels (scoreboard, blockers, bench, dispatch, dojo, marketing,
+// news, node-usage, product, steering) and bridges one (chatrelay). Each resolves a
 // bot token and a channel id from an env var or a gitignored .env.slack.local, with
 // surface-specific fallbacks. When a post silently fails the operator had no way to see
 // WHICH token/channel a surface would use or WHETHER the token even works — the failure
@@ -12,6 +12,8 @@ package main
 //	fak slack check            # resolution report for every surface (offline)
 //	fak slack check --auth     # + call auth.test per token: does it actually work?
 //	fak slack check --json     # machine-readable, for a CI gate or a dashboard
+//	fak slack walk             # registry + refresh command map for every surface
+//	fak slack refresh          # dry-run every locally refreshable feed
 //	fak slack send --channel C0ABC123 --text "deploy is green"   # ad-hoc message
 //	echo "hi" | fak slack send --channel C0ABC123 --text -        # text from stdin
 //
@@ -75,6 +77,7 @@ var slackSurfaces = []slackSurface{
 	{"dojo", "dojo rollups / trends", "FAK_DOJO_TOKEN", "FAK_DOJO_CHANNEL", dojopost.ChannelDefault, false},
 	{"backlog", "issue triage + bottleneck digest", "", "FAK_BACKLOG_CHANNEL", "", false},
 	{"marketing", "marketing updates feed", "FAK_MARKETING_TOKEN", "FAK_MARKETING_CHANNEL", "", true},
+	{"news", "external industry / SOTA / OSS research updates", "", "FAK_NEWS_CHANNEL", "", false},
 	{"node-usage", "compute-node usage snapshots", "FAK_NODE_USAGE_TOKEN", "FAK_NODE_USAGE_CHANNEL", nodeusagepost.ChannelDefault, false},
 	{"steering", "steering-guard surface", "", "FAK_STEERING_CHANNEL", steeringChannelDefault, false},
 	{"chatrelay", "Slack <-> served-model chat bridge", "FAK_CHATRELAY_TOKEN", "FAK_CHATRELAY_CHANNEL", "", true},
@@ -138,16 +141,18 @@ type surfaceReport struct {
 	tokenValue string // raw token, for the auth probe; never serialized
 }
 
-// cmdSlack routes `fak slack <check|send>`; a bare `fak slack` runs the check report so the
+// cmdSlack routes `fak slack <check|health|beat|walk|refresh|send>`; a bare `fak slack` runs the check report so the
 // most common debug action takes zero extra typing.
 func cmdSlack(argv []string) {
 	if len(argv) == 0 {
 		os.Exit(runSlackCheck(os.Stdout, os.Stderr, nil))
 	}
-	dispatchSubcommands("slack", "check | health | beat | send", argv,
+	dispatchSubcommands("slack", "check | health | beat | walk | refresh | send", argv,
 		subcommand{"check", runSlackCheck},
 		subcommand{"health", runSlackHealth},
 		subcommand{"beat", runSlackBeat},
+		subcommand{"walk", runSlackWalk},
+		subcommand{"refresh", runSlackRefresh},
 		subcommand{"send", runSlackSend},
 	)
 }

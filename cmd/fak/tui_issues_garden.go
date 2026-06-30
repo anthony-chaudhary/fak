@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func loadTUIGarden(path, workspace string, deep bool, timeout time.Duration) (gardenbundle.Payload, string, error) {
@@ -135,6 +136,7 @@ func loadTUIIssues(path, repo, state string, limit int) ([]tuiIssue, string, err
 		args = append(args, "--repo", repo)
 	}
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

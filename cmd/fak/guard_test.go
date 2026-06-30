@@ -555,18 +555,19 @@ func TestFormatAuditSummary(t *testing.T) {
 		t.Errorf("clean summary should not mention deferred/escalated:\n%s", clean)
 	}
 
-	// Cache reuse is surfaced HONESTLY: the line names the no-cache baseline (so "saved vs
-	// WHAT?" is answered inline) and credits the PROVIDER cache fak forwarded intact, never
-	// implying fak authored it. baseline = 412+23428+756 = 24596 -> "24.6k"; actual = 412 +
-	// 23428*0.1 + 756*1.25 = 3699.8 -> "3.7k"; saved = 20896.2 -> "20.9k" (85% off).
+	// Cache reuse is surfaced HONESTLY: the line names the owner split, so the provider
+	// prompt-cache cannot masquerade as fak-authored savings. provider read rebate =
+	// 23428*0.9 = 21085.2 -> "21.1k"; write premium = 756*-0.25 -> "-189";
+	// provider net = 20896.2 -> "20.9k"; fak's slice is explicitly 0 here.
 	cached := formatAuditSummary(gateway.AdjudicationSummary{
 		Total: 2, Allowed: 2,
 		CachedPromptTokens: 23428, CachedTurns: 1, InputTokens: 412, CacheCreationTokens: 756,
 	})
 	for _, want := range []string{
-		"prompt-cache saving", "billed ~3.7k of ~24.6k token-equiv", "the no-cache price",
-		"saved ~20.9k (85% off)", "net of the cache-write premium", "across 1 cached turn(s)",
-		"did not author this saving",
+		"avoided-spend attribution", "provider ~20.9k (100%) + fak ~0 (0%)",
+		"provider read rebate 21.1k", "write premium -189", "fak compaction 0",
+		"provider is OBSERVED/provider-relayed", "fak is WITNESSED/fak-authored",
+		"fak-slice diagnostic", "F is ~0", "M2/default anchor gate",
 	} {
 		if !strings.Contains(cached, want) {
 			t.Errorf("cached summary missing %q:\n%s", want, cached)
@@ -577,8 +578,50 @@ func TestFormatAuditSummary(t *testing.T) {
 		t.Errorf("the net-saving line must not dump the raw provider cached-token count:\n%s", cached)
 	}
 	// No cache activity → no cache line (the common first-turn / non-passthrough case).
-	if strings.Contains(clean, "cache saving") {
+	if strings.Contains(clean, "cache saving") || strings.Contains(clean, "cache attribution") {
 		t.Errorf("a run with no cache activity must not print a cache line:\n%s", clean)
+	}
+	if strings.Contains(clean, "fak-slice diagnostic") {
+		t.Errorf("a run with no cache activity must not print a fak-slice diagnostic:\n%s", clean)
+	}
+
+	owned := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 1, Allowed: 1,
+		CompactionShedTokens: 900, KVPrefixReusedTokens: 1000,
+	}, kernel.Counters{VDSOHits: 2})
+	for _, want := range []string{
+		"provider ~0 (0%) + fak ~1.9k (100%)",
+		"fak compaction 900", "KV-prefix 1.0k", "vDSO 2 avoided call(s)",
+	} {
+		if !strings.Contains(owned, want) {
+			t.Errorf("owned cache attribution missing %q:\n%s", want, owned)
+		}
+	}
+	if strings.Contains(owned, "fak-slice diagnostic") {
+		t.Errorf("a run with a nonzero fak slice must not print the zero-slice diagnostic:\n%s", owned)
+	}
+
+	anchorStarved := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 1, Allowed: 1,
+		CachedPromptTokens:      100,
+		CompactionBailed:        1,
+		CompactionBudget:        48000,
+		CompactionAnchorStarved: 1,
+	})
+	for _, want := range []string{"fak-slice diagnostic", "anchor-starved x1", "re-anchor/M2 needed"} {
+		if !strings.Contains(anchorStarved, want) {
+			t.Errorf("anchor-starved zero-slice diagnostic missing %q:\n%s", want, anchorStarved)
+		}
+	}
+
+	noKVReuse := formatAuditSummary(gateway.AdjudicationSummary{
+		Total: 1, Allowed: 1,
+		KVPrefixPromptTokens: 1000,
+	})
+	for _, want := range []string{"fak-slice diagnostic", "no multi-turn KV-prefix reuse observed"} {
+		if !strings.Contains(noKVReuse, want) {
+			t.Errorf("no-KV-reuse diagnostic missing %q:\n%s", want, noKVReuse)
+		}
 	}
 
 	// Tool-floor prune (the INBOUND tools[] lever): when fak dropped unreachable tool defs the

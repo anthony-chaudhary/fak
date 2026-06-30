@@ -1,4 +1,4 @@
-// webbench-run is a reproducible end-to-end webbench runner.
+// Command webbench-run is a reproducible end-to-end webbench runner.
 // It executes web agent tasks with a specified model API and measures actual token usage.
 //
 // Usage:

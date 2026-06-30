@@ -70,6 +70,11 @@ func vcacheUsage(w io.Writer) {
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
                    [--zipf-s F --anchors N --anchors-file FILE --target-coverage F]
+                   [--kernel-kv-events N --context-events N]
+                   [--kernel-kv-prompt-tokens N --kernel-kv-reused-tokens N]
+                   [--context-shed-tokens N --context-resident-tokens N]
+                   [--provider-vcache-decisions N --external-engine-events N]
+                   [--external-engine-hit-rate F]
                    [--index-out FILE]
                    [--true-warm N --false-warm N --true-cold N --false-cold N]
                    [--recall-prefix-tokens N --recall-unit-tokens N --recall-siblings N --recall-read-mult F]
@@ -339,6 +344,15 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	falseWarm := fs.Int("false-warm", 0, "prediction-error count: predicted warm and cache_read=0")
 	trueCold := fs.Int("true-cold", 0, "prediction-error count: predicted cold and cache_read=0")
 	falseCold := fs.Int("false-cold", 0, "prediction-error count: predicted cold and cache_read>0")
+	kernelKVEvents := fs.Int("kernel-kv-events", 0, "fak-authored pure-kernel KV cache events that fired")
+	kernelKVPromptTokens := fs.Float64("kernel-kv-prompt-tokens", 0, "fak-owned KV witness: total prompt tokens prefetched by pure fak")
+	kernelKVReusedTokens := fs.Float64("kernel-kv-reused-tokens", 0, "fak-owned KV witness: prompt tokens served from pure-fak KV prefix reuse")
+	contextEvents := fs.Int("context-events", 0, "fak-authored O(1) context/query cache events that fired")
+	contextShedTokens := fs.Float64("context-shed-tokens", 0, "O(1) context witness: prompt tokens removed from the live request body")
+	contextResidentTokens := fs.Float64("context-resident-tokens", 0, "O(1) context witness: resident prompt tokens kept after compaction/planning")
+	providerVCacheDecisions := fs.Int("provider-vcache-decisions", 0, "fak-authored provider-vcache warm/pin/evict decisions that fired")
+	externalEngineEvents := fs.Int("external-engine-events", 0, "fak-authored SGLang/vLLM/llama cache adapter events that fired")
+	externalEngineHitRate := fs.Float64("external-engine-hit-rate", 0, "observed SGLang/vLLM/llama prefix-cache hit rate, 0..1")
 	recallPrefix := fs.Int64("recall-prefix-tokens", def.Recall.PrefixTokens, "M4 recall proof prefix tokens (P)")
 	recallUnit := fs.Int64("recall-unit-tokens", def.Recall.UnitTokens, "M4 recall proof unit tokens (U)")
 	recallSiblings := fs.Int("recall-siblings", def.Recall.Siblings, "M4 recall proof sibling count (S)")
@@ -374,6 +388,66 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		FalseWarm: *falseWarm,
 		TrueCold:  *trueCold,
 		FalseCold: *falseCold,
+	}
+	in.AgenticActivation = vcachescore.AgenticActivationInput{
+		KernelKVEvents:          *kernelKVEvents,
+		ContextEvents:           *contextEvents,
+		ProviderVCacheDecisions: *providerVCacheDecisions,
+		ExternalEngineEvents:    *externalEngineEvents,
+	}
+	if *kernelKVPromptTokens < 0 || *kernelKVReusedTokens < 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-prompt-tokens and --kernel-kv-reused-tokens must be non-negative")
+		return 2
+	}
+	if *kernelKVReusedTokens > 0 && *kernelKVPromptTokens <= 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --kernel-kv-reused-tokens requires --kernel-kv-prompt-tokens")
+		return 2
+	}
+	if *kernelKVPromptTokens > 0 {
+		reused := *kernelKVReusedTokens
+		if reused > *kernelKVPromptTokens {
+			reused = *kernelKVPromptTokens
+		}
+		if in.AgenticActivation.KernelKVEvents == 0 && reused > 0 {
+			in.AgenticActivation.KernelKVEvents = 1
+		}
+		in.KernelKV = vcachescore.PlaneEvidenceInput{
+			Available:          true,
+			BaselineTokenEquiv: *kernelKVPromptTokens,
+			SavedTokenEquiv:    reused,
+			CostTokenEquiv:     *kernelKVPromptTokens - reused,
+			Reason:             "fak-owned KV witness supplied by CLI",
+		}
+	}
+	if *contextShedTokens < 0 || *contextResidentTokens < 0 {
+		fmt.Fprintln(stderr, "fak vcache score: --context-shed-tokens and --context-resident-tokens must be non-negative")
+		return 2
+	}
+	if *contextShedTokens > 0 {
+		if in.AgenticActivation.ContextEvents == 0 {
+			in.AgenticActivation.ContextEvents = 1
+		}
+		in.Context = vcachescore.PlaneEvidenceInput{
+			Available:       true,
+			SavedTokenEquiv: *contextShedTokens,
+			Reason:          "O(1) context/query shed-token witness supplied by CLI",
+		}
+		if *contextResidentTokens > 0 {
+			in.Context.BaselineTokenEquiv = *contextShedTokens + *contextResidentTokens
+			in.Context.CostTokenEquiv = *contextResidentTokens
+		}
+	}
+	if *externalEngineHitRate < 0 || *externalEngineHitRate > 1 {
+		fmt.Fprintln(stderr, "fak vcache score: --external-engine-hit-rate must be between 0 and 1")
+		return 2
+	}
+	if *externalEngineHitRate > 0 {
+		in.ExternalEngine = vcachescore.PlaneEvidenceInput{
+			Available:  true,
+			Provenance: "OBSERVED",
+			HitRate:    *externalEngineHitRate,
+			Reason:     "external-engine prefix-cache hit rate supplied by CLI",
+		}
 	}
 	in.Recall = vcachechain.ProveRecallInput{
 		PrefixTokens: *recallPrefix,
@@ -461,6 +535,23 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			e.Source, e.Witness, 100*e.HitRate, e.CacheReadTokens, e.CacheCreationTokens,
 			e.RebateTokenEquiv, e.RebatePct, e.CostTokenEquiv, e.BaselineTokenEquiv, e.Multiplier)
 	}
+	fmt.Fprintf(stdout, "planes: provider=%s kernel=%s context=%s external=%s forecast=%s\n",
+		planeLabel(rep.Planes.ProviderObserved),
+		planeLabel(rep.Planes.KernelWitnessed),
+		planeLabel(rep.Planes.ContextWitnessed),
+		planeLabel(rep.Planes.ExternalEngineObserved),
+		planeLabel(rep.Planes.Forecast))
+	fmt.Fprintf(stdout, "agentic activation: %d events (kernel=%d context=%d provider-decisions=%d external=%d)\n",
+		rep.AgenticActivation.Total,
+		rep.AgenticActivation.KernelKVEvents,
+		rep.AgenticActivation.ContextEvents,
+		rep.AgenticActivation.ProviderVCacheDecisions,
+		rep.AgenticActivation.ExternalEngineEvents)
+	fmt.Fprintf(stdout, "default usefulness: %s (%s %d/100) - %s\n",
+		rep.DefaultUsefulness.Verdict,
+		rep.DefaultUsefulness.Grade,
+		rep.DefaultUsefulness.Score,
+		rep.DefaultUsefulness.Reason)
 	fmt.Fprintf(stdout, "concentration: s=%.2f measured=%v defeated=%v\n",
 		rep.Concentration.ZipfS, rep.Concentration.Measured, rep.Concentration.Defeated)
 	fmt.Fprintf(stdout, "hot-anchor index: top %d covers %.1f%% (target %.1f%%)\n",
@@ -487,6 +578,13 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	return 1
+}
+
+func planeLabel(p vcachescore.PlaneValueReport) string {
+	if !p.Available {
+		return "MISSING"
+	}
+	return p.Provenance
 }
 
 func defaultVCacheStatus() vcacheStatusReport {

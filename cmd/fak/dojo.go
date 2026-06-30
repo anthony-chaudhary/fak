@@ -31,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const dojoUsage = `fak dojo — the prediction-vs-reality gym
@@ -840,6 +841,7 @@ func vcacheEpisodesFromObserve(pe vcachecal.PredictionError) []dojo.ScoredInput 
 // dependency on other leaf packages for a one-line git fact.
 func dojoHeadCommit(root string) string {
 	cmd := exec.Command("git", "-C", root, "rev-parse", "--short", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

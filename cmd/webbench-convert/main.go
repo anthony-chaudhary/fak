@@ -1,4 +1,4 @@
-// webbench-convert converts WebVoyager dataset to webbench format.
+// Command webbench-convert converts WebVoyager tasks into fak's webbench format.
 package main
 
 import (

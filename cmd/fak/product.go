@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 
+	"github.com/anthony-chaudhary/fak/internal/productscorecard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -34,7 +35,7 @@ func cmdProduct(argv []string) {
 func runProductPost(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak product post", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	status := fs.Bool("status", false, "fold tools/product_scorecard.py --json into the card (product-status snapshot)")
+	status := fs.Bool("status", false, "fold fak product-scorecard --json into the card (product-status snapshot)")
 	persona := fs.Bool("persona", false, "fold tools/persona_readiness_scorecard.py --json into the card (persona findings)")
 	from := fs.String("from", "", "read a pkg/scorecard control-pane JSON payload from this file (- for stdin)")
 	debtKey := fs.String("debt-key", "", "with --from/--status/--persona: which corpus integer is the headline debt (default: product_debt / persona_debt)")
@@ -106,7 +107,7 @@ func buildProductUpdate(status, persona bool, from, debtKey, title, notes, notes
 		if persona || from != "" {
 			return scoreboard.Update{}, fmt.Errorf("pass exactly one of --status / --persona / --from")
 		}
-		b, err := runScorecardJSON("tools/product_scorecard.py")
+		b, err := json.Marshal(productscorecard.Collect(repoRoot(), ""))
 		if err != nil {
 			return scoreboard.Update{}, err
 		}

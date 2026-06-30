@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/treedoctor"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // cmdTreeDoctor — `fak tree-doctor`: diagnose and (with --apply) repair a fak working tree
@@ -85,7 +86,9 @@ func cmdTreeDoctor(argv []string) {
 
 // discoverRepoRoot returns the top-level git working directory, or "" if cwd is not a repo.
 func discoverRepoRoot() string {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -96,6 +99,7 @@ func discoverRepoRoot() string {
 // code; error only when git could not be executed).
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}

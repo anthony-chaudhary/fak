@@ -1005,6 +1005,31 @@ func TestTUIAgentJSONResolvesClaudeAccount(t *testing.T) {
 	}
 }
 
+func TestTUIAgentLoginNoteUsesClosedStatus(t *testing.T) {
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--json",
+		"--claude-config-dir", dir,
+		"--at", "2026-06-25T12:00:00Z",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent json code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent report: %v\n%s", err, stdout.String())
+	}
+	got := strings.Join(report.Notes, "\n")
+	for _, want := range []string{"login=needs_login", "run /login", "Claude may prompt for login"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("login note missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestTUIAgentGatewayDryRunRedactsBearer(t *testing.T) {
 	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
 	t.Setenv("API_TIMEOUT_MS", "")

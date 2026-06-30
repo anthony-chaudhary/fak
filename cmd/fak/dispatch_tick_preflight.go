@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -67,13 +68,15 @@ func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string
 		}
 	}
 	return dispatchtick.AccountCheck{
-		Available: route.OK,
-		Tag:       route.Account.Tag,
-		Dir:       route.Account.Dir,
-		Tier:      route.SelectedTier,
-		Model:     route.Account.Model,
-		Reason:    route.Reason,
-		Blocked:   blocked,
+		Available:   route.OK,
+		Tag:         route.Account.Tag,
+		Dir:         route.Account.Dir,
+		Tier:        route.SelectedTier,
+		Model:       route.Account.Model,
+		Reason:      route.Reason,
+		Blocked:     blocked,
+		LoginStatus: route.Account.LoginStatus,
+		CanServe:    route.Account.CanServe,
 	}
 }
 
@@ -91,7 +94,17 @@ func dispatchCodexAmbientAccount() dispatchtick.AccountCheck {
 
 func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtick.SeatCheck {
 	if product == "codex" {
-		return dispatchtick.SeatCheck{Skipped: "codex uses ambient login (no seat pool)"}
+		live := dispatchAmbientCodexProcessCount()
+		leased := 0
+		if live > 0 {
+			leased = 1
+		}
+		return dispatchtick.SeatCheck{
+			Total:    dispatchtick.IntPtr(1),
+			Free:     dispatchtick.IntPtr(1 - leased),
+			Leased:   dispatchtick.IntPtr(leased),
+			Depleted: leased > 0,
+		}
 	}
 	rows, err := dispatchReadAccountRoster(root)
 	if err != nil {
@@ -122,6 +135,7 @@ var dispatchRunExternalJSON = dispatchRunExternalJSONImpl
 var dispatchProbeHostResources = dispatchPreflightHostResources
 var dispatchProbeWorkerCount = dispatchProductWorkerCount
 var dispatchProbeProcesses = dispatchProbeProcessesNative
+var dispatchProbeCodexProcessRows = dispatchScanCodexProcessRowsNative
 var dispatchReadAccountRoster = dispatchReadAccountRosterNative
 
 func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, error) {
@@ -155,6 +169,11 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 			RouteWeight:    dispatchIntValue(m["route_weight"]),
 			IdentityRole:   dispatchStringValue(m["identity_role"]),
 			AccountUUID:    dispatchStringValue(m["account_uuid"]),
+			LoginStatus:    dispatchStringValue(m["login_status"]),
+		}
+		if rawCanServe, ok := m["can_serve"]; ok {
+			canServe := dispatchBoolValue(rawCanServe)
+			row.CanServe = &canServe
 		}
 		if row.Account == "" && row.Dir != "" {
 			row.Account = dispatchAnyOSBase(row.Dir)
@@ -166,12 +185,39 @@ func dispatchReadAccountRosterNative(root string) ([]dispatchtick.AccountRow, er
 		if row.RouteWeight == 0 {
 			row.RouteWeight = dispatchAccountRouteWeight(row, weights)
 		}
+		dispatchApplyLoginGate(&row)
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("account registry %s has no readable account rows", registryPath)
 	}
 	return rows, nil
+}
+
+func dispatchApplyLoginGate(row *dispatchtick.AccountRow) {
+	if row == nil || row.Product != "claude" {
+		return
+	}
+	blocked := false
+	if row.CanServe != nil && !*row.CanServe {
+		blocked = true
+	}
+	if row.LoginStatus != "" && row.LoginStatus != string(configaccounts.LoginReady) {
+		blocked = true
+	}
+	if !blocked {
+		return
+	}
+	row.Available = false
+	if row.BlockReason != "" {
+		return
+	}
+	reason, _ := configaccounts.LoginReasonAction(configaccounts.LoginStatus(row.LoginStatus),
+		configaccounts.Home{Name: row.Tag, Dir: row.Dir})
+	if reason == "" {
+		reason = "account login is not ready"
+	}
+	row.BlockReason = reason
 }
 
 func dispatchAccountRegistryPath(root string) string {
@@ -477,7 +523,164 @@ func dispatchRAMAndThreadsPOSIX() (*int, *int) {
 }
 
 func dispatchProductWorkerCount(root, product string) int {
-	return len(dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product))
+	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
+	if product == "codex" {
+		for pid := range dispatchAmbientCodexPIDs() {
+			pids[pid] = true
+		}
+	}
+	return len(pids)
+}
+
+type dispatchCodexProcessRow struct {
+	PID     int    `json:"pid"`
+	PPID    int    `json:"ppid"`
+	Name    string `json:"name"`
+	Cmdline string `json:"cmdline"`
+}
+
+func dispatchAmbientCodexProcessCount() int {
+	return len(dispatchAmbientCodexPIDs())
+}
+
+func dispatchAmbientCodexPIDs() map[int]bool {
+	rows, err := dispatchProbeCodexProcessRows()
+	if err != nil {
+		return map[int]bool{}
+	}
+	return dispatchCodexProcessPIDs(rows)
+}
+
+func dispatchCodexProcessPIDs(rows []dispatchCodexProcessRow) map[int]bool {
+	native := map[int]bool{}
+	wrappers := map[int]bool{}
+	parent := map[int]int{}
+	for _, row := range rows {
+		if row.PID <= 0 {
+			continue
+		}
+		parent[row.PID] = row.PPID
+		switch {
+		case dispatchIsCodexNativeImage(row.Name):
+			native[row.PID] = true
+		case dispatchIsCodexNodeWrapper(row.Name, row.Cmdline):
+			wrappers[row.PID] = true
+		}
+	}
+	wrappersWithNativeChild := map[int]bool{}
+	for pid := range native {
+		if ppid := parent[pid]; ppid > 0 {
+			wrappersWithNativeChild[ppid] = true
+		}
+	}
+	out := map[int]bool{}
+	for pid := range native {
+		out[pid] = true
+	}
+	for pid := range wrappers {
+		if !wrappersWithNativeChild[pid] {
+			out[pid] = true
+		}
+	}
+	return out
+}
+
+func dispatchIsCodexNativeImage(name string) bool {
+	return dispatchProcessNameStem(name) == "codex"
+}
+
+func dispatchIsCodexNodeWrapper(name, cmdline string) bool {
+	if dispatchProcessNameStem(name) != "node" {
+		return false
+	}
+	low := strings.ToLower(strings.ReplaceAll(cmdline, "\\", "/"))
+	return strings.Contains(low, "@openai/codex") || strings.Contains(low, "codex/bin/codex.js")
+}
+
+func dispatchProcessNameStem(name string) string {
+	base := strings.ToLower(strings.Trim(strings.TrimSpace(name), `"`))
+	base = strings.ReplaceAll(base, "\\", "/")
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	for _, ext := range []string{".exe", ".cmd", ".bat"} {
+		if strings.HasSuffix(base, ext) {
+			base = strings.TrimSuffix(base, ext)
+			break
+		}
+	}
+	return base
+}
+
+func dispatchScanCodexProcessRowsNative() ([]dispatchCodexProcessRow, error) {
+	if runtime.GOOS == "windows" {
+		return dispatchScanCodexProcessRowsWindows()
+	}
+	return dispatchScanCodexProcessRowsPOSIX()
+}
+
+func dispatchScanCodexProcessRowsWindows() ([]dispatchCodexProcessRow, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"$rows = @(Get-CimInstance Win32_Process "+
+			"-Filter \"Name = 'codex.exe' OR Name = 'node.exe'\" | "+
+			"Select-Object @{n='pid';e={$_.ProcessId}},@{n='ppid';e={$_.ParentProcessId}},@{n='name';e={$_.Name}},@{n='cmdline';e={$_.CommandLine}}); "+
+			"$rows | ConvertTo-Json -Compress")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return decodeDispatchCodexProcessRows(out)
+}
+
+func dispatchScanCodexProcessRowsPOSIX() ([]dispatchCodexProcessRow, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ps", "-eo", "pid=,ppid=,comm=,args=")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	rows := []dispatchCodexProcessRow{}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, perr := strconv.Atoi(fields[0])
+		ppid, pperr := strconv.Atoi(fields[1])
+		if perr != nil || pperr != nil {
+			continue
+		}
+		name := fields[2]
+		cmdline := name
+		if len(fields) > 3 {
+			cmdline = strings.Join(fields[3:], " ")
+		}
+		if dispatchIsCodexNativeImage(name) || dispatchIsCodexNodeWrapper(name, cmdline) {
+			rows = append(rows, dispatchCodexProcessRow{PID: pid, PPID: ppid, Name: name, Cmdline: cmdline})
+		}
+	}
+	return rows, nil
+}
+
+func decodeDispatchCodexProcessRows(out []byte) ([]dispatchCodexProcessRow, error) {
+	text := strings.TrimSpace(string(out))
+	if text == "" {
+		return nil, nil
+	}
+	var rows []dispatchCodexProcessRow
+	if err := json.Unmarshal([]byte(text), &rows); err == nil {
+		return rows, nil
+	}
+	var one dispatchCodexProcessRow
+	if err := json.Unmarshal([]byte(text), &one); err != nil {
+		return nil, err
+	}
+	return []dispatchCodexProcessRow{one}, nil
 }
 
 func dispatchLiveResolveWorkerPIDs(runsDir, product string) map[int]bool {

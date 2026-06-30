@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func cmdTask(argv []string) { os.Exit(runTask(os.Stdout, os.Stderr, argv)) }
@@ -91,7 +92,12 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	review := taskmgr.ReviewHandoff(handoff)
+	review := taskmgr.ReviewHandoffWithOptions(handoff, taskmgr.HandoffReviewOptions{
+		StrictScope:   true,
+		Live:          *live,
+		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
+		DedupeCap:     taskHandoffIssueScanLimit(*limit),
+	})
 	mode := "dry-run"
 	if *live {
 		mode = "live"
@@ -135,6 +141,10 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	return 0
+}
+
+func taskHandoffIssueScanLimit(limit int) int {
+	return issueSyncScanLimit(limit)
 }
 
 func loadTaskHandoffIssues(existingJSON string, fetch bool, repo string, limit int) ([]taskmgr.HandoffIssue, error) {
@@ -215,6 +225,7 @@ func taskHandoffGHArgs(row taskmgr.HandoffIssuePlanRow, repo string, labels []st
 
 func runTaskHandoffGH(args []string) (string, string, bool) {
 	cmd := exec.Command("gh", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

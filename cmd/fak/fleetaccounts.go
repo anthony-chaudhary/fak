@@ -40,7 +40,9 @@ import (
 // (`probe`, which delegates to tools/account_probe.py), the probe-LEDGER freshness
 // override inside runtime status, and the mutating ops (relogin / top-up / launch). The
 // passive registry fold + roster/resolve/seats are the operator hot path and are fully
-// ported here with tests; `probe` and the mutators remain on the Python shim.
+// ported here with tests; `probe` and the mutators remain on the Python shim. The Go
+// roster keeps the legacy Python field order for the shared keys and adds the
+// credential-safe login_status/can_serve fields for Claude switcher rows.
 func cmdFleetAccounts(argv []string) { os.Exit(runFleetAccounts(os.Stdout, os.Stderr, argv)) }
 
 func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {

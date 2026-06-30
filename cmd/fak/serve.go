@@ -537,7 +537,7 @@ func cmdServe(argv []string) {
 			must(err)
 		}
 		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-		persistCacheValueObservations(srv, "serve", "stdio")
+		persistCacheValueObservations(srv, "serve", "stdio", *provider)
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -549,7 +549,7 @@ func cmdServe(argv []string) {
 		must(err)
 	}
 	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-	persistCacheValueObservations(srv, "serve", "http")
+	persistCacheValueObservations(srv, "serve", "http", *provider)
 	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 }
 
@@ -558,11 +558,12 @@ func cmdServe(argv []string) {
 // `fak vcache score` reports the REALIZED multiplier from real traffic instead of the
 // synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session.
 // It is the shared shutdown tail of the guard and serve (stdio + http) front doors.
-func persistCacheValueObservations(srv *gateway.Server, kind, name string) {
+func persistCacheValueObservations(srv *gateway.Server, kind, name, provider string) {
 	stats := cacheobs.Default.Snapshot()
 	if stats.Turns > 0 {
 		_ = cachevalueledger.Append(kind, name, cachevalueledger.DefaultLedgerRel, stats)
 	}
+	appendObservedCacheSavings(kind, provider, name, srv.AdjudicationSummary())
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
 		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns)
 	}

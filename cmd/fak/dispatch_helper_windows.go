@@ -4,17 +4,10 @@ package main
 
 import (
 	"os/exec"
-	"syscall"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-const dispatchCreateNoWindow = 0x08000000
-
 func configureDispatchHelperCommand(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.CreationFlags |= dispatchCreateNoWindow
+	windowgate.ConfigureBackgroundCommand(cmd)
 }

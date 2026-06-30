@@ -31,10 +31,50 @@ func TestRouteAccountsDumpAndCheck(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--accounts-check exit=%d out=%s", code, out)
 	}
-	for _, want := range []string{"roster valid", "accounts:", "bindings", "residency"} {
+	for _, want := range []string{"roster valid", "accounts:", "credential readiness", "bindings", "residency"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("check surface missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRouteAccountsStatusReportsEnvReadiness(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-must-not-print")
+	t.Setenv("OPENAI_WORK_API_KEY", "")
+	path := writeDumpedRoster(t)
+
+	code, out, errs := runRT("--accounts-status", path)
+	if code != 0 {
+		t.Fatalf("--accounts-status exit=%d stderr=%s out=%s", code, errs, out)
+	}
+	for _, want := range []string{"fak route accounts status", "needs_credential", "not_required", "OPENAI_WORK_API_KEY"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("accounts status missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "sk-must-not-print") {
+		t.Fatalf("accounts status leaked a secret:\n%s", out)
+	}
+
+	code, out, errs = runRT("--accounts-status", path, "--json")
+	if code != 0 {
+		t.Fatalf("--accounts-status --json exit=%d stderr=%s out=%s", code, errs, out)
+	}
+	var rep struct {
+		Schema  string `json:"schema"`
+		Summary struct {
+			Total           int `json:"total"`
+			NeedsCredential int `json:"needs_credential"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if rep.Schema != "fak.modelroute.accounts.v1" || rep.Summary.Total == 0 || rep.Summary.NeedsCredential == 0 {
+		t.Fatalf("unexpected readiness json: %+v\n%s", rep, out)
+	}
+	if strings.Contains(out, "sk-must-not-print") {
+		t.Fatalf("accounts status json leaked a secret:\n%s", out)
 	}
 }
 
