@@ -66,6 +66,59 @@ func TestRunHooks_preCommitBlocksLeak(t *testing.T) {
 	}
 }
 
+// #1455: a staged doc whose CONTENT carries a prose hardware tell is refused at commit
+// time (not only post-hoc in make ci), and the refusal names the `scrub_hardware_names.py
+// --apply <file>` recovery so the author can fix it before it reds the trunk fleet-wide.
+func TestRunHooks_preCommitHardwareTellGivesApplyHint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"docs/a.md": "the run was on DGX overnight\n"})
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 1 {
+		t.Fatalf("a prose hardware tell in doc content should block (1), got %d; stderr=%s", code, errb.String())
+	}
+	s := errb.String()
+	if !bytes.Contains(errb.Bytes(), []byte("HARDWARE_TELL")) {
+		t.Fatalf("refusal should name HARDWARE_TELL, got %s", s)
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("scrub_hardware_names.py --apply docs/a.md")) {
+		t.Fatalf("refusal should carry the --apply recovery hint naming the file, got %s", s)
+	}
+}
+
+// #1455: the new gate must reuse the FALSE-POSITIVE-safe masking — a hardware token that
+// appears ONLY as filename link-text is an identifier, not a prose tell, so the commit
+// passes (this is the exact FP that motivated the issue).
+func TestRunHooks_preCommitHardwareTellMasksLinkText(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{
+		"docs/a.md": "see [DGX-OVERNIGHT-PLAN](notes/plan.md) for the schedule\n",
+	})
+	var out, errb bytes.Buffer
+	code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo})
+	if code != 0 {
+		t.Fatalf("a hardware token only in filename link-text must not block, got %d; stderr=%s", code, errb.String())
+	}
+}
+
+// #1455: FLEET_ALLOW_HW=1 escapes the doc-content gate once (the meta-case: a commit about
+// the scrubber itself).
+func TestRunHooks_preCommitHardwareTellEscapes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	repo := newRepoWith(t, map[string]string{"docs/a.md": "the run was on DGX overnight\n"})
+	t.Setenv("FLEET_ALLOW_HW", "1")
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"pre-commit", "--root", repo}); code != 0 {
+		t.Fatalf("FLEET_ALLOW_HW=1 should escape the hardware doc gate, got %d; stderr=%s", code, errb.String())
+	}
+}
+
 func TestRunHooks_preCommitJSON(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short")

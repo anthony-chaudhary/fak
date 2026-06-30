@@ -130,9 +130,11 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			blocked = true
 			if !*asJSON {
 				printGateFindings(stderr, g.Name, findings)
+				printGateHint(stderr, g.Name, findings, true)
 			}
 		} else if !*asJSON { // warn
 			printGateFindings(stderr, g.Name+" (advisory)", findings)
+			printGateHint(stderr, g.Name, findings, false)
 		}
 	}
 
@@ -244,6 +246,43 @@ func printGateFindings(w io.Writer, label string, findings []hooks.Finding) {
 	for _, f := range findings {
 		fmt.Fprintf(w, "  %s\n", formatFinding(f))
 	}
+}
+
+// printGateHint writes a gate-specific recovery hint after a gate's findings. Today only
+// HARDWARE_TELL carries one: a prose hardware tell in staged doc CONTENT is what reds the
+// trunk later in `make ci` (#1455), and the scrubber can auto-fix it — so name the offending
+// file(s) and the exact `tools/scrub_hardware_names.py --apply <file>` command (the same
+// recovery the lint gives), plus the one-shot override when the gate actually blocked. Without
+// this, the doc-content gate refused with only the generic "soften the gate" footer, leaving
+// the author no pointer to the fix.
+func printGateHint(w io.Writer, gate string, findings []hooks.Finding, blocked bool) {
+	if gate != "HARDWARE_TELL" {
+		return
+	}
+	files := distinctFindingFiles(findings)
+	if len(files) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  fix: tools/scrub_hardware_names.py --apply %s\n", strings.Join(files, " "))
+	fmt.Fprintln(w, "       (auto-scrubs the prose tell before it reds the trunk in make ci; see PUBLIC-SCRUB-POLICY.md)")
+	if blocked {
+		fmt.Fprintln(w, "  override once: FLEET_ALLOW_HW=1 <git cmd>  (a competitor citation / a commit about the scrubber).")
+	}
+}
+
+// distinctFindingFiles returns the unique non-empty File fields of findings, in first-seen
+// order — the file set a recovery hint names.
+func distinctFindingFiles(findings []hooks.Finding) []string {
+	seen := map[string]bool{}
+	var files []string
+	for _, f := range findings {
+		if f.File == "" || seen[f.File] {
+			continue
+		}
+		seen[f.File] = true
+		files = append(files, f.File)
+	}
+	return files
 }
 
 func emitFindingsJSON(stdout, stderr io.Writer, findings []hooks.Finding) {
