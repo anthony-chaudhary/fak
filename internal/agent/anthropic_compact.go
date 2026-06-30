@@ -119,7 +119,7 @@ const (
 // CompactAnchorFirstBP, no horizon) reproduces CompactAnthropicHistoryWithOutcome exactly, so
 // the default firing path is byte-for-byte unchanged.
 type CompactOptions struct {
-	Budget int          // resident-token target for the compactible span (<=0 ⇒ identity)
+	Budget int           // resident-token target for the compactible span (<=0 ⇒ identity)
 	Anchor CompactAnchor // where the protected prefix ends (default: first breakpoint)
 	// Session horizon for the head-anchored burst gate. Consulted only when Anchor==CompactAnchorHead
 	// AND the head re-anchor actually engages (a stable head precedes messages[]). TotalTurns<=0 ⇒
