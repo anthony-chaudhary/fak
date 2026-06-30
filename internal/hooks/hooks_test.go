@@ -229,6 +229,9 @@ func TestScanMessageHardwareTells_rawCommitMessage(t *testing.T) {
 	if f := ScanMessageHardwareTells("docs(nightrun): add the dgx3 decode (fak nightrun)\n"); len(f) != 1 {
 		t.Fatalf("bare dgxN subject must be flagged, got %+v", f)
 	}
+	if f := ScanMessageHardwareTells("docs(cpu): add the da33 baseline (fak nightrun)\n"); len(f) != 1 {
+		t.Fatalf("bare da33 subject must be flagged, got %+v", f)
+	}
 	if f := ScanMessageHardwareTells("fix(x): clean\n\nbody mentions DGX and SXM4\n"); len(f) != 1 {
 		t.Fatalf("uppercase hard tells in the body must be flagged once per line, got %+v", f)
 	}
@@ -244,10 +247,105 @@ func TestScanMessageHardwareTells_rawCommitMessage(t *testing.T) {
 		"fix(x): keep dgx3-control as a channel name\n",
 		"fix(x): keep dgx3-node-state schema names\n",
 		"fix(x): keep host dgx1.example.lab\n",
+		"fix(x): keep da33-control as a channel name\n",
+		"fix(x): keep host da33.example.lab\n",
 	} {
 		if f := ScanMessageHardwareTells(msg); len(f) != 0 {
 			t.Fatalf("%q should not be flagged, got %+v", msg, f)
 		}
+	}
+}
+
+func TestHardwareTell_addedMarkdownTellBlocks(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-q", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "t@t")
+	gitRun(t, repo, "config", "user.name", "t")
+	writeFile(t, repo, "docs/note.md", "intro line\n")
+	gitRun(t, repo, "add", "docs/note.md")
+	gitRun(t, repo, "commit", "-qm", "seed")
+
+	writeFile(t, repo, "docs/note.md", "intro line\nwe ran the eval on the DGX box\n")
+	gitRun(t, repo, "add", "docs/note.md")
+	d, err := ReadStagedDiff(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := gateHardwareTell(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFindingFor(f, "HARDWARE_TELL", "DGX box") {
+		t.Fatalf("expected staged prose tell finding, got %+v", f)
+	}
+}
+
+func TestHardwareTell_da33Blocks(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-q", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "t@t")
+	gitRun(t, repo, "config", "user.name", "t")
+	writeFile(t, repo, "docs/cpu.md", "the CPU baseline ran on da33 at 0.063 GB/s\n")
+	gitRun(t, repo, "add", "docs/cpu.md")
+
+	d, err := ReadStagedDiff(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := gateHardwareTell(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFindingFor(f, "HARDWARE_TELL", "da33") {
+		t.Fatalf("expected da33 prose tell finding, got %+v", f)
+	}
+}
+
+func TestHardwareTell_filenameLinkTextAndIdentifiersPass(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-q", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "t@t")
+	gitRun(t, repo, "config", "user.name", "t")
+	writeFile(t, repo, "docs/plan.md", ""+
+		"see ([DGX-OVERNIGHT-PLAN](../nightrun/DGX-OVERNIGHT-PLAN-2026-06-28.md)). done\n"+
+		"use `cmd/dgxbridge`; the dgx3-control channel; host dgx1.example.lab\n"+
+		"```\nDGX\n```\n")
+	gitRun(t, repo, "add", "docs/plan.md")
+
+	d, err := ReadStagedDiff(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := gateHardwareTell(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f) != 0 {
+		t.Fatalf("identifier/link/fence forms must pass, got %+v", f)
+	}
+}
+
+func TestHardwareTell_preexistingTellUntouchedLinePasses(t *testing.T) {
+	repo := t.TempDir()
+	gitRun(t, repo, "init", "-q", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "t@t")
+	gitRun(t, repo, "config", "user.name", "t")
+	writeFile(t, repo, "docs/legacy.md", "old line ran on dgx3 here\nsecond line\n")
+	gitRun(t, repo, "add", "docs/legacy.md")
+	gitRun(t, repo, "commit", "-qm", "seed")
+
+	writeFile(t, repo, "docs/legacy.md", "old line ran on dgx3 here\nsecond line\nnew clean line\n")
+	gitRun(t, repo, "add", "docs/legacy.md")
+	d, err := ReadStagedDiff(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := gateHardwareTell(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f) != 0 {
+		t.Fatalf("untouched legacy tell must not block this staged change, got %+v", f)
 	}
 }
 

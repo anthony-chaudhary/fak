@@ -62,7 +62,7 @@ type Gate struct {
 	Check     func(d *StagedDiff) ([]Finding, error)
 }
 
-// PreCommitGates returns the seven pre-commit gates in the SAME order tools/githooks/pre-commit
+// PreCommitGates returns the pre-commit gates in the SAME order tools/githooks/pre-commit
 // invoked them, with their mode/escape env vars. Order is preserved so operator output and any
 // first-failure behavior match the Python path.
 func PreCommitGates() []Gate {
@@ -74,6 +74,7 @@ func PreCommitGates() []Gate {
 		{Name: "FILE_ADMISSION", ModeEnv: "FLEET_FILE_GUARD", EscapeEnv: "ALLOW_STRAY_FILE", Check: gateFileAdmission},
 		{Name: "INDEX_SYNC", ModeEnv: "FLEET_INDEX_GUARD", EscapeEnv: "ALLOW_INDEX_DRIFT", Check: gateIndexSync},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
+		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
 	}
 }
 

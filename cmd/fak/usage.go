@@ -71,7 +71,7 @@ func usageCoreVerbs() {
                  fak benchmarks/ablate remain the curated perf surfaces.)
   fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
                 (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
-                 tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff
+                 tools/check_*.py git-hook checkers. pre-commit runs all staged-diff
                  gates (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/
                  INDEX_SYNC/PROVENANCE_LABEL) over ONE staged-diff read instead of spawning
                  7 Python interpreters (~10.7s -> ~0.3s measured). Honors each gate
@@ -385,6 +385,11 @@ func usageScorecardVerbs() {
   fak conflation-scorecard [--json] [--markdown] [--compare FILE]
                 (native provenance-honesty control-pane payload: every reported number/status
                  labels its provenance -- WITNESSED vs OBSERVED -- folded into conflation_debt)
+  fak ui-quality-scorecard [--json] [--markdown] [--compare FILE]
+                (native terminal UI/UX control-pane payload: the fak console panes, fak info
+                 overlay, and fak guard --split graded for rune-safe truncation, cell-aware
+                 column pads, empty-state branches, info-legend + console-help coverage --
+                 folded into ui_quality_debt)
   fak claim-check --self-test | --file claim.json | --statement S --baseline real|strawman|none
                   [--net] --scope S --provenance WITNESSED|OBSERVED|MODELED|SIMULATED --witness S
                   [--realized=false --gate-reason R] [--json]
@@ -397,6 +402,11 @@ func usageScorecardVerbs() {
                  matrix into support_maturity_debt, coverage percentage, and an A-F grade.
                  --matrix-md emits the generated matrix block; --write-doc regenerates it in
                  docs/HARDWARE-MATRIX.md; --check-doc reds when a committed cell is stale)
+  fak support [--json] [--family SUBSTR] [--backend NAME]
+                (per-cell support read-out: one line per model x backend cell folding the
+                 scorecard grid + rung->regime router into rung . regime . target .
+                 next-action . the witness behind the rung. --json round-trips; --family /
+                 --backend answer "where is X and what should I do about it?")
   fak learning-debt-dispatch --scorecard FILE [--cap N] [--cache FILE] [--live]
                 [--fetch-existing] [--existing-json FILE] [--repo owner/repo] [--json]
                 (learning-scorecard -> backlog: file at most --cap triage issues for HARD
