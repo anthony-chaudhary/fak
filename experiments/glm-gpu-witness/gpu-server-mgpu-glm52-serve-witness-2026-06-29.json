@@ -1,10 +1,10 @@
 {
-  "schema": "fak.dgx3-mgpu-glm52-serve-witness.v1",
+  "schema": "fak.gpu-server-mgpu-glm52-serve-witness.v1",
   "captured_at": "2026-06-29T21:56:28Z",
-  "node": "dgx3 (internal 8-GPU sm_80 datacenter server; hostname redacted)",
-  "goal": "GLM-5.2 running on dgx3 performant, using the full GPUs and RAM",
+  "node": "GPU server (internal 8-GPU sm_80 datacenter server; hostname redacted)",
+  "goal": "GLM-5.2 running on the GPU server performant, using the full GPUs and RAM",
   "what_changed": {
-    "from": "tools/glm52_stage_serve_dgx3.sh pins ALL MoE experts to host RAM (--n-cpu-moe 999); only GPU0 does work; decode is host-expert-GEMM-bound (the #971 wall)",
+    "from": "private GLM-5.2 stage runner pins ALL MoE experts to host RAM (--n-cpu-moe 999); only GPU0 does work; decode is host-expert-GEMM-bound (the #971 wall)",
     "to": "full model resident across GPUs 1-7 with experts ON GPU HBM (-ngl 999, NO --n-cpu-moe); the whole 434 GiB Q4_K_M checkpoint lives in VRAM",
     "one_line": "moved the expert GEMM off the host onto 7 GPUs — exactly the #971 mandate"
   },

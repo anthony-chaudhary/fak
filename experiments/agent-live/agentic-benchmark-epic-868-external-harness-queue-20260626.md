@@ -80,10 +80,10 @@ Current artifact status: `MISSING` - missing
 Fail fast before the long SWE-bench agent run.
 
 ```bash
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only
 ```
 
-Artifacts: `/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json`, `/tmp/swe-glm52-vllm-20/DONE.rc`
+Artifacts: `<private-swebench-run>/COMPARE-PREFLIGHT.json`, `<private-swebench-run>/DONE.rc`
 
 Current artifact status: `MISSING` - missing
 
@@ -92,10 +92,10 @@ Current artifact status: `MISSING` - missing
 Run raw-vLLM vs fak-gateway on a 20-task SWE-bench Verified slice.
 
 ```bash
-python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200
+<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200
 ```
 
-Artifacts: `/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json`, `/tmp/swe-glm52-vllm-20/compare.json`, `/tmp/swe-glm52-vllm-20/COMPARE.md`, `/tmp/swe-glm52-vllm-20/DONE.rc`
+Artifacts: `<private-swebench-run>/COMPARE-PREFLIGHT.json`, `<private-swebench-run>/compare.json`, `<private-swebench-run>/COMPARE.md`, `<private-swebench-run>/DONE.rc`
 
 Current artifact status: `MISSING` - missing
 

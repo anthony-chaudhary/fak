@@ -11,7 +11,7 @@
   "model": "qwen2.5-0.5b-instruct-q8_0.gguf",
   "model_id": "qwen2.5-0.5b-gpu",
   "weights": "Q8_0 (real GGUF, ~644 MiB on disk)",
-  "category": "real fak in-kernel device decode of a real 0.5B Q8 checkpoint; NOT a 753B serving rate, NOT a DGX2/A100 number, NOT a stock-engine comparison",
+  "category": "real fak in-kernel device decode of a real 0.5B Q8 checkpoint; NOT a 753B serving rate, NOT a GPU server2/A100 number, NOT a stock-engine comparison",
   "binary": "fak-gpu:latest image built 2026-06-21T19:24Z (predates the devMu fix); single-stream numbers are unaffected by the fix",
   "single_stream_decode": {
     "max_tokens": 128,

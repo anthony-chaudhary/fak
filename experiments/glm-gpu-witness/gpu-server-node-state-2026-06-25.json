@@ -1,7 +1,7 @@
 {
-  "schema": "fak.dgx3-node-state.v1",
+  "schema": "fak.gpu-server-node-state.v1",
   "captured_at": "2026-06-25T18:10:00Z",
-  "node": "dgx3 (internal 8-GPU sm_80 datacenter server; hostname redacted)",
+  "node": "GPU server (internal 8-GPU sm_80 datacenter server; hostname redacted)",
   "kernel": "Linux 6.8.0-117-generic",
   "gpus": {
     "count": 8,
@@ -41,23 +41,23 @@
   },
   "overcome": {
     "path": "llama.cpp MLA + CPU expert-offload (sm_80-capable)",
-    "runner": "tools/glm52_stage_serve_dgx3.sh",
+    "runner": "private GLM-5.2 stage runner",
     "quant": "unsloth/GLM-5.2-GGUF UD-Q4_K_M (~466 GB, 11 shards)",
     "staging_dir": "/projects/glm52-q4 (4.1 TB free; fits the 466 GB shards)",
-    "expert_offload": "n-cpu-moe=999 keeps MoE experts on the ~2 TB host RAM; A100s hold attention/shared tensors",
+    "expert_offload": "n-cpu-moe=999 keeps MoE experts on the ~2 TB host RAM; datacenter GPUs hold attention/shared tensors",
     "status_as_of_capture": "runner committed to origin/main; launch blocked on a degraded private control bridge (box sessions stopped consuming stdin mid-session). Not a kernel/approach block; re-launch when the bridge recovers."
   },
   "fak_path_verified_locally": {
     "note": "The fak kernel + fak local guard path that will front the GLM-5.2 endpoint is verified end-to-end against an OpenAI-compatible wire (the same wire llama.cpp serves). Only the GLM-5.2 endpoint itself is gated on the box.",
     "fak_serve": "answers OpenAI /v1/models and /v1/chat/completions; the kernel adjudicates the tool call on the wire (operation=adjudicate, verdict=ALLOW).",
     "fak_guard": "`fak guard --provider openai --base-url <endpoint> -- <agent>` stands up an in-process kernel gateway, injects OPENAI_BASE_URL/OPENAI_API_BASE into the CHILD ONLY, enforces the capability floor on every proposed tool call, and writes a tamper-evident hash-chained audit journal (verify: fak audit verify <path>).",
-    "remaining_variable": "swap the guard --base-url from the local mock to http://<dgx3>:8000/v1 once tools/glm52_stage_serve_dgx3.sh reaches GLM52_SERVE_READY.",
+    "remaining_variable": "swap the guard --base-url from the local mock to http://<gpu-server>:8000/v1 once private GLM-5.2 stage runner reaches GLM52_SERVE_READY.",
     "harness_green": "tools/glm52_serving_witness_test.py (4) + tools/glm52_serve_preflight_test.py (30) pass."
   },
   "blocker": {
     "what": "the live GLM-5.2 serve + `fak guard -- claude` end-to-end could NOT run this session.",
-    "cause": "the DGX3 control bridge's box-side shell/PTY subsystem is hung: the control-hub bot is alive (answers !help/!sessions/!new, spawns sessions) but NO spawned shell executes input (no echo via !send, !new-inline, across kill+recreate, for multiple multi-minute watches). Not throttle (control commands reply); not a kernel/code/approach problem.",
-    "direct_ssh": "closed for dgx3 (fleet_endpoints lists no dgx3 ssh; the lab path is ssh_port_open:false).",
+    "cause": "the private GPU-server control bridge's box-side shell/PTY subsystem is hung: the control-hub bot is alive (answers !help/!sessions/!new, spawns sessions) but NO spawned shell executes input (no echo via !send, !new-inline, across kill+recreate, for multiple multi-minute watches). Not throttle (control commands reply); not a kernel/code/approach problem.",
+    "direct_ssh": "closed for the GPU server (fleet_endpoints lists no direct GPU-server ssh; the lab path is ssh_port_open:false).",
     "fix": "out-of-band restart of the box-side slack-control session daemon (a human/box action), then run the resume commands in docs/serving/glm52-full-size-serving-witness.md §7. An auto-recovery watcher was left armed to fire the serve the moment the shell subsystem returns."
   },
   "native_track_already_passing": {

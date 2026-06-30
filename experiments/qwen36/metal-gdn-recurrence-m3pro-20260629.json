@@ -19,7 +19,7 @@
       "internal/model/qwen35_prefill_q4k_test.go"
     ]
   },
-  "command": "FAK_QPROFILE=1 FAK_METAL=1 FAK_Q4K=1 CGO_ENABLED=1 go run -tags fakmetal ./cmd/modelbench -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf -q4k -metal -prefill-sizes 22 -prefill-reps 1 -decode-reps 1 -decode-steps 1 -decode-prompt 1 -out /tmp/fak-issue65-gdn-result.json",
+  "command": "FAK_QPROFILE=1 FAK_METAL=1 FAK_Q4K=1 CGO_ENABLED=1 go run -tags fakmetal ./cmd/modelbench -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf -q4k -metal -prefill-sizes 22 -prefill-reps 1 -decode-reps 1 -decode-steps 1 -decode-prompt 1 -out <private-scratch>/issue65-gdn-result.json",
   "model": "Qwen3.6-27B.q4_k_m.gguf",
   "engine": "fak-in-kernel Metal Q4_K/Q8 hybrid (raw GGUF Q4_K majority through MetalQ4K; Q8 minority on CPU)",
   "profile_line": "[metalprof-hybrid P=22] total=6720.7  gemm+roundtrip=6051.6  rest(recurrence/attn/norm)=669.1 ms  path=q4k",

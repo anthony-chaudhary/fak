@@ -13,7 +13,7 @@ raw-vs-fak run. It makes no result claim; it makes the run turnkey.
 
 ## Witnessed node readiness — a GPU server node ("GPU server", 2026-06-27 16:42Z)
 
-Probed read-only via the private control bridge (`fak-private/tools/dgxsh.py`; the node's
+Probed read-only via the private control bridge (`private bridge helper`; the node's
 control channel and hostname live in the gitignored private tooling, never the public repo):
 
 | Gate | Status |
@@ -52,7 +52,7 @@ checked-in reference solution and calls **no LLM** (`total_input_tokens=0`), so 
      a real file channel (scp / a shared mount / `git pull` + on-node `go build` once go is
      installed). This is the one mechanical step the current Slack-only bridge cannot do for me.
    ```bash
-   /tmp/fak serve --addr 127.0.0.1:8137 --policy examples/dev-agent-policy.json &
+   <private-scratch>/fak serve --addr 127.0.0.1:8137 --policy examples/dev-agent-policy.json &
    curl -sS 127.0.0.1:8137/healthz     # expect {"ok":true,...,"planner":"mock"}
    ```
 2. **Keyless `/v1/responses` wire smoke** (proves inbound wire + kernel adjudication on the run

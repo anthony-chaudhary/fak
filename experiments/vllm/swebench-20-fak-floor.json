@@ -22,7 +22,7 @@
   "families": [
     {
       "name": "prefill / KV-reuse work-elimination (deterministic)",
-      "bench_analog": "related to (NOT the same quantity as) bench's server-stream cache-hit/KV-reuse; live TTFT/wall-clock is the gated DGX number, not produced here",
+      "bench_analog": "related to (NOT the same quantity as) bench's server-stream cache-hit/KV-reuse; live TTFT/wall-clock is the gated GPU server number, not produced here",
       "kind": "fak_native",
       "provenance": "computed_deterministic",
       "metrics": [
@@ -135,7 +135,7 @@
           "name": "pass_rate_pct",
           "value": 0,
           "unit": "%",
-          "note": "no predictions graded — resolve-rate needs a capable model + Docker (DGX); ~0 with the local 135M model"
+          "note": "no predictions graded — resolve-rate needs a capable model + Docker (GPU server); ~0 with the local 135M model"
         }
       ]
     }
@@ -144,7 +144,7 @@
   "honesty": [
     "prefill work-elimination is a deterministic floor (exact token arithmetic), NOT a measured wall-clock — live timing is the GPU server headline",
     "cross-worker reuse (B/C) is the value-stack lever; the A/C and turn-tax (A/B) numbers are fak-vs-harness-arms, reported as such, not as a tuned-SGLang head-to-head",
-    "resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on DGX via the same harness",
+    "resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on GPU server via the same harness",
     "to be scraped by bench like SGLang, fak serve needs a Prometheus /metrics route exposing kernel.Counters() — gap noted, not yet shipped"
   ]
 }

@@ -76,10 +76,10 @@
         {
           "id": "swebench_compare_preflight",
           "description": "Fail fast before the long SWE-bench agent run.",
-          "command": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only",
+          "command": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200 --preflight-only",
           "artifacts": [
-            "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
-            "/tmp/swe-glm52-vllm-20/DONE.rc"
+            "<private-swebench-run>/COMPARE-PREFLIGHT.json",
+            "<private-swebench-run>/DONE.rc"
           ],
           "required": true,
           "artifact_status": "MISSING",
@@ -88,12 +88,12 @@
         {
           "id": "swebench_verified_20",
           "description": "Run raw-vLLM vs fak-gateway on a 20-task SWE-bench Verified slice.",
-          "command": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200",
+          "command": "<private-swebench-compare> --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir <private-swebench-run> --require-gpu-name H200",
           "artifacts": [
-            "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
-            "/tmp/swe-glm52-vllm-20/compare.json",
-            "/tmp/swe-glm52-vllm-20/COMPARE.md",
-            "/tmp/swe-glm52-vllm-20/DONE.rc"
+            "<private-swebench-run>/COMPARE-PREFLIGHT.json",
+            "<private-swebench-run>/compare.json",
+            "<private-swebench-run>/COMPARE.md",
+            "<private-swebench-run>/DONE.rc"
           ],
           "required": true,
           "artifact_status": "MISSING",
