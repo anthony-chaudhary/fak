@@ -328,5 +328,68 @@ func TestRunAccountsRemoveArchive(t *testing.T) {
 	}
 }
 
+func TestRunAccountsRemoveMovesRolesOffTombstone(t *testing.T) {
+	t.Setenv("FAK_JOB_ROSTER", "")
+	t.Setenv("FAK_DOS_ROSTER", "")
+	home := t.TempDir()
+	day27 := mkHome(t, home, ".claude-day27-netra", "day27@example.test", true)
+	anchor := mkHome(t, home, ".claude-default", "anchor@example.test", true)
+
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"day27-netra","dir":"` + jsonPath(day27) + `"},` +
+		`{"name":"default","dir":"` + jsonPath(anchor) + `"}` +
+		`],"roles":{"active":"day27-netra","anchor":"default"}}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"remove", "--name", "day27-netra", "--rehome-to", "default",
+		"--reason", "retired test account",
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 0 {
+		t.Fatalf("remove role-holder rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "registry: role active -> default (was day27-netra)") {
+		t.Fatalf("remove should report the role move, got:\n%s", out.String())
+	}
+
+	got, err := accounts.LoadRegistry(regPath)
+	if err != nil {
+		t.Fatalf("registry should validate after tombstoning role-holder: %v", err)
+	}
+	if got.Roles[accounts.RoleActive] != "default" {
+		t.Fatalf("active role = %q, want default", got.Roles[accounts.RoleActive])
+	}
+	if got.Roles[accounts.RoleAnchor] != "default" {
+		t.Fatalf("anchor role = %q, want default", got.Roles[accounts.RoleAnchor])
+	}
+	var tomb accounts.Home
+	for _, h := range got.Homes {
+		if h.Name == "day27-netra" {
+			tomb = h
+			break
+		}
+	}
+	if tomb.Name == "" || tomb.Active() || tomb.RehomeTo != "default" || tomb.EnabledOrDefault() {
+		t.Fatalf("day27-netra tombstone not recorded correctly: %+v", tomb)
+	}
+
+	dosView := filepath.Join(home, ".claude", "accounts.yaml")
+	dos, err := os.ReadFile(dosView)
+	if err != nil {
+		t.Fatalf("dos view should be regenerated under temp home: %v", err)
+	}
+	if strings.Contains(string(dos), "name: day27-netra") || strings.Contains(string(dos), "active_default: day27-netra") {
+		t.Fatalf("tombstoned active account leaked into generated dos view:\n%s", dos)
+	}
+	if !strings.Contains(string(dos), "active_default: default") {
+		t.Fatalf("generated dos view should move active_default to default:\n%s", dos)
+	}
+}
+
 // jsonPath escapes a Windows path's backslashes for embedding in a JSON string literal.
 func jsonPath(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }

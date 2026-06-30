@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -272,6 +273,15 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q to itself\n", p.name)
 		return 1
 	}
+	liveRehome, _, err := reg.Resolve(rehome)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: invalid rehome target %q: %v\n", rehome, err)
+		return 1
+	}
+	if liveRehome.Name == p.name {
+		fmt.Fprintf(stderr, "fak accounts: cannot rehome %q through %q because it resolves back to itself\n", p.name, rehome)
+		return 1
+	}
 	reason := p.reason
 	if reason == "" {
 		reason = "removed via `fak accounts remove`"
@@ -282,6 +292,7 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	reg.Homes[idx].TombstoneReason = reason
 	disabled := false
 	reg.Homes[idx].Enabled = &disabled
+	movedRoles := moveRolesOffHome(&reg, p.name, liveRehome.Name)
 
 	// --archive collapses the whole retirement into one command: rename the config dir to the
 	// house tombstone form (<dir>.DELETED-<date>) and repoint the registry entry (name + dir,
@@ -327,6 +338,9 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: tombstoned %s -> rehome %s\n", p.name, rehome)
+	for _, role := range movedRoles {
+		fmt.Fprintf(stdout, "registry: role %s -> %s (was %s)\n", role, liveRehome.Name, p.name)
+	}
 	if code := syncViewsUnlessNoSync(stdout, stderr, p.registryPath, p.dosView, p.jobView, p.noSync); code != 0 {
 		return code
 	}
@@ -336,6 +350,24 @@ func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 		fmt.Fprintf(stdout, "removed account %q (config dir left in place; tombstoned in registry + views)\n", p.name)
 	}
 	return 0
+}
+
+// moveRolesOffHome points every role currently filled by from at to, returning the roles
+// moved in stable order. A role must name an active seat, so tombstoning a role-holder has
+// to move the role before SaveRegistry's validation self-check can accept the registry.
+func moveRolesOffHome(reg *accounts.Registry, from, to string) []string {
+	if reg.Roles == nil {
+		return nil
+	}
+	var moved []string
+	for role, name := range reg.Roles {
+		if name == from {
+			reg.Roles[role] = to
+			moved = append(moved, role)
+		}
+	}
+	sort.Strings(moved)
+	return moved
 }
 
 // setRoleParams carries the resolved flags for `fak accounts set-role`.
