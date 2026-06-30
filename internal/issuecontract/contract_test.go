@@ -190,6 +190,15 @@ func TestReviewCandidateLiveRequiresNoiseControl(t *testing.T) {
 	}
 
 	c.Trigger = "A scored feeder crosses the issue threshold."
+	c.BatchPolicy = "Handle repeated signals carefully."
+	review = ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
+	if review.OK || !has(review.Reasons, ReasonNoiseIncomplete) {
+		t.Fatalf("vague batch policy review = %+v, want noise-control refusal", review)
+	}
+	if !has(review.MissingFields, "batch_policy") {
+		t.Fatalf("vague batch policy did not name batch_policy missing: %+v", review.MissingFields)
+	}
+
 	c.BatchPolicy = "One issue per marker key; reruns update existing issues."
 	review = ReviewCandidate(c, Options{Live: true, DedupeChecked: true, DedupeCap: 300})
 	if !review.OK {

@@ -533,13 +533,23 @@ func missingAgentContextFields(c Candidate) []string {
 
 func missingNoiseControlFields(c Candidate) []string {
 	var missing []string
-	if c.Trigger == "" {
+	if agentSectionValue(c.Trigger) == "" {
 		missing = append(missing, "trigger")
 	}
-	if c.BatchPolicy == "" {
+	if policy := agentSectionValue(c.BatchPolicy); policy == "" || !batchPolicyControlsSpam(policy) {
 		missing = append(missing, "batch_policy")
 	}
 	return missing
+}
+
+func batchPolicyControlsSpam(policy string) bool {
+	text := strings.ToLower(policy)
+	return hasAny(text,
+		"one issue per", "per ", "key", "class", "bucket", "group",
+		"batch", "wave", "cap", "capped", "at most", "limit", "threshold",
+		"marker", "dedupe", "dedup", "duplicate", "duplicates", "existing",
+		"update", "updates", "rerun", "reruns", "re-run",
+	)
 }
 
 func score(c Candidate, routeOK bool) Score {
