@@ -229,6 +229,8 @@ func main() {
 		cmdRoutebench(os.Args[2:])
 	case "accounts":
 		cmdAccounts(os.Args[2:])
+	case "fleet-accounts":
+		cmdFleetAccounts(os.Args[2:])
 	case "garden":
 		cmdGarden(os.Args[2:])
 	case "cadence":
