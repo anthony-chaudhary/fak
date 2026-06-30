@@ -72,9 +72,14 @@ jobs:
           python-version: "3.x"
 
       # The fold/trend logic FIRST: a green report below is only meaningful if the
-      # fold that produced it is itself proven correct.
+      # fold that produced it is itself proven correct. The milestone fold rides the
+      # SAME loop cadence (issue #1443) so a milestone regression surfaces on the
+      # operator's weekly read, not only the separate milestone-tick.yml cron.
       - name: cadence fold self-test
         run: go test ./internal/cadencereport/
+
+      - name: milestone fold self-test
+        run: go test ./internal/milestonereport/
 
       # The REPORT. Tolerate a non-zero exit (a flaky sub-tool must not suppress
       # the report) — the verdict is surfaced below, not swallowed.
@@ -98,6 +103,39 @@ jobs:
           print(f"  -> {d['next_action']}")
           PY
           cat cadence-report.txt
+
+      # MILESTONES on the SAME loop cadence (issue #1443). The milestone report's
+      # advisory --check gate runs as a sibling RSI surface here so a stalled roadmap
+      # or an unmeasured climb is visible on the operator's weekly read — the same
+      # cadence the scores/work/releases fold rides. Fail-open like the cadence report:
+      # a non-zero exit (the advisory gate, or a partial roadmap) is surfaced, not
+      # swallowed, so a flaky sub-tool never suppresses the report.
+      - name: milestone report (--check)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          go run ./cmd/fak milestone report --json --check > milestone-report.json
+          echo "milestone-check-exit=$?"
+          set -e
+          test -s milestone-report.json || echo '{}' > milestone-report.json
+          python3 - <<'PY' > milestone-report.txt || echo "(milestone report unreadable)" > milestone-report.txt
+          import json
+          d = json.load(open("milestone-report.json"))
+          print(f"{d.get('verdict','?')} ({d.get('finding','')}) @{d.get('commit','')} {d.get('date','')}")
+          m = d.get("maturity") or {}
+          if isinstance(m, dict) and m:
+              print(f"  climb     {m.get('progress_pct',0):.1f}% progress; {m.get('matured',0)}/{m.get('cells',0)} matured; highest {m.get('highest','?')}")
+          e = d.get("epics") or {}
+          if isinstance(e, dict) and e:
+              print(f"  roadmap   {e.get('overall_pct',0):.1f}% complete; {e.get('measured',0)}/{e.get('tracked',0)} epic(s) measured")
+          if d.get("trend"):
+              print(f"  trend     {d['trend'].get('summary','')}")
+          if d.get("next_action"):
+              print(f"  -> {d['next_action']}")
+          PY
+          cat milestone-report.txt
 
       - name: Dry-run stop
         if: >-
@@ -138,6 +176,11 @@ jobs:
             echo '```'
             echo '</details>'
             echo
+            echo "## milestones (same-cadence --check)"
+            echo '```'
+            cat milestone-report.txt 2>/dev/null || echo "(no milestone report)"
+            echo '```'
+            echo
             if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
               echo "_Dry-run: the ledger was extended locally but not pushed. Dispatch with dry_run=false to commit and push._"
             else
@@ -153,4 +196,6 @@ jobs:
           path: |
             cadence-report.json
             cadence-report.txt
+            milestone-report.json
+            milestone-report.txt
           if-no-files-found: ignore
