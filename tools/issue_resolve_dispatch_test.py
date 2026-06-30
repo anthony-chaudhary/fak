@@ -843,6 +843,8 @@ class BackendRoutingTest(unittest.TestCase):
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
         mod.issue_contract_review = passing_issue_contract
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.check_backend_health = lambda runs_dir, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda runs_dir, **k: []
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
             "candidates": [], "reaped": [], "would_reap": []}
@@ -902,6 +904,7 @@ class WeeklyCapGateTest(unittest.TestCase):
     """The weekly-cap gate: detect the limit banner from recent worker logs, parse
     the reset, persist a hold, and make evaluate() refuse with WEEKLY_CAPPED."""
     BANNER = "You've hit your weekly limit · resets Jun 25, 1pm (America/Los_Angeles)"
+    GLM_WALL = "Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-07-04 00:56:38"
 
     def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
                       backend: str = "claude") -> None:
@@ -937,12 +940,34 @@ class WeeklyCapGateTest(unittest.TestCase):
             self.assertIsNone(mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now))
             self.assertIsNotNone(mod._scan_recent_cap_banner(runs, product="opencode", lookback_min=45, now_ts=now))
 
+    def test_scan_detects_glm_weekly_monthly_wall(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1451-glm.log", self.GLM_WALL,
+                               mtime=now - 60, backend="opencode")
+            hit = mod._scan_recent_cap_banner(runs, product="opencode",
+                                              lookback_min=45, now_ts=now)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["kind"], "weekly")
+        self.assertEqual(hit["reset_text"], "2026-07-04 00:56:38")
+        self.assertEqual(hit["evidence_log"], "resolve-1451-glm.log")
+
     def test_parse_reset_date_and_time_to_utc(self) -> None:
         import datetime as dt
         mod = load()
         now = dt.datetime(2026, 6, 23, 8, 0, 0)
         got = mod._parse_reset_to_utc("Jun 25, 1pm", now)
         self.assertEqual(got, dt.datetime(2026, 6, 25, 20, 0, 0))   # 1pm PDT(-7) -> 20:00 UTC
+
+    def test_parse_reset_bare_iso_timestamp(self) -> None:
+        import datetime as dt
+        mod = load()
+        now = dt.datetime(2026, 6, 30, 8, 0, 0)
+        got = mod._parse_reset_to_utc("2026-07-04 00:56:38", now)
+        self.assertEqual(got, dt.datetime(2026, 7, 4, 0, 56, 38))
 
     def test_parse_reset_time_only_next_occurrence(self) -> None:
         import datetime as dt
@@ -1102,6 +1127,24 @@ class WeeklyCapGateTest(unittest.TestCase):
             until = dt.datetime.fromisoformat(out["until"].replace("Z", ""))
             # Jun 25 1pm PDT == Jun 25 20:00 UTC, ~2 days out — far beyond the session cap.
             self.assertEqual(until, dt.datetime(2026, 6, 25, 20, 0, 0))
+
+    def test_glm_weekly_monthly_limit_keeps_full_hold(self) -> None:
+        import tempfile
+        import datetime as dt
+        mod = load()
+        now_utc = dt.datetime(2026, 6, 30, 8, 0, 0)
+        now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1451-glm.log", self.GLM_WALL,
+                               mtime=now_ts - 60, backend="opencode")
+            out = mod.check_weekly_cap(runs, product="opencode", account_tag="glm",
+                                       now_ts=now_ts)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["kind"], "weekly")
+            self.assertEqual(out["reset_text"], "2026-07-04 00:56:38")
+            until = dt.datetime.fromisoformat(out["until"].replace("Z", ""))
+            self.assertEqual(until, dt.datetime(2026, 7, 4, 0, 56, 38))
 
     def test_evaluate_refuses_when_capped(self) -> None:
         mod = load()

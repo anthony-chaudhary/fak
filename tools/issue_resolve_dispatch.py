@@ -850,7 +850,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # an honest WEEKLY_CAPPED hold. Everything here is FAIL-OPEN: any error resolves to
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
-_CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit", re.IGNORECASE)
+_CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit|limit\s+exhausted", re.IGNORECASE)
 # The codex (OpenAI/ChatGPT) backend hits its own quota wall with a different banner
 # than Claude's: "You've hit your usage limit. Visit https://chatgpt.com/codex/...
 # purchase more credits or try again at Jul 1st, 2026 8:41 PM." It matches the phrase
@@ -862,13 +862,16 @@ _CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit", re.IGNORECASE)
 _CODEX_RESET_RE = re.compile(
     r"try again at\s+([A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\s+\d{1,2}(?::\d{2})?\s*(?:am|pm))",
     re.IGNORECASE)
+_RESET_AT_RE = re.compile(
+    r"(?:will\s+)?reset\s+at\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?(?:Z|[+-]\d{2}:?\d{2})?)",
+    re.IGNORECASE)
 # A SESSION limit is a short rolling window (resets in hours); a WEEKLY limit is a
 # multi-day quota wall. They share the "hit your … limit" banner but must NOT share
 # the hold: treating a transient session limit as a weekly hold — and projecting a
 # bare time-of-day reset that already passed a full day forward — falsely walls an
 # account that actually has room (the gem8 false-cap). Classify the banner so a
 # session limit gets a short cooldown bounded to its real reset.
-_CAP_WEEKLY_RE = re.compile(r"weekly\s+limit", re.IGNORECASE)
+_CAP_WEEKLY_RE = re.compile(r"weekly[\w/\s]*limit", re.IGNORECASE)
 _CAP_SESSION_RE = re.compile(r"session\s+limit", re.IGNORECASE)
 _CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
 _CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
@@ -965,7 +968,7 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
         # Codex's "try again at <date>" reset wins when present (it has no
         # "(America/Los_Angeles)" clause the Claude parsers key on); otherwise fall
         # back to the Claude reset clauses.
-        m = (_CODEX_RESET_RE.search(text) or _CAP_RESET_RE.search(text)
+        m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
              or _CAP_RESET_FALLBACK_RE.search(text))
         reset_text = m.group(1).strip() if m else ""
         # weekly is the conservative (longer) hold; default to weekly only when the
@@ -993,6 +996,11 @@ def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | 
     if not reset_text:
         return None
     t = reset_text.lower()
+    iso = _iso_to_utc(reset_text.strip())
+    if iso:
+        if iso <= now_utc:
+            return None
+        return min(iso, now_utc + dt.timedelta(days=8))
     tm = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)", t)
     if not tm:
         return None
@@ -1023,9 +1031,12 @@ def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | 
 
 def _iso_to_utc(s: str) -> dt.datetime | None:
     try:
-        return dt.datetime.fromisoformat((s or "").replace("Z", ""))
+        parsed = dt.datetime.fromisoformat((s or "").replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
