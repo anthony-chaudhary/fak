@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -212,5 +213,45 @@ func TestRunInfoRejectsBadInterval(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runInfo(&stdout, &stderr, []string{"--gateway-url", "http://127.0.0.1:1", "--interval", "0s"}); code != 2 {
 		t.Fatalf("bad interval exit = %d, want 2", code)
+	}
+}
+
+// TestGuardInfoFetchErrorLineFriendlyAndPassthrough pins the first-run UX: a "nothing is
+// listening" error (the common case of running `fak info` before a `fak guard` is up) becomes a
+// plain-words, actionable hint naming the URL and how to start a gateway — never the raw Go dial
+// phrase — while a real fault from a gateway that IS answering (an HTTP status, an auth refusal)
+// is passed through verbatim so it stays visible.
+func TestGuardInfoFetchErrorLineFriendlyAndPassthrough(t *testing.T) {
+	const base = "http://127.0.0.1:8080"
+
+	for _, e := range []error{
+		errors.New(`Get "http://127.0.0.1:8080/debug/vars": dial tcp 127.0.0.1:8080: connectex: No connection could be made because the target machine actively refused it.`),
+		errors.New("dial tcp 127.0.0.1:8080: connect: connection refused"),
+		errors.New(`Get "http://nope/debug/vars": dial tcp: lookup nope: no such host`),
+		errors.New("context deadline exceeded (Client.Timeout exceeded while awaiting headers)"),
+	} {
+		if !guardInfoUnreachable(e) {
+			t.Fatalf("should be classed unreachable: %v", e)
+		}
+		line := guardInfoFetchErrorLine(base, e)
+		for _, want := range []string{"no fak gateway answering at " + base, "fak guard", "--gateway-url"} {
+			if !strings.Contains(line, want) {
+				t.Fatalf("friendly line missing %q: %s", want, line)
+			}
+		}
+		// The raw Go dial phrase must NOT leak into the friendly hint.
+		if strings.Contains(line, "dial tcp") || strings.Contains(line, "connectex") {
+			t.Fatalf("friendly hint must not echo the raw net error: %s", line)
+		}
+	}
+
+	// A gateway that IS answering (an HTTP status) is a real fault: pass it through verbatim and
+	// do not class it as unreachable.
+	httpErr := errors.New("GET /debug/vars: status 401")
+	if guardInfoUnreachable(httpErr) {
+		t.Fatalf("an HTTP-status error must not be classed unreachable: %v", httpErr)
+	}
+	if got, want := guardInfoFetchErrorLine(base, httpErr), "fak info: GET /debug/vars: status 401"; got != want {
+		t.Fatalf("status error must pass through verbatim: got %q want %q", got, want)
 	}
 }

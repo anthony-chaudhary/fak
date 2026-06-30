@@ -75,10 +75,54 @@ func cmdInfo(argv []string) {
 func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVars, bool) {
 	var v guardInfoVars
 	if err := c.get("/debug/vars", &v); err != nil {
-		fmt.Fprintf(stderr, "fak info: %v\n", err)
+		fmt.Fprintln(stderr, guardInfoFetchErrorLine(c.base, err))
 		return v, false
 	}
 	return v, true
+}
+
+// guardInfoUnreachable reports whether err is the "nothing is listening" class — a refused
+// connection, a dial/DNS failure, or a connect timeout — as opposed to an HTTP error from a
+// gateway that IS answering (those carry "status NNN"). It matches on the platform dial-failure
+// phrasings (Windows says "actively refused"/"no connection could be made"; POSIX "connection
+// refused") plus the generic dial/timeout tells. A miss just falls back to the raw error, so a
+// false negative is harmless; HTTP-status errors contain none of these fragments, so a gateway
+// that answers with an error is never mistaken for an absent one.
+func guardInfoUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, frag := range []string{
+		"connection refused",          // POSIX dial refusal
+		"actively refused",            // Windows dial refusal (connectex)
+		"no connection could be made", // Windows, full phrasing
+		"no such host",                // DNS miss / wrong host
+		"dial tcp",                    // generic dial failure
+		"timeout",                     // dial / handshake timeout
+		"deadline exceeded",           // context timeout
+		"connection reset",            // peer went away mid-dial
+	} {
+		if strings.Contains(s, frag) {
+			return true
+		}
+	}
+	return false
+}
+
+// guardInfoFetchErrorLine turns a /debug/vars fetch error into the single line `fak info` prints.
+// When nothing is listening at the gateway — the common first-run case, where `fak info` is run
+// before (or without) a `fak guard` — it replaces the raw Go net error with a plain-words,
+// actionable hint that names the URL it tried and how to start a gateway, instead of a dial
+// stack phrase a non-technical watcher cannot act on. Any other error (an HTTP status from a
+// gateway that IS answering, an auth refusal) is passed through verbatim so a real fault stays
+// visible.
+func guardInfoFetchErrorLine(base string, err error) string {
+	if guardInfoUnreachable(err) {
+		return fmt.Sprintf("fak info: no fak gateway answering at %s — is `fak guard` running? "+
+			"start one with `fak guard -- claude`, or pass --gateway-url for a gateway elsewhere", base)
+	}
+	return fmt.Sprintf("fak info: %v", err)
 }
 
 func runInfo(stdout, stderr io.Writer, argv []string) int {
@@ -236,7 +280,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 				writeNote(stdout, "fak info: gateway closed — guarded session ended")
 				return false, true
 			}
-			writeNote(stderr, fmt.Sprintf("fak info: %v", err))
+			writeNote(stderr, guardInfoFetchErrorLine(c.base, err))
 			return false, false
 		}
 		sawHealthy = true
