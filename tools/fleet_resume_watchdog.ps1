@@ -43,7 +43,16 @@ param(
   # Anti-spam floor: skip probing an account probed within the last N minutes (read from
   # probe_ledger.jsonl). At the default ~hourly tick this just prevents back-to-back ticks
   # from double-probing; raise it to throttle harder.
-  [int]$ProbeMinIntervalMin = 20
+  [int]$ProbeMinIntervalMin = 20,
+  # The registered scheduled task invokes `-File ...fleet_resume_watchdog.ps1 -Live -Slack`,
+  # mirroring the .py port's `--slack`. The public .ps1 dropped this switch, so PowerShell
+  # failed parameter binding (NamedParameterNotFound) BEFORE any script code ran -- no
+  # heartbeat, no resume -- and conhost --headless masked it as exit 0, so the watchdog
+  # looked healthy (LastResult=0) while silently dead for hours. Accept the switch so the
+  # tick runs. (Slack POSTING itself flows through notify.ps1 / the .py port's slack_post;
+  # actually gating those posts on $Slack is a follow-on -- accepting it here is what
+  # un-wedges recovery.)
+  [switch]$Slack
 )
 $ErrorActionPreference = 'Stop'
 $stateRoot = if ($env:FLEET_STATE_DIR) {
