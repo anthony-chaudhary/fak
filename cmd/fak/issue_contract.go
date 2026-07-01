@@ -24,6 +24,8 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "contract":
 		return runIssueContract(stdout, stderr, argv[1:])
+	case "cohort":
+		return runIssueCohort(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		issueUsage(stdout)
 		return 0
@@ -1059,6 +1061,8 @@ func issueUsage(w io.Writer) {
   fak issue contract --from-plan PLAN.json [--json]
   fak issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
+  fak issue cohort   --from-plan PLAN.json [--json]
+                     [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
 
 The contract command reviews machine-created GitHub issue candidates before a
 producer syncs them. Exit 0 means dispatchable; exit 3 means the candidate is
@@ -1066,5 +1070,12 @@ triage-only or refused with closed reasons such as ISSUE_SCOPE_INCOMPLETE,
 ISSUE_UNROUTED, ISSUE_NOT_DISPATCH_LEAF, ISSUE_OVERSIZED_EXPECTED_STEPS,
 ISSUE_NOISE_CONTROL_INCOMPLETE, ISSUE_AGENT_CONTEXT_INCOMPLETE,
 ISSUE_PRIVATE_BOUNDARY, or ISSUE_LIVE_UNARMORED.
+
+The cohort command plans a whole BATCH (1..1000) of candidates at creation time:
+it partitions the dispatchable leaves into concurrency-safe waves (the same
+disjoint-tree rule dos arbitrate uses), pulls oversized/non-leaf rows into a
+split-first queue with a child-issue budget, buckets the rest into triage, and
+reports duplicate marker keys. It is a planner, not a gate: exit 0 on a valid
+plan, exit 2 on bad input.
 `)
 }
