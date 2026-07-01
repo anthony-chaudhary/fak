@@ -70,11 +70,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchCommitLinks(stdout, stderr, argv[1:])
 	case "unwitnessed-claim":
 		return runDispatchUnwitnessedClaim(stdout, stderr, argv[1:])
+	case "close-batch":
+		return runDispatchCloseBatch(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, or unwitnessed-claim)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, or close-batch)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -247,6 +249,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
   fak dispatch commit-links [--range REV..REV] [--json]
   fak dispatch unwitnessed-claim --issue N [--live] [--json]
+  fak dispatch close-batch [--in FILE] [--batch-size N] [--reserve N] [--now UNIX] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -280,5 +283,11 @@ unwitnessed-claim checks one issue's latest comment for a self-reported completi
 ("done", "fixed", "shipped", ...) sitting on an issue that is still open -- meaning ancestry
 never witnessed it. It renders (dry-run) or posts (--live) a comment naming the missing witness
 and the next recovery action; it never closes the issue itself.
+close-batch groups witnessed-closeable issue numbers (e.g. "fak dispatch progress --json"'s
+witnessed_numbers) into dry-run batches of --batch-size, pricing each batch's mutation cost
+against a rate-limit budget (--in JSON's "budget", or a default 5000/hour window) via the
+mutationbudget guard, and naming a "gh issue reopen" rollback for each batch. It is a plan
+only -- it never closes an issue; arming a live close arm on top of an ALLOW batch is later,
+separate work.
 `)
 }
