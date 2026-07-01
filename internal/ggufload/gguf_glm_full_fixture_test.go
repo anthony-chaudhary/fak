@@ -177,17 +177,25 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 // raw-quant expert routing. The quant payloads are written as all-zero blocks (valid: dequant to
 // 0), which keeps the forward finite while letting the loader take the raw-resident split.
 func glmMoeDsaFullGGUFTyped(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int, expertType TensorType) []byte {
+	// The batched routed-expert blobs take expertType; everything else is F32.
+	return glmMoeDsaFullGGUFWithTypes(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI,
+		func(name string) TensorType {
+			if strings.Contains(name, "_exps.weight") {
+				return expertType
+			}
+			return TensorF32
+		})
+}
+
+// glmMoeDsaFullGGUFWithTypes is the generalized fixture: typeOf assigns every tensor's GGUF
+// type (return TensorF32 for the default float payload). Lets a test quantize DENSE tensors
+// too — e.g. the real UD-Q4_K_M quantizes the dense MLA projections to Q8_0, the layout the
+// dense-resident-k-quant loader gate must refuse for glm_moe_dsa.
+func glmMoeDsaFullGGUFWithTypes(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int, typeOf func(string) TensorType) []byte {
 	qkHead := qkNope + qkRope
 	type tw struct {
 		name string
 		dims []uint64
-	}
-	// The batched routed-expert blobs take expertType; everything else is F32.
-	typeOf := func(name string) TensorType {
-		if strings.Contains(name, "_exps.weight") {
-			return expertType
-		}
-		return TensorF32
 	}
 	// dims low-to-high (GGUF order).
 	ts := []tw{

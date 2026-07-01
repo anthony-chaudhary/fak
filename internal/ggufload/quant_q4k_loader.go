@@ -276,8 +276,15 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 		// path (it refuses the normalize-sensitive q/k/qkv/linear_attn projections), so skipping
 		// normalizeCanonicalTensorData here is safe for exactly the identity weights (ffn_down,
 		// o_proj, lm_head) it admits. The expert k-quants take the batched resident path above.
+		// EXCEPTION — glm_moe_dsa: its device serve (glmDsaWeightHAL) uploads every DENSE weight
+		// from the f32/q8/q4kw stores and has no kqw kernels, so a dense weight held here panics
+		// the first request ("got resident raw expert-quant weight ... on the device path" — the
+		// GLM-5.2 cpu-offload serve regression, 2026-07-01). GLM dense non-Q4_K k-quants keep the
+		// dequant→Q8 route (the 2026-06-27-witnessed layout); only the routed experts, which run
+		// on the host under --cpu-offload-experts, stay raw-resident in kqw.
 		if _, _, residentable := residentExpertBlockGeometry(info.Type); residentable &&
-			info.Type != TensorQ4_K && model.ResidentKQuantEligible(cfg, canon) {
+			info.Type != TensorQ4_K && cfg.ModelType != "glm_moe_dsa" &&
+			model.ResidentKQuantEligible(cfg, canon) {
 			tw.pending = []pendingTensor{{resident: true, residentType: info.Type, name: canon, shape: shape, raw: raw}}
 			tw.acctResident = true
 			return tw
