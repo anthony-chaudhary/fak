@@ -21,7 +21,10 @@
 //     cumulative ratio hides.
 package cacheobs
 
-import "sync"
+import (
+	"math"
+	"sync"
+)
 
 // FrozenFloor / ColdCeil bucket a turn's reuse ratio into the three cliff regimes. A turn
 // at or above FrozenFloor reused almost its whole prefix (the append-only ceiling); a turn
@@ -68,18 +71,30 @@ func (o *Observer) Observe(promptTokens, reusedPrefixTokens int) {
 	}
 	ratio := float64(reusedPrefixTokens) / float64(promptTokens)
 	o.mu.Lock()
-	o.turns++
-	o.promptTokens += uint64(promptTokens)
-	o.reusedTokens += uint64(reusedPrefixTokens)
+	o.turns = saturatingAddU64(o.turns, 1)
+	o.promptTokens = saturatingAddU64(o.promptTokens, uint64(promptTokens))
+	o.reusedTokens = saturatingAddU64(o.reusedTokens, uint64(reusedPrefixTokens))
 	switch {
 	case ratio >= FrozenFloor:
-		o.frozen++
+		o.frozen = saturatingAddU64(o.frozen, 1)
 	case ratio < ColdCeil:
-		o.cold++
+		o.cold = saturatingAddU64(o.cold, 1)
 	default:
-		o.partial++
+		o.partial = saturatingAddU64(o.partial, 1)
 	}
 	o.mu.Unlock()
+}
+
+// saturatingAddU64 returns a+b clamped to math.MaxUint64 instead of silently
+// wrapping past it. A real process will never prefill anywhere near 2^64 tokens,
+// but the defined behavior at the ceiling must be a stuck-high saturation, never
+// an undetected wrap back down to a small count.
+func saturatingAddU64(a, b uint64) uint64 {
+	sum := a + b
+	if sum < a {
+		return math.MaxUint64
+	}
+	return sum
 }
 
 // Stats is a point-in-time snapshot of the accumulated reuse.

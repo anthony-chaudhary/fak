@@ -1,6 +1,7 @@
 package cacheobs
 
 import (
+	"math"
 	"sync"
 	"testing"
 )
@@ -82,6 +83,58 @@ func TestNilObserverSafe(t *testing.T) {
 func TestIdleRatioIsZero(t *testing.T) {
 	if s := New().Snapshot(); s.ReuseRatio != 0 {
 		t.Fatalf("idle reuse ratio = %v, want 0 (no phantom ratio)", s.ReuseRatio)
+	}
+}
+
+// #1946: many turns that all hit the frozen ceiling (reuse == prompt every turn)
+// must report ReuseRatio exactly 1.0 and every turn bucketed as frozen -- the
+// headline regime the cliff metric exists to show, previously untested.
+func TestAllFrozenRatioIsExactlyOne(t *testing.T) {
+	o := New()
+	const nTurns = 10_000
+	for i := 0; i < nTurns; i++ {
+		o.Observe(37, 37) // full reuse every turn: ratio == 1.0 exactly
+	}
+	s := o.Snapshot()
+	if s.Turns != nTurns {
+		t.Fatalf("turns = %d, want %d", s.Turns, nTurns)
+	}
+	if s.FrozenTurns != nTurns {
+		t.Fatalf("frozen turns = %d, want %d (every turn hits the frozen ceiling)", s.FrozenTurns, nTurns)
+	}
+	if s.PartialTurns != 0 || s.ColdTurns != 0 {
+		t.Fatalf("partial=%d cold=%d, want 0/0 for an all-frozen run", s.PartialTurns, s.ColdTurns)
+	}
+	if s.ReuseRatio != 1.0 {
+		t.Fatalf("ReuseRatio = %v, want exactly 1.0", s.ReuseRatio)
+	}
+}
+
+// #1946: the accumulators must saturate at math.MaxUint64 instead of silently
+// wrapping back down to a small number once a long-lived process nears the
+// ceiling. Directly seeding the unexported fields (this test is in-package) is
+// the only way to reach the ceiling without actually accumulating 2^64 tokens.
+func TestObserveSaturatesInsteadOfWrapping(t *testing.T) {
+	o := New()
+	o.turns = math.MaxUint64
+	o.promptTokens = math.MaxUint64
+	o.reusedTokens = math.MaxUint64
+	o.frozen = math.MaxUint64
+
+	o.Observe(100, 100) // ratio 1.0 -> would land in the already-saturated frozen bucket
+
+	s := o.Snapshot()
+	if s.Turns != math.MaxUint64 {
+		t.Fatalf("turns = %d, want saturated at MaxUint64", s.Turns)
+	}
+	if s.PromptTokens != math.MaxUint64 || s.ReusedTokens != math.MaxUint64 {
+		t.Fatalf("tokens did not saturate: prompt=%d reused=%d, want both MaxUint64", s.PromptTokens, s.ReusedTokens)
+	}
+	if s.FrozenTurns != math.MaxUint64 {
+		t.Fatalf("frozen bucket = %d, want saturated at MaxUint64", s.FrozenTurns)
+	}
+	if s.ReuseRatio != 1.0 {
+		t.Fatalf("reuse ratio at saturation = %v, want a sane 1.0, not a wrapped/NaN value", s.ReuseRatio)
 	}
 }
 
