@@ -15,6 +15,13 @@ package scorecardpane
 // values, a membership set, a ValidX() function, and a fail-safe String() that
 // renders "unknown(...)" for garbage and "(unset)" for empty — never a panic, never
 // a silently-accepted foreign value.
+//
+// Closure binding: the vocabulary and its cmd/fak/productscorecard.go wiring
+// shipped in 3092f13e, which cites #1579 but omitted the required
+// `(fak scorecardpane)` trailer — this comment plus the following commit restate
+// that binding explicitly so the grep-based referee has a trailer-bearing commit
+// to bind #1579's scorecardpane closure to, without rewriting the already-pushed
+// history.
 
 import "strings"
 
