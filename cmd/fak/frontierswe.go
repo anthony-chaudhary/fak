@@ -54,6 +54,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 		return runFrontiersweCacheWitness(stdout, stderr, rest)
 	case "env-adapter", "environment":
 		return runFrontiersweEnvAdapter(stdout, stderr, rest)
+	case "smoke-contract":
+		return runFrontiersweSmokeContract(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		frontiersweUsage(stdout)
 		return 0
@@ -103,6 +105,15 @@ usage:
         chat-completions request through the same /v1 base URL the C6 shim uses,
         then exec the FrontierSWE harness. If this host lacks Docker/GHCR/Modal,
         the result is honestly GATED and prints the exact remote command.
+
+  fak frontierswe smoke-contract [--tasks DIR] [--task NAME] [--model MODEL]
+                                  [--agent NAME] [--out contract.json]
+                                  [--md contract.md]
+        Emit the C10 raw-vs-fak pre-run contract. It fixes the same task, model,
+        agent, budget, raw arm, fak-routed arm, official grader gate,
+        score-parity gate, and TTS metric. It is offline and always
+        result_claim_allowed=false until both arms run and the official scorer
+        confirms score parity.
 `)
 }
 
