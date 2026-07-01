@@ -205,6 +205,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      GOTOOLCHAIN: auto
     steps:
       - uses: actions/checkout@v4
         with:
@@ -215,46 +216,133 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: re-download, checksum, and run the published binaries
-        id: verify_published_artifacts
+      - name: verify published archives and checksums
+        id: verify_published_assets
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           tmp="$(mktemp -d)"
-          cd "$tmp"
-          gh release download "$TAG" --clobber
-          echo "== verifying sha256 sidecars =="
+          assets="${tmp}/assets"
+          unpacked="${tmp}/unpacked"
+          mkdir -p "$assets" "$unpacked"
+          gh release download "$TAG" --dir "$assets" --clobber
+          cd "$assets"
+
+          expected_archives=(
+            "fak_${VERSION}_linux_amd64.tar.gz"
+            "fak_${VERSION}_linux_arm64.tar.gz"
+            "fak_${VERSION}_darwin_amd64.tar.gz"
+            "fak_${VERSION}_darwin_arm64.tar.gz"
+            "fak_${VERSION}_windows_amd64.zip"
+          )
+
           fail=0
-          for sum in *.sha256; do
-            # each sidecar is "<hash>  <archive>" — verify the named archive.
+
+          echo "== checking required release assets =="
+          for archive in "${expected_archives[@]}"; do
+            if [ ! -f "$archive" ]; then
+              echo "::error::expected release archive missing: $archive"; fail=1
+              continue
+            fi
+            if [ ! -f "${archive}.sha256" ]; then
+              echo "::error::expected checksum sidecar missing: ${archive}.sha256"; fail=1
+            fi
+          done
+          if [ ! -f SHA256SUMS ]; then
+            echo "::error::aggregate SHA256SUMS asset missing"; fail=1
+          fi
+
+          echo "== verifying aggregate SHA256SUMS =="
+          if [ -f SHA256SUMS ]; then
+            if sha256sum -c SHA256SUMS; then
+              echo "ok: SHA256SUMS matches published archives"
+            else
+              echo "::error::aggregate SHA256SUMS verification failed"; fail=1
+            fi
+          fi
+
+          echo "== verifying per-archive sha256 sidecars =="
+          shopt -s nullglob
+          sums=( *.sha256 )
+          if [ "${#sums[@]}" -eq 0 ]; then
+            echo "::error::no per-archive .sha256 assets found"; fail=1
+          fi
+          for sum in "${sums[@]}"; do
             if sha256sum -c "$sum"; then
               echo "ok: $sum"
             else
               echo "::error::checksum mismatch for $sum"; fail=1
             fi
           done
+
+          echo "== extracting published archives =="
+          for archive in "${expected_archives[@]}"; do
+            [ -f "$archive" ] || continue
+            dest="${unpacked}/${archive}"
+            mkdir -p "$dest"
+            case "$archive" in
+              *.tar.gz) tar -xzf "${PWD}/${archive}" -C "$dest" ;;
+              *.zip) unzip -q "${PWD}/${archive}" -d "$dest" ;;
+              *) echo "::error::unknown archive format: $archive"; fail=1; continue ;;
+            esac
+            bin="fak"
+            case "$archive" in
+              *windows*) bin="fak.exe" ;;
+            esac
+            if [ ! -f "${dest}/${bin}" ]; then
+              echo "::error::${archive} did not contain ${bin} at archive root"; fail=1
+            fi
+          done
+
           # Verify the linux/amd64 binary actually runs and reports the right version.
-          lin="fak_${VERSION}_linux_amd64.tar.gz"
+          lin="${unpacked}/fak_${VERSION}_linux_amd64.tar.gz/fak"
           if [ -f "$lin" ]; then
-            tar -xzf "$lin"
-            got="$(./fak version 2>/dev/null | head -1 || true)"
-            echo "linux_amd64 fak version -> $got"
+            chmod +x "$lin"
+            got="$("$lin" version 2>/dev/null | head -1 || true)"
+            echo "linux_amd64 fak version -> ${got}"
             case "$got" in
               *"$VERSION"*) echo "ok: binary reports $VERSION" ;;
               *) echo "::error::published linux_amd64 binary version mismatch: got '$got', want '$VERSION'"; fail=1 ;;
             esac
           else
-            echo "::error::expected asset $lin not found on release $TAG"; fail=1
+            echo "::error::linux/amd64 archive did not extract a runnable fak binary"; fail=1
           fi
           {
             echo "## verify published artifacts — ${TAG}"
-            echo "Assets present: $(ls *.tar.gz *.zip 2>/dev/null | wc -l) archives; checksum + binary-version verification ran."
+            echo "Required archives: ${#expected_archives[@]}"
+            echo "Checksum sidecars, SHA256SUMS, extraction, and linux/amd64 binary-version verification ran."
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$fail"
 
+      - name: verify go install resolves and runs the tag
+        id: verify_go_install
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          install_dir="$(mktemp -d)"
+          mod_cache="$(mktemp -d)"
+          build_cache="$(mktemp -d)"
+          env \
+            GOBIN="$install_dir" \
+            GOMODCACHE="$mod_cache" \
+            GOCACHE="$build_cache" \
+            GOPROXY=direct \
+            go install "github.com/anthony-chaudhary/fak/cmd/fak@${TAG}"
+          got="$("${install_dir}/fak" version 2>/dev/null | head -1 || true)"
+          echo "go install fak version -> ${got}"
+          case "$got" in
+            *"$VERSION"*) echo "ok: go install ...@${TAG} resolved, built, and reports ${VERSION}" ;;
+            *) echo "::error::go-installed fak version mismatch: got '$got', want '$VERSION'"; exit 1 ;;
+          esac
+          {
+            echo "## verify go install — ${TAG}"
+            echo "go install github.com/anthony-chaudhary/fak/cmd/fak@${TAG} resolved, built, and reported ${VERSION}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Quarantine failed release
-        if: ${{ failure() && steps.verify_published_artifacts.outcome == 'failure' }}
+        if: ${{ failure() }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -268,24 +356,9 @@ jobs:
             echo "Marked the GitHub release as a prerelease and make_latest=false after post-publish verification failed."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: verify go install resolves the tag
-        run: |
-          set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          # A clean module cache so this proves the public resolution path, not a
-          # cached copy. Non-fatal on a proxy lag (the tag can take minutes to appear
-          # on proxy.golang.org); the asset checks above are the hard gate.
-          export GOFLAGS=-mod=mod GOBIN="$(mktemp -d)"
-          if go install "github.com/anthony-chaudhary/fak/cmd/fak@${TAG}"; then
-            echo "ok: go install ...@${TAG} resolved and built"
-            "$GOBIN/fak" version || true
-          else
-            echo "::warning::go install ...@${TAG} did not resolve yet (module proxy lag is expected for minutes after a tag push)"
-          fi
-
   announce:
     name: announce release to #releases
-    needs: checksums
+    needs: verify-release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
