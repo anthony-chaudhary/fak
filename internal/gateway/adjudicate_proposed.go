@@ -10,6 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 )
 
 // fastPathLookup probes the registered vDSO fast paths (the same abi.FastPaths()
@@ -52,6 +53,7 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 	var served []string
 	for _, tc := range calls {
 		tool := tc.Function.Name
+		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
 		// vDSO-eligible iff the tool name is read-only-shaped (the same readOnlyPrefix
 		// gate buildCall uses to stamp readOnlyHint+idempotentHint). A write-shaped tool
 		// is never probed; vdso.Lookup's own destructive gate is the backstop.
@@ -93,11 +95,12 @@ func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.Too
 		}
 		served = append(served, servedToolLine(tool, body, res.Meta))
 		servedHits++
-		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, Admitted: true,
+		adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: true,
 			Verdict: WireVerdict{Kind: "ALLOW", Reason: "SERVED_INLINE", By: "vdso"}})
 	}
 	kept, adjs2, dropped := s.adjudicateProposed(ctx, pass, reqTrace)
 	adjs = append(adjs, adjs2...)
+	s.annotateToolLivelock(reqTrace, adjs)
 	if len(served) > 0 {
 		servedText = strings.Join(served, "\n")
 	}
@@ -165,21 +168,65 @@ func callRequestsFresh(args string) bool {
 	return json.Unmarshal(raw, &b) == nil && b
 }
 
+func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) {
+	if s == nil || trace == "" {
+		return
+	}
+	s.livelockMu.Lock()
+	if s.livelock == nil {
+		s.livelock = guardrsi.NewLivelockDetector(guardrsi.DefaultLivelockThreshold)
+	}
+	type hit struct {
+		idx int
+		env guardrsi.LivelockEnvelope
+	}
+	var hits []hit
+	sawFailure := false
+	for i := range adjs {
+		a := adjs[i]
+		if a.Admitted || a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM" {
+			continue
+		}
+		sawFailure = true
+		env, ok := s.livelock.ObserveFailure(guardrsi.LivelockObservation{
+			TraceID:     trace,
+			Tool:        a.Tool,
+			ArgsDigest:  a.ArgsDigest,
+			Verdict:     a.Verdict.Kind,
+			Reason:      a.Verdict.Reason,
+			Disposition: a.Verdict.Disposition,
+		})
+		if ok {
+			hits = append(hits, hit{idx: i, env: env})
+		}
+	}
+	if !sawFailure {
+		s.livelock.Clear(trace)
+	}
+	s.livelockMu.Unlock()
+
+	for _, h := range hits {
+		env := h.env
+		adjs[h.idx].Livelock = &env
+	}
+}
+
 func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall, reqTrace string) ([]agent.ToolCall, []ToolAdjudication, int) {
 	kept := make([]agent.ToolCall, 0, len(calls))
 	adjs := make([]ToolAdjudication, 0, len(calls))
 	dropped := 0
 	for _, tc := range calls {
 		tool := tc.Function.Name
+		argsDigest := guardrsi.ArgsDigest(tc.Function.Arguments)
 		seq := s.nextOriginSeq()
 		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, tc.Function.Arguments, false, "", reqTrace, seq)
 		if aerr != nil {
 			dropped++
-			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, Admitted: false,
+			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Admitted: false,
 				Verdict: WireVerdict{Kind: "DENY", Reason: "MALFORMED", Disposition: "RETRYABLE"}})
 			continue
 		}
-		adj := ToolAdjudication{ToolCallID: tc.ID, Tool: tool, Verdict: wv}
+		adj := ToolAdjudication{ToolCallID: tc.ID, Tool: tool, ArgsDigest: argsDigest, Verdict: wv}
 		switch wv.Kind {
 		case "ALLOW":
 			adj.Admitted = true

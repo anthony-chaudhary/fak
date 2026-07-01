@@ -5,6 +5,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
@@ -563,11 +564,13 @@ func wireRedactionsFrom(recs []agent.TranscriptRedaction) []WireRedaction {
 
 // ToolAdjudication is one proposed tool_call's verdict.
 type ToolAdjudication struct {
-	ToolCallID        string          `json:"tool_call_id,omitempty"`
-	Tool              string          `json:"tool"`
-	Admitted          bool            `json:"admitted"`
-	Verdict           WireVerdict     `json:"verdict"`
-	RepairedArguments json.RawMessage `json:"repaired_arguments,omitempty"`
+	ToolCallID        string                     `json:"tool_call_id,omitempty"`
+	Tool              string                     `json:"tool"`
+	ArgsDigest        string                     `json:"args_digest,omitempty"`
+	Admitted          bool                       `json:"admitted"`
+	Verdict           WireVerdict                `json:"verdict"`
+	RepairedArguments json.RawMessage            `json:"repaired_arguments,omitempty"`
+	Livelock          *guardrsi.LivelockEnvelope `json:"livelock,omitempty"`
 }
 
 // ResultAdmission is one inbound tool result admitted before it is forwarded to

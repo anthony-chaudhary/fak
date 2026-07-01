@@ -894,7 +894,11 @@ func writeSSEData(w http.ResponseWriter, v any) error {
 func denySummary(adjs []ToolAdjudication) string {
 	parts := make([]string, 0, len(adjs))
 	for _, a := range adjs {
-		parts = append(parts, fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, a.Verdict.Reason, a.Verdict.Disposition))
+		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, a.Verdict.Reason, a.Verdict.Disposition)
+		if a.Livelock != nil {
+			part += " " + livelockInBandNote(a)
+		}
+		parts = append(parts, part)
 	}
 	return "All proposed tool calls were refused by the fak kernel: " + strings.Join(parts, "; ")
 }
@@ -912,7 +916,11 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	for _, a := range adjs {
 		switch {
 		case !a.Admitted:
-			denied = append(denied, fmt.Sprintf("%s (%s/%s)", a.Tool, a.Verdict.Reason, a.Verdict.Disposition))
+			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, a.Verdict.Reason, a.Verdict.Disposition)
+			if a.Livelock != nil {
+				entry += " " + livelockInBandNote(a)
+			}
+			denied = append(denied, entry)
 		case a.Verdict.Kind == "TRANSFORM":
 			repaired = append(repaired, a.Tool)
 		}
@@ -938,6 +946,16 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		b.WriteString(".")
 	}
 	return b.String()
+}
+
+func livelockInBandNote(a ToolAdjudication) string {
+	if a.Livelock == nil {
+		return ""
+	}
+	return fmt.Sprintf("LIVELOCK_DETECTED repeat=%d repeated_call=%s approach=%s",
+		a.Livelock.RepeatCount,
+		livelockCallLabel(*a.Livelock),
+		a.Livelock.SuggestedChange)
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -236,6 +237,58 @@ func TestRecordTurnSafety_IsPerTurnNotCumulative(t *testing.T) {
 	}
 	if strings.Contains(lines[2], "blocked:") {
 		t.Fatalf("a turn with no recorded safety action must carry no safety half: %s", lines[2])
+	}
+}
+
+func TestAdjudicateProposedServedAnnotatesLivelockOnThirdDeniedCall(t *testing.T) {
+	s := newTestServer(t)
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	call := []agent.ToolCall{{
+		ID: "call-1", Type: "function",
+		Function: agent.Func{Name: "deny_bash", Arguments: `{"cmd":"repeat refused operation"}`},
+	}}
+	var third []ToolAdjudication
+	for i := 0; i < 3; i++ {
+		_, adjs, dropped, _, _ := s.adjudicateProposedServed(context.Background(), call, "trace-live")
+		if dropped != 1 || len(adjs) != 1 || adjs[0].Admitted {
+			t.Fatalf("turn %d adjudications = %+v dropped=%d, want one denied call", i+1, adjs, dropped)
+		}
+		if adjs[0].ArgsDigest == "" {
+			t.Fatalf("turn %d lost args digest: %+v", i+1, adjs[0])
+		}
+		if i < 2 && adjs[0].Livelock != nil {
+			t.Fatalf("turn %d fired livelock early: %+v", i+1, adjs[0].Livelock)
+		}
+		if i == 2 {
+			third = adjs
+		}
+		s.recordTurnSafety("trace-live", adjs, nil)
+		s.logInferenceTurn("trace-live", "anthropic_messages", true,
+			agent.Usage{PromptTokens: 20, CacheReadInputTokens: 80}, "end_turn", time.Millisecond, false)
+	}
+	if len(third) != 1 || third[0].Livelock == nil {
+		t.Fatalf("third identical denial did not carry livelock envelope: %+v", third)
+	}
+	env := third[0].Livelock
+	if env.Event != "LIVELOCK_DETECTED" || env.RepeatCount != 3 || env.Tool != "deny_bash" {
+		t.Fatalf("livelock envelope = %+v, want event repeat=3 tool=deny_bash", env)
+	}
+	for _, want := range []string{
+		"livelock=LIVELOCK_DETECTED",
+		"repeat=3",
+		"repeated_call=deny_bash@sha256:",
+		"approach=change_approach_fetch_merge_escalate_or_not_yet_with_witness",
+	} {
+		if !strings.Contains(lines[2], want) {
+			t.Fatalf("third debug line missing %q: %s", want, lines[2])
+		}
+	}
+	for _, text := range []string{adjudicationNote(third), denySummary(third)} {
+		if !strings.Contains(text, "LIVELOCK_DETECTED repeat=3") || !strings.Contains(text, "repeated_call=deny_bash@sha256:") {
+			t.Fatalf("in-band note missing livelock envelope: %s", text)
+		}
 	}
 }
 

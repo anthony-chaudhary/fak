@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
@@ -52,6 +53,7 @@ type turnSafetyDelta struct {
 	repaired    int
 	quarantined int
 	topReason   string
+	livelock    guardrsi.LivelockEnvelope
 }
 
 // any reports whether the delta has anything worth rendering — a clean ALLOW-everything turn has
@@ -72,6 +74,9 @@ func foldTurnSafety(adjs []ToolAdjudication, results []ResultAdmission) turnSafe
 			d.blocked++
 			if d.topReason == "" && a.Verdict.Reason != "" {
 				d.topReason = a.Verdict.Reason
+			}
+			if a.Livelock != nil && d.livelock.Event == "" {
+				d.livelock = *a.Livelock
 			}
 		case a.Verdict.Kind == "TRANSFORM":
 			d.repaired++
@@ -278,8 +283,22 @@ func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish stri
 		if safety.topReason != "" {
 			fmt.Fprintf(&b, " reason=%s", debugField(safety.topReason))
 		}
+		if safety.livelock.Event != "" {
+			fmt.Fprintf(&b, " livelock=%s repeat=%d repeated_call=%s approach=%s",
+				debugField(safety.livelock.Event),
+				safety.livelock.RepeatCount,
+				debugField(livelockCallLabel(safety.livelock)),
+				debugField(safety.livelock.SuggestedChange))
+		}
 	}
 	return b.String()
+}
+
+func livelockCallLabel(env guardrsi.LivelockEnvelope) string {
+	if env.ArgsDigest == "" {
+		return env.Tool
+	}
+	return env.Tool + "@" + env.ArgsDigest
 }
 
 const compactionNudgeNearPercent = 80

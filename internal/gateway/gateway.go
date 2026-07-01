@@ -45,6 +45,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/fusedturn"
+	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -725,6 +726,12 @@ type Server struct {
 	// resetHealth). SHADOW-only: an observability surface, never on the request path.
 	turnSafetyMu sync.Mutex
 	turnSafety   map[string]turnSafetyDelta
+
+	// livelock tracks consecutive identical refused tool calls per trace so the third
+	// repeat can be surfaced as a structured LIVELOCK_DETECTED envelope inside the same
+	// turn stream. It records only tool names and args digests, never raw arguments.
+	livelockMu sync.Mutex
+	livelock   *guardrsi.LivelockDetector
 
 	// contextQueryAudit is the managed-context clarification journal (#1622): every
 	// context question minted by the gateway records the answer source/default and
