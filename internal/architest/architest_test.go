@@ -253,6 +253,7 @@ var tier = map[string]int{
 	"closebatch":       1, // pure batch planner (#1826): groups witnessed-closeable issues into dry-run batches, pricing each against mutationbudget.Guard and naming a rollback note; never closes an issue itself, off the hot path.
 	"skipledger":       1, // pure skip/select ledger fold (#1776): turns one dispatchorder.Result into per-candidate rows (issue, lane, reason, safety/capacity category, timestamp) for later rate-loss audit; imports only dispatchorder (tier 1), off the hot path.
 	"attemptbudget":    1, // pure per-issue attempt-budget fold (#1777): counts an issue's recorded failed attempts against a budget and holds it for triage once crossed, naming the last failure class; stdlib-only, off the hot path.
+	"timeoutphase":     1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

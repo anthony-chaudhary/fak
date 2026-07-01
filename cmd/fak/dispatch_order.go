@@ -76,11 +76,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchSkipLedger(stdout, stderr, argv[1:])
 	case "attempt-budget":
 		return runDispatchAttemptBudget(stdout, stderr, argv[1:])
+	case "timeout-ledger":
+		return runDispatchTimeoutLedger(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, or attempt-budget)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -256,6 +258,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch close-batch [--in FILE] [--batch-size N] [--reserve N] [--now UNIX] [--json]
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
   fak dispatch attempt-budget [--in FILE] [--budget N] [--json]
+  fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -307,5 +310,12 @@ a budget (its own "budget" field, or the --budget default) and reports whether t
 still dispatchable or HELD for triage, naming the LAST recorded failure class -- so a
 repeatedly failing issue stops burning workers once it crosses the budget instead of being
 re-offered forever. A budget of 0 is unlimited (never held on attempt count alone).
+timeout-ledger classifies each --in timed-out attempt (which lifecycle stage -- edit, test,
+commit, push -- it was last observed in before the kill, or none at all) into a closed phase
+(before_startup, during_edit, during_tests, during_commit, during_push, or unknown when no
+evidence was observed), then persists one JSONL row per attempt to
+.dispatch-runs/timeout-ledger.jsonl under --workspace, so WHERE timeouts happen is auditable
+instead of every timeout looking like the same opaque event. It never inspects a live process
+or spawns a worker -- the only side effect is the local append.
 `)
 }
