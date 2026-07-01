@@ -29,7 +29,7 @@ Collected from the current tree on 2026-06-30:
 | Python tool test count | `rg --files tools -g "*_test.py"` -> 237 files |
 | Workflow count | `.github/workflows/*.{yml,yaml}` -> 34 workflows |
 | `fak test --list` | tiers: `fast`, `full`, `race`, `affected`, `durations`, `<pkg>` |
-| `fak test durations --help` | folds `go test -json` into `fak.test_duration_ledger.v1` with package/test budgets and ranked findings; CI/local automatic emission still pending |
+| `fak test durations --help` | runs `go test -json` for a selected tier/package via `--run`, writes `fak.test_duration_ledger.v1` via `--out`, or folds an existing stream via `--input`; CI automatic emission still pending |
 | `fak affected --help` | supports changed-file/package selection, JSON/list dry-runs, budgeted runs, `-run`, `-short`, `-count`, and report output |
 | `tools/gated_tool_tests.py --check` | 237 tests = 69 gated elsewhere + 20 quarantined + 148 hermetic; red-debt 6 |
 | Go code-quality scorecard | score 78.4/100, grade C, code-debt 23; build/vet/honesty/ship-integrity all 100; tests 326/327 non-trivial packages; architecture debt 18 |
@@ -74,7 +74,7 @@ not exact, and several important checks are advisory rather than ratcheted.
 | Modular test architecture | 69 | Architest/lane boundaries exist; current code-quality and tooling-quality scorecards show large god-file/god-function debt that slows targeted tests and safe refactors. |
 | Witness and honesty quality | 90 | Claims lint, salience, DOS review, proof artifacts, and rendered/demo witnesses are unusually strong; several coverage and scorecard checks remain advisory. |
 | Python tool-test discipline | 70 | The no-blackhole runner accounts for 237 tests and runs 148 hermetic tests; there are 43 untested non-trivial modules, 20 quarantined tests, and 6 red quarantines. |
-| CI speed/caching | 76 | Go build/test cache and separate race cache are wired, and `fak test durations` can now parse a `go test -json` stream into a budgeted ledger; automatic CI/local ledger emission, shard planning, and hard slow-test trends are still pending. |
+| CI speed/caching | 76 | Go build/test cache and separate race cache are wired, and `fak test durations --run ... --out ...` can now emit a local budgeted package/test ledger; CI ledger emission, shard planning, and hard slow-test trends are still pending. |
 | Coverage observability | 73 | CI emits a coverage profile and total statement coverage; there is no changed-package coverage floor or trend gate tied to risk. |
 
 ## Top-20 Improvement Spine
