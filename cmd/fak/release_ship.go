@@ -275,7 +275,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	}
 	worktreeAdded = true
 
-	cut := runReleaseShipCut(&result, wt, env, opts)
+	cut := runReleaseShipCut(&result, wt, releaseShipPromotionEnv(env, result), opts)
 	result.Cut = cut
 	if ok, _ := cut["ok"].(bool); !ok {
 		result.fail("release_cut_refused", jsonTail(cut))
@@ -666,6 +666,28 @@ func releaseShipEnv(lockRoot, owner string) []string {
 	env = setEnv(env, "FAK_RELEASE_LOCK_ROOT", lockRoot)
 	env = setEnv(env, "FAK_RELEASE_OWNER", owner)
 	return env
+}
+
+func releaseShipPromotionEnv(env []string, result releaseShipResult) []string {
+	env = setEnv(env, "FAK_RELEASE_SOURCE_BRANCH", result.SourceBranch)
+	env = setEnv(env, "FAK_RELEASE_SOURCE_SHA", result.SourceSHA)
+	env = setEnv(env, "FAK_RELEASE_TARGET_BRANCH", result.TargetBranch)
+	env = setEnv(env, "FAK_RELEASE_TARGET_SHA", result.TargetSHA)
+	env = setEnv(env, "FAK_RELEASE_SOURCE_RANGE", releaseShipSourceRange(result))
+	if result.SourceCI != nil {
+		env = setEnv(env, "FAK_RELEASE_SOURCE_CI", stringFromAny(result.SourceCI["status"]))
+	}
+	return env
+}
+
+func releaseShipSourceRange(result releaseShipResult) string {
+	if result.SourceSHA == "" {
+		return ""
+	}
+	if result.TargetSHA == "" || sameSHA(result.TargetSHA, result.SourceSHA) {
+		return result.SourceSHA
+	}
+	return result.TargetSHA + ".." + result.SourceSHA
 }
 
 func setEnv(env []string, key, value string) []string {

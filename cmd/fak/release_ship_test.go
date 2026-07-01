@@ -116,6 +116,18 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			for key, want := range map[string]string{
+				"FAK_RELEASE_SOURCE_BRANCH": "dev",
+				"FAK_RELEASE_SOURCE_SHA":    "dev-source-sha",
+				"FAK_RELEASE_TARGET_BRANCH": "main",
+				"FAK_RELEASE_TARGET_SHA":    "main-target-sha",
+				"FAK_RELEASE_SOURCE_RANGE":  "main-target-sha..dev-source-sha",
+				"FAK_RELEASE_SOURCE_CI":     "success",
+			} {
+				if got := envValue(env, key); got != want {
+					t.Fatalf("%s = %q, want %q in release_cut env %v", key, got, want, env)
+				}
+			}
 			return 0, `{"ok":true,"version":"0.36.0","tag":"v0.36.0","commit_sha":"release-sha"}`
 		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
 			return 0, ""
@@ -424,4 +436,14 @@ func envHas(env []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
 }
