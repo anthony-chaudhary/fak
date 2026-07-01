@@ -23,6 +23,8 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
 			return 0, "base-sha\n"
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
+			return 0, `[{"databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/source-ci"}]`
 		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
@@ -37,6 +39,8 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "ls-remote", "origin", "refs/heads/main"):
 			return 0, "release-sha\trefs/heads/main\n"
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url"):
+			return 0, `[{"databaseId":41,"status":"completed","conclusion":"success","url":"https://example.test/main-ci"}]`
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_tag.py")):
 			if !containsArgPair(args, "--trunk", "") {
 				t.Fatalf("release_tag must skip local-branch reachability after remote push: %v", args)
@@ -69,10 +73,10 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 		limitCommits:    50,
 		ttl:             1800,
 		fetch:           true,
-		requireCI:       false,
+		requireCI:       true,
 		waitCI:          false,
 		skipDryRun:      true,
-		ciAppearTimeout: 0,
+		ciAppearTimeout: time.Minute,
 	})
 
 	if !result.OK {
@@ -95,6 +99,21 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 	}
 	if len(result.ExecutedCommands) == 0 || !strings.HasSuffix(result.ExecutedCommands[0].Args[0], filepath.Join("tools", "release_lock.py")) || result.ExecutedCommands[0].Args[1] != "acquire" {
 		t.Fatalf("release lock must be acquired before release work: %#v", result.ExecutedCommands)
+	}
+	pushIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
+		return cmd.Name == "git" && sameArgs(cmd.Args, "push", "origin", "HEAD:refs/heads/main")
+	})
+	verifyIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
+		return cmd.Name == "git" && sameArgs(cmd.Args, "ls-remote", "origin", "refs/heads/main")
+	})
+	ciIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
+		return cmd.Name == "gh" && sameArgs(cmd.Args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url")
+	})
+	tagIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
+		return cmd.Name == releaseShipPython() && len(cmd.Args) > 0 && strings.HasSuffix(cmd.Args[0], filepath.Join("tools", "release_tag.py"))
+	})
+	if !(pushIdx >= 0 && pushIdx < verifyIdx && verifyIdx < ciIdx && ciIdx < tagIdx) {
+		t.Fatalf("tag must follow push, remote verify, and promoted CI witness; push=%d verify=%d ci=%d tag=%d commands=%#v", pushIdx, verifyIdx, ciIdx, tagIdx, result.ExecutedCommands)
 	}
 }
 
@@ -446,4 +465,13 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func releaseShipCommandIndex(commands []releaseShipCommand, match func(releaseShipCommand) bool) int {
+	for i, cmd := range commands {
+		if match(cmd) {
+			return i
+		}
+	}
+	return -1
 }
