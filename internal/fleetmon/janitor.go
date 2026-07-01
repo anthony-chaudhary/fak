@@ -1,6 +1,7 @@
 package fleetmon
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -172,6 +173,7 @@ func EvaluateJanitor(in JanitorInput) JanitorResult {
 	seen := map[int]bool{}
 	for _, w := range in.Workers {
 		rootStart, hasRootStart := parseTS(w.Start)
+		rootAgeSec := derefInt(byPID[w.PID].AgeSec)
 		// BFS over the worker's descendants.
 		queue := append([]int{}, children[w.PID]...)
 		for len(queue) > 0 {
@@ -205,7 +207,7 @@ func EvaluateJanitor(in JanitorInput) JanitorResult {
 			}
 
 			// Protection layers (any one protects).
-			predates := hasRootStart && childPredatesRoot(p, rootStart)
+			predates := childPredatesRoot(p, rootStart, hasRootStart, rootAgeSec)
 			switch {
 			case workerByPID[pid].PID != 0:
 				cc.Protected, cc.Reason = true, "is itself a worker root — never a kill target"
@@ -225,6 +227,34 @@ func EvaluateJanitor(in JanitorInput) JanitorResult {
 				cc.Reason = fmt.Sprintf("%s child, age %s < %s ceiling", class, roundDur(float64(age)), ceilingLabel(ceiling))
 			}
 			all = append(all, cc)
+		}
+	}
+
+	// A stale child is reaped with a process-TREE kill (taskkill /T), which takes
+	// down its whole live subtree. So a stale child whose subtree contains ANY
+	// protected process (a worker root, an MCP server, an ancestor, a predating
+	// process) cannot be reaped — the tree-kill would collaterally kill the
+	// protected process. Demote such a candidate to protected.
+	protectedPIDs := map[int]bool{}
+	for _, w := range in.Workers {
+		protectedPIDs[w.PID] = true
+	}
+	for _, c := range all {
+		if c.Protected {
+			protectedPIDs[c.RootPID] = true
+		}
+	}
+	for i := range all {
+		if !all[i].Stale {
+			continue
+		}
+		for _, pid := range all[i].TreePIDs {
+			if pid != all[i].RootPID && protectedPIDs[pid] {
+				all[i].Stale = false
+				all[i].Protected = true
+				all[i].Reason = fmt.Sprintf("subtree holds a protected process (pid %d) — a tree-kill would take it down", pid)
+				break
+			}
 		}
 	}
 
@@ -297,16 +327,27 @@ func isSimpleShell(name, cmd string) bool {
 	return containsAnyLower(low, simpleShellNeedles)
 }
 
-// childPredatesRoot reports whether a child's start time is before the worker
-// root's start — the PID-reuse signature: the child's ParentProcessId points at
-// a pid the OS recycled into the (younger) worker root, so the child is not
-// actually this worker's descendant and must not be reaped as one.
-func childPredatesRoot(child procguard.Proc, rootStart time.Time) bool {
-	ct, ok := parseTS(child.Start)
-	if !ok {
-		return false // no start time -> cannot prove reuse; do not protect on this basis
+// childPredatesRoot reports whether a "child" actually PREDATES the worker root —
+// the PID-reuse signature: the child's ParentProcessId points at a pid the OS
+// recycled into the (younger) worker root, so the child is not really this
+// worker's descendant and must not be reaped as one.
+//
+// It prefers the precise start-time comparison when both timestamps are present.
+// It ALSO falls back to an age comparison, because the process-relations
+// collector populates AgeSec on every platform but currently leaves Start empty —
+// without the fallback the fence would be inert in production. A genuine
+// descendant is always younger than (or the same age as) its worker root, so a
+// child strictly older than the root cannot be its descendant.
+func childPredatesRoot(child procguard.Proc, rootStart time.Time, hasRootStart bool, rootAgeSec int) bool {
+	if hasRootStart {
+		if ct, ok := parseTS(child.Start); ok {
+			return ct.Before(rootStart)
+		}
 	}
-	return ct.Before(rootStart)
+	if child.AgeSec != nil && rootAgeSec > 0 {
+		return *child.AgeSec > rootAgeSec
+	}
+	return false
 }
 
 func subtree(root int, children map[int][]int) []int {
@@ -353,6 +394,70 @@ func janitorNextAction(stale, protected []ChildCommand) string {
 		names = append(names, fmt.Sprintf("%s(pid %d)", c.Name, c.RootPID))
 	}
 	return fmt.Sprintf("re-run with --apply to terminate %d stale child tree(s): %s", len(stale), strings.Join(names, ", "))
+}
+
+// --- termination-decision ledger (#1857) ---------------------------------- //
+
+// JanitorLedgerSchema tags each durable termination-decision row.
+const JanitorLedgerSchema = "fak-fleet-janitor-decision/1"
+
+// JanitorDecision is one durable, append-only termination-decision record: what
+// the janitor reaped (or would reap), why, and the exact process tree affected.
+// It is the accountability trail #1857 requires — every kill decision is a row
+// carrying reason, command, age, and the affected PIDs.
+type JanitorDecision struct {
+	Schema     string `json:"schema"`
+	Action     string `json:"action"` // terminated | kill-failed | would-terminate
+	RootPID    int    `json:"root_pid"`
+	Name       string `json:"name"`
+	Command    string `json:"command"`
+	Class      string `json:"class"`
+	AgeSec     int    `json:"age_sec"`
+	WorkerPID  int    `json:"worker_pid"`
+	Session    string `json:"session,omitempty"`
+	Issue      int    `json:"issue,omitempty"`
+	TreePIDs   []int  `json:"tree_pids"`
+	Reason     string `json:"reason"`
+	Detail     string `json:"detail,omitempty"` // killer detail (e.g. why a kill failed)
+	RecordedAt string `json:"recorded_at"`
+}
+
+// Janitor decision actions.
+const (
+	JanitorActionTerminated     = "terminated"
+	JanitorActionKillFailed     = "kill-failed"
+	JanitorActionWouldTerminate = "would-terminate"
+)
+
+// NewJanitorDecision builds a decision row from a stale child + the action taken.
+func NewJanitorDecision(c ChildCommand, action, detail string, now time.Time) JanitorDecision {
+	return JanitorDecision{
+		Schema:     JanitorLedgerSchema,
+		Action:     action,
+		RootPID:    c.RootPID,
+		Name:       c.Name,
+		Command:    c.Command,
+		Class:      string(c.Class),
+		AgeSec:     c.AgeSec,
+		WorkerPID:  c.WorkerPID,
+		Session:    c.Session,
+		Issue:      c.Issue,
+		TreePIDs:   c.TreePIDs,
+		Reason:     c.Reason,
+		Detail:     detail,
+		RecordedAt: now.UTC().Format(time.RFC3339),
+	}
+}
+
+// AppendJanitorDecisionLine renders one decision as a JSONL line (no trailing
+// newline); the caller appends the newline. Pure, so the writer is testable
+// without touching disk.
+func AppendJanitorDecisionLine(d JanitorDecision) (string, error) {
+	b, err := json.Marshal(d)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // --- small helpers -------------------------------------------------------- //

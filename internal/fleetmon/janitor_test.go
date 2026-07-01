@@ -1,6 +1,7 @@
 package fleetmon
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -189,5 +190,27 @@ func TestJanitorNextActionMessages(t *testing.T) {
 	res := EvaluateJanitor(JanitorInput{Procs: nil, Workers: nil, Now: now})
 	if res.NextAction == "" {
 		t.Fatal("next action should never be empty")
+	}
+}
+
+func TestJanitorDecisionRecord(t *testing.T) {
+	now := time.Now()
+	c := ChildCommand{RootPID: 200, Name: "ls", Command: "ls -la", Class: CmdSimpleShell, AgeSec: 400, WorkerPID: 100, Session: "issue-1", Issue: 1, TreePIDs: []int{200}, Reason: "stale"}
+	d := NewJanitorDecision(c, JanitorActionTerminated, "", now)
+	if d.Schema != JanitorLedgerSchema {
+		t.Fatalf("schema not stamped: %q", d.Schema)
+	}
+	if d.Action != JanitorActionTerminated || d.RootPID != 200 || d.WorkerPID != 100 {
+		t.Fatalf("decision fields wrong: %+v", d)
+	}
+	if len(d.TreePIDs) != 1 || d.AgeSec != 400 || d.Command != "ls -la" {
+		t.Fatalf("decision must carry command/age/pids: %+v", d)
+	}
+	line, err := AppendJanitorDecisionLine(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, `"action":"terminated"`) || !strings.Contains(line, `"root_pid":200`) {
+		t.Fatalf("decision line missing fields: %s", line)
 	}
 }

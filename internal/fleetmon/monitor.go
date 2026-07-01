@@ -46,18 +46,19 @@ func DefaultThresholds() Thresholds {
 // The cmd layer gathers it (registry row + PID liveness + CPU delta + transcript
 // read + janitor scan); the classifier itself does no I/O.
 type WorkerEvidence struct {
-	Issue          int
-	Session        string
-	Account        string
-	RegistryDisp   string           // sessions.json Disp: LIVE / DONE / USER_CLOSED / INFRA_AUTH / ...
-	RegistryAction string           // sessions.json Action: BLOCKED_AUTH / ...
-	HasPID         bool             // whether a worker PID is known at all
-	PID            int              //
-	PIDAlive       bool             // OS liveness of PID (meaningful only when HasPID)
-	CPUDeltaSec    *float64         // CPU seconds consumed since the previous sample (nil = unknown)
-	PrevLines      *int             // transcript line count at the previous sample (nil = first sample)
-	Transcript     TranscriptSignal //
-	StaleChildren  []ChildCommand   // stale child commands the janitor scan attributed to this worker
+	Issue            int
+	Session          string
+	Account          string
+	RegistryDisp     string           // sessions.json Disp: LIVE / DONE / USER_CLOSED / INFRA_AUTH / ...
+	RegistryAction   string           // sessions.json Action: BLOCKED_AUTH / ...
+	HasPID           bool             // whether a worker PID is known at all
+	PID              int              //
+	PIDAlive         bool             // OS liveness of PID (meaningful only when HasPID && PIDLivenessKnown)
+	PIDLivenessKnown bool             // whether the process scan succeeded so PIDAlive is trustworthy; false => liveness unknown, never a dead verdict
+	CPUDeltaSec      *float64         // CPU seconds consumed since the previous sample (nil = unknown)
+	PrevLines        *int             // transcript line count at the previous sample (nil = first sample)
+	Transcript       TranscriptSignal //
+	StaleChildren    []ChildCommand   // stale child commands the janitor scan attributed to this worker
 }
 
 // WorkerSample is the classified, machine-readable monitor row for one worker.
@@ -128,9 +129,19 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 	activelyGrowing := (s.LineDelta != nil && *s.LineDelta > 0) || (ev.CPUDeltaSec != nil && *ev.CPUDeltaSec > 0)
 	advancing := isAdvancing(ev, ageSec, s.LineDelta, th)
 	blocked := ev.Transcript.Blocker != "" || ev.RegistryAction == "BLOCKED_AUTH" || ev.RegistryDisp == "INFRA_AUTH"
+	// pidAlive is a CONFIRMED-alive PID (the scan ran and found it). A merely
+	// advancing transcript is independent liveness evidence (the process is writing),
+	// so healthy can rest on that even when the PID scan is unavailable — but the
+	// "PID alive but idle" stale verdicts need a confirmed PID, else it is attention.
+	pidAlive := ev.HasPID && ev.PIDLivenessKnown && ev.PIDAlive
+	s.PIDAlive = pidAlive
 
 	switch {
-	case ev.HasPID && !ev.PIDAlive:
+	// dead requires a KNOWN-not-alive PID and no final report: a worker whose
+	// liveness we could not check (scan failed) is never called dead — it routes to
+	// attention — and a worker that produced a final report and then exited cleanly
+	// is completed, not dead (the completed-final branch below claims it).
+	case ev.HasPID && ev.PIDLivenessKnown && !ev.PIDAlive && !ev.Transcript.FinalReport:
 		s.Class = ClassDead
 		s.Reasons = append(s.Reasons, fmt.Sprintf("registry %s but worker PID %d is not alive", orNone(ev.RegistryDisp), ev.PID))
 
@@ -143,15 +154,15 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 		s.Class = ClassCompletedFinal
 		s.Reasons = append(s.Reasons, "transcript ended on a final report and is idle")
 
-	case ev.HasPID && ev.PIDAlive && len(ev.StaleChildren) > 0 && !ev.Transcript.FinalReport:
+	case pidAlive && len(ev.StaleChildren) > 0 && !ev.Transcript.FinalReport:
 		s.Class = ClassStaleChild
 		s.Reasons = append(s.Reasons, "PID alive but wedged on stale child: "+s.ChildSummary)
 
-	case ev.HasPID && ev.PIDAlive && stale && !ev.Transcript.FinalReport:
+	case pidAlive && stale && !ev.Transcript.FinalReport:
 		s.Class = ClassStaleTranscript
 		s.Reasons = append(s.Reasons, fmt.Sprintf("transcript idle %s > %s, PID alive", roundDur(*ageSec), th.StaleTranscript))
 
-	case ev.HasPID && ev.PIDAlive && advancing:
+	case (pidAlive || activelyGrowing) && advancing:
 		s.Class = ClassHealthy
 		s.Reasons = append(s.Reasons, advancingReason(ev, ageSec, s.LineDelta))
 
@@ -223,6 +234,8 @@ func advancingReason(ev WorkerEvidence, ageSec *float64, lineDelta *int) string 
 
 func attentionReason(ev WorkerEvidence, ageSec *float64) string {
 	switch {
+	case ev.HasPID && !ev.PIDLivenessKnown:
+		return "process scan unavailable — PID liveness unknown, cannot rule dead; re-run the scan"
 	case !ev.HasPID && !ev.Transcript.Exists:
 		return "no worker PID and no transcript — cannot witness liveness"
 	case !ev.HasPID:

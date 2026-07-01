@@ -112,43 +112,38 @@ func FoldWorker(in FoldInput) LedgerRow {
 		}
 
 	default: // a final report is present — classify by the witnessed evidence
-		blocked, followUp := blockedFinal(t)
 		row.Witness = strings.Join(t.WitnessCommands, "; ")
+		// A HARD blocker is a real API/tool error the transcript tail carried
+		// (auth/rate/credit) — that downgrades even a witnessed patch. SOFT scoped
+		// language (a "follow-up"/"not yet" line) does NOT, because the run's own
+		// prompt REQUIRES workers to end with a follow-up line and to say "not yet"
+		// when incomplete — so its mere presence cannot mean a witnessed patch failed.
+		hardBlocked := t.Blocker != ""
+		softScoped := blockedTextRE.MatchString(t.FinalReportText)
+		hasPatch := len(t.ChangedFiles) > 0 && len(t.WitnessCommands) > 0
 		switch {
-		case len(t.ChangedFiles) > 0 && len(t.WitnessCommands) > 0 && !blocked:
-			row.Outcome = string(OutcomePatchWitness)
-			row.ChangedFiles = t.ChangedFiles
-		case blocked:
+		case hardBlocked:
 			row.Outcome = string(OutcomeBlockedScoped)
 			row.ChangedFiles = t.ChangedFiles
-			row.Blocker = firstNonEmpty(t.Blocker, "reported blocked/scoped in final report")
-			row.FollowUp = followUp
-		case len(t.ChangedFiles) == 0:
-			row.Outcome = string(OutcomeReadOnlyAudit)
-		default:
+			row.Blocker = t.Blocker
+			row.FollowUp = "clear the blocker: " + t.Blocker
+		case hasPatch:
+			row.Outcome = string(OutcomePatchWitness)
+			row.ChangedFiles = t.ChangedFiles
+		case len(t.ChangedFiles) > 0:
 			// Changed files but no captured witness: a claim, not a proof.
 			row.Outcome = string(OutcomeBlockedScoped)
 			row.ChangedFiles = t.ChangedFiles
 			row.FollowUp = "changed files but no witness command captured — add a test/build/commit witness"
+		case softScoped:
+			row.Outcome = string(OutcomeBlockedScoped)
+			row.Blocker = "reported blocked/scoped in final report"
+			row.FollowUp = smallestFollowUp(t.FinalReportText)
+		default:
+			row.Outcome = string(OutcomeReadOnlyAudit)
 		}
 	}
 	return row
-}
-
-// blockedFinal inspects a final report's text for a blocked/scoped signal and
-// extracts the smallest follow-up sentence.
-func blockedFinal(t TranscriptSignal) (bool, string) {
-	if t.Blocker != "" {
-		return true, "clear the blocker: " + t.Blocker
-	}
-	text := t.FinalReportText
-	if text == "" {
-		return false, ""
-	}
-	if blockedTextRE.MatchString(text) {
-		return true, smallestFollowUp(text)
-	}
-	return false, ""
 }
 
 var blockedTextRE = regexp.MustCompile(`(?i)\bnot yet\b|\bblocked\b|\bcannot\b|\bcan't\b|\bunable to\b|\bfollow[- ]up\b|\bneeds? (?:a )?(?:follow|human|decision)\b|\bout of scope\b|\bwaiting on\b`)

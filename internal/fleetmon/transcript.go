@@ -166,8 +166,11 @@ func classifyTail(tail []tRecord, sig *TranscriptSignal) {
 var (
 	reAuth   = regexp.MustCompile(`(?i)please run /login|invalid api key|authentication_error|oauth token (?:has )?expired|not authenticated|login required|invalid bearer token`)
 	reAccess = regexp.MustCompile(`(?i)subscription access.*(?:disabled|not enabled)|organization has disabled|use an anthropic api key instead`)
-	reCredit = regexp.MustCompile(`(?i)credit balance is too low|insufficient credit|billing`)
-	reRate   = regexp.MustCompile(`(?i)rate[ _-]?limit|429|usage limit reached|overloaded_error|please try again later|too many requests|quota exceeded`)
+	// Tightened to error-shaped signatures so ordinary tail text that merely
+	// mentions billing or rate limiting (e.g. a worker fixing a rate-limit bug) is
+	// not read as a live blocker.
+	reCredit = regexp.MustCompile(`(?i)credit balance is too low|insufficient credit`)
+	reRate   = regexp.MustCompile(`(?i)rate_limit_error|usage limit reached|overloaded_error|too many requests|quota exceeded|you have exceeded your (?:rate|usage)|(?:error|status|http)[ :]*429|rate limit (?:reached|exceeded|hit)`)
 )
 
 // blockerIn classifies the text of one record into (kind, human reason). The

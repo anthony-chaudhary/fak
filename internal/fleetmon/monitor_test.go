@@ -7,13 +7,29 @@ import (
 
 func TestClassifyDeadOnlyWhenPIDGone(t *testing.T) {
 	now := time.Now()
-	// Registry-active (LIVE) but the PID is not alive => dead.
+	// Registry-active (LIVE), the scan CONFIRMED the PID is not alive => dead.
 	got := Classify(WorkerEvidence{
-		Session: "w", RegistryDisp: "LIVE", HasPID: true, PID: 4242, PIDAlive: false,
+		Session: "w", RegistryDisp: "LIVE", HasPID: true, PID: 4242, PIDAlive: false, PIDLivenessKnown: true,
 		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-2 * time.Minute)},
 	}, now, DefaultThresholds())
 	if got.Class != ClassDead {
-		t.Fatalf("registry-active worker with a dead PID must be dead, got %s", got.Class)
+		t.Fatalf("registry-active worker with a confirmed-dead PID must be dead, got %s", got.Class)
+	}
+}
+
+func TestClassifyLivenessUnknownIsNotDead(t *testing.T) {
+	now := time.Now()
+	// Same as above BUT the process scan failed (liveness unknown). We must NOT
+	// emit a false dead — route to attention instead.
+	got := Classify(WorkerEvidence{
+		Session: "w", RegistryDisp: "LIVE", HasPID: true, PID: 4242, PIDAlive: false, PIDLivenessKnown: false,
+		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-2 * time.Minute)},
+	}, now, DefaultThresholds())
+	if got.Class == ClassDead {
+		t.Fatal("a worker whose liveness could not be checked must NEVER be called dead")
+	}
+	if got.Class != ClassAttention {
+		t.Fatalf("liveness-unknown should route to attention, got %s", got.Class)
 	}
 }
 
@@ -21,7 +37,7 @@ func TestClassifyNeverDeadWhenPIDAlive(t *testing.T) {
 	now := time.Now()
 	// PID alive, transcript very stale, no final report — stale, NOT dead.
 	got := Classify(WorkerEvidence{
-		Session: "w", RegistryDisp: "LIVE", HasPID: true, PID: 10, PIDAlive: true,
+		Session: "w", RegistryDisp: "LIVE", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true,
 		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-40 * time.Minute)},
 	}, now, DefaultThresholds())
 	if got.Class == ClassDead {
@@ -35,7 +51,7 @@ func TestClassifyNeverDeadWhenPIDAlive(t *testing.T) {
 func TestClassifyBlocked(t *testing.T) {
 	now := time.Now()
 	got := Classify(WorkerEvidence{
-		Session: "w", HasPID: true, PID: 10, PIDAlive: true,
+		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true,
 		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-1 * time.Minute), Blocker: "rate/usage limit hit", BlockerKind: "rate"},
 	}, now, DefaultThresholds())
 	if got.Class != ClassAuthRateBlocked {
@@ -49,7 +65,7 @@ func TestClassifyBlocked(t *testing.T) {
 func TestClassifyBlockedFromRegistryAuth(t *testing.T) {
 	now := time.Now()
 	got := Classify(WorkerEvidence{
-		Session: "w", RegistryDisp: "INFRA_AUTH", RegistryAction: "BLOCKED_AUTH", HasPID: true, PID: 10, PIDAlive: true,
+		Session: "w", RegistryDisp: "INFRA_AUTH", RegistryAction: "BLOCKED_AUTH", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true,
 		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-1 * time.Minute)},
 	}, now, DefaultThresholds())
 	if got.Class != ClassAuthRateBlocked {
@@ -61,11 +77,24 @@ func TestClassifyCompletedFinalIdle(t *testing.T) {
 	now := time.Now()
 	lines := iptr(100)
 	got := Classify(WorkerEvidence{
-		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PrevLines: lines,
+		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true, PrevLines: lines,
 		Transcript: TranscriptSignal{Exists: true, Lines: 100, HasTimestamp: true, LastTimestamp: now.Add(-2 * time.Minute), FinalReport: true, FinalReportText: "done"},
 	}, now, DefaultThresholds())
 	if got.Class != ClassCompletedFinal {
 		t.Fatalf("idle worker with a final report must be completed-final, got %s", got.Class)
+	}
+}
+
+func TestClassifyCompletedFinalAfterCleanExit(t *testing.T) {
+	now := time.Now()
+	// A worker that produced a final report and then EXITED cleanly (PID gone) is
+	// completed, not dead — the final report claims it before the dead branch.
+	got := Classify(WorkerEvidence{
+		Session: "w", HasPID: true, PID: 10, PIDAlive: false, PIDLivenessKnown: true,
+		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-2 * time.Minute), FinalReport: true, FinalReportText: "shipped"},
+	}, now, DefaultThresholds())
+	if got.Class != ClassCompletedFinal {
+		t.Fatalf("a final report + clean exit is completed-final, not dead, got %s", got.Class)
 	}
 }
 
@@ -75,7 +104,7 @@ func TestClassifyFinalReportButStillAdvancingIsHealthy(t *testing.T) {
 	// A final report was seen, but the transcript is still growing (+10 lines) and
 	// CPU is burning: the worker resumed — treat as healthy, not completed.
 	got := Classify(WorkerEvidence{
-		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PrevLines: prev, CPUDeltaSec: fptr(5),
+		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true, PrevLines: prev, CPUDeltaSec: fptr(5),
 		Transcript: TranscriptSignal{Exists: true, Lines: 100, HasTimestamp: true, LastTimestamp: now.Add(-30 * time.Second), FinalReport: true},
 	}, now, DefaultThresholds())
 	if got.Class != ClassHealthy {
@@ -83,10 +112,24 @@ func TestClassifyFinalReportButStillAdvancingIsHealthy(t *testing.T) {
 	}
 }
 
+func TestClassifyHealthyOnTranscriptGrowthWithoutPIDScan(t *testing.T) {
+	now := time.Now()
+	prev := iptr(40)
+	// No PID scan available (liveness unknown), but the transcript is actively
+	// growing — that IS independent liveness evidence, so the worker is healthy.
+	got := Classify(WorkerEvidence{
+		Session: "w", HasPID: true, PID: 10, PIDAlive: false, PIDLivenessKnown: false, PrevLines: prev,
+		Transcript: TranscriptSignal{Exists: true, Lines: 55, HasTimestamp: true, LastTimestamp: now.Add(-10 * time.Second)},
+	}, now, DefaultThresholds())
+	if got.Class != ClassHealthy {
+		t.Fatalf("actively-growing transcript is liveness evidence => healthy, got %s", got.Class)
+	}
+}
+
 func TestClassifyStaleChildBeatsStaleTranscript(t *testing.T) {
 	now := time.Now()
 	got := Classify(WorkerEvidence{
-		Session: "w", HasPID: true, PID: 10, PIDAlive: true,
+		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true,
 		Transcript:    TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-40 * time.Minute)},
 		StaleChildren: []ChildCommand{{RootPID: 55, Name: "go", Class: CmdTest, AgeSec: 900}},
 	}, now, DefaultThresholds())
@@ -102,7 +145,7 @@ func TestClassifyHealthyAdvancing(t *testing.T) {
 	now := time.Now()
 	prev := iptr(40)
 	got := Classify(WorkerEvidence{
-		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PrevLines: prev,
+		Session: "w", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true, PrevLines: prev,
 		Transcript: TranscriptSignal{Exists: true, Lines: 55, HasTimestamp: true, LastTimestamp: now.Add(-10 * time.Second)},
 	}, now, DefaultThresholds())
 	if got.Class != ClassHealthy {
@@ -134,7 +177,7 @@ func TestWitnessThirtyWorkerRun(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		prev := iptr(10)
 		samples = append(samples, Classify(WorkerEvidence{
-			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true, PrevLines: prev,
+			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true, PIDLivenessKnown: true, PrevLines: prev,
 			Transcript: TranscriptSignal{Exists: true, Lines: 25, HasTimestamp: true, LastTimestamp: now.Add(-15 * time.Second)},
 		}, now, th))
 	}
@@ -142,21 +185,21 @@ func TestWitnessThirtyWorkerRun(t *testing.T) {
 	for i := 20; i < 25; i++ {
 		prev := iptr(30)
 		samples = append(samples, Classify(WorkerEvidence{
-			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true, PrevLines: prev,
+			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true, PIDLivenessKnown: true, PrevLines: prev,
 			Transcript: TranscriptSignal{Exists: true, Lines: 30, HasTimestamp: true, LastTimestamp: now.Add(-30 * time.Minute)},
 		}, now, th))
 	}
 	// 4 stale-child-command: alive, idle, wedged on a stale simple child.
 	for i := 25; i < 29; i++ {
 		samples = append(samples, Classify(WorkerEvidence{
-			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true,
+			Issue: 1000 + i, Session: sess(i), RegistryDisp: "LIVE", HasPID: true, PID: 1000 + i, PIDAlive: true, PIDLivenessKnown: true,
 			Transcript:    TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-8 * time.Minute)},
 			StaleChildren: []ChildCommand{{RootPID: 5000 + i, Name: "ls", Class: CmdSimpleShell, AgeSec: 400}},
 		}, now, th))
 	}
 	// 1 completed-final: idle with a final report.
 	samples = append(samples, Classify(WorkerEvidence{
-		Issue: 1029, Session: sess(29), RegistryDisp: "LIVE", HasPID: true, PID: 1029, PIDAlive: true,
+		Issue: 1029, Session: sess(29), RegistryDisp: "LIVE", HasPID: true, PID: 1029, PIDAlive: true, PIDLivenessKnown: true,
 		Transcript: TranscriptSignal{Exists: true, HasTimestamp: true, LastTimestamp: now.Add(-3 * time.Minute), FinalReport: true, FinalReportText: "done"},
 	}, now, th))
 
