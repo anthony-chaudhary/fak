@@ -158,6 +158,10 @@ The baton is data, not prose (DOS lesson #3), and it is the *least* trusted sign
 in the system, so its progress half is never a claim — it is a cursor the next leg
 **re-verifies** (DOS lesson #2). A deliberately closed schema:
 
+The field-level `fak.relay.baton.v1` contract lives in
+[`RELAY-BATON-SCHEMA-2026-07-01.md`](RELAY-BATON-SCHEMA-2026-07-01.md);
+the JSON below is the short spine sketch.
+
 ```jsonc
 {
   "schema": "fak.relay.baton.v1",
