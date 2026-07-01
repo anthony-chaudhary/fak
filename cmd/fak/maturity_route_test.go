@@ -5,8 +5,39 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestMaturityNextSubcommandAcceptsTrailingFlags(t *testing.T) {
+	root := writeMaturityRouteWorkspace(t)
+
+	var out, errb bytes.Buffer
+	code := runMaturity(&out, &errb, []string{
+		"next",
+		"--workspace", root,
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
+	}
+	var got struct {
+		Schema  string `json:"schema"`
+		Backlog []struct {
+			Lane  string `json:"lane"`
+			Title string `json:"title"`
+		} `json:"backlog"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.Schema != "fak-maturity-scorecard/1" {
+		t.Fatalf("schema = %q, want fak maturity scorecard", got.Schema)
+	}
+	if len(got.Backlog) == 0 || got.Backlog[0].Lane != "alpha" || !strings.Contains(got.Backlog[0].Title, "test alpha") {
+		t.Fatalf("backlog[0] = %+v, want alpha test item", got.Backlog)
+	}
+}
 
 func TestMaturityRouteDryRunPlansDedupedIssue(t *testing.T) {
 	root := writeMaturityRouteWorkspace(t)

@@ -24,6 +24,11 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 			return runMaturityRoute(stdout, stderr, argv[1:])
 		}
 	}
+	nextSubcommand := false
+	if len(argv) > 0 && argv[0] == "next" {
+		nextSubcommand = true
+		argv = argv[1:]
+	}
 	fs := flag.NewFlagSet("fak maturity", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
@@ -33,6 +38,9 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if nextSubcommand {
+		*next = true
 	}
 	// `fak maturity next` is the natural spelling of the backlog view.
 	if fs.NArg() == 1 && fs.Arg(0) == "next" {
