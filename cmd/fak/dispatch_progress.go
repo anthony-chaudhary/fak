@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,11 +18,12 @@ import (
 )
 
 const (
-	dispatchProgressSchema   = "fleet-issue-resolve-progress/1"
-	dispatchProgressLoopID   = "issue-resolve-progress"
-	dispatchProgressRunsDir  = ".dispatch-runs"
-	dispatchProgressLogName  = "progress.jsonl"
-	dispatchProgressBaseline = "progress-baseline.json"
+	dispatchProgressSchema    = "fleet-issue-resolve-progress/1"
+	dispatchProgressLoopID    = "issue-resolve-progress"
+	dispatchProgressRunsDir   = ".dispatch-runs"
+	dispatchProgressLogName   = "progress.jsonl"
+	dispatchProgressBaseline  = "progress-baseline.json"
+	dispatchProgressTargetIPH = 400.0
 )
 
 type dispatchProgressOptions struct {
@@ -142,6 +144,7 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		_ = dispatchProgressSaveBaseline(runsDir, baselineOpen)
 	}
 	closedTotal := dispatchProgressFoldClosedHistory(runsDir)
+	now := dispatchProgressNow().UTC()
 
 	var openAny any
 	var baselineAny any
@@ -169,7 +172,7 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 
 	rec := map[string]any{
 		"schema":                 dispatchProgressSchema,
-		"utc":                    dispatchProgressNow().UTC().Format("2006-01-02T15:04:05Z"),
+		"utc":                    now.Format("2006-01-02T15:04:05Z"),
 		"target":                 opts.Target,
 		"ok":                     ok,
 		"open_now":               openAny,
@@ -183,6 +186,9 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		"close_live":             nil,
 		"close_result":           nil,
 		"audit_error":            nil,
+	}
+	for key, value := range dispatchProgressHourlyProjection(runsDir, now, rec) {
+		rec[key] = value
 	}
 	if auditError != "" {
 		rec["audit_error"] = auditError
@@ -288,6 +294,102 @@ func dispatchProgressFoldClosedHistory(runsDir string) int {
 		total += dispatchMapInt(rec, "closed_now")
 	}
 	return total
+}
+
+func dispatchProgressHourlyProjection(runsDir string, now time.Time, current map[string]any) map[string]any {
+	samples := dispatchProgressCloseSamples(runsDir, now.Add(-time.Hour), now)
+	if dispatchMapInt(current, "closed_now") > 0 {
+		if at, err := time.Parse(time.RFC3339, dispatchMapString(current, "utc")); err == nil {
+			samples = append(samples, dispatchProgressCloseSample{At: at, Closed: dispatchMapInt(current, "closed_now")})
+		}
+	}
+	closed := 0
+	var first, last time.Time
+	for _, sample := range samples {
+		closed += sample.Closed
+		if first.IsZero() || sample.At.Before(first) {
+			first = sample.At
+		}
+		if last.IsZero() || sample.At.After(last) {
+			last = sample.At
+		}
+	}
+	windowHours := 1.0
+	if !first.IsZero() && !last.IsZero() && last.After(first) {
+		windowHours = last.Sub(first).Hours()
+		if windowHours < 1.0/60.0 {
+			windowHours = 1.0 / 60.0
+		}
+	}
+	currentIPH := 0.0
+	if closed > 0 && windowHours > 0 {
+		currentIPH = float64(closed) / windowHours
+	}
+	gap := dispatchProgressTargetIPH - currentIPH
+	if gap < 0 {
+		gap = 0
+	}
+	return map[string]any{
+		"current_issues_per_hour":      dispatchProgressRound1(currentIPH),
+		"target_issues_per_hour":       dispatchProgressTargetIPH,
+		"issues_per_hour_gap":          dispatchProgressRound1(gap),
+		"projection_closed_count":      closed,
+		"projection_window_hours":      dispatchProgressRound2(windowHours),
+		"projection_window_started_at": dispatchProgressProjectionStamp(first),
+		"projection_window_ended_at":   dispatchProgressProjectionStamp(last),
+	}
+}
+
+type dispatchProgressCloseSample struct {
+	At     time.Time
+	Closed int
+}
+
+func dispatchProgressCloseSamples(runsDir string, since, until time.Time) []dispatchProgressCloseSample {
+	path := filepath.Join(runsDir, dispatchProgressLogName)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []dispatchProgressCloseSample
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		closed := dispatchMapInt(rec, "closed_now")
+		if closed <= 0 {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, dispatchMapString(rec, "utc"))
+		if err != nil {
+			continue
+		}
+		if at.Before(since) || at.After(until) {
+			continue
+		}
+		out = append(out, dispatchProgressCloseSample{At: at, Closed: closed})
+	}
+	return out
+}
+
+func dispatchProgressProjectionStamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02T15:04:05Z")
+}
+
+func dispatchProgressRound1(v float64) float64 {
+	return math.Round(v*10) / 10
+}
+
+func dispatchProgressRound2(v float64) float64 {
+	return math.Round(v*100) / 100
 }
 
 func dispatchProgressAppend(runsDir string, rec map[string]any) error {
@@ -434,6 +536,12 @@ func renderDispatchProgress(p map[string]any) string {
 	fmt.Fprintf(&b, "  witnessed-open (closeable now): %d  %v\n", dispatchMapInt(p, "witnessed_open"), p["witnessed_numbers"])
 	fmt.Fprintf(&b, "  closed this tick: %d  closed-by-loop total: %d  remaining to %d: %v\n",
 		dispatchMapInt(p, "closed_now"), dispatchMapInt(p, "closed_by_loop_total"), target, p["target_remaining"])
+	fmt.Fprintf(&b, "  hourly projection: current=%.1f/h target=%.1f/h gap=%.1f/h closes=%d window=%.2fh\n",
+		dispatchMapFloat(p, "current_issues_per_hour"),
+		dispatchMapFloat(p, "target_issues_per_hour"),
+		dispatchMapFloat(p, "issues_per_hour_gap"),
+		dispatchMapInt(p, "projection_closed_count"),
+		dispatchMapFloat(p, "projection_window_hours"))
 	if errText := dispatchMapString(p, "audit_error"); errText != "" {
 		fmt.Fprintf(&b, "  ! audit error: %s\n", errText)
 	}
@@ -454,4 +562,22 @@ func dispatchProgressBar(resolved, target int) string {
 	width := 30
 	n := width * filled / target
 	return "[" + strings.Repeat("#", n) + strings.Repeat("-", width-n) + fmt.Sprintf("] %d/%d", filled, target)
+}
+
+func dispatchMapFloat(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case json.Number:
+		f, _ := v.Float64()
+		return f
+	default:
+		return 0
+	}
 }
