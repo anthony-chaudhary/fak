@@ -108,6 +108,42 @@ func dispatchHappyHelper(t *testing.T) func(root string, args ...string) (map[st
 	}
 }
 
+func TestDispatchPromptCarriesDevelopmentBranchRole(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\nrelease_branch = \"main\"\nrelease_source = \"dev\"\npublic_front_door = \"main\"\n"), 0o644); err != nil {
+		t.Fatalf("write dos.toml: %v", err)
+	}
+	oldFetchIssue := dispatchFetchIssue
+	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
+		return dispatchIssueInfo{
+			Number: issue,
+			Title:  "branch-aware worker prompt",
+			Body:   "Make ordinary issue workers use the development branch role.",
+			Labels: []string{"dispatch"},
+		}
+	}
+	t.Cleanup(func() { dispatchFetchIssue = oldFetchIssue })
+
+	got, err := dispatchPrompt(root, io.Discard, 1699, "dispatchtick")
+	if err != nil {
+		t.Fatalf("dispatchPrompt: %v", err)
+	}
+	if got["development_branch"] != "dev" || got["branch_role_error"] != nil {
+		t.Fatalf("branch role fields = %#v", got)
+	}
+	prompt := dispatchMapString(got, "prompt")
+	for _, want := range []string{"configured development branch `dev`", "Just commit on `dev`."} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, stale := range []string{"Work on `main` ONLY", "Just commit on main"} {
+		if strings.Contains(prompt, stale) {
+			t.Fatalf("prompt contains stale branch wording %q:\n%s", stale, prompt)
+		}
+	}
+}
+
 func TestDispatchCodexProcessPIDsCollapseNodeWrapperAndNativeChild(t *testing.T) {
 	rows := []dispatchCodexProcessRow{
 		{

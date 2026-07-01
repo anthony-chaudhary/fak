@@ -99,6 +99,31 @@ func TestIssuePromptStatesGitLawsAndHonestBlock(t *testing.T) {
 	}
 }
 
+func TestIssuePromptUsesConfiguredDevelopmentBranch(t *testing.T) {
+	in := sampleIssuePrompt()
+	in.DevelopmentBranch = "dev"
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"configured development branch `dev`",
+		"Just commit on `dev`.",
+		"a committed change on the configured development branch `dev`",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	for _, stale := range []string{
+		"ship it on `main`",
+		"Work on `main` ONLY",
+		"Just commit on main",
+		"a committed change on `main`",
+	} {
+		if strings.Contains(p, stale) {
+			t.Fatalf("prompt contains stale branch wording %q:\n%s", stale, p)
+		}
+	}
+}
+
 func TestIssuePromptTruncatesLongBody(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.Body = strings.Repeat("x", 5000)

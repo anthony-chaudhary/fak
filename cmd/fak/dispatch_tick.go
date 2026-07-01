@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -335,6 +336,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	promptChars := dispatchMapInt(promptRec, "prompt_chars")
 	payload["prompt_chars"] = promptChars
 	payload["issue_title"] = dispatchMapString(promptRec, "title")
+	payload["development_branch"] = dispatchMapString(promptRec, "development_branch")
+	if errText := dispatchMapString(promptRec, "branch_role_error"); errText != "" {
+		payload["branch_role_error"] = errText
+	}
 	model := account.Model
 	if opts.Backend != "opencode" && opts.Backend != "codex" {
 		model = ""
@@ -461,25 +466,32 @@ var dispatchRouteIssues = dispatchRouteIssuesNative
 
 func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[string]any, error) {
 	inf := dispatchFetchIssue(root, issue)
+	roles, roleErr := branchrole.Load(root)
 	rec := dispatchtick.BuildIssuePrompt(dispatchtick.IssuePromptInput{
-		Number:     firstInt(inf.Number, issue),
-		Title:      inf.Title,
-		Body:       inf.Body,
-		Labels:     inf.Labels,
-		Lane:       lane,
-		Workspace:  root,
-		FetchError: inf.FetchError,
+		Number:            firstInt(inf.Number, issue),
+		Title:             inf.Title,
+		Body:              inf.Body,
+		Labels:            inf.Labels,
+		Lane:              lane,
+		Workspace:         root,
+		DevelopmentBranch: roles.DevelopmentBranch,
+		FetchError:        inf.FetchError,
 	})
-	return map[string]any{
-		"schema":       rec.Schema,
-		"issue":        rec.Issue,
-		"lane":         rec.Lane,
-		"title":        rec.Title,
-		"body":         inf.Body,
-		"fetch_error":  rec.FetchError,
-		"prompt":       rec.Prompt,
-		"prompt_chars": rec.PromptChars,
-	}, nil
+	out := map[string]any{
+		"schema":             rec.Schema,
+		"issue":              rec.Issue,
+		"lane":               rec.Lane,
+		"title":              rec.Title,
+		"body":               inf.Body,
+		"fetch_error":        rec.FetchError,
+		"prompt":             rec.Prompt,
+		"prompt_chars":       rec.PromptChars,
+		"development_branch": roles.DevelopmentBranch,
+	}
+	if roleErr != nil {
+		out["branch_role_error"] = roleErr.Error()
+	}
+	return out, nil
 }
 
 func dispatchFetchIssueGH(root string, issue int) dispatchIssueInfo {
