@@ -25,6 +25,29 @@ another worker's output. Hold an issue for triage instead of dispatch when the e
 paths are unknown, the lane is private/exclusive, the acceptance witness is unclear, or
 the issue is a sequenced epic rather than a leaf.
 
+### Dependency markers
+
+When an issue has an explicit dependency edge, put a `Dependencies` section in the issue
+body. Each marker is one list item with the form `<relation>: #<issue>`. The supported
+relations are:
+
+- `after: #123`: this issue must wait until issue #123 is witnessed.
+- `blocks: #456`: issue #456 must wait until this issue is witnessed.
+- `related-only: #789`: issue #789 is context only and must not hold dispatch.
+
+Example:
+
+```markdown
+## Dependencies
+- after: #1756
+- blocks: #1772
+- related-only: #1706
+```
+
+Dispatch tooling treats `after` and `blocks` as blocking dependency edges. It carries
+`related-only` as a non-blocking reference so operators can preserve context without
+accidentally serializing independent workers.
+
 Start from the issue metadata and record the selection in a gitignored run directory:
 
 ```bash

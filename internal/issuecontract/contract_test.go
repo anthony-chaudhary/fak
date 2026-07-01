@@ -591,6 +591,38 @@ func TestCandidateFromIssueDraftParsesAgentContext(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftParsesDependencyMarkers(t *testing.T) {
+	body := issueProofSectionBody(
+		"Dependency markers are parsed for dispatch holds.",
+		"go test ./internal/issuecontract",
+	) + "\n" + strings.Join([]string{
+		"### Dependencies",
+		"- after: #1756 must be witnessed before this issue runs.",
+		"- related-only: #1706 is context, not a dispatch hold.",
+		"- blocks: #1772 waits on this issue's witnessed result.",
+	}, "\n")
+	review := ReviewIssueDraft(IssueDraft{
+		Number: 1755,
+		Title:  "issuecontract: parse dependency markers",
+		Body:   body,
+	}, Options{})
+	if !review.OK {
+		t.Fatalf("review = %+v, want dependency markers to preserve dispatchability", review)
+	}
+	if len(review.Dependencies) != 3 {
+		t.Fatalf("dependencies = %+v, want after, related, blocks", review.Dependencies)
+	}
+	if got := review.Dependencies[0]; got.Relation != "after" || got.Issue != 1756 || !got.Blocking {
+		t.Fatalf("first dependency = %+v, want blocking after #1756", got)
+	}
+	if got := review.Dependencies[1]; got.Relation != "related" || got.Issue != 1706 || got.Blocking {
+		t.Fatalf("second dependency = %+v, want non-blocking related #1706", got)
+	}
+	if got := review.Dependencies[2]; got.Relation != "blocks" || got.Issue != 1772 || !got.Blocking {
+		t.Fatalf("third dependency = %+v, want blocking blocks #1772", got)
+	}
+}
+
 func TestReviewIssueDraftLiveRejectsPlaceholderAgentContext(t *testing.T) {
 	body := strings.Join([]string{
 		"### Parent context",

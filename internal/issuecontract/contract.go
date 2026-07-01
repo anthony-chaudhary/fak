@@ -39,6 +39,7 @@ const MaxDispatchExpectedSteps = 8
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
 var codeSpanRE = regexp.MustCompile("`([^`]+)`")
+var issueReferenceRE = regexp.MustCompile(`#([1-9][0-9]*)`)
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
 var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 
@@ -58,38 +59,47 @@ type IssueDraft struct {
 	URL    string       `json:"url,omitempty"`
 }
 
+// DependencyRef is one parsed issue-body dependency marker.
+type DependencyRef struct {
+	Relation string `json:"relation"`
+	Issue    int    `json:"issue"`
+	Blocking bool   `json:"blocking"`
+	Raw      string `json:"raw,omitempty"`
+}
+
 // Candidate is the pure input shape a producer can review before rendering or
 // syncing a public GitHub issue.
 type Candidate struct {
-	Schema          string   `json:"schema,omitempty"`
-	IssueNumber     int      `json:"issue_number,omitempty"`
-	Key             string   `json:"key"`
-	Title           string   `json:"title"`
-	Generation      string   `json:"generation,omitempty"`
-	ParentRef       string   `json:"parent_ref,omitempty"`
-	CurrentState    string   `json:"current_state,omitempty"`
-	WhyNow          string   `json:"why_now,omitempty"`
-	WorkingSpine    string   `json:"working_spine,omitempty"`
-	PriorityContext string   `json:"priority_context,omitempty"`
-	WorkUnit        string   `json:"work_unit,omitempty"`
-	ExpectedSteps   int      `json:"expected_steps,omitempty"`
-	Assumptions     []string `json:"assumptions,omitempty"`
-	ConfusionRisks  []string `json:"confusion_risks,omitempty"`
-	Coordination    []string `json:"coordination,omitempty"`
-	Trigger         string   `json:"trigger,omitempty"`
-	BatchPolicy     string   `json:"batch_policy,omitempty"`
-	InScope         string   `json:"in_scope,omitempty"`
-	OutOfScope      string   `json:"out_of_scope,omitempty"`
-	DoneCondition   string   `json:"done_condition,omitempty"`
-	Witness         string   `json:"witness,omitempty"`
-	AcceptanceGate  string   `json:"acceptance_gate,omitempty"`
-	Lane            string   `json:"lane,omitempty"`
-	Paths           []string `json:"paths,omitempty"`
-	Labels          []string `json:"labels,omitempty"`
-	Priority        string   `json:"priority,omitempty"`
-	BoundaryNotes   []string `json:"boundary_notes,omitempty"`
-	Private         bool     `json:"private,omitempty"`
-	ClosureBinding  string   `json:"closure_binding,omitempty"`
+	Schema          string          `json:"schema,omitempty"`
+	IssueNumber     int             `json:"issue_number,omitempty"`
+	Key             string          `json:"key"`
+	Title           string          `json:"title"`
+	Generation      string          `json:"generation,omitempty"`
+	ParentRef       string          `json:"parent_ref,omitempty"`
+	CurrentState    string          `json:"current_state,omitempty"`
+	WhyNow          string          `json:"why_now,omitempty"`
+	WorkingSpine    string          `json:"working_spine,omitempty"`
+	PriorityContext string          `json:"priority_context,omitempty"`
+	WorkUnit        string          `json:"work_unit,omitempty"`
+	ExpectedSteps   int             `json:"expected_steps,omitempty"`
+	Assumptions     []string        `json:"assumptions,omitempty"`
+	ConfusionRisks  []string        `json:"confusion_risks,omitempty"`
+	Coordination    []string        `json:"coordination,omitempty"`
+	Trigger         string          `json:"trigger,omitempty"`
+	BatchPolicy     string          `json:"batch_policy,omitempty"`
+	InScope         string          `json:"in_scope,omitempty"`
+	OutOfScope      string          `json:"out_of_scope,omitempty"`
+	DoneCondition   string          `json:"done_condition,omitempty"`
+	Witness         string          `json:"witness,omitempty"`
+	AcceptanceGate  string          `json:"acceptance_gate,omitempty"`
+	Lane            string          `json:"lane,omitempty"`
+	Paths           []string        `json:"paths,omitempty"`
+	Dependencies    []DependencyRef `json:"dependencies,omitempty"`
+	Labels          []string        `json:"labels,omitempty"`
+	Priority        string          `json:"priority,omitempty"`
+	BoundaryNotes   []string        `json:"boundary_notes,omitempty"`
+	Private         bool            `json:"private,omitempty"`
+	ClosureBinding  string          `json:"closure_binding,omitempty"`
 }
 
 // Options carries context the issue body alone cannot prove, such as whether a
@@ -156,27 +166,28 @@ type GenerationFit struct {
 
 // Review is the closed-vocabulary verdict over a Candidate.
 type Review struct {
-	Schema          string        `json:"schema"`
-	OK              bool          `json:"ok"`
-	Verdict         string        `json:"verdict"`
-	Dispatchability string        `json:"dispatchability"`
-	Reasons         []string      `json:"reasons,omitempty"`
-	MissingFields   []string      `json:"missing_fields,omitempty"`
-	IssueNumber     int           `json:"issue_number,omitempty"`
-	Key             string        `json:"key,omitempty"`
-	Lane            string        `json:"lane,omitempty"`
-	Paths           []string      `json:"paths,omitempty"`
-	WorkUnit        string        `json:"work_unit,omitempty"`
-	ExpectedSteps   int           `json:"expected_steps,omitempty"`
-	Assumptions     []string      `json:"assumptions,omitempty"`
-	ConfusionRisks  []string      `json:"confusion_risks,omitempty"`
-	Coordination    []string      `json:"coordination,omitempty"`
-	Trigger         string        `json:"trigger,omitempty"`
-	BatchPolicy     string        `json:"batch_policy,omitempty"`
-	Score           Score         `json:"score"`
-	SpinePriority   SpinePriority `json:"spine_priority"`
-	AgentContext    AgentContext  `json:"agent_context"`
-	GenerationFit   GenerationFit `json:"generation_fit"`
+	Schema          string          `json:"schema"`
+	OK              bool            `json:"ok"`
+	Verdict         string          `json:"verdict"`
+	Dispatchability string          `json:"dispatchability"`
+	Reasons         []string        `json:"reasons,omitempty"`
+	MissingFields   []string        `json:"missing_fields,omitempty"`
+	IssueNumber     int             `json:"issue_number,omitempty"`
+	Key             string          `json:"key,omitempty"`
+	Lane            string          `json:"lane,omitempty"`
+	Paths           []string        `json:"paths,omitempty"`
+	Dependencies    []DependencyRef `json:"dependencies,omitempty"`
+	WorkUnit        string          `json:"work_unit,omitempty"`
+	ExpectedSteps   int             `json:"expected_steps,omitempty"`
+	Assumptions     []string        `json:"assumptions,omitempty"`
+	ConfusionRisks  []string        `json:"confusion_risks,omitempty"`
+	Coordination    []string        `json:"coordination,omitempty"`
+	Trigger         string          `json:"trigger,omitempty"`
+	BatchPolicy     string          `json:"batch_policy,omitempty"`
+	Score           Score           `json:"score"`
+	SpinePriority   SpinePriority   `json:"spine_priority"`
+	AgentContext    AgentContext    `json:"agent_context"`
+	GenerationFit   GenerationFit   `json:"generation_fit"`
 }
 
 // ReviewCandidate grades c. OK means the candidate is safe to sync as a
@@ -233,6 +244,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		Key:            c.Key,
 		Lane:           c.Lane,
 		Paths:          append([]string(nil), c.Paths...),
+		Dependencies:   append([]DependencyRef(nil), c.Dependencies...),
 		WorkUnit:       c.WorkUnit,
 		ExpectedSteps:  c.ExpectedSteps,
 		Assumptions:    append([]string(nil), c.Assumptions...),
@@ -335,6 +347,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		AcceptanceGate:  section("Acceptance gate"),
 		Lane:            section("Lane"),
 		Paths:           issueDraftPaths(section("Path hints", "Paths", "Files")),
+		Dependencies:    ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:          issueDraftLabels(d.Labels),
 		BoundaryNotes:   issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
 		ClosureBinding:  section("Closure binding"),
@@ -471,6 +484,62 @@ func issueDraftPaths(section string) []string {
 	return compact(out)
 }
 
+// ParseIssueDependencies parses issue-body dependency markers from a
+// Dependencies section. Blocking relations hold one side of the edge until the
+// named issue is witnessed; related-only references stay advisory.
+func ParseIssueDependencies(section string) []DependencyRef {
+	var out []DependencyRef
+	seen := map[string]bool{}
+	for _, line := range strings.Split(section, "\n") {
+		raw := trimListPrefix(line)
+		if raw == "" {
+			continue
+		}
+		key, rest, ok := strings.Cut(raw, ":")
+		if !ok {
+			continue
+		}
+		relation, blocking, ok := dependencyRelation(key)
+		if !ok {
+			continue
+		}
+		for _, m := range issueReferenceRE.FindAllStringSubmatch(rest, -1) {
+			issue, err := strconv.Atoi(m[1])
+			if err != nil || issue <= 0 {
+				continue
+			}
+			seenKey := relation + "#" + strconv.Itoa(issue)
+			if seen[seenKey] {
+				continue
+			}
+			seen[seenKey] = true
+			out = append(out, DependencyRef{
+				Relation: relation,
+				Issue:    issue,
+				Blocking: blocking,
+				Raw:      raw,
+			})
+		}
+	}
+	return out
+}
+
+func dependencyRelation(raw string) (relation string, blocking bool, ok bool) {
+	key := strings.ToLower(strings.TrimSpace(strings.Trim(raw, "`*_ ")))
+	key = strings.ReplaceAll(key, "_", "-")
+	key = strings.Join(strings.Fields(key), "-")
+	switch key {
+	case "after", "depends", "depends-on", "requires", "prerequisite", "blocked-by":
+		return "after", true, true
+	case "blocks":
+		return "blocks", true, true
+	case "related", "related-only", "see-also":
+		return "related", false, true
+	default:
+		return "", false, false
+	}
+}
+
 func parseExpectedSteps(section string) int {
 	for _, tok := range strings.Fields(strings.TrimSpace(section)) {
 		tok = strings.Trim(tok, "`.,;:()[]")
@@ -565,9 +634,33 @@ func normalize(c Candidate) Candidate {
 	c.Priority = strings.TrimSpace(c.Priority)
 	c.ClosureBinding = strings.TrimSpace(c.ClosureBinding)
 	c.Paths = compact(c.Paths)
+	c.Dependencies = normalizeDependencies(c.Dependencies)
 	c.Labels = compact(c.Labels)
 	c.BoundaryNotes = compact(c.BoundaryNotes)
 	return c
+}
+
+func normalizeDependencies(in []DependencyRef) []DependencyRef {
+	seen := map[string]bool{}
+	out := make([]DependencyRef, 0, len(in))
+	for _, dep := range in {
+		relation, blocking, ok := dependencyRelation(dep.Relation)
+		if !ok || dep.Issue <= 0 {
+			continue
+		}
+		seenKey := relation + "#" + strconv.Itoa(dep.Issue)
+		if seen[seenKey] {
+			continue
+		}
+		seen[seenKey] = true
+		out = append(out, DependencyRef{
+			Relation: relation,
+			Issue:    dep.Issue,
+			Blocking: blocking,
+			Raw:      strings.TrimSpace(dep.Raw),
+		})
+	}
+	return out
 }
 
 func missingScopeFields(c Candidate) []string {
