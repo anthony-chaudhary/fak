@@ -137,6 +137,7 @@ func changedTreePaths(root string) []string {
 		if root != "" {
 			cmd.Dir = root
 		}
+		configureDispatchHelperCommand(cmd)
 		out, err := cmd.Output()
 		if err != nil {
 			continue
