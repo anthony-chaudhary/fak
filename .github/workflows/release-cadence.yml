@@ -79,6 +79,38 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Publish staleness (informational)
+        # #1367: make the @latest-vs-HEAD publish lag a loud, MONITORED number on a
+        # live loop. `fak release-staleness` already computes it (commits + days behind
+        # the newest tag) and `make release-staleness{,-check}` / the cadencereport
+        # scoreboard card already surface it off the hot path — this wires the verb into
+        # the 2-hourly cadence tick so a VERY_STALE verdict is emitted by *someone* on a
+        # schedule. `--check` is run for its gate verdict but kept NON-GATING here:
+        # publish staleness is informational (the auto-cut steps below are what actually
+        # close the lag), matching the `WithPublishStaleness` contract. VERY_STALE is
+        # raised as a ::warning:: so it is visible without failing the tick.
+        run: |
+          set -euo pipefail
+          set +e
+          go run ./cmd/fak release-staleness --json --check > staleness.json
+          code=$?
+          set -e
+          cat staleness.json
+          verdict="$(python -c 'import json; print(json.load(open("staleness.json"))["verdict"])')"
+          commits="$(python -c 'import json; print(json.load(open("staleness.json"))["commits_behind"])')"
+          days="$(python -c 'import json; print(json.load(open("staleness.json"))["days_behind"])')"
+          latest="$(python -c 'import json; print(json.load(open("staleness.json")).get("latest_tag") or "(none)")')"
+          nextact="$(python -c 'import json; print(json.load(open("staleness.json")).get("next_action") or "")')"
+          {
+            echo "## Publish staleness: $verdict"
+            echo ""
+            echo "\`@latest\` = $latest — $commits commit(s) / ${days}d behind HEAD (gate exit=$code, informational)."
+            [ -n "$nextact" ] && echo "" && echo "$nextact"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$verdict" = "very_stale" ]; then
+            echo "::warning::publish staleness VERY_STALE — @latest is $commits commits / ${days}d behind HEAD ($nextact)"
+          fi
+
       - name: Release status snapshot
         env:
           GH_TOKEN: ${{ github.token }}
