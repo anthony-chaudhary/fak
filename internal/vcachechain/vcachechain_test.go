@@ -64,6 +64,19 @@ func TestChainToOrdersRootToNode(t *testing.T) {
 	}
 }
 
+// #1937 asks for an unknown-target ID and an unreachable target to return
+// distinguishable errors. ChainTo already checks the target against the DAG's
+// node set before ever walking parent pointers (chain.go), so an unknown ID
+// returns ErrMissingNode straight away -- distinct from ErrCycle/ErrMissingParent,
+// which only fire while walking an already-known node's ancestry. This pins that
+// check directly on ChainTo; TestPlanRecallDecisionTree already covers the same
+// ErrMissingNode return one layer up, through PlanRecall.
+func TestChainToUnknownTargetReturnsErrMissingNode(t *testing.T) {
+	if _, err := chain3().ChainTo("ghost"); err != ErrMissingNode {
+		t.Errorf("unknown target err = %v, want ErrMissingNode", err)
+	}
+}
+
 func TestPrefixTokensIsAncestorsOnly(t *testing.T) {
 	p, err := chain3().PrefixTokens("unit")
 	if err != nil {
