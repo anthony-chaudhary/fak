@@ -1735,6 +1735,44 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
 ACCOUNT_SIDECAR_SUFFIX = ".account"
 SEAT_POOL_SCHEMA = "fleet-seat-pool/1"
 
+# Operator-facing seat inventory (#1799): a coarser, dispatcher-vocabulary state on top
+# of ``state`` (leased/free/blocked) that names WHY an unavailable seat is held, reusing
+# the SAME closed vocabulary ``runtime_status`` already produces (``block_kind`` in
+# auth/access/credit/usage, ``throttled``, ``reset``) instead of inventing new terms.
+# "cooling" is the one state ``state`` does not distinguish: a usage-throttled seat that
+# will free itself at a known ``reset`` time is a different operator action (wait) than a
+# hard block (re-auth/top-up) or a depleted pool (no seat exists to free).
+_HOLD_KIND_REASON = {
+    "auth": "auth_failed",
+    "access": "access_disabled",
+    "credit": "credit_exhausted",
+}
+
+
+def _seat_hold_reason(row: dict) -> tuple[str, str]:
+    """(dispatch_state, hold_reason) for one seat row, derived from the SAME
+    ``runtime_status`` fields (``block_kind``/``throttled``/``reset``/``weekly``/
+    ``block_reason``) the roster and preflight already surface -- no new state names.
+
+    dispatch_state is one of: available / cooling / unavailable (``leased``/``busy``
+    is decided by the caller, which alone knows the live-worker binding). ``hold_reason``
+    is "" when available, else a specific token/detail -- never the bare word
+    "unavailable"."""
+    if bool(row.get("available")):
+        return "available", ""
+    kind = str(row.get("block_kind") or "")
+    if bool(row.get("throttled")) or kind == "usage":
+        reset = row.get("reset")
+        detail = f"cooldown_until={reset}" if reset else "rate_limited"
+        weekly = row.get("weekly")
+        if weekly:
+            detail += f";weekly={weekly}"
+        return "cooling", detail
+    if kind in _HOLD_KIND_REASON:
+        return "unavailable", _HOLD_KIND_REASON[kind]
+    reason = str(row.get("block_reason") or "").strip()
+    return "unavailable", reason or "no_capacity"
+
 
 def _lease_matches_seat(lease: dict, row: dict) -> bool:
     """Does a live-worker lease record (parsed from its ``.account`` sidecar) bind to
@@ -1801,6 +1839,15 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
         else:
             state, blocked = "blocked", blocked + 1
         total += 1
+        # dispatch_state/hold_reason: the operator-facing seat-inventory vocabulary
+        # (#1799) -- available/busy/cooling/unavailable, with a specific hold_reason
+        # whenever the seat is not simply available. A leased seat is "busy" even if the
+        # underlying account also reads throttled (the live worker IS the reason it is
+        # unavailable to a second dispatch, so that takes precedence over cooling).
+        if workers:
+            dispatch_state, hold_reason = "busy", f"leased to {', '.join(workers)}"
+        else:
+            dispatch_state, hold_reason = _seat_hold_reason(row)
         seat = {
             "seat": _pool_key(row),
             "tag": row.get("tag"),
@@ -1810,6 +1857,8 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
             "model_tier": row.get("model_tier"),
             "available": available,
             "state": state,
+            "dispatch_state": dispatch_state,
+            "hold_reason": hold_reason,
             "workers": workers,
         }
         seats.append(seat)
@@ -1823,6 +1872,10 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
     ]
     seats.sort(key=lambda s: (s["state"] != "leased", s["state"] != "free",
                               str(s.get("product") or ""), str(s.get("tag") or "")))
+    by_dispatch_state: dict[str, int] = {}
+    for s in seats:
+        ds = s["dispatch_state"]
+        by_dispatch_state[ds] = by_dispatch_state.get(ds, 0) + 1
     return {
         "schema": SEAT_POOL_SCHEMA,
         "product": wanted or "all",
@@ -1830,6 +1883,7 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
         "free_seats": free,
         "leased_seats": leased,
         "blocked_seats": blocked,
+        "by_dispatch_state": by_dispatch_state,
         "depleted": free == 0,
         "double_booked": double_booked,
         "unbound_leases": unbound,
@@ -1967,8 +2021,10 @@ def _cli_seats(pool: dict) -> None:
     for s in pool.get("seats", []):
         workers = ", ".join(s.get("workers") or []) or "-"
         tier = f"t{s.get('model_tier', '?')}"
-        print(f"  [{str(s.get('state') or ''):<7}] {str(s.get('tag') or ''):<16} "
-              f"{str(s.get('account') or ''):<28} {tier:<3} -> {workers}")
+        hold = s.get("hold_reason") or ""
+        suffix = f"  ({hold})" if hold else ""
+        print(f"  [{str(s.get('dispatch_state') or ''):<11}] {str(s.get('tag') or ''):<16} "
+              f"{str(s.get('account') or ''):<28} {tier:<3} -> {workers}{suffix}")
     if pool.get("double_booked"):
         print("\nDOUBLE-BOOKED (one seat, >1 live worker -- INVARIANT VIOLATION):")
         for d in pool["double_booked"]:

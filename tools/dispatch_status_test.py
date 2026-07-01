@@ -707,6 +707,80 @@ class HookHealthPayloadTest(unittest.TestCase):
         self.assertIn("codex=195 fail/3 sess (100%)", mod.render(p))
 
 
+class SeatInventoryPayloadTest(unittest.TestCase):
+    """#1799: build_payload threads the seat inventory (fleet_accounts.seat_pool
+    output) straight through to the JSON payload and surfaces a summary reason line,
+    covering all four operator-facing states: available / busy / cooling /
+    unavailable-with-reason."""
+
+    def _pool(self) -> dict:
+        return {
+            "schema": "fleet-seat-pool/1",
+            "product": "claude",
+            "total_seats": 4,
+            "free_seats": 1,
+            "leased_seats": 1,
+            "blocked_seats": 2,
+            "by_dispatch_state": {"available": 1, "busy": 1, "cooling": 1, "unavailable": 1},
+            "depleted": False,
+            "double_booked": [],
+            "unbound_leases": [],
+            "seats": [
+                {"seat": "dir:.claude-free1", "tag": "free1", "account": ".claude-free1",
+                 "product": "claude", "model_tier": 1, "available": True,
+                 "state": "free", "dispatch_state": "available", "hold_reason": "",
+                 "workers": []},
+                {"seat": "dir:.claude-busy1", "tag": "busy1", "account": ".claude-busy1",
+                 "product": "claude", "model_tier": 1, "available": True,
+                 "state": "leased", "dispatch_state": "busy",
+                 "hold_reason": "leased to w1", "workers": ["w1"]},
+                {"seat": "dir:.claude-cool1", "tag": "cool1", "account": ".claude-cool1",
+                 "product": "claude", "model_tier": 1, "available": False,
+                 "state": "blocked", "dispatch_state": "cooling",
+                 "hold_reason": "cooldown_until=9pm", "workers": []},
+                {"seat": "dir:.claude-auth1", "tag": "auth1", "account": ".claude-auth1",
+                 "product": "claude", "model_tier": 1, "available": False,
+                 "state": "blocked", "dispatch_state": "unavailable",
+                 "hold_reason": "auth_failed", "workers": []},
+            ],
+        }
+
+    def test_seat_inventory_flows_into_payload_json(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertEqual(p["seat_inventory"]["total_seats"], 4)
+        by_state = p["seat_inventory"]["by_dispatch_state"]
+        self.assertEqual(by_state, {"available": 1, "busy": 1, "cooling": 1, "unavailable": 1})
+        states = {s["tag"]: s["dispatch_state"] for s in p["seat_inventory"]["seats"]}
+        self.assertEqual(states, {"free1": "available", "busy1": "busy",
+                                  "cool1": "cooling", "auth1": "unavailable"})
+        # unavailable/cooling seats carry a SPECIFIC reason, never the bare word
+        reasons_by_tag = {s["tag"]: s["hold_reason"] for s in p["seat_inventory"]["seats"]}
+        self.assertEqual(reasons_by_tag["cool1"], "cooldown_until=9pm")
+        self.assertEqual(reasons_by_tag["auth1"], "auth_failed")
+        self.assertNotIn("unavailable", reasons_by_tag["cool1"])
+        self.assertNotEqual(reasons_by_tag["auth1"], "unavailable")
+
+    def test_seat_inventory_summary_reason_line(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertTrue(any(
+            "seat inventory" in r and "available=1" in r and "busy=1" in r
+            and "cooling=1" in r and "unavailable=1" in r
+            for r in p["reasons"]))
+
+    def test_seat_inventory_error_degrades_gracefully(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory={"_error": "boom"})
+        self.assertTrue(p["ok"])  # informational fold only — never flips ok
+        self.assertTrue(any("seat inventory unavailable: boom" in r for r in p["reasons"]))
+
+    def test_seat_inventory_defaults_to_empty_dict_when_omitted(self) -> None:
+        mod = load()
+        p = build(mod)
+        self.assertEqual(p["seat_inventory"], {})
+
+
 class RenderMdTest(unittest.TestCase):
     """render_md is pure: a hand-built payload -> the committed-doc markdown."""
 

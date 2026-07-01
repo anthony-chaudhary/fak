@@ -1046,6 +1046,28 @@ def _total_commits(root: Path) -> int | None:
     return int(out) if proc.returncode == 0 and out.isdigit() else None
 
 
+def read_seat_inventory(root: Path, *, product: str | None = None) -> dict[str, Any]:
+    """The operator-facing seat inventory (#1799): for every known account/seat, its
+    dispatch_state (available/busy/cooling/unavailable) and, when not simply
+    available, a specific hold_reason (e.g. ``auth_failed``, ``rate_limited``,
+    ``cooldown_until=<ts>``, ``no_capacity``) -- never a bare "unavailable".
+
+    Delegates entirely to ``fleet_accounts.seat_pool()`` (the existing explicit
+    multi-seat pool) so this reuses the SAME hold-reason vocabulary the roster and
+    the dispatch-preflight spawn gate already use, rather than inventing new state
+    names. Pure-local (no gh, no subprocess) and best-effort: an import/read failure
+    degrades to ``{"_error": ...}`` like the other fast, always-run folds on this
+    card, never raises."""
+    try:
+        sys.path.insert(0, str(root / "tools"))
+        import fleet_accounts  # noqa: PLC0415  (lazy: heavy module, only paid for here)
+        rows = fleet_accounts.annotate_accounts(fleet_accounts.discover_accounts())
+        leases = fleet_accounts.live_seat_leases(root / RUNS_DIRNAME)
+        return fleet_accounts.seat_pool(rows, leases, product=product)
+    except Exception as exc:  # best-effort card fold; never fail the whole card
+        return {"_error": str(exc)}
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -1093,6 +1115,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     merge = merge_state(root)
     leases = read_lease_state(root, backlog)
     worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases)
+    seat_inventory = read_seat_inventory(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -1101,7 +1124,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          backend_stub_rate=backend_stub_rate,
                          hook_failures=hook_failures, guard=guard,
                          run_status=run_status, merge=merge, leases=leases,
-                         worker_leases=worker_leases)
+                         worker_leases=worker_leases, seat_inventory=seat_inventory)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -1116,7 +1139,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   run_status: list[dict[str, Any]] | None = None,
                   merge: dict[str, Any] | None = None,
                   leases: dict[str, Any] | None = None,
-                  worker_leases: dict[str, Any] | None = None) -> dict[str, Any]:
+                  worker_leases: dict[str, Any] | None = None,
+                  seat_inventory: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -1310,6 +1334,19 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         elif clean:
             reasons.append(f"worker/lease cross-check clean ({clean} matched worker/lease pair(s))")
 
+    # Seat inventory (#1799): available/busy/cooling/unavailable counts across the
+    # explicit account seat pool, so an operator sees WHY a seat is held without
+    # digging through fleet_accounts directly. Informational only — never flips ok.
+    seat_inventory = seat_inventory or {}
+    if seat_inventory.get("_error"):
+        reasons.append(f"seat inventory unavailable: {seat_inventory.get('_error')}")
+    elif seat_inventory.get("schema"):
+        by_state = seat_inventory.get("by_dispatch_state") or {}
+        reasons.append(
+            f"seat inventory: {seat_inventory.get('total_seats', 0)} seat(s) — "
+            f"available={by_state.get('available', 0)} busy={by_state.get('busy', 0)} "
+            f"cooling={by_state.get('cooling', 0)} unavailable={by_state.get('unavailable', 0)}")
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -1380,6 +1417,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         },
         "leases": leases,
         "worker_lease_check": worker_leases,
+        "seat_inventory": seat_inventory or {},
         "git": {
             "merge_in_progress": bool(merge.get("merge_in_progress")),
             "merge_head": merge.get("merge_head"),

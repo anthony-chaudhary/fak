@@ -1125,5 +1125,99 @@ class ProbeLedgerConsultTest(unittest.TestCase):
         self.assertEqual(status["status_source"], "probe")
 
 
+def _seat_row(tag: str, *, available: bool = True, block_kind: str | None = None,
+              block_reason: str = "", throttled: bool = False,
+              reset: str | None = None, weekly: str | None = None) -> dict:
+    """A minimal routable-worker row shaped like an ``annotate_accounts()`` output --
+    just the fields ``seat_pool``/``_seat_hold_reason`` read."""
+    return {
+        "kind": "worker", "product": "claude", "account": f".claude-{tag}", "tag": tag,
+        "model_tier": 1, "available": available, "blocked": not available,
+        "block_kind": block_kind, "block_reason": block_reason,
+        "throttled": throttled, "reset": reset, "weekly": weekly,
+    }
+
+
+class SeatInventoryTest(unittest.TestCase):
+    """#1799: seat_pool() classifies every seat into the operator-facing
+    available/busy/cooling/unavailable vocabulary with a specific hold_reason,
+    reusing runtime_status's own block_kind/throttled/reset fields."""
+
+    def test_available_seat_has_no_hold_reason(self) -> None:
+        rows = [_seat_row("free1", available=True)]
+        pool = fleet_accounts.seat_pool(rows, [])
+        seat = pool["seats"][0]
+        self.assertEqual(seat["dispatch_state"], "available")
+        self.assertEqual(seat["hold_reason"], "")
+        self.assertEqual(pool["by_dispatch_state"], {"available": 1})
+
+    def test_leased_seat_is_busy_with_worker_named(self) -> None:
+        rows = [_seat_row("leased1", available=True)]
+        leases = [{"worker": "w42", "tag": "leased1", "dir": ".claude-leased1"}]
+        pool = fleet_accounts.seat_pool(rows, leases)
+        seat = pool["seats"][0]
+        self.assertEqual(seat["dispatch_state"], "busy")
+        self.assertIn("w42", seat["hold_reason"])
+        self.assertEqual(pool["by_dispatch_state"], {"busy": 1})
+
+    def test_usage_throttled_seat_is_cooling_with_cooldown_until(self) -> None:
+        rows = [_seat_row("cool1", available=False, block_kind="usage",
+                          throttled=True, reset="Dec 31, 11pm (America/Los_Angeles)")]
+        pool = fleet_accounts.seat_pool(rows, [])
+        seat = pool["seats"][0]
+        self.assertEqual(seat["dispatch_state"], "cooling")
+        self.assertIn("cooldown_until=", seat["hold_reason"])
+        self.assertIn("Dec 31, 11pm", seat["hold_reason"])
+
+    def test_throttled_without_reset_is_cooling_rate_limited(self) -> None:
+        rows = [_seat_row("cool2", available=False, block_kind="usage", throttled=True)]
+        pool = fleet_accounts.seat_pool(rows, [])
+        self.assertEqual(pool["seats"][0]["dispatch_state"], "cooling")
+        self.assertEqual(pool["seats"][0]["hold_reason"], "rate_limited")
+
+    def test_auth_blocked_seat_is_unavailable_auth_failed(self) -> None:
+        rows = [_seat_row("auth1", available=False, block_kind="auth",
+                          block_reason="auth/login required")]
+        pool = fleet_accounts.seat_pool(rows, [])
+        seat = pool["seats"][0]
+        self.assertEqual(seat["dispatch_state"], "unavailable")
+        self.assertEqual(seat["hold_reason"], "auth_failed")
+
+    def test_credit_blocked_seat_is_unavailable_credit_exhausted(self) -> None:
+        rows = [_seat_row("credit1", available=False, block_kind="credit")]
+        pool = fleet_accounts.seat_pool(rows, [])
+        self.assertEqual(pool["seats"][0]["dispatch_state"], "unavailable")
+        self.assertEqual(pool["seats"][0]["hold_reason"], "credit_exhausted")
+
+    def test_unclassified_block_falls_back_to_no_capacity(self) -> None:
+        rows = [_seat_row("nocap1", available=False, block_kind=None, block_reason="")]
+        pool = fleet_accounts.seat_pool(rows, [])
+        self.assertEqual(pool["seats"][0]["dispatch_state"], "unavailable")
+        self.assertEqual(pool["seats"][0]["hold_reason"], "no_capacity")
+
+    def test_all_four_states_together_roll_up_by_dispatch_state(self) -> None:
+        rows = [
+            _seat_row("free1", available=True),
+            _seat_row("leased1", available=True),
+            _seat_row("cool1", available=False, block_kind="usage", throttled=True,
+                     reset="9pm"),
+            _seat_row("auth1", available=False, block_kind="auth"),
+        ]
+        leases = [{"worker": "w1", "tag": "leased1", "dir": ".claude-leased1"}]
+        pool = fleet_accounts.seat_pool(rows, leases)
+        states = {s["tag"]: s["dispatch_state"] for s in pool["seats"]}
+        self.assertEqual(states, {
+            "free1": "available", "leased1": "busy",
+            "cool1": "cooling", "auth1": "unavailable",
+        })
+        self.assertEqual(pool["by_dispatch_state"],
+                         {"available": 1, "busy": 1, "cooling": 1, "unavailable": 1})
+        # every non-available seat carries a specific reason, never the bare word
+        for s in pool["seats"]:
+            if s["dispatch_state"] != "available":
+                self.assertNotEqual(s["hold_reason"], "unavailable")
+                self.assertTrue(s["hold_reason"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
