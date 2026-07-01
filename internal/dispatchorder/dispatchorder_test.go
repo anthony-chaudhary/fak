@@ -175,6 +175,54 @@ func TestCollisionPricedFanoutUnknownTreeCollidesConservatively(t *testing.T) {
 	}
 }
 
+func TestGenerationDefaultWindowHoldsLaterHorizons(t *testing.T) {
+	tests := []struct {
+		generation string
+		want       Disposition
+	}{
+		{"gen/now", DispKeep},
+		{"gen/next", DispKeep},
+		{"gen/second-next", DispGenerationHeld},
+		{"gen/future", DispGenerationHeld},
+	}
+	for _, tt := range tests {
+		t.Run(tt.generation, func(t *testing.T) {
+			r := Plan(Input{NowUnix: base, Candidates: []Candidate{
+				{ID: tt.generation, Key: tt.generation, Generation: tt.generation, UpdatedUnix: base - 10},
+			}})
+			if got := dispoOf(r, tt.generation); got != tt.want {
+				t.Fatalf("disposition = %q, want %q", got, tt.want)
+			}
+			if tt.want == DispKeep && r.Pick() != tt.generation {
+				t.Fatalf("pick = %q, want %q", r.Pick(), tt.generation)
+			}
+			if tt.want == DispGenerationHeld && r.Pick() != "" {
+				t.Fatalf("pick = %q, want no pick for held %s", r.Pick(), tt.generation)
+			}
+		})
+	}
+}
+
+func TestGenerationExplicitWindowAdmitsRequestedHorizon(t *testing.T) {
+	r := Plan(Input{
+		NowUnix:    base,
+		Generation: "future",
+		Candidates: []Candidate{
+			{ID: "now", Key: "now", Generation: "gen/now", UpdatedUnix: base - 10},
+			{ID: "future", Key: "future", Generation: "gen/future", UpdatedUnix: base - 20},
+		},
+	})
+	if r.Pick() != "future" {
+		t.Fatalf("pick = %q, want future under explicit future window", r.Pick())
+	}
+	if dispoOf(r, "now") != DispGenerationHeld {
+		t.Fatalf("now disposition = %q, want generation-held under explicit future window", dispoOf(r, "now"))
+	}
+	if dispoOf(r, "future") != DispKeep {
+		t.Fatalf("future disposition = %q, want keep", dispoOf(r, "future"))
+	}
+}
+
 func TestTreesOverlapUsesPrefixGeometry(t *testing.T) {
 	if TreesOverlap([]string{"internal/gateway/http.go"}, []string{"internal/gateway/mcp.go"}) {
 		t.Fatalf("sibling files should be disjoint")

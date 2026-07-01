@@ -55,6 +55,10 @@ const (
 	// preflight found that launching it in this wave would overlap another kept worker's tree.
 	// It is serialized before launch, so the caller can run the safe set now and retry later.
 	DispCollisionRisk Disposition = "collision_risk"
+	// DispGenerationHeld: this unit is otherwise present in the candidate set, but the current
+	// generation window does not admit its horizon. It is held before supersede/order/collision
+	// pricing so later-horizon work cannot consume the default dispatch slot.
+	DispGenerationHeld Disposition = "generation_held"
 )
 
 // The closed reason vocabulary for a Ranked.Reason, so an observability sink records WHY
@@ -70,6 +74,8 @@ const (
 	ReasonCooldown = "cooldown"
 	// ReasonCollisionRisk: the closed DOS refusal token for a pre-launch tree collision.
 	ReasonCollisionRisk = "COLLISION_RISK"
+	// ReasonGenerationHeld: the candidate's generation is outside the requested/default window.
+	ReasonGenerationHeld = "GENERATION_HELD"
 )
 
 // Candidate is one unit of dispatchable work — all the facts the order needs, none of the
@@ -102,6 +108,11 @@ type Candidate struct {
 	LastAttemptUnix int64 `json:"last_attempt_unix"`
 	// Live reports that a worker is currently running this unit (the in-flight skip).
 	Live bool `json:"live"`
+	// Generation is the issue generation label ("gen/now", "gen/next", "gen/second-next",
+	// "gen/future"). When any candidate declares a generation, the default window admits only
+	// now/next work; second-next, future, and unclassified candidates are held unless Input
+	// requests that horizon explicitly.
+	Generation string `json:"generation,omitempty"`
 }
 
 // recency is the unit's freshness: its last update, falling back to its creation time.
@@ -153,6 +164,11 @@ type Input struct {
 	// supersede collapse still keeps the FRESHEST duplicate (the most recent update of one
 	// target), and the live/cooldown/collision skips are unchanged.
 	PreferOldest bool `json:"prefer_oldest,omitempty"`
+	// Generation narrows the admitted horizon: "", "default", or "auto" admits gen/now and
+	// gen/next; "now", "next", "second-next", and "future" admit only that horizon; "all"
+	// admits every classified generation while still holding unclassified candidates. Legacy
+	// callers with no candidate generation keep the pre-generation behavior.
+	Generation string `json:"generation,omitempty"`
 }
 
 // Result is the full deterministic verdict: every candidate's disposition plus the freshest-
@@ -163,11 +179,12 @@ type Result struct {
 	// Keep is the IDs a worker should pick, freshest-first — Order's DispKeep units, in rank order.
 	Keep []string `json:"keep"`
 	// Counts of each disposition, so a one-line summary needs no fold.
-	KeepCount       int `json:"keep_count"`
-	SupersededCount int `json:"superseded_count"`
-	LiveCount       int `json:"live_count"`
-	CoolingCount    int `json:"cooling_count"`
-	CollisionCount  int `json:"collision_count"`
+	KeepCount           int `json:"keep_count"`
+	SupersededCount     int `json:"superseded_count"`
+	LiveCount           int `json:"live_count"`
+	CoolingCount        int `json:"cooling_count"`
+	CollisionCount      int `json:"collision_count"`
+	GenerationHeldCount int `json:"generation_held_count"`
 	// Collisions is the priced collision graph over otherwise dispatchable fan-out candidates.
 	Collisions []Collision `json:"collisions,omitempty"`
 	// Repartition names the colliding candidates that need narrower scope before a later wave
@@ -240,7 +257,17 @@ func Plan(in Input) Result {
 		cooldown = DefaultCooldownSeconds
 	}
 
-	winner := winnersByKey(in.Candidates)
+	generationActive := generationGateActive(in)
+	generationHeld := make(map[string]bool)
+	eligible := make([]Candidate, 0, len(in.Candidates))
+	for _, c := range in.Candidates {
+		if generationActive && !c.Live && !generationAllowed(c.Generation, in.Generation) {
+			generationHeld[c.ID] = true
+			continue
+		}
+		eligible = append(eligible, c)
+	}
+	winner := winnersByKey(eligible)
 
 	ranked := make([]Ranked, 0, len(in.Candidates))
 	for _, c := range in.Candidates {
@@ -248,6 +275,8 @@ func Plan(in Input) Result {
 		switch {
 		case c.Live:
 			r.Disposition, r.Reason = DispLive, ReasonWorkerLive
+		case generationHeld[c.ID]:
+			r.Disposition, r.Reason = DispGenerationHeld, ReasonGenerationHeld
 		case c.Key != "" && winner[c.Key] != c.ID:
 			r.Disposition, r.Reason, r.SupersededBy = DispSuperseded, ReasonSuperseded, winner[c.Key]
 		case cooldown > 0 && c.LastAttemptUnix > 0 && in.NowUnix-c.LastAttemptUnix < cooldown:
@@ -291,6 +320,8 @@ func Plan(in Input) Result {
 			out.CoolingCount++
 		case DispCollisionRisk:
 			out.CollisionCount++
+		case DispGenerationHeld:
+			out.GenerationHeldCount++
 		}
 	}
 	out.Collisions = collisions
@@ -300,6 +331,69 @@ func Plan(in Input) Result {
 	out.SerializationWasted = out.CollisionCount
 	out.SafeConcurrency = out.KeepCount
 	return out
+}
+
+func generationGateActive(in Input) bool {
+	if strings.TrimSpace(in.Generation) != "" {
+		return true
+	}
+	for _, c := range in.Candidates {
+		if strings.TrimSpace(c.Generation) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func generationAllowed(label, window string) bool {
+	label = normalizeGeneration(label)
+	window = normalizeGenerationWindow(window)
+	if label == "" {
+		return false
+	}
+	switch window {
+	case "", "default", "auto":
+		return label == "gen/now" || label == "gen/next"
+	case "all":
+		return isKnownGeneration(label)
+	default:
+		return label == window
+	}
+}
+
+func normalizeGeneration(label string) string {
+	s := strings.ToLower(strings.TrimSpace(label))
+	switch s {
+	case "now":
+		return "gen/now"
+	case "next":
+		return "gen/next"
+	case "second-next", "second_next", "secondnext":
+		return "gen/second-next"
+	case "future":
+		return "gen/future"
+	default:
+		return s
+	}
+}
+
+func normalizeGenerationWindow(window string) string {
+	s := strings.ToLower(strings.TrimSpace(window))
+	switch s {
+	case "", "default", "auto", "all":
+		return s
+	default:
+		return normalizeGeneration(s)
+	}
+}
+
+func isKnownGeneration(label string) bool {
+	switch label {
+	case "gen/now", "gen/next", "gen/second-next", "gen/future":
+		return true
+	default:
+		return false
+	}
 }
 
 // winnersByKey returns, for each non-empty Key, the ID of the freshest candidate sharing it

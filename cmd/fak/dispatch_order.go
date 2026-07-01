@@ -166,8 +166,8 @@ func parseCandidates(raw []byte) ([]dispatchorder.Candidate, error) {
 // keep list (the pick order), then the superseded duplicates, then the units skipped because a
 // worker is live or they are cooling.
 func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
-	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling  %d collision-risk\n\n",
-		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount)
+	fmt.Fprintf(w, "dispatch order — %d candidate(s): %d keep  %d superseded  %d live  %d cooling  %d collision-risk  %d generation-held\n\n",
+		len(r.Order), r.KeepCount, r.SupersededCount, r.LiveCount, r.CoolingCount, r.CollisionCount, r.GenerationHeldCount)
 
 	if r.KeepCount > 0 {
 		fmt.Fprintf(w, "%-4s %-16s %-14s %10s\n", "rank", "unit", "key", "age")
@@ -192,6 +192,13 @@ func renderDispatchOrder(w io.Writer, r dispatchorder.Result, now int64) {
 			}
 			fmt.Fprintf(w, "  collision %-16s (%s: overlaps %s; serialized before launch)\n",
 				x.ID, dispatchorder.ReasonCollisionRisk, with)
+		case dispatchorder.DispGenerationHeld:
+			gen := strings.TrimSpace(x.Generation)
+			if gen == "" {
+				gen = "unclassified"
+			}
+			fmt.Fprintf(w, "  generation %-16s (%s: %s is outside this dispatch window)\n",
+				x.ID, dispatchorder.ReasonGenerationHeld, gen)
 		}
 	}
 	if r.CollisionsAvoided > 0 || r.SerializationWasted > 0 {
@@ -240,7 +247,7 @@ and cooldown skips, and returns the survivors freshest-first (or oldest-first wi
 candidates + clock in, same order out.
 
 Candidates are a JSON array (or {"candidates":[...]}), each:
-  {"id":"123","key":"<shared-target>","created_unix":N,"updated_unix":N,"last_attempt_unix":N,"live":false}
+  {"id":"123","key":"<shared-target>","created_unix":N,"updated_unix":N,"last_attempt_unix":N,"live":false,"generation":"gen/now"}
 
 For multi-agent fan-out, add the pre-launch lane/tree facts. Once any candidate carries
 lane/tree/mode, the planner prices the whole fan-out before launch; shared/shared may overlap,
