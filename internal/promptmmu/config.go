@@ -83,6 +83,79 @@ type Observation struct {
 	SkipReason string
 }
 
+// ToolSchemaStrategy is the closed mask-vs-remove vocabulary for advertised tool
+// definitions. Remove means the definition was safely cut from the uncached tail;
+// mask means the definition stayed advertised and the call-time floor remains the
+// enforcement point; unchanged means there was no tool-schema action to take.
+type ToolSchemaStrategy string
+
+const (
+	// ToolSchemaRemove cuts unreachable tool definitions only after the protected
+	// cache prefix, saving uncached tool-schema tokens without changing warm bytes.
+	ToolSchemaRemove ToolSchemaStrategy = "remove"
+	// ToolSchemaMask keeps the definitions in the request and relies on the kernel
+	// floor to deny any call, preserving cache warmth when removal is not safe.
+	ToolSchemaMask ToolSchemaStrategy = "mask"
+	// ToolSchemaUnchanged records that no mask-vs-remove decision fired.
+	ToolSchemaUnchanged ToolSchemaStrategy = "unchanged"
+)
+
+// ToolSchemaDecision is the content-free explanation of one advertised-tool strategy:
+// which side of mask-vs-remove was chosen, why it affects cache warmth, and what token
+// effect the choice had. It carries names only, never schemas or prompt bytes.
+type ToolSchemaDecision struct {
+	Strategy      ToolSchemaStrategy
+	Removed       []string
+	SkipReason    string
+	CacheTradeoff string
+	TokenTradeoff string
+}
+
+// ExplainToolSchemaStrategy converts the byte-splice witness into the product-level
+// mask-vs-remove explanation. A real prune chooses remove: the pruner already proved
+// the protected prefix stayed byte-identical, so the tradeoff is uncached-token savings
+// with cache warmth preserved. A failed prune whose reason means "not safe to cut" chooses
+// mask: keep the schema bytes and let the call-time floor deny unreachable tools rather
+// than risk moving or reserializing a warm prefix.
+func ExplainToolSchemaStrategy(res PruneResult) ToolSchemaDecision {
+	if res.Changed {
+		removed := append([]string(nil), res.Pruned...)
+		return ToolSchemaDecision{
+			Strategy:      ToolSchemaRemove,
+			Removed:       removed,
+			CacheTradeoff: "protected cache prefix remains byte-identical",
+			TokenTradeoff: "removed " + itoa(len(removed)) + " unreachable post-breakpoint tool definitions",
+		}
+	}
+	dec := ToolSchemaDecision{
+		Strategy:      ToolSchemaUnchanged,
+		SkipReason:    res.SkipReason,
+		CacheTradeoff: "request body forwarded byte-identical",
+		TokenTradeoff: "no tool-definition tokens removed",
+	}
+	switch res.SkipReason {
+	case SkipNoBreakpoint, SkipNothingAfter, SkipUndecodableTools, SkipSpliceUnproven:
+		dec.Strategy = ToolSchemaMask
+		dec.CacheTradeoff = "kept advertised tool definitions to preserve the warm prefix or avoid an unproven splice"
+		dec.TokenTradeoff = "no tool-definition tokens saved; call-time floor masks unreachable tools"
+	}
+	return dec
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
 // Observe folds a mode and a spine PruneResult into the legible Observation the host
 // logs. It is the one place the mode's "compute vs apply" bit is reconciled with the
 // spine's identity-vs-change verdict, so the host never has to re-derive it:

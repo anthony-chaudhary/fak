@@ -578,11 +578,15 @@ func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *a
 // the host supplied the floor predicate. promptmmu is fail-safe: any ambiguity returns
 // req.Raw unchanged with a named SkipReason, so this never breaks a turn.
 func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (pruned []string) {
+	return s.compactInboundToolsWithDecision(req).Removed
+}
+
+func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesRequest) promptmmu.ToolSchemaDecision {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.toolFloorDenies == nil {
-		return nil
+		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: "gateway-disabled"}
 	}
 	if len(req.Tools) == 0 {
-		return nil
+		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: promptmmu.SkipNoTools}
 	}
 	drop := make(map[string]bool, len(req.Tools))
 	for _, t := range req.Tools {
@@ -591,14 +595,16 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (
 		}
 	}
 	if len(drop) == 0 {
-		return nil
+		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: promptmmu.SkipEmptyPlan}
 	}
 	res := promptmmu.CompactInboundTools(req.Raw, promptmmu.ToolPlan{Drop: drop}, func(b []byte) error {
 		_, err := agent.DecodeAnthropicMessagesRequest(b)
 		return err
 	})
+	decision := promptmmu.ExplainToolSchemaStrategy(res)
 	if !res.Changed {
-		return nil
+		s.logInboundToolSchemaDecision(decision)
+		return decision
 	}
 	req.Raw = res.Body
 	// Record the WITNESSED prune so the lever is no longer invisible: before this, the
@@ -607,7 +613,16 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (
 	// times. The pruner already proved the cached prefix stayed byte-identical, so a counted
 	// prune never bursts the upstream cache (epic #1089 — is-our-thing-ENABLED-and-USED).
 	s.metrics.observeInboundToolPrune(len(res.Pruned))
-	return res.Pruned
+	s.logInboundToolSchemaDecision(decision)
+	return decision
+}
+
+func (s *Server) logInboundToolSchemaDecision(decision promptmmu.ToolSchemaDecision) {
+	if s == nil || s.logf == nil || decision.Strategy == promptmmu.ToolSchemaUnchanged {
+		return
+	}
+	s.logf("gateway: inbound tool-schema strategy=%s removed=%d skip=%s cache_tradeoff=%q token_tradeoff=%q",
+		decision.Strategy, len(decision.Removed), decision.SkipReason, decision.CacheTradeoff, decision.TokenTradeoff)
 }
 
 func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) (pruned []string) {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/promptmmu"
 )
 
 // The INBOUND twin of #555: maybeCompactInboundTools prunes tool DEFINITIONS the floor can
@@ -30,6 +31,31 @@ func inboundToolsBody(t *testing.T) []byte {
 		{"name": "Bash", "description": strings.Repeat("shell ", 20), "input_schema": schema},
 		{"name": "WebFetch", "description": strings.Repeat("fetch the web ", 20), "input_schema": schema},
 		{"name": "DeleteEverything", "description": strings.Repeat("danger ", 20), "input_schema": schema},
+	}
+	raw, err := json.Marshal(obj{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024, "stream": true,
+		"system": []obj{{"type": "text", "text": "policy"}},
+		"tools":  tools,
+		"messages": []obj{
+			{"role": "user", "content": []obj{{"type": "text", "text": "hi"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+func inboundToolsBodyWithProtectedTail(t *testing.T) []byte {
+	t.Helper()
+	type obj map[string]any
+	schema := obj{"type": "object", "properties": obj{}}
+	tools := []obj{
+		{"name": "read_file", "description": strings.Repeat("read ", 20), "input_schema": schema},
+		{"name": "Bash", "description": strings.Repeat("shell ", 20), "input_schema": schema},
+		{"name": "WebFetch", "description": strings.Repeat("fetch the web ", 20), "input_schema": schema},
+		{"name": "DeleteEverything", "description": strings.Repeat("danger ", 20), "input_schema": schema,
+			"cache_control": obj{"type": "ephemeral"}},
 	}
 	raw, err := json.Marshal(obj{
 		"model": "claude-sonnet-4-6", "max_tokens": 1024, "stream": true,
@@ -167,6 +193,59 @@ func TestInboundToolsPrunesDeniedKeepsPrefix(t *testing.T) {
 	}
 	if names["WebFetch"] || names["DeleteEverything"] {
 		t.Fatalf("floor-denied tools must be gone; got %v", names)
+	}
+}
+
+func TestInboundToolsExplainsRemoveStrategyAndTradeoff(t *testing.T) {
+	raw := inboundToolsBody(t)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	s := anthropicServerWithFloor(floorAllowing("read_file", "Bash"))
+
+	decision := s.compactInboundToolsWithDecision(req)
+	if decision.Strategy != promptmmu.ToolSchemaRemove {
+		t.Fatalf("strategy = %q, want %q: %+v", decision.Strategy, promptmmu.ToolSchemaRemove, decision)
+	}
+	wantPruned := map[string]bool{"WebFetch": true, "DeleteEverything": true}
+	if len(decision.Removed) != len(wantPruned) {
+		t.Fatalf("Removed = %v, want two denied tools", decision.Removed)
+	}
+	for _, name := range decision.Removed {
+		if !wantPruned[name] {
+			t.Fatalf("removed unexpected tool %q: %+v", name, decision)
+		}
+	}
+	if !strings.Contains(decision.CacheTradeoff, "byte-identical") || !strings.Contains(decision.TokenTradeoff, "removed 2") {
+		t.Fatalf("decision tradeoff is not explanatory enough: %+v", decision)
+	}
+}
+
+func TestInboundToolsExplainsMaskWhenRemovalWouldBustPrefix(t *testing.T) {
+	raw := inboundToolsBodyWithProtectedTail(t)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	s := anthropicServerWithFloor(floorAllowing("read_file", "Bash"))
+
+	decision := s.compactInboundToolsWithDecision(req)
+	if decision.Strategy != promptmmu.ToolSchemaMask {
+		t.Fatalf("strategy = %q, want %q: %+v", decision.Strategy, promptmmu.ToolSchemaMask, decision)
+	}
+	if decision.SkipReason != promptmmu.SkipNothingAfter {
+		t.Fatalf("SkipReason = %q, want %q: %+v", decision.SkipReason, promptmmu.SkipNothingAfter, decision)
+	}
+	if len(decision.Removed) != 0 {
+		t.Fatalf("mask strategy must not remove definitions, got %v", decision.Removed)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("mask strategy must preserve the request body byte-identical")
+	}
+	if !strings.Contains(decision.CacheTradeoff, "preserve") || !strings.Contains(decision.TokenTradeoff, "call-time floor") {
+		t.Fatalf("decision tradeoff is not explanatory enough: %+v", decision)
 	}
 }
 

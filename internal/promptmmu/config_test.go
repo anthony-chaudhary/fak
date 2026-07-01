@@ -2,6 +2,7 @@ package promptmmu
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -238,5 +239,29 @@ func TestCurate_ShadowSurfacesSpineIdentityReason(t *testing.T) {
 	}
 	if !bytes.Equal(got, orig) {
 		t.Fatalf("shadow on identity must forward the body byte-identical to the input")
+	}
+}
+
+func TestExplainToolSchemaStrategyRemoveVsMaskTradeoff(t *testing.T) {
+	remove := ExplainToolSchemaStrategy(PruneResult{Changed: true, Pruned: []string{"delete_repo", "web_fetch"}})
+	if remove.Strategy != ToolSchemaRemove {
+		t.Fatalf("remove strategy = %q, want %q", remove.Strategy, ToolSchemaRemove)
+	}
+	if len(remove.Removed) != 2 || remove.Removed[0] != "delete_repo" || remove.Removed[1] != "web_fetch" {
+		t.Fatalf("remove Removed = %v, want [delete_repo web_fetch]", remove.Removed)
+	}
+	if !strings.Contains(remove.CacheTradeoff, "byte-identical") || !strings.Contains(remove.TokenTradeoff, "removed 2") {
+		t.Fatalf("remove tradeoff not explanatory enough: cache=%q token=%q", remove.CacheTradeoff, remove.TokenTradeoff)
+	}
+
+	mask := ExplainToolSchemaStrategy(PruneResult{Changed: false, SkipReason: SkipNothingAfter})
+	if mask.Strategy != ToolSchemaMask {
+		t.Fatalf("mask strategy = %q, want %q", mask.Strategy, ToolSchemaMask)
+	}
+	if mask.SkipReason != SkipNothingAfter {
+		t.Fatalf("mask SkipReason = %q, want %q", mask.SkipReason, SkipNothingAfter)
+	}
+	if !strings.Contains(mask.CacheTradeoff, "preserve") || !strings.Contains(mask.TokenTradeoff, "call-time floor") {
+		t.Fatalf("mask tradeoff not explanatory enough: cache=%q token=%q", mask.CacheTradeoff, mask.TokenTradeoff)
 	}
 }
