@@ -257,6 +257,55 @@ class LeaseStateTest(unittest.TestCase):
         self.assertEqual(mod._age_text(120.0), "2h")
 
 
+class WorkerLeaseCrossCheckTest(unittest.TestCase):
+    def _leases(self) -> dict:
+        return {
+            "active": [
+                {"id": "resolve-tools-1765", "lane": "tools", "holder": "peer-a"},
+                {"id": "resolve-model-1700", "lane": "model", "holder": "peer-b"},
+            ],
+        }
+
+    def test_cross_check_buckets_clean_orphan_process_and_orphan_lease(self) -> None:
+        mod = load()
+        workers = {
+            "available": True,
+            "workers": [
+                {
+                    "worker": "resolve-1765-20260701-120000",
+                    "issue": 1765,
+                    "pid": 111,
+                    "lane": "tools",
+                    "lease_id": "resolve-tools-1765",
+                },
+                {
+                    "worker": "resolve-1770-20260701-120001",
+                    "issue": 1770,
+                    "pid": 222,
+                    "lane": "docs",
+                    "lease_id": "resolve-docs-1770",
+                },
+            ],
+        }
+
+        out = mod.cross_check_worker_leases(workers, self._leases())
+
+        self.assertEqual(out["clean_count"], 1)
+        self.assertEqual(out["orphan_process_count"], 1)
+        self.assertEqual(out["orphan_lease_count"], 1)
+        self.assertEqual(out["clean"][0]["worker"]["worker"], "resolve-1765-20260701-120000")
+        self.assertEqual(out["orphan_process"][0]["worker"]["worker"], "resolve-1770-20260701-120001")
+        self.assertEqual(out["orphan_lease"][0]["lease"]["id"], "resolve-model-1700")
+
+    def test_cross_check_preserves_unavailable_liveness(self) -> None:
+        mod = load()
+        out = mod.cross_check_worker_leases(
+            {"available": False, "error": "psutil unavailable"}, self._leases())
+        self.assertFalse(out["available"])
+        self.assertEqual(out["orphan_process_count"], 0)
+        self.assertEqual(out["orphan_lease_count"], 0)
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_minimal_payload(self) -> None:
         mod = load()
@@ -342,6 +391,37 @@ class RenderTest(unittest.TestCase):
         slack = mod.slack_text(p)
         self.assertIn("leases 2 active (1 blocking)", slack)
         self.assertIn("active lane lease", slack)
+
+    def test_render_surfaces_worker_lease_cross_check_buckets(self) -> None:
+        mod = load()
+        worker_leases = {
+            "available": True,
+            "clean_count": 1,
+            "orphan_process_count": 1,
+            "orphan_lease_count": 1,
+            "clean": [{
+                "worker": {"worker": "resolve-1765-20260701-120000", "issue": 1765, "pid": 111},
+                "lease": {"id": "resolve-tools-1765"},
+            }],
+            "orphan_process": [{
+                "worker": {"worker": "resolve-1770-20260701-120001", "issue": 1770, "pid": 222,
+                           "lease_id": "resolve-docs-1770"},
+                "reason": "missing active dispatch lease",
+            }],
+            "orphan_lease": [{
+                "lease": {"id": "resolve-model-1700", "lane": "model", "holder": "peer-b"},
+                "reason": "active lease has no local live worker sidecar",
+            }],
+        }
+
+        p = build(mod, worker_leases=worker_leases)
+        self.assertTrue(any("orphan-process=1" in r for r in p["reasons"]))
+        text = mod.render(p)
+        self.assertIn("lease chk : clean=1 orphan-process=1 orphan-lease=1", text)
+        self.assertIn("orphan-process resolve-1770-20260701-120001", text)
+        self.assertIn("orphan-lease resolve-model-1700", text)
+        slack = mod.slack_text(p)
+        self.assertIn("worker/lease orphans", slack)
 
 
 class SilentWorkersFoldTest(unittest.TestCase):
@@ -736,6 +816,34 @@ class RenderMdTest(unittest.TestCase):
         self.assertIn("| `resolve-tools-1762` | tools | 10m | 3600s | blocks #1762 |", md)
         self.assertIn("| `resolve-model-1700` | model | 5m | 3600s | no candidate |", md)
         self.assertIn("1 expired lease record", md)
+
+    def test_md_lists_worker_lease_cross_check_buckets(self) -> None:
+        mod = load()
+        worker_leases = {
+            "available": True,
+            "clean_count": 1,
+            "orphan_process_count": 1,
+            "orphan_lease_count": 1,
+            "clean": [{
+                "worker": {"worker": "resolve-1765-20260701-120000", "issue": 1765, "pid": 111},
+                "lease": {"id": "resolve-tools-1765"},
+            }],
+            "orphan_process": [{
+                "worker": {"worker": "resolve-1770-20260701-120001", "issue": 1770, "pid": 222,
+                           "lease_id": "resolve-docs-1770"},
+                "reason": "missing active dispatch lease",
+            }],
+            "orphan_lease": [{
+                "lease": {"id": "resolve-model-1700", "lane": "model", "holder": "peer-b"},
+                "reason": "active lease has no local live worker sidecar",
+            }],
+        }
+        md = mod.render_md(self._payload(mod, worker_leases=worker_leases),
+                           date="2026-07-01")
+        self.assertIn("## Worker / lease cross-check", md)
+        self.assertIn("| `resolve-1765-20260701-120000` | #1765 | 111 | `resolve-tools-1765` |", md)
+        self.assertIn("| `resolve-1770-20260701-120001` | #1770 | 222 | `resolve-docs-1770` | missing active dispatch lease |", md)
+        self.assertIn("| `resolve-model-1700` | model | `peer-b` | active lease has no local live worker sidecar |", md)
 
     def test_md_silent_section_says_none_when_clean(self) -> None:
         mod = load()

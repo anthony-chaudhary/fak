@@ -72,6 +72,7 @@ _GUARD_RECENT_LOOKBACK_MIN = 90
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 _LEASEREF_PREFIX = "refs/fak/locks/"
+_NOOP_BANNER_RE = re.compile(r"(?i)>\s*build\s*[·:]")
 # The real-turn byte floor: a log at or below this carried no productive turn — it
 # is a 0-byte spawn or a banner-only stub (e.g. a detached opencode worker that
 # prints `> build · <model>` and exits). Mirrors the canonical
@@ -416,6 +417,171 @@ def read_lease_state(root: Path, backlog: dict[str, Any],
     if skipped:
         state["skipped_records"] = skipped
     return state
+
+
+def _dispatch_lease_token(s: str) -> str:
+    s = str(s or "").strip()
+    if not s:
+        return "unknown"
+    out: list[str] = []
+    for ch in s:
+        if ("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch in "-_.":
+            out.append(ch)
+        else:
+            out.append("-")
+    return "".join(out).strip("-.") or "unknown"
+
+
+def _default_lease_id_for_lane(lane: str) -> str:
+    return "resolve-" + _dispatch_lease_token(lane)
+
+
+def _spawn_lane(log: Path) -> str:
+    try:
+        first = log.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+    except (OSError, IndexError):
+        return ""
+    for field in first.split():
+        if field.startswith("lane="):
+            return field[len("lane="):]
+    return ""
+
+
+def _banner_noop(log: Path) -> bool:
+    try:
+        if log.stat().st_size > _STUB_LOG_MAX_BYTES:
+            return False
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(_NOOP_BANNER_RE.search(text))
+
+
+def _read_worker_lease_id(stem: Path, lane: str) -> str:
+    try:
+        value = (stem.with_suffix(".lease-id")).read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    except OSError:
+        pass
+    return _default_lease_id_for_lane(lane) if lane else ""
+
+
+def _read_worker_tree(stem: Path) -> list[str]:
+    try:
+        obj = json.loads(stem.with_suffix(".lease-tree.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return _string_list(obj)
+
+
+def scan_live_dispatch_workers(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> dict[str, Any]:
+    if not runs_dir.is_dir():
+        return {"available": True, "workers": []}
+    if alive is None and probe is None:
+        try:
+            import psutil  # type: ignore
+
+            alive = {p.pid for p in psutil.process_iter()}
+        except ImportError:
+            return {"available": False, "workers": [], "error": "psutil unavailable"}
+
+    workers: list[dict[str, Any]] = []
+    for log in runs_dir.glob("resolve-*.log"):
+        m = _RESOLVE_LOG_RE.search(log.name)
+        if not m:
+            continue
+        stem = log.with_suffix("")
+        pid_file = stem.with_suffix(".pid")
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(
+            pid_file, alive=alive, probe=probe):
+            continue
+        if _banner_noop(log):
+            continue
+        lane = _spawn_lane(log)
+        lease_id = _read_worker_lease_id(stem, lane)
+        workers.append({
+            "worker": stem.name,
+            "issue": int(m.group(1)),
+            "stamp": m.group(2),
+            "pid": pid,
+            "lane": lane,
+            "lease_id": lease_id,
+            "tree": _read_worker_tree(stem),
+            "log": log.name,
+        })
+    workers.sort(key=lambda r: str(r.get("worker") or ""))
+    return {"available": True, "workers": workers}
+
+
+def cross_check_worker_leases(worker_state: dict[str, Any],
+                              leases: dict[str, Any]) -> dict[str, Any]:
+    active_leases = {
+        str(row.get("id") or ""): row
+        for row in (leases.get("active") or [])
+        if row.get("id")
+    }
+    if not worker_state.get("available", True):
+        return {
+            "available": False,
+            "error": worker_state.get("error"),
+            "clean_count": 0,
+            "orphan_process_count": 0,
+            "orphan_lease_count": 0,
+            "clean": [],
+            "orphan_process": [],
+            "orphan_lease": [],
+        }
+
+    clean: list[dict[str, Any]] = []
+    orphan_process: list[dict[str, Any]] = []
+    matched: set[str] = set()
+    for worker in worker_state.get("workers") or []:
+        lease_id = str(worker.get("lease_id") or "")
+        lease = active_leases.get(lease_id)
+        if lease:
+            matched.add(lease_id)
+            clean.append({"worker": worker, "lease": lease})
+        else:
+            orphan_process.append({
+                "worker": worker,
+                "reason": "missing active dispatch lease" if lease_id else "worker has no lease id",
+            })
+
+    orphan_lease = [
+        {"lease": lease, "reason": "active lease has no local live worker sidecar"}
+        for lease_id, lease in sorted(active_leases.items())
+        if lease_id not in matched
+    ]
+    return {
+        "available": True,
+        "clean_count": len(clean),
+        "orphan_process_count": len(orphan_process),
+        "orphan_lease_count": len(orphan_lease),
+        "clean": clean,
+        "orphan_process": orphan_process,
+        "orphan_lease": orphan_lease,
+    }
+
+
+def worker_lease_crosscheck(
+    runs_dir: Path,
+    leases: dict[str, Any],
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> dict[str, Any]:
+    workers = scan_live_dispatch_workers(runs_dir, alive=alive, probe=probe)
+    return cross_check_worker_leases(workers, leases)
 
 
 def has_key_named(obj: Any, key: str) -> bool:
@@ -926,6 +1092,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     run_status = read_run_status_digests(root)
     merge = merge_state(root)
     leases = read_lease_state(root, backlog)
+    worker_leases = worker_lease_crosscheck(root / RUNS_DIRNAME, leases)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -933,7 +1100,8 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          backend_health=backend_health,
                          backend_stub_rate=backend_stub_rate,
                          hook_failures=hook_failures, guard=guard,
-                         run_status=run_status, merge=merge, leases=leases)
+                         run_status=run_status, merge=merge, leases=leases,
+                         worker_leases=worker_leases)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -947,7 +1115,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   guard: dict[str, Any] | None = None,
                   run_status: list[dict[str, Any]] | None = None,
                   merge: dict[str, Any] | None = None,
-                  leases: dict[str, Any] | None = None) -> dict[str, Any]:
+                  leases: dict[str, Any] | None = None,
+                  worker_leases: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -1128,6 +1297,18 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                 f"current candidate issue(s){suffix}")
         else:
             reasons.append(f"{leases.get('active_count')} active lane lease(s), none blocking current candidates")
+    worker_leases = worker_leases or {}
+    if worker_leases.get("available") is False:
+        reasons.append(f"worker/lease cross-check unavailable: {worker_leases.get('error')}")
+    elif worker_leases:
+        op = _int(worker_leases.get("orphan_process_count"), 0) or 0
+        ol = _int(worker_leases.get("orphan_lease_count"), 0) or 0
+        clean = _int(worker_leases.get("clean_count"), 0) or 0
+        if op or ol:
+            reasons.append(
+                f"worker/lease cross-check: clean={clean}, orphan-process={op}, orphan-lease={ol}")
+        elif clean:
+            reasons.append(f"worker/lease cross-check clean ({clean} matched worker/lease pair(s))")
 
     return {
         "schema": SCHEMA,
@@ -1198,6 +1379,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "digests": run_status,
         },
         "leases": leases,
+        "worker_lease_check": worker_leases,
         "git": {
             "merge_in_progress": bool(merge.get("merge_in_progress")),
             "merge_head": merge.get("merge_head"),
@@ -1236,6 +1418,17 @@ def _lease_summary_bits(leases: dict[str, Any], *, limit: int = 3) -> list[str]:
         bits.append(
             f"{row.get('id')} lane={row.get('lane') or '-'} "
             f"age={_age_text(row.get('age_min'))} {_lease_block_text(row)}")
+    if len(rows) > limit:
+        bits.append(f"+{len(rows) - limit} more")
+    return bits
+
+
+def _worker_lease_bucket_bits(rows: list[dict[str, Any]], *, key: str,
+                              limit: int = 3) -> list[str]:
+    bits: list[str] = []
+    for row in rows[:limit]:
+        obj = row.get(key) or {}
+        bits.append(str(obj.get("worker") or obj.get("id") or obj.get("lease_id") or "?"))
     if len(rows) > limit:
         bits.append(f"+{len(rows) - limit} more")
     return bits
@@ -1320,6 +1513,22 @@ def render(p: dict[str, Any]) -> str:
         lines.append(
             f"║ leases    : {leases.get('active_count')} active, "
             f"{leases.get('blocking_count', 0)} blocking [{bits}]")
+    wl = p.get("worker_lease_check") or {}
+    if wl.get("available") is False:
+        lines.append(f"║ lease chk : unknown ({wl.get('error')})")
+    elif wl:
+        bits = []
+        if wl.get("orphan_process_count"):
+            bits.append("orphan-process "
+                        + ",".join(_worker_lease_bucket_bits(wl.get("orphan_process") or [], key="worker")))
+        if wl.get("orphan_lease_count"):
+            bits.append("orphan-lease "
+                        + ",".join(_worker_lease_bucket_bits(wl.get("orphan_lease") or [], key="lease")))
+        detail = f" [{'; '.join(bits)}]" if bits else ""
+        lines.append(
+            f"║ lease chk : clean={wl.get('clean_count', 0)} "
+            f"orphan-process={wl.get('orphan_process_count', 0)} "
+            f"orphan-lease={wl.get('orphan_lease_count', 0)}{detail}")
     git = p.get("git") or {}
     if git.get("merge_in_progress"):
         lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
@@ -1387,6 +1596,13 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     elif leases.get("active_count"):
         out.append(f"- **lane leases**: {leases.get('active_count')} active; "
                    f"{leases.get('blocking_count', 0)} blocking current candidates")
+    wl = payload.get("worker_lease_check") or {}
+    if wl.get("available") is False:
+        out.append(f"- **worker/lease cross-check**: unknown (`{wl.get('error')}`)")
+    elif wl:
+        out.append(f"- **worker/lease cross-check**: clean={wl.get('clean_count', 0)}, "
+                   f"orphan-process={wl.get('orphan_process_count', 0)}, "
+                   f"orphan-lease={wl.get('orphan_lease_count', 0)}")
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -1492,6 +1708,59 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 f"| `{row.get('id')}` | {row.get('lane') or '—'} | "
                 f"{_age_text(row.get('age_min'))} | {row.get('ttl_seconds')}s | "
                 f"{_lease_block_text(row)} | `{holder}` | {tree} |")
+
+    wl = payload.get("worker_lease_check") or {}
+    out += ["", "## Worker / lease cross-check", ""]
+    if wl.get("available") is False:
+        out.append(f"_Worker liveness unavailable: `{wl.get('error')}`._")
+    elif not wl:
+        out.append("_Worker/lease cross-check did not run._")
+    else:
+        out.append(
+            f"clean={wl.get('clean_count', 0)}, "
+            f"orphan-process={wl.get('orphan_process_count', 0)}, "
+            f"orphan-lease={wl.get('orphan_lease_count', 0)}.")
+        clean_rows = wl.get("clean") or []
+        out += ["", "Clean matches:", ""]
+        if not clean_rows:
+            out.append("_No live worker has a matching active lease._")
+        else:
+            out += [
+                "| worker | issue | pid | lease |",
+                "|---|---:|---:|---|",
+            ]
+            for row in clean_rows:
+                worker = row.get("worker") or {}
+                lease = row.get("lease") or {}
+                out.append(f"| `{worker.get('worker')}` | #{worker.get('issue')} | "
+                           f"{worker.get('pid')} | `{lease.get('id')}` |")
+        orphan_process = wl.get("orphan_process") or []
+        out += ["", "Orphan processes:", ""]
+        if not orphan_process:
+            out.append("_No OS-visible dispatch worker is missing an active lease._")
+        else:
+            out += [
+                "| worker | issue | pid | lease id | reason |",
+                "|---|---:|---:|---|---|",
+            ]
+            for row in orphan_process:
+                worker = row.get("worker") or {}
+                out.append(f"| `{worker.get('worker')}` | #{worker.get('issue')} | "
+                           f"{worker.get('pid')} | `{worker.get('lease_id') or '—'}` | "
+                           f"{row.get('reason')} |")
+        orphan_lease = wl.get("orphan_lease") or []
+        out += ["", "Orphan leases:", ""]
+        if not orphan_lease:
+            out.append("_No active lease is missing a local live worker sidecar._")
+        else:
+            out += [
+                "| lease | lane | holder | reason |",
+                "|---|---|---|---|",
+            ]
+            for row in orphan_lease:
+                lease = row.get("lease") or {}
+                out.append(f"| `{lease.get('id')}` | {lease.get('lane') or '—'} | "
+                           f"`{lease.get('holder') or '—'}` | {row.get('reason')} |")
 
     bh = payload.get("backend_health") or {}
     dead = bh.get("dead") or []
@@ -1652,6 +1921,7 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     b = payload.get("backlog") or {}
     c = payload.get("closure") or {}
     l = payload.get("leases") or {}
+    wl = payload.get("worker_lease_check") or {}
 
     parts: list[str] = []
     if d.get("live") is not None or d.get("cap") is not None:
@@ -1674,6 +1944,10 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     if l.get("active_count"):
         parts.append(f"leases {l.get('active_count')} active"
                      + (f" ({l.get('blocking_count')} blocking)" if l.get("blocking_count") else ""))
+    if wl and wl.get("available") is not False:
+        parts.append(f"lease-check clean {wl.get('clean_count', 0)}"
+                     f"/orphan-proc {wl.get('orphan_process_count', 0)}"
+                     f"/orphan-lease {wl.get('orphan_lease_count', 0)}")
     return "capacity: " + " · ".join(parts) if parts else ""
 
 
@@ -1807,6 +2081,19 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             f"{leases.get('active_count')} active lane lease(s), "
             f"{leases.get('blocking_count', 0)} blocking current candidates"
             + (f" ({'; '.join(bits)})" if bits else ""))
+    wl = payload.get("worker_lease_check") or {}
+    if wl.get("available") is False:
+        buckets["action"].append(f"worker/lease cross-check unavailable: {wl.get('error')}")
+    elif wl:
+        op = wl.get("orphan_process_count") or 0
+        ol = wl.get("orphan_lease_count") or 0
+        if op or ol:
+            buckets["action"].append(
+                f"worker/lease orphans: clean={wl.get('clean_count', 0)}, "
+                f"orphan-process={op}, orphan-lease={ol}")
+        elif wl.get("clean_count"):
+            buckets["expected"].append(
+                f"worker/lease cross-check clean ({wl.get('clean_count')} matched)")
 
     return buckets
 
