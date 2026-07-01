@@ -1410,7 +1410,7 @@ func (s *Server) renderMetrics() string {
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	s.writeServingMetrics(&b, inf)
-	m.writeHarnessMetrics(&b) // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
+	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
