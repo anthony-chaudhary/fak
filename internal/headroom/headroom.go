@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Compressor is the generic seam for the context-savings AREA — the one interface
@@ -187,7 +189,7 @@ func Detect(b []byte) ContentKind {
 	s := string(t)
 	// Code: fenced blocks or common source tokens.
 	if strings.Contains(s, "```") ||
-		containsAny(s, "func ", "package ", "import ", "def ", "class ", "#include", "=> {", "public ", "private ") {
+		strmatch.ContainsAny(s, "func ", "package ", "import ", "def ", "class ", "#include", "=> {", "public ", "private ") {
 		return KindCode
 	}
 	// Log: many lines, a high share carrying a level tag or an ISO/clock stamp.
@@ -206,17 +208,8 @@ func Detect(b []byte) ContentKind {
 	return KindText
 }
 
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
-}
-
 func looksLogLine(ln string) bool {
-	if containsAny(ln, "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL") {
+	if strmatch.ContainsAny(ln, "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL") {
 		return true
 	}
 	// a leading time-ish stamp: "12:34", "2026-06-23", "[12:34:56]".
