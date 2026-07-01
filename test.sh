@@ -116,17 +116,35 @@ if [ "${FAK_FAST:-}" = "1" ]; then
       # plain --delete (NOT --delete-excluded) so excluded runtime state and the
       # symlinked cache are preserved. The live dogfood fleet mutates these dirs
       # while tests start; copying them can make rsync fail before `go test` runs.
-      rsync -a --delete \
-        --exclude="/$CACHE_REL" \
-        --exclude="/.git/*.lock" \
-        --exclude="/.git/**/*.lock" \
-        --exclude="/.codex-tmp" \
-        --exclude="/.dispatch-runs" \
-        --exclude="/.dos/metrics" \
-        --exclude="/.dos/runs" \
-        --exclude="/.dos/streams" \
-        --exclude="/.fak" \
+      rsync_args=(
+        -a --delete
+        --exclude="/$CACHE_REL"
+        --exclude="/.git/*.lock"
+        --exclude="/.git/**/*.lock"
+        --exclude="/.codex-tmp"
+        --exclude="/.dispatch-runs"
+        --exclude="/.dos/metrics"
+        --exclude="/.dos/runs"
+        --exclude="/.dos/streams"
+        --exclude="/.fak"
         "$SCRIPT_DIR/" "$SCRATCH/"
+      )
+      rsync_rc=0
+      for rsync_attempt in 1 2 3; do
+        set +e
+        rsync "${rsync_args[@]}"
+        rsync_rc=$?
+        set -e
+        if [ "$rsync_rc" -eq 0 ]; then
+          break
+        fi
+        if [ "$rsync_rc" -eq 23 ] && [ "$rsync_attempt" -lt 3 ]; then
+          echo "fak/test.sh: rsync saw concurrent source mutation (exit 23); retrying mirror ($rsync_attempt/3)"
+          sleep 0.2
+          continue
+        fi
+        exit "$rsync_rc"
+      done
       if [ -d "$SCRATCH/.git" ]; then
         find "$SCRATCH/.git" -type f -name '*.lock' -delete
       fi

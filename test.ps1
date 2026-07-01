@@ -21,10 +21,17 @@
 # it is actually installed; else fall back to WSL's *default* distro (omit -d).
 # Hardcoding 'Ubuntu-24.04' was a footgun — a node whose distro is just 'Ubuntu'
 # (and with FAK_WSL_DISTRO unset) hit `WSL_E_DISTRO_NOT_FOUND` and never ran.
-[CmdletBinding()]
-param([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Rest)
-
 $ErrorActionPreference = 'Stop'
+
+# Deliberately use raw $args instead of a param block: PowerShell treats `-v` as
+# the common `-Verbose` alias during parameter binding, so a pass-through wrapper
+# with `param(ValueFromRemainingArguments=...)` still loses `go test -v`.
+$Rest = @($args)
+
+if ($env:FAK_TEST_PS1_ECHO_ARGS) {
+    @($Rest) | ConvertTo-Json -Compress
+    exit 0
+}
 
 $fakFastWasSet = Test-Path Env:FAK_FAST
 if (-not $fakFastWasSet) {
