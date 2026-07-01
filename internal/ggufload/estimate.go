@@ -119,7 +119,7 @@ func (s *WeightSource) EstimateExpertParallelLoadMemoryPlan(ranks int) (compute.
 	replicatedByDType := map[string]uint64{}
 	expertByDType := map[string]uint64{}
 	for _, info := range s.File.Tensors {
-		if cfg.ModelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
+		if glmMoeDsaSkipGGUFTensorForType(cfg.ModelType, info.Name) {
 			continue
 		}
 		n, err := tensorPayloadBytes(info)
@@ -207,7 +207,7 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 	}
 	by := map[key]uint64{}
 	for _, info := range s.File.Tensors {
-		if modelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
+		if glmMoeDsaSkipGGUFTensorForType(modelType, info.Name) {
 			continue
 		}
 		n, err := tensorPayloadBytes(info)

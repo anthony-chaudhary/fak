@@ -141,6 +141,14 @@ func glmMoeDsaSkipGGUFTensor(name string) bool {
 	return false
 }
 
+// glmMoeDsaSkipGGUFTensorForType reports whether a tensor should be dropped at load for the
+// given model type: true only for a glm_moe_dsa file whose tensor is an MTP/vision tensor the
+// text forward never reads (glmMoeDsaSkipGGUFTensor). It is the shared guard the loader and the
+// byte-accounting estimators use so the "glm_moe_dsa" family check stays in one place.
+func glmMoeDsaSkipGGUFTensorForType(modelType, name string) bool {
+	return modelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(name)
+}
+
 // glmMoeDsaBatchedExpert reports whether a glm_moe_dsa GGUF tensor name is a batched routed-expert
 // blob and, if so, returns its layer index and the per-expert canonical projection name
 // (gate_proj/up_proj/down_proj). These are the tensors the loader splits into E per-expert 2-D

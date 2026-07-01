@@ -176,17 +176,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			}
 			// MLA KV-b half: dequant it; the collector buffers + merges the pair in order.
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				raw, _, err := s.TensorBytes(info.Name)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				data, err := dequantF32(info, raw)
+				shape, data, err := s.dequantGGUFShapeF32(info)
 				if err != nil {
 					tw.err = err
 					return tw
@@ -201,12 +191,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			// and unsloth UD quants can use IQ3_XXS/IQ4_XS/Q8_0 in addition to the K-quants.
 			// Any other type falls to the f32 dequant-split.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
-				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-				if err != nil {
-					tw.err = err
-					return tw
-				}
-				raw, _, err := s.TensorBytes(info.Name)
+				shape, raw, err := s.shapeAndBytes(info)
 				if err != nil {
 					tw.err = err
 					return tw
@@ -268,12 +253,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
 			return tw
 		}
-		shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
-		if err != nil {
-			tw.err = err
-			return tw
-		}
-		raw, _, err := s.TensorBytes(info.Name)
+		shape, raw, err := s.shapeAndBytes(info)
 		if err != nil {
 			tw.err = err
 			return tw

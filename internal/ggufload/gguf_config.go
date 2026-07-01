@@ -246,7 +246,11 @@ func canonicalGGUFArch(arch string) string {
 	return arch
 }
 
-func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
+// applyMoEExpertCounts reads the three shared MoE expert-axis GGUF scalars — expert count,
+// experts-used-per-token, and expert FFN length — into cfg, writing each only when present and
+// positive so a generic value is never clobbered by a zero. Shared by the Qwen3-MoE and
+// GLM-MoE-DSA config appliers.
+func applyMoEExpertCounts(f *File, p string, cfg *model.Config) {
 	if v := intValueOrZero(f, p+glmKeyExpertCount); v > 0 {
 		cfg.NumExperts = v
 	}
@@ -256,6 +260,10 @@ func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
 	if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
 		cfg.MoEIntermediateSize = v
 	}
+}
+
+func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
+	applyMoEExpertCounts(f, p, cfg)
 	if cfg.NumExperts > 0 {
 		cfg.NormTopKProb = true
 	}
@@ -427,15 +435,7 @@ const (
 // MLA are reconciled when the forward wiring lands.
 func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
 	// ---- MoE FFN axis -------------------------------------------------------
-	if v := intValueOrZero(f, p+glmKeyExpertCount); v > 0 {
-		cfg.NumExperts = v
-	}
-	if v := intValueOrZero(f, p+glmKeyExpertUsedCount); v > 0 {
-		cfg.NumExpertsPerTok = v
-	}
-	if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
-		cfg.MoEIntermediateSize = v
-	}
+	applyMoEExpertCounts(f, p, cfg)
 	if v := intValueOrZero(f, p+glmKeyExpertSharedCount); v > 0 {
 		cfg.NSharedExperts = v
 	}

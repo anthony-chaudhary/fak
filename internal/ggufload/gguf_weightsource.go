@@ -328,7 +328,7 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
 		if archUsesGGUFBatchedMoEExperts(cfg.ModelType) {
 			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
-			if cfg.ModelType == "glm_moe_dsa" && glmMoeDsaSkipGGUFTensor(info.Name) {
+			if glmMoeDsaSkipGGUFTensorForType(cfg.ModelType, info.Name) {
 				continue
 			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
@@ -385,15 +385,27 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	return cfg, tensors, nil
 }
 
-// dequantGGUFShapeF32 returns a GGUF tensor's model shape and its dequantized f32 payload,
-// reading the still-quantized bytes via TensorBytes and dequantizing them. It is the shared
-// shape+read+dequant prelude of QuantModelProfile's glm_moe_dsa split paths.
-func (s *WeightSource) dequantGGUFShapeF32(info TensorInfo) ([]int, []float32, error) {
+// shapeAndBytes returns a GGUF tensor's model shape and its still-quantized on-disk payload
+// bytes, reading the raw bytes via TensorBytes. It is the shared shape+read prelude of the
+// tensor handlers that need the raw payload (batched-expert split, canonical map) and of
+// dequantGGUFShapeF32.
+func (s *WeightSource) shapeAndBytes(info TensorInfo) ([]int, []byte, error) {
 	shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 	if err != nil {
 		return nil, nil, err
 	}
 	raw, _, err := s.TensorBytes(info.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return shape, raw, nil
+}
+
+// dequantGGUFShapeF32 returns a GGUF tensor's model shape and its dequantized f32 payload,
+// reading the still-quantized bytes via TensorBytes and dequantizing them. It is the shared
+// shape+read+dequant prelude of QuantModelProfile's glm_moe_dsa split paths.
+func (s *WeightSource) dequantGGUFShapeF32(info TensorInfo) ([]int, []float32, error) {
+	shape, raw, err := s.shapeAndBytes(info)
 	if err != nil {
 		return nil, nil, err
 	}
