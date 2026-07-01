@@ -80,6 +80,33 @@ func TestScanConflation_GenuineFeedbackFormIsAHit(t *testing.T) {
 	}
 }
 
+func TestScanConflation_HarnessLineIsMatchedTrigger(t *testing.T) {
+	noStderr := stopErrLine()
+	exitStatus := `{"type":"user","isMeta":true,"message":{"role":"user","content":"Stop hook error: repo_guard exited with exit status 2"}}`
+	transcript := strings.Join([]string{
+		noStderr,
+		asstLine("All good; the hook ran successfully."),
+		exitStatus,
+		asstLine("The cleanup completed cleanly with no errors."),
+	}, "\n")
+	hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-distinct-errors")
+	if !hadErr {
+		t.Fatalf("expected distinct Stop-hook signatures to register as errors")
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 conflation hits, got %d: %+v", len(hits), hits)
+	}
+	if hits[0].HarnessLine != noStderr {
+		t.Fatalf("first harness line = %q, want triggering line %q", hits[0].HarnessLine, noStderr)
+	}
+	if hits[1].HarnessLine != exitStatus {
+		t.Fatalf("second harness line = %q, want triggering line %q", hits[1].HarnessLine, exitStatus)
+	}
+	if hits[0].HarnessLine == hits[1].HarnessLine {
+		t.Fatalf("distinct Stop-hook signatures must not collapse to one constant: %+v", hits)
+	}
+}
+
 // The dos keep-working goal-gate ("Stop hook feedback:" with no failure tail) is not an
 // error; a success claim after it is honest, not a conflation.
 func TestScanConflation_GoalGateIsNotAnError(t *testing.T) {

@@ -36,6 +36,7 @@ const (
 	// DefaultConflationWindowHours scopes the realized half to recent sessions so a
 	// long-fixed historical conflation does not keep the score red forever.
 	DefaultConflationWindowHours = 72
+	harnessLineClip              = 240
 )
 
 // SuccessClaimRe matches an assistant turn asserting the run went fine. The phrases
@@ -226,6 +227,7 @@ func scanTranscriptBytes(raw []byte, session string) (hadError bool, hits []Conf
 	// pasted/prompt echo, not a live hook failure the model narrated over).
 	const ctx = 3
 	errAt := -1 // index of the most recent genuine (non-assistant) Stop-hook-error event
+	errLine := ""
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -237,6 +239,7 @@ func scanTranscriptBytes(raw []byte, session string) (hadError bool, hits []Conf
 			if stopErrorRe.MatchString(line) {
 				hadError = true
 				errAt = i
+				errLine = clip(line, harnessLineClip)
 			}
 			continue
 		}
@@ -251,7 +254,7 @@ func scanTranscriptBytes(raw []byte, session string) (hadError bool, hits []Conf
 			hits = append(hits, ConflationHit{
 				Session:     session,
 				Claim:       clip(claim, 120),
-				HarnessLine: "Stop hook feedback: No stderr output (memory_sync / switcher_shadow)",
+				HarnessLine: errLine,
 			})
 		}
 	}
