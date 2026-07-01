@@ -134,6 +134,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
+	lease.SettleUsage(comp.Usage) // settle the token-rate window with real usage (#2019)
 	s.accountStreamedTurn(ctx, sessionTurn, comp, req.Messages, began)
 
 	// Tool-call conformance fail-closed: the upstream announced tool_calls but none

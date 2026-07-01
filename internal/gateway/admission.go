@@ -208,20 +208,41 @@ func NewAdmissionController(p AdmissionPolicy) *AdmissionController {
 	return &AdmissionController{policy: p, running: map[string]SeqRequest{}}
 }
 
-// AdmissionLease is the live request's hold on one admitted scheduler slot. Release is
-// idempotent and schedules the next waiting request after freeing this request's budget.
+// AdmissionLease is the live request's hold on one admitted scheduler slot, plus (when a
+// token-rate gate is wired, #2019) its reservation against the provider token window.
+// Release is idempotent and schedules the next waiting request after freeing this
+// request's budget.
 type AdmissionLease struct {
-	ctl     *AdmissionController
-	traceID string
-	once    sync.Once
+	ctl      *AdmissionController
+	traceID  string
+	tokenRes *TokenReservation
+	once     sync.Once
 }
 
-// Release frees the admitted request's token/sequence budget and promotes waiters.
+// Release frees the admitted request's token/sequence budget and promotes waiters. A
+// token reservation never settled with real usage keeps its conservative estimate
+// (TokenReservation.Release).
 func (l *AdmissionLease) Release() {
-	if l == nil || l.ctl == nil || l.traceID == "" {
+	if l == nil {
 		return
 	}
-	l.once.Do(func() { l.ctl.completeAndSchedule(l.traceID) })
+	l.once.Do(func() {
+		if l.ctl != nil && l.traceID != "" {
+			l.ctl.completeAndSchedule(l.traceID)
+		}
+		l.tokenRes.Release()
+	})
+}
+
+// SettleUsage feeds the provider's real, normalized usage back into the token-rate
+// gate's window (#2019) the moment a completion reports it, replacing the admission-time
+// estimate. Safe on a nil lease or one with no token reservation; the scheduler slot
+// itself is still freed by Release.
+func (l *AdmissionLease) SettleUsage(u agent.Usage) {
+	if l == nil {
+		return
+	}
+	l.tokenRes.Settle(tokenUsageFromAgent(u))
 }
 
 // AdmissionError is the typed served-path refusal returned when the live admission
@@ -541,24 +562,52 @@ func (s *Server) writeAdmissionMetrics(b *strings.Builder) {
 	c.WriteMetrics(b)
 }
 
+// beginServedAdmission is the served request's admission boundary: the scheduler slot
+// (admissionCtl, #35) first — a queued request must not hold provider token budget while
+// it waits — then the provider token window (tokenRateGate, #2019); a token shed releases
+// the just-acquired slot. With neither gate attached it is inert (nil lease, nil error)
+// and the request path is byte-for-byte historical.
 func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, maxTokens int) (*AdmissionLease, error) {
 	if s == nil {
 		return nil, nil
 	}
 	s.admissionMu.RLock()
 	c := s.admissionCtl
+	g := s.tokenRateGate
 	s.admissionMu.RUnlock()
-	if c == nil {
+	if c == nil && g == nil {
 		return nil, nil
 	}
-	return c.Acquire(ctx, SeqRequest{
-		TraceID:  turn.traceID,
-		Priority: turn.state.Priority,
-		Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
-	})
+	var lease *AdmissionLease
+	if c != nil {
+		var err error
+		lease, err = c.Acquire(ctx, SeqRequest{
+			TraceID:  turn.traceID,
+			Priority: turn.state.Priority,
+			Tokens:   estimateServedAdmissionTokens(messages, tools, maxTokens),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if g != nil {
+		res, err := g.Admit(estimateServedTokenUsage(messages, tools, maxTokens))
+		if err != nil {
+			lease.Release() // nil-safe: free the scheduler slot the token window refused to feed
+			return nil, err
+		}
+		if lease == nil {
+			lease = &AdmissionLease{}
+		}
+		lease.tokenRes = res
+	}
+	return lease, nil
 }
 
-func estimateServedAdmissionTokens(messages []agent.Message, tools []agent.ToolDef, maxTokens int) int {
+// servedPromptChars is the raw character volume of one served turn's prompt side —
+// messages plus tool schemas — shared by the scheduler gate's single-axis estimate and
+// the token-rate gate's input/output split.
+func servedPromptChars(messages []agent.Message, tools []agent.ToolDef) int {
 	chars := 0
 	for _, m := range messages {
 		chars += len(m.Role) + len(m.Content) + len(m.ToolCallID) + len(m.Name)
@@ -572,6 +621,11 @@ func estimateServedAdmissionTokens(messages []agent.Message, tools []agent.ToolD
 	for _, t := range tools {
 		chars += len(t.Type) + len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
 	}
+	return chars
+}
+
+func estimateServedAdmissionTokens(messages []agent.Message, tools []agent.ToolDef, maxTokens int) int {
+	chars := servedPromptChars(messages, tools)
 	tokens := chars / 4
 	if chars > 0 && tokens == 0 {
 		tokens = 1
@@ -607,8 +661,13 @@ func admissionErrorStatus(err error) (status int, code, msg string, ok bool) {
 	}
 	switch ae.Verdict {
 	case VerdictShed:
-		return http.StatusTooManyRequests, "scheduler_overloaded",
-			"scheduler overloaded — back off and retry", true
+		msg := "scheduler overloaded — back off and retry"
+		// A token-rate shed (#2019) names the provider cap that fired so the client's
+		// backoff can be informed; the historical slot shed carries no reason.
+		if reason := strings.TrimSpace(ae.Reason); reason != "" {
+			msg += ": " + reason
+		}
+		return http.StatusTooManyRequests, "scheduler_overloaded", msg, true
 	case VerdictDenied:
 		reason := strings.TrimSpace(ae.Reason)
 		if reason == "" {

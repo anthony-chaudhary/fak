@@ -870,6 +870,14 @@ type Server struct {
 	admissionMu  sync.RWMutex
 	admissionCtl *AdmissionController
 
+	// tokenRateGate is the optional HOST-LEVEL provider-token admission gate (#2019,
+	// token_admission.go): a rolling-window TPM/ITPM/OTPM + concurrency budget the served
+	// path reserves against before the planner runs and settles with the provider's real
+	// normalized usage after. nil (the default) leaves the request path byte-for-byte
+	// historical; a host attaches one per provider budget (account/seat) via
+	// SetTokenRateGate. Guarded by admissionMu alongside admissionCtl.
+	tokenRateGate *TokenRateGate
+
 	// preemptionMetrics is the optional native-serving KV preemption / swap / recompute
 	// metric writer (#31). nil leaves fak_sched_preempt_* absent; a host attaches the live
 	// native scheduler only after a positive paged-KV block budget arms preemption.
@@ -1550,6 +1558,9 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	if err != nil {
 		return nil, err
 	}
+	// The provider's real usage is now known — settle the token-rate window with it
+	// (#2019), replacing the admission-time estimate.
+	lease.SettleUsage(comp.Usage)
 	s.debitServedSessionTurn(ctx, turn, comp.Usage, messages)
 	return comp, nil
 }
