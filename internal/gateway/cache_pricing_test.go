@@ -124,6 +124,79 @@ func TestProviderCacheSavingsUSD(t *testing.T) {
 	}
 }
 
+// TestCostUSDZeroUsageIsZeroCost pins the zero-token edge: no activity on any
+// axis must price to exactly zero, regardless of the base per-MTok price.
+func TestCostUSDZeroUsageIsZeroCost(t *testing.T) {
+	p := CachePricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+	var u CacheUsage
+	if got := p.CostUSD(u); got != 0 {
+		t.Errorf("CostUSD(zero usage) = %v, want 0", got)
+	}
+	if got := p.UncachedCostUSD(u); got != 0 {
+		t.Errorf("UncachedCostUSD(zero usage) = %v, want 0", got)
+	}
+	if got := p.SavingsUSD(u); got != 0 {
+		t.Errorf("SavingsUSD(zero usage) = %v, want 0", got)
+	}
+}
+
+// TestCostUSDNegativeTokensMirrorsPositive pins the CURRENT defined behavior for
+// a garbage/negative token count: CacheUsage's fields are plain int (not uint),
+// so a negative count is constructible. The model applies no clamp or rejection
+// -- it is linear in each axis, so a negative count contributes the exact
+// negation of what the same positive magnitude would. This is "defined" (no
+// panic, no NaN) rather than "meaningful" for a real token count; pinning it
+// here means a future decision to reject/clamp negative input is a deliberate
+// change, not a silent one.
+func TestCostUSDNegativeTokensMirrorsPositive(t *testing.T) {
+	p := CachePricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+	cases := []CacheUsage{
+		{InputTokens: 1_000_000},
+		{CacheReadTokens: 1_000_000},
+		{CacheCreationTokens: 1_000_000, WriteTTL: CacheTTL1h},
+	}
+	for _, pos := range cases {
+		neg := pos
+		neg.InputTokens, neg.CacheReadTokens, neg.CacheCreationTokens =
+			-neg.InputTokens, -neg.CacheReadTokens, -neg.CacheCreationTokens
+		if got, want := p.CostUSD(neg), -p.CostUSD(pos); !approx(got, want) {
+			t.Errorf("CostUSD(%+v) = %v, want %v (negation of the positive case)", neg, got, want)
+		}
+	}
+}
+
+// TestCostUSDLargeCountsStayWithinRelativeError guards against a naive change
+// (e.g. switching to a lower-precision accumulator) silently blowing up the
+// economics at scale. A trillion-token count is still exactly representable as
+// a float64 (well under the 2^53 exact-integer ceiling), so the computed cost
+// must match the hand-derived value to a tight relative tolerance.
+func TestCostUSDLargeCountsStayWithinRelativeError(t *testing.T) {
+	const tokens = 1_000_000_000_000 // 1e12, three orders below the float64 exact-integer ceiling
+	p := CachePricing{InputPerMTokUSD: 5, OutputPerMTokUSD: 25}
+	u := CacheUsage{InputTokens: tokens, CacheReadTokens: tokens, CacheCreationTokens: tokens, OutputTokens: tokens, WriteTTL: CacheTTL5m}
+	want := float64(tokens) * (5.0/1e6*1 + 5.0/1e6*CacheReadMultiplier + 5.0/1e6*CacheWrite5mMultiplier + 25.0/1e6)
+	got := p.CostUSD(u)
+	if relErr := math.Abs(got-want) / want; relErr > 1e-9 {
+		t.Errorf("CostUSD(1e12 tokens) = %v, want %v (relative error %.3e > 1e-9)", got, want, relErr)
+	}
+}
+
+// TestProviderCacheSavingsUSDNearUint64MaxStaysFinite guards the uint64->float64
+// conversion path (AdjudicationSummary's counters are unsigned, so they can't go
+// negative, but they can get close to the type's max on a very long-lived
+// process): the result must stay a finite, non-NaN number rather than
+// overflowing or wrapping silently.
+func TestProviderCacheSavingsUSDNearUint64MaxStaysFinite(t *testing.T) {
+	s := AdjudicationSummary{CachedPromptTokens: ^uint64(0) - 1}
+	got := s.ProviderCacheSavingsUSD(5)
+	if math.IsNaN(got) || math.IsInf(got, 0) {
+		t.Fatalf("ProviderCacheSavingsUSD(near-max uint64) = %v, want a finite number", got)
+	}
+	if got <= 0 {
+		t.Fatalf("ProviderCacheSavingsUSD(near-max uint64) = %v, want > 0", got)
+	}
+}
+
 func TestMechanismSavingsSumsOwnersAndMechanisms(t *testing.T) {
 	s := AdjudicationSummary{
 		CachedPromptTokens:   1000, // provider read rebate = 900 token-equiv
