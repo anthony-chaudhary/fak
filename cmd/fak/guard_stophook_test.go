@@ -116,6 +116,16 @@ func TestRunGuardStopHookEnforceBlocksOnDenyAll(t *testing.T) {
 	if !strings.Contains(stderr.String(), "ALLOWED alternative") {
 		t.Fatalf("stderr should carry the continuation instruction: %q", stderr.String())
 	}
+	// The nudge must TEACH a reshape (self-improve) instead of a bare stall: the most
+	// common model-fixable refusal is a shell SELF_MODIFY where a guarded path is merely
+	// named beside an unrelated write (fak#1917). Assert the actionable reshape guidance is
+	// present so it can never regress to the opaque "pick an alternative" that stalled a
+	// live task on 2026-07-01.
+	for _, want := range []string{"RESHAPING", "SELF_MODIFY", "split the read from the write"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("nudge missing reshape guidance %q: %s", want, stderr.String())
+		}
+	}
 }
 
 func TestRunGuardStopHookEnforceAllowsWhenNoDenyAll(t *testing.T) {
