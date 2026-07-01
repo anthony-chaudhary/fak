@@ -14,6 +14,8 @@ package main
 //	fak affected --budget 30s --report .fak/verify-loop-affected.json
 //	fak affected --file internal/foo/foo.go   test a representative one-file change
 //	fak affected --short -- -run TestX   pass-through flags to go test (after --)
+//	fak affected --blame --mine internal/foo/foo.go   attribute each red package
+//	     mine | peer-wip | peer-preexisting (#2138); exit reflects only 'mine' reds
 //
 // It is the impure shell over internal/affectedtests: it gathers the changed files
 // (`git diff`), the import graph (`go list -json ./...`), folds them through the pure
@@ -45,6 +47,7 @@ var (
 	affectedChangedFiles = gitChangedFiles
 	affectedListGraph    = goListGraph
 	affectedRunGoTest    = runAffectedGoTest
+	affectedBaselineRed  = runAffectedBaselineRed
 	affectedNow          = time.Now
 )
 
@@ -71,6 +74,10 @@ type affectedRunReport struct {
 	ElapsedMS        int64    `json:"elapsed_ms"`
 	Verdict          string   `json:"verdict"`
 	Reason           string   `json:"reason,omitempty"`
+	// BaselineRef + Blame are the #2138 attribution evidence (--blame): each failing
+	// package tagged mine | peer-wip | peer-preexisting against the clean baseline.
+	BaselineRef string                `json:"baseline_ref,omitempty"`
+	Blame       []affectedtests.Blame `json:"blame,omitempty"`
 }
 
 func runAffected(stdout, stderr io.Writer, argv []string) int {
@@ -88,6 +95,9 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	timeout := fs.String("timeout", "", "pass -timeout <dur> to go test (e.g. 120s)")
 	budget := fs.Duration("budget", 0, "fail with GATE_LATENCY_REGRESSION if the affected go test run exceeds this duration (e.g. 30s)")
 	reportPath := fs.String("report", "", "write a measured verify-loop report JSON after running tests")
+	blame := fs.Bool("blame", false, "on a red run, attribute each failing package mine | peer-wip | peer-preexisting (clean-baseline rerun + --mine closure, #2138); the exit code then reflects only 'mine' reds")
+	var mineFiles pathList
+	fs.Var(&mineFiles, "mine", "repo-relative file YOU changed (repeatable; implies --blame — a red package outside these files' affected closure is attributed peer-wip)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -96,6 +106,9 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	passthrough := fs.Args() // anything after -- (flag stops at the first non-flag/--)
+	if len(mineFiles) > 0 {
+		*blame = true // declaring your own files only means anything through the attribution rung
+	}
 
 	root := repoRoot()
 	start := affectedNow()
@@ -176,7 +189,15 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	args = append(args, passthrough...)
 	args = append(args, selected...)
 
-	code, runErr := affectedRunGoTest(root, args, stdout, stderr)
+	// With --blame the test stream is additionally teed into a buffer so the
+	// per-package FAIL verdict lines can be parsed for attribution; the operator still
+	// sees the full output live either way.
+	testOut := stdout
+	var teed bytes.Buffer
+	if *blame {
+		testOut = io.MultiWriter(stdout, &teed)
+	}
+	code, runErr := affectedRunGoTest(root, args, testOut, stderr)
 	elapsed := affectedNow().Sub(start)
 	verdict := "OK"
 	reason := ""
@@ -190,8 +211,40 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 		verdict = "GATE_LATENCY_REGRESSION"
 		reason = fmt.Sprintf("elapsed %s exceeded budget %s", roundDuration(elapsed), *budget)
 	}
+
+	exitCode := code
+	var blames []affectedtests.Blame
+	baselineRef := *base
+	if baselineRef == "" {
+		baselineRef = "HEAD"
+	}
+	if *blame && verdict == "TEST_FAILED" {
+		blames = attributeAffectedFailures(stderr, root, baselineRef, teed.String(), mineFiles, fileToPkg, edges)
+		mineCount := 0
+		for _, b := range blames {
+			if b.Class == affectedtests.BlameMine {
+				mineCount++
+			}
+			fmt.Fprintf(stderr, "fak affected blame: %s — %s: %s\n", b.Package, b.Class, b.Evidence)
+		}
+		if len(blames) > 0 && mineCount == 0 {
+			// Every red is positively a peer's: green for THIS diff. The witness the
+			// issue asked for — no stash-and-rerun cycle to prove the red isn't yours.
+			verdict = "PEER_RED_ONLY"
+			reason = fmt.Sprintf("all %d failing package(s) attributed to peers (peer-wip / peer-preexisting); green for your diff — make ci on the merged tree stays the oracle", len(blames))
+			fmt.Fprintf(stderr, "fak affected: %s\n", reason)
+			exitCode = 0
+		} else if len(blames) > 0 {
+			reason = fmt.Sprintf("go test exited %d; %d/%d failing package(s) attributed mine", code, mineCount, len(blames))
+		}
+	}
+
 	if *reportPath != "" {
 		rep := newAffectedRunReport(*base, changedFiles, changedPkgs, selected, total, append([]string{"go"}, args...), *budget, elapsed, verdict, reason)
+		if len(blames) > 0 {
+			rep.BaselineRef = baselineRef
+			rep.Blame = blames
+		}
 		if err := writeAffectedRunReport(*reportPath, rep); err != nil {
 			fmt.Fprintf(stderr, "fak affected: write report: %v\n", err)
 			return 1
@@ -201,14 +254,86 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak affected: running go test: %v\n", runErr)
 		return 1
 	}
-	if code != 0 {
-		return code
+	if exitCode != 0 {
+		return exitCode
 	}
 	if verdict == "GATE_LATENCY_REGRESSION" {
 		fmt.Fprintf(stderr, "GATE_LATENCY_REGRESSION: affected test run took %s over budget %s\n", roundDuration(elapsed), *budget)
 		return 1
 	}
 	return 0
+}
+
+// attributeAffectedFailures gathers the two evidence rungs the pure Attribute fold
+// consumes (#2138): the per-package FAIL lines parsed from the teed test output, the
+// affected-set closure of the caller's declared --mine files, and the clean-baseline
+// rerun via the affectedBaselineRed seam. Every degradation fails CLOSED and is
+// narrated: unparseable output attributes nothing (the red exit stands), and an
+// unavailable baseline exonerates nothing.
+func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput string, mineFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
+	failing := affectedtests.FailedPackages(testOutput)
+	if len(failing) == 0 {
+		fmt.Fprintln(stderr, "fak affected: --blame could not parse per-package FAIL lines from the test output; keeping the red exit unattributed")
+		return nil
+	}
+	var mineClosure map[string]bool
+	if len(mineFiles) > 0 {
+		mine := make([]string, len(mineFiles))
+		for i, f := range mineFiles {
+			mine[i] = repoSlash(f)
+		}
+		mineClosure = map[string]bool{}
+		for _, p := range affectedtests.Select(edges, affectedtests.ChangedPackages(fileToPkg, mine)) {
+			mineClosure[p] = true
+		}
+	}
+	baselineRed, err := affectedBaselineRed(root, baselineRef, failing)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak affected: baseline rerun at %s unavailable (%v); no baseline exoneration — fail-closed\n", baselineRef, err)
+		baselineRed = nil
+	}
+	return affectedtests.Attribute(failing, mineClosure, baselineRed, baselineRef)
+}
+
+// runAffectedBaselineRed answers "was this package ALREADY red before any working-tree
+// change?" by testing pkgs at a CLEAN checkout of ref in a throwaway DETACHED worktree
+// (no branch is created, nothing is committed, the worktree is removed before
+// returning — the trunk stays untouched). The rerun invokes `go test` directly rather
+// than through the test.ps1/WSL routing: that routing mirrors the MAIN working tree, so
+// it would re-test the very tree the baseline must exclude. If the direct run cannot
+// execute here, the error propagates and the caller exonerates nothing (fail-closed).
+// A non-zero test exit is the signal being measured, not an error.
+func runAffectedBaselineRed(root, ref string, pkgs []string) (map[string]bool, error) {
+	tmp, err := os.MkdirTemp("", "fak-affected-baseline-")
+	if err != nil {
+		return nil, fmt.Errorf("temp dir: %w", err)
+	}
+	wt := filepath.Join(tmp, "wt")
+	if _, err := gitOut(root, "worktree", "add", "--detach", wt, ref); err != nil {
+		os.RemoveAll(tmp)
+		return nil, fmt.Errorf("worktree add %s: %w", ref, err)
+	}
+	defer func() {
+		_, _ = gitOut(root, "worktree", "remove", "--force", wt)
+		os.RemoveAll(tmp)
+	}()
+
+	cmd := exec.Command("go", append([]string{"test"}, pkgs...)...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Dir = wt
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			return nil, fmt.Errorf("baseline go test: %w", err)
+		}
+	}
+	red := map[string]bool{}
+	for _, p := range affectedtests.FailedPackages(out.String()) {
+		red[p] = true
+	}
+	return red, nil
 }
 
 func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (int, error) {

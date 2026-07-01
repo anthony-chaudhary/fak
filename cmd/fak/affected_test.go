@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -101,6 +105,98 @@ func TestParseGoListAndSelectEndToEnd(t *testing.T) {
 	}
 	if got := affectedtests.Select(edges, docChanged); len(got) != 0 {
 		t.Fatalf("docs-only selection = %v, want empty", got)
+	}
+}
+
+// TestAffectedBlameAttribution drives the #2138 rung through runAffected with every
+// impure seam injected: a red run's FAIL lines are parsed, the failing packages are
+// attributed against the clean-baseline rerun and the --mine closure, the report
+// carries the blame rows, and the exit code reflects ONLY 'mine' reds — green for the
+// caller's diff when every red is a peer's.
+func TestAffectedBlameAttribution(t *testing.T) {
+	origCF, origLG, origRT, origBR := affectedChangedFiles, affectedListGraph, affectedRunGoTest, affectedBaselineRed
+	defer func() {
+		affectedChangedFiles, affectedListGraph, affectedRunGoTest, affectedBaselineRed = origCF, origLG, origRT, origBR
+	}()
+
+	affectedChangedFiles = func(root, base string) ([]string, error) {
+		return []string{"a/a.go", "b/b.go", "c/c.go"}, nil
+	}
+	affectedListGraph = func(root string) (map[string]string, map[string][]string, int, error) {
+		return map[string]string{"a/a.go": "m/a", "b/b.go": "m/b", "c/c.go": "m/c"},
+			map[string][]string{}, 3, nil
+	}
+	affectedRunGoTest = func(root string, args []string, stdout, stderr io.Writer) (int, error) {
+		fmt.Fprintln(stdout, "FAIL\tm/a\t0.10s")
+		fmt.Fprintln(stdout, "ok  \tm/c\t0.01s")
+		fmt.Fprintln(stdout, "FAIL\tm/b\t0.10s")
+		return 1, nil
+	}
+	var baselineAsked []string
+	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, error) {
+		if ref != "HEAD" {
+			t.Errorf("baseline ref = %q, want HEAD (no --base given)", ref)
+		}
+		baselineAsked = append([]string(nil), pkgs...)
+		return map[string]bool{"m/a": true}, nil // m/a was red before any working-tree change
+	}
+
+	// Every red is a peer's: m/a is red at clean HEAD (peer-preexisting), m/b is outside
+	// the closure of the caller's declared c/c.go (peer-wip) -> exit 0, PEER_RED_ONLY.
+	report := filepath.Join(t.TempDir(), "report.json")
+	var out, errb bytes.Buffer
+	code := runAffected(&out, &errb, []string{"--mine", "c/c.go", "--report", report})
+	if code != 0 {
+		t.Fatalf("exonerated run exit = %d, want 0\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "peer-preexisting") || !strings.Contains(s, "peer-wip") || !strings.Contains(s, "green for your diff") {
+		t.Fatalf("blame narration missing from stderr:\n%s", s)
+	}
+	if !reflect.DeepEqual(baselineAsked, []string{"m/a", "m/b"}) {
+		t.Fatalf("baseline asked for %v, want the failing packages [m/a m/b]", baselineAsked)
+	}
+	raw, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	var rep affectedRunReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatalf("report JSON: %v\n%s", err, raw)
+	}
+	if rep.Verdict != "PEER_RED_ONLY" || rep.BaselineRef != "HEAD" || len(rep.Blame) != 2 {
+		t.Fatalf("report = verdict %q baseline %q blame %+v, want PEER_RED_ONLY/HEAD/2 rows", rep.Verdict, rep.BaselineRef, rep.Blame)
+	}
+	classes := map[string]string{}
+	for _, b := range rep.Blame {
+		classes[b.Package] = b.Class
+	}
+	if classes["m/a"] != affectedtests.BlamePeerPreexisting || classes["m/b"] != affectedtests.BlamePeerWIP {
+		t.Fatalf("blame classes = %v, want m/a peer-preexisting, m/b peer-wip", classes)
+	}
+
+	// The caller's own red keeps the failing exit: declaring b/b.go puts m/b in the mine
+	// closure, and m/b is green at baseline -> mine -> exit stays 1.
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--blame", "--mine", "b/b.go"}); code != 1 {
+		t.Fatalf("mine-red run exit = %d, want 1\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "m/b — mine") {
+		t.Fatalf("mine attribution missing from stderr:\n%s", s)
+	}
+
+	// Baseline unavailable: nothing is exonerated by that rung (fail-closed), but the
+	// closure rung still works; with a red inside the closure the exit stays 1.
+	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, error) {
+		return nil, fmt.Errorf("git worktree unavailable")
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--blame", "--mine", "a/a.go"}); code != 1 {
+		t.Fatalf("baseline-unavailable run exit = %d, want 1 (fail-closed)\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "fail-closed") {
+		t.Fatalf("fail-closed narration missing from stderr:\n%s", s)
 	}
 }
 
