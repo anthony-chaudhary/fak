@@ -362,6 +362,8 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "issue":
+		cmdIssue(os.Args[2:])
 	case "complain":
 		cmdComplain(os.Args[2:])
 	case "learning-debt-dispatch":
