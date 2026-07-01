@@ -3,7 +3,6 @@ package rehome
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -91,26 +90,10 @@ func LocateOwner(sid, home string) *Owner {
 	if len(matches) == 0 {
 		return nil
 	}
-	pool := make([]Match, 0, len(matches))
-	for _, m := range matches {
-		if !m.IsHost {
-			pool = append(pool, m)
-		}
-	}
-	if len(pool) == 0 {
-		pool = append(pool, matches...)
-	}
-	sort.SliceStable(pool, func(i, j int) bool {
-		return pool[i].ModTime.After(pool[j].ModTime)
-	})
-	accts := make([]string, 0, len(matches))
-	for _, m := range matches {
-		accts = append(accts, m.Account)
-	}
-	sort.Strings(accts)
+	pool := orderHostLastNewest(matches)
 	return &Owner{
 		Match:       pool[0],
 		DupCount:    len(matches),
-		AllAccounts: accts,
+		AllAccounts: sortedAccounts(matches),
 	}
 }
