@@ -46,9 +46,11 @@ usage:
   fak dojo post   [--rollup latest|trend] [--corpus DIR] [--ledger FILE]
                   [--dry-run] [--channel ID] [--token TOK] [--source WHO]
 
-run    scores every registered lever's predicted saving against billed reality
-       over the corpus, folds the episodes, and (with --append-history) trends
-       the mean calibration error across runs in docs/dojo/history.jsonl. With
+run    scores every default lever's predicted saving against billed reality over
+       the corpus, folds the episodes, and (with --append-history) trends the
+       mean calibration error across runs in docs/dojo/history.jsonl. compaction
+       is registered but excluded from the default set (blocked on #953 — no
+       paired ON/OFF corpus yet); pass --lever compaction to include it. With
        --live (auto-selected when no --corpus is given and one exists) it
        discovers the .dojo/live-episodes corpus that --dojo writes; those markers
        are start-only today, so it surfaces what it found and reports what is
@@ -105,7 +107,7 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	live := fs.Bool("live", false, "score the live-episode corpus `fak guard --dojo` / `fak serve --dojo` write under <root>/"+dojo.LiveEpisodesRel+" instead of --corpus. Auto-selected when neither --corpus nor --live is given and that corpus exists. The markers are start-only today, so this DISCOVERS + surfaces them and reports what is missing to score them (it never fabricates a calibration).")
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the resume-posture lever scores at: 5m (default) or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
-	leverSel := fs.String("lever", "", "comma-separated levers to run (default: all registered; see `fak dojo list`)")
+	leverSel := fs.String("lever", "", "comma-separated levers to run (default: all except compaction, blocked on #953; pass --lever compaction to include it; see `fak dojo list`)")
 	asJSON := fs.Bool("json", false, "emit the dojo report as JSON instead of the human table")
 	check := fs.Bool("check", false, "advisory gate: exit non-zero only if the run could not be measured")
 	appendHistory := fs.Bool("append-history", false, "append a dated row to the durable ledger (docs/dojo/history.jsonl)")
@@ -150,9 +152,9 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	levers := registerDojoLevers(ttl, *maxFiles)
+	levers := defaultDojoLevers(ttl, *maxFiles)
 	if sel := strings.TrimSpace(*leverSel); sel != "" {
-		levers = filterDojoLevers(levers, strings.Split(sel, ","))
+		levers = filterDojoLevers(allDojoLevers(ttl, *maxFiles), strings.Split(sel, ","))
 		if len(levers) == 0 {
 			fmt.Fprintf(stderr, "fak dojo run: no lever matched %q (see `fak dojo list`)\n", sel)
 			return 2
@@ -451,7 +453,7 @@ func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
 		Corpus: *corpus,
 		Note:   "replay of recorded Claude Code transcripts",
 	}
-	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, registerDojoLevers(ttl, *maxFiles), dojo.DefaultCalibBand())
+	episodes, runErrs := dojo.Run([]dojo.Scenario{scenario}, defaultDojoLevers(ttl, *maxFiles), dojo.DefaultCalibBand())
 	for _, re := range runErrs {
 		fmt.Fprintf(stderr, "fak dojo board: lever %q on %q: %s\n", re.Lever, re.Scenario, re.Err)
 	}
@@ -569,7 +571,7 @@ func runDojoScenario(stderr io.Writer, corpus string, levers []dojo.Lever, label
 }
 
 func foldDojoCorpusRun(corpus string, ttl resume.CacheTTL, maxFiles int, root string, stderr io.Writer) dojo.Report {
-	episodes := runDojoScenario(stderr, corpus, registerDojoLevers(ttl, maxFiles), "post")
+	episodes := runDojoScenario(stderr, corpus, defaultDojoLevers(ttl, maxFiles), "post")
 	now := time.Now().UTC()
 	return dojo.Fold(episodes, dojo.FoldOpts{
 		Workspace:   root,
@@ -643,7 +645,7 @@ func dojoLeverCatalog() []dojoLeverInfo {
 		},
 		{
 			Name:    "compaction",
-			Summary: "history compaction's cache-prefix preservation and token shed scored against billed reality",
+			Summary: "history compaction's cache-prefix preservation and token shed scored against billed reality (blocked on #953 — no paired ON/OFF corpus exists yet, so it is registered but excluded from the default `dojo run`/`dojo board`/`dojo post` set; select it explicitly with `--lever compaction`)",
 			Metrics: []dojoMetricInfo{
 				{Name: "cache_prefix_preserved", Theory: "a fired compaction keeps the prefix byte-identical so the provider still cache-reads it (claim 1.0)"},
 				{Name: "token_shed_ratio", Theory: "the projected shed for the budget matches the billed delta (claim 1.0)"},
@@ -660,12 +662,33 @@ func dojoLeverCatalog() []dojoLeverInfo {
 	}
 }
 
-func registerDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
+// allDojoLevers returns every registered lever, including compactionLever{} — the
+// full set `--lever compaction` selects from. Use defaultDojoLevers for the set a
+// run folds when no --lever filter is given.
+func allDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
 	return []dojo.Lever{
 		resumePostureLever{ttl: ttl, maxFiles: maxFiles},
 		compactionLever{},
 		vcacheLever{maxFiles: maxFiles},
 	}
+}
+
+// defaultDojoLevers is the set folded implicitly by `dojo run` (no --lever),
+// `dojo board`, and `dojo post --rollup latest`. It excludes compactionLever{}:
+// #1929 — compaction has no paired ON/OFF corpus yet (#953) so Episodes() always
+// returns a single Measured:false episode, permanently polluting the board/grade
+// with an unmeasurable phantom. It stays registered and discoverable (`dojo list`
+// shows it "blocked on #953") and explicitly runnable via `dojo run --lever
+// compaction`, which reads from allDojoLevers instead of this default set.
+func defaultDojoLevers(ttl resume.CacheTTL, maxFiles int) []dojo.Lever {
+	var out []dojo.Lever
+	for _, lv := range allDojoLevers(ttl, maxFiles) {
+		if lv.Name() == "compaction" {
+			continue
+		}
+		out = append(out, lv)
+	}
+	return out
 }
 
 func filterDojoLevers(all []dojo.Lever, names []string) []dojo.Lever {

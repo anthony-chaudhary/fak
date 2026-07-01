@@ -306,6 +306,47 @@ func TestRunDojoList(t *testing.T) {
 	if !strings.Contains(out.String(), "compaction") || !strings.Contains(out.String(), "cache_prefix_preserved") {
 		t.Fatalf("list --json should describe the compaction lever, got %q", out.String())
 	}
+	if !strings.Contains(out.String(), "blocked on #953") || !strings.Contains(out.String(), "--lever compaction") {
+		t.Fatalf("list --json should show compaction is discoverable but blocked by default, got %q", out.String())
+	}
+}
+
+func TestDefaultDojoLeversExcludeCompactionUntilCorpusExists(t *testing.T) {
+	defaultNames := dojoLeverNames(defaultDojoLevers(resume.TTL5m, 0))
+	if dojoHasString(defaultNames, "compaction") {
+		t.Fatalf("default dojo levers must exclude the unmeasured compaction phantom: %v", defaultNames)
+	}
+	for _, want := range []string{"resume-posture", "vcache-warmth"} {
+		if !dojoHasString(defaultNames, want) {
+			t.Fatalf("default dojo levers missing %q: %v", want, defaultNames)
+		}
+	}
+
+	allNames := dojoLeverNames(allDojoLevers(resume.TTL5m, 0))
+	if !dojoHasString(allNames, "compaction") {
+		t.Fatalf("all dojo levers must keep compaction discoverable/selectable: %v", allNames)
+	}
+	explicit := filterDojoLevers(allDojoLevers(resume.TTL5m, 0), []string{"compaction"})
+	if len(explicit) != 1 || explicit[0].Name() != "compaction" {
+		t.Fatalf("explicit --lever compaction should select only compaction, got %v", dojoLeverNames(explicit))
+	}
+}
+
+func dojoLeverNames(levers []dojo.Lever) []string {
+	names := make([]string, 0, len(levers))
+	for _, lv := range levers {
+		names = append(names, lv.Name())
+	}
+	return names
+}
+
+func dojoHasString(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompactionEpisodesFromBacktest(t *testing.T) {
@@ -394,11 +435,11 @@ func TestCompactionEpisodesSkipsEmptyMetrics(t *testing.T) {
 
 // TestCompactionLeverReportsUnmeasuredNotError pins the honest empty state: the
 // compaction lever has no paired ON/OFF ground truth in a standard transcript
-// corpus, but it must report that as ONE UNMEASURED episode (Measured:false, no
-// Realized) rather than a hard error. A returned error makes dojo.Run drop the
-// lever silently (a 1-lever gym indistinguishable from "never registered"); an
-// UNMEASURED outcome counts the lever toward lever_count, renders UNMEASURED /
-// grade n/a, and invents no number.
+// corpus, but when selected explicitly it must report that as ONE UNMEASURED
+// episode (Measured:false, no Realized) rather than a hard error. A returned
+// error makes dojo.Run drop the lever silently (a run indistinguishable from
+// "never registered"); an UNMEASURED outcome counts the selected lever toward
+// lever_count, renders UNMEASURED / grade n/a, and invents no number.
 func TestCompactionLeverReportsUnmeasuredNotError(t *testing.T) {
 	ins, err := compactionLever{}.Episodes(dojo.Scenario{Name: "corpus", Mode: "offline"})
 	if err != nil {
