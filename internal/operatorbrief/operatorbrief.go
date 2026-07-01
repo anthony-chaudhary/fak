@@ -1147,15 +1147,21 @@ func appendDeltaItems(lines []string, label string, items []DeltaItem) []string 
 	}
 	for _, it := range items {
 		line := fmt.Sprintf("    - %s: [%s] %s: %s", label, it.Bucket, it.Source, it.Title)
-		if it.Detail != "" {
-			line += " - " + it.Detail
-		}
-		if it.Action != "" {
-			line += " | " + it.Action
-		}
+		line = appendField(line, " - ", it.Detail)
+		line = appendField(line, " | ", it.Action)
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// appendField appends sep+value to line when value is non-empty, returning the
+// (possibly unchanged) line. It captures the repeated
+// `if value != "" { line += sep + value }` idiom used across the renderers.
+func appendField(line, sep, value string) string {
+	if value != "" {
+		line += sep + value
+	}
+	return line
 }
 
 func appendStrengths(lines []string, strengths []Strength) []string {
@@ -1165,12 +1171,8 @@ func appendStrengths(lines []string, strengths []Strength) []string {
 	lines = append(lines, "", "  strengths:")
 	for _, st := range strengths {
 		line := fmt.Sprintf("    - %s: %s (%s)", st.Source, st.Title, st.Kind)
-		if st.Detail != "" {
-			line += " - " + st.Detail
-		}
-		if st.Use != "" {
-			line += " | " + st.Use
-		}
+		line = appendField(line, " - ", st.Detail)
+		line = appendField(line, " | ", st.Use)
 		lines = append(lines, line)
 	}
 	return lines
@@ -1183,12 +1185,8 @@ func appendChoices(lines []string, choices []Choice) []string {
 	lines = append(lines, "", "  choices:")
 	for _, ch := range choices {
 		line := fmt.Sprintf("    - %s: %s [default: %s]", ch.Source, ch.Question, ch.Default)
-		if ch.Why != "" {
-			line += " - " + ch.Why
-		}
-		if ch.Action != "" {
-			line += " | " + ch.Action
-		}
+		line = appendField(line, " - ", ch.Why)
+		line = appendField(line, " | ", ch.Action)
 		lines = append(lines, line)
 	}
 	return lines
@@ -1201,12 +1199,8 @@ func appendChallenges(lines []string, challenges []Challenge) []string {
 	lines = append(lines, "", "  challenges:")
 	for _, ch := range challenges {
 		line := fmt.Sprintf("    - %s: %s (%s)", ch.Source, ch.Title, ch.Kind)
-		if ch.Detail != "" {
-			line += " - " + ch.Detail
-		}
-		if ch.Action != "" {
-			line += " | " + ch.Action
-		}
+		line = appendField(line, " - ", ch.Detail)
+		line = appendField(line, " | ", ch.Action)
 		lines = append(lines, line)
 	}
 	return lines
@@ -1217,9 +1211,7 @@ func appendLearningAgenda(lines []string, agenda LearningAgenda) []string {
 		return lines
 	}
 	line := fmt.Sprintf("    - focus: %s", agenda.Focus)
-	if agenda.Reason != "" {
-		line += " - " + agenda.Reason
-	}
+	line = appendField(line, " - ", agenda.Reason)
 	if agenda.Practice != "" {
 		line += " | practice: " + agenda.Practice
 	}
@@ -1239,9 +1231,7 @@ func appendLearning(lines []string, lessons []Learning) []string {
 	lines = append(lines, "", "  learning:")
 	for _, l := range lessons {
 		line := fmt.Sprintf("    - %s: %s", l.Topic, l.Lesson)
-		if l.Apply != "" {
-			line += " | " + l.Apply
-		}
+		line = appendField(line, " | ", l.Apply)
 		lines = append(lines, line)
 	}
 	return lines
@@ -1254,12 +1244,8 @@ func appendSection(lines []string, name string, items []Item) []string {
 	lines = append(lines, "", "  "+name+":")
 	for _, it := range items {
 		line := fmt.Sprintf("    - %s: %s", it.Source, it.Title)
-		if it.Detail != "" {
-			line += " - " + it.Detail
-		}
-		if it.Action != "" {
-			line += " | " + it.Action
-		}
+		line = appendField(line, " - ", it.Detail)
+		line = appendField(line, " | ", it.Action)
 		lines = append(lines, line)
 	}
 	return lines
