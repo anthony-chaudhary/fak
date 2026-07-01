@@ -45,8 +45,11 @@ emits `fak.test_repair_packet.v1` with the resolved command, and `fak test --jso
 <tier-or-package>` captures the command result into the same envelope with
 `findings`, `exit_code`, output tails, and a `next_action`. The same packet shape
 also covers the first non-test gates: `fak test --json build`, `vet`, `gofmt`,
-`codelint <path>`, and `ruff <path>`. When ruff is not installed, the packet is an
-explicit `SKIP`, not a clean lint signal.
+`codelint <path>`, `ruff <path>`, and `scorecard`. When ruff is not installed, the
+packet is an explicit `SKIP`, not a clean lint signal. The scorecard packet wraps
+the native `fak scorecard control-pane --check --json` ratchet and carries
+scorecard-regression or unmeasured-scorecard diagnostics; `fak test scorecard`
+stays read-only and refuses `--pin`.
 For changed-package work, use `fak test affected ...`: it delegates to `fak affected`
 so the agent-facing front door still gets the affected planner's `--json`, `--list`,
 `--file`, `--budget`, report, and pass-through `go test` flags.
@@ -64,7 +67,8 @@ elapsed time instead of hand-ordered package lists.
 | `fak test [build\|vet\|gofmt]` | runs `go build ./...`, `go vet ./...`, or `gofmt -l .`; `gofmt` exits non-zero when files are listed | the fast non-test gates from `make ci`, exposed through the same runner |
 | `fak test codelint <path...>` | delegates to `fak codelint` over the same language packs | lint agent-written code through the same agent-facing test front door |
 | `fak test ruff [path...]` | runs `ruff check` when ruff is on PATH; otherwise reports an explicit skip | make Python lint availability visible instead of silently treating a missing tool as clean |
-| `fak test --json [-n] [build\|vet\|gofmt\|codelint\|ruff\|fast\|full\|race\|<pkg>]` | emits `fak.test_repair_packet.v1` for the resolved command or finished run, with normalized finding class, diagnostics, exit code, output tails, and next action | agent-facing repair packets instead of raw terminal logs |
+| `fak test scorecard [--timeout N\|--baseline FILE]` | runs `fak scorecard control-pane --check`; refuses `--pin` so the test surface cannot rewrite the ratchet baseline | scorecard-ratchet proof through the same test front door |
+| `fak test --json [-n] [build\|vet\|gofmt\|codelint\|ruff\|scorecard\|fast\|full\|race\|<pkg>]` | emits `fak.test_repair_packet.v1` for the resolved command or finished run, with normalized finding class, diagnostics, exit code, output tails, and next action | agent-facing repair packets instead of raw terminal logs |
 | `fak test affected [--json\|--list\|--file P\|--budget DUR] [-- go test args]` | delegates to `fak affected`, selecting changed packages plus transitive importers, with JSON/list dry-runs and budget/report flags preserved | the default agent loop before paying for the full suite |
 | `make test-durations` | runs `fak test durations --run fast --out .fak/test-duration-ledger.json` with package/test budgets | find the slowest next package or test before widening CI shards |
 | `fak test shards --input .fak/test-duration-ledger.json --shards 4 --go-arg -short` | reads a duration ledger and emits deterministic balanced `go test` shard commands as `fak.test_shard_plan.v1` | local proof/planning step before wiring CI to consume measured shards |

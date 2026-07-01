@@ -193,7 +193,8 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 		t.Fatalf("argv not a guard wrap: %#v", gotArgv)
 	}
 	joined := strings.Join(gotArgv, " ")
-	if !strings.HasSuffix(joined, "claude --dangerously-skip-permissions --resume xyz") {
+	wantTail := "claude --dangerously-skip-permissions --settings " + ultracodeSettingsArg + " --resume xyz"
+	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)
 	}
 	// The seat's CLAUDE_CONFIG_DIR must be injected into the child env.
@@ -225,7 +226,7 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	want := []string{"claude", "--dangerously-skip-permissions"}
+	want := []string{"claude", "--dangerously-skip-permissions", "--settings", ultracodeSettingsArg}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
 	}

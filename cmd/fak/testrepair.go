@@ -114,7 +114,7 @@ func newTestUsageRepairPacket(err error) testRepairPacket {
 		Verdict:    "USAGE",
 		Finding:    finding,
 		Reason:     err.Error(),
-		NextAction: "choose one of fast, full, race, affected, durations, shards, or a ./package/... target; rerun `fak test --list` for the menu",
+		NextAction: "choose one of fast, full, race, affected, durations, shards, scorecard, or a ./package/... target; rerun `fak test --list` for the menu",
 		ExitCode:   2,
 		Findings: []testRepairFinding{{
 			Class:      "usage",
@@ -272,6 +272,7 @@ func writeTestListJSON(stdout, stderr io.Writer) int {
 			{Name: "gofmt", Command: "gofmt -l .", When: "formatting gate"},
 			{Name: "codelint", Command: "fak codelint ...", When: "agent-written code lint packs"},
 			{Name: "ruff", Command: "ruff check ...", When: "Python lint when ruff is available"},
+			{Name: "scorecard", Command: "fak scorecard control-pane --check", When: "scorecard ratchet gate"},
 			{Name: "full", Command: "go test ./...", When: "authoritative suite"},
 			{Name: "race", Command: "go test -short -race ./...", When: "local race gate"},
 			{Name: "affected", Command: "fak affected ...", When: "changed packages plus transitive importers"},

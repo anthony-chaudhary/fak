@@ -349,6 +349,151 @@ func TestRunTestJSONRuffFailureCarriesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRunTestJSONScorecardCleanPasses(t *testing.T) {
+	oldRunScorecard := runScorecardControlPaneForTest
+	t.Cleanup(func() { runScorecardControlPaneForTest = oldRunScorecard })
+	runScorecardControlPaneForTest = func(stdout, stderr io.Writer, argv []string) int {
+		if !reflect.DeepEqual(argv, []string{"--check", "--json", "--timeout", "5"}) {
+			t.Fatalf("unexpected scorecard args: %v", argv)
+		}
+		_, _ = io.WriteString(stdout, `{
+			"schema":"fak-scorecard-control-pane/1",
+			"ok":true,
+			"verdict":"OK",
+			"finding":"all_clear",
+			"reason":"all scorecards clear",
+			"next_action":"hold the line",
+			"total_debt":0,
+			"grade_debt":0,
+			"errored":0,
+			"metrics":[],
+			"trend":{"direction":"flat","summary":"flat +0 vs @base","worsened":[]},
+			"gate_exit":0,
+			"gate_message":"RATCHET OK: flat +0 vs @base"
+		}`)
+		return 0
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "scorecard", "--timeout", "5"}); rc != 0 {
+		t.Fatalf("json scorecard clean rc = %d, stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if !packet.OK || packet.Tier != "scorecard" || packet.Findings[0].Class != "scorecard_clean" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	wantCommand := []string{"fak", "scorecard", "control-pane", "--check", "--json", "--timeout", "5"}
+	if !reflect.DeepEqual(packet.Command, wantCommand) {
+		t.Fatalf("command = %v, want %v", packet.Command, wantCommand)
+	}
+}
+
+func TestRunTestJSONScorecardRegressionCarriesDiagnostics(t *testing.T) {
+	oldRunScorecard := runScorecardControlPaneForTest
+	t.Cleanup(func() { runScorecardControlPaneForTest = oldRunScorecard })
+	runScorecardControlPaneForTest = func(stdout, stderr io.Writer, argv []string) int {
+		_, _ = io.WriteString(stdout, `{
+			"schema":"fak-scorecard-control-pane/1",
+			"ok":false,
+			"verdict":"ACTION",
+			"finding":"scorecard_regressed",
+			"reason":"scorecard debt regressed",
+			"next_action":"retire the regressed metric",
+			"total_debt":12,
+			"grade_debt":4,
+			"errored":0,
+			"metrics":[{"key":"docs","label":"docs","debt_key":"doc_debt","debt":12,"ok":false,"verdict":"ACTION"}],
+			"trend":{"direction":"regressed","summary":"+5 vs @base","worsened":["docs"]},
+			"gate_exit":1,
+			"gate_message":"RATCHET FAIL: +5 vs @base; worsened: docs"
+		}`)
+		return 1
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "scorecard"}); rc != 1 {
+		t.Fatalf("json scorecard regression rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "scorecard" || packet.Findings[0].Class != "scorecard_regression" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if !strings.Contains(packet.Reason, "RATCHET FAIL") {
+		t.Fatalf("reason = %q", packet.Reason)
+	}
+	if len(packet.Diagnostics) != 1 || packet.Diagnostics[0].Code != "SCORECARD_REGRESSED" {
+		t.Fatalf("diagnostics = %+v", packet.Diagnostics)
+	}
+}
+
+func TestRunTestJSONScorecardUnmeasuredCarriesMetricError(t *testing.T) {
+	oldRunScorecard := runScorecardControlPaneForTest
+	t.Cleanup(func() { runScorecardControlPaneForTest = oldRunScorecard })
+	runScorecardControlPaneForTest = func(stdout, stderr io.Writer, argv []string) int {
+		_, _ = io.WriteString(stdout, `{
+			"schema":"fak-scorecard-control-pane/1",
+			"ok":false,
+			"verdict":"ACTION",
+			"finding":"scorecard_unmeasured",
+			"reason":"1 scorecard(s) unmeasured",
+			"next_action":"repair the failing scorecard",
+			"total_debt":0,
+			"grade_debt":0,
+			"errored":1,
+			"metrics":[{"key":"tooling","label":"tooling-quality","debt_key":"py_debt","debt":null,"ok":false,"verdict":"ERROR","error":"missing py_debt in payload"}],
+			"trend":{"direction":"flat","summary":"flat +0 vs @base","worsened":[]},
+			"gate_exit":1,
+			"gate_message":"RATCHET FAIL: 1 scorecard(s) unmeasured"
+		}`)
+		return 1
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "scorecard"}); rc != 1 {
+		t.Fatalf("json scorecard unmeasured rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Findings[0].Class != "scorecard_unmeasured" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if len(packet.Diagnostics) != 1 || packet.Diagnostics[0].Code != "SCORECARD_UNMEASURED" ||
+		!strings.Contains(packet.Diagnostics[0].Detail, "missing py_debt") {
+		t.Fatalf("diagnostics = %+v", packet.Diagnostics)
+	}
+}
+
+func TestRunTestScorecardRejectsPin(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"scorecard", "--pin"}); rc != 2 {
+		t.Fatalf("scorecard --pin rc = %d, want 2", rc)
+	}
+	if !strings.Contains(errb.String(), "read-only") {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+func TestRunTestScorecardRejectsCheckFalse(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"scorecard", "--check=false"}); rc != 2 {
+		t.Fatalf("scorecard --check=false rc = %d, want 2", rc)
+	}
+	if !strings.Contains(errb.String(), "always runs the ratchet check") {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+func TestRunTestJSONScorecardRejectsJSONFalse(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "scorecard", "--json=false"}); rc != 2 {
+		t.Fatalf("json scorecard --json=false rc = %d, want 2", rc)
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || len(packet.Findings) != 1 || packet.Findings[0].Class != "usage" ||
+		!strings.Contains(packet.Reason, "requires scorecard JSON output") {
+		t.Fatalf("packet = %+v", packet)
+	}
+}
+
 func TestRunTest_AffectedDelegatesToAffectedPlanner(t *testing.T) {
 	oldListGraph := affectedListGraph
 	oldRunGoTest := affectedRunGoTest
@@ -396,7 +541,8 @@ func TestRunTest_ListExitsZero(t *testing.T) {
 		!strings.Contains(out.String(), "affected") || !strings.Contains(out.String(), "durations") ||
 		!strings.Contains(out.String(), "shards") || !strings.Contains(out.String(), "build") ||
 		!strings.Contains(out.String(), "vet") || !strings.Contains(out.String(), "gofmt") ||
-		!strings.Contains(out.String(), "codelint") || !strings.Contains(out.String(), "ruff") {
+		!strings.Contains(out.String(), "codelint") || !strings.Contains(out.String(), "ruff") ||
+		!strings.Contains(out.String(), "scorecard") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }
