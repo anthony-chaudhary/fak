@@ -73,7 +73,7 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 	obs := t.obs
 	var ev BudgetEvent
 	if fire && obs != nil {
-		ev = budgetEvent(out, fireKind)
+		ev = budgetEvent(out, fireKind, u.ContextTokens)
 	}
 	t.mu.Unlock()
 	if fire && obs != nil {

@@ -49,15 +49,18 @@ func (k BudgetEventKind) String() string {
 // table lock and delivered AFTER the lock is released, so an observer may do slow work
 // (a webhook POST) without stalling the debit hot path or any other session.
 type BudgetEvent struct {
-	Kind              BudgetEventKind       `json:"kind"`
-	TraceID           string                `json:"trace_id"`
-	ContinuationID    string                `json:"continuation_id,omitempty"` // set on Exhausted: the fresh-window handoff id
-	Reason            string                `json:"reason,omitempty"`          // the closed budget reason token at this event
-	CacheAffinity     CacheAffinityDecision `json:"cache_affinity,omitempty,omitzero"`
-	Rev               uint64                `json:"rev"`
-	ContextTokensLeft int                   `json:"context_tokens_left"`
-	ContextTokensCap  int                   `json:"context_tokens_cap,omitempty"`
-	FractionConsumed  float64               `json:"fraction_consumed"` // 0..1, the share of the context budget spent at this event
+	Kind                    BudgetEventKind       `json:"kind"`
+	TraceID                 string                `json:"trace_id"`
+	ContinuationID          string                `json:"continuation_id,omitempty"` // set on Exhausted: the fresh-window handoff id
+	Reason                  string                `json:"reason,omitempty"`          // the closed budget reason token at this event
+	CacheAffinity           CacheAffinityDecision `json:"cache_affinity,omitempty,omitzero"`
+	Rev                     uint64                `json:"rev"`
+	ContextTokensLeft       int                   `json:"context_tokens_left"`
+	ContextTokensCap        int                   `json:"context_tokens_cap,omitempty"`
+	ResidentContextTokens   int                   `json:"resident_context_tokens,omitempty"` // this debit's resident prompt/context tokens
+	ResidentContextCap      int                   `json:"resident_context_cap,omitempty"`    // the leg ceiling used for ResidentContextFraction
+	ResidentContextFraction float64               `json:"resident_context_fraction"`         // 0..1, resident context divided by the leg ceiling
+	FractionConsumed        float64               `json:"fraction_consumed"`                 // 0..1, the share of the context budget spent at this event
 }
 
 // BudgetObserver is the threshold-and-reset callback seam. The table invokes it from
@@ -160,30 +163,38 @@ func warnWatermark(capacity int, frac float64) int {
 
 // budgetEvent builds the observer payload from a freshly-written record. FractionConsumed
 // is clamped to [0,1] so an over-debit (a single turn larger than the whole budget) still
-// reports a sane 1.0 rather than a value past full.
-func budgetEvent(st State, kind BudgetEventKind) BudgetEvent {
+// reports a sane 1.0 rather than a value past full. ResidentContextFraction is the current
+// debit's resident prompt/context size divided by the same leg ceiling, also clamped to
+// [0,1], so relay observers can see the per-leg window pressure separately from cumulative
+// budget spend.
+func budgetEvent(st State, kind BudgetEventKind, residentContextTokens int) BudgetEvent {
 	capacity := st.Budget.ContextTokensCap
-	var frac float64
-	if capacity > 0 {
-		frac = float64(capacity-st.Budget.ContextTokensLeft) / float64(capacity)
-		if frac < 0 {
-			frac = 0
-		}
-		if frac > 1 {
-			frac = 1
-		}
-	}
+	frac := boundedFraction(capacity-st.Budget.ContextTokensLeft, capacity)
 	return BudgetEvent{
-		Kind:              kind,
-		TraceID:           st.TraceID,
-		ContinuationID:    st.ContinuationID,
-		Reason:            st.Reason,
-		CacheAffinity:     st.CacheAffinity,
-		Rev:               st.Rev,
-		ContextTokensLeft: st.Budget.ContextTokensLeft,
-		ContextTokensCap:  capacity,
-		FractionConsumed:  frac,
+		Kind:                    kind,
+		TraceID:                 st.TraceID,
+		ContinuationID:          st.ContinuationID,
+		Reason:                  st.Reason,
+		CacheAffinity:           st.CacheAffinity,
+		Rev:                     st.Rev,
+		ContextTokensLeft:       st.Budget.ContextTokensLeft,
+		ContextTokensCap:        capacity,
+		ResidentContextTokens:   residentContextTokens,
+		ResidentContextCap:      capacity,
+		ResidentContextFraction: boundedFraction(residentContextTokens, capacity),
+		FractionConsumed:        frac,
 	}
+}
+
+func boundedFraction(numerator, denominator int) float64 {
+	if numerator <= 0 || denominator <= 0 {
+		return 0
+	}
+	frac := float64(numerator) / float64(denominator)
+	if frac > 1 {
+		return 1
+	}
+	return frac
 }
 
 func transitionEvent(st State, from, to RunState) TransitionEvent {

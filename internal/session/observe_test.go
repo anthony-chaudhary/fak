@@ -51,6 +51,12 @@ func TestWatchBudgetWarnsOnceThenExhausts(t *testing.T) {
 	if got[0].TraceID != trace || got[0].ContextTokensCap != 100 || got[0].ContextTokensLeft != 15 {
 		t.Fatalf("warn payload = %+v, want trace=%s cap=100 left=15", got[0], trace)
 	}
+	if got[0].ResidentContextTokens != 15 || got[0].ResidentContextCap != 100 {
+		t.Fatalf("warn resident meter = %+v, want resident=15 cap=100", got[0])
+	}
+	if got[0].ResidentContextFraction < 0.14 || got[0].ResidentContextFraction > 0.16 {
+		t.Fatalf("warn resident fraction = %v, want ~0.15", got[0].ResidentContextFraction)
+	}
 	if got[0].FractionConsumed < 0.84 || got[0].FractionConsumed > 0.86 {
 		t.Fatalf("warn fraction = %v, want ~0.85", got[0].FractionConsumed)
 	}
@@ -72,6 +78,40 @@ func TestWatchBudgetWarnsOnceThenExhausts(t *testing.T) {
 	}
 	if got[1].Reason != ReasonBudgetContext || got[1].FractionConsumed != 1 {
 		t.Fatalf("exhausted payload = %+v, want reason=%s fraction=1", got[1], ReasonBudgetContext)
+	}
+	if got[1].ResidentContextTokens != 50 || got[1].ResidentContextCap != 100 || got[1].ResidentContextFraction < 0.49 || got[1].ResidentContextFraction > 0.51 {
+		t.Fatalf("exhausted resident meter = %+v, want resident=50 cap=100 fraction~0.50", got[1])
+	}
+}
+
+// TestRelayResidentContextMeterReportsPerLegFraction proves the relay-facing meter:
+// the budget observer receives the current resident context divided by the configured
+// leg ceiling, not just the cumulative consumed share that drives rotation thresholds.
+func TestRelayResidentContextMeterReportsPerLegFraction(t *testing.T) {
+	const trace = "relay-resident-meter"
+	tbl := NewTable()
+	rec := &recorder{}
+	tbl.WatchBudget(0.5, rec.observe) // warn at 50% consumed
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 1000})
+
+	tbl.DebitUsage(trace, Usage{ContextTokens: 400}) // resident 40%, consumed 40%: no event yet
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("before warn threshold, events = %+v, want none", got)
+	}
+
+	tbl.DebitUsage(trace, Usage{ContextTokens: 125}) // resident 12.5%, consumed 52.5%: warning event
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Kind != BudgetWarn {
+		t.Fatalf("relay meter events = %+v, want one BudgetWarn", got)
+	}
+	if got[0].ResidentContextTokens != 125 || got[0].ResidentContextCap != 1000 {
+		t.Fatalf("relay resident meter = %+v, want resident=125 cap=1000", got[0])
+	}
+	if got[0].ResidentContextFraction < 0.124 || got[0].ResidentContextFraction > 0.126 {
+		t.Fatalf("relay resident fraction = %v, want ~0.125", got[0].ResidentContextFraction)
+	}
+	if got[0].FractionConsumed < 0.524 || got[0].FractionConsumed > 0.526 {
+		t.Fatalf("relay consumed fraction = %v, want ~0.525", got[0].FractionConsumed)
 	}
 }
 
