@@ -104,9 +104,9 @@ const (
 // shape. For CredentialEnvKey only EnvKey is meaningful; for CredentialOAuthFile only
 // File (a path relative to the resolved config home) is.
 type CredentialSource struct {
-	Kind   CredentialKind
-	EnvKey string // CredentialEnvKey: the env var holding the bearer (e.g. OPENAI_API_KEY).
-	File   string // CredentialOAuthFile: the credential file, relative to the config home.
+	Kind   CredentialKind `json:"kind"`
+	EnvKey string         `json:"env_key,omitempty"` // CredentialEnvKey: the env var holding the bearer.
+	File   string         `json:"file,omitempty"`    // CredentialOAuthFile: the credential file, relative to the config home.
 }
 
 // IdentityKind names the rotation-identity READER a profile uses to derive its
@@ -136,27 +136,27 @@ const (
 // C6 lets a user declare more in config. It is pure data.
 type HarnessProfile struct {
 	// Name is the canonical profile id, used in banners and as a rotation identity label.
-	Name string
+	Name string `json:"name"`
 	// Names are the executable base names (lowercased, launcher-suffix stripped) that
 	// select this profile — the detect axis, generalizing guardDetectProvider's cases.
-	Names []string
+	Names []string `json:"names"`
 	// Wire is the upstream provider the harness's traffic is proxied on (the referenced
 	// internal/agent adapter). DefaultBaseURL is that wire's public API base.
-	Wire           Wire
-	DefaultBaseURL string
+	Wire           Wire   `json:"wire"`
+	DefaultBaseURL string `json:"default_base_url,omitempty"`
 	// Repoint is the ordered set of mechanisms guard applies to point the child at the
 	// gateway. A profile may declare more than one (Claude = env + settings-file); every
 	// profile declares env, the always-on repoint.
-	Repoint []RepointMechanism
+	Repoint []RepointMechanism `json:"repoint"`
 	// Credential declares where this harness's account credential lives + its shape.
-	Credential CredentialSource
+	Credential CredentialSource `json:"credential,omitempty"`
 	// ConfigHomeGlob is the config-home directory convention, a glob RELATIVE TO the
 	// user's home dir (".claude*", ".codex*"). Empty means the harness has no per-account
 	// config home (env-key-only), so it is not rotatable by home.
-	ConfigHomeGlob string
+	ConfigHomeGlob string `json:"config_home_glob,omitempty"`
 	// Identity names the rotation-identity reader kind (see IdentityKind). IdentityNone
 	// marks a declared-but-thin profile that does not yet enter the rotation pool.
-	Identity IdentityKind
+	Identity IdentityKind `json:"identity,omitempty"`
 }
 
 // Recognized reports whether the profile was matched from a known name (as opposed to
@@ -227,11 +227,19 @@ var builtins = []HarnessProfile{
 // is unchanged. The zero HarnessProfile is returned when not found; its Recognized()
 // reports false.
 func Lookup(agentCommand string) (HarnessProfile, bool) {
+	return lookupIn(active(), agentCommand)
+}
+
+// lookupIn is Lookup against an explicit profile set — the pure core, so a merged
+// (built-in + user-config) registry (C6) can be looked up without touching the package
+// global. The first profile whose Names contains the normalized base name wins, so a user
+// override placed ahead of the built-ins (Merge does this) shadows the built-in.
+func lookupIn(profiles []HarnessProfile, agentCommand string) (HarnessProfile, bool) {
 	name := baseName(agentCommand)
 	if name == "" {
 		return HarnessProfile{}, false
 	}
-	for _, p := range builtins {
+	for _, p := range profiles {
 		for _, n := range p.Names {
 			if n == name {
 				return p, true
@@ -258,12 +266,19 @@ func BaseURLForWire(w Wire) string {
 	}
 }
 
-// Profiles returns a copy of the built-in registry in stable order, for the
-// dump/inspect surface (C6's --dump-harness-profiles) and any read-only walk. The
-// returned slice is a fresh copy so a caller cannot mutate the registry.
-func Profiles() []HarnessProfile {
-	out := make([]HarnessProfile, len(builtins))
-	copy(out, builtins)
+// Profiles returns a copy of the ACTIVE registry (built-ins, or the merged built-in+config
+// set after SetActive) in stable order, for the dump/inspect surface (C6's
+// --dump-harness-profiles) and any read-only walk. The returned slice is a fresh copy so a
+// caller cannot mutate the registry.
+func Profiles() []HarnessProfile { return cloneProfiles(active()) }
+
+// Builtins returns a copy of the built-in registry, independent of any active override —
+// the base Merge overlays user config onto.
+func Builtins() []HarnessProfile { return cloneProfiles(builtins) }
+
+func cloneProfiles(in []HarnessProfile) []HarnessProfile {
+	out := make([]HarnessProfile, len(in))
+	copy(out, in)
 	return out
 }
 
