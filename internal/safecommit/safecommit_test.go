@@ -49,6 +49,9 @@ func keyFor(args []string) string {
 		if len(args) > 1 && args[1] == "--no-ext-diff" {
 			return "diff-review"
 		}
+		if len(args) > 2 && args[1] == "--cached" && args[2] == "--name-status" {
+			return "diff-cached"
+		}
 		// The stale-base guard issues two diffs that must be distinguishable:
 		//   "diff <mb> origin/main -- P"  (peer-added since the fork)  -> "--" at index 3
 		//   "diff origin/main -- P"       (origin vs working tree)     -> "--" at index 2

@@ -553,6 +553,7 @@ func commitExitCode(res safecommit.Result) int {
 		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
 		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull,
 		safecommit.ReasonReviewRefuted, safecommit.ReasonStaleBaseDeletion,
+		safecommit.ReasonCachedRemoveWorktreePresent,
 		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap,
 		safecommit.ReasonCoreSelfModify:
 		return 3

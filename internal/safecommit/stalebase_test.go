@@ -141,9 +141,21 @@ func TestStaleBaseDeletion_freshBaseSkips(t *testing.T) {
 	if res.Reason != "" || !res.Verified {
 		t.Fatalf("a fresh base should skip the guard and commit, got %+v", res)
 	}
-	if g.sawSubcommand("diff") {
+	if sawContentDiff(g.calls) {
 		t.Fatalf("fresh base must not run the content diff; calls=%v", g.calls)
 	}
+}
+
+func sawContentDiff(calls [][]string) bool {
+	for _, c := range calls {
+		if len(c) < 4 || c[0] != "diff" || c[1] == "--cached" {
+			continue
+		}
+		if c[1] == "origin/main" || c[2] == "origin/main" {
+			return true
+		}
+	}
+	return false
 }
 
 // TestStaleBaseDeletion_failOpenWhenNoOriginRef: origin/main does not resolve (fresh clone,

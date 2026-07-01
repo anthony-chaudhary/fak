@@ -147,6 +147,8 @@ const (
 	// it lives in stalebase.go with the content-level merge-base guard that emits it.
 	// ReasonSpuriousStagedDeletion ("SPURIOUS_STAGED_DELETION") likewise lives in
 	// spuriousdelete.go with the whole-path stale-index guard that emits it.
+	// ReasonCachedRemoveWorktreePresent ("CACHED_REMOVE_WORKTREE_PRESENT") lives in
+	// cachedremove.go with the git-rm-cached/pathspec guard that emits it.
 )
 
 // Result is the structured outcome. A non-empty Reason is a refusal/race; a clean commit
@@ -505,7 +507,25 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		}
 	}
 
-	// (4c) SPURIOUS-STAGED-DELETION guard — whole-path, lock-free, before any `git add`. A
+	// (4c) CACHED-REMOVE-WORKTREE-PRESENT guard — index-vs-worktree, lock-free, before
+	// any `git add`. `git rm --cached <path>` stages an index deletion while leaving the
+	// working file in place; a pathspec commit then reads/re-stages that file and silently
+	// clears the deletion instead of recording the intended untrack/delete operation. Gated
+	// by FAK_CACHED_REMOVE_GUARD (block|warn|off, default block); off skips, warn records
+	// and proceeds.
+	if mode := cachedRemoveGuardMode(); mode != staleBaseOff {
+		if detail, fired := checkCachedRemoveWorktreePresent(ctx, run, opts.Dir, paths); fired {
+			if mode == staleBaseWarn {
+				res.Detail = appendDetail(res.Detail, "CACHED_REMOVE_WORKTREE_PRESENT (warn): "+detail)
+			} else {
+				res.Reason = ReasonCachedRemoveWorktreePresent
+				res.Detail = detail
+				return res, true, nil
+			}
+		}
+	}
+
+	// (4d) SPURIOUS-STAGED-DELETION guard — whole-path, lock-free, before any `git add`. A
 	// requested path can be staged as a DELETION (stale index) while an untracked copy of the
 	// same path still sits in the working tree — the shape a peer `git reset`/`git rm` leaves
 	// after the file was recreated on a shared clone. Committing it deletes a file HEAD carries,
@@ -525,7 +545,7 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 		}
 	}
 
-	// (4d) PRESTAGED-PATH-OVERLAP guard - same-file ownership, lock-free, before any
+	// (4e) PRESTAGED-PATH-OVERLAP guard - same-file ownership, lock-free, before any
 	// `git add`. fak commit owns staging for requested paths. If one of those paths already
 	// has staged hunks, a shared tree cannot tell whether they are this author's work or a
 	// peer's staged same-file work. Refuse by default before folding those hunks into this
