@@ -1,11 +1,11 @@
 package gateway
 
-// native_serve.go — the native-harness keystone (#1316). When `fak serve --native` is
-// set, a non-streaming /v1/messages turn is driven by fak's OWN agent loop
-// (agent.RunArm) instead of the single-shot proxy turn at gateway.go's complete(). This
-// is the FIRST live, non-test serve-path caller of RunArm + WithSessionGate +
-// WithRouteManifest + the operator steer bus — the options that, per the program survey,
-// were fully built and tested but had zero live callers.
+// native_serve.go — the native-harness keystone (#1316/#1837). When
+// `fak serve --native` is set, /v1/messages turns are driven by fak's OWN agent loop
+// (agent.RunArm / RunArmStream) instead of the single-shot proxy turn at gateway.go's
+// complete(). This is the FIRST live, non-test serve-path caller of RunArm +
+// WithSessionGate + WithRouteManifest + the operator steer bus — the options that, per
+// the program survey, were fully built and tested but had zero live callers.
 //
 // The thesis (docs/notes/native-harness-progress-tracking-1315.md): on the proxy path
 // the external harness (Claude Code, codex) owns the turn loop and consumes tool calls
@@ -17,10 +17,8 @@ package gateway
 // message and drives the kernel-owned tool catalog (agent.ToolCatalog over
 // kernel.New("localtools")) to a final answer — the AgentDojo-shaped run the program's
 // definition-of-done names ("an AgentDojo run driven entirely by fak serve --native").
-// Generalizing the served loop to an ARBITRARY inbound tools[] surface, and the
-// streaming native turn, are tracked follow-ons (#1320/#1321 wire the operator console
-// and full session control; streaming is called out as a PARTIAL in the epic). A
-// streaming request in native mode falls through to the existing proxy path unchanged.
+// Generalizing the served loop to an ARBITRARY inbound tools[] surface remains a tracked
+// follow-on (#1320/#1321 wire the operator console and full session control).
 
 import (
 	"context"
@@ -39,7 +37,7 @@ func nativeMaxTurnsOr(n int) int {
 	return n
 }
 
-// serveNativeMessages handles a non-streaming /v1/messages turn by driving fak's owned
+// serveNativeMessages handles a buffered /v1/messages turn by driving fak's owned
 // agent loop and rendering its final answer (plus the per-turn ArmMetrics witness) back
 // on the Anthropic wire. It is the native counterpart to completeAnthropicTurn.
 func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string) {
@@ -84,6 +82,90 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 	})
 }
 
+func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.serveNativeMessages(w, r, req, reqTrace)
+		return
+	}
+	sp, ok := s.planner.(agent.StreamingPlanner)
+	if !ok || !sp.StreamingSupported() {
+		s.serveNativeMessages(w, r, req, reqTrace)
+		return
+	}
+
+	began := time.Now()
+	id := "msg_fak_" + itoa(uint64(began.UnixNano()))
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	send := anthropicSSESender(w, flusher)
+	send("message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id": id, "type": "message", "role": "assistant", "model": s.modelOr(req.Model),
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
+			"usage": map[string]int{"input_tokens": agent.EstimateAnthropicTokens(req), "output_tokens": 0},
+		},
+	})
+
+	outIdx := 0
+	textOpen := false
+	textIdx := -1
+	closeText := func() {
+		if !textOpen {
+			return
+		}
+		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": textIdx})
+		textOpen = false
+		textIdx = -1
+	}
+	emitText := func(text string) error {
+		if text == "" {
+			return nil
+		}
+		if !textOpen {
+			textIdx = outIdx
+			outIdx++
+			textOpen = true
+			send("content_block_start", map[string]any{
+				"type": "content_block_start", "index": textIdx,
+				"content_block": map[string]any{"type": "text", "text": ""},
+			})
+		}
+		send("content_block_delta", map[string]any{
+			"type": "content_block_delta", "index": textIdx,
+			"delta": map[string]any{"type": "text_delta", "text": text},
+		})
+		return nil
+	}
+
+	m, err := s.runNativeArmStream(r.Context(), req, reqTrace, emitText)
+	if err != nil {
+		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
+		closeText()
+		send("error", map[string]any{
+			"type":  "error",
+			"error": map[string]any{"type": "api_error", "message": "upstream model error"},
+		})
+		return
+	}
+	closeText()
+
+	stop := agent.AnthropicStopReason(nativeFinishReason(m), false)
+	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
+	s.logInferenceTurn(reqTrace, "anthropic_messages_native", false, agent.Usage{
+		PromptTokens:     m.PromptTokens,
+		CompletionTokens: m.CompletionTokens,
+	}, stop, time.Since(began), false)
+
+	arm := m
+	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
+}
+
 // runNativeArm drives agent.RunArm(fak=true) for one served request, wiring the
 // already-built-but-uncalled loop options to live serve-path sources:
 //
@@ -100,7 +182,15 @@ func (s *Server) serveNativeMessages(w http.ResponseWriter, r *http.Request, req
 // not an external harness, drove the turn.
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
 	task := lastUserText(req.Messages)
+	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, s.nativeRunOptions(ctx, reqTrace)...)
+}
 
+func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink) (agent.ArmMetrics, error) {
+	task := lastUserText(req.Messages)
+	return agent.RunArmStream(ctx, s.planner, task, true, s.nativeMaxTurns, sink, nil, s.nativeRunOptions(ctx, reqTrace)...)
+}
+
+func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) []agent.RunOption {
 	opts := make([]agent.RunOption, 0, 2)
 	if s.decideSession != nil {
 		opts = append(opts, agent.WithSessionGate(agent.SessionGate{
@@ -121,8 +211,23 @@ func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesR
 			opts = append(opts, agent.WithRouteManifest(mfst))
 		}
 	}
+	return opts
+}
 
-	return agent.RunArm(ctx, s.planner, task, true, s.nativeMaxTurns, nil, opts...)
+func sendAnthropicTerminalWithNativeArm(send func(string, any), stop string, usage anthropicUsage, arm *agent.ArmMetrics) {
+	finalUsage := map[string]int{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+	}
+	send("message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil},
+		"usage": finalUsage,
+	})
+	send("message_stop", map[string]any{
+		"type": "message_stop",
+		"fak":  &FakExt{NativeArm: arm},
+	})
 }
 
 // nativeFinishReason maps the owned loop's outcome to a planner-style finish reason for

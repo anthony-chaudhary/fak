@@ -150,13 +150,16 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
-	// Native-harness keystone (#1316): when `fak serve --native` is set, drive fak's OWN
-	// agent loop for a non-streaming turn instead of the single-shot proxy turn below. The
-	// owned loop runs its own per-turn session gate (WithSessionGate over the same
+	// Native-harness keystone (#1316/#1837): when `fak serve --native` is set, drive
+	// fak's OWN agent loop instead of the single-shot proxy turn below. The owned loop
+	// runs its own per-turn session gate (WithSessionGate over the same
 	// DecideSession/DebitSession hooks), so it is branched BEFORE the request-boundary
-	// admission to avoid a double Decide. A streaming request falls through to the existing
-	// proxy path (native streaming is a tracked follow-on).
-	if s.native && !req.Stream {
+	// admission to avoid a double Decide.
+	if s.native && req.Stream {
+		s.serveNativeMessagesStream(w, r, req, reqTrace)
+		return
+	}
+	if s.native {
 		s.serveNativeMessages(w, r, req, reqTrace)
 		return
 	}

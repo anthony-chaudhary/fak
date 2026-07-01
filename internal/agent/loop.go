@@ -260,6 +260,28 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int) (*RunResult,
 // stopped, or budget-exhausted. With no option, the loop is byte-for-byte the
 // historical fixed-maxTurns loop.
 func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
+	return runArm(ctx, task, fak, maxTurns, log, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+		return p.Complete(ctx, messages, tools, opts...)
+	}, opts...)
+}
+
+// RunArmStream is the streaming twin of RunArm: it drives the same owned loop and
+// syscall boundary, but each model turn is requested through CompleteStream so natural
+// language content can be delivered incrementally to sink. Tool calls remain held until
+// the turn completes, exactly as StreamingPlanner promises.
+func RunArmStream(ctx context.Context, p Planner, task string, fak bool, maxTurns int, sink StreamSink, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
+	sp, ok := p.(StreamingPlanner)
+	if !ok || !sp.StreamingSupported() {
+		return ArmMetrics{}, ErrStreamingUnsupported
+	}
+	return runArm(ctx, task, fak, maxTurns, log, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+		return sp.CompleteStream(ctx, sink, messages, tools, opts...)
+	}, opts...)
+}
+
+type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
+
+func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
 	m := ArmMetrics{Arm: "baseline"}
 	if fak {
@@ -308,7 +330,7 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			messages = append(messages, Message{Role: RoleUser, Content: steer})
 		}
 
-		comp, err := p.Complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
+		comp, err := complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
 		}
