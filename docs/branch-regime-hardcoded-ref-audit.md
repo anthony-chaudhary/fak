@@ -6,9 +6,9 @@ description: "Classification map for hard-coded main/master references during th
 # Branch Regime Hard-Coded Ref Audit
 
 **Issue:** #1701.
-**Status:** phase-1 audit. Workflow branch refs are freshness-checked by
-`internal/workflowaudit`; non-workflow refs below are classified for replacement
-or retention and still need a broader lint gate.
+**Status:** phase-2 audit. Workflow branch refs are freshness-checked by
+`internal/workflowaudit`; non-workflow refs below are classified by
+`internal/branchrole`'s hard-coded ref audit.
 
 Do not use this report as permission for a blind `main` -> `dev` replacement.
 The branch regime has two legitimate meanings for `main`: public/release front
@@ -21,6 +21,7 @@ to branch-role config.
 rg -n "github\\.ref_name == 'main'|refs/heads/main|origin/main|\\bmain\\b|\\bmaster\\b" .github cmd internal tools docs README.md AGENTS.md CONTRIBUTING.md
 fak workflow-audit --write-doc
 go test ./internal/workflowaudit -count=1
+go test ./internal/branchrole -run TestHardcodedRefAuditCurrentTreeClassified -count=1
 ```
 
 ## Workflow Refs
@@ -59,12 +60,20 @@ unclassified workflow development-path ref reds that package.
 | `internal/bench*` comments using "master goal" | not a git ref | Domain term for fan-out topology, not a branch name. |
 | `tools/demo_robustness_scorecard.py` regex that flags `@main` / `@master` installs | public-link guard | The lint intentionally detects mutable install refs. |
 
-## Missing Gate
+## Non-Workflow Gate
 
-`internal/workflowaudit` covers workflow refs only. #1701 remains open until a
-non-workflow lint/test fails new unclassified development-source references such
-as `origin/main`, `refs/heads/main`, or `branch == "master"` outside documented
-public/front-door, fixture, historical, or compatibility locations.
+`internal/workflowaudit` covers workflow refs. `internal/branchrole` now carries
+the non-workflow hard-coded-ref audit:
+
+```bash
+go test ./internal/branchrole -run TestHardcodedRefAuditCurrentTreeClassified -count=1
+```
+
+That test scans source-like files for hard-coded `origin/main`, `refs/heads/main`,
+`origin/master`, `refs/heads/master`, `github.ref*` branch gates, `branch ==
+"main|master"`, and legacy `master` worktree-ref forms. It fails new
+unclassified development-source references outside documented public/front-door,
+fixture, historical, audit, or compatibility locations.
 
 ## Next Replacement Order
 
@@ -72,7 +81,7 @@ public/front-door, fixture, historical, or compatibility locations.
    branch-role vocabulary or retire it from the active preflight path.
 2. Rename or role-bind `tools/fleet_control_pane.py`'s `worktree_master_ref`
    default.
-3. Add a non-workflow hard-coded-ref lint that allows this report's intentional
-   families and fails new unclassified development-source refs.
+3. Expand the non-workflow audit when new intentional ref families are found;
+   do not broaden allowlists without adding a classification row here.
 4. After #1703 records `proceed`, update agent/prompt text in one coordinated
    branch-role-aware change.
