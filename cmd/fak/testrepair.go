@@ -271,6 +271,7 @@ func writeTestListJSON(stdout, stderr io.Writer) int {
 			{Name: "vet", Command: "go vet ./...", When: "static Go analyzer gate"},
 			{Name: "gofmt", Command: "gofmt -l .", When: "formatting gate"},
 			{Name: "codelint", Command: "fak codelint ...", When: "agent-written code lint packs"},
+			{Name: "ruff", Command: "ruff check ...", When: "Python lint when ruff is available"},
 			{Name: "full", Command: "go test ./...", When: "authoritative suite"},
 			{Name: "race", Command: "go test -short -race ./...", When: "local race gate"},
 			{Name: "affected", Command: "fak affected ...", When: "changed packages plus transitive importers"},

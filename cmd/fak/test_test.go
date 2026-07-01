@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -275,6 +276,79 @@ func TestRunTestJSONCodelintUsageCarriesNextAction(t *testing.T) {
 	}
 }
 
+func TestRunTestJSONRuffUnavailableIsExplicitSkip(t *testing.T) {
+	oldLookPath := ruffLookPath
+	t.Cleanup(func() { ruffLookPath = oldLookPath })
+	ruffLookPath = func(string) (string, error) { return "", errors.New("missing ruff") }
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "ruff", "tools"}); rc != 0 {
+		t.Fatalf("json ruff missing rc = %d, stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if !packet.OK || packet.Verdict != "SKIP" || packet.Tier != "ruff" || packet.Findings[0].Class != "ruff_unavailable" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if !strings.Contains(packet.NextAction, "explicitly skipped") {
+		t.Fatalf("next action = %q", packet.NextAction)
+	}
+}
+
+func TestRunTestJSONRuffCleanPasses(t *testing.T) {
+	oldLookPath := ruffLookPath
+	oldRunTestCommand := runTestCommand
+	t.Cleanup(func() {
+		ruffLookPath = oldLookPath
+		runTestCommand = oldRunTestCommand
+	})
+	ruffLookPath = func(string) (string, error) { return "/usr/bin/ruff", nil }
+	runTestCommand = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) testCommandResult {
+		if !reflect.DeepEqual(argv, []string{"ruff", "check", "--output-format", "json", "tools"}) {
+			t.Fatalf("unexpected command: %v", argv)
+		}
+		_, _ = io.WriteString(stdout, "[]\n")
+		return testCommandResult{ExitCode: 0}
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "ruff", "tools"}); rc != 0 {
+		t.Fatalf("json ruff clean rc = %d, stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if !packet.OK || packet.Verdict != "PASS" || packet.Findings[0].Class != "ruff_clean" {
+		t.Fatalf("packet = %+v", packet)
+	}
+}
+
+func TestRunTestJSONRuffFailureCarriesDiagnostics(t *testing.T) {
+	oldLookPath := ruffLookPath
+	oldRunTestCommand := runTestCommand
+	t.Cleanup(func() {
+		ruffLookPath = oldLookPath
+		runTestCommand = oldRunTestCommand
+	})
+	ruffLookPath = func(string) (string, error) { return "/usr/bin/ruff", nil }
+	runTestCommand = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) testCommandResult {
+		_, _ = io.WriteString(stdout, `[{"code":"F401","filename":"tools/bad.py","message":"imported but unused","location":{"row":3,"column":1}}]`)
+		return testCommandResult{ExitCode: 1}
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "ruff", "tools/bad.py"}); rc != 1 {
+		t.Fatalf("json ruff bad rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "ruff" || packet.Findings[0].Class != "ruff_failure" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if len(packet.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %+v, want one", packet.Diagnostics)
+	}
+	if packet.Diagnostics[0].Tool != "ruff" || packet.Diagnostics[0].Code != "F401" || packet.Diagnostics[0].File != "tools/bad.py" {
+		t.Fatalf("diagnostic = %+v", packet.Diagnostics[0])
+	}
+}
+
 func TestRunTest_AffectedDelegatesToAffectedPlanner(t *testing.T) {
 	oldListGraph := affectedListGraph
 	oldRunGoTest := affectedRunGoTest
@@ -322,7 +396,7 @@ func TestRunTest_ListExitsZero(t *testing.T) {
 		!strings.Contains(out.String(), "affected") || !strings.Contains(out.String(), "durations") ||
 		!strings.Contains(out.String(), "shards") || !strings.Contains(out.String(), "build") ||
 		!strings.Contains(out.String(), "vet") || !strings.Contains(out.String(), "gofmt") ||
-		!strings.Contains(out.String(), "codelint") {
+		!strings.Contains(out.String(), "codelint") || !strings.Contains(out.String(), "ruff") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }
