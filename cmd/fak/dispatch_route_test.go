@@ -77,3 +77,47 @@ func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 		t.Fatalf("rendered route kept legacy skipped-human wording:\n%s", out)
 	}
 }
+
+func TestRenderDispatchRouteShowsCandidateConfidence(t *testing.T) {
+	out := renderDispatchRoute(dispatchtick.RouterPayload{
+		OK:      false,
+		Verdict: "ACTION",
+		Reason:  "3/4 routed",
+		Coverage: dispatchtick.RouterCoverage{
+			Complete: true,
+		},
+		Counts: dispatchtick.RouterCounts{
+			Routed:           3,
+			Unrouted:         1,
+			RoutedStepBudget: 9,
+		},
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"docs": {
+				Count:      1,
+				StepBudget: 3,
+				Issues:     []int{22},
+			},
+			"gateway": {
+				Count:      1,
+				StepBudget: 3,
+				Issues:     []int{21},
+			},
+		},
+		Issues: []dispatchtick.IssueRoute{
+			{Number: 21, Lane: "gateway", Confidence: "path-confirmed", Signal: "path:gateway"},
+			{Number: 22, Lane: "docs", Confidence: "label", Signal: "label->docs"},
+			{Number: 23, Lane: "compute", Confidence: "alias", Signal: "scope:gpu->compute", SignalConflict: true},
+			{Number: 24, Confidence: "none", Signal: "unrouted", UnroutedReason: "no scope/path/label signal"},
+		},
+	})
+	for _, want := range []string{
+		"candidate #21 lane=gateway confidence=path-confirmed signal=path:gateway",
+		"candidate #22 lane=docs confidence=label signal=label->docs",
+		"candidate #23 lane=compute confidence=alias signal=scope:gpu->compute conflict=true",
+		"candidate #24 lane=(unrouted) confidence=none signal=unrouted reason=no scope/path/label signal",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered route missing %q:\n%s", want, out)
+		}
+	}
+}

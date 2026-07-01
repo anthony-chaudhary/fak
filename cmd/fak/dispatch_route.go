@@ -66,6 +66,17 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 				sublane.Prefix, sublane.Count, sublane.StepBudget, intList(sublane.Issues))
 		}
 	}
+	for _, issue := range router.Issues {
+		fmt.Fprintf(&b, "  candidate #%d lane=%s confidence=%s signal=%s",
+			issue.Number, routeIssueLane(issue), emptyDash(issue.Confidence), emptyDash(issue.Signal))
+		if issue.SignalConflict {
+			fmt.Fprintf(&b, " conflict=true")
+		}
+		if issue.UnroutedReason != "" {
+			fmt.Fprintf(&b, " reason=%s", issue.UnroutedReason)
+		}
+		fmt.Fprintln(&b)
+	}
 	if len(router.SkippedHumanBlocked) > 0 {
 		fmt.Fprintf(&b, "  skipped: %d", len(router.SkippedHumanBlocked))
 		if summary := skippedReasonSummary(router.Counts.SkippedByReason); summary != "" {
@@ -88,6 +99,20 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 		}
 	}
 	return b.String()
+}
+
+func routeIssueLane(issue dispatchtick.IssueRoute) string {
+	if issue.Lane == "" {
+		return "(unrouted)"
+	}
+	return issue.Lane
+}
+
+func emptyDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return s
 }
 
 func skippedReasonSummary(counts map[string]int) string {
