@@ -133,6 +133,52 @@ func TestRegistryMatchPrefersSessionRowOverFirstAccountRow(t *testing.T) {
 	}
 }
 
+func TestFleetCapacityPreflightJSON(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cfg := filepath.Join(root, "cfg")
+	regDir := filepath.Join(root, "reg")
+	policyPath := filepath.Join(root, "accounts_policy.json")
+	mustWriteFleetFixture(t, policyPath, `{}`)
+	mkClaudeFleetFixture(t, home, ".claude", "uuid-default", "default@example.test", true)
+	mkClaudeFleetFixture(t, home, ".claude-gem8-acct", "uuid-gem8", "gem8@example.test", true)
+	mkClaudeFleetFixture(t, home, ".claude-needslogin-acct", "uuid-needs", "needs@example.test", false)
+	mustWriteFleetFixture(t, filepath.Join(regDir, "sessions.json"),
+		`{"generated_utc":"2026-07-01T12:00:00Z",`+
+			`"throttle":{".claude-gem8-acct":{"reset":"Jul 8, 9am","weekly":"Jul 8"}},`+
+			`"auth":{},"sessions":[]}`)
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", cfg)
+	t.Setenv("FLEET_REG_DIR", regDir)
+	t.Setenv("FLEET_POLICY_PATH", policyPath)
+
+	var out, errb bytes.Buffer
+	code := runFleetCapacity(&out, &errb, []string{"--json", "--require", "2"})
+	if code != 1 {
+		t.Fatalf("capacity exit=%d stderr=%q stdout=%q, want under-capacity exit 1", code, errb.String(), out.String())
+	}
+	var rep fleetaccounts.CapacityPreflight
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if rep.TrueConcurrentCeiling != 1 || rep.FreshSeats != 1 || rep.StaleSeats != 1 || rep.BlockedSeats != 1 || rep.Verdict != "UNDER_CAPACITY" {
+		t.Fatalf("capacity report = %+v, want ceiling=1 fresh/stale/blocked=1/1/1 under-capacity", rep)
+	}
+	states := map[string]fleetaccounts.CapacityAccount{}
+	for _, acct := range rep.Accounts {
+		states[acct.Account] = acct
+	}
+	if states[".claude"].State != fleetaccounts.CapacityFresh {
+		t.Fatalf(".claude = %+v, want fresh", states[".claude"])
+	}
+	if states[".claude-needslogin-acct"].State != fleetaccounts.CapacityStale {
+		t.Fatalf("needslogin = %+v, want stale", states[".claude-needslogin-acct"])
+	}
+	if got := states[".claude-gem8-acct"]; got.State != fleetaccounts.CapacityBlockedUntil || got.BlockedUntil != "Jul 8" {
+		t.Fatalf("gem8 = %+v, want blocked-until Jul 8", got)
+	}
+}
+
 func TestFleetJanitorDryRunThenApply(t *testing.T) {
 	now := time.Now()
 	rootStart := now.Add(-60 * time.Minute).UTC().Format(time.RFC3339)
@@ -315,6 +361,34 @@ func readFile(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func mkClaudeFleetFixture(t *testing.T, home, account, uuid, email string, creds bool) {
+	t.Helper()
+	dir := filepath.Join(home, account)
+	mustMkdirFleetFixture(t, filepath.Join(dir, "projects"))
+	mustWriteFleetFixture(t, filepath.Join(dir, ".claude.json"),
+		`{"oauthAccount":{"accountUuid":"`+uuid+`","emailAddress":"`+email+`","organizationUuid":"org-`+uuid+`","organizationType":"team"}}`)
+	if creds {
+		mustWriteFleetFixture(t, filepath.Join(dir, ".credentials.json"), `{}`)
+	}
+}
+
+func mustMkdirFleetFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFleetFixture(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func TestFleetReplaceRefusedDoesNotWriteLedger(t *testing.T) {

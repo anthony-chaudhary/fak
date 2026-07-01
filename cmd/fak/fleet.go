@@ -7,6 +7,7 @@ package main
 //	fak fleet janitor  [--plan P] [--json] [--apply]     find (and, with --apply, reap) stale child trees
 //	fak fleet fold     [--plan P] [--json] [--ledger L] [--write]  fold final reports into a witnessed ledger
 //	fak fleet replace  --session S [--index N] [--force] [--json]  render a safe replacement for a stuck worker
+//	fak fleet capacity [--require N] [--product claude|all] [--json]  preflight account-seat ceiling
 //
 // monitor/janitor/fold are reads by default; janitor mutates only with --apply,
 // fold appends to the ledger only with --write, replace launches only with
@@ -32,11 +33,12 @@ import (
 )
 
 func cmdFleet(argv []string) {
-	dispatchSubcommands("fleet", "monitor | janitor | fold | replace", argv,
+	dispatchSubcommands("fleet", "monitor | janitor | fold | replace | capacity", argv,
 		subcommand{"monitor", runFleetMonitor},
 		subcommand{"janitor", runFleetJanitor},
 		subcommand{"fold", runFleetFold},
 		subcommand{"replace", runFleetReplace},
+		subcommand{"capacity", runFleetCapacity},
 	)
 }
 
@@ -169,6 +171,70 @@ func containsIssueNumber(hay string, issue int) bool {
 func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // --- monitor (#1856) ------------------------------------------------------ //
+
+func runFleetCapacity(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fleet capacity", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	product := fs.String("product", "claude", "product family to preflight (claude|opencode|all)")
+	required := fs.Int("require", 0, "fail if fewer than N fresh seats are available")
+	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak fleet capacity: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	if *required < 0 {
+		fmt.Fprintln(stderr, "fak fleet capacity: --require must be >= 0")
+		return 2
+	}
+
+	cwd, _ := os.Getwd()
+	paths := fleetaccounts.ResolvePaths(filepath.Join(findRepoRoot(cwd), "tools"))
+	pol := fleetaccounts.LoadPolicy(paths)
+	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
+	rows := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, pol, reg)
+	report := fleetaccounts.BuildCapacityPreflight(rows, *product, *required)
+	if *asJSON {
+		returnCode := encodeJSONOrFail(stdout, stderr, report, "fak fleet capacity")
+		if returnCode != 0 {
+			return returnCode
+		}
+	} else {
+		fmt.Fprint(stdout, renderFleetCapacity(report))
+	}
+	if !report.OK {
+		return 1
+	}
+	return 0
+}
+
+func renderFleetCapacity(report fleetaccounts.CapacityPreflight) string {
+	var b strings.Builder
+	req := ""
+	if report.Required > 0 {
+		req = fmt.Sprintf(" required=%d", report.Required)
+	}
+	fmt.Fprintf(&b, "fleet capacity [%s]: ceiling=%d%s fresh=%d stale=%d blocked=%d total=%d verdict=%s\n",
+		report.Product, report.TrueConcurrentCeiling, req, report.FreshSeats, report.StaleSeats,
+		report.BlockedSeats, report.TotalSeats, report.Verdict)
+	fmt.Fprintf(&b, "  %s\n", report.Reason)
+	for _, acct := range report.Accounts {
+		tier := "t?"
+		if acct.ModelTier != nil {
+			tier = fmt.Sprintf("t%d", *acct.ModelTier)
+		}
+		detail := acct.Reason
+		if detail == "" {
+			detail = "-"
+		}
+		fmt.Fprintf(&b, "  [%-24s] %-14s %-28s %-3s active=%d live=%d %s\n",
+			truncateFleet(acct.StateLabel, 24), acct.Tag, acct.Account, tier,
+			acct.ActiveSessions, acct.LiveSessions, detail)
+	}
+	return b.String()
+}
 
 type fleetState struct {
 	Generated string                   `json:"generated"`
