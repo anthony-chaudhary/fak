@@ -30,6 +30,9 @@ var (
 	// prefill projections in the resident-Q4_K lane (full-attn q/k and Qwen3.6 linear_attn.*).
 	// Same nil-caching policy as metalQ4KW. Guarded by metalQ4KMu.
 	metalQ8KW = map[*Model]map[string]*metalgemm.Q8Weight{}
+	// metalQ8Budget caches, per *Model, whether the Q8-minority GPU upload fits the device's
+	// working-set budget (computed once by metalQ8UploadAllowed). Guarded by metalQ4KMu.
+	metalQ8Budget = map[*Model]bool{}
 	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
 	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
@@ -201,10 +204,39 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 	return w
 }
 
+// metalQ8UploadAllowed reports (and caches per *Model) whether this model's Q8-minority
+// projections may be uploaded to the GPU without breaching the device working-set budget. When it
+// returns false, both the bulk pre-upload (metalQ8Weights) and the lazy per-call upload
+// (metalQ8Weight) decline, so the Q8 minority stays on the proven CPU qGemm8 path — exactly the
+// pre-#1087 behavior, which serves the 27B on a 36 GiB Mac without the OOM. Callers already hold
+// no lock; this takes metalQ4KMu to guard the cache.
+func (m *Model) metalQ8UploadAllowed() bool {
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	if v, ok := metalQ8Budget[m]; ok {
+		return v
+	}
+	r := m.ResidentReport()
+	deviceTotal := int64(0)
+	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
+		deviceTotal = int64(total)
+	}
+	allowed := q8UploadFits(r.TotalResidentBytes, r.Q8Bytes, deviceTotal, os.Getenv("FAK_METAL_Q8_UPLOAD"))
+	metalQ8Budget[m] = allowed
+	return allowed
+}
+
 // metalQ8Weight returns this model's GPU Q8 handle for `name`, uploading the Q8_0 codes/scales
 // once (cached per *Model, nil cached too). It backs batched Metal prefill for the Q8-minority
-// projections in the resident-Q4_K lane.
+// projections in the resident-Q4_K lane. Declines (returns nil, caller stays on CPU qGemm8) when
+// the device working-set budget can't absorb the additive Q8 GPU copy (metalQ8UploadAllowed).
 func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
+	// Budget gate BEFORE the lock (metalQ8UploadAllowed takes metalQ4KMu itself; sync.Mutex is
+	// not reentrant). On a tight device the additive Q8 GPU copy would OOM the serve, so decline
+	// here and let q8GemmDispatch fall back to the CPU qGemm8 — the pre-#1087, non-OOM path.
+	if !m.metalQ8UploadAllowed() {
+		return nil
+	}
 	metalQ4KMu.Lock()
 	defer metalQ4KMu.Unlock()
 	tbl := metalQ8KW[m]
@@ -257,6 +289,13 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 // kernels, and uploading their Q8 copies would waste unified memory.
 func (m *Model) metalQ8Weights() map[string]bool {
 	if !metalgemm.Available() {
+		return nil
+	}
+	// Skip the whole bulk pre-upload when the device budget can't absorb the additive Q8 GPU
+	// copy — otherwise the 7 GiB projection store doubles and the serve is SIGKILLed at first
+	// prefill (#1087 OOM). metalQ8Weight would decline each tensor anyway; returning early keeps
+	// the intent legible and avoids the pointless per-tensor budget re-checks.
+	if !m.metalQ8UploadAllowed() {
 		return nil
 	}
 	uploaded := map[string]bool{}
