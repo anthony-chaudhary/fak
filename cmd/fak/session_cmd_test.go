@@ -23,6 +23,8 @@ import (
 type stubGateway struct {
 	lastMethod, lastPath, lastVerb string
 	lastBody                       gateway.SessionControlRequest
+	verbs                          []string
+	bodies                         []gateway.SessionControlRequest
 	curBudget                      gateway.SessionBudget
 	curPace                        gateway.SessionPace
 	curRev                         uint64
@@ -57,6 +59,8 @@ func (g *stubGateway) handler() http.Handler {
 		// POST {id}/{verb}
 		g.lastVerb = parts[1]
 		_ = json.NewDecoder(r.Body).Decode(&g.lastBody)
+		g.verbs = append(g.verbs, g.lastVerb)
+		g.bodies = append(g.bodies, g.lastBody)
 		if id == g.conflictID {
 			writeTestJSON(w, http.StatusConflict, map[string]any{
 				"error": map[string]any{"message": "session control refused (terminal or stale rev)"},
@@ -202,6 +206,49 @@ func TestSessionCLIPriorityAndPace(t *testing.T) {
 	}
 	if g.lastBody.Pace == nil || g.lastBody.Pace.MaxTokensPerTurn != 256 {
 		t.Fatalf("pace body = %+v, want max=256", g.lastBody)
+	}
+}
+
+func TestSessionCLIBudgetEnvelopeInspectOnly(t *testing.T) {
+	out, errb, code := runSessionAt(t, "http://127.0.0.1:1", "envelope", "sess-env", "turns=5,tokens=1000,context=64000,wall=30m,spend=$2.50,throughput=20/s,max-tokens=256,gap=100ms", "--inspect-only")
+	if code != 0 {
+		t.Fatalf("envelope inspect exit = %d (%s)", code, errb)
+	}
+	for _, want := range []string{"budget-envelope", "turns=5", "tokens=1000", "context=64000", "wall=30m0s", "spend=USD 2.50", "throughput=20/s", "pace(max=256 gap=100ms)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("inspect output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSessionCLIBudgetEnvelopeAppliesBudgetAndPace(t *testing.T) {
+	g := &stubGateway{curBudget: gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1}, curRev: 8}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runSessionAt(t, ts.URL, "envelope", "sess-env", "turns=4,tokens=900,context=1200,max-tokens=128,gap=75ms")
+	if code != 0 {
+		t.Fatalf("envelope apply exit = %d (%s)", code, errb)
+	}
+	if g.lastVerb != "pace" || g.lastBody.Pace == nil {
+		t.Fatalf("final envelope verb = %q body=%+v, want pace body", g.lastVerb, g.lastBody)
+	}
+	if len(g.verbs) != 2 || g.verbs[0] != "budget" || g.verbs[1] != "pace" {
+		t.Fatalf("envelope verbs = %v, want budget then pace", g.verbs)
+	}
+	if got := g.bodies[0].Budget; got == nil || got.TurnsLeft != 4 || got.TokensLeft != 900 || got.ContextTokensLeft != 1200 {
+		t.Fatalf("budget body = %+v, want turns=4 tokens=900 context=1200", got)
+	}
+	if g.lastBody.Pace.MaxTokensPerTurn != 128 || g.lastBody.Pace.MinTurnGapMs != 75 {
+		t.Fatalf("pace body = %+v, want max=128 gap=75", *g.lastBody.Pace)
+	}
+	if g.lastBody.IfRev != 9 {
+		t.Fatalf("pace if_rev = %d, want first write's returned rev 9", g.lastBody.IfRev)
+	}
+	for _, want := range []string{"applied: budget,pace", "context=1200", "pace(max=128 gap=75ms)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("envelope output missing %q:\n%s", want, out)
+		}
 	}
 }
 

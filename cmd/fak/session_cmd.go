@@ -14,6 +14,7 @@ package main
 //	fak session run    <id> <state>         # set any run-state (running|throttled|paused|draining|stopped)
 //	fak session budget <id> [--turns N] [--tokens N] [--context-tokens N]   # re-set the work allotment live
 //	fak session pace   <id> [--max-tokens N] [--gap-ms N]  # re-set the per-turn throttle
+//	fak session envelope <id> <spec>       # parse/apply one managed-context budget envelope (#1573)
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
@@ -43,6 +44,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // sessionFlagUnset is the sentinel for an integer flag the operator did not set, so a
@@ -84,7 +86,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	arity := map[string]int{
 		"ls": 0, "status": 1,
 		"stop": 1, "pause": 1, "resume": 1, "throttle": 1,
-		"run": 2, "budget": 1, "pace": 1, "priority": 2,
+		"run": 2, "budget": 1, "pace": 1, "envelope": 2, "budget-envelope": 2, "priority": 2,
 	}
 	want, known := arity[verb]
 	if !known {
@@ -112,6 +114,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	contextTokens := fs.Int("context-tokens", sessionFlagUnset, "budget: remaining prompt/context tokens (0 = off)")
 	maxTokens := fs.Int("max-tokens", sessionFlagUnset, "pace: max output tokens this turn (0 = planner default)")
 	gapMs := fs.Int("gap-ms", sessionFlagUnset, "pace: minimum inter-turn gap in ms (0 = none)")
+	inspectOnly := fs.Bool("inspect-only", false, "envelope: parse and print the deterministic budget envelope without applying it")
 	if rc, ok := parseFlagsOrHelp(fs, flagArgs); !ok {
 		return rc
 	}
@@ -146,6 +149,8 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		return c.budgetVerb(stdout, stderr, *asJSON, pos[0], *turns, *tokens, *contextTokens, *ifRev)
 	case "pace":
 		return c.paceVerb(stdout, stderr, *asJSON, pos[0], *maxTokens, *gapMs, *ifRev)
+	case "envelope", "budget-envelope":
+		return c.envelopeVerb(stdout, stderr, *asJSON, pos[0], pos[1], *ifRev, *inspectOnly)
 	case "priority":
 		n, err := strconv.Atoi(pos[1])
 		if err != nil {
@@ -157,6 +162,13 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		})
 	}
 	return 2 // unreachable: arity gate already rejected unknown verbs
+}
+
+type sessionEnvelopeReport struct {
+	Envelope    session.BudgetEnvelope `json:"envelope"`
+	Applied     []string               `json:"applied,omitempty"`
+	InspectOnly bool                   `json:"inspect_only,omitempty"`
+	State       *gateway.SessionState  `json:"state,omitempty"`
 }
 
 // runVerb applies a run-state change (the cancel/pause/resume/throttle family). A
@@ -202,6 +214,49 @@ func (c *sessionClient) paceVerb(stdout, stderr io.Writer, asJSON bool, id strin
 	return c.renderState(stdout, stderr, asJSON, func() (gateway.SessionState, error) {
 		return c.control(id, "pace", gateway.SessionControlRequest{Pace: &p, IfRev: rev})
 	})
+}
+
+// envelopeVerb parses issue #1573's one-string managed-context budget envelope and
+// applies the axes supported by the existing gateway control API: budget and pace.
+// Wall-clock, spend, and throughput remain visible in the parsed report so the caller
+// can inspect the deterministic contract even when this gateway build has no direct
+// control route for those axes.
+func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, spec string, ifRev uint64, inspectOnly bool) int {
+	env, err := session.ParseBudgetEnvelope(spec)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session envelope: parse: %v\n", err)
+		return 2
+	}
+	rep := sessionEnvelopeReport{Envelope: env, InspectOnly: inspectOnly}
+	if inspectOnly {
+		return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
+	}
+
+	gb := gateway.SessionBudget{
+		TurnsLeft:         env.SessionBudget().TurnsLeft,
+		TokensLeft:        env.SessionBudget().TokensLeft,
+		ContextTokensLeft: env.SessionBudget().ContextTokensLeft,
+	}
+	st, err := c.control(id, "budget", gateway.SessionControlRequest{Budget: &gb, IfRev: ifRev})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session envelope: apply budget: %v\n", err)
+		return 1
+	}
+	rep.Applied = append(rep.Applied, "budget")
+	rep.State = &st
+
+	pace := env.SessionPace()
+	if pace.MaxTokensPerTurn > 0 || pace.MinTurnGapMs > 0 {
+		gp := gateway.SessionPace{MaxTokensPerTurn: pace.MaxTokensPerTurn, MinTurnGapMs: pace.MinTurnGapMs}
+		st, err = c.control(id, "pace", gateway.SessionControlRequest{Pace: &gp, IfRev: st.Rev})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak session envelope: apply pace: %v\n", err)
+			return 1
+		}
+		rep.Applied = append(rep.Applied, "pace")
+		rep.State = &st
+	}
+	return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
 }
 
 // mergeBudget fills the axes the operator did not name from the session's current
@@ -301,6 +356,47 @@ func emitSessionJSON(stdout, stderr io.Writer, v any) int {
 		return 1
 	}
 	return 0
+}
+
+func emitSessionEnvelopeReport(stdout, stderr io.Writer, asJSON bool, rep sessionEnvelopeReport) int {
+	if asJSON {
+		return emitSessionJSON(stdout, stderr, rep)
+	}
+	fmt.Fprintf(stdout, "budget-envelope %s\n", formatBudgetEnvelope(rep.Envelope))
+	if len(rep.Applied) > 0 {
+		fmt.Fprintf(stdout, "applied: %s\n", strings.Join(rep.Applied, ","))
+	}
+	if rep.State != nil {
+		fmt.Fprintln(stdout, formatSessionState(*rep.State))
+	}
+	return 0
+}
+
+func formatBudgetEnvelope(env session.BudgetEnvelope) string {
+	parts := []string{
+		"turns=" + budgetAxis(env.Budget.TurnsLeft),
+		"tokens=" + budgetAxis(env.Budget.TokensLeft),
+		"context=" + contextBudgetAxis(env.Budget.ContextTokensLeft),
+	}
+	if env.WallClockLimit() > 0 {
+		parts = append(parts, "wall="+env.WallClockLimit().String())
+	}
+	if !env.Spend.IsZero() {
+		parts = append(parts, fmt.Sprintf("spend=%s %.2f", env.Spend.Currency, float64(env.Spend.MaxCents)/100))
+	}
+	if !env.Throughput.IsZero() {
+		parts = append(parts, fmt.Sprintf("throughput=%.3g/s", env.Throughput.ExpectedTokensPerSec))
+		if env.Throughput.MinTokensPerSec > 0 {
+			parts = append(parts, fmt.Sprintf("min_throughput=%.3g/s", env.Throughput.MinTokensPerSec))
+		}
+	}
+	if env.Pace.MaxTokensPerTurn > 0 || env.Pace.MinTurnGapMs > 0 {
+		parts = append(parts, fmt.Sprintf("pace(max=%d gap=%dms)", env.Pace.MaxTokensPerTurn, env.Pace.MinTurnGapMs))
+	}
+	if env.Budget.ClarificationQueriesCap > 0 || env.Budget.ClarificationQueriesLeft > 0 {
+		parts = append(parts, "queries="+budgetAxis(env.Budget.ClarificationQueriesLeft))
+	}
+	return strings.Join(parts, " ")
 }
 
 // formatSessionState renders one drive record as a compact, fixed-shape line so a
@@ -474,6 +570,8 @@ func sessionUsage(w io.Writer) {
   fak session run      <id> <state>           set running|throttled|paused|draining|stopped
   fak session budget   <id> [--turns N] [--tokens N] [--context-tokens N]  re-set the work allotment live
   fak session pace     <id> [--max-tokens N] [--gap-ms N]   re-set the per-turn throttle
+  fak session envelope <id> <spec>            apply a managed-context budget envelope
+                                               spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
@@ -481,5 +579,6 @@ func sessionUsage(w io.Writer) {
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
+       envelope: --inspect-only
 `)
 }

@@ -142,6 +142,7 @@ func cmdGuard(argv []string) {
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	maxDuration := fs.Duration("max-duration", 0, "govern this guard session to at most this much REAL WALL-CLOCK time (issue #1584), tracked independently of --context-budget-tokens and surviving a --restart-on-budget hidden restart (the elapsed total carries forward, it does not reset to zero). 0 = unbounded (still tracked for `fak session status`, just never stops the run). Query/inspect anytime with `fak session status <id>`; the time budget drains the session to Draining/Stopped with reason TIME_BUDGET_EXHAUSTED exactly like a token-budget exhaustion.")
+	budgetEnvelopeSpec := fs.String("budget-envelope", "", "managed-context budget envelope (#1573): turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms. Seeds this guard session's budget/pace/wall axes; explicit --context-budget-tokens and --max-duration override those envelope axes.")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
@@ -182,6 +183,24 @@ func cmdGuard(argv []string) {
 	// per-turn economy line out of an attended agent's full-screen UI.
 	guardSetFlags := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { guardSetFlags[f.Name] = true })
+	var guardBudgetEnvelope session.BudgetEnvelope
+	hasGuardBudgetEnvelope := strings.TrimSpace(*budgetEnvelopeSpec) != ""
+	if hasGuardBudgetEnvelope {
+		var err error
+		guardBudgetEnvelope, err = session.ParseBudgetEnvelope(*budgetEnvelopeSpec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --budget-envelope: %v\n", err)
+			os.Exit(2)
+		}
+	}
+	contextBudgetLimit := *contextBudgetTokens
+	if hasGuardBudgetEnvelope && !guardSetFlags["context-budget-tokens"] && guardBudgetEnvelope.Budget.ContextTokensLeft > 0 {
+		contextBudgetLimit = guardBudgetEnvelope.Budget.ContextTokensLeft
+	}
+	maxDurationLimit := *maxDuration
+	if hasGuardBudgetEnvelope && !guardSetFlags["max-duration"] && guardBudgetEnvelope.WallClockLimit() > 0 {
+		maxDurationLimit = guardBudgetEnvelope.WallClockLimit()
+	}
 
 	// --split-dry-run is a pure PREVIEW: render the resolved 80/20 split plan and exit BEFORE
 	// any gateway bind, pane spawn, or agent launch. The live gateway URL is not known yet (the
@@ -518,11 +537,11 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --context-budget-tokens must be non-negative")
 		os.Exit(2)
 	}
-	if *resetOnBudget && *contextBudgetTokens <= 0 {
+	if *resetOnBudget && contextBudgetLimit <= 0 {
 		fmt.Fprintln(os.Stderr, "fak guard: --reset-on-budget requires --context-budget-tokens N")
 		os.Exit(2)
 	}
-	if *restartOnBudget && *contextBudgetTokens <= 0 {
+	if *restartOnBudget && contextBudgetLimit <= 0 {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-on-budget requires --context-budget-tokens N")
 		os.Exit(2)
 	}
@@ -530,7 +549,7 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
 		os.Exit(2)
 	}
-	if *maxDuration < 0 {
+	if maxDurationLimit < 0 {
 		fmt.Fprintln(os.Stderr, "fak guard: --max-duration must be non-negative")
 		os.Exit(2)
 	}
@@ -546,17 +565,10 @@ func cmdGuard(argv []string) {
 	// is used verbatim, and the no-flag default is the fixed "guard" id (identical to
 	// defaultSessionIDFromMeta's own zero-cache-key fallback) rather than a git-SHA-derived
 	// cache key nothing will read back.
-	guardDurabilityWanted := guardSetFlags["session-id"] || *contextBudgetTokens > 0 || *maxDuration > 0
+	guardDurabilityWanted := guardSetFlags["session-id"] || contextBudgetLimit > 0 || maxDurationLimit > 0 || hasGuardBudgetEnvelope
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
 		guardTraceID = "guard"
-	}
-	if *contextBudgetTokens > 0 {
-		serveSessions.SetBudget(guardTraceID, session.Budget{
-			TurnsLeft:         session.Unbounded,
-			TokensLeft:        session.Unbounded,
-			ContextTokensLeft: *contextBudgetTokens,
-		})
 	}
 	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
 	// above — a managed run may be fine on tokens but out of real time, or vice versa.
@@ -566,9 +578,11 @@ func cmdGuard(argv []string) {
 	// restart driven by --restart-on-budget re-arms this trace's clock via the ordinary
 	// Recontinue path (RecontinueAt), which carries the accumulated elapsed time forward
 	// rather than resetting it to zero — see internal/session/timebudget.go.
-	if *maxDuration > 0 {
-		serveSessions.StartTimeBudget(guardTraceID, *maxDuration, time.Now())
+	var contextOverride *int
+	if guardSetFlags["context-budget-tokens"] {
+		contextOverride = contextBudgetTokens
 	}
+	applyGuardSessionBudgetEnvelope(serveSessions, guardTraceID, guardBudgetEnvelope, hasGuardBudgetEnvelope, contextOverride, contextBudgetLimit, maxDurationLimit, time.Now())
 	// DEFER the durability setup's git spawns (sessionStartSHA's `git rev-parse HEAD` and
 	// PublishSession's `git hash-object -w` + `git update-ref`) until AFTER the gateway is
 	// bound and MarkReady()'d (see the goroutine below, right after srv.MarkReady()) rather
@@ -577,7 +591,7 @@ func cmdGuard(argv []string) {
 	// continues on failure), so running it a few hundred ms late is safe; guardTraceID
 	// above is fixed synchronously so the deferred registration publishes under the exact
 	// id the gateway is already using as DefaultTraceID.
-	restarter := newGuardBudgetRestarter(*restartOnBudget, *contextBudgetTokens, *restartLimit, *restartSeedDir, os.Stderr)
+	restarter := newGuardBudgetRestarter(*restartOnBudget, contextBudgetLimit, *restartLimit, *restartSeedDir, os.Stderr)
 
 	// 3b. LOCAL in-kernel model (--gguf): resolve the alias/URI (downloading on demand),
 	//     pick the decode backend, and load the weights + tokenizer through the SAME serve
@@ -618,7 +632,7 @@ func cmdGuard(argv []string) {
 		if chatBackend != nil {
 			fmt.Fprintf(os.Stderr, "fak guard: in-kernel decode → device backend %q\n", chatBackend.Name())
 		}
-		inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, *contextBudgetTokens, nil)
+		inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil)
 		if inKernelModel == nil {
 			fmt.Fprintf(os.Stderr, "fak guard: failed to load %q into the in-kernel engine\n", *ggufPath)
 			os.Exit(1)
@@ -710,7 +724,7 @@ func cmdGuard(argv []string) {
 		ListSessions:          listSessions,
 		DecideSession:         decideSession,
 		DebitSession:          debitSession,
-		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, *contextBudgetTokens),
+		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, contextBudgetLimit),
 		OnBudgetExhausted:     restarter.OnBudgetExhausted,
 		DefaultTraceID:        guardTraceID,
 		StartTime:             t0,
@@ -907,8 +921,8 @@ func cmdGuard(argv []string) {
 				fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 			}
 		}
-		if *contextBudgetTokens > 0 {
-			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, *contextBudgetTokens)
+		if contextBudgetLimit > 0 {
+			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, contextBudgetLimit)
 			if *resetOnBudget {
 				fmt.Fprintln(os.Stderr, "fak guard: session reset — transparent carryover enabled")
 			}
@@ -916,8 +930,8 @@ func cmdGuard(argv []string) {
 				fmt.Fprintln(os.Stderr, "fak guard: session restart — child relaunch on budget exhaustion enabled")
 			}
 		}
-		if *maxDuration > 0 {
-			fmt.Fprintf(os.Stderr, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDuration.String())
+		if maxDurationLimit > 0 {
+			fmt.Fprintf(os.Stderr, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDurationLimit.String())
 		}
 	}
 

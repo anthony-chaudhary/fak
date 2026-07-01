@@ -569,6 +569,29 @@ func TestGuardMaxDurationStartsQueryableTimeBudget(t *testing.T) {
 	}
 }
 
+func TestGuardBudgetEnvelopeSeedsBudgetPaceAndWallClock(t *testing.T) {
+	const trace = "guard-budget-envelope-test"
+	t0 := time.Unix(1_700_000_000, 0)
+	env, err := session.ParseBudgetEnvelope("turns=6,tokens=1000,context=5000,wall=45m,max-tokens=256,gap=150ms,throughput=30/s,spend=$1.25")
+	if err != nil {
+		t.Fatalf("ParseBudgetEnvelope: %v", err)
+	}
+	tbl := session.NewTable()
+	applyGuardSessionBudgetEnvelope(tbl, trace, env, true, nil, env.Budget.ContextTokensLeft, env.WallClockLimit(), t0)
+
+	st := tbl.Get(trace)
+	if st.Budget.TurnsLeft != 6 || st.Budget.TokensLeft != 1000 || st.Budget.ContextTokensLeft != 5000 {
+		t.Fatalf("budget = %+v, want turns=6 tokens=1000 context=5000", st.Budget)
+	}
+	if st.Pace.MaxTokensPerTurn != 256 || st.Pace.MinTurnGapMs != 150 {
+		t.Fatalf("pace = %+v, want max=256 gap=150", st.Pace)
+	}
+	q := tbl.QueryTimeBudget(trace, t0.Add(5*time.Minute))
+	if !q.Bounded || q.Limit != 45*time.Minute || q.Remaining != 40*time.Minute {
+		t.Fatalf("time query = %+v, want 45m limit and 40m remaining", q)
+	}
+}
+
 // TestGuardMaxDurationZeroLeavesTimeBudgetUnconfigured proves the flag's documented
 // "0 = unbounded, off" default: a guard launch with no --max-duration (the flag's zero
 // value) must not call StartTimeBudget at all, so a session with no wall-clock
