@@ -373,18 +373,21 @@ func (s *Session) Resolve(ctx context.Context, step int, asOf ...int64) ([]byte,
 		if !s.cleared[p.QID] {
 			return nil, fmt.Errorf("%w: page %d (%s) refused — no witness Clear(%q)", ErrSealed, step, p.Reason, p.QID)
 		}
-		if v := s.reScreen(ctx, p.Role, body); v.Kind == abi.VerdictQuarantine {
-			return nil, fmt.Errorf("%w: page %d cleared by witness but the content re-screen RE-QUARANTINED it (%s) — clearance does not launder poison",
-				ErrSealed, step, abi.ReasonName(v.Reason))
-		}
-		if err := s.verifyArtifacts(ctx, p, body); err != nil {
-			return nil, err
-		}
-		return append([]byte(nil), body...), nil
+		return s.screenAndCopy(ctx, step, p, body,
+			"%w: page %d cleared by witness but the content re-screen RE-QUARANTINED it (%s) — clearance does not launder poison")
 	}
+	return s.screenAndCopy(ctx, step, p, body,
+		"%w: page %d was benign at write time but a tightened gate now flags it (%s)")
+}
+
+// screenAndCopy is Resolve's shared page-out tail: re-screen the page's body — a tightened
+// gate can flag a page that was benign at write time, or re-quarantine one a witness cleared
+// (clearance never launders poison) — and, if it passes, verify its artifacts and hand back a
+// byte-identical copy. quarantineFmt is the branch-specific error format, threaded with
+// ErrSealed, the step, and the re-screen reason. It is the body both Resolve branches shared.
+func (s *Session) screenAndCopy(ctx context.Context, step int, p Page, body []byte, quarantineFmt string) ([]byte, error) {
 	if v := s.reScreen(ctx, p.Role, body); v.Kind == abi.VerdictQuarantine {
-		return nil, fmt.Errorf("%w: page %d was benign at write time but a tightened gate now flags it (%s)",
-			ErrSealed, step, abi.ReasonName(v.Reason))
+		return nil, fmt.Errorf(quarantineFmt, ErrSealed, step, abi.ReasonName(v.Reason))
 	}
 	if err := s.verifyArtifacts(ctx, p, body); err != nil {
 		return nil, err

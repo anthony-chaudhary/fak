@@ -137,6 +137,21 @@ func pageSyndromeWith(p Page, body []byte, oracle revocationOracle) PageSyndrome
 	return s
 }
 
+// pageSyndromeCleared computes the per-page syndrome against the live vDSO and then
+// replaces the page-level (clearance-blind) quarantine axis with one that knows this
+// loaded session's recorded clearance — the only axis whose evidence lives on the
+// Session rather than on the Page. It is the shared body of Session.PageSyndrome and
+// the #785 classifySyndromeCleared, which folded the same block identically.
+func pageSyndromeCleared(p Page, body []byte, cleared bool) PageSyndrome {
+	syn := pageSyndromeWith(p, body, vdso.Default)
+	for i := range syn.Evidence {
+		if syn.Evidence[i].Axis == EvidenceQuarantine {
+			syn.Evidence[i] = quarantineEvidenceCleared(p, cleared)
+		}
+	}
+	return syn
+}
+
 // digestEvidence: the body must be present and hash to the recorded address. Absent
 // or digest-mismatched bytes fail closed — you cannot trust any other axis about a
 // page whose authoritative bytes you cannot read.
@@ -282,14 +297,7 @@ func (s *Session) PageSyndrome(step int) (PageSyndrome, error) {
 	}
 	p := s.Manifest.Pages[step]
 	body := s.cas[p.Digest] // nil if absent — digestEvidence treats that as an erasure
-	syn := pageSyndromeWith(p, body, vdso.Default)
-	// Replace the page-level (clearance-blind) quarantine axis with one that knows
-	// this loaded session's recorded clearances — the only axis whose evidence lives
-	// on the Session rather than on the Page itself.
-	for i := range syn.Evidence {
-		if syn.Evidence[i].Axis == EvidenceQuarantine {
-			syn.Evidence[i] = quarantineEvidenceCleared(p, s.cleared[p.QID])
-		}
-	}
-	return syn, nil
+	// Fold in this loaded session's recorded clearances for the quarantine axis — the
+	// only axis whose evidence lives on the Session rather than on the Page itself.
+	return pageSyndromeCleared(p, body, s.cleared[p.QID]), nil
 }

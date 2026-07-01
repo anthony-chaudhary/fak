@@ -2,8 +2,6 @@ package recall
 
 import (
 	"fmt"
-
-	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
 
 // REPAIRABLE-vs-ERASURE FAULT CLASSIFICATION (#785, builds on the #783 PageSyndrome
@@ -182,6 +180,23 @@ type noRecovery struct{}
 func (noRecovery) HasCleanReplica(string) bool  { return false }
 func (noRecovery) TrustRederivable(string) bool { return false }
 
+// classifyTrustAxis folds a blocking witness / trust-epoch axis into the verdict on the
+// pre-populated `out`: REPAIRABLE via a byte-faithful witness re-derive when the oracle
+// reports the retired trust is re-derivable, else an uncorrectable trust ERASURE. axis is
+// the blocking evidence axis and repairReason/eraseReason are its two audit strings. It is
+// the shared body of the witness and trust-epoch branches, which folded identically.
+func classifyTrustAxis(out FaultSyndrome, axis EvidenceAxis, rederivable bool, repairReason, eraseReason string) FaultSyndrome {
+	out.Axis, out.HasAxis = axis, true
+	if rederivable {
+		out.Class, out.Recovery = SyndromeRepairable, RecoveryWitnessRederive
+		out.Reason = repairReason
+		return out
+	}
+	out.Class, out.Recovery = SyndromeErasure, RecoveryNone
+	out.Reason = eraseReason
+	return out
+}
+
 // classifySyndrome maps a page's failed integrity evidence to the repairable-vs-erasure
 // dimension. It is a PURE read: it computes the #783 syndrome and the existing FaultClass, then
 // folds them — together with the recovery oracle — into one closed verdict. It mutates nothing
@@ -208,15 +223,9 @@ func classifySyndromeCleared(p Page, body []byte, oracle RepairOracle, cleared b
 		oracle = noRecovery{}
 	}
 	fault := ClassifyFault(p, body)
-	syn := pageSyndromeWith(p, body, vdso.Default)
-	// Replace the page-level (clearance-blind) quarantine axis with one that knows this loaded
-	// session's recorded clearance, mirroring Session.PageSyndrome — the only axis whose evidence
-	// lives on the Session rather than on the Page.
-	for i := range syn.Evidence {
-		if syn.Evidence[i].Axis == EvidenceQuarantine {
-			syn.Evidence[i] = quarantineEvidenceCleared(p, cleared)
-		}
-	}
+	// Compute the #783 syndrome with this loaded session's recorded clearance folded into
+	// the quarantine axis, mirroring Session.PageSyndrome (shared helper in page_syndrome.go).
+	syn := pageSyndromeCleared(p, body, cleared)
 	out := FaultSyndrome{Step: p.Step, Fault: fault}
 
 	// 1) DIGEST / ERASURE dominates: the body is absent or no longer hashes to its address.
@@ -266,26 +275,14 @@ func classifySyndromeCleared(p Page, body []byte, oracle RepairOracle, cleared b
 	//    witness axis is the canonical one; the trust-epoch axis is its temporal companion and is
 	//    reported under the same recovery path.
 	if e, ok := syn.EvidenceFor(EvidenceWitness); ok && e.blocks() {
-		out.Axis, out.HasAxis = EvidenceWitness, true
-		if oracle.TrustRederivable(p.Witness) {
-			out.Class, out.Recovery = SyndromeRepairable, RecoveryWitnessRederive
-			out.Reason = "witness refuted, but trust is re-derivable from a live replacement witness — byte-faithful trust repair"
-			return out
-		}
-		out.Class, out.Recovery = SyndromeErasure, RecoveryNone
-		out.Reason = "witness refuted and trust is not re-derivable — uncorrectable trust erasure; seal"
-		return out
+		return classifyTrustAxis(out, EvidenceWitness, oracle.TrustRederivable(p.Witness),
+			"witness refuted, but trust is re-derivable from a live replacement witness — byte-faithful trust repair",
+			"witness refuted and trust is not re-derivable — uncorrectable trust erasure; seal")
 	}
 	if e, ok := syn.EvidenceFor(EvidenceTrustEpoch); ok && e.blocks() {
-		out.Axis, out.HasAxis = EvidenceTrustEpoch, true
-		if oracle.TrustRederivable(p.Witness) {
-			out.Class, out.Recovery = SyndromeRepairable, RecoveryWitnessRederive
-			out.Reason = "trust epoch stale (witness refuted), but trust is re-derivable from a live replacement witness"
-			return out
-		}
-		out.Class, out.Recovery = SyndromeErasure, RecoveryNone
-		out.Reason = "trust epoch stale and trust is not re-derivable — uncorrectable; seal"
-		return out
+		return classifyTrustAxis(out, EvidenceTrustEpoch, oracle.TrustRederivable(p.Witness),
+			"trust epoch stale (witness refuted), but trust is re-derivable from a live replacement witness",
+			"trust epoch stale and trust is not re-derivable — uncorrectable; seal")
 	}
 
 	// NOTE on the DURABILITY axis (#82): #783's FailedEvidence also reports a durability block —
