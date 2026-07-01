@@ -70,6 +70,11 @@ type watchdogAutohealOptions struct {
 	LeaseTTL      time.Duration
 	Debounce      time.Duration
 	RestartPolicy watchdogRestartPolicy
+	// RestartReArm clears an EXHAUSTED restart streak once this long has elapsed
+	// since the last real failed restart, so a transient failure burst does not
+	// latch give_up forever (the deadlock: exhausted -> never restarts -> never
+	// alive -> attempts never reset). Zero disables re-arm.
+	RestartReArm time.Duration
 }
 
 type watchdogAutohealResult struct {
@@ -211,6 +216,7 @@ func defaultWatchdogAutohealOptions(verb string, mode watchdogAutohealMode) watc
 			BaseDelay:   250 * time.Millisecond,
 			MaxDelay:    2 * time.Second,
 		},
+		RestartReArm: 30 * time.Minute,
 	}
 }
 
@@ -413,6 +419,19 @@ func restartWatchdogWithPolicy(ctx context.Context, opts watchdogAutohealOptions
 	attempts := st.Attempts
 	lastFailure := unixNanoTime(st.LastFailureUnixNano)
 	now := opts.Clock().UTC()
+	// Re-arm a STALE exhausted streak: if we are already at the give-up ceiling but
+	// the last real failed restart was longer ago than RestartReArm, a transient
+	// burst has aged out — clear the streak so this tick restarts again instead of
+	// latching give_up forever (the give_up path never refreshes LastFailure, so
+	// now.Sub(lastFailure) grows every tick until it crosses the window). A FRESH
+	// streak (recent failures) still gives up, so a genuinely broken unit is not
+	// hammered. Guarded before the IsZero fallback so a first-run state (no recorded
+	// failure) is untouched.
+	if opts.RestartReArm > 0 && attempts >= opts.RestartPolicy.MaxAttempts &&
+		!lastFailure.IsZero() && now.Sub(lastFailure) >= opts.RestartReArm {
+		attempts = 0
+		lastFailure = time.Time{}
+	}
 	if lastFailure.IsZero() {
 		lastFailure = now.Add(-opts.RestartPolicy.BaseDelay)
 	}

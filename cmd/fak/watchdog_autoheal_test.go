@@ -127,6 +127,77 @@ func TestWatchdogHealBoundedRetryGivesUp(t *testing.T) {
 	}
 }
 
+func TestWatchdogHealReArmsStaleExhaustedStreak(t *testing.T) {
+	now := time.Unix(9000, 0).UTC()
+	dir := t.TempDir()
+	// Seed an EXHAUSTED streak whose last real failed restart is well past the
+	// re-arm window. Without re-arm this latches give_up forever (the observed
+	// deadlock: exhausted -> never restarts -> never alive -> never resets).
+	if err := writeWatchdogHealState(dir, watchdogHealState{
+		Schema:              watchdogAutohealSchema,
+		ID:                  "supervisor",
+		Attempts:            2, // == MaxAttempts
+		LastFailureUnixNano: now.Add(-time.Hour).UnixNano(),
+		LastReason:          watchdogReasonExhausted,
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	restarts := 0
+	spec := watchdogAutohealSpec{
+		watchdogService: watchdogService{ID: "supervisor", Manager: "taskscheduler", Unit: "FleetSupervisorWatchdog"},
+		Probe:           deadInstalledProbe,
+		Restart: func(context.Context) error {
+			restarts++
+			return nil
+		},
+	}
+	opts := testWatchdogAutohealOptions(dir, &now, spec)
+	opts.RestartReArm = 30 * time.Minute
+
+	got := runWatchdogAutoheal(context.Background(), opts)
+	if restarts != 1 {
+		t.Fatalf("restart calls = %d, want 1 (stale streak re-armed)", restarts)
+	}
+	if len(got) != 1 || got[0].Action != "restarted" || got[0].Reason != watchdogReasonRestarted {
+		t.Fatalf("heal = %+v, want restarted (re-armed)", got)
+	}
+}
+
+func TestWatchdogHealFreshExhaustedStreakStillGivesUp(t *testing.T) {
+	now := time.Unix(9500, 0).UTC()
+	dir := t.TempDir()
+	// A FRESH exhausted streak (last failure just now) must still give up even with
+	// re-arm configured — a genuinely broken unit is not hammered.
+	if err := writeWatchdogHealState(dir, watchdogHealState{
+		Schema:              watchdogAutohealSchema,
+		ID:                  "supervisor",
+		Attempts:            2,
+		LastFailureUnixNano: now.Add(-time.Minute).UnixNano(),
+		LastReason:          watchdogReasonExhausted,
+	}); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+	restarts := 0
+	spec := watchdogAutohealSpec{
+		watchdogService: watchdogService{ID: "supervisor", Manager: "taskscheduler", Unit: "FleetSupervisorWatchdog"},
+		Probe:           deadInstalledProbe,
+		Restart: func(context.Context) error {
+			restarts++
+			return nil
+		},
+	}
+	opts := testWatchdogAutohealOptions(dir, &now, spec)
+	opts.RestartReArm = 30 * time.Minute
+
+	got := runWatchdogAutoheal(context.Background(), opts)
+	if restarts != 0 {
+		t.Fatalf("restart calls = %d, want 0 (fresh streak still gives up)", restarts)
+	}
+	if len(got) != 1 || got[0].Action != "give_up" || got[0].Reason != watchdogReasonExhausted {
+		t.Fatalf("heal = %+v, want give_up/%s", got, watchdogReasonExhausted)
+	}
+}
+
 func TestWatchdogAutohealWarnAndOffModes(t *testing.T) {
 	now := time.Unix(4000, 0).UTC()
 	dir := t.TempDir()
