@@ -16,7 +16,7 @@ hard debt, and is tracked by #1997.
 
 ## Portfolio fold
 
-`python tools/scorecard_control_pane.py --json` currently reports:
+The initial full `python tools/scorecard_control_pane.py --json` run reported:
 
 - `finding=scorecard_unmeasured`
 - `total_debt=1126`
@@ -46,6 +46,19 @@ code F(8), code-slop F(8), tooling-quality F(8),
 repo-hygiene C(2), release-readiness C(2),
 seo B(1), steerability B(1), claim-repro B(1)
 ```
+
+Post-push refresh: after the shared trunk moved again, the live direct compile witness
+changed to:
+
+```text
+cmd/fak/dogfoodissues.go:62:69: undefined: time
+```
+
+The default control-pane refresh hit the 124s command cap before emitting JSON. A
+bounded diagnostic read, `python tools/scorecard_control_pane.py --json --timeout 1`,
+still returned `finding=scorecard_unmeasured`, with `total_debt=6`, `grade_debt=0`,
+`measured=16`, and `errored=25`. Those timeout-capped numbers are useful for shape,
+not as a replacement full-family score.
 
 ## Tickets filed
 
