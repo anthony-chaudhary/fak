@@ -20,8 +20,9 @@ package programreport
 //     so a reader can never mistake it for the forbidden vs-naive multiple.
 //   - HUMAN OPERATOR EFFECTIVENESS — the frontier is "can a human still steer the
 //     system without rereading every transcript?". The first deterministic proxy is
-//     operator-heaviness pressure from the source-reading scorecard. Metric is
-//     max(0, 100-pressure), forced to zero when hard heaviness_debt exists.
+//     operator-heaviness pressure from the source-reading scorecard. Metric is a
+//     continuous lightness value, max(0, 1 - 0.01*pressure), forced to zero when hard
+//     heaviness_debt exists.
 
 import (
 	"fmt"
@@ -153,16 +154,16 @@ func humanOperatorSignal(root string) Signal {
 		Class: worktype.HumanOperatorEffectiveness,
 		Label: worktype.HumanOperatorEffectiveness.Label(),
 		Doc:   p.OperatingDoc,
-		Note:  "operator-heaviness proxy: 100 - heaviness_pressure; hard heaviness_debt means the human steering surface has real debt",
+		Note:  "operator-heaviness proxy: continuous lightness=max(0, 1 - 0.01*pressure); hard heaviness_debt means the human steering surface has real debt",
 	}
 	payload := heavinessscore.Build(root)
 	pressure := corpusInt(payload.Corpus, "heaviness_pressure")
 	debt := corpusInt(payload.Corpus, heavinessscore.DebtKey)
-	lightness := 100 - pressure
+	lightness := 1 - float64(pressure)/100
 	if lightness < 0 {
 		lightness = 0
 	}
-	s.Metric = float64(lightness)
+	s.Metric = round3(lightness)
 	s.OK = true
 	switch {
 	case debt > 0 || !payload.OK:
@@ -174,7 +175,7 @@ func humanOperatorSignal(root string) Signal {
 		s.Frontier = "operator surface at zero heaviness pressure"
 	default:
 		s.Direction = "holding"
-		s.Frontier = fmt.Sprintf("operator-heaviness pressure %d (lightness %d/100)", pressure, lightness)
+		s.Frontier = fmt.Sprintf("operator-heaviness pressure %d (lightness %.3f)", pressure, s.Metric)
 	}
 	return s
 }

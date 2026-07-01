@@ -18,7 +18,7 @@ func cacheHolding() Signal {
 }
 
 func humanHolding() Signal {
-	return Signal{Class: worktype.HumanOperatorEffectiveness, Label: "human-operator-effectiveness", Frontier: "operator-heaviness pressure 14", Metric: 86, Direction: "holding", OK: true}
+	return Signal{Class: worktype.HumanOperatorEffectiveness, Label: "human-operator-effectiveness", Frontier: "operator-heaviness pressure 14; lightness 0.860", Metric: 0.86, Direction: "holding", OK: true}
 }
 
 // TestInterpretProgramsTally folds clean signals and pins the tally + verdict.
@@ -96,8 +96,8 @@ func TestLedgerRoundTripAndPerClassColumns(t *testing.T) {
 	p := InterpretPrograms([]Signal{cacheHolding(), humanHolding(), kernelAdvancing()}) // cache first on purpose
 	r := Fold(p, FoldOpts{Date: "2026-06-29", Commit: "abc", GeneratedAt: "2026-06-29T00:00:00Z"})
 	row := RowFromReport(r)
-	if row.KernelMetric != 3 || row.CacheMetric != 0.62 || row.HumanMetric != 86 {
-		t.Fatalf("per-class columns mis-stamped: kernel=%.3f cache=%.3f human=%.3f, want 3/0.62/86", row.KernelMetric, row.CacheMetric, row.HumanMetric)
+	if row.KernelMetric != 3 || row.CacheMetric != 0.62 || row.HumanMetric != 0.86 {
+		t.Fatalf("per-class columns mis-stamped: kernel=%.3f cache=%.3f human=%.3f, want 3/0.62/0.86", row.KernelMetric, row.CacheMetric, row.HumanMetric)
 	}
 	line, err := AppendLedgerLine(row)
 	if err != nil {
@@ -112,23 +112,23 @@ func TestLedgerRoundTripAndPerClassColumns(t *testing.T) {
 // TestTrendDirections pins the trend math: a rise in either metric is improved, a fall
 // (with no rise) is regressed, equal is flat, no prior is new.
 func TestTrendDirections(t *testing.T) {
-	base := LedgerRow{Date: "2026-06-28", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 90, Advancing: 1, GeneratedAt: "t0"}
+	base := LedgerRow{Date: "2026-06-28", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 0.90, Advancing: 1, GeneratedAt: "t0"}
 	if d := TrendVsLast(base, nil).Direction; d != "new" {
 		t.Fatalf("first tick must be new, got %q", d)
 	}
-	up := LedgerRow{Date: "2026-06-29", KernelMetric: 4, CacheMetric: 0.60, HumanMetric: 90, GeneratedAt: "t1"}
+	up := LedgerRow{Date: "2026-06-29", KernelMetric: 4, CacheMetric: 0.60, HumanMetric: 0.90, GeneratedAt: "t1"}
 	if d := TrendVsLast(up, []LedgerRow{base}).Direction; d != "improved" {
 		t.Fatalf("a higher kernel metric must be improved, got %q", d)
 	}
-	down := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.40, HumanMetric: 90, GeneratedAt: "t1"}
+	down := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.40, HumanMetric: 0.90, GeneratedAt: "t1"}
 	if d := TrendVsLast(down, []LedgerRow{base}).Direction; d != "regressed" {
 		t.Fatalf("a lower cache metric must be regressed, got %q", d)
 	}
-	humanDown := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 89, GeneratedAt: "t1"}
-	if tr := TrendVsLast(humanDown, []LedgerRow{base}); tr.Direction != "regressed" || tr.HumanMetricDelta != -1 {
+	humanDown := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 0.89, GeneratedAt: "t1"}
+	if tr := TrendVsLast(humanDown, []LedgerRow{base}); tr.Direction != "regressed" || tr.HumanMetricDelta != -0.01 {
 		t.Fatalf("a lower human metric must be regressed with signed delta, got %+v", tr)
 	}
-	flat := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 90, GeneratedAt: "t1"}
+	flat := LedgerRow{Date: "2026-06-29", KernelMetric: 2, CacheMetric: 0.60, HumanMetric: 0.90, GeneratedAt: "t1"}
 	if d := TrendVsLast(flat, []LedgerRow{base}).Direction; d != "flat" {
 		t.Fatalf("equal metrics must be flat, got %q", d)
 	}
@@ -157,8 +157,8 @@ func TestHumanOperatorSignalReadsHeavinessPressure(t *testing.T) {
 	if s.Class != worktype.HumanOperatorEffectiveness || s.Label != worktype.HumanOperatorEffectiveness.Label() {
 		t.Fatalf("human signal identity = %+v", s)
 	}
-	if s.Metric != 100 || s.Direction != "advancing" || !strings.Contains(s.Frontier, "zero heaviness pressure") {
-		t.Fatalf("clean human signal = %+v, want metric 100 advancing zero-pressure frontier", s)
+	if s.Metric != 1 || s.Direction != "advancing" || !strings.Contains(s.Frontier, "zero heaviness pressure") {
+		t.Fatalf("clean human signal = %+v, want metric 1.000 advancing zero-pressure frontier", s)
 	}
 
 	bad := humanOperatorSignal(t.TempDir())
