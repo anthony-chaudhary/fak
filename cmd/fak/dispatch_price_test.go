@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -179,6 +181,58 @@ func TestDispatchPriceHumanRenderReturnsActionLine(t *testing.T) {
 			t.Fatalf("human render missing %q:\n%s", want, out)
 		}
 	}
+}
+
+func TestDispatchPriceLargeDryRunWaveSelectionBenchmark(t *testing.T) {
+	const candidates = 512
+	agents := largeDispatchPriceAgents(candidates)
+
+	start := time.Now()
+	got := buildDispatchPriceReport(agents, dispatchtick.LaneTaxonomy{})
+	elapsed := time.Since(start)
+	perCandidate := elapsed / time.Duration(candidates)
+	t.Logf("planned %d dry-run dispatch candidates in %s (%s/candidate)", candidates, elapsed, perCandidate)
+
+	if got.Requested != candidates ||
+		got.SafeConcurrency != candidates ||
+		got.WaveCount != 1 ||
+		got.SafeConcurrencyPct != 100 ||
+		got.CollisionWavePenalty != 0 {
+		t.Fatalf("large dry-run plan = requested %d safe %d waves %d safe_pct %d penalty %d",
+			got.Requested, got.SafeConcurrency, got.WaveCount, got.SafeConcurrencyPct, got.CollisionWavePenalty)
+	}
+	if perCandidate > 5*time.Millisecond {
+		t.Fatalf("dry-run wave selection too slow: %s/candidate over %d candidates", perCandidate, candidates)
+	}
+}
+
+func BenchmarkDispatchPriceLargeDryRunWaveSelection(b *testing.B) {
+	const candidates = 512
+	agents := largeDispatchPriceAgents(candidates)
+	b.ResetTimer()
+	start := time.Now()
+	for i := 0; i < b.N; i++ {
+		got := buildDispatchPriceReport(agents, dispatchtick.LaneTaxonomy{})
+		if got.WaveCount != 1 || got.SafeConcurrency != candidates {
+			b.Fatalf("large dry-run plan = waves %d safe %d, want one wave and %d safe", got.WaveCount, got.SafeConcurrency, candidates)
+		}
+	}
+	elapsed := time.Since(start)
+	b.StopTimer()
+	b.ReportMetric(float64(candidates), "candidates/op")
+	b.ReportMetric(float64(elapsed.Nanoseconds())/float64(b.N*candidates), "ns/candidate")
+}
+
+func largeDispatchPriceAgents(n int) []dispatchPriceAgent {
+	agents := make([]dispatchPriceAgent, 0, n)
+	for i := 0; i < n; i++ {
+		agents = append(agents, dispatchPriceAgent{
+			Name: fmt.Sprintf("worker-%03d", i),
+			Lane: "gateway",
+			Tree: []string{fmt.Sprintf("internal/gateway/dryrun/%03d.go", i)},
+		})
+	}
+	return agents
 }
 
 func TestDispatchLaneTaxonomyFromFileReadsLaneTrees(t *testing.T) {
