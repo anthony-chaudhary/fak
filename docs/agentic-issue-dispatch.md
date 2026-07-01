@@ -113,6 +113,23 @@ must not be launched in the same wave because its expected path overlaps the liv
 The dry-run proof for #1790 is the manifest plus an arbitration transcript showing
 `SYN-2` was deferred, not co-launched.
 
+Captured dry-run table shape:
+
+| Issue | Worker | Expected paths | Arbitration | Wave outcome |
+|---|---|---|---|---|
+| `SYN-1` | `w-syn-1` | `docs/agentic-issue-dispatch.md` | `ACQUIRE docs/agentic-issue-dispatch.md` | `running` |
+| `SYN-2` | `w-syn-2` | `docs/agentic-issue-dispatch.md` | `REFUSE COLLISION_RISK overlaps w-syn-1` | `collision_deferred` |
+
+The corresponding operator rollup row for the deferred worker is explicit and
+non-successful:
+
+```json
+{"issue":"SYN-2","worker_id":"w-syn-2","lane":"docs","expected_paths":["docs/agentic-issue-dispatch.md"],"status":"collision_deferred","commit_sha":"","tests":[],"blocker_reason":"COLLISION_RISK overlaps w-syn-1 in same wave","witness":["dos arbitrate dry-run: REFUSE COLLISION_RISK"]}
+```
+
+This is a valid dry-run result: only `SYN-1` is launchable in the wave, and the
+deferred row can be retried in a later wave without relaunching `SYN-1`.
+
 ## 4. Launch a wave
 
 Wave size is bounded by three numbers:
