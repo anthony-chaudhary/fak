@@ -354,27 +354,27 @@ func composeSeqSublayer(t BlockTopology, x [][]float32, n normWeights, eps float
 	H := len(x[0])
 	switch t {
 	case PostNorm:
-		out := body(x) // sub-layer reads the RAW residual stream
-		for tt := range x {
-			nout := normCfg(out[tt], n.post, n.postBias, eps, cfg)
-			for i := 0; i < H; i++ {
-				x[tt][i] += nout[i]
-			}
-		}
+		addPostNormed(x, body(x), n, eps, cfg, H) // sub-layer reads the RAW residual stream
 	case SandwichNorm:
-		out := body(normSeq(x, n, eps, cfg))
-		for tt := range x {
-			nout := normCfg(out[tt], n.post, n.postBias, eps, cfg)
-			for i := 0; i < H; i++ {
-				x[tt][i] += nout[i]
-			}
-		}
+		addPostNormed(x, body(normSeq(x, n, eps, cfg)), n, eps, cfg, H)
 	default: // PreNorm — verbatim Llama
 		out := body(normSeq(x, n, eps, cfg))
 		for tt := range x {
 			for i := 0; i < H; i++ {
 				x[tt][i] += out[tt][i]
 			}
+		}
+	}
+}
+
+// addPostNormed post-normalizes each position of out (per cfg, using the post-norm
+// weights) and adds it into the residual stream x in place — the shared tail of the
+// PostNorm and SandwichNorm placements (x += post(out)).
+func addPostNormed(x, out [][]float32, n normWeights, eps float32, cfg Config, H int) {
+	for tt := range x {
+		nout := normCfg(out[tt], n.post, n.postBias, eps, cfg)
+		for i := 0; i < H; i++ {
+			x[tt][i] += nout[i]
 		}
 	}
 }
