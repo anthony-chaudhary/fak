@@ -52,6 +52,23 @@ func TestClassify(t *testing.T) {
 		{"push delete long", "git push --delete origin feature", true, "remote-ref delete"},
 		{"push delete short", "git push -d origin feature", true, "remote-ref delete"},
 
+		// ---- refspec spellings of force / delete -----------------------------
+		// `+<refspec>` forces the remote update exactly like --force, scoped to
+		// that ref; `:<dst>` (empty src) deletes the remote ref like --delete.
+		{"push +refspec force", "git push origin +main", true, "force-push"},
+		{"push +refspec binds token", "git push origin +main", true, neverAmendSharedReason},
+		{"push +refspec explicit dst", "git push origin +HEAD:refs/heads/main", true, "force-push"},
+		{"push refspec delete", "git push origin :feature-x", true, "remote-ref delete"},
+		{"push refspec delete full ref", "git push origin :refs/heads/feature-x", true, "remote-ref delete"},
+		// safe refspec shapes must DEFER: a plain src:dst push, the bare
+		// matching-branches `:`, and a fetch/pull `+refspec` (which only
+		// force-updates a LOCAL remote-tracking ref).
+		{"push normal refspec OK", "git push origin main:main", false, ""},
+		{"push HEAD refspec OK", "git push origin HEAD:refs/heads/main", false, ""},
+		{"push matching colon alone OK", "git push origin :", false, ""},
+		{"fetch +refspec OK", "git fetch origin +refs/heads/main:refs/remotes/origin/main", false, ""},
+		{"pull +refspec OK", "git pull origin +main", false, ""},
+
 		// ---- commit-by-explicit-path ----------------------------------------
 		{"commit -a", "git commit -a", true, "explicit-path"},
 		{"commit -am", `git commit -am "msg"`, true, "explicit-path"},

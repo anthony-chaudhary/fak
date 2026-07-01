@@ -161,6 +161,18 @@ var defaultHazards = []hazard{
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."
 
+// pushForceRefspecLaw / pushDeleteRefspecLaw fire on the REFSPEC spellings of a
+// force-push and a remote-ref delete, which the flag-matching hazard table cannot
+// see: `git push origin +<refspec>` forces the remote update exactly like --force
+// (just scoped to that ref), and `git push origin :<dst>` (an empty source refspec)
+// deletes the remote ref exactly like push --delete. Scoped to `push` only — a
+// fetch/pull `+refspec` merely force-updates a LOCAL remote-tracking ref (the
+// standard fetch refspec shape), and the bare matching-branches `:` neither forces
+// nor deletes, so both stay deferred.
+const pushForceRefspecLaw = neverAmendSharedLaw + " force-push refused: a `+<refspec>` push forces the remote ref exactly like --force. Push WITHOUT the leading `+`."
+
+const pushDeleteRefspecLaw = "remote-ref delete refused: `git push origin :<branch>` (empty source refspec) deletes the remote ref exactly like push --delete/-d. Do not delete a remote branch from an agent."
+
 // unscopedStashLaw fires on a whole-tree stash CREATE in the shared trunk. A bare
 // `git stash` (or `git stash push`/`save` with no pathspec) snapshots EVERY dirty
 // file — including a peer's in-flight WIP — then leaves it parked in a stash that
@@ -552,6 +564,24 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 
 	if sub == "rebase" {
 		return neverAmendSharedLaw + " rebase refused: merge the trunk in place instead.", true
+	}
+
+	// The refspec spellings of force-push and remote-delete (see the law consts):
+	// a push OPERAND starting with `+` forces the ref; one starting with `:`
+	// (empty src, non-empty dst) deletes it. Flags are skipped — the hazard table
+	// below owns them — and only `push` operands are hazardous refspecs.
+	if sub == "push" {
+		for _, t := range rest {
+			if strings.HasPrefix(t, "-") {
+				continue
+			}
+			if strings.HasPrefix(t, "+") && len(t) > 1 {
+				return pushForceRefspecLaw, true
+			}
+			if strings.HasPrefix(t, ":") && len(t) > 1 {
+				return pushDeleteRefspecLaw, true
+			}
+		}
 	}
 
 	// `git add .` / `git add -- .` stages the whole tree regardless of flag order.
