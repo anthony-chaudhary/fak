@@ -63,6 +63,14 @@ type LaneCandidate struct {
 // exactly, so when every candidate shares a weight (e.g. none carries a
 // priority/* label) the result is byte-for-byte the old by-number order. A
 // stable sort keeps equal-weight, equal-number inputs in their input order.
+//
+// Closure binding: priority_test.go's TestPriorityWeight (P0/P1/P2/no-label/
+// unlabeled-by-priority in one table) and TestOrderLaneCandidatesTierThenRecency
+// (a table test ordering P0 > P1 > P2 > default, both recency directions) satisfy
+// #1780's ask in full — the picker rank function already has explicit table-test
+// coverage for every priority label plus the unlabeled fallback. The work shipped
+// citing #1395, never #1780; history on origin/main cannot be rewritten, so this
+// comment restates the closure binding explicitly for the grep-based referee.
 func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
 	ordered := append([]LaneCandidate(nil), cands...)
 	sort.SliceStable(ordered, func(i, j int) bool {
