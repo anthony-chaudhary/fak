@@ -111,8 +111,46 @@ func NewSessionPlanner(budget int) *SessionPlanner {
 // cleared pace (MaxTokensPerTurn 0) restores the full baseline window. A pace that voices no
 // opinion is a no-op — the planner keeps its full Budget, byte-for-byte the pre-compose path.
 // It returns the new Budget.
+//
+// This composes ONLY the CONFIGURED cap (MaxTokensPerTurn). Use ApplyThroughput for the
+// runtime-OBSERVED signal (#1585), or ApplyPaceAndThroughput to fold both in one call.
 func (sp *SessionPlanner) ApplyPace(pace session.Pace, baselineOutput int) int {
 	sp.Budget = pace.ComposePlannerBudget(sp.baseBudget, baselineOutput)
+	return sp.Budget
+}
+
+// ApplyThroughput composes a session's OBSERVED runtime throughput into this planner's
+// resident-context Budget (#1585, epic #1570 "managed context") — the measured-pace twin of
+// ApplyPace. Where ApplyPace scales the window from a CONFIGURED cap set ahead of time,
+// ApplyThroughput scales it from how fast the session is ACTUALLY moving right now
+// (t.ObservedTokensPerSec against t.ExpectedTokensPerSec): a session measurably falling
+// behind its expected rate — GPU contention, a slow upstream model, backpressure, none of
+// it anyone's configured pace — sees its resident window shrink proportionally, floored at
+// baseBudget/session.MinPlannerBudgetDivisor so the structural pins and a minimal recency
+// tail always still fit (the "minimum resident context preserved" done condition).
+//
+// session.Throughput is a standalone type (compose.go), not fields on session.Pace, so this
+// method takes it as its own parameter rather than reading it off pace.
+//
+// The scale is taken from baseBudget (never the current, possibly-already-throttled
+// Budget), so repeated calls with the same observation are idempotent and a session that
+// catches back up to its expected rate restores the full baseline window — the exact
+// idempotent-and-restorable contract ApplyPace already established. A Throughput with no
+// signal (either axis zero) is a no-op. It returns the new Budget.
+func (sp *SessionPlanner) ApplyThroughput(t session.Throughput) int {
+	sp.Budget = t.ComposePlannerBudgetForThroughput(sp.baseBudget)
+	return sp.Budget
+}
+
+// ApplyPaceAndThroughput folds BOTH the configured cap and the observed throughput signal
+// into this planner's resident-context Budget in one call (#1585): whichever constraint is
+// tighter wins (session.Pace.ComposePace), so a session that is both configured-throttled
+// AND running behind its expected rate gets the harder of the two shrinks, never one
+// silently overriding the other. Like ApplyPace/ApplyThroughput, the scale is always taken
+// from baseBudget, so this is idempotent and fully restorable when both signals clear. It
+// returns the new Budget.
+func (sp *SessionPlanner) ApplyPaceAndThroughput(pace session.Pace, t session.Throughput, baselineOutput int) int {
+	sp.Budget = pace.ComposePace(t, sp.baseBudget, baselineOutput)
 	return sp.Budget
 }
 

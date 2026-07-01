@@ -127,3 +127,106 @@ func TestComposeFoldsBoth(t *testing.T) {
 		t.Fatalf("Compose.Ratio = %v, want 0.25", got.Ratio)
 	}
 }
+
+// TestThroughputRatio pins the observed-throughput ratio at every boundary #1585 reasons
+// about: no observation, no expectation, and keeping-pace-or-faster all read as "no
+// constraint" (1.0); falling behind is the exact quotient.
+func TestThroughputRatio(t *testing.T) {
+	cases := []struct {
+		name string
+		t    Throughput
+		want float64
+	}{
+		{"no observation yet", Throughput{ExpectedTokensPerSec: 100}, 1.0},
+		{"no expectation configured", Throughput{ObservedTokensPerSec: 50}, 1.0},
+		{"negative observation", Throughput{ObservedTokensPerSec: -5, ExpectedTokensPerSec: 100}, 1.0},
+		{"keeping pace exactly", Throughput{ObservedTokensPerSec: 100, ExpectedTokensPerSec: 100}, 1.0},
+		{"running ahead", Throughput{ObservedTokensPerSec: 150, ExpectedTokensPerSec: 100}, 1.0},
+		{"half pace", Throughput{ObservedTokensPerSec: 50, ExpectedTokensPerSec: 100}, 0.5},
+		{"quarter pace", Throughput{ObservedTokensPerSec: 25, ExpectedTokensPerSec: 100}, 0.25},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.t.ThroughputRatio(); math.Abs(got-c.want) > 1e-9 {
+				t.Fatalf("ThroughputRatio(%+v) = %v, want %v", c.t, got, c.want)
+			}
+		})
+	}
+}
+
+// TestComposePlannerBudgetForThroughputShrinksDown is the #1585 load-bearing assertion: a
+// session measurably falling behind its EXPECTED throughput (no configured cap at all) still
+// drives the resident-context window down proportionally, and a session keeping pace leaves
+// it byte-for-byte unchanged.
+func TestComposePlannerBudgetForThroughputShrinksDown(t *testing.T) {
+	const base = 4096
+
+	slow := Throughput{ObservedTokensPerSec: 25, ExpectedTokensPerSec: 100} // quarter pace
+	if got := slow.ComposePlannerBudgetForThroughput(base); got != 1024 {
+		t.Fatalf("quarter-pace planner budget = %d, want 1024", got)
+	}
+
+	onPace := Throughput{ObservedTokensPerSec: 100, ExpectedTokensPerSec: 100}
+	if got := onPace.ComposePlannerBudgetForThroughput(base); got != base {
+		t.Fatalf("on-pace planner budget = %d, want %d (byte-for-byte unchanged)", got, base)
+	}
+
+	noSignal := Throughput{}
+	if got := noSignal.ComposePlannerBudgetForThroughput(base); got != base {
+		t.Fatalf("no-signal planner budget = %d, want %d", got, base)
+	}
+}
+
+// TestComposePlannerBudgetForThroughputFloor proves an observed-throughput collapse never
+// starves the resident window below base/MinPlannerBudgetDivisor — the same floor
+// ComposePlannerBudget already guarantees for the configured-cap axis, now proven for the
+// OBSERVED axis (the "minimum resident context preserved" done condition).
+func TestComposePlannerBudgetForThroughputFloor(t *testing.T) {
+	const base = 4096
+	floor := base / MinPlannerBudgetDivisor // 512
+
+	crawling := Throughput{ObservedTokensPerSec: 0.001, ExpectedTokensPerSec: 1000}
+	if got := crawling.ComposePlannerBudgetForThroughput(base); got != floor {
+		t.Fatalf("near-stalled planner budget = %d, want the floor %d", got, floor)
+	}
+	if got := crawling.ComposePlannerBudgetForThroughput(base); got <= 0 {
+		t.Fatalf("planner budget %d <= 0: an observed-throughput collapse must stay usable", got)
+	}
+}
+
+// TestComposePaceTakesTheTighterConstraint proves ComposePace reconciles the configured cap
+// and the observed throughput signal by taking whichever shrinks the window MORE, never
+// letting one silently override the other.
+func TestComposePaceTakesTheTighterConstraint(t *testing.T) {
+	const base = 4096
+	const baselineOutput = 2048
+
+	// Configured cap throttles harder (quarter) than the observed throughput (half).
+	p := Pace{MaxTokensPerTurn: 512} // quarter of baselineOutput -> 1024
+	tp := Throughput{ObservedTokensPerSec: 50, ExpectedTokensPerSec: 100}
+	configured := p.ComposePlannerBudget(base, baselineOutput)
+	observed := tp.ComposePlannerBudgetForThroughput(base)
+	if configured >= observed {
+		t.Fatalf("premise broken: configured=%d must be tighter than observed=%d for this test to prove anything", configured, observed)
+	}
+	if got := p.ComposePace(tp, base, baselineOutput); got != configured {
+		t.Fatalf("ComposePace = %d, want the tighter configured budget %d", got, configured)
+	}
+
+	// Now flip it: observed throughput is the tighter constraint.
+	q := Pace{MaxTokensPerTurn: 1536} // mild throttle -> closer to base
+	tq := Throughput{ObservedTokensPerSec: 10, ExpectedTokensPerSec: 100}
+	qConfigured := q.ComposePlannerBudget(base, baselineOutput)
+	qObserved := tq.ComposePlannerBudgetForThroughput(base)
+	if qObserved >= qConfigured {
+		t.Fatalf("premise broken: observed=%d must be tighter than configured=%d for this test to prove anything", qObserved, qConfigured)
+	}
+	if got := q.ComposePace(tq, base, baselineOutput); got != qObserved {
+		t.Fatalf("ComposePace = %d, want the tighter observed budget %d", got, qObserved)
+	}
+
+	// Neither signal set -> the base, unchanged.
+	if got := (Pace{}).ComposePace(Throughput{}, base, baselineOutput); got != base {
+		t.Fatalf("no-signal ComposePace = %d, want %d", got, base)
+	}
+}

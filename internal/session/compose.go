@@ -35,8 +35,39 @@ package session
 // Fraction per turn is sound only in a SINGLE-session process (the harness / a one-shot
 // serve), not under a multi-session gateway sharing one pool. This file computes the
 // fraction from the knob; WHERE it is safe to apply it is the consumer's call.
+//
+// THROUGHPUT (#1585, epic #1570 "managed context"). MaxTokensPerTurn is a CONFIGURED
+// knob — an operator or admission control sets it ahead of time. But a session can also
+// fall behind its expected pace for reasons nobody configured: GPU contention, a slow
+// upstream model, backpressure. Throughput carries that OBSERVED rate (an
+// ObservedTokensPerSec measured against an ExpectedTokensPerSec) as its own value —
+// deliberately NOT new fields on Pace, since Pace is declared in session.go and this
+// package's session.go is concurrently owned by other in-flight work right now; keeping
+// the new axis a standalone type declared here means #1585 never has to touch that file.
+// ThroughputRatio/ComposePlannerBudgetForThroughput apply the exact same ratio-and-floor
+// shape ComposePlannerBudget already uses for the configured cap, so "the session is
+// measurably slower right now" shrinks the resident-context window exactly as "the
+// operator configured a slower cap" does — without requiring anyone to have set
+// MaxTokensPerTurn at all. ComposePace takes a Pace AND a Throughput and folds both
+// signals into one Budget by taking whichever is more constraining, so the two knobs
+// compose rather than one silently overriding the other.
 
 import "math"
+
+// Throughput is a session's MEASURED recent pace (#1585): how many tokens per
+// wall-clock second it actually produced over some recent window the caller owns (e.g. a
+// rolling turn-completion tracker), judged against the rate it was expected to sustain.
+// It is the runtime-observed twin of Pace.MaxTokensPerTurn, kept as its own type rather
+// than fields on Pace itself — see the file header. The zero value means "no observation
+// yet" and composes to "no opinion" everywhere it is used.
+type Throughput struct {
+	// ObservedTokensPerSec is the measured recent rate. 0 means no observation yet.
+	ObservedTokensPerSec float64 `json:"observed_tokens_per_sec,omitempty"`
+	// ExpectedTokensPerSec is the reference rate ObservedTokensPerSec is judged against
+	// (analogous to baselineOutput for MaxTokensPerTurn). 0 means no expectation is
+	// configured (no opinion).
+	ExpectedTokensPerSec float64 `json:"expected_tokens_per_sec,omitempty"`
+}
 
 // MinPlannerBudgetDivisor floors a composed planner budget at base/MinPlannerBudgetDivisor:
 // no matter how hard a session is throttled, its resident-context window keeps at least
@@ -119,4 +150,71 @@ func (p Pace) Compose(basePlannerBudget, baselineOutput int) ComposedBudgets {
 		WorkerFraction: p.ComposeWorkerFraction(baselineOutput),
 		Ratio:          p.ThrottleRatio(baselineOutput),
 	}
+}
+
+// ThroughputRatio (#1585, epic #1570 "managed context") is the fraction in (0,1] of its
+// expected rate this session is ACTUALLY achieving, judged from a runtime observation rather
+// than a configured cap — the measured twin of ThrottleRatio. It is 1.0 ("no constraint")
+// when there is no observation yet (ObservedTokensPerSec <= 0), no expectation configured
+// (ExpectedTokensPerSec <= 0), or the session is keeping pace or running faster than expected
+// (Observed >= Expected — running ahead is never a reason to shrink the window here, exactly
+// as ThrottleRatio never widens on a cap above baseline). Otherwise it is the quotient
+// Observed/Expected, a value in (0,1): a session running at half its expected throughput
+// yields 0.5. NaN/Inf inputs (a corrupt observation) fail closed to 1.0, never past infinity
+// or negative.
+func (t Throughput) ThroughputRatio() float64 {
+	if t.ObservedTokensPerSec <= 0 || t.ExpectedTokensPerSec <= 0 {
+		return 1.0
+	}
+	if math.IsNaN(t.ObservedTokensPerSec) || math.IsInf(t.ObservedTokensPerSec, 0) {
+		return 1.0
+	}
+	if t.ObservedTokensPerSec >= t.ExpectedTokensPerSec {
+		return 1.0
+	}
+	return t.ObservedTokensPerSec / t.ExpectedTokensPerSec
+}
+
+// ComposePlannerBudgetForThroughput scales a base resident-context window down by this
+// Throughput's observed ratio, floored at base/MinPlannerBudgetDivisor — the same floor
+// discipline ComposePlannerBudget applies to the configured MaxTokensPerTurn cap, now driven
+// by a measured runtime rate instead of a configured one. A session that is falling behind
+// its expected throughput sees its resident-context window shrink proportionally (fewer
+// spans to hold hot while it is producing tokens slowly), and a session keeping pace or
+// running ahead is untouched — byte-for-byte the base, exactly as an un-observed Throughput
+// was before this composition existed. A non-positive base is returned unchanged.
+func (t Throughput) ComposePlannerBudgetForThroughput(basePlannerBudget int) int {
+	if basePlannerBudget <= 0 {
+		return basePlannerBudget
+	}
+	r := t.ThroughputRatio()
+	if r >= 1.0 {
+		return basePlannerBudget
+	}
+	floor := basePlannerBudget / MinPlannerBudgetDivisor
+	if floor < 1 {
+		floor = 1
+	}
+	composed := int(math.Round(float64(basePlannerBudget) * r))
+	if composed < floor {
+		composed = floor
+	}
+	return composed
+}
+
+// ComposePace folds BOTH pace signals — the configured MaxTokensPerTurn cap (p) and the
+// observed runtime Throughput (t) — into a single resident-context window: whichever signal
+// is more constraining (the smaller of the two composed budgets) wins, so a session that is
+// both throttled by configuration AND running behind its expected throughput gets the harder
+// of the two shrinks, never the milder one silently overriding the other. This is the
+// one-call entry point a caller composing BOTH #628's configured pace and #1585's observed
+// throughput into one planner Budget should use, in place of calling ComposePlannerBudget and
+// ComposePlannerBudgetForThroughput separately and having to reconcile them by hand.
+func (p Pace) ComposePace(t Throughput, basePlannerBudget, baselineOutput int) int {
+	configured := p.ComposePlannerBudget(basePlannerBudget, baselineOutput)
+	observed := t.ComposePlannerBudgetForThroughput(basePlannerBudget)
+	if observed < configured {
+		return observed
+	}
+	return configured
 }
