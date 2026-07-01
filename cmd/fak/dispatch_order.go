@@ -74,11 +74,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchCloseBatch(stdout, stderr, argv[1:])
 	case "skip-ledger":
 		return runDispatchSkipLedger(stdout, stderr, argv[1:])
+	case "attempt-budget":
+		return runDispatchAttemptBudget(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, or skip-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, or attempt-budget)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -253,6 +255,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch unwitnessed-claim --issue N [--live] [--json]
   fak dispatch close-batch [--in FILE] [--batch-size N] [--reserve N] [--now UNIX] [--json]
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
+  fak dispatch attempt-budget [--in FILE] [--budget N] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -299,5 +302,10 @@ category is safety for a collision-risk hold, capacity for every other skip reas
 already live, cooldown, superseded duplicate, generation held); a selected candidate carries
 no category. It never spawns a worker or touches GitHub -- the only side effect is the local
 append.
+attempt-budget folds each issue's --in attempt history (failure_class + at_unix per try) against
+a budget (its own "budget" field, or the --budget default) and reports whether the issue is
+still dispatchable or HELD for triage, naming the LAST recorded failure class -- so a
+repeatedly failing issue stops burning workers once it crosses the budget instead of being
+re-offered forever. A budget of 0 is unlimited (never held on attempt count alone).
 `)
 }
