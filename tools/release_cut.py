@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -265,6 +266,43 @@ def append_manifest_notes(notes: str, envelope: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def promotion_witness_from_env(env: dict[str, str] | None = None) -> dict | None:
+    env = env or dict(os.environ)
+    keys = {
+        "source_branch": "FAK_RELEASE_SOURCE_BRANCH",
+        "source_sha": "FAK_RELEASE_SOURCE_SHA",
+        "target_branch": "FAK_RELEASE_TARGET_BRANCH",
+        "target_sha": "FAK_RELEASE_TARGET_SHA",
+        "source_range": "FAK_RELEASE_SOURCE_RANGE",
+        "source_ci": "FAK_RELEASE_SOURCE_CI",
+    }
+    witness = {key: ascii_clean(str(env.get(var) or "").strip()) for key, var in keys.items()}
+    if not any(witness.values()):
+        return None
+    return witness
+
+
+def append_promotion_notes(notes: str, witness: dict) -> str:
+    lines = [
+        notes.rstrip(),
+        "",
+        "## Promotion source",
+        "",
+    ]
+    if witness.get("source_branch") or witness.get("source_sha"):
+        lines.append(f"- Source: {witness.get('source_branch') or '(unknown)'} {witness.get('source_sha') or '(unknown)'}")
+    if witness.get("target_branch") or witness.get("target_sha"):
+        lines.append(
+            f"- Target before promotion: {witness.get('target_branch') or '(unknown)'} "
+            f"{witness.get('target_sha') or '(unknown)'}"
+        )
+    if witness.get("source_range"):
+        lines.append(f"- Promoted source range: {witness['source_range']}")
+    if witness.get("source_ci"):
+        lines.append(f"- Source CI: {witness['source_ci']}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def dirty_paths(root: Path) -> list[str]:
     code, out = run(["git", "status", "--porcelain", "-z"], cwd=root)
     if code != 0:
@@ -453,6 +491,9 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
     )
     if manifest_envelope:
         notes_preview = append_manifest_notes(notes_preview, manifest_envelope)
+    promotion_witness = promotion_witness_from_env()
+    if promotion_witness:
+        notes_preview = append_promotion_notes(notes_preview, promotion_witness)
     paths = dedupe(paths_from_bump_report(bump) + [notes_rel] + include_paths)
     return {
         "ok": True,
@@ -467,6 +508,7 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
         "notes_file": notes_rel,
         "notes_exists": (root / notes_rel).exists(),
         "manifest": manifest_envelope,
+        "promotion_witness": promotion_witness,
         "decision": decision,
         "context": {
             "last_tag": context.get("last_tag"),

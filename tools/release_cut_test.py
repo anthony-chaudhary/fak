@@ -134,6 +134,24 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertIn("- fix(agent): preserve horizon [gen/next]", text)
         self.assertNotIn("gen/future: 1", text)
 
+    def test_append_promotion_notes_records_source_range(self) -> None:
+        rc = load()
+        witness = rc.promotion_witness_from_env({
+            "FAK_RELEASE_SOURCE_BRANCH": "dev",
+            "FAK_RELEASE_SOURCE_SHA": "dev-source-sha",
+            "FAK_RELEASE_TARGET_BRANCH": "main",
+            "FAK_RELEASE_TARGET_SHA": "main-target-sha",
+            "FAK_RELEASE_SOURCE_RANGE": "main-target-sha..dev-source-sha",
+            "FAK_RELEASE_SOURCE_CI": "success",
+        })
+        text = rc.append_promotion_notes("base notes\n", witness)
+
+        self.assertIn("## Promotion source", text)
+        self.assertIn("- Source: dev dev-source-sha", text)
+        self.assertIn("- Target before promotion: main main-target-sha", text)
+        self.assertIn("- Promoted source range: main-target-sha..dev-source-sha", text)
+        self.assertIn("- Source CI: success", text)
+
     def test_upstream_state_refuses_behind_branch_for_release_cut(self) -> None:
         rc = load()
         origin, clone = self._clone_with_upstream()
