@@ -1,0 +1,768 @@
+{
+  "schema": "fak.relay.epic-tickets.v1",
+  "epic": 1860,
+  "title": "Perpetual sessions — bounded-context relays instead of compaction",
+  "generated": "2026-07-01",
+  "spine": "docs/notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md",
+  "generation": "next",
+  "invariant": "flat-context: peak resident tokens bounded by the per-leg ceiling, independent of goal duration or total work done.",
+  "reason_tokens": [
+    "RELAY_ARMED",
+    "RELAY_ROTATED",
+    "RELAY_GOAL_DONE",
+    "RELAY_NOT_EXTERNALIZED",
+    "RELAY_PARKED_UNSAFE",
+    "RELAY_BATON_STALE",
+    "RELAY_NO_PROGRESS"
+  ],
+  "summary": {
+    "children_total": 50,
+    "tracks": 10,
+    "priority": {
+      "P1": 33,
+      "P2": 17
+    },
+    "issue_range": "#1861-#1910"
+  },
+  "children": [
+    {
+      "key": "A1",
+      "issue": 1861,
+      "track": "A — Concept & contract",
+      "priority": "P1",
+      "title": "spec(relay): ratify the closed relay/tombstone reason vocabulary (data-only)",
+      "leaf": "docs",
+      "paths": [
+        "docs/notes/**",
+        "dos.toml"
+      ],
+      "after": []
+    },
+    {
+      "key": "A2",
+      "issue": 1862,
+      "track": "A — Concept & contract",
+      "priority": "P2",
+      "title": "docs(relay): add relay/leg/baton/tombstone/flat-context to the managed-context glossary",
+      "leaf": "docs",
+      "paths": [
+        "docs/managed-context-glossary.md"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "A3",
+      "issue": 1863,
+      "track": "A — Concept & contract",
+      "priority": "P1",
+      "title": "docs(relay): specify the fak.relay.baton.v1 schema",
+      "leaf": "docs",
+      "paths": [
+        "docs/notes/**"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "A4",
+      "issue": 1864,
+      "track": "A — Concept & contract",
+      "priority": "P2",
+      "title": "docs(relay): the no-compaction / pointer-or-nothing continuous-usage contract",
+      "leaf": "docs",
+      "paths": [
+        "docs/managed-context-continuous-usage.md"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "B1",
+      "issue": 1865,
+      "track": "B — Observe (Phase 0)",
+      "priority": "P1",
+      "title": "feat(relay): per-leg resident-context meter",
+      "leaf": "session",
+      "paths": [
+        "internal/session/**"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "B2",
+      "issue": 1866,
+      "track": "B — Observe (Phase 0)",
+      "priority": "P1",
+      "title": "feat(relay): shadow would-rotate-here signal at the soft mark",
+      "leaf": "session",
+      "paths": [
+        "internal/session/**"
+      ],
+      "after": [
+        "B1"
+      ]
+    },
+    {
+      "key": "B3",
+      "issue": 1867,
+      "track": "B — Observe (Phase 0)",
+      "priority": "P2",
+      "title": "feat(relay): shadow would-be-baton emitter",
+      "leaf": "session",
+      "paths": [
+        "internal/session/**",
+        "internal/relay/**"
+      ],
+      "after": [
+        "B2",
+        "C1"
+      ]
+    },
+    {
+      "key": "B4",
+      "issue": 1868,
+      "track": "B — Observe (Phase 0)",
+      "priority": "P2",
+      "title": "feat(relay): baton-fidelity scorer (pointers vs durable store)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "B3"
+      ]
+    },
+    {
+      "key": "B5",
+      "issue": 1869,
+      "track": "B — Observe (Phase 0)",
+      "priority": "P2",
+      "title": "feat(relay): wire the shadow rotate signal into the PreCompact shadow-hook seam",
+      "leaf": "session",
+      "paths": [
+        "internal/session/**",
+        "cmd/fak/**"
+      ],
+      "after": [
+        "B2"
+      ]
+    },
+    {
+      "key": "C1",
+      "issue": 1870,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(relay): internal/relay package + Baton type (closed schema)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "A3"
+      ]
+    },
+    {
+      "key": "C2",
+      "issue": 1871,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(relay): deterministic Baton.Parse/project + round-trip witness",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C1"
+      ]
+    },
+    {
+      "key": "C3",
+      "issue": 1872,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(relay): artifact-pointer types + resolver interface",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C1"
+      ]
+    },
+    {
+      "key": "C4",
+      "issue": 1873,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P2",
+      "title": "feat(relay): do_not_rederive pointer index + dedup",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C1"
+      ]
+    },
+    {
+      "key": "C5",
+      "issue": 1874,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(relay): bind ctxplan.ObjectivePin verbatim into the baton",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/ctxplan/**"
+      ],
+      "after": [
+        "C1"
+      ]
+    },
+    {
+      "key": "C6",
+      "issue": 1875,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(cmd): fak relay handoff writes a baton (offline)",
+      "leaf": "cmd",
+      "paths": [
+        "cmd/fak/relay_handoff.go",
+        "cmd/fak/**"
+      ],
+      "after": [
+        "C2",
+        "C3",
+        "C5"
+      ]
+    },
+    {
+      "key": "C7",
+      "issue": 1876,
+      "track": "C — Baton schema & IO (Phase 1)",
+      "priority": "P1",
+      "title": "feat(cmd): fak relay resume reads + prints a baton (offline)",
+      "leaf": "cmd",
+      "paths": [
+        "cmd/fak/relay_resume.go",
+        "cmd/fak/**"
+      ],
+      "after": [
+        "C6"
+      ]
+    },
+    {
+      "key": "D1",
+      "issue": 1877,
+      "track": "D — Reload re-verification (Phase 2)",
+      "priority": "P1",
+      "title": "feat(relay): reload verifier re-checks progress_cursor vs git",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C3",
+        "C5"
+      ]
+    },
+    {
+      "key": "D2",
+      "issue": 1878,
+      "track": "D — Reload re-verification (Phase 2)",
+      "priority": "P1",
+      "title": "feat(relay): RELAY_BATON_STALE typed outcome on mismatch",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "D1"
+      ]
+    },
+    {
+      "key": "D3",
+      "issue": 1879,
+      "track": "D — Reload re-verification (Phase 2)",
+      "priority": "P1",
+      "title": "feat(relay): ledger-verified progress read (no claimed field)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "D1"
+      ]
+    },
+    {
+      "key": "E1",
+      "issue": 1880,
+      "track": "E — Safe-stop predicate (Phase 3)",
+      "priority": "P1",
+      "title": "feat(relay): safe-point predicate (Draining + safecommit + next-action)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/safecommit/**"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "E2",
+      "issue": 1881,
+      "track": "E — Safe-stop predicate (Phase 3)",
+      "priority": "P1",
+      "title": "feat(relay): in-flight-tool-call guard (never rotate mid-decode)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/session/**"
+      ],
+      "after": [
+        "E1"
+      ]
+    },
+    {
+      "key": "E3",
+      "issue": 1882,
+      "track": "E — Safe-stop predicate (Phase 3)",
+      "priority": "P2",
+      "title": "feat(relay): green-or-parked tree check at the boundary",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/safecommit/**"
+      ],
+      "after": [
+        "E1"
+      ]
+    },
+    {
+      "key": "E4",
+      "issue": 1883,
+      "track": "E — Safe-stop predicate (Phase 3)",
+      "priority": "P2",
+      "title": "feat(relay): one-line-next-action extractor",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "E1"
+      ]
+    },
+    {
+      "key": "F1",
+      "issue": 1884,
+      "track": "F — Externalize gate (Phase 4)",
+      "priority": "P1",
+      "title": "feat(relay): transcript-only load-bearing state detector",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C3"
+      ]
+    },
+    {
+      "key": "F2",
+      "issue": 1885,
+      "track": "F — Externalize gate (Phase 4)",
+      "priority": "P1",
+      "title": "feat(relay): RELAY_NOT_EXTERNALIZED fail-closed refusal before rotate",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "F1"
+      ]
+    },
+    {
+      "key": "F3",
+      "issue": 1886,
+      "track": "F — Externalize gate (Phase 4)",
+      "priority": "P2",
+      "title": "feat(relay): load-bearing vs ephemeral classifier",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "F1"
+      ]
+    },
+    {
+      "key": "F4",
+      "issue": 1887,
+      "track": "F — Externalize gate (Phase 4)",
+      "priority": "P1",
+      "title": "test(relay): plant transcript-only fact -> assert gate refuses",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "F2",
+        "F3"
+      ]
+    },
+    {
+      "key": "G1",
+      "issue": 1888,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P1",
+      "title": "spec(relay): the [relay] policy table shape (soft marks, caps, done-hook)",
+      "leaf": "docs",
+      "paths": [
+        "docs/notes/**"
+      ],
+      "after": [
+        "A1"
+      ]
+    },
+    {
+      "key": "G2",
+      "issue": 1889,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P1",
+      "title": "feat(relay): two-phase arm/fire state machine",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "E1",
+        "B2",
+        "G1"
+      ]
+    },
+    {
+      "key": "G3",
+      "issue": 1890,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P1",
+      "title": "feat(relay): arm triggers on Envelope axes (context/turns/wall/spend)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/session/**"
+      ],
+      "after": [
+        "G2",
+        "B1"
+      ]
+    },
+    {
+      "key": "G4",
+      "issue": 1891,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P1",
+      "title": "feat(relay): hysteresis — min verified progress before re-arm",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "G2",
+        "D3"
+      ]
+    },
+    {
+      "key": "G5",
+      "issue": 1892,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P2",
+      "title": "feat(relay): per-hour rotation cap",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "G2",
+        "G1"
+      ]
+    },
+    {
+      "key": "G6",
+      "issue": 1893,
+      "track": "G — Rotation policy (Phase 5)",
+      "priority": "P1",
+      "title": "feat(relay): RELAY_NO_PROGRESS escape after K empty legs",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "G4",
+        "D3"
+      ]
+    },
+    {
+      "key": "H1",
+      "issue": 1894,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P1",
+      "title": "feat(relay): the relay driver loop",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "C6",
+        "C7",
+        "D2",
+        "D3",
+        "E1",
+        "F2",
+        "G2"
+      ]
+    },
+    {
+      "key": "H2",
+      "issue": 1895,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P1",
+      "title": "feat(relay): lease continuity across legs (held_region re-acquire)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "H1"
+      ]
+    },
+    {
+      "key": "H3",
+      "issue": 1896,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P1",
+      "title": "feat(relay): done-check evaluator + RELAY_GOAL_DONE",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "H1",
+        "D3"
+      ]
+    },
+    {
+      "key": "H4",
+      "issue": 1897,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P2",
+      "title": "feat(relay): idempotent restart — a done relay stays done",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "H3"
+      ]
+    },
+    {
+      "key": "H5",
+      "issue": 1898,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P1",
+      "title": "feat(relay): hard-ceiling park path (RELAY_PARKED_UNSAFE)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "H1",
+        "E1"
+      ]
+    },
+    {
+      "key": "H6",
+      "issue": 1899,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P1",
+      "title": "feat(relay): Recontinue wiring — leg == Generation++, ParentTrace link",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "internal/session/**"
+      ],
+      "after": [
+        "H1"
+      ]
+    },
+    {
+      "key": "H7",
+      "issue": 1900,
+      "track": "H — Relay driver (Phase 6)",
+      "priority": "P2",
+      "title": "feat(cmd): fak relay status <relay-id> (legs, reasons, cost)",
+      "leaf": "cmd",
+      "paths": [
+        "cmd/fak/relay_status.go",
+        "cmd/fak/**"
+      ],
+      "after": [
+        "H1"
+      ]
+    },
+    {
+      "key": "I1",
+      "issue": 1901,
+      "track": "I — Pointer-only carryover (Phase 7)",
+      "priority": "P1",
+      "title": "feat(relay): strict sessionreset contributor set (pointers only)",
+      "leaf": "sessionreset",
+      "paths": [
+        "internal/sessionreset/**"
+      ],
+      "after": [
+        "C1"
+      ]
+    },
+    {
+      "key": "I2",
+      "issue": 1902,
+      "track": "I — Pointer-only carryover (Phase 7)",
+      "priority": "P2",
+      "title": "test(relay): forbid model-written recap in relay mode",
+      "leaf": "sessionreset",
+      "paths": [
+        "internal/sessionreset/**"
+      ],
+      "after": [
+        "I1"
+      ]
+    },
+    {
+      "key": "J1",
+      "issue": 1903,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P1",
+      "title": "test(relay): dogfood a real goal through >=10 forced rotations (fidelity)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**",
+        "experiments/**"
+      ],
+      "after": [
+        "H1",
+        "H3",
+        "H6"
+      ]
+    },
+    {
+      "key": "J2",
+      "issue": 1904,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P1",
+      "title": "test(relay): stale-baton / tombstone-rot test",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "D2",
+        "D3"
+      ]
+    },
+    {
+      "key": "J3",
+      "issue": 1905,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P1",
+      "title": "test(relay): thrash test (hysteresis + no-progress stop)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "G4",
+        "G6"
+      ]
+    },
+    {
+      "key": "J4",
+      "issue": 1906,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P2",
+      "title": "bench(relay): cost vs compaction (flat peak context, cache, accuracy)",
+      "leaf": "bench",
+      "paths": [
+        "internal/bench/**",
+        "experiments/**"
+      ],
+      "after": [
+        "H1"
+      ]
+    },
+    {
+      "key": "J5",
+      "issue": 1907,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P2",
+      "title": "test(relay): determinism (same store+baton -> same reload plan)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "D1",
+        "D3"
+      ]
+    },
+    {
+      "key": "J6",
+      "issue": 1908,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P1",
+      "title": "test(cmd): extend #1462 handoff-to-close to handoff->rotate->resume->close",
+      "leaf": "cmd",
+      "paths": [
+        "cmd/fak/**"
+      ],
+      "after": [
+        "H1",
+        "C6",
+        "C7"
+      ]
+    },
+    {
+      "key": "J7",
+      "issue": 1909,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P2",
+      "title": "test(relay): lease-continuity concurrency (no collision across legs)",
+      "leaf": "relay",
+      "paths": [
+        "internal/relay/**"
+      ],
+      "after": [
+        "H2"
+      ]
+    },
+    {
+      "key": "J8",
+      "issue": 1910,
+      "track": "J — Dogfood / QA / docs (Phase 8)",
+      "priority": "P2",
+      "title": "docs(relay): operator runbook for perpetual sessions",
+      "leaf": "docs",
+      "paths": [
+        "docs/**"
+      ],
+      "after": [
+        "H7",
+        "A1"
+      ]
+    }
+  ]
+}

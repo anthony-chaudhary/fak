@@ -36,6 +36,12 @@
       "Title": "release at agentic speed",
       "Generation": "now",
       "Label": ""
+    },
+    {
+      "Number": 1860,
+      "Title": "perpetual sessions (bounded-context relays)",
+      "Generation": "next",
+      "Label": ""
     }
   ]
 }
