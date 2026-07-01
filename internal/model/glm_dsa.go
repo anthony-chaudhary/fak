@@ -41,22 +41,40 @@ func glmDsaAttentionOutputFromTopKNormed(m *Model, layer int, xnFlat []float32, 
 	qANorm := m.tensor(ap + "q_a_layernorm.weight")
 	kvANorm := m.tensor(ap + "kv_a_layernorm.weight")
 
+	// Batched MLA projections: residentMatMulBatch reads each weight row ONCE and reuses it
+	// across all seq prompt tokens (vs GEMV-per-token re-streaming every weight seq times).
+	// The per-token norm/bias/RoPE glue below operates on the small already-projected vectors,
+	// so this is byte-for-byte the per-token residentMatRows path (residentMatMulBatch's contract)
+	// while raising prefill arithmetic intensity — the same batched-prefill win prefill_batch.go
+	// gives dense/GQA, now for GLM-5.2's MLA. See glm_dsa_batch_test.go for the bit-exact witness.
+	qResidB := m.residentMatMulBatch(ap+"q_a_proj.weight", xnFlat, qLora, H, seq)
+	qABias := m.tensorOptional(ap + "q_a_proj.bias")
+	for t := 0; t < seq; t++ {
+		row := qResidB[t*qLora : (t+1)*qLora]
+		addOptionalBias(row, qABias)
+		copy(row, rmsnorm(row, qANorm, glmDsaInnerNormEps))
+	}
+	qFullB := m.residentMatMulBatch(ap+"q_b_proj.weight", qResidB, nH*qkHead, qLora, seq)
+
+	compressedKVB := m.residentMatMulBatch(ap+"kv_a_proj_with_mqa.weight", xnFlat, kvLora+qkRope, H, seq)
+	kvABias := m.tensorOptional(ap + "kv_a_proj_with_mqa.bias")
+	kvLatentB := make([]float32, seq*kvLora)
+	kRotB := make([]float32, seq*qkRope)
+	for t := 0; t < seq; t++ {
+		row := compressedKVB[t*(kvLora+qkRope) : (t+1)*(kvLora+qkRope)]
+		addOptionalBias(row, kvABias)
+		copy(kvLatentB[t*kvLora:(t+1)*kvLora], rmsnorm(row[:kvLora], kvANorm, glmDsaInnerNormEps))
+		copy(kRotB[t*qkRope:(t+1)*qkRope], row[kvLora:])
+	}
+	kvFullB := m.residentMatMulBatch(ap+"kv_b_proj.weight", kvLatentB, nH*(qkNope+vHead), kvLora, seq)
+
 	qStates := make([][]float32, seq)
 	kStates := make([][]float32, seq)
 	vStates := make([][]float32, seq)
 	for t := 0; t < seq; t++ {
-		xn := xnFlat[t*H : (t+1)*H]
-
-		qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
-		addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
-		qResid = rmsnorm(qResid, qANorm, glmDsaInnerNormEps)
-		qFull := m.residentMatRows(ap+"q_b_proj.weight", qResid, nH*qkHead, qLora)
-
-		compressedKV := m.residentMatRows(ap+"kv_a_proj_with_mqa.weight", xn, kvLora+qkRope, H)
-		addOptionalBias(compressedKV, m.tensorOptional(ap+"kv_a_proj_with_mqa.bias"))
-		kvLatent := rmsnorm(compressedKV[:kvLora], kvANorm, glmDsaInnerNormEps)
-		kvFull := m.residentMatRows(ap+"kv_b_proj.weight", kvLatent, nH*(qkNope+vHead), kvLora)
-		kRotRaw := compressedKV[kvLora:]
+		qFull := qFullB[t*nH*qkHead : (t+1)*nH*qkHead]
+		kvFull := kvFullB[t*nH*(qkNope+vHead) : (t+1)*nH*(qkNope+vHead)]
+		kRotRaw := kRotB[t*qkRope : (t+1)*qkRope]
 
 		cos, sin := ropeRowForLayer(cfg, layer, t)
 		qStates[t] = make([]float32, nH*qkHead)
@@ -79,13 +97,13 @@ func glmDsaAttentionOutputFromTopKNormed(m *Model, layer int, xnFlat []float32, 
 	// DeepSeek/GLM-MLA softmax scale = mscale / sqrt(qk_head); ropeAttentionFactor()==1 for
 	// non-YaRN models (see glmDsaAttendCached / #996). Keeps prefill and decode scales identical.
 	scale := float32(cfg.ropeAttentionFactor() / math.Sqrt(float64(qkHead)))
-	out := make([]float32, seq*H)
+	attnConcatB := make([]float32, seq*nH*vHead)
 	for t := 0; t < seq; t++ {
 		selected, ok := glmDsaSelectedCausalKeys(topK[t], t, seq)
 		if !ok || len(selected) == 0 {
 			return nil, false
 		}
-		attnConcat := make([]float32, nH*vHead)
+		attnConcat := attnConcatB[t*nH*vHead : (t+1)*nH*vHead]
 		for h := 0; h < nH; h++ {
 			qh := qStates[t][h*qkHead : (h+1)*qkHead]
 			scores := make([]float32, len(selected))
@@ -103,11 +121,15 @@ func glmDsaAttentionOutputFromTopKNormed(m *Model, layer int, xnFlat []float32, 
 				}
 			}
 		}
-		ot := m.residentMatRows(ap+"o_proj.weight", attnConcat, H, nH*vHead)
-		addOptionalBias(ot, m.tensorOptional(ap+"o_proj.bias"))
-		copy(out[t*H:(t+1)*H], ot)
 	}
-	return out, true
+	// Batched output projection: all seq attention-concat rows through o_proj in one GEMM,
+	// then the per-token bias add — bit-identical to the per-token residentMatRows + bias.
+	outB := m.residentMatMulBatch(ap+"o_proj.weight", attnConcatB, H, nH*vHead, seq)
+	oBias := m.tensorOptional(ap + "o_proj.bias")
+	for t := 0; t < seq; t++ {
+		addOptionalBias(outB[t*H:(t+1)*H], oBias)
+	}
+	return outB, true
 }
 
 func glmDsaTopKIndices(m *Model, layer int, hidden []float32, seq int) ([][]int, bool) {
@@ -136,20 +158,28 @@ func glmDsaTopKIndicesNormed(m *Model, layer int, xnFlat []float32, seq int) ([]
 	kNormW := m.tensor(ap + "indexer.k_norm.weight")
 	kNormB := m.tensor(ap + "indexer.k_norm.bias")
 
+	// Batched indexer projections (one weight read reused across all seq tokens) — the same
+	// batched-prefill win as the MLA path above, bit-identical to the per-token residentMatRows
+	// loop it replaces (residentMatMulBatch contract). Per-token norm/RoPE glue stays scalar.
+	qABias := m.tensorOptional(ap + "q_a_proj.bias")
+	qResidB := m.residentMatMulBatch(ap+"q_a_proj.weight", xnFlat, qLora, H, seq)
+	for t := 0; t < seq; t++ {
+		row := qResidB[t*qLora : (t+1)*qLora]
+		addOptionalBias(row, qABias)
+		copy(row, rmsnorm(row, qANorm, glmDsaInnerNormEps))
+	}
+	qFullB := m.residentMatMulBatch(ap+"indexer.wq_b.weight", qResidB, indexHeads*indexDim, qLora, seq)
+	kRawB := m.residentMatMulBatch(ap+"indexer.wk.weight", xnFlat, indexDim, H, seq)
+	weightsB := m.residentMatMulBatch(ap+"indexer.weights_proj.weight", xnFlat, indexHeads, H, seq)
+	weightScale := float32(1.0 / math.Sqrt(float64(indexHeads)))
+
 	indexQ := make([][][]float64, seq)
 	indexK := make([][]float64, seq)
 	indexWeights := make([][]float64, seq)
 	for t := 0; t < seq; t++ {
-		xn := xnFlat[t*H : (t+1)*H]
-
-		qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
-		addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
-		qResid = rmsnorm(qResid, qANorm, glmDsaInnerNormEps)
-		qFull := m.residentMatRows(ap+"indexer.wq_b.weight", qResid, indexHeads*indexDim, qLora)
-
-		k := layernorm(m.residentMatRows(ap+"indexer.wk.weight", xn, indexDim, H), kNormW, kNormB, glmDsaInnerNormEps)
-		weights := m.residentMatRows(ap+"indexer.weights_proj.weight", xn, indexHeads, H)
-		weightScale := float32(1.0 / math.Sqrt(float64(indexHeads)))
+		qFull := qFullB[t*indexHeads*indexDim : (t+1)*indexHeads*indexDim]
+		k := layernorm(kRawB[t*indexDim:(t+1)*indexDim], kNormW, kNormB, glmDsaInnerNormEps)
+		weights := append([]float32(nil), weightsB[t*indexHeads:(t+1)*indexHeads]...)
 		for i := range weights {
 			weights[i] *= weightScale
 		}
@@ -161,7 +191,6 @@ func glmDsaTopKIndicesNormed(m *Model, layer int, xnFlat []float32, seq int) ([]
 			glmDsaApplyIndexerRoPE(head[:qkRope], cos, sin)
 			indexQ[t][h] = float32To64(head)
 		}
-		k = append([]float32(nil), k...)
 		glmDsaApplyIndexerRoPE(k[:qkRope], cos, sin)
 		indexK[t] = float32To64(k)
 		indexWeights[t] = float32To64(weights)

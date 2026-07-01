@@ -43,11 +43,13 @@ func initGDNBatchedPrefill() bool {
 
 // residentMatMulBatch is the batched form of residentMatRows: it applies the named weight to a
 // [P, in] activation panel and returns the [P, out] row-major result. For an f32-resident weight
-// it runs ONE matMulBatch GEMM (each weight row reused across all P tokens); for a quant-resident
-// weight it falls back to the per-token resident GEMV (correctness-first — batched Q8/Q4 is the
-// separate device slice). Either way Y[t] is bit-for-bit the per-token residentMatRows(name, X[t]).
+// with no active LoRA it runs ONE matMulBatch GEMM (each weight row reused across all P tokens);
+// a quant-resident weight (Q8/int4/Q4_K/k-quant/GPTQ), or an active LoRA adapter whose per-row
+// low-rank delta the batched f32 kernel does not model, falls back to the per-token resident GEMV
+// (correctness-first — batched Q8/Q4 is the separate device slice). Either way Y[t] is bit-for-bit
+// the per-token residentMatRows(name, X[t]), so callers stay bit-identical whatever the format.
 func (m *Model) residentMatMulBatch(name string, X []float32, out, in, P int) []float32 {
-	if m.has(name) {
+	if m.has(name) && m.lora == nil {
 		return matMulBatch(m.tensor(name), X, out, in, P)
 	}
 	Y := make([]float32, P*out)
