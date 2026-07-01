@@ -161,6 +161,27 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(status["weekly"], "next Monday")
         self.assertIn("weekly next Monday", status["block_reason"])
 
+    def test_runtime_status_keeps_future_weekly_throttle_despite_fresh_probe_ok(self) -> None:
+        registry = {
+            "generated_utc": "2026-07-01T00:00:00+00:00",
+            "throttle": {".claude-gem7-acct": {
+                "reset": "Dec 31, 11pm (America/Los_Angeles)",
+                "weekly": "Dec 31, 11pm (America/Los_Angeles)",
+            }},
+            "sessions": [{
+                "account": ".claude-gem7-acct",
+                "project": "_probe",
+                "probe_status": "OK",
+            }],
+        }
+
+        status = fleet_accounts.runtime_status(".claude-gem7-acct", registry=registry)
+
+        self.assertFalse(status["available"])
+        self.assertEqual(status["block_kind"], "usage")
+        self.assertEqual(status["status_source"], "registry")
+        self.assertEqual(status["weekly"], "Dec 31, 11pm (America/Los_Angeles)")
+
     def test_runtime_status_blocks_access_wall_without_login_reason(self) -> None:
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
@@ -1042,6 +1063,9 @@ class ResetIsFutureTests(unittest.TestCase):
         self.assertTrue(
             fleet_accounts._reset_is_future("Jun 25, 1pm (America/Los_Angeles)",
                                             self._at(13, 22)))
+        self.assertTrue(
+            fleet_accounts._reset_is_future("Mon Jun 25 at 1pm (America/Los_Angeles)",
+                                            self._at(13, 22)))
         self.assertFalse(
             fleet_accounts._reset_is_future("Jun 23, 8pm (America/Los_Angeles)",
                                             self._at(13, 22)))
@@ -1089,10 +1113,11 @@ class ProbeLedgerConsultTest(unittest.TestCase):
         (self.reg_dir / "probe_ledger.jsonl").write_text(
             json.dumps(entry) + "\n", encoding="utf-8")
 
-    def _carried_throttle_registry(self) -> dict:
+    def _carried_throttle_registry(self, info: dict | None = None) -> dict:
+        throttle_info = {"reset": "Dec 31, 11pm (America/Los_Angeles)"}
+        throttle_info.update(info or {})
         return {"generated_utc": "2026-06-17T00:00:00+00:00",
-                "throttle": {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}},
-                "sessions": []}
+                "throttle": {self.ACCT: throttle_info}, "sessions": []}
 
     def test_fresh_ok_probe_overrides_carried_throttle(self) -> None:
         self._write_ledger(status="OK", age_min=5.0)
@@ -1109,6 +1134,19 @@ class ProbeLedgerConsultTest(unittest.TestCase):
                 self.ACCT, registry=self._carried_throttle_registry())
         self.assertFalse(status["available"], "a stale OK probe must not clear the throttle")
         self.assertEqual(status["block_kind"], "usage")
+
+    def test_fresh_ok_probe_does_not_override_future_weekly_throttle(self) -> None:
+        self._write_ledger(status="OK", age_min=5.0)
+        registry = self._carried_throttle_registry({
+            "weekly": "Dec 31, 11pm (America/Los_Angeles)",
+        })
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
+
+        self.assertFalse(status["available"])
+        self.assertEqual(status["block_kind"], "usage")
+        self.assertEqual(status["weekly"], "Dec 31, 11pm (America/Los_Angeles)")
+        self.assertEqual(status["status_source"], "registry")
 
     def test_fresh_limit_probe_blocks_even_without_carried_throttle(self) -> None:
         self._write_ledger(status="LIMIT", age_min=3.0, reset="9pm (America/Los_Angeles)")
@@ -1129,6 +1167,25 @@ class ProbeLedgerConsultTest(unittest.TestCase):
             status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
         self.assertTrue(status["available"])
         self.assertEqual(status["status_source"], "probe")
+
+    def test_fresh_ok_ledger_clears_weekly_throttle_after_account_identity_change(self) -> None:
+        self._write_ledger(status="OK", age_min=5.0)
+        home = self.reg_dir / "home"
+        home.mkdir()
+        login_dir(home, self.ACCT, uuid="new-account", email="new@example.test")
+        registry = self._carried_throttle_registry({
+            "reset": "Dec 31, 11pm (America/Los_Angeles)",
+            "weekly": "Dec 31, 11pm (America/Los_Angeles)",
+            "account_uuid": "old-account",
+            "login_email": "old@example.test",
+        })
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False), \
+             mock.patch.object(fleet_accounts, "USER", str(home)):
+            status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
+
+        self.assertTrue(status["available"])
+        self.assertFalse(status["blocked"])
+        self.assertEqual(status["status_source"], "probe-ledger")
 
 
 def _seat_row(tag: str, *, available: bool = True, block_kind: str | None = None,

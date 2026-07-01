@@ -445,6 +445,12 @@ def _normalize_auth(auth: dict | None) -> dict:
 # Map account_probe's closed STATUS set onto the (available, block_kind) shape runtime_status
 # uses, so a ledger verdict rides the SAME fresh-probe override the _probe session row does.
 _PROBE_STATUS_KIND = {"AUTH": "auth", "ACCESS": "access", "CREDIT": "credit", "LIMIT": "usage"}
+_IDENTITY_KEYS = ("account_uuid", "login_email", "org_uuid")
+_IDENTITY_ALIASES = {
+    "account_uuid": ("account_uuid", "accountUuid"),
+    "login_email": ("login_email", "emailAddress", "email"),
+    "org_uuid": ("org_uuid", "organizationUuid"),
+}
 
 # annotate_accounts calls runtime_status once per worker, so a naive per-call ledger read
 # re-parses the whole probe_ledger.jsonl ~10x per roster render. Memoize the parsed snapshot
@@ -496,8 +502,9 @@ def _fresh_probe_from_ledger(account: str, fresh_min: float = PROBE_LEDGER_FRESH
     if age is None or age > fresh_min:
         return None
     status = str(entry.get("status") or "").upper()
+    identity = _account_identity_from(entry)
     if status == "OK":
-        return {"available": True, "age_min": age}
+        return {"available": True, "age_min": age, **identity}
     if status in _PROBE_STATUS_KIND:
         kind = _PROBE_STATUS_KIND[status]
         reset = entry.get("reset")
@@ -506,7 +513,8 @@ def _fresh_probe_from_ledger(account: str, fresh_min: float = PROBE_LEDGER_FRESH
             reason = (f"usage limit; resets {reset}" if reset else "usage limit") \
                 if kind == "usage" else f"{kind} block"
         return {"available": False, "block_kind": kind, "block_reason": reason,
-                "reset": reset, "weekly": entry.get("weekly"), "age_min": age}
+                "reset": reset, "weekly": entry.get("weekly"), "age_min": age,
+                **identity}
     # Any other status (APIERR/TRANSPORT/unknown) is not a clean availability signal --
     # fall through to the registry's own status rather than inventing a verdict.
     return None
@@ -553,6 +561,13 @@ def _reset_text(info: dict | str | None) -> str | None:
     return str(reset) if reset else None
 
 
+def _weekly_reset_text(info: dict | str | None) -> str | None:
+    if isinstance(info, dict):
+        weekly = info.get("weekly")
+        return str(weekly) if weekly else None
+    return None
+
+
 # Claude's daily usage limit resets on a rolling window of at most ~5 hours, so a
 # BARE reset time (no date, e.g. "3pm") is always close to NOW -- a few hours ahead
 # at most. The next occurrence of that clock time is therefore the right anchor only
@@ -570,10 +585,11 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
     parsed reset, and None when the format is unknown.
 
     Two shapes occur in the wild:
-      * DATED weekly resets -- "Jun 25, 1pm" -- anchored to this year. A
-        yearless month/day that already passed this year is expired; it is not
-        rolled forward to next year, because stale throttle records would
-        otherwise re-block seats months after the real reset.
+      * DATED weekly resets -- "Jun 25, 1pm" or "Mon Jun 25 at 1pm" --
+        anchored to this year. A yearless month/day that already passed this
+        year is expired; it is not rolled forward to next year, because stale
+        throttle records would otherwise re-block seats months after the real
+        reset.
       * BARE daily resets -- "3pm", "12:30am" -- a clock time with no date. These
         belong to the ~5h rolling daily window, so the answer is the NEAREST
         occurrence around now, bounded by ``_DAILY_RESET_WINDOW``: today's
@@ -597,7 +613,15 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
     raw = re.sub(r"\s*\([^)]*$", "", reset).strip()
     raw = re.sub(r"\s*\([^)]*\)", "", raw).strip()
     raw = re.sub(r"\s+", " ", raw).lower()
-    formats = ("%b %d, %I:%M%p", "%b %d, %I%p", "%I:%M%p", "%I%p")
+    raw = re.sub(r"^(mon|tue|wed|thu|fri|sat|sun)\s+", "", raw)
+    formats = (
+        "%b %d at %I:%M%p",
+        "%b %d at %I%p",
+        "%b %d, %I:%M%p",
+        "%b %d, %I%p",
+        "%I:%M%p",
+        "%I%p",
+    )
     for fmt in formats:
         candidate_raw = raw
         candidate_fmt = fmt
@@ -628,10 +652,114 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
 
 def throttle_is_active(info: dict | str | None,
                        now: dt.datetime | None = None) -> bool:
+    if isinstance(info, dict) and info.get("weekly"):
+        weekly_state = _reset_is_future(_weekly_reset_text(info), now)
+        if weekly_state is not False:
+            return True
     reset_state = _reset_is_future(_reset_text(info), now)
     if reset_state is False:
         return False
     return True
+
+
+def _weekly_throttle_is_active(info: dict | str | None,
+                               now: dt.datetime | None = None) -> bool:
+    if not isinstance(info, dict) or not info.get("weekly"):
+        return False
+    weekly_state = _reset_is_future(_weekly_reset_text(info), now)
+    if weekly_state is False:
+        return False
+    return throttle_is_active(info, now)
+
+
+def _account_identity_from(info: dict | None) -> dict:
+    if not isinstance(info, dict):
+        return {}
+    sources = [info]
+    for nested_key in ("identity", "account_identity", "oauthAccount"):
+        nested = info.get(nested_key)
+        if isinstance(nested, dict):
+            sources.append(nested)
+    out = {}
+    for key, aliases in _IDENTITY_ALIASES.items():
+        for src in sources:
+            for alias in aliases:
+                value = src.get(alias)
+                if value:
+                    out[key] = str(value).strip().lower()
+                    break
+            if key in out:
+                break
+    return out
+
+
+def _identity_match(left: dict, right: dict) -> bool | None:
+    for key in _IDENTITY_KEYS:
+        if left.get(key) and right.get(key):
+            return left[key] == right[key]
+    return None
+
+
+def _registry_account_identity(registry: dict | None, account: str) -> dict:
+    if not isinstance(registry, dict):
+        return {}
+    for row in registry.get("accounts") or []:
+        if isinstance(row, dict) and row.get("account") == account:
+            return _account_identity_from(row)
+    return {}
+
+
+def _current_config_identity(account: str) -> dict:
+    try:
+        return _account_identity_from(read_account_identity(os.path.join(USER, account)))
+    except Exception:
+        return {}
+
+
+def _throttle_matches_current_identity(account: str, throttle_info: dict,
+                                       registry: dict | None,
+                                       acct_sessions: list[dict],
+                                       probe_identity: dict | None = None) -> bool:
+    throttle_identity = _account_identity_from(throttle_info)
+    if not throttle_identity:
+        return True
+    candidates = [
+        probe_identity or {},
+        _current_config_identity(account),
+        _registry_account_identity(registry, account),
+    ]
+    candidates.extend(
+        _account_identity_from(s) for s in sorted(
+            acct_sessions, key=lambda row: _age_min(row) if _age_min(row) is not None else 10**9
+        )
+    )
+    for candidate in candidates:
+        verdict = _identity_match(throttle_identity, candidate)
+        if verdict is not None:
+            return verdict
+    return True
+
+
+def _apply_throttle_status(status: dict, throttle_info: dict) -> dict:
+    reset = throttle_info.get("reset")
+    weekly = throttle_info.get("weekly")
+    reason = f"usage limit; resets {reset}" if reset else "usage limit"
+    if weekly:
+        reason += f"; weekly {weekly}"
+    status.update({
+        "available": False,
+        "blocked": True,
+        "block_kind": "usage",
+        "block_reason": reason,
+        "reset": reset,
+        "weekly": weekly,
+        # Cooldown START, when the throttle ledger record carried one (#1801). The
+        # throttle map is read whole via _normalize_throttle, so a `since` the recorder
+        # stamped survives here; None when it did not, so this stays forward-compatible.
+        "throttled_since": throttle_info.get("since"),
+        "throttled": True,
+    })
+    return status
 
 
 def _should_consult_probe_ledger(registry: dict | None, probe_ledger: bool | None) -> bool:
@@ -732,11 +860,24 @@ def runtime_status(account: str, registry: dict | None = None,
         "status_source": "registry" if reg else "none",
         "registry_age_min": _registry_age_min(reg) if reg else None,
     }
+    thr = throttle_map.get(account)
 
     # A fresh probe is authoritative. OK -> available now (clears stale carried blocks);
     # a fresh probe BLOCK -> that block, with the probe's own (account-correct) reason,
-    # never a stale dir-keyed throttle from a previous login.
+    # never a stale dir-keyed throttle from a previous login. The exception is a carried
+    # weekly cap whose reset is still active for the same account identity: an OK probe
+    # during the probe-freshness window must not reopen that seat before the weekly reset.
     if fresh_probe_ok:
+        probe_identity = {}
+        for row in probe_rows:
+            if str(row.get("probe_status") or "").upper() == "OK" \
+                    or (row.get("disp") == "LIVE" and not row.get("probe_status")):
+                probe_identity = _account_identity_from(row)
+                break
+        if thr and _weekly_throttle_is_active(thr) \
+                and _throttle_matches_current_identity(
+                    account, thr, reg, acct_sessions, probe_identity):
+            return _apply_throttle_status(status, thr)
         status["status_source"] = "probe"
         return status
     if fresh_probe_block is not None:
@@ -763,6 +904,10 @@ def runtime_status(account: str, registry: dict | None = None,
         led = _fresh_probe_from_ledger(account)
         if led is not None:
             if led.get("available"):
+                if thr and _weekly_throttle_is_active(thr) \
+                        and _throttle_matches_current_identity(
+                            account, thr, reg, acct_sessions, led):
+                    return _apply_throttle_status(status, thr)
                 status["status_source"] = "probe-ledger"
                 status["probe_age_min"] = led.get("age_min")
                 return status
@@ -776,27 +921,8 @@ def runtime_status(account: str, registry: dict | None = None,
             })
             return status
 
-    thr = throttle_map.get(account)
     if thr and throttle_is_active(thr):
-        reset = thr.get("reset")
-        weekly = thr.get("weekly")
-        reason = f"usage limit; resets {reset}" if reset else "usage limit"
-        if weekly:
-            reason += f"; weekly {weekly}"
-        status.update({
-            "available": False,
-            "blocked": True,
-            "block_kind": "usage",
-            "block_reason": reason,
-            "reset": reset,
-            "weekly": weekly,
-            # Cooldown START, when the throttle ledger record carried one (#1801). The
-            # throttle map is read whole via _normalize_throttle, so a `since` the recorder
-            # stamped survives here; None when it did not, so this stays forward-compatible.
-            "throttled_since": thr.get("since"),
-            "throttled": True,
-        })
-        return status
+        return _apply_throttle_status(status, thr)
 
     if auth_current:
         last = " ".join(str(s.get("last") or s.get("reason") or "") for s in auth_blocked)
