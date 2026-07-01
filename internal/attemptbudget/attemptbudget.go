@@ -12,7 +12,11 @@
 // internal/skipledger already use for clock-dependent folds.
 package attemptbudget
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
+)
 
 // Status is the closed dispatchability verdict for one issue.
 type Status string
@@ -68,27 +72,17 @@ const (
 func classify(raw string) FailureClass {
 	low := strings.ToLower(raw)
 	switch {
-	case containsAny(low, "auth", "credential", "permission", "unauthorized", "forbidden"):
+	case strmatch.ContainsAny(low, "auth", "credential", "permission", "unauthorized", "forbidden"):
 		return FailureClassAuth
-	case containsAny(low, "merge", "conflict", "rebase"):
+	case strmatch.ContainsAny(low, "merge", "conflict", "rebase"):
 		return FailureClassMerge
-	case containsAny(low, "test", "assert"):
+	case strmatch.ContainsAny(low, "test", "assert"):
 		return FailureClassTest
-	case containsAny(low, "ambiguous", "scope"):
+	case strmatch.ContainsAny(low, "ambiguous", "scope"):
 		return FailureClassAmbiguousScope
 	default:
 		return FailureClassOther
 	}
-}
-
-// containsAny reports whether s (already lowercased) contains any of substrs.
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
 }
 
 // DefaultBackoffSeconds is the closed, total default policy: how long an
