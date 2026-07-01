@@ -124,6 +124,30 @@ func TestRouterCarriesAgentSchedulingMetadata(t *testing.T) {
 	}
 }
 
+func TestRouterSuggestsSubLaneSplitsForOverloadedTree(t *testing.T) {
+	taxonomy := LaneTaxonomy{
+		Concurrent: []string{"dispatch"},
+		Trees: map[string][]string{
+			"dispatch": {"cmd/**", "internal/dispatchtick/**"},
+		},
+	}
+	p := RouteIssues(RouterInput{
+		Workspace:  "C:/work/fak",
+		Taxonomy:   taxonomy,
+		IssueLimit: 1000,
+		Issues: []Issue{
+			routerIssue(21, "dispatch: route cmd text output", nil, scopedDispatchIssueBody("3", "fak/cmd/fak/dispatch_route.go")),
+			routerIssue(22, "dispatch: route native prompt bucket", nil, scopedDispatchIssueBody("2", "fak/internal/dispatchtick/router.go")),
+		},
+	})
+	grp := p.Lanes["dispatch"]
+	if grp.Count != 2 || len(grp.SubLanes) != 2 {
+		t.Fatalf("dispatch lane = %+v, want two sub-lane suggestions", grp)
+	}
+	assertRouterSubLane(t, grp.SubLanes, "cmd/fak", 1, 3, []int{21})
+	assertRouterSubLane(t, grp.SubLanes, "internal/dispatchtick", 1, 2, []int{22})
+}
+
 func TestRouterExclusiveAndAmbiguity(t *testing.T) {
 	excl := routeTestIssue(routerIssue(7, "abi: hoist the public ABI surface", nil, ""))
 	if excl.Lane != "" || excl.Confidence != "none" || excl.UnroutedReason == "" {
@@ -236,6 +260,45 @@ func TestRouterKeepsSmallExpectedStepLeafDispatchable(t *testing.T) {
 	}
 }
 
+func scopedDispatchIssueBody(expectedSteps, path string) string {
+	return strings.Join([]string{
+		"## Parent context",
+		"dispatch route fixture",
+		"## Current state",
+		"Dispatch route already has lane totals.",
+		"## Why this is next",
+		"Overloaded lanes need disjoint sub-lane suggestions.",
+		"## Working spine",
+		"Route concrete path hints into prefix buckets.",
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		expectedSteps,
+		"## Trigger",
+		"Lane heatmap pressure crossed the overload threshold.",
+		"## Batch policy",
+		"One route report update per overload class.",
+		"## In scope",
+		"Suggest a path-prefix sub-lane split.",
+		"## Out of scope",
+		"Do not launch workers.",
+		"## Done condition",
+		"The dispatch route payload includes sub-lane buckets.",
+		"## Witness",
+		"go test ./internal/dispatchtick",
+		"## Acceptance gate",
+		"go test ./internal/dispatchtick",
+		"## Lane",
+		"dispatch",
+		"## Path hints",
+		"- `" + path + "`",
+		"## Boundary notes",
+		"Public issue only.",
+		"## Closure binding",
+		"Resolving commit cites #N and carries `(fak dispatchtick)`.",
+	}, "\n\n")
+}
+
 func scopedGatewayIssueBody(expectedSteps string) string {
 	return strings.Join([]string{
 		"## Parent context",
@@ -273,6 +336,28 @@ func scopedGatewayIssueBody(expectedSteps string) string {
 		"## Closure binding",
 		"Resolving commit cites #N and carries `(fak gateway)`.",
 	}, "\n\n")
+}
+
+func assertRouterSubLane(t *testing.T, sublanes []RouterSubLane, prefix string, count, steps int, issues []int) {
+	t.Helper()
+	for _, sublane := range sublanes {
+		if sublane.Prefix != prefix {
+			continue
+		}
+		if sublane.Count != count || sublane.StepBudget != steps {
+			t.Fatalf("sub-lane %q = %+v, want count=%d steps=%d", prefix, sublane, count, steps)
+		}
+		if len(sublane.Issues) != len(issues) {
+			t.Fatalf("sub-lane %q issues = %+v, want %+v", prefix, sublane.Issues, issues)
+		}
+		for i := range issues {
+			if sublane.Issues[i] != issues[i] {
+				t.Fatalf("sub-lane %q issues = %+v, want %+v", prefix, sublane.Issues, issues)
+			}
+		}
+		return
+	}
+	t.Fatalf("sub-lane %q missing from %+v", prefix, sublanes)
 }
 
 func skippedIssueByNumber(skipped []SkippedIssue, number int) SkippedIssue {

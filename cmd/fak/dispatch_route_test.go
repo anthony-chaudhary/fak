@@ -29,6 +29,10 @@ func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 				Count:      2,
 				StepBudget: 7,
 				Issues:     []int{10, 11},
+				SubLanes: []dispatchtick.RouterSubLane{
+					{Prefix: "cmd/fak", Count: 1, StepBudget: 3, Issues: []int{10}},
+					{Prefix: "internal/dispatchtick", Count: 1, StepBudget: 4, Issues: []int{11}},
+				},
 			},
 		},
 		RepairQueues: []dispatchtick.RouterRepairQueue{
@@ -57,6 +61,8 @@ func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 	for _, want := range []string{
 		"routed=2 steps=7",
 		"gateway            2 issue(s)   7 step(s): 10,11",
+		"split cmd/fak                    1 issue(s)   3 step(s): 10",
+		"split internal/dispatchtick      1 issue(s)   4 step(s): 11",
 		"skipped=2",
 		"skipped: 2 (BLOCKED_BY_HUMAN=1, ISSUE_NOT_DISPATCH_LEAF=1)",
 		"repair_queue[dispatch]: 2 issue(s) 7 step(s) issues=10,11 next=launch scoped leaf issues through their routed lanes",

@@ -191,17 +191,25 @@ type RouterCounts struct {
 }
 
 type RouterLaneGroup struct {
-	Tree       []string       `json:"tree"`
-	Count      int            `json:"count"`
-	StepBudget int            `json:"step_budget,omitempty"`
-	Issues     []int          `json:"issues"`
-	WorkUnits  map[int]string `json:"work_units,omitempty"`
-	IssueSteps map[int]int    `json:"issue_steps,omitempty"`
+	Tree       []string        `json:"tree"`
+	Count      int             `json:"count"`
+	StepBudget int             `json:"step_budget,omitempty"`
+	Issues     []int           `json:"issues"`
+	SubLanes   []RouterSubLane `json:"sub_lanes,omitempty"`
+	WorkUnits  map[int]string  `json:"work_units,omitempty"`
+	IssueSteps map[int]int     `json:"issue_steps,omitempty"`
 	// Priority maps an issue number to its dispatch-priority weight for the
 	// issues that carry a priority/* label (unlabeled issues are omitted and
 	// resolve to PriorityWeightDefault). It is how the picker orders the lane's
 	// candidates priority-first (#1395) without re-deriving weights from labels.
 	Priority map[int]int `json:"priority,omitempty"`
+}
+
+type RouterSubLane struct {
+	Prefix     string `json:"prefix"`
+	Count      int    `json:"count"`
+	StepBudget int    `json:"step_budget,omitempty"`
+	Issues     []int  `json:"issues"`
 }
 
 type RouterPayload struct {
@@ -510,12 +518,14 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		byConf[conf] = 0
 	}
 	lanes := map[string]RouterLaneGroup{}
+	laneRoutes := map[string][]IssueRoute{}
 	routedStepBudget := 0
 	for _, r := range in.Routes {
 		byConf[r.Confidence] = byConf[r.Confidence] + 1
 		if r.Lane == "" {
 			continue
 		}
+		laneRoutes[r.Lane] = append(laneRoutes[r.Lane], r)
 		grp := lanes[r.Lane]
 		grp.Tree = append([]string(nil), in.Trees[r.Lane]...)
 		grp.Count++
@@ -554,6 +564,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 			cands[i] = LaneCandidate{Number: n, Weight: laneIssueWeight(grp.Priority, n)}
 		}
 		grp.Issues = OrderLaneCandidates(cands, false)
+		grp.SubLanes = buildRouterSubLanes(laneRoutes[lane])
 		lanes[lane] = grp
 	}
 	total := len(in.Routes)
@@ -622,6 +633,84 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		Issues:              issues,
 		RepairQueues:        repairQueues,
 		SkippedHumanBlocked: skipped,
+	}
+}
+
+func buildRouterSubLanes(routes []IssueRoute) []RouterSubLane {
+	if len(routes) < 2 {
+		return nil
+	}
+	groups := map[string]*RouterSubLane{}
+	for _, route := range routes {
+		prefix := routeSubLanePrefix(route.Paths)
+		if prefix == "" {
+			continue
+		}
+		grp := groups[prefix]
+		if grp == nil {
+			grp = &RouterSubLane{Prefix: prefix}
+			groups[prefix] = grp
+		}
+		grp.Count++
+		grp.StepBudget += routeStepBudget(route)
+		grp.Issues = append(grp.Issues, route.Number)
+	}
+	if len(groups) < 2 {
+		return nil
+	}
+	out := make([]RouterSubLane, 0, len(groups))
+	for _, grp := range groups {
+		sort.Slice(grp.Issues, func(i, j int) bool { return grp.Issues[i] > grp.Issues[j] })
+		out = append(out, *grp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Prefix < out[j].Prefix
+	})
+	return out
+}
+
+func routeSubLanePrefix(paths []string) string {
+	prefix := ""
+	for _, path := range paths {
+		next := pathOwnershipPrefix(path)
+		if next == "" {
+			continue
+		}
+		if prefix == "" {
+			prefix = next
+			continue
+		}
+		if prefix != next {
+			return ""
+		}
+	}
+	return prefix
+}
+
+func pathOwnershipPrefix(path string) string {
+	parts := strings.Split(strings.Trim(strings.ReplaceAll(path, "\\", "/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	switch parts[0] {
+	case "internal", "cmd", "tools", "docs", "examples", "experiments", "visuals":
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+		return parts[0]
+	case ".github", ".claude":
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+		return parts[0]
+	default:
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+		return parts[0]
 	}
 }
 

@@ -61,6 +61,10 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 	for _, lane := range lanes {
 		grp := router.Lanes[lane]
 		fmt.Fprintf(&b, "  %-16s %3d issue(s) %3d step(s): %s\n", lane, grp.Count, grp.StepBudget, intList(grp.Issues))
+		for _, sublane := range grp.SubLanes {
+			fmt.Fprintf(&b, "    split %-24s %3d issue(s) %3d step(s): %s\n",
+				sublane.Prefix, sublane.Count, sublane.StepBudget, intList(sublane.Issues))
+		}
 	}
 	if len(router.SkippedHumanBlocked) > 0 {
 		fmt.Fprintf(&b, "  skipped: %d", len(router.SkippedHumanBlocked))
