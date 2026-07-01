@@ -42,6 +42,9 @@ type Half struct {
 	IOReadBytes  uint64
 	IOWriteBytes uint64
 	HaveIO       bool
+	NetRxBytes   uint64
+	NetTxBytes   uint64
+	HaveNet      bool
 }
 
 // CPUSeconds is the combined user+system CPU time in seconds.
@@ -68,6 +71,11 @@ type Snapshot struct {
 	GoHeapSysBytes       uint64
 	NumCPU               int
 	GOMAXPROCS           int
+	// GPU/accelerator (present only when the harness runs a model in-kernel via
+	// --gguf/--backend; the default proxy path uses no local GPU, so HaveGPU is false).
+	GPUVRAMUsedBytes  uint64
+	GPUVRAMTotalBytes uint64
+	HaveGPU           bool
 }
 
 // procSample is a single raw reading of ONE process's OS-level resource use, as
@@ -107,9 +115,42 @@ type Sampler struct {
 
 	agent Half
 
+	// gpu is the latest accelerator reading (from gpuProvider), snapshot-scoped.
+	gpuUsed  uint64
+	gpuTotal uint64
+	haveGPU  bool
+
+	// netProvider pulls the kernel half's cumulative (rx, tx) upstream network bytes
+	// each sample; gpuProvider pulls (used, total) accelerator VRAM. Both nil by default
+	// (the leaf reads no network/GPU itself — the host wires them). Set before Start.
+	netProvider func() (rx, tx uint64, ok bool)
+	gpuProvider func() (used, total uint64, ok bool)
+
 	stopOnce sync.Once
 	stop     chan struct{}
 	done     chan struct{}
+}
+
+// SetNetworkProvider installs the pull source for the kernel half's network bytes
+// (fak guard wires this to its upstream CountingRoundTripper). Call before Start.
+func (s *Sampler) SetNetworkProvider(fn func() (rx, tx uint64, ok bool)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.netProvider = fn
+	s.mu.Unlock()
+}
+
+// SetGPUProvider installs the pull source for accelerator VRAM (used, total). fak guard
+// wires this to compute.DeviceMemoryInfo when a model runs in-kernel. Call before Start.
+func (s *Sampler) SetGPUProvider(fn func() (used, total uint64, ok bool)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.gpuProvider = fn
+	s.mu.Unlock()
 }
 
 // New returns a Sampler that reads the wall clock.
@@ -211,6 +252,16 @@ func (s *Sampler) foldProc(ps procSample, now time.Time, goroutines int, heapSys
 	if heapSys > s.heapPeak {
 		s.heapPeak = heapSys
 	}
+	if s.netProvider != nil {
+		if rx, tx, ok := s.netProvider(); ok {
+			s.kernel.NetRxBytes, s.kernel.NetTxBytes, s.kernel.HaveNet = rx, tx, true
+		}
+	}
+	if s.gpuProvider != nil {
+		if used, total, ok := s.gpuProvider(); ok {
+			s.gpuUsed, s.gpuTotal, s.haveGPU = used, total, true
+		}
+	}
 }
 
 // FoldChildExit records the wrapped agent child's final resource use from its exit
@@ -245,6 +296,9 @@ func (s *Sampler) Snapshot() Snapshot {
 		GoHeapSysBytes:       s.heapPeak,
 		NumCPU:               runtime.NumCPU(),
 		GOMAXPROCS:           runtime.GOMAXPROCS(0),
+		GPUVRAMUsedBytes:     s.gpuUsed,
+		GPUVRAMTotalBytes:    s.gpuTotal,
+		HaveGPU:              s.haveGPU,
 	}
 }
 
@@ -259,6 +313,12 @@ func (s Snapshot) Report() string {
 	fmt.Fprintf(&b, "; %d goroutines peak, Go heap %s; %d cores", s.GoroutinesPeak, humanBytes(s.GoHeapSysBytes), s.NumCPU)
 	if s.GOMAXPROCS > 0 && s.GOMAXPROCS != s.NumCPU {
 		fmt.Fprintf(&b, " (GOMAXPROCS %d)", s.GOMAXPROCS)
+	}
+	if s.HaveGPU {
+		fmt.Fprintf(&b, "; gpu vram %s", humanBytes(s.GPUVRAMUsedBytes))
+		if s.GPUVRAMTotalBytes > 0 {
+			fmt.Fprintf(&b, "/%s", humanBytes(s.GPUVRAMTotalBytes))
+		}
 	}
 	fmt.Fprintf(&b, "; sampled %dx over %s", s.Samples, humanDur(s.Elapsed))
 	return b.String()
@@ -289,6 +349,9 @@ func writeHalf(b *strings.Builder, h Half, elapsed time.Duration, cpuPeak float6
 	}
 	if h.HaveIO {
 		fmt.Fprintf(b, ", io r/w %s/%s", humanBytes(h.IOReadBytes), humanBytes(h.IOWriteBytes))
+	}
+	if h.HaveNet {
+		fmt.Fprintf(b, ", net rx/tx %s/%s", humanBytes(h.NetRxBytes), humanBytes(h.NetTxBytes))
 	}
 }
 
@@ -321,6 +384,22 @@ func (s Snapshot) PrometheusText() string {
 	if s.Agent.HaveIO {
 		fmt.Fprintf(&b, "fak_harness_io_bytes_total{half=\"agent\",dir=\"read\"} %s\n", promFloat(float64(s.Agent.IOReadBytes)))
 		fmt.Fprintf(&b, "fak_harness_io_bytes_total{half=\"agent\",dir=\"write\"} %s\n", promFloat(float64(s.Agent.IOWriteBytes)))
+	}
+	writeHelp(&b, "fak_harness_net_bytes_total", "Upstream network bytes by the fak guard harness (the gateway's agent↔LLM proxy traffic), by half and direction.", "gauge")
+	if s.Kernel.HaveNet {
+		fmt.Fprintf(&b, "fak_harness_net_bytes_total{half=\"kernel\",dir=\"rx\"} %s\n", promFloat(float64(s.Kernel.NetRxBytes)))
+		fmt.Fprintf(&b, "fak_harness_net_bytes_total{half=\"kernel\",dir=\"tx\"} %s\n", promFloat(float64(s.Kernel.NetTxBytes)))
+	}
+	if s.Agent.HaveNet {
+		fmt.Fprintf(&b, "fak_harness_net_bytes_total{half=\"agent\",dir=\"rx\"} %s\n", promFloat(float64(s.Agent.NetRxBytes)))
+		fmt.Fprintf(&b, "fak_harness_net_bytes_total{half=\"agent\",dir=\"tx\"} %s\n", promFloat(float64(s.Agent.NetTxBytes)))
+	}
+	if s.HaveGPU {
+		writeHelp(&b, "fak_harness_gpu_vram_bytes", "Accelerator VRAM used/total by the fak guard harness when a model runs in-kernel (--gguf/--backend). Absent on the default proxy path (no local GPU).", "gauge")
+		fmt.Fprintf(&b, "fak_harness_gpu_vram_bytes{kind=\"used\"} %s\n", promFloat(float64(s.GPUVRAMUsedBytes)))
+		if s.GPUVRAMTotalBytes > 0 {
+			fmt.Fprintf(&b, "fak_harness_gpu_vram_bytes{kind=\"total\"} %s\n", promFloat(float64(s.GPUVRAMTotalBytes)))
+		}
 	}
 	writeHelp(&b, "fak_harness_goroutines", "Peak goroutine count observed in the fak guard kernel this session.", "gauge")
 	fmt.Fprintf(&b, "fak_harness_goroutines %d\n", s.GoroutinesPeak)
@@ -364,6 +443,8 @@ type ledgerRow struct {
 	GoHeapSysBytes   uint64   `json:"go_heap_sys_bytes"`
 	NumCPU           int      `json:"num_cpu"`
 	GOMAXPROCS       int      `json:"gomaxprocs"`
+	GPUVRAMUsed      *uint64  `json:"gpu_vram_used_bytes,omitempty"`
+	GPUVRAMTotal     *uint64  `json:"gpu_vram_total_bytes,omitempty"`
 }
 
 type halfJSON struct {
@@ -373,6 +454,8 @@ type halfJSON struct {
 	PeakRSSBytes *uint64  `json:"peak_rss_bytes,omitempty"`
 	IOReadBytes  *uint64  `json:"io_read_bytes,omitempty"`
 	IOWriteBytes *uint64  `json:"io_write_bytes,omitempty"`
+	NetRxBytes   *uint64  `json:"net_rx_bytes,omitempty"`
+	NetTxBytes   *uint64  `json:"net_tx_bytes,omitempty"`
 }
 
 func (h Half) toJSON() halfJSON {
@@ -392,6 +475,10 @@ func (h Half) toJSON() halfJSON {
 	if h.HaveIO {
 		r, w := h.IOReadBytes, h.IOWriteBytes
 		j.IOReadBytes, j.IOWriteBytes = &r, &w
+	}
+	if h.HaveNet {
+		rx, tx := h.NetRxBytes, h.NetTxBytes
+		j.NetRxBytes, j.NetTxBytes = &rx, &tx
 	}
 	return j
 }
@@ -416,6 +503,13 @@ func (s Snapshot) MarshalLedgerRow(mode, provider, agent string, now time.Time) 
 	if s.HaveKernelCPUPeak {
 		p := s.KernelCPUPercentPeak
 		row.KernelCPUPctPeak = &p
+	}
+	if s.HaveGPU {
+		used, total := s.GPUVRAMUsedBytes, s.GPUVRAMTotalBytes
+		row.GPUVRAMUsed = &used
+		if total > 0 {
+			row.GPUVRAMTotal = &total
+		}
 	}
 	return json.Marshal(row)
 }
