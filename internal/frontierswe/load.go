@@ -33,22 +33,31 @@ func LoadTask(dir string) (*Task, error) {
 	}
 
 	// job.yaml / oracle.yaml are optional; absence is fine, a parse error is not.
-	if jb, err := os.ReadFile(filepath.Join(dir, "job.yaml")); err == nil {
-		if err := parseJobYAML(jb, &t.Job); err != nil {
-			return nil, fmt.Errorf("frontierswe: %s/job.yaml: %w", dir, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("frontierswe: read job.yaml: %w", err)
+	if err := foldOptionalYAML(dir, "job.yaml", func(b []byte) error { return parseJobYAML(b, &t.Job) }); err != nil {
+		return nil, err
 	}
-	if ob, err := os.ReadFile(filepath.Join(dir, "oracle.yaml")); err == nil {
-		if err := parseOracleYAML(ob, &t.Oracle); err != nil {
-			return nil, fmt.Errorf("frontierswe: %s/oracle.yaml: %w", dir, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("frontierswe: read oracle.yaml: %w", err)
+	if err := foldOptionalYAML(dir, "oracle.yaml", func(b []byte) error { return parseOracleYAML(b, &t.Oracle) }); err != nil {
+		return nil, err
 	}
 
 	return t, nil
+}
+
+// foldOptionalYAML reads dir/name if it exists and applies parse to its bytes. A
+// missing file is not an error (the field stays zero); a read error or a parse
+// error is wrapped with the same frontierswe: prefix the two call sites shared.
+func foldOptionalYAML(dir, name string, parse func([]byte) error) error {
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("frontierswe: read %s: %w", name, err)
+	}
+	if err := parse(b); err != nil {
+		return fmt.Errorf("frontierswe: %s/%s: %w", dir, name, err)
+	}
+	return nil
 }
 
 // --- minimal, self-contained TOML reader for the flat task.toml shape ---
@@ -134,23 +143,25 @@ func assignTOML(t *Task, section, key, val string, line int) error {
 			t.Metadata.Tags = arr
 		}
 	case "agent":
-		if key == "timeout_sec" {
-			f, err := tomlFloat(val)
-			if err != nil {
-				return fmt.Errorf("line %d: agent.timeout_sec: %w", line, err)
-			}
-			t.Agent.TimeoutSec = f
-		}
+		return assignTimeoutSec(&t.Agent.TimeoutSec, section, key, val, line)
 	case "verifier":
-		if key == "timeout_sec" {
-			f, err := tomlFloat(val)
-			if err != nil {
-				return fmt.Errorf("line %d: verifier.timeout_sec: %w", line, err)
-			}
-			t.Verifier.TimeoutSec = f
-		}
+		return assignTimeoutSec(&t.Verifier.TimeoutSec, section, key, val, line)
 	case "environment":
 		return assignEnvironment(&t.Environment, key, val, line)
+	}
+	return nil
+}
+
+// assignTimeoutSec folds a `timeout_sec = <float>` line into dst. The agent and
+// verifier sections carry the identical single float field; section names the
+// table in the error message so the two callers stay byte-identical.
+func assignTimeoutSec(dst *float64, section, key, val string, line int) error {
+	if key == "timeout_sec" {
+		f, err := tomlFloat(val)
+		if err != nil {
+			return fmt.Errorf("line %d: %s.timeout_sec: %w", line, section, err)
+		}
+		*dst = f
 	}
 	return nil
 }
