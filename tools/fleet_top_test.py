@@ -196,14 +196,17 @@ class SlackPostTest(unittest.TestCase):
         snap = fleet_top.build_snapshot(
             _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
         text = fleet_top.slack_text(snap)
-        self.assertIn("*agent session health:*", text)
+        self.assertIn("agent session health", text)
+        # The headline leads with the system's OWN verdict (auth+access walls escalate).
+        self.assertIn("NEEDS YOU", text)
         self.assertIn("session(s)", text)
         self.assertIn("accounts usable", text)
         self.assertIn("plane: sessions/accounts, not dispatch slots", text)
         self.assertIn("session states:", text)
         self.assertIn("accounts:", text)
-        self.assertIn("action:", text)
-        self.assertIn("review:", text)
+        self.assertIn("action:", text)            # escalations (login / access walls)
+        self.assertIn("self-healing:", text)      # resume + recent park, folded to one line
+        self.assertNotIn("review:", text)         # replaced by the lifecycle partition
         self.assertNotIn("S/N self-score", text)
         self.assertNotIn("```", text)             # Slack uses compact mrkdwn.
 
@@ -255,6 +258,134 @@ class SlackPostTest(unittest.TestCase):
         self.assertFalse(verdict["posted"])
         self.assertEqual(verdict["skipped"], "dry-run")
         self.assertEqual(calls, [])
+
+
+class LifecycleGateTest(unittest.TestCase):
+    """The self-healing escalation gate (#2040): the snapshot carries a system verdict,
+    and each attention item is tagged self_healing (a lifecycle owns it) vs escalate (a
+    human must act). All hermetic — synthetic docs straight into build_snapshot."""
+
+    def _snap(self, doc):
+        return fleet_top.build_snapshot(
+            doc, workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
+
+    def _acct(self, tag, **kw):
+        base = {"account": f".claude-{tag}", "tag": tag, "available": False,
+                "blocked": False, "throttled": False, "block_kind": "", "block_reason": "",
+                "config_dir": f"/h/.claude-{tag}"}
+        base.update(kw)
+        return base
+
+    def _lifecycle(self, snap, kind):
+        for i in snap["attention"]:
+            if i.get("kind") == kind:
+                return i.get("lifecycle")
+        return None
+
+    def test_default_mixed_fleet_needs_you_and_partitions(self):
+        snap = self._snap(_doc())
+        self.assertEqual(snap["system"]["verdict"], "NEEDS_YOU")
+        # auth + access walls escalate; nothing can self-heal them.
+        self.assertEqual(self._lifecycle(snap, "login"), "escalate")
+        self.assertEqual(self._lifecycle(snap, "access"), "escalate")
+        # a resumable session (auto-resume owned) + a recent park are self-healing.
+        self.assertEqual(self._lifecycle(snap, "resume"), "self_healing")
+        self.assertEqual(self._lifecycle(snap, "quiet"), "self_healing")
+        self.assertGreaterEqual(snap["system"]["escalate"], 2)
+        self.assertGreaterEqual(snap["system"]["self_healing"], 2)
+
+    def test_resume_plus_throttle_reset_is_self_healing_verdict(self):
+        """A fleet whose only outstanding items are a queued auto-resume and a throttle
+        with a known reset reports SELF_HEALING — no operator action, no `action:`."""
+        doc = {
+            "now": "2026-06-23T18:00:00+00:00",
+            "throttle": {".claude-bravo": {"reset": "Jun 26, 6pm"}},
+            "accounts": [
+                self._acct("alpha", available=True),
+                self._acct("bravo", available=False, blocked=True, throttled=True,
+                           block_kind="throttle", reset="Jun 26, 6pm"),
+            ],
+            "rows": [
+                {"category": "AGENT", "disp": "DEAD_MIDTOOL", "action": "AUTO_RESUME",
+                 "age_min": 5.0, "account": ".claude-alpha", "project": "C--work-fak",
+                 "session": "aaaa-1", "resume_cmd": "claude --resume aaaa-1 -p 'go'"},
+            ],
+        }
+        snap = self._snap(doc)
+        self.assertEqual(snap["system"]["verdict"], "SELF_HEALING")
+        self.assertEqual(snap["system"]["escalate"], 0)
+        text = fleet_top.slack_text(snap)
+        self.assertIn("SELF-HEALING", text)
+        self.assertNotIn("action:", text)
+        self.assertIn("self-healing:", text)
+
+    def test_wait_with_no_reset_escalates(self):
+        """No usable account AND no known reset is an indefinite stall — escalate."""
+        doc = {
+            "now": "2026-06-23T18:00:00+00:00",
+            "throttle": {".claude-bravo": {}},
+            "accounts": [
+                self._acct("bravo", available=False, blocked=True, throttled=True,
+                           block_kind="throttle", reset=""),
+            ],
+            "rows": [
+                {"category": "AGENT", "disp": "DEAD_MIDTOOL", "action": "AUTO_RESUME",
+                 "age_min": 5.0, "account": ".claude-bravo", "project": "C--work-fak",
+                 "session": "bbbb-2", "resume_cmd": "claude --resume bbbb-2 -p 'go'"},
+            ],
+        }
+        snap = self._snap(doc)
+        self.assertEqual(self._lifecycle(snap, "wait"), "escalate")
+        self.assertEqual(snap["system"]["verdict"], "NEEDS_YOU")
+
+    def test_park_past_stuck_ceiling_escalates(self):
+        """A park under the stuck ceiling is self-healing churn; past it, it escalates."""
+        doc = {
+            "now": "2026-06-23T18:00:00+00:00", "throttle": {},
+            "accounts": [self._acct("alpha", available=True)],
+            "rows": [
+                {"category": "HANGING", "disp": "PARKED_WAIT", "action": "SURFACE",
+                 "age_min": 200.0, "account": ".claude-alpha", "project": "C--work-fak",
+                 "session": "cccc-3", "last": "parked", "resume_cmd": ""},
+                {"category": "HANGING", "disp": "PARKED_WAIT", "action": "SURFACE",
+                 "age_min": 40.0, "account": ".claude-alpha", "project": "C--work-fak",
+                 "session": "dddd-4", "last": "parked", "resume_cmd": ""},
+            ],
+        }
+        snap = self._snap(doc)
+        quiets = {i["title"]: i["lifecycle"] for i in snap["attention"] if i["kind"] == "quiet"}
+        self.assertEqual(len(quiets), 2)
+        self.assertTrue(any(v == "escalate" for v in quiets.values()))
+        self.assertTrue(any(v == "self_healing" for v in quiets.values()))
+        self.assertEqual(snap["system"]["verdict"], "NEEDS_YOU")
+
+    def test_autoresume_not_owned_makes_resume_escalate(self):
+        """Where no auto-resume watchdog runs (FLEET_TOP_AUTORESUME_OWNED=0) a resumable
+        session is stranded, operator-only work — it escalates."""
+        saved = fleet_top.AUTORESUME_OWNED
+        fleet_top.AUTORESUME_OWNED = False
+        try:
+            doc = {
+                "now": "2026-06-23T18:00:00+00:00", "throttle": {},
+                "accounts": [self._acct("alpha", available=True)],
+                "rows": [
+                    {"category": "AGENT", "disp": "DEAD_MIDTOOL", "action": "AUTO_RESUME",
+                     "age_min": 5.0, "account": ".claude-alpha", "project": "C--work-fak",
+                     "session": "eeee-5", "resume_cmd": "claude --resume eeee-5 -p 'go'"},
+                ],
+            }
+            snap = self._snap(doc)
+            self.assertEqual(self._lifecycle(snap, "resume"), "escalate")
+            self.assertEqual(snap["system"]["verdict"], "NEEDS_YOU")
+        finally:
+            fleet_top.AUTORESUME_OWNED = saved
+
+    def test_empty_fleet_is_healthy(self):
+        snap = self._snap({"rows": [], "accounts": [], "throttle": {}})
+        self.assertEqual(snap["system"]["verdict"], "HEALTHY")
+        self.assertEqual(snap["system"]["escalate"], 0)
+        self.assertEqual(snap["system"]["self_healing"], 0)
+        self.assertIn("HEALTHY", fleet_top.slack_text(snap))
 
 
 if __name__ == "__main__":

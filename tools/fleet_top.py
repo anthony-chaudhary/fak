@@ -84,7 +84,28 @@ CAUSE_SHORT = {
 # been parked / ambiguously quiet long enough that it probably is not coming back on
 # its own). Tunable so a host with slower background tasks can raise the floor.
 HANGING_ATTENTION_MIN = float(os.environ.get("FLEET_TOP_HANGING_MIN", "30"))
+# A parked/quiet session past THIS floor is no longer routine churn the janitor or a
+# replace can be expected to clear — it is genuinely stuck and worth escalating. Below
+# it, a park is a self-healing state (the lifecycle still owns it); above it, it is an
+# operator signal. Default 90m ≈ the reap/replace window; tunable per host.
+STUCK_ATTENTION_MIN = float(os.environ.get("FLEET_TOP_STUCK_MIN", "90"))
+# Whether the standing fleet actually runs an auto-resume watchdog, i.e. whether a
+# DEAD_MIDTOOL row marked AUTO_RESUME is owned by the lifecycle (self-healing) or is
+# stranded work an operator must resume by hand (escalate). Default on: the standing
+# dispatch fleet resumes automatically. Set FLEET_TOP_AUTORESUME_OWNED=0 on a host with
+# no watchdog so a resumable session escalates instead of reading self-healing.
+AUTORESUME_OWNED = os.environ.get("FLEET_TOP_AUTORESUME_OWNED", "1").strip().lower() not in ("0", "false", "no", "")
 _COMMAND_INLINE_LIMIT = 220
+
+# The system's own health verdict — the point of the card is that the SYSTEM states
+# whether it needs a human, so the operator never has to guess from a wall of rows.
+LIFECYCLE_SELF_HEALING = "self_healing"  # a lifecycle owns the remediation with an ETA
+LIFECYCLE_ESCALATE = "escalate"          # nothing self-heals this — a human must act
+VERDICT_HEALTHY = "HEALTHY"              # nothing outstanding
+VERDICT_SELF_HEALING = "SELF_HEALING"   # items in flight, all lifecycle-owned
+VERDICT_NEEDS_YOU = "NEEDS_YOU"         # ≥1 escalation a human must act on
+VERDICT_GLYPH = {VERDICT_HEALTHY: "🟢", VERDICT_SELF_HEALING: "🔵", VERDICT_NEEDS_YOU: "🔴"}
+VERDICT_WORD = {VERDICT_HEALTHY: "HEALTHY", VERDICT_SELF_HEALING: "SELF-HEALING", VERDICT_NEEDS_YOU: "NEEDS YOU"}
 
 
 def _tag(account: str) -> str:
@@ -167,6 +188,7 @@ def build_snapshot(
         "workspace": workspace,
         "window_h": window_h,
         "error": error,
+        "system": system_fold(attention),
         "sessions": {
             "total": len(rows),
             "by_category": by_category,
@@ -210,8 +232,16 @@ def _attention(
     """The ranked "what needs me now" list — critical (a free action) before warn."""
     items: list[dict[str, Any]] = []
 
+    # Each item carries a `lifecycle`: LIFECYCLE_SELF_HEALING when a running lifecycle
+    # owns the remediation with a bounded ETA (auto-resume watchdog, a throttle reset,
+    # the reap/replace window) — the system is working and the operator need not act; or
+    # LIFECYCLE_ESCALATE when nothing self-heals it (an auth/access wall, an indefinite
+    # throttle, a park aged past the reap window) and a human genuinely must step in.
+    # Conservative by design: when a self-heal cannot be PROVEN owned, escalate.
+
     # 1. Resumable: a dead/stopped autonomous session whose account IS available now.
-    #    This is the highest-value signal — work is stranded and the fix is one command.
+    #    Owned by the auto-resume watchdog on the standing fleet (AUTORESUME_OWNED) —
+    #    self-healing there; stranded, operator-only work where no watchdog runs.
     resumable = [r for r in rows if r.get("action") == "AUTO_RESUME"]
     if resumable:
         first = resumable[0]
@@ -219,6 +249,7 @@ def _attention(
             "kind": "resume",
             "count": len(resumable),
             "level": "crit",
+            "lifecycle": LIFECYCLE_SELF_HEALING if AUTORESUME_OWNED else LIFECYCLE_ESCALATE,
             "title": f"{len(resumable)} session(s) resumable on an available account",
             "detail": f"[{first.get('disp')}] {first.get('project')} "
                       f"age={first.get('age_min')}m"
@@ -226,60 +257,113 @@ def _attention(
             "command": first.get("resume_cmd") or "",
         })
 
-    # 2. Accounts that need an interactive /login (auth wall — a person must act).
+    # 2. Accounts that need an interactive /login (auth wall — a person must act). No
+    #    automation clears an auth wall, so this always escalates.
     auth = [a for a in accounts if a.get("blocked") and a.get("block_kind") == "auth"]
     for a in auth:
         items.append({
             "kind": "login",
             "tag": a.get("tag"),
             "level": "crit",
+            "lifecycle": LIFECYCLE_ESCALATE,
             "title": f"account {a.get('tag')} needs /login",
             "detail": str(a.get("block_reason") or "auth blocked"),
             "command": f"CLAUDE_CONFIG_DIR={a.get('config_dir')} claude  # then /login",
         })
 
-    # 3. Access walls — blocked, but /login will NOT fix it (subscription/admin).
+    # 3. Access walls — blocked, but /login will NOT fix it (subscription/admin). A
+    #    billing/admin action, never self-healing → escalate.
     access = [a for a in accounts if a.get("blocked") and a.get("block_kind") == "access"]
     for a in access:
         items.append({
             "kind": "access",
             "tag": a.get("tag"),
             "level": "warn",
+            "lifecycle": LIFECYCLE_ESCALATE,
             "title": f"account {a.get('tag')} access wall (not fixed by /login)",
             "detail": str(a.get("block_reason") or "access disabled"),
             "command": "",
         })
 
-    # 4. No usable account but work wants to resume — every resume would instantly re-die.
+    # 4. No usable account but work wants to resume — every resume would instantly
+    #    re-die. Self-healing when a throttled account carries a known future reset (the
+    #    system recovers at the reset); escalate when the stall is indefinite (no reset).
     if resumable and not available:
+        throttled_reset = [
+            a for a in accounts
+            if a.get("throttled") and not a.get("available")
+            and str((throttle.get(a.get("account"), {}) or {}).get("reset")
+                    or a.get("reset") or "").strip() not in ("", "?")
+        ]
+        recoverable = bool(throttled_reset)
         items.append({
             "kind": "wait",
             "level": "warn",
+            "lifecycle": LIFECYCLE_SELF_HEALING if recoverable else LIFECYCLE_ESCALATE,
             "title": "no account available — resumes will re-die on the throttle",
-            "detail": "all worker accounts are throttled or blocked; wait for a reset",
+            "detail": ("all worker accounts throttled; the system recovers at the reset"
+                       if recoverable else
+                       "all worker accounts blocked with no known reset — indefinite stall"),
             "command": "",
         })
 
-    # 5. Long-parked / ambiguously-quiet sessions worth a human glance.
-    stuck = [
+    # 5. Long-parked / ambiguously-quiet sessions. Under the stuck ceiling the janitor /
+    #    replace window still owns it (self-healing churn); past the ceiling it is
+    #    genuinely stuck and escalates. Split so only the truly-stuck ones alarm.
+    parked = [
         r for r in rows
         if r.get("category") == "HANGING"
         and isinstance(r.get("age_min"), (int, float))
         and r["age_min"] >= HANGING_ATTENTION_MIN
     ]
+    stuck = [r for r in parked if r["age_min"] >= STUCK_ATTENTION_MIN]
+    healing = [r for r in parked if r["age_min"] < STUCK_ATTENTION_MIN]
     if stuck:
         items.append({
             "kind": "quiet",
             "count": len(stuck),
             "level": "warn",
-            "title": f"{len(stuck)} session(s) parked/quiet >{HANGING_ATTENTION_MIN:.0f}m",
+            "lifecycle": LIFECYCLE_ESCALATE,
+            "title": f"{len(stuck)} session(s) stuck >{STUCK_ATTENTION_MIN:.0f}m "
+                     "(past the reap/replace window)",
             "detail": ", ".join(
                 f"{_tag(r.get('account', ''))}/{(r.get('session') or '')[:8]}" for r in stuck[:4]
             ) + (f", +{len(stuck) - 4} more" if len(stuck) > 4 else ""),
             "command": "",
         })
+    if healing:
+        items.append({
+            "kind": "quiet",
+            "count": len(healing),
+            "level": "warn",
+            "lifecycle": LIFECYCLE_SELF_HEALING,
+            "title": f"{len(healing)} session(s) parked/quiet >{HANGING_ATTENTION_MIN:.0f}m",
+            "detail": ", ".join(
+                f"{_tag(r.get('account', ''))}/{(r.get('session') or '')[:8]}" for r in healing[:4]
+            ) + (f", +{len(healing) - 4} more" if len(healing) > 4 else ""),
+            "command": "",
+        })
 
     return items
+
+
+def system_fold(attention: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold the attention list into the system's OWN health verdict, so the card leads
+    with a self-assessment instead of a wall of rows the operator must judge.
+
+    NEEDS_YOU when any item is an escalation a human must act on; SELF_HEALING when
+    items are in flight but every one is owned by a lifecycle with a bounded ETA (the
+    system is working — no action); HEALTHY when nothing is outstanding. Pure given the
+    attention list."""
+    escalate = sum(1 for i in attention if i.get("lifecycle") == LIFECYCLE_ESCALATE)
+    healing = sum(1 for i in attention if i.get("lifecycle") == LIFECYCLE_SELF_HEALING)
+    if escalate:
+        verdict = VERDICT_NEEDS_YOU
+    elif healing:
+        verdict = VERDICT_SELF_HEALING
+    else:
+        verdict = VERDICT_HEALTHY
+    return {"verdict": verdict, "escalate": escalate, "self_healing": healing}
 
 
 # ----- rendering -------------------------------------------------------------
@@ -364,12 +448,21 @@ def render_frame(
     out.append("")
 
     attn = snap.get("attention") or []
+    sysv = snap.get("system") or {}
+    verdict = sysv.get("verdict", VERDICT_HEALTHY)
     if attn:
-        out.append(ink(f"ATTENTION  {len(attn)}", "1"))
+        out.append(ink(f"ATTENTION  {len(attn)}  · system "
+                       f"{VERDICT_GLYPH.get(verdict, '')} {VERDICT_WORD.get(verdict, verdict)}"
+                       f"  ({sysv.get('escalate', 0)} need you, "
+                       f"{sysv.get('self_healing', 0)} self-healing)", "1"))
         for item in attn:
+            healing = item.get("lifecycle") == LIFECYCLE_SELF_HEALING
             crit = item.get("level") == "crit"
-            chip = CHIP["red"] if crit else CHIP["yellow"]
-            out.append(f"  {chip} " + ink(item.get("title", ""), "31" if crit else "33"))
+            # A self-healing item reads blue (the system owns it); a real escalation
+            # keeps the red/yellow alarm chip.
+            chip = CHIP["blue"] if healing else (CHIP["red"] if crit else CHIP["yellow"])
+            colour = "34" if healing else ("31" if crit else "33")
+            out.append(f"  {chip} " + ink(item.get("title", ""), colour))
             if item.get("detail"):
                 out.append(ink(f"       {item['detail']}", "2"))
             if item.get("command"):
@@ -441,7 +534,8 @@ def _attention_summary(item: dict[str, Any]) -> str:
     elif kind == "access":
         line = f"access {item.get('tag') or '?'}"
     elif kind == "quiet":
-        line = f"quiet {item.get('count') or '?'}>{HANGING_ATTENTION_MIN:.0f}m"
+        verb = "stuck" if item.get("lifecycle") == LIFECYCLE_ESCALATE else "quiet"
+        line = f"{verb} {item.get('count') or '?'}"
     elif kind == "wait":
         line = "wait"
     else:
@@ -488,13 +582,17 @@ def slack_compact(snap: dict[str, Any]) -> str:
     asum = _acct_summary(acc)
     if asum:
         lines.append("accounts: " + asum)
-    actions = [i for i in attn if i.get("level") == "crit"]
-    review = [i for i in attn if i.get("level") != "crit"]
-    if actions:
-        lines.append("action: " + _join_attention(actions))
-    if review:
-        lines.append("review: " + _join_attention(review))
-    if not actions and not review:
+    # Partition by whether a lifecycle owns the remediation, NOT by crit/warn: an
+    # escalation is the only thing that needs a human; self-healing items are folded
+    # into one quiet line so the operator sees the system IS handling them without an
+    # alarm per item (the resume command is still carried, in case a human wants it).
+    escalate = [i for i in attn if i.get("lifecycle") == LIFECYCLE_ESCALATE]
+    healing = [i for i in attn if i.get("lifecycle") == LIFECYCLE_SELF_HEALING]
+    if escalate:
+        lines.append("action: " + _join_attention(escalate))
+    if healing:
+        lines.append("self-healing: " + _join_attention(healing) + " — system recovering, no action")
+    if not escalate and not healing:
         lines.append("healthy: no session/account action")
     return "\n".join(lines) if lines else "(no fleet signal)"
 
@@ -516,11 +614,24 @@ def slack_text(snap: dict[str, Any]) -> str:
 
     sess = snap.get("sessions") or {}
     acc = snap.get("accounts") or {}
-    attn = snap.get("attention") or []
-    crit = sum(1 for a in attn if a.get("level") == "crit")
-    headline = (f"*agent session health:* {sess.get('total', 0)} session(s), "
-                f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable, "
-                f"{len(attn)} attention" + (f" ({crit} action)" if crit else ""))
+    sysv = snap.get("system") or {}
+    verdict = sysv.get("verdict", VERDICT_HEALTHY)
+    esc = int(sysv.get("escalate", 0) or 0)
+    heal = int(sysv.get("self_healing", 0) or 0)
+    # Lead with the system's OWN verdict so the channel preview / mobile push answers
+    # "does this need me?" without opening the card — the operator never guesses whether
+    # the fleet is working. The verdict word lives ONLY here (never restated in the
+    # body) so the signal/noise scorecard counts it once.
+    tail = []
+    if esc:
+        tail.append(f"{esc} need you")
+    if heal:
+        tail.append(f"{heal} self-healing")
+    status = (" — " + ", ".join(tail)) if tail else ""
+    headline = (f"{VERDICT_GLYPH.get(verdict, '🟢')} *agent session health — "
+                f"{VERDICT_WORD.get(verdict, verdict)}*{status} · "
+                f"{sess.get('total', 0)} session(s), "
+                f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable")
     return headline + "\n" + slack_compact(snap)
 
 
