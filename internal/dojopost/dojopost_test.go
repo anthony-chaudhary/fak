@@ -20,6 +20,12 @@ func TestResolveTokenAndChannelFromDojoEnv(t *testing.T) {
 	if got := ResolveChannel(); got != "C_DOJO_ENV" {
 		t.Fatalf("ResolveChannel env = %q, want C_DOJO_ENV", got)
 	}
+	if got := ResolveTokenWithSource(); got.Value != "xoxb-dojo-token" || got.Source != "env:FAK_DOJO_TOKEN" || got.ScoreboardFallback {
+		t.Fatalf("ResolveTokenWithSource env = %+v, want dojo env source", got)
+	}
+	if got := ResolveChannelWithSource(); got.Value != "C_DOJO_ENV" || got.Source != "env:FAK_DOJO_CHANNEL" {
+		t.Fatalf("ResolveChannelWithSource env = %+v, want dojo env source", got)
+	}
 }
 
 func TestResolveTokenFallsBackToScoreboardToken(t *testing.T) {
@@ -32,6 +38,10 @@ func TestResolveTokenFallsBackToScoreboardToken(t *testing.T) {
 	if got := ResolveToken(); got != "xoxb-scoreboard-token" {
 		t.Fatalf("ResolveToken fallback = %q, want the scoreboard token", got)
 	}
+	if got := ResolveTokenWithSource(); got.Value != "xoxb-scoreboard-token" ||
+		got.Source != "scoreboard-fallback (env:FAK_SCOREBOARD_TOKEN)" || !got.ScoreboardFallback {
+		t.Fatalf("ResolveTokenWithSource fallback = %+v, want scoreboard fallback source", got)
+	}
 }
 
 func TestResolveTokenNeverLeaksLabToken(t *testing.T) {
@@ -42,6 +52,9 @@ func TestResolveTokenNeverLeaksLabToken(t *testing.T) {
 	if got := ResolveToken(); got != "" {
 		t.Fatalf("ResolveToken leaked a token: got %q, want empty", got)
 	}
+	if got := ResolveTokenWithSource(); got.Value != "" || got.Source != "unset" || got.ScoreboardFallback {
+		t.Fatalf("ResolveTokenWithSource unset = %+v, want unset", got)
+	}
 }
 
 func TestResolveChannelDefaultsToPublicDojoChannel(t *testing.T) {
@@ -51,6 +64,9 @@ func TestResolveChannelDefaultsToPublicDojoChannel(t *testing.T) {
 	chdir(t, t.TempDir())
 	if got := ResolveChannel(); got != ChannelDefault {
 		t.Fatalf("ResolveChannel default = %q, want the public dojo channel %q", got, ChannelDefault)
+	}
+	if got := ResolveChannelWithSource(); got.Value != ChannelDefault || got.Source != "built-in default" {
+		t.Fatalf("ResolveChannelWithSource default = %+v, want built-in default", got)
 	}
 }
 

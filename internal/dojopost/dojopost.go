@@ -31,10 +31,6 @@
 package dojopost
 
 import (
-	"os"
-	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
 
@@ -54,6 +50,14 @@ var (
 	channelEnvs = []string{"FAK_DOJO_CHANNEL"}
 )
 
+// Resolved records a dojo Slack setting plus where it came from. The value can be a
+// channel id or a token; callers must redact token values before displaying them.
+type Resolved struct {
+	Value              string
+	Source             string
+	ScoreboardFallback bool
+}
+
 // ResolveToken applies the documented order: FAK_DOJO_TOKEN env, then a
 // FAK_DOJO_TOKEN= line in .env.slack.local, then a FALLBACK to the scoreboard token
 // (FAK_SCOREBOARD_TOKEN / its .env.slack.local line). Returns "" if none found.
@@ -63,15 +67,26 @@ var (
 // token, NEVER to the lab SLACK_BOT_TOKEN (scoreboard.ResolveToken already refuses
 // that fall-through).
 func ResolveToken() string {
+	return ResolveTokenWithSource().Value
+}
+
+// ResolveTokenWithSource is ResolveToken plus the diagnostic source label. It lets
+// `fak dojo post` report whether it used the dedicated dojo token or the noisier
+// scoreboard fallback instead of silently masking a dojo-token misconfiguration.
+func ResolveTokenWithSource() Resolved {
 	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
+		if r := slackenv.Lookup(e); r.Set() {
+			return Resolved{Value: r.Value, Source: sourceLabel(r)}
 		}
 	}
-	if v := envFileValue("FAK_DOJO_TOKEN"); v != "" {
-		return v
+	if r := slackenv.Lookup("FAK_SCOREBOARD_TOKEN"); r.Set() {
+		return Resolved{
+			Value:              r.Value,
+			Source:             "scoreboard-fallback (" + sourceLabel(r) + ")",
+			ScoreboardFallback: true,
+		}
 	}
-	return scoreboard.ResolveToken()
+	return Resolved{Source: "unset"}
 }
 
 // ResolveChannel returns the dojo channel id from FAK_DOJO_CHANNEL, then a
@@ -81,15 +96,20 @@ func ResolveToken() string {
 // the dojo surface whenever an operator sources .env.slack.local. The dojo surface
 // owns its own default, so it lands with zero config.
 func ResolveChannel() string {
+	return ResolveChannelWithSource().Value
+}
+
+// ResolveChannelWithSource is ResolveChannel plus the source label used in post
+// results. The built-in default is deliberately visible because a recreated/migrated
+// Slack channel should be fixed at the resolver boundary, not hidden behind a plain
+// chat.postMessage failure.
+func ResolveChannelWithSource() Resolved {
 	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
+		if r := slackenv.Lookup(e); r.Set() {
+			return Resolved{Value: r.Value, Source: sourceLabel(r)}
 		}
 	}
-	if v := envFileValue("FAK_DOJO_CHANNEL"); v != "" {
-		return v
-	}
-	return ChannelDefault
+	return Resolved{Value: ChannelDefault, Source: "built-in default"}
 }
 
 // envFileValue resolves key from .env.slack.local, walked up from the cwd, by delegating
@@ -97,4 +117,11 @@ func ResolveChannel() string {
 // surface (the byte-identical per-package walk-up that used to live here is gone).
 func envFileValue(key string) string {
 	return slackenv.FileValue(key)
+}
+
+func sourceLabel(r slackenv.Resolved) string {
+	if r.Source == slackenv.SourceUnset {
+		return "unset"
+	}
+	return string(r.Source) + ":" + r.Key
 }

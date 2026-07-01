@@ -592,6 +592,16 @@ func emitDojoPost(stdout, stderr io.Writer, post dojopost.Post, channel, token s
 		chanEnv:        "FAK_DOJO_CHANNEL",
 		resolveChannel: dojopost.ResolveChannel,
 		resolveToken:   dojopost.ResolveToken,
+		resolveChannelField: func() resolvedField {
+			r := dojopost.ResolveChannelWithSource()
+			return resolvedField{Value: r.Value, Source: r.Source}
+		},
+		resolveTokenField: func() resolvedField {
+			r := dojopost.ResolveTokenWithSource()
+			return resolvedField{Value: r.Value, Source: r.Source}
+		},
+		showResolutionDryRun: true,
+		warnTokenFallback:    true,
 	})
 }
 

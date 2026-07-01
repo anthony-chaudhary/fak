@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/benchpost"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -146,6 +147,14 @@ type slackPostSpec struct {
 	chanEnv        string // env var named in the "no channel" guidance
 	resolveChannel func() string
 	resolveToken   func() string
+
+	// Optional source-aware resolvers. Existing post commands use the string
+	// resolvers above and keep their historical terse output; commands that need an
+	// auditable post result can opt in here.
+	resolveChannelField  func() resolvedField
+	resolveTokenField    func() resolvedField
+	showResolutionDryRun bool
+	warnTokenFallback    bool
 }
 
 // slackPostTail renders the card on --dry-run, else resolves the channel + token and
@@ -154,32 +163,85 @@ type slackPostSpec struct {
 func slackPostTail(stdout, stderr io.Writer, s slackPostSpec) int {
 	if s.dryRun {
 		fmt.Fprintln(stdout, s.card.Text())
+		if s.showResolutionDryRun {
+			ch, chSource, tok, tokSource := resolveSlackPostFields(s)
+			writeSlackPostResolution(stdout, s.label, ch, chSource, tok, tokSource)
+			warnSlackTokenFallback(stderr, s, tokSource)
+		}
 		return 0
 	}
-	ch := s.channel
-	if ch == "" {
-		ch = s.resolveChannel()
-	}
+	ch, chSource, tok, tokSource := resolveSlackPostFields(s)
 	if ch == "" {
 		fmt.Fprintf(stderr, "%s: no channel: pass --channel, set %s, or add it to .env.slack.local\n", s.label, s.chanEnv)
 		return 2
 	}
-	tok := s.token
-	if tok == "" {
-		tok = s.resolveToken()
-	}
+	warnSlackTokenFallback(stderr, s, tokSource)
 	client, err := scoreboard.NewClient(tok)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", s.label, err)
+		fmt.Fprintf(stderr, "%s: channel %s [%s], token [%s]: %v\n", s.label, ch, sourceOrDash(chSource), sourceOrDash(tokSource), err)
 		return 2
 	}
 	ts, err := client.Post(ctx(), ch, s.card.Text(), s.card.Blocks())
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", s.label, err)
+		fmt.Fprintf(stderr, "%s: channel %s [%s], token [%s]: %v\n", s.label, ch, sourceOrDash(chSource), sourceOrDash(tokSource), err)
 		return 1
+	}
+	if chSource != "" || tokSource != "" {
+		fmt.Fprintf(stdout, "posted to %s [%s] ts=%s token=[%s]\n", ch, sourceOrDash(chSource), ts, sourceOrDash(tokSource))
+		return 0
 	}
 	fmt.Fprintf(stdout, "posted to %s ts=%s\n", ch, ts)
 	return 0
+}
+
+func resolveSlackPostFields(s slackPostSpec) (channel, channelSource, token, tokenSource string) {
+	channel = s.channel
+	if channel != "" {
+		channelSource = "--channel"
+	} else if s.resolveChannelField != nil {
+		r := s.resolveChannelField()
+		channel, channelSource = r.Value, r.Source
+	} else if s.resolveChannel != nil {
+		channel = s.resolveChannel()
+	}
+
+	token = s.token
+	if token != "" {
+		tokenSource = "--token"
+	} else if s.resolveTokenField != nil {
+		r := s.resolveTokenField()
+		token, tokenSource = r.Value, r.Source
+	} else if s.resolveToken != nil {
+		token = s.resolveToken()
+	}
+	return channel, channelSource, token, tokenSource
+}
+
+func writeSlackPostResolution(w io.Writer, label, channel, channelSource, token, tokenSource string) {
+	if channel == "" {
+		channel = "(unset)"
+	}
+	if token == "" {
+		token = "(unset)"
+	}
+	fmt.Fprintf(w, "\n%s resolution:\n", label)
+	fmt.Fprintf(w, "  channel : %s  [%s]\n", channel, sourceOrDash(channelSource))
+	fmt.Fprintf(w, "  token   : %s  [%s]\n", redactToken(token), sourceOrDash(tokenSource))
+}
+
+func warnSlackTokenFallback(w io.Writer, s slackPostSpec, tokenSource string) {
+	if !s.warnTokenFallback || !strings.Contains(tokenSource, "scoreboard-fallback") {
+		return
+	}
+	fmt.Fprintf(w, "%s: warning: using scoreboard token fallback for this post [%s]; set the surface-specific token if this is unintended\n",
+		s.label, tokenSource)
+}
+
+func sourceOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // emitBenchPost is the shared dry-run / post tail for both bench subcommands.

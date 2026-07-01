@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
+	"github.com/anthony-chaudhary/fak/internal/dojopost"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
@@ -139,6 +140,11 @@ func TestRunDojoDispatch(t *testing.T) {
 func TestRunDojoPostTrendDryRun(t *testing.T) {
 	// A trend post folds the committed ledger with NO corpus scan; --dry-run renders the
 	// card without touching Slack, so the test needs no token or network.
+	t.Setenv("FAK_DOJO_TOKEN", "")
+	t.Setenv("FAK_SCOREBOARD_TOKEN", "")
+	t.Setenv("FAK_DOJO_CHANNEL", "")
+	t.Chdir(t.TempDir())
+
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "history.jsonl")
 	body := `{"schema":"fak-dojo-ledger/1","date":"2026-06-26","commit":"c1","generated_at":"2026-06-26T01:00:00Z","verdict":"OK","mean_calib_err":0.50,"grade":"D","calibrated":2,"measured":3}
@@ -158,6 +164,42 @@ func TestRunDojoPostTrendDryRun(t *testing.T) {
 	}
 	if !strings.Contains(got, "2026-06-27") {
 		t.Fatalf("trend card missing the latest tick:\n%s", got)
+	}
+}
+
+func TestRunDojoPostDryRunReportsResolutionAndFallback(t *testing.T) {
+	t.Setenv("FAK_DOJO_TOKEN", "")
+	t.Setenv("FAK_SCOREBOARD_TOKEN", "xoxb-scoreboard-token")
+	t.Setenv("FAK_DOJO_CHANNEL", "")
+	t.Chdir(t.TempDir()) // no .env.slack.local fallback
+
+	ledger := filepath.Join(t.TempDir(), "history.jsonl")
+	body := `{"schema":"fak-dojo-ledger/1","date":"2026-06-27","commit":"c2","generated_at":"2026-06-27T01:00:00Z","verdict":"OK","mean_calib_err":0.34,"grade":"C","calibrated":2,"measured":3}
+`
+	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runDojoPost(&out, &errb, []string{"--rollup", "trend", "--ledger", ledger, "--dry-run"})
+	if code != 0 {
+		t.Fatalf("trend --dry-run should exit 0, got %d (%s)", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"fak dojo post resolution:",
+		"channel : " + dojopost.ChannelDefault + "  [built-in default]",
+		"token   : ****oken  [scoreboard-fallback (env:FAK_SCOREBOARD_TOKEN)]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "xoxb-scoreboard-token") {
+		t.Fatalf("dry-run output leaked raw token:\n%s", got)
+	}
+	if !strings.Contains(errb.String(), "warning: using scoreboard token fallback") {
+		t.Fatalf("scoreboard fallback must warn loudly, stderr=%q", errb.String())
 	}
 }
 
