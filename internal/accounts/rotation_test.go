@@ -169,6 +169,76 @@ func TestNextInRotationEmptyPool(t *testing.T) {
 	}
 }
 
+func TestRotationPlanHeadroomOrdering(t *testing.T) {
+	// alice and bob are both eligible; without a signal the pool is stable-by-name [alice, bob].
+	reg := Registry{Homes: []Home{
+		active("alice", "u-alice", "alice@x.test"),
+		active("bob", "u-bob", "bob@x.test"),
+	}}
+
+	// A headroom signal that walls the alice bucket and gives bob room flips the order: bob
+	// (room) must sort ahead of alice (walled), and the applied order + stamped scores say so.
+	hr := RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1}
+	res := reg.RotationPlanWithHeadroom(hr)
+	if got := poolNames(res); len(got) != 2 || got[0] != "bob" || got[1] != "alice" {
+		t.Fatalf("headroom pool = %v, want [bob alice] (room before walled)", got)
+	}
+	if res.OrderApplied != "headroom-desc" {
+		t.Fatalf("OrderApplied = %q, want headroom-desc", res.OrderApplied)
+	}
+	for _, s := range res.Pool {
+		if s.Headroom == nil {
+			t.Fatalf("pool seat %q missing stamped headroom", s.Name)
+		}
+	}
+
+	// A nil/empty signal must be byte-for-byte the historical stable-by-name plan — no headroom
+	// stamps, no order flip.
+	plain := reg.RotationPlanWithHeadroom(nil)
+	if got := poolNames(plain); len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
+		t.Fatalf("no-signal pool = %v, want [alice bob] (stable-by-name)", got)
+	}
+	if plain.OrderApplied != "stable-by-name" {
+		t.Fatalf("no-signal OrderApplied = %q, want stable-by-name", plain.OrderApplied)
+	}
+	for _, s := range plain.Pool {
+		if s.Headroom != nil {
+			t.Fatalf("no-signal pool seat %q should not carry a headroom stamp", s.Name)
+		}
+	}
+
+	// Equal headroom falls back to the deterministic name order (name breaks the tie).
+	tie := reg.RotationPlanWithHeadroom(RotationHeadroom{"uuid:u-alice": 1, "uuid:u-bob": 1})
+	if got := poolNames(tie); len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
+		t.Fatalf("equal-headroom pool = %v, want [alice bob] (name tiebreak)", got)
+	}
+}
+
+func TestNextInRotationHeadroomPrefersRoom(t *testing.T) {
+	// Three buckets: alice walled, bob has room, frank unknown (0). The runtime signal orders
+	// the pool [bob(1), frank(0), alice(-1)].
+	reg := Registry{Homes: []Home{
+		active("alice", "u-alice", "alice@x.test"),
+		active("bob", "u-bob", "bob@x.test"),
+		active("frank", "u-frank", "frank@x.test"),
+	}}
+	hr := RotationHeadroom{"uuid:u-alice": -1, "uuid:u-bob": 1} // frank absent -> 0
+
+	// A fresh start (no anchor) lands on the account with the most room, not the first name.
+	if got, ok := reg.NextInRotationWithHeadroom("", hr); !ok || got.Name != "bob" {
+		t.Fatalf("NextInRotationWithHeadroom(\"\") = %q,%v; want bob,true", got.Name, ok)
+	}
+	// Rotating OFF the roomiest bucket picks the next-best (frank), never re-handing bob and
+	// never jumping straight to the walled alice while a non-walled bucket remains.
+	if got, ok := reg.NextInRotationWithHeadroom("bob", hr); !ok || got.Name != "frank" {
+		t.Fatalf("NextInRotationWithHeadroom(bob) = %q,%v; want frank,true", got.Name, ok)
+	}
+	// Rotating off a walled bucket still prefers the roomiest available one.
+	if got, ok := reg.NextInRotationWithHeadroom("alice", hr); !ok || got.Name != "bob" {
+		t.Fatalf("NextInRotationWithHeadroom(alice) = %q,%v; want bob,true", got.Name, ok)
+	}
+}
+
 func TestRotationPolicyDefaultsAndViewRead(t *testing.T) {
 	// No views -> sane defaults: reserved held out.
 	def := Registry{}.RotationPolicy()

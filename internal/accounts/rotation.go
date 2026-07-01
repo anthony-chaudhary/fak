@@ -60,7 +60,28 @@ type RotationSeat struct {
 	CanServe  bool           `json:"can_serve"`
 	Email     string         `json:"email,omitempty"`
 	Canonical string         `json:"canonical,omitempty"` // for a duplicate, the pool seat it collapses onto
+	// Headroom is the injected per-bucket headroom score this seat carried into the pool
+	// ordering (higher == more room; nil when the plan ran in stable-by-name mode with no
+	// signal). Surfaced so a launcher can show WHY one bucket sorted ahead of another.
+	Headroom *float64 `json:"headroom,omitempty"`
 }
+
+// RotationHeadroom is an OPTIONAL per-account-bucket headroom signal a caller supplies so the
+// rotation pool is ordered MOST-HEADROOM-FIRST instead of the default stable-by-name
+// round-robin. The key is the account bucket key (Identity.AccountKey(), e.g. "uuid:…"); the
+// value is a score where HIGHER == more headroom (launch this bucket sooner). A bucket absent
+// from the map scores 0. An empty/nil map means "no signal" — the plan falls back to
+// stable-by-name exactly as before (OrderApplied stays "stable-by-name"). A non-empty map
+// switches the pool order to "headroom-desc", with the seat name as a deterministic tiebreak
+// so two equal-headroom buckets still order the same way every time.
+//
+// The config registry itself carries NO usage/quota telemetry (RotationPlan is pure over
+// disk-derived identity), so this signal is derived and passed in by the caller from the live
+// runtime layer (internal/fleetaccounts: usage-throttle + offerability). Keeping it an
+// injected map is what lets RotationPlan stay a pure function AND become headroom-aware
+// without the config plane reaching across into the runtime plane — the "usage signal" the
+// package doc named as the prerequisite for a near-cap-aware ordering.
+type RotationHeadroom map[string]float64
 
 // RotationPolicy is the configured rotation policy, read from the registry's generated
 // view blocks (the `rotation:` block the dos/job rosters carry). AvoidReserved defaults to
@@ -90,8 +111,15 @@ type RotationResult struct {
 // one per DISTINCT account bucket, in a deterministic round-robin order, plus every
 // excluded seat with the reason it is out. It is pure over the homes' disk-derived
 // Identity (Refresh first for a live answer) and reads the configured RotationPolicy to
-// decide whether reserved seats are held out.
-func (r Registry) RotationPlan() RotationResult {
+// decide whether reserved seats are held out. It is the stable-by-name form —
+// RotationPlanWithHeadroom(nil).
+func (r Registry) RotationPlan() RotationResult { return r.RotationPlanWithHeadroom(nil) }
+
+// RotationPlanWithHeadroom is RotationPlan with an OPTIONAL per-bucket headroom signal (see
+// RotationHeadroom). When the signal is non-empty the pool is ordered most-headroom-first
+// (name breaks ties) and OrderApplied becomes "headroom-desc"; each pool seat carries the
+// score it sorted on. An empty/nil signal is byte-for-byte the historical stable-by-name plan.
+func (r Registry) RotationPlanWithHeadroom(hr RotationHeadroom) RotationResult {
 	pol := r.RotationPolicy()
 	res := RotationResult{Policy: pol, OrderApplied: "stable-by-name"}
 
@@ -137,10 +165,37 @@ func (r Registry) RotationPlan() RotationResult {
 		}
 	}
 
-	sort.Slice(pool, func(i, j int) bool { return pool[i].Name < pool[j].Name })
+	// Order the pool. With a headroom signal, stamp each seat's score and sort most-headroom
+	// first, using the name as a deterministic tiebreak so equal-headroom buckets stay stable;
+	// without one, keep the historical stable-by-name round-robin exactly.
+	useHeadroom := len(hr) > 0
+	if useHeadroom {
+		res.OrderApplied = "headroom-desc"
+		for i := range pool {
+			v := hr[pool[i].Account] // absent bucket -> 0
+			pool[i].Headroom = &v
+		}
+	}
+	sort.Slice(pool, func(i, j int) bool {
+		if useHeadroom {
+			if hi, hj := derefFloat(pool[i].Headroom), derefFloat(pool[j].Headroom); hi != hj {
+				return hi > hj
+			}
+		}
+		return pool[i].Name < pool[j].Name
+	})
 	sort.Slice(res.Excluded, func(i, j int) bool { return res.Excluded[i].Name < res.Excluded[j].Name })
 	res.Pool = pool
 	return res
+}
+
+// derefFloat reads a *float64 as 0 when nil, so the pool comparator can treat an unstamped
+// seat (stable-by-name mode) as neutral without a nil check at every call site.
+func derefFloat(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // rotationStatusFor is the single primary-status bridge from login readiness into
@@ -169,13 +224,39 @@ func rotationStatusFor(h Home, pol RotationPolicy) RotationStatus {
 // With `after` empty or naming a seat outside the pool, the FIRST pool seat is returned (a
 // fresh rotation start). ok is false when the pool is empty (nothing to rotate to), or when
 // `after` is the pool's ONLY bucket (nowhere else to go) — so a caller can fail loud instead
-// of silently re-handing the same walled account.
+// of silently re-handing the same walled account. It is the stable-by-name form —
+// NextInRotationWithHeadroom(after, nil).
 func (r Registry) NextInRotation(after string) (RotationSeat, bool) {
-	res := r.RotationPlan()
+	return r.NextInRotationWithHeadroom(after, nil)
+}
+
+// NextInRotationWithHeadroom is NextInRotation with an OPTIONAL per-bucket headroom signal.
+// With a signal the pool is ordered most-headroom-first, so "next" is the BEST-headroom
+// bucket that is not the anchor's own bucket — a rotate never re-hands the walled/capped seat
+// the caller is leaving, and it prefers the account with the most room rather than the mere
+// next name in the ring. Without a signal it is the historical stable round-robin. ok is false
+// on an empty pool, or when the anchor's bucket is the pool's only one.
+func (r Registry) NextInRotationWithHeadroom(after string, hr RotationHeadroom) (RotationSeat, bool) {
+	res := r.RotationPlanWithHeadroom(hr)
 	if len(res.Pool) == 0 {
 		return RotationSeat{}, false
 	}
 	afterKey := r.bucketKey(after)
+	if len(hr) > 0 {
+		// Headroom mode: the pool is already ordered most-headroom-first, so the first seat
+		// that is NOT the anchor's bucket is the best account to rotate onto. A fresh start
+		// (empty anchor) returns pool[0], the highest-headroom bucket.
+		for _, s := range res.Pool {
+			if after != "" && s.Name == after {
+				continue
+			}
+			if afterKey != "" && s.Account == afterKey {
+				continue
+			}
+			return s, true
+		}
+		return RotationSeat{}, false // every pool seat is the anchor's bucket; nowhere else to go
+	}
 	idx := -1
 	for i, s := range res.Pool {
 		if (after != "" && s.Name == after) || (afterKey != "" && s.Account == afterKey) {

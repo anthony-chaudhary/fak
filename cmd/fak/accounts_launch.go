@@ -97,6 +97,7 @@ type launchParams struct {
 	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
 	rotate       bool
 	after        string
+	useHeadroom  bool // default true — order the rotation by the live runtime headroom signal
 	useGuard     bool // default true
 	skipPerms    bool // default true
 	dryRun       bool // print the plan, do not exec
@@ -127,16 +128,22 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		// Rotate onto the next DISTINCT account bucket after the anchor (an explicit --after,
 		// else the named seat, else the active seat), so a walled account is hopped off of
 		// rather than re-launched. NextInRotation skips the anchor's own bucket and every
-		// reserved/disabled/tombstoned/duplicate seat.
+		// reserved/disabled/tombstoned/duplicate seat. By default it also folds in the live
+		// runtime headroom signal, so the rotate lands on the account with room and never on a
+		// walled/capped one when an account with headroom exists.
+		var hr accounts.RotationHeadroom
+		if p.useHeadroom {
+			hr = rotationHeadroom(p.homeDir)
+		}
 		anchor := firstNonEmpty(strings.TrimSpace(p.after), name)
 		if anchor == "" {
 			if picked, ok := activeLaunchSeatName(reg); ok {
 				anchor = picked
 			}
 		}
-		seat, ok := reg.NextInRotation(anchor)
+		seat, ok := reg.NextInRotationWithHeadroom(anchor, hr)
 		if !ok {
-			plan := reg.RotationPlan()
+			plan := reg.RotationPlanWithHeadroom(hr)
 			if len(plan.Pool) == 0 {
 				fmt.Fprintln(stderr, "fak accounts launch --rotate: no eligible accounts in rotation "+
 					"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
@@ -147,7 +154,11 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 			return 1
 		}
 		if anchor != "" {
-			fmt.Fprintf(stderr, "fak accounts launch: rotating off %q -> %q\n", anchor, seat.Name)
+			rotNote := fmt.Sprintf("fak accounts launch: rotating off %q -> %q", anchor, seat.Name)
+			if seat.Headroom != nil {
+				rotNote += fmt.Sprintf(" (headroom=%s)", headroomLabel(*seat.Headroom))
+			}
+			fmt.Fprintln(stderr, rotNote)
 		}
 		name = seat.Name
 	} else if name == "" {

@@ -90,6 +90,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
+	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
 	// Allow a leading positional (e.g. `resolve <name> --env`) BEFORE flags — Go's flag
 	// package otherwise stops parsing at the first non-flag token, silently dropping the
 	// flags. Collect leading non-flag tokens, parse the remainder, then rejoin.
@@ -148,7 +149,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		if after == "" && len(positional) > 0 {
 			after = strings.TrimSpace(positional[0])
 		}
-		return accountsNext(stdout, stderr, *registryPath, *homeDir, after, *asJSON, *asEnv)
+		return accountsNext(stdout, stderr, *registryPath, *homeDir, after, *asJSON, *asEnv, !*noHeadroom)
 
 	case "pull":
 		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
@@ -251,6 +252,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			command:      *launchCommand,
 			rotate:       *rotateFlag,
 			after:        strings.TrimSpace(*afterSeat),
+			useHeadroom:  !*noHeadroom,
 			useGuard:     *launchGuard,
 			skipPerms:    *launchSkipPerms,
 			dryRun:       *dryRun,
@@ -365,16 +367,22 @@ func accountsResolve(stdout, stderr io.Writer, positional []string, registryPath
 // RotationSeat; with --env it prints CLAUDE_CONFIG_DIR=<dir> for eval/wrappers; otherwise a
 // human one-liner. A pool with nothing to rotate to fails loud (rc 1) with the reason, so a
 // caller never silently re-hands the same exhausted account.
-func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string, asJSON, asEnv bool) int {
+func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string, asJSON, asEnv, useHeadroom bool) int {
 	reg, err := loadOrDiscover(registryPath, homeDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
 	reg = reg.Refresh()
-	seat, ok := reg.NextInRotation(after)
+	// By default fold in the live runtime headroom signal so the pool is ordered with the
+	// account that has room first and walled/capped accounts last, instead of stable-by-name.
+	var hr accounts.RotationHeadroom
+	if useHeadroom {
+		hr = rotationHeadroom(homeDir)
+	}
+	seat, ok := reg.NextInRotationWithHeadroom(after, hr)
 	if !ok {
-		plan := reg.RotationPlan()
+		plan := reg.RotationPlanWithHeadroom(hr)
 		if len(plan.Pool) == 0 {
 			fmt.Fprintln(stderr, "fak accounts next: no eligible accounts in rotation "+
 				"(every seat is reserved, disabled, tombstoned, or has no live credentials)")
@@ -399,9 +407,26 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 			line += "  (" + seat.Email + ")"
 		}
 		line += fmt.Sprintf("  login=%s can_serve=%t", seat.Login, seat.CanServe)
+		if seat.Headroom != nil {
+			line += fmt.Sprintf("  headroom=%s", headroomLabel(*seat.Headroom))
+		}
 		fmt.Fprintln(stdout, line)
 	}
 	return 0
+}
+
+// headroomLabel renders a rotation headroom score as a short, honest word for the one-liner:
+// the score is a coarse offerability tier (see accounts_headroom.go), not a quota percentage,
+// so it reads as room/unknown/walled rather than a false-precision number.
+func headroomLabel(score float64) string {
+	switch {
+	case score > 0:
+		return "room"
+	case score < 0:
+		return "walled"
+	default:
+		return "unknown"
+	}
 }
 
 // accountsStatus emits the first-class login-status report. It is the machine-readable
