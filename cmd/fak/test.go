@@ -12,6 +12,7 @@ package main
 //	fak test build               run the build gate (go build ./...)
 //	fak test vet                 run the vet gate (go vet ./...)
 //	fak test gofmt               run the formatting gate (gofmt -l .)
+//	fak test codelint <path>     run the agent-code lint packs
 //	fak test full                the full suite (go test ./...)
 //	fak test race                the race tier (go test -short -race ./...)
 //	fak test affected            run fak affected for the changed package closure
@@ -125,6 +126,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
   fak test build               build gate (go build ./...)
   fak test vet                 vet gate (go vet ./...)
   fak test gofmt               formatting gate (gofmt -l .)
+  fak test codelint <path>     agent-code lint packs
   fak test full                full suite (go test ./...)
   fak test race                race tier (go test -short -race ./...)
   fak test affected            affected-package loop (delegates to fak affected)
@@ -146,7 +148,7 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		if *json {
 			return writeTestListJSON(stdout, stderr)
 		}
-		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  build      go build ./...\n  vet        go vet ./...\n  gofmt      gofmt -l .\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  shards     balance packages from a duration ledger\n  <pkg>      a ./... or import-path target\n")
+		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  build      go build ./...\n  vet        go vet ./...\n  gofmt      gofmt -l .\n  codelint   fak codelint ...\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  shards     balance packages from a duration ledger\n  <pkg>      a ./... or import-path target\n")
 		return 0
 	}
 
@@ -155,6 +157,8 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		switch args[0] {
 		case "build", "vet", "gofmt", "fmt":
 			return runTestCheck(stdout, stderr, os.Stdin, args[0], args[1:], *json, *dry || *dry2)
+		case "codelint":
+			return runTestCodelint(stdout, stderr, args[1:], *json, *dry || *dry2)
 		case "affected":
 			subArgs := args[1:]
 			if *json && !hasFlag(subArgs, "json") {

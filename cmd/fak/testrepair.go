@@ -29,7 +29,18 @@ type testRepairPacket struct {
 	StdoutTail      string              `json:"stdout_tail,omitempty"`
 	StderrTail      string              `json:"stderr_tail,omitempty"`
 	OutputTruncated bool                `json:"output_truncated,omitempty"`
+	Diagnostics     []testDiagnostic    `json:"diagnostics,omitempty"`
 	Findings        []testRepairFinding `json:"findings"`
+}
+
+type testDiagnostic struct {
+	Tool     string `json:"tool"`
+	Code     string `json:"code"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Col      int    `json:"col,omitempty"`
+	Severity string `json:"severity"`
+	Detail   string `json:"detail"`
 }
 
 type testRepairFinding struct {
@@ -259,6 +270,7 @@ func writeTestListJSON(stdout, stderr io.Writer) int {
 			{Name: "build", Command: "go build ./...", When: "compile/build gate"},
 			{Name: "vet", Command: "go vet ./...", When: "static Go analyzer gate"},
 			{Name: "gofmt", Command: "gofmt -l .", When: "formatting gate"},
+			{Name: "codelint", Command: "fak codelint ...", When: "agent-written code lint packs"},
 			{Name: "full", Command: "go test ./...", When: "authoritative suite"},
 			{Name: "race", Command: "go test -short -race ./...", When: "local race gate"},
 			{Name: "affected", Command: "fak affected ...", When: "changed packages plus transitive importers"},

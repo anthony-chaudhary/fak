@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -218,6 +220,61 @@ func TestRunTestJSONGofmtOutputFails(t *testing.T) {
 	}
 }
 
+func TestRunTestJSONCodelintCleanPasses(t *testing.T) {
+	dir := t.TempDir()
+	ok := filepath.Join(dir, "ok.go")
+	if err := os.WriteFile(ok, []byte("package x\n\nfunc F() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "codelint", ok}); rc != 0 {
+		t.Fatalf("json codelint clean rc = %d, stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if !packet.OK || packet.Tier != "codelint" || packet.Findings[0].Class != "codelint_clean" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if len(packet.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %+v, want none", packet.Diagnostics)
+	}
+}
+
+func TestRunTestJSONCodelintFailureCarriesDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.go")
+	if err := os.WriteFile(bad, []byte("package x\nfunc ("), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "codelint", bad}); rc != 1 {
+		t.Fatalf("json codelint bad rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "codelint" || packet.Findings[0].Class != "codelint_failure" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if len(packet.Diagnostics) == 0 {
+		t.Fatalf("diagnostics = %+v, want at least one", packet.Diagnostics)
+	}
+	if packet.Diagnostics[0].Tool != "go" || packet.Diagnostics[0].Code != "GO_PARSE" || packet.Diagnostics[0].File != bad {
+		t.Fatalf("diagnostic = %+v", packet.Diagnostics[0])
+	}
+}
+
+func TestRunTestJSONCodelintUsageCarriesNextAction(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "codelint"}); rc != 2 {
+		t.Fatalf("json codelint usage rc = %d, want 2; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Verdict != "USAGE" || packet.Findings[0].Class != "codelint_usage" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if !strings.Contains(packet.NextAction, "fak test --json codelint") {
+		t.Fatalf("next action = %q", packet.NextAction)
+	}
+}
+
 func TestRunTest_AffectedDelegatesToAffectedPlanner(t *testing.T) {
 	oldListGraph := affectedListGraph
 	oldRunGoTest := affectedRunGoTest
@@ -264,7 +321,8 @@ func TestRunTest_ListExitsZero(t *testing.T) {
 	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") ||
 		!strings.Contains(out.String(), "affected") || !strings.Contains(out.String(), "durations") ||
 		!strings.Contains(out.String(), "shards") || !strings.Contains(out.String(), "build") ||
-		!strings.Contains(out.String(), "vet") || !strings.Contains(out.String(), "gofmt") {
+		!strings.Contains(out.String(), "vet") || !strings.Contains(out.String(), "gofmt") ||
+		!strings.Contains(out.String(), "codelint") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }
