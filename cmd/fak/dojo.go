@@ -52,9 +52,10 @@ run    scores every default lever's predicted saving against billed reality over
        is registered but excluded from the default set (blocked on #953 — no
        paired ON/OFF corpus yet); pass --lever compaction to include it. With
        --live (auto-selected when no --corpus is given and one exists) it
-       discovers the .dojo/live-episodes corpus that --dojo writes; those markers
-       are start-only today, so it surfaces what it found and reports what is
-       missing to score them rather than inventing a calibration.
+       discovers the .dojo/live-episodes corpus that --dojo writes and folds any
+       completed sessions' scored provider-cache rows; legacy start-only markers
+       (predating #1930) are still surfaced with what is missing to score them
+       rather than inventing a calibration.
 board  folds the same run into a cross-lever leaderboard: one row per lever
        (verdict distribution, mean calib-err, worst metric, grade), worst-first.
 ablate scores the vDSO on-vs-off ablation over a trace as a WITNESSED episode:
@@ -104,7 +105,7 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dojo run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	corpus := fs.String("corpus", "", "directory of real Claude Code transcripts (.jsonl, scanned recursively) to score the levers against")
-	live := fs.Bool("live", false, "score the live-episode corpus `fak guard --dojo` / `fak serve --dojo` write under <root>/"+dojo.LiveEpisodesRel+" instead of --corpus. Auto-selected when neither --corpus nor --live is given and that corpus exists. The markers are start-only today, so this DISCOVERS + surfaces them and reports what is missing to score them (it never fabricates a calibration).")
+	live := fs.Bool("live", false, "score the live-episode corpus `fak guard --dojo` / `fak serve --dojo` write under <root>/"+dojo.LiveEpisodesRel+" instead of --corpus. Auto-selected when neither --corpus nor --live is given and that corpus exists. A completed session's scored provider-cache rows fold directly; a legacy start-only marker still just DISCOVERS + surfaces itself and reports what is missing to score it (it never fabricates a calibration).")
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the resume-posture lever scores at: 5m (default) or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
 	leverSel := fs.String("lever", "", "comma-separated levers to run (default: all except compaction, blocked on #953; pass --lever compaction to include it; see `fak dojo list`)")
@@ -226,14 +227,13 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 // that corpus (which nothing read before #1093) into the same scoring pipeline
 // the --corpus path uses, then folds whatever it can score.
 //
-// Today the writer is start-only — each marker carries {mode, command, started,
-// workspace} and no billed usage — so there is nothing to score yet. Rather than
-// crash or silently score zero, it DEGRADES GRACEFULLY: it surfaces the episodes
-// it found and reports, in plain words, what is missing to score them. The
-// scorable-marker seam (dojo.ScorableLiveEpisodes) is already wired, so when the
-// writer side later captures full episodes those flow straight into the fold with
-// no change here. Fail-open: a missing/empty corpus is a clean "nothing recorded
-// yet", never an error.
+// Since #1930, a completed --dojo session persists a second row carrying scored
+// provider-cache inputs (dojo.ScorableLiveEpisodes), so those fold directly here.
+// A marker predating that fix (or a session with no observed provider-cache
+// window) is still start-only — {mode, command, started, workspace}, no billed
+// usage — so it DEGRADES GRACEFULLY: surfaced with what is missing to score it,
+// never crashed on or silently scored zero. Fail-open: a missing/empty corpus is
+// a clean "nothing recorded yet", never an error.
 func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int {
 	dir := filepath.Join(root, filepath.FromSlash(dojo.LiveEpisodesRel))
 	lc, err := dojo.ReadLiveCorpus(dir)
@@ -244,8 +244,9 @@ func runDojoLive(stdout, stderr io.Writer, root string, asJSON, check bool) int 
 		return 1
 	}
 
-	// Score whatever the corpus carries. While the markers are start-only this is
-	// empty, so the fold is honestly unmeasured rather than fabricated.
+	// Score whatever the corpus carries. A start-only marker (no observed
+	// provider-cache window) contributes nothing, so the fold stays honestly
+	// unmeasured rather than fabricated.
 	var episodes []dojo.Episode
 	for _, in := range dojo.ScorableLiveEpisodes(lc) {
 		episodes = append(episodes, dojo.Score("live-episodes", in.Prediction, in.Outcome, dojo.DefaultCalibBand()))
