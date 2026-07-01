@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
 
 // a representative slice of a fak gateway /metrics body: the in-kernel KV-prefix
@@ -50,6 +52,15 @@ func TestParseFoldsCacheFamily(t *testing.T) {
 	}
 	if r.CacheBitScope != CacheBitScopeAggregateRun {
 		t.Errorf("cache bit scope = %q, want %q", r.CacheBitScope, CacheBitScopeAggregateRun)
+	}
+}
+
+func TestRegimeThresholdsFollowCacheObs(t *testing.T) {
+	if RegimeFrozenFloor != cacheobs.FrozenFloor {
+		t.Fatalf("RegimeFrozenFloor = %v, want cacheobs.FrozenFloor %v", RegimeFrozenFloor, cacheobs.FrozenFloor)
+	}
+	if RegimeColdCeil != cacheobs.ColdCeil {
+		t.Fatalf("RegimeColdCeil = %v, want cacheobs.ColdCeil %v", RegimeColdCeil, cacheobs.ColdCeil)
 	}
 }
 

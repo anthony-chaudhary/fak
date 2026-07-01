@@ -42,7 +42,7 @@ requires. `fak swebench cache-witness` folds it into one record:
 |---|---|---|---|
 | `kv_prefix.reused_tokens` | `fak_gateway_kv_prefix_reused_tokens_total` | **WITNESSED** | fak's OWN cache: the RadixAttention prefix match the kernel did not re-prefill. fak authored it. |
 | `kv_prefix.prompt_tokens` | `fak_gateway_kv_prefix_prompt_tokens_total` | **WITNESSED** | the prefill-token denominator of the realized cache-hit. |
-| `kv_prefix.{frozen,partial,cold}_turns` | `..._turns_by_regime_total` | **WITNESSED** | the cliff distribution — frozen (reuse ≥ 0.90) is the append-only regime the value comes from. |
+| `kv_prefix.{frozen,partial,cold}_turns` | `..._turns_by_regime_total` | **WITNESSED** | the cliff distribution from the live `cacheobs.FrozenFloor` / `cacheobs.ColdCeil` thresholds; frozen is the append-only regime the value comes from. |
 | `provider_cache_read_tokens` | `fak_gateway_inference_cached_prompt_tokens_total` | **OBSERVED** | the upstream provider's `cache_read`, relayed verbatim. **0 on the pure in-kernel path** (no provider). Never proof fak preserved anything. |
 
 The record **never sums** the two — they are distinct caches over distinct paths. `CacheBit()`

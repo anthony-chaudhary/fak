@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
 
 // Provenance labels the trust class of a cache number: who authored it.
@@ -108,6 +110,14 @@ const WarmKVMarginalFamily = "marginal-over-tuned-warm-KV (internal/swebench cos
 // It deliberately does not claim per-turn solved-ticket attribution.
 const CacheBitScopeAggregateRun = "aggregate-run-kv-prefix-reuse"
 
+// RegimeFrozenFloor and RegimeColdCeil expose the live cacheobs bucket thresholds
+// to witness consumers. The definitions remain in cacheobs; cachewitness must not
+// re-document numeric copies that can drift from the gateway's by-regime counters.
+const (
+	RegimeFrozenFloor = cacheobs.FrozenFloor
+	RegimeColdCeil    = cacheobs.ColdCeil
+)
+
 // CacheValue expresses the realized in-kernel reuse as a *publishable* cache
 // number under #1066's honesty fence. The trap it guards: a long R2E-Gym
 // trajectory has high turn-over-turn reuse (ReuseRatio → 0.9+), and 1/(1-reuse)
@@ -166,9 +176,9 @@ type KVPrefixWitness struct {
 	// ReusedTokens is THE cache value: prefill tokens served from the cached KV
 	// prefix — the work the kernel did not redo. This is the epic's headline datum.
 	ReusedTokens uint64 `json:"reused_tokens"`
-	// FrozenTurns/PartialTurns/ColdTurns is the cliff distribution: frozen turns
-	// (reuse >= 0.90) are the append-only regime the cache value comes from; cold
-	// turns (reuse < 0.10) are first prefills or head-mutated/fanned-out turns.
+	// FrozenTurns/PartialTurns/ColdTurns is the cliff distribution from the live
+	// cacheobs regime buckets. See cacheobs.FrozenFloor / cacheobs.ColdCeil
+	// (re-exported above) for the threshold definitions.
 	FrozenTurns  uint64 `json:"frozen_turns"`
 	PartialTurns uint64 `json:"partial_turns"`
 	ColdTurns    uint64 `json:"cold_turns"`
