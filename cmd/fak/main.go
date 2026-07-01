@@ -89,6 +89,8 @@ func main() {
 		cmdSync(os.Args[2:])
 	case "merge":
 		cmdMerge(os.Args[2:])
+	case "whats-changed":
+		cmdWhatsChanged(os.Args[2:])
 	case "affected":
 		cmdAffected(os.Args[2:])
 	case "preflight":
