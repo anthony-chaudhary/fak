@@ -77,6 +77,7 @@ var tier = map[string]int{
 	"commitsubject":        1,                // commit-subject coverage fold over hooks.CommitMsgVerdict + recent git subjects; imports hooks(1)+windowgate(1), off the hot path.
 	"memgate":              1,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
 	"memoryread":           1,                // read-only committed fleet-memory digest renderer; stdlib-only, off the hot path.
+	"sotacoverage":         1,                // SOTA prior-art coverage scorecard over sotamatrix + git tree scans; imports sotamatrix(1)+windowgate(1), off the hot path.
 	"testroute":            1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
 	"mergepreview":         1,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"taskdecision":         1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
