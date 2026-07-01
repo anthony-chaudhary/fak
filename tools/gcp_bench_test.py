@@ -148,6 +148,20 @@ class ProvisionerLogicTest(unittest.TestCase):
         self.assertIn("--max-run-duration=7200s", flat)
         self.assertIn("--instance-termination-action=DELETE", flat)
 
+    def test_provision_stamps_typed_benchmark_labels(self):
+        # Future inventory should not have to guess from names alone. Creation stamps
+        # the VM as a fak benchmark with the tier and run id.
+        r = FakeRunner()
+        tier = gcp_accel.by_slug("g2-l4")
+        name = "fak-bench-g2-l4-20260630t010203z"
+        gcp_bench.provision(r, tier, name, "us-central1-a", Path("/tmp/s.sh"),
+                            spot=False, max_run_hours=0)
+        flat = " ".join(r.calls[0])
+        self.assertIn(
+            "--labels=fak-purpose=bench,fak-tier=g2-l4,fak-run=20260630t010203z",
+            flat,
+        )
+
     def test_provision_termination_action_emitted_once_under_spot_and_ttl(self):
         # --instance-termination-action must appear EXACTLY once even when both --spot
         # and the TTL ask for it (gcloud rejects a duplicated flag).
@@ -202,6 +216,157 @@ class ProvisionerLogicTest(unittest.TestCase):
             "fak-bench-g2-l4-20260620t000000z --zone=us-central1-a --quiet",
             text,
         )
+
+    def test_tier_slug_from_existing_instance_name(self):
+        self.assertEqual(
+            gcp_bench.tier_slug_from_instance_name("fak-bench-a3-ultra-h200-20260630t000000z"),
+            "a3-ultra-h200",
+        )
+        self.assertEqual(gcp_bench.tier_slug_from_instance_name("not-a-bench"), "")
+
+    def test_list_existing_uses_labels_before_name_guess(self):
+        class LabelRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                rows = [{
+                    "name": "fak-bench-custom-20260630t000000z",
+                    "zone": "zones/us-central1-a",
+                    "status": "RUNNING",
+                    "creationTimestamp": "2026-06-30T00:00:00.000-07:00",
+                    "labels": {"fak-tier": "g2-l4"},
+                }]
+                return SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+
+        import json
+        r = LabelRunner()
+        got, err = gcp_bench.list_existing_bench_instances(r)
+        self.assertEqual(err, "")
+        self.assertEqual(got[0].tier_slug, "g2-l4")
+
+    def test_default_existing_policy_refuses_live_instance_before_tier_resolution(self):
+        class LeakedRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='[{"name":"fak-bench-g2-l4-20260630t000000z","zone":"zones/us-central1-a","status":"RUNNING"}]',
+                    stderr="",
+                )
+
+        r = LeakedRunner()
+        resolved = {"called": False}
+
+        def should_not_resolve(args, runner):
+            resolved["called"] = True
+            return None
+
+        out = StringIO()
+        with mock.patch.object(gcp_bench, "Runner", lambda dry_run, project, account: r), \
+                mock.patch.object(gcp_bench, "resolve_tier", should_not_resolve), \
+                redirect_stdout(out):
+            rc = gcp_bench.main(["--tier", "g2-l4"])
+        self.assertEqual(rc, 2)
+        self.assertFalse(resolved["called"], "default fail policy must stop before tier/provision")
+        self.assertIn("refusing to create another", out.getvalue())
+
+    def test_on_existing_warn_keeps_old_create_alongside_behavior(self):
+        class LeakedRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='[{"name":"fak-bench-g2-l4-20260630t000000z","zone":"zones/us-central1-a","status":"RUNNING"}]',
+                    stderr="",
+                )
+
+        r = LeakedRunner()
+        resolved = {"called": False}
+
+        def resolve_none(args, runner):
+            resolved["called"] = True
+            return None
+
+        with mock.patch.object(gcp_bench, "Runner", lambda dry_run, project, account: r), \
+                mock.patch.object(gcp_bench, "resolve_tier", resolve_none):
+            rc = gcp_bench.main(["--tier", "g2-l4", "--on-existing=warn"])
+        self.assertEqual(rc, 2)
+        self.assertTrue(resolved["called"], "warn policy should proceed past inventory")
+
+    def test_choose_reuse_instance_adopts_one_matching_live_vm(self):
+        tier = gcp_accel.by_slug("g2-l4")
+        inst = gcp_bench.BenchInstance(
+            name="fak-bench-g2-l4-20260630t000000z",
+            zone="us-central1-a",
+            status="RUNNING",
+            created="now",
+            tier_slug="g2-l4",
+        )
+        got, err = gcp_bench.choose_reuse_instance([inst], tier, "us-central1-a", True)
+        self.assertEqual(err, "")
+        self.assertEqual(got, inst)
+
+    def test_choose_reuse_instance_rejects_ambiguous_live_vms(self):
+        tier = gcp_accel.by_slug("g2-l4")
+        vms = [
+            gcp_bench.BenchInstance("fak-bench-g2-l4-a", "us-central1-a", "RUNNING", "now", "g2-l4"),
+            gcp_bench.BenchInstance("fak-bench-g2-l4-b", "us-central1-b", "RUNNING", "now", "g2-l4"),
+        ]
+        got, err = gcp_bench.choose_reuse_instance(vms, tier, "us-central1-a", False)
+        self.assertIsNone(got)
+        self.assertIn("exactly one", err)
+
+    def test_on_existing_reuse_skips_create_and_teardown(self):
+        class ReuseRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.dry_run = False
+
+            def run(self, args, *, capture=False, timeout=600, check=True):
+                self.calls.append(args)
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='[{"name":"fak-bench-g2-l4-20260630t000000z","zone":"zones/us-central1-a","status":"RUNNING"}]',
+                    stderr="",
+                )
+
+        r = ReuseRunner()
+        tier = gcp_accel.by_slug("g2-l4")
+        called = {"provision": False, "teardown": False}
+
+        def bad_provision(*args, **kwargs):
+            called["provision"] = True
+            raise AssertionError("reused VM must not be created")
+
+        def bad_teardown(*args, **kwargs):
+            called["teardown"] = True
+            raise AssertionError("reused VM must not be deleted by default")
+
+        with mock.patch.object(gcp_bench, "Runner", lambda dry_run, project, account: r), \
+                mock.patch.object(gcp_bench, "resolve_tier", lambda args, runner: tier), \
+                mock.patch.object(gcp_bench, "write_lf", lambda *a, **k: None), \
+                mock.patch.object(gcp_bench, "make_source_tarball", lambda *a, **k: None), \
+                mock.patch.object(gcp_bench, "provision", bad_provision), \
+                mock.patch.object(gcp_bench, "wait_for_ssh", lambda *a, **k: True), \
+                mock.patch.object(gcp_bench, "run_driver_over_ssh", lambda *a, **k: {"schema": "fak.gcp-vm-bench.v2"}), \
+                mock.patch.object(gcp_bench, "collect", lambda *a, **k: Path("/tmp/out")), \
+                mock.patch.object(gcp_bench, "teardown", bad_teardown):
+            rc = gcp_bench.main(["--tier", "g2-l4", "--on-existing=reuse"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(called["provision"])
+        self.assertFalse(called["teardown"])
+        self.assertFalse(any("instances" in c and "create" in c for c in r.calls))
 
     def test_resolve_instance_ip_describes_current_nat_ip(self):
         class IPRunner(FakeRunner):

@@ -70,8 +70,11 @@ Flow (each step is logged and gated):
 
 SAFETY: teardown is in a finally block AND idempotent (a second delete is a
 no-op). `--keep` skips teardown for debugging but prints a loud warning + the
-exact delete command. `--dry-run` prints every gcloud command without running
-any, so the whole path is reviewable offline and in CI.
+exact delete command. By default a live `fak-bench-*` VM makes the launcher STOP
+before provisioning another one; use `--on-existing=warn` to intentionally create
+beside it, or `--on-existing=reuse` to adopt one matching live VM. `--dry-run`
+prints every gcloud command without running any, so the whole path is reviewable
+offline and in CI.
 
 Usage:
   python tools/gcp_bench.py --dry-run                 # print the plan, touch nothing
@@ -79,6 +82,7 @@ Usage:
   python tools/gcp_bench.py --tier a4-b200 --blackwell  # the flagship Blackwell run
   python tools/gcp_bench.py --proof --engine llama    # cheapest L4, just the baseline
   python tools/gcp_bench.py --keep --tier g2-l4       # leave the VM up to debug
+  python tools/gcp_bench.py --tier g2-l4 --on-existing=reuse  # use one live kept VM
 """
 from __future__ import annotations
 
@@ -126,6 +130,26 @@ class Engine:
     key: str
     label: str
     needs_cuda: bool
+
+
+@dataclass(frozen=True)
+class BenchInstance:
+    """One cloud VM that belongs to the GCP benchmark runner."""
+
+    name: str
+    zone: str
+    status: str
+    created: str
+    tier_slug: str
+
+    def active(self) -> bool:
+        # GCE uses TERMINATED for a stopped instance. Anything else can still be
+        # booting/running/stopping and should block accidental parallel benchmark
+        # launches unless the caller explicitly opts in.
+        return self.status.upper() != "TERMINATED"
+
+    def reusable(self) -> bool:
+        return self.status.upper() in {"PROVISIONING", "STAGING", "RUNNING"}
 
 
 # The engine registry. ENGINE_ORDER is the canonical run/headline order (baselines
@@ -644,6 +668,24 @@ def instance_name(tier: gcp_accel.AccelTier) -> str:
     return f"fak-bench-{tier.slug}-{stamp()}".lower().replace("_", "-")
 
 
+def tier_slug_from_instance_name(name: str) -> str:
+    """Recover the tier slug from the canonical fak-bench-<tier>-<stamp> name."""
+    prefix = "fak-bench-"
+    if not name.startswith(prefix):
+        return ""
+    rest = name[len(prefix):]
+    for tier in sorted(gcp_accel.TIERS, key=lambda t: len(t.slug), reverse=True):
+        if rest == tier.slug or rest.startswith(tier.slug + "-"):
+            return tier.slug
+    return ""
+
+
+def bench_labels(tier: gcp_accel.AccelTier, name: str) -> str:
+    """GCE labels that make later instance inventory typed instead of name-only."""
+    run = name.rsplit("-", 1)[-1].lower()
+    return f"fak-purpose=bench,fak-tier={tier.slug},fak-run={run}"
+
+
 def machine_id_for(tier: gcp_accel.AccelTier) -> str:
     return f"gcp-{tier.slug}"
 
@@ -659,48 +701,105 @@ def _delete_instance_command(runner: Runner, name: str, zone: str) -> str:
     return " ".join(shlex.quote(c) for c in cmd)
 
 
-def warn_preexisting_bench_instances(runner: Runner) -> None:
-    """Surface fak-bench-* VMs leaked by prior launchers before creating a new one."""
+def list_existing_bench_instances(runner: Runner) -> tuple[list[BenchInstance], str]:
+    """Return existing fak-bench-* VMs plus an error string when inventory failed."""
     proc = runner.run(
         [
             "compute", "instances", "list",
             "--filter=name~^fak-bench-",
-            "--format=json(name,zone,status,creationTimestamp)",
+            "--format=json(name,zone,status,creationTimestamp,labels)",
         ],
         capture=True, timeout=120, check=False,
     )
     if runner.dry_run:
-        return
+        return [], ""
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or "").strip()
-        suffix = f": {msg}" if msg else ""
-        log(f"WARNING: could not check for pre-existing fak-bench-* VMs{suffix}")
-        return
+        return [], msg or "gcloud instances list failed"
     out = (proc.stdout or "").strip()
     if not out:
-        return
+        return [], ""
     try:
         rows = json.loads(out)
     except json.JSONDecodeError:
-        log("WARNING: could not parse pre-existing fak-bench-* VM list")
-        return
+        return [], "could not parse pre-existing fak-bench-* VM list"
     if not isinstance(rows, list):
-        log("WARNING: unexpected pre-existing fak-bench-* VM list shape")
-        return
-    leaked = [r for r in rows if str(r.get("name", "")).startswith("fak-bench-")]
-    if not leaked:
-        return
-    log(f"WARNING: found {len(leaked)} pre-existing fak-bench-* VM(s) before launch:")
-    for row in leaked:
+        return [], "unexpected pre-existing fak-bench-* VM list shape"
+
+    instances: list[BenchInstance] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
         name = str(row.get("name") or "")
-        zone = _zone_name(str(row.get("zone") or ""))
-        status = row.get("status") or "UNKNOWN"
-        created = row.get("creationTimestamp") or "unknown-created"
-        log(f"  {name} zone={zone} status={status} created={created}")
-        if zone:
-            log(f"    delete: {_delete_instance_command(runner, name, zone)}")
+        if not name.startswith("fak-bench-"):
+            continue
+        labels = row.get("labels") if isinstance(row.get("labels"), dict) else {}
+        tier_slug = str(labels.get("fak-tier") or "") or tier_slug_from_instance_name(name)
+        instances.append(BenchInstance(
+            name=name,
+            zone=_zone_name(str(row.get("zone") or "")),
+            status=str(row.get("status") or "UNKNOWN"),
+            created=str(row.get("creationTimestamp") or "unknown-created"),
+            tier_slug=tier_slug,
+        ))
+    return instances, ""
+
+
+def report_existing_bench_instances(runner: Runner, instances: list[BenchInstance], *,
+                                    prefix: str = "WARNING") -> None:
+    if not instances:
+        return
+    log(f"{prefix}: found {len(instances)} pre-existing fak-bench-* VM(s):")
+    for inst in instances:
+        tier = f" tier={inst.tier_slug}" if inst.tier_slug else ""
+        log(f"  {inst.name} zone={inst.zone or '?'} status={inst.status}{tier} created={inst.created}")
+        if inst.zone:
+            log(f"    delete: {_delete_instance_command(runner, inst.name, inst.zone)}")
         else:
             log("    delete: re-run `gcloud compute instances list` to resolve its zone")
+
+
+def warn_preexisting_bench_instances(runner: Runner) -> None:
+    """Surface fak-bench-* VMs leaked by prior launchers before creating a new one."""
+    instances, err = list_existing_bench_instances(runner)
+    if err:
+        log(f"WARNING: could not check for pre-existing fak-bench-* VMs: {err}")
+        return
+    report_existing_bench_instances(runner, instances, prefix="WARNING")
+
+
+def active_bench_instances(instances: list[BenchInstance]) -> list[BenchInstance]:
+    return [inst for inst in instances if inst.active()]
+
+
+def choose_reuse_instance(instances: list[BenchInstance], tier: gcp_accel.AccelTier,
+                          zone: str, zone_explicit: bool) -> tuple[Optional[BenchInstance], str]:
+    """Pick the single live VM --on-existing=reuse can safely adopt."""
+    candidates = [inst for inst in active_bench_instances(instances) if inst.tier_slug == tier.slug]
+    if zone_explicit:
+        candidates = [inst for inst in candidates if inst.zone == zone]
+    if not candidates:
+        return None, ""
+    unusable = [inst for inst in candidates if not inst.reusable()]
+    if unusable:
+        names = ", ".join(f"{inst.name}({inst.status})" for inst in unusable)
+        return None, f"matching instance(s) are not reusable yet: {names}"
+    if len(candidates) > 1:
+        names = ", ".join(f"{inst.name}({inst.zone},{inst.status})" for inst in candidates)
+        return None, f"--on-existing=reuse needs exactly one matching live VM; found {len(candidates)}: {names}"
+    return candidates[0], ""
+
+
+def infer_single_existing_tier(instances: list[BenchInstance]) -> tuple[str, str]:
+    active = active_bench_instances(instances)
+    if not active:
+        return "", ""
+    if len(active) != 1:
+        names = ", ".join(inst.name for inst in active)
+        return "", f"--on-existing=reuse without --tier needs exactly one live VM; found {len(active)}: {names}"
+    if not active[0].tier_slug:
+        return "", f"could not infer tier from existing VM name {active[0].name!r}; pass --tier"
+    return active[0].tier_slug, ""
 
 
 def resolve_instance_ip(runner: Runner, name: str, zone: str) -> Optional[str]:
@@ -779,6 +878,7 @@ def provision(runner: Runner, tier: gcp_accel.AccelTier, name: str, zone: str,
         "--boot-disk-type=pd-ssd",
         f"--metadata-from-file=startup-script={startup_path}",
         "--metadata=install-nvidia-driver=True",
+        f"--labels={bench_labels(tier, name)}",
         "--scopes=https://www.googleapis.com/auth/cloud-platform",
     ]
     # Accelerator-optimized machine types (a4/a4x/a3/g2) carry their GPUs
@@ -989,6 +1089,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--fak-ref", default="master")
     ap.add_argument("--keep", action="store_true",
                     help="do NOT tear down the VM (debug). Prints the delete command.")
+    ap.add_argument("--on-existing", choices=["fail", "warn", "reuse"], default="fail",
+                    help="what to do when live fak-bench-* VMs already exist: fail "
+                         "(default), warn and create another, or reuse exactly one "
+                         "matching live VM without deleting it afterward")
     ap.add_argument("--max-run-hours", type=float, default=2.0,
                     help="GCP-side auto-delete TTL (hours) so a killed launcher can't "
                          "leak the GPU VM; 0 disables (default: 2.0)")
@@ -1018,7 +1122,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     runner = Runner(args.dry_run, args.project, args.account)
-    warn_preexisting_bench_instances(runner)
+    existing_instances, existing_err = list_existing_bench_instances(runner)
+    if existing_err:
+        if args.on_existing in {"fail", "reuse"}:
+            log(f"STOP: could not prove whether a fak-bench-* VM is already running: {existing_err}")
+            log("      retry after GCP inventory works, or pass --on-existing=warn to intentionally create without that guard")
+            return 2
+        log(f"WARNING: could not check for pre-existing fak-bench-* VMs: {existing_err}")
+
+    active_existing = active_bench_instances(existing_instances)
+    if active_existing and args.on_existing == "fail":
+        report_existing_bench_instances(runner, active_existing, prefix="STOP")
+        log("STOP: live benchmark VM(s) already exist; refusing to create another by default")
+        log("      delete them, pass --on-existing=warn to create in parallel, or pass --on-existing=reuse --tier <slug> to adopt one")
+        return 2
+    if existing_instances and args.on_existing == "warn":
+        report_existing_bench_instances(runner, existing_instances, prefix="WARNING")
+    if active_existing and args.on_existing == "reuse" and not args.tier and not args.proof and not args.blackwell:
+        inferred, why = infer_single_existing_tier(existing_instances)
+        if why:
+            report_existing_bench_instances(runner, active_existing, prefix="STOP")
+            log(f"STOP: {why}")
+            return 2
+        args.tier = inferred
+        log(f"--on-existing=reuse: inferred --tier {args.tier} from the single live benchmark VM")
 
     tier = resolve_tier(args, runner)
     if not tier:
@@ -1029,6 +1156,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     # CUDA engines. On a real GPU tier all engines run.
     zone = args.zone or tier.common_zones[0]
     name = instance_name(tier)
+    reused_instance: Optional[BenchInstance] = None
+    if args.on_existing == "reuse":
+        reused_instance, reuse_err = choose_reuse_instance(existing_instances, tier, zone, args.zone is not None)
+        if reuse_err:
+            report_existing_bench_instances(runner, active_bench_instances(existing_instances), prefix="STOP")
+            log(f"STOP: {reuse_err}")
+            return 2
+        if reused_instance:
+            name = reused_instance.name
+            zone = reused_instance.zone
+            log(f"--on-existing=reuse: adopting {name} in {zone} ({reused_instance.status}); it will be left running after the benchmark")
+        elif active_bench_instances(existing_instances):
+            report_existing_bench_instances(runner, active_bench_instances(existing_instances), prefix="STOP")
+            log(f"STOP: live benchmark VM(s) exist, but none match tier={tier.slug}"
+                f"{(' zone=' + zone) if args.zone else ''}")
+            return 2
     cc = tier.compute_capability
     log(f"plan: {tier.slug} ({tier.gpu_count}x {tier.gpu_label}) in {zone}, "
         f"instance {name}, engines={engine_keys}, ~${tier.approx_usd_per_hour:.0f}/hr")
@@ -1059,8 +1202,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         # the create call, so a partial create that then raises (or a Ctrl-C mid-create)
         # still hits the idempotent teardown in finally. Deleting a never-created
         # instance is a no-op, so arming early is always safe.
-        provisioned = True
-        provision(runner, tier, name, zone, startup_path, args.spot, args.max_run_hours)
+        if reused_instance is None:
+            provisioned = True
+            provision(runner, tier, name, zone, startup_path, args.spot, args.max_run_hours)
         if not wait_for_ssh(runner, name, zone):
             log("aborting: SSH never came up")
             return 1
