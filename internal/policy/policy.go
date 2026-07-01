@@ -101,6 +101,11 @@ type Manifest struct {
 	// metadata block (169.254.169.254 & peers) is always on and cannot be disabled here.
 	// Absent leaves the floor at the hardwired set. Maps to adjudicator.Policy.EgressExtraDenyHosts.
 	Egress *EgressRule `json:"egress,omitempty"`
+	// Isolation (issue #2013, epic #2000 M13) is the declarative trust-level →
+	// ToolExec-backend dial. Absent leaves the dial unset (resolution fails
+	// closed); a present block is validated at load — see IsolationRule. Like
+	// RateLimit, this is manifest/runtime-only, NOT an adjudicator.Policy field.
+	Isolation *IsolationRule `json:"isolation,omitempty"`
 }
 
 // EgressRule is the manifest's network-egress block (issue: cloud-metadata SSRF floor).
@@ -169,6 +174,9 @@ type Runtime struct {
 	SafeSinks      []string
 	AuthorizeRules []AuthorizeRule
 	RateLimit      *RateLimitRule
+	// Isolation is the compiled trust-level → ToolExec-backend dial (#2013);
+	// nil when the manifest declares none (BackendFor then fails closed).
+	Isolation *IsolationRule
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -332,12 +340,17 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	iso, err := compileIsolation(m.Isolation)
+	if err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:    p,
 		Sources:        sources,
 		SafeSinks:      safe,
 		AuthorizeRules: auth,
 		RateLimit:      rl,
+		Isolation:      iso,
 	}, nil
 }
 
@@ -494,6 +507,15 @@ func SummaryRuntime(rt Runtime) string {
 			rt.RateLimit.MaxCalls, rt.RateLimit.MaxCost, key, rt.RateLimit.RetryAfterMS)
 	} else {
 		fmt.Fprintf(&b, "rate limit         : (none — inert)\n")
+	}
+	if rt.Isolation != nil {
+		fmt.Fprintf(&b, "isolation backends : %s (strongest: %s)\n",
+			strings.Join(rt.Isolation.Backends, ", "), rt.Isolation.strongest())
+		for _, lv := range maputil.SortedKeys(rt.Isolation.Trust) {
+			fmt.Fprintf(&b, "isolation trust    : %s -> %s\n", lv, rt.Isolation.Trust[lv])
+		}
+	} else {
+		fmt.Fprintf(&b, "isolation          : (none — dial unset; placement fails closed)\n")
 	}
 	return b.String()
 }
