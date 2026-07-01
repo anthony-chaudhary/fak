@@ -40,6 +40,10 @@ so you never hit the OS-policy block below. The `make` target set is the authori
 gate it sits over; `fak test --list` prints the tiers, and `fak test -n <tier>` prints
 the resolved command without running it. It sits over the `make` target set — the
 authoritative gates — with one host caveat that bites on Windows.
+For machine consumers, put `--json` before the tier: `fak test --json -n race`
+emits `fak.test_repair_packet.v1` with the resolved command, and `fak test --json
+<tier-or-package>` captures the command result into the same envelope with
+`findings`, `exit_code`, output tails, and a `next_action`.
 For changed-package work, use `fak test affected ...`: it delegates to `fak affected`
 so the agent-facing front door still gets the affected planner's `--json`, `--list`,
 `--file`, `--budget`, report, and pass-through `go test` flags.
@@ -54,6 +58,7 @@ elapsed time instead of hand-ordered package lists.
 | Command | What it runs | When |
 |---|---|---|
 | `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test` (default tier `fast`); on Windows routes to WSL via `test.ps1`; `fak test fast -- -run TestX` passes flags through | the one-verb inner loop over the targets below |
+| `fak test --json [-n] [fast\|full\|race\|<pkg>]` | emits `fak.test_repair_packet.v1` for the resolved command or finished run, with normalized finding class, exit code, output tails, and next action | agent-facing repair packets instead of raw terminal logs |
 | `fak test affected [--json\|--list\|--file P\|--budget DUR] [-- go test args]` | delegates to `fak affected`, selecting changed packages plus transitive importers, with JSON/list dry-runs and budget/report flags preserved | the default agent loop before paying for the full suite |
 | `make test-durations` | runs `fak test durations --run fast --out .fak/test-duration-ledger.json` with package/test budgets | find the slowest next package or test before widening CI shards |
 | `fak test shards --input .fak/test-duration-ledger.json --shards 4 --go-arg -short` | reads a duration ledger and emits deterministic balanced `go test` shard commands as `fak.test_shard_plan.v1` | local proof/planning step before wiring CI to consume measured shards |
