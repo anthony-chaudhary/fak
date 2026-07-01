@@ -385,6 +385,13 @@ func Query(ctx context.Context, im *cdb.Image, req Request) Result {
 	return res
 }
 
+// stepSkipped reports whether a selected step must be skipped during
+// materialization: it was excluded by selection, or its frame is sealed or
+// tombstoned (never materializable).
+func stepSkipped(f cdb.Frame, step int, excluded map[int]bool) bool {
+	return excluded[step] || f.Sealed || f.Tombstoned
+}
+
 // materializeRaw is the v1 path: every selected page is demand-paged and wrapped
 // as a snippet view; every materialization is a FAULT.
 func materializeRaw(ctx context.Context, im *cdb.Image, req Request, res *Result, frames []cdb.Frame, entries map[int]cachemeta.Entry, selected []int, excluded map[int]bool) {
@@ -392,7 +399,7 @@ func materializeRaw(ctx context.Context, im *cdb.Image, req Request, res *Result
 	for _, step := range selected {
 		f := frames[step]
 		e := entries[step]
-		if excluded[step] || f.Sealed || f.Tombstoned {
+		if stepSkipped(f, step, excluded) {
 			continue
 		}
 		if req.BudgetBytes > 0 && usedBytes+f.Len > req.BudgetBytes {
@@ -455,7 +462,7 @@ func materializeWithViews(ctx context.Context, im *cdb.Image, req Request, res *
 	for _, step := range selected {
 		f := frames[step]
 		e := entries[step]
-		if excluded[step] || f.Sealed || f.Tombstoned {
+		if stepSkipped(f, step, excluded) {
 			continue
 		}
 
@@ -901,6 +908,34 @@ type capResidency struct {
 	bytes     int
 }
 
+// evictCandidate pairs an evictable capability's ref with its residency record
+// so the eviction paths can sort by coldness and then flip the winners' state.
+type evictCandidate struct {
+	ref CapRef
+	cr  *capResidency
+}
+
+// collectEvictableLocked gathers every CapStateEvictable capability into a
+// coldest-first slice (fewest faults, then name for determinism) and returns
+// the total resident bytes across ALL tracked caps. The caller must hold the
+// ledger lock. Shared by EvictColdest and EvictUnderBudget.
+func (l *CapabilityLedger) collectEvictableLocked() (evictable []evictCandidate, totalBytes int) {
+	for ref, cr := range l.caps {
+		totalBytes += cr.bytes
+		if cr.state == CapStateEvictable {
+			evictable = append(evictable, evictCandidate{ref: ref, cr: cr})
+		}
+	}
+	// Sort by fault count (coldest = fewest faults)
+	sort.Slice(evictable, func(i, j int) bool {
+		if evictable[i].cr.faults != evictable[j].cr.faults {
+			return evictable[i].cr.faults < evictable[j].cr.faults
+		}
+		return evictable[i].ref.Name < evictable[j].ref.Name
+	})
+	return evictable, totalBytes
+}
+
 // NewCapabilityLedger creates a new capability residency ledger.
 func NewCapabilityLedger() *CapabilityLedger {
 	return &CapabilityLedger{
@@ -984,24 +1019,7 @@ func (l *CapabilityLedger) EvictColdest(n int) []CapRef {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	type evictCandidate struct {
-		ref CapRef
-		cr  *capResidency
-	}
-	var evictable []evictCandidate
-	for ref, cr := range l.caps {
-		if cr.state == CapStateEvictable {
-			evictable = append(evictable, evictCandidate{ref: ref, cr: cr})
-		}
-	}
-
-	// Sort by fault count (coldest = fewest faults)
-	sort.Slice(evictable, func(i, j int) bool {
-		if evictable[i].cr.faults != evictable[j].cr.faults {
-			return evictable[i].cr.faults < evictable[j].cr.faults
-		}
-		return evictable[i].ref.Name < evictable[j].ref.Name
-	})
+	evictable, _ := l.collectEvictableLocked()
 
 	evicted := make([]CapRef, 0, min(n, len(evictable)))
 	for i := 0; i < min(n, len(evictable)); i++ {
@@ -1020,31 +1038,11 @@ func (l *CapabilityLedger) EvictUnderBudget(budgetBytes int) []CapRef {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Calculate current total bytes
-	var totalBytes int
-	type evictCandidate struct {
-		ref CapRef
-		cr  *capResidency
-	}
-	var evictable []evictCandidate
-	for ref, cr := range l.caps {
-		totalBytes += cr.bytes
-		if cr.state == CapStateEvictable {
-			evictable = append(evictable, evictCandidate{ref: ref, cr: cr})
-		}
-	}
+	evictable, totalBytes := l.collectEvictableLocked()
 
 	if totalBytes <= budgetBytes {
 		return nil
 	}
-
-	// Sort by fault count (coldest = fewest faults)
-	sort.Slice(evictable, func(i, j int) bool {
-		if evictable[i].cr.faults != evictable[j].cr.faults {
-			return evictable[i].cr.faults < evictable[j].cr.faults
-		}
-		return evictable[i].ref.Name < evictable[j].ref.Name
-	})
 
 	evicted := make([]CapRef, 0, len(evictable))
 	for i := 0; i < len(evictable) && totalBytes > budgetBytes; i++ {
