@@ -232,6 +232,17 @@ func Classify(w Worker, th Thresholds) Classification {
 	return c
 }
 
+// Started reports whether the worker reached a point of producing SOME structural
+// evidence that it ran — a live PID or a non-empty log — as opposed to never having
+// started at all. NO_OP is reached via two different paths: a dead PID with a known
+// zero-byte log (nothing ever ran) vs. a banner-only or stalled-progress log (it DID
+// start, it just did no useful work). Started distinguishes those without adding a
+// new Outcome: every outcome except the dead+empty NO_OP case implies the process
+// produced output or was observed alive (issue #1782).
+func (c Classification) Started() bool {
+	return !(c.Outcome == OutcomeNoOp && c.LogSizeKnown && c.LogBytes == 0 && !c.PIDAlive)
+}
+
 // Finding is a fingerprinted, fileable record of one worker outcome worth
 // surfacing. SHIPPED workers do not produce findings (nothing to file).
 type Finding struct {

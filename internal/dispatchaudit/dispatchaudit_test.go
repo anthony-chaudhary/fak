@@ -127,6 +127,38 @@ func TestClassifyZeroByteLogByProcessLiveness(t *testing.T) {
 	}
 }
 
+// TestClassificationStarted proves Started() is true for every Outcome except the
+// one NO_OP sub-case with no structural evidence of ever running at all (dead PID +
+// known zero-byte log) — the witness `fak dispatch audit --heartbeat` needs to tell
+// a worker that reached its prompt (#1782) from one that never spawned anything.
+func TestClassificationStarted(t *testing.T) {
+	th := DefaultThresholds()
+	cases := []struct {
+		name string
+		w    Worker
+		want bool
+	}{
+		{"shipped", Worker{Log: "resolve-1.log", CommitSHA: "abc1234"}, true},
+		{"running alive empty log", Worker{Log: "resolve-2.log", LogSizeKnown: true, LogBytes: 0, PIDAlive: true}, true},
+		{"no_op dead empty log — never started", Worker{Log: "resolve-3.log", LogSizeKnown: true, LogBytes: 0, PIDAlive: false}, false},
+		{"no_op banner-only", Worker{Log: "resolve-4.log", BannerOnly: true}, true},
+		{"no_op progress tick never moved", Worker{Log: "resolve-5.log", ProgressTicks: 3, ProgressMoved: false}, true},
+		{"wasted_spawn brief cap", Worker{Log: "resolve-6.log", CapHit: true, ErrorLines: 1, FirstError: mustTime(t, "2026-06-30T00:00:00Z"), LastError: mustTime(t, "2026-06-30T00:01:00Z")}, true},
+		{"quota_walled hard cap", Worker{Log: "resolve-7.log", CapHit: true, ErrorLines: 15, FirstError: mustTime(t, "2026-06-30T00:01:22Z"), LastError: mustTime(t, "2026-06-30T00:33:26Z")}, true},
+		{"retry_storm", Worker{Log: "resolve-8.log", ErrorLines: 10, FirstError: mustTime(t, "2026-06-30T00:00:00Z"), LastError: mustTime(t, "2026-06-30T00:20:00Z")}, true},
+		{"errored", Worker{Log: "resolve-9.log", ErrorLines: 1}, true},
+		{"wasted_spawn quiet", Worker{Log: "resolve-10.log"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Classify(tc.w, th)
+			if got := c.Started(); got != tc.want {
+				t.Fatalf("Outcome=%s Started()=%v, want %v (reason: %s)", c.Outcome, got, tc.want, c.Reason)
+			}
+		})
+	}
+}
+
 func TestFingerprintStability(t *testing.T) {
 	a := Classify(Worker{Log: "resolve-1346.log", Lane: "docs", HeaderBackend: BackendOpencode, SidecarMissing: true, CapHit: true, ErrorLines: 15, FirstError: mustTime(t, "2026-06-30T00:01:22Z"), LastError: mustTime(t, "2026-06-30T00:33:26Z")}, DefaultThresholds())
 	// Same outcome+backend+lane, DIFFERENT log/timestamp -> SAME fingerprint.

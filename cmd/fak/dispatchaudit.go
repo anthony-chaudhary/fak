@@ -10,6 +10,8 @@
 //	fak dispatch audit --json
 //	# detect -> fingerprint -> dedup -> file: opens a gh issue for NEW fingerprints only
 //	fak dispatch audit --file-issues
+//	# opt-in: append a STARTED/NEVER_STARTED heartbeat event per worker to the loop ledger
+//	fak dispatch audit --heartbeat
 //
 // The classification is PURE (internal/dispatchaudit.Fold); this file is the I/O
 // shell — it reads the dir, renders the table, and (only with --file-issues)
@@ -36,6 +38,8 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	fileIssues := fs.Bool("file-issues", false, "file a gh issue for each NEW finding fingerprint (default: read-only)")
 	stormErrs := fs.Int("storm-errors", 0, "RETRY_STORM threshold: min provider-error lines (0 = default)")
 	stormMins := fs.Float64("storm-mins", 0, "RETRY_STORM threshold: min wall-clock minutes (0 = default)")
+	heartbeat := fs.Bool("heartbeat", false, "append a STARTED/NEVER_STARTED heartbeat event per worker to the loop ledger (default: off — a routine read-only audit never writes)")
+	ledger := fs.String("ledger", "", "loop JSONL ledger path for --heartbeat (default: the loop ledger)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -54,6 +58,18 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 		th.StormMinMins = *stormMins
 	}
 	rep := dispatchaudit.Fold(workers, th)
+
+	if *heartbeat {
+		ledgerPath := firstNonEmpty(*ledger, defaultLoopLedger())
+		n, err := appendWorkerHeartbeats(ledgerPath, rep.Classifications)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak dispatch audit: heartbeat: %v\n", err)
+			return 1
+		}
+		if !*asJSON {
+			fmt.Fprintf(stdout, "heartbeat: recorded %d event(s) to %s\n\n", n, ledgerPath)
+		}
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -165,5 +181,5 @@ func openIssueTitles(stderr io.Writer) map[string]bool {
 
 // dispatchAuditUsageLine is appended to the dispatch usage banner.
 func dispatchAuditUsageLine() string {
-	return "  fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]\n"
+	return "  fak dispatch audit [--runs-dir DIR] [--json] [--file-issues] [--heartbeat] [--ledger PATH]\n"
 }
