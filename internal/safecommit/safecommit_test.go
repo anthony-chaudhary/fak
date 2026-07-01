@@ -61,7 +61,14 @@ func keyFor(args []string) string {
 			return "diff-wt"
 		}
 		return "diff-peer"
-	case "symbolic-ref", "status", "diff-tree", "commit", "push", "ls-files":
+	case "status":
+		if len(args) >= 4 && args[len(args)-1] == "INDEX.md" {
+			return "status INDEX.md"
+		}
+		return args[0]
+	case "cat-file":
+		return strings.Join(args, " ")
+	case "symbolic-ref", "diff-tree", "commit", "push", "ls-files":
 		return args[0]
 	default:
 		return args[0]
@@ -145,6 +152,105 @@ func baseOpts() Options {
 		Message: "fix(foo): correct the bar — keep the cache prefix\n\n(fak safecommit)",
 		SignOff: true,
 	}
+}
+
+func TestCommitAutoIndexesNewDatedNote(t *testing.T) {
+	root := t.TempDir()
+	note := "docs/notes/DEVEX-AUTO-INDEX-2026-07-01.md"
+	writeSafecommitFile(t, filepath.Join(root, "INDEX.md"), "# INDEX\n\n## Notes & research (`docs/notes/`)\n\nDated working notes.\n\n- [Older note](docs/notes/OLDER-2026-06-30.md) -- existing.\n")
+	writeSafecommitFile(t, filepath.Join(root, filepath.FromSlash(note)), "# Dev-ex auto index witness\n\nBody.\n")
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["status"] = reply{out: "?? " + note + "\n", code: 0}
+	g.reply["cat-file -e HEAD:"+note] = reply{out: "", code: 128}
+	g.reply["diff-tree"] = reply{out: note + "\nINDEX.md\n", code: 0}
+
+	opts := baseOpts()
+	opts.Dir = root
+	opts.Paths = []string{note}
+	opts.Message = "docs(notes): add auto index witness #2163 (fak docs)"
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified || res.Reason != "" {
+		t.Fatalf("auto-indexed note should commit cleanly, got %+v", res)
+	}
+	if got, want := strings.Join(res.Paths, ","), note+",INDEX.md"; got != want {
+		t.Fatalf("Result.Paths = %q, want %q", got, want)
+	}
+	indexBytes, err := os.ReadFile(filepath.Join(root, "INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexBytes)
+	wantLine := "- [Dev-ex auto index witness](" + note + ") -- auto-indexed dated note."
+	if !strings.Contains(index, wantLine) {
+		t.Fatalf("INDEX.md missing auto entry %q:\n%s", wantLine, index)
+	}
+	if strings.Index(index, wantLine) > strings.Index(index, "- [Older note]") {
+		t.Fatalf("auto entry should be inserted before existing notes:\n%s", index)
+	}
+	if !argvContainsPath(g.argvFor("add"), "INDEX.md") || !argvContainsPath(g.commitArgv(), "INDEX.md") {
+		t.Fatalf("INDEX.md was not included in explicit add/commit pathspecs; calls=%v", g.calls)
+	}
+}
+
+func TestCommitAutoIndexSkipsDirtyIndexOutsidePathset(t *testing.T) {
+	root := t.TempDir()
+	note := "docs/notes/DIRTY-INDEX-SKIP-2026-07-01.md"
+	indexPath := filepath.Join(root, "INDEX.md")
+	originalIndex := "# INDEX\n\n## Notes & research (`docs/notes/`)\n\nDated working notes.\n"
+	writeSafecommitFile(t, indexPath, originalIndex)
+	writeSafecommitFile(t, filepath.Join(root, filepath.FromSlash(note)), "# Dirty index skip\n\nBody.\n")
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["status"] = reply{out: "?? " + note + "\n", code: 0}
+	g.reply["status INDEX.md"] = reply{out: " M INDEX.md\n", code: 0}
+	g.reply["cat-file -e HEAD:"+note] = reply{out: "", code: 128}
+	g.reply["diff-tree"] = reply{out: note + "\n", code: 0}
+
+	opts := baseOpts()
+	opts.Dir = root
+	opts.Paths = []string{note}
+	opts.Message = "docs(notes): add dirty index skip #2163 (fak docs)"
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified || res.Reason != "" {
+		t.Fatalf("dirty index skip should leave ordinary commit path intact, got %+v", res)
+	}
+	if got, want := strings.Join(res.Paths, ","), note; got != want {
+		t.Fatalf("Result.Paths = %q, want %q", got, want)
+	}
+	indexBytes, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(indexBytes) != originalIndex {
+		t.Fatalf("dirty INDEX.md should not be auto-edited; got:\n%s", string(indexBytes))
+	}
+	if argvContainsPath(g.argvFor("add"), "INDEX.md") || argvContainsPath(g.commitArgv(), "INDEX.md") {
+		t.Fatalf("dirty unrequested INDEX.md must not be swept into pathspec; calls=%v", g.calls)
+	}
+}
+
+func writeSafecommitFile(t *testing.T, path string, data string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func argvContainsPath(argv []string, path string) bool {
+	for _, arg := range argv {
+		if arg == path {
+			return true
+		}
+	}
+	return false
 }
 
 func decisionRecorder(t *testing.T) (*witness.Recorder, *[]witness.Decision) {

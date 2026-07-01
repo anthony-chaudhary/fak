@@ -288,6 +288,13 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res.HeadBefore = strings.TrimSpace(head)
 	}
 
+	if augmented, changed, aerr := autoIndexDatedNotes(ctx, run, opts.Dir, paths); aerr != nil {
+		return res, fmt.Errorf("safecommit: auto-index notes: %w", aerr)
+	} else if changed {
+		paths = augmented
+		res.Paths = append([]string(nil), paths...)
+	}
+
 	// Stage EXACTLY the requested paths, inside the lock, with an explicit pathspec — never
 	// an unscoped `git add -A`/`.` (which would sweep a peer's tree). `--all` is deliberately
 	// pathspec-scoped here: it stages additions, edits, and deletions for the requested paths,
