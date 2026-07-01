@@ -166,3 +166,41 @@ hardware was available, so the live witness is still the residual):
 So the device line moved from "the seam is cpu-ref only" to "the seam is real and the decode
 reduction flows through it"; the remaining residual is per-rank expert residency + the on-box
 multi-GPU binary, then the live witness.
+
+## Update (2026-06-30): per-rank expert RESIDENCY closed on the host multi-process rung
+
+Residual item 1 above — "per-rank resident expert COMPUTE ... each rank holding and running only
+its band's experts" — is now DONE on the **host multi-process (DistComm) topology**. A sharded EP
+serve runs N separate `fak serve --gguf X --expert-parallel N` processes, each holding ONLY its
+expert band and computing only that band, reducing its single `[H]` partial across the process group
+through a real cross-process collective. No process holds the full GLM-5.2 expert set — the
+residency the capacity table predicts.
+
+What shipped (all bit-exact vs full-model EP, host-testable on one box over loopback):
+
+- **Single-band forward + dispatch.** `Model.expertParallelRankPartial` (the one-band partial, fails
+  closed on a missing band), `expertParallelRankLocalGLMMoEDelta` (the sharded `glmMoeFFN` twin —
+  one local part reduced in rank order, the replicated shared expert added once post-reduce), and
+  `Model.epRank/epRankSet` + `SetExpertParallelRank`. `glmMoeEPFFN.rankLocal` dispatches it and
+  HARD-fails (no monolith fallback — a sharded rank lacks peer bands). Commit `0abd822e`.
+- **Sharded load.** `fak serve` threads `ggufload.WithExpertShard(ExpertShardForRank(N,rank))` into
+  the three resident-Q4K load arms so this process admits only `[Lo,Hi)`; a sharded load on a
+  non-Q4K arm is refused. Rank identity is env-driven (`FAK_EP_RANK` / `FAK_EP_COORD_ADDR`, the
+  torchrun/NCCL convention). Commit `63a7e162`.
+- **Cross-process reduce.** `distCommCollective` adapts `model.DistComm` (each rank holds only its
+  own part) to the model `Collective` seam; the serve joins the group after load and wires it. The
+  gateway skips its device-collective wiring on a rank-local model (`IsExpertParallelRankLocal`) so
+  it does not clobber the DistComm reduce. Commit `c1a924f0`.
+- **Witnesses.** `TestRankLocalEPForwardMatchesFullEP` (per-rank band-only models through the LIVE
+  dispatch over a real DistComm socket, bit-exact vs full-model EP) + a missing-band fail-closed
+  witness; `TestQwen3MoEGGUFExpertShardLoadsCorrectBandBytes` (a sharded load admits the RIGHT
+  band's BYTES, not just the right tensor count, on a distinct-per-expert non-zero Q4_K payload).
+
+**Honesty boundary — this is NOT multi-GPU.** `DistComm` reduces **host** float32 across processes
+(one box over loopback, or across boxes over TCP). It proves per-band residency + correct
+distributed tokens above the device line. It does NOT reduce a DEVICE tensor across GPUs — that is
+the separate device-NCCL rung (the existing `BackendCollective` / `SetExpertParallelDeviceCollective`
+seam, gated by `Caps().Collective`), still `not yet` and still gated on the on-box `-tags cuda,nccl`
+binary (residual item 2, unchanged). The remaining residual to a live multi-GPU tok/s number is: run
+the sharded serve on the GPU box (host DistComm across the A100s' processes gets residency today),
+then swap the DistComm reduce for the device-NCCL tensor reduce for the on-GPU expert GEMMs.
