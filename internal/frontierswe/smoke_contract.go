@@ -205,7 +205,7 @@ func BuildRawFakContract(in RawFakContractInput) RawFakContract {
 			"raw FrontierSWE arm writes reward.json, submission artifact, and run metadata for the fixed task",
 			"fak FrontierSWE arm writes reward.json, submission artifact, run metadata, and C8 TTS/cache-witness trace for the same task",
 			"official FrontierSWE scorer/grader runs over both reward.json files",
-			"score-parity gate passes: fak correctness and speedup are greater than or equal to raw",
+			"ScoreParity(raw_trials, fak_trials) passes: fak Avg/Best gated score, full-correct count, and speedup distribution do not regress raw",
 			"TTS metric is measured: wall-clock and turn count to correctness==1.0 per arm, with C8 realized reuse rate joined to the fak arm",
 			"raw/fak compare artifact joins both arms by task, agent, model, trial, reward.json digest, submission digest, and TTS trace digest",
 		},

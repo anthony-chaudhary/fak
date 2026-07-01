@@ -600,6 +600,18 @@ summary  = "a pathspec commit touches hard-self core-lock machinery -- a surface
 fix      = "do not clear this by self-report. Use an operator/release maintenance path, or rerun `fak commit` with `--core-lock-maintenance-witness <claim>` only after an independent witness resolver confirms the maintenance claim. The accepted commit records the confirmed witness on refs/notes/fak/decisions."
 see_also = ["internal/corelocks", "internal/corelockaudit", "internal/safecommit/corelock.go", "dos commit-audit"]
 
+# FrontierSWE score-parity gate (#1717): the typed refusal emitted when a fak
+# FrontierSWE arm tries to claim a time-to-solution win while its score
+# distribution regresses the raw arm. The predicate lives in internal/frontierswe:
+# fak Avg/Best gated score, full-correct trial count, and speedup distribution
+# (when raw has full-correct speedup trials) must be >= raw within tolerance.
+[reasons.FRONTIERSWE_SCORE_PARITY_FAILED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a FrontierSWE fak arm failed the score-parity gate -- it is faster only by losing quality, so no TTS-win claim may be emitted"
+fix      = "rerun or fix the fak-routed arm until ScoreParity(raw_trials, fak_trials) passes: fak Avg/Best gated score, full-correct count, and speedup distribution must not regress raw. Floor: go test ./internal/frontierswe -run TestScoreParity."
+see_also = ["internal/frontierswe/score_parity.go", "docs/benchmarks/FRONTIERSWE-SCORING-PARITY.md", "FRONTIERSWE_SCORE_PARITY_FAILED"]
+
 # Public-copy leak scan: the private canonical repo is the source for every
 # future public export, so the redact-needles listed in PUBLIC-SCRUB-POLICY.md
 # (operator Tailscale IPs, SSH user, machine paths, the .claude-agent-*

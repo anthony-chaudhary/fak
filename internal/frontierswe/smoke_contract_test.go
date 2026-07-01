@@ -56,7 +56,7 @@ func TestBuildRawFakContractGatesResultClaims(t *testing.T) {
 	assertGate(t, c.Gates, "score_parity_gate_declared", true)
 	assertGate(t, c.Gates, "tts_metric_declared", true)
 	assertGate(t, c.Gates, "official_grader_local", false)
-	for _, want := range []string{"score-parity", "TTS metric", "official FrontierSWE scorer"} {
+	for _, want := range []string{"ScoreParity(", "TTS metric", "official FrontierSWE scorer"} {
 		if !containsContractRequirement(c.RequiredBeforeClaim, want) {
 			t.Fatalf("RequiredBeforeClaim missing %q: %#v", want, c.RequiredBeforeClaim)
 		}

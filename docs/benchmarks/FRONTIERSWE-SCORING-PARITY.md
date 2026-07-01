@@ -95,3 +95,22 @@ is a run-time concern outside this scorer (the scorer takes the resolved boolean
 This is the one and only place the Go runtime intentionally does **not** match the
 single-function oracle, and it is additive: with `antiCheatFlagged = false`,
 `Score` equals the oracle on every fixture run at the library-default SSIM.
+
+## Score-parity gate before any TTS claim
+
+The FrontierSWE value claim is "same quality, faster time-to-solution." C11 makes
+that mechanical with `ScoreParity(raw_trials, fak_trials)`: the fak arm may not
+emit a TTS-win claim unless its trial distribution is at least as good as raw.
+
+The predicate is distribution-level, not a single lucky trial:
+
+- `fak.avg_score >= raw.avg_score`
+- `fak.best_score >= raw.best_score`
+- `fak.correct_count >= raw.correct_count`, where correct means `correctness == 1.0`
+- if raw has full-correct speedup trials, `fak.avg_speedup >= raw.avg_speedup` and
+  `fak.best_speedup >= raw.best_speedup`
+
+All comparisons use the gate tolerance recorded in the
+`fak.frontierswe.score-parity.v1` report. A failure emits the closed refusal token
+`FRONTIERSWE_SCORE_PARITY_FAILED`, so a faster-but-worse fak run is refused rather
+than silently reported.
