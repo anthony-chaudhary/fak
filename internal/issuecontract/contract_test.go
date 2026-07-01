@@ -402,31 +402,46 @@ func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 
 func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
 	cases := []struct {
-		name         string
-		done         string
-		witness      string
-		wantOK       bool
-		wantMissing  string
-		wantDispatch string
+		name               string
+		done               string
+		witness            string
+		includeLikelyFiles bool
+		wantOK             bool
+		wantMissing        string
+		wantMissingSection string
+		wantDispatch       string
 	}{
 		{
-			name:         "complete issue passes",
-			done:         "The lint reports no missing proof sections.",
-			witness:      "go test ./internal/issuecontract",
-			wantOK:       true,
-			wantDispatch: Dispatchable,
+			name:               "complete issue passes",
+			done:               "The lint reports no missing proof sections.",
+			witness:            "go test ./internal/issuecontract",
+			includeLikelyFiles: true,
+			wantOK:             true,
+			wantDispatch:       Dispatchable,
 		},
 		{
-			name:         "missing done condition is held",
-			witness:      "go test ./internal/issuecontract",
-			wantMissing:  "done_condition",
-			wantDispatch: TriageOnly,
+			name:               "missing done condition is held",
+			witness:            "go test ./internal/issuecontract",
+			includeLikelyFiles: true,
+			wantMissing:        "done_condition",
+			wantMissingSection: "done_condition",
+			wantDispatch:       TriageOnly,
 		},
 		{
-			name:         "missing witness is held",
-			done:         "The lint reports missing witness sections.",
-			wantMissing:  "witness",
-			wantDispatch: TriageOnly,
+			name:               "missing witness is held",
+			done:               "The lint reports missing witness sections.",
+			includeLikelyFiles: true,
+			wantMissing:        "witness",
+			wantMissingSection: "witness",
+			wantDispatch:       TriageOnly,
+		},
+		{
+			name:               "missing likely files is held",
+			done:               "The lint reports missing likely file sections.",
+			witness:            "go test ./internal/issuecontract",
+			wantMissing:        "likely_files",
+			wantMissingSection: "likely_files",
+			wantDispatch:       TriageOnly,
 		},
 	}
 
@@ -435,13 +450,13 @@ func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
 			review := ReviewIssueDraft(IssueDraft{
 				Number: 1815,
 				Title:  "dispatch: require issue proof sections",
-				Body:   issueProofSectionBody(tc.done, tc.witness),
+				Body:   issueProofSectionBodyWithLikelyFiles(tc.done, tc.witness, tc.includeLikelyFiles),
 			}, Options{})
 			if review.OK != tc.wantOK || review.Dispatchability != tc.wantDispatch {
 				t.Fatalf("review = %+v, want ok=%v dispatchability=%s", review, tc.wantOK, tc.wantDispatch)
 			}
 			if tc.wantOK {
-				if len(review.Reasons) != 0 || len(review.MissingFields) != 0 || review.Score.Total != 100 {
+				if len(review.Reasons) != 0 || len(review.MissingFields) != 0 || len(review.MissingSections) != 0 || review.Score.Total != 100 {
 					t.Fatalf("complete issue review = %+v, want no findings and full score", review)
 				}
 				return
@@ -451,6 +466,9 @@ func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
 			}
 			if !has(review.MissingFields, tc.wantMissing) {
 				t.Fatalf("missing fields = %+v, want %s", review.MissingFields, tc.wantMissing)
+			}
+			if !has(review.MissingSections, tc.wantMissingSection) {
+				t.Fatalf("missing sections = %+v, want %s", review.MissingSections, tc.wantMissingSection)
 			}
 		})
 	}
@@ -720,6 +738,8 @@ func TestReviewIssueDraftParsesCombinedDoneWitnessSection(t *testing.T) {
 		"go test ./internal/issuecontract",
 		"### Lane",
 		"issuecontract",
+		"### Path hints",
+		"- `internal/issuecontract/contract.go`",
 		"### Closure binding",
 		"Resolving commit cites #N.",
 	}, "\n")
@@ -730,6 +750,10 @@ func TestReviewIssueDraftParsesCombinedDoneWitnessSection(t *testing.T) {
 }
 
 func issueProofSectionBody(done, witness string) string {
+	return issueProofSectionBodyWithLikelyFiles(done, witness, true)
+}
+
+func issueProofSectionBodyWithLikelyFiles(done, witness string, includeLikelyFiles bool) string {
 	parts := []string{
 		"### Parent context",
 		"fleet-400iph issue contract",
@@ -757,8 +781,14 @@ func issueProofSectionBody(done, witness string) string {
 		"go test ./internal/issuecontract",
 		"### Lane",
 		"issuecontract",
-		"### Path hints",
-		"- `internal/issuecontract/contract.go`",
+	)
+	if includeLikelyFiles {
+		parts = append(parts,
+			"### Likely files",
+			"- `internal/issuecontract/contract.go`",
+		)
+	}
+	parts = append(parts,
 		"### Closure binding",
 		"Resolving commit cites #1815.",
 	)

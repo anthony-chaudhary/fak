@@ -172,6 +172,7 @@ type Review struct {
 	Dispatchability string          `json:"dispatchability"`
 	Reasons         []string        `json:"reasons,omitempty"`
 	MissingFields   []string        `json:"missing_fields,omitempty"`
+	MissingSections []string        `json:"missing_sections,omitempty"`
 	IssueNumber     int             `json:"issue_number,omitempty"`
 	Key             string          `json:"key,omitempty"`
 	Lane            string          `json:"lane,omitempty"`
@@ -278,15 +279,23 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 // issue-contract sections. This is the bridge from "all open GitHub issues" to
 // the same dispatchability language used by generated issue producers.
 func ReviewIssueDraft(d IssueDraft, opt Options) Review {
-	review := ReviewCandidate(CandidateFromIssueDraft(d), opt)
+	candidate := CandidateFromIssueDraft(d)
+	review := ReviewCandidate(candidate, opt)
+	if missingSections := missingRequiredIssueSections(d.Body, candidate); len(missingSections) > 0 {
+		review.OK = false
+		review.MissingSections = missingSections
+		review.MissingFields = appendUnique(review.MissingFields, missingSections...)
+		addReviewReason(&review, ReasonScopeIncomplete)
+		if review.Dispatchability == Dispatchable {
+			review.Verdict = "needs_scope"
+			review.Dispatchability = TriageOnly
+		}
+	}
 	if HasUnexpandedTemplate(d.Body) {
 		review.OK = false
 		review.Verdict = "refused"
 		review.Dispatchability = Refused
-		if !hasReason(review.Reasons, ReasonUnexpandedTemplate) {
-			review.Reasons = append(review.Reasons, ReasonUnexpandedTemplate)
-			sort.Strings(review.Reasons)
-		}
+		addReviewReason(&review, ReasonUnexpandedTemplate)
 	}
 	return review
 }
@@ -306,6 +315,14 @@ func hasReason(reasons []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func addReviewReason(review *Review, reason string) {
+	if hasReason(review.Reasons, reason) {
+		return
+	}
+	review.Reasons = append(review.Reasons, reason)
+	sort.Strings(review.Reasons)
 }
 
 // CandidateFromIssueDraft parses the standard issue-contract sections from an
@@ -346,7 +363,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Witness:         firstNonEmpty(section("Witness"), prefixedSectionValue(doneWitness, "Witness")),
 		AcceptanceGate:  section("Acceptance gate"),
 		Lane:            section("Lane"),
-		Paths:           issueDraftPaths(section("Path hints", "Paths", "Files")),
+		Paths:           issueDraftPaths(section("Likely files", "Path hints", "Paths", "Files")),
 		Dependencies:    ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:          issueDraftLabels(d.Labels),
 		BoundaryNotes:   issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
@@ -640,6 +657,36 @@ func normalize(c Candidate) Candidate {
 	return c
 }
 
+func missingRequiredIssueSections(body string, c Candidate) []string {
+	sections := markdownSections(body)
+	hasSection := func(names ...string) bool {
+		for _, name := range names {
+			if strings.TrimSpace(sections[normalizeHeading(name)]) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	hasScope := hasSection("Scope") || (hasSection("In scope") && hasSection("Out of scope"))
+	checks := []struct {
+		field string
+		ok    bool
+	}{
+		{"current_state", hasSection("Current state") && c.CurrentState != ""},
+		{"scope", hasScope},
+		{"done_condition", c.DoneCondition != "" && hasSection("Done condition", "Done condition / witness")},
+		{"witness", c.Witness != "" && hasSection("Witness", "Done condition / witness")},
+		{"likely_files", len(c.Paths) > 0 && hasSection("Likely files", "Path hints", "Paths", "Files")},
+	}
+	var missing []string
+	for _, check := range checks {
+		if !check.ok {
+			missing = append(missing, check.field)
+		}
+	}
+	return missing
+}
+
 func normalizeDependencies(in []DependencyRef) []DependencyRef {
 	seen := map[string]bool{}
 	out := make([]DependencyRef, 0, len(in))
@@ -659,6 +706,22 @@ func normalizeDependencies(in []DependencyRef) []DependencyRef {
 			Blocking: blocking,
 			Raw:      strings.TrimSpace(dep.Raw),
 		})
+	}
+	return out
+}
+
+func appendUnique(out []string, items ...string) []string {
+	seen := map[string]bool{}
+	for _, item := range out {
+		seen[item] = true
+	}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		out = append(out, item)
+		seen[item] = true
 	}
 	return out
 }

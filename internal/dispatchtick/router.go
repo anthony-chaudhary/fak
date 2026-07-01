@@ -1315,7 +1315,7 @@ func firstIssueContractReason(review issuecontract.Review) string {
 func issueContractNextAction(reason string) string {
 	switch reason {
 	case issuecontract.ReasonScopeIncomplete:
-		return "add in-scope, out-of-scope, done condition, witness, and acceptance gate before dispatch"
+		return "add current state, scope, done condition, witness, likely files, and acceptance gate before dispatch"
 	case issuecontract.ReasonUnrouted:
 		return "add a lane or path hints section that maps to a dispatch lane"
 	case issuecontract.ReasonPrivateBoundary:

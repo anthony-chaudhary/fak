@@ -27,6 +27,23 @@ another worker's output. Hold an issue for triage instead of dispatch when the e
 paths are unknown, the lane is private/exclusive, the acceptance witness is unclear, or
 the issue is a sequenced epic rather than a leaf.
 
+### Required worker body sections
+
+A worker-ready issue body must carry enough structure for a headless worker to act
+without rediscovering the assignment. At minimum, require these sections:
+
+- `Current state`: what is already true and what gap remains.
+- `Scope`: either one `Scope` section or both `In scope` and `Out of scope`.
+- `Done condition`: the observable end state for this one issue.
+- `Witness`: the focused command, captured artifact, or read-back that proves done.
+- `Likely files`: concrete path hints. Existing `Path hints`, `Paths`, and `Files`
+  headings are accepted aliases.
+
+Run `fak issue contract --from-issues <issues.json> --json` before launch. Each review
+row reports `missing_sections` for these five body sections and `missing_fields` for the
+stricter issue-contract fields. A row with missing required sections is triage debt, not
+a worker launch candidate.
+
 ### Dependency markers
 
 When an issue has an explicit dependency edge, put a `Dependencies` section in the issue
