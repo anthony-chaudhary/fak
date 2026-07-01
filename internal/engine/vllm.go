@@ -40,6 +40,11 @@ type VLLMConfig struct {
 	MetricsURL string
 	Client     *http.Client
 
+	// PriorityScheduling advertises that the served vLLM engine runs the V1
+	// priority scheduler, so a fak TurnIntent priority may be lowered to the
+	// request. When false the adapter emits no priority field (FCFS default).
+	PriorityScheduling bool
+
 	CacheRecorder *CacheEventRecorder
 	Residency     *PrefixResidencyIndex
 	KVEvents      VLLMKVEventSource
@@ -49,11 +54,12 @@ type VLLMConfig struct {
 // should point at the worker's OpenAI-compatible root, usually http://host:port/v1.
 func EnvVLLMConfig() VLLMConfig {
 	return VLLMConfig{
-		BaseURL:    os.Getenv("FAK_VLLM_BASE_URL"),
-		Model:      os.Getenv("FAK_VLLM_MODEL"),
-		APIKey:     os.Getenv("FAK_VLLM_API_KEY"),
-		WorkerID:   envDefault("FAK_VLLM_WORKER_ID", "vllm"),
-		MetricsURL: os.Getenv("FAK_VLLM_METRICS_URL"),
+		BaseURL:            os.Getenv("FAK_VLLM_BASE_URL"),
+		Model:              os.Getenv("FAK_VLLM_MODEL"),
+		APIKey:             os.Getenv("FAK_VLLM_API_KEY"),
+		WorkerID:           envDefault("FAK_VLLM_WORKER_ID", "vllm"),
+		MetricsURL:         os.Getenv("FAK_VLLM_METRICS_URL"),
+		PriorityScheduling: envBool("FAK_VLLM_PRIORITY_SCHEDULING"),
 	}
 }
 
@@ -112,6 +118,8 @@ func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	if err != nil {
 		return nil, err
 	}
+	ctrl := e.deriveVLLMControls(c)
+	body = applyVLLMControls(body, ctrl)
 	cctx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -135,16 +143,19 @@ func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 		return nil, fmt.Errorf("vllm: %s returned %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	r := &vllmRequest{
-		tokens:   make(chan abi.EngineToken),
-		done:     make(chan struct{}),
-		cancel:   cancel,
-		body:     resp.Body,
-		kind:     kind,
-		call:     c,
-		putCtx:   ctx,
-		engine:   VLLMEngineID,
-		workerID: e.cfg.WorkerID,
-		model:    e.cfg.Model,
+		tokens:      make(chan abi.EngineToken),
+		done:        make(chan struct{}),
+		cancel:      cancel,
+		body:        resp.Body,
+		kind:        kind,
+		call:        c,
+		putCtx:      ctx,
+		engine:      VLLMEngineID,
+		workerID:    e.cfg.WorkerID,
+		model:       e.cfg.Model,
+		cacheSalt:   ctrl.cacheSalt,
+		priority:    ctrl.priority,
+		hasPriority: ctrl.hasPriority,
 	}
 	go r.pump(cctx)
 	return r, nil
@@ -305,6 +316,10 @@ type vllmRequest struct {
 	workerID string
 	model    string
 
+	cacheSalt   string
+	priority    string
+	hasPriority bool
+
 	text         strings.Builder
 	usage        vllmUsage
 	finishReason string
@@ -414,6 +429,12 @@ func (r *vllmRequest) assemble() *abi.Result {
 	}
 	if r.usage.TotalTokens > 0 {
 		meta["total_tokens"] = strconv.Itoa(r.usage.TotalTokens)
+	}
+	if r.cacheSalt != "" {
+		meta["cache_salt"] = r.cacheSalt
+	}
+	if r.hasPriority {
+		meta["priority"] = r.priority
 	}
 	return &abi.Result{Call: r.call, Payload: putBytes(r.putCtx, body), Status: abi.StatusOK, Meta: meta}
 }
