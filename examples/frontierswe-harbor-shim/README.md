@@ -90,6 +90,8 @@ byte-identical to an un-routed instance, and (c) refuses an external gateway und
 `allow_internet = false`. `make ci` runs the same test through a Go driver
 (`cmd/fak/frontierswe_shim_test.go`) wherever python3 is available.
 
+See [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for a captured successful run.
+
 ## Honesty boundary
 
 This shim is the **routing seam only**. It does not, by itself, prove any time-to-solution
@@ -97,3 +99,7 @@ win — that is the live measurement in C8 (per-turn cache-witness) and C14
 (wall-clock-to-`correctness==1.0`), gated-until-witnessed like every other fak benchmark
 claim. What is witnessed here is narrow and exact: the agent's model traffic goes through
 the gateway, and nothing but the base URL changed.
+
+What this demo does not claim: it does not run the FrontierSWE harness, grade a task,
+measure wall-clock time, or prove a cache-reuse speedup. Those claims require the official
+FrontierSWE scorer, score-parity gate, and live cache-witness artifacts named above.

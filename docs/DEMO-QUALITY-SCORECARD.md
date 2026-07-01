@@ -1,6 +1,6 @@
 ---
 title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
-description: "fak's demo-quality scorecard grades 64 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+description: "fak's demo-quality scorecard grades 65 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
 ---
 
 # Demo-quality scorecard
@@ -16,11 +16,11 @@ description: "fak's demo-quality scorecard grades 64 demos on five deterministic
 
 | Metric | Value |
 |---|---|
-| Demos scored | 64 |
+| Demos scored | 65 |
 | **Demo-debt (total defects)** | **0** |
 | Mean score | 98.8/100 |
 | Median / min / max | 100.0 / 93.1 / 100.0 |
-| Grade distribution | A:64 B:0 C:0 D:0 F:0 |
+| Grade distribution | A:65 B:0 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -46,6 +46,7 @@ Five axes, each 0–100 (runnable · reproducible · honest_scope · self_contai
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/context-debugger` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/dogfood-claude` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/fleet-reuse-demo` |
+| 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/frontierswe-harbor-shim` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/loader-properties` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/openai-agents-guardrail` |
 | 98.4 | A | 0 | 100 | 100 | 100 | 100 | 90 | `examples/radixattention` |
@@ -165,6 +166,9 @@ No demo-debt: every demo runs, reproduces, scopes itself, and cleans up. 🎉
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/fleet-reuse-demo`
+- documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
+
+### `examples/frontierswe-harbor-shim`
 - documented: no 'what you see' / output-explainer section — the reader is left to interpret the run alone
 
 ### `examples/loader-properties`
