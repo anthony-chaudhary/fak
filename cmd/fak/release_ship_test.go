@@ -109,6 +109,10 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 			return 0, "dev-source-sha\n"
 		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
 			return 0, `[{"databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			return 0, "main-target-sha\n"
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
+			return 0, ""
 		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
@@ -145,6 +149,9 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 	}
 	if result.SourceBranch != "dev" || result.SourceSHA != "dev-source-sha" || result.TargetBranch != "main" || result.Base != "origin/dev" {
 		t.Fatalf("source/target witness fields wrong: %#v", result)
+	}
+	if result.TargetSHA != "main-target-sha" || result.TargetAncestry == nil || result.TargetAncestry["ok"] != true || result.TargetAncestry["status"] != "ancestor" {
+		t.Fatalf("target ancestry witness wrong: sha=%q ancestry=%#v", result.TargetSHA, result.TargetAncestry)
 	}
 	if result.SourceCI == nil || result.SourceCI["ok"] != true || result.SourceCI["status"] != "success" {
 		t.Fatalf("source CI witness missing or not green: %#v", result.SourceCI)
@@ -206,6 +213,63 @@ func TestReleaseShipExecuteRefusesMissingSourceCI(t *testing.T) {
 	}
 	if result.ReleaseLock == nil || result.ReleaseLockRelease == nil {
 		t.Fatalf("release lock must be released after source CI refusal: acquire=%#v release=%#v", result.ReleaseLock, result.ReleaseLockRelease)
+	}
+}
+
+func TestReleaseShipExecuteRefusesNonFastForwardTarget(t *testing.T) {
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
+			return 0, `{"ok":true,"lock":{"owner":"ship-owner"}}`
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
+			return 0, "dev-source-sha\n"
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
+			return 0, "main-target-sha\n"
+		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
+			return 1, ""
+		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "release":
+			return 0, `{"ok":true,"released":true}`
+		default:
+			t.Fatalf("non-fast-forward target should refuse before release work; got %s %v in %s", name, args, cwd)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         true,
+		base:            "origin/dev",
+		sourceBranch:    "dev",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+	})
+
+	if result.OK {
+		t.Fatalf("result unexpectedly ok: %#v", result)
+	}
+	if result.TargetSHA != "main-target-sha" || result.TargetAncestry == nil || result.TargetAncestry["status"] != "non_fast_forward" {
+		t.Fatalf("target ancestry = sha %q %#v, want non_fast_forward", result.TargetSHA, result.TargetAncestry)
+	}
+	if len(result.Errors) == 0 || !strings.Contains(result.Errors[0], "target_non_fast_forward") {
+		t.Fatalf("errors = %#v, want target_non_fast_forward", result.Errors)
+	}
+	if result.Worktree != "" || result.Cut != nil {
+		t.Fatalf("release work should not start when target cannot fast-forward: %#v", result)
+	}
+	if result.ReleaseLock == nil || result.ReleaseLockRelease == nil {
+		t.Fatalf("release lock must be released after target refusal: acquire=%#v release=%#v", result.ReleaseLock, result.ReleaseLockRelease)
 	}
 }
 

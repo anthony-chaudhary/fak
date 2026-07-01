@@ -52,6 +52,8 @@ type releaseShipResult struct {
 	SourceSHA          string               `json:"source_sha,omitempty"`
 	SourceCI           map[string]any       `json:"source_ci,omitempty"`
 	TargetBranch       string               `json:"target_branch,omitempty"`
+	TargetSHA          string               `json:"target_sha,omitempty"`
+	TargetAncestry     map[string]any       `json:"target_ancestry,omitempty"`
 	Worktree           string               `json:"worktree,omitempty"`
 	LockRoot           string               `json:"lock_root,omitempty"`
 	ReleaseOwner       string               `json:"release_owner,omitempty"`
@@ -243,6 +245,14 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		result.SourceCI = releaseShipSourceCI(&result, root, opts, result.SourceSHA)
 		if !releaseShipCIOK(result.SourceCI) && opts.execute {
 			result.fail("source_ci_unconfirmed", jsonTail(result.SourceCI))
+			return finishReleaseShip(result)
+		}
+	}
+	if releaseShipNeedsTargetAncestry(opts) {
+		result.TargetAncestry = releaseShipTargetAncestry(&result, root, opts, result.SourceSHA)
+		result.TargetSHA = stringFromAny(result.TargetAncestry["target_sha"])
+		if !releaseShipTargetAncestryOK(result.TargetAncestry) {
+			result.fail("target_non_fast_forward", jsonTail(result.TargetAncestry))
 			return finishReleaseShip(result)
 		}
 	}
@@ -500,6 +510,57 @@ func releaseShipCIOK(payload map[string]any) bool {
 	return ok
 }
 
+func releaseShipNeedsTargetAncestry(opts releaseShipOptions) bool {
+	source := strings.TrimSpace(opts.sourceBranch)
+	target := strings.TrimSpace(opts.trunk)
+	return source != "" && target != "" && source != target
+}
+
+func releaseShipTargetAncestry(result *releaseShipResult, root string, opts releaseShipOptions, sourceSHA string) map[string]any {
+	targetRef := opts.remote + "/" + opts.trunk
+	if strings.TrimSpace(sourceSHA) == "" {
+		return map[string]any{"ok": false, "status": "missing_source_sha", "target_ref": targetRef}
+	}
+	code, out := releaseShipCmd(result, root, "git", []string{"rev-parse", "--verify", targetRef + "^{commit}"}, nil, time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "status": "target_unresolvable", "target_ref": targetRef, "tail": tail(out)}
+	}
+	targetSHA := strings.TrimSpace(out)
+	payload := map[string]any{
+		"target_ref": targetRef,
+		"target_sha": targetSHA,
+		"source_ref": opts.sourceBranch,
+		"source_sha": sourceSHA,
+	}
+	if sameSHA(targetSHA, sourceSHA) {
+		payload["ok"] = true
+		payload["status"] = "same"
+		return payload
+	}
+	code, out = releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", targetSHA, sourceSHA}, nil, time.Minute)
+	switch code {
+	case 0:
+		payload["ok"] = true
+		payload["status"] = "ancestor"
+	case 1:
+		payload["ok"] = false
+		payload["status"] = "non_fast_forward"
+	default:
+		payload["ok"] = false
+		payload["status"] = "ancestor_check_failed"
+		payload["tail"] = tail(out)
+	}
+	return payload
+}
+
+func releaseShipTargetAncestryOK(payload map[string]any) bool {
+	if payload == nil {
+		return false
+	}
+	ok, _ := payload["ok"].(bool)
+	return ok
+}
+
 func cleanupReleaseShipWorktree(root, wt string) map[string]any {
 	code, out := releaseShipRunCommand(root, "git", []string{"worktree", "remove", "--force", wt}, nil, 5*time.Minute)
 	payload := map[string]any{
@@ -688,6 +749,17 @@ func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
 			fmt.Fprintf(stdout, "  source: %s %s (ci=%s)\n", result.SourceBranch, result.SourceSHA, status)
 		} else {
 			fmt.Fprintf(stdout, "  source: %s %s\n", result.SourceBranch, result.SourceSHA)
+		}
+	}
+	if result.TargetSHA != "" {
+		status := ""
+		if result.TargetAncestry != nil {
+			status = stringFromAny(result.TargetAncestry["status"])
+		}
+		if status != "" {
+			fmt.Fprintf(stdout, "  target: %s %s (ancestry=%s)\n", result.TargetBranch, result.TargetSHA, status)
+		} else {
+			fmt.Fprintf(stdout, "  target: %s %s\n", result.TargetBranch, result.TargetSHA)
 		}
 	}
 	if result.RemoteBranch != nil {
