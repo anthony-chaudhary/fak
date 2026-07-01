@@ -53,7 +53,6 @@ var tier = map[string]int{
 	"sotamatrix":       1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"branchrole":       1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
 	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
-	"dgxbridge":        1, // remote background-job bridge: drives <tag>.sh/<tag>.log/<tag>.done jobs on a remote scratch dir over an ssh/exec shell; stdlib + os/exec only, imports nothing internal, off the hot path.
 	"benchruns":        1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
@@ -147,7 +146,6 @@ var tier = map[string]int{
 	"vcachescore":     2, // vCache operator scorecard: composes vcachecal/vcachechain/vcachegov proof leaves into the offline 2x readiness gate and hot-anchor index artifact; pure off-path decision layer.
 	"vcachestar":      2, // vCache M2 star anchors (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path.
 	"vcachewarm":      2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
-	"vcacheqa":        2, // vCache gate QA harness (#1495, child of #1490): the shared honesty-lint (Law A2 elision AST scan) + forced-cache-MISS helper (drives vcachestar.FoldTelemetry) + non-forgeable witness (journal.Row-shaped hash chain, verified via journal.VerifyRows) + provenance fence (OBSERVED/WITNESSED, cachewitness vocabulary) + determinism check every M1-M5 gate imports before flipping default-on. Imports journal(2)+guardrsi(1)+cachewitness(1)+vcachestar(2)+cachemeta(1)+stdlib, off the hot path, not registered.
 	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"issuecontract":   1, // pure spine-first GitHub issue candidate contract; stdlib-only, off the hot path.
@@ -240,6 +238,7 @@ var tier = map[string]int{
 	"fusedturn":       1, // executable "one turn spawns both": classifies each abi.ToolCall into its concept-family (classical / weight-based) + folds a FusedTurn (fused iff it spans both) whose Adjudicate proves both families cross ONE floor via an injected Decider (*kernel.Kernel.BatchDecide); imports only abi(0), off the hot path.
 	"workerenvelope":  1, // machine-readable worker-result envelope (sha/issue/tests/blocker/witness) + witness-gated validation; stdlib-only, off the hot path.
 	"launchlatency":   1, // dispatch→heartbeat worker launch-latency histogram + p50/p95 (reuses fleetmetrics percentiles); stdlib-only, off the hot path.
+	"closurerate":     1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
