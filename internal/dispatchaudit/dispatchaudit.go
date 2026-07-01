@@ -29,6 +29,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -90,8 +91,13 @@ type Worker struct {
 	// SidecarMissing is true when no sidecar was present.
 	SidecarBackend Backend
 	SidecarMissing bool
-	// CommitSHA is a witnessed commit SHA found in the log ("" if none).
+	// CommitSHA is a witnessed commit SHA from structured evidence such as a
+	// sidecar ("" if none). Raw worker text that looks like a commit claim is
+	// tracked separately and never promotes the worker to SHIPPED.
 	CommitSHA string
+	// UntrustedCommitClaim is a commit-like claim observed in raw worker output.
+	// It is useful forensic signal, but never a ship witness.
+	UntrustedCommitClaim bool
 	// LogSizeKnown is true when LogBytes came from the on-disk log. Direct unit
 	// fixtures leave it false so zero's Go default does not masquerade as an
 	// observed zero-byte log.
@@ -164,6 +170,10 @@ type Classification struct {
 	WallMinutes   float64 `json:"wall_minutes"`
 	Misattributed bool    `json:"misattributed"`
 	Reason        string  `json:"reason"`
+	// EvidenceSummary is assembled only from typed/structured fields. It
+	// deliberately excludes raw worker output.
+	EvidenceSummary      string `json:"evidence_summary,omitempty"`
+	RawOutputQuarantined bool   `json:"raw_output_quarantined,omitempty"`
 }
 
 // Classify is the PURE per-worker decision. Order matters: a witnessed ship wins
@@ -229,7 +239,105 @@ func Classify(w Worker, th Thresholds) Classification {
 		c.Outcome = OutcomeWastedSpawn
 		c.Reason = "no ship and no witnessed work"
 	}
+	if w.UntrustedCommitClaim && w.CommitSHA == "" {
+		c.RawOutputQuarantined = true
+		if c.Outcome == OutcomeWastedSpawn {
+			c.Reason = "raw commit claim quarantined; no structured commit witness"
+		}
+	}
+	c.EvidenceSummary = structuredEvidenceSummary(w, c.Backend, c.Misattributed, c.RawOutputQuarantined)
 	return c
+}
+
+// StatusSummary is the one-line status text safe to render into operator
+// summaries. It carries the classifier reason plus structured evidence only,
+// never raw worker transcript text.
+func (c Classification) StatusSummary() string {
+	if c.EvidenceSummary == "" {
+		return c.Reason
+	}
+	if c.Reason == "" {
+		return "evidence: " + c.EvidenceSummary
+	}
+	return c.Reason + "; evidence: " + c.EvidenceSummary
+}
+
+func structuredEvidenceSummary(w Worker, backend Backend, misattributed, rawOutputQuarantined bool) string {
+	parts := []string{}
+	if w.Log != "" {
+		parts = append(parts, "log="+safeEvidenceToken(w.Log))
+	}
+	if w.Issue != "" {
+		parts = append(parts, "issue="+safeEvidenceToken(w.Issue))
+	}
+	if w.Lane != "" {
+		parts = append(parts, "lane="+safeEvidenceToken(w.Lane))
+	}
+	if backend != "" {
+		parts = append(parts, "backend="+safeEvidenceToken(string(backend)))
+	}
+	if w.LogSizeKnown {
+		parts = append(parts, "log_bytes="+strconv.FormatInt(w.LogBytes, 10))
+	}
+	if w.PID != 0 {
+		parts = append(parts, "pid="+strconv.Itoa(w.PID))
+		parts = append(parts, "pid_alive="+strconv.FormatBool(w.PIDAlive))
+	}
+	if w.CommitSHA != "" {
+		parts = append(parts, "commit_sha="+safeEvidenceToken(w.CommitSHA))
+	}
+	if w.CapHit {
+		parts = append(parts, "cap_hit=true")
+	}
+	if w.ErrorLines > 0 {
+		parts = append(parts, "error_lines="+strconv.Itoa(w.ErrorLines))
+	}
+	if span := w.errSpan(); span > 0 {
+		parts = append(parts, "error_span_min="+strconv.FormatFloat(span, 'f', 1, 64))
+	}
+	if w.BannerOnly {
+		parts = append(parts, "banner_only=true")
+	}
+	if w.ProgressTicks > 0 {
+		parts = append(parts, "progress_ticks="+strconv.Itoa(w.ProgressTicks))
+		parts = append(parts, "progress_moved="+strconv.FormatBool(w.ProgressMoved))
+	}
+	if misattributed {
+		parts = append(parts, "backend_attribution=mismatch_or_missing")
+	}
+	if rawOutputQuarantined {
+		parts = append(parts, "raw_commit_claim=quarantined")
+	}
+	if len(parts) == 0 {
+		return "structured_evidence=none"
+	}
+	return strings.Join(parts, " ")
+}
+
+func safeEvidenceToken(s string) string {
+	const max = 96
+	var b strings.Builder
+	for _, r := range s {
+		if b.Len() >= max {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.' || r == '_' || r == '-' || r == '/' || r == '#':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "unknown"
+	}
+	return b.String()
 }
 
 // Started reports whether the worker reached a point of producing SOME structural
@@ -254,6 +362,7 @@ type Finding struct {
 	Issue       string  `json:"issue,omitempty"`
 	Title       string  `json:"title"`
 	Detail      string  `json:"detail"`
+	Evidence    string  `json:"evidence,omitempty"`
 }
 
 // codeSite is the stable, log-name-independent anchor for a fingerprint: the
@@ -290,7 +399,8 @@ func findingFor(c Classification) (Finding, bool) {
 		Log:         c.Log,
 		Issue:       c.Issue,
 		Title:       "dispatch audit: " + string(c.Outcome) + " on " + string(c.Backend) + " (lane " + laneOrUnknown(c.Lane) + ")",
-		Detail:      c.Reason + " — first seen in " + c.Log,
+		Detail:      c.StatusSummary() + " — first seen in " + safeEvidenceToken(c.Log),
+		Evidence:    c.EvidenceSummary,
 	}
 	if c.Misattributed {
 		f.Detail += " [.backend misattributed/missing]"

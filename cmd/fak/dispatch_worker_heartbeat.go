@@ -50,7 +50,7 @@ func workerHeartbeatEvent(c dispatchaudit.Classification) loopmgr.Event {
 		Principal: string(c.Backend),
 		Status:    status,
 		Reason:    reason,
-		Summary:   truncateString(c.Reason, 200),
+		Summary:   truncateString(c.StatusSummary(), 200),
 	}
 	if c.Log != "" {
 		ev.EvidenceRefs = append(ev.EvidenceRefs, loopmgr.EvidenceRef{Kind: "log", Ref: c.Log})

@@ -21,9 +21,11 @@ var (
 	reLane        = regexp.MustCompile(`\blane=(\S+)`)
 	reHdrBackend  = regexp.MustCompile(`\bbackend=(\S+)`)
 
-	// A created/shipped commit SHA. Matches the claude "Commit created: `b68ead49`"
-	// shape and a bare "commit <sha>" line; 7-40 hex chars.
+	// A self-reported created/shipped commit SHA in raw worker output. This is
+	// quarantined as a claim; only the structured .commit sidecar below can set
+	// Worker.CommitSHA and promote a worker to SHIPPED.
 	reCommit = regexp.MustCompile("(?i)(?:commit created|✅ commit|shipped|committed)[^0-9a-f]*`?([0-9a-f]{7,40})`?")
+	reSHA    = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
 	// An RFC3339-ish leading timestamp on an opencode line:
 	// `timestamp=2026-06-30T00:01:22.783Z level=ERROR ...`
@@ -96,6 +98,9 @@ func ScanDir(runsDir string) ([]Worker, error) {
 			w.ProgressTicks = p.ticks
 			w.ProgressMoved = p.moved
 		}
+		if sha, ok := readCommitSidecar(filepath.Join(runsDir, base+".commit")); ok {
+			w.CommitSHA = sha
+		}
 		if pid, ok := readPID(filepath.Join(runsDir, base+".pid")); ok {
 			w.PID = pid
 			w.PIDAlive = pidAlive(pid)
@@ -140,9 +145,9 @@ func parseLog(path string) (Worker, error) {
 			continue
 		}
 
-		if w.CommitSHA == "" {
-			if m := reCommit.FindStringSubmatch(line); m != nil {
-				w.CommitSHA = m[1]
+		if !w.UntrustedCommitClaim {
+			if reCommit.MatchString(line) {
+				w.UntrustedCommitClaim = true
 			}
 		}
 
@@ -183,6 +188,15 @@ func readPID(path string) (int, bool) {
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
 	return pid, err == nil && pid > 0
+}
+
+func readCommitSidecar(path string) (string, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	sha := strings.TrimSpace(string(b))
+	return sha, reSHA.MatchString(sha)
 }
 
 // parseTimestamp extracts the `timestamp=...` RFC3339 value from an opencode line.
