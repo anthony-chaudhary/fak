@@ -11,13 +11,14 @@ import (
 // severity — and that each severity tier renders a visibly distinct line.
 
 // TestRenderContextStatusLineAllSeverityTiers proves the status line leads with the
-// distinct severity word for each of #1579's closed tiers, so a caller scanning the
-// line can tell the six severities apart at a glance (the issue's "concise status
+// distinct severity word for each closed tier, so a caller scanning the
+// line can tell the severities apart at a glance (the issue's "concise status
 // line" done condition).
 func TestRenderContextStatusLineAllSeverityTiers(t *testing.T) {
 	tiers := []ContextHealthSeverity{
 		ContextHealthFresh, ContextHealthConstrained, ContextHealthQueryNeeded,
-		ContextHealthStaleRisk, ContextHealthBudgetDraining, ContextHealthResetImminent,
+		ContextHealthStaleRisk, ContextHealthBudgetDraining,
+		ContextHealthObjectiveDrift, ContextHealthResetImminent,
 	}
 	seen := map[string]bool{}
 	for _, sev := range tiers {

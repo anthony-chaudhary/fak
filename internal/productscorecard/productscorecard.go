@@ -82,7 +82,9 @@ var (
 	groups                     = []string{"well-formed", "honesty", "usefulness", "durability", "managed-context"}
 	nonConcepts                = set("what fak is not", "prior-art posture")
 	requiredManagedContextSLOs = []ManagedContextSLO{
+		{ID: "assumption_effect_safety", Name: "Assumption effect safety", Area: "assumption", Hard: true},
 		{ID: "context_visibility", Name: "Context visibility", Area: "visibility", Hard: true},
+		{ID: "pinned_objective_reconciliation", Name: "Pinned-objective reconciliation", Area: "objective", Hard: true},
 		{ID: "deterministic_resets", Name: "Deterministic resets", Area: "reset", Hard: true},
 		{ID: "budget_compliance", Name: "Budget compliance", Area: "budget", Hard: true},
 		{ID: "query_correctness", Name: "Query correctness", Area: "query", Hard: true},

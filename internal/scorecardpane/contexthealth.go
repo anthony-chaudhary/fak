@@ -3,11 +3,11 @@ package scorecardpane
 // contexthealth.go — issue #1579: managed-context needs a user-facing severity
 // vocabulary, not an implicit "some KPI is low" feeling. fak already computes the
 // signals (this package's hygiene fold, and internal/productscorecard's
-// managed-context SLO report over visibility/reset/budget/query/cache/memory), but
-// nothing folds them into one CLOSED, reviewable severity a product surface can
-// render without inventing free-text prose per caller. ContextHealthSeverity is that
-// vocabulary; ClassifyContextHealth is the pure, deterministic fold from named
-// per-area signals into one severity, worst-first.
+// managed-context SLO report over the glossary areas), but nothing folds them into
+// one CLOSED, reviewable severity a product surface can render without inventing
+// free-text prose per caller. ContextHealthSeverity is that vocabulary;
+// ClassifyContextHealth is the pure, deterministic fold from named per-area signals
+// into one severity, worst-first.
 //
 // Shape follows the established closed-vocabulary convention already used by
 // internal/ctxmmu.EvidenceKind, internal/memview.ProvenanceEventKind, and
@@ -27,9 +27,9 @@ import "strings"
 
 // ContextHealthSeverity is the closed vocabulary of managed-context health states a
 // product surface (the product scorecard, the control pane) may render. The set is
-// exactly the issue's "In scope" line: fresh, constrained, query-needed, stale-risk,
-// budget-draining, reset-imminent — no other value is a member, and no caller may
-// substitute free-text severity prose for one of these.
+// exactly the managed-context health contract: fresh, constrained, query-needed,
+// stale-risk, budget-draining, objective-drift, reset-imminent — no other value is
+// a member, and no caller may substitute free-text severity prose for one of these.
 type ContextHealthSeverity string
 
 const (
@@ -53,6 +53,9 @@ const (
 	// ContextHealthBudgetDraining: the budget-compliance signal is failing — the
 	// context window/token budget is being consumed faster than the SLO allows.
 	ContextHealthBudgetDraining ContextHealthSeverity = "budget_draining"
+	// ContextHealthObjectiveDrift: the pinned objective no longer reconciles to the
+	// user's stated goal — continuity is unsafe until a host/user decision resolves it.
+	ContextHealthObjectiveDrift ContextHealthSeverity = "objective_drift"
 	// ContextHealthResetImminent: the deterministic-resets signal is failing — the
 	// most severe state, since a failed reset guarantee means the NEXT context
 	// transition may not be safe/reviewable at all.
@@ -68,6 +71,7 @@ var validContextHealthSeverities = map[ContextHealthSeverity]bool{
 	ContextHealthQueryNeeded:    true,
 	ContextHealthStaleRisk:      true,
 	ContextHealthBudgetDraining: true,
+	ContextHealthObjectiveDrift: true,
 	ContextHealthResetImminent:  true,
 }
 
@@ -96,6 +100,7 @@ func (s ContextHealthSeverity) String() string {
 // "outranked" by anything.
 var contextHealthRank = []ContextHealthSeverity{
 	ContextHealthResetImminent,
+	ContextHealthObjectiveDrift,
 	ContextHealthBudgetDraining,
 	ContextHealthStaleRisk,
 	ContextHealthQueryNeeded,
@@ -104,12 +109,15 @@ var contextHealthRank = []ContextHealthSeverity{
 
 // ContextHealthSignals is the small, named set of managed-context area failures a
 // caller has already measured (e.g. internal/productscorecard's managed-context SLO
-// report, keyed by area: visibility/reset/budget/query/cache/memory). Each field is
-// "is this area currently failing its SLO" — the classifier never re-derives the
-// measurement itself, only folds already-computed booleans into one severity, the
-// same separation collect.go draws between the impure gather and the pure fold.
+// report, keyed by area: assumption/visibility/objective/reset/budget/query/cache/
+// memory). Each field is "is this area currently failing its SLO" — the classifier
+// never re-derives the measurement itself, only folds already-computed booleans into
+// one severity, the same separation collect.go draws between the impure gather and
+// the pure fold.
 type ContextHealthSignals struct {
+	AssumptionFailing bool // assumption safety SLO failing
 	VisibilityFailing bool // context_visibility SLO failing
+	ObjectiveFailing  bool // pinned_objective SLO failing
 	ResetFailing      bool // deterministic_resets SLO failing
 	BudgetFailing     bool // budget_compliance SLO failing
 	QueryFailing      bool // query_correctness SLO failing
@@ -119,7 +127,8 @@ type ContextHealthSignals struct {
 
 // AnyFailing reports whether any tracked signal is failing.
 func (s ContextHealthSignals) AnyFailing() bool {
-	return s.VisibilityFailing || s.ResetFailing || s.BudgetFailing ||
+	return s.AssumptionFailing || s.VisibilityFailing || s.ObjectiveFailing ||
+		s.ResetFailing || s.BudgetFailing ||
 		s.QueryFailing || s.CacheFailing || s.MemoryFailing
 }
 
@@ -132,9 +141,10 @@ func (s ContextHealthSignals) AnyFailing() bool {
 func ClassifyContextHealth(s ContextHealthSignals) ContextHealthSeverity {
 	failing := map[ContextHealthSeverity]bool{
 		ContextHealthResetImminent:  s.ResetFailing,
+		ContextHealthObjectiveDrift: s.ObjectiveFailing,
 		ContextHealthBudgetDraining: s.BudgetFailing,
 		ContextHealthStaleRisk:      s.CacheFailing || s.MemoryFailing,
-		ContextHealthQueryNeeded:    s.QueryFailing,
+		ContextHealthQueryNeeded:    s.QueryFailing || s.AssumptionFailing,
 		ContextHealthConstrained:    s.VisibilityFailing,
 	}
 	for _, sev := range contextHealthRank {
@@ -159,8 +169,12 @@ func ContextHealthSignalsFromSLORows(rows []map[string]any) ContextHealthSignals
 		status := strings.ToLower(strings.TrimSpace(asString(row["status"])))
 		failing := status != "" && status != "pass"
 		switch area {
+		case "assumption":
+			s.AssumptionFailing = s.AssumptionFailing || failing
 		case "visibility":
 			s.VisibilityFailing = s.VisibilityFailing || failing
+		case "objective":
+			s.ObjectiveFailing = s.ObjectiveFailing || failing
 		case "reset":
 			s.ResetFailing = s.ResetFailing || failing
 		case "budget":

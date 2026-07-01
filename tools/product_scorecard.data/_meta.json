@@ -16,6 +16,16 @@
   ],
   "managed_context_slos": [
     {
+      "id": "assumption_effect_safety",
+      "name": "Assumption effect safety",
+      "area": "assumption",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1920 glossary parity fixture",
+      "detail": "No product scorecard fixture yet proves low-confidence or stale assumptions block effectful actions through AssumptionReport.EffectSafe.",
+      "next_action": "add an assumption fixture with use/query/refresh counts and an effect-safe witness before calling this SLO green"
+    },
+    {
       "id": "context_visibility",
       "name": "Context visibility",
       "area": "visibility",
@@ -24,6 +34,16 @@
       "source": "issue #1624 seed fixture",
       "detail": "No managed-context scorecard pane yet shows known, unknown, and assumed context buckets with source refs.",
       "next_action": "add the report fixture and mark this SLO pass only when the rendered buckets are witnessed"
+    },
+    {
+      "id": "pinned_objective_reconciliation",
+      "name": "Pinned-objective reconciliation",
+      "area": "objective",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1920 glossary parity fixture",
+      "detail": "No product scorecard fixture yet proves a pinned objective reconciles as preserved/established or surfaces drift.",
+      "next_action": "add an objective-pin fixture with a ReconcileObjective outcome before calling this SLO green"
     },
     {
       "id": "deterministic_resets",

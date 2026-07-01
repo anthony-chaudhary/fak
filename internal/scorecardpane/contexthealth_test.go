@@ -12,7 +12,8 @@ import "testing"
 func TestContextHealthSeverityClosedVocabulary(t *testing.T) {
 	all := []ContextHealthSeverity{
 		ContextHealthFresh, ContextHealthConstrained, ContextHealthQueryNeeded,
-		ContextHealthStaleRisk, ContextHealthBudgetDraining, ContextHealthResetImminent,
+		ContextHealthStaleRisk, ContextHealthBudgetDraining,
+		ContextHealthObjectiveDrift, ContextHealthResetImminent,
 	}
 	if len(all) != len(validContextHealthSeverities) {
 		t.Fatalf("declared %d severities but membership set has %d — keep them in sync",
@@ -47,15 +48,17 @@ func TestClassifyContextHealthAllClearIsFresh(t *testing.T) {
 	}
 }
 
-// TestClassifyContextHealthSingleSignals proves each individual failing area maps to
-// its named severity from the issue's In-scope line.
+// TestClassifyContextHealthSingleSignals proves each individual glossary area maps
+// to its named context-health severity.
 func TestClassifyContextHealthSingleSignals(t *testing.T) {
 	cases := []struct {
 		name   string
 		in     ContextHealthSignals
 		wanted ContextHealthSeverity
 	}{
+		{"assumption", ContextHealthSignals{AssumptionFailing: true}, ContextHealthQueryNeeded},
 		{"visibility", ContextHealthSignals{VisibilityFailing: true}, ContextHealthConstrained},
+		{"objective", ContextHealthSignals{ObjectiveFailing: true}, ContextHealthObjectiveDrift},
 		{"query", ContextHealthSignals{QueryFailing: true}, ContextHealthQueryNeeded},
 		{"cache", ContextHealthSignals{CacheFailing: true}, ContextHealthStaleRisk},
 		{"memory", ContextHealthSignals{MemoryFailing: true}, ContextHealthStaleRisk},
@@ -78,11 +81,17 @@ func TestClassifyContextHealthSingleSignals(t *testing.T) {
 // set — the product surface renders one closed enum, never a free-text list.
 func TestClassifyContextHealthWorstFirstIsDeterministic(t *testing.T) {
 	got := ClassifyContextHealth(ContextHealthSignals{
-		VisibilityFailing: true, QueryFailing: true, CacheFailing: true,
-		BudgetFailing: true, ResetFailing: true, MemoryFailing: true,
+		AssumptionFailing: true, VisibilityFailing: true, ObjectiveFailing: true,
+		QueryFailing: true, CacheFailing: true, BudgetFailing: true,
+		ResetFailing: true, MemoryFailing: true,
 	})
 	if got != ContextHealthResetImminent {
 		t.Fatalf("ClassifyContextHealth(all failing) = %q, want reset_imminent (worst-first)", got)
+	}
+
+	got = ClassifyContextHealth(ContextHealthSignals{ObjectiveFailing: true, BudgetFailing: true, QueryFailing: true, VisibilityFailing: true})
+	if got != ContextHealthObjectiveDrift {
+		t.Fatalf("ClassifyContextHealth(objective+budget+query+visibility) = %q, want objective_drift", got)
 	}
 
 	got = ClassifyContextHealth(ContextHealthSignals{BudgetFailing: true, QueryFailing: true, VisibilityFailing: true})
@@ -96,7 +105,9 @@ func TestClassifyContextHealthWorstFirstIsDeterministic(t *testing.T) {
 // without scorecardpane importing that (tier-1-only) package.
 func TestContextHealthSignalsFromSLORowsMapsAreas(t *testing.T) {
 	rows := []map[string]any{
+		{"area": "assumption", "status": "pass"},
 		{"area": "visibility", "status": "pass"},
+		{"area": "objective", "status": "fail"},
 		{"area": "reset", "status": "FAIL"},
 		{"area": "budget", "status": "pass"},
 		{"area": "query", "status": "missing"},
@@ -104,8 +115,11 @@ func TestContextHealthSignalsFromSLORowsMapsAreas(t *testing.T) {
 		{"area": "memory", "status": "pass"},
 	}
 	sig := ContextHealthSignalsFromSLORows(rows)
-	if sig.VisibilityFailing || sig.BudgetFailing || sig.CacheFailing || sig.MemoryFailing {
+	if sig.AssumptionFailing || sig.VisibilityFailing || sig.BudgetFailing || sig.CacheFailing || sig.MemoryFailing {
 		t.Fatalf("passing rows must not be marked failing: %+v", sig)
+	}
+	if !sig.ObjectiveFailing {
+		t.Error("objective row status=fail must mark ObjectiveFailing")
 	}
 	if !sig.ResetFailing {
 		t.Error("reset row status=FAIL must mark ResetFailing (case-insensitive)")
@@ -116,6 +130,20 @@ func TestContextHealthSignalsFromSLORowsMapsAreas(t *testing.T) {
 	got := ClassifyContextHealth(sig)
 	if got != ContextHealthResetImminent {
 		t.Fatalf("ClassifyContextHealth(from rows) = %q, want reset_imminent", got)
+	}
+
+	got = ClassifyContextHealth(ContextHealthSignalsFromSLORows([]map[string]any{
+		{"area": "assumption", "status": "refresh"},
+	}))
+	if got != ContextHealthQueryNeeded {
+		t.Fatalf("ClassifyContextHealth(failing assumption row) = %q, want query_needed", got)
+	}
+
+	got = ClassifyContextHealth(ContextHealthSignalsFromSLORows([]map[string]any{
+		{"area": "objective", "status": "drifted"},
+	}))
+	if got != ContextHealthObjectiveDrift {
+		t.Fatalf("ClassifyContextHealth(failing objective row) = %q, want objective_drift", got)
 	}
 }
 

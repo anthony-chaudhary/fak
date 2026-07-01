@@ -52,15 +52,17 @@ func TestProductScorecardContextHealthDefaultsFreshWithNoManagedContextData(t *t
 	}
 }
 
-// TestProductScorecardContextHealthReflectsFailingSLO proves a failing
-// managed-context SLO row (reset, the most severe per contextHealthRank) surfaces as
-// the matching closed severity, not the raw debt integer alone.
+// TestProductScorecardContextHealthReflectsFailingSLO proves failing
+// managed-context SLO rows surface as the matching closed severity, not the raw
+// debt integer alone.
 func TestProductScorecardContextHealthReflectsFailingSLO(t *testing.T) {
 	payload := productscorecard.Payload{
 		Corpus: map[string]any{
 			"managed_context": map[string]any{
 				"rows": []map[string]any{
+					{"area": "assumption", "status": "pass"},
 					{"area": "visibility", "status": "pass"},
+					{"area": "objective", "status": "pass"},
 					{"area": "reset", "status": "fail"},
 					{"area": "budget", "status": "pass"},
 					{"area": "query", "status": "pass"},
@@ -73,6 +75,22 @@ func TestProductScorecardContextHealthReflectsFailingSLO(t *testing.T) {
 	got := productScorecardContextHealth(payload)
 	if got != scorecardpane.ContextHealthResetImminent {
 		t.Fatalf("productScorecardContextHealth(failing reset SLO) = %q, want reset_imminent", got)
+	}
+
+	payload.Corpus["managed_context"] = map[string]any{
+		"rows": []map[string]any{{"area": "assumption", "status": "query"}},
+	}
+	got = productScorecardContextHealth(payload)
+	if got != scorecardpane.ContextHealthQueryNeeded {
+		t.Fatalf("productScorecardContextHealth(failing assumption SLO) = %q, want query_needed", got)
+	}
+
+	payload.Corpus["managed_context"] = map[string]any{
+		"rows": []map[string]any{{"area": "objective", "status": "drifted"}},
+	}
+	got = productScorecardContextHealth(payload)
+	if got != scorecardpane.ContextHealthObjectiveDrift {
+		t.Fatalf("productScorecardContextHealth(failing objective SLO) = %q, want objective_drift", got)
 	}
 }
 

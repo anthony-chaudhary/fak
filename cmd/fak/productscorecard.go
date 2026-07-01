@@ -109,8 +109,8 @@ func runProductScorecard(stdout, stderr io.Writer, argv []string) int {
 }
 
 // productScorecardContextHealth folds the payload's managed-context SLO rows (see
-// internal/productscorecard.ManagedContextSLOReport — visibility/reset/budget/query/
-// cache/memory) into the closed severity vocabulary from issue #1579
+// internal/productscorecard.ManagedContextSLOReport — the eight managed-context
+// glossary areas) into the closed severity vocabulary from issue #1579/#1920
 // (internal/scorecardpane.ContextHealthSeverity), so the product scorecard renders
 // one reviewable enum instead of a raw debt count. scorecardpane is tier-1
 // stdlib-only and does not import internal/productscorecard (see
