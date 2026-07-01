@@ -84,6 +84,13 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 		}
 		fmt.Fprintln(&b)
 	}
+	if len(router.UnroutableBacklog) > 0 {
+		fmt.Fprintf(&b, "  unroutable_backlog: %d\n", len(router.UnroutableBacklog))
+		for _, row := range router.UnroutableBacklog {
+			fmt.Fprintf(&b, "    #%d bucket=%s reason=%s next=%s\n",
+				row.Number, row.Bucket, row.Reason, row.NextAction)
+		}
+	}
 	for _, queue := range router.RepairQueues {
 		fmt.Fprintf(&b, "  repair_queue[%s]: %d issue(s) %d step(s)",
 			queue.Kind, queue.Count, queue.StepBudget)

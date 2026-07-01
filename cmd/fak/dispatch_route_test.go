@@ -109,12 +109,19 @@ func TestRenderDispatchRouteShowsCandidateConfidence(t *testing.T) {
 			{Number: 23, Lane: "compute", Confidence: "alias", Signal: "scope:gpu->compute", SignalConflict: true},
 			{Number: 24, Confidence: "none", Signal: "unrouted", UnroutedReason: "no scope/path/label signal"},
 		},
+		UnroutableBacklog: []dispatchtick.UnroutableBacklogRow{
+			{Number: 24, Bucket: "no_lane", Reason: "no scope/path/label signal", NextAction: "add a lane-bearing title scope, label, or concrete path hint"},
+			{Number: 25, Bucket: "missing_scope", Reason: "ISSUE_SCOPE_INCOMPLETE", NextAction: "add worker-ready scope, done condition, witness, likely files, and work-unit metadata"},
+		},
 	})
 	for _, want := range []string{
 		"candidate #21 lane=gateway confidence=path-confirmed signal=path:gateway",
 		"candidate #22 lane=docs confidence=label signal=label->docs",
 		"candidate #23 lane=compute confidence=alias signal=scope:gpu->compute conflict=true",
 		"candidate #24 lane=(unrouted) confidence=none signal=unrouted reason=no scope/path/label signal",
+		"unroutable_backlog: 2",
+		"#24 bucket=no_lane reason=no scope/path/label signal next=add a lane-bearing title scope, label, or concrete path hint",
+		"#25 bucket=missing_scope reason=ISSUE_SCOPE_INCOMPLETE next=add worker-ready scope, done condition, witness, likely files, and work-unit metadata",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered route missing %q:\n%s", want, out)

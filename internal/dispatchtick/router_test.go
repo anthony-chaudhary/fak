@@ -325,6 +325,40 @@ func TestRouterPayloadCountsAndVerdicts(t *testing.T) {
 	}
 }
 
+func TestRouterPayloadReportsUnroutableBacklogBuckets(t *testing.T) {
+	routes := []IssueRoute{
+		routeTestIssue(routerIssue(31, "Merge branches", nil, "")),
+		routeTestIssue(routerIssue(32, "abi: hoist the public ABI surface", nil, "")),
+		routeTestIssue(routerIssue(34, "fix(compute): shared", nil,
+			"touches fak/internal/gateway/a.go and fak/internal/compute/b.go")),
+	}
+	p := BuildRouterPayload(RouterPayloadInput{
+		Workspace: "C:/work/fak",
+		Routes:    routes,
+		Trees:     routerTestTaxonomy.Trees,
+		Coverage:  RouterCoverage{Complete: true, Notes: []string{}},
+		SkippedBlocked: []Issue{
+			routerIssue(33, "needs scope", []string{"needs-scope"}, ""),
+		},
+		BlockedLabelName: BlockedByHumanLabel,
+	})
+	if len(p.UnroutableBacklog) != 4 {
+		t.Fatalf("unroutable backlog = %+v, want four bucket rows", p.UnroutableBacklog)
+	}
+	want := map[int]string{
+		31: "no_lane",
+		32: "exclusive_lane",
+		33: "missing_scope",
+		34: "ambiguous_path",
+	}
+	for issue, bucket := range want {
+		row := unroutableRowByIssue(p.UnroutableBacklog, issue)
+		if row.Bucket != bucket || row.Reason == "" || row.NextAction == "" {
+			t.Fatalf("unroutable row #%d = %+v, want bucket=%s with reason/action", issue, row, bucket)
+		}
+	}
+}
+
 func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	p := RouteIssues(RouterInput{
 		Workspace:  "C:/work/fak",
@@ -661,6 +695,15 @@ func routerRepairQueueByKind(queues []RouterRepairQueue, kind string) RouterRepa
 		}
 	}
 	return RouterRepairQueue{}
+}
+
+func unroutableRowByIssue(rows []UnroutableBacklogRow, number int) UnroutableBacklogRow {
+	for _, row := range rows {
+		if row.Number == number {
+			return row
+		}
+	}
+	return UnroutableBacklogRow{}
 }
 
 func sameStringIntMap(got, want map[string]int) bool {

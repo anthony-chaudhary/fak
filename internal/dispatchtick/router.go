@@ -178,6 +178,14 @@ type RouterRepairQueue struct {
 	Issues           []int          `json:"issues,omitempty"`
 }
 
+type UnroutableBacklogRow struct {
+	Number     int    `json:"number"`
+	Title      string `json:"title,omitempty"`
+	Bucket     string `json:"bucket"`
+	Reason     string `json:"reason"`
+	NextAction string `json:"next_action"`
+}
+
 type RouterCoverage struct {
 	Complete      bool     `json:"complete"`
 	Truncated     bool     `json:"truncated"`
@@ -238,6 +246,7 @@ type RouterPayload struct {
 	Lanes               map[string]RouterLaneGroup `json:"lanes"`
 	Issues              []IssueRoute               `json:"issues"`
 	RepairQueues        []RouterRepairQueue        `json:"repair_queues,omitempty"`
+	UnroutableBacklog   []UnroutableBacklogRow     `json:"unroutable_backlog,omitempty"`
 	SkippedHumanBlocked []SkippedIssue             `json:"skipped_human_blocked"`
 }
 
@@ -850,6 +859,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 	issues := append([]IssueRoute(nil), in.Routes...)
 	sort.Slice(issues, func(i, j int) bool { return routeSortLess(issues[i], issues[j]) })
 	repairQueues := routerRepairQueues(issues, skipped)
+	unroutable := unroutableBacklogRows(issues, skipped)
 
 	return RouterPayload{
 		Schema:              RouterSchema,
@@ -864,6 +874,7 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 		Lanes:               lanes,
 		Issues:              issues,
 		RepairQueues:        repairQueues,
+		UnroutableBacklog:   unroutable,
 		SkippedHumanBlocked: skipped,
 	}
 }
@@ -1000,6 +1011,96 @@ func routerRepairQueues(routes []IssueRoute, skipped []SkippedIssue) []RouterRep
 		return out[i].Kind < out[j].Kind
 	})
 	return out
+}
+
+func unroutableBacklogRows(routes []IssueRoute, skipped []SkippedIssue) []UnroutableBacklogRow {
+	var rows []UnroutableBacklogRow
+	for _, route := range routes {
+		bucket := routeUnroutableBucket(route)
+		if bucket == "" {
+			continue
+		}
+		rows = append(rows, UnroutableBacklogRow{
+			Number:     route.Number,
+			Title:      route.Title,
+			Bucket:     bucket,
+			Reason:     firstNonEmptyString(route.UnroutedReason, route.Signal),
+			NextAction: unroutableBacklogAction(bucket),
+		})
+	}
+	for _, issue := range skipped {
+		bucket := skippedUnroutableBucket(issue)
+		if bucket == "" {
+			continue
+		}
+		rows = append(rows, UnroutableBacklogRow{
+			Number:     issue.Number,
+			Title:      issue.Title,
+			Bucket:     bucket,
+			Reason:     issue.Reason,
+			NextAction: unroutableBacklogAction(bucket),
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		ri, rj := unroutableBacklogRank(rows[i].Bucket), unroutableBacklogRank(rows[j].Bucket)
+		if ri != rj {
+			return ri < rj
+		}
+		return rows[i].Number < rows[j].Number
+	})
+	return rows
+}
+
+func routeUnroutableBucket(route IssueRoute) string {
+	if route.Lane == "" {
+		if strings.HasPrefix(route.Signal, "exclusive-scope:") || strings.Contains(route.UnroutedReason, "exclusive-lane") {
+			return "exclusive_lane"
+		}
+		return "no_lane"
+	}
+	if route.SignalConflict && strings.HasPrefix(route.Signal, "path-ambiguous:") {
+		return "ambiguous_path"
+	}
+	return ""
+}
+
+func skippedUnroutableBucket(issue SkippedIssue) string {
+	switch issue.Reason {
+	case "ISSUE_SCOPE_INCOMPLETE", "ISSUE_TRIAGE_ONLY":
+		return "missing_scope"
+	default:
+		return ""
+	}
+}
+
+func unroutableBacklogAction(bucket string) string {
+	switch bucket {
+	case "no_lane":
+		return "add a lane-bearing title scope, label, or concrete path hint"
+	case "exclusive_lane":
+		return "operator must pick a non-exclusive lane or launch the exclusive work manually"
+	case "missing_scope":
+		return "add worker-ready scope, done condition, witness, likely files, and work-unit metadata"
+	case "ambiguous_path":
+		return "narrow path hints to one lane or add matching scope/label context"
+	default:
+		return "inspect the route row before dispatch"
+	}
+}
+
+func unroutableBacklogRank(bucket string) int {
+	switch bucket {
+	case "no_lane":
+		return 0
+	case "exclusive_lane":
+		return 1
+	case "missing_scope":
+		return 2
+	case "ambiguous_path":
+		return 3
+	default:
+		return 9
+	}
 }
 
 func skippedIssueStepBudget(issue SkippedIssue) int {
