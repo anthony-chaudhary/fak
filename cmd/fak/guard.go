@@ -846,6 +846,7 @@ func cmdGuard(argv []string) {
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
+	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 
 	if !*quiet {
 		if providerAutodetected {

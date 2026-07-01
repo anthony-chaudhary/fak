@@ -289,6 +289,59 @@ func guardInjectedEnv(provider, override, gwURL string) [][2]string {
 	return pairs
 }
 
+const (
+	guardClaudeAutoCompactWindowEnv    = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+	guardClaudeOneMillionCompactWindow = "1000000"
+)
+
+// guardClaudeAutoCompactWindowInjection applies Claude Code's 1M-context workaround only
+// when the target model is statically known before the child process is spawned.
+func guardClaudeAutoCompactWindowInjection(provider, guardModel string, command []string) [][2]string {
+	if provider != "anthropic" || len(command) == 0 {
+		return nil
+	}
+	switch guardAgentBaseName(command[0]) {
+	case "claude", "claude-code":
+	default:
+		return nil
+	}
+	model := guardStaticClaudeModel(guardModel, command)
+	if !guardClaudeOneMillionModel(model) {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv(guardClaudeAutoCompactWindowEnv)) != "" {
+		return nil
+	}
+	return [][2]string{{guardClaudeAutoCompactWindowEnv, guardClaudeOneMillionCompactWindow}}
+}
+
+func guardStaticClaudeModel(guardModel string, command []string) string {
+	if model := strings.TrimSpace(guardModel); model != "" {
+		return model
+	}
+	for i := 1; i < len(command); i++ {
+		arg := strings.TrimSpace(command[i])
+		switch {
+		case arg == "--":
+			return ""
+		case arg == "--model" || arg == "-m":
+			if i+1 < len(command) {
+				return strings.TrimSpace(command[i+1])
+			}
+			return ""
+		case strings.HasPrefix(arg, "--model="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "--model="))
+		case strings.HasPrefix(arg, "-m="):
+			return strings.TrimSpace(strings.TrimPrefix(arg, "-m="))
+		}
+	}
+	return ""
+}
+
+func guardClaudeOneMillionModel(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "[1m]")
+}
+
 // guardWaitHealthy blocks until the gateway answers 200 on /healthz, the Serve
 // goroutine returns early (its result is delivered on serveErr — e.g. a bound listener
 // that fails before /healthz can answer), or the deadline passes. The listener is

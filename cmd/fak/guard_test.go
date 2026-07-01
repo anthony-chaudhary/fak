@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -203,6 +204,77 @@ func TestGuardInjectedEnv(t *testing.T) {
 	// still carrying the /v1 the OpenAI wire needs.
 	if got := guardInjectedEnv("openai", "MY_BASE", gw); len(got) != 1 || got[0] != [2]string{"MY_BASE", gw + "/v1"} {
 		t.Errorf("override injected = %v, want one MY_BASE=%s/v1", got, gw)
+	}
+}
+
+func TestGuardClaudeAutoCompactWindowInjection(t *testing.T) {
+	t.Setenv(guardClaudeAutoCompactWindowEnv, "")
+
+	want := [][2]string{{guardClaudeAutoCompactWindowEnv, guardClaudeOneMillionCompactWindow}}
+	cases := []struct {
+		name       string
+		provider   string
+		guardModel string
+		command    []string
+		want       [][2]string
+	}{
+		{
+			name:       "guard model flag detects one million Claude",
+			provider:   "anthropic",
+			guardModel: "claude-opus-4-8[1m]",
+			command:    []string{"claude"},
+			want:       want,
+		},
+		{
+			name:     "child model flag detects one million Claude",
+			provider: "anthropic",
+			command:  []string{"claude", "--model", "claude-opus-4-8[1m]"},
+			want:     want,
+		},
+		{
+			name:     "child model equals form detects one million Claude",
+			provider: "anthropic",
+			command:  []string{"claude.exe", "--model=claude-opus-4-8[1m]"},
+			want:     want,
+		},
+		{
+			name:       "non one million Claude not changed",
+			provider:   "anthropic",
+			guardModel: "claude-sonnet-4",
+			command:    []string{"claude"},
+		},
+		{
+			name:       "non Anthropic wire not changed",
+			provider:   "openai",
+			guardModel: "claude-opus-4-8[1m]",
+			command:    []string{"claude"},
+		},
+		{
+			name:       "non Claude child not changed",
+			provider:   "anthropic",
+			guardModel: "claude-opus-4-8[1m]",
+			command:    []string{"other-agent"},
+		},
+		{
+			name:     "prompt args after terminator are not parsed as flags",
+			provider: "anthropic",
+			command:  []string{"claude", "--", "--model", "claude-opus-4-8[1m]"},
+		},
+	}
+	for _, tc := range cases {
+		got := guardClaudeAutoCompactWindowInjection(tc.provider, tc.guardModel, tc.command)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: injection = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestGuardClaudeAutoCompactWindowInjectionKeepsOperatorEnv(t *testing.T) {
+	t.Setenv(guardClaudeAutoCompactWindowEnv, "750000")
+
+	got := guardClaudeAutoCompactWindowInjection("anthropic", "claude-opus-4-8[1m]", []string{"claude"})
+	if len(got) != 0 {
+		t.Fatalf("injection with operator env = %v, want none", got)
 	}
 }
 
