@@ -314,13 +314,19 @@ def _collapse_descendant_pids(pids: set[int], parent_by_pid: dict[int, int | Non
     return roots
 
 
-def _cmdline_worker_pids() -> set[int]:
+def _cmdline_worker_pids(product: str | None = None) -> set[int]:
     """OS-level worker pids by command-line marker.
 
     This catches the generic DOS-loop worker and the issue-resolution workers
     whose prompt is still on the top-level command line. Best effort: an
     inaccessible process table returns an empty set so the pid-sidecar witness
     below can still govern the issue-dispatch path.
+
+    When ``product`` is given, only workers whose process image is that product's
+    backend are kept (``claude`` -> claude*, ``opencode`` -> opencode*), so a
+    product-scoped cap counts its OWN generic dos-dispatch-loop workers without a
+    sibling product's workers pinning it. These generic workers carry no
+    ``.backend`` sidecar, so the process image is the only pool signal available.
     """
     try:
         import psutil  # type: ignore
@@ -338,7 +344,9 @@ def _cmdline_worker_pids() -> set[int]:
             # Marker on the cmdline AND a real backend image — a shell that merely
             # mentions the marker (a grep, a launcher, an operator inspecting) is
             # not a live worker and must not consume a cap slot.
-            if _is_worker_cmdline(cl) and _is_worker_image(p.info.get("name") or ""):
+            name = p.info.get("name") or ""
+            if (_is_worker_cmdline(cl) and _is_worker_image(name)
+                    and (product is None or _image_matches_product(name, product))):
                 pids.add(int(p.pid))
         return _collapse_descendant_pids(pids, parent_by_pid)
     # Fallback when psutil is absent. wmic.exe is removed on Win11 24H2+ (build
@@ -364,6 +372,8 @@ def _cmdline_worker_pids() -> set[int]:
                 image = parts[2] if len(parts) > 2 else ""
                 if not _is_worker_image(image):
                     continue
+                if product is not None and not _image_matches_product(image, product):
+                    continue
                 pid = int(parts[0])
                 parent = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
                 pids.add(pid)
@@ -384,6 +394,8 @@ def _cmdline_worker_pids() -> set[int]:
             if len(toks) < 2 or not toks[0].isdigit():
                 continue
             if not _is_worker_image(toks[1]):
+                continue
+            if product is not None and not _image_matches_product(toks[1], product):
                 continue
             pids.add(int(toks[0]))
         return pids
@@ -804,6 +816,21 @@ def _product_backends(product: str) -> tuple[str, ...]:
     return _PRODUCT_BACKENDS.get(product, (product,))
 
 
+def _image_matches_product(image: str, product: str) -> bool:
+    """True iff process ``image`` is the backend for ``product``.
+
+    Mirrors ``_is_worker_image`` but scopes to ONE product's backend
+    (``claude`` -> claude*, ``opencode`` -> opencode*), so a product-scoped
+    worker count keeps the generic cmdline-marked dos-dispatch-loop workers that
+    belong to this product's pool while a sibling product's workers stay out of
+    this pool's cap. A blank/unknown image matches nothing.
+    """
+    base = _process_name_stem(image)
+    if not base:
+        return False
+    return any(base == img or base.startswith(img) for img in _product_backends(product))
+
+
 def _sidecar_backend(pid_file: Path) -> str | None:
     """The backend (claude|opencode) a resolve sidecar belongs to, from its
     `.backend` sibling. A missing/unreadable sidecar returns None so a
@@ -829,11 +856,17 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     Codex has a single ambient seat rather than a roster; for that product, every
     live Codex CLI process also consumes the cap so an attended Codex session blocks
     background codex dispatch. The generic cmdline-marked DOS-loop workers carry no
-    backend tag, so they are counted only in the unscoped (global) call.
+    backend tag, so they are attributed to a pool by their process IMAGE
+    (``_image_matches_product``): a claude dos-dispatch-loop worker counts against
+    the claude pool's cap even though it wrote no `.backend` sidecar — without this,
+    a product-scoped count returned 0 while such workers were live and authorized an
+    over-subscribing spawn (the no-DoS bound is only sound if live is never
+    undercounted).
     """
     root = root or repo_root()
     if product is not None:
         pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
+        pids.update(_cmdline_worker_pids(product=product))
         if product == "codex":
             pids.update(ambient_codex_pids())
         return len(pids)

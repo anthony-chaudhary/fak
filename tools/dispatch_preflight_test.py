@@ -419,6 +419,27 @@ class WorkerCountTest(unittest.TestCase):
         self.assertTrue(mod._is_worker_cmdline("claude -p your goal: resolve GitHub issue #717"))
         self.assertFalse(mod._is_worker_cmdline("python tools/dispatch_preflight.py --json"))
 
+    def test_image_matches_product_scopes_by_backend(self) -> None:
+        mod = load()
+        self.assertTrue(mod._image_matches_product("claude.exe", "claude"))
+        self.assertTrue(mod._image_matches_product("/usr/bin/claude", "claude"))
+        self.assertFalse(mod._image_matches_product("opencode.exe", "claude"))
+        self.assertTrue(mod._image_matches_product("opencode", "opencode"))
+        self.assertFalse(mod._image_matches_product("", "claude"))
+
+    def test_proc_worker_count_product_counts_cmdline_dispatch_loop_worker(self) -> None:
+        # Regression (#preflight-live-detection-gap): a live
+        # `claude ... /dos-dispatch-loop --lane docs` worker writes no `.backend`
+        # sidecar, so the product-scoped count returned 0 while it was alive and
+        # authorized an over-subscribing spawn. It must now be counted via its image.
+        mod = load()
+        mod.live_resolve_worker_pids = lambda *a, **k: set()
+        mod._cmdline_worker_pids = (
+            lambda product=None: {4242} if product == "claude" else set())
+        self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="claude"), 1)
+        # a sibling product's cap is unaffected — independent per-pool headroom.
+        self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="opencode"), 0)
+
     def test_collapse_descendant_worker_pids_counts_wrapper_tree_once(self) -> None:
         mod = load()
         # The live opencode shape is a .cmd wrapper whose backend child keeps the same
@@ -526,11 +547,18 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(mod.proc_worker_count(ROOT), 3)
 
     def test_proc_worker_count_scopes_to_product_pool(self) -> None:
-        # A product-scoped count is the issue-resolver sidecars for that product
-        # ALONE — the generic cmdline-marked DOS-loop workers (no backend tag) do
-        # not pin a specific pool's cap, so the two account pools fill independently.
+        # A product-scoped count = that product's sidecars PLUS the generic
+        # cmdline-marked dos-dispatch-loop workers whose process image is that
+        # product's backend (they carry no `.backend` sidecar, so the image is the
+        # only pool signal). A SIBLING product's workers never pin this pool's cap,
+        # so the two account pools still fill independently — but a claude dos-loop
+        # worker now correctly pins the claude pool (closing the undercount that
+        # authorized an over-subscribing spawn).
         mod = load()
-        mod._cmdline_worker_pids = lambda: {999}
+        # cmdline workers are now product-filtered by image: the live claude
+        # dos-loop worker {999} belongs to the claude pool, none to opencode.
+        mod._cmdline_worker_pids = (
+            lambda product=None: {999} if product in (None, "claude") else set())
         seen = {}
 
         def fake_pids(runs_dir, **kw):
@@ -539,7 +567,9 @@ class WorkerCountTest(unittest.TestCase):
         mod.live_resolve_worker_pids = fake_pids
         # Unscoped: cmdline ∪ all sidecars = {999, 201, 202, 203} = 4
         self.assertEqual(mod.proc_worker_count(ROOT), 4)
-        # Product-scoped: only that pool's sidecars, no cmdline union
+        # claude pool: its sidecars ∪ its cmdline worker {999} = 4
+        self.assertEqual(mod.proc_worker_count(ROOT, product="claude"), 4)
+        # opencode pool: only its sidecars — the claude cmdline worker does NOT pin it
         self.assertEqual(mod.proc_worker_count(ROOT, product="opencode"), 2)
         self.assertEqual(seen["product"], "opencode")
 
