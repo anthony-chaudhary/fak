@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type Options struct {
@@ -51,6 +53,7 @@ func RealRunner(ctx context.Context, dir string, args ...string) (RunResult, err
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	windowgate.ConfigureBackgroundCommand(cmd)
 	err := cmd.Run()
 	code := 0
 	if err != nil {
