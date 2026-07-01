@@ -50,6 +50,9 @@ For generation-specific concurrent loop scheduling, use
 held/default-admitted buckets, shared-lease contention behavior, and operator
 override evidence without changing the dispatch loop's shared-trunk rules.
 
+Use the [dispatch SLO glossary](dispatch-slo-glossary.md) for report and status
+terms shared by the loop, close arm, and operator summaries.
+
 ## The load-bearing invariants
 
 These are the rules that make it safe to hand autonomous spawning to an unattended

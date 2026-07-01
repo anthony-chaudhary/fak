@@ -16,6 +16,8 @@ issue -> expected paths -> DOS arbitration -> wave launch -> witnessed rollup
 Use this when an operator has a multi-issue commit-lane batch and wants one worker per
 issue. For the always-on backlog driver, see [the issue-dispatch loop](dispatch-loop.md).
 This page is the manual packet shape that a native command can later mechanize.
+Use the [dispatch SLO glossary](dispatch-slo-glossary.md) for shared report and
+status terms.
 
 ## 1. Select issues
 
