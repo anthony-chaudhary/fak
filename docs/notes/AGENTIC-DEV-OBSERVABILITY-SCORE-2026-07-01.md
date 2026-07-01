@@ -47,18 +47,26 @@ repo-hygiene C(2), release-readiness C(2),
 seo B(1), steerability B(1), claim-repro B(1)
 ```
 
-Post-push refresh: after the shared trunk moved again, the live direct compile witness
-changed to:
+Post-push refresh: after the shared trunk moved again, the dirty shared worktree
+remained compile-blocked, but the first reported package changed as peers advanced.
+Direct compile witnesses observed during this run included:
 
 ```text
 cmd/fak/dogfoodissues.go:62:69: undefined: time
+```
+
+```text
+internal/taskmgr/quality_slo.go:59:38: task.spec.QualitySLO undefined
+internal/taskmgr/quality_slo.go:73:38: step.spec.QualitySLO undefined
 ```
 
 The default control-pane refresh hit the 124s command cap before emitting JSON. A
 bounded diagnostic read, `python tools/scorecard_control_pane.py --json --timeout 1`,
 still returned `finding=scorecard_unmeasured`, with `total_debt=6`, `grade_debt=0`,
 `measured=16`, and `errored=25`. Those timeout-capped numbers are useful for shape,
-not as a replacement full-family score.
+not as a replacement full-family score. The stable finding is that agentic-dev
+observability needs either a clean-scorecard read path or a unique-blocker summary;
+the exact dirty-tree compile line is volatile.
 
 ## Tickets filed
 
