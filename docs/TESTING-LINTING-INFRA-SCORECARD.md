@@ -28,8 +28,9 @@ Collected from the current tree on 2026-06-30:
 | Go test file count | `rg --files -g "*_test.go"` -> 1327 files |
 | Python tool test count | `rg --files tools -g "*_test.py"` -> 237 files |
 | Workflow count | `.github/workflows/*.{yml,yaml}` -> 34 workflows |
-| `fak test --list` | tiers: `fast`, `full`, `race`, `affected`, `durations`, `<pkg>` |
+| `fak test --list` | tiers: `fast`, `full`, `race`, `affected`, `durations`, `shards`, `<pkg>` |
 | `fak test durations --help` | runs `go test -json` for a selected tier/package via `--run`, writes `fak.test_duration_ledger.v1` via `--out`, or folds an existing stream via `--input`; CI automatic emission still pending |
+| `fak test shards --help` | reads `fak.test_duration_ledger.v1` via `--input` and emits deterministic balanced `go test` commands as `fak.test_shard_plan.v1`; CI job consumption and Python tool-test sharding still pending |
 | `make test-durations` | local fast-tier duration ledger target writes `.fak/test-duration-ledger.json` with ranked package/test budget findings |
 | `fak affected --help` | supports changed-file/package selection, JSON/list dry-runs, budgeted runs, `-run`, `-short`, `-count`, and report output |
 | `tools/gated_tool_tests.py --check` | 237 tests = 69 gated elsewhere + 20 quarantined + 148 hermetic; red-debt 6 |
@@ -49,7 +50,8 @@ Primary files behind the snapshot:
   DOS review, and no-blackhole tool-test runner.
 - `scripts/ci.ps1` and `test.ps1`: Windows bridge, with known differences from the
   Linux/WSL gate.
-- `cmd/fak/test.go`: host-aware `fak test` wrapper.
+- `cmd/fak/test.go`, `cmd/fak/testduration.go`, and `cmd/fak/testshards.go`:
+  host-aware `fak test` wrapper plus duration-ledger and shard-plan subcommands.
 - `cmd/fak/affected.go` and `internal/affectedtests`: affected-package selection.
 - `tools/code_quality_scorecard.py`, `tools/tooling_quality_scorecard.py`,
   `tools/gated_tool_tests.py`: current mechanical debt lenses.
@@ -68,14 +70,14 @@ not exact, and several important checks are advisory rather than ratcheted.
 | Dimension | Score | Why |
 |---|---:|---|
 | Correctness coverage | 86 | Full `go test ./...`, race CI, architest, and many domain witnesses are wired; current generated score still shows one non-trivial Go package without tests and broader model/backend coverage debt outside this loop. |
-| Inner-loop velocity | 72 | `fak test`, `test-fast`, `test-affected`, and Go caches exist; the default full gate is large, Windows requires WSL routing, and slow-test timing is not a first-class budget ledger. |
+| Inner-loop velocity | 72 | `fak test`, `test-fast`, `test-affected`, Go caches, local duration ledgers, and a Go shard planner exist; the default full gate is still large, Windows requires WSL routing, and CI has not yet consumed measured shards. |
 | Static analysis and typing | 74 | Go build/vet/gofmt/architest are strong, and codelint exists for agent writes; Python tools remain dynamically typed, ruff can skip, and new-tool policy still coexists with a large grandfathered Python surface. |
 | CI/local parity | 82 | `make ci` deliberately mirrors many hard CI steps and CI adds race/per-commit snapshots; `scripts/ci.ps1` still differs from Linux/WSL on gofmt and full tool-test execution. |
 | Agentic usability | 85 | Agent-readiness is A, `fak test` is discoverable, and failures often carry next actions; raw Go/Python output still lacks a unified ranked repair packet for agents. |
 | Modular test architecture | 69 | Architest/lane boundaries exist; current code-quality and tooling-quality scorecards show large god-file/god-function debt that slows targeted tests and safe refactors. |
 | Witness and honesty quality | 90 | Claims lint, salience, DOS review, proof artifacts, and rendered/demo witnesses are unusually strong; several coverage and scorecard checks remain advisory. |
 | Python tool-test discipline | 70 | The no-blackhole runner accounts for 237 tests and runs 148 hermetic tests; there are 43 untested non-trivial modules, 20 quarantined tests, and 6 red quarantines. |
-| CI speed/caching | 76 | Go build/test cache and separate race cache are wired, and `make test-durations` now emits a local budgeted package/test ledger; CI ledger emission, shard planning, and hard slow-test trends are still pending. |
+| CI speed/caching | 76 | Go build/test cache and separate race cache are wired, `make test-durations` emits a local budgeted package/test ledger, and `fak test shards` plans balanced Go shards; CI ledger emission, Python tool-test sharding, CI consumption of the plan, and hard slow-test trends are still pending. |
 | Coverage observability | 73 | CI emits a coverage profile and total statement coverage; there is no changed-package coverage floor or trend gate tied to risk. |
 
 ## Top-20 Improvement Spine

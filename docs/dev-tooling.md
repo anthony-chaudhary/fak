@@ -47,12 +47,16 @@ For slow-test triage, run `make test-durations` to execute the fast tier through
 `go test -json` and write the stable `fak.test_duration_ledger.v1` package/test
 ledger with ranked budget findings. Use `fak test durations --run <tier-or-package>`
 for a custom target, or `--input`/stdin to fold an existing stream.
+To turn that ledger into parallel work, run `fak test shards`: it emits
+`fak.test_shard_plan.v1` with balanced `go test` commands, using measured package
+elapsed time instead of hand-ordered package lists.
 
 | Command | What it runs | When |
 |---|---|---|
 | `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test` (default tier `fast`); on Windows routes to WSL via `test.ps1`; `fak test fast -- -run TestX` passes flags through | the one-verb inner loop over the targets below |
 | `fak test affected [--json\|--list\|--file P\|--budget DUR] [-- go test args]` | delegates to `fak affected`, selecting changed packages plus transitive importers, with JSON/list dry-runs and budget/report flags preserved | the default agent loop before paying for the full suite |
 | `make test-durations` | runs `fak test durations --run fast --out .fak/test-duration-ledger.json` with package/test budgets | find the slowest next package or test before widening CI shards |
+| `fak test shards --input .fak/test-duration-ledger.json --shards 4 --go-arg -short` | reads a duration ledger and emits deterministic balanced `go test` shard commands as `fak.test_shard_plan.v1` | local proof/planning step before wiring CI to consume measured shards |
 | `make test-fast` | `build` + `vet` + `go test -short ./...` (~2s smoke tier; skips the weight-backed model witnesses) | the pre-commit / pre-push floor — ~95% of logic regressions in seconds |
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
