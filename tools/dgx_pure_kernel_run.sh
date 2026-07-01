@@ -31,9 +31,13 @@
 #   FAK_CUDA_ARCH=sm_80   (A100; default sm_80 here)        CUDA_HOME=/usr/local/cuda
 #   FAK_GPU=1             (CUDA_VISIBLE_DEVICES; default 1 to dodge a busy GPU0)
 #   FAK_REPO_URL=https://github.com/anthony-chaudhary/fak.git
+#   FAK_PURE_WORK=/tmp/fakpure  (override to run concurrent per-GPU jobs without
+#                                clobbering each other's run.log/DONE.* sentinel —
+#                                a shared default here silently overwrote a
+#                                concurrent GPU3 run's log with a GPU1 run's log)
 set -uo pipefail
 
-WORK=/tmp/fakpure
+WORK="${FAK_PURE_WORK:-/tmp/fakpure}"
 SELF="$0"
 
 # ---- self-background on first entry so the bridge exec returns immediately ----------
