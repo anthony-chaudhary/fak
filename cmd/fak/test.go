@@ -14,6 +14,7 @@ package main
 //	fak test affected            run fak affected for the changed package closure
 //	fak test durations           fold go test -json into a duration ledger
 //	fak test shards              balance packages from a duration ledger
+//	fak test --json -n race      emit a machine-readable repair packet
 //	fak test ./internal/ctxmmu/  one package (any ./... or import-path arg)
 //	fak test fast -- -run TestX -count=1   pass extra flags through to go test
 //	fak test --list              print the tiers and exit
@@ -30,7 +31,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 )
@@ -112,6 +112,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
 		list = fs.Bool("list", false, "print the available tiers and exit")
 		dry  = fs.Bool("n", false, "print the resolved command without running it")
 		dry2 = fs.Bool("print", false, "alias of -n")
+		json = fs.Bool("json", false, "emit a JSON repair packet for the resolved or finished command")
 	)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, `fak test -- host-aware developer test runner
@@ -122,6 +123,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
   fak test affected            affected-package loop (delegates to fak affected)
   fak test durations           fold go test -json into a duration ledger
   fak test shards              balance packages from a duration ledger
+  fak test --json -n race      emit a machine-readable repair packet
   fak test ./internal/ctxmmu/  one package (any ./... or import-path target)
   fak test fast -- -run TestX  pass extra flags through to go test
   fak test --list              list tiers
@@ -134,6 +136,9 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		return 2
 	}
 	if *list {
+		if *json {
+			return writeTestListJSON(stdout, stderr)
+		}
 		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  shards     balance packages from a duration ledger\n  <pkg>      a ./... or import-path target\n")
 		return 0
 	}
@@ -142,7 +147,11 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 	if len(args) > 0 {
 		switch args[0] {
 		case "affected":
-			return runAffected(stdout, stderr, args[1:])
+			subArgs := args[1:]
+			if *json && !hasFlag(subArgs, "json") {
+				subArgs = append([]string{"--json"}, subArgs...)
+			}
+			return runAffected(stdout, stderr, subArgs)
 		case "durations", "duration", "duration-ledger":
 			return runTestDurations(stdout, stderr, args[1:])
 		case "shards", "shard", "shard-plan":
@@ -152,22 +161,22 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 
 	p, err := planTest(runtime.GOOS, args)
 	if err != nil {
+		if *json {
+			return writeTestRepairJSON(stdout, stderr, newTestUsageRepairPacket(err))
+		}
 		fmt.Fprintf(stderr, "fak test: %v\n", err)
 		return 2
+	}
+	if *json {
+		if *dry || *dry2 {
+			return writeTestRepairJSON(stdout, stderr, newTestResolvedRepairPacket(p))
+		}
+		return runTestRepairJSON(stdout, stderr, os.Stdin, p)
 	}
 	fmt.Fprintf(stdout, "# %s\n# tier=%s -> %s\n", p.Note, p.Tier, strings.Join(p.Argv, " "))
 	if *dry || *dry2 {
 		return 0
 	}
 
-	cmd := exec.Command(p.Argv[0], p.Argv[1:]...)
-	cmd.Stdout, cmd.Stderr, cmd.Stdin = stdout, stderr, os.Stdin
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
-		}
-		fmt.Fprintf(stderr, "fak test: %v\n", err)
-		return 1
-	}
-	return 0
+	return runTestCommand(p.Argv, os.Stdin, stdout, stderr).ExitCode
 }
