@@ -70,10 +70,20 @@ type dispatchSpawnResult struct {
 	Issue      int            `json:"issue"`
 	Lane       string         `json:"lane"`
 	Backend    string         `json:"backend"`
+	Tree       []string       `json:"tree,omitempty"`
 	Account    map[string]any `json:"account,omitempty"`
 	Membership any            `json:"membership,omitempty"`
 	EarlyExit  map[string]any `json:"early_exit,omitempty"`
 }
+
+type dispatchLiveScope struct {
+	Issue int
+	Lane  string
+	Tree  []string
+	Log   string
+}
+
+const dispatchLeaseTreeSidecarSuffix = ".lease-tree.json"
 
 var dispatchResolveLogRE = regexp.MustCompile(`^resolve-(\d+)-.*\.log$`)
 var dispatchResolvePIDRE = regexp.MustCompile(`^resolve-\d+-\d{8}-\d{6}\.pid$`)
@@ -317,6 +327,21 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["reason"] = "no lane has open issues (router empty/error)"
 		return finish(payload), nil
 	}
+	if hasTarget {
+		if live, ok := liveResolutionTreeCollision(runsDir, pick.Tree); ok {
+			payload["ok"] = false
+			payload["action"] = "collision_risk"
+			payload["verdict"] = dispatchorder.ReasonCollisionRisk
+			payload["live_collision"] = map[string]any{
+				"issue": live.Issue,
+				"lane":  live.Lane,
+				"tree":  append([]string(nil), live.Tree...),
+				"log":   live.Log,
+			}
+			payload["reason"] = fmt.Sprintf("candidate issue #%d tree %v overlaps live worker issue #%d lane %q tree %v", target, pick.Tree, live.Issue, live.Lane, live.Tree)
+			return finish(payload), nil
+		}
+	}
 	if opts.Lane != "" && held[pick.Lane] && opts.TargetIssue == 0 {
 		payload["ok"] = false
 		payload["action"] = "lane_busy"
@@ -427,7 +452,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		}
 	}
 	baseSHA := currentGitSHA(root)
-	spawned, err := spawnDispatchIssueWorker(launchCommand, env, root, runsDir, target, pick.Lane, opts.Backend, account, opts.Membership, baseSHA, opts.SpawnProbeS)
+	spawned, err := spawnDispatchIssueWorker(launchCommand, env, root, runsDir, target, pick.Lane, opts.Backend, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
 	if err != nil {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -839,6 +864,70 @@ func liveResolutionLanes(runsDir string) map[string]bool {
 	return out
 }
 
+func liveResolutionTreeCollision(runsDir string, requested []string) (dispatchLiveScope, bool) {
+	requested = dispatchTrimTree(requested)
+	if len(requested) == 0 {
+		return dispatchLiveScope{}, false
+	}
+	for _, live := range liveResolutionScopes(runsDir) {
+		if len(live.Tree) == 0 {
+			continue
+		}
+		if dispatchorder.TreesOverlap(requested, live.Tree) {
+			return live, true
+		}
+	}
+	return dispatchLiveScope{}, false
+}
+
+func liveResolutionScopes(runsDir string) []dispatchLiveScope {
+	var out []dispatchLiveScope
+	for _, log := range resolveLogs(runsDir) {
+		issue, ok := issueFromResolveLog(filepath.Base(log))
+		if !ok {
+			continue
+		}
+		pid, ok := readPID(strings.TrimSuffix(log, filepath.Ext(log)) + ".pid")
+		if !ok || !dispatchPIDAlive(pid) || dispatchLogIsBannerNoop(log) {
+			continue
+		}
+		stem := strings.TrimSuffix(log, filepath.Ext(log))
+		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
+		if len(tree) == 0 {
+			continue
+		}
+		out = append(out, dispatchLiveScope{
+			Issue: issue,
+			Lane:  laneFromSpawnHeader(log),
+			Tree:  tree,
+			Log:   log,
+		})
+	}
+	return out
+}
+
+func readResolveLeaseTree(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var tree []string
+	if err := json.Unmarshal(b, &tree); err != nil {
+		return nil
+	}
+	return dispatchTrimTree(tree)
+}
+
+func dispatchTrimTree(tree []string) []string {
+	out := make([]string, 0, len(tree))
+	for _, item := range tree {
+		if s := strings.TrimSpace(item); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // dispatchResolveLogStubFloorBytes mirrors the Python dispatcher's _STUB_LOG_MAX_BYTES
 // (tools/issue_resolve_dispatch.py): a genuinely live worker streams kilobytes within
 // seconds, so a log at or under this floor that carries only the opencode/glm startup
@@ -1064,7 +1153,7 @@ func augmentGuardEnvDefaults() {
 	}
 }
 
-func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
+func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
 	if len(command) == 0 {
 		return dispatchSpawnResult{}, errors.New("empty worker command")
 	}
@@ -1103,6 +1192,12 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	stem := strings.TrimSuffix(outLog, filepath.Ext(outLog))
 	_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 	_ = os.WriteFile(stem+".backend", []byte(backend), 0o644)
+	tree = dispatchTrimTree(tree)
+	if len(tree) > 0 {
+		if b, err := json.Marshal(tree); err == nil {
+			_ = os.WriteFile(stem+dispatchLeaseTreeSidecarSuffix, b, 0o644)
+		}
+	}
 	if baseSHA != "" {
 		_ = os.WriteFile(stem+dispatchtick.BaseSHASidecarSuffix, []byte(baseSHA), 0o644)
 	}
@@ -1119,7 +1214,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 			_ = os.WriteFile(stem+dispatchtick.WaveSidecarSuffix, b, 0o644)
 		}
 	}
-	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, Account: acct, Membership: mem}
+	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, Tree: tree, Account: acct, Membership: mem}
 	if probeS > 0 {
 		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
@@ -1171,6 +1266,9 @@ func dispatchSpawnMap(s dispatchSpawnResult) map[string]any {
 	}
 	if len(s.Account) > 0 {
 		out["account"] = s.Account
+	}
+	if len(s.Tree) > 0 {
+		out["tree"] = append([]string(nil), s.Tree...)
 	}
 	if s.Membership != nil {
 		out["membership"] = s.Membership

@@ -548,6 +548,55 @@ func TestDispatchTickDocsLaneHeldByLiveStreamingWorkerStaysLaneBusy(t *testing.T
 	}
 }
 
+// TestDispatchTickRefusesSameFileLiveWorkerCollision is the #1763 witness: the tick must
+// compare the candidate issue's file scope with already-live resolver workers before spawn.
+// A generic lane-busy answer is not enough for the fleet scheduler; it needs the named
+// COLLISION_RISK reason and the overlapping live worker evidence so the second candidate is
+// left unspawned for the right reason.
+func TestDispatchTickRefusesSameFileLiveWorkerCollision(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"docs": {Tree: []string{"docs/shared.md"}, Issues: []int{1763}, Count: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	stem := "resolve-1762-20260701-101011"
+	dispatchWriteResolveWorker(t, root, stem,
+		"# fak-spawn 20260701-101011 issue=1762 lane=docs backend=claude argv0=claude\n",
+		strings.Repeat("streaming real work output line\n", 40))
+	writeDispatchJSONFixture(t, filepath.Join(runsDir, stem+dispatchLeaseTreeSidecarSuffix), []string{"docs/shared.md"})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (same-file live worker collision must refuse) (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["verdict"] != dispatchorder.ReasonCollisionRisk || got["action"] != "collision_risk" || got["ok"] != false {
+		t.Fatalf("collision tick = verdict %v action %v ok %v, want COLLISION_RISK/collision_risk/false", got["verdict"], got["action"], got["ok"])
+	}
+	if got["target_issue"] != float64(1763) || got["lane"] != "docs" {
+		t.Fatalf("target/lane = %v/%v, want 1763/docs", got["target_issue"], got["lane"])
+	}
+	collision := mapAt(got, "live_collision")
+	if dispatchMapInt(collision, "issue") != 1762 || dispatchMapString(collision, "lane") != "docs" {
+		t.Fatalf("live_collision = %#v, want issue 1762 on docs", collision)
+	}
+	if tree := stringAnySlice(collision["tree"]); len(tree) != 1 || tree[0] != "docs/shared.md" {
+		t.Fatalf("live_collision.tree = %v, want [docs/shared.md]", tree)
+	}
+}
+
 // TestDispatchTickDefaultPicksOldestIssue / WithPreferNewestPicksNewest pin the
 // backlog-draining policy: by default the tick picks the OLDEST open issue on the
 // busiest lane (#1338 here), and --prefer-newest restores the historical newest-first
@@ -925,6 +974,7 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 		1338,
 		"cmd",
 		"claude",
+		[]string{"cmd/fak/dispatch_tick.go"},
 		account,
 		&membership,
 		"abc123",
@@ -936,6 +986,7 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 	stem := strings.TrimSuffix(spawned.Log, filepath.Ext(spawned.Log))
 	assertFileContains(t, stem+".backend", "claude")
 	assertFileContains(t, stem+dispatchtick.BaseSHASidecarSuffix, "abc123")
+	assertFileContains(t, stem+dispatchLeaseTreeSidecarSuffix, "cmd/fak/dispatch_tick.go")
 	assertJSONField(t, stem+dispatchtick.AccountSidecarSuffix, "tag", "acct-a")
 	assertJSONField(t, stem+dispatchtick.WaveSidecarSuffix, "wave_id", "wave-test")
 	if early := spawned.EarlyExit; early["checked"] != true || early["silent"] == true {
