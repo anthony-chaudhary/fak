@@ -34,6 +34,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 )
 
 // Msg is the minimal transcript line the carryover reasons over — role + text only.
@@ -80,6 +82,14 @@ type Contributor interface {
 type Seed struct {
 	Parts []Part
 	Recap string // the rendered system-message text that opens the fresh session
+
+	// WarmPrefix is the #1611 warm-prefix descriptor computed over the stable prefix
+	// (the system preamble) BEFORE this reset, when one was present. It lets a
+	// consumer verify a later replay/rehydrate of that prefix from the vCache
+	// prefix-DAG is byte-identical to the original by comparing digests, instead of
+	// re-paying to prefill the part of the window that never changed. nil when the
+	// drained transcript had no system preamble to describe.
+	WarmPrefix *vcachechain.WarmPrefixDescriptor
 }
 
 // registry holds the registered contributors. The four built-ins register in init;
@@ -141,7 +151,7 @@ func BuildSeed(in Input) Seed {
 		}
 		return parts[i].Name < parts[j].Name
 	})
-	return Seed{Parts: parts, Recap: renderRecap(parts)}
+	return Seed{Parts: parts, Recap: renderRecap(parts), WarmPrefix: warmPrefixDescriptorFor(in)}
 }
 
 // renderRecap stitches the ordered parts into the single carryover block the fresh

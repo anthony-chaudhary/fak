@@ -179,6 +179,26 @@ func (warmPrefix) Contribute(in Input) (Part, bool) {
 	return Part{Name: "warm_prefix", Order: 0, Text: text, Meta: meta}, true
 }
 
+// warmPrefixDescriptorFor computes the #1611 warm-prefix descriptor over the same
+// stable prefix (the leading system preamble) the warmPrefix contributor prices,
+// BEFORE the reset discards the drained transcript. It returns nil when there is no
+// system preamble to describe — mirroring warmPrefix.Contribute's own decline case —
+// so a reset with nothing stable to carry never fabricates a descriptor for an empty
+// prefix. The single system span covers the whole prefix; a host that layers tool
+// schemas or sealed spans ahead of it can build a richer vcachechain.WarmPrefixDescriptor
+// directly via vcachechain.DescribeWarmPrefix using its own span boundaries.
+func warmPrefixDescriptorFor(in Input) *vcachechain.WarmPrefixDescriptor {
+	sys := systemPreamble(in.Messages)
+	if sys == "" {
+		return nil
+	}
+	prefix := []byte(sys)
+	desc := vcachechain.DescribeWarmPrefix(prefix, []vcachechain.SpanBoundary{
+		{Kind: vcachechain.SpanSystem, Start: 0, End: len(prefix)},
+	})
+	return &desc
+}
+
 // --- Contributor 4: verbatimTail --------------------------------------------
 //
 // Keeps the last N turns verbatim — the immediate working context a human glances at
