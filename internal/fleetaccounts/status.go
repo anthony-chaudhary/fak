@@ -124,64 +124,20 @@ var (
 	wsRun     = regexp.MustCompile(`\s+`)
 )
 
-// resetIsFuture is the best-effort parser for Claude's reset strings. Returns a pointer:
-// true for a still-future reset, false for an expired parsed reset, nil for an unknown
-// format. Mirrors fleet_accounts._reset_is_future (UTC anchoring; LA zone handled only via
-// the carried "America/Los_Angeles" hint, which the Python also keys off textually).
+// resetIsFuture is the best-effort future-check for Claude's reset strings. Returns a
+// pointer: true for a still-future reset, false for an expired parsed reset, nil for an
+// unknown format. It reads the shared resetTime core (soonness.go) — which owns the format
+// handling and the daily-reset tomorrow-rollover — so a time-only reset that rolled forward
+// into today's slack reads as future here exactly as before. Mirrors
+// fleet_accounts._reset_is_future (UTC anchoring; LA zone handled only via the carried
+// "America/Los_Angeles" hint, which the Python also keys off textually).
 func resetIsFuture(reset string, now time.Time) *bool {
-	if reset == "" {
+	cand, ok := resetTime(reset, now)
+	if !ok {
 		return nil
 	}
-	raw := parenTail.ReplaceAllString(reset, "")
-	raw = strings.TrimSpace(raw)
-	raw = parenAll.ReplaceAllString(raw, "")
-	raw = strings.TrimSpace(raw)
-	raw = strings.ToLower(wsRun.ReplaceAllString(raw, " "))
-
-	type fmtSpec struct {
-		layout string
-		dated  bool
-	}
-	specs := []fmtSpec{
-		{"Jan 2, 3:04pm", true},
-		{"Jan 2, 3pm", true},
-		{"3:04pm", false},
-		{"3pm", false},
-	}
-	for _, sp := range specs {
-		candidate := raw
-		layout := sp.layout
-		if sp.dated {
-			// year is appended for dated parses
-		}
-		parsed, err := time.Parse(layout, candidate)
-		if err != nil {
-			continue
-		}
-		if sp.dated {
-			cand := time.Date(now.Year(), parsed.Month(), parsed.Day(),
-				parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
-			if cand.Before(now) && now.Sub(cand) > 180*24*time.Hour {
-				cand = cand.AddDate(1, 0, 0)
-			}
-			r := cand.After(now)
-			return &r
-		}
-		cand := time.Date(now.Year(), now.Month(), now.Day(),
-			parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
-		if cand.After(now) {
-			r := true
-			return &r
-		}
-		tomorrow := cand.Add(24 * time.Hour)
-		if tomorrow.Sub(now) <= dailyResetWindow {
-			r := true
-			return &r
-		}
-		r := false
-		return &r
-	}
-	return nil
+	r := cand.After(now)
+	return &r
 }
 
 func throttleIsActive(info map[string]any) bool {
