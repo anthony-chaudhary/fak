@@ -59,6 +59,12 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 // Metal Q8 GEMM when MetalQ4K is enabled). Mirrors prefillBatchedQ4K's `proj`.
 type hybridQ4KProj func(name string, Xf []float32, Xq *q8Panel) []float32
 
+// hybridQ4KGroup runs a group of projections that share one activation panel (Xf f32, Xq the
+// pre-quantized Q8 panel) through the batched one-command-buffer q4_k GEMM group, filling any
+// non-grouped member per-weight via the shared proj. Results are returned in `names` order and are
+// identical to calling proj per name — just fewer Metal command buffers (the prefill-wall lever).
+type hybridQ4KGroup func(names []string, Xf []float32, Xq *q8Panel) [][]float32
+
 func (s *Session) prefillQwen35HybridQ4K(ids []int) []float32 {
 	return s.headResident(s.prefillQwen35HybridQ4KHidden(ids))
 }
@@ -124,6 +130,30 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			return Y
 		}
 	}
+	// pgroup runs a group of projections that SHARE one activation panel Xf (a layer's q/k/v,
+	// gate/up, or the GDN in_proj quad) through the batched one-command-buffer q4_k GEMM group,
+	// collapsing the per-weight submit/sync round-trips that dominate prefill. It returns results
+	// in `names` order: the q4_k-resident majority is filled by metalgemm.GEMMGroup (via
+	// q4kGemmGroupDispatch) and any nil member (Q8/Q6_K minority, or a declined upload / non-Metal
+	// build) is filled by the same per-weight `proj`, so the result is identical to calling proj
+	// per name — just fewer command buffers. Xq is the pre-quantized Q8 panel proj needs for the
+	// minority fallback.
+	pgroup := func(names []string, Xf []float32, Xq *q8Panel) [][]float32 {
+		t0 := time.Now()
+		out := s.q4kGemmGroupDispatch(names, Xf, P)
+		if profile {
+			gemmTime += time.Since(t0) // the grouped GEMM+roundtrip, so the profile split stays honest
+		}
+		if out == nil {
+			out = make([][]float32, len(names))
+		}
+		for i, name := range names {
+			if out[i] == nil {
+				out[i] = proj(name, Xf, Xq) // per-weight fallback (already time-accounted by proj)
+			}
+		}
+		return out
+	}
 
 	t := s.phaseStart()
 	embed := m.embedRows()
@@ -165,9 +195,9 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 
 		var o []float32
 		if cfg.isLinearAttnLayer(l) {
-			o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, qz)
+			o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
 		} else {
-			o = s.prefillQwen35FullAttnLayerQ4K(l, Xn, P, base, proj, qz)
+			o = s.prefillQwen35FullAttnLayerQ4K(l, Xn, P, base, proj, pgroup, qz)
 		}
 		t = s.phaseStart()
 		parFor(len(X), numWorkers, func(lo, hi int) {
@@ -193,8 +223,8 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		I := cfg.IntermediateSize
 		Xn2q := qz(Xn2, P, H)
 		t = s.phaseStart()
-		G := proj(lp("mlp.gate_proj.weight"), Xn2, Xn2q)
-		U := proj(lp("mlp.up_proj.weight"), Xn2, Xn2q)
+		gu := pgroup([]string{lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight")}, Xn2, Xn2q)
+		G, U := gu[0], gu[1]
 		s.phaseEnd("mlp_gate_up_proj", t)
 		for t := 0; t < P; t++ {
 			m.addBiasIfPresent(G[t*I:(t+1)*I], lp("mlp.gate_proj.bias"))
@@ -243,7 +273,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	return xf
 }
 
-func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, qz func([]float32, int, int) *q8Panel) []float32 {
+func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	nK := cfg.LinearNumKeyHeads
@@ -263,10 +293,14 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 
 	Xnq := qz(Xn, P, H)
 	t := s.phaseStart()
-	mixed := proj(p("linear_attn.in_proj_qkv.weight"), Xn, Xnq)
-	zAll := proj(p("linear_attn.in_proj_z.weight"), Xn, Xnq)
-	bvec := proj(p("linear_attn.in_proj_b.weight"), Xn, Xnq)
-	avec := proj(p("linear_attn.in_proj_a.weight"), Xn, Xnq)
+	// The in_proj quad all reads the same post-norm panel Xn → one command buffer for whichever
+	// members are q4_k-resident (in a q4_k_m Qwen3.6 the linear_attn.* projections are unpermuted
+	// and resolve to Q8, so pgroup falls back to proj for them — harmless, no regression).
+	ip := pgroup([]string{
+		p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
+		p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
+	}, Xn, Xnq)
+	mixed, zAll, bvec, avec := ip[0], ip[1], ip[2], ip[3]
 	s.phaseEnd("qwen35_linear_in_proj", t)
 
 	conv := m.tensor(p("linear_attn.conv1d.weight"))
@@ -400,7 +434,7 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	return O
 }
 
-func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int, proj hybridQ4KProj, qz func([]float32, int, int) *q8Panel) []float32 {
+func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz func([]float32, int, int) *q8Panel) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -412,9 +446,9 @@ func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int
 	p := func(str string) string { return layerName(l, str) }
 	Xnq := qz(Xn, P, H)
 	t := s.phaseStart()
-	qf := proj(p("self_attn.q_proj.weight"), Xn, Xnq)
-	Kp := proj(p("self_attn.k_proj.weight"), Xn, Xnq)
-	V := proj(p("self_attn.v_proj.weight"), Xn, Xnq)
+	// q/k/v all read the same post-norm panel Xn → one command buffer for the group.
+	qkv := pgroup([]string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")}, Xn, Xnq)
+	qf, Kp, V := qkv[0], qkv[1], qkv[2]
 	s.phaseEnd("qwen35_full_qkv_proj", t)
 	Q := make([]float32, P*qWidth)
 	gate := make([]float32, P*qWidth)

@@ -26,9 +26,22 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	return nil
 }
 
+// q4kGemmGroupDispatch always declines in the pure-Go build (no Metal) so the prefill caller loops
+// its per-weight proj. The Metal one-command-buffer batched-GEMM group lives in metal_q4k_on.go.
+func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
+	return nil
+}
+
 // q4kFusedMLP always declines in the pure-Go build; the fused on-GPU SwiGLU MLP lives in
 // metal_q4k_on.go on Apple Silicon+cgo. The caller (denseSwiGLU.apply) uses the per-matmul path.
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
+	return nil
+}
+
+// q4kFusedMLPBatch always declines in the pure-Go build; the batched on-GPU expert MLP (all top-k
+// experts in ONE command buffer) lives in metal_q4k_on.go. The caller (moeFFN.apply) falls back to
+// the per-expert q4kFusedMLP / host loop.
+func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]float32 {
 	return nil
 }
 

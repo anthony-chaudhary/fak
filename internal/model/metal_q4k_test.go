@@ -339,6 +339,112 @@ func TestMetalQ4KGemmMatchesCPU(t *testing.T) {
 	}
 }
 
+// TestMetalGEMMGroupMatchesCPU is the correctness gate for the batched prefill GEMM group
+// (metalgemm.GEMMGroup / mg_q4k_gemm_group): n weights of different out dims sharing one activation
+// panel X[P,in], all run in ONE command buffer. It must be (a) bit-identical to a single
+// Q4KWeight.GEMM per weight (same q4k_gemm kernel, just grouped — this catches a wrong per-weight
+// Y-offset or `out`/P binding) and (b) match the CPU f32 q4kMatRowsRange reference to cosine
+// >= 0.9999 (same as the single-GEMM gate). The differing out dims + P>256 exercise the per-weight
+// [P,out_i] token-major packing at yoff[i]=P*Σout_j and the multi-token-tile loop.
+func TestMetalGEMMGroupMatchesCPU(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	in := 5120 // shared activation width (Qwen3.6-27B hidden size)
+	// Real prefill group shapes sharing in=H: q(+gate fused)=2*qWidth, k=v=nKV*hd, plus a couple of
+	// extra out dims to stress the packing. All share in.
+	outs := []int{17408, 1024, 1024, 512}
+	for _, P := range []int{16, 53, 300} { // small-P, the measured P=53 turn, and >256 (two token tiles)
+		X := randomVecF(P*in, 11)
+		ws := make([]*metalgemm.Q4KWeight, len(outs))
+		singles := make([][]float32, len(outs))
+		refs := make([][]float32, len(outs))
+		for i, out := range outs {
+			qt := randomQ4KTensor(out, in, int64(200+i))
+			w := metalgemm.UploadQ4K(qt.raw, out, in)
+			if w == nil {
+				t.Fatalf("UploadQ4K(%d,%d) returned nil", out, in)
+			}
+			ws[i] = w
+			// per-weight single GEMM (bit-identical target) + CPU f32 reference
+			single := make([]float32, P*out)
+			w.GEMM(X, P, single)
+			singles[i] = single
+			ref := make([]float32, P*out)
+			for tIdx := 0; tIdx < P; tIdx++ {
+				row := make([]float32, out)
+				q4kMatRowsRange(qt, X[tIdx*in:(tIdx+1)*in], row, 0, out)
+				copy(ref[tIdx*out:(tIdx+1)*out], row)
+			}
+			refs[i] = ref
+		}
+		group := metalgemm.GEMMGroup(ws, X, P)
+		if len(group) != len(ws) {
+			t.Fatalf("P=%d: GEMMGroup returned %d results, want %d", P, len(group), len(ws))
+		}
+		for i, out := range outs {
+			if len(group[i]) != P*out {
+				t.Fatalf("P=%d group[%d] len=%d want %d", P, i, len(group[i]), P*out)
+			}
+			// (a) bit-identical to the single per-weight GEMM
+			for k := 0; k < P*out; k++ {
+				if group[i][k] != singles[i][k] {
+					t.Fatalf("P=%d group[%d][%d]=%g != single GEMM %g (Y-offset/binding wrong)",
+						P, i, k, group[i][k], singles[i][k])
+				}
+			}
+			// (b) matches the CPU f32 reference to the same bound as the single GEMM gate
+			cos, maxRel := cosineAndMaxRel(refs[i], group[i])
+			if cos < 0.9999 || maxRel > 5e-3 {
+				t.Errorf("P=%d GEMMGroup[%d] [%d,%d]: cosine=%.6f maxRel=%.4g (want cos>=0.9999, maxRel<=5e-3)",
+					P, i, out, in, cos, maxRel)
+			}
+		}
+		metalgemm.ResetQ4K()
+		t.Logf("GEMMGroup P=%d matches single GEMM (bit-identical) + CPU ref across outs=%v", P, outs)
+	}
+}
+
+// BenchmarkMetalQ4KGemvGroupVsSingle is the prefill-wall benchmark: the q/k/v group as ONE command
+// buffer (GEMMGroup) vs three separate Q4KWeight.GEMM calls. If the group collapses the wall-clock
+// materially, the per-op command-buffer submit/sync was the prefill bottleneck (as the P=53 profile
+// showed: ~97% GEMM+roundtrip). Shapes are a Qwen3.6-27B full-attn q/k/v panel sharing H=5120.
+func BenchmarkMetalGEMMGroupVsSingle(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	in, P := 5120, 53
+	outs := []int{10240, 1024, 1024} // q(+gate) ~2*qWidth, k, v
+	ws := make([]*metalgemm.Q4KWeight, len(outs))
+	for i, out := range outs {
+		ws[i] = metalgemm.UploadQ4K(randomQ4KTensor(out, in, int64(300+i)).raw, out, in)
+		if ws[i] == nil {
+			b.Fatal("UploadQ4K returned nil")
+		}
+	}
+	X := randomVecF(P*in, 7)
+	b.Run("group_one_cmdbuf", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = metalgemm.GEMMGroup(ws, X, P)
+		}
+	})
+	b.Run("separate_gemms", func(b *testing.B) {
+		ys := make([][]float32, len(outs))
+		for i, out := range outs {
+			ys[i] = make([]float32, P*out)
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j, w := range ws {
+				w.GEMM(X, P, ys[j])
+			}
+		}
+	})
+}
+
 // BenchmarkMetalQ4KGemv reports the GPU q4_k GEMV throughput at hidden size. Compare against
 // the CPU BenchmarkQ4KMatRowsInt8 (~23 GB/s at 12 workers): the GPU should clear it and head
 // toward the unified-memory bandwidth that the 7.29 tok/s decode bar implies.

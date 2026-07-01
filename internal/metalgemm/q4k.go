@@ -19,7 +19,9 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
+int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
+void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff);
 void mg_q4k_reset(void);
 */
 import "C"
@@ -209,6 +211,44 @@ func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 	return true
 }
 
+// FusedMLPQ6DownBatch runs n experts' fused SwiGLU MLP (Q4_K gate/up, Q6_K down) — each y_e =
+// down_e( silu(gate_e·x) * (up_e·x) ) over the SAME token activation x — into ONE Metal command
+// buffer, so the top-k experts of a MoE layer pay the submit/sync once instead of n times (issue
+// #1382, the mlp_decode decode lever). Ycat receives the n outputs concatenated (row e at e*down.Out);
+// the caller applies the gate-weighted sum on the host so the reduction order matches the per-expert
+// loop exactly. All experts must share one geometry (gate.In==up.In==down.Out=H, gate.Out==up.Out==
+// down.In=I). Returns false if n<=0, len(x)<H, len(Ycat)<n*down.Out, any handle is invalid, or the
+// backend declines a shape — the caller then runs the proven per-expert FusedMLPQ6Down loop.
+func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32) bool {
+	n := len(gate)
+	if n == 0 || len(up) != n || len(down) != n {
+		return false
+	}
+	H, I, Dout := gate[0].In, gate[0].Out, down[0].Out
+	gw := make([]C.int, n)
+	uw := make([]C.int, n)
+	dw := make([]C.int, n)
+	for e := 0; e < n; e++ {
+		g, u, d := gate[e], up[e], down[e]
+		if g == nil || u == nil || d == nil || g.id < 0 || u.id < 0 || d.id < 0 {
+			return false
+		}
+		if g.In != u.In || g.Out != u.Out || d.In != g.Out || d.Out != g.In {
+			return false
+		}
+		if g.In != H || g.Out != I || d.Out != Dout {
+			return false // non-uniform batch geometry — decline (caller uses the per-expert loop)
+		}
+		gw[e], uw[e], dw[e] = C.int(g.id), C.int(u.id), C.int(d.id)
+	}
+	if len(x) < H || len(Ycat) < n*Dout {
+		return false
+	}
+	rc := C.mg_q4k_mlp_q6down_batch(&gw[0], &uw[0], &dw[0], C.int(n),
+		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&Ycat[0])))
+	return rc == 0
+}
+
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
 // Y must have length >= P*Out. Both slices are accessed only during the call.
 func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
@@ -216,6 +256,44 @@ func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
 		return
 	}
 	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
+
+// GEMMGroup runs one batched prefill GEMM per weight in ws — all reading the SAME activation panel
+// X[P, In] (shared) — in a SINGLE Metal command buffer, returning one [P*Out_i] result slice per
+// weight (token-major, Y[t*Out_i + o]). Every weight must share X's In. It is the prefill twin of
+// GEMVGroup: the live prefill group pattern (a layer's q/k/v, gate/up, or the GDN in_proj quad all
+// read the same post-norm panel), paying the per-command-buffer submit/sync once for the whole
+// group instead of once per weight — the fix for the ~7-submits-per-layer prefill wall. Returns nil
+// on a shape mismatch or empty input, so the caller falls back to per-weight GEMM.
+func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
+	n := len(ws)
+	if n == 0 || P <= 0 || ws[0] == nil || len(X) < P*ws[0].In {
+		return nil
+	}
+	in := ws[0].In
+	wids := make([]C.int, n)
+	yoff := make([]C.int, n+1) // yoff[i] = P*Σ_{j<i} out_j (element offset of weight i's [P,out_i] block)
+	off := 0
+	for i, w := range ws {
+		if w == nil || w.id < 0 || w.In != in {
+			return nil
+		}
+		wids[i] = w.id
+		yoff[i] = C.int(off)
+		off += P * w.Out
+	}
+	yoff[n] = C.int(off)
+	ycat := make([]float32, off)
+	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+	out := make([][]float32, n)
+	o := 0
+	for i, w := range ws {
+		sz := P * w.Out
+		out[i] = ycat[o : o+sz : o+sz]
+		o += sz
+	}
+	return out
 }
 
 // ID returns the backend handle for this matrix.

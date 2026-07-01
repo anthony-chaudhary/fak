@@ -448,6 +448,120 @@ int mg_q6k_upload(const unsigned char* raw, int out, int in) {
     return MG_Q6_BASE + idx;
 }
 
+// ---- Batched fused expert MLP (issue #1382: the mlp_decode decode lever) ----
+// A Qwen3.6-27B q4_k_m MoE layer fires top-k experts per decode token, and today each expert runs
+// mg_q4k_mlp_q6down in its OWN command buffer — k separate commit/waitUntilCompleted per layer, the
+// ~360us launch/sync overhead the MAC-QWEN36 decode diagnosis named paid k times. This runs ALL k
+// experts' gate->silu*up->down into ONE command buffer: k independent 3-stage chains, each on its own
+// scratch SLICE. One commit/waitUntilCompleted for the whole layer. All k experts consume the SAME
+// token activation x[H]; each writes its own y row into Ycat[k*H]. The Go caller applies the
+// gate-weighted sum (kept on the host so the reduction order matches the per-expert loop exactly).
+// gate_wids/up_wids are Q4_K wids; down_wids are Q6_K wids (>= MG_Q6_BASE), matching the q4_k_m
+// residency. Returns 0 on success, -1 if any wid is out of range or a shape disagrees (caller falls
+// back to the per-expert path). n is the expert count (top-k).
+
+static id<MTLBuffer> gMlpGateK = nil, gMlpUpK = nil, gMlpInterK = nil; static long gMlpKCap = 0;
+static id<MTLBuffer> gQYBufK = nil; static long gQYKCap = 0;
+
+// q4k_grow_mlp_k grows the k-wide gate/up/inter scratch (n experts * I elements each), sized in
+// TOTAL elements so a larger (n, I) reallocates once and is reused across decode tokens.
+static void q4k_grow_mlp_k(long totalElems) {
+    if (gMlpGateK != nil && gMlpKCap >= totalElems) return;
+    gMlpGateK  = [gDev newBufferWithLength:(NSUInteger)(totalElems * 4) options:MTLResourceStorageModeShared];
+    gMlpUpK    = [gDev newBufferWithLength:(NSUInteger)(totalElems * 4) options:MTLResourceStorageModeShared];
+    gMlpInterK = [gDev newBufferWithLength:(NSUInteger)(totalElems * 4) options:MTLResourceStorageModeShared];
+    gMlpKCap = totalElems;
+}
+
+static void q4k_grow_y_k(long totalElems) {
+    if (gQYBufK != nil && gQYKCap >= totalElems) return;
+    gQYBufK = [gDev newBufferWithLength:(NSUInteger)(totalElems * 4) options:MTLResourceStorageModeShared];
+    gQYKCap = totalElems;
+}
+
+int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids,
+                            int n, const float* x, float* Ycat) {
+    if (n <= 0 || gate_wids == NULL || up_wids == NULL || down_wids == NULL) return -1;
+    // Validate every expert up front and confirm a uniform (H, I, Dout) across the batch (all
+    // routed experts of a layer share the FFN geometry). A mismatch declines the whole batch.
+    int H = -1, I = -1, Dout = -1;
+    for (int e = 0; e < n; e++) {
+        int gw = gate_wids[e], uw = up_wids[e], dw = down_wids[e];
+        if (gw < 0 || uw < 0 || gw >= gNQ4 || uw >= gNQ4) return -1;
+        if (dw < MG_Q6_BASE || (dw - MG_Q6_BASE) >= gNQ6) return -1;
+        Q4KW G = gQ4[gw], U = gQ4[uw];
+        Q6KW D = gQ6[dw - MG_Q6_BASE];
+        if (G.in != U.in || G.out != U.out || D.in != G.out || D.out != G.in) return -1;
+        if (e == 0) { H = G.in; I = G.out; Dout = D.out; }
+        else if (G.in != H || G.out != I || D.out != Dout) return -1;
+    }
+    @autoreleasepool {
+        q4k_grow_scratch((long)H, (long)Dout); // gQXBuf holds the shared x[H]
+        q4k_grow_mlp_k((long)n * I);
+        q4k_grow_y_k((long)n * Dout);
+        id<MTLBuffer> xb = gQXBuf;
+        memcpy(xb.contents, x, (size_t)H * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+
+        // Stage 1: for every expert, gate = G_e*x and up = U_e*x into its own I-wide slice
+        // (offset e*I). One encoder holds all 2n GEMV dispatches; distinct output slices avoid a
+        // false write-after-write hazard across experts.
+        id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        [e1 setComputePipelineState:psoQ4KGemv];
+        [e1 setBuffer:xb offset:0 atIndex:1];
+        for (int e = 0; e < n; e++) {
+            Q4KW G = gQ4[gate_wids[e]], U = gQ4[up_wids[e]];
+            NSUInteger off = (NSUInteger)((long)e * I * 4);
+            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+            [e1 setBuffer:gMlpGateK offset:off atIndex:2];
+            [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
+            [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
+            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+            [e1 setBuffer:gMlpUpK offset:off atIndex:2];
+            [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
+            [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
+            [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)U.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        }
+        [e1 endEncoding];
+
+        // Stage 2: inter_e = silu(gate_e) * up_e over each expert's I-wide slice.
+        id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        [e2 setComputePipelineState:psoQ4KSwiGLU];
+        for (int e = 0; e < n; e++) {
+            NSUInteger off = (NSUInteger)((long)e * I * 4);
+            [e2 setBuffer:gMlpGateK offset:off atIndex:0];
+            [e2 setBuffer:gMlpUpK offset:off atIndex:1];
+            [e2 setBuffer:gMlpInterK offset:off atIndex:2];
+            [e2 setBytes:&I length:sizeof(int) atIndex:3];
+            [e2 dispatchThreads:MTLSizeMake((NSUInteger)I,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];
+        }
+        [e2 endEncoding];
+
+        // Stage 3: y_e = D_e * inter_e (Q6_K GEMV) into Ycat row e (offset e*Dout).
+        id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        [e3 setComputePipelineState:psoQ6KGemv];
+        for (int e = 0; e < n; e++) {
+            Q6KW D = gQ6[down_wids[e] - MG_Q6_BASE];
+            NSUInteger interOff = (NSUInteger)((long)e * I * 4);
+            NSUInteger yOff = (NSUInteger)((long)e * Dout * 4);
+            [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
+            [e3 setBuffer:gMlpInterK offset:interOff atIndex:1];
+            [e3 setBuffer:gQYBufK offset:yOff atIndex:2];
+            [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
+            [e3 setBytes:&D.out  length:sizeof(int) atIndex:4];
+            [e3 dispatchThreadgroups:MTLSizeMake((NSUInteger)D.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
+        }
+        [e3 endEncoding];
+
+        [cb commit];
+        [cb waitUntilCompleted];
+        memcpy(Ycat, gQYBufK.contents, (size_t)n * Dout * 4);
+    }
+    return 0;
+}
+
 // mg_q4k_mlp_q6down is mg_q4k_mlp with a Q6_K down_proj: stages 1 (gate/up GEMV) and 2 (SwiGLU) are
 // IDENTICAL — they run over the resident gMlpGate/gMlpUp/gMlpInter scratch — only stage 3 binds the
 // Q6_K down weight (gQ6[down_wid-MG_Q6_BASE]) and the Q6_K GEMV pipeline. The whole MLP still runs in
@@ -720,6 +834,58 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y) {
         [cb waitUntilCompleted];
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
+    }
+}
+
+// mg_q4k_gemm_group runs n batched prefill GEMMs that SHARE one activation panel X[P, in] but apply
+// n DIFFERENT resident q4_k weights, into ONE command buffer (one commit/waitUntilCompleted). It is
+// the prefill twin of mg_q4k_gemv_group: a layer's q/k/v (or gate/up, or the GDN in_proj quad) all
+// read the same post-norm activation panel, so the fixed ~submit/sync overhead is paid ONCE for the
+// group and the GPU pipelines the n GEMMs — the prefill-wall lever (~7 per-weight submits per layer
+// collapse to ~2-3). Each weight i writes its own [P, out_i] token-major block into Ycat at element
+// offset yoff[i] (= P*Σ_{j<i} out_j; yoff[n] = total y elems). Every weight must share X's `in`.
+void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff) {
+    if (n <= 0 || P <= 0) return;
+    @autoreleasepool {
+        int in = gQ4[wids[0]].in;
+        long ytot = (long)yoff[n];
+        q4k_grow_scratch((long)P * in, ytot);
+        id<MTLBuffer> xb = gQXBuf;
+        id<MTLBuffer> yb = gQYBuf;
+        memcpy(xb.contents, X, (size_t)P * in * 4); // shared activation panel for every group member
+
+        // 2D tile identical to mg_q4k_gemm: BM output rows × BN token-tile per threadgroup, all in
+        // ONE command buffer. The BN token loop is issued per weight; the grid's row axis is the
+        // weight's own out. Every dispatch reads the shared xb and writes into the weight's Y slot.
+        const int BM = 64;  // must match Q4K_BM in the MSL source
+        const int BN = 64;  // must match Q4K_BN in the MSL source
+        const int TG = 256; // must match Q4K_TG (TGX*TGY) in the MSL source
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        [e setComputePipelineState:psoQ4KGemm];
+        [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
+        [e setBytes:&P length:sizeof(int) atIndex:5];
+        for (int i = 0; i < n; i++) {
+            Q4KW Wi = gQ4[wids[i]];
+            int rowBlocks = (Wi.out + BM - 1) / BM;
+            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:0 atIndex:0];
+            [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
+            [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
+            for (int t0 = 0; t0 < P; t0 += BN) {
+                int nt = P - t0;
+                if (nt > BN) nt = BN;
+                [e setBytes:&t0 length:sizeof(int) atIndex:6];
+                [e setBytes:&nt length:sizeof(int) atIndex:7];
+                [e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks, 1, 1)
+                    threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG, 1, 1)];
+            }
+        }
+        [e endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+
+        memcpy(Ycat, yb.contents, (size_t)ytot * 4);
     }
 }
 

@@ -331,3 +331,17 @@ func TestPrefillBatchedQ4KDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestQ4KGemmGroupDispatchDeclinesWithoutMetal is the default-path-untouched guard for the batched
+// prefill GEMM group: a session with MetalQ4K unset (every non-Apple-Silicon build, and the default
+// on Metal) MUST get nil from q4kGemmGroupDispatch, so the prefill caller falls back to the proven
+// per-weight proj. This runs on every platform (no build tag): on the pure-Go build it exercises the
+// metal_q4k_off.go stub; the Metal build's on-path also short-circuits on !s.MetalQ4K. It pins the
+// contract that the group batching is opt-in and never perturbs the shipping CPU prefill.
+func TestQ4KGemmGroupDispatchDeclinesWithoutMetal(t *testing.T) {
+	m := &Model{}
+	s := m.NewSession() // MetalQ4K defaults false
+	if got := s.q4kGemmGroupDispatch([]string{"a", "b"}, make([]float32, 8), 2); got != nil {
+		t.Fatalf("q4kGemmGroupDispatch without MetalQ4K = %v, want nil (default prefill path must be untouched)", got)
+	}
+}

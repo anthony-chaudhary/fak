@@ -53,6 +53,51 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	return Y
 }
 
+// q4kGemmGroupDispatch is the PREFILL twin of q4kGroupDispatch: it runs a group of batched GEMMs
+// that share one f32 activation panel Xf[P, in] (a layer's q/k/v, gate/up, or the GDN in_proj quad)
+// in ONE Metal command buffer via metalgemm.GEMMGroup, collapsing the ~7 per-weight submit/sync
+// round-trips per layer that are the measured prefill wall (~97% of prefill is GEMM+roundtrip).
+// It returns one result slice per name with the q4_k-resident members filled and every other member
+// (Q8/Q6_K minority, or a declined upload) left nil, so the caller fills those via its existing
+// per-weight `proj`. Returns nil entirely — caller loops per-weight — unless MetalQ4K is on, a
+// device is present, AND at least two members are q4_k-resident (so a command buffer is worth
+// amortizing). Each filled slice is [P*out] token-major, bit-identical to calling q4kGemmDispatch
+// per name (same q4k_gemm kernel, just grouped into one command buffer).
+func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
+	if !s.MetalQ4K || !metalgemm.Available() || P <= 0 {
+		return nil
+	}
+	n := len(names)
+	ws := make([]*metalgemm.Q4KWeight, 0, n)
+	pos := make([]int, 0, n) // index in names of each grouped (q4_k-resident, uploaded) member
+	for i, name := range names {
+		qt := s.M.q4kw[name]
+		if qt == nil {
+			continue
+		}
+		w := s.M.metalQ4KWeight(name, qt)
+		if w == nil {
+			continue
+		}
+		ws = append(ws, w)
+		pos = append(pos, i)
+	}
+	if len(ws) < 2 {
+		return nil // not enough resident members to amortize a command buffer
+	}
+	grouped := metalgemm.GEMMGroup(ws, Xf, P)
+	if grouped == nil {
+		return nil
+	}
+	out := make([][]float32, n)
+	for j, i := range pos {
+		out[i] = grouped[j]
+	}
+	// Ungrouped members (Q8/Q6_K minority, or a declined upload) stay nil; the caller fills them
+	// via its per-weight proj so the panel-quantized Q8 path is reused unchanged.
+	return out
+}
+
 // q8GemmDispatch is the prefill-GEMM twin for the Q8-minority projections in the resident-Q4_K
 // path. Pure CPU builds and non-Metal sessions use qGemm8. With MetalQ4K enabled, the Q8 panel
 // runs through metalgemm's batched Q8 GEMM, so Qwen3.6's full-attn q/k and linear_attn.* no longer
@@ -183,6 +228,53 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 		return y
 	}
 	return nil
+}
+
+// q4kFusedMLPBatch runs the top-k routed experts' fused SwiGLU MLP (Q4_K gate/up, Q6_K down) in ONE
+// Metal command buffer and returns each expert's [H] output (row e = experts[e]'s down result). It is
+// the batched decode lever (#1382): the per-expert q4kFusedMLP fires one command buffer per expert, so
+// a top-k MoE layer pays the ~360us submit/sync k×; this pays it once. Declines (returns nil, caller
+// runs the per-expert loop) unless MetalQ4K is on, every expert's gate/up is resident Q4_K and its down
+// is resident Q6_K, and the whole batch shares one geometry — the q4_k_m residency the fused path needs.
+// The gate-weighted sum stays on the host so the routed-delta reduction order matches the loop exactly.
+func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]float32 {
+	if !s.MetalQ4K || !metalgemm.Available() {
+		return nil
+	}
+	n := len(gate)
+	if n == 0 || len(up) != n || len(down) != n {
+		return nil
+	}
+	gws := make([]*metalgemm.Q4KWeight, n)
+	uws := make([]*metalgemm.Q4KWeight, n)
+	dws := make([]*metalgemm.Q6KWeight, n)
+	var dout int
+	for e := 0; e < n; e++ {
+		gt, ut := s.M.q4kw[gate[e]], s.M.q4kw[up[e]]
+		if gt == nil || ut == nil {
+			return nil
+		}
+		dq := s.M.kqw[down[e]]
+		if dq == nil || dq.kind != kindQ6K {
+			return nil // a Q4_K-down expert (or missing) — not this fused path's residency
+		}
+		gws[e] = s.M.metalQ4KWeight(gate[e], gt)
+		uws[e] = s.M.metalQ4KWeight(up[e], ut)
+		dws[e] = s.M.metalQ6KWeight(down[e], dq)
+		if gws[e] == nil || uws[e] == nil || dws[e] == nil {
+			return nil
+		}
+		dout = dq.out
+	}
+	ycat := make([]float32, n*dout)
+	if !metalgemm.FusedMLPQ6DownBatch(gws, uws, dws, x, ycat) {
+		return nil
+	}
+	out := make([][]float32, n)
+	for e := 0; e < n; e++ {
+		out[e] = ycat[e*dout : (e+1)*dout]
+	}
+	return out
 }
 
 // metalQ6KWeight returns this model's GPU Q6_K handle for `name`, uploading the raw 210-B blocks
