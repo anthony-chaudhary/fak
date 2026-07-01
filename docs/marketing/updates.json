@@ -8,10 +8,10 @@
       "position": 1,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync window gate command",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/04a4eb0a",
-        "dateModified": "2026-06-30",
-        "keywords": "cmd"
+        "name": "Shipped: add origin registry proof names #1962",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/76521d8a",
+        "dateModified": "2026-07-01",
+        "keywords": "taskmgr"
       }
     },
     {
@@ -19,10 +19,10 @@
       "position": 2,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync window gate coverage",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/4a564c74",
-        "dateModified": "2026-06-30",
-        "keywords": "windowgate"
+        "name": "New: add origin witness kind registry #1962",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/6a643703",
+        "dateModified": "2026-07-01",
+        "keywords": "taskmgr"
       }
     },
     {
@@ -30,9 +30,9 @@
       "position": 3,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: add silicon-vendor answer-engine terms",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/02b1240e",
-        "dateModified": "2026-06-30",
+        "name": "Documented: re-verify front page green, re-stamp 2026-07-01",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d3049dbd",
+        "dateModified": "2026-07-01",
         "keywords": "docs"
       }
     },
@@ -41,10 +41,10 @@
       "position": 4,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e03dd2e6",
-        "dateModified": "2026-06-30",
-        "keywords": "cmd"
+        "name": "Fixed: expire past bare-month resets (#1999)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c8a28c66",
+        "dateModified": "2026-07-01",
+        "keywords": "tools"
       }
     },
     {
@@ -52,10 +52,10 @@
       "position": 5,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d4ba89a9",
-        "dateModified": "2026-06-30",
-        "keywords": "windowgate"
+        "name": "Improved: extract placeAndValidateAtSpan/retryBackoffWait dedup helpers (#776)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/fce14fc7",
+        "dateModified": "2026-07-01",
+        "keywords": "agent"
       }
     },
     {
@@ -63,10 +63,10 @@
       "position": 6,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/3a03db49",
-        "dateModified": "2026-06-30",
-        "keywords": "supportmaturity"
+        "name": "Improved: extract shapeAndBytes/applyMoEExpertCounts/glmMoeDsaSkip dedup helpers (#776)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/8a9a20ba",
+        "dateModified": "2026-07-01",
+        "keywords": "ggufload"
       }
     },
     {
@@ -74,10 +74,10 @@
       "position": 7,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: add binding-layer AEO vendor routing",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e6758095",
-        "dateModified": "2026-06-30",
-        "keywords": "docs"
+        "name": "New: add HarnessProfile schema + built-in registry + design note (#1952)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a7083963",
+        "dateModified": "2026-07-01",
+        "keywords": "harnessprofile"
       }
     },
     {
@@ -85,10 +85,10 @@
       "position": 8,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/21996096",
-        "dateModified": "2026-06-30",
-        "keywords": "cmd"
+        "name": "Improved: route Probe through shared probePaths executor (#776)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/750ffc83",
+        "dateModified": "2026-07-01",
+        "keywords": "ctxplan"
       }
     },
     {
@@ -96,10 +96,10 @@
       "position": 9,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: cover concept-disambiguation ci gaps",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/fd7e46ef",
-        "dateModified": "2026-06-30",
-        "keywords": "tools"
+        "name": "Improved: extract decodeToolArgs/ensureStampedOutputDir dedup helpers (#776)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/92ea8c06",
+        "dateModified": "2026-07-01",
+        "keywords": "swebench"
       }
     },
     {
@@ -107,10 +107,10 @@
       "position": 10,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add generation readout (#1633)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e0467ea0",
-        "dateModified": "2026-06-30",
-        "keywords": "operatorbrief"
+        "name": "Shipped: format pushed trunk before release",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/76f58a8a",
+        "dateModified": "2026-07-01",
+        "keywords": "cmd"
       }
     },
     {
@@ -118,10 +118,10 @@
       "position": 11,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a30e8802",
-        "dateModified": "2026-06-30",
-        "keywords": "benchcatalog"
+        "name": "New: HarnessProfile schema + built-in registry + design note (#1952)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/eae548b0",
+        "dateModified": "2026-07-01",
+        "keywords": "harnessprofile"
       }
     },
     {
@@ -129,10 +129,10 @@
       "position": 12,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d7992dca",
-        "dateModified": "2026-06-30",
-        "keywords": "issuecontract"
+        "name": "Documented: add remaining refusal recoveries (#1422)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/79035aa0",
+        "dateModified": "2026-07-01",
+        "keywords": "docs"
       }
     },
     {
@@ -140,10 +140,10 @@
       "position": 13,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: add the neo-cloud heterogeneous fleet reference path",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1710137e",
-        "dateModified": "2026-06-30",
-        "keywords": "docs"
+        "name": "Improved: extract detailOrDebt/docDir dedup helpers (#776)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/b9cc5bd4",
+        "dateModified": "2026-07-01",
+        "keywords": "scorecardpane"
       }
     },
     {
@@ -151,10 +151,10 @@
       "position": 14,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1d82a07d",
-        "dateModified": "2026-06-30",
-        "keywords": "cmd"
+        "name": "New: add origin evidence witness gate #1961",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/ac70e13e",
+        "dateModified": "2026-07-01",
+        "keywords": "taskmgr"
       }
     },
     {
@@ -162,10 +162,10 @@
       "position": 15,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/607aff73",
-        "dateModified": "2026-06-30",
-        "keywords": "accounts"
+        "name": "Shipped: witness inert async handle slots (#1422)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/900c89e3",
+        "dateModified": "2026-07-01",
+        "keywords": "kernel"
       }
     },
     {
@@ -173,10 +173,10 @@
       "position": 16,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/47b882cc",
-        "dateModified": "2026-06-30",
-        "keywords": "windowgate"
+        "name": "Shipped: declare internal/relay tier",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/816ad93b",
+        "dateModified": "2026-07-01",
+        "keywords": "architest"
       }
     },
     {
@@ -184,10 +184,10 @@
       "position": 17,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: sync shared documentation",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/0fc84e15",
-        "dateModified": "2026-06-30",
-        "keywords": "docs"
+        "name": "New: record structured cooldown (start/reason/until) on throttled seats",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c01f76a8",
+        "dateModified": "2026-07-01",
+        "keywords": "tools"
       }
     },
     {
@@ -195,10 +195,10 @@
       "position": 18,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/8ad4a7c5",
-        "dateModified": "2026-06-30",
-        "keywords": "codelint"
+        "name": "Documented: bottleneck map 2026-07-01 — recovery-layer CRITICAL, taxonomy regressed",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/2a9b7082",
+        "dateModified": "2026-07-01",
+        "keywords": "bottleneck-map"
       }
     },
     {
@@ -206,10 +206,10 @@
       "position": 19,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/be42d9b4",
-        "dateModified": "2026-06-30",
-        "keywords": "cmd"
+        "name": "Shipped: surface publish-staleness on the cadence tick",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/ae43e41c",
+        "dateModified": "2026-07-01",
+        "keywords": "ci"
       }
     },
     {
@@ -217,10 +217,10 @@
       "position": 20,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared automation",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d85a83b9",
-        "dateModified": "2026-06-30",
-        "keywords": "ci"
+        "name": "New: add shadow soft-mark signal (#1866)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/70676b3e",
+        "dateModified": "2026-07-01",
+        "keywords": "session"
       }
     },
     {
@@ -228,10 +228,10 @@
       "position": 21,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1c8a1516",
-        "dateModified": "2026-06-30",
-        "keywords": "accounts"
+        "name": "New: internal/relay package + Baton type (closed schema) (#1870)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5081d12f",
+        "dateModified": "2026-07-01",
+        "keywords": "relay"
       }
     },
     {
@@ -239,10 +239,10 @@
       "position": 22,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/980b7747",
-        "dateModified": "2026-06-30",
-        "keywords": "swebench"
+        "name": "Fixed: add paraphrase detection corpus (#1943)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/12b3c46a",
+        "dateModified": "2026-07-01",
+        "keywords": "dogfoodscore"
       }
     },
     {
@@ -250,10 +250,10 @@
       "position": 23,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/017aefaa",
-        "dateModified": "2026-06-30",
-        "keywords": "nightrun"
+        "name": "Shipped: add transcript fixture corpus (#1924)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a95923f8",
+        "dateModified": "2026-07-01",
+        "keywords": "dogfoodscore"
       }
     },
     {
@@ -261,10 +261,10 @@
       "position": 24,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: sync shared worktree",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c7db3e6b",
-        "dateModified": "2026-06-30",
-        "keywords": "fleet"
+        "name": "Fixed: fix matched harness line (#1923)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/9ccf5712",
+        "dateModified": "2026-07-01",
+        "keywords": "dogfoodscore"
       }
     },
     {
@@ -272,12 +272,12 @@
       "position": 25,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: sync shared documentation",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/67e0d3dd",
-        "dateModified": "2026-06-30",
-        "keywords": "docs"
+        "name": "New: add resident context meter (#1865)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/441c9e13",
+        "dateModified": "2026-07-01",
+        "keywords": "session"
       }
     }
   ],
-  "dateModified": "2026-06-30T17:44:38Z"
+  "dateModified": "2026-07-01T15:47:11Z"
 }
