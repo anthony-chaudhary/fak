@@ -71,6 +71,7 @@ how to work it:
 - Take the lane lease first if siblings may collide: `+"`dos arbitrate --workspace . --lane %[3]s --kind cluster`"+` (honor a REFUSE - pick nothing and stop; do not --force onto a held lane).
 - Make the SMALLEST change that resolves the issue's actual ask. Prefer one leaf / one file. If the issue is a docs/observability/test ask, that is often a single file. If it is a large epic you cannot land whole, land the smallest honest increment and say in your report what remains.
 - Run the gate yourself before claiming done: the lane's own test (`+"`go test ./... -count=1`"+` for the touched package, or the doc/lint check the issue names). A claim with no gate run is not done.
+- Proof by default checklist: visual/TUI bugs need a captured render or screenshot witness; logic/behavior bugs need a failing-before and passing-after repro test; docs/operator changes need a lint, render, or exact-output fixture; shipped/done claims need a witnessed commit tied to `+"`#%[1]d`"+` and `+"`(fak %[3]s)`"+`. Do not stop on narrative alone.
 
 git laws (enforced below the agent - breaking them refuses your commit):
 - Work on the configured development branch `+"`%[8]s`"+` ONLY. Never branch / new-worktree (the OFF_TRUNK guard refuses it).

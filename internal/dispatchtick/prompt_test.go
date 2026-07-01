@@ -99,6 +99,32 @@ func TestIssuePromptStatesGitLawsAndHonestBlock(t *testing.T) {
 	}
 }
 
+func TestIssuePromptIncludesProofByDefaultChecklist(t *testing.T) {
+	p := RenderIssuePrompt(sampleIssuePrompt())
+	for _, want := range []string{
+		"Proof by default checklist:",
+		"visual/TUI bugs need a captured render or screenshot witness",
+		"logic/behavior bugs need a failing-before and passing-after repro test",
+		"docs/operator changes need a lint, render, or exact-output fixture",
+		"shipped/done claims need a witnessed commit tied to `#465` and `(fak docs)`",
+		"Do not stop on narrative alone.",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing proof checklist item %q:\n%s", want, p)
+		}
+	}
+	lower := strings.ToLower(p)
+	for _, forbidden := range []string{
+		"just say done",
+		"report that it is done",
+		"looks fixed",
+	} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("prompt contains broad self-report wording %q:\n%s", forbidden, p)
+		}
+	}
+}
+
 func TestIssuePromptLocksTrunkOnlyAndForbidsBranchEscape(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
 	for _, want := range []string{
