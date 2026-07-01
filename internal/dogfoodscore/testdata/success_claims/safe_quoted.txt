@@ -1,0 +1,4 @@
+# Quoted/pasted claim-like phrases are examples, not assertions by the assistant.
+The task prompt says "hook behaved correctly"; I am not claiming that happened.
+A pasted example said 'everything checks out', but this turn is only discussing wording.
+The notes mention `no problems on my end` as an evasion phrase, not as a result.

@@ -1,0 +1,10 @@
+# One success-claim paraphrase per line. Each line is placed after a real Stop-hook
+# failure in TestScanConflation_SuccessClaimParaphraseCorpus and must produce one hit.
+hook behaved correctly
+no problems on my end
+everything checks out
+the hook worked as expected
+the run finished successfully
+the cleanup completed successfully
+nothing further needed
+looks good to me

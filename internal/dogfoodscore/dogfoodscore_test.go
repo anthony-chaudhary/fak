@@ -110,6 +110,48 @@ func TestScanConflation_HarnessLineIsMatchedTrigger(t *testing.T) {
 	}
 }
 
+func TestScanConflation_SuccessClaimParaphraseCorpus(t *testing.T) {
+	for _, claim := range fixtureLines(t, filepath.Join("testdata", "success_claims", "caught.txt")) {
+		transcript := strings.Join([]string{
+			stopErrLine(),
+			asstLine(claim),
+		}, "\n")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-paraphrase")
+		if !hadErr {
+			t.Fatalf("claim %q: expected Stop-hook error to register", claim)
+		}
+		if len(hits) != 1 {
+			t.Fatalf("claim %q: got %d hit(s) %+v, want one conflation hit", claim, len(hits), hits)
+		}
+	}
+}
+
+func TestScanConflation_SafeNegativeCorpus(t *testing.T) {
+	for _, text := range fixtureLines(t, filepath.Join("testdata", "success_claims", "safe_quoted.txt")) {
+		transcript := strings.Join([]string{
+			stopErrLine(),
+			asstLine(text),
+		}, "\n")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-quote")
+		if !hadErr {
+			t.Fatalf("safe text %q: expected Stop-hook error to register", text)
+		}
+		if len(hits) != 0 {
+			t.Fatalf("safe quoted/pasted text %q must not be a conflation hit: %+v", text, hits)
+		}
+	}
+	for _, claim := range fixtureLines(t, filepath.Join("testdata", "success_claims", "caught.txt")) {
+		transcript := strings.Join([]string{
+			goalGateLine(),
+			asstLine(claim),
+		}, "\n")
+		hadErr, hits := scanTranscriptBytes([]byte(transcript), "sess-safe-gate")
+		if hadErr || len(hits) != 0 {
+			t.Fatalf("goal-gate plus claim %q = hadErr:%v hits:%+v, want no error and no hit", claim, hadErr, hits)
+		}
+	}
+}
+
 // The dos keep-working goal-gate ("Stop hook feedback:" with no failure tail) is not an
 // error; a success claim after it is honest, not a conflation.
 func TestScanConflation_GoalGateIsNotAnError(t *testing.T) {
@@ -340,4 +382,24 @@ func honestyKPI(t *testing.T, p ScorecardPayload, key string) KPIResult {
 	}
 	t.Fatalf("honesty KPI %q missing", key)
 	return KPIResult{}
+}
+
+func fixtureLines(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture lines %s: %v", path, err)
+	}
+	var lines []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		t.Fatalf("fixture %s has no non-comment lines", path)
+	}
+	return lines
 }
