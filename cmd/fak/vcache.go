@@ -42,6 +42,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheProveRecall(stdout, stderr, argv[1:])
 	case "observe":
 		return runVCacheObserve(stdout, stderr, argv[1:])
+	case "context-join":
+		return runVCacheContextJoin(stdout, stderr, argv[1:])
 	case "score", "bench":
 		return runVCacheScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -66,6 +68,8 @@ func vcacheUsage(w io.Writer) {
                    [--read-mult F] [--siblings N]
   fak vcache observe [--transcript FILE]... [--telemetry FILE] [--json]
                    [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
+  fak vcache context-join [--transcript FILE]... [--telemetry FILE] --events FILE
+                   [--json] [--before-millis N] [--after-millis N]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
@@ -100,6 +104,11 @@ transcripts (--transcript, repeatable) or a session-telemetry JSONL (--telemetry
 groups turns by prefix family (one session = one shared system prefix), and runs the
 shipped M1-M5 decision leaves over that real data — one panel per sub-concept, each
 labeled OBSERVED (relayed from the provider's counters) or DECISION (fak's verdict).
+context-join (#1607) answers whether an observed cost change came from CONTEXT
+PLANNING (a reset, compaction, page fault, or prefix mutation fak decided) or from
+PROVIDER CACHE BEHAVIOR (a natural miss/TTL expiry unrelated to any context action).
+It joins the same --transcript/--telemetry turn stream against a --events JSONL of
+managed-context lifecycle events (see internal/vcacheobserve.LifecycleEvent).
 
 `)
 }
