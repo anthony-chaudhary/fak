@@ -147,20 +147,7 @@ func FoldRows(paths []string) Fold {
 			if err := json.Unmarshal([]byte(line), &row); err != nil {
 				continue
 			}
-			verdict := strings.ToUpper(strings.TrimSpace(asString(row["verdict"])))
-			kind := strings.ToUpper(strings.TrimSpace(asString(row["kind"])))
-			if verdict == "" {
-				switch kind {
-				case "DENY", "RESULT_DENY":
-					verdict = "DENY"
-				case "QUARANTINE":
-					verdict = "QUARANTINE"
-				case "DECIDE", "VDSO_HIT":
-					verdict = "ALLOW"
-				default:
-					verdict = kind
-				}
-			}
+			verdict := normalizeVerdict(asString(row["verdict"]), asString(row["kind"]))
 			if verdict == "" {
 				continue
 			}

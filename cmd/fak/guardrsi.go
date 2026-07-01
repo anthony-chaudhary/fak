@@ -44,6 +44,8 @@ func runGuardVerdictRSI(stdout, stderr io.Writer, argv []string) int {
 		return runGuardVerdictRSIRun(stdout, stderr, args)
 	case "route":
 		return runGuardVerdictRSIRoute(stdout, stderr, args)
+	case "recovery":
+		return runGuardVerdictRSIRecovery(stdout, stderr, args)
 	case "-h", "--help", "help":
 		guardVerdictRSIUsage(stdout)
 		return 0
@@ -121,6 +123,38 @@ func runGuardVerdictRSIRun(stdout, stderr io.Writer, argv []string) int {
 		return encodeGuardRSIJSON(stdout, stderr, "fak guard-verdict-rsi run", it)
 	}
 	fmt.Fprintln(stdout, guardrsi.RenderIteration(it))
+	return 0
+}
+
+// runGuardVerdictRSIRecovery is the refusal-recovery telemetry rung (#2143): for
+// every refusal reason token, how often the SAME refused call (tool + args-digest,
+// within one session journal) later cleared vs looped, worst token first — the
+// measured answer to "which closed-vocabulary fix hint is not landing".
+func runGuardVerdictRSIRecovery(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak guard-verdict-rsi recovery", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	audit := fs.String("audit", "", "explicit guard-audit.jsonl to fold")
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak guard-verdict-rsi recovery: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+	rep := guardrsi.BuildRecovery(root, *audit)
+	if *asJSON {
+		return encodeGuardRSIJSON(stdout, stderr, "fak guard-verdict-rsi recovery", rep)
+	}
+	fmt.Fprintln(stdout, guardrsi.RenderRecovery(rep))
+	if len(rep.JournalPaths) == 0 {
+		fmt.Fprintf(stdout, "  (no journal: %s)\n", guardrsi.DiagnoseAuditGap(root))
+	}
 	return 0
 }
 
@@ -338,10 +372,15 @@ func encodeGuardRSIJSON(stdout, stderr io.Writer, label string, v any) int {
 func guardVerdictRSIUsage(w io.Writer) {
 	fmt.Fprint(w, `fak guard-verdict-rsi - RSI loop over the real guard decision journal
 
-  fak guard-verdict-rsi fold  [--audit FILE] [--json]
-  fak guard-verdict-rsi run   [--audit FILE] [--witness JSON] [--json] [--out FILE]
-  fak guard-verdict-rsi route [--source ID] [--threshold N] [--no-issues] [--dry-run] [--repo R] [--json]
+  fak guard-verdict-rsi fold     [--audit FILE] [--json]
+  fak guard-verdict-rsi run      [--audit FILE] [--witness JSON] [--json] [--out FILE]
+  fak guard-verdict-rsi route    [--source ID] [--threshold N] [--no-issues] [--dry-run] [--repo R] [--json]
+  fak guard-verdict-rsi recovery [--audit FILE] [--json]
   fak guard-verdict-rsi --check ITER.json
+
+  recovery measures, per refusal reason token, how often the refused call (same
+  tool + args-digest, within one session journal) later cleared vs looped — the
+  refusal-recovery success telemetry that surfaces the fix hint that is not landing.
 
   route closes the loop: it reviews the session journal and, when the worst bucket is
   a real finding, routes a pickable findings-queue row (always) plus a deduped gh issue
