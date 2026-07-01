@@ -326,6 +326,47 @@ func TestSessionContextBudgetRefusalCarriesResetDirective(t *testing.T) {
 	}
 }
 
+func TestSessionContextBudgetRefusalCarriesCacheAffinityDirective(t *testing.T) {
+	srv := newTestServer(t)
+	tbl := session.NewTable()
+	tbl.SetBudget("sess-affinity", session.Budget{
+		TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 10,
+	})
+	wireSessionTableForTest(srv, tbl)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+		FinishReason: "stop",
+		Usage:        agent.Usage{PromptTokens: 11, CompletionTokens: 1, TotalTokens: 12},
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp := chatPostWithTrace(t, ts.URL, "sess-affinity")
+	resp.Body.Close()
+	st := tbl.Get("sess-affinity")
+	if st.CacheAffinity.IsZero() {
+		t.Fatalf("post-debit state has no cache affinity decision: %+v", st)
+	}
+
+	resp = chatPostWithTrace(t, ts.URL, "sess-affinity")
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second context-budget turn status = %d, want 409; body=%s", resp.StatusCode, raw)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		`"cache_affinity"`,
+		`"action":"preserve"`,
+		st.CacheAffinity.AffinityKey,
+		st.CacheAffinity.ToTraceID,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("refusal body missing cache-affinity field %q: %s", want, body)
+		}
+	}
+}
+
 // TestResetOnBudgetContinuesTransparently proves the opt-in human-like reset: once a
 // session's context budget drains (the case that 409s in the test above), a wired
 // ResetOnBudget hook re-arms a fresh session and the client's NEXT request succeeds
@@ -464,6 +505,13 @@ func testSessionState(st session.State) SessionState {
 		ContinuationID: st.ContinuationID,
 		ParentTrace:    st.ParentTrace,
 		Generation:     st.Generation,
-		Rev:            st.Rev,
+		CacheAffinity: SessionCacheAffinity{
+			Action:      st.CacheAffinity.Action,
+			AffinityKey: st.CacheAffinity.AffinityKey,
+			FromTraceID: st.CacheAffinity.FromTraceID,
+			ToTraceID:   st.CacheAffinity.ToTraceID,
+			Reason:      st.CacheAffinity.Reason,
+		},
+		Rev: st.Rev,
 	}
 }

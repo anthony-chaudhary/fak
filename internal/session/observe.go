@@ -49,14 +49,15 @@ func (k BudgetEventKind) String() string {
 // table lock and delivered AFTER the lock is released, so an observer may do slow work
 // (a webhook POST) without stalling the debit hot path or any other session.
 type BudgetEvent struct {
-	Kind              BudgetEventKind `json:"kind"`
-	TraceID           string          `json:"trace_id"`
-	ContinuationID    string          `json:"continuation_id,omitempty"` // set on Exhausted: the fresh-window handoff id
-	Reason            string          `json:"reason,omitempty"`          // the closed budget reason token at this event
-	Rev               uint64          `json:"rev"`
-	ContextTokensLeft int             `json:"context_tokens_left"`
-	ContextTokensCap  int             `json:"context_tokens_cap,omitempty"`
-	FractionConsumed  float64         `json:"fraction_consumed"` // 0..1, the share of the context budget spent at this event
+	Kind              BudgetEventKind       `json:"kind"`
+	TraceID           string                `json:"trace_id"`
+	ContinuationID    string                `json:"continuation_id,omitempty"` // set on Exhausted: the fresh-window handoff id
+	Reason            string                `json:"reason,omitempty"`          // the closed budget reason token at this event
+	CacheAffinity     CacheAffinityDecision `json:"cache_affinity,omitempty,omitzero"`
+	Rev               uint64                `json:"rev"`
+	ContextTokensLeft int                   `json:"context_tokens_left"`
+	ContextTokensCap  int                   `json:"context_tokens_cap,omitempty"`
+	FractionConsumed  float64               `json:"fraction_consumed"` // 0..1, the share of the context budget spent at this event
 }
 
 // BudgetObserver is the threshold-and-reset callback seam. The table invokes it from
@@ -177,6 +178,7 @@ func budgetEvent(st State, kind BudgetEventKind) BudgetEvent {
 		TraceID:           st.TraceID,
 		ContinuationID:    st.ContinuationID,
 		Reason:            st.Reason,
+		CacheAffinity:     st.CacheAffinity,
 		Rev:               st.Rev,
 		ContextTokensLeft: st.Budget.ContextTokensLeft,
 		ContextTokensCap:  capacity,

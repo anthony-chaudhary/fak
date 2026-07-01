@@ -424,16 +424,33 @@ type TraceResetResponse struct {
 // the monotonic revision the table bumps on every write; a client may round-trip it
 // as if_rev to reject a stale clobber (optimistic concurrency).
 type SessionState struct {
-	TraceID        string        `json:"trace_id"`
-	Run            string        `json:"run"`
-	Budget         SessionBudget `json:"budget"`
-	Priority       int           `json:"priority"`
-	Pace           SessionPace   `json:"pace"`
-	Reason         string        `json:"reason,omitempty"`
-	ContinuationID string        `json:"continuation_id,omitempty"`
-	ParentTrace    string        `json:"parent_trace,omitempty"`
-	Generation     int           `json:"generation,omitempty"`
-	Rev            uint64        `json:"rev"`
+	TraceID        string               `json:"trace_id"`
+	Run            string               `json:"run"`
+	Budget         SessionBudget        `json:"budget"`
+	Priority       int                  `json:"priority"`
+	Pace           SessionPace          `json:"pace"`
+	Reason         string               `json:"reason,omitempty"`
+	ContinuationID string               `json:"continuation_id,omitempty"`
+	ParentTrace    string               `json:"parent_trace,omitempty"`
+	Generation     int                  `json:"generation,omitempty"`
+	CacheAffinity  SessionCacheAffinity `json:"cache_affinity,omitempty,omitzero"`
+	Rev            uint64               `json:"rev"`
+}
+
+// SessionCacheAffinity is the gateway wire form of session.CacheAffinityDecision.
+// It is provider-neutral and audit-only: hosts can derive provider-specific routing
+// hints from AffinityKey, but correctness must not depend on that hint landing.
+type SessionCacheAffinity struct {
+	Action      string `json:"action,omitempty"`
+	AffinityKey string `json:"affinity_key,omitempty"`
+	FromTraceID string `json:"from_trace_id,omitempty"`
+	ToTraceID   string `json:"to_trace_id,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// IsZero reports whether the decision is absent, for json omitzero.
+func (d SessionCacheAffinity) IsZero() bool {
+	return d.Action == "" && d.AffinityKey == "" && d.FromTraceID == "" && d.ToTraceID == "" && d.Reason == ""
 }
 
 // SessionBudget is the wire form of internal/session.Budget. TurnsLeft/TokensLeft

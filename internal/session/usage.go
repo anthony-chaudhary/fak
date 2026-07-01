@@ -59,6 +59,7 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 			if cur.ContinuationID == "" {
 				cur.ContinuationID = continuationID(trace, cur.Rev+1)
 			}
+			cur.CacheAffinity = cacheAffinityForContinuation(cur, cur.ContinuationID, ReasonBudgetContext)
 			fireKind, fire = BudgetExhausted, t.obs != nil
 		case t.crossedWarnLocked(cur.Budget, prevLeft):
 			fireKind, fire = BudgetWarn, true

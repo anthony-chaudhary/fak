@@ -380,6 +380,36 @@ func TestContextBudgetMintsContinuationAndDrains(t *testing.T) {
 	}
 }
 
+func TestContinuationCacheAffinityDecisionPreservesAcrossContinuations(t *testing.T) {
+	tbl := NewTable()
+	tbl.SetBudget("root", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 10})
+
+	drained := tbl.DebitUsage("root", Usage{ContextTokens: 11})
+	aff := drained.CacheAffinity
+	if aff.Action != CacheAffinityPreserve || aff.AffinityKey == "" {
+		t.Fatalf("cache affinity decision = %+v, want preserve with an affinity key", aff)
+	}
+	if aff.FromTraceID != "root" || aff.ToTraceID != drained.ContinuationID || aff.Reason != ReasonBudgetContext {
+		t.Fatalf("cache affinity decision lineage = %+v, want root -> continuation for %s", aff, ReasonBudgetContext)
+	}
+
+	child := tbl.Recontinue("root", drained.ContinuationID, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 10})
+	if child.CacheAffinity.AffinityKey != aff.AffinityKey {
+		t.Fatalf("fresh child affinity key = %q, want preserved %q", child.CacheAffinity.AffinityKey, aff.AffinityKey)
+	}
+	if child.CacheAffinity.FromTraceID != "root" || child.CacheAffinity.ToTraceID != child.TraceID {
+		t.Fatalf("fresh child affinity decision = %+v, want parent root -> child", child.CacheAffinity)
+	}
+
+	nextDrain := tbl.DebitUsage(child.TraceID, Usage{ContextTokens: 11})
+	if nextDrain.CacheAffinity.AffinityKey != aff.AffinityKey {
+		t.Fatalf("second continuation affinity key = %q, want original %q", nextDrain.CacheAffinity.AffinityKey, aff.AffinityKey)
+	}
+	if nextDrain.CacheAffinity.FromTraceID != child.TraceID || nextDrain.CacheAffinity.ToTraceID != nextDrain.ContinuationID {
+		t.Fatalf("second continuation decision = %+v, want child -> grandchild", nextDrain.CacheAffinity)
+	}
+}
+
 // TestRecontinueReArmsDrainedSessionOnFreshTrace proves the human-like reset: a
 // budget-drained session is re-armed under its continuation id with a clean budget,
 // the fresh session is live with the lineage recorded, and the drained PARENT record

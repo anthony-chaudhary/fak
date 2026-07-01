@@ -75,6 +75,26 @@ func TestWatchBudgetWarnsOnceThenExhausts(t *testing.T) {
 	}
 }
 
+func TestWatchBudgetExhaustionCarriesCacheAffinityDecision(t *testing.T) {
+	const trace = "watch-affinity"
+	tbl := NewTable()
+	rec := &recorder{}
+	tbl.WatchBudget(0, rec.observe)
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 10})
+
+	st := tbl.DebitUsage(trace, Usage{ContextTokens: 11})
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Kind != BudgetExhausted {
+		t.Fatalf("events = %+v, want one exhaustion", got)
+	}
+	if got[0].CacheAffinity != st.CacheAffinity {
+		t.Fatalf("event cache affinity = %+v, want state decision %+v", got[0].CacheAffinity, st.CacheAffinity)
+	}
+	if got[0].CacheAffinity.Action != CacheAffinityPreserve || got[0].CacheAffinity.ToTraceID != st.ContinuationID {
+		t.Fatalf("event cache affinity decision = %+v, want preserve to continuation", got[0].CacheAffinity)
+	}
+}
+
 // TestWatchBudgetStraightToExhaustionSkipsWarn proves a single oversized debit that jumps
 // past the watermark straight to zero fires only the exhaustion event, not a warning.
 func TestWatchBudgetStraightToExhaustionSkipsWarn(t *testing.T) {

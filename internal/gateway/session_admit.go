@@ -221,10 +221,11 @@ func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 	if st.ContinuationID != "" || st.Reason == sessionReasonBudgetContext {
 		body["session"] = st
 		body["reset"] = SessionResetDirective{
-			Action:      "restart_fresh_session",
-			FromTraceID: st.TraceID,
-			ToTraceID:   st.ContinuationID,
-			Reason:      st.Reason,
+			Action:        "restart_fresh_session",
+			FromTraceID:   st.TraceID,
+			ToTraceID:     st.ContinuationID,
+			Reason:        st.Reason,
+			CacheAffinity: st.CacheAffinity,
 			Required: []string{
 				"dump_session_image",
 				"start_fresh_process",
@@ -242,10 +243,11 @@ func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 // child itself here; it gives the host a deterministic continuation id and the
 // required fresh-window actions.
 type SessionResetDirective struct {
-	Action      string   `json:"action"`
-	FromTraceID string   `json:"from_trace_id,omitempty"`
-	ToTraceID   string   `json:"to_trace_id,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	Required    []string `json:"required_actions,omitempty"`
-	Note        string   `json:"note,omitempty"`
+	Action        string               `json:"action"`
+	FromTraceID   string               `json:"from_trace_id,omitempty"`
+	ToTraceID     string               `json:"to_trace_id,omitempty"`
+	Reason        string               `json:"reason,omitempty"`
+	CacheAffinity SessionCacheAffinity `json:"cache_affinity,omitempty,omitzero"`
+	Required      []string             `json:"required_actions,omitempty"`
+	Note          string               `json:"note,omitempty"`
 }

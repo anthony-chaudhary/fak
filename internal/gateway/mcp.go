@@ -440,10 +440,11 @@ func (s *Server) sessionReset(ctx context.Context, req SessionResetRequest) (Ses
 	resp.TraceID = newTrace
 	resp.Seed = seed
 	resp.Directive = &SessionResetDirective{
-		Action:      "restart_fresh_session",
-		FromTraceID: trace,
-		ToTraceID:   newTrace,
-		Reason:      st.Reason,
+		Action:        "restart_fresh_session",
+		FromTraceID:   trace,
+		ToTraceID:     newTrace,
+		Reason:        st.Reason,
+		CacheAffinity: st.CacheAffinity,
 		Required: []string{
 			"dump_session_image",
 			"start_fresh_process",

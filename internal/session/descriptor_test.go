@@ -301,6 +301,31 @@ func TestRegistryRestartReattachesAtPersistedState(t *testing.T) {
 	}
 }
 
+func TestRegistryRestoresCacheAffinityDecision(t *testing.T) {
+	store := NewMemStore()
+	r := NewRegistry(store)
+	t0 := fixedClock()
+
+	live := NewTable()
+	live.SetBudget("trace-affinity", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 10})
+	st := live.DebitUsage("trace-affinity", Usage{ContextTokens: 11})
+	if st.CacheAffinity.IsZero() {
+		t.Fatalf("setup produced no cache affinity decision: %+v", st)
+	}
+	if _, err := r.Register("sess-affinity", "host-a", st, time.Hour, t0); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	d, ok, err := r.Get("sess-affinity")
+	if err != nil || !ok {
+		t.Fatalf("get descriptor: ok=%v err=%v", ok, err)
+	}
+	restored := d.RestoredState()
+	if restored.CacheAffinity != st.CacheAffinity {
+		t.Fatalf("restored cache affinity = %+v, want %+v", restored.CacheAffinity, st.CacheAffinity)
+	}
+}
+
 func TestMemStoreRejectsBlankID(t *testing.T) {
 	s := NewMemStore()
 	if err := s.Put(Descriptor{ID: ""}); err == nil {

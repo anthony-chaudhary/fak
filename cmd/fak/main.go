@@ -1077,7 +1077,14 @@ func toGatewaySessionState(s session.State) gateway.SessionState {
 		ContinuationID: s.ContinuationID,
 		ParentTrace:    s.ParentTrace,
 		Generation:     s.Generation,
-		Rev:            s.Rev,
+		CacheAffinity: gateway.SessionCacheAffinity{
+			Action:      s.CacheAffinity.Action,
+			AffinityKey: s.CacheAffinity.AffinityKey,
+			FromTraceID: s.CacheAffinity.FromTraceID,
+			ToTraceID:   s.CacheAffinity.ToTraceID,
+			Reason:      s.CacheAffinity.Reason,
+		},
+		Rev: s.Rev,
 	}
 }
 

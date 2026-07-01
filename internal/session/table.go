@@ -458,6 +458,7 @@ func (t *Table) RecontinueAt(parent, child string, fresh Budget, now time.Time) 
 		st.Budget = fresh.withContextCap()
 		st.ParentTrace = parent
 		st.Reason = ReasonBudgetReset
+		st.CacheAffinity = cacheAffinityForContinuation(State{TraceID: parent}, child, ReasonBudgetReset)
 		return st
 	}
 	t.mu.Lock()
@@ -479,13 +480,14 @@ func (t *Table) RecontinueAt(parent, child string, fresh Budget, now time.Time) 
 		carriedTime = carriedTime.Start(now)
 	}
 	next := State{
-		TraceID:     child,
-		Run:         Running,
-		Budget:      fresh.withContextCap(),
-		ParentTrace: parent,
-		Generation:  prevGen + 1,
-		Reason:      ReasonBudgetReset,
-		Time:        carriedTime,
+		TraceID:       child,
+		Run:           Running,
+		Budget:        fresh.withContextCap(),
+		ParentTrace:   parent,
+		Generation:    prevGen + 1,
+		Reason:        ReasonBudgetReset,
+		Time:          carriedTime,
+		CacheAffinity: cacheAffinityForContinuation(parentSt, child, parentSt.Reason),
 	}
 	return t.putLocked(next)
 }

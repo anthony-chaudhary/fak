@@ -216,6 +216,13 @@ type State struct {
 	ContinuationID string   `json:"continuation_id,omitempty"` // fresh-window handoff id minted on context exhaustion
 	ParentTrace    string   `json:"parent_trace,omitempty"`    // the trace this session was re-continued FROM (Recontinue lineage)
 	Generation     int      `json:"generation,omitempty"`      // how many budget-reset re-continuations preceded this session (0 = original)
+	// CacheAffinity is the provider/engine cache-affinity decision attached to a
+	// continuation lineage (issue #1609). A context-budget reset must not silently
+	// throw away a warm provider/engine cache route just because the visible trace
+	// id changed, so the state carries an auditable decision: preserve the lineage's
+	// opaque affinity key from parent trace to continuation trace. Advisory only:
+	// correctness never depends on provider affinity landing.
+	CacheAffinity CacheAffinityDecision `json:"cache_affinity,omitempty,omitzero"`
 	// Intent is the ADVISORY, never-trust projection of what the kernel knows about
 	// this session's next turn but the GPU cannot see (issue #807, the intent conduit
 	// #805). A scheduler reading Snapshot MAY act on it to place KV / order prefill,
