@@ -178,6 +178,82 @@ func TestOriginWitnessIsSkippedWithoutEvidenceRefs(t *testing.T) {
 	}
 }
 
+func TestOriginWitnessByKindConfirmsMixedPathAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	artifact := filepath.Join(dir, "artifact.txt")
+	if err := os.WriteFile(artifact, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	m := NewManager(WithDefaultOriginWitnesses())
+	refs := []EvidenceRef{
+		{Kind: PathRefKind, Ref: artifact},
+		{Kind: OutputRefKind, Ref: coherentOutput},
+	}
+	if _, err := m.StartTask(TaskSpec{TaskID: "task_mixed_origin", EvidenceRefs: refs}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+
+	got := m.Snapshot().Tasks[0]
+	if got.Witness == nil {
+		t.Fatalf("missing origin witness")
+	}
+	if got.Witness.VerifiedState != VerifiedDone || got.Witness.Source != kindWitnessSource {
+		t.Fatalf("origin witness = %+v, want registry verified_done", got.Witness)
+	}
+	if !strings.Contains(got.Witness.Detail, PathRefKind) || !strings.Contains(got.Witness.Detail, OutputRefKind) {
+		t.Fatalf("registry detail = %q, want both verified kinds", got.Witness.Detail)
+	}
+	var sawPath, sawScrubbedOutput bool
+	for _, ref := range got.Witness.EvidenceRefs {
+		switch ref.Kind {
+		case PathRefKind:
+			if ref.Ref == artifact {
+				sawPath = true
+			}
+		case OutputRefKind:
+			if ref.Ref == "" && strings.Contains(ref.Note, "graded") {
+				sawScrubbedOutput = true
+			}
+		}
+	}
+	if !sawPath || !sawScrubbedOutput {
+		t.Fatalf("registry evidence refs = %+v, want path ref plus scrubbed output ref", got.Witness.EvidenceRefs)
+	}
+}
+
+func TestOriginWitnessByKindRefusesFailingKind(t *testing.T) {
+	m := NewManager(WithDefaultOriginWitnesses())
+	refs := []EvidenceRef{
+		{Kind: PathRefKind, Ref: filepath.Join(t.TempDir(), "missing.txt")},
+		{Kind: OutputRefKind, Ref: coherentOutput},
+	}
+	if _, err := m.StartTask(TaskSpec{TaskID: "task_refused_origin", EvidenceRefs: refs}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	got := m.Snapshot().Tasks[0].Witness
+	if got == nil || got.VerifiedState != VerifiedRefused {
+		t.Fatalf("origin witness = %+v, want verified_refused", got)
+	}
+	if !strings.Contains(got.Detail, PathRefKind) || !strings.Contains(got.Detail, "missing") {
+		t.Fatalf("refusal detail = %q, want failing path kind", got.Detail)
+	}
+}
+
+func TestOriginWitnessByKindUnavailableForUnregisteredKind(t *testing.T) {
+	m := NewManager(WithDefaultOriginWitnesses())
+	ref := EvidenceRef{Kind: "commit", Ref: "HEAD"}
+	if _, err := m.StartTask(TaskSpec{TaskID: "task_unknown_origin", EvidenceRefs: []EvidenceRef{ref}}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	got := m.Snapshot().Tasks[0].Witness
+	if got == nil || got.VerifiedState != VerifiedUnavailable {
+		t.Fatalf("origin witness = %+v, want verified_unavailable", got)
+	}
+	if !strings.Contains(got.Detail, "commit") || !strings.Contains(got.Detail, "no registered witness") {
+		t.Fatalf("unavailable detail = %q, want unregistered commit kind", got.Detail)
+	}
+}
+
 func TestSetWitnessRejectsBadStateAndUnknownTarget(t *testing.T) {
 	m := NewManager()
 	if _, err := m.StartTask(TaskSpec{TaskID: "task_b"}); err != nil {

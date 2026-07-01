@@ -92,7 +92,7 @@ func (w PathWitness) WitnessClaim(c Claim) WitnessRecord {
 	checked := 0
 	var missing string
 	for _, ref := range c.Refs {
-		if ref.Kind != "path" {
+		if ref.Kind != PathRefKind {
 			continue
 		}
 		checked++
@@ -102,7 +102,7 @@ func (w PathWitness) WitnessClaim(c Claim) WitnessRecord {
 			}
 		}
 	}
-	rec := WitnessRecord{Source: "path", EvidenceRefs: c.Refs}
+	rec := WitnessRecord{Source: PathRefKind, EvidenceRefs: c.Refs}
 	switch {
 	case checked == 0:
 		rec.VerifiedState = VerifiedUnavailable
