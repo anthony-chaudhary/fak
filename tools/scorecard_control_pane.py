@@ -229,6 +229,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "robustness", "debt": "robustness_debt", "script": "demo_robustness_scorecard.py", "label": "demo-robustness"},
     {"key": "hygiene", "debt": "hygiene_debt", "script": "repo_hygiene_scorecard.py", "label": "repo-hygiene"},
     {"key": "parity", "debt": "parity_debt", "script": "industry_scorecard.py", "label": "industry-parity"},
+    {"key": "sota", "debt": "sota_debt", "script": "sota_coverage_scorecard.py", "label": "sota-coverage"},
     {"key": "agent", "debt": "friction_debt", "script": "agent_readiness_scorecard.py", "label": "agent-readiness"},
     {"key": "product", "debt": "product_debt", "script": "product_scorecard.py", "label": "product"},
     {"key": "persona", "debt": "persona_debt", "script": "persona_readiness_scorecard.py", "label": "persona"},
