@@ -465,6 +465,13 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	if len(launch) < 6 || launch[1] != "guard" || !containsString(launch, "--audit") || !containsString(launch, "claude") {
 		t.Fatalf("launch command is not guarded claude argv: %#v", launch)
 	}
+	launchLine := strings.Join(launch, " ")
+	if strings.Contains(launchLine, root) || strings.Contains(launchLine, "acct-preflight") {
+		t.Fatalf("launch command shape leaked workspace/account detail: %#v", launch)
+	}
+	if !strings.Contains(launchLine, "<workspace>") {
+		t.Fatalf("launch command shape did not preserve redacted workspace marker: %#v", launch)
+	}
 	acct, _ := got["account"].(map[string]any)
 	if acct["tag"] != "acct-preflight" {
 		t.Fatalf("account = %#v, want acct-preflight", acct)

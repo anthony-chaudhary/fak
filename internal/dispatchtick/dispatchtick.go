@@ -8,6 +8,7 @@ package dispatchtick
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -184,6 +185,95 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 	args = append(args, "--audit", GuardAuditPath(workspace, lane, backend), "--")
 	args = append(args, command...)
 	return args, true
+}
+
+// LaunchCommandShape returns a status-safe argv shape for reports and dry-runs.
+// It preserves enough structure to debug backend/guard selection while scrubbing
+// workspace paths, account identifiers, and token-like values.
+func LaunchCommandShape(command []string, workspace string, account Account) []string {
+	out := make([]string, 0, len(command))
+	redactNext := false
+	for _, arg := range command {
+		if redactNext {
+			out = append(out, "<redacted>")
+			redactNext = false
+			continue
+		}
+		shaped := redactLaunchArg(arg, workspace, account)
+		out = append(out, shaped)
+		if isSensitiveFlag(arg) && !strings.Contains(arg, "=") {
+			redactNext = true
+		}
+	}
+	return out
+}
+
+func redactLaunchArg(arg, workspace string, account Account) string {
+	out := arg
+	out = replaceLaunchSecret(out, workspace, "<workspace>")
+	out = replaceLaunchSecret(out, account.Dir, "<account-dir>")
+	out = replaceLaunchSecret(out, account.Tag, "<account>")
+	if strings.Contains(out, "://") {
+		out = redactLaunchURL(out)
+	}
+	if idx := strings.Index(out, "="); idx > 0 && isSensitiveKey(out[:idx]) {
+		return out[:idx+1] + "<redacted>"
+	}
+	return out
+}
+
+func replaceLaunchSecret(s, secret, marker string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return s
+	}
+	for _, variant := range uniqueStrings(secret, filepath.Clean(secret), filepath.ToSlash(secret)) {
+		if variant == "" || variant == "." {
+			continue
+		}
+		s = strings.ReplaceAll(s, variant, marker)
+	}
+	return s
+}
+
+func redactLaunchURL(s string) string {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return s
+	}
+	u.User = nil
+	u.RawQuery = ""
+	return u.String()
+}
+
+func isSensitiveFlag(s string) bool {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "-") {
+		return false
+	}
+	return isSensitiveKey(strings.TrimLeft(s, "-"))
+}
+
+func isSensitiveKey(s string) bool {
+	low := strings.ToLower(s)
+	for _, needle := range []string{"token", "oauth", "api-key", "apikey", "api_key", "authorization", "bearer", "secret"} {
+		if strings.Contains(low, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values ...string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func cleanPathToken(s string) string {

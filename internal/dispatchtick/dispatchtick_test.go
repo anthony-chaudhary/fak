@@ -2,6 +2,7 @@ package dispatchtick
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,30 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	opencode, guarded := GuardedLaunchCommand([]string{"opencode", "run", "prompt"}, "fak", "docs", "opencode", "/repo", "")
 	if guarded || opencode[0] != "opencode" {
 		t.Fatalf("opencode without base URL must not be guarded, got %#v guarded=%v", opencode, guarded)
+	}
+}
+
+func TestLaunchCommandShapeRedactsSensitiveFields(t *testing.T) {
+	raw := []string{
+		`C:\private\fak\fak.exe`, "guard",
+		"--base-url", "https://oauth-token@node.example/v1?api_key=sk-live",
+		"--api-key", "sk-live",
+		"--audit", `C:\private\fak\.dispatch-runs\guard-acct-secret.audit.jsonl`,
+		"--", "claude", "-p", "<resolve #1783 prompt>",
+	}
+	got := LaunchCommandShape(raw, `C:\private\fak`, Account{
+		Tag: "acct-secret",
+		Dir: `C:\Users\USER\.claude\acct-secret`,
+	})
+	joined := strings.Join(got, " ")
+	for _, leak := range []string{`C:\private\fak`, "acct-secret", "oauth-token", "api_key", "sk-live"} {
+		if strings.Contains(joined, leak) {
+			t.Fatalf("launch command shape leaked %q: %#v", leak, got)
+		}
+	}
+	for _, want := range []string{"<workspace>", "<account>", "guard", "--base-url", "https://node.example/v1", "--api-key", "<redacted>", "claude"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("launch command shape missing %q: %#v", want, got)
+		}
 	}
 }

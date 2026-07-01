@@ -395,8 +395,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return nil, err
 	}
 	launchPreview, guardedPreview := guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
-	payload["command"] = preview
-	payload["launch_command"] = launchPreview
+	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
+	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
 	payload["guarded"] = guardedPreview
 
 	// Self-modify pre-route (#1397): a GUARDED worker aimed at fak's own running source
@@ -519,8 +519,8 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
-	payload["command"] = command
-	payload["launch_command"] = launchCommand
+	payload["command"] = dispatchtick.LaunchCommandShape(command, root, account)
+	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchCommand, root, account)
 	payload["guarded"] = guarded
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
 		spawned.Startup = writeDispatchStartupBundleSidecar(spawned.Log, bundle)
@@ -1374,6 +1374,9 @@ func renderDispatchTick(p map[string]any) string {
 	fmt.Fprintf(&b, "  lane      : %s  (%d issues, %d steps)\n", firstString(dispatchMapString(p, "lane"), "-"), dispatchMapInt(p, "lane_issue_count"), dispatchMapInt(p, "lane_step_budget"))
 	if n := dispatchMapInt(p, "target_issue"); n != 0 {
 		fmt.Fprintf(&b, "  target    : #%d  %.54s\n", n, dispatchMapString(p, "issue_title"))
+	}
+	if launch := stringSlice(p["launch_command"]); len(launch) > 0 {
+		fmt.Fprintf(&b, "  launch    : %s\n", strings.Join(launch, " "))
 	}
 	fmt.Fprintf(&b, "  -> %s\n", dispatchMapString(p, "reason"))
 	if spawned := mapAt(p, "spawned"); len(spawned) > 0 {
