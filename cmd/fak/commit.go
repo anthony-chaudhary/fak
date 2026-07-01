@@ -106,13 +106,17 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	if code != 0 {
 		return code
 	}
+	root := resolveRoot(*dir)
+	if derived, ok := deriveCommitMessageStamp(message, paths, root); ok {
+		message = derived
+	}
 	review := commitReviewOptions(*reviewModel, firstNonEmpty(*reviewObjective, os.Getenv("FAK_GOAL_OBJECTIVE"), firstCommitLine(message)), *reviewEndpoint, *reviewAPIKeyEnv)
 
 	// --require-issue pre-lints the message before touching git: a real commit on the shared trunk
 	// cannot be amended (a sibling may push it first), so a missing bindable `#N` is caught here as a
 	// PRE-commit refusal (exit 3) rather than discovered weeks later as a CLAIMED_CLOSED row (#312).
 	if *requireIssue {
-		rep := hooks.LintCommitMessageWithOptions(message, paths, resolveRoot(*dir), true)
+		rep := hooks.LintCommitMessageWithOptions(message, paths, root, true)
 		if !rep.OK {
 			fmt.Fprintln(stderr, "fak commit: --require-issue refused this commit:")
 			renderPreview(stderr, rep, "")
@@ -154,6 +158,26 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		renderCommitResult(stdout, res)
 	}
 	return commitExitCode(res)
+}
+
+func deriveCommitMessageStamp(message string, paths []string, root string) (string, bool) {
+	rep := hooks.LintCommitMessageWithOptions(message, paths, root, false)
+	if rep.SuggestedSubject == "" {
+		return message, false
+	}
+	return replaceFirstNonEmptyLine(message, rep.SuggestedSubject)
+}
+
+func replaceFirstNonEmptyLine(message, line string) (string, bool) {
+	parts := strings.Split(message, "\n")
+	for i, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		parts[i] = line
+		return strings.Join(parts, "\n"), true
+	}
+	return message, false
 }
 
 type commitSubmitResult struct {

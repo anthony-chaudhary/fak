@@ -147,6 +147,39 @@ func TestLintCommitMessage_nounLedNoTrailer(t *testing.T) {
 	}
 }
 
+func TestLintCommitMessage_missingTrailerSuggestsExactSubject(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage("feat(gateway): add the slot reclaim path", []string{"internal/gateway/server.go"}, root)
+	if r.OK {
+		t.Fatalf("expected NOT ok before the trailer is appended")
+	}
+	if r.SuggestTrailer != "(fak gateway)" {
+		t.Fatalf("SuggestTrailer = %q, want (fak gateway)", r.SuggestTrailer)
+	}
+	wantSubject := "feat(gateway): add the slot reclaim path (fak gateway)"
+	if r.SuggestedSubject != wantSubject {
+		t.Fatalf("SuggestedSubject = %q, want %q", r.SuggestedSubject, wantSubject)
+	}
+}
+
+func TestLintCommitMessage_multiLaneNoTrailerAsksForPrimary(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"feat(kernel): add cross-lane routing",
+		[]string{"internal/gateway/server.go", "internal/policy/rules.go"},
+		root,
+	)
+	if r.OK {
+		t.Fatalf("expected NOT ok before the trailer is chosen")
+	}
+	if r.SuggestTrailer != "" || r.SuggestedSubject != "" {
+		t.Fatalf("multi-lane path set must not guess, trailer=%q subject=%q", r.SuggestTrailer, r.SuggestedSubject)
+	}
+	if !hasIssueContaining(r, "choose the primary leaf") {
+		t.Fatalf("want primary-leaf instruction, got issues=%v", r.Issues)
+	}
+}
+
 func TestLintCommitMessage_offLaneTypo(t *testing.T) {
 	root := writeLintRepo(t)
 	r := LintCommitMessage("fix(gateway): correct the reclaim (fak gatway)", []string{"internal/gateway/server.go"}, root)
@@ -158,6 +191,10 @@ func TestLintCommitMessage_offLaneTypo(t *testing.T) {
 	}
 	if !hasIssueContaining(r, "off-lane stamp") || !hasIssueContaining(r, "did you mean `(fak gateway)`") {
 		t.Errorf("want off-lane + did-you-mean hint, got %v", r.Issues)
+	}
+	wantSubject := "fix(gateway): correct the reclaim (fak gateway)"
+	if r.SuggestedSubject != wantSubject {
+		t.Fatalf("SuggestedSubject = %q, want %q", r.SuggestedSubject, wantSubject)
 	}
 }
 
@@ -172,6 +209,10 @@ func TestLintCommitMessage_laneMismatch(t *testing.T) {
 	}
 	if !hasIssueContaining(r, "stamp/path lane mismatch") {
 		t.Errorf("want mismatch issue, got %v", r.Issues)
+	}
+	wantSubject := "feat(policy): add a rule (fak policy)"
+	if r.SuggestedSubject != wantSubject {
+		t.Fatalf("SuggestedSubject = %q, want %q", r.SuggestedSubject, wantSubject)
 	}
 }
 

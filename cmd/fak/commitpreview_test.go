@@ -46,6 +46,42 @@ func TestRunCommitPreview_issuesIsExit1(t *testing.T) {
 	}
 }
 
+func TestRunCommitPreview_rendersSuggestedSubject(t *testing.T) {
+	tmp := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--preview", "--dir", tmp,
+		"-m", "feat(gateway): add x",
+		"--path", "internal/gateway/server.go",
+	})
+	if code != 1 {
+		t.Fatalf("want exit 1 for a missing stamp, got %d (out=%q err=%q)", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "suggested subject: feat(gateway): add x (fak gateway)") {
+		t.Fatalf("preview should render exact suggested subject, got %q", out.String())
+	}
+}
+
+func TestRunCommitPreview_multiLaneDoesNotGuessSuggestedSubject(t *testing.T) {
+	tmp := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--preview", "--dir", tmp,
+		"-m", "feat(kernel): add cross-lane routing",
+		"--path", "internal/gateway/server.go",
+		"--path", "internal/policy/rules.go",
+	})
+	if code != 1 {
+		t.Fatalf("want exit 1 for a missing stamp, got %d (out=%q err=%q)", code, out.String(), errb.String())
+	}
+	if strings.Contains(out.String(), "suggested subject:") {
+		t.Fatalf("multi-lane preview must not guess a suggested subject, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "choose the primary leaf") {
+		t.Fatalf("multi-lane preview should ask for the primary leaf, got %q", out.String())
+	}
+}
+
 func TestRunCommitPreview_noMessageIsExit2(t *testing.T) {
 	tmp := t.TempDir()
 	var out, errb bytes.Buffer

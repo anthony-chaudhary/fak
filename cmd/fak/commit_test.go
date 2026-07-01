@@ -52,6 +52,55 @@ func TestRunCommit_dashMAndDashFAreExclusive(t *testing.T) {
 	}
 }
 
+func TestRunCommit_derivesMissingSingleLaneStamp(t *testing.T) {
+	tmp := t.TempDir()
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: o.Paths}, nil
+	})
+
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--dir", tmp,
+		"--path", "internal/gateway/server.go",
+		"-m", "feat(gateway): add stamp derivation\n\nBody stays here.",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+	if !strings.HasPrefix(got.Message, "feat(gateway): add stamp derivation (fak gateway)") {
+		t.Fatalf("commit message did not get derived trailer: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "Body stays here.") {
+		t.Fatalf("commit body should be preserved, got %q", got.Message)
+	}
+}
+
+func TestRunCommit_multiLaneMissingStampDoesNotGuess(t *testing.T) {
+	tmp := t.TempDir()
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: o.Paths}, nil
+	})
+
+	const msg = "feat(kernel): add cross-lane routing"
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--dir", tmp,
+		"--path", "internal/gateway/server.go",
+		"--path", "internal/policy/rules.go",
+		"-m", msg,
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+	if got.Message != msg {
+		t.Fatalf("multi-lane path set should not guess a stamp, got %q", got.Message)
+	}
+}
+
 func TestRunCommitSubmit_jsonPersistsIntentWithoutGit(t *testing.T) {
 	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
 	var out, errb bytes.Buffer

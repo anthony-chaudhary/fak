@@ -40,23 +40,24 @@ var (
 // CommitLintReport is the structured verdict over a proposed commit (subject + the paths it
 // will touch). OK is true when nothing BLOCKING was found; Issues are blocking, Notes advisory.
 type CommitLintReport struct {
-	Subject        string   `json:"subject"`
-	Gradeable      bool     `json:"gradeable"`                 // CommitMsgVerdict ok (verb-led, conventional type)
-	GradeWhy       string   `json:"grade_why,omitempty"`       // why not, if !Gradeable
-	StampKind      string   `json:"stamp_kind"`                // "trailer" | "direct" | "release" | "exempt" | "none"
-	Leaf           string   `json:"leaf,omitempty"`            // the stamped <leaf>, "" if unstamped
-	LeafRecognized bool     `json:"leaf_recognized"`           // <leaf> is a declared dos.toml lane (or a real cmd/<leaf> demo)
-	PathLanes      []string `json:"path_lanes,omitempty"`      // the lanes the paths fall in (deduped, sorted)
-	LeafMatches    bool     `json:"leaf_matches"`              // <leaf> is an acceptable stamp for those lanes
-	SuggestTrailer string   `json:"suggest_trailer,omitempty"` // the trailer the paths imply, e.g. "(fak gateway)"
-	Score          int      `json:"score"`                     // 0-100 commit-readiness score; notes lower it, issues crater it
-	Grade          string   `json:"grade"`                     // A-F grade derived from Score
-	IssueRefs      []int    `json:"issue_refs,omitempty"`      // every #N referenced in the message (#312)
-	IssueResolving bool     `json:"issue_resolving"`           // a #N is in a resolving position the closure audit binds (#312)
-	Generation     string   `json:"generation,omitempty"`      // optional body sidecar: Generation: gen/now|gen/next|gen/second-next|gen/future
-	Issues         []string `json:"issues,omitempty"`          // BLOCKING defects, each with a fix
-	Notes          []string `json:"notes,omitempty"`           // advisory observations
-	OK             bool     `json:"ok"`                        // len(Issues)==0
+	Subject          string   `json:"subject"`
+	Gradeable        bool     `json:"gradeable"`                   // CommitMsgVerdict ok (verb-led, conventional type)
+	GradeWhy         string   `json:"grade_why,omitempty"`         // why not, if !Gradeable
+	StampKind        string   `json:"stamp_kind"`                  // "trailer" | "direct" | "release" | "exempt" | "none"
+	Leaf             string   `json:"leaf,omitempty"`              // the stamped <leaf>, "" if unstamped
+	LeafRecognized   bool     `json:"leaf_recognized"`             // <leaf> is a declared dos.toml lane (or a real cmd/<leaf> demo)
+	PathLanes        []string `json:"path_lanes,omitempty"`        // the lanes the paths fall in (deduped, sorted)
+	LeafMatches      bool     `json:"leaf_matches"`                // <leaf> is an acceptable stamp for those lanes
+	SuggestTrailer   string   `json:"suggest_trailer,omitempty"`   // the trailer the paths imply, e.g. "(fak gateway)"
+	SuggestedSubject string   `json:"suggested_subject,omitempty"` // the exact first line with the derived trailer applied, when unambiguous
+	Score            int      `json:"score"`                       // 0-100 commit-readiness score; notes lower it, issues crater it
+	Grade            string   `json:"grade"`                       // A-F grade derived from Score
+	IssueRefs        []int    `json:"issue_refs,omitempty"`        // every #N referenced in the message (#312)
+	IssueResolving   bool     `json:"issue_resolving"`             // a #N is in a resolving position the closure audit binds (#312)
+	Generation       string   `json:"generation,omitempty"`        // optional body sidecar: Generation: gen/now|gen/next|gen/second-next|gen/future
+	Issues           []string `json:"issues,omitempty"`            // BLOCKING defects, each with a fix
+	Notes            []string `json:"notes,omitempty"`             // advisory observations
+	OK               bool     `json:"ok"`                          // len(Issues)==0
 }
 
 // LintCommitMessage runs the pre-commit ship-stamp lint over a proposed commit message and the
@@ -120,6 +121,9 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			fix := "append a `(fak <leaf>)` trailer so `dos verify` can bind this commit to a unit of work"
 			if r.SuggestTrailer != "" {
 				fix = "append the trailer `" + r.SuggestTrailer + "` so `dos verify` can bind this commit to its leaf"
+				r.SuggestedSubject = appendTrailerToSubject(r.Subject, r.SuggestTrailer)
+			} else if len(r.PathLanes) > 1 {
+				fix = "paths span lanes `" + strings.Join(r.PathLanes, "`, `") + "`; choose the primary leaf and append its `(fak <leaf>)` trailer"
 			}
 			r.Issues = append(r.Issues, "no ship-stamp: "+fix)
 		}
@@ -141,6 +145,11 @@ func LintCommitMessageWithOptions(message string, paths []string, root string, r
 			fix := "the stamped leaf `" + r.Leaf + "` is not the lane these paths live in"
 			if r.SuggestTrailer != "" {
 				fix += " — these paths imply `" + r.SuggestTrailer + "`"
+				if r.StampKind == "trailer" {
+					r.SuggestedSubject = trailerLeafRE.ReplaceAllString(r.Subject, r.SuggestTrailer)
+				}
+			} else if len(r.PathLanes) > 1 {
+				fix += " — paths span lanes `" + strings.Join(r.PathLanes, "`, `") + "`; choose the primary leaf instead of guessing"
 			}
 			r.Issues = append(r.Issues, "stamp/path lane mismatch: "+fix)
 		}
@@ -492,17 +501,23 @@ func nearestLane(leaf string, tax laneTaxonomy) string {
 	return ""
 }
 
-// suggestTrailer renders the trailer the paths imply: a single lane -> "(fak <lane>)"; several ->
-// the first with a note that the commit spans lanes. "" when no lane is known.
+// suggestTrailer renders the trailer the paths imply when the path set is unambiguous:
+// a single lane -> "(fak <lane>)"; zero or several lanes -> "" so callers do not guess.
 func suggestTrailer(pathLanes []string) string {
 	switch len(pathLanes) {
-	case 0:
-		return ""
 	case 1:
 		return "(fak " + pathLanes[0] + ")"
 	default:
-		return "(fak " + pathLanes[0] + ")  [paths span lanes: " + strings.Join(pathLanes, ", ") + " — stamp the primary]"
+		return ""
 	}
+}
+
+func appendTrailerToSubject(subject, trailer string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" || trailer == "" {
+		return subject
+	}
+	return subject + " " + trailer
 }
 
 // fixWantsSymptomWitness returns a non-empty advisory when a `fix(...)` commit touches Go

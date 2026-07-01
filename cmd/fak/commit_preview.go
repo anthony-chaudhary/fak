@@ -81,7 +81,9 @@ func renderPreview(w io.Writer, r hooks.CommitLintReport, expectedBranch string)
 	for _, n := range r.Notes {
 		fmt.Fprintf(w, "  · %s\n", n)
 	}
-	if !r.OK && r.SuggestTrailer != "" {
+	if !r.OK && r.SuggestedSubject != "" {
+		fmt.Fprintf(w, "  → suggested subject: %s\n", r.SuggestedSubject)
+	} else if !r.OK && r.SuggestTrailer != "" {
 		fmt.Fprintf(w, "  → suggested trailer: %s\n", r.SuggestTrailer)
 	}
 }
