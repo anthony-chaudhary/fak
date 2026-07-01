@@ -20,6 +20,7 @@ type dispatchWavePrice struct {
 	ActionReason         string                            `json:"action_reason"`
 	Requested            int                               `json:"requested"`
 	Granted              int                               `json:"granted"`
+	EffectiveCap         int                               `json:"effective_cap"`
 	CandidateCount       int                               `json:"candidate_count"`
 	CandidateStepBudget  int                               `json:"candidate_step_budget,omitempty"`
 	ScopedCount          int                               `json:"scoped_count"`
@@ -47,6 +48,8 @@ type dispatchWavePrice struct {
 	CollisionWavePenalty int                               `json:"collision_wave_penalty"`
 	ExpectedRework       int                               `json:"expected_rework"`
 }
+
+const dispatchWaveReasonWaveCap = "wave-cap"
 
 type dispatchWaveCandidate struct {
 	ID           string                    `json:"id"`
@@ -410,10 +413,10 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 			cand.Issue = issueByLane[cand.Lane]
 		}
 		cand.Disposition = row.Disposition
-		cand.Reason = row.Reason
 		cand.CollidesWith = append([]string(nil), row.CollidesWith...)
 		cand.Rank = row.Rank
 		cand.Selected = selected[row.ID]
+		cand.Reason = dispatchWaveCandidateReason(row, cand.Selected)
 		rows = append(rows, cand)
 		if cand.Selected {
 			runTargets = append(runTargets, cand)
@@ -445,6 +448,7 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		ActionReason:         actionReason,
 		Requested:            requested,
 		Granted:              granted,
+		EffectiveCap:         len(runTargets),
 		CandidateCount:       len(cands),
 		CandidateStepBudget:  candidateStepBudget,
 		ScopedCount:          scopedCount,
@@ -472,6 +476,13 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 		CollisionWavePenalty: positiveDelta(len(waves), laneSerialWaves),
 		ExpectedRework:       res.CollisionsAvoided + res.SerializationWasted,
 	}, nil
+}
+
+func dispatchWaveCandidateReason(row dispatchorder.Ranked, selected bool) string {
+	if row.Disposition == dispatchorder.DispKeep && !selected {
+		return dispatchWaveReasonWaveCap
+	}
+	return row.Reason
 }
 
 func dispatchWaveAction(candidates, run, collisions, wasted int) (string, string) {
@@ -874,16 +885,67 @@ func renderDispatchWave(rec map[string]any) string {
 		fmt.Fprintf(&b, "  stop: %s\n", reason)
 	}
 	if price, ok := rec["price"].(dispatchWavePrice); ok {
-		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
+		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s effective_cap=%d run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
 			price.Action,
-			strings.Join(price.RunLanes, ","), price.RunStepBudget, price.CandidateStepBudget, price.CollisionsAvoided, price.LanesUtilized,
+			strings.Join(price.RunLanes, ","), price.EffectiveCap, price.RunStepBudget, price.CandidateStepBudget, price.CollisionsAvoided, price.LanesUtilized,
 			price.SerializationWasted, price.SafeConcurrency, price.SafeConcurrencyPct,
 			price.ScopeCoveragePct, price.SameLaneParallelism, len(price.Repartition))
+		if len(price.RunTargets) > 0 {
+			fmt.Fprintln(&b, "  selected_targets:")
+			for _, target := range price.RunTargets {
+				fmt.Fprintf(&b, "    rank=%d issue=%s lane=%s lease=%s scope=%s steps=%d reason=%s\n",
+					target.Rank, dispatchWaveIssueLabel(target), target.Lane, target.LeaseID,
+					dispatchWaveScopeLabel(target), target.StepBudget, target.Reason)
+			}
+		}
+		if skipped := dispatchWaveSkippedCandidates(price.Candidates); len(skipped) > 0 {
+			fmt.Fprintln(&b, "  skipped_candidates:")
+			for _, cand := range skipped {
+				fmt.Fprintf(&b, "    rank=%d issue=%s lane=%s disposition=%s reason=%s collides=%s\n",
+					cand.Rank, dispatchWaveIssueLabel(cand), cand.Lane, cand.Disposition, cand.Reason,
+					dispatchWaveCollisionLabel(cand.CollidesWith))
+			}
+		}
 	}
 	if !dispatchMapBool(rec, "live") {
 		fmt.Fprintln(&b, "  (dry-run - re-run with --live to spawn the wave)")
 	}
 	return b.String()
+}
+
+func dispatchWaveSkippedCandidates(candidates []dispatchWaveCandidate) []dispatchWaveCandidate {
+	out := make([]dispatchWaveCandidate, 0, len(candidates))
+	for _, cand := range candidates {
+		if !cand.Selected {
+			out = append(out, cand)
+		}
+	}
+	return out
+}
+
+func dispatchWaveIssueLabel(cand dispatchWaveCandidate) string {
+	if cand.Issue <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("#%d", cand.Issue)
+}
+
+func dispatchWaveScopeLabel(cand dispatchWaveCandidate) string {
+	switch {
+	case len(cand.Tree) == 0:
+		return "unknown"
+	case cand.Scoped:
+		return "issue"
+	default:
+		return "lane"
+	}
+}
+
+func dispatchWaveCollisionLabel(ids []string) string {
+	if len(ids) == 0 {
+		return "-"
+	}
+	return strings.Join(ids, ",")
 }
 
 func accountFromWaveLane(m dispatchtick.AccountWaveLane) dispatchtick.Account {

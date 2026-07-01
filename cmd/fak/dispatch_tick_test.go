@@ -900,6 +900,97 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	}
 }
 
+func TestDispatchWavePlannerSelectsNextFiveNonCollidingIssues(t *testing.T) {
+	router := dispatchtick.RouterPayload{
+		Schema: dispatchtick.RouterSchema,
+		OK:     true,
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"bench":   {Tree: []string{"internal/bench/**"}, Issues: []int{105}, Count: 1},
+			"docs":    {Tree: []string{"docs/**"}, Issues: []int{101, 90}, Count: 2},
+			"gateway": {Tree: []string{"internal/gateway/**"}, Issues: []int{102}, Count: 1},
+			"model":   {Tree: []string{"internal/model/**"}, Issues: []int{103}, Count: 1},
+			"policy":  {Tree: []string{"internal/policy/**"}, Issues: []int{104}, Count: 1},
+		},
+		Issues: []dispatchtick.IssueRoute{
+			{Number: 101, Title: "docs alpha", Lane: "docs", Confidence: "path-confirmed", Paths: []string{"docs/alpha.md"}},
+			{Number: 102, Title: "gateway http", Lane: "gateway", Confidence: "path-confirmed", Paths: []string{"internal/gateway/http.go"}},
+			{Number: 103, Title: "model planner", Lane: "model", Confidence: "path-confirmed", Paths: []string{"internal/model/planner.go"}},
+			{Number: 104, Title: "policy rules", Lane: "policy", Confidence: "path-confirmed", Paths: []string{"internal/policy/rules.go"}},
+			{Number: 105, Title: "bench run", Lane: "bench", Confidence: "path-confirmed", Paths: []string{"internal/bench/run.go"}},
+			{Number: 90, Title: "older docs alpha", Lane: "docs", Confidence: "path-confirmed", Paths: []string{"docs/alpha.md"}},
+		},
+	}
+
+	price, err := priceDispatchWavePayload(t.TempDir(), router, 5, 5, "", nil, 0)
+	if err != nil {
+		t.Fatalf("priceDispatchWavePayload: %v", err)
+	}
+	if price.EffectiveCap != 5 || len(price.RunTargets) != 5 || price.SafeConcurrency != 5 {
+		t.Fatalf("wave cap/run/safe = %d/%d/%d, want 5/5/5; price=%+v",
+			price.EffectiveCap, len(price.RunTargets), price.SafeConcurrency, price)
+	}
+
+	selected := map[int]dispatchWaveCandidate{}
+	for _, target := range price.RunTargets {
+		selected[target.Issue] = target
+		if !target.Selected || !target.Scoped || len(target.Tree) != 1 {
+			t.Fatalf("run target = %+v, want selected issue-scoped one-path target", target)
+		}
+	}
+	for _, want := range []int{101, 102, 103, 104, 105} {
+		if _, ok := selected[want]; !ok {
+			t.Fatalf("selected issues = %#v, missing #%d", selected, want)
+		}
+	}
+	if _, ok := selected[90]; ok {
+		t.Fatalf("selected colliding older issue #90: %#v", selected[90])
+	}
+	for a, left := range price.RunTargets {
+		for b, right := range price.RunTargets {
+			if a >= b {
+				continue
+			}
+			if dispatchorder.TreesOverlap(left.Tree, right.Tree) {
+				t.Fatalf("selected targets overlap: %+v and %+v", left, right)
+			}
+		}
+	}
+
+	var skipped dispatchWaveCandidate
+	for _, cand := range price.Candidates {
+		if cand.Issue == 90 {
+			skipped = cand
+			break
+		}
+	}
+	if skipped.Issue != 90 || skipped.Selected || skipped.Reason != dispatchorder.ReasonCollisionRisk {
+		t.Fatalf("skipped #90 = %+v, want unselected collision-risk candidate", skipped)
+	}
+
+	out := renderDispatchWave(map[string]any{
+		"live":      false,
+		"requested": 5,
+		"granted":   5,
+		"spawned":   0,
+		"backend":   "claude",
+		"price":     price,
+		"ok":        true,
+	})
+	for _, want := range []string{
+		"effective_cap=5",
+		"selected_targets:",
+		"issue=#105 lane=bench",
+		"issue=#101 lane=docs",
+		"skipped_candidates:",
+		"issue=#90 lane=docs",
+		"reason=COLLISION_RISK",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered planner missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestDispatchWavePriceUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	router := dispatchtick.RouterPayload{
 		Schema: dispatchtick.RouterSchema,
