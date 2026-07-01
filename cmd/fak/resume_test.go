@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,105 @@ func TestResumeValidateJSON(t *testing.T) {
 	}
 	if rep.Pairs != 2 || rep.Scored != 2 || rep.Agree != 2 || rep.Accuracy != 1.0 || rep.ConfirmedCold != 1 {
 		t.Errorf("got %+v, want pairs/scored/agree=2, accuracy=1.0, confirmedCold=1", rep)
+	}
+}
+
+// TestResumeValidateTTLCalibrationJSON is the #1614 witness: --json's ttl_calibration field
+// is the vcachecal.CalibrateResumeTTL verdict fit from the SAME back-test gap buckets, not a
+// hardcoded/assumed constant. On the small agreeing fixture there is too little evidence per
+// bucket to refute the 5m assumption, so the verdict reports calibrated (no evidence) rather
+// than fabricating a miscalibration from two boundaries.
+func TestResumeValidateTTLCalibrationJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), []byte(backtestCorpusFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runResumeAt("validate", "--corpus", dir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var rep struct {
+		TTLCalibration struct {
+			AssumedTTLMillis int64  `json:"assumed_ttl_millis"`
+			N                int    `json:"n"`
+			WellCalibrated   bool   `json:"well_calibrated"`
+			Reason           string `json:"reason"`
+		} `json:"ttl_calibration"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if rep.TTLCalibration.AssumedTTLMillis != 300_000 {
+		t.Errorf("assumed_ttl_millis = %d, want 300000 (the 5m default TTL)", rep.TTLCalibration.AssumedTTLMillis)
+	}
+	if rep.TTLCalibration.N != 2 {
+		t.Errorf("ttl_calibration.n = %d, want 2 (the two scored boundaries)", rep.TTLCalibration.N)
+	}
+	if !rep.TTLCalibration.WellCalibrated {
+		t.Errorf("want well_calibrated=true on too little evidence to refute the assumption, got reason=%q", rep.TTLCalibration.Reason)
+	}
+	// The human table surfaces the same calibration verdict.
+	tout, _, _ := runResumeAt("validate", "--corpus", dir)
+	if !strings.Contains(tout, "TTL calibration") {
+		t.Errorf("table missing the TTL calibration section:\n%s", tout)
+	}
+}
+
+// resumeTTLTooShortFixture packs enough resumes past the 5m (300s) TTL that still come back
+// warm to trip the ReasonTTLTooShort verdict: five sessions, each a 400s-idle pair (past the
+// 300s TTL, inside the [300,900) bucket) whose second turn fully re-serves the prior prefix.
+func resumeTTLTooShortFixture(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-06-26T10:00:00Z","message":{"role":"assistant","usage":{"input_tokens":2,"cache_read_input_tokens":0,"cache_creation_input_tokens":19000,"output_tokens":100}}}`+"\n")
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-06-26T10:06:40Z","message":{"role":"assistant","usage":{"input_tokens":2,"cache_read_input_tokens":19000,"cache_creation_input_tokens":100,"output_tokens":100}}}`+"\n")
+	}
+	return b.String()
+}
+
+// TestResumeValidateTTLCalibrationFlagsTooShort feeds enough real-shaped past-TTL warm resumes
+// (n=6 >= vcachecal.MinCalibrationSamples) that the provider is visibly holding the prefix past
+// the assumed 300s TTL — the calibration verdict must flag it (ttl_too_short) and suggest a
+// revision fit from the same evidence, never silently agree with a stale assumption.
+func TestResumeValidateTTLCalibrationFlagsTooShort(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 6; i++ {
+		name := filepath.Join(dir, fmt.Sprintf("s%d.jsonl", i))
+		if err := os.WriteFile(name, []byte(resumeTTLTooShortFixture(1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, errb, code := runResumeAt("validate", "--corpus", dir, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var rep struct {
+		TTLCalibration struct {
+			WellCalibrated     bool   `json:"well_calibrated"`
+			Reason             string `json:"reason"`
+			SuggestedTTLMillis int64  `json:"suggested_ttl_millis"`
+			PastTTLN           int    `json:"past_ttl_n"`
+		} `json:"ttl_calibration"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if rep.TTLCalibration.WellCalibrated || rep.TTLCalibration.Reason != "ttl_too_short" {
+		t.Fatalf("got well_calibrated=%v reason=%q, want false/ttl_too_short (6 past-TTL warm resumes): %+v",
+			rep.TTLCalibration.WellCalibrated, rep.TTLCalibration.Reason, rep.TTLCalibration)
+	}
+	if rep.TTLCalibration.SuggestedTTLMillis <= 300_000 {
+		t.Errorf("suggested_ttl_millis = %d, want > 300000 (a widened TTL fit from the observed warm resumes)", rep.TTLCalibration.SuggestedTTLMillis)
+	}
+	if rep.TTLCalibration.PastTTLN < 5 {
+		t.Errorf("past_ttl_n = %d, want >= 5 (MinCalibrationSamples)", rep.TTLCalibration.PastTTLN)
+	}
+	tout, _, _ := runResumeAt("validate", "--corpus", dir)
+	if !strings.Contains(tout, "MISCALIBRATED") {
+		t.Errorf("table missing the MISCALIBRATED verdict:\n%s", tout)
+	}
+	if !strings.Contains(tout, "suggested TTL") {
+		t.Errorf("table missing the suggested TTL line:\n%s", tout)
 	}
 }
 

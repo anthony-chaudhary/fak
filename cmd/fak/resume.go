@@ -33,6 +33,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionimage"
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 )
 
 // cmdResume is the `fak resume` entry point; it maps the testable core's exit code to the
@@ -397,11 +398,65 @@ func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	rep := resume.Backtest(sessions, ttl, resume.DefaultRecoveryBand())
+	cal := vcachecal.CalibrateResumeTTL(gapBucketsToResumeBuckets(rep.Buckets), rep.TTLSeconds*1000)
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, rep, "fak resume validate")
+		out := resumeValidateReport{BacktestReport: rep, TTLCalibration: cal}
+		return encodeJSONOrFail(stdout, stderr, out, "fak resume validate")
 	}
 	renderBacktestReport(stdout, rep, scanned, len(sessions))
+	renderTTLCalibration(stdout, cal)
 	return 0
+}
+
+// resumeValidateReport is the `fak resume validate --json` envelope: the back-test residual
+// (internal/resume.Backtest) PLUS the #1614 TTL-calibration verdict fit from the SAME gap
+// buckets — whether the provider TTL the back-test assumed is well-calibrated against real
+// resume timing, and a suggested revision when it is not. BacktestReport is embedded (not
+// nested under its own key) so every existing consumer of the flat report shape keeps working
+// unchanged; TTLCalibration is purely additive.
+type resumeValidateReport struct {
+	resume.BacktestReport
+	TTLCalibration vcachecal.TTLCalibrationVerdict `json:"ttl_calibration"`
+}
+
+// gapBucketsToResumeBuckets adapts internal/resume's gap-bucketed back-test tallies into the
+// generic vcachecal.ResumeGapBucket shape the calibration fold consumes. This is the seam
+// vcacheobserve already uses to bridge vcachecal.Calibration against real provider telemetry
+// (contextjoin.go) — resume (tier 1) cannot import vcachecal (tier 2), so the join happens
+// here, in the tier-4 shell that already imports both.
+func gapBucketsToResumeBuckets(buckets []resume.GapBucket) []vcachecal.ResumeGapBucket {
+	out := make([]vcachecal.ResumeGapBucket, 0, len(buckets))
+	for _, b := range buckets {
+		out = append(out, vcachecal.ResumeGapBucket{
+			LoSeconds: b.LoSeconds,
+			HiSeconds: b.HiSeconds,
+			WarmN:     b.WarmN,
+			ColdN:     b.ColdN,
+		})
+	}
+	return out
+}
+
+// renderTTLCalibration prints the #1614 verdict: whether the provider TTL the back-test
+// assumed is well-calibrated against real resume timing, and — when it is not — the closed
+// reason plus a suggested revision fit from the SAME evidence, never auto-applied.
+func renderTTLCalibration(w io.Writer, v vcachecal.TTLCalibrationVerdict) {
+	fmt.Fprintf(w, "\nTTL calibration (assumed %dms against %d real resume(s)):\n", v.AssumedTTLMillis, v.N)
+	verdict := "WELL-CALIBRATED"
+	if !v.WellCalibrated {
+		verdict = "MISCALIBRATED"
+	}
+	fmt.Fprintf(w, "  %s (%s)\n", verdict, v.Reason)
+	if v.WithinTTLN > 0 {
+		fmt.Fprintf(w, "  within-TTL warm rate: %.1f%% (n=%d)\n", v.WithinTTLWarmRate*100, v.WithinTTLN)
+	}
+	if v.PastTTLN > 0 {
+		fmt.Fprintf(w, "  past-TTL warm rate:   %.1f%% (n=%d)\n", v.PastTTLWarmRate*100, v.PastTTLN)
+	}
+	if v.SuggestedTTLMillis > 0 {
+		fmt.Fprintf(w, "  suggested TTL: %dms (%ds) — fit from the widest reliably-warm observed bucket, not auto-applied\n",
+			v.SuggestedTTLMillis, v.SuggestedTTLMillis/1000)
+	}
 }
 
 // findTranscripts walks a corpus directory and returns every .jsonl file under it (sorted, so
