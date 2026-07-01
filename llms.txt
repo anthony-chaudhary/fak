@@ -70,6 +70,7 @@
 - [Guided tutorial](docs/fak/tutorial.md): zero to first adjudicated tool call, with real output at every step.
 - [Learning path](LEARNING-PATH.md): a prerequisite-ordered course catalog — 98 courses across six levels (100→600). Find the row that matches your background, then walk every concept in dependency order. The course readings are the docs below; the path is the order to read them in.
 - [FAQ](docs/FAQ.md): direct answers to common questions (what is fak, how it differs from a firewall/guardrails/vLLM, threat model, prompt-injection handling).
+- [Localized entry points (i18n)](docs/i18n/README.md): in-language front doors — [हिन्दी / Hindi](docs/i18n/hi/README.md) and [简体中文 / Simplified Chinese](docs/i18n/zh/README.md) — each carrying the pitch, the 60-second proof, install, and the market-specific value props (cost, DPDP/PIPL data residency, domestic-model fit, `GOPROXY` onboarding) before handing off to the English docs. Go-to-market rationale in the [emerging-market adoption note](docs/notes/CONCEPT-EMERGING-MARKET-ADOPTION-2026-06-30.md).
 - [Operator & integrator docs index](docs/fak/README.md): the hub for the `fak serve` doc set — install, run the gateway, author policy, integrate agents, and deploy.
 - [Operator FAQ](docs/fak/faq.md): operator-grade answers — what fail-closed and quarantine mean, how fak compares to vLLM/LangChain/E2B, how to debug a denied call, and the explicit limits.
 
