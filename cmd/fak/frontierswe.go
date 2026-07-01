@@ -52,6 +52,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 		return runFrontiersweDescribe(stdout, stderr, rest)
 	case "cache-witness":
 		return runFrontiersweCacheWitness(stdout, stderr, rest)
+	case "env-adapter", "environment":
+		return runFrontiersweEnvAdapter(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		frontiersweUsage(stdout)
 		return 0
@@ -92,6 +94,15 @@ usage:
         WITNESSED; the provider cache_read is OBSERVED — kept separate, never summed.
         --metrics-dir / --metrics-files fold captured bodies offline (RUNNABLE NOW,
         no gateway); --gateway live-scrapes a co-resident gateway (needs C7).
+
+  fak frontierswe env-adapter [--tasks DIR] [--task NAME] [--json] [--out FILE]
+                              [--gateway-base-url URL] [--gateway-addr HOST:PORT]
+                              [--upstream-base-url URL] [--pinned-hosts A,B]
+        Emit the C7 co-resident environment adapter recipe: start fak serve inside
+        the FrontierSWE task sandbox, wait on /healthz before turn 1, smoke one
+        chat-completions request through the same /v1 base URL the C6 shim uses,
+        then exec the FrontierSWE harness. If this host lacks Docker/GHCR/Modal,
+        the result is honestly GATED and prints the exact remote command.
 `)
 }
 
