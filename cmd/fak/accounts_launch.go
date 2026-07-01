@@ -38,6 +38,7 @@ type launchOpts struct {
 	useGuard        bool     // wrap the agent in `fak guard` (kernel adjudication + vCache)
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
+	model           string   // pass --model <id> to Claude (default Opus 4.8); empty => the seat's own default
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
@@ -47,6 +48,14 @@ type launchOpts struct {
 // Claude Code models the mode) — it must be handed per-launch via --settings. buildLaunchArgv
 // only emits it for Claude, since --settings is Claude-specific.
 const ultracodeSettingsArg = `{"ultracode":true}`
+
+// defaultLaunchModel is the model an account-switched Claude launch pins by default: Opus 4.8,
+// the frontier Claude coding model. The switcher passes it explicitly via --model so every seat a
+// launch lands on starts on Opus 4.8 regardless of that seat's OWN saved default — the account you
+// switch to should not silently drop you onto whatever model it last saved. `--model ""` opts out
+// and lets the seat's saved default stand. Like ultracode it is emitted for Claude only: --model
+// is a Claude-specific flag and the id names a Claude model, meaningless to other agents.
+const defaultLaunchModel = "claude-opus-4-8"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
@@ -88,6 +97,16 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 			agentCmd = append(agentCmd, flag)
 		}
 	}
+	// Default model (Opus 4.8) is Claude-specific and gated exactly as ultracode is: --model is a
+	// Claude flag and the id names a Claude model, so only a Claude launch gets it. An empty model
+	// opts out (launch with the seat's own saved default). It is emitted BEFORE --settings and any
+	// passthrough, so an explicit `-- --model <x>` a caller adds after `--` still comes later.
+	if o.model != "" {
+		switch guardAgentBaseName(o.command) {
+		case "claude", "claude-code":
+			agentCmd = append(agentCmd, "--model", o.model)
+		}
+	}
 	// Ultracode (workflow mode) is Claude-only and session-only: emit --settings for a Claude
 	// launch so a fak launch defaults to the same workflow-on posture the `f` shortcut sets.
 	// Gated on the agent being Claude exactly as launchSkipPermsFlag gates, since --settings is
@@ -117,11 +136,12 @@ type launchParams struct {
 	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
 	rotate       bool
 	after        string
-	useHeadroom  bool // default true — order the rotation by the live runtime headroom signal
-	useGuard     bool // default true
-	skipPerms    bool // default true
-	ultracode    bool // default true — put Claude in ultracode (workflow) mode via --settings
-	dryRun       bool // print the plan, do not exec
+	useHeadroom  bool   // default true — order the rotation by the live runtime headroom signal
+	useGuard     bool   // default true
+	skipPerms    bool   // default true
+	ultracode    bool   // default true — put Claude in ultracode (workflow) mode via --settings
+	model        string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
+	dryRun       bool   // print the plan, do not exec
 	passthrough  []string
 	registryPath string
 	homeDir      string
@@ -223,6 +243,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		useGuard:        p.useGuard,
 		skipPermissions: p.skipPerms,
 		ultracode:       p.ultracode,
+		model:           p.model,
 		passthrough:     p.passthrough,
 	})
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
@@ -254,9 +275,19 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 			ultracodeWord = fmt.Sprintf("n/a (%s is not Claude; --settings not applied)", command)
 		}
 	}
+	modelWord := "seat default (--model '')"
+	if strings.TrimSpace(p.model) != "" {
+		switch guardAgentBaseName(command) {
+		case "claude", "claude-code":
+			modelWord = p.model
+		default:
+			modelWord = fmt.Sprintf("n/a (%s is not Claude; --model not applied)", command)
+		}
+	}
 	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
 	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
+	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(argv, " "))
 
 	if p.dryRun {

@@ -88,6 +88,33 @@ func TestBuildLaunchArgv(t *testing.T) {
 			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, ultracode: true},
 			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
 		},
+		{
+			// The default model (Opus 4.8) is pinned via --model for a Claude launch, after the
+			// bypass flag and before ultracode's --settings — so a switched seat starts on Opus
+			// 4.8 regardless of its own saved default.
+			name: "claude default model adds --model after the bypass flag",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, model: defaultLaunchModel},
+			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel},
+		},
+		{
+			// --model precedes --settings, and both precede any passthrough — so a caller's own
+			// `-- --model x` still comes later.
+			name: "claude model + ultracode order: --model then --settings then passthrough",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true, model: defaultLaunchModel, passthrough: []string{"--model", "sonnet"}},
+			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", `{"ultracode":true}`, "--model", "sonnet"},
+		},
+		{
+			// An empty model opts out: the seat's own saved default stands (no --model emitted).
+			name: "claude empty model omits --model",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, model: ""},
+			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions"},
+		},
+		{
+			// --model is Claude-specific: a Claude model id is never handed to a non-Claude agent.
+			name: "codex model gets no --model",
+			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, model: defaultLaunchModel},
+			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,7 +185,9 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 		"CLAUDE_CONFIG_DIR = " + seat,
 		"login             = ready (can_serve=true)",
 		"guard             = on",
+		"model             = " + defaultLaunchModel,
 		"--dangerously-skip-permissions",
+		"--model " + defaultLaunchModel,
 		"dry-run",
 	} {
 		if !strings.Contains(gotErr, want) {
@@ -169,6 +198,33 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	gotOut := strings.TrimSpace(out.String())
 	if !strings.Contains(gotOut, "guard -- claude --dangerously-skip-permissions") {
 		t.Fatalf("dry-run stdout command = %q", gotOut)
+	}
+}
+
+// TestRunAccountsLaunchModelOptOut pins the opt-out: `--model ""` launches with the seat's own
+// saved default (no --model handed to Claude), while the default pins Opus 4.8.
+func TestRunAccountsLaunchModelOptOut(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	var gotArgv []string
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+		gotArgv = argv
+		return 0
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--model", "", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch --model '' rc=%d stderr=%s", rc, errb.String())
+	}
+	if joined := strings.Join(gotArgv, " "); strings.Contains(joined, "--model") {
+		t.Fatalf("--model '' should omit --model, got argv %q", joined)
+	}
+	if !strings.Contains(errb.String(), "model             = seat default") {
+		t.Fatalf("launch plan should note the seat-default model:\n%s", errb.String())
 	}
 }
 
@@ -194,7 +250,7 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 		t.Fatalf("argv not a guard wrap: %#v", gotArgv)
 	}
 	joined := strings.Join(gotArgv, " ")
-	wantTail := "claude --dangerously-skip-permissions --settings " + ultracodeSettingsArg + " --resume xyz"
+	wantTail := "claude --dangerously-skip-permissions --model " + defaultLaunchModel + " --settings " + ultracodeSettingsArg + " --resume xyz"
 	if !strings.HasSuffix(joined, wantTail) {
 		t.Fatalf("argv tail wrong: %q", joined)
 	}
@@ -277,7 +333,7 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("launch --guard=false rc=%d stderr=%s", rc, errb.String())
 	}
-	want := []string{"claude", "--dangerously-skip-permissions", "--settings", ultracodeSettingsArg}
+	want := []string{"claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel, "--settings", ultracodeSettingsArg}
 	if !reflect.DeepEqual(gotArgv, want) {
 		t.Fatalf("direct launch argv = %#v, want %#v", gotArgv, want)
 	}
