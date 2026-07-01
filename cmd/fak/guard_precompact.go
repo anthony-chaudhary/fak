@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 const (
@@ -209,15 +210,20 @@ func normalizeGuardPreCompactMode(mode string) (string, error) {
 	}
 }
 
+// guardPreCompactIsClaudeCommand reports whether the wrapped agent takes the `settings-file`
+// repoint — the `--settings` PreCompact/Stop hooks and `--mcp-config` self-query registration,
+// all Claude-shaped. It now delegates to the profile registry (C3, #1954): a harness gets
+// settings-file iff its HarnessProfile declares RepointSettingsFile, which today is exactly the
+// claude profile. So the settings/MCP installers are still inert for every non-Claude agent, but
+// the SELECTION is data (profile.Repoint) rather than a hardcoded name check. Delegating to
+// harnessprofile.Lookup also makes the match cross-platform (a Windows-path launcher on a Linux
+// runner now matches, where filepath.Base did not) — a latent-bug fix, not a behavior the tested
+// paths relied on.
 func guardPreCompactIsClaudeCommand(command []string) bool {
 	if len(command) == 0 {
 		return false
 	}
-	base := strings.ToLower(filepath.Base(command[0]))
-	for _, suffix := range []string{".exe", ".cmd", ".bat", ".ps1"} {
-		base = strings.TrimSuffix(base, suffix)
-	}
-	return base == "claude" || base == "claude-code"
+	return guardProfileHasRepoint(command[0], harnessprofile.RepointSettingsFile)
 }
 
 func guardPreCompactMetricsURLFromBase(base string) string {

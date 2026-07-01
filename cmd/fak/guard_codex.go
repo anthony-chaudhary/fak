@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 // guard_codex.go — the first-class `fak guard -- codex` wiring. It is the OpenAI-Codex
@@ -42,13 +44,15 @@ const guardCodexProviderID = "fak"
 // already exports OPENAI_API_KEY for Codex keeps working with the kernel in front.
 const guardCodexDefaultEnvKey = "OPENAI_API_KEY"
 
-// guardIsCodex reports whether the wrapped agent is the OpenAI Codex CLI, matched on the
-// executable's normalized base name (so an absolute path or a Windows launcher suffix still
-// matches). It is the gate for installGuardCodexConfig: the `-c` override syntax is
-// Codex-specific, so it must never be appended to any other agent's argv — `fak guard
-// --provider openai-responses -- some-other-agent` gets the wire but not the Codex flags.
+// guardIsCodex reports whether the wrapped agent takes the Codex `cli-config` repoint — the
+// `-c model_providers.fak.*` overrides installGuardCodexConfig prepends. It now delegates to
+// the profile registry (C3, #1954): a harness gets cli-config iff its HarnessProfile declares
+// RepointCLIConfig, which today is exactly the codex profile. So the `-c` override syntax is
+// still never appended to any other agent's argv, but the SELECTION is data (profile.Repoint),
+// not a hardcoded base-name check — matching on the same normalization as before
+// (harnessprofile.Lookup ports guardAgentBaseName).
 func guardIsCodex(command string) bool {
-	return guardAgentBaseName(command) == "codex"
+	return guardProfileHasRepoint(command, harnessprofile.RepointCLIConfig)
 }
 
 // guardCodexInstall records what the Codex config injection did, for the banner and tests.
