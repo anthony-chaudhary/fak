@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func boolPtr(v bool) *bool { return &v }
 
@@ -82,6 +85,28 @@ func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
 	}
 	if got.WaveID == "" || got.Lanes[0].WaveID != got.WaveID {
 		t.Fatalf("wave id not stamped consistently: %+v", got)
+	}
+}
+
+func TestAllocateWaveRefusesExtrasInsteadOfDoubleBookingSeats(t *testing.T) {
+	rows := []AccountRow{
+		{Account: ".claude-seat-a", Tag: "seat-a", Product: "claude", Dir: "C:/seats/a", AccountUUID: "acct-a", Available: true, ModelTier: 1},
+		{Account: ".claude-seat-a-copy", Tag: "seat-a-copy", Product: "claude", Dir: "C:/seats/a-copy", AccountUUID: "acct-a", Available: true, ModelTier: 1},
+		{Account: ".claude-seat-b", Tag: "seat-b", Product: "claude", Dir: "C:/seats/b", AccountUUID: "acct-b", Available: true, ModelTier: 1},
+	}
+	got := AllocateWave(AccountWaveInput{Rows: rows, Count: 3, Product: "claude", WorkKind: "engineering"})
+	if !got.OK || got.Requested != 3 || got.Granted != 2 || got.Shortfall != 1 || got.DistinctPools != 2 {
+		t.Fatalf("wave = %+v, want requested=3 granted=2 shortfall=1 distinct_pools=2", got)
+	}
+	seenPools := map[string]bool{}
+	for _, lane := range got.Lanes {
+		if seenPools[lane.Pool] {
+			t.Fatalf("pool %q was assigned twice in one wave: %+v", lane.Pool, got.Lanes)
+		}
+		seenPools[lane.Pool] = true
+	}
+	if !strings.Contains(got.Reason, "granted 2 of 3 distinct pools") || !strings.Contains(got.Reason, "1 short") {
+		t.Fatalf("reason = %q, want explicit capacity shortfall", got.Reason)
 	}
 }
 
