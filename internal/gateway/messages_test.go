@@ -230,6 +230,61 @@ func TestAnthropicMessagesVerbatimRepeatSteers(t *testing.T) {
 	}
 }
 
+// A degenerate tail must NOT steer when the pending input carries fresh user prose the
+// model has never answered. The observed victim is Claude Code's prompt-based Stop hook:
+// its evaluator replays the stuck session PLUS a novel trailing judge prompt and must
+// answer with structured JSON — steering it substituted prose for the verdict and every
+// stop errored with "JSON validation failed". Fresh input is not a dead loop.
+func TestAnthropicMessagesFreshUserInputVetoesSteer(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: `{"ok":false,"reason":"top issues still open"}`},
+		FinishReason: "stop",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"Judge whether the stop condition is satisfied and answer with JSON. Condition: work on top next issues"}]}`)
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", body, &resp)
+	joined := ""
+	for _, b := range resp.Content {
+		if b.Type == "text" {
+			joined += b.Text
+		}
+	}
+	if strings.Contains(joined, "repeating myself") {
+		t.Errorf("fresh trailing user input must veto the steer: %q", joined)
+	}
+	if !strings.Contains(joined, `"ok"`) {
+		t.Errorf("the evaluator call must reach the model, got %q", joined)
+	}
+}
+
+// A trailing user turn that is kernel-originated (`[fak]`) or a verbatim repeat of an
+// already-answered nudge is NOT fresh input — the mechanical continuation the steer
+// exists for must still trip it.
+func TestAnthropicMessagesKernelNoteTailStillSteers(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL)."},
+		FinishReason: "stop",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."}]}`)
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", body, &resp)
+	if len(resp.Content) != 1 || !strings.Contains(resp.Content[0].Text, "repeating myself") {
+		t.Errorf("a kernel-note tail is not fresh input; expected the steer, got %+v", resp.Content)
+	}
+}
+
 // A clean all-allow turn must NOT inject an in-band [fak] note (that channel is
 // reserved for drops/repairs the agent must react to), while the structured `fak`
 // extension still records the allow for fak-aware tooling — the same asymmetry the

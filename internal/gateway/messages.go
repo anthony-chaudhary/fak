@@ -1047,6 +1047,45 @@ func degenerateStreak(messages []agent.Message) int {
 	return n
 }
 
+// pendingFreshUserInput reports whether the turns after the most recent assistant
+// message — the input this completion must answer — carry fresh user prose: a plain
+// RoleUser turn that is non-empty, not kernel-originated (`[fak]`), and not a verbatim
+// repeat of a user turn the model already answered. Fresh input means the next turn is
+// not predetermined to repeat, so the repetition-loop steer must stand down. The
+// observed victim is an out-of-band evaluator call — Claude Code's prompt-based Stop
+// hook replays the stuck session PLUS a novel judge prompt and must answer with
+// structured JSON; steering it substituted prose for the verdict, and every stop
+// errored with "JSON validation failed". Tool results decode as RoleTool and a
+// re-injected identical nudge is a verbatim repeat, so the dead loops the steer exists
+// for — mechanical continuations that add nothing new — still trip it.
+func pendingFreshUserInput(messages []agent.Message) bool {
+	last := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == agent.RoleAssistant {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	answered := make(map[string]struct{})
+	for _, m := range messages[:last+1] {
+		if m.Role == agent.RoleUser && m.Content != "" {
+			answered[m.Content] = struct{}{}
+		}
+	}
+	for _, m := range messages[last+1:] {
+		if m.Role != agent.RoleUser || m.Content == "" || strings.Contains(m.Content, "[fak]") {
+			continue
+		}
+		if _, ok := answered[m.Content]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // repetitionLoopSteer returns a terminal corrective turn when the model is stuck in a
 // degenerate tail (degenerateStreak ≥ loopBreakThreshold) — echoing the kernel's `[fak]`
 // notes or repeating the same prose with no progress — or nil otherwise. The corrective
@@ -1055,8 +1094,13 @@ func degenerateStreak(messages []agent.Message) int {
 // ends the turn (end_turn). Returned BEFORE the planner runs, it breaks the loop
 // deterministically and cheaply (no model round-trip) and Claude Code reads a normal
 // terminal assistant turn so its agent loop settles instead of grinding to the turn-cap.
+// A pending fresh user turn vetoes the steer: new input (an operator question, a Stop
+// hook evaluator's judge prompt) deserves a real model answer even behind a stuck tail.
 func repetitionLoopSteer(messages []agent.Message, id, model string) *anthropicTurn {
 	if degenerateStreak(messages) < loopBreakThreshold {
+		return nil
+	}
+	if pendingFreshUserInput(messages) {
 		return nil
 	}
 	const steer = "I was repeating myself without making progress: a tool I tried is " +
