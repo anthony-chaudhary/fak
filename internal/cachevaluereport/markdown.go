@@ -101,10 +101,14 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 	t2Periods, t2Net := savingsSeries(r.Track2)
 	fmt.Fprintf(&sb, "### Track 2 — net cache economics (OBSERVED $ projection)\n\n")
 	if len(t2Periods) > 0 {
-		fmt.Fprintf(&sb, "cumulative-net trend: `%s`  (latest net $%.4f, cumulative $%.4f, %s)\n\n",
-			markdownSparkline(t2Net), r.LatestNetUSD, r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
-		sb.WriteString(mermaidXYChart("Track 2 — cumulative net (OBSERVED $)", "cumulative net $", t2Periods, t2Net))
-		sb.WriteString("\n")
+		if allSavingsBucketsDollarBlind(r.Track2) {
+			fmt.Fprintf(&sb, "dollar-blind: %d row(s) have provider/cache tokens but no configured price; dollar fields are placeholders, not priced savings.\n\n", r.DollarBlindRows)
+		} else {
+			fmt.Fprintf(&sb, "cumulative-net trend: `%s`  (latest net $%.4f, cumulative $%.4f, %s)\n\n",
+				markdownSparkline(t2Net), r.LatestNetUSD, r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
+			sb.WriteString(mermaidXYChart("Track 2 — cumulative net (OBSERVED $)", "cumulative net $", t2Periods, t2Net))
+			sb.WriteString("\n")
+		}
 	} else {
 		sb.WriteString("no OBSERVED-$ rows yet (Track-2 ledger empty).\n\n")
 	}
@@ -113,8 +117,13 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 	sb.WriteString("### KPI\n\n")
 	sb.WriteString("| metric | value | provenance |\n|---|---|---|\n")
 	fmt.Fprintf(&sb, "| latest realized reuse | %.3f (%s) | WITNESSED (kernel) |\n", r.Track1.LatestReuseRatio, r.Track1.LatestTrend)
-	fmt.Fprintf(&sb, "| latest net | $%.4f | OBSERVED ($ projection) |\n", r.LatestNetUSD)
-	fmt.Fprintf(&sb, "| cumulative net | $%.4f (%s) | OBSERVED ($ projection) |\n", r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
+	if allSavingsBucketsDollarBlind(r.Track2) {
+		fmt.Fprintf(&sb, "| latest net | dollar-blind | OBSERVED tokens, no configured price |\n")
+		fmt.Fprintf(&sb, "| cumulative net | dollar-blind | OBSERVED tokens, no configured price |\n")
+	} else {
+		fmt.Fprintf(&sb, "| latest net | $%.4f | OBSERVED ($ projection) |\n", r.LatestNetUSD)
+		fmt.Fprintf(&sb, "| cumulative net | $%.4f (%s) | OBSERVED ($ projection) |\n", r.CumulativeNetUSD, breakEvenLabel(r.BrokeEven))
+	}
 	if len(r.OwnerAttribution) > 0 {
 		last := r.OwnerAttribution[len(r.OwnerAttribution)-1]
 		fmt.Fprintf(&sb, "| provider prompt-cache token-equiv | %.0f | OBSERVED (provider-relayed) |\n", last.ProviderPromptCacheTokenEquiv)

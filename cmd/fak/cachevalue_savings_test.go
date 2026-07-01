@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestAppendObservedCacheSavingsReportsRowsAndErrors(t *testing.T) {
+	clearCachevaluePriceEnv(t)
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "cache-savings.jsonl")
 	sum := gateway.AdjudicationSummary{
@@ -39,6 +41,22 @@ func TestAppendObservedCacheSavingsReportsRowsAndErrors(t *testing.T) {
 	if rows[0].Mechanism != "provider_prompt_cache" || rows[1].Mechanism != "compaction_shed" {
 		t.Fatalf("mechanisms = %q/%q, want provider_prompt_cache/compaction_shed", rows[0].Mechanism, rows[1].Mechanism)
 	}
+	for i, row := range rows {
+		if row.InputPerMTokUSD != gateway.ClaudeOpus48InputPerMTokUSD || row.OutputPerMTokUSD != gateway.ClaudeOpus48OutputPerMTokUSD {
+			t.Fatalf("row %d default pricing = %.2f/%.2f, want %.2f/%.2f",
+				i, row.InputPerMTokUSD, row.OutputPerMTokUSD,
+				gateway.ClaudeOpus48InputPerMTokUSD, gateway.ClaudeOpus48OutputPerMTokUSD)
+		}
+		if row.PricingSource != gateway.CachePricingSourceAnthropicClaudeOpus48 {
+			t.Fatalf("row %d pricing source = %q, want %q", i, row.PricingSource, gateway.CachePricingSourceAnthropicClaudeOpus48)
+		}
+		if row.DollarStatus == cachevaluereport.SavingsDollarStatusBlind {
+			t.Fatalf("row %d should be priced by default, got dollar-blind: %+v", i, row)
+		}
+		if row.NetUSD == 0 {
+			t.Fatalf("row %d default-pricing net_usd must not be silently zero: %+v", i, row)
+		}
+	}
 
 	badPath := filepath.Join(t.TempDir(), "missing", "cache-savings.jsonl")
 	failed := appendObservedCacheSavingsTo(badPath, "guard", "anthropic", "claude", sum, now)
@@ -47,6 +65,43 @@ func TestAppendObservedCacheSavingsReportsRowsAndErrors(t *testing.T) {
 	}
 	if failed.RowsPlanned != 2 || failed.RowsWritten != 0 {
 		t.Fatalf("failed rows planned/written = %d/%d, want 2/0", failed.RowsPlanned, failed.RowsWritten)
+	}
+}
+
+func TestAppendObservedCacheSavingsEnvOverridesDefaultPricing(t *testing.T) {
+	t.Setenv(cachevalueInputPriceEnv, "7")
+	t.Setenv(cachevalueOutputPriceEnv, "11")
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "cache-savings.jsonl")
+	sum := gateway.AdjudicationSummary{
+		InputTokens:          20,
+		CachedPromptTokens:   60,
+		CacheCreationTokens:  20,
+		OutputTokens:         3,
+		CompactionShedTokens: 9,
+	}
+
+	res := appendObservedCacheSavingsTo(path, "guard", "anthropic", "claude", sum, now)
+	if res.Err != nil {
+		t.Fatalf("append savings returned error: %v", res.Err)
+	}
+	rows := cachevaluereport.ReadSavingsLedgerFile(path)
+	if len(rows) != 2 {
+		t.Fatalf("ledger rows = %d, want 2", len(rows))
+	}
+	for i, row := range rows {
+		if row.InputPerMTokUSD != 7 || row.OutputPerMTokUSD != 11 {
+			t.Fatalf("row %d env pricing = %.2f/%.2f, want 7/11", i, row.InputPerMTokUSD, row.OutputPerMTokUSD)
+		}
+		if row.PricingSource != cachevalueEnvPricingSource {
+			t.Fatalf("row %d pricing source = %q, want %q", i, row.PricingSource, cachevalueEnvPricingSource)
+		}
+	}
+	if got, want := rows[0].RebateUSD, 60*0.9*7/1_000_000.0; math.Abs(got-want) > 1e-12 {
+		t.Fatalf("env-priced rebate_usd = %.12f, want %.12f", got, want)
+	}
+	if rows[0].DollarStatus == cachevaluereport.SavingsDollarStatusBlind {
+		t.Fatalf("env-priced row should not be dollar-blind: %+v", rows[0])
 	}
 }
 
@@ -88,6 +143,12 @@ func TestFormatCacheValuePersistenceSummaryNamesEvidenceAndNextCommand(t *testin
 			t.Fatalf("summary missing %q:\n%s", want, out)
 		}
 	}
+}
+
+func clearCachevaluePriceEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(cachevalueInputPriceEnv, "")
+	t.Setenv(cachevalueOutputPriceEnv, "")
 }
 
 func TestFormatCacheValuePersistenceSummaryMakesNoEvidenceExplicit(t *testing.T) {

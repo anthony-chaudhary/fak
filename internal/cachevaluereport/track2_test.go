@@ -243,6 +243,49 @@ func TestNewSavingsRowsSplitsProviderAndCompaction(t *testing.T) {
 	}
 }
 
+func TestNewSavingsRowsMarksDollarBlindWithoutPricing(t *testing.T) {
+	rows := NewSavingsRows(SavingsObservation{
+		SessionType:         "guard",
+		Provider:            "openai",
+		Context:             "codex",
+		CacheReadTokens:     10_000,
+		CacheCreationTokens: 1000,
+		Pricing:             SavingsPricing{DollarBlind: true, Source: "none"},
+	}, twoTrackNow)
+	if len(rows) != 1 {
+		t.Fatalf("want one provider row, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].DollarStatus != SavingsDollarStatusBlind {
+		t.Fatalf("missing dollar-blind marker on unpriced row: %+v", rows[0])
+	}
+	if rows[0].PricingSource != "none" {
+		t.Fatalf("pricing source = %q, want none", rows[0].PricingSource)
+	}
+	if rows[0].RebateUSD != 0 || rows[0].WritePremiumUSD != 0 || rows[0].SpendUSD != 0 || rows[0].NetUSD != 0 {
+		t.Fatalf("unpriced row dollar fields should stay placeholders at zero: %+v", rows[0])
+	}
+
+	line, err := AppendSavingsLine(rows[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, `"dollar_status":"dollar_blind"`) {
+		t.Fatalf("ledger line must carry the dollar-blind marker: %s", line)
+	}
+
+	rep := FoldTwoTrack(nil, rows, twoTrackNow)
+	if rep.BrokeEven {
+		t.Fatalf("dollar-blind zero dollars must not be reported as break-even: %+v", rep)
+	}
+	if rep.DollarBlindRows != 1 || len(rep.Track2) != 1 || rep.Track2[0].DollarStatus != SavingsDollarStatusBlind {
+		t.Fatalf("fold did not carry dollar-blind status: %+v", rep)
+	}
+	out := RenderTwoTrack(rep)
+	if !strings.Contains(out, "dollar-blind") || !strings.Contains(out, "zero dollar fields are placeholders") {
+		t.Fatalf("render should make dollar-blind rows explicit:\n%s", out)
+	}
+}
+
 func TestNewSavingsRowsSkipsProviderWithoutCacheCounters(t *testing.T) {
 	rows := NewSavingsRows(SavingsObservation{
 		SessionType:  "serve",

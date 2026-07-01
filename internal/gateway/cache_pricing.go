@@ -24,7 +24,11 @@ package gateway
 // keeping with the same OBSERVED-vs-WITNESSED discipline metrics.go applies to the
 // raw counters (see [AdjudicationSummary.CachedPromptTokens]).
 
-import "github.com/anthony-chaudhary/fak/internal/vcachegov"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+)
 
 // Anthropic prompt-cache price multipliers, expressed RELATIVE to the model's base
 // input per-token price. These are the published cache economics:
@@ -46,6 +50,13 @@ const (
 	CacheWrite5mMultiplier = 1.25
 	// CacheWrite1hMultiplier is the price of a 1-hour-TTL cache WRITE relative to base input.
 	CacheWrite1hMultiplier = 2.0
+
+	// ClaudeOpus48InputPerMTokUSD is the default guarded-Claude base input price.
+	ClaudeOpus48InputPerMTokUSD = 5.0
+	// ClaudeOpus48OutputPerMTokUSD is the default guarded-Claude base output price.
+	ClaudeOpus48OutputPerMTokUSD = 25.0
+	// CachePricingSourceAnthropicClaudeOpus48 names the default price source in ledgers.
+	CachePricingSourceAnthropicClaudeOpus48 = "default:anthropic/claude-opus-4-8"
 )
 
 // CacheTTL names the cache_control TTL a write was placed under. It mirrors the
@@ -93,6 +104,42 @@ type CacheUsage struct {
 type CachePricing struct {
 	InputPerMTokUSD  float64
 	OutputPerMTokUSD float64
+}
+
+// DefaultCachePricing resolves the small built-in price table used when a caller
+// has provider/context but no explicit price env. It is intentionally narrow:
+// the guarded Claude Code path is known to default to Opus 4.8, while other
+// provider/context pairs stay unpriced so callers can mark them dollar-blind.
+func DefaultCachePricing(provider, context string) (CachePricing, string, bool) {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	c := normalizedPricingContext(context)
+	switch p {
+	case "anthropic", "claude":
+		switch c {
+		case "claude", "claude.exe", "claude-opus-4-8":
+			return CachePricing{
+				InputPerMTokUSD:  ClaudeOpus48InputPerMTokUSD,
+				OutputPerMTokUSD: ClaudeOpus48OutputPerMTokUSD,
+			}, CachePricingSourceAnthropicClaudeOpus48, true
+		}
+		if strings.Contains(c, "claude-opus-4-8") || strings.Contains(c, "opus-4-8") {
+			return CachePricing{
+				InputPerMTokUSD:  ClaudeOpus48InputPerMTokUSD,
+				OutputPerMTokUSD: ClaudeOpus48OutputPerMTokUSD,
+			}, CachePricingSourceAnthropicClaudeOpus48, true
+		}
+	}
+	return CachePricing{}, "", false
+}
+
+func normalizedPricingContext(context string) string {
+	c := strings.ToLower(strings.TrimSpace(context))
+	c = strings.ReplaceAll(c, "\\", "/")
+	c = strings.TrimRight(c, "/")
+	if i := strings.LastIndex(c, "/"); i >= 0 {
+		c = c[i+1:]
+	}
+	return c
 }
 
 // perToken converts a per-MTok price to a per-token price.

@@ -45,12 +45,21 @@ const DefaultSavingsLedgerRel = "docs/nightrun/cache-savings.jsonl"
 
 const providerCacheReadMultiplier = 0.1
 
-// SavingsPricing is the caller-supplied base price for the model in play. Zero
-// values keep the row token-observed but dollar-neutral, which is honest when the
-// live session has provider counters but no trusted price table.
+const (
+	// SavingsDollarStatusBlind marks rows whose token axes are observed but whose
+	// dollar axes are intentionally unpriced because no trusted base price was configured.
+	SavingsDollarStatusBlind = "dollar_blind"
+	savingsDollarStatusMixed = "mixed"
+)
+
+// SavingsPricing is the caller-supplied base price for the model in play. DollarBlind
+// keeps zero-dollar rows explicit when the live session has provider counters but no
+// trusted price table, so $0 cannot be read as a priced no-savings result.
 type SavingsPricing struct {
 	InputPerMTokUSD  float64
 	OutputPerMTokUSD float64
+	Source           string
+	DollarBlind      bool
 }
 
 // SavingsObservation is the live-session input that becomes one or more durable
@@ -120,6 +129,8 @@ type SavingsRow struct {
 
 	InputPerMTokUSD  float64 `json:"input_per_mtok_usd,omitempty"`
 	OutputPerMTokUSD float64 `json:"output_per_mtok_usd,omitempty"`
+	PricingSource    string  `json:"pricing_source,omitempty"`
+	DollarStatus     string  `json:"dollar_status,omitempty"`
 }
 
 // NetUSDComputed re-derives the NET from the row's own component $ fields, so a
@@ -161,6 +172,9 @@ type SavingsBucket struct {
 	// crosses break-even. BrokeEven is true once it first turns non-negative.
 	CumulativeNetUSD float64 `json:"cumulative_net_usd"`
 	BrokeEven        bool    `json:"broke_even"`
+
+	DollarStatus        string `json:"dollar_status,omitempty"`
+	DollarBlindSessions int    `json:"dollar_blind_sessions,omitempty"`
 }
 
 // OwnerAttributionBucket is the report-level owner split, in token-equivalent
@@ -183,11 +197,13 @@ type OwnerAttributionBucket struct {
 func NewSavingsRows(obs SavingsObservation, now time.Time) []SavingsRow {
 	now = now.UTC()
 	base := SavingsRow{
-		Schema:      SavingsLedgerSchema,
-		Date:        now.Format("2006-01-02"),
-		SessionType: obs.SessionType,
-		Context:     obs.Context,
-		GeneratedAt: now.Format(time.RFC3339),
+		Schema:        SavingsLedgerSchema,
+		Date:          now.Format("2006-01-02"),
+		SessionType:   obs.SessionType,
+		Context:       obs.Context,
+		GeneratedAt:   now.Format(time.RFC3339),
+		PricingSource: strings.TrimSpace(obs.Pricing.Source),
+		DollarStatus:  savingsDollarStatus(obs.Pricing),
 	}
 	var rows []SavingsRow
 	if obs.CacheReadTokens > 0 || obs.CacheCreationTokens > 0 {
@@ -240,6 +256,13 @@ func providerSpendUSD(obs SavingsObservation) float64 {
 
 func perMTok(price, tokens float64) float64 {
 	return price * tokens / 1_000_000
+}
+
+func savingsDollarStatus(p SavingsPricing) string {
+	if p.DollarBlind || (p.InputPerMTokUSD == 0 && p.OutputPerMTokUSD == 0) {
+		return SavingsDollarStatusBlind
+	}
+	return ""
 }
 
 // ParseSavingsLedger reads OBSERVED-$ rows (Track 2) from JSONL content. Like the
@@ -322,6 +345,16 @@ func normalizeSavingsDimensions(row *SavingsRow) {
 			row.Mechanism = "unknown_mechanism"
 		}
 	}
+	if strings.TrimSpace(row.DollarStatus) == "" &&
+		row.InputPerMTokUSD == 0 &&
+		row.OutputPerMTokUSD == 0 &&
+		row.RebateUSD == 0 &&
+		row.WritePremiumUSD == 0 &&
+		row.SpendUSD == 0 &&
+		row.CompactionSavedUSD == 0 &&
+		(row.CacheReadTokens > 0 || row.CacheCreationTokens > 0 || row.CompactionShedTokens > 0) {
+		row.DollarStatus = SavingsDollarStatusBlind
+	}
 }
 
 // foldSavings buckets Track-2 rows by ISO week, provider, and mechanism, then computes each
@@ -363,6 +396,9 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		b.WritePremiumUSD += row.WritePremiumUSD
 		b.SpendUSD += row.SpendUSD
 		b.CompactionSavedUSD += row.CompactionSavedUSD
+		if row.DollarStatus == SavingsDollarStatusBlind {
+			b.DollarBlindSessions++
+		}
 	}
 
 	keys := make([]string, 0, len(byPeriod))
@@ -378,10 +414,19 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		a := byPeriod[k]
 		b := a.b
 		b.Start = a.start.Format("2006-01-02")
+		if b.DollarBlindSessions > 0 {
+			if b.DollarBlindSessions == b.Sessions {
+				b.DollarStatus = SavingsDollarStatusBlind
+			} else {
+				b.DollarStatus = savingsDollarStatusMixed
+			}
+		}
 		b.NetUSD = b.RebateUSD + b.CompactionSavedUSD - b.WritePremiumUSD - b.SpendUSD
-		cumulative += b.NetUSD
+		if b.DollarStatus != SavingsDollarStatusBlind {
+			cumulative += b.NetUSD
+		}
 		b.CumulativeNetUSD = cumulative
-		if !brokeEven && cumulative >= 0 {
+		if b.DollarStatus != SavingsDollarStatusBlind && !brokeEven && cumulative >= 0 {
 			brokeEven = true
 		}
 		b.BrokeEven = brokeEven
@@ -411,6 +456,7 @@ type TwoTrackReport struct {
 	LatestNetUSD     float64 `json:"latest_net_usd"`
 	CumulativeNetUSD float64 `json:"cumulative_net_usd"`
 	BrokeEven        bool    `json:"broke_even"`
+	DollarBlindRows  int     `json:"dollar_blind_rows,omitempty"`
 
 	// ProjectionFence is the constant honesty self-label: the $ NET is a COST
 	// PROJECTION over OBSERVED quantities, never a fak-WITNESSED claim, and tracks
@@ -452,10 +498,23 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 		rep.CumulativeNetUSD = last.CumulativeNetUSD
 		rep.BrokeEven = last.BrokeEven
 	}
+	for _, b := range t2 {
+		rep.DollarBlindRows += b.DollarBlindSessions
+	}
 
 	t1Measured := t1.Verdict == "MEASURED"
 	t2Measured := len(t2) > 0
+	t2AllDollarBlind := t2Measured && allSavingsBucketsDollarBlind(t2)
 	switch {
+	case t1Measured && t2AllDollarBlind:
+		rep.Verdict = "MEASURED"
+		rep.Finding = fmt.Sprintf("Track 1 realized reuse %.3f (%s); Track 2 has token evidence but is dollar-blind (no price configured)",
+			t1.LatestReuseRatio, t1.LatestTrend)
+		rep.NextAction = "set FAK_CACHEVALUE_INPUT_PER_MTOK_USD / FAK_CACHEVALUE_OUTPUT_PER_MTOK_USD or use a known provider/context default before treating Track 2 as dollars"
+	case t2AllDollarBlind:
+		rep.Verdict = "MEASURED"
+		rep.Finding = "Track 2 has token evidence but is dollar-blind (no price configured); Track 1 has no multi-turn reuse to trend yet"
+		rep.NextAction = "set FAK_CACHEVALUE_INPUT_PER_MTOK_USD / FAK_CACHEVALUE_OUTPUT_PER_MTOK_USD or use a known provider/context default before treating Track 2 as dollars"
 	case t1Measured && t2Measured:
 		rep.Verdict = "MEASURED"
 		rep.Finding = fmt.Sprintf("Track 1 realized reuse %.3f (%s); Track 2 net $%.4f this period, cumulative $%.4f (%s)",
@@ -476,6 +535,18 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 		rep.NextAction = "accumulate guard/serve/run sessions into both ledgers, then re-roll"
 	}
 	return rep
+}
+
+func allSavingsBucketsDollarBlind(buckets []SavingsBucket) bool {
+	if len(buckets) == 0 {
+		return false
+	}
+	for _, b := range buckets {
+		if b.DollarStatus != SavingsDollarStatusBlind {
+			return false
+		}
+	}
+	return true
 }
 
 func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttributionBucket {
@@ -556,16 +627,24 @@ func RenderTwoTrack(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "  no OBSERVED-$ rows yet (Track-2 ledger empty)\n")
 		return sb.String()
 	}
-	fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5s  %10s  %10s  %10s  %10s  %12s  %s\n",
-		"week", "provider", "mechanism", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "cumulative$ (break-even)")
+	if r.DollarBlindRows > 0 {
+		fmt.Fprintf(&sb, "  pricing: %d row(s) dollar-blind (no price configured); zero dollar fields are placeholders, not priced savings\n",
+			r.DollarBlindRows)
+	}
+	fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5s  %10s  %10s  %10s  %10s  %12s  %-13s  %s\n",
+		"week", "provider", "mechanism", "sess", "rebate$", "compact$", "writeprem$", "spend$", "net$", "pricing", "cumulative$ (break-even)")
 	for _, b := range r.Track2 {
 		be := ""
 		if b.BrokeEven {
 			be = "  >= break-even"
 		}
-		fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %12.4f%s\n",
+		pricing := b.DollarStatus
+		if pricing == "" {
+			pricing = "priced"
+		}
+		fmt.Fprintf(&sb, "  %-9s  %-16s  %-23s  %5d  %10.4f  %10.4f  %10.4f  %10.4f  %12.4f  %-13s  %12.4f%s\n",
 			b.Period, b.Provider, b.Mechanism, b.Sessions, b.RebateUSD, b.CompactionSavedUSD, b.WritePremiumUSD, b.SpendUSD,
-			b.NetUSD, b.CumulativeNetUSD, be)
+			b.NetUSD, pricing, b.CumulativeNetUSD, be)
 	}
 	fmt.Fprintf(&sb, "\nOwner attribution (token-equiv; provider prompt-cache vs fak-authored)\n")
 	if len(r.OwnerAttribution) == 0 {

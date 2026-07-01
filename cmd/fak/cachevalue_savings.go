@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	cachevalueInputPriceEnv  = "FAK_CACHEVALUE_INPUT_PER_MTOK_USD"
-	cachevalueOutputPriceEnv = "FAK_CACHEVALUE_OUTPUT_PER_MTOK_USD"
+	cachevalueInputPriceEnv    = "FAK_CACHEVALUE_INPUT_PER_MTOK_USD"
+	cachevalueOutputPriceEnv   = "FAK_CACHEVALUE_OUTPUT_PER_MTOK_USD"
+	cachevalueEnvPricingSource = "env:FAK_CACHEVALUE_INPUT_PER_MTOK_USD/FAK_CACHEVALUE_OUTPUT_PER_MTOK_USD"
 )
 
 func appendObservedCacheSavings(sessionType, provider, context string, sum gateway.AdjudicationSummary) {
@@ -41,7 +42,7 @@ func appendObservedCacheSavingsTo(path, sessionType, provider, context string, s
 		CacheCreationTokens:  sum.CacheCreationTokens,
 		OutputTokens:         sum.OutputTokens,
 		CompactionShedTokens: sum.CompactionShedTokens,
-		Pricing:              cachevalueSavingsPricingFromEnv(),
+		Pricing:              cachevalueSavingsPricing(provider, context),
 	}, now)
 	res := cacheValueAppendResult{RowsPlanned: len(rows)}
 	for _, row := range rows {
@@ -70,23 +71,38 @@ func providerTokenEquiv(row cachevaluereport.SavingsRow) float64 {
 	return row.NetSavedTokenEquiv
 }
 
-func cachevalueSavingsPricingFromEnv() cachevaluereport.SavingsPricing {
-	return cachevaluereport.SavingsPricing{
-		InputPerMTokUSD:  cachevaluePriceFromEnv(cachevalueInputPriceEnv),
-		OutputPerMTokUSD: cachevaluePriceFromEnv(cachevalueOutputPriceEnv),
+func cachevalueSavingsPricing(provider, context string) cachevaluereport.SavingsPricing {
+	input, inputSet := cachevaluePriceFromEnv(cachevalueInputPriceEnv)
+	output, outputSet := cachevaluePriceFromEnv(cachevalueOutputPriceEnv)
+	if inputSet || outputSet {
+		return cachevaluereport.SavingsPricing{
+			InputPerMTokUSD:  input,
+			OutputPerMTokUSD: output,
+			Source:           cachevalueEnvPricingSource,
+			DollarBlind:      input == 0 && output == 0,
+		}
 	}
+	if p, source, ok := gateway.DefaultCachePricing(provider, context); ok {
+		return cachevaluereport.SavingsPricing{
+			InputPerMTokUSD:  p.InputPerMTokUSD,
+			OutputPerMTokUSD: p.OutputPerMTokUSD,
+			Source:           source,
+		}
+	}
+	return cachevaluereport.SavingsPricing{Source: "none", DollarBlind: true}
 }
 
-func cachevaluePriceFromEnv(name string) float64 {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return 0
+func cachevaluePriceFromEnv(name string) (float64, bool) {
+	raw, ok := os.LookupEnv(name)
+	raw = strings.TrimSpace(raw)
+	if !ok || raw == "" {
+		return 0, false
 	}
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil || v < 0 {
-		return 0
+		return 0, true
 	}
-	return v
+	return v, true
 }
 
 type cacheValuePersistenceReport struct {
