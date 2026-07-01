@@ -332,6 +332,70 @@ class HostCapFoldTest(unittest.TestCase):
         self.assertLess(loaded["cap"], roomy["cap"])
 
 
+class CapacityLimiterTest(unittest.TestCase):
+    """#1803: the preflight status names the primary cap limiter and carries the raw
+    terms used to compute it."""
+
+    def test_configured_max_limiter(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0)
+        p = run_eval(mod, max_workers=4)
+        self.assertEqual(p["capacity_limiter"]["primary"], "configured_max")
+        self.assertEqual(p["capacity_limiter"]["term"], "max_workers")
+        self.assertEqual(p["capacity_limiter"]["raw"]["max_workers"], 4)
+
+    def test_zero_configured_cap_is_not_misreported_as_leases(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0)
+        p = run_eval(mod, max_workers=0)
+        self.assertEqual(p["capacity_limiter"]["primary"], "configured_max")
+
+    def test_cpu_limiter(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 2, "free_ram_mb": 128_000, "total_threads": 100})
+        p = run_eval(mod, max_workers=10)
+        self.assertEqual(p["capacity_limiter"]["primary"], "cpu")
+        self.assertEqual(p["capacity_limiter"]["term"], "host_cap")
+        self.assertEqual(p["capacity_limiter"]["raw"]["host_binding"], "cores")
+
+    def test_memory_limiter(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 64, "free_ram_mb": 3000, "total_threads": 100})
+        p = run_eval(mod, max_workers=10)
+        self.assertEqual(p["capacity_limiter"]["primary"], "memory")
+        self.assertEqual(p["capacity_limiter"]["term"], "host_cap")
+        self.assertEqual(p["capacity_limiter"]["raw"]["host_components"]["ram"], 2)
+
+    def test_seat_limiter(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     seat={"total": 3, "free": 3, "leased": 0, "depleted": False})
+        p = run_eval(mod, max_workers=10)
+        self.assertEqual(p["capacity_limiter"]["primary"], "seats")
+        self.assertEqual(p["capacity_limiter"]["term"], "seat_total")
+        self.assertEqual(p["capacity_limiter"]["raw"]["seat_free"], 3)
+
+    def test_live_leases_limiter(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=4,
+                     seat={"total": 4, "free": 0, "leased": 4, "depleted": True})
+        p = run_eval(mod, max_workers=100)
+        self.assertEqual(p["capacity_limiter"]["primary"], "leases")
+        self.assertEqual(p["capacity_limiter"]["term"], "live")
+        self.assertEqual(p["capacity_limiter"]["raw"]["live"], 4)
+
+    def test_render_shows_limiter_terms(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
+                     host_res={"cores": 64, "free_ram_mb": 3000, "total_threads": 100})
+        text = mod.render(run_eval(mod, max_workers=10))
+        self.assertIn("limiter=memory", text)
+        self.assertIn("host_cap=2", text)
+        self.assertIn("host_binding=ram", text)
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_evaluate_output(self) -> None:
         mod = load()

@@ -931,6 +931,74 @@ def host_capacity(*, cores: Any, free_ram_mb: Any, total_threads: Any,
     return info
 
 
+def _host_binding_limiter(binding: Any) -> str:
+    return {
+        "cores": "cpu",
+        "ram": "memory",
+        "threads": "threads",
+    }.get(str(binding or ""), "host")
+
+
+def capacity_limiter(*, max_workers: int, target: Any, host_cap_info: dict[str, Any],
+                     seat: dict[str, Any], live: int, cap: int) -> dict[str, Any]:
+    """Primary worker-count limiter plus the raw terms that selected it.
+
+    The effective cap is a min() across configured ceiling, optional DOS target,
+    host headroom, and seat count. When live workers consume that cap, the current
+    limiter is the lease/live-worker occupancy rather than the static ceiling.
+    """
+    host_cap = host_cap_info.get("host_cap")
+    host_binding = host_cap_info.get("binding")
+    seat_total = seat.get("total")
+    raw = {
+        "cap": cap,
+        "live": live,
+        "headroom": cap - live,
+        "max_workers": max_workers,
+        "dos_target": target,
+        "host_cap": host_cap,
+        "host_binding": host_binding,
+        "host_components": host_cap_info.get("components") or {},
+        "seat_total": seat_total,
+        "seat_free": seat.get("free"),
+        "seat_leased": seat.get("leased"),
+        "seat_depleted": bool(seat.get("depleted")),
+    }
+    if cap > 0 and live >= cap:
+        return {"primary": "leases", "term": "live", "raw": raw}
+
+    terms: list[tuple[str, str, int]] = [("configured_max", "max_workers", max_workers)]
+    target_n = _int(target)
+    if target_n is not None and target_n > 0:
+        terms.append(("configured_max", "dos_target", target_n))
+    host_cap_n = _int(host_cap)
+    if host_cap_n is not None:
+        terms.append((_host_binding_limiter(host_binding), "host_cap", host_cap_n))
+    seat_n = _int(seat_total)
+    if seat_n is not None and seat_n > 0:
+        terms.append(("seats", "seat_total", seat_n))
+
+    primary, term, _ = min(terms, key=lambda row: row[2])
+    return {"primary": primary, "term": term, "raw": raw}
+
+
+def _capacity_limiter_terms(limiter: dict[str, Any]) -> str:
+    raw = limiter.get("raw") or {}
+    parts = [
+        f"cap={raw.get('cap')}",
+        f"live={raw.get('live')}",
+        f"headroom={raw.get('headroom')}",
+        f"max={raw.get('max_workers')}",
+        f"target={raw.get('dos_target')}",
+        f"host_cap={raw.get('host_cap')}",
+        f"host_binding={raw.get('host_binding')}",
+        f"seats={raw.get('seat_total')}",
+        f"free={raw.get('seat_free')}",
+        f"leased={raw.get('seat_leased')}",
+    ]
+    return " ".join(parts)
+
+
 def _ram_and_threads_windows() -> tuple[int | None, int | None]:
     out = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -1050,6 +1118,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
     live = max(alive_kernel_for_cap or 0, alive_proc)
     headroom = cap - live
+    limiter = capacity_limiter(max_workers=max_workers, target=target,
+                               host_cap_info=host_cap_info, seat=seat,
+                               live=live, cap=cap)
 
     # Fail-safe ordering, evaluated top to bottom:
     #   1. an un-runnable host/kernel safety check  -> REFUSE_INSPECT (never assume safe)
@@ -1114,6 +1185,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "max_workers": max_workers,
         "host_cap": host_cap,
         "host_capacity": host_cap_info,
+        "capacity_limiter": limiter,
         "seat": seat,
         "host": host,
         "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model")},
@@ -1125,6 +1197,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
 def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
     hc = p.get("host_capacity") or {}
+    limiter = p.get("capacity_limiter") or {}
     host_cap = p.get("host_cap")
     host_cap_str = (f"host_cap={host_cap}"
                     + (f" (bound by {hc.get('binding')})" if hc.get("binding") else "")
@@ -1135,6 +1208,7 @@ def render(p: dict[str, Any]) -> str:
         f"  live={p.get('live')}/{p.get('cap')} (headroom {p.get('headroom')})  "
         f"host={'clean' if (p.get('host') or {}).get('safe') else 'FLAGGED'}  "
         f"account={a.get('tag') or '-'} (t{a.get('tier')})  {host_cap_str}",
+        f"  limiter={limiter.get('primary') or '-'} ({_capacity_limiter_terms(limiter)})",
     ])
 
 

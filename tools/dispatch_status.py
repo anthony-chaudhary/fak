@@ -1108,6 +1108,67 @@ def _seat_inventory_summary_line(seat_inventory: dict[str, Any]) -> str:
     return line
 
 
+def _github_rate_limit_error(*docs: dict[str, Any]) -> str:
+    for doc in docs:
+        err = str((doc or {}).get("_error") or "")
+        if "rate limit" in err.lower() or "secondary rate" in err.lower():
+            return err
+    return ""
+
+
+def _dispatch_limiter(pre: dict[str, Any], backlog: dict[str, Any],
+                      closure: dict[str, Any], leases: dict[str, Any]) -> dict[str, Any]:
+    base = dict(pre.get("capacity_limiter") or {})
+    raw = dict(base.get("raw") or {})
+    raw.setdefault("cap", pre.get("cap"))
+    raw.setdefault("live", pre.get("live"))
+    raw.setdefault("headroom", (pre.get("cap") - pre.get("live"))
+                   if isinstance(pre.get("cap"), int) and isinstance(pre.get("live"), int)
+                   else None)
+    raw.setdefault("max_workers", pre.get("max_workers"))
+    raw.setdefault("host_cap", pre.get("host_cap"))
+    seat = pre.get("seat") or {}
+    raw.setdefault("seat_total", seat.get("total"))
+    raw.setdefault("seat_free", seat.get("free"))
+    raw.setdefault("seat_leased", seat.get("leased"))
+    raw["lane_leases_active"] = leases.get("active_count")
+    raw["lane_leases_blocking"] = leases.get("blocking_count")
+
+    gh_err = _github_rate_limit_error(backlog, closure)
+    if gh_err:
+        raw["github_error"] = gh_err
+        return {"primary": "github_rate_limit", "term": "github_error", "raw": raw}
+
+    blocking = _int(leases.get("blocking_count"), 0) or 0
+    if blocking:
+        return {"primary": "leases", "term": "lane_leases_blocking", "raw": raw}
+
+    if base:
+        base["raw"] = raw
+        return base
+    return {"primary": "unknown", "term": "unknown", "raw": raw}
+
+
+def _dispatch_limiter_terms(limiter: dict[str, Any]) -> str:
+    raw = limiter.get("raw") or {}
+    parts = [
+        f"cap={raw.get('cap')}",
+        f"live={raw.get('live')}",
+        f"headroom={raw.get('headroom')}",
+        f"max={raw.get('max_workers')}",
+        f"target={raw.get('dos_target')}",
+        f"host_cap={raw.get('host_cap')}",
+        f"host_binding={raw.get('host_binding')}",
+        f"seats={raw.get('seat_total')}",
+        f"free={raw.get('seat_free')}",
+        f"leased={raw.get('seat_leased')}",
+        f"lane_leases={raw.get('lane_leases_blocking')}/{raw.get('lane_leases_active')}",
+    ]
+    if raw.get("github_error"):
+        parts.append("github_error=rate_limit")
+    return " ".join(parts)
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -1383,6 +1444,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     elif seat_inventory.get("schema"):
         reasons.append(_seat_inventory_summary_line(seat_inventory))
 
+    limiter = _dispatch_limiter(pre, backlog, closure, leases)
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -1396,6 +1459,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "headroom": (cap - live) if (cap is not None and live is not None) else None,
             "host_safe": host_safe,
             "preflight_verdict": pre_verdict,
+            "limiter": limiter,
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "available")},
             "watchdog": wd,
         },
@@ -1519,6 +1583,8 @@ def render(p: dict[str, Any]) -> str:
         f"╔═ DISPATCHER: {p.get('verdict')} ({'ok' if p.get('ok') else 'ACTION'})",
         f"║ workers   : {d.get('live')}/{d.get('cap')} live (headroom {d.get('headroom')})  "
         f"host={'clean' if d.get('host_safe') else 'FLAGGED'}",
+        f"║ limiter   : {(d.get('limiter') or {}).get('primary') or '-'} "
+        f"({_dispatch_limiter_terms(d.get('limiter') or {})})",
         f"║ switcher  : account={a.get('tag') or '-'} (t{a.get('tier')}) "
         f"avail={a.get('available')}  preflight={d.get('preflight_verdict')}",
         "║ always-on : watchdog "
@@ -1651,6 +1717,8 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         f"- **workers**: {d.get('live')}/{d.get('cap')} live "
         f"(headroom {d.get('headroom')}); host "
         f"{'clean' if d.get('host_safe') else '**FLAGGED**'}",
+        f"- **primary limiter**: `{(d.get('limiter') or {}).get('primary') or '-'}` "
+        f"({_dispatch_limiter_terms(d.get('limiter') or {})})",
         f"- **switcher account**: `{a.get('tag') or '-'}` (t{a.get('tier')}, "
         f"{a.get('model') or '?'}), available={a.get('available')}",
         "- **always-on watchdog**: "
@@ -2008,6 +2076,9 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
         hr = d.get("headroom")
         parts.append(f"worker slots {d.get('live')}/{d.get('cap')} active"
                      + (f" ({hr} free)" if isinstance(hr, int) else ""))
+    limiter = d.get("limiter") or {}
+    if limiter.get("primary"):
+        parts.append(f"limiter {limiter.get('primary')} ({_dispatch_limiter_terms(limiter)})")
     if a.get("tag"):
         parts.append(f"next account {a.get('tag')} t{a.get('tier')}"
                      + ("" if a.get("available") else " unavailable"))
@@ -2101,6 +2172,9 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     auth_seat_action = _auth_failed_seat_action(payload.get("seat_inventory") or {})
     if auth_seat_action:
         buckets["action"].append(auth_seat_action)
+    limiter = ((payload.get("dispatcher") or {}).get("limiter") or {})
+    if limiter.get("primary") == "github_rate_limit":
+        buckets["action"].append("GitHub rate limit is blocking the gh-backed status folds")
 
     workers = payload.get("workers") or {}
     if workers.get("silent_count"):

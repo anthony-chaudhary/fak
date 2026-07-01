@@ -27,15 +27,19 @@ def load():
 
 
 def pre(verdict: str = "SPAWN_OK", *, host_safe: bool = True, cap: int = 2,
-        live: int = 0) -> dict:
-    return {
+        live: int = 0, limiter: dict | None = None) -> dict:
+    doc = {
         "verdict": verdict,
         "reason": f"synthetic {verdict}",
         "cap": cap,
         "live": live,
+        "max_workers": cap,
         "host": {"safe": host_safe},
         "account": {"tag": "worker-a", "tier": 1, "model": "claude", "available": True},
     }
+    if limiter is not None:
+        doc["capacity_limiter"] = limiter
+    return doc
 
 
 def sup(verdict: str = "READY_TO_CANARY") -> dict:
@@ -57,6 +61,25 @@ def closure_ok() -> dict:
     return {
         "closure_rate": 0.8,
         "counts": {"TRUE_RESOLVED": 8, "CLAIMED_CLOSED": 10, "OPEN_WITNESSED": 2},
+    }
+
+
+def cap_limiter(primary: str = "configured_max", term: str = "max_workers") -> dict:
+    return {
+        "primary": primary,
+        "term": term,
+        "raw": {
+            "cap": 2,
+            "live": 0,
+            "headroom": 2,
+            "max_workers": 2,
+            "dos_target": 0,
+            "host_cap": 32,
+            "host_binding": "cores",
+            "seat_total": 4,
+            "seat_free": 4,
+            "seat_leased": 0,
+        },
     }
 
 
@@ -101,6 +124,51 @@ class VerdictTest(unittest.TestCase):
         p = build(mod, pre=pre("REFUSE_INSPECT"))
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "INSPECT")
+
+
+class LimiterStatusTest(unittest.TestCase):
+    """#1803: dispatch status displays one primary limiter plus raw compute terms."""
+
+    def test_preflight_limiter_flows_into_payload_and_render(self) -> None:
+        mod = load()
+        limiter = cap_limiter("memory", "host_cap")
+        limiter["raw"]["host_cap"] = 2
+        limiter["raw"]["host_binding"] = "ram"
+        p = build(mod, pre=pre("SPAWN_OK", limiter=limiter))
+        self.assertEqual(p["dispatcher"]["limiter"]["primary"], "memory")
+        self.assertEqual(p["dispatcher"]["limiter"]["raw"]["host_cap"], 2)
+
+        text = mod.render(p)
+        self.assertIn("limiter   : memory", text)
+        self.assertIn("host_cap=2", text)
+        self.assertIn("host_binding=ram", text)
+
+    def test_github_rate_limit_is_primary_status_limiter(self) -> None:
+        mod = load()
+        p = build(
+            mod,
+            pre=pre("SPAWN_OK", limiter=cap_limiter("configured_max")),
+            backlog={"_error": "gh: API rate limit exceeded"},
+        )
+        self.assertEqual(p["dispatcher"]["limiter"]["primary"], "github_rate_limit")
+        self.assertIn("API rate limit", p["dispatcher"]["limiter"]["raw"]["github_error"])
+        self.assertIn("github_error=rate_limit", mod.render(p))
+        self.assertIn("(ACTION)", mod.slack_text(p))
+        self.assertIn("GitHub rate limit is blocking", mod.slack_text(p))
+
+    def test_blocking_lane_lease_overrides_preflight_limiter(self) -> None:
+        mod = load()
+        leases = {
+            "active_count": 1,
+            "blocking_count": 1,
+            "active": [{"id": "L1", "lane": "tools", "blocks_candidate": True,
+                        "blocking_candidates": [{"issue": 1803}]}],
+        }
+        p = build(mod, pre=pre("SPAWN_OK", limiter=cap_limiter("configured_max")),
+                  leases=leases)
+        self.assertEqual(p["dispatcher"]["limiter"]["primary"], "leases")
+        self.assertEqual(p["dispatcher"]["limiter"]["term"], "lane_leases_blocking")
+        self.assertEqual(p["dispatcher"]["limiter"]["raw"]["lane_leases_blocking"], 1)
 
 
 class BacklogClosureNaTest(unittest.TestCase):
