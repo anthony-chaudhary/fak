@@ -168,6 +168,7 @@ concurrent = [
   "benchloop",
   "benchruns",
   "newleaf",
+  "scorecard", # pkg/scorecard shared scorecard fold/render kernel; not an internal leaf
   "productscorecard",
   "sessionaudit",
   "selfquery",
@@ -248,6 +249,7 @@ autopick = [
   "benchloop",
   "benchruns",
   "newleaf",
+  "scorecard", # pkg/scorecard shared scorecard fold/render kernel; see [lanes].concurrent note
   "productscorecard",
   "sessionaudit",
   "selfquery",
@@ -410,6 +412,7 @@ apihostprobe = ["internal/apihostprobe/**"]
 benchloop = ["internal/benchloop/**"]
 benchruns = ["internal/benchruns/**"]
 newleaf = ["internal/newleaf/**"]
+scorecard = ["pkg/scorecard/**"]
 productscorecard = ["internal/productscorecard/**"]
 sessionaudit = ["internal/sessionaudit/**"]
 selfquery = ["internal/selfquery/**"]
