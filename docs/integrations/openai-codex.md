@@ -93,6 +93,14 @@ The dry-run should print a command shaped like:
 fak guard --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
+After the child exits, `fak codex` also tries to find the newest Codex session JSONL
+touched during the run and writes privacy-preserving vCache artifacts: sanitized token
+counters plus a `fak.vcache.score.v1` score under the user config dir
+(`fak/codex-vcache/`), and the default observed-window snapshot consumed by
+`fak vcache score`. Use `--vcache-out-dir DIR` to relocate those artifacts,
+`--vcache-snapshot=false` to skip the default snapshot update, or
+`--vcache-artifacts=false` to disable the post-run extraction.
+
 At runtime `fak guard` rewrites the Codex child argv to include:
 
 ```text
@@ -240,6 +248,25 @@ python tools\codex_dogfood_witness.py --thread-id $env:CODEX_THREAD_ID --run-cod
 The witness writes `experiments/agent-live/codex-dogfood-<thread>.json` plus a sanitized
 usage JSONL. It copies token counters, fak verdicts, MCP call metadata, and DOS hook
 counts; it does not copy prompts, tool arguments, tool outputs, diffs, or model text.
+
+When Codex was launched outside `fak codex`, turn the same Codex token counters into the
+default vCache value surface by extracting a privacy-preserving cache snapshot after the
+run:
+
+```powershell
+.\fak vcache codex-session-extract `
+  --thread-id $env:CODEX_THREAD_ID `
+  --out experiments\agent-live\vcache-codex-$env:CODEX_THREAD_ID.jsonl `
+  --snapshot-out default `
+  --score-out experiments\agent-live\vcache-codex-score-$env:CODEX_THREAD_ID.json
+.\fak vcache score --json
+```
+
+The extractor writes only token counters and a `codex` prefix-family label. With
+`--snapshot-out default`, `fak vcache score` reads that observed Codex window by default
+instead of falling back to the synthetic forecast. `--score-out` writes the immediate
+`fak.vcache.score.v1` verdict for the same window; provider rebate remains OBSERVED
+telemetry and is still not treated as trust.
 
 A good run has this shape:
 

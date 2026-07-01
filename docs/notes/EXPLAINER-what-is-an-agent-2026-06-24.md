@@ -73,7 +73,7 @@ number — line numbers rot), and the single sharpest "it is not."
   image via `Table.Restore`. *It is not a turn* (it spans many), *and not identity*
   (the TraceID is only the key it is filed under).
 - **Identity.** The stable handle for *who* a task is: a deterministic signature
-  over `(project, cwd, canonical first directive)` from `tools/task_identity.py`,
+  over `(project, cwd, canonical first directive)` from `internal/taskidentity`,
   plus the share/taint provenance on `abi.Ref` (`ShareScope`, `TaintLabel`).
   *It is not the session* — fifteen re-homed sessions of one `/goal` collapse to
   one identity; fifteen distinct goals under a byte-identical preamble must not.
@@ -304,7 +304,7 @@ shipped and wired. The load-bearing gaps, stated plainly:
 - **Session drive state is consumed on the harness loop, not yet the served turn.**
   An operator `POST …/pause` records and reads back; the gateway's served passthrough
   turn does not yet gate on `Decide`. Priority is a field with no contended scheduler.
-- **Identity is a Python module, not an `abi` Go type.** `task_identity.py` answers
+- **Identity is a Go module, not an `abi` type.** `internal/taskidentity` answers
   "who is this task"; `abi.ShareScope`/`Taint` answer "what may its results be shared
   as." They are not wired into one principal, and the primitive is not yet the sole
   consumer at every call site.

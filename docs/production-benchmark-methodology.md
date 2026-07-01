@@ -79,7 +79,7 @@ multi-session fleet load. Before quoting a result:
 - record the node metadata in `node-info.json`;
 - run the full, uncapped command above;
 - keep the raw JSON/CSV, not just pasted tables;
-- compare nodes with `python tools/fak_node_compare.py --json`.
+- compare nodes with `fak node-compare --json`.
 - Run the Phase 0 clean-node reproduction gate with:
 
 ```bash
