@@ -856,11 +856,15 @@ def _func_bodies(code: list[str]) -> list[tuple[str, int, list[str]]]:
 # Two shapes that assert through a channel the `t.*`/`require.`/`assert.` scan can't
 # see, so a no-`t.*` body is NOT vacuous:
 #   (a) a re-exec HELPER test — the `TestXHelperProcess` pattern: when invoked as a
-#       child via os.Exec with an env guard set, it writes to os.Stdout/os.Stderr and
-#       calls os.Exit; the PARENT test asserts on that out-of-band output/exit code.
+#       child via os.Exec with an env guard set, it calls os.Exit (optionally writing
+#       out-of-band to os.Stdout/os.Stderr/fmt.Print*); the PARENT test asserts on that
+#       exit code and/or output. A child whose only job is to BE a live PID and then
+#       exit cleanly (a dead-PID fixture) writes nothing at all — still not vacuous.
 #   (b) a *DoesNotPanic* test whose single statement is a bare call — the assertion IS
 #       "this call returns without panicking"; the test fails (panics) if it doesn't.
-_REEXEC_OOB_RE = re.compile(r"\b(os\.Stdout|os\.Stderr|fmt\.Fprint)")
+# The stdout writers (fmt.Print/Println/Printf) join Fprint here so a child that reports
+# via println is recognised, but the OOB write is NOT required — see _is_reexec_helper_test.
+_REEXEC_OOB_RE = re.compile(r"\b(os\.Stdout|os\.Stderr|fmt\.(Fprint|Print))")
 _REEXEC_EXIT_RE = re.compile(r"\bos\.Exit\(")
 # RAW source — code_only blanks the quotes, so this matches the original lines.
 _REEXEC_ENVGUARD_RE = re.compile(
@@ -872,11 +876,16 @@ _SINGLE_CALL_RE = re.compile(r"^[\w.]+\([^;]*\)$")
 
 def _is_reexec_helper_test(body_blob: str, raw_lines: list[str], lineno: int) -> bool:
     """True iff the func is a re-exec child helper: its code-only body calls os.Exit(
-    AND writes out-of-band (os.Stdout/os.Stderr/fmt.Fprint), AND its first statement is
-    an env-guard (`if os.Getenv(...) == "..." {`) whose next non-blank line is a bare
-    `return` (the not-the-child early-out). `body_blob` is the code-only body joined;
-    `raw_lines` is text.splitlines() (the env-guard match needs the RAW quotes)."""
-    if not (_REEXEC_EXIT_RE.search(body_blob) and _REEXEC_OOB_RE.search(body_blob)):
+    AND its first statement is an env-guard (`if os.Getenv(...) == "..." {`) whose next
+    non-blank line is a bare `return` (the not-the-child early-out). An out-of-band write
+    (os.Stdout/os.Stderr/fmt.Print*) is a common but NOT required tell — a dead-PID
+    fixture is re-exec'd only to be a live process that then exits cleanly, and writes
+    nothing. The env-guard->return->os.Exit triad is the non-forgeable signature (a real
+    test does not gate its whole body behind an undocumented env var and then os.Exit),
+    so dropping the mandatory write cannot admit a genuinely vacuous test. `body_blob` is
+    the code-only body joined; `raw_lines` is text.splitlines() (the env-guard match needs
+    the RAW quotes)."""
+    if not _REEXEC_EXIT_RE.search(body_blob):
         return False
     span = raw_lines[lineno - 1:lineno - 1 + 12]
     for i, rl in enumerate(span):

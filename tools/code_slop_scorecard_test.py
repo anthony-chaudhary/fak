@@ -711,6 +711,28 @@ def test_fix2_reexec_helper_test_not_vacuous():
     assert cs.kpi_vacuous_tests(tf)["defects"] == []
 
 
+def test_fix2_reexec_dead_pid_fixture_no_write_not_vacuous():
+    # FP: a dead-PID fixture is re-exec'd only to BE a live process that then exits
+    # cleanly — its whole point is to write NOTHING (the parent captures its PID, kills
+    # it, and observes the death). The env-guard->return->os.Exit tell is present; the
+    # out-of-band write is absent by design, and must not be required.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestDeadPIDHelper(t *testing.T) {\n"
+                        "\tif os.Getenv(\"DEAD_PID_HELPER\") != \"1\" {\n\t\treturn\n\t}\n"
+                        "\tos.Exit(0)\n}\n")}
+    assert cs.kpi_vacuous_tests(tf)["defects"] == []
+
+
+def test_fix2_reexec_helper_reporting_via_println_not_vacuous():
+    # FP: a re-exec child that reports via fmt.Println (stdout) — not just fmt.Fprint —
+    # is a helper, not a vacuous test; the stdout Print* writers count as out-of-band.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestSpawnHelper(t *testing.T) {\n"
+                        "\tif os.Getenv(\"SPAWN_HELPER\") != \"1\" {\n\t\treturn\n\t}\n"
+                        "\tfmt.Println(\"worker helper wrote output\")\n\tos.Exit(0)\n}\n")}
+    assert cs.kpi_vacuous_tests(tf)["defects"] == []
+
+
 def test_fix2_does_not_panic_test_not_vacuous():
     # FP: running a production call without panicking IS the assertion (name marker +
     # single bare call body, composite-literal arg allowed).
