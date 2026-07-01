@@ -166,11 +166,11 @@ func TestMarshalLedgerRowOmitsAbsentAxes(t *testing.T) {
 
 func TestHumanBytes(t *testing.T) {
 	cases := map[uint64]string{
-		512:              "512 B",
-		1 << 10:          "1.0 KiB",
-		1536:             "1.5 KiB",
-		1 << 20:          "1.0 MiB",
-		3 << 30:          "3.0 GiB",
+		512:     "512 B",
+		1 << 10: "1.0 KiB",
+		1536:    "1.5 KiB",
+		1 << 20: "1.0 MiB",
+		3 << 30: "3.0 GiB",
 	}
 	for in, want := range cases {
 		if got := humanBytes(in); got != want {
