@@ -460,6 +460,101 @@ func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
 	}
 }
 
+// TestGuardMaxDurationStartsQueryableTimeBudget exercises the exact --max-duration
+// wiring cmdGuard performs (issue #1584): serveSessions.StartTimeBudget(guardTraceID,
+// *maxDuration, time.Now()), followed by the read side an operator/supervisor uses —
+// `fak session status`-style querying via serveSessions.QueryTimeBudget — proving the
+// flag's wall-clock envelope is live and independently trackable from the token budget
+// a sibling --context-budget-tokens flag would also set on the same trace.
+func TestGuardMaxDurationStartsQueryableTimeBudget(t *testing.T) {
+	const trace = "guard-max-duration-test"
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+
+	t0 := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	// Mirrors cmdGuard's apply step: `if *maxDuration > 0 { serveSessions.StartTimeBudget(...) }`.
+	serveSessions.StartTimeBudget(trace, 30*time.Minute, t0)
+	// A sibling token budget on the SAME trace, proving the two axes are independent —
+	// exactly what --context-budget-tokens would also configure on guardTraceID.
+	serveSessions.SetBudget(trace, session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 1000})
+
+	still := serveSessions.QueryTimeBudget(trace, t0.Add(10*time.Minute))
+	if !still.Bounded || still.Exceeded {
+		t.Fatalf("time budget at +10m = %+v, want bounded and not yet exceeded", still)
+	}
+	if still.Remaining != 20*time.Minute {
+		t.Fatalf("remaining at +10m = %v, want 20m", still.Remaining)
+	}
+
+	exhausted := serveSessions.QueryTimeBudget(trace, t0.Add(45*time.Minute))
+	if !exhausted.Exceeded {
+		t.Fatalf("time budget at +45m = %+v, want exceeded", exhausted)
+	}
+	// The token axis is untouched by a query against the time axis.
+	if got := serveSessions.Get(trace).Budget.ContextTokensLeft; got != 1000 {
+		t.Fatalf("querying the time axis mutated the token axis: context_tokens_left=%d", got)
+	}
+
+	v := serveSessions.DecideTimeBudget(trace, t0.Add(45*time.Minute))
+	if v.Proceed || !v.Stop || v.Reason != session.ReasonTimeBudgetExhausted {
+		t.Fatalf("DecideTimeBudget at +45m = %+v, want stop with %s", v, session.ReasonTimeBudgetExhausted)
+	}
+}
+
+// TestGuardMaxDurationZeroLeavesTimeBudgetUnconfigured proves the flag's documented
+// "0 = unbounded, off" default: a guard launch with no --max-duration (the flag's zero
+// value) must not call StartTimeBudget at all, so a session with no wall-clock
+// envelope reports Bounded=false — no behavior change for a caller not opting in.
+func TestGuardMaxDurationZeroLeavesTimeBudgetUnconfigured(t *testing.T) {
+	const trace = "guard-max-duration-zero-test"
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+
+	maxDuration := time.Duration(0)
+	if maxDuration > 0 {
+		serveSessions.StartTimeBudget(trace, maxDuration, time.Now())
+	}
+	v := serveSessions.QueryTimeBudget(trace, time.Now())
+	if v.Bounded {
+		t.Fatalf("--max-duration=0 must leave the time budget unconfigured, got %+v", v)
+	}
+}
+
+// TestGuardMaxDurationSurvivesRecontinueRestart ties --max-duration to the SAME
+// hidden-restart mechanism TestGuardBudgetRestarterRecontinuesAndEmitsSeed exercises
+// for the token axis: a --restart-on-budget relaunch (Recontinue under the hood) must
+// carry the wall-clock envelope's accumulated elapsed time forward onto the fresh
+// child trace, not reset it to zero.
+func TestGuardMaxDurationTimeBudgetSurvivesRecontinueRestart(t *testing.T) {
+	const trace = "guard-max-duration-restart-test"
+	var child string
+	t.Cleanup(func() {
+		serveSessions.Reset(trace)
+		if child != "" {
+			serveSessions.Reset(child)
+		}
+	})
+
+	t0 := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	serveSessions.StartTimeBudget(trace, time.Hour, t0)
+	serveSessions.SetBudget(trace, session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 5})
+
+	// Drain the token axis (the existing --restart-on-budget trigger) after 12 real
+	// minutes have passed.
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 6})
+	child = st.ContinuationID
+	if child == "" {
+		t.Fatalf("debit state = %+v, want continuation id", st)
+	}
+	resetAt := t0.Add(12 * time.Minute)
+	fresh := serveSessions.RecontinueAt(trace, child, session.Budget{TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 50}, resetAt)
+
+	if !fresh.Time.Bounded() {
+		t.Fatalf("recontinued child lost its wall-clock envelope: %+v", fresh.Time)
+	}
+	if got := fresh.Time.Elapsed(resetAt); got != 12*time.Minute {
+		t.Fatalf("recontinued child elapsed = %v, want 12m carried from the parent, not reset to zero", got)
+	}
+}
+
 func TestGuardEnvVar(t *testing.T) {
 	cases := []struct {
 		provider string

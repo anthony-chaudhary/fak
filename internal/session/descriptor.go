@@ -98,6 +98,20 @@ type Descriptor struct {
 	// Reason is the closed token on a Throttled/Stopped descriptor ("" otherwise), carried
 	// so a restart of a terminal session still reports WHY it stopped.
 	Reason string `json:"reason,omitempty"`
+	// Time mirrors the live State's wall-clock budget (issue #1584): the persisted
+	// LimitNanos/ElapsedNanos/StartedAtUnixNano so a process restart re-attaches the
+	// accumulated elapsed time, not a zeroed clock. descriptorFromState copies whatever
+	// TimeBudget the caller's State carries verbatim — Register/Update do not themselves
+	// call Pause before persisting, so a descriptor snapshotted mid-tick (StartedAtUnixNano
+	// set) is possible if the process dies before an explicit shutdown-time Pause. That is
+	// fine by construction: RestoredState below always loads Time back through
+	// TimeBudget.restoredPaused, which discards a live StartedAtUnixNano rather than
+	// trusting a wall-clock instant from a (possibly now-dead) process, so the durably-
+	// stored clock is never resumed ticking from a stale instant regardless of when the
+	// snapshot was taken. A caller that DOES pause cleanly before a graceful shutdown
+	// (Table.PauseTimeBudget) simply gets a descriptor whose ElapsedNanos is already
+	// exact and whose StartedAtUnixNano is already 0 — restoredPaused is then a no-op.
+	Time TimeBudget `json:"time,omitempty,omitzero"`
 	// Rev is the live State's monotonic revision at the last stamp — the optimistic-
 	// concurrency cursor, preserved so an operator UI that held an If-Rev across the
 	// restart still composes (the same Rev-preservation discipline as Table.Restore).
@@ -154,6 +168,7 @@ func descriptorFromState(st State) Descriptor {
 		Generation: st.Generation,
 		Reason:     st.Reason,
 		Rev:        st.Rev,
+		Time:       st.Time,
 	}
 }
 
@@ -180,6 +195,14 @@ func (d Descriptor) RestoredState() State {
 		Generation: d.Generation,
 		Reason:     d.Reason,
 		Rev:        d.Rev,
+		// Time is restored PAUSED (see TimeBudget.restoredPaused): a HIDDEN process
+		// restart is exactly a Pause the old process never got to make, so the
+		// persisted StartedAtUnixNano (a wall-clock instant in a now-dead process) must
+		// not be trusted to keep ticking from — a caller re-arms it explicitly via
+		// Table.ResumeTimeBudget(trace, now) once the restarted process picks now, which
+		// folds no further elapsed time (already paused) and simply starts the clock
+		// fresh, preserving ElapsedNanos exactly as persisted.
+		Time: d.Time.restoredPaused(),
 	}
 }
 

@@ -248,7 +248,16 @@ type State struct {
 	// identical. A consumer that promotes it to a live field (resume's idle figure, the
 	// scheduler's dormant-vs-stuck split #1180) lands in a later phase.
 	LastActive dormancy.Stamp `json:"last_active,omitempty,omitzero"`
-	Rev        uint64         `json:"rev"`
+	// Time is the wall-clock budget tracker (issue #1584, epic #1570 "managed
+	// context"): a persisted, timestamp-based allotment of REAL elapsed time,
+	// independent of the token axes on Budget. It is carried forward across a
+	// Recontinue re-arm exactly like Generation/ParentTrace (see (*Table) RecontinueAt in
+	// table.go), so a hidden context reset does not zero the wall-clock accounting.
+	// The zero value is unbounded/never-started — a State with no configured time
+	// envelope behaves byte-identically to a pre-#1584 State (omitzero keeps the wire
+	// shape unchanged when unused).
+	Time TimeBudget `json:"time,omitempty,omitzero"`
+	Rev  uint64     `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the

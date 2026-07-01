@@ -141,6 +141,7 @@ func cmdGuard(argv []string) {
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
+	maxDuration := fs.Duration("max-duration", 0, "govern this guard session to at most this much REAL WALL-CLOCK time (issue #1584), tracked independently of --context-budget-tokens and surviving a --restart-on-budget hidden restart (the elapsed total carries forward, it does not reset to zero). 0 = unbounded (still tracked for `fak session status`, just never stops the run). Query/inspect anytime with `fak session status <id>`; the time budget drains the session to Draining/Stopped with reason TIME_BUDGET_EXHAUSTED exactly like a token-budget exhaustion.")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
@@ -529,6 +530,10 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
 		os.Exit(2)
 	}
+	if *maxDuration < 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: --max-duration must be non-negative")
+		os.Exit(2)
+	}
 	// Session durability (the file-backed registry restore + the git-backed leaseref
 	// publish) is only useful for RESUME/DISPATCH of THIS session later — a plain
 	// attended `fak guard -- claude` never reads it back. So GATE the whole block on an
@@ -541,7 +546,7 @@ func cmdGuard(argv []string) {
 	// is used verbatim, and the no-flag default is the fixed "guard" id (identical to
 	// defaultSessionIDFromMeta's own zero-cache-key fallback) rather than a git-SHA-derived
 	// cache key nothing will read back.
-	guardDurabilityWanted := guardSetFlags["session-id"] || *contextBudgetTokens > 0
+	guardDurabilityWanted := guardSetFlags["session-id"] || *contextBudgetTokens > 0 || *maxDuration > 0
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
 		guardTraceID = "guard"
@@ -552,6 +557,17 @@ func cmdGuard(argv []string) {
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: *contextBudgetTokens,
 		})
+	}
+	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
+	// above — a managed run may be fine on tokens but out of real time, or vice versa.
+	// StartTimeBudget both configures the envelope and arms the clock at the current
+	// instant, so `fak session status` can report remaining wall-clock time from the very
+	// first turn. This governs the SAME guardTraceID the token budget above does; a hidden
+	// restart driven by --restart-on-budget re-arms this trace's clock via the ordinary
+	// Recontinue path (RecontinueAt), which carries the accumulated elapsed time forward
+	// rather than resetting it to zero — see internal/session/timebudget.go.
+	if *maxDuration > 0 {
+		serveSessions.StartTimeBudget(guardTraceID, *maxDuration, time.Now())
 	}
 	// DEFER the durability setup's git spawns (sessionStartSHA's `git rev-parse HEAD` and
 	// PublishSession's `git hash-object -w` + `git update-ref`) until AFTER the gateway is
@@ -899,6 +915,9 @@ func cmdGuard(argv []string) {
 			if *restartOnBudget {
 				fmt.Fprintln(os.Stderr, "fak guard: session restart — child relaunch on budget exhaustion enabled")
 			}
+		}
+		if *maxDuration > 0 {
+			fmt.Fprintf(os.Stderr, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDuration.String())
 		}
 	}
 

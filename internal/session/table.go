@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"sort"
 	"sync"
+	"time"
 )
 
 // DefaultTableLimit bounds the process-local per-session drive records. Gateways
@@ -303,6 +304,93 @@ func (t *Table) SetGoal(trace string, goal Goal) (State, bool) {
 	return t.setLocked(trace, func(cur *State) { cur.Goal = goal })
 }
 
+// SetTimeBudget re-sets a session's wall-clock envelope live (issue #1584) — raise it
+// to grant more real time, cut it to bound a runaway managed run. A terminal session
+// rejects the change, matching SetBudget. Unlike SetBudget, this does NOT arm the
+// clock: pass a TimeBudget built with WithLimit (Start/Running left false) to configure
+// the envelope without starting it, or one already Started/Resumed to configure AND
+// arm it in one write. StartTimeBudget is the common case (configure once, arm now).
+func (t *Table) SetTimeBudget(trace string, b TimeBudget) (State, bool) {
+	return t.setLocked(trace, func(cur *State) { cur.Time = b })
+}
+
+// StartTimeBudget configures trace's wall-clock envelope to limit and arms the clock at
+// now in one write — the usual entry point for a managed run that wants "govern me to
+// at most N wall-clock minutes starting now". limit<=0 configures an unbounded budget
+// (TimeUnbounded) that is still started (Running() true), so Elapsed(now) still reports
+// real elapsed time even with no cap — useful for observability-only wall-clock
+// tracking. A terminal session rejects the change.
+func (t *Table) StartTimeBudget(trace string, limit time.Duration, now time.Time) (State, bool) {
+	return t.setLocked(trace, func(cur *State) {
+		cur.Time = NewTimeBudget().WithLimit(limit).Start(now)
+	})
+}
+
+// PauseTimeBudget folds trace's live wall-clock duration into its TimeBudget's
+// ElapsedNanos and clears the running clock, as of now — the write a hidden restart (or
+// a clean shutdown) makes BEFORE the process goes away, so the durable State (persisted
+// via Descriptor/Registry exactly like Budget already is) carries the true elapsed
+// total forward instead of losing the live run's duration. A terminal session still
+// accepts this write (unlike most control verbs): a Stopped/Draining session's elapsed
+// time must still be foldable so its final accounting is correct, mirroring how
+// Restore may re-establish a terminal record faithfully. Pausing an already-paused (or
+// time-unconfigured) session is a safe no-op.
+func (t *Table) PauseTimeBudget(trace string, now time.Time) State {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+	cur.Time = cur.Time.Pause(now)
+	return t.putLocked(cur)
+}
+
+// ResumeTimeBudget re-arms trace's wall-clock clock at now after a hidden restart,
+// preserving the ElapsedNanos a prior PauseTimeBudget (or a persisted Descriptor
+// restore) carried forward — the read-side counterpart of PauseTimeBudget. A terminal
+// session rejects the change (a stopped session's clock should not resume ticking).
+func (t *Table) ResumeTimeBudget(trace string, now time.Time) (State, bool) {
+	return t.setLocked(trace, func(cur *State) { cur.Time = cur.Time.Resume(now) })
+}
+
+// QueryTimeBudget answers "how much wall-clock budget does trace have left as of now"
+// without mutating anything (Table.Decide's per-turn read is the mutating half; this is
+// the pure query a `fak session status`/supervisor check calls as often as it likes).
+// An unseen trace reports the default (unbounded, not running) TimeBudget's verdict.
+func (t *Table) QueryTimeBudget(trace string, now time.Time) TimeQueryVerdict {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.getLocked(trace).Time.Query(now)
+}
+
+// DecideTimeBudget is the wall-clock twin of Decide's budget check: given trace's
+// current TimeBudget as of now, it reports whether the run should STOP (the envelope is
+// exceeded), and if so drives the session to Draining/Stopped exactly like a token-axis
+// exhaustion (ReasonTimeBudgetExhausted), folding the elapsed live duration into
+// ElapsedNanos so the stopped record's accounting is final and correct. A session that
+// is Paused/Draining/Stopped, or has no bounded time envelope, is left untouched and
+// reports Proceed=true (Decide's own run-state gate already covers those cases; this
+// verb only adds the wall-clock axis on top of a live session). Call this once per turn
+// boundary alongside Decide — it is deliberately separate so a caller not using wall-
+// clock budgets pays zero cost and sees zero behavior change.
+func (t *Table) DecideTimeBudget(trace string, now time.Time) Verdict {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+	if cur.Run.terminal() {
+		return Verdict{Proceed: false, Stop: true, Reason: cur.stopReasonOr(ReasonStopped), State: cur}
+	}
+	if cur.Run == Paused {
+		return Verdict{Proceed: false, Stop: false, Reason: ReasonPaused, State: cur}
+	}
+	if !cur.Time.Bounded() || !cur.Time.Exceeded(now) {
+		return Verdict{Proceed: true, State: cur}
+	}
+	cur.Time = cur.Time.Pause(now) // fold the final live duration before stopping
+	cur.Run = Draining
+	cur.Reason = ReasonTimeBudgetExhausted
+	final := t.finalizeDrainLocked(cur)
+	return Verdict{Proceed: false, Stop: true, Reason: final.Reason, State: final}
+}
+
 // CompareAndSet applies want only if the session's current Rev equals expectRev —
 // the optimistic-concurrency guard a stale operator UI is checked against, so a
 // newer transition is never silently clobbered. want's TraceID and Rev are ignored
@@ -347,9 +435,24 @@ func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State
 //
 // The returned State is the fresh child (Running, fresh budget, ParentTrace=parent,
 // Generation=parent.Generation+1, Reason=ReasonBudgetReset, Rev 1). The parent trace
-// is left exactly as the budget drain left it. A nil receiver mints a detached
-// default child (no table to record into) so a loop with no table behaves sanely.
+// is left exactly as the budget drain left it, EXCEPT its TimeBudget's live clock is
+// paused (folded into ElapsedNanos) — see RecontinueAt, which this delegates to with
+// now defaulted to time.Now at the call boundary only (never inside a decision path).
+// A nil receiver mints a detached default child (no table to record into) so a loop
+// with no table behaves sanely.
 func (t *Table) Recontinue(parent, child string, fresh Budget) State {
+	return t.RecontinueAt(parent, child, fresh, time.Now())
+}
+
+// RecontinueAt is Recontinue with an explicit now, for deterministic testing of the
+// wall-clock carry-forward (issue #1584): the fresh child's TimeBudget PRESERVES the
+// parent lineage's total ElapsedNanos and LimitNanos (a hidden context reset must not
+// zero the wall-clock envelope any more than it zeros Generation), pausing the parent's
+// clock at now (folding its live duration in) and re-arming the SAME accumulated total
+// on the child, started fresh at now. A parent with no time budget configured
+// (Bounded()==false and never started) carries forward a zero TimeBudget, so a caller
+// not using wall-clock budgets sees no behavior change.
+func (t *Table) RecontinueAt(parent, child string, fresh Budget, now time.Time) State {
 	if t == nil {
 		st := DefaultState(child)
 		st.Budget = fresh.withContextCap()
@@ -359,7 +462,22 @@ func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	prevGen := t.getLocked(parent).Generation
+	t.ensureLocked()
+	parentSt := t.getLocked(parent)
+	prevGen := parentSt.Generation
+	pausedParentTime := parentSt.Time.Pause(now)
+	if _, known := t.state[parent]; known {
+		// Fold the parent's final live duration into its own persisted record so its
+		// closed accounting is correct, WITHOUT bumping Rev — this is an internal
+		// wall-clock accounting write, not an operator-visible transition (the parent's
+		// Run/Reason/Budget from the earlier drain are left exactly as they were).
+		parentSt.Time = pausedParentTime
+		t.state[parent] = parentSt
+	}
+	carriedTime := pausedParentTime
+	if carriedTime.Bounded() || carriedTime.ElapsedNanos > 0 {
+		carriedTime = carriedTime.Start(now)
+	}
 	next := State{
 		TraceID:     child,
 		Run:         Running,
@@ -367,6 +485,7 @@ func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 		ParentTrace: parent,
 		Generation:  prevGen + 1,
 		Reason:      ReasonBudgetReset,
+		Time:        carriedTime,
 	}
 	return t.putLocked(next)
 }
