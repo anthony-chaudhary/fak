@@ -3,6 +3,7 @@ package guardcomplaint
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -135,6 +136,9 @@ func TestSyncCreateUsesInjectedRunnerAndLabels(t *testing.T) {
 	row := BuildPlan(c, nil)
 	var gotArgs []string
 	runner := func(args []string) (string, string, bool) {
+		if strings.Join(args, " ") == "issue view 1 --json number,title,body,state,url --repo owner/repo" {
+			return `{"number":1,"body":` + strconv.Quote(dogfoodSyncBody(row)) + `,"url":"https://example/issues/1"}`, "", true
+		}
 		gotArgs = args
 		return "https://example/issues/1", "", true
 	}
@@ -156,6 +160,9 @@ func TestSyncUpdateEditsByNumber(t *testing.T) {
 	row := BuildPlan(c, existing)
 	var gotArgs []string
 	runner := func(args []string) (string, string, bool) {
+		if strings.Join(args, " ") == "issue view 88 --json number,title,body,state,url" {
+			return `{"number":88,"body":` + strconv.Quote(dogfoodSyncBody(row)) + `,"url":"https://example/issues/88"}`, "", true
+		}
 		gotArgs = args
 		return "", "", true
 	}

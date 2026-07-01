@@ -319,13 +319,20 @@ func Sync(row PlanRow, repo string, labels []string, runner dogfoodissues.Runner
 		Number: row.Number,
 		State:  row.State,
 		Title:  row.Title,
-		Body:   row.Body,
+		Body:   dogfoodSyncBody(row),
 	}
 	out := dogfoodissues.Sync([]dogfoodissues.PlanRow{ddRow}, repo, labels, runner)
 	if len(out) == 1 {
 		return out[0]
 	}
 	return dogfoodissues.SyncRow{Key: row.Key, Action: row.Action}
+}
+
+func dogfoodSyncBody(row PlanRow) string {
+	if dogfoodissues.MarkerKey(row.Body) == row.Key {
+		return row.Body
+	}
+	return fmt.Sprintf("<!-- fak-dogfood-action-key: %s -->\n%s", row.Key, row.Body)
 }
 
 // FetchExisting queries gh for the existing issues to classify create vs update. It is a
