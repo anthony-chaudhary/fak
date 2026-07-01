@@ -1062,6 +1062,7 @@ func issueUsage(w io.Writer) {
   fak issue contract --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N]
   fak issue cohort   --from-plan PLAN.json [--json]
+  fak issue cohort   --from-issues ISSUES.json [--json]
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
 
 The contract command reviews machine-created GitHub issue candidates before a

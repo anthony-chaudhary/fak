@@ -101,6 +101,58 @@ func TestRunIssueCohortMissingArg(t *testing.T) {
 	}
 }
 
+func TestRunIssueCohortBothSourcesRejected(t *testing.T) {
+	path := writeCohortPlan(t, []issuecontract.Candidate{
+		cohortTestCandidate("a", []string{"internal/foo/**"}),
+	})
+	var stdout, stderr bytes.Buffer
+	if code := runIssueCohort(&stdout, &stderr, []string{"--from-plan", path, "--from-issues", path}); code != 2 {
+		t.Fatalf("exit = %d, want 2 (exactly one source)", code)
+	}
+}
+
+// TestRunIssueCohortFromIssues plans concurrency-safe waves over EXISTING open
+// issues by parsing their bodies with the same issuecontract sections the
+// contract audit uses.
+func TestRunIssueCohortFromIssues(t *testing.T) {
+	body := func(paths string) string {
+		return "## Current state\n\nnot done\n\n" +
+			"## In scope\n\none file\n\n## Out of scope\n\nrest\n\n" +
+			"## Done condition\n\nit changes\n\n## Witness\n\ngo test passes\n\n" +
+			"## Parent context\n\nepic #1\n\n## Why this is next\n\nunblocks\n\n" +
+			"## Working spine\n\nmake it true\n\n## Acceptance gate\n\nmake ci\n\n" +
+			"## Closure binding\n\ncites #1 (fak leaf)\n\n## Likely files\n\n" + paths + "\n"
+	}
+	issues := []issuecontract.IssueDraft{
+		{Number: 10, Title: "leaf ten", Body: body("- `internal/foo/**`")},
+		{Number: 11, Title: "leaf eleven", Body: body("- `internal/foo/bar.go`")}, // overlaps #10
+		{Number: 12, Title: "leaf twelve", Body: body("- `internal/baz/**`")},     // disjoint
+	}
+	b, err := json.Marshal(issues)
+	if err != nil {
+		t.Fatalf("marshal issues: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "issues.json")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write issues: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runIssueCohort(&stdout, &stderr, []string{"--from-issues", path, "--json"}); code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	var plan issuecohort.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("decode plan: %v\n%s", err, stdout.String())
+	}
+	if plan.Dispatchable != 3 {
+		t.Fatalf("dispatchable = %d, want 3", plan.Dispatchable)
+	}
+	if plan.CollisionPairs != 1 || plan.NumWaves != 2 {
+		t.Fatalf("collisions=%d waves=%d, want 1 collision / 2 waves", plan.CollisionPairs, plan.NumWaves)
+	}
+}
+
 func TestRunIssueCohortRoutedViaRunIssue(t *testing.T) {
 	path := writeCohortPlan(t, []issuecontract.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
