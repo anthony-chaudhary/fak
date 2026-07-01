@@ -249,13 +249,19 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		now = time.Now
 	}
 	lockStart := now()
-	defer func() {
+	lockReleased := false
+	releaseLock := func() {
+		if lockReleased {
+			return
+		}
 		held := now().Sub(lockStart)
 		if held > 0 {
 			res.LockHoldNS = held.Nanoseconds()
 		}
 		unlock()
-	}()
+		lockReleased = true
+	}
+	defer releaseLock()
 
 	// (6) Capture HEAD, then commit by pathspec with the message in a file.
 	if head, code, herr := run(ctx, opts.Dir, "rev-parse", "HEAD"); herr != nil {
@@ -346,11 +352,19 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	recordPathspec = true
 	recordVerdict, recordReason, recordAssertion = witness.VerdictAssertPass, "", "committed-set==requested-set"
 
-	// (8) Optional push — only a verified commit, plain push (never --force). A rejection
-	// (e.g. non-fast-forward) surfaces honestly; the commit stands for a human to integrate.
-	// We never pull --rebase --autostash (it strands .git/rebase-merge).
+	// The correctness-critical window is done once HEAD was captured and the committed
+	// pathset was verified. Release before any remote I/O; a slow push must not stall the
+	// shared same-host commit lane.
+	releaseLock()
+
+	// (8) Optional push — only after a verified commit, by exact SHA refspec (never --force).
+	// Pushing the verified SHA, rather than the mutable branch tip after unlock, prevents a
+	// peer's later local commit from being swept into this push. A rejection (e.g.
+	// non-fast-forward) surfaces honestly; the commit stands for a human to integrate. We
+	// never pull --rebase --autostash (it strands .git/rebase-merge).
 	if opts.Push {
-		if out, code, perr := run(ctx, opts.Dir, "push"); perr != nil {
+		pushArgs := pushVerifiedArgs(ctx, run, opts.Dir, trunk, res.SHA)
+		if out, code, perr := run(ctx, opts.Dir, pushArgs...); perr != nil {
 			return res, fmt.Errorf("safecommit: git not executable: %w", perr)
 		} else if code != 0 {
 			res.Reason = ReasonPushRejected
@@ -361,6 +375,30 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 
 	return res, nil
+}
+
+func pushVerifiedArgs(ctx context.Context, run Runner, dir, trunk, sha string) []string {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return []string{"push"}
+	}
+	remote := gitConfigValue(ctx, run, dir, "branch."+trunk+".remote")
+	if remote == "" {
+		remote = "origin"
+	}
+	mergeRef := gitConfigValue(ctx, run, dir, "branch."+trunk+".merge")
+	if mergeRef == "" {
+		mergeRef = "refs/heads/" + trunk
+	}
+	return []string{"push", remote, sha + ":" + mergeRef}
+}
+
+func gitConfigValue(ctx context.Context, run Runner, dir, key string) string {
+	out, code, err := run(ctx, dir, "config", "--get", key)
+	if err != nil || code != 0 {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // precommitGates runs the pure, lock-free refusal checks before any lock or `git add`

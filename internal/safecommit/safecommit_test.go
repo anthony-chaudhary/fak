@@ -344,6 +344,44 @@ func TestLockHoldDurationMeasuresOnlyAcquiredLockWindow(t *testing.T) {
 	}
 }
 
+func TestPushRunsAfterUnlockWithVerifiedSHARefspec(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	opts := baseOpts()
+	opts.Push = true
+	var events []string
+	run := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if len(args) > 0 && args[0] == "push" {
+			events = append(events, "push")
+		}
+		return g.run(ctx, dir, args...)
+	}
+	lock := func(LockOptions) (func(), error) {
+		events = append(events, "lock")
+		return func() {
+			events = append(events, "unlock")
+		}, nil
+	}
+
+	res, err := CommitWith(context.Background(), run, lock, opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Verified || !res.Pushed || res.Reason != "" {
+		t.Fatalf("want verified pushed commit, got %+v", res)
+	}
+	unlockAt, pushAt := eventIndex(events, "unlock"), eventIndex(events, "push")
+	if unlockAt < 0 || pushAt < 0 {
+		t.Fatalf("events = %v, want unlock and push", events)
+	}
+	if pushAt < unlockAt {
+		t.Fatalf("push ran while lock was held: events=%v", events)
+	}
+	wantPush := []string{"push", "origin", "abc123:refs/heads/main"}
+	if got := g.argvFor("push"); strings.Join(got, "\x00") != strings.Join(wantPush, "\x00") {
+		t.Fatalf("push argv = %q, want %q", got, wantPush)
+	}
+}
+
 func eventIndex(events []string, want string) int {
 	for i, ev := range events {
 		if ev == want {
