@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/taskdecision"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -25,6 +26,8 @@ func runTask(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "handoff":
 		return runTaskHandoff(stdout, stderr, argv[1:])
+	case "decision":
+		return runTaskDecision(stdout, stderr, argv[1:])
 	case "sample":
 		return runTaskSample(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -35,6 +38,120 @@ func runTask(stdout, stderr io.Writer, argv []string) int {
 		taskUsage(stderr)
 		return 2
 	}
+}
+
+type taskDecisionResult struct {
+	Schema  string               `json:"schema"`
+	Mode    string               `json:"mode"`
+	File    string               `json:"file"`
+	Entry   taskdecision.Entry   `json:"entry,omitempty"`
+	Entries []taskdecision.Entry `json:"entries,omitempty"`
+}
+
+func runTaskDecision(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, "fak task decision: subcommand required (append | list)")
+		return 2
+	}
+	switch argv[0] {
+	case "append":
+		return runTaskDecisionAppend(stdout, stderr, argv[1:])
+	case "list":
+		return runTaskDecisionList(stdout, stderr, argv[1:])
+	default:
+		fmt.Fprintf(stderr, "fak task decision: unknown subcommand %q (append | list)\n", argv[0])
+		return 2
+	}
+}
+
+func runTaskDecisionAppend(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("task decision append", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	taskID := fs.String("task", "", "task id for the scoped decision log")
+	logPath := fs.String("log", "", "decision log JSONL path (default: .fak/task-decisions/<task>.jsonl)")
+	decision := fs.String("decision", "", "decision made")
+	rationale := fs.String("rationale", "", "why the decision was made")
+	evidenceRef := fs.String("evidence-ref", "", "witness/reference for the decision")
+	unixNano := fs.Int64("time-unix-nano", 0, "optional event timestamp for deterministic fixtures")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	var openThreads stringList
+	fs.Var(&openThreads, "open-thread", "open thread/risk to reload after compaction (repeatable)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak task decision append: unexpected positional arguments")
+		return 2
+	}
+	entry := taskdecision.Normalize(taskdecision.Entry{
+		TaskID:      *taskID,
+		Decision:    *decision,
+		Rationale:   *rationale,
+		EvidenceRef: *evidenceRef,
+		OpenThreads: []string(openThreads),
+		UnixNano:    *unixNano,
+	})
+	if err := taskdecision.Validate(entry); err != nil {
+		fmt.Fprintf(stderr, "fak task decision append: %v\n", err)
+		return 2
+	}
+	path := taskDecisionLogPath(*logPath, entry.TaskID)
+	if err := taskdecision.Append(path, entry); err != nil {
+		fmt.Fprintf(stderr, "fak task decision append: %v\n", err)
+		return 1
+	}
+	result := taskDecisionResult{Schema: "fak.task-decision-result.v1", Mode: "append", File: path, Entry: entry}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, result, "fak task decision append")
+	}
+	fmt.Fprintf(stdout, "task decision appended: task=%s file=%s decision=%q\n", entry.TaskID, path, entry.Decision)
+	return 0
+}
+
+func runTaskDecisionList(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("task decision list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	taskID := fs.String("task", "", "task id to load")
+	logPath := fs.String("log", "", "decision log JSONL path (default: .fak/task-decisions/<task>.jsonl)")
+	limit := fs.Int("limit", taskdecision.DefaultReloadLimit, "maximum newest entries to load into reset context")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak task decision list: unexpected positional arguments")
+		return 2
+	}
+	if strings.TrimSpace(*taskID) == "" {
+		fmt.Fprintln(stderr, "fak task decision list: --task is required")
+		return 2
+	}
+	path := taskDecisionLogPath(*logPath, *taskID)
+	entries, err := taskdecision.Load(path, *taskID, *limit)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak task decision list: %v\n", err)
+		return 1
+	}
+	result := taskDecisionResult{Schema: "fak.task-decision-result.v1", Mode: "list", File: path, Entries: entries}
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, result, "fak task decision list")
+	}
+	fmt.Fprintf(stdout, "task decisions: task=%s entries=%d file=%s\n", strings.TrimSpace(*taskID), len(entries), path)
+	if text := taskdecision.Render(entries); text != "" {
+		fmt.Fprintln(stdout, text)
+	}
+	return 0
+}
+
+func taskDecisionLogPath(explicit, taskID string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return explicit
+	}
+	root := resolveRoot("")
+	if root == "" {
+		root = "."
+	}
+	return taskdecision.DefaultPath(root, taskID)
 }
 
 type taskHandoffResult struct {
@@ -419,6 +536,9 @@ func taskUsage(w io.Writer) {
   fak task handoff --file HANDOFF.json [--json] [--existing-json FILE]
                    [--fetch-existing] [--live] [--repo owner/repo]
                    [--label LABEL ...]
+  fak task decision append --task ID --decision STR --rationale STR --evidence-ref REF
+                           [--open-thread STR ...] [--log FILE] [--json]
+  fak task decision list   --task ID [--limit N] [--log FILE] [--json]
 
 The sample command emits the same snapshot shape a long-running fak process can embed:
 process resources, task/step wall time, concept runtime, progress, and ETA when known.
@@ -427,5 +547,9 @@ The handoff command gates a completed task's next-step push: the JSON must carry
 StateDone task with a VerifiedDone witness, a current-state summary, and either one
 or two concrete next steps or a no-next-step reason. Dry-run prints stable GitHub
 issue create/update decisions; --live is required to call gh.
+
+The decision command writes the task-scoped, append-only reasoning log that
+session resets reload as bounded carryover: decision, rationale, evidence_ref, and
+open_threads.
 `)
 }

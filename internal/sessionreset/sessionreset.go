@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anthony-chaudhary/fak/internal/taskdecision"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 )
 
@@ -55,6 +56,7 @@ type Input struct {
 	Trace          string
 	Messages       []Msg
 	FreshBudgetTok int // the context-token budget the fresh session is re-armed with (0 = unbounded)
+	DecisionLog    []taskdecision.Entry
 }
 
 // Part is one contributor's proposal for the seed. Order fixes the deterministic
