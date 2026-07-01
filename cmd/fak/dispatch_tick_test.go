@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -440,6 +441,10 @@ func TestDispatchTickDryRunHoldsGuardedMisroutedSelfSourceIssue(t *testing.T) {
 func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	root := t.TempDir()
+	initDispatchGit(t, root)
+	if err := os.WriteFile(filepath.Join(root, "dirty.txt"), []byte("peer work in progress\n"), 0o644); err != nil {
+		t.Fatalf("write dirty fixture: %v", err)
+	}
 
 	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
@@ -463,6 +468,33 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	acct, _ := got["account"].(map[string]any)
 	if acct["tag"] != "acct-preflight" {
 		t.Fatalf("account = %#v, want acct-preflight", acct)
+	}
+	bundle := mapAt(got, "startup_bundle")
+	if bundle["schema"] != dispatchStartupBundleSchema {
+		t.Fatalf("startup bundle schema = %v, want %s", bundle["schema"], dispatchStartupBundleSchema)
+	}
+	route := mapAt(bundle, "route")
+	if route["lane"] != "docs" || route["target_issue"] != float64(12) {
+		t.Fatalf("startup route = %#v, want docs/#12", route)
+	}
+	capFact := mapAt(bundle, "cap")
+	if dispatchMapInt(capFact, "cap") != 3 || dispatchMapInt(capFact, "live") != 0 {
+		t.Fatalf("startup cap = %#v, want cap=3 live=0", capFact)
+	}
+	seat := mapAt(bundle, "seat")
+	if dispatchMapInt(seat, "total") != 3 || dispatchMapInt(seat, "free") != 2 {
+		t.Fatalf("startup seat = %#v, want total/free 3/2", seat)
+	}
+	lease := mapAt(bundle, "lease")
+	if dispatchMapString(lease, "id") != "resolve-docs" {
+		t.Fatalf("startup lease = %#v, want resolve-docs id", lease)
+	}
+	if tree := stringAnySlice(lease["tree"]); len(tree) != 1 || tree[0] != "docs/**" {
+		t.Fatalf("startup lease tree = %#v, want docs/**", tree)
+	}
+	dirty := mapAt(bundle, "dirty_tree")
+	if dirty["available"] != true || dirty["clean"] != false || dispatchMapInt(dirty, "dirty_total") == 0 {
+		t.Fatalf("startup dirty tree = %#v, want available dirty tree fact", dirty)
 	}
 }
 
@@ -1043,6 +1075,27 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 	}
 }
 
+func TestWriteDispatchStartupBundleSidecar(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "resolve-1784-20260701-120000.log")
+	if err := os.WriteFile(logPath, []byte("# fak-spawn\n"), 0o644); err != nil {
+		t.Fatalf("write log fixture: %v", err)
+	}
+	path := writeDispatchStartupBundleSidecar(logPath, map[string]any{
+		"schema":     dispatchStartupBundleSchema,
+		"route":      map[string]any{"lane": "docs", "target_issue": 1784},
+		"cap":        map[string]any{"cap": 3, "live": 0},
+		"seat":       map[string]any{"total": 3, "free": 2},
+		"lease":      map[string]any{"id": "resolve-docs", "tree": []string{"docs/**"}},
+		"dirty_tree": map[string]any{"available": true, "clean": false, "dirty_total": 1},
+	})
+	if path == "" || !strings.HasSuffix(path, dispatchStartupBundleSidecarSuffix) {
+		t.Fatalf("startup sidecar path = %q, want *%s", path, dispatchStartupBundleSidecarSuffix)
+	}
+	assertFileContains(t, path, dispatchStartupBundleSchema)
+	assertFileContains(t, path, "dirty_tree")
+}
+
 func TestDispatchSpawnHelper(t *testing.T) {
 	if os.Getenv("FAK_DISPATCH_SPAWN_HELPER") != "1" {
 		return
@@ -1069,6 +1122,16 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func initDispatchGit(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
 }
 
 func writeDispatchJSONFixture(t *testing.T, path string, doc any) {

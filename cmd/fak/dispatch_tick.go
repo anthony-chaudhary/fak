@@ -72,6 +72,7 @@ type dispatchSpawnResult struct {
 	Backend    string         `json:"backend"`
 	LeaseID    string         `json:"lease_id,omitempty"`
 	Tree       []string       `json:"tree,omitempty"`
+	Startup    string         `json:"startup_bundle,omitempty"`
 	Account    map[string]any `json:"account,omitempty"`
 	Membership any            `json:"membership,omitempty"`
 	EarlyExit  map[string]any `json:"early_exit,omitempty"`
@@ -79,6 +80,8 @@ type dispatchSpawnResult struct {
 
 const dispatchLeaseTreeSidecarSuffix = ".lease-tree.json"
 const dispatchLeaseIDSidecarSuffix = ".lease-id"
+const dispatchStartupBundleSidecarSuffix = ".startup.json"
+const dispatchStartupBundleSchema = "fleet-worker-startup-bundle/1"
 
 var dispatchResolvePIDRE = regexp.MustCompile(`^resolve-\d+-\d{8}-\d{6}\.pid$`)
 
@@ -285,6 +288,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if hasTarget {
 		payload["target_issue"] = target
 	}
+	payload["startup_bundle"] = dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled)
 
 	finish := func(p map[string]any) map[string]any {
 		if opts.RecordLoop {
@@ -464,6 +468,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
 	payload["lease"] = lease
+	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
+		bundle["lease"] = lease
+	}
 	if refused, _ := lease["refused"].(bool); refused {
 		payload["ok"] = false
 		payload["action"] = "lane_leased"
@@ -505,6 +512,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	payload["command"] = command
 	payload["launch_command"] = launchCommand
 	payload["guarded"] = guarded
+	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
+		spawned.Startup = writeDispatchStartupBundleSidecar(spawned.Log, bundle)
+	}
 	payload["spawned"] = dispatchSpawnMap(spawned)
 	if early, ok := spawned.EarlyExit["silent"].(bool); ok && early {
 		payload["ok"] = false
@@ -1106,6 +1116,93 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick.json"), blob, 0o644)
 }
 
+func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool) map[string]any {
+	route := map[string]any{
+		"lane":             pick.Lane,
+		"target_issue":     nil,
+		"candidate_issues": append([]int(nil), pick.Numbers...),
+		"lane_issue_count": len(pick.Numbers),
+		"lane_step_budget": pick.ByLaneStepBudget[pick.Lane],
+		"tree":             append([]string(nil), pick.Tree...),
+		"held_lanes":       sortedStringSet(held),
+		"already_live":     sortedSet(liveIssues),
+		"cooled_recently":  sortedSet(cooled),
+	}
+	if hasTarget {
+		route["target_issue"] = target
+	}
+	return map[string]any{
+		"schema":    dispatchStartupBundleSchema,
+		"workspace": root,
+		"backend":   opts.Backend,
+		"route":     route,
+		"cap": map[string]any{
+			"cap":             pre["cap"],
+			"live":            pre["live"],
+			"headroom":        pre["headroom"],
+			"max_workers":     pre["max_workers"],
+			"host_cap":        pre["host_cap"],
+			"host_capacity":   mapAt(pre, "host_capacity"),
+			"kernel":          mapAt(pre, "kernel"),
+			"os_worker_procs": pre["os_worker_procs"],
+		},
+		"seat": mapAt(pre, "seat"),
+		"lease": map[string]any{
+			"id":   firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)),
+			"tree": append([]string(nil), pick.Tree...),
+		},
+		"dirty_tree": dispatchDirtyTree(root),
+		"account":    dispatchtick.AccountSidecar(account),
+		"preflight": map[string]any{
+			"verdict": dispatchMapString(pre, "verdict"),
+			"reason":  dispatchMapString(pre, "reason"),
+		},
+	}
+}
+
+func dispatchDirtyTree(root string) map[string]any {
+	cmd := exec.Command("git", "status", "--porcelain=v1")
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return map[string]any{
+			"available":   false,
+			"clean":       nil,
+			"dirty_total": nil,
+			"error":       truncateString(strings.TrimSpace(string(out)), 300),
+		}
+	}
+	rows := nonEmptyLines(string(out))
+	sample := rows
+	if len(sample) > 25 {
+		sample = sample[:25]
+	}
+	return map[string]any{
+		"available":     true,
+		"clean":         len(rows) == 0,
+		"dirty_total":   len(rows),
+		"dirty_sample":  append([]string(nil), sample...),
+		"dirty_omitted": len(rows) - len(sample),
+	}
+}
+
+func writeDispatchStartupBundleSidecar(logPath string, bundle map[string]any) string {
+	if strings.TrimSpace(logPath) == "" || len(bundle) == 0 {
+		return ""
+	}
+	blob, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return ""
+	}
+	stem := strings.TrimSuffix(logPath, filepath.Ext(logPath))
+	path := stem + dispatchStartupBundleSidecarSuffix
+	if err := os.WriteFile(path, blob, 0o644); err != nil {
+		return ""
+	}
+	return path
+}
+
 func dispatchSpawnMap(s dispatchSpawnResult) map[string]any {
 	out := map[string]any{
 		"pid":     s.PID,
@@ -1119,6 +1216,9 @@ func dispatchSpawnMap(s dispatchSpawnResult) map[string]any {
 	}
 	if s.LeaseID != "" {
 		out["lease_id"] = s.LeaseID
+	}
+	if s.Startup != "" {
+		out["startup_bundle"] = s.Startup
 	}
 	if len(s.Tree) > 0 {
 		out["tree"] = append([]string(nil), s.Tree...)
@@ -1159,6 +1259,9 @@ func recordDispatchTickLoop(root, ledger string, payload map[string]any) map[str
 	}
 	if spawned := mapAt(payload, "spawned"); dispatchMapString(spawned, "log") != "" {
 		evidence = append(evidence, loopmgr.EvidenceRef{Kind: "log", Ref: dispatchMapString(spawned, "log")})
+	}
+	if spawned := mapAt(payload, "spawned"); dispatchMapString(spawned, "startup_bundle") != "" {
+		evidence = append(evidence, loopmgr.EvidenceRef{Kind: "startup_bundle", Ref: dispatchMapString(spawned, "startup_bundle")})
 	}
 	account := mapAt(payload, "account")
 	if tag := dispatchMapString(account, "tag"); tag != "" {
@@ -1391,6 +1494,17 @@ func anySlice(v any) []any {
 		return arr
 	}
 	return nil
+}
+
+func nonEmptyLines(s string) []string {
+	rows := []string{}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
+			rows = append(rows, line)
+		}
+	}
+	return rows
 }
 
 func sortedSet(in map[int]bool) []int {
