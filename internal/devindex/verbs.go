@@ -85,6 +85,7 @@ var verbManifest = []Verb{
 	{Name: "callavoid", Synopsis: "the call-avoidance report: identical-call dedup (vDSO) round-trips saved", Lane: "cmd"},
 	{Name: "chat", Synopsis: "minimal chat client against a fak serve/guard gateway", Lane: "cmd"},
 	{Name: "chatrelay", Synopsis: "the chat-relay Slack surface bridging a channel to a gateway", Lane: "cmd"},
+	{Name: "check-tool-failure", Synopsis: "lookup the closed non-guard tool-failure vocabulary (summary/fix/retryable)", Lane: "cmd"},
 	{Name: "claim-check", Synopsis: "grade an efficiency/perf claim against the six-question net-true-value rubric", Lane: "cmd"},
 	{Name: "claude-mac-fak", Synopsis: "one-command Mac gateway dogfood through the node-macos-a fak serve gateway", Lane: "cmd"},
 	{Name: "cluster", Synopsis: "multi-node compute: run a real cross-node collective over fak's process group", Lane: "cmd"},

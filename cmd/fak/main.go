@@ -189,6 +189,8 @@ func main() {
 		cmdAnswerShape(os.Args[2:])
 	case "claim-check":
 		cmdClaimCheck(os.Args[2:])
+	case "check-tool-failure":
+		cmdCheckToolFailure(os.Args[2:])
 	case "doctor":
 		cmdDoctor(os.Args[2:])
 	case "feature":

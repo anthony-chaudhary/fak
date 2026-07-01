@@ -1,6 +1,6 @@
-// Package auditreason is a closed vocabulary that classifies why a
-// commit-audit could not verify a resolving commit, and — crucially — whether
-// that failure is worth retrying.
+// Package auditreason holds closed vocabularies for audit-facing failure
+// surfaces: commit-audit verification failures, and non-guard tool failures
+// such as hangs, timeouts, shell mismatches, and partial applies.
 //
 // # The transient-vs-permanent contract
 //

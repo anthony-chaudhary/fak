@@ -229,6 +229,10 @@ func usageCoreVerbs() {
                  cross-check the real kernel admit verdict (would the context-MMU
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
+  fak check-tool-failure [--list | TOKEN | --message TEXT] [--json]
+                (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
+                 mismatches, hang/shell-mismatch exit-143 cases, and partial applies.
+                 Prints the check-reason-shaped summary/fix/retryable row)
   fak feature   query <intent> [--json] [--plane dev|live|all] [--detail NAME]
                 (the SELF-FEATURE QUERY: ask fak what dev facts, live tools, memory
                  strategies, and capability cards are available. The answer is a
