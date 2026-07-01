@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"golang.org/x/term"
 )
 
@@ -69,6 +70,18 @@ type guardInfoVars struct {
 		Multiplier      float64 `json:"multiplier"`
 		Status          string  `json:"status"`
 	} `json:"vcache"`
+	CacheAttribution *guardInfoCacheAttribution `json:"cache_attribution"`
+}
+
+type guardInfoCacheAttribution struct {
+	ProviderTokenEquiv                        float64 `json:"provider_token_equiv"`
+	FakTokenEquiv                             float64 `json:"fak_token_equiv"`
+	TotalTokenEquiv                           float64 `json:"total_token_equiv"`
+	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
+	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"`
+	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
+	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"`
 }
 
 func cmdInfo(argv []string) {
@@ -423,6 +436,9 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	if v.VCache != nil {
 		cache = guardCacheWord(v.VCache.Status, v.VCache.Multiplier, v.VCache.SavedTokenEquiv, v.VCache.HitRate)
 	}
+	if split := guardInfoCacheAttributionText(v); split != "" {
+		cache += " · " + split
+	}
 	return fmt.Sprintf("%s · %s · replies %d · busy with %d · running %s",
 		cache,
 		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
@@ -441,6 +457,37 @@ func guardCacheWord(status string, multiplier, savedTokens, hitRate float64) str
 	}
 	return fmt.Sprintf("%s — reused %.0f%% of text, ×%.2f cheaper, %s tokens",
 		lead, hitRate*100, multiplier, signedTokens(savedTokens))
+}
+
+func guardInfoCacheAttributionText(v guardInfoVars) string {
+	if v.CacheAttribution == nil {
+		return ""
+	}
+	provider := v.CacheAttribution.ProviderTokenEquiv
+	fak := v.CacheAttribution.FakTokenEquiv
+	total := v.CacheAttribution.TotalTokenEquiv
+	providerPct, fakPct := ownerSplitPct(provider, fak, total)
+	return fmt.Sprintf("split default cache %.0f%% (~%s tok) + fak %.0f%% (~%s tok)",
+		providerPct, gateway.HumanTokenEquiv(provider),
+		fakPct, gateway.HumanTokenEquiv(fak))
+}
+
+func ownerSplitPct(provider, fak, total float64) (providerPct, fakPct float64) {
+	if total > 0 {
+		return provider / total * 100, fak / total * 100
+	}
+	denom := absFloat(provider) + absFloat(fak)
+	if denom == 0 {
+		return 0, 0
+	}
+	return absFloat(provider) / denom * 100, absFloat(fak) / denom * 100
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // guardFloorSafetyWord summarizes, in plain words, what fak did this session to keep you safe:

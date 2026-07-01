@@ -173,6 +173,9 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 	hitRow := fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(tr.hit, sw), guardInfoHitPct(v), guardInfoMult(v))
 	workRow := fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(tr.turns, sw), v.Inference.Turns, v.Gateway.InflightRequests)
 	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), gw), guardInfoHitPct(v), guardInfoSavingWord(v))
+	if split := guardInfoCacheAttributionText(v); split != "" {
+		cacheRow += " · " + split
+	}
 	safetyRow := " safety " + guardInfoSafetyText(v)
 	incidentRow := ""
 	if incident := guardInfoIncidentText(v); incident != "" {

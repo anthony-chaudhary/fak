@@ -69,6 +69,23 @@ func TestRenderGuardInfoLineProvenCacheAndSafety(t *testing.T) {
 	}
 }
 
+func TestRenderGuardInfoLineCacheAttributionSplit(t *testing.T) {
+	v := provenVisualVars()
+	v.CacheAttribution = cacheAttributionFixture(80, 20, 100)
+
+	line := renderGuardInfoLine(v)
+	for _, want := range []string{
+		"split default cache 80%",
+		"fak 20%",
+		"~80 tok",
+		"~20 tok",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("cache attribution line missing %q:\n%s", want, line)
+		}
+	}
+}
+
 // debugVarsStub returns a gateway whose /debug/vars matches the guardInfoVars shape.
 func debugVarsStub(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -233,6 +250,38 @@ func TestGuardInfoVarsDecodesUpstreamIncidents(t *testing.T) {
 	if v.Upstream.Retries != 3 {
 		t.Fatalf("upstream retries = %d, want 3", v.Upstream.Retries)
 	}
+}
+
+func TestGuardInfoVarsDecodesCacheAttribution(t *testing.T) {
+	raw := []byte(`{
+		"cache_attribution":{
+			"provider_token_equiv":80,
+			"fak_token_equiv":20,
+			"total_token_equiv":100,
+			"provider_prompt_cache_read_token_equiv":120,
+			"provider_prompt_cache_write_premium_token_equiv":-40,
+			"fak_compaction_shed_tokens":15,
+			"fak_kv_prefix_reused_tokens":5,
+			"fak_vdso_avoided_calls":2
+		}
+	}`)
+	var v guardInfoVars
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode guardInfoVars cache_attribution block: %v", err)
+	}
+	if v.CacheAttribution == nil {
+		t.Fatal("cache_attribution did not decode")
+	}
+	if v.CacheAttribution.ProviderTokenEquiv != 80 || v.CacheAttribution.FakTokenEquiv != 20 || v.CacheAttribution.TotalTokenEquiv != 100 {
+		t.Fatalf("cache_attribution owner totals not decoded: %+v", v.CacheAttribution)
+	}
+	if v.CacheAttribution.FakCompactionShedTokens != 15 || v.CacheAttribution.FakKVPrefixReusedTokens != 5 || v.CacheAttribution.FakVDSOAvoidedCalls != 2 {
+		t.Fatalf("cache_attribution fak mechanisms not decoded: %+v", v.CacheAttribution)
+	}
+}
+
+func cacheAttributionFixture(provider, fak, total float64) *guardInfoCacheAttribution {
+	return &guardInfoCacheAttribution{ProviderTokenEquiv: provider, FakTokenEquiv: fak, TotalTokenEquiv: total}
 }
 
 func TestRunInfoRejectsBadInterval(t *testing.T) {

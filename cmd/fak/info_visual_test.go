@@ -168,6 +168,27 @@ func TestRenderGuardInfoVisualBlockIncidentRegion(t *testing.T) {
 	}
 }
 
+func TestRenderGuardInfoVisualBlockCacheAttributionSplit(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := provenVisualVars()
+	v.CacheAttribution = cacheAttributionFixture(120, 0, 120)
+	for i := 0; i < 3; i++ {
+		tr.push(v)
+	}
+
+	block := renderGuardInfoVisualBlock(v, tr, 180, 0)
+	for _, want := range []string{
+		"split default cache 100%",
+		"fak 0%",
+		"~120 tok",
+		"~0 tok",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("visual cache attribution missing %q:\n%s", want, block)
+		}
+	}
+}
+
 // TestRenderGuardInfoVisualBlockFits proves the block never wraps and never exceeds the pane: for
 // a range of widths and heights every row is within the width budget and the row count respects
 // the height budget (the property that keeps the in-place redraw exact in a small 20% pane).
