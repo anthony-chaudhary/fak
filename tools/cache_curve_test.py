@@ -124,6 +124,63 @@ class SurvivalIdentity(unittest.TestCase):
             self.assertAlmostEqual(h, s * ceiling, places=9)
 
 
+class MeasuredValidation(unittest.TestCase):
+    def test_validate_measured_fanout_fixture_reports_residuals(self):
+        fixture = {
+            "samples": [
+                {
+                    "name": "default fanout",
+                    "axis": "fanout",
+                    "agents": 10,
+                    "concurrent": True,
+                    "measured_reuse": 0.02,
+                },
+                {
+                    "name": "shared fanout",
+                    "axis": "fanout",
+                    "agents": 10,
+                    "concurrent": False,
+                    "measured_reuse": 0.88,
+                },
+                {
+                    "name": "quarter edit",
+                    "axis": "flex",
+                    "edit_depth": 0.25,
+                    "measured_survival": 0.71,
+                },
+            ],
+        }
+        v = cc.validate_measurements(fixture, tolerance=0.05)
+        self.assertEqual(v["schema"], "fak.cache_curve.validation.v1")
+        self.assertEqual(v["summary"]["samples"], 3)
+        self.assertEqual(v["summary"]["failures"], 0)
+
+        rows = {r["name"]: r for r in v["rows"]}
+        self.assertAlmostEqual(rows["default fanout"]["modeled_survival"], 0.0)
+        self.assertAlmostEqual(rows["default fanout"]["residual"], 0.02)
+        self.assertAlmostEqual(rows["shared fanout"]["modeled_survival"], 0.9)
+        self.assertAlmostEqual(rows["shared fanout"]["residual"], -0.02)
+        self.assertAlmostEqual(rows["quarter edit"]["modeled_survival"], 0.75)
+        self.assertAlmostEqual(rows["quarter edit"]["residual"], -0.04)
+
+        rendered = cc.render_validation(v)
+        self.assertIn("measured decay validation", rendered)
+        self.assertIn("residual", rendered)
+        self.assertIn("default fanout", rendered)
+
+    def test_validate_fails_when_residual_exceeds_tolerance(self):
+        v = cc.validate_measurements({
+            "samples": [{
+                "axis": "fanout",
+                "agents": 5,
+                "concurrent": True,
+                "measured_reuse": 0.50,
+            }],
+        }, tolerance=0.05)
+        self.assertEqual(v["summary"]["status"], "FAIL")
+        self.assertEqual(v["summary"]["failures"], 1)
+
+
 class Determinism(unittest.TestCase):
     def test_chart_is_deterministic(self):
         self.assertEqual(cc.render_chart(200), cc.render_chart(200))

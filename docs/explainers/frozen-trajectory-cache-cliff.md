@@ -252,14 +252,15 @@ scheduler → cross-regime integrity oracle → fleet quarantine). The honesty f
 transfers intact: never serve one regime's KV bytes to another — re-derive.
 
 The near-term step this demonstrator points at is its own: **turn the model into a meter.**
-`cache_curve.py` *predicts* the survival factors; the offline prefix-divergence analysis from
+`cache_curve.py` *predicts* the survival factors and now exposes `validate` for measured
+fan-out/flex anchors; the offline prefix-divergence analysis from
 [FAK 401](../../LEARNING-PATH.md) / [kv-cache-agentic-context](kv-cache-agentic-context.md)
-*measures* the flexibility factor on a real transcript (longest-common-prefix reuse per
-turn), and `session_audit.py` already reads the provider `cache_read` / `cache_creation`
-split. Wiring those into a measured survival-per-axis report makes the cliff falsifiable on a
-live workload and supplies the meters the scaling-laws note asks for (reread rate, legal
-cache-hit rate, residency pressure). That is the concrete next move — and the cache substrate
-it would measure is already the program above.
+is the richer path that *measures* the flexibility factor directly on a real transcript
+(longest-common-prefix reuse per turn), while `session_audit.py` already reads the provider
+`cache_read` / `cache_creation` split. Feeding those measurements into the explicit validation
+hook makes the cliff falsifiable on a live workload and supplies the meters the scaling-laws note
+asks for (reread rate, legal cache-hit rate, residency pressure). The cache substrate it would
+measure is already the program above.
 
 ## Learning points
 
@@ -293,6 +294,9 @@ python tools/cache_curve.py chart       # the decay, at a glance
 # the real measured ceiling on this machine:
 python tools/session_audit.py audit --since-days 30 --json /tmp/a.json
 python tools/cache_curve.py anchor /tmp/a.json
+
+# measured decay anchors for the modeled survival factors:
+python tools/cache_curve.py validate measured_fanout.json
 ```
 
 ## Honest fences
@@ -312,6 +316,10 @@ python tools/cache_curve.py anchor /tmp/a.json
   compound collapse therefore multiplies only the two single-agent axes (flexibility, tool
   density); fan-out is reported as the cost-multiplier-with-0%-recovery, never folded into the
   percentage. Staggered launches within the TTL, or a shared/cloned prefix, recover it.
+- `cache_curve.py validate` is the measured-anchor cross-check for those modeled survival
+  factors. The validation JSON must explicitly name the measured survival/reuse quantity
+  (`measured_survival`, `measured_reuse`, or equivalent); a generic cache hit-rate export is
+  not silently treated as fan-out or flex survival.
 - The per-bucket and per-session figures are EXACT token counts from this machine's 30-day
   transcript window (a different window shifts them); the dollar figures in
   `session_audit.py` use an assumed price table and are not used here.

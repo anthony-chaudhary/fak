@@ -36,8 +36,9 @@ Subcommands:
   fanout   [--agents ...]              cross-agent shared-prefix reuse: default vs shared (table)
   compound [--turns N]                 single-agent collapse (flex x tools), then the fleet fan-out
   anchor   <session_audit.json>        the REAL measured ceiling, from session_audit.py --json
+  validate <measured_decay.json>       compare modeled survival factors to measured anchors
   chart    [--turns N]                 an at-a-glance ASCII chart of the decay
-  report   [--turns N] [--anchor J]    a full markdown report (curves + fanout + chart + anchor)
+  report   [--turns N] [--anchor J]    a full markdown report (curves + fanout + chart + anchors)
 
 Companion docs:
   docs/explainers/frozen-trajectory-cache-cliff.md   (the explainer this tool grounds)
@@ -273,6 +274,130 @@ def load_anchor(path):
     }
 
 
+# --- validation: measured anchors for the modeled decay axes --------------------
+def _samples_from_validation_doc(data):
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        raise ValueError("validation JSON must be an object or list of sample objects")
+    for key in ("samples", "validations", "rows"):
+        rows = data.get(key)
+        if isinstance(rows, list):
+            return rows
+    return [data]
+
+
+def _sample_float(sample, keys, required=True, default=None):
+    for key in keys:
+        if key in sample and sample[key] is not None:
+            return float(sample[key])
+    if required:
+        raise ValueError(f"sample {sample.get('name') or sample.get('id') or '<unnamed>'} missing one of {keys}")
+    return default
+
+
+def _sample_int(sample, keys, required=True, default=None):
+    val = _sample_float(sample, keys, required, default)
+    return int(val) if val is not None else None
+
+
+def _sample_bool(sample, key, default):
+    if key not in sample:
+        return default
+    val = sample[key]
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() not in ("0", "false", "no", "off")
+    return bool(val)
+
+
+def _measured_survival(sample):
+    return _sample_float(sample, (
+        "measured_survival", "measured_reuse", "measured_reuse_rate",
+        "observed_survival", "observed_reuse", "observed_reuse_rate",
+        "actual_survival", "actual_reuse", "actual_reuse_rate",
+    ))
+
+
+def _modeled_survival(sample):
+    axis = str(sample.get("axis", "")).lower().replace("-", "_")
+    params = {}
+    if axis in ("fanout", "cross_agent_fanout", "cross_agent"):
+        agents = _sample_int(sample, ("agents", "n", "workers"))
+        concurrent = _sample_bool(sample, "concurrent", True)
+        modeled, _payments = fanout_shared_reuse(agents, concurrent=concurrent)
+        params = {"agents": agents, "concurrent": concurrent}
+        return "cross_agent_reuse", modeled, params
+    if axis in ("flex", "flexibility"):
+        edit_depth = _sample_float(sample, ("edit_depth", "prefix_edit_depth"))
+        params = {"edit_depth": edit_depth}
+        return "flex_survival", s_flex(edit_depth), params
+    if axis in ("tools", "tool_density", "tooldensity"):
+        calls = _sample_int(sample, ("tool_calls_in_turn", "tool_calls", "calls_per_turn"))
+        breakpoints = _sample_int(sample, ("breakpoints",), required=False, default=1)
+        params = {"tool_calls_in_turn": calls, "breakpoints": breakpoints}
+        return "tool_density_survival", s_tooldensity(calls, breakpoints), params
+    if axis in ("compound", "single_agent_compound"):
+        edit_depth = _sample_float(sample, ("edit_depth", "prefix_edit_depth"))
+        calls = _sample_int(sample, ("tool_calls_in_turn", "tool_calls", "calls_per_turn"))
+        breakpoints = _sample_int(sample, ("breakpoints",), required=False, default=1)
+        params = {"edit_depth": edit_depth, "tool_calls_in_turn": calls, "breakpoints": breakpoints}
+        return "single_agent_compound_survival", s_flex(edit_depth) * s_tooldensity(calls, breakpoints), params
+    raise ValueError(f"sample {sample.get('name') or sample.get('id') or '<unnamed>'} has unknown axis {axis!r}")
+
+
+def validate_measurements(data, tolerance=0.05, source=None):
+    """Compare modeled survival factors against measured anchors.
+
+    The input is intentionally small and explicit. Each sample must carry an `axis`
+    plus a measured survival/reuse field such as `measured_survival` or
+    `measured_reuse`. This keeps the modeled fan-out/flex constants falsifiable
+    without pretending a generic hit-rate export is the same quantity.
+    """
+    rows = []
+    for i, sample in enumerate(_samples_from_validation_doc(data), start=1):
+        if not isinstance(sample, dict):
+            raise ValueError(f"validation sample #{i} is not an object")
+        metric, modeled, params = _modeled_survival(sample)
+        measured = _measured_survival(sample)
+        residual = measured - modeled
+        abs_residual = abs(residual)
+        rows.append({
+            "name": sample.get("name") or sample.get("id") or f"sample-{i}",
+            "axis": sample.get("axis"),
+            "metric": metric,
+            "parameters": params,
+            "measured_survival": measured,
+            "modeled_survival": modeled,
+            "residual": residual,
+            "abs_residual": abs_residual,
+            "tolerance": tolerance,
+            "status": "PASS" if abs_residual <= tolerance else "FAIL",
+            "source": sample.get("source"),
+        })
+    max_abs = max((r["abs_residual"] for r in rows), default=0.0)
+    failures = sum(1 for r in rows if r["status"] != "PASS")
+    return {
+        "schema": "fak.cache_curve.validation.v1",
+        "source": source,
+        "tolerance": tolerance,
+        "summary": {
+            "samples": len(rows),
+            "failures": failures,
+            "max_abs_residual": max_abs,
+            "status": "PASS" if failures == 0 else "FAIL",
+        },
+        "rows": rows,
+    }
+
+
+def load_validation(path, tolerance=0.05):
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return validate_measurements(data, tolerance=tolerance, source=path)
+
+
 # --- rendering -----------------------------------------------------------------
 def _bar(frac, width=40, fill="#", empty="."):
     n = int(round(max(0.0, min(1.0, frac)) * width))
@@ -362,6 +487,21 @@ def render_anchor(a):
     return "\n".join(L)
 
 
+def render_validation(v):
+    L = []
+    s = v["summary"]
+    L.append(f"measured decay validation — {s['samples']} sample(s), tolerance ±{v['tolerance']:.3f}: "
+             f"{s['status']} (max |residual| {s['max_abs_residual']:.3f})")
+    L.append(f"  {'sample':<22} {'axis':<18} {'metric':<30} {'measured':>9} {'modeled':>9} {'residual':>9} {'status':>6}")
+    for r in v["rows"]:
+        L.append(f"  {r['name']:<22} {str(r['axis']):<18} {r['metric']:<30} "
+                 f"{r['measured_survival']:>9.3f} {r['modeled_survival']:>9.3f} "
+                 f"{r['residual']:>+9.3f} {r['status']:>6}")
+    L.append("  measured_survival is an explicit anchor for the same s/reuse quantity the model uses;")
+    L.append("  generic cache hit-rate exports are not silently treated as fan-out or flex survival.")
+    return "\n".join(L)
+
+
 def render_chart(turns=200):
     """At-a-glance ASCII chart. Two SINGLE-AGENT cache-hit curves that bend to 0% (flex,
     per-turn tool density), then fan-out shown as its OWN quantity — a fleet shared-setup
@@ -388,7 +528,7 @@ def render_chart(turns=200):
     return "\n".join(L)
 
 
-def render_report(turns, anchor_path):
+def render_report(turns, anchor_path, validate_path=None, tolerance=0.05):
     now = datetime.datetime.now().isoformat(timespec="seconds")
     c = curve_table(turns)
     f = fanout_table([1, 2, 5, 10, 25, 100])
@@ -417,6 +557,12 @@ def render_report(turns, anchor_path):
         L.append("```")
         L.append(render_anchor(a))
         L.append("```\n")
+    if validate_path:
+        v = load_validation(validate_path, tolerance=tolerance)
+        L.append("## Measured decay validation\n")
+        L.append("```")
+        L.append(render_validation(v))
+        L.append("```\n")
     return "\n".join(L)
 
 
@@ -435,30 +581,53 @@ def main():
     qf.add_argument("--agents", type=int, nargs="+", default=[1, 2, 5, 10, 25, 100])
     qa = sub.add_parser("anchor")
     qa.add_argument("json")
+    qv = sub.add_parser("validate")
+    qv.add_argument("json")
+    qv.add_argument("--tolerance", type=float, default=0.05)
+    qv.add_argument("--json", dest="json_output", action="store_true")
     qr = sub.add_parser("report")
     qr.add_argument("--turns", type=int, default=200)
     qr.add_argument("--anchor", default=None)
+    qr.add_argument("--validate", default=None)
+    qr.add_argument("--tolerance", type=float, default=0.05)
     qr.add_argument("--md", default=None)
     a = p.parse_args()
 
     if a.cmd == "curves":
         print(_doc_model())
         print(render_curves(curve_table(a.turns)))
+        return 0
     elif a.cmd == "fanout":
         print(render_fanout(fanout_table(a.agents)))
+        return 0
     elif a.cmd == "compound":
         print(render_compound(compound_scenario(a.turns)))
+        return 0
     elif a.cmd == "chart":
         print(render_chart(a.turns))
+        return 0
     elif a.cmd == "anchor":
         print(render_anchor(load_anchor(a.json)))
+        return 0
+    elif a.cmd == "validate":
+        try:
+            v = load_validation(a.json, tolerance=a.tolerance)
+        except Exception as e:
+            print(f"cache_curve.py validate: {e}", file=sys.stderr)
+            return 2
+        if a.json_output:
+            print(json.dumps(v, indent=2, sort_keys=True))
+        else:
+            print(render_validation(v))
+        return 0 if v["summary"]["failures"] == 0 else 1
     elif a.cmd == "report":
-        md = render_report(a.turns, a.anchor)
+        md = render_report(a.turns, a.anchor, validate_path=a.validate, tolerance=a.tolerance)
         if a.md:
             open(a.md, "w", encoding="utf-8").write(md)
             print(f"wrote {a.md}", file=sys.stderr)
         print(md)
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
