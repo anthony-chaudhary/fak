@@ -382,29 +382,25 @@ func writeOpenMetricBucketLabels(out *bytes.Buffer, labels []OpenMetricLabel, le
 }
 
 func escapeOpenMetricHelp(s string) string {
-	var out strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			out.WriteString(`\\`)
-		case '\n':
-			out.WriteString(`\n`)
-		default:
-			out.WriteRune(r)
-		}
-	}
-	return out.String()
+	return escapeOpenMetricString(s, false)
 }
 
 func escapeOpenMetricLabelValue(s string) string {
+	return escapeOpenMetricString(s, true)
+}
+
+// escapeOpenMetricString escapes backslash and newline runes for OpenMetrics
+// text exposition. When escapeQuote is set the double-quote rune is also
+// escaped, as required inside quoted label values; help text leaves it verbatim.
+func escapeOpenMetricString(s string, escapeQuote bool) string {
 	var out strings.Builder
 	for _, r := range s {
-		switch r {
-		case '\\':
+		switch {
+		case r == '\\':
 			out.WriteString(`\\`)
-		case '\n':
+		case r == '\n':
 			out.WriteString(`\n`)
-		case '"':
+		case escapeQuote && r == '"':
 			out.WriteString(`\"`)
 		default:
 			out.WriteRune(r)
