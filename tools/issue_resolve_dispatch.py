@@ -243,19 +243,46 @@ def _git_capture(root: Path, args: list[str], *, timeout: int = 30) -> tuple[int
 
 
 def lane_issue_numbers(root: Path, explicit_lane: str | None,
-                       exclude: set[str] | None = None) -> dict[str, Any]:
+                       exclude: set[str] | None = None,
+                       guarded: bool | None = None) -> dict[str, Any]:
     """Pick the lane (busiest, or explicit) and return its OPEN issue numbers,
     most-recent first. Reuses the same router fold issue_dispatch.pick_lane uses,
     but keeps the per-issue numbers (which pick_lane discards). ``exclude`` drops
     lanes from the busiest-pick (e.g. an opus task excludes 'docs' so the glm task
-    owns it) -- ignored when an explicit lane is named."""
+    owns it) -- ignored when an explicit lane is named.
+
+    ``guarded`` (default: ``dispatch_worker.guard_enabled()``) additionally
+    EXCLUDES a self-source lane (``issue_dispatch.is_self_source_tree``,
+    cmd/**, internal/**) from the busiest-pick pool -- proactively, before any
+    worker is spawned. This mirrors issue_dispatch.pick_lane's fix (itself a
+    port of the native Go dispatch path's SELF_MODIFY_HOLD): of the 28 lanes
+    the router currently returns, 21 are self-source (metrics, bench, compute,
+    gateway, policy, promptmmu, model, cmd, engine, agent, ggufload, ...) and
+    only the top two lanes by count (docs, tools) are not -- so as soon as
+    those two are excluded (already held by a live worker, e.g. under
+    concurrent dispatch), the OLD busiest-pick would silently auto-select a
+    self-source lane most of the time, each pick individually risking the same
+    build-poisoning failure issue_dispatch.pick_lane's docstring names (#1397;
+    #1338 cost two runs, ~52 turns, 0 commits) -- and this is the module the
+    live Scheduled Tasks actually invoke, so this module previously had only
+    REACTIVE, post-hoc detection (``NO_COMMIT_SELF_MODIFY`` below, discovered
+    from a worker's session log tail AFTER it already burned turns) despite
+    driving production dispatch. Unlike the ``exclude``/busy-lane skip, a
+    self-source lane is a HARD exclude -- if every lane with open issues is
+    self-source-held, ``lane`` comes back ``None`` and the held lanes are
+    named in ``self_modify_held``. An explicit lane is still honored verbatim
+    regardless of guard state (operator intent overrides the guard, same as
+    the Go path and issue_dispatch.pick_lane)."""
     router = issue_dispatch.run_json(
         [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
         root, timeout=130)
     lanes = router.get("lanes") or {}
+    guarded = dispatch_worker.guard_enabled() if guarded is None else guarded
     nums_by_lane: dict[str, list[int]] = {}
+    trees: dict[str, Any] = {}
     for ln, info in lanes.items():
         iss = info.get("issues") if isinstance(info, dict) else info
+        trees[ln] = info.get("tree") if isinstance(info, dict) else None
         nums: list[int] = []
         for it in (iss or []):
             n = it.get("number") if isinstance(it, dict) else it
@@ -265,14 +292,21 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
                 continue
         nums_by_lane[ln] = sorted(nums, reverse=True)
     exclude = exclude or set()
+    by_lane_count = {k: len(v) for k, v in nums_by_lane.items()}
     if explicit_lane:
         chosen = explicit_lane
+        held: list[str] = []
     else:
-        eligible = {k: v for k, v in nums_by_lane.items() if k not in exclude}
+        self_source = ({ln for ln in nums_by_lane if issue_dispatch.is_self_source_tree(trees.get(ln))}
+                       if guarded else set())
+        held = sorted(ln for ln in nums_by_lane if ln in self_source and nums_by_lane[ln])
+        eligible = {k: v for k, v in nums_by_lane.items()
+                    if k not in exclude and k not in self_source}
         chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
     return {"lane": chosen, "numbers": nums_by_lane.get(chosen or "", []),
-            "by_lane_count": {k: len(v) for k, v in nums_by_lane.items()},
+            "by_lane_count": by_lane_count,
             "excluded_lanes": sorted(exclude),
+            "self_modify_held": held,
             "router_error": router.get("_error")}
 
 
@@ -2063,6 +2097,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface the structurally-held issues only when something is actually held, so
         # the common (nothing held) payload stays byte-identical to before (#1396).
         **({"held_no_commit": sorted(held_no_commit)} if held_no_commit else {}),
+        # Surface proactive self-source-tree holds (lane_issue_numbers) only when
+        # something is actually held, for the same byte-identical-common-case reason.
+        **({"self_modify_held": pick.get("self_modify_held")} if pick.get("self_modify_held") else {}),
         "already_live": sorted(live_issues), "held_lanes": sorted(held_lanes),
     }
 
@@ -2072,8 +2109,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                         "reason": f"preflight refused: {pre.get('reason')}"})
         return finish(payload)
     if not chosen_lane:
-        payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
-                        "reason": "no lane has open issues (router empty/error)"})
+        if pick.get("self_modify_held"):
+            payload.update({"ok": False, "action": "no_lane", "verdict": "SELF_MODIFY_HOLD",
+                            "reason": (f"every lane with open issues is self-source "
+                                       f"({sorted(pick.get('self_modify_held'))}); "
+                                       f"refusing to risk build-poisoning the shared "
+                                       f"trunk — see #1334 for worktree isolation")})
+        else:
+            payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
+                            "reason": "no lane has open issues (router empty/error)"})
         return finish(payload)
     if chosen_lane in held_lanes:
         # The lane lease is held by a live worker (only reachable via an explicit

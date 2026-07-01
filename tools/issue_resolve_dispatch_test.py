@@ -701,6 +701,20 @@ class EvaluateTest(unittest.TestCase):
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "NO_LANE")
 
+    def test_no_lane_but_self_modify_held_surfaces_distinct_verdict(self) -> None:
+        # Every lane with open issues is fak's own source tree -- distinct from the
+        # plain "router empty" NO_LANE case, and named in the payload so an operator
+        # (or the fleet dashboard) can see WHY, not just that nothing was picked.
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": None, "numbers": [], "by_lane_count": {},
+                          "self_modify_held": ["cmd", "gateway"]})
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                          lane=None, live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SELF_MODIFY_HOLD")
+        self.assertEqual(p["self_modify_held"], ["cmd", "gateway"])
+
     def test_live_reports_spawn_failed_when_worker_exits_silent_immediately(self) -> None:
         mod = load()
         self._patch(mod, pre=self.SPAWN_OK,
@@ -928,6 +942,70 @@ class ExcludeLaneTest(unittest.TestCase):
         mod.issue_dispatch.run_json = lambda cmd, root, timeout: self.ROUTER
         picked = mod.lane_issue_numbers(ROOT, "docs", exclude={"docs"})
         self.assertEqual(picked["lane"], "docs")   # explicit wins over exclude
+
+
+class LaneIssueNumbersSelfModifyHoldTest(unittest.TestCase):
+    """Proactive pre-route hold on the ACTUAL production picker: this module
+    (not issue_dispatch.py) is what the live Scheduled Tasks invoke. Mirrors
+    issue_dispatch.pick_lane's fix -- a lane whose tree is fak's own source
+    (cmd/**, internal/**) is excluded from the busiest-pick under guard."""
+
+    ROUTER = {"lanes": {
+        "docs": {"issues": [{"number": 2}, {"number": 1}], "tree": ["docs/**"]},
+        "gateway": {"issues": [{"number": 4}, {"number": 3}, {"number": 2}, {"number": 1}],
+                    "tree": ["internal/gateway/**"]},
+        "tools": {"issues": [{"number": 9}], "tree": ["tools/**", "scripts/**"]},
+    }}
+
+    def _router(self, mod) -> None:
+        mod.issue_dispatch.run_json = lambda cmd, root, timeout: self.ROUTER
+
+    def test_guarded_skips_self_source_lane_for_richest_safe(self) -> None:
+        mod = load()
+        self._router(mod)
+        picked = mod.lane_issue_numbers(ROOT, None, guarded=True)
+        self.assertEqual(picked["lane"], "docs")   # gateway (4, self-source) excluded
+        self.assertEqual(picked["self_modify_held"], ["gateway"])
+
+    def test_unguarded_does_not_hold_self_source_lane(self) -> None:
+        mod = load()
+        self._router(mod)
+        picked = mod.lane_issue_numbers(ROOT, None, guarded=False)
+        self.assertEqual(picked["lane"], "gateway")
+        self.assertEqual(picked["self_modify_held"], [])
+
+    def test_all_lanes_self_source_yields_no_lane(self) -> None:
+        mod = load()
+        mod.issue_dispatch.run_json = lambda cmd, root, timeout: {"lanes": {
+            "gateway": {"issues": [{"number": 2}, {"number": 1}], "tree": ["internal/gateway/**"]},
+            "cmd": {"issues": [{"number": 9}], "tree": ["cmd/**"]},
+        }}
+        picked = mod.lane_issue_numbers(ROOT, None, guarded=True)
+        self.assertIsNone(picked["lane"])
+        self.assertEqual(picked["numbers"], [])
+        self.assertEqual(picked["self_modify_held"], ["cmd", "gateway"])
+
+    def test_explicit_lane_honored_despite_self_source(self) -> None:
+        mod = load()
+        self._router(mod)
+        picked = mod.lane_issue_numbers(ROOT, "gateway", guarded=True)
+        self.assertEqual(picked["lane"], "gateway")
+        self.assertEqual(picked["self_modify_held"], [])   # explicit path skips the fold
+
+    def test_exclude_and_self_source_hold_compose(self) -> None:
+        # docs excluded (busy) + gateway held (self-source) -> only tools left.
+        mod = load()
+        self._router(mod)
+        picked = mod.lane_issue_numbers(ROOT, None, exclude={"docs"}, guarded=True)
+        self.assertEqual(picked["lane"], "tools")
+        self.assertEqual(picked["self_modify_held"], ["gateway"])
+
+    def test_default_guarded_reads_dispatch_worker_guard_enabled(self) -> None:
+        mod = load()
+        self._router(mod)
+        mod.dispatch_worker.guard_enabled = lambda *a, **k: True
+        picked = mod.lane_issue_numbers(ROOT, None)
+        self.assertEqual(picked["self_modify_held"], ["gateway"])
 
 
 class OpencodeConfigHomeTest(unittest.TestCase):

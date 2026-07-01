@@ -77,6 +77,24 @@ INFLIGHT_PREFIX = "inflight-"
 # by a tick that crashed before it could prune, even if the pid was since reused.
 INFLIGHT_TTL_SECONDS = 12 * 3600
 
+# Mirrors internal/dispatchtick/selfmodify.go's SelfSourceTreePrefixes on the native
+# Go dispatch path. A lane whose tree touches fak's own source risks poisoning
+# ``go build ./...`` for every OTHER concurrently-running agent on the shared trunk
+# (#1397; #1338 cost two runs, ~52 turns, 0 commits) -- a build-poisoning risk, not
+# just a tool-call-denial risk, so this is deliberately broader than the runtime
+# adjudicator's own (narrower) SelfModifyGlobs deny-list.
+SELF_SOURCE_TREE_PREFIXES = ("cmd/", "internal/")
+
+
+def is_self_source_tree(tree: Any) -> bool:
+    """True iff any glob in ``tree`` names fak's own source tree (cmd/**, internal/**)."""
+    if not tree:
+        return False
+    for glob in tree:
+        if str(glob).strip().startswith(SELF_SOURCE_TREE_PREFIXES):
+            return True
+    return False
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -142,7 +160,8 @@ def preflight(root: Path, *, max_workers: int, work_kind: str,
 
 
 def pick_lane(root: Path, explicit: str | None,
-              busy: set[str] | None = None) -> dict[str, Any]:
+              busy: set[str] | None = None,
+              guarded: bool | None = None) -> dict[str, Any]:
     """The lane with the most open issues, or an explicit override.
 
     When ``busy`` names lanes that already have a live dispatched worker (from
@@ -152,15 +171,32 @@ def pick_lane(root: Path, explicit: str | None,
     issues is busy, it falls back to the richest overall and sets ``stacked`` so the
     stack is surfaced, never silent — the DoS cap, not this hint, is what bounds the
     live population, so falling back keeps throughput when no free lane is left.
-    An explicit lane is honored verbatim (operator intent overrides the spread)."""
+    An explicit lane is honored verbatim (operator intent overrides the spread).
+
+    ``guarded`` (default: ``dispatch_worker.guard_enabled()``) additionally EXCLUDES
+    a self-source lane (``is_self_source_tree``, cmd/**, internal/**) from the
+    automatic pool -- proactively, before any worker is spawned. This mirrors the
+    native Go dispatch path's ``SELF_MODIFY_HOLD``; this legacy Python path
+    previously had only REACTIVE, post-hoc detection (``NO_COMMIT_SELF_MODIFY`` in
+    issue_resolve_dispatch.py, discovered from a worker's session log tail AFTER it
+    already burned turns). Unlike the busy-lane fallback, self-source lanes are a
+    HARD exclude even when every other lane is busy — falling back to one would spawn
+    the exact build-poisoning risk the guard exists to prevent — so if every lane
+    with open issues is self-source-held, ``lane`` comes back ``None`` and the held
+    lanes are named in ``self_modify_held``. An explicit lane is still honored
+    verbatim regardless of guard state (operator intent overrides the guard, same as
+    the Go path)."""
     busy = busy or set()
+    guarded = dispatch_worker.guard_enabled() if guarded is None else guarded
     router = run_json([_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
                       root, timeout=130)
     lanes = router.get("lanes") or {}
     counts = {}
+    trees = {}
     for ln, info in lanes.items():
         iss = info.get("issues") if isinstance(info, dict) else info
         counts[ln] = len(iss) if hasattr(iss, "__len__") else 0
+        trees[ln] = info.get("tree") if isinstance(info, dict) else None
     if explicit:
         return {"lane": explicit, "issues": counts.get(explicit, 0), "by_lane": counts,
                 "explicit": True, "busy": sorted(busy),
@@ -168,15 +204,22 @@ def pick_lane(root: Path, explicit: str | None,
     if not counts:
         return {"lane": None, "issues": 0, "by_lane": {}, "busy": sorted(busy),
                 "router_error": router.get("_error")}
-    free = {ln: n for ln, n in counts.items() if ln not in busy}
-    pool = free or counts
-    stacked = not free   # every lane with open issues is already being worked
+    self_source = ({ln for ln in counts if is_self_source_tree(trees.get(ln))}
+                   if guarded else set())
+    held = sorted(ln for ln in counts if ln in self_source and counts[ln] > 0)
+    dispatchable = {ln: n for ln, n in counts.items() if ln not in self_source}
+    if not dispatchable:
+        return {"lane": None, "issues": 0, "by_lane": counts, "busy": sorted(busy),
+                "self_modify_held": held, "router_error": router.get("_error")}
+    free = {ln: n for ln, n in dispatchable.items() if ln not in busy}
+    pool = free or dispatchable
+    stacked = not free   # every dispatchable lane with open issues is already being worked
     # Highest open-issue count first; lane name as a stable lexicographic tiebreak so
     # the pick is deterministic across ticks rather than dependent on router order.
     lane = sorted(pool, key=lambda k: (-pool[k], k))[0]
     return {"lane": lane, "issues": counts[lane], "by_lane": counts,
             "busy": sorted(busy), "stacked": stacked,
-            "router_error": router.get("_error")}
+            "self_modify_held": held, "router_error": router.get("_error")}
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -378,6 +421,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "lane_issue_count": lane_pick.get("issues"),
         "busy_lanes": sorted(busy),
         "lane_stacked": bool(lane_pick.get("stacked")),
+        "self_modify_held": lane_pick.get("self_modify_held") or [],
         "command": command,
         "guarded": guarded,
         "launch_command": launch_command,
@@ -391,8 +435,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                         "reason": f"preflight refused: {pre.get('reason')}"})
         return payload
     if not chosen:
-        payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
-                        "reason": "no lane has open issues (router empty/error)"})
+        held = lane_pick.get("self_modify_held") or []
+        if held:
+            payload.update({"ok": False, "action": "no_lane", "verdict": "SELF_MODIFY_HOLD",
+                            "reason": (f"every lane with open issues is self-modify held "
+                                       f"under guard ({', '.join(held)}) -- worktree "
+                                       f"isolation (#1334) is needed before these can be "
+                                       f"safely auto-dispatched")})
+        else:
+            payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
+                            "reason": "no lane has open issues (router empty/error)"})
         return payload
     if not live:
         payload.update({"ok": True, "action": "would_spawn", "verdict": "WOULD_SPAWN",
@@ -462,15 +514,23 @@ def _dos_cmd() -> list[str]:
     return [exe] if exe else [_py(), "-m", "dos.cli"]
 
 
-def lane_candidates(root: Path) -> dict[str, Any]:
+def lane_candidates(root: Path, guarded: bool | None = None) -> dict[str, Any]:
     """Candidate lanes for a wave: every lane the router reports with at least one
     open issue, ordered by open-issue count (richest first, lane name as tiebreak),
     each carrying its canonical file ``tree`` so the partition can be priced for
-    disjointness."""
+    disjointness.
+
+    ``guarded`` (default: ``dispatch_worker.guard_enabled()``) proactively drops a
+    self-source lane (``is_self_source_tree``, cmd/**, internal/**) from the
+    candidate list before it ever reaches ``dos arbitrate`` or a seat — same rule and
+    same reasoning as ``pick_lane``'s single-tick hold. Held lanes are named in
+    ``self_modify_held`` for the wave payload's audit trail."""
+    guarded = dispatch_worker.guard_enabled() if guarded is None else guarded
     router = run_json([_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
                       root, timeout=130)
     lanes = router.get("lanes") or {}
     cands: list[dict[str, Any]] = []
+    held: list[str] = []
     for ln, info in lanes.items():
         if isinstance(info, dict):
             iss, tree = info.get("issues"), info.get("tree") or []
@@ -479,9 +539,13 @@ def lane_candidates(root: Path) -> dict[str, Any]:
         n = len(iss) if hasattr(iss, "__len__") else 0
         if n <= 0:
             continue
+        if guarded and is_self_source_tree(tree):
+            held.append(ln)
+            continue
         cands.append({"lane": ln, "issues": n, "tree": list(tree)})
     cands.sort(key=lambda c: (-c["issues"], c["lane"]))
-    return {"candidates": cands, "router_error": router.get("_error")}
+    return {"candidates": cands, "self_modify_held": sorted(held),
+            "router_error": router.get("_error")}
 
 
 def arbitrate_lane(root: Path, lane: str, tree: list[str],
@@ -619,6 +683,7 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
                   "tags": [s.get("tag") for s in seat_lanes], "error": seats.get("error")},
         "candidate_lanes": [c["lane"] for c in candidates],
         "busy_lanes": sorted(busy),
+        "self_modify_held": cand.get("self_modify_held") or [],
         "router_error": cand.get("router_error"),
     }
 
@@ -686,8 +751,16 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
         if live:
             _write_wave_artifacts(root / RUNS_DIRNAME, payload)
     elif not candidates:
-        payload.update({"ok": False, "verdict": "WAVE_NO_LANE", "action": "no_lane",
-                        "reason": "no lane has open issues (router empty/error)"})
+        held = cand.get("self_modify_held") or []
+        if held:
+            payload.update({"ok": False, "verdict": "SELF_MODIFY_HOLD", "action": "no_lane",
+                            "reason": (f"every lane with open issues is self-modify held "
+                                       f"under guard ({', '.join(held)}) -- worktree "
+                                       f"isolation (#1334) is needed before these can be "
+                                       f"safely auto-dispatched")})
+        else:
+            payload.update({"ok": False, "verdict": "WAVE_NO_LANE", "action": "no_lane",
+                            "reason": "no lane has open issues (router empty/error)"})
     elif free_seats == 0:
         payload.update({"ok": False, "verdict": "WAVE_NO_SEATS", "action": "no_seats",
                         "reason": (f"no free seats for a wave "

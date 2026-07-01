@@ -432,6 +432,17 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "WAVE_NO_LANE")
         self.assertEqual(p["size"], 0)
 
+    def test_no_candidate_lanes_but_self_modify_held_surfaces_hold(self) -> None:
+        mod = load()
+        self._wire(mod, seats=[_seat(0)], candidates=[])
+        mod.lane_candidates = lambda root: {"candidates": [],
+                                            "self_modify_held": ["gateway", "kernel"],
+                                            "router_error": None}
+        p = mod.evaluate_wave(ROOT, max_workers=4, work_kind="engineering", live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SELF_MODIFY_HOLD")
+        self.assertEqual(p["self_modify_held"], ["gateway", "kernel"])
+
     def test_no_seats_yields_no_seats(self) -> None:
         mod = load()
         cands = [{"lane": "tools", "issues": 9, "tree": ["tools/**"]}]
@@ -558,6 +569,113 @@ class PickLaneBusyTest(unittest.TestCase):
         pick = mod.pick_lane(ROOT, "gateway", busy={"gateway"})
         self.assertEqual(pick["lane"], "gateway")
         self.assertTrue(pick["explicit"])
+
+
+class IsSelfSourceTreeTest(unittest.TestCase):
+    def test_cmd_and_internal_prefixes_are_self_source(self) -> None:
+        mod = load()
+        self.assertTrue(mod.is_self_source_tree(["cmd/**"]))
+        self.assertTrue(mod.is_self_source_tree(["internal/kernel/**"]))
+
+    def test_other_trees_are_not_self_source(self) -> None:
+        mod = load()
+        self.assertFalse(mod.is_self_source_tree(["docs/**", "README.md"]))
+        self.assertFalse(mod.is_self_source_tree(["tools/**", "scripts/**"]))
+        self.assertFalse(mod.is_self_source_tree(None))
+        self.assertFalse(mod.is_self_source_tree([]))
+
+
+class PickLaneSelfModifyHoldTest(unittest.TestCase):
+    """Proactive pre-route hold: a lane whose tree is fak's own source (cmd/**,
+    internal/**) is excluded from the automatic pick under guard, mirroring the
+    native Go dispatch path's SELF_MODIFY_HOLD (internal/dispatchtick/selfmodify.go).
+    Previously this legacy Python path had no proactive check at all."""
+
+    LANES = {"lanes": {
+        "docs": {"issues": [1, 2], "tree": ["docs/**"]},
+        "gateway": {"issues": [1, 2, 3, 4], "tree": ["internal/gateway/**"]},
+        "tools": {"issues": [9], "tree": ["tools/**", "scripts/**"]},
+    }}
+
+    def _router(self, mod) -> None:
+        mod.run_json = lambda cmd, cwd, timeout: json.loads(json.dumps(self.LANES))
+
+    def test_guarded_skips_self_source_lane_for_richest_safe(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, guarded=True)
+        self.assertEqual(pick["lane"], "docs")   # gateway (4, self-source) excluded
+        self.assertEqual(pick["self_modify_held"], ["gateway"])
+
+    def test_unguarded_does_not_hold_self_source_lane(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, guarded=False)
+        self.assertEqual(pick["lane"], "gateway")
+        self.assertEqual(pick["self_modify_held"], [])
+
+    def test_all_dispatchable_lanes_self_source_yields_no_lane(self) -> None:
+        mod = load()
+        mod.run_json = lambda cmd, cwd, timeout: {"lanes": {
+            "gateway": {"issues": [1, 2], "tree": ["internal/gateway/**"]},
+            "kernel": {"issues": [9], "tree": ["internal/kernel/**"]},
+        }}
+        pick = mod.pick_lane(ROOT, None, guarded=True)
+        self.assertIsNone(pick["lane"])
+        self.assertEqual(pick["self_modify_held"], ["gateway", "kernel"])
+
+    def test_explicit_lane_honored_despite_self_source(self) -> None:
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, "gateway", guarded=True)
+        self.assertEqual(pick["lane"], "gateway")
+        self.assertTrue(pick["explicit"])
+
+    def test_self_source_lane_is_hard_excluded_even_when_all_others_busy(self) -> None:
+        # Busy-lane fallback must NEVER resurrect a self-source lane -- that would
+        # spawn exactly the build-poisoning risk the guard exists to prevent.
+        mod = load()
+        self._router(mod)
+        pick = mod.pick_lane(ROOT, None, busy={"docs", "tools"}, guarded=True)
+        self.assertEqual(pick["lane"], "docs")   # busy fallback stays within safe pool
+        self.assertTrue(pick["stacked"])
+        self.assertEqual(pick["self_modify_held"], ["gateway"])
+
+    def test_default_guarded_reads_dispatch_worker_guard_enabled(self) -> None:
+        mod = load()
+        self._router(mod)
+        mod.dispatch_worker.guard_enabled = lambda *a, **k: True
+        pick = mod.pick_lane(ROOT, None)
+        self.assertEqual(pick["self_modify_held"], ["gateway"])
+
+
+class LaneCandidatesSelfModifyHoldTest(unittest.TestCase):
+    """lane_candidates (the wave path's picker) applies the same proactive
+    self-source hold as pick_lane (the single-tick path), so #1335 wave dispatch
+    can't route straight at fak's own source either."""
+
+    LANES = {"lanes": {
+        "docs": {"issues": [1, 2], "tree": ["docs/**"]},
+        "gateway": {"issues": [1, 2, 3, 4], "tree": ["internal/gateway/**"]},
+        "cmd": {"issues": [9], "tree": ["cmd/**"]},
+    }}
+
+    def _router(self, mod) -> None:
+        mod.run_json = lambda cmd, cwd, timeout: json.loads(json.dumps(self.LANES))
+
+    def test_guarded_excludes_self_source_lanes(self) -> None:
+        mod = load()
+        self._router(mod)
+        cand = mod.lane_candidates(ROOT, guarded=True)
+        self.assertEqual([c["lane"] for c in cand["candidates"]], ["docs"])
+        self.assertEqual(cand["self_modify_held"], ["cmd", "gateway"])
+
+    def test_unguarded_keeps_self_source_lanes(self) -> None:
+        mod = load()
+        self._router(mod)
+        cand = mod.lane_candidates(ROOT, guarded=False)
+        self.assertEqual({c["lane"] for c in cand["candidates"]}, {"docs", "gateway", "cmd"})
+        self.assertEqual(cand["self_modify_held"], [])
 
 
 class SpawnInflightMarkerTest(unittest.TestCase):
