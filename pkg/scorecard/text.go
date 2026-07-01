@@ -64,3 +64,18 @@ func anyInt(v any) int {
 		return 0
 	}
 }
+
+// anyFloat coerces a JSON-decoded number (or int) to float64. It is intentionally
+// narrow: booleans and strings are not numeric compatibility values.
+func anyFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
+	}
+}

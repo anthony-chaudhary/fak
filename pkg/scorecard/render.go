@@ -16,7 +16,7 @@ import (
 func Render(p Payload, debtKey string) string {
 	c := p.Corpus
 	out := []string{
-		fmt.Sprintf("%s: %v (score %v, %s %v)", scorecardName(p.Schema), c["grade"], c["score"], debtKey, c[debtKey]),
+		fmt.Sprintf("%s: %v (value %v, legacy score %v, %s %v)", scorecardName(p.Schema), c["grade"], c["value"], c["score"], debtKey, c[debtKey]),
 		"  " + p.Finding,
 		"",
 	}
@@ -27,7 +27,7 @@ func Render(p Payload, debtKey string) string {
 		} else if len(k.Soft) > 0 {
 			mark = "~  "
 		}
-		out = append(out, fmt.Sprintf("  %s%-22s %5.1f  %s", mark, k.Key, k.Score, k.Detail))
+		out = append(out, fmt.Sprintf("  %s%-22s %5.3f  %s", mark, k.Key, k.Value, k.Detail))
 		for _, d := range k.Defects {
 			out = append(out, "       HARD  "+d)
 		}
@@ -70,18 +70,18 @@ func Markdown(p Payload, d MarkdownDoc) string {
 		lines = append(lines, "_"+d.AutoGen+"_", "")
 	}
 	lines = append(lines,
-		fmt.Sprintf("**Grade %v** - score %v - %s **%v**%s", c["grade"], c["score"], d.DebtKey, c[d.DebtKey], d.HeaderExtra),
+		fmt.Sprintf("**Grade %v** - value %v - legacy score %v - %s **%v**%s", c["grade"], c["value"], c["score"], d.DebtKey, c[d.DebtKey], d.HeaderExtra),
 		"",
 	)
 	if d.Law != "" {
 		lines = append(lines, d.Law, "")
 	}
 	lines = append(lines,
-		"| KPI | score | detail |",
-		"|---|---|---|",
+		"| KPI | value | legacy score | detail |",
+		"|---|---:|---:|---|",
 	)
 	for _, k := range p.KPIs {
-		lines = append(lines, fmt.Sprintf("| %s | %.0f | %s |", k.Key, k.Score, k.Detail))
+		lines = append(lines, fmt.Sprintf("| %s | %.3f | %.0f | %s |", k.Key, k.Value, k.Score, k.Detail))
 	}
 	var work []string
 	for _, k := range p.KPIs {

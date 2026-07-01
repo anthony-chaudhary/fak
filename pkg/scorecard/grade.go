@@ -81,3 +81,19 @@ func Round3(x float64) float64 {
 func ValueFromScore(score float64) float64 {
 	return score / 100
 }
+
+// StampLegacyScore keeps the legacy score compatibility fields and the continuous
+// value in sync after a card overrides corpus["score"] for byte-compatible output.
+func StampLegacyScore(corpus map[string]any, score float64) {
+	if corpus == nil {
+		return
+	}
+	legacy := Round1(score)
+	corpus["score"] = legacy
+	corpus["legacy_score"] = legacy
+	corpus["legacy_score_scale"] = 100
+	corpus["value"] = Round3(ValueFromScore(score))
+	if _, ok := corpus["value_unit"]; !ok {
+		corpus["value_unit"] = "quality_ratio"
+	}
+}

@@ -14,18 +14,18 @@
 // re-deriving the fold/grade/markdown machinery, and the grade tables live in exactly one
 // place (grade.go) as named functions a card selects.
 //
-// The kernel's JSON field names and numeric rendering MUST match the Python envelope
-// exactly: the control-pane fold reads corpus.<debtKey>, corpus.grade, and top-level
-// ok/verdict. A per-card differential parity test (the internal/hooks/parity_test.go
-// pattern) is what proves a given port keeps that contract.
+// The kernel now emits corpus.value (a continuous quality ratio, 1.0 == the old
+// 100/100) as the primary numeric signal. The legacy corpus.score remains during the
+// migration so Python-era consumers can still read the old control-pane contract.
 //
 // Import this package under pkg/ (like pkg/abi) so an out-of-tree tool can build a
 // scorecard against the same fold; the per-card KPI logic stays in internal/<name>score.
 package scorecard
 
-// KPI is one scored dimension. It mirrors the Python KPI dict 1:1
-// (conflation_scorecard.py:157): the same field names, and Score as a float because the
-// Python scores are floats (e.g. 100.0*(1-n/total)) and the JSON must render identically.
+// KPI is one scored dimension. Score is the legacy 0-100 input because the Python
+// family still emits that shape; Value is the continuous quality ratio derived from it
+// by Fold (1.0 == the old 100/100). New callers should reason about Value and use
+// Score only when bridging old payloads.
 //
 // Defects are the HARD debt of this KPI -- each entry is one concrete, re-derivable thing
 // to fix, and debt is the count of them across all KPIs. Soft entries are advisory nudges
@@ -35,6 +35,7 @@ type KPI struct {
 	Key     string   `json:"kpi"`
 	Group   string   `json:"group"`
 	Score   float64  `json:"score"`
+	Value   float64  `json:"value"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
 	Soft    []string `json:"soft"`
@@ -45,8 +46,9 @@ type KPI struct {
 // downstream consumer read a Go card and a Python card identically.
 //
 // Corpus is map[string]any so a card adds its own <name>_debt plus bespoke keys while the
-// kernel writes score/grade/the debt count; keeping it a map (rather than a struct) is what
-// lets one fold serve every card without knowing its private corpus keys.
+// kernel writes value/grade/the debt count plus a legacy score; keeping it a map (rather
+// than a struct) is what lets one fold serve every card without knowing its private corpus
+// keys.
 type Payload struct {
 	Schema     string         `json:"schema"`
 	OK         bool           `json:"ok"`
@@ -67,7 +69,8 @@ type Messages struct {
 	FindingClean    string
 	NextAction      string
 	NextActionClean string
-	// ExtraCorpus is merged into corpus alongside the kernel-written score/grade/<debtKey>.
+	// ExtraCorpus is merged into corpus alongside the kernel-written value/grade/<debtKey>
+	// and the legacy score compatibility fields.
 	ExtraCorpus map[string]any
 	// Grade selects the A-F table (e.g. GradeStd or GradeStrict). Nil defaults to GradeStd.
 	Grade func(float64) string
@@ -77,8 +80,9 @@ type Messages struct {
 
 // Fold turns a slice of scored KPIs into the control-pane Payload.
 //
-//   - composite = the weighted mean of kpi.Score (mean when weights is nil), matching the
-//     Python sum(k.score)/len(k) when every weight is equal.
+//   - composite = the weighted mean of kpi.Score (mean when weights is nil), retained
+//     as legacy 0-100 input compatibility.
+//   - value = composite / 100, the continuous value new consumers should trend.
 //   - debt = Σ len(kpi.Defects) -- the headline integer, written into corpus[debtKey].
 //   - grade = msgs.Grade(composite), rounded; ok = debt==0; verdict = OK | ACTION.
 //
@@ -87,6 +91,7 @@ type Messages struct {
 // the GROUP_WEIGHTS cards without forcing a second fold.
 func Fold(schema string, kpis []KPI, debtKey string, weights map[string]float64, msgs Messages) Payload {
 	composite := weightedMean(kpis, weights)
+	value := ValueFromScore(composite)
 	debt := 0
 	for _, k := range kpis {
 		debt += len(k.Defects)
@@ -113,12 +118,21 @@ func Fold(schema string, kpis []KPI, debtKey string, weights map[string]float64,
 	}
 
 	corpus := map[string]any{
-		"score": Round1(composite),
-		"grade": grade,
-		debtKey: debt,
+		"value":              Round3(value),
+		"value_unit":         "quality_ratio",
+		"score":              Round1(composite),
+		"legacy_score":       Round1(composite),
+		"legacy_score_scale": 100,
+		"grade":              grade,
+		debtKey:              debt,
 	}
 	for k, v := range msgs.ExtraCorpus {
 		corpus[k] = v
+	}
+	if _, explicitValue := msgs.ExtraCorpus["value"]; !explicitValue {
+		if score, ok := anyFloat(corpus["score"]); ok {
+			StampLegacyScore(corpus, score)
+		}
 	}
 
 	return Payload{
@@ -174,6 +188,7 @@ func defectReason(kpis []KPI) string {
 func normalizeKPIs(kpis []KPI) []KPI {
 	out := make([]KPI, len(kpis))
 	for i, k := range kpis {
+		k.Value = Round3(ValueFromScore(k.Score))
 		if k.Defects == nil {
 			k.Defects = []string{}
 		}

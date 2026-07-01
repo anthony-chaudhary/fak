@@ -58,6 +58,15 @@ func TestRound1(t *testing.T) {
 	}
 }
 
+func TestValueFromScoreAndRound3(t *testing.T) {
+	if got := ValueFromScore(66.7); got != 0.667 {
+		t.Fatalf("ValueFromScore(66.7)=%g want 0.667", got)
+	}
+	if got := Round3(0.666666); got != 0.667 {
+		t.Fatalf("Round3(0.666666)=%g want 0.667", got)
+	}
+}
+
 func TestFoldDebtIsSumOfDefects(t *testing.T) {
 	kpis := []KPI{
 		{Key: "a", Group: "g", Score: 100},
@@ -87,6 +96,9 @@ func TestFoldDebtIsSumOfDefects(t *testing.T) {
 	}
 	if p.Corpus["score"] != Round1((100+0+70)/3.0) {
 		t.Errorf("score=%v want %v", p.Corpus["score"], Round1((100+0+70)/3.0))
+	}
+	if p.Corpus["value"] != Round3(ValueFromScore((100+0+70)/3.0)) {
+		t.Errorf("value=%v want %v", p.Corpus["value"], Round3(ValueFromScore((100+0+70)/3.0)))
 	}
 }
 
@@ -144,8 +156,9 @@ func TestFoldKPIsMarshalEmptyNotNull(t *testing.T) {
 	if !strings.Contains(s, `"defects":[]`) || !strings.Contains(s, `"soft":[]`) {
 		t.Errorf("KPI defects/soft must marshal as [] not null: %s", s)
 	}
-	// the envelope keys the control-pane fold reads
-	for _, key := range []string{`"ok":`, `"verdict":`, `"corpus":`, `"x_debt":`, `"grade":`} {
+	// the envelope keys the control-pane fold reads, plus the continuous value key new
+	// scorecards prefer over the legacy 0-100 score.
+	for _, key := range []string{`"ok":`, `"verdict":`, `"corpus":`, `"x_debt":`, `"grade":`, `"value":`} {
 		if !strings.Contains(s, key) {
 			t.Errorf("payload missing control-pane key %s", key)
 		}
