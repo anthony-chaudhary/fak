@@ -112,6 +112,37 @@ func TestDispatchWeeklyReportFromFixtureLedger(t *testing.T) {
 	}
 }
 
+func TestDispatchWeeklyReportSurfacesSlowLaneWedges(t *testing.T) {
+	runsDir := filepath.Join(t.TempDir(), dispatchProgressRunsDir)
+	writeDispatchProgressRows(t, runsDir, []map[string]any{
+		{"utc": "2026-07-01T00:05:00Z", "lane": "cmd", "ok": false, "closed_now": 0, "audit_error": "commit audit unavailable"},
+		{"utc": "2026-07-01T00:10:00Z", "lane": "cmd", "ok": false, "closed_now": 0, "audit_error": "commit audit unavailable"},
+		{"utc": "2026-07-01T00:15:00Z", "lane": "cmd", "ok": false, "closed_now": 0, "audit_error": "commit audit unavailable"},
+		{"utc": "2026-07-01T00:20:00Z", "lane": "docs", "ok": true, "closed_now": 1},
+		{"utc": "2026-07-01T00:25:00Z", "lane": "docs", "ok": true, "closed_now": 1},
+	})
+
+	since := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 7, 1, 1, 0, 0, 0, time.UTC)
+	got, err := buildDispatchWeeklyReport(runsDir, since, until)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.LaneWedges) != 1 {
+		t.Fatalf("lane wedges = %+v, want exactly the cmd lane wedged", got.LaneWedges)
+	}
+	wedge := got.LaneWedges[0]
+	if wedge.Lane != "cmd" ||
+		wedge.Attempts != 3 ||
+		wedge.WitnessedCloses != 0 ||
+		wedge.CloseRate != 0 ||
+		wedge.DominantFailureClass != "AUDIT_UNAVAILABLE" ||
+		wedge.DominantFailureCount != 3 ||
+		!strings.Contains(wedge.NextAction, "clear AUDIT_UNAVAILABLE") {
+		t.Fatalf("cmd wedge = %+v, want repeated audit blocker and no witnessed closes", wedge)
+	}
+}
+
 func TestRenderDispatchWeeklyReportMarkdown(t *testing.T) {
 	report := dispatchWeeklyReport{
 		Schema:                         dispatchWeeklySchema,
@@ -124,7 +155,12 @@ func TestRenderDispatchWeeklyReportMarkdown(t *testing.T) {
 		AchievedWitnessedClosesPerHour: 30.0,
 		CapacityLossIssues:             10.0,
 		TopBlockers:                    []dispatchWeeklyBlocker{{Reason: "AUDIT_UNAVAILABLE", Count: 2}},
-		NextSafeCapChange:              "hold cap; clear AUDIT_UNAVAILABLE before raising",
+		LaneWedges: []dispatchLaneWedge{{
+			Lane: "cmd", Attempts: 3, WitnessedCloses: 0, CloseRate: 0,
+			DominantFailureClass: "AUDIT_UNAVAILABLE", DominantFailureCount: 3,
+			NextAction: "inspect cmd lane; clear AUDIT_UNAVAILABLE before adding workers",
+		}},
+		NextSafeCapChange: "hold cap; clear AUDIT_UNAVAILABLE before raising",
 	}
 	out := renderDispatchWeeklyReport(report)
 	for _, want := range []string{
@@ -133,6 +169,8 @@ func TestRenderDispatchWeeklyReportMarkdown(t *testing.T) {
 		"| achieved witnessed closes/hour | 30.0 |",
 		"| capacity loss | 10.0 issue(s) |",
 		"- AUDIT_UNAVAILABLE: 2",
+		"## Lane Wedges",
+		"- cmd: attempts=3 closes=0 close_rate=0.00 dominant=AUDIT_UNAVAILABLE/3",
 		"Next safe cap change: hold cap; clear AUDIT_UNAVAILABLE before raising",
 	} {
 		if !strings.Contains(out, want) {

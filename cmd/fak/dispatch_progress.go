@@ -241,6 +241,7 @@ type dispatchWeeklyReport struct {
 	AchievedWitnessedClosesPerHour float64                 `json:"achieved_witnessed_closes_per_hour"`
 	CapacityLossIssues             float64                 `json:"capacity_loss_issues"`
 	TopBlockers                    []dispatchWeeklyBlocker `json:"top_blockers"`
+	LaneWedges                     []dispatchLaneWedge     `json:"lane_wedges"`
 	NextSafeCapChange              string                  `json:"next_safe_cap_change"`
 	ProgressLedger                 string                  `json:"progress_ledger"`
 }
@@ -248,6 +249,23 @@ type dispatchWeeklyReport struct {
 type dispatchWeeklyBlocker struct {
 	Reason string `json:"reason"`
 	Count  int    `json:"count"`
+}
+
+type dispatchLaneWedge struct {
+	Lane                 string  `json:"lane"`
+	Attempts             int     `json:"attempts"`
+	WitnessedCloses      int     `json:"witnessed_closes"`
+	CloseRate            float64 `json:"close_rate"`
+	DominantFailureClass string  `json:"dominant_failure_class"`
+	DominantFailureCount int     `json:"dominant_failure_count"`
+	NextAction           string  `json:"next_action"`
+}
+
+type dispatchLaneWedgeStats struct {
+	lane     string
+	attempts int
+	closes   int
+	reasons  map[string]int
 }
 
 func evaluateDispatchWeeklyReport(opts dispatchProgressOptions) (dispatchWeeklyReport, error) {
@@ -309,19 +327,23 @@ func buildDispatchWeeklyReport(runsDir string, since, until time.Time) (dispatch
 	closed := 0
 	considered := 0
 	blockers := map[string]int{}
+	lanes := map[string]*dispatchLaneWedgeStats{}
 	for _, row := range rows {
 		at, err := time.Parse(time.RFC3339, dispatchMapString(row, "utc"))
 		if err != nil || at.Before(since) || at.After(until) {
 			continue
 		}
 		considered++
-		closed += dispatchMapInt(row, "closed_now")
+		closedNow := dispatchMapInt(row, "closed_now")
+		closed += closedNow
 		if target := dispatchMapFloat(row, "target_issues_per_hour"); target > 0 {
 			targetIPH = target
 		}
-		for _, reason := range dispatchProgressRowBlockers(row) {
+		reasons := dispatchProgressRowBlockers(row)
+		for _, reason := range reasons {
 			blockers[reason]++
 		}
+		dispatchWeeklyFoldLane(lanes, row, closedNow, reasons)
 	}
 	windowHours := until.Sub(since).Hours()
 	achieved := 0.0
@@ -344,6 +366,7 @@ func buildDispatchWeeklyReport(runsDir string, since, until time.Time) (dispatch
 		AchievedWitnessedClosesPerHour: dispatchProgressRound1(achieved),
 		CapacityLossIssues:             dispatchProgressRound1(loss),
 		TopBlockers:                    top,
+		LaneWedges:                     dispatchWeeklyLaneWedges(lanes, 5),
 		NextSafeCapChange:              dispatchWeeklyNextCapChange(targetIPH, achieved, top),
 		ProgressLedger:                 filepath.Join(runsDir, dispatchProgressLogName),
 	}, nil
@@ -393,6 +416,26 @@ func dispatchProgressRowBlockers(row map[string]any) []string {
 	return reasons
 }
 
+func dispatchWeeklyFoldLane(lanes map[string]*dispatchLaneWedgeStats, row map[string]any, closedNow int, reasons []string) {
+	lane := strings.TrimSpace(dispatchMapString(row, "lane"))
+	if lane == "" {
+		lane = strings.TrimSpace(dispatchMapString(row, "path_lane"))
+	}
+	if lane == "" {
+		return
+	}
+	st := lanes[lane]
+	if st == nil {
+		st = &dispatchLaneWedgeStats{lane: lane, reasons: map[string]int{}}
+		lanes[lane] = st
+	}
+	st.attempts++
+	st.closes += closedNow
+	for _, reason := range reasons {
+		st.reasons[reason]++
+	}
+}
+
 func dispatchBlockerReason(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" || strings.EqualFold(s, "ok") {
@@ -416,6 +459,68 @@ func dispatchWeeklyTopBlockers(counts map[string]int, limit int) []dispatchWeekl
 		out = out[:limit]
 	}
 	return out
+}
+
+func dispatchWeeklyLaneWedges(stats map[string]*dispatchLaneWedgeStats, limit int) []dispatchLaneWedge {
+	out := make([]dispatchLaneWedge, 0, len(stats))
+	for _, st := range stats {
+		if st.attempts == 0 {
+			continue
+		}
+		reason, reasonCount := dispatchWeeklyDominantReason(st.reasons)
+		closeRate := float64(st.closes) / float64(st.attempts)
+		if !dispatchLaneIsWedged(st.attempts, closeRate, reasonCount) {
+			continue
+		}
+		if reason == "" {
+			reason = "LOW_WITNESSED_CLOSE_RATE"
+		}
+		out = append(out, dispatchLaneWedge{
+			Lane:                 st.lane,
+			Attempts:             st.attempts,
+			WitnessedCloses:      st.closes,
+			CloseRate:            dispatchProgressRound2(closeRate),
+			DominantFailureClass: reason,
+			DominantFailureCount: reasonCount,
+			NextAction:           dispatchLaneWedgeNextAction(st.lane, reason),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DominantFailureCount != out[j].DominantFailureCount {
+			return out[i].DominantFailureCount > out[j].DominantFailureCount
+		}
+		if out[i].Attempts != out[j].Attempts {
+			return out[i].Attempts > out[j].Attempts
+		}
+		return out[i].Lane < out[j].Lane
+	})
+	if limit >= 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func dispatchWeeklyDominantReason(counts map[string]int) (string, int) {
+	bestReason := ""
+	bestCount := 0
+	for reason, count := range counts {
+		if count > bestCount || (count == bestCount && (bestReason == "" || reason < bestReason)) {
+			bestReason = reason
+			bestCount = count
+		}
+	}
+	return bestReason, bestCount
+}
+
+func dispatchLaneIsWedged(attempts int, closeRate float64, dominantFailures int) bool {
+	if attempts < 2 {
+		return false
+	}
+	return closeRate < 0.5 || dominantFailures >= 2
+}
+
+func dispatchLaneWedgeNextAction(lane, reason string) string {
+	return "inspect " + lane + " lane; clear " + reason + " before adding workers"
 }
 
 func dispatchWeeklyNextCapChange(target, achieved float64, blockers []dispatchWeeklyBlocker) string {
@@ -799,6 +904,17 @@ func renderDispatchWeeklyReport(r dispatchWeeklyReport) string {
 	} else {
 		for _, blocker := range r.TopBlockers {
 			fmt.Fprintf(&b, "- %s: %d\n", blocker.Reason, blocker.Count)
+		}
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Lane Wedges")
+	if len(r.LaneWedges) == 0 {
+		fmt.Fprintln(&b, "- none")
+	} else {
+		for _, wedge := range r.LaneWedges {
+			fmt.Fprintf(&b, "- %s: attempts=%d closes=%d close_rate=%.2f dominant=%s/%d next=%s\n",
+				wedge.Lane, wedge.Attempts, wedge.WitnessedCloses, wedge.CloseRate,
+				wedge.DominantFailureClass, wedge.DominantFailureCount, wedge.NextAction)
 		}
 	}
 	fmt.Fprintln(&b)
