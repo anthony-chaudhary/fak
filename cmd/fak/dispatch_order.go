@@ -52,6 +52,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchPrice(stdout, stderr, argv[1:])
 	case "route":
 		return runDispatchRoute(stdout, stderr, argv[1:])
+	case "skipped":
+		return runDispatchSkipped(stdout, stderr, argv[1:])
 	case "tick":
 		return runDispatchTick(stdout, stderr, argv[1:])
 	case "wave":
@@ -246,6 +248,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
+  fak dispatch skipped [--workspace DIR] [--channel C] [--repo-url URL] [--token T] [--dry-run]
   fak dispatch tick  [--workspace DIR] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch wave  [--workspace DIR] [--count N] [--backend claude|opencode|codex] [--live] [--json]
   fak dispatch sweep [--workspace DIR] [--max-agents N] [--backend claude|opencode|codex] [--live] [--json]
@@ -279,7 +282,10 @@ example (collapse 25 tasks for the same target to the freshest, then pick):
   fak dispatch order --in candidates.json --json | jq .pick
 
 route is the native issue-lane router: read dos.toml lane trees plus open GitHub issues and emit
-the lanes JSON shape that tick consumes. tick is the native issue-resolution dispatch tick:
+the lanes JSON shape that tick consumes. skipped folds route's human-blocked skips (skip reason
+BLOCKED_BY_HUMAN -- the witnessed blocked-by-human backlog no worker may take) into one compact
+card and posts it to a dedicated internal Slack channel ($FAK_SKIPPED_CHANNEL); --dry-run renders
+the card without posting. tick is the native issue-resolution dispatch tick:
 preflight the host/account/cap, route open issues to lanes, pick one fresh issue, and dry-run or spawn one guarded worker. price quotes a proposed
 fan-out before launch and emits plan_id, launch_plan, wave metrics, and repartition advice. wave allocates
 multiple account seats and drives ticks; sweep repeats ticks until the queue drains or preflight
