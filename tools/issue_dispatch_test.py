@@ -549,6 +549,23 @@ class PickLaneBusyTest(unittest.TestCase):
         self.assertFalse(pick["stacked"])
         self.assertEqual(pick["busy"], ["gateway"])
 
+    def test_three_lane_pressure_rotates_second_spawn_to_another_lane(self) -> None:
+        # #1774 witness: gateway stays the highest-pressure lane, but once it is
+        # in flight the next pick moves to docs, then recall, before stacking.
+        mod = load()
+        self._router(mod)
+        first = mod.pick_lane(ROOT, None, busy=set())
+        second = mod.pick_lane(ROOT, None, busy={first["lane"]})
+        third = mod.pick_lane(ROOT, None, busy={first["lane"], second["lane"]})
+        stacked = mod.pick_lane(ROOT, None, busy={"docs", "gateway", "recall"})
+
+        self.assertEqual(first["lane"], "gateway")
+        self.assertEqual(second["lane"], "docs")
+        self.assertEqual(third["lane"], "recall")
+        self.assertFalse(second["stacked"])
+        self.assertFalse(third["stacked"])
+        self.assertTrue(stacked["stacked"])
+
     def test_all_busy_falls_back_to_richest_and_flags_stacked(self) -> None:
         mod = load()
         self._router(mod)
