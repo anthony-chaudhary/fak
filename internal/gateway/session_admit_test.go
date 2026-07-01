@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -427,6 +428,39 @@ func TestResetOnBudgetContinuesTransparently(t *testing.T) {
 	// The seed was spliced ahead of the live messages the planner saw (1 user + 1 seed).
 	if cp.seen < 2 {
 		t.Fatalf("planner saw %d messages, want >=2 (seed spliced ahead of live turn)", cp.seen)
+	}
+}
+
+func TestResetSeedSpliceIdempotentAndNonMutating(t *testing.T) {
+	seed := []agent.Message{
+		{Role: agent.RoleSystem, Content: "[carryover] durable: concise answers"},
+		{Role: agent.RoleUser, Content: "Continue from the reset checkpoint."},
+	}
+	messages := []agent.Message{
+		{Role: agent.RoleSystem, Content: "system framing"},
+		{Role: agent.RoleUser, Content: "live request"},
+	}
+	seedOrig := append([]agent.Message(nil), seed...)
+	messagesOrig := append([]agent.Message(nil), messages...)
+
+	first := spliceSeed(seed, messages)
+	second := spliceSeed(seed, messages)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("spliceSeed is not idempotent:\n first=%+v\n second=%+v", first, second)
+	}
+	if !reflect.DeepEqual(seed, seedOrig) {
+		t.Fatalf("spliceSeed mutated seed: before=%+v after=%+v", seedOrig, seed)
+	}
+	if !reflect.DeepEqual(messages, messagesOrig) {
+		t.Fatalf("spliceSeed mutated messages: before=%+v after=%+v", messagesOrig, messages)
+	}
+	wantRoles := []string{agent.RoleSystem, agent.RoleSystem, agent.RoleUser, agent.RoleUser}
+	gotRoles := make([]string, 0, len(first))
+	for _, m := range first {
+		gotRoles = append(gotRoles, m.Role)
+	}
+	if !reflect.DeepEqual(gotRoles, wantRoles) {
+		t.Fatalf("spliced role order = %v, want %v", gotRoles, wantRoles)
 	}
 }
 

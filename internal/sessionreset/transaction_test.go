@@ -57,6 +57,37 @@ func TestResetTransactionCapturesSeedDigestContributorsAndOmissions(t *testing.T
 	}
 }
 
+func TestResetSeedAndTransactionIdempotentAcrossReplays(t *testing.T) {
+	in := Input{
+		Trace:          "trace-parent",
+		Messages:       sampleTranscript(),
+		FreshBudgetTok: 75,
+	}
+	replayed := Input{
+		Trace:          string([]byte(in.Trace)),
+		Messages:       append([]Msg(nil), in.Messages...),
+		FreshBudgetTok: in.FreshBudgetTok,
+	}
+
+	firstSeed := BuildSeed(in)
+	replayedSeed := BuildSeed(replayed)
+	if !reflect.DeepEqual(firstSeed, replayedSeed) {
+		t.Fatalf("reset seed is not idempotent across replayed inputs:\n first=%+v\n replay=%+v", firstSeed, replayedSeed)
+	}
+	if firstSeed.Recap == "" || firstSeed.WarmPrefix == nil {
+		t.Fatalf("fixture must produce a carryover recap and warm-prefix descriptor: %+v", firstSeed)
+	}
+
+	firstTx := BuildResetTransaction(in, "trace-child", firstSeed)
+	replayedTx := BuildResetTransaction(replayed, "trace-child", replayedSeed)
+	if !reflect.DeepEqual(firstTx, replayedTx) {
+		t.Fatalf("reset continuation metadata is not idempotent across replayed inputs:\n first=%+v\n replay=%+v", firstTx, replayedTx)
+	}
+	if firstTx.SeedDigest != DigestSeed(replayedSeed) {
+		t.Fatalf("seed digest = %q, want replayed seed digest %q", firstTx.SeedDigest, DigestSeed(replayedSeed))
+	}
+}
+
 func hasContributor(contributors []string, want string) bool {
 	for _, got := range contributors {
 		if got == want {
