@@ -49,15 +49,15 @@ type WorkerEvidence struct {
 	Issue          int
 	Session        string
 	Account        string
-	RegistryDisp   string             // sessions.json Disp: LIVE / DONE / USER_CLOSED / INFRA_AUTH / ...
-	RegistryAction string             // sessions.json Action: BLOCKED_AUTH / ...
-	HasPID         bool               // whether a worker PID is known at all
-	PID            int                //
-	PIDAlive       bool               // OS liveness of PID (meaningful only when HasPID)
-	CPUDeltaSec    *float64           // CPU seconds consumed since the previous sample (nil = unknown)
-	PrevLines      *int               // transcript line count at the previous sample (nil = first sample)
-	Transcript     TranscriptSignal   //
-	StaleChildren  []ChildCommand     // stale child commands the janitor scan attributed to this worker
+	RegistryDisp   string           // sessions.json Disp: LIVE / DONE / USER_CLOSED / INFRA_AUTH / ...
+	RegistryAction string           // sessions.json Action: BLOCKED_AUTH / ...
+	HasPID         bool             // whether a worker PID is known at all
+	PID            int              //
+	PIDAlive       bool             // OS liveness of PID (meaningful only when HasPID)
+	CPUDeltaSec    *float64         // CPU seconds consumed since the previous sample (nil = unknown)
+	PrevLines      *int             // transcript line count at the previous sample (nil = first sample)
+	Transcript     TranscriptSignal //
+	StaleChildren  []ChildCommand   // stale child commands the janitor scan attributed to this worker
 }
 
 // WorkerSample is the classified, machine-readable monitor row for one worker.
@@ -287,12 +287,12 @@ func classPriority(c Classification) int {
 // MonitorPayload is the full machine-readable monitor output the cmd layer emits
 // with --json.
 type MonitorPayload struct {
-	Schema      string                   `json:"schema"`
-	GeneratedAt string                   `json:"generated_at"`
-	RunID       string                   `json:"run_id,omitempty"`
-	Total       int                      `json:"total"`
-	ByClass     map[Classification]int   `json:"by_class"`
-	Workers     []WorkerSample           `json:"workers"`
+	Schema      string                 `json:"schema"`
+	GeneratedAt string                 `json:"generated_at"`
+	RunID       string                 `json:"run_id,omitempty"`
+	Total       int                    `json:"total"`
+	ByClass     map[Classification]int `json:"by_class"`
+	Workers     []WorkerSample         `json:"workers"`
 }
 
 // NewMonitorPayload assembles the payload from classified samples, stamping the

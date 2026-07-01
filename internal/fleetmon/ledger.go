@@ -18,12 +18,12 @@ const RunLedgerSchema = "fak-fleet-runledger/1"
 type Outcome string
 
 const (
-	OutcomePatchWitness    Outcome = "patch-with-witness"  // changed files AND a captured witness (test/build/commit)
-	OutcomeBlockedScoped   Outcome = "blocked-scoped"      // a final report that is blocked/scoped, with the smallest follow-up
-	OutcomeReadOnlyAudit   Outcome = "read-only-audit"     // a final report with no file changes (an audit/scoped read)
-	OutcomeCrashedNoFinal  Outcome = "crashed-no-final"    // the worker process is gone and left no final report
-	OutcomeStaleIncomplete Outcome = "stale-incomplete"    // idle or busy but no final report — NOT complete
-	OutcomeSuperseded      Outcome = "superseded"          // a replacement session took over this issue
+	OutcomePatchWitness    Outcome = "patch-with-witness" // changed files AND a captured witness (test/build/commit)
+	OutcomeBlockedScoped   Outcome = "blocked-scoped"     // a final report that is blocked/scoped, with the smallest follow-up
+	OutcomeReadOnlyAudit   Outcome = "read-only-audit"    // a final report with no file changes (an audit/scoped read)
+	OutcomeCrashedNoFinal  Outcome = "crashed-no-final"   // the worker process is gone and left no final report
+	OutcomeStaleIncomplete Outcome = "stale-incomplete"   // idle or busy but no final report — NOT complete
+	OutcomeSuperseded      Outcome = "superseded"         // a replacement session took over this issue
 )
 
 var validOutcomes = map[Outcome]bool{
@@ -65,14 +65,14 @@ type LedgerRow struct {
 
 // FoldInput is the per-worker evidence the fold classifies into a ledger row.
 type FoldInput struct {
-	RunID      string
-	Worker     PlanWorker
-	Transcript TranscriptSignal
-	PIDAlive   *bool  // nil = unknown; false = the worker process is gone
-	Idle       bool   // the transcript is not advancing (a settled worker)
-	Superseded bool   // a replacement session exists for this issue
+	RunID        string
+	Worker       PlanWorker
+	Transcript   TranscriptSignal
+	PIDAlive     *bool // nil = unknown; false = the worker process is gone
+	Idle         bool  // the transcript is not advancing (a settled worker)
+	Superseded   bool  // a replacement session exists for this issue
 	SupersededBy string
-	Now        time.Time
+	Now          time.Time
 }
 
 // FoldWorker folds one worker's transcript + liveness into a witnessed ledger
@@ -250,12 +250,12 @@ func ValidateLedger(rows []LedgerRow) []LedgerDefect {
 
 // RunLedgerSummary is the aggregate the fold emits alongside the JSONL rows.
 type RunLedgerSummary struct {
-	Schema     string           `json:"schema"`
-	RunID      string           `json:"run_id,omitempty"`
-	Total      int              `json:"total"`
-	ByOutcome  map[Outcome]int  `json:"by_outcome"`
-	Rows       []LedgerRow      `json:"rows"`
-	Defects    []LedgerDefect   `json:"defects,omitempty"`
+	Schema    string          `json:"schema"`
+	RunID     string          `json:"run_id,omitempty"`
+	Total     int             `json:"total"`
+	ByOutcome map[Outcome]int `json:"by_outcome"`
+	Rows      []LedgerRow     `json:"rows"`
+	Defects   []LedgerDefect  `json:"defects,omitempty"`
 }
 
 // Summarize folds rows into a run summary with an outcome histogram and any

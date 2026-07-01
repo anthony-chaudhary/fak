@@ -155,11 +155,11 @@ func TestLedgerParseSkipsGarbage(t *testing.T) {
 
 func TestValidateLedgerEvidenceInvariants(t *testing.T) {
 	rows := []LedgerRow{
-		{Outcome: string(OutcomePatchWitness)},                       // missing files + witness
+		{Outcome: string(OutcomePatchWitness)},                                                     // missing files + witness
 		{Outcome: string(OutcomePatchWitness), ChangedFiles: []string{"a.go"}, Witness: "go test"}, // ok
-		{Outcome: string(OutcomeBlockedScoped)},                      // missing blocker + follow-up
-		{Outcome: string(OutcomeSuperseded)},                         // missing superseded_by
-		{Outcome: "made-up-outcome"},                                 // off-schema
+		{Outcome: string(OutcomeBlockedScoped)},                                                    // missing blocker + follow-up
+		{Outcome: string(OutcomeSuperseded)},                                                       // missing superseded_by
+		{Outcome: "made-up-outcome"},                                                               // off-schema
 	}
 	defects := ValidateLedger(rows)
 	if len(defects) == 0 {

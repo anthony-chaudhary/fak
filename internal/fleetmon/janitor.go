@@ -81,19 +81,19 @@ type WorkerRoot struct {
 
 // ChildCommand is one classified child process tree under a worker root.
 type ChildCommand struct {
-	RootPID   int    `json:"root_pid"`   // the child subtree root — the tree-kill target
-	PPID      int    `json:"ppid"`       //
-	Name      string `json:"name"`       //
-	Command   string `json:"command"`    // the child command line (trimmed)
-	Class     CommandClass `json:"class"` //
-	AgeSec    int    `json:"age_sec"`    //
-	WorkerPID int    `json:"worker_pid"` // the owning worker root PID
-	Session   string `json:"session,omitempty"`
-	Issue     int    `json:"issue,omitempty"`
-	TreePIDs  []int  `json:"tree_pids"`  // the child + all its descendants (for reporting)
-	Stale     bool   `json:"stale"`      //
-	Protected bool   `json:"protected"`  // an MCP/persistent server or a predates-worker process — never killed
-	Reason    string `json:"reason"`     //
+	RootPID   int          `json:"root_pid"`   // the child subtree root — the tree-kill target
+	PPID      int          `json:"ppid"`       //
+	Name      string       `json:"name"`       //
+	Command   string       `json:"command"`    // the child command line (trimmed)
+	Class     CommandClass `json:"class"`      //
+	AgeSec    int          `json:"age_sec"`    //
+	WorkerPID int          `json:"worker_pid"` // the owning worker root PID
+	Session   string       `json:"session,omitempty"`
+	Issue     int          `json:"issue,omitempty"`
+	TreePIDs  []int        `json:"tree_pids"` // the child + all its descendants (for reporting)
+	Stale     bool         `json:"stale"`     //
+	Protected bool         `json:"protected"` // an MCP/persistent server or a predates-worker process — never killed
+	Reason    string       `json:"reason"`    //
 }
 
 // JanitorInput is the injected snapshot the pure evaluator folds.

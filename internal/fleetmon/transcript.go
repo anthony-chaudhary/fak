@@ -22,17 +22,17 @@ type TranscriptSignal struct {
 	LastTimestamp   time.Time `json:"-"`
 	HasTimestamp    bool      `json:"-"`
 	LastTimestampS  string    `json:"last_timestamp,omitempty"`
-	LastRole        string    `json:"last_role,omitempty"`   // "assistant" | "user" | ""
+	LastRole        string    `json:"last_role,omitempty"` // "assistant" | "user" | ""
 	LastStopReason  string    `json:"last_stop_reason,omitempty"`
-	FinalReport     bool      `json:"final_report"`          // session ended on an assistant text turn (agent stopped, produced a report)
+	FinalReport     bool      `json:"final_report"` // session ended on an assistant text turn (agent stopped, produced a report)
 	FinalReportText string    `json:"final_report_text,omitempty"`
-	Blocker         string    `json:"blocker,omitempty"`     // human blocker string from the recent tail ("" if none)
-	BlockerKind     string    `json:"blocker_kind,omitempty"`// auth | rate | credit | access | ""
-	Interrupted     bool      `json:"interrupted"`           // the recent tail has an interrupted tool turn
-	ChangedFiles    []string  `json:"changed_files,omitempty"`   // paths touched by Edit/Write/NotebookEdit (evidence)
-	WitnessCommands []string  `json:"witness_commands,omitempty"`// test/build/commit commands seen (evidence)
-	LastToolUse     string    `json:"last_tool_use,omitempty"`   // name of the last tool_use block
-	LastBashCommand string    `json:"last_bash_command,omitempty"`// command text of the last Bash tool_use (child-command correlation)
+	Blocker         string    `json:"blocker,omitempty"`           // human blocker string from the recent tail ("" if none)
+	BlockerKind     string    `json:"blocker_kind,omitempty"`      // auth | rate | credit | access | ""
+	Interrupted     bool      `json:"interrupted"`                 // the recent tail has an interrupted tool turn
+	ChangedFiles    []string  `json:"changed_files,omitempty"`     // paths touched by Edit/Write/NotebookEdit (evidence)
+	WitnessCommands []string  `json:"witness_commands,omitempty"`  // test/build/commit commands seen (evidence)
+	LastToolUse     string    `json:"last_tool_use,omitempty"`     // name of the last tool_use block
+	LastBashCommand string    `json:"last_bash_command,omitempty"` // command text of the last Bash tool_use (child-command correlation)
 }
 
 // tailScanLines bounds how many trailing records the blocker scan inspects, so a
@@ -206,10 +206,10 @@ func isWitnessCommand(cmd string) bool {
 // different purpose.
 
 type tRecord struct {
-	Type                 string  `json:"type"`
-	Timestamp            string  `json:"timestamp"`
-	InterruptedMessageID string  `json:"interruptedMessageId"`
-	Message              tMsg    `json:"message"`
+	Type                 string `json:"type"`
+	Timestamp            string `json:"timestamp"`
+	InterruptedMessageID string `json:"interruptedMessageId"`
+	Message              tMsg   `json:"message"`
 }
 
 type tMsg struct {

@@ -57,13 +57,13 @@ func TestReplacePromptCarriesForwardDiscipline(t *testing.T) {
 	for _, must := range []string{
 		"#1856",
 		"https://github.com/anthony-chaudhary/fak/issues/1856",
-		"fleet monitor",           // expected area
-		"git add -A",              // the never-add-all rule
-		"force-push",              // the never-force-push rule
-		"trunk",                   // stay on trunk
-		"final report",            // the final-report requirement
-		"witness",                 // proof requirement
-		"REPLACEMENT",             // it identifies as a replacement
+		"fleet monitor", // expected area
+		"git add -A",    // the never-add-all rule
+		"force-push",    // the never-force-push rule
+		"trunk",         // stay on trunk
+		"final report",  // the final-report requirement
+		"witness",       // proof requirement
+		"REPLACEMENT",   // it identifies as a replacement
 	} {
 		if !strings.Contains(p, must) {
 			t.Errorf("replacement prompt must mention %q", must)
@@ -75,8 +75,8 @@ func TestReplaceCustomTemplate(t *testing.T) {
 	now := time.Now()
 	tpl := "Redo issue {{issue}} at {{issue_url}} in area {{area}}."
 	d := EvaluateReplace(ReplaceRequest{
-		Worker:   PlanWorker{Issue: 7, Session: "issue-7", IssueURL: "u", Area: "core"},
-		Class:    ClassDead, Index: 1, Template: tpl, Now: now,
+		Worker: PlanWorker{Issue: 7, Session: "issue-7", IssueURL: "u", Area: "core"},
+		Class:  ClassDead, Index: 1, Template: tpl, Now: now,
 	})
 	if d.Prompt != "Redo issue 7 at u in area core." {
 		t.Fatalf("custom template not rendered: %q", d.Prompt)
