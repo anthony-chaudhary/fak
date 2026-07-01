@@ -17,6 +17,7 @@ flowchart TD
   MN --> Quality["code: quality-score"]
   MN --> Audit["read-mostly audit: bottleneck-map, trajectory-audit"]
   Pack --> DOS["DOS trust gates<br/>(witness, price, dispatch)"]
+  Pack --> Fleet["Fleet / bulk dispatch<br/>(super-loop: launch headless waves)"]
 ```
 
 *The page's skill families — and, within Maintenance, the surface each skill tends.*
@@ -44,6 +45,22 @@ are intentionally small local entry points over `dos` verbs and this repo's
 | [`dos-replan`](dos-replan/SKILL.md) | Refresh the portfolio from `dos verify` evidence and surface only the operator decisions that remain. |
 | [`dos-plan-price`](dos-plan-price/SKILL.md) | Price a proposed multi-agent fan-out before launch so overlapping trees are caught before workers start. |
 | [`dos-witness-claim`](dos-witness-claim/SKILL.md) | Verify subagent results before folding them into synthesis; confirmed effects fold, narration does not. |
+
+## Fleet / bulk dispatch (launch headless work in bulk)
+
+The "super loop" family: launch *detached* headless work sessions in bulk, then let
+DOS witness what they actually shipped. These drive the proven launchers
+(`tools/issue_dispatch.py --wave`, `tools/launch_wave_detached.ps1`) rather than
+re-implementing process detachment — the skill supplies the ordering and the
+discipline (PLAN first, price the fan-out, respect the no-DoS cap).
+
+| Skill | What it does |
+|---|---|
+| [`super-loop`](super-loop/SKILL.md) | Launch N detached `/goal` workers in bulk — tree-disjoint in one checkout (`issue_dispatch.py --wave`) or one-per-distinct-account for rate-limit headroom (`launch_wave_detached.ps1`). PLAN by default; prices collisions + account-distinctness before spawning; re-checks the preflight cap per spawn; holds the fan-out to the honesty boundary (a launch is not a ship — ancestry closes issues). Fuel: [`resolve-top-issue-witnessed`](../goal-prompts/resolve-top-issue-witnessed.md). |
+
+Contrast with [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md) (an *in-session*
+dispatch⇄replan cadence on one lane) and [`run-it-all-night`](run-it-all-night/SKILL.md)
+(unattended *data collection*, not issue resolution).
 
 ## Maintenance (read `.claude/project.yaml`)
 
