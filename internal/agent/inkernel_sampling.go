@@ -72,8 +72,17 @@ func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias m
 		return sampleLogits(logits, temp, topP, topK, rng)
 	}
 	eff := append([]float32(nil), logits...)
+	applyLogitBias(eff, bias)
+	return sampleLogits(eff, temp, topP, topK, rng)
+}
+
+// applyLogitBias adds the OpenAI logit_bias map into logits IN PLACE. Out-of-range
+// token ids are skipped; biases are clamped to the same [-100, 100] bound the native
+// model constraint sink uses. Factored out of sampleLogitsWithBias so
+// sampleLogitsWithPenalty can share the exact same clamp/add behavior.
+func applyLogitBias(logits []float32, bias model.LogitBias) {
 	for tok, b := range bias {
-		if tok < 0 || tok >= len(eff) {
+		if tok < 0 || tok >= len(logits) {
 			continue
 		}
 		if b > model.LogitBiasClamp {
@@ -81,7 +90,35 @@ func sampleLogitsWithBias(logits []float32, temp, topP float64, topK int, bias m
 		} else if b < -model.LogitBiasClamp {
 			b = -model.LogitBiasClamp
 		}
-		eff[tok] += float32(b)
+		logits[tok] += float32(b)
+	}
+}
+
+// sampleLogitsWithPenalty applies the OpenAI logit_bias map AND the OpenAI
+// frequency/presence repetition penalties before the existing in-kernel sampler:
+//
+//	logit[t] -= frequency_penalty*count[t] + presence_penalty*(1 if count[t]>0 else 0)
+//
+// counts is indexed by token id and holds how many times each token has already been
+// generated in this response (the caller's running per-token histogram); a nil/short
+// counts slice treats every token as count 0. Both a zero frequencyPenalty AND a zero
+// presencePenalty make this a byte-for-byte no-op versus sampleLogitsWithBias (the
+// penalty term is skipped entirely, not just multiplied by zero), so an
+// unset/zero-valued request reproduces the exact pre-penalty output.
+func sampleLogitsWithPenalty(logits []float32, temp, topP float64, topK int, bias model.LogitBias, frequencyPenalty, presencePenalty float64, counts []int32, rng *rand.Rand) int {
+	if frequencyPenalty == 0 && presencePenalty == 0 {
+		return sampleLogitsWithBias(logits, temp, topP, topK, bias, rng)
+	}
+	eff := append([]float32(nil), logits...)
+	if len(bias) > 0 {
+		applyLogitBias(eff, bias)
+	}
+	for tok, c := range counts {
+		if tok >= len(eff) || c <= 0 {
+			continue
+		}
+		penalty := frequencyPenalty*float64(c) + presencePenalty
+		eff[tok] -= float32(penalty)
 	}
 	return sampleLogits(eff, temp, topP, topK, rng)
 }

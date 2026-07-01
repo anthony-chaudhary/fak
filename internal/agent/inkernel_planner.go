@@ -432,7 +432,7 @@ type inKernelGenerateResult struct {
 	stopped                 bool
 }
 
-func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -442,7 +442,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
+	gen, promptTok, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
@@ -456,8 +456,8 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
 	if err == nil {
 		return res, nil
 	}
@@ -470,7 +470,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit)
+	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -592,6 +592,15 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if len(sp.LogitBias) > 0 {
 		logitBias = model.LogitBias(sp.LogitBias)
 	}
+	// Per-request OpenAI repetition penalties; nil/omitted stays 0, which
+	// sampleLogitsWithPenalty treats as a byte-for-byte no-op (the pre-#1705 path).
+	var freqPenalty, presPenalty float64
+	if sp.FrequencyPenalty != nil {
+		freqPenalty = *sp.FrequencyPenalty
+	}
+	if sp.PresencePenalty != nil {
+		presPenalty = *sp.PresencePenalty
+	}
 
 	chat := renderChatMLTools(messages, tools)
 	ids, err := p.tok.Encode(chat)
@@ -631,7 +640,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, stops, emit, func() {
+	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 		sb.Reset()
 	})
 	if err != nil {
@@ -1025,10 +1034,16 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 }
 
 func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
-	return p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, stops, emit)
+	return p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)
 }
 
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
+// generateReusedContextWithBias runs the decode loop, sampling each next token with
+// sampleLogitsWithPenalty. freqPenalty/presPenalty are the OpenAI repetition
+// penalties (#1705); both zero is a byte-for-byte no-op versus the pre-penalty
+// path, so every existing caller (which passes 0, 0) is unaffected. The per-token
+// generation-count histogram (counts) is built from THIS turn's decode loop only —
+// it is sized to the logits vocab on first use and never persists across turns.
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -1109,15 +1124,27 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 
 	// 4) Decode.
 	rng := rand.New(rand.NewSource(p.seed))
+	// counts is the per-token generation histogram this turn's frequency/presence
+	// penalty is computed from (#1705): counts[t] is how many times token t has
+	// already been generated in THIS response. Only allocated when a penalty is
+	// actually requested, so the zero-penalty path (the overwhelming default) pays
+	// no extra allocation or per-step bookkeeping versus the pre-#1705 code.
+	var counts []int32
+	if freqPenalty != 0 || presPenalty != 0 {
+		counts = make([]int32, len(logits))
+	}
 	td := time.Now()
 	for gen = 0; gen < maxNew; gen++ {
 		if err = ctx.Err(); err != nil {
 			break
 		}
-		next := sampleLogitsWithBias(logits, temp, topP, topK, logitBias, rng)
+		next := sampleLogitsWithPenalty(logits, temp, topP, topK, logitBias, freqPenalty, presPenalty, counts, rng)
 		if next < 0 || stops[next] {
 			stopped = true
 			break
+		}
+		if counts != nil && next < len(counts) {
+			counts[next]++
 		}
 		if emit != nil && emit(next) {
 			gen++ // this token WAS generated; count it before exiting the loop

@@ -146,6 +146,71 @@ func TestSampleLogitsWithBias(t *testing.T) {
 	}
 }
 
+// TestSampleLogitsWithPenaltyZeroIsNoOp pins #1705: a zero (or all-nil) frequency/
+// presence penalty must reproduce the EXACT pre-#1705 sampleLogitsWithBias output,
+// byte-for-byte, whether or not a generation-count history is supplied. This is the
+// no-regression witness for the sampler seam every existing caller (0, 0 penalties)
+// falls through.
+func TestSampleLogitsWithPenaltyZeroIsNoOp(t *testing.T) {
+	logits := []float32{0.1, 0.9, 0.3}
+	counts := []int32{5, 5, 5} // even a nonzero count history must not matter at penalty 0
+
+	want := sampleLogitsWithBias(logits, 0, 0, 0, nil, nil)
+	if got := sampleLogitsWithPenalty(logits, 0, 0, 0, nil, 0, 0, nil, nil); got != want {
+		t.Fatalf("zero penalty, nil counts changed selection: got %d want %d", got, want)
+	}
+	if got := sampleLogitsWithPenalty(logits, 0, 0, 0, nil, 0, 0, counts, nil); got != want {
+		t.Fatalf("zero penalty with a nonzero count history changed selection: got %d want %d", got, want)
+	}
+	// logit_bias must still apply identically alongside a zero penalty.
+	wantBias := sampleLogitsWithBias(logits, 0, 0, 0, model.LogitBias{1: -100}, nil)
+	if got := sampleLogitsWithPenalty(logits, 0, 0, 0, model.LogitBias{1: -100}, 0, 0, counts, nil); got != wantBias {
+		t.Fatalf("zero penalty changed the logit_bias result: got %d want %d", got, wantBias)
+	}
+}
+
+// TestSampleLogitsWithPenaltyFrequencySuppressesRepeatedToken pins the core #1705
+// failure mode: with temp<=0 (pure argmax) a token that has already been generated
+// many times this turn must lose its argmax slot to a nonzero frequency_penalty,
+// exactly the effect a client needs to break a non-terminating repetition loop that
+// temperature alone cannot break.
+func TestSampleLogitsWithPenaltyFrequencySuppressesRepeatedToken(t *testing.T) {
+	logits := []float32{1.0, 5.0, 2.0} // token 1 is the unpenalized argmax winner
+	orig := append([]float32(nil), logits...)
+
+	if got := sampleLogitsWithPenalty(logits, 0, 0, 0, nil, 0, 0, nil, nil); got != 1 {
+		t.Fatalf("sanity: unpenalized argmax = %d, want 1", got)
+	}
+
+	// Token 1 already generated 10 times this turn; frequency_penalty=1.0 knocks its
+	// effective logit from 5.0 down to 5.0 - 1.0*10 = -5.0, well below token 2's 2.0.
+	counts := []int32{0, 10, 0}
+	got := sampleLogitsWithPenalty(logits, 0, 0, 0, nil, 1.0, 0, counts, nil)
+	if got != 2 {
+		t.Fatalf("frequency_penalty did not suppress the repeated token: got %d, want 2 (runner-up)", got)
+	}
+	// The input logits slice must never be mutated (sampleLogitsWithBias's own
+	// contract, preserved here).
+	for i := range logits {
+		if logits[i] != orig[i] {
+			t.Fatalf("sampleLogitsWithPenalty mutated logits[%d]: got %v want %v", i, logits[i], orig[i])
+		}
+	}
+}
+
+// TestSampleLogitsWithPenaltyPresenceIsBinary pins that presence_penalty applies
+// ONCE for any token seen at all (count>0), independent of how many times — unlike
+// frequency_penalty, which scales with count.
+func TestSampleLogitsWithPenaltyPresenceIsBinary(t *testing.T) {
+	logits := []float32{1.0, 5.0, 4.9} // token 1 wins by 0.1 over token 2
+	// Token 1 seen once, token 2 never seen. presence_penalty=0.5 should drop token
+	// 1's effective logit to 4.5, below token 2's untouched 4.9.
+	counts := []int32{0, 1, 0}
+	if got := sampleLogitsWithPenalty(logits, 0, 0, 0, nil, 0, 0.5, counts, nil); got != 2 {
+		t.Fatalf("presence_penalty did not flip the winner: got %d, want 2", got)
+	}
+}
+
 // jsonInt reads a JSON number (decoded as float64) as an int.
 func jsonInt(v any) int {
 	f, _ := v.(float64)

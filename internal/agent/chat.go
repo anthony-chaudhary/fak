@@ -339,6 +339,17 @@ type SampleParams struct {
 	// to the upstream so the engine applies the mask at its own logit step; the native
 	// in-kernel mask is a sibling-lane (internal/model) concern, out of this seam.
 	LogitBias map[int]float64
+	// FrequencyPenalty is the OpenAI per-request frequency penalty (nil => planner
+	// default / unset on the wire). Subtracted from each candidate token's logit
+	// scaled by how many times that token has already been generated this turn — see
+	// sampleLogitsWithPenalty. A nil pointer (including the common all-defaults
+	// request) is byte-for-byte the pre-penalty sampler behavior.
+	FrequencyPenalty *float64
+	// PresencePenalty is the OpenAI per-request presence penalty (nil => planner
+	// default / unset on the wire). Subtracted once from a candidate token's logit
+	// if that token has appeared at all this turn (count>0), independent of how many
+	// times — see sampleLogitsWithPenalty. nil is a no-op.
+	PresencePenalty *float64
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,
@@ -456,6 +467,29 @@ func WithLogitBias(bias map[int]float64) SampleOpt {
 	return func(sp *SampleParams) {
 		if len(bias) > 0 {
 			sp.LogitBias = bias
+		}
+	}
+}
+
+// WithFrequencyPenalty sets the per-request OpenAI frequency penalty. nil is a
+// no-op (keep the planner default); a non-nil p (including a pointer to 0) sets it
+// explicitly, matching the WithTemperature/WithTopP pointer-carries-omitted pattern.
+func WithFrequencyPenalty(p *float64) SampleOpt {
+	return func(sp *SampleParams) {
+		if p != nil {
+			v := *p
+			sp.FrequencyPenalty = &v
+		}
+	}
+}
+
+// WithPresencePenalty sets the per-request OpenAI presence penalty. nil is a no-op;
+// a non-nil p sets it explicitly, matching WithFrequencyPenalty.
+func WithPresencePenalty(p *float64) SampleOpt {
+	return func(sp *SampleParams) {
+		if p != nil {
+			v := *p
+			sp.PresencePenalty = &v
 		}
 	}
 }
