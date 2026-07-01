@@ -207,6 +207,12 @@ func TestProductScorecardBuildPayloadScenarios(t *testing.T) {
 	if floatValue(mapValue(p.Corpus["coverage"])["coverage_pct"]) != 100.0 {
 		t.Fatalf("coverage = %#v", p.Corpus["coverage"])
 	}
+	if floatValue(p.Corpus["value"]) != 1 || stringAny(p.Corpus["value_unit"]) != "quality_ratio" || floatValue(p.Corpus["legacy_score"]) != 100 || intValue(p.Corpus["legacy_score_scale"]) != 100 {
+		t.Fatalf("continuous value fields not stamped: %#v", p.Corpus)
+	}
+	if floatValue(mapValue(p.Corpus["kpi_values"])["well_formed"]) != 1 || p.KPIs[0].Value != 1 {
+		t.Fatalf("per-KPI values not stamped: corpus=%#v kpi=%#v", p.Corpus["kpi_values"], p.KPIs[0])
+	}
 	p = BuildPayload(".", testData([]Row{testRow(nil)}), testTree(), "")
 	if p.OK || p.Finding != "coverage_debt" || intValue(p.Corpus["coverage_debt"]) != 1 || intValue(p.Corpus["honesty_defects"]) != 0 {
 		t.Fatalf("coverage-debt payload = %#v", p)
@@ -246,6 +252,9 @@ func TestProductScorecardManagedContextSLODebt(t *testing.T) {
 	if intValue(mc["debt"]) != 1 || intValue(mc["total"]) != len(requiredManagedContextSLOs) || intValue(mc["passed"]) != len(requiredManagedContextSLOs)-1 {
 		t.Fatalf("managed-context report = %#v, want one failing SLO", mc)
 	}
+	if floatValue(mc["value"]) != 0.875 || stringAny(mc["value_unit"]) != "quality_ratio" || floatValue(mc["legacy_score"]) != 87.5 {
+		t.Fatalf("managed-context value fields = %#v, want continuous value plus legacy score", mc)
+	}
 	out := Render(p)
 	for _, want := range []string{"managed-context SLOs:", "managed-context SLO work-list:", "context_visibility [fail]"} {
 		if !strings.Contains(out, want) {
@@ -267,6 +276,16 @@ func TestProductScorecardRenderersAndDocFolder(t *testing.T) {
 	} {
 		if strings.TrimSpace(text) == "" {
 			t.Fatalf("%s rendered empty", name)
+		}
+	}
+	for name, text := range map[string]string{
+		"render":  Render(p),
+		"chart":   RenderChart(p),
+		"compare": RenderCompare(payloadMap(p), p),
+		"doc":     RenderDocIndex(p, "2026-06-24"),
+	} {
+		if strings.Contains(text, "/100") || strings.Contains(text, "Composite score") {
+			t.Fatalf("%s must render continuous value, got:\n%s", name, text)
 		}
 	}
 	chart := RenderChart(p)

@@ -20,8 +20,8 @@ func Render(p Payload) string {
 		fmt.Sprintf("product-scorecard: %s (%s)", p.Verdict, p.Finding),
 		fmt.Sprintf("  %s", p.Reason),
 		"",
-		fmt.Sprintf("score %s/100 (grade %s) - PRODUCT-DEBT %d (honesty %d + coverage %d + managed-context %d) - %d advisory",
-			formatNumber(c["score"]), stringAny(c["grade"]), intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"]), intValue(c["managed_context_debt"]), intValue(c["soft_signals"])),
+		fmt.Sprintf("value %s (grade %s, legacy score %s) - PRODUCT-DEBT %d (honesty %d + coverage %d + managed-context %d) - %d advisory",
+			formatValueFrom(c["value"], c["score"]), stringAny(c["grade"]), formatNumber(c["score"]), intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"]), intValue(c["managed_context_debt"]), intValue(c["soft_signals"])),
 		fmt.Sprintf("coverage: %s%% (%d/%d concept sections positioned) - %d concepts scored - %d durable products",
 			formatNumber(cov["coverage_pct"]), intValue(cov["covered"]), intValue(cov["catalog_total"]), intValue(c["rows"]), intValue(c["durable_products"])),
 		fmt.Sprintf("standing: %d durable-product - %d usable-today - %d real-not-easy - %d honest-stub - %d concept-only",
@@ -32,8 +32,8 @@ func Render(p Payload) string {
 		fmt.Sprintf("  %-16s %-10s %-11s %-7s concept", "verdict", "maturity", "cat", "today?"),
 	)
 	if mc := mapValue(c["managed_context"]); len(mc) > 0 {
-		lines = append(lines, fmt.Sprintf("managed-context SLOs: score %s/100 - debt %d/%d - passed %d",
-			formatNumber(mc["score"]), intValue(mc["debt"]), intValue(mc["total"]), intValue(mc["passed"])), "")
+		lines = append(lines, fmt.Sprintf("managed-context SLOs: value %s (legacy score %s) - debt %d/%d - passed %d",
+			formatValueFrom(mc["value"], mc["score"]), formatNumber(mc["score"]), intValue(mc["debt"]), intValue(mc["total"]), intValue(mc["passed"])), "")
 	}
 	for _, row := range sortedLeaderboard(c["leaderboard"]) {
 		verdict := stringAny(row["verdict"])
@@ -50,10 +50,10 @@ func Render(p Payload) string {
 		lines = append(lines, fmt.Sprintf("  %s %-14s %-10s %-11s %-7s %s%s",
 			marks[verdict], verdict, stringAny(row["maturity"]), stringAny(row["category"]), today, stringAny(row["concept"]), flag))
 	}
-	lines = append(lines, "", "per-KPI (worst first):", fmt.Sprintf("  %5s %4s  %-13s %-20s detail", "score", "debt", "group", "kpi"))
+	lines = append(lines, "", "per-KPI (worst first):", fmt.Sprintf("  %5s %6s %4s  %-13s %-20s detail", "value", "legacy", "debt", "group", "kpi"))
 	for _, b := range mapSlice(c["breakdown"]) {
-		lines = append(lines, fmt.Sprintf("  %5d %4d  %-13s %-20s %s",
-			intValue(b["score"]), intValue(b["debt"]), stringAny(b["group"]), stringAny(b["kpi"]), stringAny(b["detail"])))
+		lines = append(lines, fmt.Sprintf("  %5s %6d %4d  %-13s %-20s %s",
+			formatValueFrom(b["value"], b["score"]), intValue(b["score"]), intValue(b["debt"]), stringAny(b["group"]), stringAny(b["kpi"]), stringAny(b["detail"])))
 	}
 	lines = append(lines, "")
 	if unc := sectionSlice(cov["uncovered"]); len(unc) > 0 {
@@ -149,7 +149,8 @@ func RenderCompare(baseline map[string]any, current Payload) string {
 		fmt.Sprintf("product-debt: %d -> %d   (%s fewer defects+gaps)", bd, cd, ratio),
 		fmt.Sprintf("  honesty:    %d -> %d", intValue(b["honesty_defects"]), intValue(cur["honesty_defects"])),
 		fmt.Sprintf("  coverage:   %d -> %d", intValue(b["coverage_debt"]), intValue(cur["coverage_debt"])),
-		fmt.Sprintf("score:        %s/100 -> %s/100   (+%s)", formatNumber(b["score"]), formatNumber(cur["score"]), formatNumber(floatValue(cur["score"])-floatValue(b["score"]))),
+		fmt.Sprintf("value:        %s -> %s   (%+.3f)", formatValueFrom(b["value"], b["score"]), formatValueFrom(cur["value"], cur["score"]), productValueFor(floatValue(cur["value"]), floatValue(cur["score"]))-productValueFor(floatValue(b["value"]), floatValue(b["score"]))),
+		fmt.Sprintf("legacy score: %s -> %s   (+%s)", formatNumber(b["score"]), formatNumber(cur["score"]), formatNumber(floatValue(cur["score"])-floatValue(b["score"]))),
 		fmt.Sprintf("durable:      %d -> %d durable products", intValue(b["durable_products"]), intValue(cur["durable_products"])),
 	}
 	bg, cg := mapValue(b["debt_by_group"]), mapValue(cur["debt_by_group"])
@@ -175,7 +176,7 @@ func RenderChart(p Payload) string {
 	cov := mapValue(c["coverage"])
 	lb := sortedLeaderboard(c["leaderboard"])
 	lines := []string{
-		fmt.Sprintf("product standing chart - %d concepts - score %s/100 (grade %s) - product-debt %d", intValue(c["rows"]), formatNumber(c["score"]), stringAny(c["grade"]), intValue(c["product_debt"])),
+		fmt.Sprintf("product standing chart - %d concepts - value %s (grade %s, legacy score %s) - product-debt %d", intValue(c["rows"]), formatValueFrom(c["value"], c["score"]), stringAny(c["grade"]), formatNumber(c["score"]), intValue(c["product_debt"])),
 		"",
 		"verdict ladder (count of concepts, best -> roadmap):",
 	}
@@ -258,7 +259,7 @@ func RenderDocIndex(p Payload, stamp string) string {
 		"|---|---|",
 		fmt.Sprintf("| **Coverage** | **%s%%** (%d/%d concept sections positioned) |", formatNumber(cov["coverage_pct"]), intValue(cov["covered"]), intValue(cov["catalog_total"])),
 		fmt.Sprintf("| **Product-debt** | **%d** (honesty %d + coverage %d) |", intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"])),
-		fmt.Sprintf("| Composite score | %s/100 (grade %s) |", formatNumber(c["score"]), stringAny(c["grade"])),
+		fmt.Sprintf("| Composite value | %s (grade %s; legacy score %s) |", formatValueFrom(c["value"], c["score"]), stringAny(c["grade"]), formatNumber(c["score"])),
 		fmt.Sprintf("| Durable products | %d of %d concepts |", intValue(c["durable_products"]), intValue(c["rows"])),
 		fmt.Sprintf("| As of | %s (fak %s) |", stringAny(c["as_of"]), stringAny(c["fak_version"])),
 		"",
@@ -294,9 +295,9 @@ func RenderDocIndex(p Payload, stamp string) string {
 		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s | %s | **%s** - %s |",
 			marks[verdict], verdict, stringAny(row["maturity"]), stringAny(row["category"]), today, stringAny(row["concept"]), stringAny(row["what_you_get"])))
 	}
-	lines = append(lines, "", "## Per-KPI", "", "| Group | KPI | Score | Debt | Detail |", "|---|---|---:|:--:|---|")
+	lines = append(lines, "", "## Per-KPI", "", "| Group | KPI | Value | Legacy score | Debt | Detail |", "|---|---|---:|---:|:--:|---|")
 	for _, b := range mapSlice(c["breakdown"]) {
-		lines = append(lines, fmt.Sprintf("| %s | `%s` | %d | %d | %s |", stringAny(b["group"]), stringAny(b["kpi"]), intValue(b["score"]), intValue(b["debt"]), stringAny(b["detail"])))
+		lines = append(lines, fmt.Sprintf("| %s | `%s` | %s | %d | %d | %s |", stringAny(b["group"]), stringAny(b["kpi"]), formatValueFrom(b["value"], b["score"]), intValue(b["score"]), intValue(b["debt"]), stringAny(b["detail"])))
 	}
 	if unc := sectionSlice(cov["uncovered"]); len(unc) > 0 {
 		lines = append(lines, "", "## Coverage gaps", "")
@@ -356,17 +357,7 @@ func mapSlice(v any) []map[string]any {
 	if rows, ok := v.([]map[string]any); ok {
 		return rows
 	}
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(raw))
-	for _, it := range raw {
-		if m, ok := it.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out
+	return collectMaps(v, func(m map[string]any) map[string]any { return m })
 }
 
 func sectionSlice(v any) []Section {
@@ -424,6 +415,10 @@ func formatNumber(v any) string {
 		return fmt.Sprintf("%d", int(f))
 	}
 	return fmt.Sprintf("%.1f", f)
+}
+
+func formatValueFrom(value, legacyScore any) string {
+	return fmt.Sprintf("%.3f", productValueFor(floatValue(value), floatValue(legacyScore)))
 }
 
 func sortedMapKeys[T any](m map[string]T) []string {
