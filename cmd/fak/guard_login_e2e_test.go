@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -88,6 +89,147 @@ func guardE2EExitZeroCommand() string {
 		return "cmd /c exit 0"
 	}
 	return "sh -c true"
+}
+
+func writeGuardE2EFakeGit(t *testing.T) (binDir string, logPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	logPath = filepath.Join(dir, "git-calls.log")
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "git.bat")
+		body := `@echo off
+echo %*>>"%FAK_GUARD_GIT_CALL_LOG%"
+if "%1"=="rev-parse" (
+  echo 0123456789abcdef0123456789abcdef01234567
+  exit /b 0
+)
+if "%1"=="hash-object" (
+  echo abcdef0123456789abcdef0123456789abcdef01
+  exit /b 0
+)
+exit /b 0
+`
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write fake git: %v", err)
+		}
+		return dir, logPath
+	}
+	path := filepath.Join(dir, "git")
+	body := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAK_GUARD_GIT_CALL_LOG"
+case "$1" in
+  rev-parse) echo 0123456789abcdef0123456789abcdef01234567 ;;
+  hash-object) echo abcdef0123456789abcdef0123456789abcdef01 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	return dir, logPath
+}
+
+func writeGuardE2ENoopChild(t *testing.T, sleep bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "guard-noop-child.bat")
+		body := "@echo off\r\n"
+		if sleep {
+			body += "ping -n 3 127.0.0.1 >NUL\r\n"
+		}
+		body += "exit /b 0\r\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write noop child: %v", err)
+		}
+		return path
+	}
+	path := filepath.Join(dir, "guard-noop-child")
+	body := "#!/bin/sh\n"
+	if sleep {
+		body += "sleep 1\n"
+	}
+	body += "exit 0\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write noop child: %v", err)
+	}
+	return path
+}
+
+func guardE2EGitEnv(binDir, logPath, registryPath string) map[string]string {
+	return map[string]string{
+		"PATH":                   binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"FAK_GUARD_GIT_CALL_LOG": logPath,
+		sessionRegistryEnv:       registryPath,
+	}
+}
+
+func readGuardE2EGitCalls(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read fake git call log: %v", err)
+	}
+	return string(b)
+}
+
+// TestGuardDefaultLaunchDoesNotSpawnGit is the #1833 regression witness: a plain
+// `fak guard -- <agent>` used to pay sessionDescriptorMeta + PublishSession on the
+// critical path, which meant at least three serial `git` subprocesses before the child could
+// run. With a fake git first on PATH, the default launch must produce no git call log at all.
+func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
+	binDir, logPath := writeGuardE2EFakeGit(t)
+	child := writeGuardE2ENoopChild(t, false)
+	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
+	env := guardE2EGitEnv(binDir, logPath, registryPath)
+
+	code, out, timedOut := runGuardE2E(t,
+		"--provider openai --base-url http://127.0.0.1:9 --quiet --no-audit -- "+child,
+		env,
+	)
+	if timedOut {
+		t.Fatalf("guard default launch timed out.\noutput:\n%s", out)
+	}
+	if code != 0 {
+		t.Fatalf("guard default launch exit=%d, want 0.\noutput:\n%s", code, out)
+	}
+	if calls := readGuardE2EGitCalls(t, logPath); strings.TrimSpace(calls) != "" {
+		t.Fatalf("default guard launch spawned git despite no durability opt-in:\n%s\noutput:\n%s", calls, out)
+	}
+}
+
+// TestGuardDurableLaunchStillPublishes proves the #1833 gate did not remove durability:
+// an explicit session id opts in, so the deferred post-ready path still resolves git HEAD and
+// publishes the live session side ref while the child remains alive.
+func TestGuardDurableLaunchStillPublishes(t *testing.T) {
+	binDir, logPath := writeGuardE2EFakeGit(t)
+	child := writeGuardE2ENoopChild(t, true)
+	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
+	env := guardE2EGitEnv(binDir, logPath, registryPath)
+
+	code, out, timedOut := runGuardE2E(t,
+		"--provider openai --base-url http://127.0.0.1:9 --quiet --no-audit --session-id e2e-durable -- "+child,
+		env,
+	)
+	if timedOut {
+		t.Fatalf("guard durable launch timed out.\noutput:\n%s", out)
+	}
+	if code != 0 {
+		t.Fatalf("guard durable launch exit=%d, want 0.\noutput:\n%s", code, out)
+	}
+	calls := readGuardE2EGitCalls(t, logPath)
+	for _, want := range []string{
+		"rev-parse HEAD",
+		"hash-object -w",
+		"update-ref refs/fak/locks/session-e2e-durable",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("durable guard launch did not publish %q.\ngit calls:\n%s\noutput:\n%s", want, calls, out)
+		}
+	}
 }
 
 // TestGuardHeadlessNoTokenFailsLoudNotHang is the symptom witness: with NO subscription token

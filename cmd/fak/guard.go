@@ -520,14 +520,22 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
 		os.Exit(2)
 	}
-	guardMeta := sessionDescriptorMeta(command)
+	// Session durability (the file-backed registry restore + the git-backed leaseref
+	// publish) is only useful for RESUME/DISPATCH of THIS session later — a plain
+	// attended `fak guard -- claude` never reads it back. So GATE the whole block on an
+	// actual signal that durability is wanted (#1833): an explicit --session-id (the
+	// caller named a stable id to resume against) or --context-budget-tokens > 0 (budget
+	// tracking implies the caller cares about this session's persisted drive state).
+	// Neither set: skip it entirely — sessionDescriptorMeta/configureServeSessionDurability/
+	// registerServeSessionDurability never run, so a default launch spawns zero git
+	// subprocesses for this. guardTraceID itself never needs git: an explicit --session-id
+	// is used verbatim, and the no-flag default is the fixed "guard" id (identical to
+	// defaultSessionIDFromMeta's own zero-cache-key fallback) rather than a git-SHA-derived
+	// cache key nothing will read back.
+	guardDurabilityWanted := guardSetFlags["session-id"] || *contextBudgetTokens > 0
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
-		guardTraceID = defaultSessionIDFromMeta(guardMeta)
-	}
-	if err := configureServeSessionDurability(serveSessions, "", os.Stderr, guardMeta); err != nil {
-		fmt.Fprintln(os.Stderr, "fak guard:", err)
-		os.Exit(1)
+		guardTraceID = "guard"
 	}
 	if *contextBudgetTokens > 0 {
 		serveSessions.SetBudget(guardTraceID, session.Budget{
@@ -536,10 +544,14 @@ func cmdGuard(argv []string) {
 			ContextTokensLeft: *contextBudgetTokens,
 		})
 	}
-	if err := registerServeSessionDurability(context.Background(), guardTraceID); err != nil {
-		fmt.Fprintln(os.Stderr, "fak guard:", err)
-		os.Exit(1)
-	}
+	// DEFER the durability setup's git spawns (sessionStartSHA's `git rev-parse HEAD` and
+	// PublishSession's `git hash-object -w` + `git update-ref`) until AFTER the gateway is
+	// bound and MarkReady()'d (see the goroutine below, right after srv.MarkReady()) rather
+	// than blocking the critical path between flag-parse and the agent exec. The register/
+	// publish path is already best-effort (sessionDurability.publishBestEffort logs and
+	// continues on failure), so running it a few hundred ms late is safe; guardTraceID
+	// above is fixed synchronously so the deferred registration publishes under the exact
+	// id the gateway is already using as DefaultTraceID.
 	restarter := newGuardBudgetRestarter(*restartOnBudget, *contextBudgetTokens, *restartLimit, *restartSeedDir, os.Stderr)
 
 	// 3b. LOCAL in-kernel model (--gguf): resolve the alias/URI (downloading on demand),
@@ -722,6 +734,30 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	srv.MarkReady()
+
+	// Deferred session durability (#1833): only now — after the gateway is bound and
+	// ready, off the critical path to the agent exec — do the git-spawning setup for an
+	// opted-in durable session (guardDurabilityWanted, decided above from --session-id /
+	// --context-budget-tokens). sessionDescriptorMeta() shells out to `git rev-parse HEAD`
+	// and registerServeSessionDurability's PublishSession shells out to `git hash-object -w`
+	// + `git update-ref` — three subprocess spawns that used to sit unconditionally between
+	// flag-parse and the child exec. Running them in a background goroutine here means a
+	// slow or failing git (a huge repo, a detached worktree, no git on PATH) can never delay
+	// the agent's first byte; every failure path already routes through stderr warnings
+	// (configureServeSessionDurability/registerServeSessionDurability) or
+	// publishBestEffort's warnf, so a late or failed write is observable but never fatal.
+	if guardDurabilityWanted {
+		go func(traceID string) {
+			meta := sessionDescriptorMeta(command)
+			if err := configureServeSessionDurability(serveSessions, "", os.Stderr, meta); err != nil {
+				fmt.Fprintln(os.Stderr, "fak guard:", err)
+				return
+			}
+			if err := registerServeSessionDurability(context.Background(), traceID); err != nil {
+				fmt.Fprintln(os.Stderr, "fak guard:", err)
+			}
+		}(guardTraceID)
+	}
 
 	// Default-launch UI: open the 20% `fak info` pane beside the (inline) 80% agent pane, so
 	// fak's live cache economy + floor safety counters stay visible the whole session instead
