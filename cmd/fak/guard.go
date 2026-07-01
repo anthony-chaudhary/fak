@@ -137,6 +137,7 @@ func cmdGuard(argv []string) {
 	splitDryRun := fs.Bool("split-dry-run", false, "preview the --split 80/20 plan (resolved multiplexer, geometry, and the exact `fak info` pane command) and EXIT, without bringing up the gateway, spawning a pane, or launching the agent. Use it to see what --split will do before handing the terminal to the agent.")
 	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). DEFAULT-ON: once a wrapped conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). Anthropic passthrough only.")
+	compactAnchorHead := fs.Bool("compact-anchor-head", false, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the default first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything (see the 'anchor-starved' diagnostic). OPT-IN, not default-on: re-anchoring bursts the recent breakpoint's cached suffix once, so it only fires when the burst repays (CacheBurstPaysBack, #1408) — without a wired session-turn horizon it only fires zero-penalty bursts.")
 	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
 	sessionID := fs.String("session-id", "", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id (default: derived from host, git HEAD, cwd, and wrapped argv)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
@@ -406,6 +407,12 @@ func cmdGuard(argv []string) {
 		apiKey               string
 		pinUpstream          bool
 		oauthSource          string
+		// credPath is the on-disk .credentials.json path fak is pinning upstream, populated
+		// only when pinUpstream is true. It is threaded through to the post-crash auth-recovery
+		// check (guardMaybeRecoverAuthCrash) so a wrapped-agent exit caused by an expired
+		// subscription token can be diagnosed and, if a fresh login lands, auto-resumed —
+		// without re-deriving the config-dir/credentials-file join at every call site.
+		credPath string
 		// apiKeyFunc re-resolves the upstream credential per request when set. On the
 		// pinned Claude subscription path it re-reads the short-lived OAuth access token
 		// from disk, so a long guarded session (which outlives the ~1h token) always sends
@@ -420,6 +427,9 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
+		if pinUpstream {
+			credPath = filepath.Join(us.claudeConfigDir, ".credentials.json")
+		}
 		// No subscription token anywhere AND the child has no key of its own: a headless spawn
 		// would block on a /login the wrapped agent can never complete (the unrecoverable end of
 		// the 'stuck on login' class — distinct from the rotation race, which the pin-on-intent
@@ -473,7 +483,6 @@ func cmdGuard(argv []string) {
 		// pinning the subscription, is left alone (Ran=false) — see guardRunHeadlessRehydrate's
 		// doc for why.
 		if pinUpstream {
-			credPath := filepath.Join(us.claudeConfigDir, ".credentials.json")
 			if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), pinUpstream, credPath); v.Refused {
 				fmt.Fprintf(os.Stderr, "fak guard: STALE_CRED — the Claude subscription OAuth token in %s is expired and did not refresh within the wait window, and stdin is not a terminal — refusing to spawn a headless agent that would only hit a raw upstream 401.%s\n", v.CredPath, guardLoginStatusNote(us))
 				fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in (refreshes the token), or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or raise FAK_AUTH_REFRESH_WINDOW if a refresh is just slow.")
@@ -699,6 +708,7 @@ func cmdGuard(argv []string) {
 		DebugStatsf:          debugStatsSink(debugStatsStderr),
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
+		CompactAnchorHead:    *compactAnchorHead,
 		ElideResultBytes:     *elideResultBytes,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
@@ -836,7 +846,6 @@ func cmdGuard(argv []string) {
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
-	child := buildGuardChild(command, injected, pinUpstream)
 
 	if !*quiet {
 		if providerAutodetected {
@@ -894,10 +903,10 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
 		return
 	}
-	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"

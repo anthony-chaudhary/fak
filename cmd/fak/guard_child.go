@@ -247,6 +247,14 @@ func guardHeadlessRehydrateWindowDuration() time.Duration {
 // after a 401. now defaults to time.Now; sleep defaults to time.Sleep (both overridable so a
 // test never sleeps wall-clock time).
 func guardHeadlessCredCheck(credPath string, now func() time.Time, sleep func(time.Duration)) accounts.CredCheck {
+	return guardCredCheckWithWindow(credPath, guardHeadlessRehydrateWindowDuration(), now, sleep)
+}
+
+// guardCredCheckWithWindow is guardHeadlessCredCheck generalized over an explicit wait window,
+// so the pre-spawn #1834 rehydrate rung (a short, rotation-in-progress window) and the
+// post-crash auth-recovery path (guardMaybeRecoverAuthCrash — a much longer, human-paced
+// window) share ONE poll implementation instead of two copies that could drift.
+func guardCredCheckWithWindow(credPath string, window time.Duration, now func() time.Time, sleep func(time.Duration)) accounts.CredCheck {
 	if now == nil {
 		now = time.Now
 	}
@@ -269,7 +277,7 @@ func guardHeadlessCredCheck(credPath string, now func() time.Time, sleep func(ti
 		if credLive(now()) {
 			return true, false // still live: no wait needed, first request goes out immediately
 		}
-		deadline := now().Add(guardHeadlessRehydrateWindowDuration())
+		deadline := now().Add(window)
 		for {
 			select {
 			case <-ctx.Done():
@@ -329,6 +337,139 @@ func guardRunHeadlessRehydrate(stdinInteractive, pinUpstream bool, credPath stri
 		return guardHeadlessRehydrateVerdict{Ran: true, CredPath: credPath}
 	}
 	return guardHeadlessRehydrateVerdict{Ran: true, Refused: true, Detail: adm.Detail, CredPath: credPath}
+}
+
+// guardAuthCrashRecoverWindow is the default bound for guardAuthCrashRecoverWindowDuration —
+// see its doc for why this is a SEPARATE, much longer knob than the reactive
+// authRefreshWindow/guardHeadlessRehydrateWindow pair.
+const guardAuthCrashRecoverWindow = 5 * time.Minute
+
+// maxGuardAuthCrashRecoverWindow bounds FAK_GUARD_AUTH_RECOVER_WINDOW so a fat-fingered value
+// cannot wedge the guard process indefinitely after a crash; the operator is expected to notice
+// within this ceiling or fall back to the printed manual-resume guidance.
+const maxGuardAuthCrashRecoverWindow = 30 * time.Minute
+
+// guardAuthCrashRecoverWindowDuration resolves how long fak guard actively waits, AFTER the
+// wrapped agent has already exited on what looks like an expired subscription token, for a
+// fresh login to land before giving up and falling back to the manual formatGuardResumeGuidance
+// path. This is deliberately a SEPARATE, much longer budget than authRefreshWindow (10s,
+// internal/agent) and guardHeadlessRehydrateWindow (30s, the pre-spawn proactive check): those
+// two are riding out a ROTATION ALREADY IN PROGRESS (an interactive `claude` elsewhere rewrites
+// the file within seconds); this one is riding out a crash that has ALREADY happened and now
+// needs a HUMAN to notice and re-authenticate — five minutes is a realistic "someone is watching
+// an alert" budget, not a network-hiccup budget. FAK_GUARD_AUTH_RECOVER_WINDOW overrides it (any
+// Go duration), clamped to [0, maxGuardAuthCrashRecoverWindow]; 0 disables the wait entirely (an
+// auth-caused crash is still diagnosed in the exit message, but never auto-relaunched).
+func guardAuthCrashRecoverWindowDuration() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("FAK_GUARD_AUTH_RECOVER_WINDOW")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > maxGuardAuthCrashRecoverWindow {
+				return maxGuardAuthCrashRecoverWindow
+			}
+			return d
+		}
+	}
+	return guardAuthCrashRecoverWindow
+}
+
+// guardContinueFlagForAgent returns the resume/continue flag fak knows is SAFE to auto-inject
+// for a recognized wrapped agent, keyed off the same command[0] basename resolveGuardProvider
+// uses. Currently only Claude Code (`claude`) is recognized — its `--continue` flag is exactly
+// the resume path formatGuardResumeGuidance already tells an operator to run BY HAND, so
+// auto-injecting it here only automates the one case already proven safe. Any other/unrecognized
+// binary returns ok=false: fak cannot safely guess a foreign tool's continuation syntax, so it
+// never auto-relaunches for it — the crash falls through to today's manual guidance instead of
+// risking a silent, context-dropping relaunch.
+func guardContinueFlagForAgent(agentName string) (flag string, ok bool) {
+	base := strings.ToLower(filepath.Base(agentName))
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".cmd")
+	if base == "claude" {
+		return "--continue", true
+	}
+	return "", false
+}
+
+// guardAppendContinueFlag returns command with flag appended, unless flag is already present
+// anywhere in command[1:] — so a second auth-crash-and-recover cycle in the same guarded
+// session never stacks the flag twice. The input is never mutated in place.
+func guardAppendContinueFlag(command []string, flag string) []string {
+	for _, a := range command[1:] {
+		if a == flag {
+			return command
+		}
+	}
+	out := make([]string, len(command), len(command)+1)
+	copy(out, command)
+	return append(out, flag)
+}
+
+// guardClassifyAuthCrash decides whether a completed credential check correlates a non-zero
+// child exit with an expired subscription token. hasCredential must come from a caller-side
+// credExpiresAt(credPath) probe — check's own (fresh, refreshed) result cannot distinguish "no
+// parseable credential on disk at all" from "a credential that stayed expired for the whole
+// wait window" (both return false, false), and only the FORMER is a genuine "nothing to
+// correlate against" case that must never be misreported as an auth crash. correlated is true
+// only when there IS a credential to judge AND it was not already live at check time — a crash
+// with a perfectly live token is something else entirely (a bad flag, an OOM) and must not be
+// mislabeled. recovered mirrors check's own refreshed result: a fresh login landed within the
+// window check was built with.
+func guardClassifyAuthCrash(ctx context.Context, hasCredential bool, check accounts.CredCheck) (correlated, recovered bool) {
+	if !hasCredential || check == nil {
+		return false, false
+	}
+	fresh, refreshed := check(ctx)
+	if fresh {
+		return false, false
+	}
+	return true, refreshed
+}
+
+// guardMaybeRecoverAuthCrash is the mid-session counterpart to guardRunHeadlessRehydrate
+// (#1834): where that rung heads off a STALE_CRED refusal BEFORE the child ever spawns, this
+// one runs AFTER the wrapped agent has already exited abnormally, asking "did this crash happen
+// because the Claude subscription token expired mid-session, and if so, has a fresh login landed
+// since?" A crash the wrapped agent's OWN 401-handling causes (dropping into its own /login, or
+// exiting outright) is exactly the failure class formatGuardResumeGuidance's manual "re-run with
+// --continue" note already exists to route around — this closes that loop automatically for the
+// one wrapped agent (Claude Code) fak knows a safe resume flag for. runErr is the child's
+// completed exec.Cmd.Run/Wait error (nil/success and non-*exec.ExitError never match); credPath
+// is the credential fak was pinning upstream (empty when not pinning, e.g. API-key billing or a
+// local model — this never fires there). On a match, it BLOCKS for up to
+// guardAuthCrashRecoverWindowDuration() polling the credential file, then returns the command
+// with the resume flag appended and ok=true only if a fresh login actually landed; otherwise it
+// returns ok=false and the caller's existing exit/report path proceeds unchanged (a
+// non-auth-caused crash never even reaches the blocking poll, since correlated is checked first).
+func guardMaybeRecoverAuthCrash(runErr error, command []string, credPath, agentName string, quiet bool, stderr io.Writer) (relaunch []string, ok bool) {
+	if runErr == nil || strings.TrimSpace(credPath) == "" {
+		return nil, false
+	}
+	ee, isExit := runErr.(*exec.ExitError)
+	if !isExit || ee.ExitCode() == 0 {
+		return nil, false
+	}
+	flag, known := guardContinueFlagForAgent(agentName)
+	if !known {
+		return nil, false
+	}
+	_, hasCred := credExpiresAt(credPath)
+	window := guardAuthCrashRecoverWindowDuration()
+	check := guardCredCheckWithWindow(credPath, window, nil, nil)
+	correlated, recovered := guardClassifyAuthCrash(context.Background(), hasCred, check)
+	if !correlated {
+		return nil, false
+	}
+	next := guardAppendContinueFlag(command, flag)
+	if !recovered {
+		if !quiet && stderr != nil {
+			fmt.Fprintf(stderr, "fak guard: %s exited (code %d) with an expired subscription token that did not recover within %s — resume manually once re-authenticated (`fak guard -- %s`)\n", agentName, ee.ExitCode(), window, strings.Join(next, " "))
+		}
+		return nil, false
+	}
+	if !quiet && stderr != nil {
+		fmt.Fprintf(stderr, "fak guard: %s crashed on an expired subscription token; a fresh login landed within %s — auto-relaunching `%s` to resume this session\n", agentName, window, strings.Join(next, " "))
+	}
+	return next, true
 }
 
 // guardEmptyNamedKeyIsError is the pure decision behind the empty-`--api-key-env` fail-loud
@@ -583,12 +724,27 @@ func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
 // prints the session's adjudication + journal summary (unless quiet), flushes the durable
 // trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
 // a non-silent error so a clean child exit never hides a downed adjudication boundary.
-func runGuardChildAndReport(child *exec.Cmd, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
-	runErr := child.Run()
-	finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+//
+// Before reporting a non-zero exit, it gives guardMaybeRecoverAuthCrash (the mid-session
+// counterpart to the #1834 pre-spawn rehydrate rung) a chance to diagnose an expired
+// subscription token and, if a fresh login lands within the recovery window, relaunch the SAME
+// command with a resume flag appended — so a crash caused by auth expiry self-heals within this
+// guarded session instead of always needing a manual re-run. credPath is empty when guard is not
+// pinning the Claude subscription upstream, which makes the check an unconditional no-op there.
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
+	for {
+		child := buildGuardChild(command, injected, pinUpstream)
+		runErr := child.Run()
+		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+			command = next
+			continue
+		}
+		finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+		return
+	}
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
 	var extraEnv [][2]string
 	restarts := 0
 	for {
@@ -601,6 +757,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		go func() { wait <- child.Wait() }()
 		select {
 		case runErr := <-wait:
+			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
+				command = next
+				continue
+			}
 			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
 			return
 		case ev := <-restarter.events:
