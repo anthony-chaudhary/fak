@@ -78,6 +78,64 @@ func TestRouterRungs(t *testing.T) {
 	}
 }
 
+func TestRouterLabelFallbackDeterminism(t *testing.T) {
+	tests := []struct {
+		name           string
+		labels         []string
+		wantLane       string
+		wantConfidence string
+		wantSignal     string
+		wantReason     string
+	}{
+		{
+			name:           "dispatch label routes to tools",
+			labels:         []string{"dispatch"},
+			wantLane:       "tools",
+			wantConfidence: "label",
+			wantSignal:     "label->tools",
+		},
+		{
+			name:           "docs label routes to docs",
+			labels:         []string{"docs"},
+			wantLane:       "docs",
+			wantConfidence: "label",
+			wantSignal:     "label->docs",
+		},
+		{
+			name:           "testing label routes to ci",
+			labels:         []string{"testing"},
+			wantLane:       "ci",
+			wantConfidence: "label",
+			wantSignal:     "label->ci",
+		},
+		{
+			name:           "performance label routes to compute",
+			labels:         []string{"performance"},
+			wantLane:       "compute",
+			wantConfidence: "label",
+			wantSignal:     "label->compute",
+		},
+		{
+			name:           "unknown label refuses explicitly",
+			labels:         []string{"unknown-lane"},
+			wantConfidence: "none",
+			wantSignal:     "unrouted",
+			wantReason:     "no scope/path/label signal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := routeTestIssue(routerIssue(31, "unscoped worker row", tt.labels, ""))
+			if got.Lane != tt.wantLane || got.Confidence != tt.wantConfidence || got.Signal != tt.wantSignal || got.UnroutedReason != tt.wantReason {
+				t.Fatalf("route = lane %q confidence %q signal %q reason %q, want %q/%q/%q/%q (%+v)",
+					got.Lane, got.Confidence, got.Signal, got.UnroutedReason,
+					tt.wantLane, tt.wantConfidence, tt.wantSignal, tt.wantReason, got)
+			}
+		})
+	}
+}
+
 func TestRouterCarriesPathScope(t *testing.T) {
 	got := routeTestIssue(routerIssue(6, "fix(gateway): split handlers", nil,
 		"touches fak/internal/gateway/http.go and fak/internal/gateway/mcp.go"))
