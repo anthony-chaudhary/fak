@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 
+	"github.com/anthony-chaudhary/fak/internal/contextq"
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
@@ -50,6 +51,24 @@ func (s *Server) resources() []mcpResource {
 					"protocolVersions": mcpProtocolVersions,
 					"tools":            toolCatalogSummary(),
 					"selfFeatureQuery": selfFeatureSummary(),
+				}
+				b, _ := json.Marshal(doc)
+				return string(b)
+			},
+		},
+		{
+			uri:  contextq.MCPMissingContextURIPrefix + "{key}",
+			name: "missing context demand-page template",
+			desc: "read fak://context/missing/<key> to turn missing context into a bounded clarification payload before acting",
+			mime: "application/json",
+			build: func(s *Server) string {
+				doc := map[string]any{
+					"schema": contextq.MCPMissingContextSchema,
+					"template": map[string]any{
+						"uri":    contextq.MCPMissingContextURIPrefix + "{key}",
+						"method": "resources/read",
+						"reason": "missing_context",
+					},
 				}
 				b, _ := json.Marshal(doc)
 				return string(b)
@@ -103,6 +122,22 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	}
 	if e := mcpUnmarshalParams(params, &p, "resources/read"); e != nil {
 		return nil, e
+	}
+	if req, ok := contextq.MCPMissingContextResourceRequest(p.URI, 0); ok {
+		plan := selfquery.MissingContextClarifications([]string{req.Key})
+		doc := map[string]any{
+			"schema":         contextq.MCPMissingContextSchema,
+			"request":        req,
+			"clarifications": plan,
+		}
+		b, _ := json.Marshal(doc)
+		return map[string]any{
+			"contents": []map[string]any{{
+				"uri":      req.URI,
+				"mimeType": "application/json",
+				"text":     string(b),
+			}},
+		}, nil
 	}
 	for _, r := range s.resources() {
 		if r.uri == p.URI {

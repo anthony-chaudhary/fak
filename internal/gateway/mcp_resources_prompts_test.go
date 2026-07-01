@@ -136,6 +136,51 @@ func TestResourceReadUnknownURI(t *testing.T) {
 	}
 }
 
+func TestMCPMissingContextResourceReadReturnsClarification(t *testing.T) {
+	srv := newTestServer(t)
+	read := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"fak://context/missing/deploy-target"}`))
+	contents, ok := read["contents"].([]any)
+	if !ok || len(contents) != 1 {
+		t.Fatalf("resources/read contents malformed: %v", read)
+	}
+	text, _ := contents[0].(map[string]any)["text"].(string)
+	var doc struct {
+		Schema  string `json:"schema"`
+		Request struct {
+			Method  string `json:"method"`
+			URI     string `json:"uri"`
+			Key     string `json:"key"`
+			Reason  string `json:"reason"`
+			Audited bool   `json:"audited"`
+		} `json:"request"`
+		Clarifications struct {
+			Bounded   bool `json:"bounded"`
+			Questions []struct {
+				Key           string `json:"key"`
+				Reason        string `json:"reason"`
+				DefaultChoice string `json:"default_choice"`
+				BudgetTokens  int    `json:"budget_tokens"`
+			} `json:"questions"`
+		} `json:"clarifications"`
+	}
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("missing-context resource is not valid JSON: %v\n%s", err, text)
+	}
+	if doc.Schema != "fak-mcp-missing-context-resource/1" {
+		t.Fatalf("schema = %q", doc.Schema)
+	}
+	if doc.Request.Method != "resources/read" || doc.Request.Key != "deploy-target" || doc.Request.Reason != "missing_context" || !doc.Request.Audited {
+		t.Fatalf("request = %+v, want audited missing-context resource read", doc.Request)
+	}
+	if !doc.Clarifications.Bounded || len(doc.Clarifications.Questions) != 1 {
+		t.Fatalf("clarifications = %+v, want one bounded question", doc.Clarifications)
+	}
+	q := doc.Clarifications.Questions[0]
+	if q.Key != "deploy-target" || q.Reason != "missing_context" || q.DefaultChoice == "" || q.BudgetTokens <= 0 {
+		t.Fatalf("question = %+v, want actionable missing-context clarification", q)
+	}
+}
+
 // TestPromptsListAndGet exercises the MCP prompt primitive: list surfaces the
 // guarded-call template, and get expands it with the caller's argument.
 func TestPromptsListAndGet(t *testing.T) {
