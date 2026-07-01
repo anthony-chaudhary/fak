@@ -52,7 +52,7 @@ unclassified workflow development-path ref reds that package.
 
 | Path family | Classification | Why it stays hard-coded or explicitly named |
 |---|---|---|
-| Public install docs and release links | public front door | User-facing docs should stay anchored on `main` / tagged releases unless #1700 changes the public URL policy. |
+| Public install docs and release links | public front door | User-facing docs should stay anchored on `main` / tagged releases; see [`docs/branch-regime-public-front-door-audit.md`](branch-regime-public-front-door-audit.md) for the #1700 classification map. |
 | `.github/workflows/*` `github.ref_name == 'main'` release/feed gates | release-front-door | These jobs intentionally post or publish only from the public front door; see the workflow audit. |
 | `.github/workflows/*` `master` arms | legacy | Compatibility arm captured in `internal/workflowaudit/allow.txt`; new legacy arms must be reviewed. |
 | `docs/stable-releases/*`, historical proof docs, and imported tracker closeouts | historical archive | These quote old branch names and should not be rewritten as current policy. |

@@ -79,7 +79,9 @@ cannot prove a single accepted development branch, keep the old `main` regime.
 6. **#1699 - dispatch and agent prompts.** Only after the guard and CI agree,
    teach agents and dispatch packets that everyday work ships on `dev`.
 7. **#1700 - public docs/install links.** Keep public docs, install commands,
-   Pages, and release notes anchored on `main`.
+   Pages, and release notes anchored on `main`. Use
+   [`docs/branch-regime-public-front-door-audit.md`](branch-regime-public-front-door-audit.md)
+   as the classification map.
 8. **#1701 - hard-coded ref audit.** Replace remaining hard-coded `main`/`master`
    refs with role config where they are not public-front-door references. Use
    [`docs/branch-regime-hardcoded-ref-audit.md`](branch-regime-hardcoded-ref-audit.md)
