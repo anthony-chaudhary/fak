@@ -516,9 +516,24 @@ FLAG_PLUMB_LINE_FRAC = 0.7
 _FLAG_API_PRESENT = re.compile(
     r"(?:fs|flag)\.(?:String|Bool|Int|Int64|Uint|Float64|Duration|Var|Func|"
     r"NewFlagSet|Parse)\(")
-# A single flag-plumbing line shape: a flag decl (a flag-API call assigned via
-# :=/=), `fs.Parse(`, an `if err != nil {`, a bare `}` / `} else {`, or a small
-# return (`return <int>` / `return err` / `return nil`).
+# A single flag-plumbing line shape. The first five alternatives are the original
+# flag-decl / parse / err-check / brace / small-return shapes; the trailing block
+# (added #FP-subcmd) recognizes the rest of the fak CLI-subcommand skeleton that
+# otherwise DILUTED the 70% fraction below threshold and let convention-plumbing
+# blocks count as clones:
+#   - the subcommand SIGNATURE line `func X(stdout, stderr io.Writer, argv []string)`
+#     — the repo's universal CLI dispatch shape (every `fak <sub>` handler has it),
+#     not extractable copy-paste any more than a `cmd/*/main.go` entry point is;
+#   - `fs.SetOutput(...)` — flag-set I/O wiring;
+#   - a pointer-bool flag guard `if *verbose {` / `if *asJSON {` — the toggle head;
+#   - a `writeIndentedJSON[...]( ` machine-output call (bare or `_ =`/`if err :=`);
+#   - a command I/O write `fmt.Fprint[ln|f](stdout|stderr|os.Stdout|os.Stderr, …)`
+#     — the command's OUTPUT boundary (a `&b` markdown builder is deliberately NOT
+#     matched, so genuine table-emit repetition stays counted).
+# The RECALL GUARD is unchanged: `_is_flag_plumbing_block` still requires a real
+# `_FLAG_API_PRESENT` token in the span, so a block with no flag wiring (a genuine
+# copy-pasted helper) is never demoted, and a flag preamble followed by a real
+# computation body still fails the 70% fraction (its loop/arith lines are non-plumb).
 _FLAG_PLUMBING_LINE = re.compile(
     r"^\s*(?:"
     r"[\w.]+\s*(?::=|=)\s*(?:fs|flag)\.(?:String|Bool|Int|Int64|Uint|Float64|"
@@ -526,7 +541,13 @@ _FLAG_PLUMBING_LINE = re.compile(
     r"(?:fs|flag)\.Parse\(|"                            # fs.Parse()
     r"if\s+err\s*!=\s*nil\s*\{|"                        # err check
     r"\}\s*(?:else\s*\{)?\s*$|"                         # bare } / } else {
-    r"return\s+(?:\d+|err|nil)\s*$"                     # small return
+    r"return\s+(?:\d+|err|nil)\s*$|"                    # small return
+    r"func\s+\w+\(stdout, stderr io\.Writer, argv \[\]string\)"  # subcmd signature
+    r"(?:\s*(?:int|error))?\s*\{|"
+    r"(?:fs|flag)\.SetOutput\(|"                        # flag-set I/O wiring
+    r"if\s+\*\w+\s*\{|"                                 # pointer-bool flag guard
+    r"(?:_\s*=\s*|if\s+err\s*:=\s*)?writeIndented[A-Za-z]*\(|"  # machine-output call
+    r"fmt\.Fprint(?:ln|f)?\(\s*(?:stdout|stderr|os\.Stdout|os\.Stderr)\b"  # cmd I/O
     r")")
 
 

@@ -5,7 +5,7 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 # Code-slop scorecard
 
-<!-- code-slop-scorecard: 2026-06-28 · process: tools/code_slop_scorecard.py -->
+<!-- code-slop-scorecard: 2026-06-30 · process: tools/code_slop_scorecard.py -->
 
 > Regenerate: `python tools/code_slop_scorecard.py --markdown --stamp DATE > docs/CODE-SLOP-SCORECARD.md`
 > Verify snapshot freshness: `python tools/code_slop_scorecard.py --check-doc`
@@ -16,17 +16,17 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 | Metric | Value |
 |---|---|
-| Slop-score | 63.8/100 (grade D) |
-| **Slop-debt (total HARD defects)** | **430** |
-| Soft signals (advisory) | 69 |
+| Slop-score | 51.4/100 (grade F) |
+| **Slop-debt (total HARD defects)** | **735** |
+| Soft signals (advisory) | 73 |
 
 ## Per-KPI (worst-first)
 
 | KPI | Score | Slop-debt | Detail |
 |---|---:|---:|---|
-| duplication | 0/100 | 421 | 421 duplicated block(s) (copy-pasted across 2+ sites) |
-| dead_code | 60/100 | 8 | 8 dead unexported symbol(s) |
-| vacuous_tests | 90/100 | 1 | 1 vacuous of 5276 Test func(s) |
+| duplication | 0/100 | 715 | 715 duplicated block(s) (copy-pasted across 2+ sites) |
+| dead_code | 10/100 | 18 | 18 dead unexported symbol(s) |
+| vacuous_tests | 80/100 | 2 | 2 vacuous of 7832 Test func(s) |
 | comment_slop | 100/100 | 0 | no comment slop |
 | stub_masquerade | 100/100 | 0 | no exported stub-masquerade |
 | churn_bloat | 100/100 | 0 | no commits in range (skipped) |
@@ -47,13 +47,13 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 | Gate | State |
 |---|---|
 | symbol<->`[STUB]`-ledger link tight | yes |
-| zero-FP soak (releases since 0.34.0) | 0/3 |
+| zero-FP soak (releases since 0.34.0) | 2/3 |
 | promotable now | no |
 
-> AWAITING SOAK: 0/3 release(s) since the detector shipped (0.34.0); stays SOFT (advisory)
+> AWAITING SOAK: 2/3 release(s) since the detector shipped (0.34.0); stays SOFT (advisory)
 
 > When `promotable` is yes: review the elapsed window for any false positive, then move the `stub_masquerade` finding from `soft` to `defects` and bump `KPI_WEIGHTS["stub_masquerade"]` in `tools/code_slop_scorecard.py` — the deliberate flip.
 
-> 430 unit(s) of slop-debt; score 63.8/100 (grade D); heaviest KPI: duplication (421 defect(s))
+> 735 unit(s) of slop-debt; score 51.4/100 (grade F); heaviest KPI: duplication (715 defect(s))
 
 > next: retire slop-debt worst-first (see corpus.breakdown + per-KPI defects): de-duplicate clones, delete dead unexported symbols, drop commented-out code + tautological doc comments, add assertions to vacuous tests; re-run to prove the drop

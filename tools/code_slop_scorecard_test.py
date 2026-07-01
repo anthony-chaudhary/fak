@@ -770,6 +770,53 @@ def test_fix3_flag_block_with_real_body_still_caught():
     assert len(cs.kpi_duplication(files)["defects"]) >= 1
 
 
+def _subcmd_plumbing(name: str, label: str) -> str:
+    # The fak CLI-subcommand skeleton (#FP-subcmd): the universal dispatch signature
+    # `func X(stdout, stderr io.Writer, argv []string) int`, the flag preamble, and the
+    # emit-json-or-human OUTPUT guard. Pure convention plumbing — every `fak <sub>`
+    # handler repeats it (analogous to a `cmd/*/main.go` entry-point scaffold), so a
+    # group where every site is this shape must NOT count as extractable copy-paste slop.
+    return (f"func {name}(stdout, stderr io.Writer, argv []string) int {{\n"
+            f"\tfs := flag.NewFlagSet(\"{label}\", flag.ContinueOnError)\n"
+            "\tfs.SetOutput(stderr)\n"
+            "\tasJSON := fs.Bool(\"json\", false, \"emit machine-readable JSON\")\n"
+            "\tif err := fs.Parse(argv); err != nil {\n\t\treturn 2\n\t}\n"
+            "\tif *asJSON {\n"
+            "\t\t_ = writeIndentedJSON(stdout, rep)\n"
+            "\t\treturn 0\n"
+            "\t}\n"
+            "\tfmt.Fprint(stdout, render(rep))\n"
+            "\treturn 0\n}\n")
+
+
+def test_fp_subcmd_flag_output_plumbing_is_not_debt():
+    # FP (#FP-subcmd): two fak subcommands sharing only the dispatch signature + flag
+    # preamble + json-output guard. Before the fix the signature/SetOutput/`if *asJSON`/
+    # writeIndentedJSON/Fprint(stdout) lines were unrecognized and DILUTED the plumbing
+    # fraction below 70%, so the block counted as a clone. It must now be demoted.
+    files = {"cmd/fak/a.go": "package main\n" + _subcmd_plumbing("runA", "fak a"),
+             "cmd/fak/b.go": "package main\n" + _subcmd_plumbing("runB", "fak b")}
+    assert cs.kpi_duplication(files)["defects"] == [], cs.kpi_duplication(files)["defects"]
+
+
+def test_fp_subcmd_recall_real_compute_body_stays_debt():
+    # RECALL: the SAME CLI skeleton but with a real copy-pasted computation body between
+    # parse and output is a genuine clone — its loop/arith lines are non-plumbing, so the
+    # 70% fraction is not met and the flag-API recall guard does not excuse it. The fix
+    # must not silence a real clone just because it wears a CLI-subcommand signature.
+    blk = ("func NAME(stdout, stderr io.Writer, argv []string) int {\n"
+           "\tfs := flag.NewFlagSet(\"x\", flag.ContinueOnError)\n"
+           "\tn := fs.Int(\"n\", 0, \"count\")\n"
+           "\tif err := fs.Parse(argv); err != nil {\n\t\treturn 2\n\t}\n"
+           "\ttotal := 0\n\tfor i := 0; i < *n; i++ {\n"
+           "\t\ttotal += i * i\n\t\ttotal -= i % 3\n"
+           "\t\tif total > 100 {\n\t\t\ttotal = total / 2\n\t\t}\n\t}\n"
+           "\tfmt.Fprint(stdout, total)\n\treturn 0\n}\n")
+    files = {"cmd/fak/a.go": "package main\n" + blk.replace("NAME", "runA"),
+             "cmd/fak/b.go": "package main\n" + blk.replace("NAME", "runB")}
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
 def test_fix4_dispatch_arm_is_advisory_not_debt():
     # FP: same-file sibling `case X:` arms sharing an identical loop-free preamble ->
     # advisory soft, not slop-debt. Each arm carries enough identical logic (a guard with
