@@ -53,6 +53,17 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 	fmt.Fprintf(&b, "  %s\n", router.Reason)
 	fmt.Fprintf(&b, "  routed=%d steps=%d unrouted=%d skipped=%d coverage=%s\n",
 		router.Counts.Routed, router.Counts.RoutedStepBudget, router.Counts.Unrouted, router.Counts.SkippedHumanBlocked, coverageWord(router.Coverage))
+	if heatmap := dispatchRouteLaneHeatmap(router.Lanes); len(heatmap) > 0 {
+		fmt.Fprintln(&b, "  lane_heatmap: top open-issue pressure")
+		for i, row := range heatmap {
+			if i >= 8 {
+				fmt.Fprintf(&b, "    ... %d more lane(s)\n", len(heatmap)-i)
+				break
+			}
+			fmt.Fprintf(&b, "    #%d %-16s %3d issue(s) %3d step(s) %s %s\n",
+				i+1, row.Lane, row.Count, row.StepBudget, dispatchRouteHeatBar(row.Count, heatmap[0].Count), dispatchRouteHeatLabel(i))
+		}
+	}
 	lanes := make([]string, 0, len(router.Lanes))
 	for lane := range router.Lanes {
 		lanes = append(lanes, lane)
@@ -106,6 +117,54 @@ func renderDispatchRoute(router dispatchtick.RouterPayload) string {
 		}
 	}
 	return b.String()
+}
+
+type dispatchRouteHeatmapRow struct {
+	Lane       string
+	Count      int
+	StepBudget int
+}
+
+func dispatchRouteLaneHeatmap(lanes map[string]dispatchtick.RouterLaneGroup) []dispatchRouteHeatmapRow {
+	rows := make([]dispatchRouteHeatmapRow, 0, len(lanes))
+	for lane, grp := range lanes {
+		if grp.Count <= 0 {
+			continue
+		}
+		rows = append(rows, dispatchRouteHeatmapRow{Lane: lane, Count: grp.Count, StepBudget: grp.StepBudget})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		if rows[i].StepBudget != rows[j].StepBudget {
+			return rows[i].StepBudget > rows[j].StepBudget
+		}
+		return rows[i].Lane < rows[j].Lane
+	})
+	return rows
+}
+
+func dispatchRouteHeatBar(count, maxCount int) string {
+	const width = 12
+	if count <= 0 || maxCount <= 0 {
+		return strings.Repeat("-", width)
+	}
+	filled := width * count / maxCount
+	if filled <= 0 {
+		filled = 1
+	}
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("#", filled) + strings.Repeat("-", width-filled)
+}
+
+func dispatchRouteHeatLabel(rank int) string {
+	if rank < 3 {
+		return "HOT"
+	}
+	return "watch"
 }
 
 func routeIssueLane(issue dispatchtick.IssueRoute) string {

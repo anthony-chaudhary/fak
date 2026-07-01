@@ -7,6 +7,45 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
+func TestRenderDispatchRouteShowsLaneHeatmapByPressure(t *testing.T) {
+	out := renderDispatchRoute(dispatchtick.RouterPayload{
+		OK:      true,
+		Verdict: "OK",
+		Reason:  "routed",
+		Coverage: dispatchtick.RouterCoverage{
+			Complete: true,
+		},
+		Counts: dispatchtick.RouterCounts{
+			Routed:           12,
+			RoutedStepBudget: 31,
+		},
+		Lanes: map[string]dispatchtick.RouterLaneGroup{
+			"docs":    {Count: 3, StepBudget: 9, Issues: []int{31, 30, 29}},
+			"gateway": {Count: 3, StepBudget: 6, Issues: []int{28, 27, 26}},
+			"tools":   {Count: 5, StepBudget: 13, Issues: []int{25, 24, 23, 22, 21}},
+			"bench":   {Count: 1, StepBudget: 3, Issues: []int{20}},
+		},
+	})
+	for _, want := range []string{
+		"lane_heatmap: top open-issue pressure",
+		"#1 tools              5 issue(s)  13 step(s) ############ HOT",
+		"#2 docs               3 issue(s)   9 step(s) #######----- HOT",
+		"#3 gateway            3 issue(s)   6 step(s) #######----- HOT",
+		"#4 bench              1 issue(s)   3 step(s) ##---------- watch",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered route missing heatmap row %q:\n%s", want, out)
+		}
+	}
+	toolsIdx := strings.Index(out, "#1 tools")
+	docsIdx := strings.Index(out, "#2 docs")
+	gatewayIdx := strings.Index(out, "#3 gateway")
+	benchIdx := strings.Index(out, "#4 bench")
+	if !(toolsIdx < docsIdx && docsIdx < gatewayIdx && gatewayIdx < benchIdx) {
+		t.Fatalf("heatmap order = tools:%d docs:%d gateway:%d bench:%d\n%s", toolsIdx, docsIdx, gatewayIdx, benchIdx, out)
+	}
+}
+
 func TestRenderDispatchRouteSummarizesSkippedReasons(t *testing.T) {
 	out := renderDispatchRoute(dispatchtick.RouterPayload{
 		OK:      true,
