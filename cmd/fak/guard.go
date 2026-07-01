@@ -156,6 +156,7 @@ func cmdGuard(argv []string) {
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
+	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
@@ -877,6 +878,15 @@ func cmdGuard(argv []string) {
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
+	// Live discovery (#1499): register fak's fak_index_*/fak_memory_*/fak_tools_search
+	// MCP tools into the wrapped Claude child by default, so a default `fak guard --
+	// claude` session can reach them with no manual .mcp.json setup.
+	command, mcpInstall, err := installGuardMCPRegistration(command, *mcpRegister, gwURL)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: Claude MCP registration setup failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	if !*quiet {
 		if providerAutodetected {
@@ -905,6 +915,7 @@ func cmdGuard(argv []string) {
 			fmt.Fprintf(os.Stderr, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", handoffCfg.Mode, live, handoffCfg.File, guardTaskHandoffFileEnv)
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
+		printGuardMCPNote(os.Stderr, mcpInstall)
 		switch {
 		case debugStatsStderr:
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
