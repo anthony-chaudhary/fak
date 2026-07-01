@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
 
 // descriptor.go — the DURABLE, addressable index of the live drive state (issue
@@ -104,6 +106,12 @@ type Descriptor struct {
 	// ResetTransaction mirrors State.ResetTransaction so a child trace restored after a
 	// process restart still carries the replayable reset row that minted it.
 	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	// ObjectivePin mirrors State.ObjectivePin (issue #1589) so a session migrated to a
+	// new process — a hidden restart, a re-home to another host, or a sessionimage
+	// dump/restore — still reports the same pinned objective (PinID + content Digest)
+	// it held before migration, instead of silently dropping the managed-context
+	// continuity contract #1583 established for in-process resets.
+	ObjectivePin ctxplan.ObjectivePin `json:"objective_pin,omitempty,omitzero"`
 	// Time mirrors the live State's wall-clock budget (issue #1584): the persisted
 	// LimitNanos/ElapsedNanos/StartedAtUnixNano so a process restart re-attaches the
 	// accumulated elapsed time, not a zeroed clock. descriptorFromState copies whatever
@@ -175,6 +183,7 @@ func descriptorFromState(st State) Descriptor {
 		Reason:           st.Reason,
 		CacheAffinity:    st.CacheAffinity,
 		ResetTransaction: st.ResetTransaction,
+		ObjectivePin:     st.ObjectivePin,
 		Rev:              st.Rev,
 		Time:             st.Time,
 	}
@@ -204,6 +213,7 @@ func (d Descriptor) RestoredState() State {
 		Reason:           d.Reason,
 		CacheAffinity:    d.CacheAffinity,
 		ResetTransaction: d.ResetTransaction,
+		ObjectivePin:     d.ObjectivePin,
 		Rev:              d.Rev,
 		// Time is restored PAUSED (see TimeBudget.restoredPaused): a HIDDEN process
 		// restart is exactly a Pause the old process never got to make, so the

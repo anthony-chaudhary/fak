@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/trajectory"
@@ -311,6 +313,76 @@ func TestTerminalSessionResumesStopped(t *testing.T) {
 	got := tbl.Get("sess-done")
 	if got.Run != session.Stopped || got.Reason != session.ReasonBudgetTurns || got.Rev != 7 {
 		t.Fatalf("terminal session not resumed faithfully: %+v", got)
+	}
+}
+
+// TestSessionImageSnapshotPreservesManagedContextAcrossMigration is the #1589 witness:
+// managed-context runtime state — the pinned objective (#1583), the wall-clock budget
+// (#1584), and the reset-transaction lineage (#1582) — must all survive a full
+// dump -> pack -> unpack-into-a-fresh-directory -> rehydrate-onto-a-fresh-Table cycle,
+// the exact shape a cold session migration (a new process, a re-home to another host,
+// a VM move) takes. Before #1589, ObjectivePin had no field on session.State at all, so
+// this is the field the migration previously dropped silently; Time and ResetTransaction
+// already rode this same path (#1584/#1582) and are asserted here too so a regression on
+// any managed-context axis is caught by one witness, matching the issue's Done condition:
+// "a dumped/restored session reports the same managed-context state before continuing."
+func TestSessionImageSnapshotPreservesManagedContextAcrossMigration(t *testing.T) {
+	ctx := context.Background()
+	srcDir := t.TempDir()
+
+	pin := ctxplan.NewObjectivePin("pin-mc-1", "migrate the managed-context session cleanly", 2)
+	tx := session.ResetTransaction{
+		Schema:       session.ResetTransactionSchema,
+		OldTrace:     "sess-mc-parent",
+		NewTrace:     "sess-mc",
+		SeedDigest:   "seed-digest-mc",
+		Contributors: []string{"objective_pin", "warm_prefix"},
+	}
+	drive := session.State{
+		TraceID:          "sess-mc",
+		Run:              session.Running,
+		Budget:           session.Budget{TurnsLeft: 5, TokensLeft: 2048},
+		ObjectivePin:     pin,
+		ResetTransaction: tx,
+		Time:             session.NewTimeBudget().WithLimit(30 * time.Minute).Start(time.Unix(1_700_000_000, 0)),
+		Rev:              3,
+	}
+	if _, err := DumpDir(srcDir, Input{SessionID: "sess-mc", Drive: drive, Model: "model-A", Host: "laptop", Now: 1_700_000_000}); err != nil {
+		t.Fatalf("DumpDir: %v", err)
+	}
+
+	// Offload to one file and restore it in a FRESH directory under a new host/model —
+	// the cold-migration shape (a new process picks the image up with no shared memory).
+	arc := filepath.Join(t.TempDir(), "sess-mc.faksession")
+	if err := PackFile(srcDir, arc); err != nil {
+		t.Fatalf("PackFile: %v", err)
+	}
+	dstDir := t.TempDir()
+	img, err := LoadArchive(arc, dstDir)
+	if err != nil {
+		t.Fatalf("LoadArchive: %v", err)
+	}
+
+	tbl := session.NewTable()
+	if _, err := img.Rehydrate(ctx, RehydrateOptions{Table: tbl, ToModel: "model-B", ToHost: "server-vm", Now: 1_700_000_500}); err != nil {
+		t.Fatalf("Rehydrate: %v", err)
+	}
+
+	got := tbl.Get("sess-mc")
+	if got.ObjectivePin != pin {
+		t.Fatalf("migration lost the pinned objective: got %+v want %+v", got.ObjectivePin, pin)
+	}
+	if !got.ObjectivePin.Verify() {
+		t.Fatalf("migrated objective pin failed Verify(): %+v", got.ObjectivePin)
+	}
+	if got.ResetTransaction.SeedDigest != tx.SeedDigest || got.ResetTransaction.OldTrace != tx.OldTrace {
+		t.Fatalf("migration lost the reset-transaction lineage: got %+v want %+v", got.ResetTransaction, tx)
+	}
+	if !got.Time.Bounded() {
+		t.Fatalf("migration lost the wall-clock budget: %+v", got.Time)
+	}
+	if got.Run != session.Running || got.Rev != 3 || got.Budget.TokensLeft != 2048 {
+		t.Fatalf("migration did not otherwise re-attach the drive faithfully: %+v", got)
 	}
 }
 

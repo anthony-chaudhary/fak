@@ -1,6 +1,10 @@
 package session
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+)
 
 func TestRecontinueResetTransactionRowLivesOnChild(t *testing.T) {
 	tbl := NewTable()
@@ -62,5 +66,47 @@ func TestDescriptorRoundTripPreservesResetTransaction(t *testing.T) {
 		restored.ResetTransaction.SeedDigest != "seed" ||
 		len(restored.ResetTransaction.Contributors) != 1 {
 		t.Fatalf("restored reset transaction = %+v, want descriptor to preserve %+v", restored.ResetTransaction, tx)
+	}
+}
+
+// TestDescriptorRoundTripPreservesObjectivePin is the #1589 witness at the
+// descriptor layer: a State carrying a pinned objective (#1583) survives the
+// Descriptor projection/restore round trip that a session migration (a hidden
+// restart, a re-home to another host, or a sessionimage dump/restore) drives a
+// session through, so the pin's PinID and content Digest are not silently reset.
+func TestDescriptorRoundTripPreservesObjectivePin(t *testing.T) {
+	pin := ctxplan.NewObjectivePin("pin-1", "ship the managed-context migration issue", 3)
+	st := State{
+		TraceID:      "new",
+		Run:          Running,
+		Budget:       Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded},
+		ObjectivePin: pin,
+		Rev:          4,
+	}
+	d := descriptorFromState(st)
+	if d.ObjectivePin != pin {
+		t.Fatalf("descriptor objective pin = %+v, want %+v", d.ObjectivePin, pin)
+	}
+	restored := d.RestoredState()
+	if restored.ObjectivePin != pin {
+		t.Fatalf("restored objective pin = %+v, want descriptor to preserve %+v", restored.ObjectivePin, pin)
+	}
+	if !restored.ObjectivePin.Verify() {
+		t.Fatalf("restored objective pin failed Verify(): %+v", restored.ObjectivePin)
+	}
+}
+
+// TestDescriptorRoundTripNoObjectivePinStaysZero proves the extension is additive:
+// a State that never pinned an objective restores with a zero ObjectivePin, so a
+// pre-#1589 session (or one that simply never pins) sees no behavior change.
+func TestDescriptorRoundTripNoObjectivePinStaysZero(t *testing.T) {
+	st := State{TraceID: "no-pin", Run: Running, Budget: Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded}, Rev: 1}
+	d := descriptorFromState(st)
+	if !d.ObjectivePin.IsZero() {
+		t.Fatalf("descriptor objective pin = %+v, want zero", d.ObjectivePin)
+	}
+	restored := d.RestoredState()
+	if !restored.ObjectivePin.IsZero() {
+		t.Fatalf("restored objective pin = %+v, want zero", restored.ObjectivePin)
 	}
 }

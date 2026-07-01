@@ -41,6 +41,7 @@
 package session
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/lifecycle"
 )
@@ -270,7 +271,20 @@ type State struct {
 	// kernel data instead of a model self-report. The zero value means this state was
 	// not produced by a reset.
 	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
-	Rev              uint64           `json:"rev"`
+	// ObjectivePin is the standing user objective's stable, addressable span (issue
+	// #1583, the managed-context runtime-continuity epic #1570): a PinID that must
+	// survive every replan/reset/migration unchanged, plus a content Digest that makes
+	// "the objective was preserved" a checkable equality instead of a narrative claim.
+	// It rides the drive record — and therefore this State's existing dump/restore and
+	// sessionimage migration paths — so a session migrated to a new process (issue
+	// #1589) reports the SAME pinned objective before continuing, not a silently reset
+	// one. The zero value means no objective has been pinned yet; a State with no pin
+	// behaves byte-identically to a pre-#1589 State (omitzero keeps the wire shape
+	// unchanged when unused). session owns no pinning policy of its own — sessionreset's
+	// PinObjective/RepinObjective/CarryObjective mint and reconcile the pin; this field
+	// is only its durable home on the drive so a migration cannot drop it.
+	ObjectivePin ctxplan.ObjectivePin `json:"objective_pin,omitempty,omitzero"`
+	Rev          uint64               `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the

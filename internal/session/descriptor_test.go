@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
 
 // descriptor_test.go — the pure-core unit tests for the durable descriptor index
@@ -323,6 +325,50 @@ func TestRegistryRestoresCacheAffinityDecision(t *testing.T) {
 	restored := d.RestoredState()
 	if restored.CacheAffinity != st.CacheAffinity {
 		t.Fatalf("restored cache affinity = %+v, want %+v", restored.CacheAffinity, st.CacheAffinity)
+	}
+}
+
+// TestRegistryRestartReattachesObjectivePin is the #1589 process-restart witness for
+// the managed-context objective pin (#1583): a session that pinned its standing
+// objective, then crossed a hidden process restart (the same registry-restart shape
+// TestRegistryRestartReattachesAtPersistedState proves for run-state/budget/priority),
+// must re-attach carrying the SAME PinID and Digest — not a dropped/reset pin — so the
+// migrated session can keep reconciling against the original objective identity.
+func TestRegistryRestartReattachesObjectivePin(t *testing.T) {
+	store := NewMemStore()
+	r1 := NewRegistry(store)
+	t0 := fixedClock()
+
+	pin := ctxplan.NewObjectivePin("pin-migrate", "land the session-migration continuity fix", 1)
+	live := NewTable()
+	live.Restore("trace-obj", State{TraceID: "trace-obj", Run: Running, Budget: Budget{TurnsLeft: 10, TokensLeft: 10}, ObjectivePin: pin})
+	if _, err := r1.Register("sess-obj", "host-a", live.Get("trace-obj"), time.Hour, t0); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// --- process restart: a brand-new Registry + Table over the SAME durable store. ---
+	r2 := NewRegistry(store)
+	t1 := t0.Add(time.Minute)
+	descs, err := r2.List(t1)
+	if err != nil {
+		t.Fatalf("list on restart: %v", err)
+	}
+	if len(descs) != 1 {
+		t.Fatalf("restart did not read back the descriptor: %d rows", len(descs))
+	}
+	d := descs[0]
+
+	restarted := NewTable()
+	// Precondition: an unseen trace has no pin, so the assertion below is not vacuous.
+	if !restarted.Get(d.Trace).ObjectivePin.IsZero() {
+		t.Fatalf("precondition: fresh table already carried the pin; test would be vacuous")
+	}
+	got := restarted.Restore(d.Trace, d.RestoredState())
+	if got.ObjectivePin != pin {
+		t.Fatalf("restart lost the pinned objective: got %+v want %+v", got.ObjectivePin, pin)
+	}
+	if got.ObjectivePin.PinID != "pin-migrate" || !got.ObjectivePin.Verify() {
+		t.Fatalf("restart re-attached an invalid/mismatched pin: %+v", got.ObjectivePin)
 	}
 }
 
