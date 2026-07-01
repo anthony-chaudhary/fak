@@ -141,18 +141,115 @@ func isPlaceholderSecret(span string) bool {
 
 // InjectionMarkers are the prompt-injection lexical tells, matched on the
 // lower-cased canonical views (so spacing/case/obfuscation is already undone).
+// This vocabulary — including the two over-generic entries "exfiltrate" and
+// "you are now" — is the raw baseline internal/normgate's superset proof pins
+// (TestRawMarkerSourceMatchesCanon, TestCanonInjectionSupersetOfRaw_*): canon
+// must flag Injection on ANY body containing ANY of these markers, unless the
+// body is recognizably META (see genericMarkerMetaSuppressed below). Do not
+// remove or gate entries here behind a co-occurrence condition — that broke
+// the superset contract once already (#1331 first attempt, reverted 0da1f38a:
+// gating "you are now"/"exfiltrate" behind an imperative+target window let
+// plain raw-positive bodies with no nearby verb/target fall through Scan
+// ungated, which both TestUntrustedSingleMarkerInjectionTransforms and
+// TestCanonInjectionSupersetOfRaw_QuickCheck caught). The precision fix for
+// #1331 lives entirely in the META suppressor below, which only SUBTRACTS a
+// hit already found — it can never widen what counts as a marker.
 var InjectionMarkers = []string{
 	"ignore previous instructions", "ignore all previous", "disregard the above",
 	"you are now", "system override", "new instructions:", "###system",
 	"reveal your system prompt", "exfiltrate",
 }
 
+// genericInjectionMarkers are the over-generic tells within InjectionMarkers
+// that legitimately appear in security prose, runbooks, quoted examples, and
+// this detector's own source: the bare word "exfiltrate" and the short
+// fragment "you are now". Unlike the other (distinctive, multi-word)
+// InjectionMarkers, a hit on one of these two is eligible for the meta
+// suppressor (genericMarkerMetaSuppressed) — but ONLY when the marker was the
+// sole reason for the hit; see markerHit in Scan.
+var genericInjectionMarkers = map[string]bool{"exfiltrate": true, "you are now": true}
+
 // DistinctiveSqueezed are the markers safe to match after FULL de-separation
 // (alnum-only). Generic ones ("you are now","new instructions:") are excluded —
-// squeezing the whole body could match those in benign prose.
+// squeezing the whole body could match those in benign prose. "exfiltrate" is
+// intentionally still included here — the squeezed pass only runs when the
+// lower-cased pass in Scan found nothing at all, so a squeezed "exfiltrate"
+// hit is itself subject to the same meta suppression as the direct pass.
 var DistinctiveSqueezed = []string{
 	"ignorepreviousinstructions", "ignoreallprevious", "disregardtheabove",
 	"systemoverride", "revealyoursystemprompt", "exfiltrate", "ignorealLconstraints",
+}
+
+// injectionMetaCues are discussion/quotation tells that mark a span as TALKING
+// ABOUT an injection rather than BEING one — symmetric with the secret axis's
+// placeholderHints. A generic-marker hit whose view carries one of these reads
+// as a runbook, a doc, a detector reading its own source, or a quoted example
+// (#1331), and must not be quarantined. This is checked ONLY as a subtractive
+// pass on top of a marker hit already found (see genericMarkerMetaSuppressed) —
+// it can never suppress the distinctive multi-word InjectionMarkers phrases, so
+// the normgate superset contract (raw substring match ⇒ canon.Scan.Injection)
+// stays intact for every marker in the raw baseline: bare "exfiltrate" /
+// "you are now" is unconditionally flagged UNLESS this discussion/quotation
+// context is present, never behind an additional imperative/target condition.
+var injectionMetaCues = []string{
+	"explains how", "explain how", "explaining how", "discusses", "discuss how",
+	"example of", "for example", "such as", "marker", "detect", "detected",
+	"blocks it", "block it", "the gate", "how an attacker", "attacker might",
+	"might exfiltrate", "would exfiltrate", "could exfiltrate", "runbook",
+	"documentation", "this doc", "i.e.", "e.g.", "hypothetical", "if the",
+}
+
+// genericMarkerMetaSuppressed reports whether the lower-cased view reads as
+// discussion of an injection rather than a live directive: adjacent to a
+// discussion cue (injectionMetaCues), or quoted inside a fenced/inline code
+// span. Backticks survive Normalize, so the raw view carries them too.
+func genericMarkerMetaSuppressed(lowerView string) bool {
+	for _, cue := range injectionMetaCues {
+		if strings.Contains(lowerView, cue) {
+			return true
+		}
+	}
+	if strings.Contains(lowerView, "```") || strings.Count(lowerView, "`") >= 2 {
+		return true
+	}
+	return false
+}
+
+// onlyGenericMarkerHit reports whether v's InjectionMarkers hit(s) are ALL
+// generic (exfiltrate / you are now) — i.e. none of the distinctive multi-word
+// markers matched. Only in that case is the hit eligible for meta suppression;
+// a distinctive marker riding alongside a generic one must still quarantine.
+func onlyGenericMarkerHit(v string) bool {
+	sawAny := false
+	for _, m := range InjectionMarkers {
+		if strings.Contains(v, m) {
+			sawAny = true
+			if !genericInjectionMarkers[m] {
+				return false
+			}
+		}
+	}
+	return sawAny
+}
+
+// genericSqueezedMarkers are the DistinctiveSqueezed entries that are also
+// over-generic (today just "exfiltrate" — "you are now" is not in the squeezed
+// set at all, per DistinctiveSqueezed's own doc comment).
+var genericSqueezedMarkers = map[string]bool{"exfiltrate": true}
+
+// onlyGenericSqueezedHit is onlyGenericMarkerHit's counterpart for the squeezed
+// (post de-separation) marker pass.
+func onlyGenericSqueezedHit(v string) bool {
+	sawAny := false
+	for _, m := range DistinctiveSqueezed {
+		if strings.Contains(v, strings.ToLower(m)) {
+			sawAny = true
+			if !genericSqueezedMarkers[strings.ToLower(m)] {
+				return false
+			}
+		}
+	}
+	return sawAny
 }
 
 // homoglyphs maps common Cyrillic/Greek look-alikes to their ASCII letter.
@@ -323,26 +420,50 @@ func Scan(body []byte) Findings {
 	}
 
 	for _, v := range []string{strings.ToLower(norm), strings.ToLower(dec), strings.ToLower(rev)} {
+		hit := false
 		for _, m := range InjectionMarkers {
 			if strings.Contains(v, m) {
-				f.Injection = true
+				hit = true
 				break
 			}
 		}
-		if f.Injection {
+		// A hit made up ENTIRELY of the over-generic markers ("exfiltrate", "you
+		// are now") is suppressed when THIS view reads as discussion/quotation
+		// rather than a live directive (#1331). Purely subtractive: a distinctive
+		// multi-word marker (InjectionMarkers minus genericInjectionMarkers) is
+		// never suppressed, so the normgate raw-superset contract is untouched for
+		// every marker except the two generic ones, and even those still fire
+		// unconditionally outside a recognizable meta/quotation span.
+		if hit && onlyGenericMarkerHit(v) && genericMarkerMetaSuppressed(v) {
+			hit = false
+		}
+		if hit {
+			f.Injection = true
 			break
 		}
 	}
 	if !f.Injection {
 		// de-separated (squeeze) pass for distinctive markers only.
 		for _, v := range []string{squeezeAlnum(norm), squeezeAlnum(dec), squeezeAlnum(rev)} {
+			hit := false
 			for _, m := range DistinctiveSqueezed {
 				if strings.Contains(v, strings.ToLower(m)) {
-					f.Injection = true
+					hit = true
 					break
 				}
 			}
-			if f.Injection {
+			// The squeezed view strips spacing, so the meta-cue text itself may no
+			// longer read literally; fall back to the ORIGINAL (unsqueezed) view for
+			// the same view kind to decide meta-ness, mirroring the direct pass.
+			if hit && v == squeezeAlnum(norm) && onlyGenericSqueezedHit(v) && genericMarkerMetaSuppressed(strings.ToLower(norm)) {
+				hit = false
+			} else if hit && v == squeezeAlnum(dec) && onlyGenericSqueezedHit(v) && genericMarkerMetaSuppressed(strings.ToLower(dec)) {
+				hit = false
+			} else if hit && v == squeezeAlnum(rev) && onlyGenericSqueezedHit(v) && genericMarkerMetaSuppressed(strings.ToLower(rev)) {
+				hit = false
+			}
+			if hit {
+				f.Injection = true
 				break
 			}
 		}
