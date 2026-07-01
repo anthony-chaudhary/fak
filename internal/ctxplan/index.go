@@ -1,9 +1,6 @@
 package ctxplan
 
-import (
-	"math"
-	"sort"
-)
+import "math"
 
 // index.go — the candidate INDEX: the planner's access path, the piece that bounds the
 // per-turn planning COMPUTE the way the budget bounds the per-turn resident TOKENS.
@@ -203,109 +200,19 @@ func (o ProbeOptions) orDefaults() ProbeOptions {
 // capped at MaxCandidates. It runs in O(R + matches + |durable| + cap·log cap), independent
 // of N for a bounded query — the index scan that replaces the Θ(N) seq scan. The returned
 // spans are in render order (step asc, then id), the order Candidates/Optimize expect.
+//
+// Probe is the UNCONDITIONAL union — every access path scanned — which is exactly
+// probePaths (access_path.go) with all four paths chosen. It delegates to that shared
+// executor rather than re-implementing the tiered union/dedup/cap, so the cost-based
+// ProbePlan and the unconditional Probe are provably ONE code path, differing only in
+// which access paths the chooser enabled.
 func (ix *Index) Probe(f Forecast, opts ProbeOptions) []Span {
-	opts = opts.orDefaults()
-
-	const (
-		tierPin = iota
-		tierRelevance
-		tierRecency
-		tierDurable
-		tierNone
-	)
-	// best[i] = the highest-priority (lowest) tier span i was reached by; tierNone = unseen.
-	best := make([]int, len(ix.spans))
-	for i := range best {
-		best[i] = tierNone
-	}
-	mark := func(i, tier int) {
-		if i >= 0 && i < len(best) && tier < best[i] {
-			best[i] = tier
-		}
-	}
-
-	// tier 0 — pins: resolve each pinned id to its span index.
-	for _, id := range f.Pins {
-		if i, ok := ix.byID[id]; ok {
-			mark(i, tierPin)
-		}
-	}
-	// tier 1 — relevance: walk each intent token's posting list (the inverted index),
-	// accumulating an IDF/selectivity score per span. A span matched by a RARE intent
-	// token (high idf) outscores one matched only by a common token, so when the cap
-	// bites the least-selective relevance hits drop first (#564) — the planner's
-	// pg_statistic analogue. relScore stays 0 for spans reached only by another tier.
-	relScore := make([]float64, len(ix.spans))
-	for t := range tokenSet(joinIntents(f.Intents)) {
-		w := ix.idf(t)
-		for _, j := range ix.posting[t] {
-			mark(j, tierRelevance)
-			relScore[j] += w
-		}
-	}
-	// tier 2 — recency: the most-recent RecencyWindow spans (the append-order tail).
-	lo := len(ix.spans) - opts.RecencyWindow
-	if lo < 0 {
-		lo = 0
-	}
-	for i := len(ix.spans) - 1; i >= lo; i-- {
-		mark(i, tierRecency)
-	}
-	// tier 3 — durability: the bounded/durable set, filtered to the admitted classes.
-	admit := durabilityAdmitSet(opts.IncludeDurability)
-	for _, i := range ix.durable {
-		if admit[NormDurability(ix.spans[i].Durability)] {
-			mark(i, tierDurable)
-		}
-	}
-
-	// Collect every reached span, then order by (tier asc, step DESC, id asc): a hard cap
-	// keeps the highest-priority, then the most recent within a tier — deterministic, and
-	// it never drops a pin. Step-descending so that when the cap bites it keeps the freshest
-	// of a tier; the final slice is re-sorted into render order below.
-	type hit struct {
-		idx, tier, step int
-		score           float64 // IDF selectivity; non-zero only for a span on the relevance tier
-		id              string
-	}
-	hits := make([]hit, 0, len(ix.spans))
-	for i, tier := range best {
-		if tier != tierNone {
-			hits = append(hits, hit{idx: i, tier: tier, step: ix.spans[i].Step, score: relScore[i], id: ix.spans[i].ID})
-		}
-	}
-	sort.Slice(hits, func(a, b int) bool {
-		if hits[a].tier != hits[b].tier {
-			return hits[a].tier < hits[b].tier
-		}
-		// Within the relevance tier, the more SELECTIVE span (higher summed IDF) ranks
-		// first, so a cap drops the least-discriminating relevance hits before the most
-		// (#564). score is 0 for every other tier, so this clause is a no-op there and the
-		// recency tiebreak below decides as before — a behavior-preserving refinement.
-		if hits[a].score != hits[b].score {
-			return hits[a].score > hits[b].score
-		}
-		if hits[a].step != hits[b].step {
-			return hits[a].step > hits[b].step // freshest first within a tier
-		}
-		return hits[a].id < hits[b].id
+	return ix.probePaths(f, opts, map[AccessPath]bool{
+		PathPin:       true,
+		PathRelevance: true,
+		PathRecency:   true,
+		PathDurable:   true,
 	})
-	if len(hits) > opts.MaxCandidates {
-		hits = hits[:opts.MaxCandidates]
-	}
-
-	out := make([]Span, len(hits))
-	for k, h := range hits {
-		out[k] = ix.spans[h.idx]
-	}
-	// Render order: step asc, then id — the order Candidates/Optimize present a plan in.
-	sort.Slice(out, func(a, b int) bool {
-		if out[a].Step != out[b].Step {
-			return out[a].Step < out[b].Step
-		}
-		return out[a].ID < out[b].ID
-	})
-	return out
 }
 
 // PlanCells is the index-bounded planning entry point — the bounded-compute peer of the
