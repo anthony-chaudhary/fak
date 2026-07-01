@@ -201,6 +201,41 @@ func ParseLiveProcesses(out []byte) ([]LiveProcess, error) {
 	return []LiveProcess{one}, nil
 }
 
+// routeFinding appends a finding's message to the violation or watchlist bucket
+// according to its level. Shared by the live-process and visible-window folds.
+func routeFinding(level, message string, violations, watchlist *[]string) {
+	switch level {
+	case "violation":
+		*violations = append(*violations, message)
+	case "watchlist":
+		*watchlist = append(*watchlist, message)
+	}
+}
+
+// compareFindingHeader orders two findings by their shared header fields — level,
+// then category, then name — returning -1, 0, or 1. Callers break a remaining tie
+// on their type-specific fields (PID, and Title for visible windows).
+func compareFindingHeader(aLevel, aCategory, aName, bLevel, bCategory, bName string) int {
+	switch {
+	case aLevel != bLevel:
+		if aLevel < bLevel {
+			return -1
+		}
+		return 1
+	case aCategory != bCategory:
+		if aCategory < bCategory {
+			return -1
+		}
+		return 1
+	case aName != bName:
+		if aName < bName {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
 // ClassifyLiveProcesses folds a process snapshot into review rows and counts.
 // It is intentionally advisory by default: process presence is weaker evidence
 // than a visible top-level window, but it catches the transient cmd/gh/git/ps
@@ -228,25 +263,14 @@ func ClassifyLiveProcesses(processes []LiveProcess) LiveProcessReport {
 			continue
 		}
 		rep.Findings = append(rep.Findings, finding)
-		switch finding.Level {
-		case "violation":
-			rep.Violations = append(rep.Violations, finding.Message)
-		case "watchlist":
-			rep.Watchlist = append(rep.Watchlist, finding.Message)
-		}
+		routeFinding(finding.Level, finding.Message, &rep.Violations, &rep.Watchlist)
 	}
 	sort.Strings(rep.Violations)
 	sort.Strings(rep.Watchlist)
 	sort.Slice(rep.Findings, func(i, j int) bool {
 		a, b := rep.Findings[i], rep.Findings[j]
-		if a.Level != b.Level {
-			return a.Level < b.Level
-		}
-		if a.Category != b.Category {
-			return a.Category < b.Category
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
+		if c := compareFindingHeader(a.Level, a.Category, a.Name, b.Level, b.Category, b.Name); c != 0 {
+			return c < 0
 		}
 		return a.PID < b.PID
 	})
@@ -302,23 +326,7 @@ func liveProcessFinding(proc LiveProcess) LiveProcessFinding {
 
 func liveProcessRow(proc LiveProcess) string {
 	parts := []string{fmt.Sprintf("pid=%d name=%s", proc.PID, proc.Name)}
-	if browser := browserAutomationDetailsFor(proc.Name, proc.CommandLine); browser != nil {
-		if browser.RemoteDebuggingPort != "" {
-			parts = append(parts, "port="+browser.RemoteDebuggingPort)
-		}
-		if browser.Profile != "" {
-			parts = append(parts, "profile="+browser.Profile)
-		}
-		if browser.WindowPosition != "" {
-			parts = append(parts, "window_pos="+browser.WindowPosition)
-		}
-		if browser.Offscreen {
-			parts = append(parts, "offscreen=true")
-		}
-		if browser.Headless {
-			parts = append(parts, "headless=true")
-		}
-	}
+	parts = appendBrowserParts(parts, browserAutomationDetailsFor(proc.Name, proc.CommandLine))
 	if proc.ParentPID != 0 || proc.ParentName != "" {
 		parts = append(parts, fmt.Sprintf("parent=%s[%d]", emptyDash(proc.ParentName), proc.ParentPID))
 	}
@@ -368,30 +376,18 @@ func liveProcessAutomationOwned(proc LiveProcess) bool {
 		proc.GrandparentName,
 		proc.GrandparentCommandLine,
 	}, " "))
-	for _, marker := range []string{
+	return containsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
 		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
-		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex")
 }
 
 func liveProcessIgnored(proc LiveProcess) bool {
 	text := strings.ToLower(proc.CommandLine + " " + proc.ParentCommandLine + " " + proc.GrandparentCommandLine)
-	for _, marker := range []string{
+	return containsAny(text,
 		"fak windowgate",
 		"get-ciminstance win32_process",
-		"go run ./cmd/fak windowgate",
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+		"go run ./cmd/fak windowgate")
 }
 
 func liveBrowserAutomationProcess(proc LiveProcess) bool {
@@ -405,10 +401,11 @@ func liveBrowserAutomationProcess(proc LiveProcess) bool {
 	if strings.Contains(text, "--type=") {
 		return false
 	}
-	return strings.Contains(text, "--remote-debugging-port") ||
-		strings.Contains(text, "chrome-cdp") ||
-		strings.Contains(text, "playwright") ||
-		strings.Contains(text, "selenium")
+	return containsAny(text,
+		"--remote-debugging-port",
+		"chrome-cdp",
+		"playwright",
+		"selenium")
 }
 
 // ClassifyVisibleWindows folds live top-level windows into hard findings and
@@ -423,25 +420,14 @@ func ClassifyVisibleWindows(windows []VisibleWindow) VisibleWindowReport {
 			continue
 		}
 		rep.Findings = append(rep.Findings, finding)
-		switch finding.Level {
-		case "violation":
-			rep.Violations = append(rep.Violations, finding.Message)
-		case "watchlist":
-			rep.Watchlist = append(rep.Watchlist, finding.Message)
-		}
+		routeFinding(finding.Level, finding.Message, &rep.Violations, &rep.Watchlist)
 	}
 	sort.Strings(rep.Violations)
 	sort.Strings(rep.Watchlist)
 	sort.Slice(rep.Findings, func(i, j int) bool {
 		a, b := rep.Findings[i], rep.Findings[j]
-		if a.Level != b.Level {
-			return a.Level < b.Level
-		}
-		if a.Category != b.Category {
-			return a.Category < b.Category
-		}
-		if a.Name != b.Name {
-			return a.Name < b.Name
+		if c := compareFindingHeader(a.Level, a.Category, a.Name, b.Level, b.Category, b.Name); c != 0 {
+			return c < 0
 		}
 		if a.Title != b.Title {
 			return a.Title < b.Title
@@ -495,23 +481,7 @@ func visibleWindowFinding(win VisibleWindow) VisibleWindowFinding {
 
 func visibleWindowRow(win VisibleWindow) string {
 	parts := []string{fmt.Sprintf("pid=%d name=%s title=%q", win.PID, win.Name, win.Title)}
-	if browser := browserAutomationDetails(win); browser != nil {
-		if browser.RemoteDebuggingPort != "" {
-			parts = append(parts, "port="+browser.RemoteDebuggingPort)
-		}
-		if browser.Profile != "" {
-			parts = append(parts, "profile="+browser.Profile)
-		}
-		if browser.WindowPosition != "" {
-			parts = append(parts, "window_pos="+browser.WindowPosition)
-		}
-		if browser.Offscreen {
-			parts = append(parts, "offscreen=true")
-		}
-		if browser.Headless {
-			parts = append(parts, "headless=true")
-		}
-	}
+	parts = appendBrowserParts(parts, browserAutomationDetails(win))
 	if win.ParentPID != 0 || win.ParentName != "" {
 		parts = append(parts, fmt.Sprintf("parent=%s[%d]", emptyDash(win.ParentName), win.ParentPID))
 	}
@@ -541,15 +511,9 @@ func visibleConsoleTool(win VisibleWindow) bool {
 
 func visibleAutomationOwned(win VisibleWindow) bool {
 	text := strings.ToLower(win.Path + " " + win.CommandLine + " " + win.Title)
-	for _, marker := range []string{
+	return containsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
-		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
-	} {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`)
 }
 
 func visibleBrowserAutomation(win VisibleWindow) bool {
@@ -558,10 +522,11 @@ func visibleBrowserAutomation(win VisibleWindow) bool {
 		return false
 	}
 	text := strings.ToLower(win.CommandLine)
-	return strings.Contains(text, "--remote-debugging-port") ||
-		strings.Contains(text, "chrome-cdp") ||
-		strings.Contains(text, "playwright") ||
-		strings.Contains(text, "selenium")
+	return containsAny(text,
+		"--remote-debugging-port",
+		"chrome-cdp",
+		"playwright",
+		"selenium")
 }
 
 var (
@@ -612,6 +577,44 @@ func browserWindowPositionOffscreen(pos string) bool {
 		return false
 	}
 	return x <= -10000 || y <= -10000
+}
+
+// containsAny reports whether s contains any of subs. It folds the repeated
+// `strings.Contains(s, …) || …` chains and `for _, marker := range []string{…}`
+// membership loops in this file into one call; callers lowercase s beforehand.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// appendBrowserParts appends the non-empty browser-automation fields of browser
+// (port/profile/window position/offscreen/headless), in a stable order, to parts.
+// It returns parts unchanged when browser is nil, so a row builder can pass the
+// details lookup straight through.
+func appendBrowserParts(parts []string, browser *BrowserAutomationDetails) []string {
+	if browser == nil {
+		return parts
+	}
+	if browser.RemoteDebuggingPort != "" {
+		parts = append(parts, "port="+browser.RemoteDebuggingPort)
+	}
+	if browser.Profile != "" {
+		parts = append(parts, "profile="+browser.Profile)
+	}
+	if browser.WindowPosition != "" {
+		parts = append(parts, "window_pos="+browser.WindowPosition)
+	}
+	if browser.Offscreen {
+		parts = append(parts, "offscreen=true")
+	}
+	if browser.Headless {
+		parts = append(parts, "headless=true")
+	}
+	return parts
 }
 
 func emptyDash(s string) string {
@@ -696,10 +699,11 @@ func liveTaskInteractive(logonType string) bool {
 
 func liveTaskWindowless(task LiveScheduledTask) bool {
 	text := strings.ToLower(task.Execute + " " + task.Arguments)
-	return strings.Contains(text, "conhost.exe --headless") ||
-		strings.Contains(text, "-windowstyle hidden") ||
-		strings.Contains(text, "-nonewwindow") ||
-		strings.Contains(text, "pythonw.exe")
+	return containsAny(text,
+		"conhost.exe --headless",
+		"-windowstyle hidden",
+		"-nonewwindow",
+		"pythonw.exe")
 }
 
 func liveTaskConsoleProne(task LiveScheduledTask) bool {
@@ -800,13 +804,12 @@ var (
 // pop a Windows console — exempt it (the Windows arm uses tasklist/taskkill).
 var posixOnly = map[string]bool{"pgrep": true, "pkill": true, "ps": true, "killall": true}
 
-// PySpawnViolations returns one message per subprocess spawn that lacks a
-// creationflags hint, but only for a module that opts into the suppressor. Pure.
-func PySpawnViolations(rel, src string) []string {
-	if !reOptIn.MatchString(src) {
-		return nil
-	}
-	var out []string
+// forEachPythonSpawn invokes fn for every subprocess spawn call in src that sits in
+// real Python code (not a string/comment) and has a balanced argument list, passing
+// the call's argument text and the match offset. It folds the spawn-scan scaffold
+// shared by PySpawnViolations and PySpawnCandidates; each caller supplies its own
+// per-call filter and message in fn.
+func forEachPythonSpawn(src string, fn func(args string, off int)) {
 	for _, m := range reSpawnCall.FindAllStringIndex(src, -1) {
 		if !pythonCodeOffset(src, m[0]) {
 			continue
@@ -816,20 +819,32 @@ func PySpawnViolations(rel, src string) []string {
 		if !ok {
 			continue // unbalanced — skip rather than false-positive
 		}
+		fn(args, m[0])
+	}
+}
+
+// PySpawnViolations returns one message per subprocess spawn that lacks a
+// creationflags hint, but only for a module that opts into the suppressor. Pure.
+func PySpawnViolations(rel, src string) []string {
+	if !reOptIn.MatchString(src) {
+		return nil
+	}
+	var out []string
+	forEachPythonSpawn(src, func(args string, off int) {
 		if strings.Contains(args, "**") { // a **kwargs splat may carry the flag
-			continue
+			return
 		}
 		if reFlagWord.MatchString(args) {
-			continue
+			return
 		}
 		if g := rePosixHead.FindStringSubmatch(args); g != nil && posixOnly[g[1]] {
-			continue
+			return
 		}
 		out = append(out, fmt.Sprintf("%s:%d: subprocess spawn without creationflags in a "+
 			"window-suppressing module — pass creationflags=no_window_creationflags() so the "+
 			"console child stays windowless on Windows (%s)",
-			rel, lineOf(src, m[0]), ReasonUnsuppressedSpawn))
-	}
+			rel, lineOf(src, off), ReasonUnsuppressedSpawn))
+	})
 	return out
 }
 
@@ -848,26 +863,18 @@ func PySpawnCandidates(rel, src string) []string {
 		return nil
 	}
 	var out []string
-	for _, m := range reSpawnCall.FindAllStringIndex(src, -1) {
-		if !pythonCodeOffset(src, m[0]) {
-			continue
-		}
-		open := m[1] - 1
-		args, ok := callArgs(src, open)
-		if !ok {
-			continue
-		}
+	forEachPythonSpawn(src, func(args string, off int) {
 		if reFlagWord.MatchString(args) {
-			continue
+			return
 		}
 		tool := pythonSpawnTool(args)
 		if tool == "" || posixOnly[tool] || !candidateConsoleTools[tool] {
-			continue
+			return
 		}
 		out = append(out, fmt.Sprintf("%s:%d: subprocess %s launch is on the desktop-popup watchlist — "+
 			"if this can run from background automation, pass creationflags=no_window_creationflags() (%s)",
-			rel, lineOf(src, m[0]), tool, ReasonUnsuppressedSpawn))
-	}
+			rel, lineOf(src, off), tool, ReasonUnsuppressedSpawn))
+	})
 	return out
 }
 
