@@ -102,6 +102,7 @@ var tier = map[string]int{
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
 	"cachevaluereport": 2, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
+	"auditusage":       2, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
 	"harvest":          2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
 	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
