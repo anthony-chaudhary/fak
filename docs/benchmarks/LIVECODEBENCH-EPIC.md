@@ -7,6 +7,7 @@ Current docs:
 
 - Results scaffold: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md)
 - Runbook: [LIVECODEBENCH-RUNBOOK.md](LIVECODEBENCH-RUNBOOK.md)
+- Submission gate: [LIVECODEBENCH-SUBMISSION-PACKET.md](LIVECODEBENCH-SUBMISSION-PACKET.md)
 
 Honesty rule: this index does not carry a score. LiveCodeBench results stay `pending run`
 until a release-pinned, date-windowed official grading artifact exists.

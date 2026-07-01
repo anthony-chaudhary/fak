@@ -6,6 +6,7 @@ fields a real LiveCodeBench result must carry, but it does not report any pass r
 Upstream: [LiveCodeBench](https://github.com/livecodebench/livecodebench) (official
 `lcb_runner` harness). Repo epic: [#2085](https://github.com/anthony-chaudhary/fak/issues/2085).
 Runbook: [LIVECODEBENCH-RUNBOOK.md](LIVECODEBENCH-RUNBOOK.md).
+Submission gate: [LIVECODEBENCH-SUBMISSION-PACKET.md](LIVECODEBENCH-SUBMISSION-PACKET.md).
 
 ## Result Ledger
 
@@ -58,4 +59,5 @@ preflight remains `pending run` here.
 - Epic: [#2085](https://github.com/anthony-chaudhary/fak/issues/2085)
 - Results scaffold child: [#2119](https://github.com/anthony-chaudhary/fak/issues/2119)
 - Runbook child: [#2118](https://github.com/anthony-chaudhary/fak/issues/2118)
+- Submission packet child: [#2115](https://github.com/anthony-chaudhary/fak/issues/2115)
 - Upstream harness: [LiveCodeBench](https://github.com/livecodebench/livecodebench)
