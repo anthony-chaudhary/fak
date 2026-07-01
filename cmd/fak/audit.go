@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
 
 // cmdAudit handles `fak audit <subcommand>` over the durable DECISION JOURNAL —
@@ -16,7 +19,9 @@ import (
 //
 //	verify PATH — re-read the file and validate the hash chain end to end; exit 1
 //	              naming the FIRST broken link if a single byte changed since it
-//	              was written.
+//	              was written. Also covers a usagelog journal (internal/usagelog,
+//	              the `fak usage` CLI-invocation trail) — verify auto-detects it
+//	              by its schema field and dispatches to usagelog.Verify.
 //	export PATH — re-emit the journal as JSONL on stdout (a sound copy of a sound
 //	              journal), for archival or piping to another tool.
 //	diagnose PATH — reconstruct the per-session chains from the hash links and tell a
@@ -68,12 +73,51 @@ func auditJournalPathArg(name, usage string, args []string) string {
 
 func cmdAuditVerify(args []string) {
 	path := auditJournalPathArg("audit verify", "usage: fak audit verify <journal.jsonl>", args)
+	if isUsageLog(path) {
+		n, err := usagelog.Verify(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
+			os.Exit(1)
+		}
+		fmt.Printf("fak audit verify: %s — OK: %d hash-chained usage row(s), chain intact (no edit since written)\n", path, n)
+		return
+	}
 	n, err := journal.Verify(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak audit verify: %s — TAMPERED/BROKEN after %d sound row(s): %v\n", path, n, err)
 		os.Exit(1)
 	}
 	fmt.Printf("fak audit verify: %s — OK: %d hash-chained row(s), chain intact (no edit since written)\n", path, n)
+}
+
+// isUsageLog peeks the first well-formed line of path to tell a usage journal
+// (internal/usagelog, schema "fak-usage-log/1") apart from a decision journal
+// (internal/journal, no schema field) so 'fak audit verify' dispatches to the
+// matching Verify without a separate --kind flag. A file that can't be opened
+// or whose first line doesn't parse falls through to the decision-journal
+// path, which reports the real error.
+func isUsageLog(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var probe struct {
+			Schema string `json:"schema"`
+		}
+		if err := json.Unmarshal(line, &probe); err != nil {
+			return false
+		}
+		return probe.Schema == usagelog.SchemaV1
+	}
+	return false
 }
 
 // cmdAuditExport re-emits a journal as JSONL on stdout. It opens the file-backed

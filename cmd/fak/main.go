@@ -54,8 +54,25 @@ import (
 )
 
 func main() {
+	start := time.Now()
+	var verb string
+	var argv []string
+	if len(os.Args) >= 2 {
+		verb = os.Args[1]
+	}
+	if len(os.Args) > 2 {
+		argv = os.Args[2:]
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			recordUsage(verb, argv, 2, start)
+			panic(r)
+		}
+	}()
+
 	if len(os.Args) < 2 {
 		usage()
+		recordUsage(verb, argv, 2, start)
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -224,6 +241,8 @@ func main() {
 		}
 	case "audit":
 		cmdAudit(os.Args[2:])
+	case "usage":
+		cmdUsage(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
 	case "fleetcap":
@@ -387,8 +406,10 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "fak: unknown verb %q\n", os.Args[1])
 		usage()
+		recordUsage(verb, argv, 2, start)
 		os.Exit(2)
 	}
+	recordUsage(verb, argv, 0, start)
 }
 
 func ctx() context.Context { return context.Background() }
