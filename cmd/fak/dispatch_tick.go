@@ -261,6 +261,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		pick.Tree = append([]string(nil), opts.LeaseTree...)
 	}
 
+	startup := dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled)
 	payload := map[string]any{
 		"schema":           dispatchtick.Schema,
 		"workspace":        root,
@@ -284,11 +285,12 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		"target_issue":     nil,
 		"already_live":     sortedSet(liveIssues),
 		"held_lanes":       sortedStringSet(held),
+		"startup_bundle":   startup,
+		"stale_base":       mapAt(startup, "stale_base"),
 	}
 	if hasTarget {
 		payload["target_issue"] = target
 	}
-	payload["startup_bundle"] = dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled)
 
 	finish := func(p map[string]any) map[string]any {
 		if opts.RecordLoop {
@@ -375,6 +377,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	payload["development_branch"] = dispatchMapString(promptRec, "development_branch")
 	if errText := dispatchMapString(promptRec, "branch_role_error"); errText != "" {
 		payload["branch_role_error"] = errText
+	}
+	if warning := dispatchMapString(mapAt(payload, "stale_base"), "warning"); warning != "" {
+		prompt := dispatchMapString(promptRec, "prompt") + "\n\nworker preflight warning:\n- " + warning + "\n"
+		promptRec["prompt"] = prompt
+		promptRec["prompt_chars"] = len(prompt)
+		payload["worker_preflight_warning"] = warning
+		promptChars = len(prompt)
+		payload["prompt_chars"] = promptChars
 	}
 	model := account.Model
 	if opts.Backend != "opencode" && opts.Backend != "codex" {
@@ -1152,12 +1162,48 @@ func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string
 			"tree": append([]string(nil), pick.Tree...),
 		},
 		"dirty_tree": dispatchDirtyTree(root),
+		"stale_base": dispatchStaleBase(root, pick.Tree),
 		"account":    dispatchtick.AccountSidecar(account),
 		"preflight": map[string]any{
 			"verdict": dispatchMapString(pre, "verdict"),
 			"reason":  dispatchMapString(pre, "reason"),
 		},
 	}
+}
+
+func dispatchStaleBase(root string, tree []string) map[string]any {
+	tree = dispatchTrimTree(tree)
+	out := map[string]any{
+		"available": false,
+		"stale":     false,
+		"base":      "HEAD",
+		"upstream":  "origin/main",
+		"tree":      append([]string(nil), tree...),
+	}
+	if len(tree) == 0 {
+		out["available"] = true
+		out["reason"] = "no target tree to compare"
+		return out
+	}
+	args := []string{"diff", "--name-only", "HEAD..origin/main", "--"}
+	args = append(args, tree...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		out["error"] = truncateString(strings.TrimSpace(string(raw)), 300)
+		return out
+	}
+	changed := nonEmptyLines(string(raw))
+	out["available"] = true
+	out["changed"] = changed
+	out["changed_count"] = len(changed)
+	if len(changed) > 0 {
+		out["stale"] = true
+		out["warning"] = fmt.Sprintf("stale base: origin/main has newer changes in this target scope (%s). Before editing, refresh in place with `git fetch origin main` and merge origin/main so these files include upstream work; the issue remains dispatchable after refresh.", strings.Join(changed, ", "))
+	}
+	return out
 }
 
 func dispatchDirtyTree(root string) map[string]any {

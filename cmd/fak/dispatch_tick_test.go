@@ -498,6 +498,69 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	}
 }
 
+func TestDispatchTickDryRunShowsStaleBaseWarningAndFreshAfterRefresh(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+	initDispatchGit(t, root)
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "shared.md"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base docs file: %v", err)
+	}
+	runDispatchGit(t, root, "add", "docs/shared.md")
+	commitDispatchGit(t, root, "base")
+	runDispatchGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(root, "docs", "shared.md"), []byte("origin change\n"), 0o644); err != nil {
+		t.Fatalf("write upstream docs file: %v", err)
+	}
+	runDispatchGit(t, root, "add", "docs/shared.md")
+	commitDispatchGit(t, root, "origin change")
+	runDispatchGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runDispatchGit(t, root, "update-ref", "refs/heads/main", "HEAD~1")
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("stale-base dry run exit = %d, want 0 (stderr: %s)\n%s", code, errb, out)
+	}
+	var staleGot map[string]any
+	if err := json.Unmarshal([]byte(out), &staleGot); err != nil {
+		t.Fatalf("bad stale json: %v\n%s", err, out)
+	}
+	if staleGot["action"] != "would_spawn" || staleGot["verdict"] != "WOULD_SPAWN" {
+		t.Fatalf("stale-base tick = action %v verdict %v, want dispatchable WOULD_SPAWN", staleGot["action"], staleGot["verdict"])
+	}
+	stale := mapAt(staleGot, "stale_base")
+	if stale["available"] != true || stale["stale"] != true || dispatchMapInt(stale, "changed_count") != 1 {
+		t.Fatalf("stale_base = %#v, want available stale changed_count=1", stale)
+	}
+	if !strings.Contains(dispatchMapString(staleGot, "worker_preflight_warning"), "stale base") {
+		t.Fatalf("worker preflight warning missing stale-base text: %#v", staleGot)
+	}
+	bundleStale := mapAt(mapAt(staleGot, "startup_bundle"), "stale_base")
+	if bundleStale["stale"] != true {
+		t.Fatalf("startup bundle stale_base = %#v, want stale=true", bundleStale)
+	}
+
+	runDispatchGit(t, root, "update-ref", "refs/heads/main", "refs/remotes/origin/main")
+	out, errb, code = runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 0 {
+		t.Fatalf("fresh dry run exit = %d, want 0 (stderr: %s)\n%s", code, errb, out)
+	}
+	var freshGot map[string]any
+	if err := json.Unmarshal([]byte(out), &freshGot); err != nil {
+		t.Fatalf("bad fresh json: %v\n%s", err, out)
+	}
+	fresh := mapAt(freshGot, "stale_base")
+	if fresh["available"] != true || fresh["stale"] != false || dispatchMapInt(fresh, "changed_count") != 0 {
+		t.Fatalf("fresh stale_base = %#v, want available stale=false changed_count=0", fresh)
+	}
+	if dispatchMapString(freshGot, "worker_preflight_warning") != "" {
+		t.Fatalf("fresh run should not carry stale-base warning: %#v", freshGot)
+	}
+}
+
 // dispatchWriteResolveWorker writes a resolver worker's .log + .pid sidecars into a
 // workspace's .dispatch-runs dir so an end-to-end `fak dispatch tick` sees it exactly as a
 // live host would. The pid is the test process's own (alive) -- the recycled-pid case the
@@ -1126,12 +1189,24 @@ func containsString(values []string, needle string) bool {
 
 func initDispatchGit(t *testing.T, root string) {
 	t.Helper()
-	cmd := exec.Command("git", "init")
+	runDispatchGit(t, root, "init")
+	runDispatchGit(t, root, "checkout", "-B", "main")
+}
+
+func commitDispatchGit(t *testing.T, root, message string) {
+	t.Helper()
+	runDispatchGit(t, root, "-c", "user.email=fak@example.invalid", "-c", "user.name=fak test", "commit", "-m", message)
+}
+
+func runDispatchGit(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
+	return string(out)
 }
 
 func writeDispatchJSONFixture(t *testing.T, path string, doc any) {
