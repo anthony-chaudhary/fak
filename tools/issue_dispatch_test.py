@@ -529,6 +529,67 @@ class BusyLanesTest(unittest.TestCase):
                 mod.busy_lanes(Path(d) / "nope", is_alive=lambda pid: True), set())
 
 
+class BusyAccountsTest(unittest.TestCase):
+    """busy_accounts folds the SAME inflight markers into the set of ACCOUNTS with a
+    LIVE worker (#2060 cross-tick account de-confliction), self-healing dead markers in
+    one pass exactly like busy_lanes."""
+
+    def _marker(self, mod, runs: Path, lane: str, pid: int, account) -> Path:
+        runs.mkdir(parents=True, exist_ok=True)
+        p = runs / f"{mod.INFLIGHT_PREFIX}{lane}-{pid}.json"
+        rec = {"lane": lane, "pid": pid}
+        if account is not None:
+            rec["account"] = account
+        p.write_text(json.dumps(rec), encoding="utf-8")
+        return p
+
+    def test_live_account_busy_and_dead_pruned(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            live = self._marker(mod, runs, "docs", 111, r"C:\U\.claude")
+            dead = self._marker(mod, runs, "tools", 222, r"C:\U\.claude-day30-netra")
+            busy = mod.busy_accounts(runs, is_alive=lambda pid: pid == 111)
+            self.assertEqual(busy, {r"C:\U\.claude"})   # only the live worker's account
+            self.assertTrue(live.exists())
+            self.assertFalse(dead.exists())             # dead marker pruned
+
+    def test_marker_without_account_contributes_nothing_but_is_kept(self) -> None:
+        # An older marker predating the account field: a live pid keeps the marker
+        # (busy_lanes still needs it) but it adds no account to the busy set.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            m = self._marker(mod, runs, "docs", 111, None)
+            self.assertEqual(mod.busy_accounts(runs, is_alive=lambda pid: True), set())
+            self.assertTrue(m.exists())
+
+    def test_write_marker_records_account_and_busy_accounts_reads_it(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            mod._write_inflight_marker(runs, "docs", 4242, account=r"C:\U\.claude")
+            self.assertEqual(
+                mod.busy_accounts(runs, is_alive=lambda pid: pid == 4242),
+                {r"C:\U\.claude"})
+
+    def test_stale_marker_pruned_even_if_pid_alive(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            m = self._marker(mod, runs, "model", 333, r"C:\U\.claude")
+            old = os.path.getmtime(m) - (mod.INFLIGHT_TTL_SECONDS + 100)
+            os.utime(m, (old, old))
+            self.assertEqual(mod.busy_accounts(runs, is_alive=lambda pid: True), set())
+            self.assertFalse(m.exists())
+
+    def test_missing_runs_dir_yields_empty(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(
+                mod.busy_accounts(Path(d) / "nope", is_alive=lambda pid: True), set())
+
+
 class PickLaneBusyTest(unittest.TestCase):
     """pick_lane prefers the richest lane NOT already in flight; falls back to the
     richest overall (flagged ``stacked``) only when every lane is busy."""
@@ -725,6 +786,30 @@ class SpawnInflightMarkerTest(unittest.TestCase):
             self.assertEqual(out["inflight"], str(marker))
             busy = mod.busy_lanes(runs, is_alive=lambda pid: pid == 4242)
             self.assertEqual(busy, {"gateway"})
+
+    def test_spawn_detached_records_pinned_account_for_busy_accounts(self) -> None:
+        # The marker also carries the worker's pinned CLAUDE_CONFIG_DIR so a later
+        # tick's busy_accounts avoids double-loading that account (#2060).
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d) / "runs"
+
+            class FakeProc:
+                pid = 4243
+
+            with warnings.catch_warnings(), \
+                 mock.patch.object(mod.subprocess, "Popen", lambda *a, **k: FakeProc()), \
+                 mock.patch.object(mod.shutil, "which", lambda x: x):
+                warnings.simplefilter("ignore", ResourceWarning)
+                out = mod.spawn_detached(
+                    ["claude", "-p", "x"],
+                    {"CLAUDE_CONFIG_DIR": r"C:\U\.claude-day30-netra"},
+                    Path(d), runs, "tools")
+            rec = json.loads(Path(out["inflight"]).read_text(encoding="utf-8"))
+            self.assertEqual(rec["account"], r"C:\U\.claude-day30-netra")
+            self.assertEqual(
+                mod.busy_accounts(runs, is_alive=lambda pid: pid == 4243),
+                {r"C:\U\.claude-day30-netra"})
 
 
 class EvaluateBusyWiringTest(unittest.TestCase):

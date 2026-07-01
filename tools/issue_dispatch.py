@@ -255,14 +255,20 @@ def _safe_unlink(path: Path) -> None:
         pass
 
 
-def _write_inflight_marker(runs_dir: Path, lane: str, pid: int) -> str | None:
-    """Record {lane, pid} so a LATER tick sees this lane is in flight and spreads to
-    a different one. Best-effort: a write failure never blocks the spawn."""
+def _write_inflight_marker(runs_dir: Path, lane: str, pid: int,
+                           account: str | None = None) -> str | None:
+    """Record {lane, pid, account} so a LATER tick sees this lane AND this account are
+    in flight and spreads to a different one. ``account`` (the worker's pinned
+    CLAUDE_CONFIG_DIR) lets the next wave avoid double-loading an account that already
+    has a live worker — the cross-tick ACCOUNT de-confliction (#2060), the twin of the
+    cross-tick LANE de-confliction. Best-effort: a write failure never blocks the
+    spawn."""
     try:
         runs_dir.mkdir(parents=True, exist_ok=True)
         path = runs_dir / f"{INFLIGHT_PREFIX}{lane}-{int(pid)}.json"
         path.write_text(
             json.dumps({"lane": lane, "pid": int(pid),
+                        "account": account or None,
                         "stamp": dt.datetime.now(dt.timezone.utc).isoformat()}),
             encoding="utf-8")
         return str(path)
@@ -303,6 +309,44 @@ def busy_lanes(runs_dir: Path, *, is_alive: Callable[[int], bool] | None = None,
             continue
         lanes.add(lane)
     return lanes
+
+
+def busy_accounts(runs_dir: Path, *, is_alive: Callable[[int], bool] | None = None,
+                  now: float | None = None,
+                  ttl_seconds: int = INFLIGHT_TTL_SECONDS) -> set[str]:
+    """The set of ACCOUNTS (pinned CLAUDE_CONFIG_DIRs) with a currently-live dispatched
+    worker, folded from the same inflight markers ``busy_lanes`` reads. This is the
+    cross-tick ACCOUNT de-confliction (#2060): a wave excludes an account already
+    running a worker so a single free seat is placed on the IDLE account instead of
+    double-loading one (which the prior seat allocation, blind to a prior tick's live
+    worker, did — risking a single account's rate/usage cap). Same self-heal as
+    ``busy_lanes``; a marker with no recorded account contributes nothing (older
+    markers predate the field)."""
+    alive = is_alive or _pid_is_alive
+    if not runs_dir.is_dir():
+        return set()
+    when = now if now is not None else time.time()
+    accounts: set[str] = set()
+    for marker in sorted(runs_dir.glob(f"{INFLIGHT_PREFIX}*.json")):
+        try:
+            rec = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _safe_unlink(marker)
+            continue
+        raw_pid = (rec or {}).get("pid")
+        pid = int(raw_pid) if isinstance(raw_pid, int) else (
+            int(raw_pid) if isinstance(raw_pid, str) and raw_pid.strip().isdigit() else 0)
+        try:
+            stale = (when - marker.stat().st_mtime) > ttl_seconds
+        except OSError:
+            stale = True
+        if pid <= 0 or stale or not alive(pid):
+            _safe_unlink(marker)
+            continue
+        account = str((rec or {}).get("account") or "").strip()
+        if account:
+            accounts.add(account)
+    return accounts
 
 
 def _truthy_env(value: str | None) -> bool:
@@ -360,9 +404,11 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     fh = open(out_log, "w", encoding="utf-8")
     proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                             stdout=fh, stderr=subprocess.STDOUT, **kwargs)
-    # Stamp this lane as in flight so a later tick spreads off it (cross-tick
-    # de-confliction). Best-effort and pid-keyed; busy_lanes prunes it on death.
-    marker = _write_inflight_marker(log_dir, lane, proc.pid)
+    # Stamp this lane AND its pinned account as in flight so a later tick spreads off
+    # both (cross-tick lane + account de-confliction). Best-effort and pid-keyed;
+    # busy_lanes/busy_accounts prune it on death.
+    marker = _write_inflight_marker(log_dir, lane, proc.pid,
+                                    account=env.get("CLAUDE_CONFIG_DIR"))
     return {"pid": proc.pid, "log": str(out_log), "inflight": marker}
 
 
@@ -653,6 +699,15 @@ def evaluate_wave(root: Path, *, max_workers: int, work_kind: str, live: bool,
     reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
     seats = allocate_seats(root, max_workers, work_kind)
     seat_lanes = seats.get("lanes") or []
+    # Cross-tick ACCOUNT de-confliction (#2060): the seat allocation is re-derived each
+    # tick and is blind to a PRIOR tick's still-live worker, so with one seat free it
+    # re-picked the SAME account (double-loading it, risking that account's usage cap)
+    # while the peer account idled. Drop any seat whose account already runs an
+    # in-flight worker so the free seat lands on the IDLE account. Never spawns onto a
+    # busy account; if all accounts are busy the wave simply finds no free seat.
+    busy_acct = busy_accounts(root / RUNS_DIRNAME)
+    if busy_acct:
+        seat_lanes = [s for s in seat_lanes if s.get("config_dir") not in busy_acct]
     free_seats = len(seat_lanes)
     wave_id = seats.get("wave_id") or "wave-unallocated"
 
