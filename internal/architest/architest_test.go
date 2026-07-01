@@ -77,6 +77,7 @@ var tier = map[string]int{
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
 	"commitsubject":        1,                // commit-subject coverage fold over hooks.CommitMsgVerdict + recent git subjects; imports hooks(1)+windowgate(1), off the hot path.
 	"memgate":              1,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
+	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
 	"memoryread":           1,                // read-only committed fleet-memory digest renderer; stdlib-only, off the hot path.
 	"sotacoverage":         1,                // SOTA prior-art coverage scorecard over sotamatrix + git tree scans; imports sotamatrix(1)+windowgate(1), off the hot path.
 	"testroute":            1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
