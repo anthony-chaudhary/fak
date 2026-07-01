@@ -118,6 +118,8 @@ const (
 type Family struct {
 	Key                 string                          `json:"key"`
 	Turns               int                             `json:"turns"`
+	TurnsReordered      bool                            `json:"turns_reordered,omitempty"`
+	OutOfOrderTurns     int                             `json:"out_of_order_turns,omitempty"`
 	ElapsedSeconds      float64                         `json:"elapsed_seconds"`
 	InputTokens         int64                           `json:"input_tokens"`
 	CacheReadTokens     int64                           `json:"cache_read_tokens"`
@@ -160,6 +162,8 @@ type OwnerSlice struct {
 type Report struct {
 	Schema           string                          `json:"schema"`
 	Turns            int                             `json:"turns"`
+	TurnsReordered   bool                            `json:"turns_reordered,omitempty"`
+	OutOfOrderTurns  int                             `json:"out_of_order_turns,omitempty"`
 	FamilyCount      int                             `json:"family_count"`
 	Families         []Family                        `json:"families"`
 	Aggregate        vcachegov.TelemetrySavingsProof `json:"aggregate"`
@@ -198,6 +202,12 @@ func ObserveWithOptions(turns []Turn, opt Options) Report {
 
 	families := groupFamilies(turns)
 	rep.FamilyCount = len(families)
+	for _, fam := range families {
+		if fam.TurnsReordered {
+			rep.TurnsReordered = true
+			rep.OutOfOrderTurns += fam.OutOfOrderTurns
+		}
+	}
 
 	var allRows []vcachegov.TelemetryRow
 	var ranked []vcachecal.RankedVBlock
@@ -324,6 +334,7 @@ func groupFamilies(turns []Turn) []Family {
 	out := []Family{}
 	minT := map[string]int64{}
 	maxT := map[string]int64{}
+	maxSeen := map[string]int64{}
 	for _, t := range turns {
 		i, ok := idx[t.Family]
 		if !ok {
@@ -332,12 +343,20 @@ func groupFamilies(turns []Turn) []Family {
 			out = append(out, Family{Key: t.Family})
 			minT[t.Family] = t.UnixMillis
 			maxT[t.Family] = t.UnixMillis
+			maxSeen[t.Family] = t.UnixMillis
 		}
 		f := &out[i]
 		f.Turns++
 		f.InputTokens += t.InputTokens
 		f.CacheReadTokens += t.CacheRead
 		f.CacheCreationTokens += t.CacheCreation
+		if t.UnixMillis < maxSeen[t.Family] {
+			f.TurnsReordered = true
+			f.OutOfOrderTurns++
+		}
+		if t.UnixMillis > maxSeen[t.Family] {
+			maxSeen[t.Family] = t.UnixMillis
+		}
 		if t.UnixMillis < minT[t.Family] {
 			minT[t.Family] = t.UnixMillis
 		}

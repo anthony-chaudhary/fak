@@ -250,6 +250,9 @@ func renderObserveReport(w io.Writer, r vcacheobserve.Report) {
 	fmt.Fprintf(w, "grade: MEASURED %s (%d/100)  vs  SYNTHETIC %s (%d/100)   concentration s=%.2f (defeated=%v)\n\n",
 		r.GradeMeasured, r.ScoreMeasured, r.GradeSynthetic, r.ScoreSynthetic,
 		r.Concentration.ZipfS, r.Concentration.Defeated)
+	if r.TurnsReordered {
+		fmt.Fprintf(w, "input order: reordered %d same-family turn(s) by timestamp before TTL-sensitive leaves\n\n", r.OutOfOrderTurns)
+	}
 
 	fmt.Fprintf(w, "%-12s %6s %9s %12s %7s %7s %-14s\n",
 		"family", "turns", "hit%", "saved_teq", "saved%", "1stpos", "governor")

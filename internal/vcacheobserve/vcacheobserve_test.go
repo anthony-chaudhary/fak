@@ -92,6 +92,39 @@ func TestObserveWarmthBeliefNeverFalseWarms(t *testing.T) {
 	}
 }
 
+func TestObserveFlagsAndSortsOutOfOrderFamilyTurns(t *testing.T) {
+	const sec = 1000
+	ordered := []Turn{
+		{Family: "shuffled", UnixMillis: 0, InputTokens: 100, CacheCreation: 40000, Ephemeral1h: 40000},
+		{Family: "shuffled", UnixMillis: 10 * sec, InputTokens: 50, CacheRead: 40000, CacheCreation: 500, Ephemeral1h: 500},
+		{Family: "shuffled", UnixMillis: 20 * sec, InputTokens: 50, CacheRead: 40000, CacheCreation: 500, Ephemeral1h: 500},
+	}
+	shuffled := []Turn{ordered[2], ordered[0], ordered[1]}
+
+	clean := Observe(ordered, DefaultMultipliers())
+	if clean.TurnsReordered || clean.OutOfOrderTurns != 0 || clean.Families[0].TurnsReordered {
+		t.Fatalf("ordered input was flagged as reordered: %+v / %+v", clean, clean.Families[0])
+	}
+
+	got := Observe(shuffled, DefaultMultipliers())
+	if !got.TurnsReordered {
+		t.Fatal("shuffled same-family turns should flag report.turns_reordered")
+	}
+	if got.OutOfOrderTurns != 2 {
+		t.Fatalf("out-of-order turn count = %d, want 2", got.OutOfOrderTurns)
+	}
+	if len(got.Families) != 1 || !got.Families[0].TurnsReordered || got.Families[0].OutOfOrderTurns != 2 {
+		t.Fatalf("family reorder flags not set: %+v", got.Families)
+	}
+	if got.Prediction != clean.Prediction {
+		t.Fatalf("shuffled input should be stably sorted before TTL prediction: got %+v want %+v", got.Prediction, clean.Prediction)
+	}
+	if got.Families[0].ArrivalRatePerSec != clean.Families[0].ArrivalRatePerSec {
+		t.Fatalf("shuffled input should sort before arrival-rate classification: got %v want %v",
+			got.Families[0].ArrivalRatePerSec, clean.Families[0].ArrivalRatePerSec)
+	}
+}
+
 func TestObserveWithCalibrationFeedsTTLAndReadMultiplier(t *testing.T) {
 	const min = 60 * 1000
 	turns := []Turn{

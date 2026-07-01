@@ -40,6 +40,22 @@ func TestRunVCacheObserveTelemetry(t *testing.T) {
 	}
 }
 
+func TestRunVCacheObserveFlagsReorderedTelemetry(t *testing.T) {
+	tel := writeLines(t, "tel.jsonl",
+		`{"session_id":"s1","captured_utc":"2026-06-26T00:00:20Z","input_tokens":50,"cache_creation_input_tokens":500,"cache_read_input_tokens":40000,"ephemeral_1h_input_tokens":500}`,
+		`{"session_id":"s1","captured_utc":"2026-06-26T00:00:00Z","input_tokens":100,"cache_creation_input_tokens":40000,"cache_read_input_tokens":0,"ephemeral_1h_input_tokens":40000}`,
+		`{"session_id":"s1","captured_utc":"2026-06-26T00:00:10Z","input_tokens":50,"cache_creation_input_tokens":500,"cache_read_input_tokens":40000,"ephemeral_1h_input_tokens":500}`,
+	)
+	var out, errb bytes.Buffer
+	code := runVCacheObserve(&out, &errb, []string{"--telemetry", tel})
+	if code != 0 {
+		t.Fatalf("exit %d, stderr=%s", code, errb.String())
+	}
+	if got := out.String(); !strings.Contains(got, "input order: reordered 2 same-family turn(s)") {
+		t.Fatalf("output missing reorder warning:\n%s", got)
+	}
+}
+
 func TestRunVCacheObserveJSONReconciles(t *testing.T) {
 	tel := writeLines(t, "tel.jsonl",
 		`{"session_id":"s1","captured_utc":"2026-06-26T00:00:00Z","input_tokens":100,"cache_creation_input_tokens":40000,"ephemeral_1h_input_tokens":40000}`,
