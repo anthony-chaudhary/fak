@@ -1,0 +1,43 @@
+# Metal decode-lever benchmark (issue #1382): measure the batched fused-expert MLP speedup
+# on a GitHub Apple-Silicon runner (macos-latest = M-series, arm64, has Metal), independent of
+# any single bench laptop. Manual-only (workflow_dispatch) so it never runs on push/PR — it is a
+# measurement, not a gate. Prints Single vs Batch ms/layer so the #1382 decode speedup is visible
+# in the run log even when the dedicated Mac is offline.
+name: metal-decode-bench
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: macos-latest # Apple Silicon (M-series), has a Metal device for compute
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Prove a Metal device is actually present on the runner (compute does not need a display).
+      - name: metal device probe
+        run: |
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -iE 'Metal|Chipset|Vendor' | head || true
+          sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+
+      # The fakmetal build must compile (cgo + the Metal framework the runner ships).
+      - name: build fakmetal
+        run: go build -tags fakmetal ./internal/metalgemm/ ./internal/model/
+
+      # Correctness gate: the batched fused MLP equals n single fused MLPs (offset binding).
+      - name: parity - batched fused MLP == single
+        run: go test -tags fakmetal ./internal/model/ -run 'TestMetalFusedMLPQ6DownBatchMatchesSingle|TestMetalFusedMLPQ6DownMatchesCPU' -count=1 -v
+
+      # The measurement: n separate command buffers (Single) vs one batched (Batch), ms/layer.
+      # The Single/Batch ms ratio is the #1382 command-buffer-collapse speedup on the mlp_decode cost.
+      - name: benchmark - batched vs single fused expert MLP
+        run: go test -tags fakmetal ./internal/model/ -run NONE -bench 'BenchmarkMetalFusedMLPQ6Down' -benchtime 30x -v
