@@ -50,6 +50,7 @@ type releaseShipResult struct {
 	BaseSHA            string               `json:"base_sha,omitempty"`
 	SourceBranch       string               `json:"source_branch,omitempty"`
 	SourceSHA          string               `json:"source_sha,omitempty"`
+	SourceCI           map[string]any       `json:"source_ci,omitempty"`
 	TargetBranch       string               `json:"target_branch,omitempty"`
 	Worktree           string               `json:"worktree,omitempty"`
 	LockRoot           string               `json:"lock_root,omitempty"`
@@ -238,6 +239,13 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	}
 	result.BaseSHA = strings.TrimSpace(out)
 	result.SourceSHA = result.BaseSHA
+	if opts.requireCI && !opts.skipCI {
+		result.SourceCI = releaseShipSourceCI(&result, root, opts, result.SourceSHA)
+		if !releaseShipCIOK(result.SourceCI) && opts.execute {
+			result.fail("source_ci_unconfirmed", jsonTail(result.SourceCI))
+			return finishReleaseShip(result)
+		}
+	}
 
 	wt, err := releaseShipWorktreeDir(root, opts)
 	if err != nil {
@@ -454,6 +462,44 @@ func waitReleaseShipCIAppears(result *releaseShipResult, wt string, opts release
 	}
 }
 
+func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShipOptions, sha string) map[string]any {
+	if strings.TrimSpace(sha) == "" {
+		return map[string]any{"ok": false, "status": "missing_source_sha"}
+	}
+	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"}
+	code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
+	if code != 0 {
+		return map[string]any{"ok": false, "status": "unavailable", "tail": tail(out)}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
+	}
+	if len(rows) == 0 {
+		return map[string]any{"ok": false, "status": "missing", "source_sha": sha}
+	}
+	row := rows[0]
+	conclusion := stringFromAny(row["conclusion"])
+	status := stringFromAny(row["status"])
+	if conclusion == "" {
+		conclusion = status
+	}
+	return map[string]any{
+		"ok":         conclusion == "success",
+		"status":     conclusion,
+		"source_sha": sha,
+		"run":        row,
+	}
+}
+
+func releaseShipCIOK(payload map[string]any) bool {
+	if payload == nil {
+		return false
+	}
+	ok, _ := payload["ok"].(bool)
+	return ok
+}
+
 func cleanupReleaseShipWorktree(root, wt string) map[string]any {
 	code, out := releaseShipRunCommand(root, "git", []string{"worktree", "remove", "--force", wt}, nil, 5*time.Minute)
 	payload := map[string]any{
@@ -632,6 +678,17 @@ func renderReleaseShip(stdout, stderr io.Writer, result releaseShipResult) {
 	}
 	if result.CommitSHA != "" {
 		fmt.Fprintf(stdout, "  commit: %s\n", result.CommitSHA)
+	}
+	if result.SourceSHA != "" {
+		status := ""
+		if result.SourceCI != nil {
+			status = stringFromAny(result.SourceCI["status"])
+		}
+		if status != "" {
+			fmt.Fprintf(stdout, "  source: %s %s (ci=%s)\n", result.SourceBranch, result.SourceSHA, status)
+		} else {
+			fmt.Fprintf(stdout, "  source: %s %s\n", result.SourceBranch, result.SourceSHA)
+		}
 	}
 	if result.RemoteBranch != nil {
 		fmt.Fprintf(stdout, "  pushed: %s/%s %s\n", result.RemoteBranch["remote"], result.RemoteBranch["trunk"], result.RemoteBranch["sha"])
