@@ -257,7 +257,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch unwitnessed-claim --issue N [--live] [--json]
   fak dispatch close-batch [--in FILE] [--batch-size N] [--reserve N] [--now UNIX] [--json]
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
-  fak dispatch attempt-budget [--in FILE] [--budget N] [--json]
+  fak dispatch attempt-budget [--in FILE] [--budget N] [--now UNIX] [--json]
   fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
@@ -307,9 +307,18 @@ no category. It never spawns a worker or touches GitHub -- the only side effect 
 append.
 attempt-budget folds each issue's --in attempt history (failure_class + at_unix per try) against
 a budget (its own "budget" field, or the --budget default) and reports whether the issue is
-still dispatchable or HELD for triage, naming the LAST recorded failure class -- so a
-repeatedly failing issue stops burning workers once it crosses the budget instead of being
+still dispatchable, COOLING_DOWN, or HELD for triage, naming the LAST recorded failure class --
+so a repeatedly failing issue stops burning workers once it crosses the budget instead of being
 re-offered forever. A budget of 0 is unlimited (never held on attempt count alone).
+The LAST attempt's failure class is also classified into a closed backoff policy (auth,
+merge, test, ambiguous_scope, or other) and each class carries its OWN cooldown window --
+auth and ambiguous_scope need a human so they cool down longest (4h/2h by default), merge
+gives concurrent peers time to land (30m), and test is shortest since it is cheapest to retry
+(10m). An issue is COOLING_DOWN (distinct from HELD) when it is still under budget but its
+last failure's window has not elapsed as of --now (default: current time; 0 disables cooldown
+timing without dropping the reported window). The report's backoff_class/backoff_window
+columns make the policy visible per issue, not just defined in code; --in may set a per-issue
+"backoff" override map to tune one issue's windows.
 timeout-ledger classifies each --in timed-out attempt (which lifecycle stage -- edit, test,
 commit, push -- it was last observed in before the kill, or none at all) into a closed phase
 (before_startup, during_edit, during_tests, during_commit, during_push, or unknown when no
