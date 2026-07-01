@@ -66,11 +66,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchScorecard(stdout, stderr, argv[1:])
 	case "issue-smallness-lint", "smallness":
 		return runDispatchIssueSmallnessLint(stdout, stderr, os.Stdin, argv[1:])
+	case "commit-links":
+		return runDispatchCommitLinks(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, or issue-smallness-lint)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, or commit-links)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -241,6 +243,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
   fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
+  fak dispatch commit-links [--range REV..REV] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most

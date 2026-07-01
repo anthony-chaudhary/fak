@@ -248,6 +248,7 @@ var tier = map[string]int{
 	"completiondist":  1, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
 	"fleetfreeze":     1, // operator freeze/dry-run gate: holds new spawns while allowing witness-close + status-refresh; stdlib-only, off the hot path.
 	"auditreason":     1, // closed vocabulary classifying commit-audit failures as transient (retryable) vs permanent unwitnessed claim; stdlib-only, off the hot path.
+	"commitissuelink": 1, // pure checker (#1812): flags a commit that carries this repo's ship-stamp trailer but whose subject omits a scannable #N, guessing the issue from a body Fixes/Closes/Resolves trailer when one exists; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
