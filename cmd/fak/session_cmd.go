@@ -15,6 +15,7 @@ package main
 //	fak session budget <id> [--turns N] [--tokens N] [--context-tokens N]   # re-set the work allotment live
 //	fak session pace   <id> [--max-tokens N] [--gap-ms N]  # re-set the per-turn throttle
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
+//	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
 // All write verbs accept --if-rev N: the optimistic-concurrency guard, so a stale
 // operator (or a second controller) cannot clobber a newer change — a lost race
@@ -69,6 +70,14 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	}
 	verb := argv[0]
 	args := argv[1:]
+
+	// reset-diff (#1575) is the one offline verb in this surface: a pure JSON-in,
+	// diff-out render over internal/sessionreset.DiffReset that never dials a live
+	// gateway, so it is dispatched here before the gateway-shaped arity/flag table
+	// below (which assumes every verb talks to a sessionClient).
+	if verb == "reset-diff" {
+		return runSessionResetDiff(os.Stdin, stdout, stderr, args)
+	}
 
 	// Positional arity per verb: the fixed leading args (an id, maybe a value) come
 	// before any flags, so `fak session status sess-1 --json` parses cleanly.
@@ -466,6 +475,9 @@ func sessionUsage(w io.Writer) {
   fak session budget   <id> [--turns N] [--tokens N] [--context-tokens N]  re-set the work allotment live
   fak session pace     <id> [--max-tokens N] [--gap-ms N]   re-set the per-turn throttle
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
+  fak session reset-diff [--in FILE] [--json] [--md]
+                                               offline before/after diff for one reset
+                                               (survived/summarized/expired/must-requery)
 
 flags: --addr (default $FAK_ADDR or http://127.0.0.1:8080)  --key ($FAK_KEY)
        --if-rev N (optimistic-concurrency guard)  --json
