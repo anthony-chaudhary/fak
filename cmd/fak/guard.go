@@ -662,6 +662,16 @@ func cmdGuard(argv []string) {
 	tListen := time.Now()
 	ln, err := net.Listen("tcp", listenAddr)
 	must(err)
+	// Harness network tracking (#2049): wrap the gateway listener so the wire bytes it
+	// SERVES (the child↔gateway traffic the proxy carries, plus any /metrics scrape) are
+	// tallied for the kernel half's network axis — WITNESSED in-process, cross-platform,
+	// no privileged per-process socket accounting. Only when resource stats are on, so the
+	// default path keeps its listener byte-for-byte. Addr/Close delegate via embedding.
+	var netCounter *harnessres.CountingListener
+	if *resourceStats {
+		netCounter = harnessres.NewCountingListener(ln)
+		ln = netCounter
+	}
 	listenDur := time.Since(tListen)
 	gwURL := "http://" + ln.Addr().String()
 
@@ -789,6 +799,14 @@ func cmdGuard(argv []string) {
 	var resSampler *harnessres.Sampler
 	if *resourceStats {
 		resSampler = harnessres.New()
+		// Feed the kernel half's network axis from the listener counter installed at bind
+		// time (#2049). Set BEFORE Start so the first sample already carries it.
+		if netCounter != nil {
+			resSampler.SetNetworkProvider(func() (rx, tx uint64, ok bool) {
+				rx, tx = netCounter.Bytes()
+				return rx, tx, true
+			})
+		}
 		resSampler.Start(guardResourceSampleInterval)
 		// Expose the live harness resource snapshot on the gateway's /metrics as the
 		// fak_harness_* family, so a running session's CPU/mem/IO is scrapeable — not
