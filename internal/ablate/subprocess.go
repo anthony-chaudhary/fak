@@ -105,6 +105,7 @@ func SweepViaSubprocess(ctx context.Context, bin string, t *bench.Trace, engineI
 		Provenance:   provenanceFor(canonTrace, engineModel),
 		WorkloadHash: parentHash,
 		Baseline:     baseline,
+		Caveats:      reportSessionCaveats(canonTrace, engineID, configs),
 	}
 	var dropped []DroppedArm
 	seen := make(map[string]bool, len(configs))

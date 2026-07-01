@@ -263,6 +263,7 @@ type Report struct {
 	Provenance   metrics.Provenance `json:"provenance"`
 	WorkloadHash string             `json:"workload_hash"`
 	Baseline     string             `json:"baseline_arm,omitempty"`
+	Caveats      []string           `json:"caveats,omitempty"`
 	Runs         []AblationRun      `json:"runs"`
 }
 
@@ -353,6 +354,63 @@ func BuildSweep(features []string) ([]FeatureConfig, error) {
 		configs = append(configs, all)
 	}
 	return configs, nil
+}
+
+// SessionCaveats returns report-level caveats for captured-session replays whose
+// configured engine cannot exercise in-kernel-only features. Without this, a
+// session replay through a proxy/mock engine can honestly show a near-zero delta
+// while silently measuring a no-op for radix/ctxplan_seam.
+func SessionCaveats(features []string, engineID string, sliceIsSession bool) []string {
+	if !sliceIsSession || strings.EqualFold(strings.TrimSpace(engineID), "inkernel") {
+		return nil
+	}
+	inKernelOnly := map[string]bool{
+		FeatureCtxplanSeam: true,
+		FeatureRadix:       true,
+	}
+	seen := map[string]bool{}
+	for _, f := range features {
+		f = strings.TrimSpace(f)
+		if inKernelOnly[f] {
+			seen[f] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(seen))
+	for f := range seen {
+		names = append(names, f)
+	}
+	sort.Strings(names)
+	return []string{fmt.Sprintf("NO-OP caveat (#1846): captured session replay through engine %q cannot exercise in-kernel-only feature(s) %s; treat their deltas as proxy no-ops, not measured kernel effects.", engineID, strings.Join(names, ", "))}
+}
+
+func reportSessionCaveats(t *bench.Trace, engineID string, configs []FeatureConfig) []string {
+	if t == nil {
+		return nil
+	}
+	features := featuresInConfigs(configs)
+	sliceIsSession := strings.HasPrefix(t.SliceID, "session:") || strings.HasPrefix(engineID, "session:")
+	return SessionCaveats(features, engineID, sliceIsSession)
+}
+
+func featuresInConfigs(configs []FeatureConfig) []string {
+	seen := map[string]bool{}
+	for _, c := range configs {
+		if _, ok := c.Descriptor()[FeatureVDSO]; ok {
+			seen[FeatureVDSO] = true
+		}
+		for f := range c.EnvFeatures {
+			seen[f] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // runArm replays the frozen trace through a fresh kernel under one config and wraps
@@ -468,6 +526,7 @@ func Sweep(ctx context.Context, t *bench.Trace, engineID, engineModel string, co
 		},
 		WorkloadHash: wh,
 		Baseline:     baseline,
+		Caveats:      reportSessionCaveats(t, engineID, configs),
 	}
 	seen := make(map[string]bool, len(configs))
 	for _, c := range configs {
