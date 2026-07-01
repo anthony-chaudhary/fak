@@ -61,18 +61,7 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 	target := task.TargetTier
 
 	wantedProduct := strings.ToLower(strings.TrimSpace(req.Product))
-	var workers []Account
-	for _, r := range rows {
-		if RoutableWorker(r) && (wantedProduct == "" || strings.ToLower(r.Product) == wantedProduct) {
-			workers = append(workers, r)
-		}
-	}
-	var available []Account
-	for _, r := range workers {
-		if accountCanBeOffered(r) {
-			available = append(available, r)
-		}
-	}
+	workers, available := routableAndAvailable(rows, wantedProduct)
 
 	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
 	effectiveAllow := req.AllowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")

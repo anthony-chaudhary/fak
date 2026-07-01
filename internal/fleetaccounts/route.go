@@ -155,17 +155,29 @@ func tierOf(r Account) int {
 	return *r.ModelTier
 }
 
-// RouteAccount chooses an account by task difficulty and model tier over an annotated roster.
-func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback, strictTier bool,
-	product string, pol Policy) RouteResult {
-	task := ClassifyTask(taskText, taskClass, pol)
-	wantedProduct := strings.ToLower(product)
-	var workers []Account
+// routableAndAvailable filters a roster to the routable worker accounts matching wantedProduct
+// (empty matches any product), then to the subset that can be offered right now. Shared by
+// RouteAccount and AllocateWave, which each derive wantedProduct before calling.
+func routableAndAvailable(rows []Account, wantedProduct string) (workers, available []Account) {
 	for _, r := range rows {
 		if RoutableWorker(r) && (wantedProduct == "" || strings.ToLower(r.Product) == wantedProduct) {
 			workers = append(workers, r)
 		}
 	}
+	for _, r := range workers {
+		if accountCanBeOffered(r) {
+			available = append(available, r)
+		}
+	}
+	return workers, available
+}
+
+// RouteAccount chooses an account by task difficulty and model tier over an annotated roster.
+func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback, strictTier bool,
+	product string, pol Policy) RouteResult {
+	task := ClassifyTask(taskText, taskClass, pol)
+	wantedProduct := strings.ToLower(product)
+	workers, available := routableAndAvailable(rows, wantedProduct)
 	if len(workers) == 0 {
 		reason := "no worker accounts"
 		if wantedProduct != "" {
@@ -173,12 +185,6 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 		}
 		return RouteResult{OK: false, Reason: reason, Task: task, TargetTier: task.TargetTier,
 			BlockedTargetAccounts: []BlockedAccount{}}
-	}
-	var available []Account
-	for _, r := range workers {
-		if accountCanBeOffered(r) {
-			available = append(available, r)
-		}
 	}
 	target := task.TargetTier
 	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)

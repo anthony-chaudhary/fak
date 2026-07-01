@@ -217,6 +217,19 @@ type SeatPool struct {
 	Seats         []Seat         `json:"seats"`
 }
 
+// leaseWorkerLabel resolves the human-readable worker id for a lease: the recorded worker
+// name, else the PID, else "?" when neither is known.
+func leaseWorkerLabel(ls Lease) string {
+	w := ls.Worker
+	if w == "" && ls.PID != nil {
+		w = itoa(*ls.PID)
+	}
+	if w == "" {
+		w = "?"
+	}
+	return w
+}
+
 func leaseMatchesSeat(lease Lease, row Account) bool {
 	ldir, rdir := lease.Dir, row.Dir
 	if ldir != "" {
@@ -252,14 +265,7 @@ func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 			if leaseMatchesSeat(ls, row) {
 				bound = append(bound, i)
 				matched[i] = true
-				w := ls.Worker
-				if w == "" && ls.PID != nil {
-					w = itoa(*ls.PID)
-				}
-				if w == "" {
-					w = "?"
-				}
-				workers = append(workers, w)
+				workers = append(workers, leaseWorkerLabel(ls))
 			}
 		}
 		available := accountCanBeOffered(row)
@@ -286,14 +292,7 @@ func BuildSeatPool(rows []Account, leases []Lease, product string) SeatPool {
 	var unbound []UnboundLease
 	for i, ls := range leases {
 		if !matched[i] {
-			w := ls.Worker
-			if w == "" && ls.PID != nil {
-				w = itoa(*ls.PID)
-			}
-			if w == "" {
-				w = "?"
-			}
-			unbound = append(unbound, UnboundLease{Worker: w, Tag: ls.Tag, Dir: ls.Dir})
+			unbound = append(unbound, UnboundLease{Worker: leaseWorkerLabel(ls), Tag: ls.Tag, Dir: ls.Dir})
 		}
 	}
 	sort.SliceStable(seats, func(i, j int) bool {

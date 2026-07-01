@@ -223,14 +223,7 @@ func safeOpencodeModels(acctDir string) map[string]string {
 // accountProfile returns the model-routing profile for an account row, honoring policy
 // overrides by exact account, product:tag, short tag, or product.
 func accountProfile(row Account, pol Policy) Profile {
-	product := row.Product
-	if product == "" {
-		product = AccountProduct(row.Account)
-	}
-	tag := row.Tag
-	if tag == "" {
-		tag = AccountTag(row.Account)
-	}
+	product, tag := resolveProductTag(row)
 	for _, key := range profileKeys(product, row.Account, tag) {
 		if ov, ok := pol.AccountProfiles[key]; ok {
 			return cleanProfile(ov, "policy:"+key)
@@ -265,6 +258,21 @@ func accountProfile(row Account, pol Policy) Profile {
 	return cleanProfile(ProfileOverride{ModelTier: 3, Agent: product}, "default:unknown")
 }
 
+// resolveProductTag returns the account's product and tag, falling back to deriving each
+// from the account name when the row leaves it blank. Shared by accountProfile and
+// accountRouteWeight before they consult profileKeys.
+func resolveProductTag(row Account) (product, tag string) {
+	product = row.Product
+	if product == "" {
+		product = AccountProduct(row.Account)
+	}
+	tag = row.Tag
+	if tag == "" {
+		tag = AccountTag(row.Account)
+	}
+	return product, tag
+}
+
 // profileKeys is the policy-override key precedence shared by accountProfile and
 // accountRouteWeight: exact account, product:account, product:tag, short tag, product.
 func profileKeys(product, account, tag string) []string {
@@ -276,14 +284,7 @@ func accountRouteWeight(row Account, pol Policy) int {
 	if len(pol.RouteWeights) == 0 {
 		return 0
 	}
-	product := row.Product
-	if product == "" {
-		product = AccountProduct(row.Account)
-	}
-	tag := row.Tag
-	if tag == "" {
-		tag = AccountTag(row.Account)
-	}
+	product, tag := resolveProductTag(row)
 	for _, key := range profileKeys(product, row.Account, tag) {
 		if w, ok := pol.RouteWeights[key]; ok {
 			return w
