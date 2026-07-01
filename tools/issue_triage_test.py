@@ -75,8 +75,25 @@ class ClassifyScoreTest(unittest.TestCase):
 
     def test_bare_issue_gets_all_missing_tags(self):
         g = m.classify(_issue(4, labels=[], idle_days_ago=0), NOW, {})
-        for tag in ("needs-priority", "needs-kind", "needs-area", "bare"):
+        for tag in ("needs-priority", "needs-kind", "needs-area", "needs-milestone",
+                    "bare"):
             self.assertIn(tag, g["tags"])
+
+    def test_needs_milestone_when_absent(self):
+        # A fully-labeled issue with no milestone is still a triage gap: it never
+        # rolls up onto the roadmap. needs-milestone fires; score is unchanged
+        # (the tag surfaces attention, it does not reweight the ranking).
+        i = _issue(7, labels=["priority/P2", "bug", "gpu"], idle_days_ago=0)
+        g = m.classify(i, NOW, {})
+        self.assertIn("needs-milestone", g["tags"])
+        self.assertEqual(g["score"], 150 + 40)  # P2 base + bug; no milestone penalty
+
+    def test_no_needs_milestone_when_present(self):
+        i = _issue(8, labels=["priority/P1", "bug", "gpu"], idle_days_ago=0)
+        i["milestone"] = {"title": "Generation G0 - Now / Immediate"}
+        g = m.classify(i, NOW, {})
+        self.assertNotIn("needs-milestone", g["tags"])
+        self.assertEqual(g["milestone"], "Generation G0 - Now / Immediate")
 
     def test_stale_tag_for_idle_non_inprogress(self):
         g = m.classify(_issue(5, labels=["priority/P2"], idle_days_ago=70), NOW, {})
@@ -140,6 +157,17 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(scores, sorted(scores, reverse=True))
         self.assertEqual(rep["rows"][0]["number"], 11)
         self.assertEqual(rep["counts"]["open"], 2)
+
+    def test_needs_milestone_counted_and_rendered(self):
+        # One milestoned, one not -> count is 1, and the bucket renders in markdown.
+        milestoned = _issue(20, labels=["priority/P2", "bug", "gpu"])
+        milestoned["milestone"] = {"title": "M"}
+        bare_ms = _issue(21, labels=["priority/P2", "bug", "gpu"])  # milestone None
+        rep = m.build_report([milestoned, bare_ms], NOW)
+        self.assertEqual(rep["counts"]["needs_milestone"], 1)
+        md = m.render_md(rep, "2026-06-01")
+        self.assertIn("needs-milestone 1", md)
+        self.assertIn("Needs a milestone", md)
 
     def test_main_json_exit0_with_monkeypatched_fetch(self):
         orig = m.fetch_issues

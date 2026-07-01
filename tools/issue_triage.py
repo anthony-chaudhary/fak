@@ -2,8 +2,8 @@
 """GitHub issue triage + rank + garden helper for fleet — the /issue-triage helper.
 
 READ-ONLY. Fetches OPEN issues via `gh`, classifies each into triage buckets
-(missing priority/kind/area, orphaned high-prio, stale, dormant question, likely-
-duplicate, bare), ranks them into a deterministic attention order, and emits:
+(missing priority/kind/area/milestone, orphaned high-prio, stale, dormant question,
+likely-duplicate, bare), ranks them into a deterministic attention order, and emits:
 
   --json            the full triage model (stdout)
   --md OUT          a dated human report
@@ -173,6 +173,8 @@ def classify(issue: dict, now: dt.datetime, dup_groups: dict[int, int]) -> dict:
         tags.append("needs-kind")
     if not (labels & AREA):
         tags.append("needs-area")
+    if not issue.get("milestone"):
+        tags.append("needs-milestone")
     if not labels:
         tags.append("bare")
     if is_p0p1 and not in_prog and not assigned:
@@ -316,7 +318,8 @@ def render_md(report: dict, as_of: str) -> str:
         "",
         f"**Open issues:** {c['open']}  ·  needs-priority {c['needs_priority']}  "
         f"·  needs-kind {c['needs_kind']}  ·  needs-area {c['needs_area']}  ·  "
-        f"orphan {c['orphan']}  ·  stale {c['stale']}  ·  dormant-Q {c['dormant_question']}  "
+        f"needs-milestone {c['needs_milestone']}  ·  orphan {c['orphan']}  ·  "
+        f"stale {c['stale']}  ·  dormant-Q {c['dormant_question']}  "
         f"·  likely-dup {c['likely_dup']}  ·  bare {c['bare']}",
         "",
         "> Read-only pass. The `--actions` manifest proposes only mechanical moves "
@@ -349,6 +352,9 @@ def render_md(report: dict, as_of: str) -> str:
 
     bucket("Needs a priority label", "needs-priority",
            "Review and set priority/P0|P1|P2. The single largest triage gap.")
+    bucket("Needs a milestone (roadmap placement)", "needs-milestone",
+           "Assign a milestone so the issue rolls up to a generation/theme and shows "
+           "on the roadmap early — the planning gap that keeps the backlog off the map.")
     bucket("Orphan P0/P1 (no in-progress, no assignee)", "orphan",
            "Highest-leverage: claim or explicitly defer.")
     bucket("Stale (open + idle, not in-progress)", "stale",
@@ -416,6 +422,7 @@ def build_report(issues: list[dict], now: dt.datetime) -> dict:
             "needs_priority": count("needs-priority"),
             "needs_kind": count("needs-kind"),
             "needs_area": count("needs-area"),
+            "needs_milestone": count("needs-milestone"),
             "orphan": count("orphan"),
             "stale": count("stale"),
             "dormant_question": count("dormant-question"),
