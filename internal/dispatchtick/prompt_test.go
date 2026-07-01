@@ -99,6 +99,36 @@ func TestIssuePromptStatesGitLawsAndHonestBlock(t *testing.T) {
 	}
 }
 
+func TestIssuePromptLocksTrunkOnlyAndForbidsBranchEscape(t *testing.T) {
+	p := RenderIssuePrompt(sampleIssuePrompt())
+	for _, want := range []string{
+		"Work on the configured development branch `main` ONLY.",
+		"Never branch / new-worktree (the OFF_TRUNK guard refuses it).",
+		"No push / tag / force-push / history-rewrite / reset / clean / checkout-of-tracked-files.",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing trunk-only guard %q:\n%s", want, p)
+		}
+	}
+	lower := strings.ToLower(p)
+	for _, forbidden := range []string{
+		"feature branch",
+		"side branch",
+		"git checkout -b",
+		"git switch -c",
+		"git branch ",
+		"git worktree add",
+		"create a branch",
+		"create a new worktree",
+		"open a branch",
+		"open a new worktree",
+	} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("prompt contains branch-escape wording %q:\n%s", forbidden, p)
+		}
+	}
+}
+
 func TestIssuePromptUsesConfiguredDevelopmentBranch(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.DevelopmentBranch = "dev"
