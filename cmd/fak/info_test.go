@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 func TestGroupThousands(t *testing.T) {
@@ -87,6 +88,41 @@ func TestRenderGuardInfoLineCacheAttributionSplit(t *testing.T) {
 		if !strings.Contains(line, want) {
 			t.Fatalf("cache attribution line missing %q:\n%s", want, line)
 		}
+	}
+}
+
+func TestRenderGuardInfoLineAssumptionsLedgerGolden(t *testing.T) {
+	var v guardInfoVars
+	v.Assumptions = []gateway.SessionAssumption{
+		{TraceID: "run-1", Key: "gpu-route", Statement: "lab GPU pool", Source: "inferred", Confidence: 0.60, Expiry: "next reset"},
+		{TraceID: "run-1", Key: "deployment-target", Statement: "staging", Source: "user_stated", Confidence: 0.95, Expiry: "session", SourceRef: "user:turn-3"},
+		{TraceID: "run-1", Key: "budget", Statement: "2h wall clock", Source: "queried", Confidence: 1, Expiry: "2026-07-01T12:00:00Z", SourceRef: "answer:turn-4"},
+	}
+
+	got := renderGuardInfoLine(v)
+	want := "assumptions: 3 active — queried budget=2h wall clock (100%, expires 2026-07-01T12:00:00Z, from answer:turn-4); user-stated deployment-target=staging (95%, expires session, from user:turn-3); inferred gpu-route=lab GPU pool (60%, expires next reset)"
+	if !strings.Contains(got, want) {
+		t.Fatalf("assumption ledger render mismatch:\nwant suffix: %s\ngot: %s", want, got)
+	}
+}
+
+func TestGuardInfoVarsDecodesAssumptionsLedger(t *testing.T) {
+	raw := []byte(`{
+		"assumptions":[
+			{"trace_id":"run-1","key":"deployment-target","statement":"staging","source":"user_stated","confidence":0.95,"expiry":"session","source_ref":"user:turn-3"},
+			{"trace_id":"run-1","key":"gpu-route","statement":"lab GPU pool","source":"inferred","confidence":0.60,"expiry":"next reset"},
+			{"trace_id":"run-1","key":"budget","statement":"2h wall clock","source":"queried","confidence":1,"expiry":"2026-07-01T12:00:00Z","source_ref":"answer:turn-4"}
+		]
+	}`)
+	var v guardInfoVars
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode guardInfoVars assumptions block: %v", err)
+	}
+	if len(v.Assumptions) != 3 {
+		t.Fatalf("assumptions decoded %d rows, want 3: %+v", len(v.Assumptions), v.Assumptions)
+	}
+	if v.Assumptions[0].Source != "user_stated" || v.Assumptions[2].Expiry == "" {
+		t.Fatalf("assumptions fields not decoded: %+v", v.Assumptions)
 	}
 }
 
@@ -466,6 +502,115 @@ func TestGuardInfoPrefixStabilityFromScoreLowersAllFields(t *testing.T) {
 	}
 	if got.FirstDivergentKind != string(cachemeta.SegSealed) || !got.ProtectedSpanBroken || got.Reason != score.Reason {
 		t.Fatalf("lowered fields mismatch: %+v", got)
+	}
+}
+
+// TestGuardInfoManagedContextTextNilIsSilent mirrors
+// TestGuardInfoPrefixStabilityTextNilIsSilent: a gateway build that has not wired
+// issue #1577's managed-context tracker yet must render NOTHING extra, not a
+// fabricated all-zero status line.
+func TestGuardInfoManagedContextTextNilIsSilent(t *testing.T) {
+	if got := guardInfoManagedContextText(nil); got != "" {
+		t.Fatalf("nil managed-context block should render empty, got %q", got)
+	}
+}
+
+// TestGuardInfoManagedContextTextRendersEachSeverity proves the `fak info` line
+// reflects the closed #1579 severity for a live session, and that the six named
+// signals (issue #1577's In-scope list) all appear in the rendered text — the same
+// contract internal/scorecardpane.RenderContextStatusLine's own tests prove directly,
+// checked here at the guardInfoVars wire-shape seam.
+func TestGuardInfoManagedContextTextRendersEachSeverity(t *testing.T) {
+	cases := []struct {
+		name     string
+		severity string
+	}{
+		{"fresh", "fresh"},
+		{"constrained", "constrained"},
+		{"query_needed", "query_needed"},
+		{"stale_risk", "stale_risk"},
+		{"budget_draining", "budget_draining"},
+		{"reset_imminent", "reset_imminent"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &guardInfoManagedContext{
+				Severity: tc.severity, ResidentTokens: 4000, BudgetTokens: 10000,
+				CacheState: "stable", ResetCount: 1, QueryNeededCount: 2, StaleAssumptionCount: 3,
+			}
+			got := guardInfoManagedContextText(m)
+			for _, want := range []string{
+				"context: " + tc.severity, "resident 4,000 tok", "budget left 6,000 tok",
+				"cache stable", "resets 1", "query-needed 2", "stale 3",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s: text %q missing %q", tc.name, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderGuardInfoLineAppendsManagedContext proves the status line grows a
+// "· context: ..." suffix once the gateway reports the managed-context block, and
+// stays unchanged when the block is absent — the same append-don't-alter contract
+// TestRenderGuardInfoLineAppendsPrefixStability proves for the prefix-stability
+// suffix, and the concrete evidence for the issue's done condition ("fak info ...
+// show a one-line managed-context status for live sessions").
+func TestRenderGuardInfoLineAppendsManagedContext(t *testing.T) {
+	var v guardInfoVars
+	v.Inference.Turns = 1
+	base := renderGuardInfoLine(v)
+	if strings.Contains(base, "context:") {
+		t.Fatalf("no ManagedContext block should not mention context:: %s", base)
+	}
+
+	v.ManagedContext = &guardInfoManagedContext{Severity: "fresh", ResidentTokens: 100, BudgetTokens: 1000}
+	withCtx := renderGuardInfoLine(v)
+	if !strings.Contains(withCtx, "context: fresh") {
+		t.Fatalf("line missing managed-context suffix: %s", withCtx)
+	}
+	if !strings.HasPrefix(withCtx, base) {
+		t.Fatalf("managed-context text should be appended, not alter the existing line: base=%q got=%q", base, withCtx)
+	}
+}
+
+// TestGuardInfoVarsDecodesManagedContext mirrors TestGuardInfoVarsDecodesPrefixStability:
+// the JSON wire shape must round-trip field-for-field, and the block must stay a nil
+// pointer (omitted) when absent so "no field yet" and "explicitly zero" stay
+// distinguishable.
+func TestGuardInfoVarsDecodesManagedContext(t *testing.T) {
+	raw := []byte(`{
+		"managed_context":{
+			"severity":"budget_draining",
+			"resident_tokens":8000,
+			"budget_tokens":10000,
+			"cache_state":"mutated",
+			"reset_count":2,
+			"query_needed_count":5,
+			"stale_assumption_count":1
+		}
+	}`)
+	var v guardInfoVars
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode guardInfoVars managed_context block: %v", err)
+	}
+	if v.ManagedContext == nil {
+		t.Fatal("managed_context did not decode")
+	}
+	if v.ManagedContext.Severity != "budget_draining" || v.ManagedContext.ResidentTokens != 8000 ||
+		v.ManagedContext.BudgetTokens != 10000 || v.ManagedContext.CacheState != "mutated" ||
+		v.ManagedContext.ResetCount != 2 || v.ManagedContext.QueryNeededCount != 5 ||
+		v.ManagedContext.StaleAssumptionCount != 1 {
+		t.Fatalf("managed_context fields not decoded: %+v", v.ManagedContext)
+	}
+
+	var absent guardInfoVars
+	if err := json.Unmarshal([]byte(`{}`), &absent); err != nil {
+		t.Fatalf("decode empty object: %v", err)
+	}
+	if absent.ManagedContext != nil {
+		t.Fatalf("managed_context must stay nil when the gateway omits the block, got %+v", absent.ManagedContext)
 	}
 }
 

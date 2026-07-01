@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
 	"golang.org/x/term"
 )
 
@@ -84,6 +86,32 @@ type guardInfoVars struct {
 	// guardInfoPrefixStabilityText for the rendering and `fak info --prefix-transcript`
 	// for the offline compute-and-display path over a recorded session.
 	PrefixStability *guardInfoPrefixStability `json:"prefix_stability"`
+	// ManagedContext is issue #1577's concise context status: resident/budget tokens,
+	// cache state, reset count, query-needed count, and stale-assumption count, folded
+	// through internal/scorecardpane.RenderContextStatusLine. Pointer, like VCache and
+	// PrefixStability, so a gateway build that has not wired a live managed-context
+	// tracker yet omits the block rather than fabricating all-zero counts.
+	ManagedContext *guardInfoManagedContext `json:"managed_context"`
+	// Assumptions is the public, active assumption ledger mirrored from the gateway's
+	// live session state. It is rendered from /debug/vars only; `fak info` never reads
+	// hidden transcript text to infer what the model might be assuming.
+	Assumptions []gateway.SessionAssumption `json:"assumptions,omitempty"`
+}
+
+// guardInfoManagedContext is the wire shape of a
+// scorecardpane.ContextStatusSignals, field-for-field, so a gateway that starts
+// populating debugVarsResponse.ManagedContext needs no change on this side.
+// Severity is the closed #1579 ContextHealthSeverity string; the renderer fails safe
+// on any value scorecardpane.ContextHealthSeverity itself would (an empty or foreign
+// severity renders as "(unset)"/"unknown(...)" rather than a fabricated tier).
+type guardInfoManagedContext struct {
+	Severity             string `json:"severity"`
+	ResidentTokens       int    `json:"resident_tokens"`
+	BudgetTokens         int    `json:"budget_tokens"`
+	CacheState           string `json:"cache_state"`
+	ResetCount           int    `json:"reset_count"`
+	QueryNeededCount     int    `json:"query_needed_count"`
+	StaleAssumptionCount int    `json:"stale_assumption_count"`
 }
 
 // guardInfoPrefixStability is the wire shape of a cachemeta.PrefixStabilityScore, field-
@@ -621,7 +649,143 @@ func renderGuardInfoLine(v guardInfoVars) string {
 	if prefix := guardInfoPrefixStabilityText(v.PrefixStability); prefix != "" {
 		line += " · " + prefix
 	}
+	if ctx := guardInfoManagedContextText(v.ManagedContext); ctx != "" {
+		line += " · " + ctx
+	}
+	if assumptions := guardInfoAssumptionsText(v.Assumptions); assumptions != "" {
+		line += " · " + assumptions
+	}
 	return line
+}
+
+func guardInfoAssumptionsText(rows []gateway.SessionAssumption) string {
+	rows = cleanGuardInfoAssumptions(rows)
+	if len(rows) == 0 {
+		return ""
+	}
+	limit := len(rows)
+	if limit > 3 {
+		limit = 3
+	}
+	parts := make([]string, 0, limit+1)
+	for _, row := range rows[:limit] {
+		detail := fmt.Sprintf("%s %s (%s, expires %s",
+			guardInfoAssumptionSource(row.Source),
+			guardInfoAssumptionSubject(row),
+			guardInfoAssumptionConfidence(row.Confidence),
+			guardInfoAssumptionExpiry(row.Expiry))
+		if ref := strings.TrimSpace(row.SourceRef); ref != "" {
+			detail += ", from " + ref
+		}
+		detail += ")"
+		parts = append(parts, detail)
+	}
+	if extra := len(rows) - limit; extra > 0 {
+		parts = append(parts, fmt.Sprintf("+%d more", extra))
+	}
+	return fmt.Sprintf("assumptions: %d active — %s", len(rows), strings.Join(parts, "; "))
+}
+
+func cleanGuardInfoAssumptions(rows []gateway.SessionAssumption) []gateway.SessionAssumption {
+	out := make([]gateway.SessionAssumption, 0, len(rows))
+	for _, row := range rows {
+		row.TraceID = strings.TrimSpace(row.TraceID)
+		row.Key = strings.TrimSpace(row.Key)
+		row.Statement = strings.TrimSpace(row.Statement)
+		row.Source = strings.TrimSpace(row.Source)
+		row.Expiry = strings.TrimSpace(row.Expiry)
+		row.SourceRef = strings.TrimSpace(row.SourceRef)
+		if row.Key == "" && row.Statement == "" {
+			continue
+		}
+		out = append(out, row)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].TraceID != out[j].TraceID {
+			return out[i].TraceID < out[j].TraceID
+		}
+		if out[i].Key != out[j].Key {
+			return out[i].Key < out[j].Key
+		}
+		if out[i].Statement != out[j].Statement {
+			return out[i].Statement < out[j].Statement
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out
+}
+
+func guardInfoAssumptionSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "user_stated", "user-stated", "user":
+		return "user-stated"
+	case "inferred", "infer":
+		return "inferred"
+	case "queried", "query", "asked":
+		return "queried"
+	case "witnessed", "witness":
+		return "witnessed"
+	case "stale":
+		return "stale"
+	case "unknown":
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
+func guardInfoAssumptionSubject(row gateway.SessionAssumption) string {
+	key := strings.TrimSpace(row.Key)
+	stmt := strings.TrimSpace(row.Statement)
+	switch {
+	case key != "" && stmt != "" && key != stmt:
+		return key + "=" + stmt
+	case key != "":
+		return key
+	case stmt != "":
+		return stmt
+	default:
+		return "assumption"
+	}
+}
+
+func guardInfoAssumptionConfidence(v float64) string {
+	if v < 0 {
+		v = 0
+	}
+	if v > 1 {
+		v = 1
+	}
+	return fmt.Sprintf("%.0f%%", v*100)
+}
+
+func guardInfoAssumptionExpiry(expiry string) string {
+	if expiry = strings.TrimSpace(expiry); expiry != "" {
+		return expiry
+	}
+	return "none"
+}
+
+// guardInfoManagedContextText renders issue #1577's concise managed-context status
+// (resident/budget tokens, cache state, reset count, query-needed count, stale-
+// assumption count) via internal/scorecardpane.RenderContextStatusLine, or "" when
+// the gateway has not reported the block at all (a nil pointer — the same "no field
+// yet" contract guardInfoPrefixStabilityText already keeps for PrefixStability, so a
+// build that has not wired a live managed-context tracker renders nothing extra
+// rather than a fabricated all-zero line).
+func guardInfoManagedContextText(m *guardInfoManagedContext) string {
+	if m == nil {
+		return ""
+	}
+	return scorecardpane.RenderContextStatusLine(scorecardpane.ContextStatusSignals{
+		Severity:             scorecardpane.ContextHealthSeverity(m.Severity),
+		ResidentTokens:       m.ResidentTokens,
+		BudgetTokens:         m.BudgetTokens,
+		CacheState:           m.CacheState,
+		ResetCount:           m.ResetCount,
+		QueryNeededCount:     m.QueryNeededCount,
+		StaleAssumptionCount: m.StaleAssumptionCount,
+	})
 }
 
 // guardInfoPrefixStabilityText renders issue #1602's managed-context prefix-stability
@@ -813,7 +977,7 @@ func guardInfoStartupHeader(base string, interval time.Duration, width int) stri
 // guardInfoCompactLegend is the one-line guide for a narrow pane — the same plain words as the
 // full guide, shortened so it fits beside the live status row instead of wrapping over it.
 func guardInfoCompactLegend() string {
-	return "what this means: cache = is re-using text saving money · safety = what fak blocked/fixed/set aside · replies/busy/running = how it's going"
+	return "what this means: cache = is re-using text saving money · safety = what fak blocked/fixed/set aside · assumptions = facts/source/confidence/expiry"
 }
 
 // guardInfoLegend explains each part of the live line in plain words, printed once at the top
@@ -824,6 +988,7 @@ func guardInfoLegend() string {
 	fmt.Fprintln(&b, "what this means:")
 	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
 	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
+	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
 	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")
 	return b.String()
 }
