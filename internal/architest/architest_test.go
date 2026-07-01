@@ -251,6 +251,7 @@ var tier = map[string]int{
 	"commitissuelink":  1, // pure checker (#1812): flags a commit that carries this repo's ship-stamp trailer but whose subject omits a scannable #N, guessing the issue from a body Fixes/Closes/Resolves trailer when one exists; stdlib-only, off the hot path.
 	"unwitnessedclaim": 1, // pure checker (#1816): flags an open issue whose latest comment reads as a self-reported completion claim, rendering the missing-witness/recovery-action comment without closing the issue; stdlib-only, off the hot path.
 	"closebatch":       1, // pure batch planner (#1826): groups witnessed-closeable issues into dry-run batches, pricing each against mutationbudget.Guard and naming a rollback note; never closes an issue itself, off the hot path.
+	"skipledger":       1, // pure skip/select ledger fold (#1776): turns one dispatchorder.Result into per-candidate rows (issue, lane, reason, safety/capacity category, timestamp) for later rate-loss audit; imports only dispatchorder (tier 1), off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -72,11 +72,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchUnwitnessedClaim(stdout, stderr, argv[1:])
 	case "close-batch":
 		return runDispatchCloseBatch(stdout, stderr, argv[1:])
+	case "skip-ledger":
+		return runDispatchSkipLedger(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, or close-batch)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, or skip-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -250,6 +252,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch commit-links [--range REV..REV] [--json]
   fak dispatch unwitnessed-claim --issue N [--live] [--json]
   fak dispatch close-batch [--in FILE] [--batch-size N] [--reserve N] [--now UNIX] [--json]
+  fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -289,5 +292,12 @@ against a rate-limit budget (--in JSON's "budget", or a default 5000/hour window
 mutationbudget guard, and naming a "gh issue reopen" rollback for each batch. It is a plan
 only -- it never closes an issue; arming a live close arm on top of an ALLOW batch is later,
 separate work.
+skip-ledger runs the same order decision as "order" over --in candidates, then persists one
+JSONL row per candidate (issue, lane, disposition, reason, category, timestamp) to
+.dispatch-runs/skip-ledger.jsonl under --workspace, so rate loss is auditable later. A skip's
+category is safety for a collision-risk hold, capacity for every other skip reason (worker
+already live, cooldown, superseded duplicate, generation held); a selected candidate carries
+no category. It never spawns a worker or touches GitHub -- the only side effect is the local
+append.
 `)
 }
