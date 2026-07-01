@@ -400,6 +400,62 @@ func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftHoldsMissingDoneConditionOrWitness(t *testing.T) {
+	cases := []struct {
+		name         string
+		done         string
+		witness      string
+		wantOK       bool
+		wantMissing  string
+		wantDispatch string
+	}{
+		{
+			name:         "complete issue passes",
+			done:         "The lint reports no missing proof sections.",
+			witness:      "go test ./internal/issuecontract",
+			wantOK:       true,
+			wantDispatch: Dispatchable,
+		},
+		{
+			name:         "missing done condition is held",
+			witness:      "go test ./internal/issuecontract",
+			wantMissing:  "done_condition",
+			wantDispatch: TriageOnly,
+		},
+		{
+			name:         "missing witness is held",
+			done:         "The lint reports missing witness sections.",
+			wantMissing:  "witness",
+			wantDispatch: TriageOnly,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			review := ReviewIssueDraft(IssueDraft{
+				Number: 1815,
+				Title:  "dispatch: require issue proof sections",
+				Body:   issueProofSectionBody(tc.done, tc.witness),
+			}, Options{})
+			if review.OK != tc.wantOK || review.Dispatchability != tc.wantDispatch {
+				t.Fatalf("review = %+v, want ok=%v dispatchability=%s", review, tc.wantOK, tc.wantDispatch)
+			}
+			if tc.wantOK {
+				if len(review.Reasons) != 0 || len(review.MissingFields) != 0 || review.Score.Total != 100 {
+					t.Fatalf("complete issue review = %+v, want no findings and full score", review)
+				}
+				return
+			}
+			if !has(review.Reasons, ReasonScopeIncomplete) {
+				t.Fatalf("reasons = %+v, want %s", review.Reasons, ReasonScopeIncomplete)
+			}
+			if !has(review.MissingFields, tc.wantMissing) {
+				t.Fatalf("missing fields = %+v, want %s", review.MissingFields, tc.wantMissing)
+			}
+		})
+	}
+}
+
 func TestReviewIssueDraftUsesGeneratedMarkerKey(t *testing.T) {
 	body := "<!-- fak-task-handoff-key: task_push_next/issue-sync -->\n" + strings.Join([]string{
 		"### Parent context",
@@ -639,6 +695,42 @@ func TestReviewIssueDraftParsesCombinedDoneWitnessSection(t *testing.T) {
 	if !review.OK || review.Score.Witness != 25 {
 		t.Fatalf("review = %+v, want combined done/witness parsed as ready", review)
 	}
+}
+
+func issueProofSectionBody(done, witness string) string {
+	parts := []string{
+		"### Parent context",
+		"fleet-400iph issue contract",
+		"### Current state",
+		"Generated issues can enter the dispatch queue.",
+		"### Why this is next",
+		"The queue needs proof sections before high-throughput workers pick items.",
+		"### Working spine",
+		"issue draft -> proof-section lint -> safe dispatch candidate",
+		"### Priority context",
+		"Working path: issue draft -> linter -> dispatch. Current blocker: missing proof sections. Unblocks: high-throughput worker launch. Not polish: this is the smallest proof gate.",
+		"### In scope",
+		"Lint the issue body for proof sections.",
+		"### Out of scope",
+		"Do not launch workers or mutate live issues.",
+	}
+	if strings.TrimSpace(done) != "" {
+		parts = append(parts, "### Done condition", done)
+	}
+	if strings.TrimSpace(witness) != "" {
+		parts = append(parts, "### Witness", witness)
+	}
+	parts = append(parts,
+		"### Acceptance gate",
+		"go test ./internal/issuecontract",
+		"### Lane",
+		"issuecontract",
+		"### Path hints",
+		"- `internal/issuecontract/contract.go`",
+		"### Closure binding",
+		"Resolving commit cites #1815.",
+	)
+	return strings.Join(parts, "\n")
 }
 
 func has(items []string, want string) bool {
