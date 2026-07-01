@@ -76,6 +76,37 @@ func TestRunDispatchCommitLinks_RealGitRepo(t *testing.T) {
 	}
 }
 
+func TestRunDispatchCommitLinksWitnessJSONBucketsUnresolved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "witness.json")
+	fixture := `{"issues":[
+		{"number":10,"sha":"aaa111","subject":"fix(dispatch): close work (fak cmd)","audit_verdict":"OK","audit_witness":"diff-witnessed","reachable":true},
+		{"number":11,"sha":"bbb222","subject":"fix(dispatch): close #11 (fak cmd)","audit_verdict":"FAIL","audit_witness":"diff-witnessed","reachable":true},
+		{"number":12,"sha":"ccc333","subject":"fix(dispatch): close #12 (fak cmd)","audit_verdict":"OK","audit_witness":"diff-witnessed","reachable":false},
+		{"number":13,"sha":"ddd444","subject":"fix(dispatch): close #13 (fak cmd)","audit_verdict":"OK","audit_witness":"subject-only","reachable":true}
+	]}`
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDispatchCommitLinks(&stdout, &stderr, []string{"--witness-json", path})
+	if code != 0 {
+		t.Fatalf("runDispatchCommitLinks exit=%d, stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"witness-failures: scanned 4 issue(s)",
+		"#10  aaa111  missing_issue_link",
+		"#11  bbb222  failed_audit",
+		"#12  ccc333  stale_sha",
+		"#13  ddd444  insufficient_diff_evidence",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("witness report missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func runGitFixture(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

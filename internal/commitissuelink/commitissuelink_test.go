@@ -71,6 +71,77 @@ func TestFold_BodyIssueRefWithoutSubjectRef_StillAFinding(t *testing.T) {
 	}
 }
 
+func TestFoldUnresolvedCommitLinkedIssues_MapsReasons(t *testing.T) {
+	reachable := true
+	stale := false
+	rep := FoldUnresolvedCommitLinkedIssues([]CommitLinkedIssue{
+		{
+			Number:       10,
+			SHA:          "aaa111",
+			Subject:      "fix(dispatch): close shipped work (fak cmd)",
+			AuditVerdict: "OK",
+			AuditWitness: "diff-witnessed",
+			Reachable:    &reachable,
+		},
+		{
+			Number:       11,
+			SHA:          "bbb222",
+			Subject:      "fix(dispatch): close #11 (fak cmd)",
+			AuditVerdict: "FAIL",
+			AuditWitness: "diff-witnessed",
+			Reachable:    &reachable,
+		},
+		{
+			Number:       12,
+			SHA:          "ccc333",
+			Subject:      "fix(dispatch): close #12 (fak cmd)",
+			AuditVerdict: "OK",
+			AuditWitness: "diff-witnessed",
+			Reachable:    &stale,
+		},
+		{
+			Number:       13,
+			SHA:          "ddd444",
+			Subject:      "fix(dispatch): close #13 (fak cmd)",
+			AuditVerdict: "OK",
+			AuditWitness: "subject-only",
+			Reachable:    &reachable,
+		},
+		{
+			Number:       14,
+			SHA:          "eee555",
+			Subject:      "fix(dispatch): close #14 (fak cmd)",
+			AuditVerdict: "OK",
+			AuditWitness: "diff-witnessed",
+			Reachable:    &reachable,
+		},
+	})
+	if rep.Scanned != 5 {
+		t.Fatalf("scanned = %d, want 5", rep.Scanned)
+	}
+	got := map[int]string{}
+	for _, f := range rep.Findings {
+		got[f.Number] = f.Reason
+	}
+	want := map[int]string{
+		10: ReasonMissingIssueLink,
+		11: ReasonFailedAudit,
+		12: ReasonStaleSHA,
+		13: ReasonInsufficientDiffEvidence,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("findings = %+v, want one per unresolved reason", rep.Findings)
+	}
+	for number, reason := range want {
+		if got[number] != reason {
+			t.Fatalf("#%d reason = %q, want %q (all findings %+v)", number, got[number], reason, rep.Findings)
+		}
+	}
+	if _, ok := got[14]; ok {
+		t.Fatalf("fully witnessed issue #14 must not be a finding: %+v", rep.Findings)
+	}
+}
+
 func TestFold_Empty(t *testing.T) {
 	rep := Fold(nil)
 	if rep.Scanned != 0 || len(rep.Findings) != 0 {

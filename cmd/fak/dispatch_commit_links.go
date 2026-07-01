@@ -9,9 +9,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -30,9 +32,24 @@ func runDispatchCommitLinks(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch commit-links", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rng := fs.String("range", "HEAD~50..HEAD", "git revision range to scan (git rev-list syntax)")
+	witnessJSON := fs.String("witness-json", "", "read commit-linked issue witness facts and bucket unresolved close-gate failures")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
 	if err := fs.Parse(argv); err != nil {
 		return 2 // flag already printed the error
+	}
+
+	if strings.TrimSpace(*witnessJSON) != "" {
+		rows, err := readCommitLinkedIssueWitnesses(*witnessJSON)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak dispatch commit-links: %v\n", err)
+			return 1
+		}
+		rep := commitissuelink.FoldUnresolvedCommitLinkedIssues(rows)
+		if *asJSON {
+			return encodeJSONOrFail(stdout, stderr, rep, "fak dispatch commit-links")
+		}
+		renderUnresolvedCommitLinks(stdout, rep)
+		return 0
 	}
 
 	raw, err := gitLogForCommitLinks(*rng)
@@ -63,6 +80,24 @@ func gitLogForCommitLinks(rng string) (string, error) {
 		return "", fmt.Errorf("git log %s: %w: %s", rng, err, strings.TrimSpace(errBuf.String()))
 	}
 	return out.String(), nil
+}
+
+func readCommitLinkedIssueWitnesses(path string) ([]commitissuelink.CommitLinkedIssue, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read witness json %s: %w", path, err)
+	}
+	var arr []commitissuelink.CommitLinkedIssue
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr, nil
+	}
+	var obj struct {
+		Issues []commitissuelink.CommitLinkedIssue `json:"issues"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("parse witness json %s: %w", path, err)
+	}
+	return obj.Issues, nil
 }
 
 // parseCommitLinkLog is the pure half of the shell: splitting the delimited
@@ -109,5 +144,16 @@ func renderCommitLinks(w io.Writer, rep commitissuelink.Report) {
 		} else {
 			fmt.Fprintf(w, "  %s  %s  (no #N anywhere -- unlinked)\n", sha, f.Subject)
 		}
+	}
+}
+
+func renderUnresolvedCommitLinks(w io.Writer, rep commitissuelink.UnresolvedReport) {
+	fmt.Fprintf(w, "fak dispatch commit-links witness-failures: scanned %d issue(s)\n", rep.Scanned)
+	if len(rep.Findings) == 0 {
+		fmt.Fprintln(w, "  no unresolved commit-linked issues")
+		return
+	}
+	for _, f := range rep.Findings {
+		fmt.Fprintf(w, "  #%d  %s  %s  %s\n", f.Number, f.SHA, f.Reason, f.Detail)
 	}
 }

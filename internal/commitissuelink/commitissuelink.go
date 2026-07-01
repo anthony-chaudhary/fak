@@ -19,7 +19,11 @@
 // -- resolving a revision range, reading `git log` -- is the caller's job.
 package commitissuelink
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // subjectIssueRE matches a #N issue reference occurring in the subject line.
 var subjectIssueRE = regexp.MustCompile(`#(\d+)`)
@@ -58,6 +62,40 @@ type Report struct {
 	Findings []Finding `json:"findings"`
 }
 
+const (
+	ReasonMissingIssueLink         = "missing_issue_link"
+	ReasonFailedAudit              = "failed_audit"
+	ReasonStaleSHA                 = "stale_sha"
+	ReasonInsufficientDiffEvidence = "insufficient_diff_evidence"
+)
+
+// CommitLinkedIssue is a pre-read issue/commit/audit fact for the close-gate
+// witness bucket. It lets callers surface issues that already mention a
+// resolving commit but cannot be witnessed-closed yet. The fold is pure: callers
+// decide how to read GitHub, git ancestry, and dos commit-audit.
+type CommitLinkedIssue struct {
+	Number       int    `json:"number"`
+	Title        string `json:"title,omitempty"`
+	SHA          string `json:"sha"`
+	Subject      string `json:"subject,omitempty"`
+	Body         string `json:"body,omitempty"`
+	AuditVerdict string `json:"audit_verdict,omitempty"`
+	AuditWitness string `json:"audit_witness,omitempty"`
+	Reachable    *bool  `json:"reachable,omitempty"`
+}
+
+type UnresolvedFinding struct {
+	Number int    `json:"number"`
+	SHA    string `json:"sha,omitempty"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+}
+
+type UnresolvedReport struct {
+	Scanned  int                 `json:"scanned"`
+	Findings []UnresolvedFinding `json:"findings"`
+}
+
 // Fold scans commits for the ship-stamp trailer without a subject-line #N. A
 // commit whose subject already carries any #N is never a finding, regardless
 // of the trailer or the body.
@@ -77,4 +115,54 @@ func Fold(commits []Commit) Report {
 		rep.Findings = append(rep.Findings, f)
 	}
 	return rep
+}
+
+func FoldUnresolvedCommitLinkedIssues(rows []CommitLinkedIssue) UnresolvedReport {
+	rep := UnresolvedReport{Scanned: len(rows)}
+	for _, row := range rows {
+		reason, detail, ok := unresolvedReason(row)
+		if !ok {
+			continue
+		}
+		rep.Findings = append(rep.Findings, UnresolvedFinding{
+			Number: row.Number,
+			SHA:    shortSHA(row.SHA),
+			Reason: reason,
+			Detail: detail,
+		})
+	}
+	return rep
+}
+
+func unresolvedReason(row CommitLinkedIssue) (reason, detail string, ok bool) {
+	if row.Number > 0 && !commitTextNamesIssue(row, row.Number) {
+		return ReasonMissingIssueLink, fmt.Sprintf("commit text does not name #%d", row.Number), true
+	}
+	if row.Reachable != nil && !*row.Reachable {
+		return ReasonStaleSHA, "commit is not reachable from the audited trunk", true
+	}
+	verdict := strings.ToUpper(strings.TrimSpace(row.AuditVerdict))
+	witness := strings.TrimSpace(row.AuditWitness)
+	if verdict != "" && verdict != "OK" {
+		return ReasonFailedAudit, "commit-audit verdict=" + verdict, true
+	}
+	if verdict == "OK" && witness != "diff-witnessed" && witness != "data-witnessed" {
+		if witness == "" {
+			witness = "missing"
+		}
+		return ReasonInsufficientDiffEvidence, "commit-audit witness=" + witness, true
+	}
+	return "", "", false
+}
+
+func commitTextNamesIssue(row CommitLinkedIssue, number int) bool {
+	re := regexp.MustCompile(fmt.Sprintf(`#%d\b`, number))
+	return re.MatchString(row.Subject) || re.MatchString(row.Body)
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
