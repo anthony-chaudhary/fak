@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -35,6 +36,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
+
+const guardResourceSampleInterval = 2 * time.Second
 
 // guardDefaultPolicyJSON is the day-to-day capability floor `fak guard` enforces when
 // the operator names no --policy. It is embedded in the binary so `fak guard` works
@@ -121,6 +124,7 @@ func cmdGuard(argv []string) {
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
+	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended as a durable row to docs/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
 	denyAllContinue := fs.String("deny-all-continue", guardPreCompactModeEnforce, "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn (the floor refused EVERY proposed tool call, which the wire reports as end_turn — a stop the agent did not choose): off|shadow|enforce. ENFORCE by default (the false-stop fix), bounded by --deny-all-max consecutive continues; shadow logs the would-continue while letting the turn end; off disables. Claude children only.")
@@ -776,6 +780,18 @@ func cmdGuard(argv []string) {
 	}
 	srv.MarkReady()
 
+	// First-class harness resource tracking (epic #2044): start sampling THIS process's
+	// own hardware-resource use (CPU/RSS/IO — the guard process hosts the in-process
+	// gateway on the same PID, so this covers the whole kernel half) now that the gateway
+	// is ready and before the agent takes the terminal. The wrapped child (the agent half)
+	// is folded from its exit state in finishGuardChildAndReport. nil when disabled, which
+	// every downstream call tolerates.
+	var resSampler *harnessres.Sampler
+	if *resourceStats {
+		resSampler = harnessres.New()
+		resSampler.Start(guardResourceSampleInterval)
+	}
+
 	// Deferred session durability (#1833): only now — after the gateway is bound and
 	// ready, off the critical path to the agent exec — do the git-spawning setup for an
 	// opted-in durable session (guardDurabilityWanted, decided above from --session-id /
@@ -916,6 +932,7 @@ func cmdGuard(argv []string) {
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
 		printGuardMCPNote(os.Stderr, mcpInstall)
+		printGuardCapabilitiesNote(os.Stderr, mcpInstall)
 		switch {
 		case debugStatsStderr:
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
@@ -948,10 +965,10 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode, resSampler)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode, resSampler)
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"

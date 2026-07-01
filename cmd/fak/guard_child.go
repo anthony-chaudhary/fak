@@ -21,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
@@ -757,7 +758,7 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 // command with a resume flag appended — so a crash caused by auth expiry self-heals within this
 // guarded session instead of always needing a manual re-run. credPath is empty when guard is not
 // pinning the Claude subscription upstream, which makes the check an unconditional no-op there.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	for {
 		child := buildGuardChild(command, injected, pinUpstream)
 		runErr := child.Run()
@@ -765,19 +766,19 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command = next
 			continue
 		}
-		finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
+		finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode, sampler)
 		return
 	}
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 	var extraEnv [][2]string
 	restarts := 0
 	for {
 		child := buildGuardChild(command, injected, pinUpstream, extraEnv...)
 		wait := make(chan error, 1)
 		if err := child.Start(); err != nil {
-			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
+			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode, sampler)
 			return
 		}
 		go func() { wait <- child.Wait() }()
@@ -787,7 +788,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command = next
 				continue
 			}
-			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
+			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode, sampler)
 			return
 		case ev := <-restarter.events:
 			if restarter.limit > 0 && restarts >= restarter.limit {
@@ -795,7 +796,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode, sampler)
 				return
 			}
 			restarts++
@@ -881,11 +882,21 @@ func guardSummaryResetPrefix(isTTY bool) string {
 	return "\x1b[0m\x1b[?25h"
 }
 
-func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
+func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
 
 	// Tear the gateway down and report what the kernel decided this session.
+	if sampler != nil {
+		sampler.FoldChildExit(childState)
+	}
 	cancel()
 	serr := <-serveErr
+	if sampler != nil {
+		snap := sampler.Stop()
+		appendHarnessResources("guard", provider, agentName, snap)
+		if !quiet {
+			fmt.Fprintln(os.Stderr, "fak guard: "+snap.Report())
+		}
+	}
 	if !quiet {
 		// The wrapped agent (Claude Code) paints a full-screen alternate-screen TUI over this
 		// same terminal and, on a crash or an abnormal exit, can tear it down mid-escape-sequence
