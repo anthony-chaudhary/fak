@@ -67,6 +67,33 @@ path contention and creates stale work in the later streams. One global
 admission pass with generation-aware gates keeps the trunk collision model
 visible.
 
+## Conflict Arbitration Value
+
+When two candidate workers collide on a lease, generation value is a decision
+input, not a bypass. Apply this ladder:
+
+1. Refuse any candidate that lacks a concrete witness, a safe runtime exposure
+   story, or a narrow path scope.
+2. If the remaining candidates still overlap the same tree, choose at most one
+   winner for the current wave.
+3. Prefer the candidate whose witness retires the strongest live blocker:
+   - `gen/now`: current product, operator, release, or trunk-hygiene blocker.
+   - `gen/next`: repeat dispatch friction, dogfood gap, schema/gate gap, or
+     near-term foundation that keeps now-work cheaper.
+   - `gen/second-next`: architecture, compatibility, or scheduling decision
+     that is already blocking a `gen/next` path or causing repeated collisions.
+   - `gen/future`: research or standards signal with an explicit consumer,
+     decision deadline, or external observation window.
+4. If generation value is tied, rank by priority label, lane pressure, witness
+   freshness, and the lane's oldest/newest tiebreak.
+5. If the value is still unclear, do not guess. Emit a human-escalation row that
+   names the candidates, shared paths, conflicting horizons, and the missing
+   decision.
+
+This makes horizon value explicit without making horizon a priority class. A
+high-value `gen/future` decision can win a research window, and a weak `gen/now`
+cleanup can lose a collision when it has no fresh witness or safe path.
+
 ## Contention Handling
 
 | Condition | Scheduler action |
