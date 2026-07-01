@@ -79,10 +79,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"runtime"
 	"sort"
-
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // TopologyGenome is one searched fleet-graph shape — the three levers fanout.go/dos.toml
@@ -455,13 +452,7 @@ func RunTopologySearch(ctx context.Context, cfg TopologySearchConfig, cm FanoutC
 	)
 
 	return &TopologySearchReport{
-		Provenance: Provenance{
-			AppVersion:  appversion.Current(),
-			Command:     "turnbench.RunTopologySearch",
-			GoVersion:   runtime.Version(),
-			OS:          runtime.GOOS,
-			GeneratedBy: "fak/internal/turnbench (fleet-topology genome search over model-free replay)",
-		},
+		Provenance:             baseProvenance("turnbench.RunTopologySearch", "fak/internal/turnbench (fleet-topology genome search over model-free replay)"),
 		Cost:                   cm,
 		Seed:                   cfg.Seed,
 		Iterations:             len(candidates) - 1,

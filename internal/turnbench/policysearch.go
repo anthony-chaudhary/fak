@@ -60,13 +60,11 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"runtime"
 	"sort"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // HarmfulSinkMetaKey marks a recorded call as a HARMFUL SINK in its Call.Meta — the
@@ -466,13 +464,7 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 	)
 
 	return &PolicySearchReport{
-		Provenance: Provenance{
-			AppVersion:  appversion.Current(),
-			Command:     "turnbench.RunPolicySearch",
-			GoVersion:   runtime.Version(),
-			OS:          runtime.GOOS,
-			GeneratedBy: "fak/internal/turnbench (policy-genome search over model-free replay)",
-		},
+		Provenance:             baseProvenance("turnbench.RunPolicySearch", "fak/internal/turnbench (policy-genome search over model-free replay)"),
 		Cost:                   cm,
 		Seed:                   cfg.Seed,
 		Iterations:             len(candidates) - 1,

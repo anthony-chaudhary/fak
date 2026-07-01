@@ -5,8 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
+
+// baseProvenance builds the shared five-field provenance stamp used by every report whose
+// only per-command variation is the command name and the generated-by blurb. The
+// app/go/os invariants (AppVersion, GoVersion, OS=runtime.GOOS) are byte-identical across
+// them, and SliceID/WorkloadHash stay at their zero values. Reports that additionally
+// carry a SliceID or WorkloadHash (or a GOARCH-qualified OS) build their Provenance inline.
+func baseProvenance(command, generatedBy string) Provenance {
+	return Provenance{
+		AppVersion:  appversion.Current(),
+		Command:     command,
+		GoVersion:   runtime.Version(),
+		OS:          runtime.GOOS,
+		GeneratedBy: generatedBy,
+	}
+}
 
 // marshalArtifact renders v as stable-indented JSON with a trailing newline — the
 // canonical artifact encoding shared by every report/sweep JSON() method in this

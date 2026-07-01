@@ -55,10 +55,7 @@ package turnbench
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sort"
-
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // FloorCounters is the security-floor slice of the kernel counters: the three verdict
@@ -298,13 +295,7 @@ func RunFleetCounterfactual(ctx context.Context, corpus []DivHistInput, cm CostM
 	}
 
 	return &FleetCounterfactualReport{
-		Provenance: Provenance{
-			AppVersion:  appversion.Current(),
-			Command:     "turnbench.RunFleetCounterfactual",
-			GoVersion:   runtime.Version(),
-			OS:          runtime.GOOS,
-			GeneratedBy: "fak/internal/turnbench (fleet counterfactual replay)",
-		},
+		Provenance:      baseProvenance("turnbench.RunFleetCounterfactual", "fak/internal/turnbench (fleet counterfactual replay)"),
 		Cost:            cm,
 		Traces:          len(corpus),
 		Policies:        len(byPolicy),

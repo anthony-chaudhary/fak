@@ -50,10 +50,7 @@ package turnbench
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // UltraLongThreshold is the per-agent context length (tokens) at or above which a session
@@ -355,13 +352,7 @@ func (r *LongContextReport) JSON() []byte { return marshalArtifact(r) }
 func RunLongContextLadder(s ModelShape, shapes []SessionShape, cm CostModel) *LongContextReport {
 	cm = withCostModelVersion(cm)
 	rep := &LongContextReport{
-		Provenance: Provenance{
-			AppVersion:  appversion.Current(),
-			Command:     "turnbench.RunLongContextLadder",
-			GoVersion:   runtime.Version(),
-			OS:          runtime.GOOS,
-			GeneratedBy: "fak/internal/turnbench (ultra-long-context work floor)",
-		},
+		Provenance:         baseProvenance("turnbench.RunLongContextLadder", "fak/internal/turnbench (ultra-long-context work floor)"),
 		Cost:               cm,
 		Model:              s,
 		Threshold:          UltraLongThreshold,

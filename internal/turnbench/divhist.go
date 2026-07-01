@@ -23,10 +23,7 @@ package turnbench
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sort"
-
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
 // DivHistInput is one corpus entry: a frozen trace plus the candidate policy arms to
@@ -124,13 +121,7 @@ func RunDivergenceHistogram(ctx context.Context, corpus []DivHistInput, cm CostM
 	}
 
 	return &DivergenceHistogramReport{
-		Provenance: Provenance{
-			AppVersion:  appversion.Current(),
-			Command:     "turnbench.RunDivergenceHistogram",
-			GoVersion:   runtime.Version(),
-			OS:          runtime.GOOS,
-			GeneratedBy: "fak/internal/turnbench (divergence-rate histogram)",
-		},
+		Provenance:      baseProvenance("turnbench.RunDivergenceHistogram", "fak/internal/turnbench (divergence-rate histogram)"),
 		Traces:          len(corpus),
 		Arms:            cells,
 		Cells:           cells,
