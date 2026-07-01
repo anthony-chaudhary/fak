@@ -108,6 +108,29 @@ surfaces. Request/reply (correlated `Send` + a reply channel) and shared-state (
 existing `Ref` CAS pool) are the natural further options; they compose from the same
 primitives.
 
+## Bounded worker corrections
+
+The orchestrator-to-worker correction path is a typed protocol over the same bus,
+not an exception to the trust floor:
+
+- The worker exposes a live `WorkerStatus` row. Its `Digest()` is the status
+  witness.
+- The orchestrator sends a `CorrectionRequest` that cites that digest, the worker
+  id, issue, task id, lane, and a message bounded by `DefaultCorrectionMaxBytes`.
+- `SendCorrection` refuses stale or missing status evidence as `UNWITNESSED`,
+  oversize text as `OVERSIZE`, malformed shape as `MALFORMED`, and worker/issue/lane
+  mismatch as `TRUST_VIOLATION`.
+- On allow, the correction is delivered as a shared-scope `a2achan` message. The
+  worker `AckCorrection`s with the same correction id and a `WorkerAction` whose
+  `correction_id` is the structural "reflected in next action" witness.
+
+This gives an orchestrator a bounded mid-flight steering channel without letting a
+raw `SendMessage` launder trust or widen privilege. The issue witness is
+`TestCorrectionChannelAckAndActionWitness`: an in-scope correction is allowed,
+acked, and reflected in the worker's next action; the paired
+`TestCorrectionOutOfScopeStillTrustViolation` proves an out-of-scope correction is
+still refused with `TRUST_VIOLATION`.
+
 ## Where it sits in the shared-state ladder
 
 `a2achan` is the **live message** rung of fak's shared-state story. It proves that

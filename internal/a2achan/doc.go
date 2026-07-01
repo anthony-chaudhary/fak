@@ -63,6 +63,19 @@
 //     scope/taint violation; abi.ReasonDefaultDeny for an un-negotiated cap) — no
 //     new reason is minted into the 12-reason set.
 //
+// # Bounded worker corrections
+//
+// The correction helpers are a typed protocol over the same Bus, not a second
+// trust path. A worker exposes a live WorkerStatus row; the orchestrator's
+// CorrectionRequest must cite that row's Digest(), match the worker/issue/task/lane
+// scope exactly, and stay under DefaultCorrectionMaxBytes. SendCorrection refuses
+// missing or stale status evidence as ReasonUnwitnessed, oversize text as
+// ReasonOversize, malformed shape as ReasonMalformed, and out-of-scope correction
+// attempts as ReasonTrustViolation. The worker AckCorrection includes a
+// WorkerAction carrying the same correction id, and ObserveCorrection requires
+// both acked and reflected before the orchestrator can treat the correction as
+// witnessed.
+//
 // # Honest scope (the wedge)
 //
 // The InKernel locale is REAL and shipped: a process-global, adjudicated,
