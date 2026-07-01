@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 // guard_provider.go — upstream provider + base-URL resolution and the child
@@ -34,34 +36,32 @@ func resolveGuardProvider(flagValue, command string) (provider string, autodetec
 
 // guardDetectProvider infers the upstream wire from the wrapped agent's command when the
 // operator passes no --provider, so naming a known agent (`fak guard -- codex`) Just
-// Works without also having to say `--provider openai`. The table lists agents that read
-// a base-URL variable guard injects: ANTHROPIC_BASE_URL for the Anthropic wire, and
-// OPENAI_BASE_URL plus OPENAI_API_BASE for the OpenAI wire (guard sets both, so Aider,
-// which reads OPENAI_API_BASE rather than OPENAI_BASE_URL, connects too). An agent that
-// reads neither (Goose's split OPENAI_HOST + OPENAI_BASE_PATH, an IDE-extension settings
-// panel) is left to an explicit --provider/--env on purpose, rather than autodetected into
-// a base URL it ignores. Matching is on the executable's base name, lowercased, with any
-// directory and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix stripped, so an
-// absolute path or a wrapped launcher still matches.
+// Works without also having to say `--provider openai`. It now delegates to the
+// internal/harnessprofile registry (C2, #1953): the built-in profiles are the SINGLE
+// source of truth for which agent maps to which wire, so this is a thin lookup rather
+// than a duplicate switch. The recognized names read a base-URL variable guard injects:
+// ANTHROPIC_BASE_URL for the Anthropic wire, and OPENAI_BASE_URL plus OPENAI_API_BASE for
+// the OpenAI wire (guard sets both, so Aider, which reads OPENAI_API_BASE rather than
+// OPENAI_BASE_URL, connects too). An agent no profile recognizes (Goose's split
+// OPENAI_HOST + OPENAI_BASE_PATH, an IDE-extension settings panel) is left to an explicit
+// --provider/--env on purpose — a miss (recognized=false), which resolveGuardProvider
+// turns into the historical anthropic fallback.
 //
 // Codex is special: current Codex docs prefer the OpenAI **Responses API** and deprecate
-// Chat Completions for future removal, so it autodetects to the `openai-responses` wire
-// rather than the plain chat-completions `openai`. That selects fak's Responses adapter
-// for the UPSTREAM proxy hop, so current Codex models round-trip on the recommended wire.
-// The inbound side already accepts Codex's `/v1/responses` (#925); installGuardCodexConfig
+// Chat Completions for future removal, so its profile's wire is `openai-responses` rather
+// than the plain chat-completions `openai`. That selects fak's Responses adapter for the
+// UPSTREAM proxy hop, so current Codex models round-trip on the recommended wire. The
+// inbound side already accepts Codex's `/v1/responses` (#925); installGuardCodexConfig
 // does the matching repoint, since Codex reads its provider base from config.toml, not the
-// OPENAI_BASE_URL env var guard injects for the other OpenAI-wire agents.
+// OPENAI_BASE_URL env var guard injects for the other OpenAI-wire agents. The profile's
+// Lookup ports guardAgentBaseName's normalization, so an absolute path or a wrapped
+// launcher still matches identically.
 func guardDetectProvider(command string) (provider string, recognized bool) {
-	switch guardAgentBaseName(command) {
-	case "claude", "claude-code":
-		return "anthropic", true
-	case "codex":
-		return "openai-responses", true
-	case "opencode", "aider", "hermes":
-		return "openai", true
-	default:
+	profile, ok := harnessprofile.Lookup(command)
+	if !ok {
 		return "", false
 	}
+	return string(profile.Wire), true
 }
 
 // guardAgentBaseName normalizes a wrapped-agent command to its lowercased executable base
@@ -83,24 +83,15 @@ func guardAgentBaseName(command string) string {
 	return base
 }
 
-// guardDefaultBaseURL maps a provider to its public API base URL. The anthropic host
-// is given WITHOUT a /v1 suffix (the gateway's Anthropic client appends the Messages
-// path), matching the witnessed `fak serve --provider anthropic --base-url
-// https://api.anthropic.com`. An unknown provider returns "" so the caller can require
-// an explicit --base-url instead of guessing.
+// guardDefaultBaseURL maps a provider (wire) to its public API base URL. It delegates to
+// harnessprofile.BaseURLForWire (C2, #1953) so the wire→URL table lives in ONE place: the
+// anthropic host is given WITHOUT a /v1 suffix (the gateway's Anthropic client appends the
+// Messages path), matching the witnessed `fak serve --provider anthropic --base-url
+// https://api.anthropic.com`; both OpenAI wires share the public /v1 base (the chat adapter
+// appends "/chat/completions", the Responses adapter appends "/responses"). An unknown wire
+// returns "" so the caller can require an explicit --base-url instead of guessing.
 func guardDefaultBaseURL(provider string) string {
-	switch provider {
-	case "anthropic":
-		return "https://api.anthropic.com"
-	case "openai", "openai-responses":
-		// Both OpenAI wires share the public base ending in /v1: the chat adapter appends
-		// "/chat/completions" and the Responses adapter appends "/responses", so the same
-		// https://api.openai.com/v1 root serves `fak guard -- codex` (Responses) and the
-		// plain chat-completions agents alike.
-		return "https://api.openai.com/v1"
-	default:
-		return ""
-	}
+	return harnessprofile.BaseURLForWire(harnessprofile.Wire(provider))
 }
 
 // guardLocalModelDecision decides whether `fak guard` should run a LOCAL in-kernel model
