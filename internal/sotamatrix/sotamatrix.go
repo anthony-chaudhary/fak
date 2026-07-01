@@ -20,7 +20,7 @@
 //   - the PRIOR_ART pre-commit gate (internal/hooks/gate_priorart.go) - which,
 //     when a commit touches a kernel file matched by a row's FileGlobs, prints the
 //     row's SOTA reference + route and suggests a `Prior-art:` trailer (advisory).
-//   - tools/sota_coverage_scorecard.py             - which cross-checks every row
+//   - `fak sota-coverage-scorecard`                - which cross-checks every row
 //     against the tree (the fak-path file must exist; the row must carry a primary
 //     SOTA link and an oracle), so the matrix cannot silently drift from reality.
 //
