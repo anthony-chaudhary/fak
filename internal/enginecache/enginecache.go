@@ -234,7 +234,15 @@ func (c Client) exactSpanResolvedEndpoint() (string, error) {
 	if raw == "" {
 		return "", fmt.Errorf("enginecache: exact-span endpoint is not configured")
 	}
-	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && u.Host != "" {
+	// A "://" marks raw as an attempted absolute URL, not a bare path: resolve it
+	// only if it fully validates (scheme+host), rather than silently falling
+	// through to the bare-path join below with a malformed absolute URL as the
+	// "path" (e.g. "http://" or an unparseable "://bad").
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return "", fmt.Errorf("enginecache: exact-span endpoint %q must be a full URL with scheme and host", raw)
+		}
 		return raw, nil
 	}
 	base, err := controlBase(c.BaseURL)

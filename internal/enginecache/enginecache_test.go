@@ -393,6 +393,81 @@ func TestInvalidateNoopsWithoutDirectives(t *testing.T) {
 	}
 }
 
+// TestInvalidateMalformedBaseURLErrorsClearly pins the EXISTING controlBase
+// validation (in place since the initial public release, well before #1938 was
+// filed): a BaseURL missing a scheme/host errors with a typed config message
+// before any network call, never a generic I/O error from post(). This was
+// previously untested, not previously unvalidated.
+func TestInvalidateMalformedBaseURLErrorsClearly(t *testing.T) {
+	cases := map[string]string{
+		"":            "base URL is required",
+		"not-a-url":   "base URL must include scheme and host",
+		"http://":     "base URL must include scheme and host",
+		"example.com": "base URL must include scheme and host",
+	}
+	for baseURL, wantSubstr := range cases {
+		res, err := Client{Engine: EngineSGLang, BaseURL: baseURL}.Invalidate(
+			context.Background(),
+			[]cachemeta.ExternalInvalidationDirective{sampleDirective("sglang")},
+		)
+		if err == nil {
+			t.Fatalf("BaseURL=%q: expected a validation error, got nil (res=%+v)", baseURL, res)
+		}
+		if !strings.Contains(err.Error(), wantSubstr) {
+			t.Fatalf("BaseURL=%q: error = %q, want it to contain %q", baseURL, err, wantSubstr)
+		}
+	}
+}
+
+// TestInvalidateMalformedExactSpanEndpointErrorsClearly is the #1938 fix: an
+// ExactSpanEndpoint that looks like an attempted absolute URL ("://" present)
+// but fails to fully validate must error clearly rather than being silently
+// resolved as a bare relative path joined onto BaseURL.
+func TestInvalidateMalformedExactSpanEndpointErrorsClearly(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server must not be called with a malformed exact-span endpoint")
+	}))
+	defer ts.Close()
+
+	for _, endpoint := range []string{"http://", "://bad"} {
+		res, err := Client{
+			Engine:            EngineSGLang,
+			BaseURL:           ts.URL,
+			ExactSpanEndpoint: endpoint,
+		}.Invalidate(context.Background(), []cachemeta.ExternalInvalidationDirective{sampleDirective("sglang")})
+		if err == nil {
+			t.Fatalf("ExactSpanEndpoint=%q: expected a validation error, got nil (res=%+v)", endpoint, res)
+		}
+		if !strings.Contains(err.Error(), "must be a full URL with scheme and host") {
+			t.Fatalf("ExactSpanEndpoint=%q: error = %q, want the scheme+host message", endpoint, err)
+		}
+	}
+}
+
+// TestInvalidateNoSupportedEngineErrors pins the empty-engine refusal named in
+// #1938's acceptance criteria: no Engine configured and no directive names a
+// recognized provider/engine/residency owner refuses cleanly.
+func TestInvalidateNoSupportedEngineErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server must not be called when no engine can be inferred")
+	}))
+	defer ts.Close()
+
+	res, err := Client{BaseURL: ts.URL}.Invalidate(
+		context.Background(),
+		[]cachemeta.ExternalInvalidationDirective{sampleDirective("some-unrecognized-vendor")},
+	)
+	if err == nil {
+		t.Fatal("expected a no-supported-engine error")
+	}
+	if !strings.Contains(err.Error(), "no supported engine in directives") {
+		t.Fatalf("error = %q, want the no-supported-engine message", err)
+	}
+	if !reflect.DeepEqual(res, Result{}) {
+		t.Fatalf("no-engine refusal should return a zero result, got %+v", res)
+	}
+}
+
 func TestInvalidateReportsHTTPFailure(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "busy", http.StatusBadRequest)
