@@ -1,0 +1,28 @@
+{
+  "_comment": "fak branch-regime GitHub Ruleset template for the HOT DEVELOPMENT branch. Apply after creating refs/heads/dev and before switching worker prompts to dev. This mirrors the local OFF_TRUNK/no-force/no-delete floor for the high-churn integration branch; release/front-door protection is a separate template in github-main-ruleset.json.",
+  "name": "fak-dev-trunk-laws",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/dev"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
+    { "type": "required_signatures" },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "ci-fast" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

@@ -1,0 +1,29 @@
+{
+  "_comment": "fak branch-regime GitHub Ruleset template for the CLEAN PUBLIC/RELEASE front door. Apply only after the release-promotion actor/path is ready. Ordinary workers should not push here; promotion commits must already have the release/main checks named below. If your forge requires a bot/app exception for promotion, add that bypass actor explicitly before active enforcement.",
+  "name": "fak-main-release-laws",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
+    { "type": "required_signatures" },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "ci" },
+          { "context": "release-artifacts" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

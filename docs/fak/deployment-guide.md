@@ -515,21 +515,44 @@ The templates and a one-command apply wrapper live in
 [`tools/forge-rulesets/`](https://github.com/anthony-chaudhary/fak/tree/main/tools/forge-rulesets):
 
 ```bash
-# GitHub (needs `gh auth login`); edit the status-check contexts in the JSON first:
-tools/forge-rulesets/apply.sh github  <owner>/<repo>
+# GitHub (needs `gh auth login`); edit the selected status-check contexts first:
+tools/forge-rulesets/apply.sh github  <owner>/<repo> current
+
+# Branch-regime cutover: create dev first, then apply the role-specific templates:
+tools/forge-rulesets/apply.sh github  <owner>/<repo> dev
+tools/forge-rulesets/apply.sh github  <owner>/<repo> main
 
 # GitLab (needs GITLAB_TOKEN with api scope):
 tools/forge-rulesets/apply.sh gitlab  <project-id>
 ```
 
-- `github-ruleset.json` — a Repository Ruleset targeting `main`: non-fast-forward
-  (no force-push), deletion protection, required linear history, required signatures, and
-  required status checks (`ci`). Mirrors `OFF_TRUNK` and the no-force-push law server-side.
+- `github-ruleset.json` — the current no-cutover Repository Ruleset targeting `main`:
+  non-fast-forward (no force-push), deletion protection, required linear history, required
+  signatures, and required status checks (`ci`). Mirrors `OFF_TRUNK` and the no-force-push
+  law server-side for today's single hot trunk.
+- `github-dev-ruleset.json` — the branch-regime development template targeting `dev`:
+  deletion and force-push protection, linear history, signatures, and the development CI
+  check (`ci-fast`). This is the high-churn integration branch ordinary workers target
+  after `[branch_roles].development_branch` moves to `dev`.
+- `github-main-ruleset.json` — the branch-regime public/release template targeting `main`:
+  deletion and force-push protection, linear history, signatures, and release/front-door
+  checks (`ci`, `release-artifacts`). Ordinary workers should not push to this branch; if
+  the forge needs a release-promotion bot/app exception, add that bypass actor explicitly
+  before active enforcement.
 - `gitlab-push-rules.json` — Push Rules with a `commit_message_regex` mirroring the
   Conventional-Commits + `(fak <leaf>)` stamp (the same shape `tools/commit_stamp_doctor.py`
   recognizes) and `prevent_secrets` mirroring the leak scan.
 - `apply.sh` — the `gh api` / GitLab Push Rules API wrappers plus a Terraform stub so the
   ruleset can live in IaC and not drift silently.
+
+Branch-regime ordering is deliberate:
+
+1. Create `dev` from the verified current trunk.
+2. Apply `github-dev-ruleset.json` to protect the hot development branch.
+3. Shadow-run agents and CI while `[branch_roles]` still names the no-cutover regime.
+4. Switch `[branch_roles].development_branch` and worker prompts to `dev`.
+5. Apply `github-main-ruleset.json` only after the release-promotion path is ready, so
+   `main` becomes the clean public front door instead of an ordinary worker target.
 
 This is pure defense-in-depth that **composes with, and does not overlap,** fak's core
 value: fak adjudicates *before the call runs* (it refuses a hazard with a reason,
