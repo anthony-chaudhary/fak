@@ -17,6 +17,10 @@ candidate; the garden tick reaps one class of stale work; a scorecard run report
 debt number; `fak loop drive` settles one `GOAL.md` witness. Each is a **normal
 loop**: keyed on a *task* and a cadence, its tick *does* one concrete thing, and it
 is a **leaf** in the work graph — it acts on the codebase or the world directly.
+When a super loop spans generation-labeled work, use the
+[generation super-loop budget contract](generation-super-loop-budgets.md) to keep
+time, token, worker, and review capacity explicit without turning generation into
+priority, a branch, or a runtime gate.
 
 A **super loop** sits one altitude up. It is keyed on an operator **intent**, and its
 tick is a **traversal over other loops**, not a task.
