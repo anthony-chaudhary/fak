@@ -75,6 +75,7 @@ type KPIPayload struct {
 	KPI     string   `json:"kpi"`
 	Group   string   `json:"group"`
 	Score   int      `json:"score"`
+	Value   float64  `json:"value"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
 	Soft    []string `json:"soft"`
@@ -426,8 +427,8 @@ func Build(opts Options) ScorecardPayload {
 
 	finding, next, reason := "loops_durable_observable_native", "hold the line; re-run after a loop session — keep firing loops registered and guard-wrapped", ""
 	if ok {
-		reason = "loop-score: durability " + itoa(dScore) + "/100, self-report " + itoa(sScore) +
-			"/100, dogfood " + itoa(gScore) + "/100, composite " + itoa(composite) + "/100 (" + grade +
+		reason = "loop-score: durability value " + valueStr(dScore) + ", self-report value " + valueStr(sScore) +
+			", dogfood value " + valueStr(gScore) + ", composite value " + valueStr(composite) + " (" + grade + ", legacy score " + itoa(composite) +
 			"); the background loops are registered, observable, and fak-native; zero hard gaps"
 	} else {
 		finding = "loopscore_debt"
@@ -435,9 +436,9 @@ func Build(opts Options) ScorecardPayload {
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		reason = "loop-score carries " + itoa(debt) + " debt (durability " + itoa(dScore) +
-			"/100, self-report " + itoa(sScore) + "/100, dogfood " + itoa(gScore) + "/100, composite " +
-			itoa(composite) + " " + grade + "): " + strings.Join(keys, ", ")
+		reason = "loop-score carries " + itoa(debt) + " debt (durability value " + valueStr(dScore) +
+			", self-report value " + valueStr(sScore) + ", dogfood value " + valueStr(gScore) + ", composite value " +
+			valueStr(composite) + " " + grade + ", legacy score " + itoa(composite) + "): " + strings.Join(keys, ", ")
 		lead := hardFail[0]
 		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
 	}
@@ -457,9 +458,12 @@ func Build(opts Options) ScorecardPayload {
 		ExtraCorpus: map[string]any{
 			"loopscore_debt":    debt,
 			"score":             composite,
+			"durability_value":  scorecard.Round3(scorecard.ValueFromScore(float64(dScore))),
 			"grade":             grade,
 			"durability_score":  dScore,
+			"self_report_value": scorecard.Round3(scorecard.ValueFromScore(float64(sScore))),
 			"self_report_score": sScore,
+			"dogfood_value":     scorecard.Round3(scorecard.ValueFromScore(float64(gScore))),
 			"dogfood_score":     gScore,
 			"active_loops":      ev.ActiveLoops,
 			"registered":        ev.Registered,
@@ -493,9 +497,9 @@ func Render(p ScorecardPayload) string {
 	c := p.Corpus
 	lines := []string{
 		"loop-score — " + p.Verdict + " (" + p.Finding + ")",
-		"  loopscore_debt: " + anyStr(c["loopscore_debt"]) + "   composite " + anyStr(c["score"]) +
-			"/100 [" + anyStr(c["grade"]) + "]   (durability " + anyStr(c["durability_score"]) +
-			"; self-report " + anyStr(c["self_report_score"]) + "; dogfood " + anyStr(c["dogfood_score"]) + ")",
+		"  loopscore_debt: " + anyStr(c["loopscore_debt"]) + "   value " + anyStr(c["value"]) +
+			" [" + anyStr(c["grade"]) + "]   (legacy score " + anyStr(c["score"]) + "; durability value " + anyStr(c["durability_value"]) +
+			"; self-report value " + anyStr(c["self_report_value"]) + "; dogfood value " + anyStr(c["dogfood_value"]) + ")",
 		"  evidence: " + anyStr(c["active_loops"]) + " active loop(s); " + anyStr(c["registered"]) +
 			" registered; " + anyStr(c["fired"]) + " firing; " + anyStr(c["dark"]) + " dark; " +
 			anyStr(c["guard_wrapped"]) + " guard-wrapped; " + anyStr(c["witnessed"]) + " witnessed",
@@ -525,9 +529,10 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString(`description: "Whether fak's always-on agentic background loops are first-class durable processes — they survive a system restart (auto-restart), self-report their own status, and run through fak's own tooling — re-derived from the loop ledger + job registry fak writes, never a self-report."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# fak loop scorecard\n\n")
-	b.WriteString("**loopscore_debt: " + anyStr(c["loopscore_debt"]) + "**; composite **" + anyStr(c["score"]) +
-		"/100 (" + anyStr(c["grade"]) + ")**; durability " + anyStr(c["durability_score"]) + "/100; self-report " +
-		anyStr(c["self_report_score"]) + "/100; dogfood " + anyStr(c["dogfood_score"]) + "/100\n\n")
+	b.WriteString("**loopscore_debt: " + anyStr(c["loopscore_debt"]) + "**; value **" + anyStr(c["value"]) +
+		" (" + anyStr(c["grade"]) + ")**; legacy score " + anyStr(c["score"]) +
+		"; durability value " + anyStr(c["durability_value"]) + "; self-report value " +
+		anyStr(c["self_report_value"]) + "; dogfood value " + anyStr(c["dogfood_value"]) + "\n\n")
 	b.WriteString("> " + p.Reason + "\n\n")
 	b.WriteString("The question: are fak's always-on background loops — the issue dispatchers, the resolve-progress tracker, the freshness cadences, the smoke loops — *first-class durable processes*, or fire-and-forget scripts that vanish on the next reboot and report nothing? Every number is re-derived from the loop ledger (`.fak/loops.jsonl`) and the job registry (`tools/loop-registry.json`) fak's own `fak loop` tooling writes, folded with the same `loopmgr` projection `fak loop status` / `fak loop health` use — so the score moves only when the loops actually become more durable, observable, and fak-native.\n\n")
 	b.WriteString("## Durability — auto-restart on system restart\n\n| ok | criterion | detail |\n|---|---|---|\n")
@@ -565,7 +570,8 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	lines := []string{
 		"loop-score compare:",
 		"  loopscore_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
-		"  composite: " + itoa(bScore) + " -> " + itoa(cScore) +
+		"  value: " + anyStr(bc["value"]) + " -> " + anyStr(current.Corpus["value"]) +
+			"  legacy score " + itoa(bScore) + " -> " + itoa(cScore) +
 			"  grade " + anyStr(bc["grade"]) + " -> " + anyStr(current.Corpus["grade"]),
 	}
 	// The loop program drives the composite up; report the multiple on the composite
@@ -622,7 +628,7 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 	out := make([]KPIPayload, 0, len(rows))
 	for _, r := range rows {
 		sk := toKPI(r)
-		out = append(out, KPIPayload{KPI: sk.Key, Group: sk.Group, Score: int(sk.Score), Detail: sk.Detail, Defects: sk.Defects, Soft: sk.Soft})
+		out = append(out, KPIPayload{KPI: sk.Key, Group: sk.Group, Score: int(sk.Score), Value: scorecard.Round3(scorecard.ValueFromScore(sk.Score)), Detail: sk.Detail, Defects: sk.Defects, Soft: sk.Soft})
 	}
 	return out
 }
@@ -647,12 +653,18 @@ func boolStr(ok bool, yes, no string) string {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
+func valueStr(score int) string {
+	return anyStr(scorecard.Round3(scorecard.ValueFromScore(float64(score))))
+}
+
 func anyStr(v any) string {
 	switch x := v.(type) {
 	case string:
 		return x
 	case int:
 		return itoa(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
 	default:
 		return itoa(anyInt(v))
 	}
