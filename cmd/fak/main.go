@@ -193,6 +193,8 @@ func main() {
 		cmdLint(os.Args[2:])
 	case "codelint":
 		cmdCodelint(os.Args[2:])
+	case "tool-coverage-audit":
+		cmdToolCoverageAudit(os.Args[2:])
 	case "answer-shape":
 		cmdAnswerShape(os.Args[2:])
 	case "claim-check":

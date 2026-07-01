@@ -235,6 +235,10 @@ func usageCoreVerbs() {
                  (Go/JSON in-process, Python/CUDA via their toolchains, degrading
                  to no-opinion where a checker is absent). The same Lint the
                  SWE-bench fleet runs on every agent file write. Exit 1 on an error)
+  fak tool-coverage-audit [--workspace DIR] [--min-coverage PCT] [--json]
+                (audits load-bearing tools/*.py modules referenced by skills/CI and
+                 reports which lack a sibling *_test.py. With --min-coverage, exits
+                 non-zero when load-bearing test coverage falls below the floor)
   fak answer-shape [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
                 (the DEGENERATION/VERBOSITY WITNESS: judge the SHAPE of a candidate
                  answer or tool result  -  how repetitive (looping) and how long
