@@ -183,6 +183,57 @@ class MeasuredValidation(unittest.TestCase):
         self.assertEqual(v["summary"]["failures"], 1)
 
 
+class CostInversion(unittest.TestCase):
+    def test_hit_and_bill_rise_together(self):
+        # the whole thesis: the vanity metric AND the per-turn bill are BOTH monotonically
+        # increasing in trajectory length — the rate is high *because* the prefix (and its
+        # re-read cost) grew, so a rising hit reports a rising bill, not a falling one.
+        d = 2000.0
+        turns = [2, 10, 50, 200, 1000]
+        hits = [cc.h_frozen(t) for t in turns]
+        bills = [cc.turn_cost(t, d) for t in turns]
+        self.assertEqual(hits, sorted(hits))
+        self.assertEqual(bills, sorted(bills))
+        # the hit saturates below 1; the per-turn bill keeps climbing without bound.
+        self.assertLess(hits[-1], 1.0)
+        self.assertGreater(cc.turn_cost(1000, d), 3 * cc.turn_cost(200, d))
+
+    def test_turn_cost_closed_form(self):
+        # c(t) = delta*(1 + read_mult*(t-1))
+        self.assertAlmostEqual(cc.turn_cost(1, 2000), 2000.0)                 # turn 1: only the delta
+        self.assertAlmostEqual(cc.turn_cost(101, 2000), 2000 * (1 + 0.1 * 100))
+        self.assertEqual(cc.turn_cost(0, 2000), 0.0)
+
+    def test_cum_cost_is_superlinear_in_turns(self):
+        d = 1000.0
+        # doubling the turns MORE than doubles the bill (the quadratic re-read term),
+        # unlike a linear cost where it would exactly double.
+        self.assertGreater(cc.cum_cost(200, d), 2 * cc.cum_cost(100, d))
+
+    def test_saved_headline_grows_with_length(self):
+        d = 1000.0
+        self.assertGreater(cc.saved_headline(200, d), cc.saved_headline(100, d))
+        # (1-read_mult)*read, read = d*T(T-1)/2 — the quoted 'saving' is quadratic in length.
+        self.assertAlmostEqual(cc.saved_headline(50, d), 0.9 * d * 50 * 49 / 2)
+        self.assertEqual(cc.saved_headline(1, d), 0.0)
+
+    def test_cut_break_even_is_a_couple_of_turns_when_prefix_dwarfs_baton(self):
+        # monolith grown to 180k, fresh leg (system + O(1) baton) 20k:
+        #   n* = write_mult*B / (read_mult*(P-B)) = 1.25*20000 / (0.1*160000)
+        be = cc.cut_break_even_turns(180_000, 20_000)
+        self.assertAlmostEqual(be, (1.25 * 20_000) / (0.1 * 160_000))
+        self.assertLess(be, 2.0)   # the cut has repaid itself in under two turns
+
+    def test_cut_break_even_infinite_when_no_shrink(self):
+        # if the fresh prefix is not smaller, there is nothing to buy back.
+        self.assertEqual(cc.cut_break_even_turns(20_000, 20_000), float("inf"))
+        self.assertEqual(cc.cut_break_even_turns(10_000, 20_000), float("inf"))
+
+    def test_inversion_render_is_deterministic(self):
+        inv = cc.inversion_table(200, 2000, 20_000)
+        self.assertEqual(cc.render_inversion(inv), cc.render_inversion(inv))
+
+
 class Determinism(unittest.TestCase):
     def test_chart_is_deterministic(self):
         self.assertEqual(cc.render_chart(200), cc.render_chart(200))

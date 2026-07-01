@@ -32,9 +32,11 @@ This tool makes that concrete and reproducible. It is honest by construction:
     the documented behavior of the hosted prompt cache. Every constant is a flag.
 
 Subcommands:
-  curves   [--turns N]                 frozen ceiling + the 2 single-agent decay axes (flex, tools)
-  fanout   [--agents ...]              cross-agent shared-prefix reuse: default vs shared (table)
-  compound [--turns N]                 single-agent collapse (flex x tools), then the fleet fan-out
+  curves    [--turns N]                frozen ceiling + the 2 single-agent decay axes (flex, tools)
+  fanout    [--agents ...]             cross-agent shared-prefix reuse: default vs shared (table)
+  compound  [--turns N]                single-agent collapse (flex x tools), then the fleet fan-out
+  inversion [--turns N] [--delta D]    the VANITY inversion: hit rate vs the per-turn bill it hides,
+            [--baton B]                plus the cut-to-a-fresh-leg break-even (a couple of turns)
   anchor   <session_audit.json>        the REAL measured ceiling, from session_audit.py --json
   validate <measured_decay.json>       compare modeled survival factors to measured anchors
   chart    [--turns N]                 an at-a-glance ASCII chart of the decay
@@ -97,6 +99,60 @@ def _doc_model():
         "  not a single agent's hit: its reuse rate is 0% and flat in N, so it is reported\n"
         "  separately (see fanout/compound), never multiplied into one agent's percentage.\n"
     )
+
+
+# --- the cost inversion: the vanity metric vs the bill it hides ----------------
+# The frozen ceiling above is a *hit RATE*. This block prices the SAME frozen,
+# append-only trajectory in base-input-price units, so the rate can be put next to
+# the per-turn BILL it conceals. The one fact that makes cache-hit a vanity metric:
+# the rate and the bill rise together, and in the wrong direction. The reported hit
+# rises toward 1 *because* the cached prefix each turn grows — and that same growing
+# prefix makes every turn cost strictly more (a cache read is cheap, not free). A
+# number that improves precisely because the thing you pay for got bigger is not
+# measuring efficiency; it is measuring length. See
+# docs/notes/CACHE-HIT-VANITY-METRIC-SELF-FULFILLING-2026-07-01.md.
+def turn_cost(t, delta, read_mult=READ_MULT):
+    """Billed cost of turn t of a frozen append-only agent, in base-input-price units.
+
+    Turn t re-sends a prefix of (t-1)*delta cached tokens (billed at read_mult) plus a
+    fresh delta of `delta` new tokens (billed at 1x): c(t) = delta*(1 + read_mult*(t-1)).
+    It RISES linearly with t, without bound, even as the hit rate rises toward 1."""
+    if t < 1:
+        return 0.0
+    return delta * (1.0 + read_mult * (t - 1))
+
+
+def cum_cost(turns, delta, read_mult=READ_MULT):
+    """Cumulative billed cost over `turns` turns = sum of turn_cost. Grows ~quadratically
+    in T (delta*T + read_mult*delta*T(T-1)/2), so the running bill AND the 'saved-token'
+    headline that tracks the read both scale with T^2 — celebrating the saving is
+    celebrating length (docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md)."""
+    return sum(turn_cost(t, delta, read_mult) for t in range(1, max(0, turns) + 1))
+
+
+def saved_headline(turns, delta, read_mult=READ_MULT):
+    """The 'saved-token-equiv' headline for the same run: the read rebate (1-read_mult)*read,
+    with read(T)=delta*T(T-1)/2. Quadratic in T, so the number that gets quoted grows with
+    trajectory length by construction — the longer the session, the bigger the 'saving'."""
+    read = delta * turns * (turns - 1) / 2 if turns > 1 else 0.0
+    return (1.0 - read_mult) * read
+
+
+def cut_break_even_turns(prefix_now, baton_prefix, read_mult=READ_MULT, write_mult=WRITE_MULT_5M):
+    """Turns after which cutting to a fresh, flat-prefix leg (a relay leg: system + an O(1)
+    baton of size `baton_prefix`) has already repaid its one-time cold-prefix write.
+
+    Cutting costs write_mult*baton_prefix ONCE (the cold prefill of the small new prefix), then
+    buys back read_mult*(prefix_now - baton_prefix) every subsequent turn (the monolith re-reads
+    its whole grown prefix; the fresh leg re-reads only the small baton). So it pays for itself
+    after  n* = write_mult*baton_prefix / (read_mult*(prefix_now - baton_prefix))  turns.
+    Returns +inf when the fresh prefix is not smaller (nothing to buy back). This is the number
+    the cache-hit metric hides: the 'regression' of a cut is recouped in a couple of turns once
+    the session is long."""
+    gap = prefix_now - baton_prefix
+    if gap <= 0:
+        return float("inf")
+    return (write_mult * baton_prefix) / (read_mult * gap)
 
 
 # --- axis 1: flexibility (the product) -----------------------------------------
@@ -244,6 +300,53 @@ def compound_scenario(turns=200, agents=100):
             "cross_agent_reuse_shared": r_sh,     # (N-1)/N, what sharing/cloning recovers
         },
     }
+
+
+# --- the cost inversion table + render -----------------------------------------
+def inversion_table(turns=200, delta=2_000, baton_prefix=20_000):
+    """The vanity metric next to the bill it hides, over a frozen append-only trajectory.
+
+    For a scan of turn counts: the reported cumulative hit (rising toward 1), the per-turn
+    bill at that length (rising without bound), the cumulative bill (~T^2), and the
+    'saved-token' headline (~T^2). Plus the cut break-even at each length — if the run were
+    cut now to a flat `baton_prefix` leg, how few turns until that cut has repaid itself."""
+    marks = [t for t in (2, 5, 10, 25, 50, 100, 200, 400) if t <= turns] or [turns]
+    if marks[-1] != turns:
+        marks.append(turns)
+    rows = []
+    for t in marks:
+        prefix_now = (t - 1) * delta
+        rows.append({
+            "turn": t,
+            "hit_cum": h_frozen(t),
+            "turn_cost": turn_cost(t, delta),
+            "cum_cost": cum_cost(t, delta),
+            "saved_headline": saved_headline(t, delta),
+            "prefix_now": prefix_now,
+            "cut_break_even_turns": cut_break_even_turns(prefix_now, baton_prefix),
+        })
+    return {"turns": turns, "delta": delta, "baton_prefix": baton_prefix, "rows": rows}
+
+
+def render_inversion(inv):
+    d, B = inv["delta"], inv["baton_prefix"]
+    saved_lbl = '"saved" hdln'   # a quoted label, hoisted out to keep the f-string escape-free
+    L = []
+    L.append(f"the cache-hit VANITY inversion — frozen append-only agent, delta={d:,} tok/turn")
+    L.append("  the reported hit RATE and the per-turn BILL rise together: the rate is high")
+    L.append("  *because* the cached prefix grew, and that same prefix makes each turn cost more.")
+    L.append(f"  {'turn':>5}  {'hit(cum)':>8}  {'turn bill':>10}  {'cum bill':>13}  "
+             f"{saved_lbl:>13}  {'cut pays back in':>16}")
+    for r in inv["rows"]:
+        be = r["cut_break_even_turns"]
+        be_s = "n/a" if be == float("inf") else f"{be:.2f} turns"
+        L.append(f"  {r['turn']:>5}  {r['hit_cum']*100:>7.1f}%  {r['turn_cost']:>10,.0f}  "
+                 f"{r['cum_cost']:>13,.0f}  {r['saved_headline']:>13,.0f}  {be_s:>16}")
+    L.append(f"  bill/headline in base-input-price units (read={READ_MULT}x, write={WRITE_MULT_5M}x).")
+    L.append(f"  'cut pays back in' = turns to repay one cold {B:,}-tok baton prefix vs re-reading")
+    L.append("  the grown prefix — a couple of turns once the session is long. The vanity metric")
+    L.append("  frames that cut as a REGRESSION (a hit dip); the bill says it is a fast win.")
+    return "\n".join(L)
 
 
 # --- anchor: the real measured ceiling -----------------------------------------
@@ -547,6 +650,10 @@ def render_report(turns, anchor_path, validate_path=None, tolerance=0.05):
     L.append("")
     L.append(render_compound(comp))
     L.append("```\n")
+    L.append("## The vanity inversion: the hit rate vs the bill it hides\n")
+    L.append("```")
+    L.append(render_inversion(inversion_table(turns)))
+    L.append("```\n")
     L.append("## The decay, at a glance\n")
     L.append("```")
     L.append(render_chart(turns))
@@ -579,6 +686,10 @@ def main():
         q.add_argument("--turns", type=int, default=200)
     qf = sub.add_parser("fanout")
     qf.add_argument("--agents", type=int, nargs="+", default=[1, 2, 5, 10, 25, 100])
+    qi = sub.add_parser("inversion")
+    qi.add_argument("--turns", type=int, default=200)
+    qi.add_argument("--delta", type=int, default=2_000, help="new tokens appended per turn")
+    qi.add_argument("--baton", type=int, default=20_000, help="fresh-leg prefix (system + O(1) baton)")
     qa = sub.add_parser("anchor")
     qa.add_argument("json")
     qv = sub.add_parser("validate")
@@ -602,6 +713,9 @@ def main():
         return 0
     elif a.cmd == "compound":
         print(render_compound(compound_scenario(a.turns)))
+        return 0
+    elif a.cmd == "inversion":
+        print(render_inversion(inversion_table(a.turns, a.delta, a.baton)))
         return 0
     elif a.cmd == "chart":
         print(render_chart(a.turns))
