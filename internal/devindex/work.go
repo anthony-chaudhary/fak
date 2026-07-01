@@ -10,6 +10,15 @@ package devindex
 // than re-reading the JSON or guessing the issue-search syntax. Like the rest of
 // devindex it is a VIEW: it reads the file that owns the fact, never a cached copy,
 // and never reaches the network itself.
+//
+// #1291 closure binding: the ask above ("ongoing work has no single live view") is
+// met by IssueViews/SearchViews here plus the `fak index work` CLI shell
+// (cmd/fak/index.go's indexWork) and the fak_index_work MCP tool
+// (internal/gateway/mcp.go), covered by work_test.go and
+// internal/gateway/mcp_index_test.go's TestMCPIndexToolsMirrorDevIndex. The
+// shipping commits (ac2ca4f8, 30c577a7) cited #1291 in prose but never carried a
+// `Fixes` trailer, so the issue stayed open past the work landing. No behavior
+// change here.
 
 import (
 	"encoding/json"
