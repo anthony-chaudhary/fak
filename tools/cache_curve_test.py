@@ -156,6 +156,8 @@ class MeasuredValidation(unittest.TestCase):
         self.assertEqual(v["summary"]["failures"], 0)
 
         rows = {r["name"]: r for r in v["rows"]}
+        self.assertEqual(rows["default fanout"]["metric"], "cross_agent_reuse")
+        self.assertEqual(rows["shared fanout"]["parameters"], {"agents": 10, "concurrent": False})
         self.assertAlmostEqual(rows["default fanout"]["modeled_survival"], 0.0)
         self.assertAlmostEqual(rows["default fanout"]["residual"], 0.02)
         self.assertAlmostEqual(rows["shared fanout"]["modeled_survival"], 0.9)
