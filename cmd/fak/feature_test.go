@@ -107,6 +107,38 @@ func TestFeatureQueryCLIUsesLiveDescriptorCatalog(t *testing.T) {
 	}
 }
 
+func TestFeatureQueryMissingContextProducesClarification(t *testing.T) {
+	root := writeIndexRepo(t)
+	var out, errb bytes.Buffer
+	if rc := runFeature(&out, &errb, []string{
+		"query",
+		"--root", root,
+		"--missing-context", "deploy-target",
+		"deploy",
+		"--json",
+	}); rc != 0 {
+		t.Fatalf("runFeature query rc=%d stderr=%s", rc, errb.String())
+	}
+	var resp selfquery.Response
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		t.Fatalf("feature query --json invalid: %v\n%s", err, out.String())
+	}
+	if resp.Clarifications == nil {
+		t.Fatalf("missing context did not produce clarifications:\n%s", out.String())
+	}
+	plan := resp.Clarifications
+	if !plan.Bounded || len(plan.Questions) != 1 {
+		t.Fatalf("clarification plan = %+v, want one bounded question", plan)
+	}
+	q := plan.Questions[0]
+	if q.Key != "deploy-target" || q.Reason != selfquery.ClarificationMissingContext {
+		t.Fatalf("clarification question = %+v, want missing deploy-target", q)
+	}
+	if q.DefaultChoice != "provide_value" || q.BudgetTokens <= 0 || len(q.Choices) != 3 {
+		t.Fatalf("clarification question is not bounded/actionable: %+v", q)
+	}
+}
+
 func featureSharedFacts(cards []selfquery.FeatureCard) []string {
 	var out []string
 	for _, c := range cards {

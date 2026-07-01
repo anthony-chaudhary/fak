@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 )
 
@@ -293,6 +294,57 @@ func TestAssumptionConfidenceFeatureCard(t *testing.T) {
 		if !tags[want] {
 			t.Fatalf("assumption card tags missing %q: %+v", want, found.Tags)
 		}
+	}
+}
+
+func TestQueryClarificationBrokerTurnsMissingContextIntoBoundedQuestion(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Query(Request{
+		Query:          "deploy",
+		Plane:          PlaneLive,
+		MissingContext: []string{"deploy-target", "approval-ticket"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Clarifications == nil {
+		t.Fatal("missing context should produce a clarification plan")
+	}
+	plan := resp.Clarifications
+	if !plan.Bounded || plan.MaxQuestions != 3 || plan.MaxBudgetTokens != 120 {
+		t.Fatalf("clarification plan bounds = %+v", plan)
+	}
+	if len(plan.Questions) != 2 {
+		t.Fatalf("questions=%+v, want one question per missing key", plan.Questions)
+	}
+	q := plan.Questions[0]
+	if q.Key != "approval-ticket" || q.Reason != ClarificationMissingContext {
+		t.Fatalf("first clarification = %+v, want stable missing-context question", q)
+	}
+	if q.DefaultChoice != "provide_value" || q.BudgetTokens <= 0 || q.BudgetTokens > plan.MaxBudgetTokens {
+		t.Fatalf("clarification budget/default = %+v within plan %+v", q, plan)
+	}
+	if len(q.Choices) != 3 {
+		t.Fatalf("clarification choices = %+v, want bounded option set", q.Choices)
+	}
+}
+
+func TestPlanClarificationsBoundsQuestionsAndBudget(t *testing.T) {
+	report := ctxplan.AssessAssumptions([]ctxplan.Assumption{
+		{Key: "a", Source: ctxplan.AssumptionUnknown},
+		{Key: "b", Source: ctxplan.AssumptionUnknown},
+		{Key: "c", Source: ctxplan.AssumptionUnknown},
+		{Key: "d", Source: ctxplan.AssumptionUnknown},
+	}, ctxplan.DefaultAssumptionPolicy())
+	bounded := PlanClarifications(report, ClarificationOptions{
+		MaxQuestions:    1,
+		MaxBudgetTokens: 40,
+	})
+	if len(bounded.Questions) != 1 || bounded.Omitted != 3 {
+		t.Fatalf("bounded plan = %+v, want one included and three omitted", bounded)
 	}
 }
 

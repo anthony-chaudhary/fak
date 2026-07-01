@@ -40,6 +40,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	plane := fs.String("plane", "all", "catalog plane: dev, live, or all")
 	detail := fs.String("detail", "", "fault detail for one selected card name/detail_ref")
 	limit := fs.Int("limit", 0, "cap the number of query cards (0 = all)")
+	missingContext := fs.String("missing-context", "", "comma-separated missing context keys to turn into bounded clarification questions")
 	asJSON := fs.Bool("json", false, "emit stable JSON")
 	var args []string
 	for rest := argv; ; {
@@ -68,10 +69,11 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	resp, err := cat.Query(selfquery.Request{
-		Query:  joinArgs(args),
-		Plane:  selfquery.Plane(*plane),
-		Detail: *detail,
-		Limit:  *limit,
+		Query:          joinArgs(args),
+		Plane:          selfquery.Plane(*plane),
+		Detail:         *detail,
+		Limit:          *limit,
+		MissingContext: splitCSV(*missingContext),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak feature query: %v\n", err)
@@ -80,16 +82,21 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, resp, "fak feature query")
 	}
-	if len(resp.Cards) == 0 {
+	if len(resp.Cards) == 0 && resp.Clarifications == nil {
 		fmt.Fprintln(stdout, "no matching feature")
 		return 0
 	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	for _, c := range resp.Cards {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind, c.Effect, c.Source, truncRunes(c.Summary, 96))
+	if len(resp.Cards) > 0 {
+		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		for _, c := range resp.Cards {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", c.Name, c.Kind, c.Effect, c.Source, truncRunes(c.Summary, 96))
+		}
+		if code := flushTab(tw, stderr, "fak feature query"); code != 0 {
+			return code
+		}
 	}
-	if code := flushTab(tw, stderr, "fak feature query"); code != 0 {
-		return code
+	if resp.Clarifications != nil {
+		printClarifications(stdout, resp.Clarifications)
 	}
 	if resp.Detail != nil {
 		fmt.Fprintf(stdout, "\ndetail: %s\n", resp.Detail.Card.Name)
@@ -106,12 +113,25 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func printClarifications(w io.Writer, plan *selfquery.ClarificationPlan) {
+	if plan == nil {
+		return
+	}
+	fmt.Fprintf(w, "\nclarifications: %d question(s), %d omitted, %d/%d token budget\n",
+		len(plan.Questions), plan.Omitted, plan.BudgetTokens, plan.MaxBudgetTokens)
+	for _, q := range plan.Questions {
+		fmt.Fprintf(w, "  %s\t%s\tdefault=%s\tbudget=%d\t%s\n",
+			q.Key, q.Reason, q.DefaultChoice, q.BudgetTokens, q.Question)
+	}
+}
+
 func writeFeatureUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fak feature query <intent> [--json] [--plane dev|live|all] [--detail NAME] [--limit N] [--root DIR]
+  fak feature query <intent> [--json] [--plane dev|live|all] [--detail NAME] [--limit N] [--missing-context a,b] [--root DIR]
 
 Query fak's self-feature catalog: dev facts from devindex, live MCP tools, memory
 drivers, and capability cards. Queries return lightweight cards; --detail faults
-only the selected schema, doc snippet, or memory explain plan.
+only the selected schema, doc snippet, or memory explain plan. --missing-context
+adds bounded clarification questions for context that must not be inferred.
 `)
 }

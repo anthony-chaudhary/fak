@@ -66,19 +66,21 @@ type Detail struct {
 }
 
 type Response struct {
-	Root   string        `json:"root,omitempty"`
-	Query  string        `json:"query"`
-	Plane  Plane         `json:"plane"`
-	Cards  []FeatureCard `json:"cards"`
-	Detail *Detail       `json:"detail,omitempty"`
+	Root           string             `json:"root,omitempty"`
+	Query          string             `json:"query"`
+	Plane          Plane              `json:"plane"`
+	Cards          []FeatureCard      `json:"cards"`
+	Detail         *Detail            `json:"detail,omitempty"`
+	Clarifications *ClarificationPlan `json:"clarifications,omitempty"`
 }
 
 type Request struct {
-	Root   string
-	Query  string
-	Plane  Plane
-	Detail string
-	Limit  int
+	Root           string
+	Query          string
+	Plane          Plane
+	Detail         string
+	Limit          int
+	MissingContext []string
 }
 
 type ToolDescriptor struct {
@@ -184,6 +186,10 @@ func (c *Catalog) Query(req Request) (Response, error) {
 		cards = cards[:req.Limit]
 	}
 	resp := Response{Root: c.root, Query: q, Plane: plane, Cards: cards}
+	if len(req.MissingContext) > 0 {
+		plan := MissingContextClarifications(req.MissingContext)
+		resp.Clarifications = &plan
+	}
 	if strings.TrimSpace(req.Detail) != "" {
 		card, ok := findCard(all, req.Detail)
 		if !ok {
