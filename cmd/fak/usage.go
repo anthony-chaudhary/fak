@@ -363,6 +363,14 @@ func usageOpsVerbs() {
                  explicit --available) to get an UNDER_CAPACITY/SUFFICIENT verdict + the
                  worker shortfall. Pure planning arithmetic — launches, counts, observes
                  NO real worker. One leaf of the fleet-400iph throughput program)
+  fak fleet     monitor | janitor | fold | replace [--plan P] [--json]
+                (HEADLESS-WORKER FLEET control surface (#1856-#1859): monitor
+                 classifies every worker from registry/process/transcript EVIDENCE
+                 (healthy/completed/dead/stale/blocked/wedged); janitor reaps stale
+                 child process trees (dry-run unless --apply) without touching the
+                 worker root or its MCP server; fold folds final reports into a
+                 witnessed run ledger; replace renders a safe replacement for a
+                 genuinely stuck worker. Reads by default; mutate only with --apply)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the
@@ -437,12 +445,15 @@ func usageScorecardVerbs() {
                  pane beside the agent in a multiplexer terminal so the live cache
                  economy + floor safety stay visible during the session)
   fak codex     [--dry-run] [--policy FILE] [--api-key-env VAR] [--base-url URL]
-                [--model MODEL] [--local|--gguf PATH] [--split auto|on|off] -- <codex args...>
+                [--model MODEL] [--local|--gguf PATH] [--split auto|on|off]
+                [--vcache-artifacts=false] [--vcache-out-dir DIR] -- <codex args...>
                 (CODEX LAUNCHER: the short dogfood front door for OpenAI Codex CLI.
                  Expands to 'fak guard ... -- codex', passes Codex's bypass flag by
                  default so fak's floor is the permission system, and lets guard inject
                  per-run Codex -c model_provider=fak / wire_api=responses overrides.
-                 Use --dry-run first to print the exact launch command)
+                 After the Codex child exits it best-effort writes sanitized vCache
+                 token-counter artifacts and updates the default score snapshot; use
+                 --dry-run first to print the exact launch command)
   fak guard-verdict-rsi fold|run|--check
                 (the GUARD VERDICT RSI loop: folds the real guard decision journal,
                  scores verdict-quality, and keeps only on rows + strict gain + witness)
