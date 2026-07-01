@@ -850,32 +850,29 @@ func mapValue(v any) object {
 	return object{}
 }
 
-func mapList(v any) []map[string]any {
+// collectMaps type-asserts v to a []any and returns each element that is a
+// map[string]any, converted via conv. A nil slice is returned when v is not a
+// []any.
+func collectMaps[T any](v any, conv func(map[string]any) T) []T {
 	raw, ok := v.([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(raw))
+	out := make([]T, 0, len(raw))
 	for _, it := range raw {
 		if m, ok := it.(map[string]any); ok {
-			out = append(out, m)
+			out = append(out, conv(m))
 		}
 	}
 	return out
 }
 
+func mapList(v any) []map[string]any {
+	return collectMaps(v, func(m map[string]any) map[string]any { return m })
+}
+
 func rowList(v any) []Row {
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]Row, 0, len(raw))
-	for _, it := range raw {
-		if m, ok := it.(map[string]any); ok {
-			out = append(out, Row(m))
-		}
-	}
-	return out
+	return collectMaps(v, func(m map[string]any) Row { return Row(m) })
 }
 
 func managedContextSLOList(v any) []ManagedContextSLO {
