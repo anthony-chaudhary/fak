@@ -97,6 +97,8 @@ var defaultBudget = budgetTable([]Budget{
 	{Rung: "secretgate", Method: "scan", MaxNS: 10_000, MaxTokenDelta: 0},
 	{Rung: "ifc-stamp", Method: "stamp", MaxNS: 5_000, MaxTokenDelta: 0},
 	{Rung: "recall", Method: "fold", MaxNS: 20_000, MaxTokenDelta: 0},
+	// Dispatch planner — dry-run fan-out/collision pricing before workers launch.
+	{Rung: "dispatch", Method: "plan_fanout", MaxNS: 100_000_000, MaxTokenDelta: 0},
 })
 
 // budgetKey is the lookup key for the declared table.
