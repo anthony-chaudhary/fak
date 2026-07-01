@@ -136,6 +136,48 @@ func TestClassifyOutcome(t *testing.T) {
 	}
 }
 
+func TestQueryAuditLinksDefaultAnswerToAssumption(t *testing.T) {
+	row := QueryAuditRecord{
+		QuestionID:          "context-query:1",
+		Key:                 "deploy-target",
+		Reason:              "missing_context",
+		AnswerSource:        "default",
+		DefaultChoice:       "provide_value",
+		AssumptionKey:       "deploy-target",
+		AssumptionSourceRef: "context-query:1",
+	}
+	if !row.LinksAssumption() {
+		t.Fatalf("query audit row should link answer/default to assumption: %+v", row)
+	}
+	row.AssumptionSourceRef = "context-query:other"
+	if row.LinksAssumption() {
+		t.Fatalf("query audit row with mismatched assumption source ref must not link: %+v", row)
+	}
+}
+
+func TestQueryAuditCountsAsBehaviorSignal(t *testing.T) {
+	corpus := []Record{
+		{
+			SessionID:      "value",
+			AssistantTurns: 3,
+			Outcome:        OutcomeShipped,
+			QueryAudit: []QueryAuditRecord{{
+				QuestionID:          "context-query:1",
+				Key:                 "deploy-target",
+				AnswerSource:        "default",
+				DefaultChoice:       "provide_value",
+				AssumptionKey:       "deploy-target",
+				AssumptionSourceRef: "context-query:1",
+			}},
+		},
+		{SessionID: "waste", AssistantTurns: 2, Outcome: OutcomeStopped},
+	}
+	rep := Score(corpus, fullPipeline())
+	if got := kpi(rep, "behavior_signal_present"); got.Score != 50 || got.Debt != 0 {
+		t.Fatalf("behavior_signal_present = %+v, want query audit counted as one of two signal-bearing records", got)
+	}
+}
+
 func TestScoreIsDeterministic(t *testing.T) {
 	corpus, pipe := cleanCorpus(), fullPipeline()
 	a := Score(corpus, pipe)

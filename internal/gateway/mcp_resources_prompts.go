@@ -125,10 +125,12 @@ func (s *Server) readResource(params json.RawMessage) (any, *rpcError) {
 	}
 	if req, ok := contextq.MCPMissingContextResourceRequest(p.URI, 0); ok {
 		plan := selfquery.MissingContextClarifications([]string{req.Key})
+		audit := s.recordMissingContextQueryAudit(req, plan)
 		doc := map[string]any{
 			"schema":         contextq.MCPMissingContextSchema,
 			"request":        req,
 			"clarifications": plan,
+			"audit":          audit,
 		}
 		b, _ := json.Marshal(doc)
 		return map[string]any{

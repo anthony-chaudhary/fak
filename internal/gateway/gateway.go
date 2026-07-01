@@ -726,6 +726,15 @@ type Server struct {
 	turnSafetyMu sync.Mutex
 	turnSafety   map[string]turnSafetyDelta
 
+	// contextQueryAudit is the managed-context clarification journal (#1622): every
+	// context question minted by the gateway records the answer source/default and
+	// the assumption source ref it produced, so a replay can attribute a later
+	// assumption to the question/default that created it. Runtime-only and bounded;
+	// scrubbed corpus rows live in internal/sessionobs.
+	contextQueryAuditMu  sync.Mutex
+	contextQueryAuditSeq uint64
+	contextQueryAudit    []ContextQueryAuditRecord
+
 	// notedResultsMu guards notedResults, the per-trace set of inbound tool results whose
 	// human-facing "[fak] … held out of context" note has ALREADY been emitted this session.
 	// The client (Claude Code) replays the full transcript every turn, so admitInboundResults

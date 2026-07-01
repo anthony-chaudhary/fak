@@ -26,6 +26,7 @@ type debugVarsResponse struct {
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
 	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
+	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
 	Metrics          debugMetricsVars               `json:"metrics"`
 }
 
@@ -394,6 +395,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
 		Assumptions:      s.debugAssumptions(ctx),
+		ContextQueries:   s.contextQueryAuditSnapshot(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),

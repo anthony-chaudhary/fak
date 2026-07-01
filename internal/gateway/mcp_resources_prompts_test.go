@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // rpcRoundTrip drives one JSON-RPC frame through the real dispatch path (the same
@@ -178,6 +179,50 @@ func TestMCPMissingContextResourceReadReturnsClarification(t *testing.T) {
 	q := doc.Clarifications.Questions[0]
 	if q.Key != "deploy-target" || q.Reason != "missing_context" || q.DefaultChoice == "" || q.BudgetTokens <= 0 {
 		t.Fatalf("question = %+v, want actionable missing-context clarification", q)
+	}
+}
+
+func TestQueryAuditRecordsMissingContextDefaultAndAssumptionLink(t *testing.T) {
+	srv := newTestServer(t)
+	read := resultMap(t, rpcRoundTrip(t, srv, "resources/read", `{"uri":"fak://context/missing/deploy-target"}`))
+	contents, ok := read["contents"].([]any)
+	if !ok || len(contents) != 1 {
+		t.Fatalf("resources/read contents malformed: %v", read)
+	}
+	text, _ := contents[0].(map[string]any)["text"].(string)
+	var doc struct {
+		Audit []ContextQueryAuditRecord `json:"audit"`
+	}
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("missing-context resource is not valid JSON: %v\n%s", err, text)
+	}
+	if len(doc.Audit) != 1 {
+		t.Fatalf("audit rows = %+v, want one context-query row", doc.Audit)
+	}
+	row := doc.Audit[0]
+	if row.Seq != 1 || row.ID == "" || row.Event != "context_question" {
+		t.Fatalf("audit identity = %+v, want stable context_question row", row)
+	}
+	if row.Method != "resources/read" || row.URI != "fak://context/missing/deploy-target" {
+		t.Fatalf("audit request provenance = %+v", row)
+	}
+	if row.Key != "deploy-target" || row.Reason != "missing_context" || row.Question == "" {
+		t.Fatalf("audit question = %+v, want missing-context question", row)
+	}
+	if row.AnswerSource != "default" || row.DefaultChoice == "" || row.Answer != row.DefaultChoice {
+		t.Fatalf("audit answer = %+v, want explicit default answer", row)
+	}
+	if row.AssumptionKey != "deploy-target" || row.AssumptionSource != "default" || row.AssumptionSourceRef != row.ID {
+		t.Fatalf("audit assumption link = %+v, want answer/default source ref", row)
+	}
+
+	snap := srv.contextQueryAuditSnapshot()
+	if len(snap) != 1 || snap[0].ID != row.ID {
+		t.Fatalf("server query-audit snapshot = %+v, want row %q", snap, row.ID)
+	}
+	vars := srv.debugVars(time.Unix(1, 0))
+	if len(vars.ContextQueries) != 1 || vars.ContextQueries[0].AssumptionSourceRef != row.ID {
+		t.Fatalf("debug vars context query audit = %+v, want replay link %q", vars.ContextQueries, row.ID)
 	}
 }
 

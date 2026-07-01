@@ -125,41 +125,76 @@ func ClassifyOutcome(committed, witnessed, stopped, mutated bool) Outcome {
 // and waste sessions. Every field is a count derived from the transcript or the
 // linked outcome -- structured, never prose, so the record stays committable.
 type Signals struct {
-	GuardRefusals int `json:"guard_refusals,omitempty"` // turns the kernel DENIED a proposed tool call (not result quarantines)
-	ToolErrors    int `json:"tool_errors,omitempty"`    // is_error tool_results
-	Interrupts    int `json:"interrupts,omitempty"`     // interrupted assistant turns
-	Commits       int `json:"commits,omitempty"`        // commits the session landed (linked from git)
-	StopEvents    int `json:"stop_events,omitempty"`    // STOP-hook fires / goal-block events
-	GoalEvents    int `json:"goal_events,omitempty"`    // /goal directives the session ran under
+	GuardRefusals     int `json:"guard_refusals,omitempty"`     // turns the kernel DENIED a proposed tool call (not result quarantines)
+	ToolErrors        int `json:"tool_errors,omitempty"`        // is_error tool_results
+	Interrupts        int `json:"interrupts,omitempty"`         // interrupted assistant turns
+	Commits           int `json:"commits,omitempty"`            // commits the session landed (linked from git)
+	StopEvents        int `json:"stop_events,omitempty"`        // STOP-hook fires / goal-block events
+	GoalEvents        int `json:"goal_events,omitempty"`        // /goal directives the session ran under
+	ContextQuestions  int `json:"context_questions,omitempty"`  // managed-context questions surfaced to the user/operator
+	ContextAnswers    int `json:"context_answers,omitempty"`    // user/default/inferred answers recorded for those questions
+	ContextDefaults   int `json:"context_defaults,omitempty"`   // unanswered questions resolved by an explicit default
+	AssumptionUpdates int `json:"assumption_updates,omitempty"` // downstream assumption rows tied to a query answer/default
 }
 
 // any reports whether the session carried ANY behavior signal -- the aggregate-rung
 // test (a record with an outcome but zero features still teaches a loop very little).
 func (s Signals) any() bool {
 	return s.GuardRefusals > 0 || s.ToolErrors > 0 || s.Interrupts > 0 ||
-		s.Commits > 0 || s.StopEvents > 0 || s.GoalEvents > 0
+		s.Commits > 0 || s.StopEvents > 0 || s.GoalEvents > 0 ||
+		s.ContextQuestions > 0 || s.ContextAnswers > 0 ||
+		s.ContextDefaults > 0 || s.AssumptionUpdates > 0
+}
+
+// QueryAuditRecord is the scrubbed replay link between a context question and a
+// later assumption row. It deliberately stores provenance keys and answer source,
+// not raw prompt/answer prose, so committed session corpora stay content-free.
+type QueryAuditRecord struct {
+	QuestionID          string `json:"question_id"`
+	Key                 string `json:"key"`
+	Reason              string `json:"reason,omitempty"`
+	AnswerSource        string `json:"answer_source"` // user | default | inferred
+	AnswerRef           string `json:"answer_ref,omitempty"`
+	DefaultChoice       string `json:"default_choice,omitempty"`
+	AssumptionKey       string `json:"assumption_key"`
+	AssumptionSourceRef string `json:"assumption_source_ref"`
+}
+
+// LinksAssumption reports whether replay can attribute the later assumption row
+// to the question answer/default that produced it.
+func (q QueryAuditRecord) LinksAssumption() bool {
+	return q.QuestionID != "" &&
+		q.Key != "" &&
+		q.AnswerSource != "" &&
+		q.AssumptionKey != "" &&
+		q.AssumptionSourceRef == q.QuestionID
 }
 
 // Record is one session's scrubbed observability record -- the unit of a corpus that
 // is safe to COMMIT and AGGREGATE across hosts. It carries only structured signal and
 // NEVER raw prompt/result prose.
 type Record struct {
-	SessionID      string  `json:"session_id"`           // transcript uuid (an opaque id, not content)
-	Namespace      string  `json:"namespace,omitempty"`  // project namespace (e.g. C--work-fak)
-	Account        string  `json:"account,omitempty"`    // fleet account/home that produced it
-	StartUnix      int64   `json:"start_unix,omitempty"` // first timestamped record
-	EndUnix        int64   `json:"end_unix,omitempty"`   // last timestamped record
-	AssistantTurns int     `json:"assistant_turns"`      // billed assistant turns (de-duplicated)
-	ToolCalls      int     `json:"tool_calls"`           // tool_use blocks
-	ReadOnlyCalls  int     `json:"read_only_calls"`      // tool_use blocks against read-only tools
-	OutputTokens   int64   `json:"output_tokens"`        // the work actually generated
-	Outcome        Outcome `json:"outcome"`              // the value-vs-waste class
-	Signals        Signals `json:"signals,omitempty"`    // behavior features for the loop
+	SessionID      string             `json:"session_id"`            // transcript uuid (an opaque id, not content)
+	Namespace      string             `json:"namespace,omitempty"`   // project namespace (e.g. C--work-fak)
+	Account        string             `json:"account,omitempty"`     // fleet account/home that produced it
+	StartUnix      int64              `json:"start_unix,omitempty"`  // first timestamped record
+	EndUnix        int64              `json:"end_unix,omitempty"`    // last timestamped record
+	AssistantTurns int                `json:"assistant_turns"`       // billed assistant turns (de-duplicated)
+	ToolCalls      int                `json:"tool_calls"`            // tool_use blocks
+	ReadOnlyCalls  int                `json:"read_only_calls"`       // tool_use blocks against read-only tools
+	OutputTokens   int64              `json:"output_tokens"`         // the work actually generated
+	Outcome        Outcome            `json:"outcome"`               // the value-vs-waste class
+	Signals        Signals            `json:"signals,omitempty"`     // behavior features for the loop
+	QueryAudit     []QueryAuditRecord `json:"query_audit,omitempty"` // scrubbed question/answer -> assumption replay links
 }
 
 // structured reports whether the record is analysis-shaped (has at least the turn
 // structure a folder needs) rather than an empty husk.
 func (r Record) structured() bool { return r.AssistantTurns > 0 }
+
+func (r Record) hasBehaviorSignals() bool {
+	return r.Signals.any() || len(r.QueryAudit) > 0
+}
 
 // Pipeline carries the pipeline-state facts the score needs that are NOT derivable
 // from the corpus rows -- whether the machinery to CAPTURE durably, COMMIT, and
@@ -233,7 +268,7 @@ func Score(corpus []Record, pipe Pipeline) Report {
 		if r.structured() {
 			structured++
 		}
-		if r.Signals.any() {
+		if r.hasBehaviorSignals() {
 			withSignals++
 		}
 	}
