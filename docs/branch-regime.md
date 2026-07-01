@@ -81,7 +81,9 @@ cannot prove a single accepted development branch, keep the old `main` regime.
 7. **#1700 - public docs/install links.** Keep public docs, install commands,
    Pages, and release notes anchored on `main`.
 8. **#1701 - hard-coded ref audit.** Replace remaining hard-coded `main`/`master`
-   refs with role config where they are not public-front-door references.
+   refs with role config where they are not public-front-door references. Use
+   [`docs/branch-regime-hardcoded-ref-audit.md`](branch-regime-hardcoded-ref-audit.md)
+   as the current classification map.
 9. **#1702 - status visibility.** Surface `dev`/`main` drift, promotion blockers,
    and release-source freshness in status views.
 10. **#1703 - reversible shadow cutover.** Run a shadow mode that reports what
