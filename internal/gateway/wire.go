@@ -318,6 +318,14 @@ type ChatRequest struct {
 	// LogitBias is the OpenAI per-token logit-bias map (token id -> bias, the standard
 	// -100..100 mask), forwarded verbatim to the upstream. Absent => unset on the wire.
 	LogitBias map[int]float64 `json:"logit_bias,omitempty"`
+	// FrequencyPenalty / PresencePenalty are the OpenAI repetition-penalty controls
+	// (#1705): forwarded to agent.WithFrequencyPenalty/WithPresencePenalty, which the
+	// in-kernel sampler applies per-token before the softmax/argmax draw so a
+	// reasoning model can break out of a non-terminating repetition loop the way an
+	// upstream ride engine already could. Absent => nil => unset (byte-for-byte the
+	// pre-#1705 sampler behavior).
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	// Guided* are provider-native guided-decode controls accepted by common
 	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
 	// so the gateway collects only these known keys and threads them through the

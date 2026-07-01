@@ -2678,6 +2678,56 @@ func TestAnthropicMessagesForwardsSamplingParams(t *testing.T) {
 	}
 }
 
+// TestChatCompletionsForwardsFrequencyPresencePenalty proves the OpenAI
+// /v1/chat/completions handler forwards frequency_penalty/presence_penalty to the
+// planner seam (#1705): before this, the gateway silently dropped both, so a
+// reasoning model's repetition loop had no way to be broken via the in-kernel
+// sampler even though a client asked for it. Mirrors
+// TestAnthropicMessagesForwardsSamplingParams's present/omitted shape.
+func TestChatCompletionsForwardsFrequencyPresencePenalty(t *testing.T) {
+	srv := newTestServer(t)
+	rp := &recordingPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+		FinishReason: "stop",
+	}}
+	srv.planner = rp
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Present: both penalties reach the planner seam.
+	body := []byte(`{"model":"m","frequency_penalty":0.5,"presence_penalty":0.25,"messages":[{"role":"user","content":"hi"}]}`)
+	r, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.StatusCode)
+	}
+	if rp.got.FrequencyPenalty == nil || *rp.got.FrequencyPenalty != 0.5 {
+		t.Fatalf("planner got frequency_penalty = %v, want 0.5", rp.got.FrequencyPenalty)
+	}
+	if rp.got.PresencePenalty == nil || *rp.got.PresencePenalty != 0.25 {
+		t.Fatalf("planner got presence_penalty = %v, want 0.25", rp.got.PresencePenalty)
+	}
+
+	// Omitted: both absent must leave the options unset so the planner keeps its
+	// zero-penalty default (byte-for-byte the pre-#1705 behavior), not a spurious 0.
+	rp.got = agent.SampleParams{}
+	body = []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	r, err = http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if rp.got.FrequencyPenalty != nil {
+		t.Fatalf("omitted frequency_penalty must leave the option unset, got %v", *rp.got.FrequencyPenalty)
+	}
+	if rp.got.PresencePenalty != nil {
+		t.Fatalf("omitted presence_penalty must leave the option unset, got %v", *rp.got.PresencePenalty)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // test helpers
 // ---------------------------------------------------------------------------

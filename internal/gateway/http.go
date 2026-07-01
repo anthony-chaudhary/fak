@@ -469,6 +469,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithResponseFormat(req.ResponseFormat),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithGuidedDecode(req.GuidedDecodeFields()),
+		// Repetition-penalty passthrough (#1705): forward frequency_penalty/
+		// presence_penalty to the in-kernel sampler so a reasoning model can break a
+		// non-terminating repetition loop the way an upstream ride engine already
+		// could. No-op when the client omitted them (nil pointer).
+		agent.WithFrequencyPenalty(req.FrequencyPenalty),
+		agent.WithPresencePenalty(req.PresencePenalty),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
