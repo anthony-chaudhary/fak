@@ -74,6 +74,7 @@ var tier = map[string]int{
 	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
 	"releasestatus":        1,                // pure read-only release-posture fold (Compute over injected Facts) porting tools/release_status.py; the broader sibling of releasestale. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
+	"commitsubject":        1,                // commit-subject coverage fold over hooks.CommitMsgVerdict + recent git subjects; imports hooks(1)+windowgate(1), off the hot path.
 	"testroute":            1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
 	"mergepreview":         1,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"taskdecision":         1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
