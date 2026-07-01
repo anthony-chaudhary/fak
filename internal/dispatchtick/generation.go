@@ -104,13 +104,51 @@ type GenerationCandidate struct {
 	Generation string
 }
 
+// GenerationGateActive reports whether generation-based filtering should apply at all: only
+// when the caller supplied an explicit horizon, or at least one candidate carries a real
+// (non-empty, classified) generation label. Most of a repo's backlog carries no gen/* label,
+// so the gate must stay OFF for an all-unclassified candidate set -- otherwise a picker that
+// wires this in would silently hold the entire ordinary backlog the moment nothing in it
+// happens to be generation-labeled, per the Core Rule that generation is a scheduling hint,
+// not a queue silo.
+func GenerationGateActive(cands []GenerationCandidate, horizon string) bool {
+	if strings.TrimSpace(horizon) != "" {
+		return true
+	}
+	for _, c := range cands {
+		if isKnownGenerationBucket(c.Generation) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownGenerationBucket(bucket string) bool {
+	switch bucket {
+	case GenNow, GenNext, GenSecondNext, GenFuture:
+		return true
+	default:
+		return false
+	}
+}
+
 // OrderEligibleGenerationCandidates filters cands to the issues eligible under
 // horizon, then orders the survivors exactly as OrderLaneCandidates does --
 // priority weight first, then the oldest/newest number tiebreak. Held candidates
 // (e.g. gen/second-next and gen/future under the default window) are dropped
 // entirely rather than merely sorted last, so a caller's launchable set never
-// silently includes a horizon it did not ask for.
+// silently includes a horizon it did not ask for. When GenerationGateActive is
+// false (no explicit horizon and no candidate carries a real generation label),
+// every candidate passes through unfiltered -- the ordinary, generation-blind
+// backlog keeps flowing exactly as OrderLaneCandidates already ordered it.
 func OrderEligibleGenerationCandidates(cands []GenerationCandidate, horizon string, preferNewest bool) []int {
+	all := make([]LaneCandidate, len(cands))
+	for i, c := range cands {
+		all[i] = LaneCandidate{Number: c.Number, Weight: c.Weight}
+	}
+	if !GenerationGateActive(cands, horizon) {
+		return OrderLaneCandidates(all, preferNewest)
+	}
 	eligible := make([]LaneCandidate, 0, len(cands))
 	for _, c := range cands {
 		if GenerationEligible(c.Generation, horizon) {

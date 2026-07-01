@@ -148,6 +148,32 @@ func TestRouterSuggestsSubLaneSplitsForOverloadedTree(t *testing.T) {
 	assertRouterSubLane(t, grp.SubLanes, "internal/dispatchtick", 1, 2, []int{22})
 }
 
+func TestRouterCarriesGenerationBucket(t *testing.T) {
+	labeled := routeTestIssue(routerIssue(21, "gateway: add retry budget", []string{"gen/next"}, ""))
+	if labeled.Generation != GenNext {
+		t.Fatalf("route generation = %q, want %q", labeled.Generation, GenNext)
+	}
+	unlabeled := routeTestIssue(routerIssue(22, "gateway: add retry budget", nil, ""))
+	if unlabeled.Generation != "" {
+		t.Fatalf("unlabeled route generation = %q, want empty (omitempty)", unlabeled.Generation)
+	}
+
+	routes := []IssueRoute{labeled, unlabeled}
+	p := BuildRouterPayload(RouterPayloadInput{
+		Workspace: "C:/work/fak",
+		Routes:    routes,
+		Trees:     routerTestTaxonomy.Trees,
+		Coverage:  RouterCoverage{Complete: true, Notes: []string{}},
+	})
+	grp := p.Lanes["gateway"]
+	if grp.Generation[21] != GenNext {
+		t.Fatalf("lane generation[21] = %q, want %q (%+v)", grp.Generation[21], GenNext, grp.Generation)
+	}
+	if _, ok := grp.Generation[22]; ok {
+		t.Fatalf("lane generation[22] = %q present, want omitted for an unlabeled issue", grp.Generation[22])
+	}
+}
+
 func TestRouterExclusiveAndAmbiguity(t *testing.T) {
 	excl := routeTestIssue(routerIssue(7, "abi: hoist the public ABI surface", nil, ""))
 	if excl.Lane != "" || excl.Confidence != "none" || excl.UnroutedReason == "" {

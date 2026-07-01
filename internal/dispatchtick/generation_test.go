@@ -101,6 +101,26 @@ func TestOrderEligibleGenerationCandidatesPriorityStillWinsInsideHorizon(t *test
 	}
 }
 
+func TestOrderEligibleGenerationCandidatesPassesThroughWhenNoLabelsPresent(t *testing.T) {
+	// The gate must stay OFF for an ordinary, generation-blind backlog: no candidate
+	// carries a real gen/* label and no horizon was requested, so nothing should be
+	// held. A naive always-filter picker would silently drop the entire backlog the
+	// moment none of it happened to be generation-labeled.
+	cands := []GenerationCandidate{
+		{Number: 10, Weight: PriorityWeightDefault, Generation: GenUnclassified},
+		{Number: 20, Weight: PriorityWeightP1, Generation: ""},
+		{Number: 30, Weight: PriorityWeightDefault, Generation: GenUnclassified},
+	}
+	if GenerationGateActive(cands, "") {
+		t.Fatalf("GenerationGateActive = true for an all-unclassified candidate set with no horizon, want false")
+	}
+	got := OrderEligibleGenerationCandidates(cands, "", false)
+	want := []int{20, 10, 30}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("passthrough order = %v, want %v (unfiltered priority/number order, same as OrderLaneCandidates)", got, want)
+	}
+}
+
 func TestOrderEligibleGenerationCandidatesExplicitHorizonAdmitsHeldBucket(t *testing.T) {
 	cands := []GenerationCandidate{
 		{Number: 10, Weight: PriorityWeightDefault, Generation: GenNow},

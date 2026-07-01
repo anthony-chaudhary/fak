@@ -149,6 +149,11 @@ type IssueRoute struct {
 	Trigger        string   `json:"trigger,omitempty"`
 	BatchPolicy    string   `json:"batch_policy,omitempty"`
 	UnroutedReason string   `json:"unrouted_reason,omitempty"`
+	// Generation is the issue's classified scheduling bucket (gen/now, gen/next,
+	// gen/second-next, gen/future), omitted when the issue carries none of the four
+	// labels. Per docs/generation-loop-scheduling.md, this is a scheduling hint
+	// surfaced for a consumer to read, not a queue silo or a priority override.
+	Generation string `json:"generation,omitempty"`
 }
 
 type SkippedIssue struct {
@@ -203,6 +208,11 @@ type RouterLaneGroup struct {
 	// resolve to PriorityWeightDefault). It is how the picker orders the lane's
 	// candidates priority-first (#1395) without re-deriving weights from labels.
 	Priority map[int]int `json:"priority,omitempty"`
+	// Generation maps an issue number to its classified generation bucket for the
+	// issues that carry a gen/* label (unclassified issues are omitted). It is how
+	// a generation-aware picker restricts a lane's candidates to the admitted
+	// horizon without re-deriving the bucket from labels.
+	Generation map[int]string `json:"generation,omitempty"`
 }
 
 type RouterSubLane struct {
@@ -550,6 +560,12 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 				grp.Priority = map[int]int{}
 			}
 			grp.Priority[r.Number] = w
+		}
+		if r.Generation != "" {
+			if grp.Generation == nil {
+				grp.Generation = map[int]string{}
+			}
+			grp.Generation[r.Number] = r.Generation
 		}
 		lanes[r.Lane] = grp
 	}
@@ -1049,7 +1065,19 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, paths []
 		Trigger:        issueBriefField(issue, "trigger", "creation trigger"),
 		BatchPolicy:    issueBriefField(issue, "batch policy", "noise control", "spam control"),
 		UnroutedReason: unroutedReason,
+		Generation:     generationField(issue),
 	}
+}
+
+// generationField reports issue's classified generation bucket, or "" when the issue
+// carries none of the gen/now, gen/next, gen/second-next, gen/future labels -- so the
+// json tag's omitempty keeps an ordinary, unlabeled issue's route payload unchanged.
+func generationField(issue Issue) string {
+	bucket := GenerationBucket(labelNames(issue))
+	if bucket == GenUnclassified {
+		return ""
+	}
+	return bucket
 }
 
 func normalizeRepoPaths(paths []string) []string {

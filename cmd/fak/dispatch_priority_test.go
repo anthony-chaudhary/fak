@@ -77,7 +77,7 @@ func TestPickDispatchLaneUsesStepBudgetBeforeIssueCount(t *testing.T) {
 	}
 	t.Cleanup(func() { dispatchRouteIssues = old })
 
-	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false)
+	pick, err := pickDispatchLane(t.TempDir(), io.Discard, "", nil, false, "")
 	if err != nil {
 		t.Fatalf("pickDispatchLane: %v", err)
 	}

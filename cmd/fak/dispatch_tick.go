@@ -37,6 +37,7 @@ type dispatchTickOptions struct {
 	Live           bool
 	Refresh        bool
 	PreferNewest   bool
+	Generation     string
 	CooldownMin    int
 	WorkerTimeoutS int
 	SpawnProbeS    float64
@@ -116,6 +117,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	live := fs.Bool("live", false, "actually spawn the issue-resolution worker")
 	noRefresh := fs.Bool("no-refresh", false, "skip the per-tick account-registry refresh")
 	preferNewest := fs.Bool("prefer-newest", false, "pick the NEWEST open issue on the lane first (default: oldest first, to drain the backlog)")
+	generationFlag := fs.String("generation", "", "generation horizon to admit: now|next|second-next|future|all (default: now+next; only engages when a candidate carries a gen/* label)")
 	cooldownMin := fs.Int("cooldown-min", dispatchtick.DefaultCooldownMinutes, "skip issues attempted within this many minutes (0 disables)")
 	workerTimeoutS := fs.Int("worker-timeout-s", dispatchtick.DefaultWorkerTimeoutS, "worker lease TTL base in seconds (0 uses default)")
 	spawnProbeS := fs.Float64("spawn-probe-s", dispatchtick.DefaultSpawnProbeS, "seconds to wait after spawn to catch immediate empty-log exits")
@@ -166,6 +168,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		Live:           *live,
 		Refresh:        !*noRefresh,
 		PreferNewest:   *preferNewest,
+		Generation:     strings.TrimSpace(*generationFlag),
 		CooldownMin:    *cooldownMin,
 		WorkerTimeoutS: *workerTimeoutS,
 		SpawnProbeS:    maxFloat64(0, *spawnProbeS),
@@ -226,7 +229,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 			exclude[lane] = true
 		}
 	}
-	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest)
+	pick, err := pickDispatchLane(root, stderr, opts.Lane, exclude, opts.PreferNewest, opts.Generation)
 	if err != nil {
 		return nil, err
 	}
@@ -532,7 +535,7 @@ func dispatchIssueLabels(raw any) []string {
 	return out
 }
 
-func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool) (dispatchLanePick, error) {
+func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation string) (dispatchLanePick, error) {
 	router, err := dispatchRouteIssues(root, stderr)
 	if err != nil {
 		return dispatchLanePick{}, err
@@ -555,15 +558,22 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 		// is byte-for-byte the old by-number order. This is safe ("when reasonable")
 		// because the anti-churn cooldown (recentlyAttemptedIssues) advances past an
 		// issue a worker could not land rather than re-storming it every tick.
-		cands := make([]dispatchtick.LaneCandidate, len(nums))
+		//
+		// Generation-aware on top (docs/generation-loop-scheduling.md): when a
+		// candidate carries a gen/* label, or --generation names an explicit
+		// horizon, gen/now and gen/next stay launchable by default while
+		// gen/second-next, gen/future, and unclassified issues are held. The gate
+		// stays OFF for an ordinary, generation-blind lane, so this never holds
+		// the backlog just because none of it happens to carry a gen/* label.
+		cands := make([]dispatchtick.GenerationCandidate, len(nums))
 		for i, n := range nums {
 			weight := dispatchtick.PriorityWeightDefault
 			if w, ok := info.Priority[n]; ok {
 				weight = w
 			}
-			cands[i] = dispatchtick.LaneCandidate{Number: n, Weight: weight}
+			cands[i] = dispatchtick.GenerationCandidate{Number: n, Weight: weight, Generation: info.Generation[n]}
 		}
-		numsByLane[lane] = dispatchtick.OrderLaneCandidates(cands, preferNewest)
+		numsByLane[lane] = dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest)
 		counts[lane] = len(nums)
 		stepBudget := info.StepBudget
 		if stepBudget <= 0 {
