@@ -10,7 +10,6 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -353,16 +352,7 @@ func runTestDurationCommand(name string, args []string, stderr io.Writer) ([]byt
 }
 
 func writeTestDurationLedgerFile(path string, ledger testDurationLedger) error {
-	var buf bytes.Buffer
-	if err := writeIndentedJSONNoEscape(&buf, ledger); err != nil {
-		return err
-	}
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	return writeIndentedJSONFile(path, ledger)
 }
 
 func isTerminalTestAction(action string) bool {

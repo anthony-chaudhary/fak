@@ -266,16 +266,7 @@ func newAffectedRunReport(base string, changedFiles, changedPkgs, selected []str
 }
 
 func writeAffectedRunReport(path string, rep affectedRunReport) error {
-	var b bytes.Buffer
-	if err := writeIndentedJSONNoEscape(&b, rep); err != nil {
-		return err
-	}
-	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(path, b.Bytes(), 0o644)
+	return writeIndentedJSONFile(path, rep)
 }
 
 func roundDuration(d time.Duration) time.Duration {

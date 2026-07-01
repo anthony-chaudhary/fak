@@ -35,23 +35,8 @@ func runConflationScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 	payload := conflationscore.Build(root)
 
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak conflation-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, conflationscore.DebtKey))
-		return okExit(payload.OK)
-	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak conflation-scorecard: encode json: %v\n", err)
-			return 1
-		}
-		return okExit(payload.OK)
-	}
-	if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak conflation-scorecard", conflationscore.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title: "fak conflation scorecard - the provenance-honesty stick",
 			Description: "fak's deterministic conflation scorecard: does every number and status fak reports " +
 				"label its provenance - WITNESSED (a fact fak authored) vs OBSERVED (a value relayed " +
@@ -64,10 +49,38 @@ func runConflationScorecard(stdout, stderr io.Writer, argv []string) int {
 			DebtKey: conflationscore.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - %v reporting surface(s) - %v external-value string(s)",
 				payload.Corpus["surfaces"], payload.Corpus["external_values_seen"]),
-		}))
+		})
+}
+
+// emitScorecard renders a scorecard.Payload across the shared control-pane surface every
+// fak *-scorecard verb exposes -- --compare (a debt-delta line vs a prior --json payload),
+// --json (the indented control-pane envelope), --markdown (the committed snapshot body), and
+// the default terminal work-list -- returning the process exit code. prefix is the
+// "fak <verb>" message/error prefix; debtKey is the card's corpus debt integer; doc is the
+// per-card markdown front matter, emitted only under --markdown. It is byte-identical to the
+// tail block each card previously inlined (the conflation/propagation/operator-heaviness/
+// support-maturity cards).
+func emitScorecard(stdout, stderr io.Writer, prefix, debtKey string, payload scorecard.Payload, comparePath string, asJSON, asMarkdown bool, doc scorecard.MarkdownDoc) int {
+	if comparePath != "" {
+		base, ok := readCompareBase(stderr, prefix, comparePath)
+		if !ok {
+			return 2
+		}
+		fmt.Fprintln(stdout, scorecard.Compare(payload, base, debtKey))
+		return okExit(payload.OK)
+	}
+	if asJSON {
+		if err := writeIndentedJSON(stdout, payload); err != nil {
+			fmt.Fprintf(stderr, "%s: encode json: %v\n", prefix, err)
+			return 1
+		}
+		return okExit(payload.OK)
+	}
+	if asMarkdown {
+		fmt.Fprint(stdout, scorecard.Markdown(payload, doc))
 		return 0
 	}
-	fmt.Fprintln(stdout, scorecard.Render(payload, conflationscore.DebtKey))
+	fmt.Fprintln(stdout, scorecard.Render(payload, debtKey))
 	return okExit(payload.OK)
 }
 

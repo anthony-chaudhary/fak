@@ -52,23 +52,8 @@ func runPropagationScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 	payload := propagationscore.Build(root)
 
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak propagation-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, propagationscore.DebtKey))
-		return okExit(payload.OK)
-	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak propagation-scorecard: encode json: %v\n", err)
-			return 1
-		}
-		return okExit(payload.OK)
-	}
-	if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak propagation-scorecard", propagationscore.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title: "fak propagation scorecard - does a proven scorecard improvement fan out to every sibling",
 			Description: "fak's deterministic convention-propagation scorecard: when a scoring concept is " +
 				"improved in one card (the shared pkg/scorecard kernel, --compare, --markdown), has it " +
@@ -81,11 +66,7 @@ func runPropagationScorecard(stdout, stderr io.Writer, argv []string) int {
 			DebtKey: propagationscore.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - %v family card(s) - %v convention(s) - %v open fan-out gap(s)",
 				payload.Corpus["members"], payload.Corpus["conventions"], payload.Corpus["fanout_gaps"]),
-		}))
-		return 0
-	}
-	fmt.Fprintln(stdout, scorecard.Render(payload, propagationscore.DebtKey))
-	return okExit(payload.OK)
+		})
 }
 
 func cmdPropagationDebtDispatch(argv []string) {

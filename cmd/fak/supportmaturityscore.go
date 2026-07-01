@@ -42,23 +42,8 @@ func runSupportMaturityScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	payload := supportmaturityscore.Build()
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak support-maturity-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, supportmaturityscore.DebtKey))
-		return okExit(payload.OK)
-	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak support-maturity-scorecard: encode json: %v\n", err)
-			return 1
-		}
-		return okExit(payload.OK)
-	}
-	if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak support-maturity-scorecard", supportmaturityscore.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title:       "fak support-maturity scorecard",
 			Description: "fak's deterministic support-maturity scorecard folds the generated model x backend coverage matrix into support_maturity_debt, coverage percentage, and an A-F grade.",
 			Heading:     "Support-maturity scorecard",
@@ -66,11 +51,7 @@ func runSupportMaturityScorecard(stdout, stderr io.Writer, argv []string) int {
 			Law:         "A cell is fully mature only when the generated coverage matrix marks it SUPPORTED; proof-path-only, fenced, and undefined cells remain honest but incomplete support.",
 			DebtKey:     supportmaturityscore.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - %v/%v cells supported", payload.Corpus["supported"], payload.Corpus["cells"]),
-		}))
-		return 0
-	}
-	fmt.Fprintln(stdout, scorecard.Render(payload, supportmaturityscore.DebtKey))
-	return okExit(payload.OK)
+		})
 }
 
 // runSupportMaturityMatrixDoc regenerates (--write-doc) or freshness-checks (--check-doc)

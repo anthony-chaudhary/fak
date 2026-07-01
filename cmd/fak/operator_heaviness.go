@@ -35,23 +35,8 @@ func runOperatorHeaviness(stdout, stderr io.Writer, argv []string) int {
 	}
 	payload := heavinessscore.Build(root)
 
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak operator heaviness", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, heavinessscore.DebtKey))
-		return okExit(payload.OK)
-	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak operator heaviness: encode json: %v\n", err)
-			return 1
-		}
-		return okExit(payload.OK)
-	}
-	if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak operator heaviness", heavinessscore.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title: "fak operator-heaviness scorecard - how heavy the repo feels to drive",
 			Description: "fak's deterministic operator-heaviness scorecard: how heavy the repo feels to an " +
 				"operator who DRIVES it - the verb-surface size, the front-door flag burden, the refusal " +
@@ -67,9 +52,5 @@ func runOperatorHeaviness(stdout, stderr io.Writer, argv []string) int {
 			HeaderExtra: fmt.Sprintf(" - pressure %v - %v verbs - %v front-door flags - %v refusal reasons",
 				payload.Corpus["heaviness_pressure"], payload.Corpus["verbs"],
 				payload.Corpus["front_door_flags"], payload.Corpus["refusal_reasons"]),
-		}))
-		return 0
-	}
-	fmt.Fprintln(stdout, scorecard.Render(payload, heavinessscore.DebtKey))
-	return okExit(payload.OK)
+		})
 }
