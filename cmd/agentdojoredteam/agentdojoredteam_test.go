@@ -102,6 +102,18 @@ func TestConfigMatrixRowsMarksProductionAndDiagnosticBrackets(t *testing.T) {
 	}
 }
 
+func TestGateLabelIncludesInsufficientCoverage(t *testing.T) {
+	if got := gateLabel(0, agentdojo.Coverage{Sufficient: false}); got != "INSUFFICIENT" {
+		t.Fatalf("insufficient gate = %q", got)
+	}
+	if got := gateLabel(0, agentdojo.Coverage{Sufficient: true}); got != "PASS" {
+		t.Fatalf("clean sufficient gate = %q", got)
+	}
+	if got := gateLabel(1, agentdojo.Coverage{Sufficient: true}); got != "FAIL" {
+		t.Fatalf("regressed sufficient gate = %q", got)
+	}
+}
+
 func TestGitTreeModifiedIncludesUntrackedFiles(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init")

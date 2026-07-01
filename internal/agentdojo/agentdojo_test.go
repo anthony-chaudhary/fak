@@ -2,6 +2,7 @@ package agentdojo
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -132,6 +133,41 @@ func TestStewardAbstainsOnHealthyStack(t *testing.T) {
 	}
 	if witness != "" {
 		t.Fatalf("an abstaining steward must carry no witness, got %q", witness)
+	}
+}
+
+func TestASRStewardCoveragePayloadSeparatesSmallAndExpandedCorpus(t *testing.T) {
+	ctx := context.Background()
+	seed := NewFullStack().Score(ctx, Matrix())
+	seedCoverage := AssessCoverage(seed, DefaultCoverageFloor)
+	if seedCoverage.Sufficient {
+		t.Fatalf("seed matrix unexpectedly satisfies coverage floor: %+v", seedCoverage)
+	}
+	if seedCoverage.AttacksRun != len(Matrix()) || seedCoverage.CoverageFloor != DefaultCoverageFloor {
+		t.Fatalf("seed coverage payload lost sample/floor: %+v", seedCoverage)
+	}
+
+	expanded := NewFullStack().Score(ctx, ExpandedMatrix())
+	expandedCoverage := AssessCoverage(expanded, DefaultCoverageFloor)
+	if !expandedCoverage.Sufficient {
+		t.Fatalf("expanded matrix should satisfy coverage floor: %+v", expandedCoverage)
+	}
+	if expandedCoverage.BlockRateLowerBound95 <= 0 || expandedCoverage.BlockRateLowerBound95 >= 1 {
+		t.Fatalf("expanded coverage lower bound should be a real confidence value, got %+v", expandedCoverage)
+	}
+}
+
+func TestASRStewardRejectsTooSmallCleanCorpus(t *testing.T) {
+	ctx := context.Background()
+	small := &ASRSteward{attacks: Matrix(), newDef: NewFullStack}
+	violated, witness := small.Check(ctx)
+	if !violated {
+		t.Fatal("small clean corpus must be INSUFFICIENT, not PASS")
+	}
+	for _, want := range []string{"INSUFFICIENT", "attacks_run=", "coverage_floor=", "block_rate_lower_bound_95="} {
+		if !strings.Contains(witness, want) {
+			t.Fatalf("witness %q missing %q", witness, want)
+		}
 	}
 }
 
@@ -283,13 +319,16 @@ func TestFullStackBarsUnlistedKeyDestinationEvasion(t *testing.T) {
 // witness when ASR climbs, so its green is a real signal, not a stuck "ok".
 func TestStewardFiresWhenIFCRegresses(t *testing.T) {
 	ctx := context.Background()
-	broken := &ASRSteward{attacks: Matrix(), newDef: NewDetectionOnly} // IFC "removed"
+	broken := &ASRSteward{attacks: ExpandedMatrix(), newDef: NewDetectionOnly} // IFC "removed"
 	violated, witness := broken.Check(ctx)
 	if !violated {
 		t.Fatal("steward must FIRE when IFC is removed (ASR>0)")
 	}
 	if witness == "" {
 		t.Fatal("a firing steward must carry a reproducible witness")
+	}
+	if strings.Contains(witness, "INSUFFICIENT") {
+		t.Fatalf("regressed expanded steward should carry an ASR witness, got %q", witness)
 	}
 	t.Logf("steward witness on the regressed stack: %s", witness)
 }
