@@ -459,6 +459,27 @@ func cmdGuard(argv []string) {
 				return tok
 			}
 		}
+		// #1834: PROACTIVE, not passive. A headless launch has no interactive `claude` process
+		// rewriting .credentials.json, so the reactive 401 self-heal (a 3s-default poll,
+		// internal/agent's authRefreshWindow) never has anything rewrite the file for it to
+		// notice — it always times out and the upstream 401 surfaces raw. Wire the #1183
+		// StaleCred rung (accounts.NewRehydrateCredRung, unwired until now) in HERE, before the
+		// child is spawned and before the first upstream request: on a headless
+		// pinned-subscription launch, force the freshness check (and, if stale, an active wait
+		// for a rotation) now. A refusal means the credential is expired AND could not refresh
+		// within the window — fail loud with the same re-auth guidance the noTokenAnywhere gate
+		// above uses, naming STALE_CRED so the operator/CI can route on it, instead of letting
+		// the child hit a raw upstream_unauthorized. An interactive launch, or a launch not
+		// pinning the subscription, is left alone (Ran=false) — see guardRunHeadlessRehydrate's
+		// doc for why.
+		if pinUpstream {
+			credPath := filepath.Join(us.claudeConfigDir, ".credentials.json")
+			if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), pinUpstream, credPath); v.Refused {
+				fmt.Fprintf(os.Stderr, "fak guard: STALE_CRED — the Claude subscription OAuth token in %s is expired and did not refresh within the wait window, and stdin is not a terminal — refusing to spawn a headless agent that would only hit a raw upstream 401.%s\n", v.CredPath, guardLoginStatusNote(us))
+				fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in (refreshes the token), or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or raise FAK_AUTH_REFRESH_WINDOW if a refresh is just slow.")
+				os.Exit(2)
+			}
+		}
 	}
 	upstreamResolveDur = time.Since(tUpstream)
 
@@ -992,6 +1013,36 @@ func (s guardOAuthCredentialsSource) readOnce(now func() time.Time) (tok string,
 		return "", false, false
 	}
 	return v, true, false
+}
+
+// credExpiresAt reads the .credentials.json accessToken's expiresAt WITHOUT collapsing an
+// expired token to "absent" (unlike readOnce, which the Lookup contract requires to do): the
+// #1183 StaleCred rehydrate rung (accounts.CredFreshness / CredCheck) needs the raw freshness
+// fact — is the token live right now — not the "safe to send" verdict. ok is false when the
+// file is missing/unparseable/carries no token (nothing to judge); a token with expiresAt<=0
+// (no expiry recorded) is treated as always-fresh, matching Claude Code's own convention of
+// omitting expiresAt for a token that does not rotate.
+func credExpiresAt(path string) (expiresAt time.Time, ok bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var doc struct {
+		ClaudeAIOauth struct {
+			AccessToken string `json:"accessToken"`
+			ExpiresAt   int64  `json:"expiresAt"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(b, &doc) != nil {
+		return time.Time{}, false
+	}
+	if strings.TrimSpace(doc.ClaudeAIOauth.AccessToken) == "" {
+		return time.Time{}, false
+	}
+	if doc.ClaudeAIOauth.ExpiresAt <= 0 {
+		return time.Time{}, true // no expiry recorded: treat as never-expiring
+	}
+	return time.UnixMilli(doc.ClaudeAIOauth.ExpiresAt), true
 }
 
 type guardOAuthFileSource struct {

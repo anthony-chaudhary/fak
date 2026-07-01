@@ -18,9 +18,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -199,6 +201,134 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 		claudeConfigDir: claudeConfigDir, loginStatus: loginStatus, canServe: canServe,
 		remoteServe: remote,
 	}
+}
+
+// guardHeadlessRehydrateWindow is how long the proactive wake-time StaleCred check (#1834)
+// polls disk for the credential file to rotate BEFORE the first upstream request goes out,
+// under a headless launch where no interactive `claude` process is running to rewrite
+// .credentials.json on its own. It intentionally matches internal/agent's
+// maxAuthRefreshWindow (the ceiling FAK_AUTH_REFRESH_WINDOW clamps to — that constant is
+// unexported, so this is a deliberately duplicated literal, not an independent budget): this
+// check is what the reactive 401 poll was always hoping to catch, just moved BEFORE the
+// request instead of after a 401 already happened, so there is no reason for its ceiling to
+// differ. FAK_AUTH_REFRESH_WINDOW also governs this proactive wait (see
+// guardHeadlessRehydrateWindowDuration) so one operator knob tunes both the proactive and
+// reactive paths together.
+const guardHeadlessRehydrateWindow = 30 * time.Second
+
+// guardHeadlessRehydratePollInterval mirrors internal/agent's authRefreshPollInterval (also
+// unexported) so the proactive pre-request poll puts no more disk pressure on
+// .credentials.json than the existing reactive 401 poll already does.
+const guardHeadlessRehydratePollInterval = 150 * time.Millisecond
+
+// guardHeadlessRehydrateWindowDuration resolves the proactive wait's budget the same way
+// internal/agent's authRefreshWindow does: FAK_AUTH_REFRESH_WINDOW (any Go duration) when
+// set and valid, clamped to [0, guardHeadlessRehydrateWindow], else the default. Honoring the
+// SAME env var as the reactive path means an operator who raises the reactive window (to ride
+// out a slower refresh) raises the proactive one too, with one knob instead of two.
+func guardHeadlessRehydrateWindowDuration() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("FAK_AUTH_REFRESH_WINDOW")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > guardHeadlessRehydrateWindow {
+				return guardHeadlessRehydrateWindow
+			}
+			return d
+		}
+	}
+	return guardHeadlessRehydrateWindow
+}
+
+// guardHeadlessCredCheck builds the accounts.CredCheck the #1834 proactive rehydrate rung
+// runs on a headless launch: it reads credPath's accessToken expiry once, and — if it is
+// already expired — polls the file for up to guardHeadlessRehydrateWindowDuration() for a
+// REWRITTEN, still-live expiry (a concurrent `claude` refresh landing, or an operator's cron
+// re-auth), exactly mirroring the reactive 401-path's poll (internal/agent/stream.go
+// refreshAPIKeyWait/refreshAPIKey) but run proactively before the first request instead of
+// after a 401. now defaults to time.Now; sleep defaults to time.Sleep (both overridable so a
+// test never sleeps wall-clock time).
+func guardHeadlessCredCheck(credPath string, now func() time.Time, sleep func(time.Duration)) accounts.CredCheck {
+	if now == nil {
+		now = time.Now
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	// credLive reports whether the credential currently on disk has an expiry strictly after
+	// t — the same "is this bearer still good" question CredFreshness answers for a
+	// last-refresh+window pair, expressed directly over an absolute expiresAt instant.
+	credLive := func(t time.Time) bool {
+		expiresAt, ok := credExpiresAt(credPath)
+		return ok && expiresAt.After(t)
+	}
+	return func(ctx context.Context) (fresh bool, refreshed bool) {
+		if _, ok := credExpiresAt(credPath); !ok {
+			// No parseable credential on disk at all (missing/torn/no token) — nothing this
+			// rung can vouch for or refresh; fail closed to the caller's STALE_CRED refusal.
+			return false, false
+		}
+		if credLive(now()) {
+			return true, false // still live: no wait needed, first request goes out immediately
+		}
+		deadline := now().Add(guardHeadlessRehydrateWindowDuration())
+		for {
+			select {
+			case <-ctx.Done():
+				return false, false
+			default:
+			}
+			if !now().Before(deadline) {
+				return false, false // window exhausted with no rotation observed — refresh walled
+			}
+			sleep(guardHeadlessRehydratePollInterval)
+			if credLive(now()) {
+				return false, true // a fresher token landed mid-poll: refreshed in place
+			}
+		}
+	}
+}
+
+// guardHeadlessRehydrateVerdict is cmdGuard's outcome from running the #1834 proactive
+// StaleCred rung: Ran is false when the rung was not applicable (not a headless pinned-OAuth
+// launch, or no credentials file to check at all — resolveGuardUpstream's own resolution
+// already covers that case), so cmdGuard's caller can tell "didn't run" from "ran and
+// cleared". Refused is true only on a genuine STALE_CRED refusal (expired credential, refresh
+// walled within the window) — the exact case that used to fall through to a raw upstream 401.
+type guardHeadlessRehydrateVerdict struct {
+	Ran      bool
+	Refused  bool
+	Detail   string
+	CredPath string
+}
+
+// guardRunHeadlessRehydrate wires accounts.NewRehydrateCredRung (#1183) into the guard launch
+// path (#1834): on a HEADLESS launch (stdinInteractive false) that is pinning the Claude
+// subscription OAuth token upstream (pinUpstream true), it forces the credential-freshness
+// check — and, if needed, an active wait for a rotation — to run BEFORE cmdGuard spawns the
+// child and the first upstream request goes out, instead of discovering staleness reactively
+// on a 401 after the fact (internal/agent's 3s-then-configurable authRefreshWindow). It uses
+// rehydrate.NewGate/Admit at the canonical StaleCred band (dormancy.Cold) so this composes
+// with the SAME staged-gate vocabulary internal/sessionimage.Rehydrate uses for a resumed
+// session — this call site just has no session image to resume, so it runs the one applicable
+// rung directly rather than staging a whole dormancy-banded gate.
+//
+// An INTERACTIVE launch is left alone (Ran=false): there a live `claude` process is already
+// the thing rewriting .credentials.json, so the existing reactive per-request re-read is
+// sufficient and a blocking pre-spawn wait would only delay an attended terminal for no
+// benefit. A launch that is not pinning the subscription OAuth token (API-key billing, a
+// non-Anthropic wire, local --gguf) has no credential file this rung understands, so it is
+// also skipped (Ran=false) — resolveGuardUpstream's own noTokenAnywhere/passthroughFallback
+// handling already covers those postures.
+func guardRunHeadlessRehydrate(stdinInteractive, pinUpstream bool, credPath string) guardHeadlessRehydrateVerdict {
+	if stdinInteractive || !pinUpstream || strings.TrimSpace(credPath) == "" {
+		return guardHeadlessRehydrateVerdict{}
+	}
+	check := guardHeadlessCredCheck(credPath, nil, nil)
+	gate := rehydrate.NewGate(accounts.NewRehydrateCredRung(check))
+	adm := gate.Admit(context.Background(), dormancy.Cold)
+	if adm.Admitted {
+		return guardHeadlessRehydrateVerdict{Ran: true, CredPath: credPath}
+	}
+	return guardHeadlessRehydrateVerdict{Ran: true, Refused: true, Detail: adm.Detail, CredPath: credPath}
 }
 
 // guardEmptyNamedKeyIsError is the pure decision behind the empty-`--api-key-env` fail-loud
