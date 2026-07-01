@@ -61,6 +61,13 @@ func ValidateSnapshot(s Snapshot) error {
 		if err := validateWitness("task "+task.TaskID, task.Witness); err != nil {
 			return err
 		}
+		taskCtx := "task " + task.TaskID
+		if err := validateQualitySLO(taskCtx, task.QualitySLO); err != nil {
+			return err
+		}
+		if err := validateQualitySLOStatus(taskCtx, task.QualitySLO, task.QualitySLOStatus); err != nil {
+			return err
+		}
 
 		seenSteps := make(map[string]struct{}, len(task.Steps))
 		for j := range task.Steps {
@@ -78,6 +85,12 @@ func ValidateSnapshot(s Snapshot) error {
 				return err
 			}
 			if err := validateWitness(ctx, step.Witness); err != nil {
+				return err
+			}
+			if err := validateQualitySLO(ctx, step.QualitySLO); err != nil {
+				return err
+			}
+			if err := validateQualitySLOStatus(ctx, step.QualitySLO, step.QualitySLOStatus); err != nil {
 				return err
 			}
 		}

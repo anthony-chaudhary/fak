@@ -21,7 +21,11 @@ func (m *Manager) BeatTaskWithEvidence(taskID string, output []byte) (WitnessRec
 	if err := m.BeatTask(taskID); err != nil {
 		return WitnessRecord{}, err
 	}
-	return m.WitnessTask(taskID, ShapeWitness{}, []EvidenceRef{beatOutputRef(output)})
+	witness, err := m.taskShapeWitness(taskID)
+	if err != nil {
+		return WitnessRecord{}, err
+	}
+	return m.WitnessTask(taskID, witness, []EvidenceRef{beatOutputRef(output)})
 }
 
 // BeatStepWithEvidence records a step heartbeat and immediately grades the output
@@ -31,7 +35,11 @@ func (m *Manager) BeatStepWithEvidence(taskID, stepID string, output []byte) (Wi
 	if err := m.BeatStep(taskID, stepID); err != nil {
 		return WitnessRecord{}, err
 	}
-	return m.WitnessStep(taskID, stepID, ShapeWitness{}, []EvidenceRef{beatOutputRef(output)})
+	witness, err := m.stepShapeWitness(taskID, stepID)
+	if err != nil {
+		return WitnessRecord{}, err
+	}
+	return m.WitnessStep(taskID, stepID, witness, []EvidenceRef{beatOutputRef(output)})
 }
 
 func beatOutputRef(output []byte) EvidenceRef {

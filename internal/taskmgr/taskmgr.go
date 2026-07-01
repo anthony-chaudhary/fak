@@ -81,6 +81,7 @@ type TaskSpec struct {
 	Unit         string            `json:"unit,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	EvidenceRefs []EvidenceRef     `json:"evidence_refs,omitempty"`
+	QualitySLO   *QualitySLO       `json:"quality_slo,omitempty"`
 }
 
 type StepSpec struct {
@@ -91,6 +92,7 @@ type StepSpec struct {
 	Unit         string            `json:"unit,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	EvidenceRefs []EvidenceRef     `json:"evidence_refs,omitempty"`
+	QualitySLO   *QualitySLO       `json:"quality_slo,omitempty"`
 }
 
 type Snapshot struct {
@@ -130,6 +132,8 @@ type TaskSnapshot struct {
 	Concepts           []ConceptUsage    `json:"concepts,omitempty"`
 	Labels             map[string]string `json:"labels,omitempty"`
 	EvidenceRefs       []EvidenceRef     `json:"evidence_refs,omitempty"`
+	QualitySLO         *QualitySLO       `json:"quality_slo,omitempty"`
+	QualitySLOStatus   *QualitySLOStatus `json:"quality_slo_status,omitempty"`
 	// Witness is the optional, independently-attested completion rung. It is nil
 	// for a claimed-only task; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
@@ -154,6 +158,8 @@ type StepSnapshot struct {
 	Resource           ResourceWindow    `json:"resource"`
 	Labels             map[string]string `json:"labels,omitempty"`
 	EvidenceRefs       []EvidenceRef     `json:"evidence_refs,omitempty"`
+	QualitySLO         *QualitySLO       `json:"quality_slo,omitempty"`
+	QualitySLOStatus   *QualitySLOStatus `json:"quality_slo_status,omitempty"`
 	// Witness is the optional, independently-attested completion rung for this
 	// step. Nil means claimed-only; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
@@ -589,7 +595,7 @@ func (m *Manager) taskSnapshotLocked(task *taskState, now time.Time, current Res
 	progress := progressSnapshot(task.progress)
 	eta, etaAt := estimate(task.started, now, task.state, task.progress)
 	liveness, beats, lastBeat, beatAge := livenessSnapshot(task.state, end, task.heartbeat, m.livenessTimeout)
-	return TaskSnapshot{
+	out := TaskSnapshot{
 		TaskID:             task.spec.TaskID,
 		Title:              task.spec.Title,
 		State:              task.state,
@@ -610,8 +616,11 @@ func (m *Manager) taskSnapshotLocked(task *taskState, now time.Time, current Res
 		Concepts:           conceptUsage([]TaskSnapshot{{Steps: steps}}),
 		Labels:             cloneLabels(task.spec.Labels),
 		EvidenceRefs:       cloneEvidenceRefs(task.spec.EvidenceRefs),
+		QualitySLO:         cloneQualitySLO(task.spec.QualitySLO),
 		Witness:            cloneWitness(task.witness),
 	}
+	out.QualitySLOStatus = evaluateTaskQualitySLO(out.QualitySLO, out.Witness, out.LivenessClass, out.Steps)
+	return out
 }
 
 func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current ResourceSample) StepSnapshot {
@@ -624,7 +633,7 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 	progress := progressSnapshot(step.progress)
 	eta, etaAt := estimate(step.started, now, step.state, step.progress)
 	liveness, beats, lastBeat, beatAge := livenessSnapshot(step.state, end, step.heartbeat, m.livenessTimeout)
-	return StepSnapshot{
+	out := StepSnapshot{
 		StepID:             step.spec.StepID,
 		Title:              step.spec.Title,
 		Concept:            step.spec.Concept,
@@ -643,8 +652,11 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 		Resource:           ResourceWindow{Start: step.start, Current: cur, Delta: resourceDelta(step.start, cur)},
 		Labels:             cloneLabels(step.spec.Labels),
 		EvidenceRefs:       cloneEvidenceRefs(step.spec.EvidenceRefs),
+		QualitySLO:         cloneQualitySLO(step.spec.QualitySLO),
 		Witness:            cloneWitness(step.witness),
 	}
+	out.QualitySLOStatus = evaluateStepQualitySLO(out.QualitySLO, out.Witness, out.LivenessClass)
+	return out
 }
 
 func SampleRuntime(processStart, now time.Time) ResourceSample {
@@ -687,7 +699,7 @@ func validateTaskSpec(spec TaskSpec) error {
 	if spec.Total < 0 {
 		return errors.New("taskmgr: total work cannot be negative")
 	}
-	return nil
+	return validateQualitySLO("task "+spec.TaskID, spec.QualitySLO)
 }
 
 func validateStepSpec(spec StepSpec) error {
@@ -697,7 +709,7 @@ func validateStepSpec(spec StepSpec) error {
 	if spec.Total < 0 {
 		return errors.New("taskmgr: total work cannot be negative")
 	}
-	return nil
+	return validateQualitySLO("step "+spec.StepID, spec.QualitySLO)
 }
 
 func normalizeProgress(done, total float64, unit string, prev progressState) (progressState, error) {
@@ -830,12 +842,14 @@ func unixNanoOrZero(t time.Time) int64 {
 func cloneTaskSpec(spec TaskSpec) TaskSpec {
 	spec.Labels = cloneLabels(spec.Labels)
 	spec.EvidenceRefs = cloneEvidenceRefs(spec.EvidenceRefs)
+	spec.QualitySLO = cloneQualitySLO(spec.QualitySLO)
 	return spec
 }
 
 func cloneStepSpec(spec StepSpec) StepSpec {
 	spec.Labels = cloneLabels(spec.Labels)
 	spec.EvidenceRefs = cloneEvidenceRefs(spec.EvidenceRefs)
+	spec.QualitySLO = cloneQualitySLO(spec.QualitySLO)
 	return spec
 }
 
