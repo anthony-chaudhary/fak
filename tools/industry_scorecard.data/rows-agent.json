@@ -117,6 +117,27 @@
       "apples_to_apples": true,
       "comparison_note": "To our knowledge / among surveyed 2025-2026 routers and gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router), every one routes the WHOLE request to ONE model and the only shipped model ensemble is OpenRouter Fusion — a fixed parallel-synthesize recipe, not a configurable reduction. fak routes at the ASPECT level (request | tool_call | query | step), so one request can send different aspects to different models, with first-class ENSEMBLES folded by a configurable reduction (first | vote | best_of | all_reduce | concat), expressed as one deterministic, verifiable policy. The decision spine (Route + Combine) and the offline benchmark (fak routebench) are SHIPPED (commit 2298421, witnessed by go test), so this is a CATEGORICAL capability lead on routing granularity and ensemble expressiveness — NOT a benchmarked speed/quality win. Any '10x' is a target to be measured, never an inferred or borrowed number; the live multi-model dispatch that executes a decision on real engines is STUB, so the end-to-end competitive latency/cost/quality delta is unmeasured.",
       "measured_on": "2026-06-24"
+    },
+    {
+      "id": "long-horizon-time-to-solution",
+      "dim_id": "long-horizon-agent-time-to-solution",
+      "axis": "Long-horizon agent time-to-solution: wall-clock time to FINISH a multi-hour engineering task (FrontierSWE as the SOTA bar)",
+      "category": "time-to-solution",
+      "competitor": "FrontierSWE (Proximal Labs) - frontier model + agent scaffold on 20h/task ultra-long-horizon tasks",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "FrontierSWE launch (https://www.proximal.ai/blog/frontierswe, 2026-04-16; repo github.com/Proximal-Labs/frontier-swe): 17 tasks, 20h/task budget, unsaturated - top model Claude Fable 5 (avg rank 2.35 / 90 percent dominance) still fails almost all tasks.",
+      "fak_value": null,
+      "unit": "wall-clock hours to task completion (lower is better)",
+      "higher_is_better": false,
+      "verdict": "no-claim",
+      "status": "projected",
+      "fak_commit": "",
+      "fak_artifact": "",
+      "fak_doc": "epic #1706 (FrontierSWE first-class support - time-to-solution); C4 (TTS model) -> C14/C15 close this row with a witnessed number. Related on-axis: [[fleet-serving-50x5]] (cross-agent fleet serving) and [[marginal-vs-tuned-process]] (the honest marginal-vs-live-engine gap).",
+      "apples_to_apples": true,
+      "comparison_note": "HONEST NAMED GAP, not a win. The competitive thesis - that fak cross-agent prefix fusion + cache-value + disinterested-referee orchestration FINISH long-horizon work faster - is projected/gated, NOT yet witnessed. FrontierSWE is the SOTA bar precisely because the field has no time-to-solution winner: models barely progress in 20h. fak has run NO FrontierSWE task end-to-end, so there is no fak time-to-solution number; this row exists to set the bar the eventual witnessed measurement (epic #1706 C14/C15) gets scored against. Any speedup here is a target to be measured, never inferred or borrowed.",
+      "measured_on": "2026-06-27"
     }
   ]
 }

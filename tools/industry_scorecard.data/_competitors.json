@@ -2,6 +2,13 @@
   "_about": "SOTA-system registry. last_reviewed drives the industry-drift backlog (`--stale`).",
   "systems": [
     {
+      "name": "FrontierSWE (Proximal Labs)",
+      "kind": "benchmark",
+      "last_reviewed": "2026-06-27",
+      "url": "https://www.proximal.ai/blog/frontierswe",
+      "notes": "Ultra-long-horizon coding-agent benchmark (17 tasks, 20h/task budget, zero-to-one grading), published 2026-04-16. Unsaturated: top model Claude Fable 5 (avg rank 2.35 / 90 percent dominance) still fails almost all tasks. The SOTA bar for the long-horizon-agent-time-to-solution dimension; repo github.com/Proximal-Labs/frontier-swe."
+    },
+    {
       "name": "AgentDojo",
       "kind": "serving-system",
       "last_reviewed": "2026-06-27",

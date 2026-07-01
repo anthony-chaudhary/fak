@@ -2,6 +2,25 @@
   "_about": "INDUSTRY-FIRST dimension catalog: the things the LLM-serving / agent-infra field competes on, researched from vendor docs / papers / leaderboards (NOT derived from what fak measured). Each carries the current SOTA bar + a dated source. The scorecard positions fak against every in_scope dimension.",
   "dimensions": [
     {
+      "id": "long-horizon-agent-time-to-solution",
+      "category": "time-to-solution",
+      "dimension": "Long-horizon agent time-to-solution: wall-clock time for an agent (or agent fleet) to actually FINISH a multi-hour engineering task",
+      "why_it_matters": "The serving field competes on tokens/s, goodput, and latency - the throughput of a single forward pass. None of that measures the thing an agent operator actually pays for: how long until the WORK is done. FrontierSWE exists precisely because frontier models barely make progress on real ultra-long-horizon engineering tasks even given 20 hours each, so nobody is yet competing on FINISHING the same work faster. That is the dimension fak value stack (cross-agent prefix fusion, cache-value, disinterested-referee orchestration) is built to win, so it belongs on the scorecard as a first-class axis with FrontierSWE as the SOTA bar.",
+      "sota_systems": [
+        "FrontierSWE (Proximal Labs) - the ultra-long-horizon coding benchmark",
+        "Claude Fable 5 / Opus 4.6 + agent scaffold (top FrontierSWE ranks)",
+        "GPT-5.4 + agent scaffold"
+      ],
+      "sota_bar": "FrontierSWE (Proximal Labs, published 2026-04-16) is the field ultra-long-horizon coding benchmark: 17 real tasks (5 implementation, 9 performance-engineering, 3 ML-research) with a 20-hour-per-task budget, graded on a zero-to-one scale rather than binary pass/fail. It is UNSATURATED - the top model (Claude Fable 5, avg rank 2.35 / 90 percent dominance) still fails to solve almost all tasks, and agents burn many hours (e.g. Opus 4.6 ~6.6-13.8h/task) making little progress. There is no published time-to-solution winner: the SOTA bar is that long-horizon completion is an OPEN problem the field measures but nobody yet finishes fast.",
+      "best_value": null,
+      "metric_unit": "wall-clock hours to task completion (no published winner; 20h/task budget, unsaturated)",
+      "source_url": "https://www.proximal.ai/blog/frontierswe",
+      "source_date": "2026-04",
+      "notes": "Sourced from the FrontierSWE launch (proximal.ai/blog/frontierswe, 2026-04-16; repo github.com/Proximal-Labs/frontier-swe; also listed on Prime Intellect Environments Hub). best_value is null by construction: the benchmark grades relative dominance on a zero-to-one scale, not a single time-to-solution number, and no system wins it yet - that is the point. This is the axis fak eventual witnessed time-to-solution number (epic #1706 C14/C15) will be scored against; until then fak position is an honest named gap, not a claimed win.",
+      "in_scope": true,
+      "last_reviewed": "2026-06-27"
+    },
+    {
       "id": "continuous-batching-aggregate-throughput",
       "category": "throughput",
       "dimension": "Continuous / in-flight (iteration-level) batching: max aggregate token throughput at high concurrency",

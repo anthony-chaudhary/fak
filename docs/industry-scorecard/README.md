@@ -18,39 +18,39 @@ Two numbers are driven:
 
 | Metric | Value |
 |---|---|
-| **Coverage** | **100.0%** (89/89 industry dimensions positioned) |
+| **Coverage** | **100.0%** (91/91 industry dimensions positioned) |
 | **Parity-debt (honesty defects)** | **0** |
 | Coverage-debt (unpositioned dimensions) | 0 |
 | Composite score | 98.8/100 (grade A) — honesty 98.0 × 60% + coverage 100.0% × 40% |
-| Standing | **46.7/100** — 5 lead · 14 parity · 10 trails · 62 honest gap |
-| Measured vs gap | 28 measured · 63 honest gaps |
-| Tracked | 89 dimensions · 103 competitors · 91 positions |
+| Standing | **47.0/100** — 5 lead · 15 parity · 10 trails · 63 honest gap |
+| Measured vs gap | 29 measured · 64 honest gaps |
+| Tracked | 91 dimensions · 104 competitors · 93 positions |
 | As of | 2026-06-27 (fak 0.31.0) |
-| Advisory signals | 9 fak-freshness · 0 industry-drift |
+| Advisory signals | 10 fak-freshness · 0 industry-drift |
 
 > **Read this right.** The score grades how *complete and honest fak's competitive map is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
 ## Standing at a glance
 
 ```text
-industry standing chart — 89 dimensions · 103 competitors · map 98.8/100 (grade A) · standing 46.7/100 · parity-debt 0
+industry standing chart — 91 dimensions · 104 competitors · map 98.8/100 (grade A) · standing 47.0/100 · parity-debt 0
 
 coverage of the field (positioned / in-scope dimensions):
-  positioned  [████████████████████████████████]  89/89  (100.0%)
+  positioned  [████████████████████████████████]  91/91  (100.0%)
 
 standing on the positioned axes (shown, not hidden):
   ▲ lead      ██······················ 5
-  ≈ parity    █████··················· 14
+  ≈ parity    ██████·················· 15
   ▼ trails    ████···················· 10
-  ○ no-claim  ████████████████████████ 62
+  ○ no-claim  ████████████████████████ 63
 
 coverage by group:
-  agent          ██████████·············· 6/6
+  agent          ███████████············· 7/7
   cost           ████████················ 5/5
   decoding       █████████████████████··· 13/13
   distributed    ████████················ 5/5
   memory         █████████████████████··· 13/13
-  models         █████████████··········· 8/8
+  models         ██████████████·········· 9/9
   numerics       █████████████████████··· 13/13
   operability    ██████████████·········· 9/9
   security       ███····················· 2/2
@@ -61,12 +61,12 @@ coverage by group:
 
 | Group | Positioned / in-scope | Pages |
 |---|---|---|
-| agent | 6/6 | [agent.md](agent.md) |
+| agent | 7/7 | [agent.md](agent.md) |
 | cost | 5/5 | [cost.md](cost.md) |
 | decoding | 13/13 | [decoding.md](decoding.md) |
 | distributed | 5/5 | [distributed.md](distributed.md) |
 | memory | 13/13 | [memory.md](memory.md) |
-| models | 8/8 | [models.md](models.md) |
+| models | 9/9 | [models.md](models.md) |
 | numerics | 13/13 | [numerics.md](numerics.md) |
 | operability | 9/9 | [operability.md](operability.md) |
 | security | 2/2 | [security.md](security.md) |
@@ -83,6 +83,7 @@ coverage by group:
 | ▲ | lead | client-compaction | Compact a long session WITHOUT busting the provider prompt-cache prefix (proven byte-identity drop-and-splice vs summarize/clear-and-rewrite) | — | — | — | Anthropic API context-editing; OpenAI Codex CLI; GitHub Copilot CLI; Aider; LangChain (trim_messages / ConversationSummaryMemory) |
 | ▲ | lead | model-routing | Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection | — | — | — | RouteLLM (LMSYS); Martian; NotDiamond; Unify.ai; OpenRouter (+ Fusion); Portkey; LiteLLM Router |
 | ▲ | lead | quantization | int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer | 2.97 × vs HF int8 | 1 × vs HF int8 | 2.97× | HuggingFace dynamic-int8 (the standard same-rung int8 reference) |
+| ≈ | parity | hardware-shape-neutrality | Hardware-shape neutrality: explicit fences for host-CPU assumptions | 7 of 7 host-shape assumptions explicitly FENCED in the compute HAL contract | — | — | vLLM plugin backends; llama.cpp backend matrix; MLC-LLM / TVM compilation |
 | ≈ | parity | kv-cache | Prefix caching / automatic KV reuse across requests (shared-context workloads) | 6.95 × | 7.5 × | 0.93× | fak's own deterministic token-reuse ceiling (the exact upper bound) |
 | ≈ | parity | kv-cache | Prefix/KV-cache reuse impact on TTFT (cache-hit latency) | 6.95 × | 7.5 × | 0.93× | fak's own deterministic token-reuse ceiling (the exact upper bound) |
 | ≈ | parity | kv-cache | Automatic prefix caching / RadixAttention prefix reuse and cache hit rate | 86.7 % | 50–99 % | — | SGLang RadixAttention published hit-rate band |
@@ -169,13 +170,14 @@ coverage by group:
 | ○ | no-claim | throughput | Continuous / in-flight (iteration-level) batching: max aggregate token throughput at high concurrency | — | — | — | vLLM (PagedAttention + continuous batching); Orca (iteration-level scheduling, originator); TensorRT-LLM (in-flight batching) |
 | ○ | no-claim | throughput | Absolute aggregate tokens/s at scale on standardized hardware (MLPerf Inference) | — | 2.494e+06 tokens/s (standardized MLPerf hardware) | — | NVIDIA GB300 NVL72 x4 (288 Blackwell Ultra GPUs, TensorRT-LLM/Dynamo); MLPerf Inference v6.0 submitters (DeepSeek-R1 671B MoE, offline) |
 | ○ | no-claim | throughput | Latency-vs-throughput Pareto frontier | — | — | — | Sarathi-Serve (chunked prefill); DynaServe; vLLM/SGLang sweeps |
+| ○ | no-claim | time-to-solution | Long-horizon agent time-to-solution: wall-clock time to FINISH a multi-hour engineering task (FrontierSWE as the SOTA bar) | — | — | — | FrontierSWE (Proximal Labs) - frontier model + agent scaffold on 20h/task ultra-long-horizon tasks |
 
 ## Per-KPI (parity-debt = honesty of the rows that exist)
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (9 unverifiable) |
-| structure | `well_formed` | 100 | 0 | all 91 rows well-formed |
+| honesty | `verdict_consistency` | 90 | 0 | every verdict matches its evidence (10 unverifiable) |
+| structure | `well_formed` | 100 | 0 | all 93 rows well-formed |
 | completeness | `competitor_named` | 100 | 0 | every row names a concrete competitor |
 | completeness | `axis_coverage` | 100 | 0 | all 5 contracted regimes covered |
 | honesty | `baseline_sota` | 100 | 0 | every comparison is vs a tuned / SOTA / next-best baseline |

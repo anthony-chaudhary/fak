@@ -31,6 +31,19 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 - **fak note:** REAL but narrow vs the SOTA breadth bar. fak ships four numerically-correct single-device backends: pure-Go CPU (x86 AVX/arm64) plus NVIDIA CUDA (RTX 4070 + 8-GPU datacenter server sm_80), AMD Vulkan (RX 7600), and Apple Metal (M3 Pro), each argmax-exact / cosine=1.0 vs cpu-ref. But vLLM (TPU, Gaudi 2/3, Inferentia/Trainium, Ascend, Spyre) and llama.cpp (HIP, SYCL, CANN, OpenCL, WebGPU via MLC) span far more silicon, and fak's GPU paths are mostly f32 and throughput-immature (Vulkan ~58x slower than llama.cpp CPU; CUDA reaches parity only on a small model that fits VRAM). fak trails on breadth and on per-backend maturity; disclosed, not hidden.
 - **Trace:** CLAIMS Engine: pure-Go CPU; '-tags vulkan' RX 7600; '-tags cuda' RTX 4070 / datacenter GPU; 'darwin && metal' M3 Pro — each numerically witnessed (cosine=1.0 / argmax-exact)
 
+## Hardware shape neutrality (`hardware-shape-neutrality`)
+
+### ≈ Hardware-shape neutrality: explicit fences for host-CPU assumptions — fak: **parity**
+
+*Why it matters:* Hardware breadth can be GPU-biased if the score only counts brands or devices. A serving stack also needs to say whether its core execution contract assumes f32-only tensors, host-addressable buffers, x86 dispatch, synchronous execution, goroutine row splitting, row-major layout, or eager host-resident weights. Operators comparing new silicon need these assumptions named as FENCED or UNDEFINED, otherwise a broad backend list can hide a hard host-shape dependency.
+
+- **SOTA bar:** A hardware-neutral stack exposes backend contracts, capability discovery, layout/dtype/residency boundaries, and explicit fallback behavior so new accelerators do not require a fork of the model loop. Mature serving stacks cover more device families, but most public scorecards still report breadth without a seven-assumption shape-neutrality ledger.
+- **Leading systems:** vLLM plugin backends, llama.cpp backend matrix, MLC-LLM / TVM compilation
+- **Source:** [https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/hardware-portability.md) (2026-06-30)
+- **fak:** parity — 7 of 7 host-shape assumptions explicitly FENCED in the compute HAL contract (shipped)
+- **fak note:** This corrects the GPU-bias in a pure backend-breadth row. fak still TRAILS the mature engines on how many accelerator families it serves, but it has a FENCED contract for the seven host-shape assumptions the HAL explainer names: (1) float32 monoculture -> Dtype/QuantSpec, (2) host-pointer aliasing -> Tensor/Host/Read boundary, (3) x86 build-tag dispatch -> runtime registry and Tier, (4) synchronous return-by-value -> Caps.Async with explicit Read/Argmax fences, (5) goroutine-only parallelism -> whole-op Backend methods, (6) row-major only -> Layout descriptor, and (7) eager full-RAM plus little-endian host -> WeightSource and Upload. Provenance labels: contract FENCED in code and docs; CUDA/Vulkan/Metal/CPU backends WITNESSED where their support rows say so; broad vendor conformance remains not-yet until the BCK/fak-certified work lands. apples_to_apples=false because this dimension measures contract shape, not device count or throughput.
+- **Trace:** docs/explainers/hardware-portability.md plus internal/compute/compute.go: Dtype/QuantSpec, Tensor/Host, Register/Pick/Tier, Caps.Async/Read/Argmax, whole-op Backend methods, Layout, WeightSource/Upload
+
 ## Model coverage (`model-coverage`)
 
 ### ▼ Maximum parameter count & frontier-MoE architecture coverage — fak: **trails**
