@@ -250,6 +250,9 @@ or function that makes it checkable.
 
 ## See also
 
+- [Managed-context continuous usage semantics](managed-context-continuous-usage.md) — the
+  user-facing contract for preserving continuity across hidden context resets without
+  making the user manage the context window manually.
 - [Context is not memory](CONTEXT-IS-NOT-MEMORY.md) — the durability axis behind memory
   promotion, in full.
 - [`internal/ctxplan` package doc](../internal/ctxplan/doc.go) — the resident-view / context-query
