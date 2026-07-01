@@ -90,6 +90,12 @@ func main() {
 		cmdBenchLoop(os.Args[2:])
 	case "ablate":
 		cmdAblate(os.Args[2:])
+	case "ablate-arm":
+		// Hidden: the rung-2 arm-mode child `fak ablate` re-execs (one fresh process per
+		// env-gated arm, each reading its own FAK_* at start). Reads an arm request on
+		// stdin, writes one AblationRun on stdout. Not listed in usage() — an internal seam
+		// of the ablate subprocess fan-out.
+		cmdAblateArm(os.Args[2:])
 	case "turntax":
 		cmdTurnTax(os.Args[2:])
 	case "agent":

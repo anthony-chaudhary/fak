@@ -241,6 +241,16 @@ func execArmRunner(ctx context.Context, bin string, c FeatureConfig, traceJSON [
 	return run, nil
 }
 
+// ExecArmRunner is the exported production armRunner: the real subprocess re-exec that
+// makes a process-start env feature ablatable (one fresh child per arm, each reading its
+// own FAK_* at start). cmd/fak injects it into SweepViaSubprocess for the live rung-2 path;
+// the package's own tests inject a fake instead, so the suite never spawns the real binary.
+// It surfaces execArmRunner without renaming it, so the internal name — and the doc
+// comments and compile-time assertion that reference it — stay intact.
+func ExecArmRunner(ctx context.Context, bin string, c FeatureConfig, traceJSON []byte) (AblationRun, error) {
+	return execArmRunner(ctx, bin, c, traceJSON)
+}
+
 // provenanceFor builds the report provenance for a subprocess sweep (the parent stamps
 // it once; children only report their own AblationRun). Factored so both Sweep and
 // SweepViaSubprocess stamp identically.

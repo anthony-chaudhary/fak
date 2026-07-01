@@ -28,6 +28,11 @@ import (
 // Exit 0 ok, 1 a load/run error, 2 a usage error.
 func cmdAblate(argv []string) { os.Exit(runAblate(os.Stdout, os.Stderr, argv)) }
 
+// ablateArmRunner is the runner runAblate hands to ablate.SweepViaSubprocess for the
+// env-gated (rung-2) path. Production binds the real subprocess re-exec; a test swaps a
+// fake so the cmd suite never spawns the real fak binary.
+var ablateArmRunner = ablate.ExecArmRunner
+
 // runAblate is the testable core: it returns the process exit code instead of calling
 // os.Exit, and takes its streams explicitly (mirrors runRoute).
 func runAblate(stdout, stderr io.Writer, argv []string) int {
@@ -45,12 +50,6 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	features := splitCommaList(*sweep)
-	for _, f := range features {
-		if f != ablate.FeatureVDSO {
-			fmt.Fprintf(stderr, "fak ablate: unknown runtime feature %q (this in-process rung can sweep only %s)\n", f, ablate.FeatureVDSO)
-			return 2
-		}
-	}
 
 	path := *tracePath
 	if path == "" {
@@ -62,10 +61,35 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	// BuildSweep validates the sweep spec (an unknown token fails loud → usage exit 2) and
+	// builds the arm matrix shared by both rungs.
 	configs, err := ablate.BuildSweep(features)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 2
+	}
+
+	// Route by rung. A vdso-only sweep flips the one runtime knob IN-PROCESS (no spawn).
+	// Any env-gated feature is read once at process start, so its arms must re-exec a child
+	// carrying the arm's FAK_* env (rung 2). A MIXED sweep goes wholly through the subprocess
+	// path — each child still applies vdso in-process AND reads its own env — so the vdso and
+	// the env arms land in one report under the same identical-workload guard.
+	if anyEnvGated(features) {
+		bin, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(stderr, "fak ablate: resolve fak binary for arm re-exec:", err)
+			return 1
+		}
+		rep, dropped, err := ablate.SweepViaSubprocess(ctx(), bin, t, *engine, *engine+"-offline", configs, *baseline, ablateArmRunner)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak ablate:", err)
+			return 1
+		}
+		// A dropped child is a logged hole with a reason, never a silent gap.
+		for _, d := range dropped {
+			fmt.Fprintf(stderr, "fak ablate: arm %q dropped: %s\n", d.ArmID, d.Reason)
+		}
+		return emitAblation(stdout, stderr, rep, *out, *asJSON)
 	}
 
 	rep, err := ablate.Sweep(ctx(), t, *engine, *engine+"-offline", configs, *baseline)
@@ -73,20 +97,54 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 1
 	}
+	return emitAblation(stdout, stderr, rep, *out, *asJSON)
+}
 
-	if *out != "" {
-		if err := os.WriteFile(*out, rep.JSON(), 0o644); err != nil {
+// anyEnvGated reports whether the sweep contains a feature the kernel reads at process
+// start (so the run must take the rung-2 subprocess path). A pure-vdso sweep stays
+// in-process.
+func anyEnvGated(features []string) bool {
+	for _, f := range features {
+		if ablate.EnvGated(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// emitAblation writes the assembled report to the requested sinks — an --out file, --json
+// to stdout, or the human table — and returns the process exit code. Shared by the
+// in-process and subprocess rungs so both render identically.
+func emitAblation(stdout, stderr io.Writer, rep *ablate.Report, outPath string, asJSON bool) int {
+	if outPath != "" {
+		if err := os.WriteFile(outPath, rep.JSON(), 0o644); err != nil {
 			fmt.Fprintln(stderr, "fak ablate:", err)
 			return 1
 		}
 	}
-	if *asJSON {
+	if asJSON {
 		_, _ = stdout.Write(rep.JSON())
 		return 0
 	}
 	printAblation(stdout, rep)
-	if *out != "" {
-		fmt.Fprintf(stdout, "report written : %s\n", *out)
+	if outPath != "" {
+		fmt.Fprintf(stdout, "report written : %s\n", outPath)
+	}
+	return 0
+}
+
+// cmdAblateArm is the HIDDEN child verb the rung-2 re-exec drives: it reads one arm request
+// from stdin, runs that single arm in THIS process (whose FAK_* env the parent set at
+// spawn), and writes the resulting AblationRun to stdout. It is not in usage() — an
+// internal seam of `fak ablate`'s subprocess fan-out, reachable only via the re-exec.
+func cmdAblateArm(argv []string) { os.Exit(runAblateArm(os.Stdin, os.Stdout, os.Stderr, argv)) }
+
+// runAblateArm is the testable core of the child verb: it drives ablate.RunArmMode with the
+// production trace codec and returns the process exit code.
+func runAblateArm(stdin io.Reader, stdout, stderr io.Writer, _ []string) int {
+	if err := ablate.RunArmMode(ctx(), stdin, stdout, ablate.UnmarshalTrace); err != nil {
+		fmt.Fprintln(stderr, "fak ablate-arm:", err)
+		return 1
 	}
 	return 0
 }

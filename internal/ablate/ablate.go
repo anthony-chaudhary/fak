@@ -101,6 +101,13 @@ func envFeature(f string) bool {
 	return ok
 }
 
+// EnvGated is the exported form of envFeature: it reports whether a sweep token names an
+// env-gated (process-start) feature. A CLI caller consults it to decide whether a sweep
+// must take the rung-2 subprocess path (any env-gated feature present) or can flip the one
+// runtime knob in-process (a vdso-only sweep). Kept a thin surface so the closed
+// envFeatureVars map stays the single source of truth.
+func EnvGated(feature string) bool { return envFeature(feature) }
+
 // knownFeature reports whether f is a feature the harness can sweep (runtime or env).
 func knownFeature(f string) bool {
 	if f == FeatureVDSO {
