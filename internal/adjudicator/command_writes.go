@@ -37,10 +37,8 @@ func commandArg(args map[string]any) (string, bool) {
 
 // guardedCommandTree decodes a tool-call's shell command and reports the guarded glob
 // it names. ok is false — the caller should ALLOW — when there is no command or the
-// command reaches no guarded tree. It is the shared front gate of the command-string
-// self-modify floors (commandSelfModify, synthToolSelfModify): each calls it to reach
-// a (cmd, guarded-glob) pair, then applies its OWN write-shaped predicate before
-// returning the glob as a deny.
+// command reaches no guarded tree. It is the front gate for synthToolSelfModify,
+// whose envelope check is intentionally about guarded reach by an authored tool.
 func guardedCommandTree(args map[string]any, globs []string) (cmd, glob string, ok bool) {
 	cmd, has := commandArg(args)
 	if !has {
@@ -59,18 +57,16 @@ func guardedCommandTree(args map[string]any, globs []string) (cmd, glob string, 
 // whose write target lives in the `command`/`cmd` string rather than a path arg.
 //
 // It fires only when BOTH hold: (1) the command string contains a write-shaped
-// shell verb or an output redirect, AND (2) the command string contains a guarded
-// glob fragment. Requiring a write verb is what keeps a read of a guarded file
-// (`cat internal/abi/x.go`) allowed — only a write into the tree is refused. This
-// is a substring floor, not a shell parser: it is intentionally over-broad (a
-// guarded path mentioned anywhere alongside a write verb is refused) because the
-// guarded trees are the kernel's own witness machinery, where a false refusal is
-// cheap and a false allow is the self-grading-homework failure the floor exists to
-// stop.
+// shell verb or an output redirect, AND (2) a decoded write TARGET contains a
+// guarded glob fragment. Requiring a write target is what keeps a read of a
+// guarded file (`cat VERSION > /tmp/v`, `cp VERSION /tmp/v`) allowed — only the
+// write into the tree is refused. Opaque eval-shaped writers keep the conservative
+// whole-segment target because their real file open happens inside a program string,
+// not in shell operands.
 func commandSelfModify(args map[string]any, globs []string) string {
-	cmd, g, ok := guardedCommandTree(args, globs)
+	cmd, ok := commandArg(args)
 	if !ok {
-		return "" // no command, or touches no guarded tree — nothing to guard
+		return "" // no command to inspect
 	}
 	if !commandWrites(cmd) {
 		return "" // a read of a guarded file is allowed; only writes are refused
@@ -85,11 +81,14 @@ func commandSelfModify(args map[string]any, globs []string) string {
 	// still names a guarded glob after the identity arg is stripped (e.g. `tee ~/.ssh/
 	// id_rsa`, or a redirect into a key) keeps its deny — the floor is unchanged for it.
 	if stripped, did := stripSSHIdentityArg(cmd); did {
-		if matchGlob(stripped, globs) == "" {
-			return ""
+		cmd = stripped
+	}
+	for _, target := range commandWriteTargets(cmd) {
+		if g := matchGlob(target, globs); g != "" {
+			return g
 		}
 	}
-	return g
+	return ""
 }
 
 // stripSSHIdentityArg removes the `-i <keyfile>` identity operand from an ssh/scp command
@@ -176,13 +175,13 @@ func commandWrites(cmd string) bool {
 	// otherwise launder a self-edit past every rung above (#172 Hole 1 residual, the
 	// `perl -i`/`ruby -i` gap one interpreter further out — python/node/ruby are the ones
 	// most likely on a coding agent's PATH). The program string is opaque to this floor, so
-	// — matching its documented "a guarded tree named alongside a writer is refused; a false
-	// refusal is cheap" stance — an inline interpreter program is treated as write-shaped.
+	// — matching the opaque nature of inline code — an inline interpreter program is
+	// treated as write-shaped.
 	// Matching is by TOKEN (interpreterEvalMatch), so the idiomatic `ruby -e'…'` (no space),
 	// `node --eval=…`, and intervening-flag (`ruby -rjson -e …`) spellings are all caught,
-	// not just a `<interp> <flag> ` prefix. commandSelfModify only reaches here once the
-	// command already names a guarded glob, so an inline program touching nothing guarded is
-	// unaffected; a read-shaped interpreter call WITHOUT an eval flag (`python score.py`,
+	// not just a `<interp> <flag> ` prefix. commandSelfModify's target extractor treats
+	// the opaque inline-program segment as the write target; a read-shaped interpreter call
+	// WITHOUT an eval flag (`python score.py`,
 	// `node app.js`) names no flag token and is not matched.
 	for _, ev := range interpreterEvalFlags {
 		if interpreterEvalMatch(lc, ev) {
@@ -201,9 +200,8 @@ func commandWrites(cmd string) bool {
 	//     redirect and no caught verb (`ex -s -c wq file`, `ed -s file`). They are
 	//     short tokens, so they are matched only in COMMAND POSITION (start of the
 	//     command or right after a shell separator), never as a substring of `sed`,
-	//     `indexed`, `fixed`, `expr`, etc. commandSelfModify only reaches here once a
-	//     guarded glob is already named, so a benign `ed`/`ex` over an unguarded path
-	//     is unaffected; only an editor invocation alongside a guarded tree is refused.
+	//     `indexed`, `fixed`, `expr`, etc. commandSelfModify later checks the editor's
+	//     file operand against the guarded globs.
 	if strings.Contains(lc, "-i inplace") {
 		return true
 	}
@@ -214,9 +212,9 @@ func commandWrites(cmd string) bool {
 	// extractor writes files into a destination directory with none of the tokens
 	// above — `tar -xf a.tar -C internal/abi`, `unzip -d internal/abi a.zip`,
 	// `rsync src/ internal/abi/` overwrite the guarded tree via the extract/sync
-	// DESTINATION. commandSelfModify only reaches here once a guarded glob is named,
-	// so the job is to fire on the WRITE (extract/sync) idioms while leaving the
-	// READ idioms over the same tree allowed (tar LIST/CREATE, unzip LIST/test).
+	// DESTINATION. The target extractor then matches only those extract/sync
+	// destinations against guarded globs, while READ idioms over the same tree stay
+	// allowed (tar LIST/CREATE, unzip LIST/test).
 	if archiveExtractsOrSyncs(lc) {
 		return true
 	}
@@ -244,6 +242,13 @@ func commandWrites(cmd string) bool {
 // a dangling `>`) is treated as NOT a write only when it names no real path, so the
 // floor never loses a redirect into a guarded tree.
 func hasFileWriteRedirect(cmd string) bool {
+	return len(fileWriteRedirectTargets(cmd)) > 0
+}
+
+// fileWriteRedirectTargets returns the real file targets of output redirects in cmd.
+// fd-duplication (`2>&1`) and null-device sinks are deliberately absent.
+func fileWriteRedirectTargets(cmd string) []string {
+	var targets []string
 	for i := 0; i < len(cmd); i++ {
 		if cmd[i] != '>' {
 			continue
@@ -272,9 +277,9 @@ func hasFileWriteRedirect(cmd string) bool {
 		if target == "" || isNullSink(target) {
 			continue // no real file written by this redirect
 		}
-		return true
+		targets = append(targets, cleanShellOperand(target))
 	}
-	return false
+	return targets
 }
 
 // isNullSink reports whether a redirect target is the null device — a write that
@@ -293,10 +298,439 @@ func isRedirectTargetBoundary(b byte) bool {
 	return false
 }
 
+// commandWriteTargets returns the shell operands this command writes to. It is still
+// deliberately small, not a shell parser: the goal is to keep the SELF_MODIFY floor
+// target-scoped for the common write idioms the floor already recognizes.
+func commandWriteTargets(cmd string) []string {
+	var targets []string
+	add := func(target string) {
+		target = cleanShellOperand(target)
+		if target == "" || isNullSink(target) {
+			return
+		}
+		for _, existing := range targets {
+			if existing == target {
+				return
+			}
+		}
+		targets = append(targets, target)
+	}
+	for _, target := range fileWriteRedirectTargets(cmd) {
+		add(target)
+	}
+	for _, segment := range shellSegments(cmd) {
+		for _, target := range segmentWriteTargets(segment) {
+			add(target)
+		}
+	}
+	return targets
+}
+
+func segmentWriteTargets(segment string) []string {
+	var targets []string
+	add := func(target string) {
+		target = cleanShellOperand(target)
+		if target != "" && !isNullSink(target) {
+			targets = append(targets, target)
+		}
+	}
+	for _, target := range fileWriteRedirectTargets(segment) {
+		add(target)
+	}
+	words := shellWords(segment)
+	if len(words) == 0 {
+		return targets
+	}
+	start := commandWordStart(words)
+	if start >= len(words) {
+		return targets
+	}
+	head := strings.ToLower(words[start].text)
+	args := words[start+1:]
+	lc := strings.ToLower(segment)
+	switch head {
+	case "tee":
+		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	case "dd":
+		for _, w := range args {
+			if target, ok := strings.CutPrefix(w.text, "of="); ok {
+				add(target)
+			}
+		}
+	case "truncate", "shred", "rm":
+		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	case "cp", "install", "ln":
+		if target := lastPlainOperand(args); target != "" {
+			add(target)
+		}
+	case "mv":
+		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	case "chmod", "chown":
+		for _, target := range operandsAfterFirst(args) {
+			add(target)
+		}
+	case "sed":
+		if strings.Contains(lc, "sed -i") {
+			if target := lastPlainOperand(args); target != "" {
+				add(target)
+			}
+		}
+	case "perl", "ruby":
+		if hasInPlaceFlag(args) {
+			if target := lastPlainOperand(args); target != "" {
+				add(target)
+			}
+		}
+	case "awk", "gawk":
+		if strings.Contains(lc, "-i inplace") {
+			if target := lastPlainOperand(args); target != "" {
+				add(target)
+			}
+		}
+	case "ed", "ex":
+		if target := lastPlainOperand(args); target != "" {
+			add(target)
+		}
+	case "git":
+		for _, target := range gitWriteTargets(args) {
+			add(target)
+		}
+	case "find":
+		for _, target := range findWriteTargets(args) {
+			add(target)
+		}
+	case "tar":
+		if tarExtracts(lc) {
+			for _, target := range tarExtractTargets(args) {
+				add(target)
+			}
+		}
+	case "unzip":
+		if !unzipListsOnly(lc) {
+			for _, target := range flagValues(args, "-d", "--dir", "--directory") {
+				add(target)
+			}
+		}
+	case "rsync":
+		if target := lastPlainOperand(args); target != "" {
+			add(target)
+		}
+	case "patch":
+		for _, target := range plainOperands(args) {
+			add(target)
+		}
+	}
+	for _, ev := range interpreterEvalFlags {
+		if interpreterEvalMatch(lc, ev) {
+			add(segment)
+			break
+		}
+	}
+	for _, w := range words {
+		if !w.quoted || !looksNestedShell(w.text) {
+			continue
+		}
+		for _, target := range commandWriteTargets(w.text) {
+			add(target)
+		}
+	}
+	return targets
+}
+
+type shellWord struct {
+	text   string
+	quoted bool
+}
+
+func shellWords(cmd string) []shellWord {
+	var out []shellWord
+	var b strings.Builder
+	var quote byte
+	quoted := false
+	escaped := false
+	flush := func() {
+		if b.Len() == 0 && !quoted {
+			return
+		}
+		out = append(out, shellWord{text: b.String(), quoted: quoted})
+		b.Reset()
+		quoted = false
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+				quoted = true
+				continue
+			}
+			b.WriteByte(c)
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+			quoted = true
+		case ' ', '\t', '\n', '\r':
+			flush()
+		default:
+			b.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+func shellSegments(cmd string) []string {
+	var segments []string
+	var quote byte
+	escaped := false
+	start := 0
+	flush := func(end int) {
+		if s := strings.TrimSpace(cmd[start:end]); s != "" {
+			segments = append(segments, s)
+		}
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+		case ';', '\n', '|', '&':
+			if c == '|' && i > 0 && cmd[i-1] == '>' {
+				continue
+			}
+			if c == '&' && ((i > 0 && cmd[i-1] == '>') || (i+1 < len(cmd) && cmd[i+1] == '>')) {
+				continue
+			}
+			flush(i)
+			start = i + 1
+		}
+	}
+	flush(len(cmd))
+	return segments
+}
+
+func commandWordStart(words []shellWord) int {
+	i := 0
+	for i < len(words) {
+		tok := words[i].text
+		if isAssignment(tok) {
+			i++
+			continue
+		}
+		if strings.ToLower(tok) != "env" {
+			break
+		}
+		i++
+		for i < len(words) {
+			tok = words[i].text
+			switch {
+			case tok == "--":
+				i++
+				return i
+			case tok == "-u" || tok == "--unset":
+				i += 2
+			case strings.HasPrefix(tok, "-"):
+				i++
+			case isAssignment(tok):
+				i++
+			default:
+				return i
+			}
+		}
+	}
+	return i
+}
+
+func plainOperands(words []shellWord) []string {
+	var out []string
+	skipNext := false
+	for _, w := range words {
+		tok := cleanShellOperand(w.text)
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if tok == "" || tok == "--" {
+			continue
+		}
+		if tok == "<" || tok == ">" || tok == ">>" || tok == ">|" {
+			skipNext = tok == "<"
+			continue
+		}
+		if strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "+") {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return out
+}
+
+func lastPlainOperand(words []shellWord) string {
+	ops := plainOperands(words)
+	if len(ops) == 0 {
+		return ""
+	}
+	return ops[len(ops)-1]
+}
+
+func operandsAfterFirst(words []shellWord) []string {
+	ops := plainOperands(words)
+	if len(ops) <= 1 {
+		return nil
+	}
+	return ops[1:]
+}
+
+func hasInPlaceFlag(words []shellWord) bool {
+	for _, w := range words {
+		tok := w.text
+		if tok == "-i" || strings.HasPrefix(tok, "-i.") || strings.HasPrefix(tok, "-i'") || strings.HasPrefix(tok, "-i\"") {
+			return true
+		}
+	}
+	return false
+}
+
+func gitWriteTargets(args []shellWord) []string {
+	var targets []string
+	mutating := false
+	for i := 0; i < len(args); i++ {
+		tok := strings.ToLower(args[i].text)
+		switch tok {
+		case "reset", "commit", "clean", "rm", "mv", "checkout", "restore", "stash", "apply":
+			mutating = true
+		}
+	}
+	if !mutating {
+		return nil
+	}
+	for i := 0; i < len(args); i++ {
+		tok := args[i].text
+		if tok == "-C" && i+1 < len(args) {
+			targets = append(targets, args[i+1].text)
+			i++
+			continue
+		}
+		if target, ok := strings.CutPrefix(tok, "--git-dir="); ok {
+			targets = append(targets, target)
+		}
+	}
+	for _, target := range plainOperands(args) {
+		targets = append(targets, target)
+	}
+	return targets
+}
+
+func findWriteTargets(args []shellWord) []string {
+	writes := false
+	var targets []string
+	for i := 0; i < len(args); i++ {
+		tok := args[i].text
+		if tok == "-delete" {
+			writes = true
+		}
+		if tok != "-exec" && tok != "-execdir" {
+			continue
+		}
+		writes = true
+		var exec []string
+		for j := i + 1; j < len(args); j++ {
+			if args[j].text == ";" || args[j].text == "+" {
+				break
+			}
+			exec = append(exec, args[j].text)
+		}
+		for _, target := range commandWriteTargets(strings.Join(exec, " ")) {
+			targets = append(targets, target)
+		}
+	}
+	if !writes {
+		return nil
+	}
+	for _, w := range args {
+		tok := cleanShellOperand(w.text)
+		if tok == "" || strings.HasPrefix(tok, "-") || tok == "!" || tok == "(" || tok == ")" {
+			break
+		}
+		targets = append(targets, tok)
+	}
+	if len(targets) == 0 {
+		targets = append(targets, ".")
+	}
+	return targets
+}
+
+func tarExtractTargets(args []shellWord) []string {
+	targets := flagValues(args, "-C", "--directory")
+	for _, w := range args {
+		if target, ok := strings.CutPrefix(w.text, "--directory="); ok {
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+func flagValues(args []shellWord, names ...string) []string {
+	var values []string
+	for i := 0; i < len(args); i++ {
+		tok := args[i].text
+		for _, name := range names {
+			if tok == name && i+1 < len(args) {
+				values = append(values, args[i+1].text)
+				i++
+				break
+			}
+			if strings.HasPrefix(tok, name+"=") {
+				values = append(values, strings.TrimPrefix(tok, name+"="))
+			}
+		}
+	}
+	return values
+}
+
+func cleanShellOperand(s string) string {
+	return strings.Trim(strings.TrimSpace(s), "\"'")
+}
+
+func looksNestedShell(s string) bool {
+	return commandWrites(s) || strings.ContainsAny(s, ";&|>")
+}
+
 // archiveExtractsOrSyncs reports whether lc (the lowercased command) is an archive
 // EXTRACTION or a sync that WRITES files into its destination. It deliberately fires
 // only on the write idioms, so a read over the same guarded tree stays allowed
-// (commandSelfModify has already confirmed a guarded glob is named in the command):
+// (commandSelfModify later matches only the extracted destination against guarded globs):
 //
 //   - `tar` writes only in EXTRACT mode (`-x` / a leading `x` in the bundled-flag
 //     form `tar xf`); LIST (`-t`) and CREATE-archive (`-c`, which READS the tree into
@@ -305,9 +739,7 @@ func isRedirectTargetBoundary(b byte) bool {
 //   - `unzip` extracts by default; it is a READ only in LIST/test mode (`-l` / `-v` /
 //     `-t` / `-z`). So an `unzip` command is a write here unless it carries a
 //     list/test flag.
-//   - `rsync` writes its DESTINATION operand; once a guarded glob is named anywhere in
-//     an rsync command, conservatively treat it as a write into the tree (the floor's
-//     documented "a guarded tree named alongside a writer is refused" stance).
+//   - `rsync` writes its DESTINATION operand.
 func archiveExtractsOrSyncs(lc string) bool {
 	if hasCommandLeadingToken(lc, "rsync") {
 		return true

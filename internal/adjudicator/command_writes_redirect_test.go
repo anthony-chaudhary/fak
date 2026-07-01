@@ -74,3 +74,42 @@ func TestStderrRedirectOverGuardedTreeIsNotSelfModify(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandSelfModifyUsesWriteTargetsOnly pins #1917: the shell SELF_MODIFY floor
+// matches guarded globs against the paths being written, not every guarded path the
+// command happens to read or mention in another command segment.
+func TestCommandSelfModifyUsesWriteTargetsOnly(t *testing.T) {
+	globs := []string{"VERSION", ".dos/", "internal/abi/", "id_rsa"}
+
+	allowed := []string{
+		"cat VERSION > /tmp/v",
+		"echo x > /tmp/y ; cat .dos/state",
+		"cp VERSION /tmp/v",
+		"tee /tmp/out < VERSION",
+		"dd if=VERSION of=/tmp/v",
+		"install VERSION /tmp/v",
+		"ln VERSION /tmp/v",
+	}
+	for _, c := range allowed {
+		if g := commandSelfModify(map[string]any{"command": c}, globs); g != "" {
+			t.Errorf("guarded read/source wrongly refused SELF_MODIFY (glob %q):\n  %s", g, c)
+		}
+	}
+
+	denied := []string{
+		"echo x > VERSION",
+		"echo x > /tmp/y ; echo z > .dos/state",
+		"cp /tmp/v VERSION",
+		"mv VERSION /tmp/v",
+		"tee .dos/state",
+		"dd if=/tmp/v of=internal/abi/x.go",
+		"install /tmp/v internal/abi/x.go",
+		"ln /tmp/v internal/abi/x.go",
+		"rsync -a /tmp/src/ internal/abi/",
+	}
+	for _, c := range denied {
+		if g := commandSelfModify(map[string]any{"command": c}, globs); g == "" {
+			t.Errorf("real guarded write was NOT refused SELF_MODIFY:\n  %s", c)
+		}
+	}
+}
