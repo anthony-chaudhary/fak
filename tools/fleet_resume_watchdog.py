@@ -131,6 +131,7 @@ def resolve_probe_mode(setting: str, live: bool) -> str:
 RESUME_PROMPT = (
     "Resume where you left off; re-establish any /goal or /loop and continue toward it."
 )
+NON_LAUNCH_PHASES = {"deferred", "considered", "skipped"}
 
 
 def now_iso() -> str:
@@ -163,6 +164,22 @@ def source_admit_gate() -> tuple[bool, str]:
     if r.returncode == 3:
         return False, (r.stdout or r.stderr or "SOURCE_DEFER").strip()
     return True, "admitted"
+
+
+def is_resume_attempt_record(h: dict) -> bool:
+    """Whether a ledger record represents an actual spawned resume attempt.
+
+    Source-gate DEFER rows carry a cause for observability, but they are not attempts and
+    must not burn the retry cap.
+    """
+    phase = h.get("phase")
+    if phase in NON_LAUNCH_PHASES:
+        return False
+    if phase in ("launched", "resumed"):
+        return True
+    if h.get("cause"):
+        return True
+    return h.get("action") in (None, "", "auto-resume")
 
 
 def note(msg: str) -> None:
@@ -391,9 +408,12 @@ def resume_blocked(sid: str, history: list[dict]) -> tuple[bool, str]:
     if any(str(h.get("action", "")).startswith("consolidate") or h.get("manual_override")
            for h in history):
         return True, "operator-settled (manual ledger override)"
-    auto = [h for h in history if h.get("cause") or h.get("phase") in ("launched", "resumed")
-            or h.get("action") in (None, "", "auto-resume")]
-    attempts = len(auto) or len(history)
+    auto = [h for h in history if is_resume_attempt_record(h)]
+    attempts = len(auto)
+    if attempts == 0 and all(h.get("phase") not in NON_LAUNCH_PHASES for h in history):
+        attempts = len(history)
+    if attempts == 0:
+        return False, ""
     if attempts >= MAX_ATTEMPTS:
         return True, f"attempt cap reached ({attempts}/{MAX_ATTEMPTS})"
     outcome = last_resume_outcome(sid)
@@ -523,6 +543,18 @@ def main() -> int:
                  f"(transcript copied; resuming on healthy account)")
         env["CLAUDE_CONFIG_DIR"] = resume_cfg
         env.pop("JOB_SUPERVISED_WORKER", None)
+        # A tick run from INSIDE a guarded/Claude session (an operator's manual
+        # FAK_LIVE=1 run) carries that session's model-API wiring: ANTHROPIC_API_KEY
+        # plus ANTHROPIC_BASE_URL point at the parent's loopback fak-guard gateway,
+        # and env auth takes precedence over the seat's OAuth login. A resumed child
+        # inheriting them routes every request through the parent session's proxy
+        # (wrong seat; account routing nullified) and dies with the parent -- the
+        # whole-wave-crashes-at-one-instant signature (2026-07-01). Strip the wiring
+        # so the child authenticates with its own CLAUDE_CONFIG_DIR seat. Scheduled
+        # -task ticks never carry these, so this is a no-op there.
+        for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                  "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION"):
+            env.pop(k, None)
         out = os.path.join(LOG_DIR, f"resume-{sid8}-{int(time.time())}.log")
         wd = p.get("cwd") if p.get("cwd") and os.path.isdir(p.get("cwd")) else FLEET_DIR
         spawn_kw = {}
@@ -546,8 +578,7 @@ def main() -> int:
         # transcript (resume_blocked -> last_resume_outcome). A resume that dies
         # recoverably (limit/transient) stays eligible up to MAX_ATTEMPTS instead of
         # being burned on launch; a clean finish / auth wall blocks it as before.
-        attempt = len([h for h in history.get(sid, []) if h.get("phase") in ("launched", "resumed")
-                       or h.get("cause")]) + 1
+        attempt = len([h for h in history.get(sid, []) if is_resume_attempt_record(h)]) + 1
         rec = {"ts": now_iso(), "session": sid, "account": p.get("account"),
                "resume_account": p.get("resume_account"), "rehomed": bool(p.get("rehomed")),
                "project": p.get("project"), "pid": proc.pid, "cause": p.get("disp"),
