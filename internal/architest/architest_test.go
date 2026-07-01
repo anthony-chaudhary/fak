@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -347,23 +348,126 @@ func imports(t *testing.T, internal, pkg string) []string {
 	return out
 }
 
+// trunkRef is the shared-trunk ref this gate scopes an undeclared-leaf failure against.
+// A push's responsibility is the leaves its commits deliver ON TOP of this ref; an
+// undeclared leaf that this push's commits never touch belongs to some other push and
+// must not red this one. Overridable for tests / a non-"main" trunk.
+func trunkRef() string {
+	if r := os.Getenv("FAK_ARCHITEST_TRUNK"); r != "" {
+		return r
+	}
+	return "origin/main"
+}
+
+// tierDeclarationCmd is the exact one-line command an operator runs to declare the tier
+// of leaf p, named verbatim in the failure so the owner can copy-paste the fix.
+func tierDeclarationCmd(p string) string {
+	return "fak new-leaf " + p + " --tier foundation|mechanism|composer|integrator [--register]"
+}
+
+// leafOf maps a repo-relative path to the internal/<leaf> package dir it belongs to, or ""
+// if the path is not under internal/. "internal/foo/bar.go" -> "foo".
+func leafOf(path string) string {
+	const pfx = "internal/"
+	if !strings.HasPrefix(path, pfx) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, pfx)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i]
+	}
+	return "" // a file directly in internal/ is not a leaf package
+}
+
+// leavesTouchedByPush returns the set of internal/<leaf> dirs modified by the commits this
+// push delivers on top of the trunk — the diff between merge-base(trunkRef, HEAD) and HEAD
+// — and whether that scoping ground is available at all.
+//
+// This is deliberately the COMMITTED delta, not the working tree or the index: on a shared
+// trunk both are polluted by peers (a peer's `git add -A` can stage files this push never
+// authored), so only what a commit actually delivers identifies whose push owns a leaf.
+// It shells to git — off the hot path, in a _test file, so the no-exec request-path rules
+// do not apply. ok=false means there is no trunk to diff against (no .git, a `git archive`
+// checkout, or the remote-tracking ref is absent); the caller then falls back to strict
+// all-undeclared-fail, which is safe precisely because in that setting there are no
+// concurrent peer pushes to wedge.
+func leavesTouchedByPush(internal string) (map[string]bool, bool) {
+	repo := filepath.Dir(internal) // internal/ -> repo root
+	base := exec.Command("git", "merge-base", trunkRef(), "HEAD")
+	base.Dir = repo
+	baseOut, err := base.Output()
+	if err != nil {
+		return nil, false
+	}
+	mb := strings.TrimSpace(string(baseOut))
+	if mb == "" {
+		return nil, false
+	}
+	diff := exec.Command("git", "diff", "--name-only", mb, "HEAD", "--", "internal/")
+	diff.Dir = repo
+	diffOut, err := diff.Output()
+	if err != nil {
+		return nil, false
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(diffOut)), "\n") {
+		if leaf := leafOf(strings.TrimSpace(line)); leaf != "" {
+			set[leaf] = true
+		}
+	}
+	return set, true
+}
+
+// undeclaredLeafVerdict classifies an undeclared on-disk leaf as either an advisory (a leaf
+// this push's commits never touched — some other push owns it) or a hard failure (a leaf
+// this push delivers). It is the pure decision the scoped gate rests on, split out so
+// #2088's fleet-safety property is unit-testable without the real tree or a live git
+// remote: when scoping ground exists AND this push did NOT touch the leaf, it is advisory;
+// otherwise (this push touched it, or there is no scoping ground) it is a failure.
+func undeclaredLeafVerdict(scoped, touchedByPush bool) (advisory bool) {
+	return scoped && !touchedByPush
+}
+
 // TestEveryPackageDeclaresTier fails if a package on disk is missing from the tier table
 // (a new leaf that forgot to take a layering position) or if the table names a package
 // that no longer exists (a stale entry). This is what forces every future leaf through a
 // conscious tier decision.
+//
+// FLEET-SAFETY SCOPING (#2088): architest runs on EVERY push to the shared trunk, so a
+// naive "any undeclared leaf fails" would let one agent's forgotten tier row wedge EVERY
+// peer's unrelated push. The undeclared-leaf failure is therefore scoped to the leaves
+// THIS push's commits actually deliver (leavesTouchedByPush): an undeclared leaf that this
+// push touched is a hard failure its owner must fix; an undeclared leaf this push never
+// touched — a peer's leaf sitting in the shared tree, or pre-existing debt already on the
+// trunk — is reported as an advisory (t.Logf) and does NOT red the build. When there is no
+// trunk to diff against (a `git archive` checkout, no remote) the gate falls back to strict
+// all-undeclared-fail, safe there because no concurrent peer push exists to wedge. Either
+// way the failure names the owning leaf and the exact one-line declaration command.
 func TestEveryPackageDeclaresTier(t *testing.T) {
 	internal := internalDir(t)
 	onDisk := goPackageDirs(t, internal)
 
+	touched, scoped := leavesTouchedByPush(internal)
+
 	diskSet := map[string]bool{}
 	for _, p := range onDisk {
 		diskSet[p] = true
-		if _, ok := tier[p]; !ok {
-			t.Errorf("package internal/%s has no declared tier.\n"+
-				"Add it to the architest tier table at the LOWEST layer whose role it fits "+
-				"(root<foundation<mechanism<composer<integrator). This forced choice is the "+
-				"review gate that keeps the layered-DAG contract honest as the kernel grows.", p)
+		if _, ok := tier[p]; ok {
+			continue
 		}
+		// Scoped + this push never touched the leaf: not our push's doing — advise, do not fail.
+		if undeclaredLeafVerdict(scoped, touched[p]) {
+			t.Logf("advisory: package internal/%s has no declared tier, but this push's commits "+
+				"do not touch it (a peer's leaf, or pre-existing trunk debt). Its owner should "+
+				"declare it with:\n  %s\nThis push is not blocked for it.", p, tierDeclarationCmd(p))
+			continue
+		}
+		// This push delivers the leaf (or no-trunk fallback): its owner must declare the tier.
+		t.Errorf("new leaf internal/%s has no declared tier.\n"+
+			"Add it to the architest tier table at the LOWEST layer whose role it fits "+
+			"(root<foundation<mechanism<composer<integrator). Declare it with:\n  %s\n"+
+			"This forced choice is the review gate that keeps the layered-DAG contract "+
+			"honest as the kernel grows.", p, tierDeclarationCmd(p))
 	}
 	for p := range tier {
 		if p == "abi" {
@@ -2250,5 +2354,141 @@ func TestKernelImportsOnlyAbi(t *testing.T) {
 			"DAG rule. Move the shared type into abi and walk it from the registry, or, if this is a deliberate "+
 			"direction change, edit this gate consciously â€” do not loosen it silently.",
 			len(leafImports), strings.Join(leafImports, "\n  "))
+	}
+}
+
+// TestUndeclaredLeafVerdictScopesToTouchedLeaf proves #2088's fleet-safety property at the
+// decision level: an undeclared leaf this push's commits did NOT touch is advisory (an
+// unrelated peer's push is NOT reded for it), while a leaf this push DID touch — or the
+// no-trunk fallback — is a hard failure the owning push must fix. This is the pure gate the
+// scoped TestEveryPackageDeclaresTier rests on.
+func TestUndeclaredLeafVerdictScopesToTouchedLeaf(t *testing.T) {
+	cases := []struct {
+		name          string
+		scoped        bool
+		touchedByPush bool
+		wantAdvisory  bool
+	}{
+		{"peer's leaf this push never touched => advisory, does not wedge the push", true, false, true},
+		{"leaf this push's commit delivers => hard failure", true, true, false},
+		{"no trunk ground (archive/no remote) => strict fail", false, false, false},
+		{"no trunk ground but touched flag stale => strict fail", false, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := undeclaredLeafVerdict(c.scoped, c.touchedByPush); got != c.wantAdvisory {
+				t.Fatalf("undeclaredLeafVerdict(scoped=%v, touchedByPush=%v) = advisory %v, want %v",
+					c.scoped, c.touchedByPush, got, c.wantAdvisory)
+			}
+		})
+	}
+}
+
+// TestLeavesTouchedByPushScopesToCommitDelta is the end-to-end fleet-safety witness for
+// #2088's Done-when in a real temp repo. It seeds a "trunk" commit that ALREADY carries an
+// undeclared peer leaf ('peerleaf'), then makes THIS push a single new commit that touches
+// only an unrelated leaf ('myleaf'). leavesTouchedByPush must report {myleaf} — the commit
+// delta — and NOT peerleaf. Composed with undeclaredLeafVerdict this proves the property:
+//   - peerleaf (undeclared, present in tree, NOT in this push's commits) => advisory: an
+//     unrelated peer's leaf does not red this push.
+//   - myleaf (undeclared, delivered by this push's commit) => hard failure: the owning push
+//     is correctly asked to declare it.
+func TestLeavesTouchedByPushScopesToCommitDelta(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	internal := filepath.Join(repo, "internal")
+	writePkg := func(leaf string) {
+		dir := filepath.Join(internal, leaf)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "doc.go"), []byte("package "+leaf+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	// TRUNK: already carries the peer's undeclared leaf. This is the shared-trunk state a
+	// push inherits — the leaf exists but this push has no part in it.
+	writePkg("peerleaf")
+	git("add", "internal/peerleaf/doc.go")
+	git("commit", "-q", "-m", "trunk state with a peer's undeclared leaf")
+	branch := func() string {
+		cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		cmd.Dir = repo
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("rev-parse: %v", err)
+		}
+		return strings.TrimSpace(string(out))
+	}()
+	t.Setenv("FAK_ARCHITEST_TRUNK", branch)
+	// THIS PUSH: one new commit that touches ONLY an unrelated leaf.
+	git("branch", "trunk-snapshot") // freeze the merge-base; FAK_ARCHITEST_TRUNK points here
+	t.Setenv("FAK_ARCHITEST_TRUNK", "trunk-snapshot")
+	writePkg("myleaf")
+	git("add", "internal/myleaf/doc.go")
+	git("commit", "-q", "-m", "this push adds myleaf only")
+
+	touched, ok := leavesTouchedByPush(internal)
+	if !ok {
+		t.Fatal("leavesTouchedByPush reported no scoping ground on a real repo with commits ahead of trunk")
+	}
+	if !touched["myleaf"] {
+		t.Errorf("leaf 'myleaf' delivered by this push's commit not reported as touched: %v", touched)
+	}
+	if touched["peerleaf"] {
+		t.Errorf("peer's pre-existing 'peerleaf' wrongly reported as touched by this push: %v", touched)
+	}
+	// The property: an unrelated peer leaf is advisory (won't wedge this push); the leaf this
+	// push's commit delivers is a hard failure its owner must fix.
+	if advisory := undeclaredLeafVerdict(ok, touched["peerleaf"]); !advisory {
+		t.Error("undeclared peer leaf 'peerleaf' should be advisory — an unrelated push must NOT be reded for it")
+	}
+	if advisory := undeclaredLeafVerdict(ok, touched["myleaf"]); advisory {
+		t.Error("undeclared 'myleaf' delivered by this push should be a hard failure, not advisory")
+	}
+}
+
+// TestLeavesTouchedByPushFallsBackWithoutGitTrunk proves the hermetic fallback: outside any
+// git repo (e.g. a `git archive` checkout) leavesTouchedByPush returns ok=false, so the gate
+// reverts to strict all-undeclared-fail — safe there because no concurrent peer push exists
+// to wedge.
+func TestLeavesTouchedByPushFallsBackWithoutGitTrunk(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	bare := t.TempDir() // not a git repo
+	t.Setenv("FAK_ARCHITEST_TRUNK", "origin/main")
+	if _, ok := leavesTouchedByPush(filepath.Join(bare, "internal")); ok {
+		t.Fatal("leavesTouchedByPush reported scoping ground outside any git repo — strict fallback lost")
+	}
+}
+
+// TestLeafOf pins the path->leaf mapping the scoping rests on.
+func TestLeafOf(t *testing.T) {
+	cases := map[string]string{
+		"internal/foo/bar.go":          "foo",
+		"internal/foo/sub/baz.go":      "foo",
+		"internal/architest/x_test.go": "architest",
+		"internal/toplevel.go":         "", // a file directly under internal/ is not a leaf
+		"cmd/fak/main.go":              "", // outside internal/
+		"README.md":                    "",
+	}
+	for path, want := range cases {
+		if got := leafOf(path); got != want {
+			t.Errorf("leafOf(%q) = %q, want %q", path, got, want)
+		}
 	}
 }
