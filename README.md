@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![cross-platform](https://github.com/anthony-chaudhary/fak/actions/workflows/cross-platform.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/cross-platform.yml) [![bench](https://github.com/anthony-chaudhary/fak/actions/workflows/bench.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/bench.yml) [![release cadence](https://github.com/anthony-chaudhary/fak/actions/workflows/release-cadence.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-cadence.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-06-30 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; 2026-06-30 added the CI/CD ship-loop front-door note. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-30 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; 2026-06-30 added the CI/CD ship-loop front-door note; 2026-07-01 appeal pass (/appeal-score) added early Pick-your-path + What-you-get anchors and split run-on/overlong sentences. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
 **fak in one line:** fak is a fused agent kernel. One Go binary sits in front of an agent's
 tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
@@ -16,33 +16,35 @@ with nothing else changed.
 and your keys exactly as they are. You get back the parts of the agent loop that got
 expensive. `fak` points one base URL at itself for you; nothing else in your setup changes.
 
-What you get, in numbers. Every figure traces to
-[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and the honesty ledger is
-[CLAIMS.md](CLAIMS.md):
+## Pick your path
+
+[Run your agent through it now](#get-started-with-fak-guard)
+· [run the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
+[run a model in the kernel](#run-the-model-in-the-kernel) ·
+[the performance story](#the-performance-value-proposition) ·
+[a hard security floor](#for-security-teams).
+
+> In one line: put `fak` in front of the agent you already run. It makes long sessions
+> cheaper, routes each call to the right model, and on the same boundary enforces a safety
+> floor and records every decision. One binary, no rewrite, no key to start.
+
+## What you get, in numbers
+
+Every figure traces to [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and the honesty
+ledger is [CLAIMS.md](CLAIMS.md):
 
 - **~4.1× less work than a tuned warm-cache stack** on a 50-turn × 5-agent run. `fak` reuses
   the shared prompt prefix across agents instead of re-paying for it. That prefix is the
-  system prompt + tools, the *KV cache* of the work so far. The reuse factor climbs to
-  **6.95×** across the model ladder. Against the naive re-send loop it is ~60×; the tuned
-  number is the honest one to beat.
-- **~120 tok/s in-kernel GPU decode** on an RTX 4070 (SmolLM2-135M, f32 weights, gated
-  `FAK_CUDA_GRAPH=1`), landing inside llama.cpp's Q8_0 range of 120 ± 15 tok/s — so a
+  system prompt + tools — the *KV cache* of the work so far. Reuse climbs to **6.95×** across
+  the model ladder (~60× versus a naive re-send loop; the tuned figure is the honest bar).
+- **In-kernel GPU decode hits ~120 tok/s** on an RTX 4070 (SmolLM2-135M, f32 weights, gated
+  `FAK_CUDA_GRAPH=1`). That lands inside llama.cpp's Q8_0 range of 120 ± 15 tok/s, so a
   full-precision kernel reaches parity with a quantized llama.cpp.
 - **The provider cache discount survives a long session.** `fak` sheds old turns while
   keeping the prompt-cache prefix byte-identical, so the rebate holds instead of breaking
   the moment the conversation sprawls.
 - **The guard tax is ~362 ns per call.** The kernel's allow/deny decision runs in-process
   (measured, Apple M3 Pro), with no network hop.
-
-> In one line: put `fak` in front of the agent you already run. It makes long sessions
-> cheaper, routes each call to the right model, and on the same boundary enforces a safety
-> floor and records every decision. One binary, no rewrite, no key to start.
-
-Who is this for? Pick your path: [run your agent through it now](#get-started-with-fak-guard)
-· [run the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
-[run a model in the kernel](#run-the-model-in-the-kernel) ·
-[the performance story](#the-performance-value-proposition) ·
-[a hard security floor](#for-security-teams).
 
 ## Get started with `fak guard`
 
@@ -210,10 +212,10 @@ KV-deletion work on the product path? See
   to it from a phone or a second machine, then tear it down. Same five commands whether the
   node is local or fleet-wide. The upstream credential lives on the host; clients present
   only the gateway's bearer key. See [docs/fak/node-setup.md](docs/fak/node-setup.md).
-- **Codex, Cursor, MCP hosts.** Keep your normal model wire. Let the agent ask the kernel
+- **Codex, Cursor, MCP hosts.** Keep your normal model wire and let the agent ask the kernel
   for verdicts over MCP. `fak serve --stdio --policy examples/dev-agent-policy.json` exposes
-  five kernel tools: `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_context_change`, plus
-  session reset. See [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md),
+  five kernel tools (`fak_adjudicate` / `fak_syscall` / `fak_admit` / `fak_context_change`
+  plus a session reset). See [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md),
   [docs/integrations/cursor.md](docs/integrations/cursor.md), and [examples/mcp](examples/mcp).
 - **Any OpenAI- or Anthropic-compatible client.** Put `fak serve` in front of a model
   endpoint and point the client at it:
@@ -269,10 +271,10 @@ or `[STUB]`. The lint gate enforces that honesty ledger.
 
 ## For security teams
 
-If a hard capability floor is *why* you're here, not just a nice-to-have, this is your
-section. The same boundary that sheds tokens above is, for your purposes, the lock around
-tool execution. (This is the "policy" layer; it is deliberately not the front-page lead,
-because most adopters meet it through `fak guard`'s built-in floor without ever editing it.)
+If a hard capability floor is *why* you're here, this is your section. The same boundary that
+sheds tokens above is, for your purposes, the lock around tool execution. (This is the
+"policy" layer; it is deliberately not the front-page lead, because most adopters meet it
+through `fak guard`'s built-in floor without ever editing it.)
 
 Most agent security tries to recognize bad text. Recognizers help; they are not the floor.
 Prompt injection is a text game, and attackers get turns too. So `fak` moves the load-bearing
@@ -302,8 +304,8 @@ Point your agent at a starter floor with `fak guard --policy examples/<file>`:
 | Customer support | [`customer-support-readonly-policy.json`](examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
 | Infra / DevOps review | [`devops-dryrun-policy.json`](examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
 
-The full catalogue covers flight booking, trading, clinical/PHI, SQL analyst, and more, each
-with a witness command. It lives in [examples/README.md](examples/README.md) and the
+The full catalogue adds flight booking, trading, clinical/PHI, and SQL-analyst floors — each
+with its own witness command. It lives in [examples/README.md](examples/README.md) and the
 [per-domain use-case page](docs/README-legacy.md#use-cases-by-domain). Every refusal cites a
 closed reason code you can assert on (`POLICY_BLOCK`, `OVERSIZE`, `SECRET_EXFIL`, …). Read
 [POLICY.md](POLICY.md), [docs/fak/security.md](docs/fak/security.md), and
