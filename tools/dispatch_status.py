@@ -2043,6 +2043,27 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | {sw.get('kind') or '—'} | "
                        f"{sw.get('size') if sw.get('size') is not None else '—'} | `{sw.get('log')}` |")
 
+    out += ["", "## Issue-contract repair flow", ""]
+    out += [
+        "When `fak issue contract` / `fak dispatch route --json` hold an issue "
+        "below `DEFAULT_ISSUE_CONTRACT_MIN_SCORE`, that is a scaffold gap, not a "
+        "reason to `--force` dispatch. Run the read-only repair-assist pass instead:",
+        "",
+        "1. `python tools/issue_contract_repair.py --lane <lane> --limit N --json` "
+        "— classifies each held issue's contract reasons into a repair kind "
+        "(`split`/`scope`/`route`/`noise`/`private`/`template`/`other`) and builds "
+        "a manifest row per issue. Never edits, labels, comments on, or closes "
+        "an issue.",
+        "2. `template`-kind rows carry a dry-run-computed normalized-header fix "
+        "(`ready: true`); every other kind lists exactly the missing contract "
+        "fields as one-line human questions — content is never invented.",
+        "3. An operator or follow-up agent answers the scaffolded questions (or "
+        "reviews the `template` fix) and applies it via a manual `gh issue edit`.",
+        "4. Re-run `fak issue contract --live` to confirm the score reaches the "
+        "floor, then dispatch proceeds through the normal picker — no gate "
+        "bypass needed.",
+    ]
+
     out += ["", "---", "", "Reasons: " + "; ".join(payload.get("reasons") or [])]
     return "\n".join(out) + "\n"
 
