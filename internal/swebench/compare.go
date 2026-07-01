@@ -50,8 +50,7 @@ func RunComparison(ctx context.Context, cfg CompareConfig) (*ComparisonRun, erro
 		cfg.Runners = []RunnerType{RunnerFleet, RunnerDeepSWE}
 	}
 	var err error
-	cfg.OutputDir, err = ensureOutputDir(cfg.OutputDir,
-		fmt.Sprintf("swebench-compare-%s", time.Now().Format("20060102T150405Z")))
+	cfg.OutputDir, err = ensureStampedOutputDir(cfg.OutputDir, "swebench-compare")
 	if err != nil {
 		return nil, err
 	}

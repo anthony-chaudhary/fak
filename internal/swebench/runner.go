@@ -29,6 +29,13 @@ func ensureOutputDir(dir, fallback string) (string, error) {
 	return dir, nil
 }
 
+// ensureStampedOutputDir defaults an empty output dir to a run-scoped directory
+// named "<prefix>-<UTC run timestamp>" and creates it. The run and compare entry
+// points share this shape and differ only in the leaf prefix.
+func ensureStampedOutputDir(dir, prefix string) (string, error) {
+	return ensureOutputDir(dir, fmt.Sprintf("%s-%s", prefix, time.Now().Format("20060102T150405Z")))
+}
+
 // RunnerType identifies the agent runner being used for a solve run.
 type RunnerType string
 
@@ -120,8 +127,8 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		cfg.MaxSteps = 50
 	}
 	var err error
-	cfg.OutputDir, err = ensureOutputDir(cfg.OutputDir,
-		fmt.Sprintf("swebench-run-%s-%s", cfg.Runner, time.Now().Format("20060102T150405Z")))
+	cfg.OutputDir, err = ensureStampedOutputDir(cfg.OutputDir,
+		fmt.Sprintf("swebench-run-%s", cfg.Runner))
 	if err != nil {
 		return nil, err
 	}

@@ -210,8 +210,8 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool, 
 		var a struct {
 			Path string `json:"path"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
-			return "error: invalid arguments: " + err.Error(), false
+		if msg, ok := decodeToolArgs(tc, &a); !ok {
+			return msg, false
 		}
 		full, err := safeJoin(dir, a.Path)
 		if err != nil {
@@ -228,8 +228,8 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool, 
 			Path    string `json:"path"`
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
-			return "error: invalid arguments: " + err.Error(), false
+		if msg, ok := decodeToolArgs(tc, &a); !ok {
+			return msg, false
 		}
 		full, err := safeJoin(dir, a.Path)
 		if err != nil {
@@ -254,8 +254,8 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool, 
 		var a struct {
 			Command string `json:"command"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
-			return "error: invalid arguments: " + err.Error(), false
+		if msg, ok := decodeToolArgs(tc, &a); !ok {
+			return msg, false
 		}
 		if strings.TrimSpace(a.Command) == "" {
 			return "error: empty command", false
@@ -266,6 +266,16 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool, 
 	default:
 		return "error: unknown tool " + tc.Name, false
 	}
+}
+
+// decodeToolArgs unmarshals a tool call's JSON args into dst. On a decode
+// failure it returns the model-facing "invalid arguments" result and false so
+// the caller can return it directly; on success it returns "", true.
+func decodeToolArgs(tc ChatToolCall, dst any) (string, bool) {
+	if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), dst); err != nil {
+		return "error: invalid arguments: " + err.Error(), false
+	}
+	return "", true
 }
 
 // lintWritten runs the kernel's language-server packs over a file the agent just
