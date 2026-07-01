@@ -91,24 +91,7 @@ func (s *Store) PublishSession(ctx context.Context, d SessionDescriptor) (string
 	if d.UpdatedAt == 0 {
 		d.UpdatedAt = time.Now().Unix()
 	}
-
-	blob, err := json.Marshal(d)
-	if err != nil {
-		return "", fmt.Errorf("leaseref: marshal session descriptor: %w", err)
-	}
-
-	sha, err := s.writeBlob(ctx, blob)
-	if err != nil {
-		return "", err
-	}
-
-	ref := d.Ref()
-	if _, code, err := s.run(ctx, s.dir, "update-ref", ref, sha); err != nil {
-		return "", fmt.Errorf("leaseref: git not executable: %w", err)
-	} else if code != 0 {
-		return "", fmt.Errorf("leaseref: update-ref %s exited %d", ref, code)
-	}
-	return ref, nil
+	return s.putBlobRef(ctx, d.Ref(), d)
 }
 
 // RemoveSession deletes refs/fak/locks/session-<id> — the stop/expire side of the
@@ -119,21 +102,7 @@ func (s *Store) RemoveSession(ctx context.Context, id string) error {
 	if !validSessionID(id) {
 		return fmt.Errorf("leaseref: invalid session id %q", id)
 	}
-	ref := refPrefix + sessionPrefix + id
-	_, code, err := s.run(ctx, s.dir, "update-ref", "-d", ref)
-	if err != nil {
-		return fmt.Errorf("leaseref: git not executable: %w", err)
-	}
-	if code != 0 {
-		// A delete of a ref that does not exist is the already-removed state, not a
-		// failure (same rule as Release): treat non-zero as success only after
-		// confirming the ref is indeed absent.
-		if exists, derr := s.has(ctx, ref); derr == nil && !exists {
-			return nil
-		}
-		return fmt.Errorf("leaseref: update-ref -d %s exited %d", ref, code)
-	}
-	return nil
+	return s.deleteRef(ctx, refPrefix+sessionPrefix+id)
 }
 
 // GetSession reads back the single descriptor at refs/fak/locks/session-<id>, or

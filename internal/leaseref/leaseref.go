@@ -196,18 +196,21 @@ func (s *Store) Acquire(ctx context.Context, rec Record) (string, error) {
 	if rec.AcquiredAt == 0 {
 		rec.AcquiredAt = time.Now().Unix()
 	}
+	return s.putBlobRef(ctx, rec.Ref(), rec)
+}
 
-	blob, err := json.Marshal(rec)
+// putBlobRef marshals v to a git blob and points ref at it with a plain update-ref
+// (never a branch/HEAD, never a force). Returns the written ref on success. Shared
+// by Acquire (lock leases) and PublishSession (session descriptors).
+func (s *Store) putBlobRef(ctx context.Context, ref string, v any) (string, error) {
+	blob, err := json.Marshal(v)
 	if err != nil {
 		return "", fmt.Errorf("leaseref: marshal record: %w", err)
 	}
-
 	sha, err := s.writeBlob(ctx, blob)
 	if err != nil {
 		return "", err
 	}
-
-	ref := rec.Ref()
 	if _, code, err := s.run(ctx, s.dir, "update-ref", ref, sha); err != nil {
 		return "", fmt.Errorf("leaseref: git not executable: %w", err)
 	} else if code != 0 {
@@ -223,7 +226,14 @@ func (s *Store) Release(ctx context.Context, id string) error {
 	if !validID(id) {
 		return fmt.Errorf("leaseref: invalid lease id %q", id)
 	}
-	ref := refPrefix + id
+	return s.deleteRef(ctx, refPrefix+id)
+}
+
+// deleteRef removes the named ref with `git update-ref -d`, treating an
+// already-absent ref as success (the idempotent release/remove post-state). It
+// targets ONLY the named side ref, never a branch/HEAD. Shared by Release and
+// RemoveSession.
+func (s *Store) deleteRef(ctx context.Context, ref string) error {
 	_, code, err := s.run(ctx, s.dir, "update-ref", "-d", ref)
 	if err != nil {
 		return fmt.Errorf("leaseref: git not executable: %w", err)
