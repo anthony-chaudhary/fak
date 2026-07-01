@@ -533,6 +533,47 @@ class EvaluateTest(unittest.TestCase):
         self.assertIn("ISSUE_SCOPE_INCOMPLETE", p["reason"])
         self.assertEqual(p["issue_contract_gate"]["score"], 40)
 
+    def test_force_downgrades_contract_hold_to_advisory(self) -> None:
+        """--force (operator best-effort): a contract that WOULD hold is downgraded
+        to advisory and the tick proceeds to WOULD_SPAWN, recording the bypass."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False,
+            "unavailable": False,
+            "score": 40,
+            "spine_priority": 0,
+            "review": {
+                "ok": False,
+                "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                "missing_fields": ["working_spine"],
+                "score": {"total": 40},
+            },
+        }
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False, force=True)
+        # Readiness is relaxed, but the tick is now spawnable (dry-run: WOULD_SPAWN).
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertTrue(p["issue_contract_forced"]["bypassed"])
+        self.assertIn("ISSUE_SCOPE_INCOMPLETE",
+                      p["issue_contract_forced"]["gate_reason"])
+        # The gate result is still recorded transparently (not hidden by the force).
+        self.assertFalse(p["issue_contract_gate"]["ok"])
+
+    def test_issue_override_pins_target(self) -> None:
+        """--issue pins an explicit target, overriding the freshest-first auto-pick."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 401, 388],
+                          "by_lane_count": {"gateway": 3}})
+        mod.issue_contract_review = passing_issue_contract
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane="gateway", live=False, issue_override=401)
+        self.assertEqual(p["target_issue"], 401)
+
     def test_reap_runs_before_preflight_and_is_recorded(self) -> None:
         mod = load()
         state = {"reaped": False}

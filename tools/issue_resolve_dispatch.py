@@ -1896,6 +1896,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               realloc_ceiling: int = DEFAULT_REALLOC_CEILING,
               record_loop: bool = False,
               loop_ledger: Path | None = None,
+              issue_override: int | None = None,
+              force: bool = False,
               lease_runner: Any | None = None) -> dict[str, Any]:
     # lease_runner is the injectable `fak leaseref` seam (default: a real
     # subprocess). Tests pass a canned runner returning {rc, verdict} so the whole
@@ -2030,6 +2032,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     held_no_commit = held_no_commit_issues(witnessed)
     skip = live_issues | cooled | held_no_commit
     target = pick_target_issue(pick.get("numbers") or [], skip)
+    # Operator override: pin an explicit, already-vetted target issue instead of
+    # the lane's freshest-first auto-pick. The full safety chain STILL runs on the
+    # pinned issue -- preflight cap, the issue-contract gate, the lane lease, and
+    # the detached spawn -- so an override can only NARROW what spawns, never
+    # bypass a guard. Used to dispatch a specific contract-passing top issue when
+    # the busiest lane's freshest issue is a thin one the gate would (rightly) HOLD.
+    if issue_override is not None:
+        target = int(issue_override)
 
     payload: dict[str, Any] = {
         "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
@@ -2098,8 +2108,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "min_score": DEFAULT_ISSUE_CONTRACT_MIN_SCORE,
         "reason": issue_contract_hold_reason(contract),
     }
-    if (contract.get("unavailable") or not contract.get("ok") or
-            int(contract.get("score") or 0) < DEFAULT_ISSUE_CONTRACT_MIN_SCORE):
+    contract_hold = (contract.get("unavailable") or not contract.get("ok") or
+                     int(contract.get("score") or 0) < DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+    if contract_hold and not force:
         payload.update({
             "ok": False,
             "action": "issue_contract_hold",
@@ -2107,6 +2118,19 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "reason": issue_contract_hold_reason(contract),
         })
         return finish(payload)
+    if contract_hold and force:
+        # Operator force (--force): the readiness gate WOULD hold (typically the
+        # issue lacks the full agent-context contract the always-on loop demands),
+        # but the operator has explicitly accepted a best-effort spawn. Record the
+        # bypass transparently. Every downstream SAFETY guard still applies -- the
+        # preflight cap, the lane lease (no two workers on one leaf tree), the
+        # spawn-probe liveness check, the worker-timeout reaper -- and the worker
+        # prompt is honest-block-first, so a force can only relax READINESS, never a
+        # safety invariant.
+        payload["issue_contract_forced"] = {
+            "bypassed": True,
+            "gate_reason": issue_contract_hold_reason(contract),
+        }
     model = acct.get("model") if backend == "opencode" else None
     preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
     payload["command"] = build_worker_command(backend, preview_prompt, model)
@@ -2284,6 +2308,11 @@ def main(argv: list[str] | None = None) -> int:
                          "which silently stalled the docs lane until this default landed.")
     ap.add_argument("--lane", default=None,
                     help="explicit lane (default: the lane with the most open issues)")
+    ap.add_argument("--issue", type=int, default=None,
+                    help="pin an explicit target issue #N (operator override of the "
+                         "freshest-first auto-pick). The full safety chain still runs "
+                         "on it (preflight cap, contract gate, lane lease, spawn). "
+                         "Requires --lane so the lane lease/tree matches the issue.")
     ap.add_argument("--backend", choices=BACKENDS, default="claude",
                     help="worker backend: claude (opus, t1) or opencode (glm-5.2, t2, "
                          "a separate quota pool). Default claude.")
@@ -2293,6 +2322,13 @@ def main(argv: list[str] | None = None) -> int:
                          "--lane is set.")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
+    ap.add_argument("--force", action="store_true",
+                    help="operator best-effort: downgrade the issue-contract readiness "
+                         "HOLD to advisory and spawn anyway (records the bypass). Every "
+                         "SAFETY guard still applies (preflight cap, lane lease, spawn "
+                         "probe, worker-timeout). Use to dispatch the top real issues "
+                         "when the always-on gate demands a fuller agent-context contract "
+                         "than the backlog currently carries.")
     ap.add_argument("--no-refresh", action="store_true",
                     help="skip the per-tick account-registry refresh")
     ap.add_argument("--cooldown-min", type=int, default=120,
@@ -2317,6 +2353,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    if args.issue is not None and not args.lane:
+        ap.error("--issue requires --lane so the lane lease/tree matches the pinned issue")
     exclude_lanes = {s.strip() for s in args.exclude_lane.split(",") if s.strip()}
     # The opencode/glm pool is tier 2 only; engineering routes to t1 and finds
     # nothing there. Derive the work-kind from the backend unless set explicitly.
@@ -2330,7 +2368,9 @@ def main(argv: list[str] | None = None) -> int:
                        realloc_ceiling=max(0, args.max_realloc_workers),
                        record_loop=not args.no_loop_ledger,
                        loop_ledger=(Path(args.loop_ledger).resolve()
-                                    if args.loop_ledger else None))
+                                    if args.loop_ledger else None),
+                       issue_override=args.issue,
+                       force=args.force)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return tick_exit_code(payload)
 
