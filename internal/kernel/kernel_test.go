@@ -286,6 +286,47 @@ func TestReapAnyPrefersReadyHandleAndLeavesPending(t *testing.T) {
 	}
 }
 
+func TestReservedQueueOpaqueAreInert(t *testing.T) {
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterEngine("e", &countEngine{})
+	k := New("e")
+	ctx := context.Background()
+
+	h, v := k.Submit(ctx, call("read_x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("Submit verdict=%v, want Allow", v.Kind)
+	}
+
+	mutated := h
+	mutated.Queue = 42
+	mutated.Opaque = 99
+	if got := k.TestHandle(mutated); got != abi.StatusPending {
+		t.Fatalf("TestHandle with mutated reserved fields=%v, want StatusPending", got)
+	}
+	gotH, r, err := k.ReapAny(ctx, []abi.SubmissionHandle{mutated})
+	if err != nil {
+		t.Fatalf("ReapAny with mutated reserved fields failed: %v", err)
+	}
+	if gotH != mutated || r == nil || r.Status != abi.StatusOK || string(r.Payload.Inline) != "{}" {
+		t.Fatalf("ReapAny handle/result=%+v/%+v, want mutated handle with original payload", gotH, r)
+	}
+
+	h2, v := k.Submit(ctx, call("read_y", `{"ok":true}`))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("second Submit verdict=%v, want Allow", v.Kind)
+	}
+	h2.Queue = 7
+	h2.Opaque = 123
+	r, err = k.Reap(ctx, h2)
+	if err != nil {
+		t.Fatalf("Reap with mutated reserved fields failed: %v", err)
+	}
+	if r == nil || r.Status != abi.StatusOK || string(r.Payload.Inline) != `{"ok":true}` {
+		t.Fatalf("Reap result=%+v, want original second payload", r)
+	}
+}
+
 func TestReapAllIndexAlignedMulti(t *testing.T) {
 	setup()
 	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})

@@ -76,6 +76,16 @@ one: nothing reads `Queue` to make a scheduling decision.
   one engine fold, every handle's `Queue` is whatever the single driver stamps, and no
   code dispatches on it.
 
+**WITNESS.** `go test ./internal/kernel -run TestReservedQueueOpaqueAreInert`
+mutates both reserved fields on a submitted handle and proves `TestHandle`, `ReapAny`,
+and `Reap` still complete the original submission by `Seq`. Source-audit backstop:
+`rg -n "\.Queue\b|Queue:\b|Queue\s+uint32" internal/abi internal/kernel` reports only
+the `SubmissionHandle.Queue` field declaration.
+
+**VERDICT.** **PROVEN** (2026-07-01). The current kernel treats `Queue` and `Opaque`
+as inert reserved slots; no scheduling, tag-matching, or receive-side selection semantics
+ride on them today.
+
 **CONSEQUENCE.** A future async/multi-engine driver MAY give `Queue` real
 routing meaning and use `Opaque` / `Ext` for its own correlation — that is exactly the
 seam's purpose. When it does, it inherits a *frozen* handle shape (so two independent
