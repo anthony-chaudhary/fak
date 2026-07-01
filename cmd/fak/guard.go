@@ -932,7 +932,6 @@ func cmdGuard(argv []string) {
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
 		printGuardMCPNote(os.Stderr, mcpInstall)
-		printGuardCapabilitiesNote(os.Stderr, mcpInstall)
 		switch {
 		case debugStatsStderr:
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
