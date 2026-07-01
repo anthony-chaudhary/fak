@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // cmdBackend is the os.Exit-wrapping entry point main.go's switch should dispatch `fak backend
@@ -94,6 +95,7 @@ func runBackendScaffold(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak backend scaffold: unexpected extra arguments: %s\n", strings.Join(fs.Args(), " "))
 		writeBackendUsage(stderr)

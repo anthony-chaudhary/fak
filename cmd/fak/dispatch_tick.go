@@ -1270,11 +1270,20 @@ func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string
 
 func dispatchStaleBase(root string, tree []string) map[string]any {
 	tree = dispatchTrimTree(tree)
+	roles, roleErr := branchrole.Load(root)
+	if roleErr != nil {
+		roles = branchrole.Defaults()
+	}
+	upstreamBranch := strings.TrimSpace(roles.DevelopmentBranch)
+	if upstreamBranch == "" {
+		upstreamBranch = branchrole.Defaults().DevelopmentBranch
+	}
+	upstreamRef := fmt.Sprintf("origin/%s", upstreamBranch)
 	out := map[string]any{
 		"available": false,
 		"stale":     false,
 		"base":      "HEAD",
-		"upstream":  "origin/main",
+		"upstream":  upstreamRef,
 		"tree":      append([]string(nil), tree...),
 	}
 	if len(tree) == 0 {
@@ -1282,7 +1291,7 @@ func dispatchStaleBase(root string, tree []string) map[string]any {
 		out["reason"] = "no target tree to compare"
 		return out
 	}
-	args := []string{"diff", "--name-only", "HEAD..origin/main", "--"}
+	args := []string{"diff", "--name-only", "HEAD.." + upstreamRef, "--"}
 	args = append(args, tree...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
@@ -1298,7 +1307,7 @@ func dispatchStaleBase(root string, tree []string) map[string]any {
 	out["changed_count"] = len(changed)
 	if len(changed) > 0 {
 		out["stale"] = true
-		out["warning"] = fmt.Sprintf("stale base: origin/main has newer changes in this target scope (%s). Before editing, refresh in place with `git fetch origin main` and merge origin/main so these files include upstream work; the issue remains dispatchable after refresh.", strings.Join(changed, ", "))
+		out["warning"] = fmt.Sprintf("stale base: %s has newer changes in this target scope (%s). Before editing, refresh in place with `git fetch origin %s` and merge %s so these files include upstream work; the issue remains dispatchable after refresh.", upstreamRef, strings.Join(changed, ", "), upstreamBranch, upstreamRef)
 	}
 	return out
 }

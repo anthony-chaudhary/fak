@@ -739,7 +739,8 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 		// doubled backslashes a plain-substring check (or a human) never expects.
 		// Forward-slash normalization keeps the seed path byte-identical in the
 		// %q-quoted next_action field on every OS.
-		next += " and FAK_RESET_SEED_FILE=" + filepath.ToSlash(seed)
+		seed = strings.ReplaceAll(filepath.ToSlash(seed), "\\", "/")
+		next += " and FAK_RESET_SEED_FILE=" + seed
 	}
 	return fmt.Sprintf("fak guard: managed-context status reset_limit limit=%d reason=%s continuity=%s next_action=%q",
 		limit, reason, continuity, next)
