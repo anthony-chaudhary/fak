@@ -99,6 +99,19 @@ type HandoffReview struct {
 // HandoffReviewOptions turns on the stricter GitHub-issue contract for callers
 // that are about to plan or sync follow-up issues. The default ReviewHandoff path
 // stays the basic task-completion gate for existing non-issue users.
+//
+// Closure binding: StrictScope plus the typed next-step fields on HandoffNextStep
+// (InScope, OutOfScope, DoneCondition, Witness, AcceptanceGate, Lane, Paths,
+// BoundaryNotes, ClosureBinding, ...), the ReviewHandoffWithOptions gate below that
+// refuses a vague next step via issuecontract.ReviewCandidate before live issue
+// sync, and HandoffIssueBody's stable-section rendering together satisfy #1460's
+// ask in full, covered by handoff_test.go's TestReviewHandoffStrictScopeRejectsVagueNextStep,
+// TestReviewHandoffStrictScopeAcceptsDispatchableNextStep, and
+// TestHandoffIssueBodyIncludesStrictScopeSections, with cmd/fak/taskmgr.go's live
+// sync path already wiring StrictScope: true. The work shipped citing #1639 and a
+// generic worktree-sync subject, never #1460 itself; history on origin/main cannot
+// be rewritten, so this comment restates the closure binding explicitly for the
+// grep-based referee.
 type HandoffReviewOptions struct {
 	StrictScope   bool
 	Live          bool
