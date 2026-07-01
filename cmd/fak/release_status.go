@@ -243,7 +243,7 @@ func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]
 		"FINAL_DECISION_RECORD",
 	)
 	decision := "ready_for_pilot"
-	if len(blockers) > 0 {
+	if len(blockers) > 0 || len(proofGaps) > 0 {
 		decision = "hold"
 	}
 	return map[string]any{
@@ -251,7 +251,7 @@ func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]
 		"issue":          "#1703",
 		"checklist":      "docs/branch-regime-shadow-cutover.md",
 		"decision":       decision,
-		"ready":          decision == "ready_for_pilot",
+		"ready":          decision == "ready_for_pilot" && len(proofGaps) == 0,
 		"blockers":       blockers,
 		"proof_gaps":     proofGaps,
 		"proof_commands": []string{"fak release status --json --require-ci-green --limit-commits 50", "fak workflow-audit --write-doc", "go test ./internal/workflowaudit -count=1", "fak release ship --json --source-branch dev --trunk main --base origin/dev"},
@@ -860,11 +860,17 @@ func releaseStatusRenderShadowCutover(shadowCutover map[string]any) string {
 	}
 	decision := releaseStatusFirstString(releaseStatusString(shadowCutover["decision"]), "unknown")
 	blockers := releaseStatusStringSlice(shadowCutover["blockers"])
+	proofGaps := releaseStatusStringSlice(shadowCutover["proof_gaps"])
 	detail := decision
 	if len(blockers) > 0 {
 		detail += "; blocker: " + blockers[0]
 		if len(blockers) > 1 {
 			detail += fmt.Sprintf(" (+%d more)", len(blockers)-1)
+		}
+	} else if len(proofGaps) > 0 {
+		detail += "; proof gap: " + proofGaps[0]
+		if len(proofGaps) > 1 {
+			detail += fmt.Sprintf(" (+%d more)", len(proofGaps)-1)
 		}
 	}
 	return "  shadow cutover: " + detail

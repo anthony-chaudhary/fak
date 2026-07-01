@@ -269,21 +269,24 @@ func TestReleaseStatusShadowCutoverDecision(t *testing.T) {
 		t.Fatalf("main-only blockers = %#v, want BRANCH_ROLES_NOT_SPLIT", mainOnly["blockers"])
 	}
 
-	ready := releaseStatusShadowCutover(map[string]any{
+	splitRolesWithOpenProofGaps := releaseStatusShadowCutover(map[string]any{
 		"development_branch": "dev",
 		"release_branch":     "main",
 		"release_source":     "dev",
 		"public_front_door":  "main",
 		"promotion_blockers": []string{},
 	}, map[string]any{"ok": true})
-	if ready["decision"] != "ready_for_pilot" || ready["ready"] != true {
-		t.Fatalf("split-role shadow decision = %#v, want ready_for_pilot", ready)
+	if splitRolesWithOpenProofGaps["decision"] != "hold" || splitRolesWithOpenProofGaps["ready"] != false {
+		t.Fatalf("split-role shadow decision = %#v, want hold until proof gaps clear", splitRolesWithOpenProofGaps)
 	}
-	if blockers := releaseStatusStringSlice(ready["blockers"]); len(blockers) != 0 {
+	if blockers := releaseStatusStringSlice(splitRolesWithOpenProofGaps["blockers"]); len(blockers) != 0 {
 		t.Fatalf("split-role blockers = %#v, want none", blockers)
 	}
-	if gaps := releaseStatusStringSlice(ready["proof_gaps"]); !containsString(gaps, "PILOT_COHORT_WITNESS") {
+	if gaps := releaseStatusStringSlice(splitRolesWithOpenProofGaps["proof_gaps"]); !containsString(gaps, "PILOT_COHORT_WITNESS") {
 		t.Fatalf("proof gaps = %#v, want pilot cohort witness gap", gaps)
+	}
+	if gaps := releaseStatusStringSlice(splitRolesWithOpenProofGaps["proof_gaps"]); len(gaps) > 0 && releaseStatusBool(splitRolesWithOpenProofGaps["ready"]) {
+		t.Fatalf("shadow cutover reported ready=true with proof gaps: %#v", splitRolesWithOpenProofGaps)
 	}
 }
 
@@ -306,20 +309,32 @@ func TestReleaseStatusRenderIncludesBranchRegime(t *testing.T) {
 			"promotion_blockers": []string{"DEVELOPMENT_CI_RED"},
 		},
 		"shadow_cutover": map[string]any{
-			"decision": "hold",
-			"blockers": []string{"PROMOTION_BLOCKED_DEVELOPMENT_CI_RED", "PILOT_COHORT_WITNESS"},
+			"decision":   "hold",
+			"blockers":   []string{"PROMOTION_BLOCKED_DEVELOPMENT_CI_RED"},
+			"proof_gaps": []string{"PILOT_COHORT_WITNESS"},
 		},
 	}
 	out := renderReleaseStatus(status)
 	for _, want := range []string{
 		"last tag: v1.2.3",
 		"branch regime: dev is 3 commit(s) ahead of main; promotion blocked: DEVELOPMENT_CI_RED",
-		"shadow cutover: hold; blocker: PROMOTION_BLOCKED_DEVELOPMENT_CI_RED (+1 more)",
+		"shadow cutover: hold; blocker: PROMOTION_BLOCKED_DEVELOPMENT_CI_RED",
 		"commits since tag: 9",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestReleaseStatusRenderShowsProofGapWhenNoBlocker(t *testing.T) {
+	out := releaseStatusRenderShadowCutover(map[string]any{
+		"decision":   "hold",
+		"blockers":   []string{},
+		"proof_gaps": []string{"PILOT_COHORT_WITNESS", "FINAL_DECISION_RECORD"},
+	})
+	if !strings.Contains(out, "shadow cutover: hold; proof gap: PILOT_COHORT_WITNESS (+1 more)") {
+		t.Fatalf("render missing proof-gap reason:\n%s", out)
 	}
 }
 
