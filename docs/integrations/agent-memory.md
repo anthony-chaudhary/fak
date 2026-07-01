@@ -49,6 +49,63 @@ Three things mem0 has no mechanism for, with the policy in
 
 ---
 
+## Memory-store integration checklist
+
+Use this checklist when the store is not mem0/OpenMemory, or when you are adding the
+deeper durability barrier described in
+[`CONTEXT-IS-NOT-MEMORY.md`](../CONTEXT-IS-NOT-MEMORY.md). The shape is the same for
+mem0, Letta, Zep/Graphiti, LangMem, and custom MCP memory tools: the memory store keeps
+its retrieval engine; fak owns the boundary where an agent writes, recalls, deletes, or
+promotes memory.
+
+1. **Inventory every memory surface.** Name the exact tool or API operation for writes,
+   recalls, lists, deletes/resets, and background consolidation. If the agent can still
+   call the store through an SDK path that bypasses `fak guard`, that path is not gated.
+2. **Put the effectful surface on the proxied stream.** Prefer an MCP tool surface or an
+   equivalent wrapper where the model proposes `add`, `search`, `delete`, and `promote`
+   as visible tool calls. fak cannot gate a direct library call it never sees.
+3. **Declare an exact capability floor.** Allow the smallest write/read/list set the agent
+   needs. Deny broad destructive tools such as `delete_all`, `reset`, and bulk namespace
+   wipes by default. Add argument rules for oversized writes, secret-shaped payloads, and
+   missing tenant/user scope.
+4. **Classify writes before persistence.** Every write candidate should carry source
+   principal, source digest, scope, and a durability class: `turn`, `session`, `bounded`,
+   or `durable`. Unclassified observations default to `turn` at the live write boundary,
+   so they can be used in context without becoming long-term memory.
+5. **Make promotion reviewable.** A `turn` or `session` observation should create a
+   proposal or audit event, not a durable fact. Promote only when the candidate is
+   explicit, user-confirmed, corroborated, or an established pattern. A one-off remark
+   like "I'm tired today" is not enough evidence to mint "user prefers terse answers."
+6. **Re-admit recalls before they re-enter context.** A recalled item is untrusted tool
+   output. Route it through result admission, preserve the source digest and durability
+   metadata, enforce any validity window, and inject the smallest useful fact rather than
+   a raw transcript chunk.
+7. **Gate deletes and invalidations separately.** Single-item deletion, temporal
+   invalidation, and broad reset are different capabilities. Prefer invalidating or
+   closing a validity interval where the store supports it; require an explicit higher
+   capability for destructive broad deletes.
+8. **Journal the decision, not the prose.** Record the tool name, verdict, reason,
+   durability, source digest, scope, and store-side id. A later audit should be able to
+   answer why the fact was written, recalled, refused, promoted, invalidated, or deleted
+   without trusting a worker's natural-language status line.
+
+Provider-specific routing:
+
+| Store | Write path to gate | Recall path to gate | Delete / invalidation path | Promotion rule |
+|---|---|---|---|---|
+| **mem0 / OpenMemory MCP** | `add_memories` | `search_memory`, `list_memories` | Deny `delete_all_memories`; narrowly gate single-item deletes if exposed | Do not let every extracted fact become durable; require a durability tag before `add_memories` |
+| **Letta** | Memory-block edits and archival-memory inserts | Archival-memory search plus any always-visible memory block read-back | Gate block overwrites and archival deletes as separate capabilities | Treat block rewrites as durable promotions; require explicit/corroborated evidence before updating a standing profile |
+| **Zep / Graphiti** | Episode ingestion and fact/edge upserts | Temporal fact reads, graph searches, and episode read-back | Prefer validity-window closure over hard delete | Preserve `valid_at` / `invalid_at` style metadata; a bounded fact must be queried as-of, not read as timeless |
+| **LangMem / LangGraph memory** | `manage_memory`-style writes and background consolidation writes | `search_memory`-style lookups | Gate namespace deletes and background cleanup separately | Run background consolidators through the same write gate; they are not trusted just because they are offline |
+| **Custom MCP memory tools** | Any MCP tool that writes or mutates store state | MCP tool results and memory resources | Separate `delete`, `reset`, and namespace admin tools in policy | Require the tool schema to expose scope, source digest, and desired durability, or fail closed to a proposal |
+
+The important invariant is boring: **no memory side effect happens because the model said
+it was useful later.** The write path needs a capability verdict, the recall path needs a
+result-admission verdict, the delete path needs its own destructive capability, and the
+promotion path needs evidence that the fact is actually durable.
+
+---
+
 ## Prove the floor before you wire anything (no model, no mem0, no key)
 
 The floor is the same code whether a model is in the loop or not, so you can verify every

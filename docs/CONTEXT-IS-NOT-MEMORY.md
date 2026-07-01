@@ -617,6 +617,9 @@ the expensive direction (§4). This is a second, narrower gate that sits *above*
 - [`MEMORY-LAYERS-EXPLAINER.md`](MEMORY-LAYERS-EXPLAINER.md) — the *spatial/trust* axis
   (routing / addressing / fusion / semantics). This doc is the **orthogonal**
   *temporal/durability* axis the four layers don't cover.
+- [`integrations/agent-memory.md`](integrations/agent-memory.md) — the integration
+  checklist for routing memory writes, recalls, deletes, and durable-promotion decisions
+  through fak when composing with mem0, Letta, Zep/Graphiti, LangMem, or MCP memory tools.
 - `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published) — S1–S6 memory
   semantics; the durability classification here is the natural **S7** (promotion /
   truth-duration), upstream of all six.
