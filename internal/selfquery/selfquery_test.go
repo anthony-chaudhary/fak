@@ -348,6 +348,23 @@ func TestPlanClarificationsBoundsQuestionsAndBudget(t *testing.T) {
 	}
 }
 
+func TestStaleClarificationDefaultsToRefreshSource(t *testing.T) {
+	report := ctxplan.AssessAssumptions([]ctxplan.Assumption{
+		{Key: "account-tier", Source: ctxplan.AssumptionStale, Statement: "gold in recalled page", SourceRef: "recall:page:4:trust_epoch"},
+	}, ctxplan.DefaultAssumptionPolicy())
+	plan := PlanClarifications(report, ClarificationOptions{})
+	if len(plan.Questions) != 1 {
+		t.Fatalf("stale assumption should produce one clarification question: %+v", plan)
+	}
+	q := plan.Questions[0]
+	if q.Reason != ClarificationStaleContext || q.DefaultChoice != "refresh_source" {
+		t.Fatalf("stale clarification = %+v, want refresh_source default", q)
+	}
+	if q.SourceRef != "recall:page:4:trust_epoch" || q.BudgetTokens <= 0 {
+		t.Fatalf("stale clarification should carry source ref and budget: %+v", q)
+	}
+}
+
 func TestDetailFaultsOnlySelectedSchemaOrPlan(t *testing.T) {
 	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
 	if err != nil {
