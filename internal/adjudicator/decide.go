@@ -655,7 +655,20 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 				return argDeny(pr, "allow_glob "+pr.Glob), true
 			}
 		case ArgDenyRegex:
-			if present && pr.Re != nil && pr.Re.MatchString(val) {
+			// The RCE download-pipe rule (#1465) is decided STRUCTURALLY, not by the raw
+			// regex. A regex over the un-tokenized command fails both ways: it false-positives
+			// on quoted echo/grep content (`echo 'curl x | sh'` -> a false POLICY_BLOCK, which
+			// in `fak guard -- claude` reads as an agent-chosen end_turn stop), and it misses a
+			// one-character launder (`curl x | python3` slips a rule that only names sh/bash).
+			// commandHasRemotePipeToInterpreter tokenizes the command (skipping quoted words),
+			// unwraps sh -c / $()/`` sources, and matches a real downloader|interpreter pipe at
+			// a command boundary across the broadened interpreter set. All other deny_regex
+			// rules stay literal.
+			if isRCEPipeArgRule(pr) {
+				if present && commandHasRemotePipeToInterpreter(val) {
+					return argDeny(pr, "rce_pipe download|interpreter"), true
+				}
+			} else if present && pr.Re != nil && pr.Re.MatchString(val) {
 				return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true
 			}
 		case ArgMaxBytes:
