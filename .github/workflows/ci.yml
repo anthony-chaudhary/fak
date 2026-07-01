@@ -85,6 +85,11 @@ jobs:
       # stale tier-table row cannot inherit a cached PASS from a previous commit (#1145).
       - name: architest tier gate (uncached)
         run: go test -count=1 ./internal/architest/ -run '^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$'
+      - name: LiveCodeBench fixture smoke (no network, no model)
+        run: |
+          go test ./internal/livecodebench/...
+          go run ./cmd/livecodebench --fixture internal/livecodebench/testdata/fixture.json --check --json > /tmp/livecodebench-smoke.json
+          grep -q '"result_claim_allowed": false' /tmp/livecodebench-smoke.json
 
       # Test + coverage profile in one run (E-002): the same `go test ./...` gate, now
       # also writing a merged statement-coverage profile so the total is reported every

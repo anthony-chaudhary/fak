@@ -1,0 +1,32 @@
+{
+  "schema": "fak.livecodebench.fixture.v1",
+  "release_version": "fixture_release",
+  "start_date": "2026-01-01",
+  "end_date": "2026-01-02",
+  "items": [
+    {
+      "question_id": "fixture-codegeneration-1",
+      "scenario": "codegeneration",
+      "prompt": "Return a Python function add(a, b) that returns the sum.",
+      "code_list": ["def add(a, b):\n    return a + b\n"]
+    },
+    {
+      "question_id": "fixture-selfrepair-1",
+      "scenario": "selfrepair",
+      "prompt": "Repair a Python function that subtracts instead of adding.",
+      "code_list": ["def add(a, b):\n    return a + b\n"]
+    },
+    {
+      "question_id": "fixture-testoutputprediction-1",
+      "scenario": "testoutputprediction",
+      "prompt": "Predict the output of print(add(2, 3)).",
+      "code_list": ["5"]
+    },
+    {
+      "question_id": "fixture-codeexecution-1",
+      "scenario": "codeexecution",
+      "prompt": "Execute the snippet mentally: x = 2; print(x * 4).",
+      "code_list": ["8"]
+    }
+  ]
+}
