@@ -122,6 +122,32 @@ func TestObserveUpstreamAuthRefresh_CountsAndRenders(t *testing.T) {
 	}
 }
 
+func TestDebugVarsExposeUpstreamIncidents(t *testing.T) {
+	srv := newTestServer(t)
+	srv.metrics.observeUpstreamError(&agent.UpstreamStatusError{Status: 401})
+	srv.metrics.observeUpstreamError(&agent.UpstreamStatusError{Status: 429})
+	srv.metrics.observeUpstreamAuthRefresh("exhausted")
+	srv.metrics.observeUpstreamRetry()
+	srv.metrics.observeUpstreamRetry()
+
+	vars := srv.debugVars(time.Now())
+	if vars.Upstream.ErrorsByKind["auth"] != 1 {
+		t.Fatalf("/debug/vars upstream auth count = %d, want 1: %+v", vars.Upstream.ErrorsByKind["auth"], vars.Upstream)
+	}
+	if vars.Upstream.ErrorsByKind["rate_limited"] != 1 {
+		t.Fatalf("/debug/vars upstream rate_limited count = %d, want 1: %+v", vars.Upstream.ErrorsByKind["rate_limited"], vars.Upstream)
+	}
+	if vars.Upstream.AuthRefreshByOutcome["exhausted"] != 1 {
+		t.Fatalf("/debug/vars auth-refresh exhausted = %d, want 1: %+v", vars.Upstream.AuthRefreshByOutcome["exhausted"], vars.Upstream)
+	}
+	if _, ok := vars.Upstream.AuthRefreshByOutcome["recovered"]; !ok {
+		t.Fatalf("/debug/vars must carry recovered even at zero: %+v", vars.Upstream.AuthRefreshByOutcome)
+	}
+	if vars.Upstream.Retries != 2 {
+		t.Fatalf("/debug/vars upstream retries = %d, want 2: %+v", vars.Upstream.Retries, vars.Upstream)
+	}
+}
+
 // Both auth-refresh outcome series must render at 0 on a fresh metrics object — the panel must
 // exist before any 401 happens, so an empty "exhausted" series can never read as a missing
 // failure signal.

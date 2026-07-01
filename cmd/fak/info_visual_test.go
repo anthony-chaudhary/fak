@@ -136,6 +136,38 @@ func TestRenderGuardInfoVisualBlockContent(t *testing.T) {
 	}
 }
 
+func TestRenderGuardInfoVisualBlockIncidentRegion(t *testing.T) {
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	v := provenVisualVars()
+	v.Upstream.ErrorsByKind = map[string]uint64{
+		"auth":         1,
+		"rate_limited": 2,
+	}
+	v.Upstream.AuthRefreshByOutcome = map[string]uint64{
+		"exhausted": 1,
+	}
+	v.Upstream.Retries = 3
+	for i := 0; i < 3; i++ {
+		tr.push(v)
+	}
+
+	block := renderGuardInfoVisualBlock(v, tr, 120, 8)
+	for _, want := range []string{
+		" incident ",
+		"upstream auth/401 x1",
+		"rate_limited/429 x2",
+		"auth-refresh exhausted x1",
+		"retries x3",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("incident panel missing %q:\n%s", want, block)
+		}
+	}
+	if strings.Contains(renderGuardInfoLine(v), "auth/401") || strings.Contains(renderGuardInfoLine(v), "rate_limited/429") {
+		t.Fatalf("upstream incident leaked into compact status line:\n%s", renderGuardInfoLine(v))
+	}
+}
+
 // TestRenderGuardInfoVisualBlockFits proves the block never wraps and never exceeds the pane: for
 // a range of widths and heights every row is within the width budget and the row count respects
 // the height budget (the property that keeps the in-place redraw exact in a small 20% pane).

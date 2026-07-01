@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 )
@@ -173,10 +174,22 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 	workRow := fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(tr.turns, sw), v.Inference.Turns, v.Gateway.InflightRequests)
 	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), gw), guardInfoHitPct(v), guardInfoSavingWord(v))
 	safetyRow := " safety " + guardInfoSafetyText(v)
+	incidentRow := ""
+	if incident := guardInfoIncidentText(v); incident != "" {
+		incidentRow = " incident " + incident
+	}
 
 	var rows []string
 	switch {
-	case height <= 0 || height >= 8:
+	case incidentRow != "" && (height <= 0 || height >= 9):
+		rows = []string{
+			id,
+			guardInfoRuleTUI("trends", width),
+			saveRow, hitRow, workRow,
+			guardInfoRuleTUI("tasks", width),
+			cacheRow, safetyRow, incidentRow,
+		}
+	case incidentRow == "" && (height <= 0 || height >= 8):
 		rows = []string{
 			id,
 			guardInfoRuleTUI("trends", width),
@@ -185,9 +198,20 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 			cacheRow, safetyRow,
 		}
 	case height >= 5:
-		rows = []string{id, saveRow, hitRow, cacheRow, safetyRow}
+		if incidentRow != "" {
+			rows = []string{id, saveRow, hitRow, cacheRow, incidentRow}
+			if height >= 6 {
+				rows = []string{id, saveRow, hitRow, cacheRow, safetyRow, incidentRow}
+			}
+		} else {
+			rows = []string{id, saveRow, hitRow, cacheRow, safetyRow}
+		}
 	case height >= 3:
-		rows = []string{id, saveRow, cacheRow}
+		if incidentRow != "" {
+			rows = []string{id, cacheRow, incidentRow}
+		} else {
+			rows = []string{id, saveRow, cacheRow}
+		}
 	default:
 		rows = []string{guardInfoVisualTinyRow(v)}
 	}
@@ -225,6 +249,78 @@ func guardInfoSafetyText(v guardInfoVars) string {
 	return strings.TrimPrefix(
 		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
 		"safety: ")
+}
+
+func guardInfoIncidentText(v guardInfoVars) string {
+	var parts []string
+	if s := guardInfoUpstreamErrorsText(v.Upstream.ErrorsByKind); s != "" {
+		parts = append(parts, "upstream "+s)
+	}
+	if s := guardInfoAuthRefreshText(v.Upstream.AuthRefreshByOutcome); s != "" {
+		parts = append(parts, "auth-refresh "+s)
+	}
+	if v.Upstream.Retries > 0 {
+		parts = append(parts, fmt.Sprintf("retries x%d", v.Upstream.Retries))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func guardInfoUpstreamErrorsText(counts map[string]uint64) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	order := []string{"auth", "rate_limited", "forbidden", "stalled", "status_5xx", "overloaded", "unreachable", "oom", "status_4xx", "other"}
+	seen := map[string]bool{}
+	var parts []string
+	for _, kind := range order {
+		seen[kind] = true
+		if n := counts[kind]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s x%d", guardInfoUpstreamKindLabel(kind), n))
+		}
+	}
+	var extra []string
+	for kind, n := range counts {
+		if n > 0 && !seen[kind] {
+			extra = append(extra, kind)
+		}
+	}
+	sort.Strings(extra)
+	for _, kind := range extra {
+		parts = append(parts, fmt.Sprintf("%s x%d", guardInfoUpstreamKindLabel(kind), counts[kind]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func guardInfoAuthRefreshText(counts map[string]uint64) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, outcome := range []string{"exhausted", "recovered"} {
+		if n := counts[outcome]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s x%d", outcome, n))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func guardInfoUpstreamKindLabel(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "auth":
+		return "auth/401"
+	case "rate_limited":
+		return "rate_limited/429"
+	case "forbidden":
+		return "forbidden/403"
+	case "stalled":
+		return "stalled/504"
+	case "status_5xx":
+		return "status_5xx/5xx"
+	case "overloaded":
+		return "overloaded/529"
+	default:
+		return kind
+	}
 }
 
 // guardInfoSaved / guardInfoHitPct / guardInfoHitFrac / guardInfoMult / guardInfoSavingWord pull

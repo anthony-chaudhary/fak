@@ -15,6 +15,7 @@ type debugVarsResponse struct {
 	Runtime          debugRuntimeVars               `json:"runtime"`
 	Kernel           debugKernelVars                `json:"kernel"`
 	Inference        debugInferenceVars             `json:"inference"`
+	Upstream         debugUpstreamVars              `json:"upstream"`
 	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
 	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
 	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
@@ -47,6 +48,14 @@ type debugInferenceVars struct {
 	PrefillTokensPerSecond float64 `json:"prefill_tokens_per_second"`
 	DecodeTokensPerSecond  float64 `json:"decode_tokens_per_second"`
 	InflightMaxAgeSeconds  float64 `json:"inflight_max_age_seconds"`
+}
+
+// debugUpstreamVars mirrors the upstream-error /metrics families into /debug/vars so live
+// operator panes can show provider/API incidents without scraping Prometheus text.
+type debugUpstreamVars struct {
+	ErrorsByKind         map[string]uint64 `json:"errors_by_kind"`
+	Retries              uint64            `json:"retries"`
+	AuthRefreshByOutcome map[string]uint64 `json:"auth_refresh_by_outcome"`
 }
 
 type debugGatewayVars struct {
@@ -367,6 +376,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			VDSOHitRatio: ratio,
 		},
 		Inference:        inferenceVarsFromSnapshot(infer, inflightMaxAge),
+		Upstream:         m.debugUpstreamVars(),
 		VCache:           vcacheVarsFromSnapshot(infer),
 		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
@@ -394,6 +404,29 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+}
+
+func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
+	out := debugUpstreamVars{
+		ErrorsByKind: map[string]uint64{},
+		AuthRefreshByOutcome: map[string]uint64{
+			"recovered": 0,
+			"exhausted": 0,
+		},
+	}
+	if m == nil {
+		return out
+	}
+	m.upstreamErrMu.Lock()
+	for k, v := range m.upstreamErrors {
+		out.ErrorsByKind[k] = v
+	}
+	for k, v := range m.upstreamAuthRefreshes {
+		out.AuthRefreshByOutcome[k] = v
+	}
+	m.upstreamErrMu.Unlock()
+	out.Retries = atomic.LoadUint64(&m.upstreamRetries)
+	return out
 }
 
 // inferenceVarsFromSnapshot derives the /debug/vars inference block from the same

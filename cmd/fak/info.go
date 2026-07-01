@@ -57,6 +57,11 @@ type guardInfoVars struct {
 	Inference struct {
 		Turns int64 `json:"turns"`
 	} `json:"inference"`
+	Upstream struct {
+		ErrorsByKind         map[string]uint64 `json:"errors_by_kind"`
+		Retries              uint64            `json:"retries"`
+		AuthRefreshByOutcome map[string]uint64 `json:"auth_refresh_by_outcome"`
+	} `json:"upstream"`
 	VCache *struct {
 		CacheReadTokens int64   `json:"cache_read_tokens"`
 		SavedTokenEquiv float64 `json:"saved_token_equiv"`

@@ -209,6 +209,32 @@ func TestRunInfoJSONSnapshot(t *testing.T) {
 	}
 }
 
+func TestGuardInfoVarsDecodesUpstreamIncidents(t *testing.T) {
+	raw := []byte(`{
+		"gateway":{"uptime_seconds":42,"inflight_requests":1,"vdso":true},
+		"kernel":{"submits":3,"admitted":2,"denies":1,"transforms":0,"quarantines":1,"result_denies":0},
+		"inference":{"turns":5},
+		"upstream":{
+			"errors_by_kind":{"auth":1,"rate_limited":2},
+			"retries":3,
+			"auth_refresh_by_outcome":{"recovered":1,"exhausted":1}
+		}
+	}`)
+	var v guardInfoVars
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode guardInfoVars upstream block: %v", err)
+	}
+	if v.Upstream.ErrorsByKind["auth"] != 1 || v.Upstream.ErrorsByKind["rate_limited"] != 2 {
+		t.Fatalf("upstream errors not decoded: %+v", v.Upstream.ErrorsByKind)
+	}
+	if v.Upstream.AuthRefreshByOutcome["exhausted"] != 1 || v.Upstream.AuthRefreshByOutcome["recovered"] != 1 {
+		t.Fatalf("auth-refresh outcomes not decoded: %+v", v.Upstream.AuthRefreshByOutcome)
+	}
+	if v.Upstream.Retries != 3 {
+		t.Fatalf("upstream retries = %d, want 3", v.Upstream.Retries)
+	}
+}
+
 func TestRunInfoRejectsBadInterval(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runInfo(&stdout, &stderr, []string{"--gateway-url", "http://127.0.0.1:1", "--interval", "0s"}); code != 2 {
