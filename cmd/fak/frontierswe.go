@@ -50,6 +50,8 @@ func runFrontierswe(stdout, stderr io.Writer, argv []string) int {
 	switch sub {
 	case "describe", "show":
 		return runFrontiersweDescribe(stdout, stderr, rest)
+	case "cache-witness":
+		return runFrontiersweCacheWitness(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		frontiersweUsage(stdout)
 		return 0
@@ -80,6 +82,16 @@ usage:
         n_concurrent_trials prefix-sharing axis). --task NAME restricts it to one
         task. It is a deterministic floor (no model), NOT a measurement — the
         measured TTS is deferred to C14.
+
+  fak frontierswe cache-witness [--metrics-dir DIR | --metrics-files A,B,...
+                                | --gateway URL --interval SEC --samples N]
+                                [--out TRACE.jsonl]
+        Fold a FrontierSWE trial's periodic fak serve /metrics scrapes into the
+        per-turn reused-prefill-token SERIES and the MEASURED cross-turn reuse rate
+        r that C14 plugs into the TTS projection. fak's own KV-prefix reuse is
+        WITNESSED; the provider cache_read is OBSERVED — kept separate, never summed.
+        --metrics-dir / --metrics-files fold captured bodies offline (RUNNABLE NOW,
+        no gateway); --gateway live-scrapes a co-resident gateway (needs C7).
 `)
 }
 
