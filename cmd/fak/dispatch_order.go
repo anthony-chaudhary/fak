@@ -64,11 +64,13 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "scorecard":
 		return runDispatchScorecard(stdout, stderr, argv[1:])
+	case "issue-smallness-lint", "smallness":
+		return runDispatchIssueSmallnessLint(stdout, stderr, os.Stdin, argv[1:])
 	case "-h", "--help", "help":
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, or scorecard)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, or issue-smallness-lint)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -238,6 +240,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
+  fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -263,6 +266,8 @@ preflight the host/account/cap, route open issues to lanes, pick one fresh issue
 fan-out before launch and emits plan_id, launch_plan, wave metrics, and repartition advice. wave allocates
 multiple account seats and drives ticks; sweep repeats ticks until the queue drains or preflight
 refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
-commands are dry-run until --live.
+commands are dry-run until --live. issue-smallness-lint is a filing/backlog dry-run report: it
+checks that each issue has one primary deliverable and exactly one witness, flagging bundled
+work before it enters the worker queue.
 `)
 }
