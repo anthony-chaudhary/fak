@@ -289,7 +289,13 @@ func ParseAcceptanceTarget(spec string) (AcceptanceTarget, error) {
 	return target, nil
 }
 
-func LoadReadinessRosterTargets(path string) ([]ReadinessTarget, error) {
+// loadRosterTargets reads a roster JSON file, extracts its "targets" list (an
+// absent field is an empty roster, a non-list field is an error), and folds each
+// object row into a T via build. build returns (target, keep, err): keep=false
+// skips the row (a filtered/ineligible entry), a non-nil err aborts the load.
+// It folds the read+list-extract+row-loop scaffold shared by the readiness and
+// acceptance roster loaders.
+func loadRosterTargets[T any](path string, build func(idx int, row map[string]any) (T, bool, error)) ([]T, error) {
 	var data map[string]any
 	if err := readJSONFile(path, &data); err != nil {
 		return nil, err
@@ -302,16 +308,29 @@ func LoadReadinessRosterTargets(path string) ([]ReadinessTarget, error) {
 			return nil, fmt.Errorf("roster targets field is not a JSON list: %s", path)
 		}
 	}
-	targets := make([]ReadinessTarget, 0, len(rawRows))
+	targets := make([]T, 0, len(rawRows))
 	for idx, raw := range rawRows {
 		row, ok := raw.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("roster target %d is not a JSON object", idx)
 		}
+		target, keep, err := build(idx, row)
+		if err != nil {
+			return nil, err
+		}
+		if keep {
+			targets = append(targets, target)
+		}
+	}
+	return targets, nil
+}
+
+func LoadReadinessRosterTargets(path string) ([]ReadinessTarget, error) {
+	return loadRosterTargets(path, func(idx int, row map[string]any) (ReadinessTarget, bool, error) {
 		contractClass := stringField(row, "contract_class")
 		status := stringField(row, "status")
 		if !openAICompatibleClasses[contractClass] || status == "INVALID_TARGET" {
-			continue
+			return ReadinessTarget{}, false, nil
 		}
 		target := ReadinessTarget{
 			Name:      stringField(row, "name"),
@@ -324,41 +343,22 @@ func LoadReadinessRosterTargets(path string) ([]ReadinessTarget, error) {
 			if label == "" {
 				label = fmt.Sprint(idx)
 			}
-			return nil, fmt.Errorf("roster target %s: %s", label, err)
+			return ReadinessTarget{}, false, fmt.Errorf("roster target %s: %s", label, err)
 		}
-		targets = append(targets, target)
-	}
-	return targets, nil
+		return target, true, nil
+	})
 }
 
 func LoadAcceptanceRosterTargets(path string) ([]AcceptanceTarget, error) {
-	var data map[string]any
-	if err := readJSONFile(path, &data); err != nil {
-		return nil, err
-	}
-	rawRows, ok := data["targets"].([]any)
-	if !ok {
-		if _, exists := data["targets"]; !exists {
-			rawRows = nil
-		} else {
-			return nil, fmt.Errorf("roster targets field is not a JSON list: %s", path)
-		}
-	}
-	targets := make([]AcceptanceTarget, 0, len(rawRows))
-	for idx, raw := range rawRows {
-		row, ok := raw.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("roster target %d is not a JSON object", idx)
-		}
-		targets = append(targets, AcceptanceTarget{
+	return loadRosterTargets(path, func(idx int, row map[string]any) (AcceptanceTarget, bool, error) {
+		return AcceptanceTarget{
 			Name:      stringField(row, "name"),
 			Provider:  NormalizeProvider(stringField(row, "provider")),
 			BaseURL:   stringField(row, "base_url"),
 			APIKeyEnv: stringField(row, "api_key_env"),
 			ModelHint: stringField(row, "model_hint"),
-		})
-	}
-	return targets, nil
+		}, true, nil
+	})
 }
 
 func ReadinessTargetError(target ReadinessTarget) string {
