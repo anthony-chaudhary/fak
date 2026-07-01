@@ -107,6 +107,52 @@ func TestReviewCandidateFlagsGenerationMismatch(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftRefusesUnexpandedTemplateTokens(t *testing.T) {
+	body := strings.Join([]string{
+		"## Generation stream",
+		"- Generation: $(@{gen=next; title=x; labels=dispatch}.gen)",
+		"- Milestone: $(System.Collections.Hashtable.title)",
+		"",
+		"## Current state",
+		"Scoped body content exists.",
+		"",
+		"## Why this is next",
+		"The issue should be repaired before dispatch.",
+		"",
+		"## Working spine",
+		"Repair generated issue metadata before worker launch.",
+		"",
+		"## In scope",
+		"Reject raw PowerShell template tokens.",
+		"",
+		"## Out of scope",
+		"Do not launch a worker from this corrupt body.",
+		"",
+		"## Done condition",
+		"The contract refuses the issue row.",
+		"",
+		"## Witness",
+		"go test ./internal/issuecontract",
+		"",
+		"## Lane",
+		"docs",
+		"",
+		"## Path hints",
+		"- `docs/**`",
+	}, "\n")
+	review := ReviewIssueDraft(IssueDraft{
+		Number: 1727,
+		Title:  "generation(next): broken filer output",
+		Body:   body,
+	}, Options{})
+	if review.OK || review.Dispatchability != Refused || review.Verdict != "refused" {
+		t.Fatalf("review = %+v, want refused corrupt issue body", review)
+	}
+	if !has(review.Reasons, ReasonUnexpandedTemplate) {
+		t.Fatalf("reasons = %+v, want %s", review.Reasons, ReasonUnexpandedTemplate)
+	}
+}
+
 func TestReviewCandidateScoresGoldPlatingBelowSpineWork(t *testing.T) {
 	c := completeCandidate()
 	c.PriorityContext = "Nice later: polish helper names after the workflow already works."

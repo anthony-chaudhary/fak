@@ -23,14 +23,15 @@ const (
 	TriageOnly   = "triage_only"
 	Refused      = "refused"
 
-	ReasonScopeIncomplete = "ISSUE_SCOPE_INCOMPLETE"
-	ReasonUnrouted        = "ISSUE_UNROUTED"
-	ReasonPrivateBoundary = "ISSUE_PRIVATE_BOUNDARY"
-	ReasonLiveUnarmored   = "ISSUE_LIVE_UNARMORED"
-	ReasonNotDispatchLeaf = "ISSUE_NOT_DISPATCH_LEAF"
-	ReasonOversizedSteps  = "ISSUE_OVERSIZED_EXPECTED_STEPS"
-	ReasonNoiseIncomplete = "ISSUE_NOISE_CONTROL_INCOMPLETE"
-	ReasonAgentIncomplete = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
+	ReasonScopeIncomplete    = "ISSUE_SCOPE_INCOMPLETE"
+	ReasonUnrouted           = "ISSUE_UNROUTED"
+	ReasonPrivateBoundary    = "ISSUE_PRIVATE_BOUNDARY"
+	ReasonLiveUnarmored      = "ISSUE_LIVE_UNARMORED"
+	ReasonNotDispatchLeaf    = "ISSUE_NOT_DISPATCH_LEAF"
+	ReasonOversizedSteps     = "ISSUE_OVERSIZED_EXPECTED_STEPS"
+	ReasonNoiseIncomplete    = "ISSUE_NOISE_CONTROL_INCOMPLETE"
+	ReasonAgentIncomplete    = "ISSUE_AGENT_CONTEXT_INCOMPLETE"
+	ReasonUnexpandedTemplate = "ISSUE_UNEXPANDED_TEMPLATE"
 )
 
 const MaxDispatchExpectedSteps = 8
@@ -39,6 +40,7 @@ var keyRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$`)
 var markdownHeadingRE = regexp.MustCompile(`^#{1,6}\s+(.+?)\s*$`)
 var codeSpanRE = regexp.MustCompile("`([^`]+)`")
 var issueMarkerKeyRE = regexp.MustCompile(`<!--\s*fak-[A-Za-z0-9_-]+-key:\s*([^>\s]+)\s*-->`)
+var unexpandedIssueTemplateRE = regexp.MustCompile(`(?m)(\$\(@\{|System\.Collections|System\.Management\.Automation|\$\(System\.|\bSource:\s*\$source\b)`)
 
 // IssueLabel is the subset of a GitHub label row used by IssueDraft.
 type IssueLabel struct {
@@ -264,7 +266,34 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 // issue-contract sections. This is the bridge from "all open GitHub issues" to
 // the same dispatchability language used by generated issue producers.
 func ReviewIssueDraft(d IssueDraft, opt Options) Review {
-	return ReviewCandidate(CandidateFromIssueDraft(d), opt)
+	review := ReviewCandidate(CandidateFromIssueDraft(d), opt)
+	if HasUnexpandedTemplate(d.Body) {
+		review.OK = false
+		review.Verdict = "refused"
+		review.Dispatchability = Refused
+		if !hasReason(review.Reasons, ReasonUnexpandedTemplate) {
+			review.Reasons = append(review.Reasons, ReasonUnexpandedTemplate)
+			sort.Strings(review.Reasons)
+		}
+	}
+	return review
+}
+
+// HasUnexpandedTemplate reports whether an already-rendered issue body still
+// contains PowerShell template tokens from a failed batch filer. Such a body is
+// not safe to dispatch: routing metadata may be corrupt even when later
+// acceptance sections are intact.
+func HasUnexpandedTemplate(body string) bool {
+	return unexpandedIssueTemplateRE.MatchString(body)
+}
+
+func hasReason(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
 }
 
 // CandidateFromIssueDraft parses the standard issue-contract sections from an
