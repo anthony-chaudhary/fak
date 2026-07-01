@@ -15,6 +15,8 @@ const (
 	DefaultTwoXThreshold     = 2.0
 	DefaultTargetCoverage    = 0.85
 	DefaultMaxFalseWarmRate  = 0.05
+	AnchorSourceSynthetic    = "synthetic"
+	AnchorSourceMeasured     = "measured"
 	defaultConcentrationZipf = 1.74
 	defaultAnchorUniverse    = 1000
 )
@@ -32,6 +34,8 @@ type Input struct {
 	TelemetryWrite5m  float64
 	TelemetryWrite1h  float64
 	Ranked            []vcachecal.RankedVBlock
+	AnchorSource      string
+	TurnsObserved     int
 	TargetCoverage    float64
 	Prediction        vcachecal.PredictionError
 	Recall            vcachechain.ProveRecallInput
@@ -249,6 +253,8 @@ type Report struct {
 	Grade             string                           `json:"grade"`
 	Score             int                              `json:"score"`
 	ActiveSource      string                           `json:"active_source"`
+	AnchorSource      string                           `json:"anchor_source"`
+	TurnsObserved     int                              `json:"turns_observed"`
 	ActiveMultiplier  float64                          `json:"active_multiplier"`
 	TwoXThreshold     float64                          `json:"two_x_threshold"`
 	TwoXBetter        bool                             `json:"two_x_better"`
@@ -312,6 +318,8 @@ func Score(in Input) Report {
 		Grade:            grade(score),
 		Score:            score,
 		ActiveSource:     activeSource,
+		AnchorSource:     in.AnchorSource,
+		TurnsObserved:    in.TurnsObserved,
 		ActiveMultiplier: activeMultiplier,
 		TwoXThreshold:    in.TwoXThreshold,
 		TwoXBetter:       twoX,
@@ -639,6 +647,18 @@ func normalize(in Input) Input {
 		in.Ranked = def.Ranked
 	} else {
 		in.Ranked = NormalizeRanked(in.Ranked)
+	}
+	switch strings.ToLower(strings.TrimSpace(in.AnchorSource)) {
+	case AnchorSourceMeasured:
+		in.AnchorSource = AnchorSourceMeasured
+	default:
+		in.AnchorSource = AnchorSourceSynthetic
+	}
+	if in.TurnsObserved < 0 {
+		in.TurnsObserved = 0
+	}
+	if len(in.TelemetryRows) > 0 && in.TurnsObserved == 0 {
+		in.TurnsObserved = len(in.TelemetryRows)
 	}
 	if in.TargetCoverage <= 0 || in.TargetCoverage > 1 {
 		in.TargetCoverage = DefaultTargetCoverage

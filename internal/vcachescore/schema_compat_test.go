@@ -120,7 +120,7 @@ func TestCurrentReportJSONKeepsLegacyFieldsAlongsideV1Facets(t *testing.T) {
 		}
 	}
 
-	v1Keys := []string{"planes", "agentic_activation", "default_usefulness", "cold_path_correct"}
+	v1Keys := []string{"planes", "agentic_activation", "default_usefulness", "cold_path_correct", "anchor_source", "turns_observed"}
 	for _, key := range v1Keys {
 		if _, ok := m[key]; !ok {
 			t.Fatalf("v1 facet key %q missing from current Report JSON", key)

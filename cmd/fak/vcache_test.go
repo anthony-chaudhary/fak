@@ -329,6 +329,9 @@ func TestRunVCacheScoreDefaultPassesTwoXGate(t *testing.T) {
 	if rep.Schema != "fak.vcache.score.v1" || rep.Status != "2x_ready" || !rep.TwoXBetter {
 		t.Fatalf("score = %+v, want default 2x-ready report", rep)
 	}
+	if rep.AnchorSource != vcachescore.AnchorSourceSynthetic || rep.TurnsObserved != 0 {
+		t.Fatalf("anchor source/turns = %q/%d, want synthetic/0", rep.AnchorSource, rep.TurnsObserved)
+	}
 }
 
 func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
@@ -348,6 +351,9 @@ func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
 	}
 	if !stdoutRep.TwoXBetter || stdoutRep.ActiveSource != "telemetry" || stdoutRep.Observed == nil {
 		t.Fatalf("stdout report = %+v, want telemetry-backed 2x report", stdoutRep)
+	}
+	if stdoutRep.AnchorSource != vcachescore.AnchorSourceSynthetic || stdoutRep.TurnsObserved != 1 {
+		t.Fatalf("stdout anchor source/turns = %q/%d, want synthetic/1", stdoutRep.AnchorSource, stdoutRep.TurnsObserved)
 	}
 	var fileRep vcachescore.Report
 	b, err := os.ReadFile(artifact)
@@ -495,6 +501,12 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	if rep.ActiveSource != "telemetry" || rep.Observed == nil {
 		t.Fatalf("a snapshot with turns must flip active_source to telemetry (observed), got %+v", rep)
 	}
+	if rep.AnchorSource != vcachescore.AnchorSourceMeasured || rep.TurnsObserved != 2 {
+		t.Fatalf("snapshot anchor source/turns = %q/%d, want measured/2", rep.AnchorSource, rep.TurnsObserved)
+	}
+	if rep.Index.TotalAnchors != 1 {
+		t.Fatalf("snapshot index total anchors=%d, want measured one-family workload", rep.Index.TotalAnchors)
+	}
 
 	// --snapshot off forces the planned FORECAST even when a snapshot exists.
 	var out2, errb2 bytes.Buffer
@@ -507,6 +519,29 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	}
 	if rep2.ActiveSource != "planned" {
 		t.Fatalf("--snapshot off must fall back to the planned forecast, got active_source=%q", rep2.ActiveSource)
+	}
+	if rep2.AnchorSource != vcachescore.AnchorSourceSynthetic || rep2.TurnsObserved != 0 {
+		t.Fatalf("--snapshot off anchor source/turns = %q/%d, want synthetic/0", rep2.AnchorSource, rep2.TurnsObserved)
+	}
+}
+
+func TestRunVCacheScoreSnapshotEnvFeedsMeasuredSource(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_VCACHE_SNAPSHOT", snap)
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json"}); code != 0 && code != 1 {
+		t.Fatalf("score with FAK_VCACHE_SNAPSHOT exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.AnchorSource != vcachescore.AnchorSourceMeasured || rep.TurnsObserved != 1 || rep.ActiveSource != "telemetry" {
+		t.Fatalf("env snapshot report = %+v, want measured one-turn telemetry", rep)
 	}
 }
 
@@ -531,6 +566,9 @@ func TestRunVCacheScoreAnchorsFileWritesIndexArtifact(t *testing.T) {
 	}
 	if rep.Index.AnchorCount != 2 || rep.Index.Coverage != 0.9 {
 		t.Fatalf("report index=%+v, want top-2 covering 90%%", rep.Index)
+	}
+	if rep.AnchorSource != vcachescore.AnchorSourceMeasured || rep.TurnsObserved != 0 {
+		t.Fatalf("anchors-file source/turns = %q/%d, want measured/0", rep.AnchorSource, rep.TurnsObserved)
 	}
 	b, err := os.ReadFile(index)
 	if err != nil {

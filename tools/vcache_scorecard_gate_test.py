@@ -25,11 +25,15 @@ READY = {
     "schema": gate.SCORE_SCHEMA,
     "two_x_better": True,
     "active_multiplier": 3.76,
+    "anchor_source": "synthetic",
+    "turns_observed": 0,
     "planned": {"status": "PROVEN"},
 }
 
+_ORIG_SNAPSHOT_EXPECTATION = gate.snapshot_expectation
 
-def _patch(monkeypatch_pairs):
+
+def _patch(monkeypatch_pairs, snapshot_reason=""):
     """Replace gate.run_score with a stub that returns (code, payload) keyed on whether
     the `--two-x 99` negative arg is present. monkeypatch_pairs maps "default"/"neg" to
     a (code, payload) tuple."""
@@ -37,10 +41,12 @@ def _patch(monkeypatch_pairs):
         key = "neg" if "99" in extra else "default"
         return monkeypatch_pairs[key]
     gate.run_score = stub  # type: ignore[assignment]
+    gate.snapshot_expectation = lambda: snapshot_reason  # type: ignore[assignment]
 
 
 def _restore(orig):
     gate.run_score = orig  # type: ignore[assignment]
+    gate.snapshot_expectation = _ORIG_SNAPSHOT_EXPECTATION  # type: ignore[assignment]
 
 
 def _source_built_resolution():
@@ -84,6 +90,34 @@ def test_fails_on_wrong_schema():
         bad = dict(READY, schema="fak.something.else.v1")
         _patch({"default": (0, bad), "neg": (1, {"two_x_better": False})})
         assert gate.main([]) == 1
+    finally:
+        _restore(orig)
+
+
+def test_fails_on_synthetic_green_when_snapshot_expected():
+    orig = gate.run_score
+    try:
+        _patch({"default": (0, READY), "neg": (1, {"two_x_better": False})},
+               snapshot_reason="$FAK_VCACHE_SNAPSHOT")
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate.main(["--json"])
+        assert rc == 1
+        out = json.loads(buf.getvalue())
+        assert any("synthetic anchor_source" in f for f in out["failures"])
+    finally:
+        _restore(orig)
+
+
+def test_passes_on_measured_green_when_snapshot_expected():
+    orig = gate.run_score
+    try:
+        measured = dict(READY, anchor_source="measured", turns_observed=3)
+        _patch({"default": (0, measured), "neg": (1, {"two_x_better": False})},
+               snapshot_reason="$FAK_VCACHE_SNAPSHOT")
+        assert gate.main(["--json"]) == 0
     finally:
         _restore(orig)
 

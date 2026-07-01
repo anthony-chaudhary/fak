@@ -37,6 +37,42 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCORE_SCHEMA = "fak.vcache.score.v1"
+SNAPSHOT_ENV = "FAK_VCACHE_SNAPSHOT"
+
+
+def default_snapshot_path() -> Path:
+    configured = os.environ.get(SNAPSHOT_ENV, "").strip()
+    if configured and configured.lower() != "off":
+        return Path(configured)
+    if configured.lower() == "off":
+        return Path()
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or os.environ.get("AppData")
+        if base:
+            return Path(base) / "fak" / "vcache-turns.jsonl"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "fak" / "vcache-turns.jsonl"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "fak" / "vcache-turns.jsonl"
+    return Path.home() / ".config" / "fak" / "vcache-turns.jsonl"
+
+
+def snapshot_expectation() -> str:
+    configured = os.environ.get(SNAPSHOT_ENV, "").strip()
+    if configured and configured.lower() != "off":
+        return f"${SNAPSHOT_ENV}"
+    if configured.lower() == "off":
+        return ""
+    path = default_snapshot_path()
+    if not str(path):
+        return ""
+    try:
+        if path.exists() and path.stat().st_size > 0:
+            return str(path)
+    except OSError:
+        return ""
+    return ""
 
 
 def binary_build_info(path: str) -> dict:
@@ -134,10 +170,11 @@ def run_score(extra: list[str], timeout: int) -> tuple[int, dict]:
     return proc.returncode, payload
 
 
-def check_default(threshold: float, timeout: int) -> list[str]:
+def check_default(threshold: float, timeout: int) -> tuple[list[str], list[str]]:
     """Assert the default score is 2x-ready and the planned proof PROVEN. Returns a list
     of failure messages (empty == pass)."""
     fails: list[str] = []
+    warnings: list[str] = []
     code, p = run_score([], timeout)
     if code != 0:
         fails.append(f"default `fak vcache score` exited {code}, want 0 (2x gate should pass)")
@@ -152,7 +189,18 @@ def check_default(threshold: float, timeout: int) -> list[str]:
     status = str(planned.get("status", "")).upper()
     if status and status != "PROVEN":
         fails.append(f"default planned proof status = {status!r}, want PROVEN")
-    return fails
+    anchor_source = str(p.get("anchor_source", "")).lower()
+    if anchor_source not in ("measured", "synthetic"):
+        fails.append(f"default anchor_source = {p.get('anchor_source')!r}, want 'measured' or 'synthetic'")
+    turns = p.get("turns_observed")
+    if not isinstance(turns, int) or turns < 0:
+        fails.append(f"default turns_observed = {turns!r}, want a non-negative integer")
+    expected = snapshot_expectation()
+    if expected and p.get("two_x_better") is True and anchor_source == "synthetic":
+        fails.append(f"default greened on synthetic anchor_source with snapshot expected from {expected}; want measured")
+    if not expected and anchor_source == "synthetic":
+        warnings.append("default score used synthetic anchors; no live snapshot expectation was detected")
+    return fails, warnings
 
 
 def check_negative(timeout: int) -> list[str]:
@@ -187,7 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        fails = check_default(args.two_x, args.timeout) + check_negative(args.timeout)
+        default_fails, warnings = check_default(args.two_x, args.timeout)
+        fails = default_fails + check_negative(args.timeout)
     except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
         msg = f"vcache-scorecard-gate: could not run fak: {e}"
         if args.json:
@@ -201,11 +250,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps({"schema": "fak.vcache-scorecard-gate.v1", "ok": ok,
                           "two_x_threshold": args.two_x, "failures": fails,
+                          "warnings": warnings,
                           "fak": fak}))
     else:
         print(f"vcache-scorecard-gate: fak={fak.get('path')} source={fak.get('source')}")
         if fak.get("source_built"):
             print(f"vcache-scorecard-gate: WARNING -- {fak.get('warning')}", file=sys.stderr)
+        for warning in warnings:
+            print(f"vcache-scorecard-gate: WARNING -- {warning}", file=sys.stderr)
         if ok:
             print(f"vcache-scorecard-gate: OK -- vCache 2x floor holds (threshold {args.two_x}x)")
         else:

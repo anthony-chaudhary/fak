@@ -52,6 +52,19 @@ func TestObserveGroupsFamiliesAndProvesSavings(t *testing.T) {
 	}
 }
 
+func TestRankedWorkloadUsesObservedFamilies(t *testing.T) {
+	ranked := RankedWorkload(twoFamilies())
+	if len(ranked) != 2 {
+		t.Fatalf("ranked workload length=%d, want two observed families", len(ranked))
+	}
+	if ranked[0].Key != "alpha" || ranked[1].Key != "beta" {
+		t.Fatalf("ranked workload order=%v, want alpha before beta", ranked)
+	}
+	if ranked[0].Weight() <= ranked[1].Weight() {
+		t.Fatalf("ranked weights alpha=%g beta=%g, want alpha heavier", ranked[0].Weight(), ranked[1].Weight())
+	}
+}
+
 func TestObserveOwnerSlicesSeparateProviderFromFak(t *testing.T) {
 	r := Observe(twoFamilies(), DefaultMultipliers())
 	if len(r.OwnerSlices) != 2 {

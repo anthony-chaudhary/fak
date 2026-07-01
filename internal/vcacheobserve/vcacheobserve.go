@@ -464,6 +464,41 @@ func Rows(turns []Turn) []vcachegov.TelemetryRow {
 	return rows
 }
 
+// RankedWorkload converts observed turns into the measured family-ranked workload
+// vcachescore consumes for its anchor-concentration gate. It uses the same family
+// weight as Observe: turns * mean resident prefix tokens * mean cache-read reuse.
+func RankedWorkload(turns []Turn) []vcachecal.RankedVBlock {
+	if len(turns) == 0 {
+		return nil
+	}
+	families := groupFamilies(turns)
+	ranked := make([]vcachecal.RankedVBlock, 0, len(families))
+	for i := range families {
+		fam := &families[i]
+		if fam.Turns <= 0 {
+			continue
+		}
+		residentSum := 0.0
+		for _, t := range famTurns(turns, fam.Key) {
+			residentSum += float64(t.InputTokens + t.CacheRead + t.CacheCreation)
+		}
+		ranked = append(ranked, vcachecal.RankedVBlock{
+			Key:          fam.Key,
+			Frequency:    float64(fam.Turns),
+			Size:         residentSum / float64(fam.Turns),
+			ReuseDensity: float64(fam.CacheReadTokens) / float64(fam.Turns),
+		})
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		wi, wj := ranked[i].Weight(), ranked[j].Weight()
+		if wi == wj {
+			return ranked[i].Key < ranked[j].Key
+		}
+		return wi > wj
+	})
+	return ranked
+}
+
 func ratio(num, den float64) float64 {
 	if den == 0 {
 		if num > 0 {

@@ -333,7 +333,8 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write machine-readable scorecard JSON to this file")
 	telemetry := fs.String("telemetry", "", "optional provider telemetry JSONL file ('-' for stdin)")
 	anchorsFile := fs.String("anchors-file", "", "optional ranked anchor workload JSONL/JSON/CSV file ('-' for stdin)")
-	snapshot := fs.String("snapshot", "", "OBSERVED-by-default source: per-turn provider-cache window a finished `fak guard`/`fak serve` session persisted (default: the well-known path under your config dir). When no --telemetry/--anchors-file is given and this snapshot has turns, the score reports the REALIZED cache multiplier from real traffic instead of the synthetic-Zipf FORECAST. Pass 'off' to force the planned forecast; an absent/empty snapshot falls open to the forecast (clearly labeled).")
+	snapshotDefault := strings.TrimSpace(os.Getenv("FAK_VCACHE_SNAPSHOT"))
+	snapshot := fs.String("snapshot", snapshotDefault, "OBSERVED-by-default source: per-turn provider-cache window a finished `fak guard`/`fak serve` session persisted (default: $FAK_VCACHE_SNAPSHOT, then the well-known path under your config dir). When no --telemetry/--anchors-file is given and this snapshot has turns, the score reports the REALIZED cache multiplier from real traffic instead of the synthetic-Zipf FORECAST. Pass 'off' to force the planned forecast; an absent/empty snapshot falls open to the forecast (clearly labeled).")
 	indexOut := fs.String("index-out", "", "write selected hot-anchor index JSON to this file")
 	anchor := fs.Float64("anchor-tokens", def.Star.AnchorTokens, "cacheable anchor size in input tokens")
 	suffix := fs.Float64("suffix-tokens", def.Star.SuffixTokens, "fresh suffix tokens per sibling request")
@@ -471,6 +472,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		in.Ranked = ranked
+		in.AnchorSource = vcachescore.AnchorSourceMeasured
 	}
 	in.Ranked = vcachescore.NormalizeRanked(in.Ranked)
 	if strings.TrimSpace(*telemetry) != "" {
@@ -480,6 +482,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		in.TelemetryRows = rows
+		in.TurnsObserved = len(rows)
 	}
 	// OBSERVED-by-default: with no explicit --telemetry and no --anchors-file, read the
 	// persisted live cache window a finished guard/serve session left at the well-known path
@@ -497,6 +500,9 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
 		} else if ok {
 			in.TelemetryRows = vcacheobserve.Rows(turns)
+			in.Ranked = vcacheobserve.RankedWorkload(turns)
+			in.AnchorSource = vcachescore.AnchorSourceMeasured
+			in.TurnsObserved = len(turns)
 		}
 	}
 
@@ -527,6 +533,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "status: %s\n", rep.Status)
 	fmt.Fprintf(stdout, "grade: %s (%d/100)\n", rep.Grade, rep.Score)
 	fmt.Fprintf(stdout, "active source: %s\n", rep.ActiveSource)
+	fmt.Fprintf(stdout, "anchor source: %s (turns observed %d)\n", rep.AnchorSource, rep.TurnsObserved)
 	fmt.Fprintf(stdout, "active multiplier: %.2fx (target %.2fx)\n", rep.ActiveMultiplier, rep.TwoXThreshold)
 	fmt.Fprintf(stdout, "2x gate: %s\n", passFail(rep.TwoXBetter))
 	fmt.Fprintf(stdout, "planned proof: %s saved %.1f / %.1f (%.1f%%)\n",

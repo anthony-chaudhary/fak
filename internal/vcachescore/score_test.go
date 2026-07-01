@@ -13,6 +13,9 @@ func TestDefaultScorePassesTwoXAndBuildsIndex(t *testing.T) {
 	if !rep.TwoXBetter || rep.Status != "2x_ready" {
 		t.Fatalf("default status=%s twoX=%v multiplier=%g", rep.Status, rep.TwoXBetter, rep.ActiveMultiplier)
 	}
+	if rep.AnchorSource != AnchorSourceSynthetic || rep.TurnsObserved != 0 {
+		t.Fatalf("default anchor source/turns = %q/%d, want synthetic/0", rep.AnchorSource, rep.TurnsObserved)
+	}
 	if rep.ActiveMultiplier < 2 {
 		t.Fatalf("active multiplier=%g, want >=2", rep.ActiveMultiplier)
 	}
@@ -47,6 +50,9 @@ func TestTelemetryOverridesActiveMultiplier(t *testing.T) {
 	rep := Score(in)
 	if rep.Observed == nil || rep.ActiveSource != "telemetry" {
 		t.Fatalf("observed/source = %+v/%q, want telemetry active", rep.Observed, rep.ActiveSource)
+	}
+	if rep.AnchorSource != AnchorSourceSynthetic || rep.TurnsObserved != 1 {
+		t.Fatalf("telemetry anchor source/turns = %q/%d, want synthetic/1", rep.AnchorSource, rep.TurnsObserved)
 	}
 	if rep.Observed.Status != vcachegov.ProofProven {
 		t.Fatalf("observed status=%s reason=%s, want proven", rep.Observed.Status, rep.Observed.Reason)
