@@ -2,6 +2,8 @@ package dogfoodissues
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -228,6 +230,58 @@ func TestRenderReportsSkippedContractRows(t *testing.T) {
 	}
 	if !strings.Contains(body, "no dispatchable scorecard ACTION items found") {
 		t.Fatalf("render missing no-dispatchable line:\n%s", body)
+	}
+}
+
+func TestReportFreshnessForFileDetectsFreshAndStale(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	mtime := now.Add(-2 * time.Hour)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := ReportFreshnessForFile(path, now, 3*time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Stale || fresh.AgeSeconds != 7200 || fresh.MaxAgeSeconds != 10800 {
+		t.Fatalf("freshness = %+v, want fresh 2h under 3h", fresh)
+	}
+	stale, err := ReportFreshnessForFile(path, now, time.Hour, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale.Stale || !stale.StaleAllowed || stale.Age != "2h" || stale.MaxAge != "1h" {
+		t.Fatalf("stale freshness = %+v, want allowed stale 2h over 1h", stale)
+	}
+	if stale.Timestamp != "2026-07-01T10:00:00Z" {
+		t.Fatalf("timestamp = %q, want RFC3339 mtime", stale.Timestamp)
+	}
+}
+
+func TestRenderReportsReportFreshnessAndStaleWarning(t *testing.T) {
+	freshness := ReportFreshness{
+		Timestamp:     "2026-07-01T10:00:00Z",
+		Source:        "mtime",
+		Age:           "2h",
+		MaxAge:        "1h",
+		AgeSeconds:    7200,
+		MaxAgeSeconds: 3600,
+		Stale:         true,
+	}
+	body := Render(Result{
+		Schema:          Schema,
+		Mode:            "dry-run",
+		Report:          "report.json",
+		ReportFreshness: &freshness,
+	})
+	for _, want := range []string{"report timestamp: 2026-07-01T10:00:00Z", "report age: 2h  max=1h  stale=yes", "STALE report:"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("render missing %q:\n%s", want, body)
+		}
 	}
 }
 

@@ -23,6 +23,7 @@ touches no network. ``--sync`` is the explicit opt-in that actually calls ``gh``
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import glob
 import json
 import os
@@ -43,6 +44,71 @@ SCHEMA = "dogfood-issue-sync/1"
 # issue by this exact string so a re-run edits rather than duplicates.
 MARKER = "dogfood-issue-sync"
 TRIAGE_LABELS = ["needs-triage", "triage-only"]
+DEFAULT_MAX_REPORT_AGE_SECONDS = 24 * 60 * 60
+
+
+def _parse_duration_seconds(value: str) -> float:
+    s = value.strip().lower()
+    if not s:
+        raise argparse.ArgumentTypeError("duration must not be empty")
+    unit = s[-1]
+    scale = {"s": 1, "m": 60, "h": 60 * 60, "d": 24 * 60 * 60}.get(unit)
+    if scale is not None:
+        number = s[:-1]
+    else:
+        scale = 1
+        number = s
+    try:
+        seconds = float(number) * scale
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid duration {value!r}") from exc
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("duration must be non-negative")
+    return seconds
+
+
+def _iso_utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _format_duration(seconds: int | float) -> str:
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec}s" if sec else f"{minutes}m"
+    hours, minute = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minute}m" if minute else f"{hours}h"
+    days, hour = divmod(hours, 24)
+    return f"{days}d {hour}h" if hour else f"{days}d"
+
+
+def _report_freshness(path: str, *, max_age_seconds: float = DEFAULT_MAX_REPORT_AGE_SECONDS,
+                      allow_stale: bool = False, now: datetime | None = None) -> dict[str, Any]:
+    stamp = os.path.getmtime(path)
+    now_dt = now or datetime.now(timezone.utc)
+    age_seconds = int(max(0, now_dt.timestamp() - stamp))
+    max_age = int(max_age_seconds)
+    return {
+        "timestamp": _iso_utc(stamp),
+        "source": "mtime",
+        "age_seconds": age_seconds,
+        "age": _format_duration(age_seconds),
+        "max_age_seconds": max_age,
+        "max_age": _format_duration(max_age),
+        "stale": age_seconds > max_age,
+        "stale_allowed": bool(allow_stale),
+    }
+
+
+def _stale_report_message(freshness: dict[str, Any]) -> str:
+    return (
+        "selected dogfood report is stale "
+        f"(age {freshness['age']} > max {freshness['max_age']}); "
+        "rerun dogfood or pass --allow-stale-report to sync anyway"
+    )
 
 
 def _debt_count(payload: dict[str, Any]) -> int | None:
@@ -180,6 +246,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--report", default="", help="dogfood report.json (default: newest under .fak/recent-feature-dogfood/)")
     ap.add_argument("--sync", action="store_true", help="actually create/update issues via gh (explicit network opt-in)")
+    ap.add_argument("--max-report-age", type=_parse_duration_seconds, default=DEFAULT_MAX_REPORT_AGE_SECONDS,
+                    help="stale report threshold before --sync is refused (default: 24h; suffix s/m/h/d)")
+    ap.add_argument("--allow-stale-report", action="store_true",
+                    help="allow --sync even when the selected report is older than --max-report-age")
     ap.add_argument("--label", default="", help="label to put on newly-created issues (must already exist)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
@@ -195,16 +265,41 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     issues = plan_issues(report)
-    results = [_sync_issue(i, args.label) for i in issues] if args.sync else []
+    freshness = _report_freshness(path, max_age_seconds=args.max_report_age,
+                                  allow_stale=args.allow_stale_report)
     doc = {"schema": SCHEMA, "report": path, "mode": "sync" if args.sync else "dry-run",
+           "report_freshness": freshness,
            "actionable": len(issues), "issues": [{k: i[k] for k in ("key", "title")} for i in issues],
-           "results": results}
+           "results": []}
+
+    if args.sync and freshness["stale"] and not args.allow_stale_report:
+        doc["refused"] = True
+        doc["error"] = "stale_report"
+        message = _stale_report_message(freshness)
+        if args.json:
+            print(json.dumps(doc, indent=2))
+        else:
+            print(f"dogfood-issue-sync: REFUSED  report={path}")
+            print(f"  report timestamp: {freshness['timestamp']} (source={freshness['source']})")
+            print(f"  report age: {freshness['age']}  max={freshness['max_age']}  stale=yes")
+            print(f"  {message}")
+        print(f"dogfood-issue-sync: {message}", file=sys.stderr)
+        return 2
+
+    results = [_sync_issue(i, args.label) for i in issues] if args.sync else []
+    doc["results"] = results
 
     if args.json:
         print(json.dumps(doc, indent=2))
     else:
         mode = "SYNC" if args.sync else "DRY-RUN (no network; pass --sync to create/update)"
         print(f"dogfood-issue-sync: {mode}  report={path}")
+        print(f"  report timestamp: {freshness['timestamp']} (source={freshness['source']})")
+        stale = "yes" if freshness["stale"] else "no"
+        print(f"  report age: {freshness['age']}  max={freshness['max_age']}  stale={stale}")
+        if freshness["stale"]:
+            suffix = " --allow-stale-report override active" if args.allow_stale_report else ""
+            print(f"  STALE report: {_stale_report_message(freshness)}{suffix}")
         print(f"  actionable scorecards: {len(issues)}")
         for i in issues:
             print(f"    - {i['title']}")

@@ -25,6 +25,22 @@ var issueURLRE = regexp.MustCompile(`https?://\S+/issues/([0-9]+)`)
 // wedge the dogfood issue sync indefinitely.
 const DefaultGhTimeout = 30 * time.Second
 
+// DefaultMaxReportAge is the freshness ceiling before live issue sync is refused
+// unless the operator explicitly overrides it.
+const DefaultMaxReportAge = 24 * time.Hour
+
+// ReportFreshness records the timestamp/age of the selected dogfood report.
+type ReportFreshness struct {
+	Timestamp     string `json:"timestamp"`
+	Source        string `json:"source"`
+	AgeSeconds    int64  `json:"age_seconds"`
+	Age           string `json:"age"`
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	MaxAge        string `json:"max_age"`
+	Stale         bool   `json:"stale"`
+	StaleAllowed  bool   `json:"stale_allowed"`
+}
+
 // ActionItem is one scorecard ACTION item extracted from a dogfood report.json.
 type ActionItem struct {
 	Key            string
@@ -105,12 +121,15 @@ type SyncRow struct {
 
 // Result is the machine-readable plan/result fold.
 type Result struct {
-	Schema  string       `json:"schema"`
-	Mode    string       `json:"mode"`
-	Report  string       `json:"report"`
-	Planned []PlanRow    `json:"planned"`
-	Synced  []SyncRow    `json:"synced"`
-	Skipped []SkippedRow `json:"skipped,omitempty"`
+	Schema          string           `json:"schema"`
+	Mode            string           `json:"mode"`
+	Report          string           `json:"report"`
+	ReportFreshness *ReportFreshness `json:"report_freshness,omitempty"`
+	Planned         []PlanRow        `json:"planned"`
+	Synced          []SyncRow        `json:"synced"`
+	Skipped         []SkippedRow     `json:"skipped,omitempty"`
+	Refused         bool             `json:"refused,omitempty"`
+	Error           string           `json:"error,omitempty"`
 }
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
@@ -199,6 +218,76 @@ func LoadReport(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("report must be a JSON object")
 	}
 	return m, nil
+}
+
+// ReportFreshnessForFile computes freshness from the selected report's mtime,
+// matching the newest-report selection semantics used by the Python bridge.
+func ReportFreshnessForFile(path string, now time.Time, maxAge time.Duration, allowStale bool) (ReportFreshness, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ReportFreshness{}, err
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	mtime := info.ModTime().UTC()
+	age := now.UTC().Sub(mtime)
+	if age < 0 {
+		age = 0
+	}
+	return ReportFreshness{
+		Timestamp:     mtime.Format(time.RFC3339),
+		Source:        "mtime",
+		AgeSeconds:    int64(age / time.Second),
+		Age:           FormatReportDuration(age),
+		MaxAgeSeconds: int64(maxAge / time.Second),
+		MaxAge:        FormatReportDuration(maxAge),
+		Stale:         age > maxAge,
+		StaleAllowed:  allowStale,
+	}, nil
+}
+
+// StaleReportMessage is the human-readable gate explanation shared by the CLI
+// and renderer.
+func StaleReportMessage(f ReportFreshness) string {
+	return fmt.Sprintf("selected dogfood report is stale (age %s > max %s); rerun dogfood or pass --allow-stale-report to continue",
+		f.Age, f.MaxAge)
+}
+
+// FormatReportDuration renders a short duration suitable for terminal output.
+func FormatReportDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	seconds := int64(d / time.Second)
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	minutes := seconds / 60
+	sec := seconds % 60
+	if minutes < 60 {
+		if sec == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm %ds", minutes, sec)
+	}
+	hours := minutes / 60
+	minute := minutes % 60
+	if hours < 24 {
+		if minute == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh %dm", hours, minute)
+	}
+	days := hours / 24
+	hour := hours % 24
+	if hour == 0 {
+		return fmt.Sprintf("%dd", days)
+	}
+	return fmt.Sprintf("%dd %dh", days, hour)
 }
 
 // ExtractActionItems folds the report's probes into the scorecard ACTION items
@@ -790,6 +879,29 @@ func Render(r Result) string {
 	lines := []string{
 		fmt.Sprintf("dogfood-action-issues: %s  %d item(s)", r.Mode, len(r.Planned)),
 		fmt.Sprintf("  report: %s", r.Report),
+	}
+	if r.ReportFreshness != nil {
+		stale := "no"
+		if r.ReportFreshness.Stale {
+			stale = "yes"
+		}
+		lines = append(lines,
+			fmt.Sprintf("  report timestamp: %s (source=%s)", r.ReportFreshness.Timestamp, r.ReportFreshness.Source),
+			fmt.Sprintf("  report age: %s  max=%s  stale=%s", r.ReportFreshness.Age, r.ReportFreshness.MaxAge, stale),
+		)
+		if r.ReportFreshness.Stale {
+			msg := StaleReportMessage(*r.ReportFreshness)
+			if r.ReportFreshness.StaleAllowed {
+				msg += " (--allow-stale-report override active)"
+			}
+			lines = append(lines, "  STALE report: "+msg)
+		}
+	}
+	if r.Refused {
+		if strings.TrimSpace(r.Error) != "" {
+			lines = append(lines, "  refused: "+r.Error)
+		}
+		return strings.Join(lines, "\n")
 	}
 	if len(r.Skipped) > 0 {
 		lines = append(lines, fmt.Sprintf("  skipped-contract: %d item(s)", len(r.Skipped)))

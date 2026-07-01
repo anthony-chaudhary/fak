@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 )
@@ -32,9 +33,15 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
 	live := fs.Bool("live", false, "create/update GitHub issues with gh")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
+	maxReportAge := fs.Duration("max-report-age", dogfoodissues.DefaultMaxReportAge, "stale report threshold before --live is refused (default 24h)")
+	allowStaleReport := fs.Bool("allow-stale-report", false, "allow --live even when the selected report is older than --max-report-age")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *maxReportAge < 0 {
+		fmt.Fprintln(stderr, "dogfood-issues: --max-report-age must be non-negative")
 		return 2
 	}
 	if fs.NArg() != 1 {
@@ -53,7 +60,39 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "dogfood-issues: %v\n", err)
 		return 2
 	}
+	freshness, err := dogfoodissues.ReportFreshnessForFile(reportPath, time.Now(), *maxReportAge, *allowStaleReport)
+	if err != nil {
+		fmt.Fprintf(stderr, "dogfood-issues: %v\n", err)
+		return 2
+	}
 	items := dogfoodissues.ExtractActionItems(report, reportPath)
+
+	mode := "dry-run"
+	if *live {
+		mode = "live"
+	}
+	if *live && freshness.Stale && !*allowStaleReport {
+		result := dogfoodissues.Result{
+			Schema:          dogfoodissues.Schema,
+			Mode:            mode,
+			Report:          reportPath,
+			ReportFreshness: &freshness,
+			Planned:         []dogfoodissues.PlanRow{},
+			Synced:          []dogfoodissues.SyncRow{},
+			Refused:         true,
+			Error:           "stale_report",
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, result); err != nil {
+				fmt.Fprintf(stderr, "dogfood-issues: encode json: %v\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprintln(stdout, dogfoodissues.Render(result))
+		}
+		fmt.Fprintf(stderr, "dogfood-issues: %s\n", dogfoodissues.StaleReportMessage(freshness))
+		return 2
+	}
 
 	var existing []dogfoodissues.Issue
 	switch {
@@ -80,17 +119,14 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
 		DedupeCap:     issueSyncScanLimit(*limit),
 	})
-	mode := "dry-run"
-	if *live {
-		mode = "live"
-	}
 	result := dogfoodissues.Result{
-		Schema:  dogfoodissues.Schema,
-		Mode:    mode,
-		Report:  reportPath,
-		Planned: plan,
-		Synced:  []dogfoodissues.SyncRow{},
-		Skipped: skipped,
+		Schema:          dogfoodissues.Schema,
+		Mode:            mode,
+		Report:          reportPath,
+		ReportFreshness: &freshness,
+		Planned:         plan,
+		Synced:          []dogfoodissues.SyncRow{},
+		Skipped:         skipped,
 	}
 	if *live && len(plan) > 0 {
 		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)

@@ -9,8 +9,14 @@ never reached, so the whole suite is offline and deterministic.
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
+import json
+import os
 import sys
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +38,20 @@ def _report(probes):
 
 def _probe(key, payload):
     return {"key": key, "command": ["py", "tools/x.py", "--json"], "payload": payload}
+
+
+def _action_report():
+    return _report([_probe("code-slop-scorecard", {
+        "schema": "code-slop/1", "verdict": "ACTION", "finding": "extract the dup clone",
+        "score": 54.1, "grade": "F", "slop_debt": 12})])
+
+
+def _write_report(path: Path, report=None, *, mtime: datetime | None = None) -> Path:
+    path.write_text(json.dumps(report or _action_report()), encoding="utf-8")
+    if mtime is not None:
+        ts = mtime.timestamp()
+        os.utime(path, (ts, ts))
+    return path
 
 
 class PlanIssuesTest(unittest.TestCase):
@@ -84,6 +104,87 @@ class PlanIssuesTest(unittest.TestCase):
         ])
         keys = sorted(i["key"] for i in mod.plan_issues(rep))
         self.assertEqual(keys, ["code-slop-scorecard", "other-scorecard"])
+
+    def test_json_reports_fresh_report_timestamp_and_age(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            report = _write_report(Path(td) / "report.json", mtime=datetime.now(timezone.utc) - timedelta(minutes=5))
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = mod.main(["--report", str(report), "--json"])
+            self.assertEqual(code, 0, err.getvalue())
+            doc = json.loads(out.getvalue())
+            fresh = doc["report_freshness"]
+            self.assertEqual(fresh["source"], "mtime")
+            self.assertRegex(fresh["timestamp"], r"^\d{4}-\d{2}-\d{2}T")
+            self.assertLess(fresh["age_seconds"], fresh["max_age_seconds"])
+            self.assertFalse(fresh["stale"])
+
+    def test_text_flags_stale_dry_run_without_refusing(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            report = _write_report(Path(td) / "report.json", mtime=datetime.now(timezone.utc) - timedelta(hours=2))
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = mod.main(["--report", str(report), "--max-report-age", "1h"])
+            self.assertEqual(code, 0, err.getvalue())
+            body = out.getvalue()
+            self.assertIn("report timestamp:", body)
+            self.assertIn("stale=yes", body)
+            self.assertIn("STALE report:", body)
+
+    def test_sync_refuses_stale_report_before_github(self) -> None:
+        mod = load()
+        calls = []
+
+        def fake_sync(issue, label):
+            calls.append((issue, label))
+            return {"key": issue["key"], "action": "created"}
+
+        old_sync = mod._sync_issue
+        mod._sync_issue = fake_sync
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                report = _write_report(Path(td) / "report.json", mtime=datetime.now(timezone.utc) - timedelta(hours=2))
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = mod.main(["--report", str(report), "--sync", "--json", "--max-report-age", "1h"])
+                self.assertEqual(code, 2)
+                doc = json.loads(out.getvalue())
+                self.assertEqual(doc["error"], "stale_report")
+                self.assertTrue(doc["refused"])
+                self.assertTrue(doc["report_freshness"]["stale"])
+                self.assertIn("--allow-stale-report", err.getvalue())
+                self.assertEqual(calls, [])
+        finally:
+            mod._sync_issue = old_sync
+
+    def test_sync_override_allows_stale_report_without_real_github(self) -> None:
+        mod = load()
+        calls = []
+
+        def fake_sync(issue, label):
+            calls.append((issue["key"], label))
+            return {"key": issue["key"], "action": "created", "url": "https://example.invalid/1"}
+
+        old_sync = mod._sync_issue
+        mod._sync_issue = fake_sync
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                report = _write_report(Path(td) / "report.json", mtime=datetime.now(timezone.utc) - timedelta(hours=2))
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = mod.main([
+                        "--report", str(report), "--sync", "--allow-stale-report",
+                        "--json", "--max-report-age", "1h",
+                    ])
+                self.assertEqual(code, 0, err.getvalue())
+                doc = json.loads(out.getvalue())
+                self.assertTrue(doc["report_freshness"]["stale"])
+                self.assertTrue(doc["report_freshness"]["stale_allowed"])
+                self.assertEqual(calls, [("code-slop-scorecard", "")])
+        finally:
+            mod._sync_issue = old_sync
 
 
 if __name__ == "__main__":
