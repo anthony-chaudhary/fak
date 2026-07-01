@@ -78,6 +78,14 @@ func runChatModel(argv []string) {
 	if stats.Turns > 0 {
 		_ = cachevalueledger.Append("run", modelRef, cachevalueledger.DefaultLedgerRel, stats)
 	}
+	// #1303 names this exit point alongside guard_child.go/serve.go for the Track-2
+	// appendObservedCacheSavings(sessionType, provider, context, gateway.AdjudicationSummary)
+	// OBSERVED-$ ledger, but `fak run` has no HTTP gateway and no provider (see the
+	// doc comment above) -- there is no AdjudicationSummary to observe here, only the
+	// Track-1 WITNESSED in-kernel reuse already appended above. Calling it with a
+	// zero-value summary would write zero rows forever (cachevaluereport.NewSavingsRows
+	// is a no-op unless CacheReadTokens/CacheCreationTokens/CompactionShedTokens is
+	// nonzero), so it is deliberately omitted rather than wired as dead code.
 }
 
 // cacheValueLine renders one WITNESSED cache-value line from the per-turn delta of the
