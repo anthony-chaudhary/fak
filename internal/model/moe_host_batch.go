@@ -171,3 +171,50 @@ func (m *Model) hostBatchedGLMExperts(layer int, xn, delta []float32, picks []ro
 	batchedExpertDelta(m.Cfg, picks, gate, up, down, xn, delta)
 	return true
 }
+
+// batchedMetalExperts is the Metal-decode twin of hostBatchedGLMExperts (#1382): it gathers the
+// picked experts' gate/up/down tensor NAMES and runs all of them through the session's batched
+// fused-MLP (q4kFusedMLPBatch — one Metal command buffer for the whole layer's top-k experts),
+// then accumulates the gate-weighted sum into delta in route order. It returns true only when the
+// batch actually ran on the GPU; otherwise it writes NOTHING and returns false so moeFFN falls back
+// to the per-expert loop (where each expert still takes the single-expert q4kFusedMLP). The guards
+// mirror the loop's fused-path gate exactly (no LoRA, no per-expert bias), so a config the fused
+// path cannot serve declines rather than diverging; the host-order accumulation keeps delta
+// bit-identical to the loop up to Metal float-order, pinned by the decode parity gate.
+func (m *Model) batchedMetalExperts(s *Session, layer int, xn, delta []float32, picks []routePick) bool {
+	if m.lora != nil {
+		return false
+	}
+	K := len(picks)
+	if K == 0 {
+		return true
+	}
+	gate := make([]string, K)
+	up := make([]string, K)
+	down := make([]string, K)
+	for i, pk := range picks {
+		if m.has(expertName(layer, pk.expert, "gate_proj.bias")) ||
+			m.has(expertName(layer, pk.expert, "up_proj.bias")) ||
+			m.has(expertName(layer, pk.expert, "down_proj.bias")) {
+			return false
+		}
+		gate[i] = expertName(layer, pk.expert, "gate_proj.weight")
+		up[i] = expertName(layer, pk.expert, "up_proj.weight")
+		down[i] = expertName(layer, pk.expert, "down_proj.weight")
+	}
+	outs := s.q4kFusedMLPBatch(gate, up, down, xn)
+	if outs == nil {
+		return false
+	}
+	H := m.Cfg.HiddenSize
+	for i, pk := range picks {
+		o := outs[i]
+		if len(o) < H {
+			return false // defensive: a short row means the batch geometry disagreed
+		}
+		for j := 0; j < H; j++ {
+			delta[j] += pk.weight * o[j]
+		}
+	}
+	return true
+}

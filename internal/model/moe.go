@@ -369,22 +369,24 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	H := m.Cfg.HiddenSize
 	delta := make([]float32, H)
 	picks := route(m, layer, xn, mat)
-	// Lever 2 for the Mixtral/Qwen3-MoE router (mlp.experts.<e>.*): on the resident host path,
-	// batch the routed experts' GEMVs into ONE parFor per projection instead of ~3 per expert
-	// (moe_host_batch.go) — the same hostBatchedGLMExperts primitive glmMoeFFN uses, bit-identical
-	// to the per-expert loop below (TestBatchedExpertDeltaMatchesLoop; the SwiGLU math, activation,
-	// and route-order accumulation are the same reductions). This retires the mlp_decode
-	// command-buffer count that the MAC-QWEN36-27B decode diagnosis named as the dominant lever:
-	// a q4_k_m checkpoint's experts are resident (gate/up Q4_K in q4kw, down Q6_K in kqw), the exact
-	// shape hostBatchedGLMExperts reads, so the top-k experts' 3*K host dispatches per MoE layer
-	// collapse to 3. GPT-OSS is excluded (its expertGPTOSS clamp is not the plain SwiGLU the batched
-	// path models); any config the fast path does not model (per-expert bias, active LoRA, a
-	// non-resident expert) declines it — writes nothing, returns false — and falls through to the
-	// proven loop. The qwen3_5 gated shared expert below is unchanged either way.
+	// Batched-expert decode lever (#1382): the top-k routed experts of a Qwen3.6-27B q4_k_m MoE
+	// layer are the dominant decode cost (mlp_decode, ~32-54% — the MAC-QWEN36 diagnosis), and the
+	// per-expert loop below fires ONE command buffer / parFor per expert. Two batched paths collapse
+	// that to one submit per layer, each declining cleanly (nil/false) to the proven loop when its
+	// residency does not hold, and each accumulating the gate-weighted sum in the SAME route order —
+	// so delta is bit-identical to the loop (TestMoEFFNBatchedMatchesLoop / the Metal parity gate).
+	// GPT-OSS is excluded (its expertGPTOSS clamp is not the plain SwiGLU these paths model).
 	batched := false
 	if !m.Cfg.isGPTOSS() {
-		if _, host := mat.(residentKernel); host {
-			if xf, ok := xn.([]float32); ok {
+		if xf, ok := xn.([]float32); ok {
+			switch k := mat.(type) {
+			case sessionQ4KKernel:
+				// The live Qwen3.6 Metal-Q4_K decode kernel: run all top-k experts' fused
+				// gate→silu·up→down in ONE Metal command buffer (q4kFusedMLPBatch) instead of k.
+				batched = m.batchedMetalExperts(k.s, layer, xf, delta, picks)
+			case residentKernel:
+				// The host resident forward (GLM/EP/prefill): batch the experts' GEMVs into one
+				// parFor per projection (the same hostBatchedGLMExperts primitive glmMoeFFN uses).
 				batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
 			}
 		}
