@@ -115,6 +115,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 	dirty := releaseStatusDirtySummary(root)
 	ciDiag := releaseStatusCIDiagnosis(root)
 	branchRegime := releaseStatusBranchRegimeMap(releaseStatusBranchRegime(root, lastTag))
+	cutPlan := releaseStatusCutPlan(root, opts)
 	status := map[string]any{
 		"schema":             releaseStatusSchema,
 		"root":               root,
@@ -139,12 +140,13 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 			"ci_diagnosis":            ciDiag,
 			"workflows_parse_ok":      releaseStatusAnyOrNil(contextPayload["workflows_parse_ok"]),
 			"decision":                decision,
-			"cut_plan":                releaseStatusCutPlan(root, opts),
+			"cut_plan":                cutPlan,
 		},
 		"github_release": releaseStatusGitHubReleaseView(root, lastTag, opts.SkipGH),
 		"stable":         stable,
 		"cadence":        releaseStatusCadence(root),
 		"branch_regime":  branchRegime,
+		"shadow_cutover": releaseStatusShadowCutover(branchRegime, cutPlan),
 	}
 	action := releaseStatusNextAction(decision, stable, dirty, ciDiag)
 	status["next_action"] = action
@@ -198,6 +200,61 @@ func releaseStatusBranchRegimeMap(r releasestatus.BranchRegime) map[string]any {
 		"release_lock_held":   r.ReleaseLockHeld,
 		"next_action":         r.NextAction,
 		"role_error":          releaseStatusNilIfEmpty(r.RoleError),
+	}
+}
+
+func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]any) map[string]any {
+	dev := releaseStatusString(branchRegime["development_branch"])
+	release := releaseStatusString(branchRegime["release_branch"])
+	source := releaseStatusString(branchRegime["release_source"])
+	frontDoor := releaseStatusString(branchRegime["public_front_door"])
+	promotionBlockers := releaseStatusStringSlice(branchRegime["promotion_blockers"])
+	var blockers []string
+	var proofGaps []string
+
+	if dev == "" || release == "" || source == "" || frontDoor == "" {
+		blockers = append(blockers, "BRANCH_ROLE_CONFIG_MISSING")
+	}
+	if dev != "" && release != "" && dev == release {
+		blockers = append(blockers, "BRANCH_ROLES_NOT_SPLIT")
+	}
+	if source != "" && dev != "" && source != dev {
+		blockers = append(blockers, "RELEASE_SOURCE_NOT_DEVELOPMENT_BRANCH")
+	}
+	if frontDoor != "" && release != "" && frontDoor != release {
+		blockers = append(blockers, "PUBLIC_FRONT_DOOR_NOT_RELEASE_BRANCH")
+	}
+	for _, blocker := range promotionBlockers {
+		blockers = append(blockers, "PROMOTION_BLOCKED_"+blocker)
+	}
+
+	cutSkipped := releaseStatusBool(cutPlan["skipped"])
+	cutOK := releaseStatusBool(cutPlan["ok"])
+	if cutSkipped {
+		blockers = append(blockers, "RELEASE_PROMOTION_DRY_RUN_SKIPPED")
+	} else if len(cutPlan) == 0 || !cutOK {
+		blockers = append(blockers, "RELEASE_PROMOTION_DRY_RUN_REFUSED")
+	}
+
+	proofGaps = append(proofGaps,
+		"DEV_RULESET_PROOF",
+		"DEVELOPMENT_CI_ARTIFACT",
+		"PILOT_COHORT_WITNESS",
+		"FINAL_DECISION_RECORD",
+	)
+	decision := "ready_for_pilot"
+	if len(blockers) > 0 {
+		decision = "hold"
+	}
+	return map[string]any{
+		"schema":         "fak.branch-regime.shadow-cutover.v1",
+		"issue":          "#1703",
+		"checklist":      "docs/branch-regime-shadow-cutover.md",
+		"decision":       decision,
+		"ready":          decision == "ready_for_pilot",
+		"blockers":       blockers,
+		"proof_gaps":     proofGaps,
+		"proof_commands": []string{"fak release status --json --require-ci-green --limit-commits 50", "fak workflow-audit --write-doc", "go test ./internal/workflowaudit -count=1", "fak release ship --json --source-branch dev --trunk main --base origin/dev"},
 	}
 }
 
@@ -749,10 +806,12 @@ func renderReleaseStatus(status map[string]any) string {
 	stable := releaseStatusMap(status["stable"])
 	action := releaseStatusMap(status["next_action"])
 	branchRegime := releaseStatusMap(status["branch_regime"])
+	shadowCutover := releaseStatusMap(status["shadow_cutover"])
 	lines := []string{
 		fmt.Sprintf("release-status: %s - %s", strings.ToUpper(releaseStatusFirstString(releaseStatusString(decision["decision"]), "unknown")), releaseStatusString(decision["reason"])),
 		fmt.Sprintf("  last tag: %s", releaseStatusFirstString(releaseStatusString(rolling["last_tag"]), "(none)")),
 		releaseStatusRenderBranchRegime(branchRegime),
+		releaseStatusRenderShadowCutover(shadowCutover),
 		fmt.Sprintf("  commits since tag: %d", releaseStatusInt(rolling["commits_since_tag"])),
 		fmt.Sprintf("  next action: %s - %s", releaseStatusString(action["kind"]), releaseStatusString(action["detail"])),
 	}
@@ -793,6 +852,22 @@ func releaseStatusRenderBranchRegime(branchRegime map[string]any) string {
 		}
 	}
 	return "  branch regime: " + detail
+}
+
+func releaseStatusRenderShadowCutover(shadowCutover map[string]any) string {
+	if len(shadowCutover) == 0 {
+		return "  shadow cutover: unavailable"
+	}
+	decision := releaseStatusFirstString(releaseStatusString(shadowCutover["decision"]), "unknown")
+	blockers := releaseStatusStringSlice(shadowCutover["blockers"])
+	detail := decision
+	if len(blockers) > 0 {
+		detail += "; blocker: " + blockers[0]
+		if len(blockers) > 1 {
+			detail += fmt.Sprintf(" (+%d more)", len(blockers)-1)
+		}
+	}
+	return "  shadow cutover: " + detail
 }
 
 func releaseStatusSemverTags(root string, merged bool) []string {

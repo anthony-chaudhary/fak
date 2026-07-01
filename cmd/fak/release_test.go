@@ -245,8 +245,45 @@ func TestReleaseStatusNativeJSONEnvelope(t *testing.T) {
 	if len(blockers) == 0 {
 		t.Fatalf("branch_regime promotion blockers empty: %#v", regime)
 	}
+	shadow := got["shadow_cutover"].(map[string]any)
+	if shadow["checklist"] != "docs/branch-regime-shadow-cutover.md" || shadow["decision"] == "" {
+		t.Fatalf("shadow_cutover missing checklist/decision: %#v", shadow)
+	}
 	if len(scripts) != 3 || scripts[0] != "release_context.py" || scripts[1] != "release_decide.py" || scripts[2] != "release_lock.py" {
 		t.Fatalf("helpers = %#v, want context+decide+release_lock", scripts)
+	}
+}
+
+func TestReleaseStatusShadowCutoverDecision(t *testing.T) {
+	mainOnly := releaseStatusShadowCutover(map[string]any{
+		"development_branch": "main",
+		"release_branch":     "main",
+		"release_source":     "main",
+		"public_front_door":  "main",
+		"promotion_blockers": []string{},
+	}, map[string]any{"ok": true})
+	if mainOnly["decision"] != "hold" || mainOnly["ready"] != false {
+		t.Fatalf("main-only shadow decision = %#v, want hold", mainOnly)
+	}
+	if !containsString(releaseStatusStringSlice(mainOnly["blockers"]), "BRANCH_ROLES_NOT_SPLIT") {
+		t.Fatalf("main-only blockers = %#v, want BRANCH_ROLES_NOT_SPLIT", mainOnly["blockers"])
+	}
+
+	ready := releaseStatusShadowCutover(map[string]any{
+		"development_branch": "dev",
+		"release_branch":     "main",
+		"release_source":     "dev",
+		"public_front_door":  "main",
+		"promotion_blockers": []string{},
+	}, map[string]any{"ok": true})
+	if ready["decision"] != "ready_for_pilot" || ready["ready"] != true {
+		t.Fatalf("split-role shadow decision = %#v, want ready_for_pilot", ready)
+	}
+	if blockers := releaseStatusStringSlice(ready["blockers"]); len(blockers) != 0 {
+		t.Fatalf("split-role blockers = %#v, want none", blockers)
+	}
+	if gaps := releaseStatusStringSlice(ready["proof_gaps"]); !containsString(gaps, "PILOT_COHORT_WITNESS") {
+		t.Fatalf("proof gaps = %#v, want pilot cohort witness gap", gaps)
 	}
 }
 
@@ -268,11 +305,16 @@ func TestReleaseStatusRenderIncludesBranchRegime(t *testing.T) {
 			"promotion_blocked":  true,
 			"promotion_blockers": []string{"DEVELOPMENT_CI_RED"},
 		},
+		"shadow_cutover": map[string]any{
+			"decision": "hold",
+			"blockers": []string{"PROMOTION_BLOCKED_DEVELOPMENT_CI_RED", "PILOT_COHORT_WITNESS"},
+		},
 	}
 	out := renderReleaseStatus(status)
 	for _, want := range []string{
 		"last tag: v1.2.3",
 		"branch regime: dev is 3 commit(s) ahead of main; promotion blocked: DEVELOPMENT_CI_RED",
+		"shadow cutover: hold; blocker: PROMOTION_BLOCKED_DEVELOPMENT_CI_RED (+1 more)",
 		"commits since tag: 9",
 	} {
 		if !strings.Contains(out, want) {
