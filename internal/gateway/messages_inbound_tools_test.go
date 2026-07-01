@@ -249,6 +249,74 @@ func TestInboundToolsExplainsMaskWhenRemovalWouldBustPrefix(t *testing.T) {
 	}
 }
 
+// TestInboundToolsKeepsToolChoicePinnedDef: a floor-denied tool that the request's
+// tool_choice PINS must survive the prune. Dropping it would forward a body whose
+// tool_choice names a tool absent from tools[] — an upstream 400 the client cannot
+// attribute — turning a legible kernel deny into an infrastructure failure. Observed
+// shape: the harness's structured-output sidechannel calls (prompt-hook evaluators,
+// schema'd subagents) pin their StructuredOutput return-channel tool.
+func TestInboundToolsKeepsToolChoicePinnedDef(t *testing.T) {
+	type obj map[string]any
+	schema := obj{"type": "object", "properties": obj{}}
+	raw, err := json.Marshal(obj{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024,
+		"tools": []obj{
+			{"name": "read_file", "description": strings.Repeat("read ", 20), "input_schema": schema,
+				"cache_control": obj{"type": "ephemeral"}},
+			{"name": "StructuredOutput", "description": strings.Repeat("return structured output ", 8), "input_schema": schema},
+			{"name": "DeleteEverything", "description": strings.Repeat("danger ", 20), "input_schema": schema},
+		},
+		"tool_choice": obj{"type": "tool", "name": "StructuredOutput"},
+		"messages":    []obj{{"role": "user", "content": []obj{{"type": "text", "text": "judge"}}}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	s := anthropicServerWithFloor(floorAllowing("read_file"))
+	pruned := s.maybeCompactInboundTools(req)
+	if len(pruned) != 1 || pruned[0] != "DeleteEverything" {
+		t.Fatalf("expected exactly the unpinned denied tool pruned, got %v", pruned)
+	}
+	out, err := agent.DecodeAnthropicMessagesRequest(req.Raw)
+	if err != nil {
+		t.Fatalf("pruned body failed to re-decode: %v", err)
+	}
+	names := map[string]bool{}
+	for _, td := range out.Tools {
+		names[td.Function.Name] = true
+	}
+	if !names["StructuredOutput"] {
+		t.Fatalf("tool_choice-pinned def must survive the prune; got %v", names)
+	}
+	if names["DeleteEverything"] {
+		t.Fatalf("unpinned floor-denied tool must still be pruned; got %v", names)
+	}
+}
+
+func TestToolChoicePinnedNameOnlySpecificToolChoice(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "specific", raw: `{"tool_choice":{"type":"tool","name":"StructuredOutput"}}`, want: "StructuredOutput"},
+		{name: "auto", raw: `{"tool_choice":{"type":"auto","name":"StructuredOutput"}}`},
+		{name: "string", raw: `{"tool_choice":"auto"}`},
+		{name: "malformed", raw: `{`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toolChoicePinnedName([]byte(tt.raw)); got != tt.want {
+				t.Fatalf("toolChoicePinnedName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestInboundToolsAllAllowedIsIdentity: when every advertised tool is floor-allowed there is
 // nothing to drop → identity (a named no-op, not a spurious rewrite).
 func TestInboundToolsAllAllowedIsIdentity(t *testing.T) {

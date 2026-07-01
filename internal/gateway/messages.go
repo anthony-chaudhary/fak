@@ -594,6 +594,17 @@ func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesReq
 			drop[name] = true
 		}
 	}
+	// tool_choice soundness: a request that PINS a tool ({"tool_choice":{"type":"tool",
+	// "name":X}}) references that definition by name — dropping it would forward a body
+	// whose tool_choice names a tool absent from tools[], which the upstream rejects as
+	// a 400 the client cannot attribute. Keeping the def is the behavior-preserving
+	// direction: the model may propose the call and the kernel still DEFAULT_DENYs it
+	// with a legible verdict. Observed shape: the host harness's structured-output
+	// sidechannel calls (prompt-hook evaluators, schema'd subagents) pin their
+	// StructuredOutput return-channel tool.
+	if pinned := toolChoicePinnedName(req.Raw); pinned != "" {
+		delete(drop, pinned)
+	}
 	if len(drop) == 0 {
 		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: promptmmu.SkipEmptyPlan}
 	}
@@ -615,6 +626,25 @@ func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesReq
 	s.metrics.observeInboundToolPrune(len(res.Pruned))
 	s.logInboundToolSchemaDecision(decision)
 	return decision
+}
+
+// toolChoicePinnedName returns the tool name the request's tool_choice pins, or ""
+// when tool_choice is absent or not a specific-tool choice ({"type":"auto"|"any"}
+// carries no name; a malformed or string-typed field conservatively pins nothing).
+func toolChoicePinnedName(raw []byte) string {
+	var body struct {
+		ToolChoice struct {
+			Type string `json:"type"`
+			Name string `json:"name"`
+		} `json:"tool_choice"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return ""
+	}
+	if body.ToolChoice.Type != "tool" {
+		return ""
+	}
+	return body.ToolChoice.Name
 }
 
 func (s *Server) logInboundToolSchemaDecision(decision promptmmu.ToolSchemaDecision) {
