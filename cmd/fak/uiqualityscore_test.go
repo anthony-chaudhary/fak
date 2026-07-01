@@ -50,7 +50,7 @@ func TestUIQualityScoreJSONShape(t *testing.T) {
 func TestUIQualityScoreHumanRuns(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	_ = runUIQualityScore(&out, &errBuf, nil)
-	if !strings.Contains(out.String(), "UI/UX-quality scorecard") {
+	if !strings.Contains(out.String(), "ui quality scorecard") || !strings.Contains(out.String(), "ui_quality_debt") {
 		t.Fatalf("human output missing header:\n%s", out.String())
 	}
 }
