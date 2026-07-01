@@ -40,10 +40,14 @@ so you never hit the OS-policy block below. The `make` target set is the authori
 gate it sits over; `fak test --list` prints the tiers, and `fak test -n <tier>` prints
 the resolved command without running it. It sits over the `make` target set — the
 authoritative gates — with one host caveat that bites on Windows.
+For changed-package work, use `fak test affected ...`: it delegates to `fak affected`
+so the agent-facing front door still gets the affected planner's `--json`, `--list`,
+`--file`, `--budget`, report, and pass-through `go test` flags.
 
 | Command | What it runs | When |
 |---|---|---|
 | `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test` (default tier `fast`); on Windows routes to WSL via `test.ps1`; `fak test fast -- -run TestX` passes flags through | the one-verb inner loop over the targets below |
+| `fak test affected [--json\|--list\|--file P\|--budget DUR] [-- go test args]` | delegates to `fak affected`, selecting changed packages plus transitive importers, with JSON/list dry-runs and budget/report flags preserved | the default agent loop before paying for the full suite |
 | `make test-fast` | `build` + `vet` + `go test -short ./...` (~2s smoke tier; skips the weight-backed model witnesses) | the pre-commit / pre-push floor — ~95% of logic regressions in seconds |
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
@@ -196,7 +200,7 @@ So you never reach for a verb that isn't there:
 |---|---|---|
 | Enhanced debugging | `fak debug` (context/session core-dump debugger) + `fak doctor` (answer-shape diagnostic) + [integrations/debugging.md](integrations/debugging.md) | shipped |
 | Built-in profiling | `fak profile` (host-aware wrapper over `go test -bench -cpuprofile -memprofile`) + Go pprof + `fak benchmarks` / `fak bench` / `fak ablate` | shipped |
-| Test runner | `fak test` (host-aware runner: routes `go test` to WSL on Windows), over `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | shipped |
+| Test runner | `fak test` (host-aware runner: routes `go test` to WSL on Windows), `fak test affected` (the affected-package agent loop), over `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | shipped |
 | Dev workflow guide | this page, plus [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md), [Work map](WORK-MAP.md) | shipped |
 
 `fak test` and `fak profile` encode the host knowledge this guide carries (routing
