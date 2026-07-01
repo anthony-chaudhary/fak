@@ -266,17 +266,7 @@ func nativePreemptionPolicyFromEnv() NativePreemptionPolicy {
 // tokenizer/model mismatch must never crash prefill) — so the NL path is purely
 // additive and the byte default is preserved exactly when tok is nil.
 func (e *Engine) buildPrompt(tool string, args []byte, vocab int) []int {
-	if e.tok != nil {
-		if ids, err := e.tok.Encode(tool + " " + string(args)); err == nil && len(ids) > 0 {
-			if len(ids) > maxPromptTokens {
-				ids = ids[:maxPromptTokens]
-			}
-			if idsWithinVocab(ids, vocab) {
-				return ids
-			}
-		}
-	}
-	return tokenize(tool, args, vocab)
+	return buildPipelinePrompt(e.tok, tool, args, vocab)
 }
 
 // idsWithinVocab reports whether every id is a valid index under a vocab of size
