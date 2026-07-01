@@ -38,7 +38,7 @@ type launchOpts struct {
 	useGuard        bool     // wrap the agent in `fak guard` (kernel adjudication + vCache)
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
-	model           string   // pass --model <id> to Claude (default Opus 4.8); empty => the seat's own default
+	model           string   // pass --model <id> to Claude (default Fable); empty => the seat's own default
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
@@ -49,13 +49,12 @@ type launchOpts struct {
 // only emits it for Claude, since --settings is Claude-specific.
 const ultracodeSettingsArg = `{"ultracode":true}`
 
-// defaultLaunchModel is the model an account-switched Claude launch pins by default: Opus 4.8,
-// the frontier Claude coding model. The switcher passes it explicitly via --model so every seat a
-// launch lands on starts on Opus 4.8 regardless of that seat's OWN saved default — the account you
-// switch to should not silently drop you onto whatever model it last saved. `--model ""` opts out
-// and lets the seat's saved default stand. Like ultracode it is emitted for Claude only: --model
-// is a Claude-specific flag and the id names a Claude model, meaningless to other agents.
-const defaultLaunchModel = "claude-opus-4-8"
+// defaultLaunchModel is the model an account-switched Claude launch pins by default. The switcher
+// passes it explicitly via --model so every seat a launch lands on starts on the same model
+// regardless of that seat's OWN saved default. `--model ""` opts out and lets the seat's saved
+// default stand. Like ultracode it is emitted for Claude only: --model is a Claude-specific flag
+// and the id names a Claude model, meaningless to other agents.
+const defaultLaunchModel = "fable"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
@@ -97,7 +96,7 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 			agentCmd = append(agentCmd, flag)
 		}
 	}
-	// Default model (Opus 4.8) is Claude-specific and gated exactly as ultracode is: --model is a
+	// Default model is Claude-specific and gated exactly as ultracode is: --model is a
 	// Claude flag and the id names a Claude model, so only a Claude launch gets it. An empty model
 	// opts out (launch with the seat's own saved default). It is emitted BEFORE --settings and any
 	// passthrough, so an explicit `-- --model <x>` a caller adds after `--` still comes later.
@@ -140,7 +139,7 @@ type launchParams struct {
 	useGuard     bool   // default true
 	skipPerms    bool   // default true
 	ultracode    bool   // default true — put Claude in ultracode (workflow) mode via --settings
-	model        string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
+	model        string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
 	dryRun       bool   // print the plan, do not exec
 	passthrough  []string
 	registryPath string

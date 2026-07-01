@@ -89,9 +89,9 @@ func TestBuildLaunchArgv(t *testing.T) {
 			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
 		},
 		{
-			// The default model (Opus 4.8) is pinned via --model for a Claude launch, after the
-			// bypass flag and before ultracode's --settings — so a switched seat starts on Opus
-			// 4.8 regardless of its own saved default.
+			// The default model is pinned via --model for a Claude launch, after the
+			// bypass flag and before ultracode's --settings — so a switched seat starts on
+			// the configured default regardless of its own saved default.
 			name: "claude default model adds --model after the bypass flag",
 			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, model: defaultLaunchModel},
 			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--model", defaultLaunchModel},
@@ -202,7 +202,7 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 }
 
 // TestRunAccountsLaunchModelOptOut pins the opt-out: `--model ""` launches with the seat's own
-// saved default (no --model handed to Claude), while the default pins Opus 4.8.
+// saved default (no --model handed to Claude), while the default pins the configured model.
 func TestRunAccountsLaunchModelOptOut(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)

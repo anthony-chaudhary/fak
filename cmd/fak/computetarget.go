@@ -154,7 +154,7 @@ func builtinComputeTargets() []computeTarget {
 			Name:       "anthropic",
 			Kind:       targetProviderProxy,
 			GatewayURL: envOrDefault("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-			Model:      "claude-opus-4-8",
+			Model:      defaultLaunchModel,
 			Locality:   localityRemote,
 			// The real Anthropic API exposes no /healthz; the console proves it live
 			// only via a real request, so it lists n/a rather than a phantom "up".

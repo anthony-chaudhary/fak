@@ -115,7 +115,7 @@ func TestTUIAgentTargetResolvesBuiltins(t *testing.T) {
 		{"mac", "existing-fak-gateway", "http://node-macos-a.local:8080", defaultClaudeMacModel, false},
 		{"gcp", "existing-fak-gateway", "http://127.0.0.1:8200", "glm-5.2", false},
 		{"local", "existing-fak-gateway", "http://127.0.0.1:8080", "", false},
-		{"anthropic", "anthropic", "", "claude-opus-4-8", true},
+		{"anthropic", "anthropic", "", defaultLaunchModel, true},
 	}
 	for _, c := range cases {
 		t.Run(c.target, func(t *testing.T) {
