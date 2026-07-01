@@ -76,6 +76,70 @@ func TestEvaluatePreflightHostCapFolds(t *testing.T) {
 	}
 }
 
+func TestEvaluatePreflightCapTermsNameLimiter(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutate     func(*PreflightInput)
+		wantCap    int
+		wantLimit  string
+		wantLease  any
+		wantHost   any
+		wantSeat   any
+		wantConfig int
+	}{
+		{
+			name: "lease target limits below configured and host",
+			mutate: func(in *PreflightInput) {
+				in.MaxWorkers = 8
+				in.Kernel.Target = IntPtr(3)
+				in.Resources = roomyResources()
+			},
+			wantCap:    3,
+			wantLimit:  "lease",
+			wantLease:  3,
+			wantHost:   32,
+			wantSeat:   nil,
+			wantConfig: 8,
+		},
+		{
+			name: "seat inventory limits below lease and host",
+			mutate: func(in *PreflightInput) {
+				in.MaxWorkers = 8
+				in.Kernel.Target = IntPtr(6)
+				in.Resources = roomyResources()
+				in.Seat = SeatCheck{Total: IntPtr(2), Free: IntPtr(2)}
+			},
+			wantCap:    2,
+			wantLimit:  "seat",
+			wantLease:  6,
+			wantHost:   32,
+			wantSeat:   2,
+			wantConfig: 8,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := preflightInput()
+			tc.mutate(&in)
+
+			got := EvaluatePreflight(in)
+			if got.Cap != tc.wantCap || got.CapTerms.EffectiveCap != tc.wantCap {
+				t.Fatalf("cap/effective = %d/%d, want %d", got.Cap, got.CapTerms.EffectiveCap, tc.wantCap)
+			}
+			if got.CapTerms.Limiting != tc.wantLimit {
+				t.Fatalf("limiting = %q, want %q; terms=%#v", got.CapTerms.Limiting, tc.wantLimit, got.CapTerms)
+			}
+			m := got.Map()
+			terms := m["cap_terms"].(map[string]any)
+			if terms["configured_cap"] != tc.wantConfig || terms["lease_cap"] != tc.wantLease || terms["host_cap"] != tc.wantHost || terms["seat_cap"] != tc.wantSeat ||
+				terms["effective_cap"] != tc.wantCap || terms["limiting"] != tc.wantLimit {
+				t.Fatalf("cap_terms map = %#v", terms)
+			}
+		})
+	}
+}
+
 func TestEvaluatePreflightHostPressureTable(t *testing.T) {
 	tests := []struct {
 		name          string

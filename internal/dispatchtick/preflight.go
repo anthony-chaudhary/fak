@@ -95,6 +95,7 @@ type PreflightResult struct {
 	Cap           int              `json:"cap"`
 	Live          int              `json:"live"`
 	Headroom      int              `json:"headroom"`
+	CapTerms      CapTerms         `json:"cap_terms"`
 	MaxWorkers    int              `json:"max_workers"`
 	HostCap       *int             `json:"host_cap"`
 	HostCapacity  HostCapacityInfo `json:"host_capacity"`
@@ -103,6 +104,15 @@ type PreflightResult struct {
 	Account       AccountCheck     `json:"account"`
 	Kernel        KernelCheck      `json:"kernel"`
 	OSWorkerProcs int              `json:"os_worker_procs"`
+}
+
+type CapTerms struct {
+	ConfiguredCap int    `json:"configured_cap"`
+	LeaseCap      *int   `json:"lease_cap"`
+	HostCap       *int   `json:"host_cap"`
+	SeatCap       *int   `json:"seat_cap"`
+	EffectiveCap  int    `json:"effective_cap"`
+	Limiting      string `json:"limiting"`
 }
 
 func IntPtr(n int) *int { return &n }
@@ -188,6 +198,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		Cap:           capacity,
 		Live:          live,
 		Headroom:      headroom,
+		CapTerms:      capTerms(in, hostCapInfo.HostCap, capacity),
 		MaxWorkers:    in.MaxWorkers,
 		HostCap:       hostCapInfo.HostCap,
 		HostCapacity:  hostCapInfo,
@@ -197,6 +208,35 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		Kernel:        in.Kernel,
 		OSWorkerProcs: in.OSWorkerProcs,
 	}
+}
+
+func capTerms(in PreflightInput, hostCap *int, effective int) CapTerms {
+	terms := CapTerms{
+		ConfiguredCap: in.MaxWorkers,
+		LeaseCap:      positivePtr(in.Kernel.Target),
+		HostCap:       copyIntPtr(hostCap),
+		SeatCap:       positivePtr(in.Seat.Total),
+		EffectiveCap:  effective,
+		Limiting:      "configured",
+	}
+	best := in.MaxWorkers
+	for _, candidate := range []struct {
+		name  string
+		value *int
+	}{
+		{name: "lease", value: terms.LeaseCap},
+		{name: "host", value: terms.HostCap},
+		{name: "seat", value: terms.SeatCap},
+	} {
+		if candidate.value != nil && *candidate.value < best {
+			best = *candidate.value
+			terms.Limiting = candidate.name
+		}
+	}
+	if best < 0 {
+		terms.Limiting = "configured"
+	}
+	return terms
 }
 
 func classifyPreflight(in PreflightInput, capacity, live int, seatsDepleted bool, hostCap *int) (string, string) {
@@ -242,6 +282,7 @@ func (r PreflightResult) Map() map[string]any {
 		"cap":             r.Cap,
 		"live":            r.Live,
 		"headroom":        r.Headroom,
+		"cap_terms":       r.CapTerms.Map(),
 		"max_workers":     r.MaxWorkers,
 		"host_cap":        ptrAny(r.HostCap),
 		"host_capacity":   r.HostCapacity.Map(),
@@ -250,6 +291,17 @@ func (r PreflightResult) Map() map[string]any {
 		"account":         r.Account.Map(),
 		"kernel":          r.Kernel.Map(),
 		"os_worker_procs": r.OSWorkerProcs,
+	}
+}
+
+func (c CapTerms) Map() map[string]any {
+	return map[string]any{
+		"configured_cap": c.ConfiguredCap,
+		"lease_cap":      ptrAny(c.LeaseCap),
+		"host_cap":       ptrAny(c.HostCap),
+		"seat_cap":       ptrAny(c.SeatCap),
+		"effective_cap":  c.EffectiveCap,
+		"limiting":       c.Limiting,
 	}
 }
 
@@ -304,6 +356,20 @@ func ptrAny(p *int) any {
 		return nil
 	}
 	return *p
+}
+
+func copyIntPtr(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	return IntPtr(*p)
+}
+
+func positivePtr(p *int) *int {
+	if p == nil || *p <= 0 {
+		return nil
+	}
+	return IntPtr(*p)
 }
 
 func intValue(p *int) int {

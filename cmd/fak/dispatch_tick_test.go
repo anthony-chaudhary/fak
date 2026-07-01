@@ -488,6 +488,16 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	if dispatchMapInt(capFact, "cap") != 3 || dispatchMapInt(capFact, "live") != 0 {
 		t.Fatalf("startup cap = %#v, want cap=3 live=0", capFact)
 	}
+	terms := mapAt(capFact, "cap_terms")
+	if dispatchMapInt(terms, "configured_cap") != 4 || dispatchMapInt(terms, "lease_cap") != 3 ||
+		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") != 3 ||
+		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
+		t.Fatalf("startup cap terms = %#v, want configured=4 lease=3 host=32 seat=3 effective=3 limiting=lease", terms)
+	}
+	preflight := mapAt(got, "preflight")
+	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {
+		t.Fatalf("tick preflight cap terms = %#v, want limiting=lease", preflight)
+	}
 	seat := mapAt(bundle, "seat")
 	if dispatchMapInt(seat, "total") != 3 || dispatchMapInt(seat, "free") != 2 {
 		t.Fatalf("startup seat = %#v, want total/free 3/2", seat)
