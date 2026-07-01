@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestRestoreRoundTripsSnapshotVerbatim is the load-bearing witness for the durable
 // session image: a State read out via Snapshot, then Restore-d into a FRESH table,
@@ -23,11 +26,11 @@ func TestRestoreRoundTripsSnapshotVerbatim(t *testing.T) {
 
 	dst := NewTable()
 	got := dst.Restore("gw-7", want)
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Restore returned %+v, want %+v", got, want)
 	}
 	// And the table now serves the restored record verbatim, Rev included.
-	if reread := dst.Get("gw-7"); reread != want {
+	if reread := dst.Get("gw-7"); !reflect.DeepEqual(reread, want) {
 		t.Fatalf("Get after Restore = %+v, want %+v (Rev must be preserved, not bumped)", reread, want)
 	}
 }

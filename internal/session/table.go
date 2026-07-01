@@ -444,6 +444,14 @@ func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 	return t.RecontinueAt(parent, child, fresh, time.Now())
 }
 
+// RecontinueWithTransaction is Recontinue with a caller-supplied reset audit row.
+// Hosts that build a sessionreset.Seed pass the transaction sessionreset derived
+// from that seed so the child carries seed digest / contributor / omitted-span
+// evidence along with the table-owned lineage and budget re-arm fields.
+func (t *Table) RecontinueWithTransaction(parent, child string, fresh Budget, tx ResetTransaction) State {
+	return t.RecontinueAtWithTransaction(parent, child, fresh, time.Now(), tx)
+}
+
 // RecontinueAt is Recontinue with an explicit now, for deterministic testing of the
 // wall-clock carry-forward (issue #1584): the fresh child's TimeBudget PRESERVES the
 // parent lineage's total ElapsedNanos and LimitNanos (a hidden context reset must not
@@ -453,12 +461,21 @@ func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 // (Bounded()==false and never started) carries forward a zero TimeBudget, so a caller
 // not using wall-clock budgets sees no behavior change.
 func (t *Table) RecontinueAt(parent, child string, fresh Budget, now time.Time) State {
+	return t.RecontinueAtWithTransaction(parent, child, fresh, now, ResetTransaction{})
+}
+
+// RecontinueAtWithTransaction is RecontinueAt with an explicit reset transaction.
+// The table normalizes old/new trace and budget re-arm from its actual write, so a
+// stale caller cannot attach a row that disagrees with the child it minted.
+func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, now time.Time, tx ResetTransaction) State {
+	tx = normalizeResetTransaction(tx, parent, child, fresh)
 	if t == nil {
 		st := DefaultState(child)
 		st.Budget = fresh.withContextCap()
 		st.ParentTrace = parent
 		st.Reason = ReasonBudgetReset
 		st.CacheAffinity = cacheAffinityForContinuation(State{TraceID: parent}, child, ReasonBudgetReset)
+		st.ResetTransaction = tx
 		return st
 	}
 	t.mu.Lock()
@@ -480,14 +497,15 @@ func (t *Table) RecontinueAt(parent, child string, fresh Budget, now time.Time) 
 		carriedTime = carriedTime.Start(now)
 	}
 	next := State{
-		TraceID:       child,
-		Run:           Running,
-		Budget:        fresh.withContextCap(),
-		ParentTrace:   parent,
-		Generation:    prevGen + 1,
-		Reason:        ReasonBudgetReset,
-		Time:          carriedTime,
-		CacheAffinity: cacheAffinityForContinuation(parentSt, child, parentSt.Reason),
+		TraceID:          child,
+		Run:              Running,
+		Budget:           fresh.withContextCap(),
+		ParentTrace:      parent,
+		Generation:       prevGen + 1,
+		Reason:           ReasonBudgetReset,
+		Time:             carriedTime,
+		CacheAffinity:    cacheAffinityForContinuation(parentSt, child, parentSt.Reason),
+		ResetTransaction: tx,
 	}
 	return t.putLocked(next)
 }

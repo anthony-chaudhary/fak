@@ -424,17 +424,18 @@ type TraceResetResponse struct {
 // the monotonic revision the table bumps on every write; a client may round-trip it
 // as if_rev to reject a stale clobber (optimistic concurrency).
 type SessionState struct {
-	TraceID        string               `json:"trace_id"`
-	Run            string               `json:"run"`
-	Budget         SessionBudget        `json:"budget"`
-	Priority       int                  `json:"priority"`
-	Pace           SessionPace          `json:"pace"`
-	Reason         string               `json:"reason,omitempty"`
-	ContinuationID string               `json:"continuation_id,omitempty"`
-	ParentTrace    string               `json:"parent_trace,omitempty"`
-	Generation     int                  `json:"generation,omitempty"`
-	CacheAffinity  SessionCacheAffinity `json:"cache_affinity,omitempty,omitzero"`
-	Rev            uint64               `json:"rev"`
+	TraceID          string                  `json:"trace_id"`
+	Run              string                  `json:"run"`
+	Budget           SessionBudget           `json:"budget"`
+	Priority         int                     `json:"priority"`
+	Pace             SessionPace             `json:"pace"`
+	Reason           string                  `json:"reason,omitempty"`
+	ContinuationID   string                  `json:"continuation_id,omitempty"`
+	ParentTrace      string                  `json:"parent_trace,omitempty"`
+	Generation       int                     `json:"generation,omitempty"`
+	CacheAffinity    SessionCacheAffinity    `json:"cache_affinity,omitempty,omitzero"`
+	ResetTransaction SessionResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	Rev              uint64                  `json:"rev"`
 }
 
 // SessionCacheAffinity is the gateway wire form of session.CacheAffinityDecision.
@@ -451,6 +452,41 @@ type SessionCacheAffinity struct {
 // IsZero reports whether the decision is absent, for json omitzero.
 func (d SessionCacheAffinity) IsZero() bool {
 	return d.Action == "" && d.AffinityKey == "" && d.FromTraceID == "" && d.ToTraceID == "" && d.Reason == ""
+}
+
+// SessionResetTransaction is the gateway wire form of session.ResetTransaction.
+type SessionResetTransaction struct {
+	Schema           string                    `json:"schema,omitempty"`
+	OldTrace         string                    `json:"old_trace,omitempty"`
+	NewTrace         string                    `json:"new_trace,omitempty"`
+	SeedDigest       string                    `json:"seed_digest,omitempty"`
+	Contributors     []string                  `json:"contributors,omitempty"`
+	OmittedSpans     []SessionResetOmittedSpan `json:"omitted_spans,omitempty"`
+	BudgetRearm      SessionResetBudgetRearm   `json:"budget_rearm,omitempty,omitzero"`
+	WarmPrefixDigest string                    `json:"warm_prefix_digest,omitempty"`
+}
+
+// IsZero reports whether no reset transaction was attached.
+func (tx SessionResetTransaction) IsZero() bool {
+	return tx.Schema == "" && tx.OldTrace == "" && tx.NewTrace == "" &&
+		tx.SeedDigest == "" && len(tx.Contributors) == 0 && len(tx.OmittedSpans) == 0 &&
+		tx.BudgetRearm == (SessionResetBudgetRearm{}) && tx.WarmPrefixDigest == ""
+}
+
+// SessionResetBudgetRearm records the fresh budget armed by a reset.
+type SessionResetBudgetRearm struct {
+	TurnsLeft         int `json:"turns_left"`
+	TokensLeft        int `json:"tokens_left"`
+	ContextTokensLeft int `json:"context_tokens_left,omitempty"`
+	ContextTokensCap  int `json:"context_tokens_cap,omitempty"`
+}
+
+// SessionResetOmittedSpan is a payload-free pointer to an omitted source span.
+type SessionResetOmittedSpan struct {
+	Index  int    `json:"index"`
+	Role   string `json:"role,omitempty"`
+	Digest string `json:"digest"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // SessionBudget is the wire form of internal/session.Budget. TurnsLeft/TokensLeft

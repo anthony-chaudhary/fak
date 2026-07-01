@@ -890,19 +890,21 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 		if traceID == "" || child == "" {
 			return "", nil, false
 		}
-		seed := sessionreset.BuildSeed(sessionreset.Input{
+		resetInput := sessionreset.Input{
 			Trace:          traceID,
 			Messages:       resetMsgs(messages),
 			FreshBudgetTok: freshContextTokens,
-		})
+		}
+		seed := sessionreset.BuildSeed(resetInput)
 		if strings.TrimSpace(seed.Recap) == "" {
 			return "", nil, false
 		}
-		childState := serveSessions.Recontinue(traceID, child, session.Budget{
+		resetTx := sessionreset.BuildResetTransaction(resetInput, child, seed)
+		childState := serveSessions.RecontinueWithTransaction(traceID, child, session.Budget{
 			TurnsLeft:         session.Unbounded,
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: freshContextTokens,
-		})
+		}, resetTx)
 		persistServeSessionRevision(ctx, child, childState)
 		return child, []agent.Message{{Role: agent.RoleSystem, Content: seed.Recap}}, true
 	}
@@ -1084,8 +1086,38 @@ func toGatewaySessionState(s session.State) gateway.SessionState {
 			ToTraceID:   s.CacheAffinity.ToTraceID,
 			Reason:      s.CacheAffinity.Reason,
 		},
-		Rev: s.Rev,
+		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
+		Rev:              s.Rev,
 	}
+}
+
+func toGatewayResetTransaction(tx session.ResetTransaction) gateway.SessionResetTransaction {
+	out := gateway.SessionResetTransaction{
+		Schema:       tx.Schema,
+		OldTrace:     tx.OldTrace,
+		NewTrace:     tx.NewTrace,
+		SeedDigest:   tx.SeedDigest,
+		Contributors: append([]string(nil), tx.Contributors...),
+		BudgetRearm: gateway.SessionResetBudgetRearm{
+			TurnsLeft:         tx.BudgetRearm.TurnsLeft,
+			TokensLeft:        tx.BudgetRearm.TokensLeft,
+			ContextTokensLeft: tx.BudgetRearm.ContextTokensLeft,
+			ContextTokensCap:  tx.BudgetRearm.ContextTokensCap,
+		},
+		WarmPrefixDigest: tx.WarmPrefixDigest,
+	}
+	if len(tx.OmittedSpans) > 0 {
+		out.OmittedSpans = make([]gateway.SessionResetOmittedSpan, 0, len(tx.OmittedSpans))
+		for _, span := range tx.OmittedSpans {
+			out.OmittedSpans = append(out.OmittedSpans, gateway.SessionResetOmittedSpan{
+				Index:  span.Index,
+				Role:   span.Role,
+				Digest: span.Digest,
+				Reason: span.Reason,
+			})
+		}
+	}
+	return out
 }
 
 func toGatewaySessionVerdict(v session.Verdict) gateway.SessionVerdict {

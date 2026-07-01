@@ -101,6 +101,9 @@ type Descriptor struct {
 	// CacheAffinity mirrors State.CacheAffinity so a process restart does not erase
 	// whether a continuation preserved or changed provider/engine cache affinity.
 	CacheAffinity CacheAffinityDecision `json:"cache_affinity,omitempty,omitzero"`
+	// ResetTransaction mirrors State.ResetTransaction so a child trace restored after a
+	// process restart still carries the replayable reset row that minted it.
+	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
 	// Time mirrors the live State's wall-clock budget (issue #1584): the persisted
 	// LimitNanos/ElapsedNanos/StartedAtUnixNano so a process restart re-attaches the
 	// accumulated elapsed time, not a zeroed clock. descriptorFromState copies whatever
@@ -162,17 +165,18 @@ func (d Descriptor) stale(now time.Time) bool {
 // the State, so they are left untouched here.
 func descriptorFromState(st State) Descriptor {
 	return Descriptor{
-		Trace:         st.TraceID,
-		Run:           st.Run,
-		PCBState:      pcbState(st.Run),
-		Budget:        st.Budget,
-		Priority:      st.Priority,
-		Pace:          st.Pace,
-		Generation:    st.Generation,
-		Reason:        st.Reason,
-		CacheAffinity: st.CacheAffinity,
-		Rev:           st.Rev,
-		Time:          st.Time,
+		Trace:            st.TraceID,
+		Run:              st.Run,
+		PCBState:         pcbState(st.Run),
+		Budget:           st.Budget,
+		Priority:         st.Priority,
+		Pace:             st.Pace,
+		Generation:       st.Generation,
+		Reason:           st.Reason,
+		CacheAffinity:    st.CacheAffinity,
+		ResetTransaction: st.ResetTransaction,
+		Rev:              st.Rev,
+		Time:             st.Time,
 	}
 }
 
@@ -191,15 +195,16 @@ func (d Descriptor) RestoredState() State {
 		}
 	}
 	return State{
-		TraceID:       d.Trace,
-		Run:           run,
-		Budget:        d.Budget,
-		Priority:      d.Priority,
-		Pace:          d.Pace,
-		Generation:    d.Generation,
-		Reason:        d.Reason,
-		CacheAffinity: d.CacheAffinity,
-		Rev:           d.Rev,
+		TraceID:          d.Trace,
+		Run:              run,
+		Budget:           d.Budget,
+		Priority:         d.Priority,
+		Pace:             d.Pace,
+		Generation:       d.Generation,
+		Reason:           d.Reason,
+		CacheAffinity:    d.CacheAffinity,
+		ResetTransaction: d.ResetTransaction,
+		Rev:              d.Rev,
 		// Time is restored PAUSED (see TimeBudget.restoredPaused): a HIDDEN process
 		// restart is exactly a Pause the old process never got to make, so the
 		// persisted StartedAtUnixNano (a wall-clock instant in a now-dead process) must

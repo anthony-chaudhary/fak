@@ -295,6 +295,16 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Generation != 1 || fresh.Budget.ContextTokensLeft != 50 {
 		t.Fatalf("fresh child state = %+v, want running child with parent/generation/context budget", fresh)
 	}
+	tx := fresh.ResetTransaction
+	if tx.Schema != session.ResetTransactionSchema || tx.OldTrace != trace || tx.NewTrace != child {
+		t.Fatalf("reset transaction lineage = %+v, want schema and %s -> %s", tx, trace, child)
+	}
+	if tx.SeedDigest == "" || len(tx.Contributors) == 0 || len(tx.OmittedSpans) == 0 {
+		t.Fatalf("reset transaction missing replay proof fields: %+v", tx)
+	}
+	if tx.BudgetRearm.ContextTokensLeft != 50 || tx.BudgetRearm.ContextTokensCap != 50 {
+		t.Fatalf("reset transaction budget rearm = %+v, want 50/50", tx.BudgetRearm)
+	}
 }
 
 func TestSessionPauseResumeDurableWriteThrough(t *testing.T) {

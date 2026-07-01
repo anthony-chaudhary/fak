@@ -264,7 +264,13 @@ type State struct {
 	// envelope behaves byte-identically to a pre-#1584 State (omitzero keeps the wire
 	// shape unchanged when unused).
 	Time TimeBudget `json:"time,omitempty,omitzero"`
-	Rev  uint64     `json:"rev"`
+	// ResetTransaction is the latest context-budget reset row that minted this trace.
+	// It binds old trace, new trace, seed digest, contributor list, omitted spans, and
+	// fresh budget re-arm to the child state, so a continuation can be audited from
+	// kernel data instead of a model self-report. The zero value means this state was
+	// not produced by a reset.
+	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	Rev              uint64           `json:"rev"`
 }
 
 // Goal is the structural root descriptor carried on State (issue #849). It names the
