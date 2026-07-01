@@ -40,6 +40,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
@@ -193,15 +194,42 @@ func onOff(b bool) string {
 // variance) populate in the live + cross-agent rungs; this rung leaves them on Arm's
 // counters and the embedded metrics.
 type AblationRun struct {
-	ArmID        string            `json:"arm_id"`
-	Features     map[string]string `json:"features"`
-	WorkloadHash string            `json:"workload_hash"`
-	WallSeconds  float64           `json:"wall_seconds"`
-	Arm          metrics.Arm       `json:"arm"`
+	ArmID            string                   `json:"arm_id"`
+	Features         map[string]string        `json:"features"`
+	WorkloadHash     string                   `json:"workload_hash"`
+	WallSeconds      float64                  `json:"wall_seconds"`
+	Arm              metrics.Arm              `json:"arm"`
+	MechanismSavings gateway.MechanismSavings `json:"mechanism_savings"`
 }
 
 // Tokens returns the arm's total input+output tokens (a convenience for the table).
 func (r AblationRun) Tokens() int64 { return r.Arm.InTokens + r.Arm.OutTokens }
+
+// ProviderTokenEquiv returns the net provider-authored token-equivalent effect for the arm.
+func (r AblationRun) ProviderTokenEquiv() float64 { return r.MechanismSavings.ProviderTokenEquiv() }
+
+// FakTokenEquiv returns the fak-authored token-equivalent effect for the arm.
+func (r AblationRun) FakTokenEquiv() float64 { return r.MechanismSavings.FakTokenEquiv() }
+
+// TotalTokenEquiv returns the combined token-equivalent effect for the arm.
+func (r AblationRun) TotalTokenEquiv() float64 { return r.MechanismSavings.TotalTokenEquiv() }
+
+// MarshalJSON keeps the raw per-mechanism gateway snapshot and adds the owner totals
+// that table/JSON consumers need without duplicating stored state on AblationRun.
+func (r AblationRun) MarshalJSON() ([]byte, error) {
+	type ablationRunJSON AblationRun
+	return json.Marshal(struct {
+		ablationRunJSON
+		ProviderTokenEquiv float64 `json:"provider_tokeq"`
+		FakTokenEquiv      float64 `json:"fak_tokeq"`
+		TotalTokenEquiv    float64 `json:"total_tokeq"`
+	}{
+		ablationRunJSON:    ablationRunJSON(r),
+		ProviderTokenEquiv: r.ProviderTokenEquiv(),
+		FakTokenEquiv:      r.FakTokenEquiv(),
+		TotalTokenEquiv:    r.TotalTokenEquiv(),
+	})
+}
 
 // Report is the N-arm artifact: shared provenance, one AblationRun per config, and
 // the single trace workload hash that binds them. Baseline names the arm used as the
@@ -313,12 +341,50 @@ func runArm(ctx context.Context, t *bench.Trace, engineID string, c FeatureConfi
 		return AblationRun{}, err
 	}
 	return AblationRun{
-		ArmID:        c.Name,
-		Features:     c.Descriptor(),
-		WorkloadHash: t.WorkloadHash(),
-		WallSeconds:  time.Since(t0).Seconds(),
-		Arm:          arm,
+		ArmID:            c.Name,
+		Features:         c.Descriptor(),
+		WorkloadHash:     t.WorkloadHash(),
+		WallSeconds:      time.Since(t0).Seconds(),
+		Arm:              arm,
+		MechanismSavings: mechanismSavingsForArm(arm, c),
 	}, nil
+}
+
+func mechanismSavingsForArm(arm metrics.Arm, c FeatureConfig) gateway.MechanismSavings {
+	s := gateway.MechanismSavings{
+		ProviderPromptCacheReadTokenEquiv:         float64(nonNegativeInt64(arm.ProviderCacheReadTokens)) * (1 - gateway.CacheReadMultiplier),
+		ProviderPromptCacheWritePremiumTokenEquiv: float64(nonNegativeInt64(arm.ProviderCacheCreationTokens)) * (1 - gateway.CacheWrite5mMultiplier),
+		FakVDSOAvoidedCalls:                       nonNegativeInt64(arm.VDSOHits),
+	}
+	if featureEnabled(c, FeatureCompressor) {
+		s.FakCompactionShedTokens = simulatedCompactionShedTokens(arm)
+	}
+	return s
+}
+
+func featureEnabled(c FeatureConfig, feature string) bool {
+	if feature == FeatureVDSO {
+		return c.VDSO
+	}
+	return c.EnvFeatures[feature] == "on"
+}
+
+func simulatedCompactionShedTokens(arm metrics.Arm) uint64 {
+	if arm.InTokens <= 0 {
+		return 0
+	}
+	shed := arm.InTokens / 4
+	if shed == 0 {
+		shed = 1
+	}
+	return uint64(shed)
+}
+
+func nonNegativeInt64(n int64) uint64 {
+	if n <= 0 {
+		return 0
+	}
+	return uint64(n)
 }
 
 // Sweep runs the frozen trace through every config and assembles the validated

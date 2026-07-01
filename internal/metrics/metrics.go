@@ -111,6 +111,10 @@ type Arm struct {
 	// token-saved total. A benchmark reports them under their own labels.
 	ProviderCacheHits       int64 `json:"provider_cache_hits"`
 	ProviderCacheReadTokens int64 `json:"provider_cache_read_tokens"`
+	// ProviderCacheCreationTokens is the prompt-prefix cache WRITE axis the upstream
+	// reported. It prices as a negative token-equivalent saving until later reads repay
+	// the write premium, so consumers must keep it distinct from read hits.
+	ProviderCacheCreationTokens int64 `json:"provider_cache_creation_tokens"`
 }
 
 // Baseline is the recorded spawned-hook decide latency (unit 23).

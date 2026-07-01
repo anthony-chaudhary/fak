@@ -30,7 +30,7 @@ func TestAblateTableTwoArms(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb)
 	}
-	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "deltas vs all-off"} {
+	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "provider_tokeq", "fak_tokeq", "deltas vs all-off"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table missing %q:\n%s", want, out)
 		}
@@ -54,6 +54,11 @@ func TestAblateJSONReport(t *testing.T) {
 			Arm          struct {
 				VDSOHits int64 `json:"vdso_hits"`
 			} `json:"arm"`
+			MechanismSavings struct {
+				FakVDSOAvoidedCalls uint64 `json:"fak_vdso_avoided_calls"`
+			} `json:"mechanism_savings"`
+			ProviderTokenEquiv float64 `json:"provider_tokeq"`
+			FakTokenEquiv      float64 `json:"fak_tokeq"`
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(out), &rep); err != nil {
@@ -63,6 +68,7 @@ func TestAblateJSONReport(t *testing.T) {
 		t.Fatalf("want 2 arms, got %d", len(rep.Runs))
 	}
 	var offHits, onHits int64 = -1, -1
+	var offAvoided, onAvoided uint64
 	for _, r := range rep.Runs {
 		if r.WorkloadHash != rep.WorkloadHash {
 			t.Errorf("arm %q workload hash %q != report %q", r.ArmID, r.WorkloadHash, rep.WorkloadHash)
@@ -70,8 +76,10 @@ func TestAblateJSONReport(t *testing.T) {
 		switch r.ArmID {
 		case "all-off":
 			offHits = r.Arm.VDSOHits
+			offAvoided = r.MechanismSavings.FakVDSOAvoidedCalls
 		case "vdso":
 			onHits = r.Arm.VDSOHits
+			onAvoided = r.MechanismSavings.FakVDSOAvoidedCalls
 		}
 	}
 	if offHits != 0 {
@@ -79,6 +87,71 @@ func TestAblateJSONReport(t *testing.T) {
 	}
 	if onHits <= offHits {
 		t.Errorf("vdso arm hits (%d) must exceed all-off (%d)", onHits, offHits)
+	}
+	if onAvoided <= offAvoided {
+		t.Errorf("vdso arm avoided calls (%d) must exceed all-off (%d)", onAvoided, offAvoided)
+	}
+}
+
+func TestAblateCompressorReportsFakTokenEquivOnly(t *testing.T) {
+	withFakeArmRunner(t)
+	code, out, errb := runAB("--sweep", "compressor", "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	var rep struct {
+		Runs []struct {
+			ArmID            string  `json:"arm_id"`
+			ProviderTokenEq  float64 `json:"provider_tokeq"`
+			FakTokenEq       float64 `json:"fak_tokeq"`
+			MechanismSavings struct {
+				FakCompactionShedTokens uint64 `json:"fak_compaction_shed_tokens"`
+			} `json:"mechanism_savings"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	var off, on *struct {
+		ArmID            string  `json:"arm_id"`
+		ProviderTokenEq  float64 `json:"provider_tokeq"`
+		FakTokenEq       float64 `json:"fak_tokeq"`
+		MechanismSavings struct {
+			FakCompactionShedTokens uint64 `json:"fak_compaction_shed_tokens"`
+		} `json:"mechanism_savings"`
+	}
+	for i := range rep.Runs {
+		switch rep.Runs[i].ArmID {
+		case "all-off":
+			off = &rep.Runs[i]
+		case "compressor":
+			on = &rep.Runs[i]
+		}
+	}
+	if off == nil || on == nil {
+		t.Fatalf("expected all-off and compressor arms, got %+v", rep.Runs)
+	}
+	if off.FakTokenEq != 0 || off.ProviderTokenEq != 0 {
+		t.Fatalf("all-off token-equiv = provider %v fak %v, want 0/0", off.ProviderTokenEq, off.FakTokenEq)
+	}
+	if on.ProviderTokenEq != 0 {
+		t.Fatalf("compressor provider_tokeq = %v, want 0", on.ProviderTokenEq)
+	}
+	if on.FakTokenEq <= 0 || on.MechanismSavings.FakCompactionShedTokens == 0 {
+		t.Fatalf("compressor fak split did not move: fak_tokeq=%v mechanisms=%+v", on.FakTokenEq, on.MechanismSavings)
+	}
+}
+
+func TestAblateCompressorTableShowsOwnerDeltas(t *testing.T) {
+	withFakeArmRunner(t)
+	code, out, errb := runAB("--sweep", "compressor")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	for _, want := range []string{"provider_tokeq", "fak_tokeq", "compressor", "provider_tokeq 0", "fak_tokeq +"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table missing %q:\n%s", want, out)
+		}
 	}
 }
 

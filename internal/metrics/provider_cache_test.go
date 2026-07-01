@@ -77,13 +77,13 @@ func TestFoldSavingsSplitCopiesOnlyProviderSide(t *testing.T) {
 // The provider counters serialize under their own JSON labels, distinct from the
 // local-reuse fields, so a metrics consumer can report them separately.
 func TestProviderCacheCountersSerializeDistinctly(t *testing.T) {
-	a := Arm{ProviderCacheHits: 2, ProviderCacheReadTokens: 4096, VDSOHits: 7}
+	a := Arm{ProviderCacheHits: 2, ProviderCacheReadTokens: 4096, ProviderCacheCreationTokens: 512, VDSOHits: 7}
 	b, err := json.Marshal(a)
 	if err != nil {
 		t.Fatalf("marshal Arm: %v", err)
 	}
 	s := string(b)
-	for _, key := range []string{`"provider_cache_hits":2`, `"provider_cache_read_tokens":4096`, `"vdso_hits":7`} {
+	for _, key := range []string{`"provider_cache_hits":2`, `"provider_cache_read_tokens":4096`, `"provider_cache_creation_tokens":512`, `"vdso_hits":7`} {
 		if !strings.Contains(s, key) {
 			t.Fatalf("Arm JSON missing %q: %s", key, s)
 		}

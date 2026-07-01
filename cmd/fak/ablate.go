@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ablate"
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
@@ -168,13 +169,15 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 	fmt.Fprintf(w, "arms           : %d   baseline: %s   (same trace each arm; deltas are apples-to-apples)\n\n",
 		len(rep.Runs), rep.Baseline)
 
-	fmt.Fprintf(w, "%-10s %-12s %6s %9s %7s %7s %9s %9s %8s\n",
-		"arm", "features", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "wall_s")
+	fmt.Fprintf(w, "%-10s %-12s %6s %9s %7s %7s %9s %9s %14s %9s %8s\n",
+		"arm", "features", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "provider_tokeq", "fak_tokeq", "wall_s")
 	for i := range rep.Runs {
 		r := &rep.Runs[i]
-		fmt.Fprintf(w, "%-10s %-12s %6d %9d %7d %7d %9d %9d %8.3f\n",
+		fmt.Fprintf(w, "%-10s %-12s %6d %9d %7d %7d %9d %9d %14s %9s %8.3f\n",
 			r.ArmID, featStr(r.Features), r.Arm.Calls, r.Arm.VDSOHits, r.Arm.Denies,
-			r.Arm.Quarantines, r.Arm.P50Ns, r.Tokens(), r.WallSeconds)
+			r.Arm.Quarantines, r.Arm.P50Ns, r.Tokens(),
+			formatAblationTokenEquiv(r.ProviderTokenEquiv()), formatAblationTokenEquiv(r.FakTokenEquiv()),
+			r.WallSeconds)
 	}
 
 	base := rep.ArmByID(rep.Baseline)
@@ -187,14 +190,27 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 		if r.ArmID == rep.Baseline {
 			continue
 		}
-		fmt.Fprintf(w, "  %-10s vdso_hits %+d   denies %+d   quar %+d   p50_ns %+d   tokens %+d\n",
+		fmt.Fprintf(w, "  %-10s vdso_hits %+d   denies %+d   quar %+d   p50_ns %+d   tokens %+d   provider_tokeq %s   fak_tokeq %s\n",
 			r.ArmID,
 			r.Arm.VDSOHits-base.Arm.VDSOHits,
 			r.Arm.Denies-base.Arm.Denies,
 			r.Arm.Quarantines-base.Arm.Quarantines,
 			r.Arm.P50Ns-base.Arm.P50Ns,
-			r.Tokens()-base.Tokens())
+			r.Tokens()-base.Tokens(),
+			formatAblationTokenEquivDelta(r.ProviderTokenEquiv()-base.ProviderTokenEquiv()),
+			formatAblationTokenEquivDelta(r.FakTokenEquiv()-base.FakTokenEquiv()))
 	}
+}
+
+func formatAblationTokenEquiv(v float64) string {
+	return gateway.HumanTokenEquiv(v)
+}
+
+func formatAblationTokenEquivDelta(v float64) string {
+	if v > 0 {
+		return "+" + gateway.HumanTokenEquiv(v)
+	}
+	return gateway.HumanTokenEquiv(v)
 }
 
 // featStr renders an arm's descriptor as "k=v k=v" in sorted key order.

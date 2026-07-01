@@ -2,9 +2,12 @@ package ablate
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 
 	// Blank-import the built-in driver list so the real kernel (engine, vdso,
@@ -76,6 +79,10 @@ func TestSweep_VDSO_NArmGuardAndIsolatedDelta(t *testing.T) {
 		t.Errorf("expected vdso arm hits (%d) > all-off hits (%d) — the ablation must change the path",
 			on.Arm.VDSOHits, off.Arm.VDSOHits)
 	}
+	if on.MechanismSavings.FakVDSOAvoidedCalls <= off.MechanismSavings.FakVDSOAvoidedCalls {
+		t.Errorf("expected vdso arm avoided calls (%d) > all-off avoided calls (%d)",
+			on.MechanismSavings.FakVDSOAvoidedCalls, off.MechanismSavings.FakVDSOAvoidedCalls)
+	}
 
 	// Provenance is stamped and self-describing.
 	if rep.Provenance.GeneratedBy != "fak/internal/ablate" {
@@ -86,6 +93,51 @@ func TestSweep_VDSO_NArmGuardAndIsolatedDelta(t *testing.T) {
 	}
 	if len(rep.JSON()) == 0 {
 		t.Error("JSON() returned empty")
+	}
+}
+
+func TestRunOneArm_CompressorReportsFakTokenEquivOnly(t *testing.T) {
+	tr, err := bench.LoadTrace(smokeTrace)
+	if err != nil {
+		t.Fatalf("LoadTrace(%q): %v", smokeTrace, err)
+	}
+	cfg := FeatureConfig{Name: FeatureCompressor}
+	cfg.apply(FeatureCompressor, true)
+
+	run, err := RunOneArm(context.Background(), tr, "mock", cfg)
+	if err != nil {
+		t.Fatalf("RunOneArm: %v", err)
+	}
+	if run.MechanismSavings.FakCompactionShedTokens == 0 {
+		t.Fatalf("compressor arm did not report compaction-shed tokens: %+v", run.MechanismSavings)
+	}
+	if run.FakTokenEquiv() <= 0 {
+		t.Fatalf("compressor arm fak_tokeq = %v, want > 0", run.FakTokenEquiv())
+	}
+	if run.ProviderTokenEquiv() != 0 {
+		t.Fatalf("compressor arm provider_tokeq = %v, want 0 (fak-owned slice only)", run.ProviderTokenEquiv())
+	}
+}
+
+func TestAblationRunJSONIncludesOwnerTokenEquiv(t *testing.T) {
+	run := AblationRun{
+		ArmID: "split",
+		MechanismSavings: gateway.MechanismSavings{
+			ProviderPromptCacheReadTokenEquiv:         900,
+			ProviderPromptCacheWritePremiumTokenEquiv: -50,
+			FakCompactionShedTokens:                   300,
+			FakKVPrefixReusedTokens:                   400,
+		},
+	}
+	b, err := json.Marshal(run)
+	if err != nil {
+		t.Fatalf("marshal AblationRun: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"provider_tokeq":850`, `"fak_tokeq":700`, `"total_tokeq":1550`, `"mechanism_savings":`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("AblationRun JSON missing %q: %s", want, s)
+		}
 	}
 }
 
