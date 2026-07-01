@@ -34,15 +34,9 @@ type ToolPlan struct {
 // cached prefix through the last system cache_control block byte-identical and
 // removes only named blocks after that boundary whose block and name match plan.
 func CompactInboundSystem(raw []byte, plan BlockPlan, decode func([]byte) error) PruneResult {
-	if len(raw) == 0 {
-		return identity(raw, SkipEmptyInput)
-	}
-	if len(plan.Drop) == 0 {
-		return identity(raw, SkipEmptyPlan)
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return identity(raw, SkipNotJSONObject)
+	obj, bad, ok := decodeCurateInput(raw, len(plan.Drop))
+	if !ok {
+		return bad
 	}
 	systemRaw, ok := obj["system"]
 	if !ok || len(systemRaw) == 0 || systemRaw[0] != '[' {
@@ -106,6 +100,26 @@ func identity(raw []byte, reason string) PruneResult {
 	return PruneResult{Body: raw, Changed: false, SkipReason: reason}
 }
 
+// decodeCurateInput runs the fail-safe prologue every inbound compactor shares:
+// reject empty input, an empty plan (dropCount == 0), and a body that is not a
+// JSON object, each with its named SkipReason. On success it returns the parsed
+// top-level object and ok == true; on any guard it returns the identity result to
+// forward verbatim (bad == that PruneResult, ok == false). Callers thread the plan
+// drop-count in because the plan type differs per block (ToolPlan / BlockPlan)
+// while this prologue is byte-identical across them.
+func decodeCurateInput(raw []byte, dropCount int) (obj map[string]json.RawMessage, bad PruneResult, ok bool) {
+	if len(raw) == 0 {
+		return nil, identity(raw, SkipEmptyInput), false
+	}
+	if dropCount == 0 {
+		return nil, identity(raw, SkipEmptyPlan), false
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, identity(raw, SkipNotJSONObject), false
+	}
+	return obj, PruneResult{}, true
+}
+
 // CompactInboundTools rewrites an outbound Anthropic /v1/messages body so the
 // byte range from offset 0 through the END of the last tools[] element carrying
 // a cache_control breakpoint is copied VERBATIM, and only whole tool elements
@@ -121,16 +135,9 @@ func identity(raw []byte, reason string) PruneResult {
 // guaranteed bytes.Equal to the input's, and (when decode != nil) the result
 // re-decodes.
 func CompactInboundTools(raw []byte, plan ToolPlan, decode func([]byte) error) PruneResult {
-	if len(raw) == 0 {
-		return identity(raw, SkipEmptyInput)
-	}
-	if len(plan.Drop) == 0 {
-		return identity(raw, SkipEmptyPlan)
-	}
-
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return identity(raw, SkipNotJSONObject)
+	obj, bad, ok := decodeCurateInput(raw, len(plan.Drop))
+	if !ok {
+		return bad
 	}
 	toolsRaw, ok := obj["tools"]
 	if !ok {
