@@ -65,10 +65,12 @@ func TestClassify(t *testing.T) {
 		// ---- tag / rebase ---------------------------------------------------
 		{"tag force", "git tag -f v1", true, "tag-force"},
 		{"tag delete", "git tag -d v1", true, "tag-delete"},
-		{"rebase -i", "git rebase -i HEAD~3", true, "history-rewrite"},
-		{"rebase interactive long", "git rebase --interactive origin/main", true, "history-rewrite"},
-		{"rebase autostash", "git rebase --autostash origin/main", true, "autostash refused"},
-		{"pull rebase autostash", "git pull --rebase --autostash origin main", true, "autostash refused"},
+		{"rebase plain", "git rebase origin/main", true, neverAmendSharedReason},
+		{"rebase -i", "git rebase -i HEAD~3", true, neverAmendSharedReason},
+		{"rebase interactive long", "git rebase --interactive origin/main", true, neverAmendSharedReason},
+		{"rebase autostash", "git rebase --autostash origin/main", true, neverAmendSharedReason},
+		{"pull rebase", "git pull --rebase origin main", true, neverAmendSharedReason},
+		{"pull rebase autostash", "git pull --rebase --autostash origin main", true, neverAmendSharedReason},
 
 		// ---- unscoped stash (whole-tree snapshot sweeps a peer's WIP) --------
 		{"bare stash", "git stash", true, "unscoped-stash"},
@@ -101,12 +103,10 @@ func TestClassify(t *testing.T) {
 		{"add -p OK", "git add -p internal/x.go", false, ""},
 		{"add file named -A after dashdash", "git add -- -A", false, ""},
 		{"tag create OK", "git tag v1.2.3", false, ""},
-		{"rebase plain OK", "git rebase origin/main", false, ""},
 		{"status OK", "git status", false, ""},
 		{"log OK", "git log --oneline -n 20", false, ""},
 		{"diff OK", "git diff --cached", false, ""},
 		{"fetch OK", "git fetch origin", false, ""},
-		{"pull OK", "git pull --rebase origin main", false, ""},
 
 		// ---- KEY false-positive guards --------------------------------------
 		// A hazardous flag mentioned INSIDE a quoted commit message is an operand,
@@ -311,6 +311,32 @@ func TestAdjudicate(t *testing.T) {
 	}
 }
 
+func TestSharedHistoryRewriteRefusesWithDedicatedToken(t *testing.T) {
+	g := New()
+	for _, cmd := range []string{
+		"git commit --amend --no-edit",
+		"git push --force origin main",
+		"git push --force-with-lease",
+		"git rebase origin/main",
+		"git pull --rebase origin main",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			law, denied := g.Classify(cmd)
+			if !denied {
+				t.Fatalf("Classify(%q) deferred, want %s refusal", cmd, neverAmendSharedReason)
+			}
+			if !strings.Contains(law, neverAmendSharedReason) {
+				t.Fatalf("Classify(%q) law=%q, want token %s", cmd, law, neverAmendSharedReason)
+			}
+			v := g.Adjudicate(context.Background(), cmdCall("Bash", "command", cmd))
+			wp, ok := v.Payload.(abi.WitnessPayload)
+			if v.Kind != abi.VerdictDeny || !ok || !strings.Contains(wp.Claim, neverAmendSharedReason) {
+				t.Fatalf("Adjudicate(%q) = %+v, want deny witness with %s", cmd, v, neverAmendSharedReason)
+			}
+		})
+	}
+}
+
 func TestAdjudicateRecordsRefusalWhenRecorderWired(t *testing.T) {
 	g := New()
 	rec, captured := decisionRecorder(t)
@@ -324,11 +350,28 @@ func TestAdjudicateRecordsRefusalWhenRecorderWired(t *testing.T) {
 		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
 	}
 	got := (*captured)[0]
-	if got.Op != "gitgate" || got.Verdict != witness.VerdictRefuse || got.ReasonClass != "POLICY_BLOCK" {
-		t.Fatalf("recorded decision = %+v, want gitgate/refuse/POLICY_BLOCK", got)
+	if got.Op != "gitgate" || got.Verdict != witness.VerdictRefuse || got.ReasonClass != neverAmendSharedReason {
+		t.Fatalf("recorded decision = %+v, want gitgate/refuse/%s", got, neverAmendSharedReason)
 	}
 	if strings.Join(got.RefusedArgv, " ") != "shell -c git push --force origin main" {
 		t.Fatalf("RefusedArgv = %+v", got.RefusedArgv)
+	}
+}
+
+func TestAdjudicateRecordsGenericPolicyForNonRewriteRefusal(t *testing.T) {
+	g := New()
+	rec, captured := decisionRecorder(t)
+	g.SetRecorder(rec)
+
+	v := g.Adjudicate(context.Background(), cmdCall("Bash", "command", "git commit --no-verify -m x"))
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("commit no-verify: Kind=%v, want Deny", v.Kind)
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("expected one recorded decision, got %d: %+v", len(*captured), *captured)
+	}
+	if got := (*captured)[0]; got.ReasonClass != "POLICY_BLOCK" {
+		t.Fatalf("non-rewrite refusal reason_class = %q, want POLICY_BLOCK", got.ReasonClass)
 	}
 }
 

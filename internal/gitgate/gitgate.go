@@ -108,20 +108,24 @@ type hazard struct {
 	law   string // the agent-facing reason cited in the deny witness
 }
 
+const neverAmendSharedReason = "NEVER_AMEND_SHARED"
+
+const neverAmendSharedLaw = neverAmendSharedReason + ": shared-history rewrite refused: never amend, rebase, or force-push on the shared trunk. Make a new path-scoped commit, or fetch and merge the trunk in place."
+
 // defaultHazards is the repo's structurally-decidable trunk discipline, encoded
 // once. Every entry maps 1:1 to a documented law (AGENTS.md / CLAUDE.md) that today
 // only a doc sentence or an after-the-fact git hook enforces.
 var defaultHazards = []hazard{
 	// Never force-push the shared trunk (AGENTS.md). Closes the gap that the
 	// named-tool `git_push` deny leaves for a Bash command="git push --force".
-	{sub: "push", long: "--force", short: 'f', law: "force-push refused: never force-push the shared trunk (AGENTS.md). Re-run `git push` WITHOUT --force/-f."},
-	{sub: "push", long: "--force-with-lease", law: "force-push refused: never force-push the shared trunk (AGENTS.md). Re-run `git push` WITHOUT --force-with-lease."},
+	{sub: "push", long: "--force", short: 'f', law: neverAmendSharedLaw + " force-push refused: re-run `git push` WITHOUT --force/-f."},
+	{sub: "push", long: "--force-with-lease", law: neverAmendSharedLaw + " force-push refused: re-run `git push` WITHOUT --force-with-lease."},
 	// Never skip the guards / signing.
 	{sub: "push", long: "--no-verify", law: "skip-hooks refused: never bypass the pre-push guards (push --no-verify). Push with the hooks enabled."},
 	// Do not delete a remote ref from an agent.
 	{sub: "push", long: "--delete", short: 'd', law: "remote-ref delete refused: do not delete a remote branch from an agent (push --delete/-d)."},
 	// Never amend in a shared tree — HEAD moves between peers (CLAUDE.md).
-	{sub: "commit", long: "--amend", law: "amend refused: never amend in the shared tree — HEAD moves between peers (CLAUDE.md). Make a NEW commit instead."},
+	{sub: "commit", long: "--amend", law: neverAmendSharedLaw + " amend refused: HEAD moves between peers; make a NEW commit instead."},
 	{sub: "commit", long: "--no-verify", short: 'n', law: "skip-hooks refused: never bypass the commit guards (commit --no-verify/-n). Commit with the hooks enabled."},
 	{sub: "commit", long: "--no-gpg-sign", law: "skip-signing refused: do not disable commit signing (commit --no-gpg-sign)."},
 	// Commit by explicit path — never sweep a peer's files in a shared tree (AGENTS.md).
@@ -132,7 +136,8 @@ var defaultHazards = []hazard{
 	{sub: "tag", long: "--force", short: 'f', law: "tag-force refused: never overwrite a tag (tag -f/--force); shared-history tags are append-only."},
 	{sub: "tag", long: "--delete", short: 'd', law: "tag-delete refused: do not delete a tag from an agent (tag -d/--delete)."},
 	// No history rewrite on the shared trunk.
-	{sub: "rebase", long: "--interactive", short: 'i', law: "history-rewrite refused: no interactive rebase on the shared trunk (rebase -i/--interactive)."},
+	{sub: "rebase", long: "--interactive", short: 'i', law: neverAmendSharedLaw + " history-rewrite refused: no interactive rebase on the shared trunk (rebase -i/--interactive)."},
+	{sub: "pull", long: "--rebase", law: neverAmendSharedLaw + " pull-rebase refused: fetch, then merge the trunk in place instead of rebasing shared-trunk commits."},
 	// Never --autostash in the shared tree: an aborted/conflicted rebase pops the
 	// stash back as a working-tree blob, dumping a peer's in-flight WIP into your
 	// tree and leaving a dangling `autostash` stash (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
@@ -248,13 +253,20 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 			By:      "gitgate",
 			Payload: abi.WitnessPayload{Claim: law},
 		}
-		g.recordRefusal(ctx, "gitgate", abi.ReasonName(v.Reason), []string{"shell", "-c", cmd}, nil)
+		g.recordRefusal(ctx, "gitgate", gitgateReasonClass(law, abi.ReasonName(v.Reason)), []string{"shell", "-c", cmd}, nil)
 		return v
 	}
 	return deferVerdict()
 }
 
 func deferVerdict() abi.Verdict { return abi.Verdict{Kind: abi.VerdictDefer, By: "gitgate"} }
+
+func gitgateReasonClass(law, fallback string) string {
+	if strings.Contains(law, neverAmendSharedReason) {
+		return neverAmendSharedReason
+	}
+	return fallback
+}
 
 // CollectiveCommitPlan is the argv/lease-decidable shape verified by the
 // collective-commit barrier. Writers are independent workers holding lease trees;
@@ -537,6 +549,10 @@ func (g *GitGate) inspectGit(args []string) (string, bool) {
 	}
 	sub := args[i]
 	rest := args[i+1:]
+
+	if sub == "rebase" {
+		return neverAmendSharedLaw + " rebase refused: merge the trunk in place instead.", true
+	}
 
 	// `git add .` / `git add -- .` stages the whole tree regardless of flag order.
 	if sub == "add" {
