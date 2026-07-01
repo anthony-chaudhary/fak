@@ -102,7 +102,9 @@ regulatory regimes:
   personal information in-country; the capability floor is *structural* (an effect the
   model cannot request is one it cannot leak), which is a stronger claim than a classifier.
 
-This is a positioning + one-explainer-doc lever, not new code.
+This ships here as the [data-residency & compliance explainer](../explainers/data-residency-and-compliance.md)
+— the mechanism mapped to both regimes, with the honest "not legal advice, not a
+certification" fence. No new code; the boundary already had the properties.
 
 ### 5 — Cost framing in local unit-economics
 
@@ -153,10 +155,11 @@ make the docs and the product ready for them.
 - The [`docs/i18n/`](../i18n/README.md) hub + Hindi + Simplified-Chinese entry points
   (lever 1), including the real `GOPROXY=https://goproxy.cn` onboarding tip (lever 7) and
   the zero-payment-friction + residency framing (levers 4, 8) in-language.
+- The [data-residency & compliance explainer](../explainers/data-residency-and-compliance.md)
+  (lever 4) — the DPDP / PIPL mapping as a real page, linked from both localized front doors.
 
 **Not yet — the honest follow-ons, each a bounded next step:**
 - Localized AEO terms + structured data (lever 2) — extend `internal/marketing/aeo.go`.
-- A data-residency explainer under `docs/explainers/` mapped to DPDP / PIPL (lever 4).
 - ModelScope download URLs + a Gitee mirror (lever 7) — needs a real mirror before the claim.
 - Native review of the machine-authored translations (lever 1 fence).
 - GTM channel seeding + per-market landing copy (levers 9, 10) — human-owned.

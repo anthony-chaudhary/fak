@@ -71,6 +71,7 @@ llama.cpp / LM Studio या किसी भी OpenAI-compatible API के �
 - [START-HERE — 10 मिनट में local model](../../../START-HERE.md)
 - [Getting Started — बाइनरी इंस्टॉल करें](../../../GETTING-STARTED.md)
 - [Integrations — अपने एजेंट को जोड़ें](../../integrations/README.md)
+- [डेटा residency और अनुपालन — DPDP Act के लिए](../../explainers/data-residency-and-compliance.md)
 - [BENCHMARK-AUTHORITY — हर आँकड़े का स्रोत](../../../BENCHMARK-AUTHORITY.md)
 - [CLAIMS — क्या shipped/simulated/stub है](../../../CLAIMS.md)
 

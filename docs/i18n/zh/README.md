@@ -69,6 +69,7 @@ go build -o fak ./cmd/fak
 - [START-HERE — 10 分钟跑起本地模型](../../../START-HERE.md)
 - [Getting Started — 安装二进制](../../../GETTING-STARTED.md)
 - [Integrations — 接入你的智能体](../../integrations/README.md)
+- [数据驻留与合规 — 对应 PIPL / 数据安全法](../../explainers/data-residency-and-compliance.md)
 - [BENCHMARK-AUTHORITY — 每个数字的出处](../../../BENCHMARK-AUTHORITY.md)
 - [CLAIMS — 哪些是 shipped/simulated/stub](../../../CLAIMS.md)
 
