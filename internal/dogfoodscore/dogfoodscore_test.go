@@ -1,10 +1,13 @@
 package dogfoodscore
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/stopfailure"
 )
 
 // jsonl builds a transcript line for an assistant text event in the nested shape.
@@ -201,6 +204,41 @@ func TestBuild_FloorAndShape(t *testing.T) {
 	}
 }
 
+func TestBuild_CommittedTranscriptFixturesRedAndGreen(t *testing.T) {
+	root := repoRootFromTest(t)
+	red := Build(Options{
+		Root:        root,
+		Now:         time.Now().UTC(),
+		ClaudeHome:  fixtureClaudeHome(t, "conflation.jsonl"),
+		WindowHours: 24 * 365 * 20,
+	})
+	if !red.Evidence.TranscriptsReachable || red.Evidence.TranscriptsScanned != 1 {
+		t.Fatalf("red fixture reachability/scans = reachable:%v scanned:%d, want reachable:true scanned:1", red.Evidence.TranscriptsReachable, red.Evidence.TranscriptsScanned)
+	}
+	if red.Evidence.ConflationTurns != 1 || len(red.Evidence.ConflationHits) != 1 {
+		t.Fatalf("red fixture conflation evidence = %+v, want one witnessed hit", red.Evidence)
+	}
+	if conf := honestyKPI(t, red, "no_narration_conflation"); conf.Passed {
+		t.Fatalf("conflation fixture must red no_narration_conflation, got %+v", conf)
+	}
+
+	green := Build(Options{
+		Root:        root,
+		Now:         time.Now().UTC(),
+		ClaudeHome:  fixtureClaudeHome(t, "clean.jsonl", "quoted.jsonl"),
+		WindowHours: 24 * 365 * 20,
+	})
+	if !green.Evidence.TranscriptsReachable || green.Evidence.TranscriptsScanned != 2 {
+		t.Fatalf("green fixture reachability/scans = reachable:%v scanned:%d, want reachable:true scanned:2", green.Evidence.TranscriptsReachable, green.Evidence.TranscriptsScanned)
+	}
+	if green.Evidence.ConflationTurns != 0 || len(green.Evidence.ConflationHits) != 0 {
+		t.Fatalf("green fixtures must not produce conflation evidence: %+v", green.Evidence)
+	}
+	if conf := honestyKPI(t, green, "no_narration_conflation"); !conf.Passed {
+		t.Fatalf("clean+quoted fixtures must green no_narration_conflation, got %+v", conf)
+	}
+}
+
 // Build must register that THIS verb is wired in main.go (the score gardens its own
 // registration, like guardrsi does).
 func TestBuild_RegisteredInMain(t *testing.T) {
@@ -272,4 +310,34 @@ func repoRootFromTest(t *testing.T) string {
 	}
 	t.Fatalf("could not find module root from %s", dir)
 	return ""
+}
+
+func fixtureClaudeHome(t *testing.T, names ...string) string {
+	t.Helper()
+	home := t.TempDir()
+	project := filepath.Join(home, ".claude-fixture", "projects", stopfailure.DefaultTranscriptNamespace)
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatalf("mkdir fixture project: %v", err)
+	}
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join("testdata", "transcripts", name))
+		if err != nil {
+			t.Fatalf("read fixture transcript %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(project, name), raw, 0o644); err != nil {
+			t.Fatalf("write fixture transcript %s: %v", name, err)
+		}
+	}
+	return home
+}
+
+func honestyKPI(t *testing.T, p ScorecardPayload, key string) KPIResult {
+	t.Helper()
+	for _, r := range p.Honesty {
+		if r.Key == key {
+			return r
+		}
+	}
+	t.Fatalf("honesty KPI %q missing", key)
+	return KPIResult{}
 }

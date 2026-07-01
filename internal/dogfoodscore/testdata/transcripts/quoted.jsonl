@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The prompt quoted 'Stop hook error: No stderr output', but there is no live harness event here; everything is working fine."}]}}

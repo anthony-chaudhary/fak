@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"Run the clean dogfood fixture."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"All good; the build completed cleanly."}]}}

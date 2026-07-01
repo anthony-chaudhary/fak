@@ -1,0 +1,2 @@
+{"type":"user","isMeta":true,"message":{"role":"user","content":"Stop hook feedback: [python \"$CLAUDE_PROJECT_DIR/../fak-private/tools/memory_sync.py\" push --commit --push]: No stderr output"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"All good; the hook ran successfully with no errors."}]}}
