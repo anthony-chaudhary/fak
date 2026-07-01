@@ -199,6 +199,69 @@ func TestBuildHandoffIssuePlanDedupesByStableMarker(t *testing.T) {
 	}
 }
 
+func TestHandoffDerivedEvidenceRefsFromLiveTask(t *testing.T) {
+	m := NewManager()
+	task, err := m.StartTask(TaskSpec{
+		TaskID:       "task_live_handoff",
+		Title:        "Live handoff evidence",
+		EvidenceRefs: []EvidenceRef{{Kind: PathRefKind, Ref: "internal/taskmgr/taskmgr.go"}},
+	})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if _, err := task.BeatWithEvidence([]byte(coherentOutput)); err != nil {
+		t.Fatalf("beat with evidence: %v", err)
+	}
+
+	snap := m.Snapshot().Tasks[0]
+	h := DraftHandoffFromTask(snap, HandoffDraftOptions{
+		CurrentState: "Live task is ready for operator handoff editing.",
+		Evidence: HandoffEvidenceInputs{
+			ChangedPaths:       []string{"internal/taskmgr/handoff.go", "internal/taskmgr/handoff.go"},
+			TestCommands:       []string{"  go test ./internal/taskmgr -run Handoff.*Evidence  "},
+			GeneratedArtifacts: []string{"artifacts/handoff.json"},
+		},
+	})
+	refs := evidenceRefStrings(h.CompletionEvidence)
+	for _, want := range []string{
+		"path:internal/taskmgr/handoff.go (changed path)",
+		"test:go test ./internal/taskmgr -run Handoff.*Evidence (targeted test command)",
+		"path:artifacts/handoff.json (generated artifact)",
+	} {
+		if !contains(refs, want) {
+			t.Fatalf("derived refs = %+v, missing %q", refs, want)
+		}
+	}
+	if strings.Contains(strings.Join(refs, "\n"), coherentOutput) {
+		t.Fatalf("handoff evidence leaked raw output payload: %+v", refs)
+	}
+}
+
+func TestHandoffIssuePlanCarriesDerivedEvidenceRefs(t *testing.T) {
+	h := verifiedHandoff()
+	h.CompletionEvidence = DeriveHandoffEvidenceRefs(HandoffEvidenceInputs{
+		ChangedPaths: []string{"internal/taskmgr/handoff.go"},
+		TestCommands: []string{"go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence"},
+	})
+	h.NextSteps[0].EvidenceRefs = nil
+
+	plan := BuildHandoffIssuePlan(h, nil)
+	if len(plan) != 1 {
+		t.Fatalf("plan rows = %d, want 1", len(plan))
+	}
+	for _, want := range []string{
+		"path:internal/taskmgr/handoff.go (changed path)",
+		"test:go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence (targeted test command)",
+	} {
+		if !contains(plan[0].EvidenceRefs, want) {
+			t.Fatalf("plan evidence refs = %+v, missing %q", plan[0].EvidenceRefs, want)
+		}
+	}
+	if body := plan[0].Body; !strings.Contains(body, "test:go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence") {
+		t.Fatalf("issue body missing derived test evidence:\n%s", body)
+	}
+}
+
 func TestHandoffIssueBodyIncludesStrictScopeSections(t *testing.T) {
 	h := verifiedHandoff()
 	body := HandoffIssueBody(h, h.NextSteps[0])

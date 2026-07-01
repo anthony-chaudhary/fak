@@ -48,6 +48,79 @@ func TestTaskHandoffDryRunPlansIssueCreate(t *testing.T) {
 	}
 }
 
+func TestTaskHandoffEvidenceRefsReachDryRunPlan(t *testing.T) {
+	dir := t.TempDir()
+	handoff := taskmgr.DraftHandoffFromTask(taskmgr.TaskSnapshot{
+		TaskID: "task_origin_handoff",
+		Title:  "Origin handoff evidence",
+		State:  taskmgr.StateDone,
+		Witness: &taskmgr.WitnessRecord{
+			VerifiedState: taskmgr.VerifiedDone,
+			Source:        "commit-audit",
+			SHA:           "abc123",
+		},
+	}, taskmgr.HandoffDraftOptions{
+		CurrentState: "Task is ready for follow-up issue sync.",
+		Evidence: taskmgr.HandoffEvidenceInputs{
+			ChangedPaths: []string{"internal/taskmgr/handoff.go"},
+			TestCommands: []string{"go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence"},
+		},
+	})
+	handoff.NextSteps = []taskmgr.HandoffNextStep{{
+		Key:             "task_origin_handoff/evidence-sync",
+		Title:           "Keep derived handoff evidence in issue sync",
+		Body:            "Ensure task handoff dry-run plans expose derived path and test refs.",
+		Reason:          "The handoff producer now derives evidence before the operator edits the JSON.",
+		WorkingSpine:    "Task handoff evidence should flow into the issue plan without manual copying.",
+		PriorityContext: "Working path: live task snapshot -> derived evidence refs -> handoff issue plan. Current blocker: derived refs used to stop at handoff JSON. Unblocks: issue sync can carry path/test evidence. Not polish: this proves the smallest producer-to-plan path.",
+		WorkUnit:        "leaf",
+		ExpectedSteps:   3,
+		Assumptions:     []string{"The handoff producer can derive changed paths and targeted tests before issue sync."},
+		ConfusionRisks:  []string{"Derived refs are suggestions, not a replacement for witnessed completion."},
+		Coordination:    []string{"Keep this scoped to task handoff evidence plumbing."},
+		Trigger:         "A verified task handoff proposes a follow-up with derived evidence refs.",
+		BatchPolicy:     "At most two follow-up issues per handoff; reruns update by marker.",
+		InScope:         "Carry derived path/test refs into the dry-run issue plan.",
+		OutOfScope:      "Do not run live gh sync in this unit test.",
+		DoneCondition:   "The dry-run plan exposes the derived path and test evidence refs.",
+		Witness:         "go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence",
+		AcceptanceGate:  "go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence",
+		Lane:            "taskmgr",
+		Paths:           []string{"internal/taskmgr/handoff.go", "cmd/fak/task_handoff_test.go"},
+		BoundaryNotes:   []string{"Public task handoff issue only."},
+		ClosureBinding:  "Resolving commit cites the issue and carries `(fak taskmgr)`.",
+	}}
+	b, err := json.Marshal(handoff)
+	if err != nil {
+		t.Fatalf("marshal handoff: %v", err)
+	}
+	handoffPath := filepath.Join(dir, "handoff.json")
+	if err := os.WriteFile(handoffPath, b, 0o644); err != nil {
+		t.Fatalf("write handoff: %v", err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runTask(&out, &errb, []string{"handoff", "--file", handoffPath, "--json"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s stdout=%s", code, errb.String(), out.String())
+	}
+	var got taskHandoffResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("parse output: %v\n%s", err, out.String())
+	}
+	if len(got.Planned) != 1 {
+		t.Fatalf("planned = %+v, want one row", got.Planned)
+	}
+	for _, want := range []string{
+		"path:internal/taskmgr/handoff.go (changed path)",
+		"test:go test ./internal/taskmgr ./cmd/fak -run Handoff.*Evidence (targeted test command)",
+	} {
+		if !taskHandoffString(got.Planned[0].EvidenceRefs, want) {
+			t.Fatalf("planned evidence refs = %+v, missing %q", got.Planned[0].EvidenceRefs, want)
+		}
+	}
+}
+
 func TestTaskHandoffRefusesUnwitnessedCompletion(t *testing.T) {
 	dir := t.TempDir()
 	handoffPath := writeTaskHandoffFixture(t, dir, false)
@@ -182,8 +255,12 @@ func writeTaskHandoffFixtureWithScope(t *testing.T, dir string, witnessed, scope
 }
 
 func taskHandoffReason(reasons []string, want string) bool {
-	for _, reason := range reasons {
-		if reason == want {
+	return taskHandoffString(reasons, want)
+}
+
+func taskHandoffString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
 			return true
 		}
 	}

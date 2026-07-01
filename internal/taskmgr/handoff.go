@@ -309,7 +309,7 @@ func BuildHandoffIssuePlan(h Handoff, existing []HandoffIssue) []HandoffIssuePla
 			Labels:       compactStrings(append(append([]string{}, step.Labels...), handoffGenerationLabels(step.Generation)...)),
 			Reason:       strings.TrimSpace(step.Reason),
 			Priority:     strings.TrimSpace(step.Priority),
-			EvidenceRefs: evidenceRefStrings(step.EvidenceRefs),
+			EvidenceRefs: evidenceRefStrings(append(append([]EvidenceRef{}, h.CompletionEvidence...), step.EvidenceRefs...)),
 		}
 		if found, ok := byKey[row.Key]; ok {
 			row.Action = "update"
