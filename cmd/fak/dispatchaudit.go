@@ -76,11 +76,11 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 // renderAuditTable prints the per-backend rollup and the deduped findings.
 func renderAuditTable(w io.Writer, rep dispatchaudit.Report) {
 	fmt.Fprintf(w, "dispatch audit — %d workers, %d distinct findings\n\n", len(rep.Classifications), len(rep.Findings))
-	fmt.Fprintf(w, "%-10s %7s %7s %7s %7s %7s %7s %7s %12s\n",
-		"backend", "workers", "shipped", "wasted", "walled", "storm", "no-op", "errored", "wasted-min")
+	fmt.Fprintf(w, "%-10s %7s %7s %7s %7s %7s %7s %7s %7s %12s\n",
+		"backend", "workers", "shipped", "running", "wasted", "walled", "storm", "no-op", "errored", "wasted-min")
 	for _, r := range rep.Rollups {
-		fmt.Fprintf(w, "%-10s %7d %7d %7d %7d %7d %7d %7d %12.1f\n",
-			r.Backend, r.Workers, r.Shipped, r.WastedSpawns, r.QuotaWalled, r.RetryStorms, r.NoOps, r.Errored, r.WastedMinutes)
+		fmt.Fprintf(w, "%-10s %7d %7d %7d %7d %7d %7d %7d %7d %12.1f\n",
+			r.Backend, r.Workers, r.Shipped, r.Running, r.WastedSpawns, r.QuotaWalled, r.RetryStorms, r.NoOps, r.Errored, r.WastedMinutes)
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintf(w, "\nfindings (fingerprint  outcome):\n")

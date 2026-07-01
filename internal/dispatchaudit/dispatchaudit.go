@@ -12,6 +12,7 @@
 // The taxonomy (issue #1454):
 //
 //	SHIPPED       — the worker's log carries a commit witness (a created/shipped SHA).
+//	RUNNING       — the worker has a zero-byte log but its .pid sidecar is live.
 //	WASTED_SPAWN  — the worker hit a provider WEEKLY/MONTHLY cap (a hold for that
 //	                backend was, or should have been, live) and produced no ship.
 //	QUOTA_WALLED  — an explicit upstream cap/limit banner, distinct from a transient
@@ -37,6 +38,7 @@ type Outcome string
 
 const (
 	OutcomeShipped     Outcome = "SHIPPED"
+	OutcomeRunning     Outcome = "RUNNING"
 	OutcomeWastedSpawn Outcome = "WASTED_SPAWN"
 	OutcomeQuotaWalled Outcome = "QUOTA_WALLED"
 	OutcomeRetryStorm  Outcome = "RETRY_STORM"
@@ -90,6 +92,15 @@ type Worker struct {
 	SidecarMissing bool
 	// CommitSHA is a witnessed commit SHA found in the log ("" if none).
 	CommitSHA string
+	// LogSizeKnown is true when LogBytes came from the on-disk log. Direct unit
+	// fixtures leave it false so zero's Go default does not masquerade as an
+	// observed zero-byte log.
+	LogSizeKnown bool
+	// LogBytes is the observed byte size of the log when LogSizeKnown is true.
+	LogBytes int64
+	// PID / PIDAlive come from the resolve-*.pid sidecar when one is present.
+	PID      int
+	PIDAlive bool
 	// CapHit is true when the log carries an explicit provider weekly/monthly
 	// cap / limit-exhausted banner.
 	CapHit bool
@@ -146,6 +157,10 @@ type Classification struct {
 	Lane          string  `json:"lane,omitempty"`
 	Backend       Backend `json:"backend"`
 	Outcome       Outcome `json:"outcome"`
+	LogSizeKnown  bool    `json:"log_size_known,omitempty"`
+	LogBytes      int64   `json:"log_bytes"`
+	PID           int     `json:"pid,omitempty"`
+	PIDAlive      bool    `json:"pid_alive,omitempty"`
 	WallMinutes   float64 `json:"wall_minutes"`
 	Misattributed bool    `json:"misattributed"`
 	Reason        string  `json:"reason"`
@@ -156,12 +171,16 @@ type Classification struct {
 // retry storm beats a generic error; banner-only / no-progress collapses to NO_OP.
 func Classify(w Worker, th Thresholds) Classification {
 	c := Classification{
-		Worker:      w,
-		Log:         w.Log,
-		Issue:       w.Issue,
-		Lane:        w.Lane,
-		Backend:     w.Backend(),
-		WallMinutes: w.errSpan(),
+		Worker:       w,
+		Log:          w.Log,
+		Issue:        w.Issue,
+		Lane:         w.Lane,
+		Backend:      w.Backend(),
+		LogSizeKnown: w.LogSizeKnown,
+		LogBytes:     w.LogBytes,
+		PID:          w.PID,
+		PIDAlive:     w.PIDAlive,
+		WallMinutes:  w.errSpan(),
 	}
 	// Misattribution flag: a present sidecar that disagrees with the header, or a
 	// missing sidecar when a header backend is declared. Advisory — it annotates
@@ -178,6 +197,12 @@ func Classify(w Worker, th Thresholds) Classification {
 	case w.CommitSHA != "":
 		c.Outcome = OutcomeShipped
 		c.Reason = "commit witness " + w.CommitSHA
+	case w.LogSizeKnown && w.LogBytes == 0 && w.PIDAlive:
+		c.Outcome = OutcomeRunning
+		c.Reason = "worker is alive with an empty log buffer"
+	case w.LogSizeKnown && w.LogBytes == 0:
+		c.Outcome = OutcomeNoOp
+		c.Reason = "worker exited or has no live pid and produced an empty log"
 	case w.CapHit && w.CommitSHA == "":
 		// A provider weekly/monthly wall with no ship: the spawn produced nothing
 		// but burned the wall-clock between first and last cap line. A cap with a
@@ -239,9 +264,10 @@ func Fingerprint(c Classification) string {
 }
 
 // findingFor builds the fileable Finding for a non-shipped, non-trivial
-// classification. It returns ok=false for outcomes not worth filing (SHIPPED).
+// classification. It returns ok=false for outcomes not worth filing (SHIPPED,
+// RUNNING).
 func findingFor(c Classification) (Finding, bool) {
-	if c.Outcome == OutcomeShipped {
+	if c.Outcome == OutcomeShipped || c.Outcome == OutcomeRunning {
 		return Finding{}, false
 	}
 	site := codeSite(c)
@@ -273,6 +299,7 @@ type BackendRollup struct {
 	Backend       Backend `json:"backend"`
 	Workers       int     `json:"workers"`
 	Shipped       int     `json:"shipped"`
+	Running       int     `json:"running"`
 	WastedSpawns  int     `json:"wasted_spawns"`
 	QuotaWalled   int     `json:"quota_walled"`
 	RetryStorms   int     `json:"retry_storms"`
@@ -318,6 +345,8 @@ func Fold(workers []Worker, th Thresholds) Report {
 		switch c.Outcome {
 		case OutcomeShipped:
 			r.Shipped++
+		case OutcomeRunning:
+			r.Running++
 		case OutcomeWastedSpawn:
 			r.WastedSpawns++
 			r.WastedMinutes += c.WallMinutes

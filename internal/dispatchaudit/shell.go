@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,9 +37,12 @@ var (
 	reProviderErr = regexp.MustCompile(`(?i)stream error|AI_APICallError|APICallError|provider.{0,12}error|429|503`)
 )
 
+var pidAlive = processAlive
+
 // logBaseRE matches the run id + timestamp at the tail of a resolve log name so
 // the .backend sidecar can be paired by prefix.
 var resolveLogRE = regexp.MustCompile(`^resolve-.*\.log$`)
+var resolveIssueRE = regexp.MustCompile(`^resolve-(\d+)-`)
 
 // ScanDir reads runsDir, parses every resolve-*.log into a Worker (pairing its
 // .backend sidecar and folding in the shared progress ledger), and returns them
@@ -83,9 +87,18 @@ func ScanDir(runsDir string) ([]Worker, error) {
 		} else {
 			w.SidecarMissing = true
 		}
+		if w.Issue == "" {
+			if m := resolveIssueRE.FindStringSubmatch(e.Name()); m != nil {
+				w.Issue = m[1]
+			}
+		}
 		if p, ok := progress[w.Issue]; ok && w.Issue != "" {
 			w.ProgressTicks = p.ticks
 			w.ProgressMoved = p.moved
+		}
+		if pid, ok := readPID(filepath.Join(runsDir, base+".pid")); ok {
+			w.PID = pid
+			w.PIDAlive = pidAlive(pid)
 		}
 		workers = append(workers, w)
 	}
@@ -102,6 +115,10 @@ func parseLog(path string) (Worker, error) {
 	defer f.Close()
 
 	w := Worker{Log: filepath.Base(path)}
+	if st, err := f.Stat(); err == nil {
+		w.LogSizeKnown = true
+		w.LogBytes = st.Size()
+	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	nonBanner := 0
@@ -157,6 +174,15 @@ func parseLog(path string) (Worker, error) {
 	// blank lines appeared, and it carries no ship and no errors.
 	w.BannerOnly = nonBanner == 0 && w.CommitSHA == "" && w.ErrorLines == 0 && lines > 0
 	return w, nil
+}
+
+func readPID(path string) (int, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	return pid, err == nil && pid > 0
 }
 
 // parseTimestamp extracts the `timestamp=...` RFC3339 value from an opencode line.

@@ -2,7 +2,9 @@ package dispatchaudit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -90,6 +92,38 @@ func TestClassifyNoOpProgressTick(t *testing.T) {
 	c := Classify(w, DefaultThresholds())
 	if c.Outcome != OutcomeNoOp {
 		t.Fatalf("a progress tick that never moved is NO_OP, got %s", c.Outcome)
+	}
+}
+
+func TestClassifyZeroByteLogByProcessLiveness(t *testing.T) {
+	cases := []struct {
+		name string
+		w    Worker
+		want Outcome
+	}{
+		{
+			name: "alive empty",
+			w:    Worker{Log: "resolve-1785-alive.log", Lane: "cmd", SidecarBackend: BackendCodex, LogSizeKnown: true, LogBytes: 0, PID: os.Getpid(), PIDAlive: true},
+			want: OutcomeRunning,
+		},
+		{
+			name: "dead empty",
+			w:    Worker{Log: "resolve-1785-dead.log", Lane: "cmd", SidecarBackend: BackendCodex, LogSizeKnown: true, LogBytes: 0, PID: 1, PIDAlive: false},
+			want: OutcomeNoOp,
+		},
+		{
+			name: "nonempty no witness",
+			w:    Worker{Log: "resolve-1785-nonempty.log", Lane: "cmd", SidecarBackend: BackendCodex, LogSizeKnown: true, LogBytes: 19},
+			want: OutcomeWastedSpawn,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(tc.w, DefaultThresholds())
+			if got.Outcome != tc.want {
+				t.Fatalf("Outcome = %s (%s), want %s", got.Outcome, got.Reason, tc.want)
+			}
+		})
 	}
 }
 
@@ -240,6 +274,87 @@ func TestScanDirFixture(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestScanDirZeroByteLogLivenessFixture(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "resolve-1785-20260701-010000.log", "")
+	writeFile(t, dir, "resolve-1785-20260701-010000.backend", "codex")
+	writeFile(t, dir, "resolve-1785-20260701-010000.pid", strconv.Itoa(os.Getpid()))
+
+	dead := deadPID(t)
+	writeFile(t, dir, "resolve-1786-20260701-010001.log", "")
+	writeFile(t, dir, "resolve-1786-20260701-010001.backend", "codex")
+	writeFile(t, dir, "resolve-1786-20260701-010001.pid", strconv.Itoa(dead))
+
+	writeFile(t, dir, "resolve-1787-20260701-010002.log",
+		"# fak-spawn 20260701-010002 issue=1787 lane=cmd backend=codex argv0=codex\n"+
+			"working but no ship yet\n")
+	writeFile(t, dir, "resolve-1787-20260701-010002.backend", "codex")
+
+	workers, err := ScanDir(dir)
+	if err != nil {
+		t.Fatalf("ScanDir: %v", err)
+	}
+	if len(workers) != 3 {
+		t.Fatalf("want 3 workers parsed, got %d", len(workers))
+	}
+
+	rep := Fold(workers, DefaultThresholds())
+	got := map[string]Classification{}
+	for _, c := range rep.Classifications {
+		got[c.Issue] = c
+	}
+	if got["1785"].Outcome != OutcomeRunning {
+		t.Fatalf("alive zero-byte log should be RUNNING, got %+v", got["1785"])
+	}
+	if got["1785"].PID != os.Getpid() || !got["1785"].PIDAlive || got["1785"].LogBytes != 0 {
+		t.Fatalf("alive zero-byte facts not preserved: %+v", got["1785"])
+	}
+	if got["1786"].Outcome != OutcomeNoOp {
+		t.Fatalf("dead zero-byte log should be NO_OP, got %+v", got["1786"])
+	}
+	if got["1787"].Outcome != OutcomeWastedSpawn {
+		t.Fatalf("nonempty no-witness log should remain WASTED_SPAWN, got %+v", got["1787"])
+	}
+
+	var codex BackendRollup
+	for _, r := range rep.Rollups {
+		if r.Backend == BackendCodex {
+			codex = r
+			break
+		}
+	}
+	if codex.Running != 1 || codex.NoOps != 1 || codex.WastedSpawns != 1 {
+		t.Fatalf("codex rollup = %+v, want running/no-op/wasted = 1/1/1", codex)
+	}
+	for _, f := range rep.Findings {
+		if f.Outcome == OutcomeRunning {
+			t.Fatalf("RUNNING must not be fileable as a finding: %+v", f)
+		}
+	}
+}
+
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestDispatchAuditDeadPIDHelper")
+	cmd.Env = append(os.Environ(), "DISPATCHAUDIT_DEAD_PID_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start dead-pid helper: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait dead-pid helper: %v", err)
+	}
+	return pid
+}
+
+func TestDispatchAuditDeadPIDHelper(t *testing.T) {
+	if os.Getenv("DISPATCHAUDIT_DEAD_PID_HELPER") != "1" {
+		return
+	}
+	os.Exit(0)
 }
 
 func writeFile(t *testing.T, dir, name, content string) {
