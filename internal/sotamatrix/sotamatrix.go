@@ -188,14 +188,33 @@ var matrix = []Op{
 	{
 		Slug:        "moe-expert-dispatch",
 		Title:       "MoE expert dispatch",
-		FileGlobs:   []string{"internal/model/moe.go", "internal/model/moe_*.go", "internal/model/glm_dsa.go", "internal/compute/cuda_nccl.cu", "internal/compute/cuda_collective*.go", "internal/compute/collective.go"},
-		FakPath:     "internal/model/moe.go, glm_dsa.go, moe_offload.go; internal/compute/cuda_nccl.cu (EP collective)",
+		FileGlobs:   []string{"internal/model/moe.go", "internal/model/moe_*.go", "internal/model/glm_dsa.go"},
+		FakPath:     "internal/model/moe.go, glm_dsa.go, moe_offload.go (grouped-decode expert dispatch)",
 		SOTA:        "TensorRT-LLM / DeepEP expert-parallel",
 		PrimaryLink: "https://github.com/deepseek-ai/DeepEP",
 		Route:       RouteBorrow,
 		Oracle:      "dense reference / HF",
 		Papers:      []string{"DeepSeek-V3 expert-parallel report; GShard (Lepikhin et al.) arXiv:2006.16668"},
-		Note:        "Borrow grouped-decode cleanup; fak's value is the contract around it.",
+		Note:        "Borrow grouped-decode cleanup; the cross-process EP transport is the collective-comm row.",
+	},
+	{
+		Slug:  "collective-comm",
+		Title: "Collective communication (multi-GPU all-reduce / process-group)",
+		// The distributed-serve transport under EP/TP: cuda_nccl.cu is the single-process
+		// ncclCommInitAll set; cuda_nccl_pg.cu is the multi-PROCESS ncclCommInitRank bootstrap
+		// (one OS process per GPU, the torchrun/MPI-style path). Both bind -lnccl; the host
+		// wiring is collective.go + cuda_collective*.go. Do NOT hand-roll a ring/tree all-reduce.
+		FileGlobs: []string{
+			"internal/compute/cuda_nccl*.cu", "internal/compute/cuda_collective*.go",
+			"internal/compute/collective.go",
+		},
+		FakPath:     "internal/compute/cuda_nccl_pg.cu (multi-process ncclCommInitRank), cuda_nccl.cu (single-process ncclCommInitAll); internal/compute/collective.go, cuda_collective*.go host wiring",
+		SOTA:        "NVIDIA NCCL (ring/tree all-reduce + process-group bootstrap); NVSHMEM; MSCCL++",
+		PrimaryLink: "https://github.com/NVIDIA/nccl",
+		Route:       RouteBind,
+		Oracle:      "host DistComm / cpuref CollectiveBackend reduce — argmax-exact + cosine (NCCL ring/tree sums in a hardware-determined order, so this is an Approx peer, never max|Δ|=0)",
+		Papers:      []string{"Ring all-reduce (Gibiansky, \"Bringing HPC Techniques to Deep Learning\", 2017)", "Horovod (Sergeev & Del Balso, 2018) arXiv:1802.05799"},
+		Note:        "Bind to NCCL's collectives directly (-lnccl); fak's value is the honest Approx fence around a hardware-ordered reduce, not a new all-reduce.",
 	},
 	{
 		Slug:        "fused-attention",

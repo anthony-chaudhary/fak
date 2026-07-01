@@ -70,7 +70,9 @@ table and `fak sota <slug>` for one operation's full detail (route note, oracle,
 | GPTQ resident (CPU) | `internal/model/gptq.go` | AutoGPTQ / [Marlin](https://github.com/IST-DASLab/marlin) | bind | HF GPTQ dequant / `cpuref` |
 | EXL2 loader | `internal/model/exl2.go` | [ExLlamaV2](https://github.com/turboderp-org/exllamav2) | stay-minimal | ExLlamaV2 reference |
 | GGUF quant-at-load (Q4/5/6_K) | `internal/ggufload/`, `internal/model/quant_q4k.go` | [llama.cpp](https://github.com/ggml-org/llama.cpp) GGUF | bind | llama.cpp 2-token parity |
+| CPU K-quant SIMD dequant-GEMM | `internal/model/quant_kquant.go`, `quant_amd64_kquant.go`, `quant_arm64_q6k.go` | [llama.cpp ggml-quants](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-quants.c) | borrow | `cpuref` dequant (max\|Δ\|=0) |
 | MoE expert dispatch | `internal/model/moe.go`, `glm_dsa.go` | [DeepEP](https://github.com/deepseek-ai/DeepEP) / TensorRT-LLM | borrow | dense reference / HF |
+| Collective communication (all-reduce / process-group) | `internal/compute/cuda_nccl.cu`, `cuda_nccl_pg.cu`, `collective.go` | [NVIDIA NCCL](https://github.com/NVIDIA/nccl); NVSHMEM; MSCCL++ | bind | host reduce — argmax + cosine (Approx) |
 | Fused attention (MHA/GQA/MQA) | `internal/compute/cuda_kernels.cu` `k_flash_attention` | [FlashInfer](https://docs.flashinfer.ai/) / FlashAttention | stay-minimal | `cpuref` (cosine ≥ 0.999) |
 | GLM sparse attention (DSA) | `internal/compute/dsa.go` | [TensorRT-LLM](https://nvidia.github.io/TensorRT-LLM/) custom sparse | stay-minimal | `cpuref` (cosine ≥ 0.999) |
 | KV cache (paging / prefix reuse) | `internal/model/kv.go`, `internal/radixkv` | [vLLM PagedAttention](https://docs.vllm.ai); SGLang RadixAttention | stay-minimal | bit-identity |
