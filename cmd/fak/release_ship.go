@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 )
 
 type releaseShipCommandRunner func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string)
@@ -22,6 +24,7 @@ type releaseShipOptions struct {
 	execute         bool
 	asJSON          bool
 	base            string
+	sourceBranch    string
 	remote          string
 	trunk           string
 	workflow        string
@@ -45,6 +48,9 @@ type releaseShipResult struct {
 	Root               string               `json:"root"`
 	Base               string               `json:"base"`
 	BaseSHA            string               `json:"base_sha,omitempty"`
+	SourceBranch       string               `json:"source_branch,omitempty"`
+	SourceSHA          string               `json:"source_sha,omitempty"`
+	TargetBranch       string               `json:"target_branch,omitempty"`
 	Worktree           string               `json:"worktree,omitempty"`
 	LockRoot           string               `json:"lock_root,omitempty"`
 	ReleaseOwner       string               `json:"release_owner,omitempty"`
@@ -101,29 +107,18 @@ func runReleaseShip(stdout, stderr io.Writer, argv []string) int {
 func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOptions, error) {
 	fs := flag.NewFlagSet("fak release ship", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	opts := releaseShipOptions{
-		base:            "origin/main",
-		remote:          "origin",
-		trunk:           "main",
-		workflow:        "ci.yml",
-		limitCommits:    50,
-		ttl:             1800,
-		fetch:           true,
-		requireCI:       true,
-		waitCI:          true,
-		skipDryRun:      true,
-		ciAppearTimeout: 2 * time.Minute,
-	}
+	opts := defaultReleaseShipOptions(repoRoot())
+	base := fs.String("base", "", "ref to detach from (default: <remote>/<source-branch>)")
 	fs.BoolVar(&opts.execute, "execute", false, "mutate: cut, push, tag, and publish; default is a detached dry-run plan")
 	fs.BoolVar(&opts.asJSON, "json", false, "emit JSON")
-	fs.StringVar(&opts.base, "base", opts.base, "ref to detach from")
+	fs.StringVar(&opts.sourceBranch, "source-branch", opts.sourceBranch, "branch role to cut from")
 	fs.StringVar(&opts.remote, "remote", opts.remote, "remote to fetch/push")
 	fs.StringVar(&opts.trunk, "trunk", opts.trunk, "branch to push HEAD to")
 	fs.StringVar(&opts.workflow, "workflow", opts.workflow, "GitHub Actions workflow checked before tagging")
 	fs.StringVar(&opts.version, "version", "", "target X.Y.Z; default from release_decide")
 	fs.IntVar(&opts.limitCommits, "limit-commits", opts.limitCommits, "commit window passed to release helpers")
 	fs.IntVar(&opts.ttl, "ttl", opts.ttl, "release lock TTL in seconds")
-	fs.BoolVar(&opts.fetch, "fetch", opts.fetch, "fetch remote trunk before creating the detached worktree")
+	fs.BoolVar(&opts.fetch, "fetch", opts.fetch, "fetch remote source/target branches before creating the detached worktree")
 	fs.BoolVar(&opts.force, "force", false, "pass --force to release_cut (only bypasses the substantive floor)")
 	fs.BoolVar(&opts.requireCI, "require-ci", opts.requireCI, "require green CI before tagging")
 	fs.BoolVar(&opts.waitCI, "wait-ci", opts.waitCI, "watch a pending CI run before tagging")
@@ -135,11 +130,16 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	if err := fs.Parse(argv); err != nil {
 		return opts, err
 	}
+	if strings.TrimSpace(*base) != "" {
+		opts.base = strings.TrimSpace(*base)
+	} else {
+		opts.base = opts.remote + "/" + opts.sourceBranch
+	}
 	if fs.NArg() != 0 {
 		return opts, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
-	if opts.remote == "" || opts.trunk == "" || opts.base == "" {
-		return opts, fmt.Errorf("--remote, --trunk, and --base are required")
+	if opts.remote == "" || opts.trunk == "" || opts.base == "" || opts.sourceBranch == "" {
+		return opts, fmt.Errorf("--remote, --trunk, --source-branch, and --base are required")
 	}
 	if opts.limitCommits <= 0 {
 		return opts, fmt.Errorf("--limit-commits must be positive")
@@ -150,14 +150,51 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	return opts, nil
 }
 
+func releaseShipFetchBranches(opts releaseShipOptions) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, branch := range []string{opts.sourceBranch, opts.trunk} {
+		branch = strings.TrimSpace(branch)
+		if branch == "" || seen[branch] {
+			continue
+		}
+		seen[branch] = true
+		out = append(out, branch)
+	}
+	return out
+}
+
+func defaultReleaseShipOptions(root string) releaseShipOptions {
+	roles, err := branchrole.Load(root)
+	if err != nil {
+		roles = branchrole.Defaults()
+	}
+	opts := releaseShipOptions{
+		sourceBranch:    roles.ReleaseSource,
+		remote:          "origin",
+		trunk:           roles.ReleaseBranch,
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       true,
+		waitCI:          true,
+		skipDryRun:      true,
+		ciAppearTimeout: 2 * time.Minute,
+	}
+	return opts
+}
+
 func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	root := repoRoot()
 	result = releaseShipResult{
 		DryRun:       !opts.execute,
 		Root:         root,
 		Base:         opts.base,
+		SourceBranch: opts.sourceBranch,
 		Remote:       opts.remote,
 		Trunk:        opts.trunk,
+		TargetBranch: opts.trunk,
 		LockRoot:     root,
 		CommandTail:  map[string]string{},
 		RemoteBranch: map[string]string{},
@@ -186,10 +223,12 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 	}
 
 	if opts.fetch {
-		refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", opts.trunk, opts.remote, opts.trunk)
-		if code, out := releaseShipCmd(&result, root, "git", []string{"fetch", opts.remote, refspec}, nil, 5*time.Minute); code != 0 {
-			result.fail("fetch_failed", out)
-			return finishReleaseShip(result)
+		for _, branch := range releaseShipFetchBranches(opts) {
+			refspec := fmt.Sprintf("refs/heads/%s:refs/remotes/%s/%s", branch, opts.remote, branch)
+			if code, out := releaseShipCmd(&result, root, "git", []string{"fetch", opts.remote, refspec}, nil, 5*time.Minute); code != 0 {
+				result.fail("fetch_failed", out)
+				return finishReleaseShip(result)
+			}
 		}
 	}
 	code, out := releaseShipCmd(&result, root, "git", []string{"rev-parse", "--verify", opts.base + "^{commit}"}, nil, time.Minute)
@@ -198,6 +237,7 @@ func executeReleaseShip(opts releaseShipOptions) (result releaseShipResult) {
 		return finishReleaseShip(result)
 	}
 	result.BaseSHA = strings.TrimSpace(out)
+	result.SourceSHA = result.BaseSHA
 
 	wt, err := releaseShipWorktreeDir(root, opts)
 	if err != nil {

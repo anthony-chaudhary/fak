@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,68 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 	}
 	if len(result.ExecutedCommands) == 0 || !strings.HasSuffix(result.ExecutedCommands[0].Args[0], filepath.Join("tools", "release_lock.py")) || result.ExecutedCommands[0].Args[1] != "acquire" {
 		t.Fatalf("release lock must be acquired before release work: %#v", result.ExecutedCommands)
+	}
+}
+
+func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
+	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+		switch {
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/main:refs/remotes/origin/main"):
+			return 0, ""
+		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
+			return 0, "dev-source-sha\n"
+		case name == "git" && len(args) >= 5 && sameArgs(args[:3], "worktree", "add", "--detach"):
+			return 0, ""
+		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			return 0, `{"ok":true,"version":"0.36.0","tag":"v0.36.0","commit_sha":"release-sha"}`
+		case name == "git" && sameArgs(args, "worktree", "remove", "--force", fakeReleaseWorktree):
+			return 0, ""
+		case name == "git" && sameArgs(args, "worktree", "prune"):
+			return 0, ""
+		default:
+			t.Fatalf("unexpected command in %s: %s %v", cwd, name, args)
+			return 127, "unexpected"
+		}
+	})
+	defer restore()
+
+	result := executeReleaseShip(releaseShipOptions{
+		execute:         false,
+		base:            "origin/dev",
+		sourceBranch:    "dev",
+		remote:          "origin",
+		trunk:           "main",
+		workflow:        "ci.yml",
+		limitCommits:    50,
+		ttl:             1800,
+		fetch:           true,
+		requireCI:       false,
+		waitCI:          false,
+		skipDryRun:      true,
+		ciAppearTimeout: 0,
+	})
+
+	if !result.OK {
+		t.Fatalf("result not ok: %#v", result)
+	}
+	if result.SourceBranch != "dev" || result.SourceSHA != "dev-source-sha" || result.TargetBranch != "main" || result.Base != "origin/dev" {
+		t.Fatalf("source/target witness fields wrong: %#v", result)
+	}
+	if result.CommitSHA != "release-sha" || result.Tag != "v0.36.0" {
+		t.Fatalf("release outputs missing: %#v", result)
+	}
+}
+
+func TestDefaultReleaseShipOptionsUseBranchRoles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[branch_roles]\ndevelopment_branch = \"dev\"\nrelease_branch = \"main\"\nrelease_source = \"dev\"\npublic_front_door = \"main\"\n"), 0o644); err != nil {
+		t.Fatalf("write dos.toml: %v", err)
+	}
+	opts := defaultReleaseShipOptions(root)
+	if opts.sourceBranch != "dev" || opts.trunk != "main" || opts.remote != "origin" {
+		t.Fatalf("defaults = source %q trunk %q remote %q, want dev/main/origin", opts.sourceBranch, opts.trunk, opts.remote)
 	}
 }
 
