@@ -21,6 +21,11 @@
 // the verdict kind + reason, and bumps its bucket. A vDSO-served call ran no
 // adjudication, so it is counted under a single rung="vdso" bucket.
 //
+// The same de-duplicated event fold also records the fused-turn KPI: classified
+// calls (fusedturn.MetaClassKey) are grouped by TraceID, classical/weight op totals
+// are counted by family, and a turn becomes fused exactly once when both families
+// appear. Unknown ops are counted as unknown but do not enter the rate denominator.
+//
 // PASSIVE BY CONSTRUCTION. The observer never mutates the call, the verdict, or
 // the kernel's Counters — it only reads. The hot path (kernel.Submit / Fold) is
 // byte-for-byte unchanged whether or not rungobs is registered; the observer
@@ -37,6 +42,6 @@
 // fak_kernel_*_total counters; it resets on restart and is not persisted.
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only
-// packages whose tier is <= 2; an upward import fails the architest gate.
+// packages whose tier is <= 2 (abi, fusedturn, kernel); an upward import fails the architest gate.
 // See AGENTS.md and internal/architest for the layering contract.
 package rungobs

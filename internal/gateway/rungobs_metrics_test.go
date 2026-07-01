@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 )
 
 // AC #5 (issue #693) — /metrics exposes the rung-decision distribution as a labeled
@@ -43,12 +47,61 @@ func TestMetricsExposesRungDecisionDistribution(t *testing.T) {
 	}
 }
 
+func TestMetricsExposesFusedTurnObserver(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+	for _, c := range []*abi.ToolCall{
+		taggedMetricsCall("turn-fused", fusedturn.ClassClassical),
+		taggedMetricsCall("turn-fused", fusedturn.ClassWeight),
+		taggedMetricsCall("turn-classical", fusedturn.ClassClassical),
+	} {
+		srv.k.Syscall(ctx, c)
+	}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"# HELP fak_fused_turns_total ",
+		"# TYPE fak_fused_turns_total counter",
+		"fak_fused_turns_total 1",
+		"# HELP fak_turn_ops_total ",
+		`fak_turn_ops_total{family="classical"} 2`,
+		`fak_turn_ops_total{family="weight"} 1`,
+		"fak_turns_total 2",
+		"# TYPE fak_fused_turn_rate gauge",
+		"fak_fused_turn_rate 0.5",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("metrics missing %q\n--- fused metrics ---\n%s", want,
+				extractFusedTurnMetrics(text))
+		}
+	}
+}
+
+func taggedMetricsCall(trace string, class fusedturn.OpClass) *abi.ToolCall {
+	return fusedturn.Tag(&abi.ToolCall{
+		Tool:    "allow_read",
+		TraceID: trace,
+		Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+	}, class)
+}
+
 // extractDecisions returns just the fak_kernel_decisions_total lines for a readable
 // failure message.
 func extractDecisions(text string) string {
 	var out strings.Builder
 	for _, line := range strings.Split(text, "\n") {
 		if strings.Contains(line, "fak_kernel_decisions_total") {
+			out.WriteString(line)
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
+}
+
+func extractFusedTurnMetrics(text string) string {
+	var out strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "fak_fused_turn") || strings.Contains(line, "fak_turn") {
 			out.WriteString(line)
 			out.WriteByte('\n')
 		}

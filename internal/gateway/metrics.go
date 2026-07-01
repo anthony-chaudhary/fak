@@ -1332,6 +1332,15 @@ func (s *Server) renderMetrics() string {
 			fmt.Fprintf(&b, "fak_kernel_decisions_total{rung=\"%s\",kind=\"%s\",reason=\"%s\"} %d\n",
 				promQuote(row.Rung), promQuote(row.Kind), promQuote(row.Reason), row.Count)
 		}
+		fused := s.rungObs.FusedSnapshot()
+		writeCounter(&b, "fak_fused_turns_total", "Turns that emitted at least one classical and one weight-classified operation.", fused.FusedTurns)
+		writeCounter(&b, "fak_turns_total", "Turns that emitted at least one classified classical or weight operation.", fused.Turns)
+		writeHelpType(&b, "fak_turn_ops_total", "Kernel operations by fused-turn concept family (unknown ops do not enter the fused-turn denominator).", "counter")
+		for _, row := range fused.Ops {
+			fmt.Fprintf(&b, "fak_turn_ops_total{family=\"%s\"} %d\n", promQuote(row.Family), row.Count)
+		}
+		writeHelpType(&b, "fak_fused_turn_rate", "Cumulative fused-turn rate: fak_fused_turns_total / fak_turns_total.", "gauge")
+		fmt.Fprintf(&b, "fak_fused_turn_rate %s\n", promFloat(fused.Rate))
 	}
 	writeHelpType(&b, "fak_gateway_vdso_hit_ratio", "Current cumulative vDSO hit ratio over kernel submissions.", "gauge")
 	ratio := 0.0

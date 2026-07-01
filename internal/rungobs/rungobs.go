@@ -3,9 +3,11 @@ package rungobs
 import (
 	"context"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
@@ -41,11 +43,19 @@ type bucketCost struct {
 	tokenDelta int64
 }
 
+type turnClassCounts struct {
+	classical bool
+	weight    bool
+	observed  bool
+	fused     bool
+}
+
 // Observer is the passive rung-decision distribution counter. Construct it with
 // New and register it with abi.RegisterEmitter; read the histogram with Snapshot.
 //
 // It is safe for concurrent use: every mutation goes through mu. The dedup window
-// (seen + ring), the counts map, and the per-bucket cost are all guarded by it.
+// (seen + ring), the counts map, the per-bucket cost, and the fused-turn counters
+// are all guarded by it.
 type Observer struct {
 	mu           sync.Mutex
 	counts       map[decKey]int64
@@ -54,15 +64,22 @@ type Observer struct {
 	ring         []uint64              // FIFO eviction order for `seen`
 	rhead        int                   // next slot to overwrite in `ring`
 	adjudicators []abi.Adjudicator
+
+	turnOps    map[fusedturn.OpClass]int64
+	turns      map[string]*turnClassCounts
+	knownTurns int64
+	fusedTurns int64
 }
 
 // New returns an empty, ready-to-register Observer.
 func New() *Observer {
 	return &Observer{
-		counts: map[decKey]int64{},
-		cost:   map[decKey]bucketCost{},
-		seen:   map[uint64]struct{}{},
-		ring:   make([]uint64, dedupCap),
+		counts:  map[decKey]int64{},
+		cost:    map[decKey]bucketCost{},
+		seen:    map[uint64]struct{}{},
+		ring:    make([]uint64, dedupCap),
+		turnOps: map[fusedturn.OpClass]int64{},
+		turns:   map[string]*turnClassCounts{},
 	}
 }
 
@@ -104,6 +121,7 @@ func (o *Observer) Emit(ev abi.Event) {
 			kind = kindOf(ev.Verdict.Kind)
 			reason = reasonOf(ev.Verdict.Reason)
 		}
+		o.observeFusedOp(ev.Call)
 		o.bump("vdso", kind, reason, adjNs, tokDelta)
 		return
 	}
@@ -129,11 +147,13 @@ func (o *Observer) Emit(ev abi.Event) {
 		if !o.claim(ev.Call.SeqNo) {
 			return
 		}
+		o.observeFusedOp(ev.Call)
 		o.attribute(ev.Call, ev.Verdict, adjNs, tokDelta)
 	case abi.EvDeny:
 		if !o.claim(ev.Call.SeqNo) {
 			return
 		}
+		o.observeFusedOp(ev.Call)
 		o.attribute(ev.Call, ev.Verdict, adjNs, tokDelta)
 	}
 }
@@ -195,6 +215,57 @@ func (o *Observer) bump(rung, kind, reason string, adjNs, tokDelta int64) {
 	o.mu.Unlock()
 }
 
+// observeFusedOp folds one de-duplicated kernel decision into the fused-turn KPI.
+// Unknown ops are counted as ops but do not create a turn denominator and cannot
+// make a turn fused; only classified classical/weight ops enter the rate.
+func (o *Observer) observeFusedOp(call *abi.ToolCall) {
+	if call == nil {
+		return
+	}
+	class := fusedturn.Classify(call)
+	key := turnKey(call)
+
+	o.mu.Lock()
+	o.turnOps[class]++
+	if class == fusedturn.ClassUnknown || key == "" {
+		o.mu.Unlock()
+		return
+	}
+	t := o.turns[key]
+	if t == nil {
+		t = &turnClassCounts{}
+		o.turns[key] = t
+	}
+	if !t.observed {
+		t.observed = true
+		o.knownTurns++
+	}
+	switch class {
+	case fusedturn.ClassClassical:
+		t.classical = true
+	case fusedturn.ClassWeight:
+		t.weight = true
+	}
+	if !t.fused && t.classical && t.weight {
+		t.fused = true
+		o.fusedTurns++
+	}
+	o.mu.Unlock()
+}
+
+func turnKey(call *abi.ToolCall) string {
+	if call == nil {
+		return ""
+	}
+	if call.TraceID != "" {
+		return call.TraceID
+	}
+	if call.SeqNo != 0 {
+		return "seq:" + strconv.FormatUint(call.SeqNo, 10)
+	}
+	return ""
+}
+
 // attribute re-folds the call's chain off the hot path to recover the winning rung,
 // then bumps its bucket. The re-fold is exact today because the hot path folds this
 // same process-global registry chain (abi.AdjudicatorsFor); see the package doc for
@@ -247,6 +318,22 @@ type DecisionRow struct {
 	TokenDelta int64
 }
 
+// FusedOpRow is one fak_turn_ops_total{family} row.
+type FusedOpRow struct {
+	Family string
+	Count  int64
+}
+
+// FusedSnapshot is the fused-turn KPI folded from classified kernel calls. Turns is
+// the denominator: distinct TraceID/turn keys that emitted at least one classical
+// or weight op. Unknown ops are counted in Ops but never inflate Turns or Rate.
+type FusedSnapshot struct {
+	Ops        []FusedOpRow
+	Turns      int64
+	FusedTurns int64
+	Rate       float64
+}
+
 // Snapshot returns the per-(rung,kind,reason) counts and folded cost, sorted by
 // (rung, kind, reason) for stable /metrics output. The slice is a fresh copy; callers
 // may mutate it.
@@ -268,6 +355,30 @@ func (o *Observer) Snapshot() []DecisionRow {
 		return rows[i].Reason < rows[j].Reason
 	})
 	return rows
+}
+
+// FusedSnapshot returns the fused-turn counters in stable family order. The result
+// is a fresh value; callers may mutate it.
+func (o *Observer) FusedSnapshot() FusedSnapshot {
+	o.mu.Lock()
+	counts := map[fusedturn.OpClass]int64{}
+	for class, count := range o.turnOps {
+		counts[class] = count
+	}
+	turns, fused := o.knownTurns, o.fusedTurns
+	o.mu.Unlock()
+
+	rows := make([]FusedOpRow, 0, len(counts))
+	for _, class := range []fusedturn.OpClass{fusedturn.ClassClassical, fusedturn.ClassWeight, fusedturn.ClassUnknown} {
+		if count := counts[class]; count > 0 {
+			rows = append(rows, FusedOpRow{Family: class.String(), Count: count})
+		}
+	}
+	rate := 0.0
+	if turns > 0 {
+		rate = float64(fused) / float64(turns)
+	}
+	return FusedSnapshot{Ops: rows, Turns: turns, FusedTurns: fused, Rate: rate}
 }
 
 // Total returns the sum of every bucket — the full decision count including the

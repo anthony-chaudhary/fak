@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
@@ -64,6 +65,12 @@ func (hitFP) Caps() []abi.Capability { return nil }
 
 func call(tool string) *abi.ToolCall {
 	return &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+}
+
+func classifiedCall(trace string, class fusedturn.OpClass) *abi.ToolCall {
+	c := call("allow_it")
+	c.TraceID = trace
+	return fusedturn.Tag(c, class)
 }
 
 // registerChain wires an isolated adjudication chain on the global ABI registry.
@@ -313,6 +320,41 @@ func TestRungObsFoldsCostIntoBuckets(t *testing.T) {
 	}
 	if !sawTransform {
 		t.Fatal("no TRANSFORM bucket folded; transform_it cost was dropped")
+	}
+}
+
+func TestRungObsFusedTurnCounters(t *testing.T) {
+	registerChain()
+	obs := New()
+	abi.RegisterEmitter(obs)
+
+	k := kernel.New("e")
+	for _, c := range []*abi.ToolCall{
+		classifiedCall("turn-fused", fusedturn.ClassClassical),
+		classifiedCall("turn-fused", fusedturn.ClassWeight),
+		classifiedCall("turn-classical", fusedturn.ClassClassical),
+		classifiedCall("turn-unknown", fusedturn.ClassUnknown),
+	} {
+		k.Syscall(context.Background(), c)
+	}
+
+	snap := obs.FusedSnapshot()
+	if snap.Turns != 2 {
+		t.Fatalf("Turns = %d, want 2 (unknown-only turn must not enter denominator)", snap.Turns)
+	}
+	if snap.FusedTurns != 1 {
+		t.Fatalf("FusedTurns = %d, want 1", snap.FusedTurns)
+	}
+	if snap.Rate != 0.5 {
+		t.Fatalf("Rate = %v, want 0.5", snap.Rate)
+	}
+	gotOps := map[string]int64{}
+	for _, row := range snap.Ops {
+		gotOps[row.Family] = row.Count
+	}
+	wantOps := map[string]int64{"classical": 2, "weight": 1, "unknown": 1}
+	if !reflect.DeepEqual(gotOps, wantOps) {
+		t.Fatalf("Ops = %v, want %v", gotOps, wantOps)
 	}
 }
 
