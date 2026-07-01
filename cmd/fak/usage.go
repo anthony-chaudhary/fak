@@ -39,6 +39,13 @@ func usageCoreVerbs() {
                  Text and --json results include score/grade/score_notes so loops can
                  rank "retry later" refusals above post-commit integrity failures.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
+  fak edit-tx   --spec FILE|- [--workspace DIR] [--check CMD ...] [--dry-run] [--json]
+                (TRANSACTIONAL MULTI-FILE EDIT: apply a JSON batch of full-file writes/
+                 deletes, run validation commands against the whole set, and roll back
+                 every touched path if any write or check fails. Spec shape:
+                 {"edits":[{"path":"p","content":"..."},{"path":"q","delete":true}],
+                 "checks":["go test ./pkg"]}. Exit 0 applied/dry-run OK, 1 rolled back
+                 or refused, 2 usage.)
   fak sweep     [--dir DIR] [--json] | --apply --lane L -m "SUBJECT" [--path P ...] [--push]
                 (DRIVE A DIRTY MULTI-SESSION TREE TOWARD ZERO: the layer above fak commit.
                  Default mode REPORTS the working tree grouped by lane — every stampable
