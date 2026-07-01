@@ -22,6 +22,45 @@ func hermeticTargets(t *testing.T) {
 	}
 }
 
+// TestComputeTargetCredMissing proves a reachable-but-credential-gated target fails with
+// a target-named, actionable message (not the generic downstream one), while the exempt
+// targets — a loopback local serve and the OAuth-guard anthropic proxy — never demand a key.
+func TestComputeTargetCredMissing(t *testing.T) {
+	getenv := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	mac := computeTarget{Name: "mac", Kind: targetGatewayURL, GatewayURL: "http://mac-host:8080", Locality: localityRemote, CredEnv: "FAK_GATEWAY_KEY"}
+
+	// Remote gateway target, key env empty -> missing, message names the target, the env
+	// var, and (for mac) the SSH-fetch shortcut.
+	msg, missing := computeTargetCredMissing(mac, mac.CredEnv, getenv(map[string]string{}))
+	if !missing {
+		t.Fatalf("mac with empty FAK_GATEWAY_KEY: missing=false, want true")
+	}
+	for _, want := range []string{`"mac"`, "FAK_GATEWAY_KEY", "claude-mac-fak"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("cred-missing message missing %q:\n%s", want, msg)
+		}
+	}
+
+	// Key present -> not missing.
+	if _, missing := computeTargetCredMissing(mac, mac.CredEnv, getenv(map[string]string{"FAK_GATEWAY_KEY": "sekret"})); missing {
+		t.Errorf("mac with FAK_GATEWAY_KEY set: missing=true, want false")
+	}
+
+	// Loopback local serve declares no cred and must never demand a key.
+	local := computeTarget{Name: "local", Kind: targetLocalSpawn, GatewayURL: "http://127.0.0.1:8080", Locality: localityLocal}
+	if _, missing := computeTargetCredMissing(local, "", getenv(map[string]string{})); missing {
+		t.Errorf("loopback local target demanded a key")
+	}
+
+	// The anthropic provider-proxy (OAuth via guard) is exempt even with a CredEnv named.
+	anth := computeTarget{Name: "anthropic", Kind: targetProviderProxy, GatewayURL: "https://api.anthropic.com", Locality: localityRemote, CredEnv: "ANTHROPIC_API_KEY"}
+	if _, missing := computeTargetCredMissing(anth, anth.CredEnv, getenv(map[string]string{})); missing {
+		t.Errorf("anthropic provider-proxy demanded a key (should use OAuth via guard)")
+	}
+}
+
 // TestResolveLeadingTarget is the core back-compat/footgun unit: a leading token that
 // NAMES a target is stripped and returned; an unknown token (or a flag) is left in place
 // so it still forwards to claude verbatim.

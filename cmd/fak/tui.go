@@ -673,6 +673,15 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		}
 		applyComputeTarget(&opts, tgt, setFlags)
 		resolvedTarget = &tgt
+		// A target can be /healthz-up yet un-launchable because its bearer env var is
+		// unset (the mac gateway's healthz is unauthenticated). Fail here with a
+		// target-named, actionable message instead of the generic downstream
+		// "--gateway-url requires FAK_GATEWAY_KEY to be set" — this covers both explicit
+		// `fak c mac` and an `--auto` winner that resolved to a credential-gated target.
+		if msg, missing := computeTargetCredMissing(tgt, opts.GatewayKeyEnv, os.Getenv); missing {
+			fmt.Fprintln(stderr, msg)
+			return 2
+		}
 	}
 	report, err := buildTUIAgentReport(opts, at, tuiExecutable(), os.Getenv)
 	if err != nil {
@@ -720,6 +729,38 @@ func resolveLeadingTarget(argv []string, reg *targetRegistry, stderr io.Writer) 
 		fmt.Fprintf(stderr, "fak console agent: %q is not a known compute target (did you mean %q? — `fak c --list-targets`); forwarding it to claude\n", tok, hint)
 	}
 	return "", argv
+}
+
+// computeTargetCredMissing reports whether a resolved gateway-routed target declares a
+// credential env var that is empty in the environment, and returns an actionable,
+// target-named message. It exists because a target selected purely on a live /healthz
+// (which is unauthenticated) can still be un-launchable when its bearer env var is unset:
+// today that surfaces only as the generic downstream "--gateway-url requires FAK_GATEWAY_KEY
+// to be set", which names neither the target nor how to supply the key. It fires ONLY for a
+// REMOTE gateway-url/local-spawn target with a non-empty effective key env whose value is
+// unset — a loopback local serve and the anthropic provider-proxy (OAuth via guard, empty
+// GatewayURL) are exempt, matching buildTUIAgentGatewayReport's own bearer tolerance.
+func computeTargetCredMissing(tgt computeTarget, keyEnv string, getenv func(string) string) (string, bool) {
+	if tgt.Kind != targetGatewayURL && tgt.Kind != targetLocalSpawn {
+		return "", false
+	}
+	if gatewayIsLocal(tgt.GatewayURL) {
+		return "", false
+	}
+	env := strings.TrimSpace(keyEnv)
+	if env == "" {
+		env = strings.TrimSpace(tgt.CredEnv)
+	}
+	if env == "" || strings.TrimSpace(getenv(env)) != "" {
+		return "", false // target needs no bearer, or the bearer is present
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak console agent: target %q is reachable but its gateway credential $%s is empty.\n", tgt.Name, env)
+	fmt.Fprintf(&b, "  export it (e.g. %s=$(ssh <gateway-host> 'cat ~/.fak-gateway-key')), or pick another target (`fak c --list-targets`)", env)
+	if strings.EqualFold(tgt.Name, "mac") {
+		fmt.Fprint(&b, ";\n  or run `fak claude-mac-fak`, which fetches the Mac bearer over SSH for you")
+	}
+	return b.String(), true
 }
 
 // applyComputeTarget folds a resolved target into the launch options WITHOUT clobbering
