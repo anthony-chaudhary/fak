@@ -27,11 +27,51 @@ mode="${FLEET_TRUNK_GUARD:-block}"
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_BRANCH:-0}" = "1" ] && exit 0
 
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+# A reference-transaction hook runs while git is holding ref/index state. Do not
+# start another git process here unless this phase can actually act; nested git
+# commands on Git-for-Windows have wedged commits in this hook. In block mode only
+# the prepared phase can refuse. In warn mode only the committed phase can print.
+case "$mode:$phase" in
+	block:prepared|warn:committed) ;;
+	*) exit 0 ;;
+esac
+
+zero="0000000000000000000000000000000000000000"
+created=""
+while read -r old new ref; do
+	case "$ref" in
+		refs/heads/*) : ;;
+		*) continue ;;
+	esac
+	[ "$old" = "$zero" ] || continue          # creations only (skip normal commits)
+	name="${ref#refs/heads/}"
+	created="$created $name"
+done
+
+[ -z "$created" ] && exit 0
+
+# Git runs non-bare hooks from the worktree root. Prefer that cwd over calling
+# `git rev-parse` from inside the transaction hook.
+repo_root=$(pwd -P 2>/dev/null || pwd)
 dos_file="$repo_root/dos.toml"
 
+trimmed_branch_role=""
 trim_branch_role() {
-	printf '%s\n' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+	trimmed_branch_role=$1
+	while :; do
+		case "$trimmed_branch_role" in
+			" "*) trimmed_branch_role=${trimmed_branch_role#?} ;;
+			"	"*) trimmed_branch_role=${trimmed_branch_role#?} ;;
+			*) break ;;
+		esac
+	done
+	while :; do
+		case "$trimmed_branch_role" in
+			*" ") trimmed_branch_role=${trimmed_branch_role%?} ;;
+			*"	") trimmed_branch_role=${trimmed_branch_role%?} ;;
+			*) break ;;
+		esac
+	done
 }
 
 branch_role_value() {
@@ -41,7 +81,8 @@ branch_role_value() {
 	in_roles=0
 	while IFS= read -r raw || [ -n "$raw" ]; do
 		line=${raw%%#*}
-		line=$(trim_branch_role "$line")
+		trim_branch_role "$line"
+		line=$trimmed_branch_role
 		[ -n "$line" ] || continue
 		case "$line" in
 			\[*\])
@@ -58,9 +99,13 @@ branch_role_value() {
 			*=*) : ;;
 			*) continue ;;
 		esac
-		k=$(trim_branch_role "${line%%=*}")
+		k=${line%%=*}
+		trim_branch_role "$k"
+		k=$trimmed_branch_role
 		[ "$k" = "$key" ] || continue
-		v=$(trim_branch_role "${line#*=}")
+		v=${line#*=}
+		trim_branch_role "$v"
+		v=$trimmed_branch_role
 		case "$v" in
 			\"*\") v=${v#\"}; v=${v%\"} ;;
 			\'*\') v=${v#\'}; v=${v%\'} ;;
@@ -74,15 +119,8 @@ branch_role_value() {
 development_branch=$(branch_role_value development_branch "$dos_file")
 [ -n "$development_branch" ] || development_branch=main
 
-zero="0000000000000000000000000000000000000000"
 violations=""
-while read -r old new ref; do
-	case "$ref" in
-		refs/heads/*) : ;;
-		*) continue ;;
-	esac
-	[ "$old" = "$zero" ] || continue          # creations only (skip normal commits)
-	name="${ref#refs/heads/}"
+for name in $created; do
 	[ "$name" = "$development_branch" ] && continue
 	violations="$violations $name"
 done
