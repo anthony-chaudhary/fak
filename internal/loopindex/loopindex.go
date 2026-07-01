@@ -90,29 +90,37 @@ type Loop struct {
 	Stages []Stage `json:"stages"`
 }
 
-// KPI is one graded stage rung. Score is 0..100; Debt is 0 or 1 (each stage is one
-// rung). Detail is a human one-liner — on a failing rung it carries the fix hint.
+// KPI is one graded stage rung. Value is the continuous health contribution; Score
+// is the legacy integer compatibility field. Debt is 0 or 1 (each stage is one rung).
+// Detail is a human one-liner — on a failing rung it carries the fix hint.
 type KPI struct {
-	Name   string `json:"kpi"`
-	Group  string `json:"group"`
-	Signal string `json:"signal"`
-	Wired  bool   `json:"wired"`
-	Score  int    `json:"score"`
-	Debt   int    `json:"debt"`
-	Detail string `json:"detail"`
+	Name   string  `json:"kpi"`
+	Group  string  `json:"group"`
+	Signal string  `json:"signal"`
+	Wired  bool    `json:"wired"`
+	Value  float64 `json:"value"`
+	Score  int     `json:"score"`
+	Debt   int     `json:"debt"`
+	Detail string  `json:"detail"`
 }
 
 // Corpus is the headline summary block. The control pane reads
 // corpus.loopindex_debt and corpus.grade; the keys are stable.
 type Corpus struct {
-	Stages         int     `json:"stages"`          // always 6 when valid
-	WiredStages    int     `json:"wired_stages"`    // stages with a load-bearing witness
-	LoopIndex      int     `json:"loop_index"`      // 0..100 over ALL stages (unwired contributes 0) — the "how close to 10x" headline
-	WitnessedIndex int     `json:"witnessed_index"` // 0..100 over only the WIRED stages (health of what we can see)
-	Score          int     `json:"score"`           // alias of LoopIndex for the control-pane fold
-	Grade          string  `json:"grade"`           // A..F from LoopIndex
-	LoopIndexDebt  int     `json:"loopindex_debt"`  // the headline integer: stages not yet witnessed at their floor
-	WiredFrac      float64 `json:"wired_frac"`      // WiredStages / Stages
+	Stages           int     `json:"stages"`          // always 6 when valid
+	WiredStages      int     `json:"wired_stages"`    // stages with a load-bearing witness
+	LoopIndex        int     `json:"loop_index"`      // 0..100 over ALL stages (unwired contributes 0) — the "how close to 10x" headline
+	WitnessedIndex   int     `json:"witnessed_index"` // 0..100 over only the WIRED stages (health of what we can see)
+	Value            float64 `json:"value"`           // continuous loop value over all stages
+	ValueUnit        string  `json:"value_unit"`      // quality_ratio
+	LoopValue        float64 `json:"loop_value"`      // alias for value, named for humans
+	WitnessedValue   float64 `json:"witnessed_value"` // continuous health over wired stages only
+	Score            int     `json:"score"`           // alias of LoopIndex for the control-pane fold
+	LegacyScore      int     `json:"legacy_score"`    // legacy alias of LoopIndex
+	LegacyScoreScale int     `json:"legacy_score_scale"`
+	Grade            string  `json:"grade"`          // A..F from LoopIndex
+	LoopIndexDebt    int     `json:"loopindex_debt"` // the headline integer: stages not yet witnessed at their floor
+	WiredFrac        float64 `json:"wired_frac"`     // WiredStages / Stages
 }
 
 // Report is the control-pane envelope every fak scorecard emits, specialized to the
@@ -160,6 +168,7 @@ func Score(loop Loop) Report {
 			Group:  st.Name,
 			Signal: st.Signal,
 			Wired:  w,
+			Value:  round3(contrib),
 			Score:  int(round(100 * contrib)),
 		}
 		if st.satisfied() {
@@ -173,9 +182,12 @@ func Score(loop Loop) Report {
 	}
 
 	n := len(loop.Stages)
+	loopValue := round3(sumAll / float64(n))
 	loopIndex := int(round(100 * sumAll / float64(n)))
 	witnessed := 0
+	witnessedValue := 0.0
 	if wired > 0 {
+		witnessedValue = round3(sumWired / float64(wired))
 		witnessed = int(round(100 * sumWired / float64(wired)))
 	}
 	grade := gradeLetter(loopIndex)
@@ -184,19 +196,25 @@ func Score(loop Loop) Report {
 		Schema: schema,
 		OK:     debt == 0,
 		Corpus: Corpus{
-			Stages:         n,
-			WiredStages:    wired,
-			LoopIndex:      loopIndex,
-			WitnessedIndex: witnessed,
-			Score:          loopIndex,
-			Grade:          grade,
-			LoopIndexDebt:  debt,
-			WiredFrac:      round3(float64(wired) / float64(n)),
+			Stages:           n,
+			WiredStages:      wired,
+			LoopIndex:        loopIndex,
+			WitnessedIndex:   witnessed,
+			Value:            loopValue,
+			ValueUnit:        "quality_ratio",
+			LoopValue:        loopValue,
+			WitnessedValue:   witnessedValue,
+			Score:            loopIndex,
+			LegacyScore:      loopIndex,
+			LegacyScoreScale: 100,
+			Grade:            grade,
+			LoopIndexDebt:    debt,
+			WiredFrac:        round3(float64(wired) / float64(n)),
 		},
 		KPIs:        kpis,
 		StageDetail: loop.Stages,
 	}
-	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = verdict(debt, loopIndex, kpis)
+	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = verdict(debt, loopValue, loopIndex, kpis)
 	return rep
 }
 
@@ -225,24 +243,26 @@ func malformed(loop Loop) Report {
 		Reason:     fmt.Sprintf("got %d stages; want orient,plan,act,verify,ship,learn", len(loop.Stages)),
 		NextAction: "fix the impure shell to emit exactly the six canonical stages in loop order",
 		Corpus: Corpus{
-			Stages:        len(loop.Stages),
-			LoopIndexDebt: len(stageOrder),
-			Grade:         "F",
+			Stages:           len(loop.Stages),
+			ValueUnit:        "quality_ratio",
+			LegacyScoreScale: 100,
+			LoopIndexDebt:    len(stageOrder),
+			Grade:            "F",
 		},
 	}
 }
 
 // verdict picks the one-line finding + the worst-first next action.
-func verdict(debt, loopIndex int, kpis []KPI) (verdict, finding, reason, next string) {
+func verdict(debt int, loopValue float64, loopIndex int, kpis []KPI) (verdict, finding, reason, next string) {
 	if debt == 0 {
 		return "OK",
-			fmt.Sprintf("every loop stage is witnessed at its floor (loop-index %d/100)", loopIndex),
+			fmt.Sprintf("every loop stage is witnessed at its floor (loop-index value %.3f, legacy score %d)", loopValue, loopIndex),
 			"orient→plan→act→verify→ship→learn each have a load-bearing witnessed signal",
 			"hold the index; raise a stage's floor or deepen its probes to push toward 10x"
 	}
 	worst := worstStage(kpis)
 	return "ACTION",
-		fmt.Sprintf("loop not fully witnessed: %d/%d stage(s) below floor (loop-index %d/100)", debt, len(kpis), loopIndex),
+		fmt.Sprintf("loop not fully witnessed: %d/%d stage(s) below floor (loop-index value %.3f, legacy score %d)", debt, len(kpis), loopValue, loopIndex),
 		fmt.Sprintf("worst-first stage: %s — %s", worst.Name, worst.Detail),
 		worst.Detail
 }
@@ -318,10 +338,10 @@ func round3(x float64) float64 { return round(1000*x) / 1000 }
 // (failing before passing, in loop order among equals). It is the terminal view.
 func Render(w io.Writer, rep Report) {
 	c := rep.Corpus
-	fmt.Fprintf(w, "loop-index scorecard (agentic-coding loop): %s grade %s, loopindex_debt=%d\n",
-		rep.Verdict, c.Grade, c.LoopIndexDebt)
-	fmt.Fprintf(w, "  loop-index=%d/100  witnessed=%d/100  wired=%d/%d stages\n",
-		c.LoopIndex, c.WitnessedIndex, c.WiredStages, c.Stages)
+	fmt.Fprintf(w, "loop-index scorecard (agentic-coding loop): %s value %.3f grade %s, loopindex_debt=%d\n",
+		rep.Verdict, c.Value, c.Grade, c.LoopIndexDebt)
+	fmt.Fprintf(w, "  loop-index value=%.3f (legacy score %d)  witnessed value=%.3f (legacy score %d)  wired=%d/%d stages\n",
+		c.LoopValue, c.LoopIndex, c.WitnessedValue, c.WitnessedIndex, c.WiredStages, c.Stages)
 	fmt.Fprintf(w, "  finding: %s\n", rep.Finding)
 	fmt.Fprintf(w, "  next: %s\n", rep.NextAction)
 
@@ -344,6 +364,6 @@ func Render(w io.Writer, rep Report) {
 		if k.Wired {
 			wire = "wired"
 		}
-		fmt.Fprintf(w, "  [%s] %-7s %-6s %3d  %s\n", mark, k.Name, wire, k.Score, k.Detail)
+		fmt.Fprintf(w, "  [%s] %-7s %-6s %.3f (legacy %3d)  %s\n", mark, k.Name, wire, k.Value, k.Score, k.Detail)
 	}
 }

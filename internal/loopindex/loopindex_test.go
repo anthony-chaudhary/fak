@@ -81,6 +81,9 @@ func TestAllWitnessedIsClean(t *testing.T) {
 	if rep.Corpus.LoopIndex != 100 {
 		t.Fatalf("loop-index = %d, want 100", rep.Corpus.LoopIndex)
 	}
+	if rep.Corpus.Value != 1 || rep.Corpus.LoopValue != 1 || rep.Corpus.WitnessedValue != 1 || rep.Corpus.LegacyScore != 100 || rep.Corpus.LegacyScoreScale != 100 {
+		t.Fatalf("continuous value fields not stamped: %+v", rep.Corpus)
+	}
 	if rep.Corpus.Grade != "A" {
 		t.Fatalf("grade = %q, want A", rep.Corpus.Grade)
 	}
@@ -124,6 +127,9 @@ func TestUnwiredContributesZeroButWitnessedIgnoresIt(t *testing.T) {
 	rep := Score(loop)
 	if rep.Corpus.LoopIndex != 50 {
 		t.Fatalf("loop-index = %d, want 50", rep.Corpus.LoopIndex)
+	}
+	if rep.Corpus.Value != 0.5 || rep.KPIs[0].Value != 1 || rep.KPIs[3].Value != 0 {
+		t.Fatalf("continuous values = corpus %+v kpis %+v", rep.Corpus, rep.KPIs)
 	}
 	if rep.Corpus.WitnessedIndex != 100 {
 		t.Fatalf("witnessed-index = %d, want 100", rep.Corpus.WitnessedIndex)
@@ -176,9 +182,12 @@ func TestRenderMentionsHeadline(t *testing.T) {
 	var b bytes.Buffer
 	Render(&b, Score(loop))
 	out := b.String()
-	for _, want := range []string{"loopindex_debt", "loop-index=", "plan", "DEBT"} {
+	for _, want := range []string{"loopindex_debt", "loop-index value=", "legacy score", "plan", "DEBT"} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
 			t.Errorf("Render output missing %q:\n%s", want, out)
 		}
+	}
+	if bytes.Contains([]byte(out), []byte("/100")) {
+		t.Fatalf("Render output must use continuous values, got:\n%s", out)
 	}
 }
