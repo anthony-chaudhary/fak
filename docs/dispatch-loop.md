@@ -85,6 +85,10 @@ loop. Each one is a hard guarantee, not a best effort:
 Run the [bottleneck map loop](bottleneck-map-loop.md) before turning on a dispatch
 window or when the loop reports `AT_CAP`/low throughput. That fold answers whether
 the next bottleneck is fleet capacity/recovery or the issue backlog itself.
+Before increasing `--max-workers` or a scheduled task's `-MaxWorkers`, run the
+[safe-to-raise-cap checklist](safe-to-raise-cap-checklist.md); it requires green
+seats, host cap, lease health, rate budget, and closure honesty, and records a
+raise/hold decision row.
 
 If fleet health is CRITICAL/HIGH from account throttles or auth failures, treat it
 as a **transient dispatch gate**: cap the spawn arm and recheck after reset/relogin
