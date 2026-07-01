@@ -178,7 +178,7 @@ func TestOriginWitnessIsSkippedWithoutEvidenceRefs(t *testing.T) {
 	}
 }
 
-func TestOriginWitnessByKindConfirmsMixedPathAndOutput(t *testing.T) {
+func TestOriginWitnessKindRegistryConfirmsMixedPathAndOutput(t *testing.T) {
 	dir := t.TempDir()
 	artifact := filepath.Join(dir, "artifact.txt")
 	if err := os.WriteFile(artifact, []byte("ok"), 0o644); err != nil {
@@ -221,7 +221,7 @@ func TestOriginWitnessByKindConfirmsMixedPathAndOutput(t *testing.T) {
 	}
 }
 
-func TestOriginWitnessByKindRefusesFailingKind(t *testing.T) {
+func TestOriginWitnessKindRegistryRefusesFailingKind(t *testing.T) {
 	m := NewManager(WithDefaultOriginWitnesses())
 	refs := []EvidenceRef{
 		{Kind: PathRefKind, Ref: filepath.Join(t.TempDir(), "missing.txt")},
@@ -239,7 +239,7 @@ func TestOriginWitnessByKindRefusesFailingKind(t *testing.T) {
 	}
 }
 
-func TestOriginWitnessByKindUnavailableForUnregisteredKind(t *testing.T) {
+func TestOriginWitnessKindRegistryUnavailableForUnregisteredKind(t *testing.T) {
 	m := NewManager(WithDefaultOriginWitnesses())
 	ref := EvidenceRef{Kind: "commit", Ref: "HEAD"}
 	if _, err := m.StartTask(TaskSpec{TaskID: "task_unknown_origin", EvidenceRefs: []EvidenceRef{ref}}); err != nil {
