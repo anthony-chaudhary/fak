@@ -93,6 +93,15 @@ CLAUDE_EXE = (
     or shutil.which("claude.exe")
     or os.path.expanduser("~/.local/bin/claude")
 )
+# The fak binary used for the per-source concurrency gate (`fak resume admit`). Resolved
+# on PATH before a bare default; None if fak is unavailable, in which case the gate
+# fails OPEN (never strands the watchdog on a missing binary).
+FAK_EXE = (
+    os.environ.get("FLEET_FAK_EXE")
+    or os.environ.get("FAK_EXE")
+    or shutil.which("fak")
+    or shutil.which("fak.exe")
+)
 LOG_DIR = os.environ.get("FAK_WATCHDOG_LOG_DIR", os.path.join(HERE, "_watchdog"))
 # Honor FLEET_REG_DIR exactly as fleet_sessions.py does (same tools/_registry default),
 # so the watchdog reads the plan/ledger/sessions from the dir the refresh child WRITES.
@@ -126,6 +135,34 @@ RESUME_PROMPT = (
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def source_admit_gate() -> tuple[bool, str]:
+    """Ask the host-wide per-source concurrency gate whether this box may take one more
+    live resume RIGHT NOW, across ALL accounts (#1341/#1344). Returns (admit, reason).
+
+    The decision lives in the audited Go leaf `fak resume admit`: it counts the LIVE
+    `claude --resume` processes on the host (the dimension the server-side 529 burst wall
+    keys on -- which FAK_MAX_PER_TICK and the per-account rehome cap never measured) plus
+    the recent launch rate from the shared ledger, and exits 3 to DEFER. Fronting the
+    spawn with it means the safety rail lives INSIDE the launcher (the #617 lesson: a rail
+    in bypassable tooling gets bypassed), read by one primitive instead of re-derived here.
+
+    Fails OPEN: if fak is unavailable or the call errors for any reason other than a clean
+    exit-3 DEFER, admit -- a broken gate must never strand the whole watchdog. The existing
+    FAK_MAX_PER_TICK / spacing / once-gate remain as the fallback bound."""
+    if not FAK_EXE:
+        return True, "no-fak-binary"
+    try:
+        r = subprocess.run(
+            [FAK_EXE, "resume", "admit", "--quiet"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as exc:  # missing binary raced away, timeout, OS error -> fail open
+        return True, f"gate-error:{exc}"
+    if r.returncode == 3:
+        return False, (r.stdout or r.stderr or "SOURCE_DEFER").strip()
+    return True, "admitted"
 
 
 def note(msg: str) -> None:
@@ -452,6 +489,25 @@ def main() -> int:
             continue
         if not LIVE:
             note(f"  WOULD RESUME {sid8} acct={acct} proj={p.get('project')}")
+            continue
+
+        # Host-wide per-source concurrency gate (#1341/#1344): before spawning, ask the
+        # audited Go leaf whether the BOX may take one more live resume across ALL
+        # accounts. A DEFER here bounds the standing concurrency the per-source 529 burst
+        # wall keys on -- the thing FAK_MAX_PER_TICK (a per-tick count) and the per-account
+        # rehome cap never measured. Record a phase="deferred" ledger row so this DEFER is
+        # NOT counted as launch pressure by the next gate check, then skip this session
+        # (it stays eligible next tick). Fails open (see source_admit_gate).
+        admit_ok, admit_reason = source_admit_gate()
+        if not admit_ok:
+            note(f"  DEFER {sid8} acct={acct} -- per-source gate: {admit_reason}")
+            with open(ledger_path, "a") as fh:
+                fh.write(json.dumps({
+                    "ts": now_iso(), "session": sid, "account": p.get("account"),
+                    "resume_account": p.get("resume_account"),
+                    "phase": "deferred", "cause": "source_concurrency_gate",
+                    "reason": admit_reason,
+                }) + "\n")
             continue
 
         env = dict(os.environ)

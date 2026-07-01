@@ -24,11 +24,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionimage"
 )
@@ -51,11 +53,13 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeValidate(stdout, stderr, argv[1:])
 	case "scan":
 		return runResumeScan(stdout, stderr, argv[1:])
+	case "admit":
+		return runResumeAdmit(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, or scan)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, or admit)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -126,6 +130,216 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderResumeReport(stdout, rep, groundNote)
 	return 0
+}
+
+// runResumeAdmit is the PER-SOURCE concurrency gate: it folds the host's current
+// live-resume census and recent launch ledger into a snapshot, applies the tunable
+// source policy, and returns an admit/refuse verdict. A launcher self-gates on it before
+// it spawns a `claude --resume` — exit 0 admit, exit 3 refused — so the per-source 529
+// burst wall (#1341/#1344) is bounded by ONE audited decision a launcher cannot route
+// around, instead of the per-tick / per-account caps that never counted the box's total
+// live resumes. The decision is pure (resume.AdmitSource); this shell does only the I/O
+// the leaf forbids: the OS process census and the ledger read.
+func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("resume admit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultResumeLedger(), "launch ledger JSONL path (the durable record every launcher appends to)")
+	policyPath := fs.String("policy", defaultResumeSourcePolicy(), "per-source admission policy JSON path")
+	maxLive := fs.Int("max-live", 4, "host-wide ceiling on live `claude --resume` processes across all accounts (0 disables)")
+	maxPerWindow := fs.Int("max-per-window", 10, "max recorded launches in the trailing window (0 disables)")
+	windowSec := fs.Int64("window-sec", 300, "the rolling launch-rate window, in seconds")
+	minSpacingSec := fs.Int64("min-spacing-sec", 8, "host-wide minimum seconds between launches (0 disables)")
+	asJSON := fs.Bool("json", false, "emit the decision as JSON")
+	quiet := fs.Bool("quiet", false, "suppress the human line (for use as a launcher gate that reads only the exit code)")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak resume admit: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	// The policy file is the standing config; explicit flags OVERRIDE it (flag-over-file,
+	// the same precedence launch_admission's --global-cap etc. take). The fail-open loader
+	// makes a missing file the permissive default, then we layer the CLI ceilings on top.
+	policies, err := resume.LoadSourcePolicy(*policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak resume admit: %v\n", err)
+		return 2
+	}
+	policy := policies.Default
+	applyResumeSourceFlagOverrides(fs, &policy, *maxLive, *maxPerWindow, *windowSec, *minSpacingSec)
+
+	now := time.Now()
+	snap := foldSourceSnapshot(*ledger, now)
+	d := resume.AdmitSource(snap, policy, now)
+
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, map[string]any{
+			"schema":      "fak.resume-admit.v1",
+			"ledger_path": *ledger,
+			"policy_path": *policyPath,
+			"snapshot":    snap,
+			"decision":    d,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak resume admit: encode json: %v\n", err)
+			return 1
+		}
+	} else if !*quiet {
+		verdict := "ADMIT"
+		if !d.Admit {
+			verdict = "REFUSE"
+		}
+		fmt.Fprintf(stdout, "%-6s %-22s %s\n", verdict, d.Reason, d.Summary)
+	}
+
+	// Exit 3 when refused, so a launcher can gate with `fak resume admit && spawn`,
+	// matching `fak loop admit` and launch_admission.py's exit-3 DEFER contract.
+	if !d.Admit {
+		return 3
+	}
+	return 0
+}
+
+// applyResumeSourceFlagOverrides layers explicitly-set CLI ceilings over the loaded
+// policy. A flag the operator did not set leaves the file's value (or the permissive
+// zero) intact; a flag they did set wins. This keeps the policy file the durable default
+// while letting a one-off invocation (or a launcher that hard-codes its ceilings) override.
+func applyResumeSourceFlagOverrides(fs *flag.FlagSet, policy *resume.SourcePolicy, maxLive, maxPerWindow int, windowSec, minSpacingSec int64) {
+	if flagSet(fs, "max-live") {
+		policy.MaxLiveResumes = maxLive
+	} else if policy.MaxLiveResumes == 0 {
+		policy.MaxLiveResumes = maxLive // a fresh policy file inherits the CLI default ceiling
+	}
+	if flagSet(fs, "max-per-window") {
+		policy.MaxLaunchesPerWindow = maxPerWindow
+	} else if policy.MaxLaunchesPerWindow == 0 {
+		policy.MaxLaunchesPerWindow = maxPerWindow
+	}
+	if flagSet(fs, "window-sec") {
+		policy.WindowSeconds = windowSec
+	} else if policy.WindowSeconds == 0 {
+		policy.WindowSeconds = windowSec
+	}
+	if flagSet(fs, "min-spacing-sec") {
+		policy.MinLaunchSpacingSeconds = minSpacingSec
+	} else if policy.MinLaunchSpacingSeconds == 0 {
+		policy.MinLaunchSpacingSeconds = minSpacingSec
+	}
+}
+
+// resumeProcRe matches a `claude --resume <session-id>` invocation in a process command
+// line — the same signal the python audit tools (resume_sweep.live_resume_sids) key on.
+// It tolerates `claude`, `claude.exe`, a full path, and any flags between the exe and
+// `--resume`; the trailing token is the session id (a uuid or any non-space run).
+var resumeProcRe = regexp.MustCompile(`(?i)claude(?:\.exe)?\b.*--resume\s+(\S+)`)
+
+// countLiveResumes returns how many processes on this host are a live `claude --resume`,
+// across every account — the host-wide standing-concurrency truth the per-source 529 wall
+// keys on, which no per-tick / per-account cap ever measured. It uses the same audited
+// cross-platform census procguard already ships (Windows CIM CommandLine; POSIX /proc or
+// ps), so there is one process-enumeration implementation, not a fork.
+func countLiveResumes() int {
+	procs, _ := procguard.CollectRelations()
+	n := 0
+	for _, p := range procs {
+		if resumeProcRe.MatchString(p.Cmdline) {
+			n++
+		}
+	}
+	return n
+}
+
+// foldSourceSnapshot builds the SourceSnapshot the pure decision consumes: the live
+// process census plus the recorded launch timestamps from the durable ledger. The two
+// signals are independent — the census is the OS truth, the ledger is the launch record —
+// so neither has to trust the other.
+func foldSourceSnapshot(ledgerPath string, now time.Time) resume.SourceSnapshot {
+	times, last := scanLaunchLedger(ledgerPath)
+	return resume.SourceSnapshot{
+		LiveResumeCount: countLiveResumes(),
+		LaunchUnixTimes: times,
+		LastLaunchUnix:  last,
+	}
+}
+
+// scanLaunchLedger reads the launch ledger JSONL and returns the unix-second timestamps
+// of recorded LAUNCHES (and the most recent one). A row whose `phase` marks a non-launch
+// (deferred/considered/skipped) is excluded so the gate's own DEFER rows never count as
+// launch pressure — the same `_is_launch` rule launch_admission.py uses. Rows vary in
+// shape (some carry no `phase`/`pid`); only `ts` and the optional `phase` are read, so a
+// minimal or forward-extended row is handled. A missing/unreadable ledger yields no
+// launches (fail-open: an absent record never blocks a launch).
+func scanLaunchLedger(path string) (times []int64, last int64) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0
+	}
+	defer f.Close()
+
+	type lrec struct {
+		Ts    string `json:"ts"`
+		Phase string `json:"phase"`
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1<<16), 1<<20)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var r lrec
+		if json.Unmarshal(line, &r) != nil {
+			continue
+		}
+		if isNonLaunchPhase(r.Phase) {
+			continue
+		}
+		ts := parseTranscriptUnix(r.Ts)
+		if ts == 0 {
+			continue
+		}
+		times = append(times, ts)
+		if ts > last {
+			last = ts
+		}
+	}
+	return times, last
+}
+
+// isNonLaunchPhase reports whether a ledger row's phase marks something that is NOT a
+// fired launch — a deferral or consideration is not launch pressure, so counting it would
+// let the gate's own DEFERs cascade into more refusals. Mirrors launch_admission's
+// _NON_LAUNCH_PHASES set. An empty phase is a launch (the watchdog's launched rows and the
+// other launchers' phase-less rows both record a real spawn).
+func isNonLaunchPhase(phase string) bool {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "deferred", "considered", "skipped":
+		return true
+	default:
+		return false
+	}
+}
+
+// defaultResumeLedger is the durable launch ledger every launcher appends to, under the
+// fleet registry dir (FLEET_REG_DIR, default tools/_registry) — the same path
+// fleet_resume_watchdog.py and launch_admission.py use.
+func defaultResumeLedger() string {
+	reg := strings.TrimSpace(os.Getenv("FLEET_REG_DIR"))
+	if reg == "" {
+		reg = filepath.Join("tools", "_registry")
+	}
+	return filepath.Join(reg, "resume_ledger.jsonl")
+}
+
+// defaultResumeSourcePolicy is the per-source policy path: FAK_RESUME_SOURCE_POLICY if
+// set, else .fak/resume-source-policy.json (the same env-then-default-path idiom
+// defaultLoopPolicy uses for the loop governor).
+func defaultResumeSourcePolicy() string {
+	if v := strings.TrimSpace(os.Getenv("FAK_RESUME_SOURCE_POLICY")); v != "" {
+		return v
+	}
+	return filepath.Join(".fak", "resume-source-policy.json")
 }
 
 // runResumeValidate is the VALIDATION half of the verb: it back-tests the resume-cache
@@ -561,10 +775,21 @@ func resumeUsage(w io.Writer) {
   fak resume scan --store DIR [--ttl 5m|1h] [--horizon N] [--shed-budget N]
                   [--input-price F] [--output-price F] [--all] [--json]
 
+  fak resume admit [--max-live N] [--max-per-window N] [--window-sec S]
+                   [--min-spacing-sec S] [--ledger FILE] [--policy FILE]
+                   [--json] [--quiet]
+
 plan answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
 prices RESUME_FULL / CUT / RESET, and recommends a cut-by-default re-entry. Pure and
 deterministic: same facts in, same priced verdict out.
+
+admit is the PER-SOURCE concurrency gate a launcher self-gates on before it spawns a
+"claude --resume": it counts the LIVE resume processes on this host across all accounts
+(the dimension the server-side 529 burst wall keys on, which no per-tick / per-account
+cap measured) plus the recent launch rate from the durable ledger, and returns ADMIT
+(exit 0) or REFUSE (exit 3) with a structured reason. Gate a launch with:
+  fak resume admit --quiet && claude --resume <sid> ...
 
 validate back-tests that projection against billed reality: it scans a corpus of real
 Claude Code transcripts, scores how often the cold/warm posture call agreed with the
