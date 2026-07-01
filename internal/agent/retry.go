@@ -386,3 +386,31 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+// retryBackoffWait performs the pre-attempt backoff shared by every upstream retry loop
+// (Complete, streamConnect, StreamAnthropicRaw) on a retry iteration (attempt > 0). It computes
+// the next wait — honoring a named Retry-After, else the jittered exponential schedule, clamped
+// to the remaining time budget when budgetOn — surfaces it via RetryNotify BEFORE the otherwise-
+// invisible sleep (so the operator's `retry` line and counter fire with the exact wait slept),
+// then sleeps it out cancellably under ctx. It returns stop=true when the time budget is spent
+// (the caller breaks the loop and surfaces the last error) and a non-nil err when ctx was
+// cancelled during the wait (the caller returns it). The wait is computed ONCE and shared with
+// the hook, so the reported wait carries the same jitter and honored Retry-After as the sleep.
+func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus int, lastRetryAfter string, deadline time.Time, budgetOn bool) (stop bool, err error) {
+	var wait time.Duration
+	if budgetOn {
+		wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
+		if wait < 0 {
+			return true, nil // budget spent — nothing left to even wait
+		}
+	} else {
+		wait = retryWait(attempt, lastRetryAfter)
+	}
+	if p.RetryNotify != nil {
+		p.RetryNotify(attempt, lastStatus, wait)
+	}
+	if err := sleepCtx(ctx, wait); err != nil {
+		return false, err
+	}
+	return false, nil
+}

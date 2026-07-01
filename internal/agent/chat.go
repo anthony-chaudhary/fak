@@ -1027,27 +1027,15 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	triedAuthRefresh := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			// Surface the retry BEFORE the silent backoff sleep — the otherwise-invisible
-			// window. nil hook = unchanged. status carries WHY we are retrying (the upstream
-			// HTTP status, or 0 for a transport error) so the operator line can say "429".
-			// The wait is computed ONCE and shared with the hook so the reported wait is the
-			// exact one slept (it carries jitter and any honored Retry-After). When the TIME
-			// budget is the bound, the wait is clamped to the remaining budget; a non-positive
-			// result means the budget is spent, so stop and surface the last error.
-			var wait time.Duration
-			if budgetOn {
-				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
-				if wait < 0 {
-					break
-				}
-			} else {
-				wait = retryWait(attempt, lastRetryAfter)
-			}
-			if p.RetryNotify != nil {
-				p.RetryNotify(attempt, lastStatus, wait)
-			}
-			if err := sleepCtx(ctx, wait); err != nil {
+			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
+			// budget is the bound a spent budget stops the loop (surface the last error) and a
+			// cancelled context returns promptly. See retryBackoffWait for the shared step.
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, deadline, budgetOn)
+			if err != nil {
 				return nil, err
+			}
+			if stop {
+				break
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))

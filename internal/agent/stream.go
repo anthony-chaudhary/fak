@@ -370,20 +370,12 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			var wait time.Duration
-			if budgetOn {
-				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
-				if wait < 0 {
-					break
-				}
-			} else {
-				wait = retryWait(attempt, lastRetryAfter)
-			}
-			if p.RetryNotify != nil {
-				p.RetryNotify(attempt, lastStatus, wait)
-			}
-			if err := sleepCtx(ctx, wait); err != nil {
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, deadline, budgetOn)
+			if err != nil {
 				return nil, err
+			}
+			if stop {
+				break
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))

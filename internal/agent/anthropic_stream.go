@@ -101,26 +101,16 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook
-			// the buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry`
-			// line and retry counter fire for the streaming passthrough too), then wait —
-			// honoring a named Retry-After, else the jittered exponential schedule. A
-			// cancelled context aborts the wait promptly rather than sleeping it out. When the
-			// time budget is the bound, the wait is clamped to the remaining budget.
-			var wait time.Duration
-			if budgetOn {
-				wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())
-				if wait < 0 {
-					break
-				}
-			} else {
-				wait = retryWait(attempt, lastRetryAfter)
-			}
-			if p.RetryNotify != nil {
-				p.RetryNotify(attempt, lastStatus, wait)
-			}
-			if err := sleepCtx(ctx, wait); err != nil {
+			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
+			// buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry` line fires
+			// for the streaming passthrough too), then wait — honoring a named Retry-After, else
+			// the jittered exponential schedule; a spent budget stops. See retryBackoffWait.
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, deadline, budgetOn)
+			if err != nil {
 				return err
+			}
+			if stop {
+				break
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", adapter.Endpoint(p.BaseURL, p.ModelID), bytes.NewReader(body))

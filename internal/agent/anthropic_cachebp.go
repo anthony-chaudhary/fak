@@ -170,15 +170,9 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 					PredictedUplift: plan.recommendation.PredictedUplift,
 				}
 			}
-			out, ok := placeCacheControlAtSpan(raw, sysSpans[plan.anchorOriginal])
-			if !ok {
-				return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
-			}
-			if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
-				return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
-			}
-			if !bytes.Equal(raw[:sysSpans[plan.anchorOriginal].start], out[:sysSpans[plan.anchorOriginal].start]) {
-				return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
+			out, reason := placeAndValidateAtSpan(raw, sysSpans[plan.anchorOriginal])
+			if reason != BreakpointReasonNone {
+				return raw, BreakpointOutcome{Reason: reason}
 			}
 			return out, BreakpointOutcome{
 				Reason:          BreakpointReasonNone,
@@ -203,23 +197,12 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 	}
 	last := spans[len(spans)-1]
 
-	// 3. Splice the breakpoint into the last block on the ORIGINAL bytes: everything before the
-	//    block is copied verbatim, the breakpoint key is inserted before the block's closing `}`,
-	//    and the tail is copied verbatim. No other block is re-marshalled.
-	out, ok := placeCacheControlAtSpan(raw, last)
-	if !ok {
-		return raw, BreakpointOutcome{Reason: BreakpointReasonSpliceFailed}
-	}
-
-	// 4. Prove it: the result must re-decode as a valid Messages request, and every byte before
-	//    the rewritten block must be byte-identical to the input (the cache prefix upstream of the
-	//    new breakpoint is untouched). Either failing is a splice bug, not a reason to ship a
-	//    malformed/cache-busting body — fall back to identity.
-	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
-		return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
-	}
-	if !bytes.Equal(raw[:last.start], out[:last.start]) {
-		return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
+	// 3. Splice the breakpoint onto the last block on the ORIGINAL bytes and prove it (re-decodes
+	//    as a request; the cache prefix upstream of the new breakpoint is byte-identical to the
+	//    input). See placeAndValidateAtSpan for the placement-and-proof step and its bail reasons.
+	out, reason := placeAndValidateAtSpan(raw, last)
+	if reason != BreakpointReasonNone {
+		return raw, BreakpointOutcome{Reason: reason}
 	}
 	return out, BreakpointOutcome{Reason: BreakpointReasonNone, Target: target}
 }
@@ -401,6 +384,29 @@ func placeCacheControlAtSpan(raw []byte, span elementSpan) ([]byte, bool) {
 	b.Write(spliced)
 	b.Write(raw[span.end:])
 	return b.Bytes(), true
+}
+
+// placeAndValidateAtSpan splices a cache_control breakpoint onto the block at span and PROVES the
+// result three ways, returning BreakpointReasonNone (with the rewritten bytes) only when all hold:
+// the splice must succeed (else BreakpointReasonSpliceFailed), the body must re-decode as a valid
+// Messages request (else BreakpointReasonRedecodeFail), and every byte BEFORE the block must be
+// byte-identical to the input — the cache prefix upstream of the new breakpoint is untouched (else
+// BreakpointReasonRedecodeFail). On any failure the INPUT bytes are returned unchanged alongside
+// the labeled reason. It is the shared placement-and-proof step the stable system-anchor and the
+// tools-anchor placements both close on (the rewritten-system path proves differently — it MOVES
+// bytes, so it cannot assert the byte-identical-prefix invariant — and stays inline).
+func placeAndValidateAtSpan(raw []byte, span elementSpan) ([]byte, string) {
+	out, ok := placeCacheControlAtSpan(raw, span)
+	if !ok {
+		return raw, BreakpointReasonSpliceFailed
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		return raw, BreakpointReasonRedecodeFail
+	}
+	if !bytes.Equal(raw[:span.start], out[:span.start]) {
+		return raw, BreakpointReasonRedecodeFail
+	}
+	return out, BreakpointReasonNone
 }
 
 func rewriteSystemArrayWithBreakpoint(raw []byte, systemRaw json.RawMessage, elems []json.RawMessage, plan anthropicSystemAnchorPlan) ([]byte, bool) {
