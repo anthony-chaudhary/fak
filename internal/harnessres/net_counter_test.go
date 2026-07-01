@@ -91,8 +91,8 @@ type rtFunc func(*http.Request) (*http.Response, error)
 
 func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func newStringReader(s string) io.Reader          { return &strReader{s: s} }
-func newStringReadCloser(s string) io.ReadCloser  { return io.NopCloser(&strReader{s: s}) }
+func newStringReader(s string) io.Reader         { return &strReader{s: s} }
+func newStringReadCloser(s string) io.ReadCloser { return io.NopCloser(&strReader{s: s}) }
 
 type strReader struct {
 	s string
