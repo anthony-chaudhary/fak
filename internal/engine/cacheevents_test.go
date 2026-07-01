@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -151,6 +152,51 @@ func TestCacheEventMetricsExposedAsPrometheus(t *testing.T) {
 		if !strings.Contains(prom, want) {
 			t.Fatalf("Prometheus output missing %q:\n%s", want, prom)
 		}
+	}
+}
+
+// #1945: CacheEvent.Direction (and Outcome/ToTier) are plain strings, not
+// compiler-enforced enums, so a buggy or adversarial engine adapter can feed an
+// unbounded stream of distinct (direction, outcome, to_tier, memory_class)
+// combinations. byKey must stay bounded — events beyond the cap fold into an
+// observable overflow bucket instead of growing the map forever.
+func TestCacheEventMetricsCapsByKeyCardinality(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+
+	const nUnique = 2000
+	for i := 0; i < nUnique; i++ {
+		rec.Record(engine.CacheEvent{
+			Direction: cachemeta.KVTransferDirection(fmt.Sprintf("synthetic-direction-%d", i)),
+			ToTier:    cachemeta.TierDRAM,
+			Outcome:   cachemeta.KVTransferOK,
+			Tokens:    1,
+		})
+	}
+
+	snap := rec.Metrics().Snapshot()
+	if snap.Events != nUnique {
+		t.Fatalf("Events = %d, want %d (overflow must not drop the event count)", snap.Events, nUnique)
+	}
+	if len(snap.Rows) > 256 {
+		t.Fatalf("byKey grew unbounded: %d rows, want <= 256", len(snap.Rows))
+	}
+	if !snap.KeysCapped {
+		t.Fatal("KeysCapped = false, want true once the key bound is hit")
+	}
+	wantOverflow := uint64(nUnique - len(snap.Rows))
+	if snap.OverflowEvents != wantOverflow {
+		t.Fatalf("OverflowEvents = %d, want %d (nUnique - distinct rows kept)", snap.OverflowEvents, wantOverflow)
+	}
+	if snap.OverflowEvents == 0 {
+		t.Fatal("expected some events to have overflowed for this test to be meaningful")
+	}
+
+	prom := snap.Prometheus()
+	if !strings.Contains(prom, "fak_engine_cache_keys_capped 1") {
+		t.Fatalf("Prometheus output missing capped gauge=1:\n%s", prom)
+	}
+	if !strings.Contains(prom, fmt.Sprintf("fak_engine_cache_event_overflow_total %d", wantOverflow)) {
+		t.Fatalf("Prometheus output missing overflow counter %d:\n%s", wantOverflow, prom)
 	}
 }
 

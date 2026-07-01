@@ -103,7 +103,23 @@ type CacheEventMetrics struct {
 	tokensMoved  int64
 	restoreMiss  uint64 // restore/load that found nothing usable (typed MISS)
 	restoreFault uint64 // restore/load that errored (typed FAULT) — never silent
+
+	// overflow folds any event whose (direction, outcome, to_tier, memory_class)
+	// key would grow byKey past maxCacheEventKeys, so the seam stays flat-memory
+	// even if an engine adapter feeds unbounded direction/outcome/tier strings
+	// (#1945). overflowEvents counts how many events landed here.
+	overflowEvents uint64
+	overflow       cacheEventAgg
 }
+
+// maxCacheEventKeys bounds byKey's cardinality. Direction (offload/restore/route/
+// migrate), outcome (ok/missed/fault), and residency tier (fewer than a dozen
+// named tiers) are the only legitimate dimensions, so a well-behaved engine
+// adapter never approaches this bound; it exists purely to stop a buggy or
+// adversarial adapter — Direction/Outcome/ResidencyTier are plain strings, not
+// compiler-enforced enums — from growing byKey without limit on a long-running
+// gateway.
+const maxCacheEventKeys = 256
 
 type cacheEventKey struct {
 	direction   string
@@ -141,8 +157,15 @@ func (mx *CacheEventMetrics) observe(e cachemeta.Entry, v cachemeta.LookupVerdic
 	}
 	agg := mx.byKey[key]
 	if agg == nil {
-		agg = &cacheEventAgg{}
-		mx.byKey[key] = agg
+		if len(mx.byKey) >= maxCacheEventKeys {
+			// The cap is already hit: fold this event into the shared overflow
+			// bucket instead of allocating byKey's (maxCacheEventKeys+1)th entry.
+			mx.overflowEvents++
+			agg = &mx.overflow
+		} else {
+			agg = &cacheEventAgg{}
+			mx.byKey[key] = agg
+		}
 	}
 	agg.count++
 	agg.bytesMoved += e.Metrics.BytesTransferred
@@ -179,6 +202,15 @@ type CacheEventSnapshot struct {
 	BytesMoved   int64
 	TokensMoved  int64
 	Rows         []CacheEventRow
+
+	// KeysCapped is true once byKey has hit maxCacheEventKeys — further distinct
+	// (direction, outcome, to_tier, memory_class) keys fold into the overflow
+	// bucket below rather than growing Rows. OverflowEvents/Bytes/Tokens are that
+	// bucket's totals, so the per-key breakdown never silently loses mass.
+	KeysCapped          bool
+	OverflowEvents      uint64
+	OverflowBytesMoved  int64
+	OverflowTokensMoved int64
 }
 
 // CacheEventRow is one (direction, outcome, to_tier, memory_class) bucket.
@@ -208,6 +240,10 @@ func (mx *CacheEventMetrics) Snapshot() CacheEventSnapshot {
 	s.RestoreFault = mx.restoreFault
 	s.BytesMoved = mx.bytesMoved
 	s.TokensMoved = mx.tokensMoved
+	s.KeysCapped = len(mx.byKey) >= maxCacheEventKeys
+	s.OverflowEvents = mx.overflowEvents
+	s.OverflowBytesMoved = mx.overflow.bytesMoved
+	s.OverflowTokensMoved = mx.overflow.tokensMoved
 	s.Rows = make([]CacheEventRow, 0, len(mx.byKey))
 	for k, agg := range mx.byKey {
 		s.Rows = append(s.Rows, CacheEventRow{
@@ -285,7 +321,18 @@ func (s CacheEventSnapshot) Prometheus() string {
 	writeCacheBreakdown(&b, "fak_engine_cache_bytes_moved_breakdown_total", s.Rows, func(r CacheEventRow) string { return itoa64(r.BytesMoved) })
 	help("fak_engine_cache_tokens_moved_breakdown_total", "KV span positions moved by cache events, bucketed by direction, outcome, destination residency tier, and memory class.", "counter")
 	writeCacheBreakdown(&b, "fak_engine_cache_tokens_moved_breakdown_total", s.Rows, func(r CacheEventRow) string { return itoa64(r.TokensMoved) })
+	help("fak_engine_cache_keys_capped", "1 when the cache-event breakdown key cardinality has hit its bound (further distinct keys fold into the overflow bucket, never grow unbounded), 0 otherwise.", "gauge")
+	b.WriteString("fak_engine_cache_keys_capped " + boolGauge(s.KeysCapped) + "\n")
+	help("fak_engine_cache_event_overflow_total", "Cache events folded into the overflow bucket because a new (direction, outcome, to_tier, memory_class) key would exceed the bound.", "counter")
+	b.WriteString("fak_engine_cache_event_overflow_total " + utoa(s.OverflowEvents) + "\n")
 	return b.String()
+}
+
+func boolGauge(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }
 
 // writeCacheBreakdown writes one Prometheus breakdown series — one labeled line per row,
