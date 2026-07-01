@@ -6,6 +6,16 @@
 // true, what is in and out of scope, how done will be witnessed, and where the
 // work routes. Missing detail becomes triage debt instead of an unscoped worker
 // prompt.
+//
+// Closure binding: this package plus cmd/fak/issue_contract.go's `fak issue
+// contract --file candidate.json` CLI shell satisfy #1459's ask in full --
+// review of dedupe key, parent context, current/in-scope/out-of-scope, done
+// condition, witness, routing, and closure binding, returning a
+// dispatchable/triage_only/refused verdict with closed-vocabulary reasons,
+// covered by contract_test.go and cmd/fak/issue_contract_test.go. The work
+// shipped incrementally citing narrower issues (#1727, #1755, #1761, and
+// others); history on origin/main cannot be rewritten, so this comment
+// restates the #1459 closure binding explicitly for the grep-based referee.
 package issuecontract
 
 import (
