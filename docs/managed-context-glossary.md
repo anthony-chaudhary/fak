@@ -1,6 +1,6 @@
 ---
 title: "The managed-context glossary and product contract"
-description: "The public glossary for fak's managed-context promise: assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, and cache state — each grounded in the shipped mechanism, with what fak manages automatically, what it asks about, and what stays user-controlled."
+description: "The public glossary for fak's managed-context promise: assumption, resident view, pinned objective, budget envelope, reset transaction, context query, memory promotion, cache state, and relay vocabulary — grounded in shipped mechanisms where available and explicitly marked when planned."
 ---
 
 # The managed-context glossary and product contract
@@ -10,11 +10,11 @@ description: "The public glossary for fak's managed-context promise: assumption,
 
 fak already runs strong context mechanisms — a planner, a durability gate, a wall-clock
 budget, a reset ledger. What was missing was a plain-language contract that lets a user
-stop managing those assumptions in their head. This page is that contract: eight terms,
+stop managing those assumptions in their head. This page is that contract: the core terms,
 each defined by what fak automatically manages, what it will ask the user about instead of
-silently assuming, and what remains fully user-controlled. Every definition below names the
-real, shipped Go type or function behind it — this is a glossary of what the code does
-today, not a roadmap.
+silently assuming, and what remains fully user-controlled. Entries grounded in shipped code
+name the real Go type or function behind them. The relay vocabulary is called out as a
+planned, data-only extension until the #1860 relay rungs consume it.
 
 **How to read each entry:**
 
@@ -236,6 +236,47 @@ workload as structurally defeated rather than warming a tail that will never pay
 
 ---
 
+## 9. Relay vocabulary
+
+**Definition.** The planned perpetual-session vocabulary for running one long goal as a
+sequence of bounded context windows without asking the model to summarize itself.
+
+**Status:** planned/data-only contract for epic #1860. The concept spine is
+[`docs/notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md`](notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md);
+the closed reason rows live in
+[`docs/notes/RELAY-REASON-VOCABULARY-2026-07-01.md`](notes/RELAY-REASON-VOCABULARY-2026-07-01.md);
+the baton wire shape lives in
+[`docs/notes/RELAY-BATON-SCHEMA-2026-07-01.md`](notes/RELAY-BATON-SCHEMA-2026-07-01.md).
+No shipped driver consumes these terms yet.
+
+- **Relay.** A single goal executed as an ordered sequence of bounded legs; the operator
+  starts the relay, and the `done_when` check decides when the goal is over.
+- **Leg.** One bounded session window in a relay, corresponding to one `Generation`, that
+  ends only at a safe point and never mid-tool-call or mid-write.
+- **Baton.** The pointer-only handoff a closing leg writes for its successor: objective pin,
+  re-verifiable progress cursor, next action, open questions, durable artifact pointers, and
+  tombstone, with no transcript bytes and no `claimed` field.
+- **Tombstone.** The closing leg's typed exit record: a closed relay reason token plus the
+  commit anchor and short display note explaining why the leg ended.
+- **Externalize gate.** The fail-closed pre-rotation check that every load-bearing fact from
+  the leg is already durable as a commit, ledger row, memory slug, issue, or other witnessed
+  pointer before a baton may be trusted for rotation.
+- **Safe point.** A quiescent boundary where ending the leg cannot corrupt work: no in-flight
+  tool call, no half-written commit, a green or explicitly parked tree, and a next action that
+  fits in one baton line.
+- **Flat-context invariant.** The relay property that peak resident context is bounded by
+  the per-leg ceiling, independent of the goal's total duration or number of rotations.
+
+- **What fak manages:** not yet shipped. The planned driver will detect arm/fire conditions,
+  write and read batons, re-verify cursors, preserve lease continuity, and rotate only at a
+  safe point.
+- **What fak asks about:** anything the externalize gate cannot prove durable, any stale
+  baton cursor, and any objective mismatch. Those become typed relay outcomes, not prose.
+- **What stays user-controlled:** the objective text, `done_when` predicate, relay budget
+  envelope, and operator choice to launch, park, resume, or stop the relay.
+
+---
+
 ## What this adds up to
 
 A reader should now be able to state, plainly: fak automatically manages *what's resident in
@@ -245,14 +286,20 @@ warmth as a non-authoritative bias). It asks the user (or defers to an explicit 
 whenever a fact's confidence, durability, or promotion status is ambiguous — never silently
 guessing on the expensive-to-get-wrong side. And it leaves fully user-controlled: every
 explicit statement of fact, every budget number, every layout/pin override, and the
-objective itself. Nothing here is marketing language — every clause above names the Go type
-or function that makes it checkable.
+objective itself. The relay section extends the vocabulary for the planned perpetual-session
+mode while keeping its unshipped status explicit.
 
 ## See also
 
 - [Managed-context continuous usage semantics](managed-context-continuous-usage.md) — the
   user-facing contract for preserving continuity across hidden context resets without
   making the user manage the context window manually.
+- [Perpetual sessions](notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md) — the relay concept
+  spine that defines the long-running, flat-context mode.
+- [Relay baton schema](notes/RELAY-BATON-SCHEMA-2026-07-01.md) — field-level contract for
+  `fak.relay.baton.v1`.
+- [Relay reason vocabulary](notes/RELAY-REASON-VOCABULARY-2026-07-01.md) — closed
+  relay/tombstone reason rows.
 - [Context is not memory](CONTEXT-IS-NOT-MEMORY.md) — the durability axis behind memory
   promotion, in full.
 - [`internal/ctxplan` package doc](../internal/ctxplan/doc.go) — the resident-view / context-query
