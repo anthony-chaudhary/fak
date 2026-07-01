@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -120,7 +122,7 @@ func cmdGuard(argv []string) {
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
 	logPath := fs.String("log", "", "write the gateway's per-request + per-verdict structured logs to this file (or '-' for stderr); default off to keep the agent's terminal clean")
-	auditPath := fs.String("audit", "", "write the durable, hash-chained DECISION JOURNAL to this file (default: a per-user path under your config dir; pass 'off' to disable). Every kernel verdict this session is appended as a tamper-evident JSONL row you can later replay with `fak audit verify`.")
+	auditPath := fs.String("audit", "", "write the durable, hash-chained DECISION JOURNAL to this file (default: .dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl; pass 'off' to disable). Every kernel verdict this session is appended as a tamper-evident JSONL row you can later replay with `fak audit verify`.")
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
@@ -335,7 +337,7 @@ func cmdGuard(argv []string) {
 	//     EvDecide/EvDeny events on the proxy adjudication path are exactly what the
 	//     journal records, so a guard session produces a populated ledger. Precedence:
 	//     FAK_AUDIT_JOURNAL honored at boot wins; --no-audit / --audit off disables;
-	//     --audit PATH or a per-user default path otherwise. Enable BEFORE serving so
+	//     --audit PATH or a repo-local per-session path otherwise. Enable BEFORE serving so
 	//     the emitter is registered before the first decision crosses the floor.
 	auditLabel, auditJournal := guardEnableAudit(*auditPath, *noAudit)
 	var auditSeq0 uint64
@@ -1355,7 +1357,7 @@ func guardLogSink(logPath string, stderr io.Writer) (logf func(string, ...any), 
 // returns the path to enable (""=> do not enable) and whether the off was an
 // explicit opt-out, given the flags and whether a journal is already active at
 // boot (FAK_AUDIT_JOURNAL). Kept side-effect-free so the precedence — boot env
-// wins, then --no-audit / --audit off, then --audit PATH, then the per-user
+// wins, then --no-audit / --audit off, then --audit PATH, then the repo-local
 // default — is unit-tested without touching the process-global journal.
 func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath string, optedOut bool) {
 	if bootActive {
@@ -1372,15 +1374,66 @@ func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath stri
 }
 
 // guardDefaultAuditPath is where fak guard writes its durable decision journal
-// when the operator names none: <user-config>/fak/guard-audit.jsonl — a stable,
-// per-user, cross-platform location appended across sessions so the tamper-evident
-// chain CONTINUES rather than forking each run. Falls back to ".fak/guard-audit.jsonl"
-// under the working directory if no user config dir resolves.
+// when the operator names none: .dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl.
+// That is the same repo-local discovery root guardrsi folds, so an attended
+// `fak guard -- claude` refusal has a per-session witness row beside fleet runs.
 func guardDefaultAuditPath() string {
-	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
-		return filepath.Join(dir, "fak", "guard-audit.jsonl")
+	root := findRepoRoot(".")
+	return filepath.Join(guardAuditDir(root),
+		fmt.Sprintf("interactive-%d-%s.jsonl", os.Getpid(), guardAuditPathHash(root)))
+}
+
+func guardAuditDir(root string) string {
+	return filepath.Join(root, ".dispatch-runs", "guard-audit")
+}
+
+func guardAuditPathHash(root string) string {
+	abs, err := filepath.Abs(root)
+	if err == nil {
+		root = abs
 	}
-	return filepath.Join(".fak", "guard-audit.jsonl")
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// guardReadableAuditPath is the reader-side default used by diagnostics and the
+// guard TUI. A separate process cannot know another guard session's PID-derived
+// writer path, so readers prefer the newest repo-local journal when the operator
+// did not name FAK_AUDIT_JOURNAL.
+func guardReadableAuditPath() string {
+	if p := strings.TrimSpace(os.Getenv("FAK_AUDIT_JOURNAL")); p != "" {
+		return p
+	}
+	if p := latestGuardAuditJournalPath(); p != "" {
+		return p
+	}
+	return guardDefaultAuditPath()
+}
+
+func latestGuardAuditJournalPath() string {
+	dir := guardAuditDir(findRepoRoot("."))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var bestPath, bestName string
+	var bestMod time.Time
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl") {
+			continue
+		}
+		info, err := ent.Info()
+		if err != nil {
+			continue
+		}
+		mod := info.ModTime()
+		if bestPath == "" || mod.After(bestMod) || (mod.Equal(bestMod) && ent.Name() > bestName) {
+			bestName = ent.Name()
+			bestMod = mod
+			bestPath = filepath.Join(dir, ent.Name())
+		}
+	}
+	return bestPath
 }
 
 // guardEnableAudit turns the durable, hash-chained decision journal ON for the

@@ -16,7 +16,7 @@ import (
 // previous one — which is exactly what happens, with NO tampering, when more than one
 // `fak guard` session shares the default journal file: each session holds its OWN
 // in-memory seq counter + chain head and appends INTERLEAVED, so a fleet user who runs two
-// `claude` sessions at once gets a default `<config>/fak/guard-audit.jsonl` that `fak audit
+// `claude` sessions at once used to get a shared default `<config>/fak/guard-audit.jsonl` that `fak audit
 // verify` reports as "TAMPERED/BROKEN" on day one. That is a false alarm on the headline
 // trust feature, and `verify` alone cannot tell a benign interleave from a real edit.
 //
@@ -35,14 +35,14 @@ import (
 //
 // It also folds what the floor actually DID this corpus (allow/deny/quarantine by reason),
 // reusing guardrsi.FoldRows, so one command answers both "is my audit trail trustworthy?"
-// and "what did the kernel block?". With no path argument it diagnoses the live default
-// journal (FAK_AUDIT_JOURNAL, else <config>/fak/guard-audit.jsonl).
+// and "what did the kernel block?". With no path argument it diagnoses the named journal
+// in FAK_AUDIT_JOURNAL, else the newest repo-local guard journal.
 func cmdAuditDiagnose(args []string) {
 	fs := flag.NewFlagSet("audit diagnose", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "emit the diagnosis as a JSON object")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak audit diagnose [--json] [<journal.jsonl>]")
-		fmt.Fprintln(os.Stderr, "  (no path -> the live default journal: $FAK_AUDIT_JOURNAL, else <config>/fak/guard-audit.jsonl)")
+		fmt.Fprintln(os.Stderr, "  (no path -> $FAK_AUDIT_JOURNAL, else newest .dispatch-runs/guard-audit/*.jsonl)")
 	}
 	_ = fs.Parse(args)
 	if fs.NArg() > 1 {
@@ -56,14 +56,11 @@ func cmdAuditDiagnose(args []string) {
 	os.Exit(runAuditDiagnose(os.Stdout, os.Stderr, path, *asJSON))
 }
 
-// defaultGuardJournalPath is the live journal diagnose defaults to: the documented
-// FAK_AUDIT_JOURNAL override when set, else the per-user guardDefaultAuditPath the guard
-// front door writes. It mirrors the tui --tail canonical-path resolution.
+// defaultGuardJournalPath is the journal diagnose defaults to: the documented
+// FAK_AUDIT_JOURNAL override when set, else the newest repo-local guard journal.
+// It mirrors the tui --tail canonical-path resolution.
 func defaultGuardJournalPath() string {
-	if p := os.Getenv("FAK_AUDIT_JOURNAL"); p != "" {
-		return p
-	}
-	return guardDefaultAuditPath()
+	return guardReadableAuditPath()
 }
 
 // auditDiagnosis is the structured result of reconstructing a journal's chains — the

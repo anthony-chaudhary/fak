@@ -277,7 +277,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	var guardJSON stringList
 	fs.Var(&guardJSON, "guard-json", "read a guard artifact JSON file (repeatable)")
 	journalPath := fs.String("journal", "", "tail the durable, hash-chained guard DECISION JOURNAL at this path instead of static --guard-json artifacts (#843): each adjudication row is folded through the same guard model, redaction-safe (the journal carries no payloads, only digests)")
-	tail := fs.Bool("tail", false, "tail the CANONICAL guard journal (FAK_AUDIT_JOURNAL, else <config>/fak/guard-audit.jsonl) — equivalent to --journal <canonical-path>")
+	tail := fs.Bool("tail", false, "tail the CANONICAL guard journal (FAK_AUDIT_JOURNAL, else newest .dispatch-runs/guard-audit/*.jsonl) — equivalent to --journal <canonical-path>")
 	follow := fs.Bool("follow", false, "with --journal/--tail: keep following the journal and print each NEW adjudication row as it lands (Ctrl-C to stop)")
 	maxRows := fs.Int("rows", 50, "cap the number of (highest-attention) journal rows rendered in the pane")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
@@ -422,16 +422,9 @@ func tuiGuardJournalDetail(r journal.Row) string {
 }
 
 // canonicalGuardJournalPath resolves the canonical guard decision journal: the
-// documented FAK_AUDIT_JOURNAL override, else <user-config>/fak/guard-audit.jsonl (the
-// path internal/guardrsi writes). Empty when no config home is resolvable.
+// documented FAK_AUDIT_JOURNAL override, else the newest repo-local guard journal.
 func canonicalGuardJournalPath() string {
-	if p := strings.TrimSpace(os.Getenv("FAK_AUDIT_JOURNAL")); p != "" {
-		return p
-	}
-	if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
-		return filepath.Join(cfg, "fak", "guard-audit.jsonl")
-	}
-	return ""
+	return guardReadableAuditPath()
 }
 
 // followGuardJournal tails the journal after the initial snapshot, printing each NEW

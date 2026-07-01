@@ -1070,7 +1070,7 @@ func TestFormatAmplification(t *testing.T) {
 
 // guardAuditPlan is the pure precedence behind the default-on decision journal:
 // a boot-time FAK_AUDIT_JOURNAL wins (nothing to enable), then --no-audit / --audit
-// off opt out, then --audit PATH, then the per-user default. Tested without
+// off opt out, then --audit PATH, then the repo-local default. Tested without
 // touching the process-global journal.
 func TestGuardAuditPlan(t *testing.T) {
 	def := guardDefaultAuditPath()
@@ -1088,7 +1088,7 @@ func TestGuardAuditPlan(t *testing.T) {
 		{"--audit off opts out", "off", false, false, "", true},
 		{"--audit OFF is case-insensitive + trimmed", "  OFF ", false, false, "", true},
 		{"explicit --audit path", "/tmp/a.jsonl", false, false, "/tmp/a.jsonl", false},
-		{"unset -> per-user default", "", false, false, def, false},
+		{"unset -> repo-local interactive default", "", false, false, def, false},
 		{"trimmed --audit path", "  /tmp/b.jsonl ", false, false, "/tmp/b.jsonl", false},
 	}
 	for _, tc := range cases {
@@ -1107,12 +1107,84 @@ func TestGuardDefaultAuditPath(t *testing.T) {
 	if p == "" {
 		t.Fatal("default audit path must not be empty (guard always has somewhere to write)")
 	}
-	if filepath.Base(p) != "guard-audit.jsonl" {
-		t.Errorf("default audit path = %q, want basename guard-audit.jsonl", p)
+	base := filepath.Base(p)
+	if !strings.HasPrefix(base, "interactive-") || !strings.HasSuffix(base, ".jsonl") {
+		t.Errorf("default audit path = %q, want interactive-<pid>-<hash>.jsonl", p)
 	}
-	// Parent is a 'fak' dir under the user config root, or the '.fak' cwd fallback.
-	if parent := filepath.Base(filepath.Dir(p)); parent != "fak" && parent != ".fak" {
-		t.Errorf("default audit path parent dir = %q, want fak or .fak", parent)
+	if parent := filepath.ToSlash(filepath.Dir(p)); !strings.HasSuffix(parent, ".dispatch-runs/guard-audit") {
+		t.Errorf("default audit path parent = %q, want .dispatch-runs/guard-audit", parent)
+	}
+}
+
+func TestDefaultGuardJournalPathUsesLatestRepoLocalJournal(t *testing.T) {
+	t.Setenv("FAK_AUDIT_JOURNAL", "")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir(%q): %v", root, err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	dir := guardAuditDir(".")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", dir, err)
+	}
+	older := filepath.Join(dir, "interactive-1-old.jsonl")
+	newer := filepath.Join(dir, "interactive-2-new.jsonl")
+	ignored := filepath.Join(dir, "interactive-3-newer.txt")
+	for _, p := range []string{older, newer, ignored} {
+		if err := os.WriteFile(p, []byte("journal-row\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q): %v", p, err)
+		}
+	}
+	baseTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(older, baseTime, baseTime); err != nil {
+		t.Fatalf("Chtimes(%q): %v", older, err)
+	}
+	if err := os.Chtimes(newer, baseTime.Add(time.Minute), baseTime.Add(time.Minute)); err != nil {
+		t.Fatalf("Chtimes(%q): %v", newer, err)
+	}
+	if err := os.Chtimes(ignored, baseTime.Add(2*time.Minute), baseTime.Add(2*time.Minute)); err != nil {
+		t.Fatalf("Chtimes(%q): %v", ignored, err)
+	}
+
+	if got, want := filepath.Clean(defaultGuardJournalPath()), filepath.Clean(newer); got != want {
+		t.Fatalf("defaultGuardJournalPath() = %q, want newest repo-local JSONL %q", got, want)
+	}
+}
+
+func TestGuardEnableAuditDefaultWritesRepoLocalInteractiveJournal(t *testing.T) {
+	t.Cleanup(journal.ResetActiveForTest)
+	label, j := guardEnableAudit("", false)
+	if j == nil {
+		t.Fatal("guardEnableAudit should enable the default journal when --audit is absent")
+	}
+	defer func() {
+		_ = j.Close()
+		_ = os.Remove(j.Path())
+	}()
+
+	path := filepath.ToSlash(j.Path())
+	if !strings.Contains(path, ".dispatch-runs/guard-audit/interactive-") {
+		t.Fatalf("default audit path = %q, want repo-local interactive journal", j.Path())
+	}
+	if !strings.Contains(label, j.Path()) || !strings.Contains(label, "hash-chained") {
+		t.Fatalf("banner label = %q, want path + hash-chained", label)
+	}
+
+	j.Emit(abi.Event{
+		Kind:    abi.EvDeny,
+		Call:    &abi.ToolCall{Tool: "Bash", TraceID: "interactive", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"command":"rm -rf /"}`)}},
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonSelfModify, By: "test"},
+	})
+	if err := j.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if n, err := journal.Verify(j.Path()); err != nil || n != 1 {
+		t.Fatalf("journal.Verify(%q) = n=%d err=%v, want 1 nil", j.Path(), n, err)
 	}
 }
 
