@@ -128,6 +128,17 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(self._v("Bash", {"command": cmd}), [], cmd)
         self.assertEqual(self._v("Write", {"file_path": "/dev/null"}), [])
 
+    def test_heredoc_program_comparisons_are_not_redirects(self):
+        command = "python - file <<'EOF'\nif depth > 3:\n    return depth\nEOF\n"
+        self.assertEqual(self._v("Bash", {"command": command}), [])
+
+    def test_interpreter_program_comparison_is_not_bare_drive_redirect(self):
+        command = "python -c 'if depth > 3: print(depth)'"
+        self.assertEqual(self._v("Bash", {"command": command}), [])
+
+    def test_out_of_tree_redirect_still_denied(self):
+        self.assertTrue(self._v("Bash", {"command": "echo bad > /c/Users/u/work/tools/log.txt"}))
+
     def test_private_companion_empty_when_workspace_is_private(self):
         # When the workspace IS the private repo, there is no <ws>-private-private
         # companion; the function must return () rather than a nonexistent path.

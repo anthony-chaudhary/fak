@@ -196,6 +196,26 @@ func TestNullDeviceSinksAllowed(t *testing.T) {
 	}
 }
 
+func TestHeredocProgramComparisonsAreNotRedirects(t *testing.T) {
+	command := "python - file <<'EOF'\nif depth > 3:\n    return depth\nEOF\n"
+	if v := eval("Bash", cmd(command)); len(v) != 0 {
+		t.Errorf("heredoc program text must not be scanned as shell redirects, got %v", v)
+	}
+}
+
+func TestInterpreterProgramComparisonIsNotBareDriveRedirect(t *testing.T) {
+	command := "python -c 'if depth > 3: print(depth)'"
+	if v := eval("Bash", cmd(command)); len(v) != 0 {
+		t.Errorf("bare comparison operand 3: must not be treated as a Windows drive redirect, got %v", v)
+	}
+}
+
+func TestOutOfTreeRedirectStillDenied(t *testing.T) {
+	if v := eval("Bash", cmd("echo bad > /c/Users/u/work/tools/log.txt")); len(v) == 0 {
+		t.Fatal("expected a violation for a real absolute sibling redirect")
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

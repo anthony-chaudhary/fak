@@ -96,7 +96,7 @@ def normalize(path: str) -> str:
 
 
 def _is_absolute(p: str) -> bool:
-    return p.startswith("/") or (len(p) >= 2 and p[1] == ":")
+    return p.startswith("/") or (len(p) >= 2 and p[1] == ":" and p[0].isalpha())
 
 
 def to_abs(raw: str, base: str) -> str | None:
@@ -169,13 +169,93 @@ def _split_segments(command: str) -> list[str]:
     return [s for s in out if s.strip()]
 
 
+def _strip_heredoc_bodies(command: str) -> str:
+    """Remove here-doc bodies before the redirect scan.
+
+    The guard is placement-only: it must scan shell syntax, not embedded program
+    text fed to an interpreter. A line like ``if depth > 3:`` inside ``<<'EOF'``
+    is Python, not a redirect to a Windows-ish ``3:`` path.
+    """
+    out: list[str] = []
+    pending: list[str] = []
+    for line in command.splitlines(keepends=True):
+        body = line.rstrip("\n").rstrip("\r")
+        if pending:
+            if body.strip() == pending[0]:
+                pending.pop(0)
+            continue
+        out.append(line)
+        pending.extend(_heredoc_markers(body))
+    return "".join(out)
+
+
+def _heredoc_markers(line: str) -> list[str]:
+    markers: list[str] = []
+    in_single = False
+    in_double = False
+    escaped = False
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if ch == "\\" and not in_single:
+            escaped = True
+            i += 1
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if in_single or in_double:
+            i += 1
+            continue
+        if ch == "<" and i + 1 < n and line[i + 1] == "<":
+            if i + 2 < n and line[i + 2] == "<":
+                i += 3  # here-string, not a here-doc body
+                continue
+            j = i + 2
+            if j < n and line[j] == "-":
+                j += 1
+            while j < n and line[j] in (" ", "\t"):
+                j += 1
+            marker, next_i = _read_heredoc_marker(line, j)
+            if marker:
+                markers.append(marker)
+            i = max(next_i, i + 2)
+            continue
+        i += 1
+    return markers
+
+
+def _read_heredoc_marker(line: str, start: int) -> tuple[str, int]:
+    if start >= len(line):
+        return "", start
+    if line[start] in ("'", '"'):
+        q = line[start]
+        end = line.find(q, start + 1)
+        if end < 0:
+            return "", start
+        return line[start + 1 : end], end + 1
+    end = start
+    while end < len(line) and line[end] not in " \t\r\n;|&()<>":
+        end += 1
+    return line[start:end], end
+
+
 def extract_targets(command: str) -> list[tuple[str, str]]:
     """Return ``[(op, raw_path), ...]`` -- the write/delete targets a command
     acts on. ``op`` is the verb (or 'redirect'/'output-flag'). Redirections
     (``> f``, ``>> f``) are scanned on the raw text; everything else via a
     lenient shlex tokenization of each segment."""
     targets: list[tuple[str, str]] = []
-    for seg in _split_segments(command):
+    for seg in _split_segments(_strip_heredoc_bodies(command)):
         # Redirections: > file / >> file (skip >&2; the null/std-stream device sinks
         # like >/dev/null are exempted downstream via NULL_DEVICES).
         toks_raw = seg.split()

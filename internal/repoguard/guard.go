@@ -114,7 +114,7 @@ func isAlpha(b byte) bool {
 }
 
 func isAbsolute(p string) bool {
-	return strings.HasPrefix(p, "/") || (len(p) >= 2 && p[1] == ':')
+	return strings.HasPrefix(p, "/") || (len(p) >= 2 && p[1] == ':' && isAlpha(p[0]))
 }
 
 // toAbs resolves raw (a path operand) to a normalized absolute path string,
@@ -315,11 +315,92 @@ func basename(p string) string {
 	return p
 }
 
+func stripHeredocBodies(command string) string {
+	var out strings.Builder
+	var pending []string
+	for _, line := range strings.SplitAfter(command, "\n") {
+		body := strings.TrimSuffix(line, "\n")
+		body = strings.TrimSuffix(body, "\r")
+		if len(pending) > 0 {
+			if strings.TrimSpace(body) == pending[0] {
+				pending = pending[1:]
+			}
+			continue
+		}
+		out.WriteString(line)
+		pending = append(pending, heredocMarkers(body)...)
+	}
+	return out.String()
+}
+
+func heredocMarkers(line string) []string {
+	var markers []string
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case escaped:
+			escaped = false
+			continue
+		case c == '\\' && !inSingle:
+			escaped = true
+			continue
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+			continue
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+			continue
+		case inSingle || inDouble:
+			continue
+		case c == '<' && i+1 < len(line) && line[i+1] == '<':
+			if i+2 < len(line) && line[i+2] == '<' {
+				i += 2 // here-string, not a here-doc body
+				continue
+			}
+			j := i + 2
+			if j < len(line) && line[j] == '-' {
+				j++
+			}
+			for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+				j++
+			}
+			marker, next := readHeredocMarker(line, j)
+			if marker != "" {
+				markers = append(markers, marker)
+			}
+			i = next - 1
+		}
+	}
+	return markers
+}
+
+func readHeredocMarker(line string, start int) (string, int) {
+	if start >= len(line) {
+		return "", start
+	}
+	if q := line[start]; q == '\'' || q == '"' {
+		j := start + 1
+		for j < len(line) && line[j] != q {
+			j++
+		}
+		if j >= len(line) {
+			return "", start
+		}
+		return line[start+1 : j], j + 1
+	}
+	j := start
+	for j < len(line) && !strings.ContainsRune(" \t\r\n;|&()<>", rune(line[j])) {
+		j++
+	}
+	return line[start:j], j
+}
+
 // extractTargets returns the write/delete targets a command acts on. Mirrors
 // repo_guard.extract_targets.
 func extractTargets(command string) []target {
 	var targets []target
-	for _, seg := range splitSegments(command) {
+	for _, seg := range splitSegments(stripHeredocBodies(command)) {
 		// Redirections: > file / >> file (skip >&2; >/dev/null is handled by the
 		// scratch allow-list downstream). Scanned on the raw whitespace split.
 		toksRaw := strings.Fields(seg)
