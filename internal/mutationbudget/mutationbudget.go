@@ -31,13 +31,13 @@ import (
 	"time"
 )
 
-// Budget is a snapshot of the remaining GitHub mutation allowance in the current
+// Budget is a snapshot of the remaining GitHub API allowance in the current
 // rate-limit window: how many calls are Remaining, the window's Limit, and the
 // unix second at which the window Resets (and Remaining refills to Limit).
 type Budget struct {
-	Remaining   int   // mutations left in the current window
+	Remaining   int   // API calls left in the current window
 	ResetAtUnix int64 // unix seconds at which the window resets
-	Limit       int   // the window's total mutation allowance
+	Limit       int   // the window's total API-call allowance
 }
 
 // ResetInSec reports how many seconds remain until the window resets, measured
@@ -62,6 +62,98 @@ type Decision struct {
 	Planned        int    // mutations the burst would spend
 	Reserve        int    // minimum budget that must survive the burst
 	AfterRemaining int    // Remaining - Planned, the budget the burst would leave
+}
+
+// HourlyPlan is the dry-run rate-limit estimate for one dispatch hour. It names
+// the GitHub calls the close/create/comment machinery plans to spend before any
+// live mutation runs. Fetches are not mutations, but they still consume the same
+// API window and must be counted against the hourly budget.
+type HourlyPlan struct {
+	Creates  int `json:"creates"`
+	Comments int `json:"comments"`
+	Closes   int `json:"closes"`
+	Labels   int `json:"labels"`
+	Fetches  int `json:"fetches"`
+}
+
+// TotalCalls returns all GitHub API calls in the planned hour, with negative
+// counts clamped to zero so a caller cannot subtract calls from the budget.
+func (p HourlyPlan) TotalCalls() int {
+	return clampNonNegative(p.Creates) +
+		clampNonNegative(p.Comments) +
+		clampNonNegative(p.Closes) +
+		clampNonNegative(p.Labels) +
+		clampNonNegative(p.Fetches)
+}
+
+// MutationCalls returns the write-side calls in the planned hour. Fetches are
+// reported separately so an operator can tell write pressure from read pressure.
+func (p HourlyPlan) MutationCalls() int {
+	return clampNonNegative(p.Creates) +
+		clampNonNegative(p.Comments) +
+		clampNonNegative(p.Closes) +
+		clampNonNegative(p.Labels)
+}
+
+// HourlyEstimate is the pure dry-run verdict for one planned dispatch hour.
+type HourlyEstimate struct {
+	Allow          bool       `json:"allow"`
+	Warning        string     `json:"warning,omitempty"`
+	Reason         string     `json:"reason"`
+	Plan           HourlyPlan `json:"plan"`
+	TotalCalls     int        `json:"total_calls"`
+	MutationCalls  int        `json:"mutation_calls"`
+	FetchCalls     int        `json:"fetch_calls"`
+	Remaining      int        `json:"remaining"`
+	Reserve        int        `json:"reserve"`
+	AfterRemaining int        `json:"after_remaining"`
+}
+
+// EstimateHour checks a planned dispatch hour against the remaining GitHub API
+// window. It is deterministic: the reset clock is injected via nowUnix, and it
+// performs no I/O. A non-allowing estimate carries a rate-limit warning before a
+// live close/comment/label/create wave can strand itself mid-hour.
+func EstimateHour(budget Budget, plan HourlyPlan, minReserve int, nowUnix int64) HourlyEstimate {
+	reserve := minReserve
+	if reserve < 0 {
+		reserve = 0
+	}
+	total := plan.TotalCalls()
+	mutations := plan.MutationCalls()
+	fetches := clampNonNegative(plan.Fetches)
+	after := budget.Remaining - total
+	out := HourlyEstimate{
+		Allow:          true,
+		Plan:           plan,
+		TotalCalls:     total,
+		MutationCalls:  mutations,
+		FetchCalls:     fetches,
+		Remaining:      budget.Remaining,
+		Reserve:        reserve,
+		AfterRemaining: after,
+	}
+	if total == 0 {
+		out.Reason = fmt.Sprintf("ALLOW: 0 planned GitHub API calls spend nothing (remaining %d, reserve %d)",
+			budget.Remaining, reserve)
+		return out
+	}
+	if budget.Remaining < reserve {
+		out.Allow = false
+		out.Warning = fmt.Sprintf("RATE_LIMIT_WARNING: remaining %d already below reserve %d before planned dispatch hour; resets in %s",
+			budget.Remaining, reserve, humanizeSec(budget.ResetInSec(nowUnix)))
+		out.Reason = hourlyReason(plan, total, mutations, fetches, out.Warning)
+		return out
+	}
+	if after < reserve {
+		out.Allow = false
+		out.Warning = fmt.Sprintf("RATE_LIMIT_WARNING: planned dispatch hour needs %d GitHub API calls and would leave %d < reserve %d; resets in %s",
+			total, after, reserve, humanizeSec(budget.ResetInSec(nowUnix)))
+		out.Reason = hourlyReason(plan, total, mutations, fetches, out.Warning)
+		return out
+	}
+	out.Reason = fmt.Sprintf("ALLOW: planned dispatch hour needs %d GitHub API calls (mutations=%d fetches=%d) and leaves %d >= reserve %d",
+		total, mutations, fetches, after, reserve)
+	return out
 }
 
 // Guard decides whether plannedMutations may run against budget while keeping at
@@ -143,6 +235,26 @@ func Guard(budget Budget, plannedMutations, minReserve int, nowUnix int64) Decis
 // print d.String() directly.
 func (d Decision) String() string {
 	return d.Reason
+}
+
+func hourlyReason(plan HourlyPlan, total, mutations, fetches int, warning string) string {
+	return fmt.Sprintf("%s (creates=%d comments=%d closes=%d labels=%d fetches=%d; mutations=%d fetches=%d total=%d)",
+		warning,
+		clampNonNegative(plan.Creates),
+		clampNonNegative(plan.Comments),
+		clampNonNegative(plan.Closes),
+		clampNonNegative(plan.Labels),
+		clampNonNegative(plan.Fetches),
+		mutations,
+		fetches,
+		total)
+}
+
+func clampNonNegative(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // humanizeSec renders a non-negative second count as a compact human window for a

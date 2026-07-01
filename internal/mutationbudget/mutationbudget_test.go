@@ -190,6 +190,74 @@ func TestGuardHoldReasonNamesShortfallAndWindow(t *testing.T) {
 	}
 }
 
+func TestEstimateHourWarnsOnHighCloseCommentVolume(t *testing.T) {
+	b := Budget{Remaining: 900, ResetAtUnix: nowUnix + 14*60, Limit: 1000}
+	estimate := EstimateHour(b, HourlyPlan{
+		Comments: 600,
+		Closes:   400,
+		Fetches:  80,
+	}, 50, nowUnix)
+
+	if estimate.Allow {
+		t.Fatalf("expected rate-limit warning, got allow: %+v", estimate)
+	}
+	for _, sub := range []string{
+		"RATE_LIMIT_WARNING",
+		"planned dispatch hour needs 1080 GitHub API calls",
+		"leave -180 < reserve 50",
+		"resets in 14m",
+		"comments=600",
+		"closes=400",
+		"fetches=80",
+		"mutations=1000",
+		"total=1080",
+	} {
+		if !strings.Contains(estimate.Reason, sub) {
+			t.Errorf("hourly warning %q missing %q", estimate.Reason, sub)
+		}
+	}
+	if estimate.TotalCalls != 1080 || estimate.MutationCalls != 1000 || estimate.FetchCalls != 80 || estimate.AfterRemaining != -180 {
+		t.Fatalf("estimate counts = %+v, want total=1080 mutation=1000 fetch=80 after=-180", estimate)
+	}
+}
+
+func TestEstimateHourAllowsWithinBudgetAndCountsFetches(t *testing.T) {
+	b := Budget{Remaining: 500, ResetAtUnix: nowUnix + 600, Limit: 1000}
+	estimate := EstimateHour(b, HourlyPlan{
+		Creates:  10,
+		Comments: 20,
+		Closes:   10,
+		Labels:   5,
+		Fetches:  25,
+	}, 50, nowUnix)
+
+	if !estimate.Allow || estimate.Warning != "" {
+		t.Fatalf("expected allow without warning, got %+v", estimate)
+	}
+	if estimate.TotalCalls != 70 || estimate.MutationCalls != 45 || estimate.FetchCalls != 25 || estimate.AfterRemaining != 430 {
+		t.Fatalf("estimate counts = %+v, want total=70 mutation=45 fetch=25 after=430", estimate)
+	}
+	for _, sub := range []string{"ALLOW", "70 GitHub API calls", "mutations=45", "fetches=25", "leaves 430 >= reserve 50"} {
+		if !strings.Contains(estimate.Reason, sub) {
+			t.Errorf("allow reason %q missing %q", estimate.Reason, sub)
+		}
+	}
+}
+
+func TestEstimateHourClampsNegativeOperationCounts(t *testing.T) {
+	plan := HourlyPlan{Creates: -10, Comments: 3, Closes: -2, Labels: 1, Fetches: -7}
+	if got := plan.TotalCalls(); got != 4 {
+		t.Fatalf("TotalCalls = %d, want 4", got)
+	}
+	if got := plan.MutationCalls(); got != 4 {
+		t.Fatalf("MutationCalls = %d, want 4", got)
+	}
+	estimate := EstimateHour(Budget{Remaining: 10, ResetAtUnix: nowUnix + 60, Limit: 100}, plan, 0, nowUnix)
+	if !estimate.Allow || estimate.TotalCalls != 4 || estimate.FetchCalls != 0 {
+		t.Fatalf("negative-count estimate = %+v, want clamped allow total=4 fetch=0", estimate)
+	}
+}
+
 func TestResetInSec(t *testing.T) {
 	cases := []struct {
 		name    string
