@@ -244,6 +244,10 @@ One leg's loop, with the new gates in **bold**:
 Proposed tokens, in the DOS style — each emittable, verifiable, and refusable.
 Data-only until a named check opts into enforcing them (DOS lesson #6):
 
+Authoritative `summary` + `fix` rows live in
+[`RELAY-REASON-VOCABULARY-2026-07-01.md`](RELAY-REASON-VOCABULARY-2026-07-01.md);
+the table below is the short spine view.
+
 | Token | Category | Meaning |
 |---|---|---|
 | `RELAY_ARMED` | advisory | soft threshold crossed; rotate at next safe point |
