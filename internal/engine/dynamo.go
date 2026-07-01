@@ -12,12 +12,10 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
@@ -94,7 +92,7 @@ func (e *DynamoEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("dynamo: FAK_DYNAMO_BASE_URL or DynamoConfig.BaseURL is required")
 	}
-	endpoint, kind, body, err := e.buildOpenAIRequest(ctx, c)
+	endpoint, kind, body, err := buildOpenAIRequest(ctx, e.cfg.BaseURL, e.cfg.Model, c)
 	if err != nil {
 		return nil, err
 	}
@@ -138,88 +136,11 @@ func (e *DynamoEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 
 // Complete drains the live stream and returns the assembled result.
 func (e *DynamoEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	req, err := e.Admit(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	for range req.Tokens() {
-	}
-	res, err := req.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res != nil && res.Call == nil {
-		res.Call = c
-	}
-	return res, nil
-}
-
-func (e *DynamoEngine) buildOpenAIRequest(ctx context.Context, c *abi.ToolCall) (endpoint, kind string, body []byte, err error) {
-	args := refBytes(ctx, c.Args)
-	kind = vllmEndpointKind(c)
-	path := "/chat/completions"
-	if kind == "completions" {
-		path = "/completions"
-	}
-	endpoint, err = joinEndpoint(e.cfg.BaseURL, path)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if kind == "completions" {
-		body, err = e.buildCompletionsBody(c, args)
-		return endpoint, kind, body, err
-	}
-	body, err = e.buildChatBody(c, args)
-	return endpoint, kind, body, err
-}
-
-func (e *DynamoEngine) buildChatBody(c *abi.ToolCall, args []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
-		obj = map[string]json.RawMessage{}
-	}
-	if _, ok := obj["model"]; !ok && e.cfg.Model != "" {
-		obj["model"] = mustJSON(e.cfg.Model)
-	}
-	if _, ok := obj["messages"]; !ok {
-		content := strings.TrimSpace(toolName(c) + " " + string(args))
-		obj["messages"] = mustJSON([]map[string]string{{"role": "user", "content": content}})
-	}
-	forceStream(obj)
-	return json.Marshal(obj)
-}
-
-func (e *DynamoEngine) buildCompletionsBody(c *abi.ToolCall, args []byte) ([]byte, error) {
-	obj := map[string]json.RawMessage{}
-	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
-		obj = map[string]json.RawMessage{}
-	}
-	if _, ok := obj["model"]; !ok && e.cfg.Model != "" {
-		obj["model"] = mustJSON(e.cfg.Model)
-	}
-	if _, ok := obj["prompt"]; !ok {
-		prompt := strings.TrimSpace(toolName(c) + " " + string(args))
-		obj["prompt"] = mustJSON(prompt)
-	}
-	forceStream(obj)
-	return json.Marshal(obj)
+	return completeViaAdmit(ctx, e, c)
 }
 
 func (e *DynamoEngine) metricsURL() (string, error) {
-	if e.cfg.MetricsURL != "" {
-		return e.cfg.MetricsURL, nil
-	}
-	if e.cfg.BaseURL == "" {
-		return "", errors.New("dynamo: FAK_DYNAMO_METRICS_URL or BaseURL is required for metrics scrape")
-	}
-	u, err := url.Parse(e.cfg.BaseURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = strings.TrimRight(strings.TrimSuffix(u.Path, "/v1"), "/") + "/metrics"
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
+	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "dynamo", "FAK_DYNAMO_METRICS_URL", true)
 }
 
 // ScrapeServingMetrics reads Dynamo's Prometheus endpoint and returns one normalized

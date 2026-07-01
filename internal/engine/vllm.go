@@ -114,7 +114,7 @@ func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("vllm: FAK_VLLM_BASE_URL or VLLMConfig.BaseURL is required")
 	}
-	endpoint, kind, body, err := e.buildOpenAIRequest(ctx, c)
+	endpoint, kind, body, err := buildOpenAIRequest(ctx, e.cfg.BaseURL, e.cfg.Model, c)
 	if err != nil {
 		return nil, err
 	}
@@ -184,38 +184,29 @@ func (e *VLLMEngine) RunKVEventSubscription(ctx context.Context) error {
 
 // Complete drains the live stream and returns the assembled result.
 func (e *VLLMEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	req, err := e.Admit(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	for range req.Tokens() {
-	}
-	res, err := req.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res != nil && res.Call == nil {
-		res.Call = c
-	}
-	return res, nil
+	return completeViaAdmit(ctx, e, c)
 }
 
-func (e *VLLMEngine) buildOpenAIRequest(ctx context.Context, c *abi.ToolCall) (endpoint, kind string, body []byte, err error) {
+// buildOpenAIRequest lowers a tool call onto an OpenAI-compatible frontend: it
+// selects the /chat/completions or /completions route, joins it onto baseURL, and
+// shapes the matching request body with model injected. It is shared by every
+// OpenAI-frontend engine (vLLM, Dynamo, llm-d) so the lowering lives once.
+func buildOpenAIRequest(ctx context.Context, baseURL, model string, c *abi.ToolCall) (endpoint, kind string, body []byte, err error) {
 	args := refBytes(ctx, c.Args)
 	kind = vllmEndpointKind(c)
 	path := "/chat/completions"
 	if kind == "completions" {
 		path = "/completions"
 	}
-	endpoint, err = joinEndpoint(e.cfg.BaseURL, path)
+	endpoint, err = joinEndpoint(baseURL, path)
 	if err != nil {
 		return "", "", nil, err
 	}
 	if kind == "completions" {
-		body, err = e.buildCompletionsBody(c, args)
+		body, err = openAICompletionsBody(model, c, args)
 		return endpoint, kind, body, err
 	}
-	body, err = e.buildChatBody(c, args)
+	body, err = openAIChatBody(model, c, args)
 	return endpoint, kind, body, err
 }
 
@@ -238,13 +229,17 @@ func vllmEndpointKind(c *abi.ToolCall) string {
 	return "chat"
 }
 
-func (e *VLLMEngine) buildChatBody(c *abi.ToolCall, args []byte) ([]byte, error) {
+// openAIChatBody shapes an OpenAI-compatible /chat/completions request body: a
+// caller-supplied JSON object is passed through with the configured model and a
+// synthesized user message filled in when absent, and streaming forced on. An
+// empty/non-object args synthesizes the whole body from the tool name.
+func openAIChatBody(model string, c *abi.ToolCall, args []byte) ([]byte, error) {
 	obj := map[string]json.RawMessage{}
 	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
 		obj = map[string]json.RawMessage{}
 	}
-	if _, ok := obj["model"]; !ok && e.cfg.Model != "" {
-		obj["model"] = mustJSON(e.cfg.Model)
+	if _, ok := obj["model"]; !ok && model != "" {
+		obj["model"] = mustJSON(model)
 	}
 	if _, ok := obj["messages"]; !ok {
 		content := strings.TrimSpace(toolName(c) + " " + string(args))
@@ -254,13 +249,15 @@ func (e *VLLMEngine) buildChatBody(c *abi.ToolCall, args []byte) ([]byte, error)
 	return json.Marshal(obj)
 }
 
-func (e *VLLMEngine) buildCompletionsBody(c *abi.ToolCall, args []byte) ([]byte, error) {
+// openAICompletionsBody is the /completions counterpart of openAIChatBody: it fills
+// a synthesized prompt (rather than a chat message) when absent.
+func openAICompletionsBody(model string, c *abi.ToolCall, args []byte) ([]byte, error) {
 	obj := map[string]json.RawMessage{}
 	if json.Unmarshal(args, &obj) != nil || len(obj) == 0 {
 		obj = map[string]json.RawMessage{}
 	}
-	if _, ok := obj["model"]; !ok && e.cfg.Model != "" {
-		obj["model"] = mustJSON(e.cfg.Model)
+	if _, ok := obj["model"]; !ok && model != "" {
+		obj["model"] = mustJSON(model)
 	}
 	if _, ok := obj["prompt"]; !ok {
 		prompt := strings.TrimSpace(toolName(c) + " " + string(args))
@@ -897,21 +894,34 @@ func (e *VLLMEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 	return ParseVLLMPrometheus(e.cfg.WorkerID, string(raw)), nil
 }
 
-func (e *VLLMEngine) metricsURL() (string, error) {
-	if e.cfg.MetricsURL != "" {
-		return e.cfg.MetricsURL, nil
+// deriveMetricsURL resolves an engine's Prometheus /metrics endpoint: a configured
+// metricsURL wins outright, otherwise the /metrics path is derived from baseURL —
+// stripping a trailing /v1 for OpenAI-frontend engines when stripV1 is set. The
+// engine/env pair names the endpoint in the missing-config error. Shared by every
+// ridden-engine adapter so the derivation lives once.
+func deriveMetricsURL(configured, baseURL, engine, metricsEnv string, stripV1 bool) (string, error) {
+	if configured != "" {
+		return configured, nil
 	}
-	if e.cfg.BaseURL == "" {
-		return "", errors.New("vllm: FAK_VLLM_METRICS_URL or BaseURL is required for metrics scrape")
+	if baseURL == "" {
+		return "", fmt.Errorf("%s: %s or BaseURL is required for metrics scrape", engine, metricsEnv)
 	}
-	u, err := url.Parse(e.cfg.BaseURL)
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
 	}
-	u.Path = strings.TrimRight(strings.TrimSuffix(u.Path, "/v1"), "/") + "/metrics"
+	path := u.Path
+	if stripV1 {
+		path = strings.TrimSuffix(path, "/v1")
+	}
+	u.Path = strings.TrimRight(path, "/") + "/metrics"
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+func (e *VLLMEngine) metricsURL() (string, error) {
+	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "vllm", "FAK_VLLM_METRICS_URL", true)
 }
 
 type metricSumCount struct {

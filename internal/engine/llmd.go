@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
@@ -109,7 +108,7 @@ func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("llm-d: FAK_LLMD_BASE_URL or LLMDConfig.BaseURL is required")
 	}
-	endpoint, kind, body, err := e.vllm.buildOpenAIRequest(ctx, c)
+	endpoint, kind, body, err := buildOpenAIRequest(ctx, e.cfg.BaseURL, e.cfg.Model, c)
 	if err != nil {
 		return nil, err
 	}
@@ -153,20 +152,7 @@ func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 
 // Complete drains the live stream and returns the assembled result.
 func (e *LLMDEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	req, err := e.Admit(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	for range req.Tokens() {
-	}
-	res, err := req.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res != nil && res.Call == nil {
-		res.Call = c
-	}
-	return res, nil
+	return completeViaAdmit(ctx, e, c)
 }
 
 // RunKVEventSubscription consumes decoded vLLM KV-event batches from the llm-d
@@ -176,20 +162,7 @@ func (e *LLMDEngine) RunKVEventSubscription(ctx context.Context) error {
 }
 
 func (e *LLMDEngine) metricsURL() (string, error) {
-	if e.cfg.MetricsURL != "" {
-		return e.cfg.MetricsURL, nil
-	}
-	if e.cfg.BaseURL == "" {
-		return "", errors.New("llm-d: FAK_LLMD_METRICS_URL or BaseURL is required for metrics scrape")
-	}
-	u, err := url.Parse(e.cfg.BaseURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = strings.TrimRight(strings.TrimSuffix(u.Path, "/v1"), "/") + "/metrics"
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
+	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "llm-d", "FAK_LLMD_METRICS_URL", true)
 }
 
 // ScrapeServingMetrics reads the llm-d/vLLM Prometheus endpoint and normalizes it

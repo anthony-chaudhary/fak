@@ -39,7 +39,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -195,20 +194,7 @@ func (e *SGLangEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 
 // Complete drains the live stream and returns the assembled result.
 func (e *SGLangEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	req, err := e.Admit(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-	for range req.Tokens() {
-	}
-	res, err := req.Result()
-	if err != nil {
-		return nil, err
-	}
-	if res != nil && res.Call == nil {
-		res.Call = c
-	}
-	return res, nil
+	return completeViaAdmit(ctx, e, c)
 }
 
 // buildGenerateBody shapes the native SGLang /generate request. SGLang takes a raw
@@ -233,21 +219,9 @@ func (e *SGLangEngine) buildGenerateBody(c *abi.ToolCall, args []byte) ([]byte, 
 }
 
 // metricsURL derives the SGLang Prometheus endpoint when not configured explicitly.
+// SGLang's HTTP root is not an OpenAI /v1 frontend, so no /v1 suffix is stripped.
 func (e *SGLangEngine) metricsURL() (string, error) {
-	if e.cfg.MetricsURL != "" {
-		return e.cfg.MetricsURL, nil
-	}
-	if e.cfg.BaseURL == "" {
-		return "", errors.New("sglang: FAK_SGLANG_METRICS_URL or BaseURL is required for metrics scrape")
-	}
-	u, err := url.Parse(e.cfg.BaseURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/metrics"
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
+	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "sglang", "FAK_SGLANG_METRICS_URL", false)
 }
 
 func (e *SGLangEngine) radixURL() (string, error) {

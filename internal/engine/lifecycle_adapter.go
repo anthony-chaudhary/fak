@@ -93,10 +93,18 @@ func (a *AdapterEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineR
 	return r, nil
 }
 
-// Complete is the one-shot shim so the adapter also satisfies the bare
-// EngineDriver: admit, drain the stream, return the assembled turn.
-func (a *AdapterEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	req, err := a.Admit(ctx, c)
+// admitStreamer is the subset of a LifecycleEngine the one-shot Complete shim
+// needs: open the live request stream for one call.
+type admitStreamer interface {
+	Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error)
+}
+
+// completeViaAdmit is the shared one-shot EngineDriver shim for a lifecycle engine:
+// Admit the call, drain its Tokens stream, then return the assembled Result with the
+// originating call bound on when the engine left it nil. Every lifecycle engine's
+// Complete is exactly this drain over its own Admit, so they all delegate here.
+func completeViaAdmit(ctx context.Context, e admitStreamer, c *abi.ToolCall) (*abi.Result, error) {
+	req, err := e.Admit(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +118,12 @@ func (a *AdapterEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Res
 		res.Call = c
 	}
 	return res, nil
+}
+
+// Complete is the one-shot shim so the adapter also satisfies the bare
+// EngineDriver: admit, drain the stream, return the assembled turn.
+func (a *AdapterEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	return completeViaAdmit(ctx, a, c)
 }
 
 // adapterRequest is one in-flight upstream-backed request.
