@@ -4,39 +4,41 @@
 
 <!-- readme-verified: 2026-06-30 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. Restructured 2026-06-29 to lead with the `fak guard` + API getting-started path, then the in-kernel model, then the performance value proposition; 2026-06-30 added the CI/CD ship-loop front-door note. Front-page overflow lives in docs/README-legacy.md; previous snapshot in docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
-**fak in one line:** fak is a fused agent kernel: one Go binary that sits in front of an
-agent's tool calls, checks each call, and reuses the stable work in long sessions so the same
-agent loop is safer, cheaper, and faster.
+**fak in one line:** fak is a fused agent kernel. One Go binary sits in front of an agent's
+tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
+loop comes out safer, cheaper, and faster.
 
-**Put one binary in front of the agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — and the same long session gets cheaper and faster, with nothing else changed.**
+**Put one binary in front of the agent you already run.** It works with Claude Code, Codex,
+Cursor, or any OpenAI / Anthropic / MCP client. The same long session gets cheaper and faster,
+with nothing else changed.
 
 `fak guard -- claude` wraps your normal agent in one command. It keeps your model, your IDE,
 and your keys exactly as they are. You get back the parts of the agent loop that got
 expensive. `fak` points one base URL at itself for you; nothing else in your setup changes.
 
-**What you get, in numbers.** Every figure traces to
+What you get, in numbers. Every figure traces to
 [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md), and the honesty ledger is
 [CLAIMS.md](CLAIMS.md):
 
 - **~4.1× less work than a tuned warm-cache stack** on a 50-turn × 5-agent run. `fak` reuses
-  the shared prompt prefix across agents (the system prompt + tools, the *KV cache* of the
-  work so far) instead of re-paying for it. That reuse factor climbs to **6.95×** across the
-  model ladder. (Against the naive re-send loop it is ~60×; the tuned number is the honest
-  one to beat.)
+  the shared prompt prefix across agents instead of re-paying for it. That prefix is the
+  system prompt + tools, the *KV cache* of the work so far. The reuse factor climbs to
+  **6.95×** across the model ladder. Against the naive re-send loop it is ~60×; the tuned
+  number is the honest one to beat.
 - **~120 tok/s in-kernel GPU decode** on an RTX 4070 (SmolLM2-135M, f32 weights, gated
   `FAK_CUDA_GRAPH=1`), landing inside llama.cpp's Q8_0 range of 120 ± 15 tok/s — so a
-  full-precision kernel **reaches parity with a quantized llama.cpp**.
+  full-precision kernel reaches parity with a quantized llama.cpp.
 - **The provider cache discount survives a long session.** `fak` sheds old turns while
   keeping the prompt-cache prefix byte-identical, so the rebate holds instead of breaking
   the moment the conversation sprawls.
 - **The guard tax is ~362 ns per call.** The kernel's allow/deny decision runs in-process
-  (measured, Apple M3 Pro), not as a network hop.
+  (measured, Apple M3 Pro), with no network hop.
 
-> **fak in one line:** put `fak` in front of the agent you already run. It makes long
-> sessions cheaper, routes each call to the right model, and on the same boundary enforces a
-> safety floor and records every decision. One binary, no rewrite, no key to start.
+> In one line: put `fak` in front of the agent you already run. It makes long sessions
+> cheaper, routes each call to the right model, and on the same boundary enforces a safety
+> floor and records every decision. One binary, no rewrite, no key to start.
 
-**Who is this for?** Pick your path: [run your agent through it now](#get-started-with-fak-guard)
+Who is this for? Pick your path: [run your agent through it now](#get-started-with-fak-guard)
 · [run the modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
 [run a model in the kernel](#run-the-model-in-the-kernel) ·
 [the performance story](#the-performance-value-proposition) ·
@@ -86,8 +88,8 @@ crossed the gateway over your subscription:
 
 ### See a real number — no key, no model, no GPU
 
-Installed the binary (see [Install](#install))? These run from the bare binary anywhere,
-with no clone, no key, no model, and no GPU:
+Installed the binary (see [Install](#install))? These run from the bare binary anywhere. No
+clone, no key, no model, no GPU:
 
 ```bash
 fak routebench                  # -> COST / LATENCY / QUALITY delta: per-aspect routing vs a one-model baseline
@@ -96,8 +98,8 @@ fak benchmarks list --offline   # -> the zero-asset benchmark set you can run ri
 
 `fak routebench` replays a built-in 8-case corpus through a routing policy versus a
 single-model baseline. On the demo corpus it prints `routed is ~20% cheaper, ~10% less total
-compute, quality tied`. That is a deterministic offline lens, not a bill, and the fastest
-way to see the kernel do something real before you wire it to anything.
+compute, quality tied`. That is a deterministic offline lens rather than a bill, and the
+fastest way to see the kernel do something real before you wire it to anything.
 
 Prefer a hosted run with expected-state checks? Open the
 [modular Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb):
@@ -106,7 +108,7 @@ Ollama gateway case.
 
 ## Run the model in the kernel
 
-`fak guard` is happiest in front of a frontier API, but the kernel can *be* the model host
+`fak guard` is happiest in front of a frontier API. But the kernel can *be* the model host
 too. `fak guard --gguf` loads a local GGUF model in-process, with no API key, no network,
 and no second server:
 
@@ -142,13 +144,13 @@ reasoning. Local-model build tags and GPU flags:
 
 A long agent session burns money re-solving the same setup. A 100k-token Claude Code
 conversation re-sends its *whole* transcript every single turn, and a 5-agent fleet pays for
-the same shared system prompt five times over. `fak` does the shared work **once**.
+the same shared system prompt five times over. `fak` does the shared work *once*.
 
 **Reuse the shared prefix across agents.** The system prompt, the tool table, and the
 instructions are identical for every agent in a fleet. `fak` computes that prefix once and
-reuses it (copy-on-write) for all of them, so a 50-turn × 5-agent run does **~4.1× less work
-than a tuned warm-cache stack** (the prefix-reuse factor itself climbs to **6.95×** across
-the model ladder).
+reuses it (copy-on-write) for all of them. A 50-turn × 5-agent run does ~4.1× less work
+than a tuned warm-cache stack, and the prefix-reuse factor itself climbs to 6.95× across
+the model ladder.
 
 ```mermaid
 flowchart TD
@@ -164,10 +166,11 @@ flowchart TD
 **Shed history without losing the cache hit.** This is where most of the cost goes. Once a
 conversation sprawls past ~48k resident tokens, `fak guard` (on by default) drops the old
 middle turns. It copies the provider's cache prefix through byte-for-byte, so the prompt-cache
-discount holds instead of breaking. The obvious alternative, summarizing the old turns,
-rewrites the prompt and busts the cache, so it costs *more*. On any doubt `fak` forwards the
-original prompt unchanged, and relays the provider's own `cache_read` number rather than
-claiming the hit.
+discount holds instead of breaking.
+
+The obvious alternative, summarizing the old turns, rewrites the prompt and busts the cache,
+so it costs *more*. On any doubt `fak` forwards the original prompt unchanged. It relays the
+provider's own `cache_read` number rather than claiming the hit.
 
 ```mermaid
 flowchart LR
@@ -202,15 +205,15 @@ KV-deletion work on the product path? See
 
 `fak guard` is per-session and the right default. When you want something else:
 
-- **Always-on gateway — `fak node`.** Install `fak serve` as a real system service (macOS
-  launchd, Linux systemd `--user`, Windows Scheduled Task), connect a client to it from a
-  phone or a second machine, and tear it down. Same five commands whether the node is local
-  or fleet-wide. The upstream credential lives on the host; clients present only the
-  gateway's bearer key. See [docs/fak/node-setup.md](docs/fak/node-setup.md).
-- **Codex, Cursor, MCP hosts.** Keep your normal model wire but let the agent ask the kernel
-  for verdicts over MCP: `fak serve --stdio --policy examples/dev-agent-policy.json` exposes
-  five kernel tools (`fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_context_change`,
-  session reset). See [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md),
+- **Always-on gateway — `fak node`.** Install `fak serve` as a real system service. It runs
+  under macOS launchd, Linux systemd `--user`, or a Windows Scheduled Task. Connect a client
+  to it from a phone or a second machine, then tear it down. Same five commands whether the
+  node is local or fleet-wide. The upstream credential lives on the host; clients present
+  only the gateway's bearer key. See [docs/fak/node-setup.md](docs/fak/node-setup.md).
+- **Codex, Cursor, MCP hosts.** Keep your normal model wire. Let the agent ask the kernel
+  for verdicts over MCP. `fak serve --stdio --policy examples/dev-agent-policy.json` exposes
+  five kernel tools: `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_context_change`, plus
+  session reset. See [docs/integrations/openai-codex.md](docs/integrations/openai-codex.md),
   [docs/integrations/cursor.md](docs/integrations/cursor.md), and [examples/mcp](examples/mcp).
 - **Any OpenAI- or Anthropic-compatible client.** Put `fak serve` in front of a model
   endpoint and point the client at it:
@@ -272,8 +275,8 @@ tool execution. (This is the "policy" layer; it is deliberately not the front-pa
 because most adopters meet it through `fak guard`'s built-in floor without ever editing it.)
 
 Most agent security tries to recognize bad text. Recognizers help; they are not the floor.
-Prompt injection is a text game, and attackers get turns too. `fak` moves the load-bearing
-decision to the **capability floor**: a dangerous tool outside the allow-list cannot be
+Prompt injection is a text game, and attackers get turns too. So `fak` moves the load-bearing
+decision to the **capability floor**. A dangerous tool outside the allow-list cannot be
 called, no matter what the model was told. Two independent gates carry it:
 
 - **Call-side gate.** Tool names and selected arguments are checked before dispatch; a
@@ -299,8 +302,8 @@ Point your agent at a starter floor with `fak guard --policy examples/<file>`:
 | Customer support | [`customer-support-readonly-policy.json`](examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
 | Infra / DevOps review | [`devops-dryrun-policy.json`](examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
 
-The full catalogue (flight booking, trading, clinical/PHI, SQL analyst, and more, each with
-a witness command) is in [examples/README.md](examples/README.md) and the
+The full catalogue covers flight booking, trading, clinical/PHI, SQL analyst, and more, each
+with a witness command. It lives in [examples/README.md](examples/README.md) and the
 [per-domain use-case page](docs/README-legacy.md#use-cases-by-domain). Every refusal cites a
 closed reason code you can assert on (`POLICY_BLOCK`, `OVERSIZE`, `SECRET_EXFIL`, …). Read
 [POLICY.md](POLICY.md), [docs/fak/security.md](docs/fak/security.md), and
@@ -341,13 +344,15 @@ blocked by OS Application Control on freshly compiled test binaries. Use `./test
 WSL for the full suite on that host.
 
 The badges at the top mirror this local loop. Run the cheapest witness that covers your
-change first (`make test-fast` for code, `python tools/readme_freshness_audit.py --json`
-for this page, or the relevant `--dry-run`/`--check` command), then use `make ci` as the
-green bar before delivery. Shipping is continuous but path-scoped: preview the exact
-subject and files with `fak commit --preview -m "<subject>" --path <p>`, commit only those
-paths, and push after the gate is green. Each pushed commit should be a self-building
-snapshot; do not rely on a later commit in the same push to repair a broken intermediate.
-No side branch, no `git add -A`, no force-push.
+change first: `make test-fast` for code, `python tools/readme_freshness_audit.py --json`
+for this page, or the relevant `--dry-run`/`--check` command. Then use `make ci` as the
+green bar before delivery.
+
+Shipping is continuous but path-scoped. Preview the exact subject and files with
+`fak commit --preview -m "<subject>" --path <p>`, commit only those paths, and push after
+the gate is green. Each pushed commit should be a self-building snapshot; do not rely on a
+later commit in the same push to repair a broken intermediate. No side branch, no
+`git add -A`, no force-push.
 
 ## Boundaries
 
@@ -362,10 +367,10 @@ No side branch, no `git add -A`, no force-push.
 ## Going deeper
 
 Narrower-audience and deep-dive material that used to sit on this page now lives on the
-[front-page overflow page](docs/README-legacy.md): why the agent stack needs this now, the
-full per-domain use-case catalogue, the vCache provider-cache budget signal, model routing
-and router fusion, and the three-axes view of the kernel (scale → depth → deployment
-substrate).
+[front-page overflow page](docs/README-legacy.md). You'll find why the agent stack needs
+this now, the full per-domain use-case catalogue, the vCache provider-cache budget signal,
+and model routing. It also gives the three-axes view of the kernel: scale → depth →
+deployment substrate.
 
 ## Docs map
 
