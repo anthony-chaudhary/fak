@@ -260,6 +260,7 @@ var tier = map[string]int{
 	"frontierswe":      1, // typed FrontierSWE dataset spine (#1707, epic #1706): the Task model + Category enum + 17-task Catalog + hand-rolled task.toml/job.yaml/oracle.yaml loaders, mirroring internal/swebench's Instance; stdlib-only, imports nothing internal, off the hot path.
 	"fleetcap":         1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
 	"fleetcompare":     1, // pure fleet sweep slice builder that decomposes shared vs isolated/cross-cache gains; stdlib-only, off the hot path.
+	"fleettrend":       1, // fleet status JSONL history and sparkline trend fold; stdlib-only, off the hot path.
 	"workflowaudit":    1, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	"fleetsim":         1, // synthetic 400-issues/hour dry-run replay fixture: deterministic ledger generator + closes/hour fold; stdlib-only, off the hot path.
 	"fleetmetrics":     1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
