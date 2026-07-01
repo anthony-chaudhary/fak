@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 func TestCleanJournalScores100(t *testing.T) {
@@ -105,7 +107,7 @@ func TestScorecardPayloadShapeAndGrade(t *testing.T) {
 	if payload.Schema != ScorecardSchema || payload.Corpus["guard_rsi_debt"] != 0 {
 		t.Fatalf("payload = %+v", payload)
 	}
-	if GradeLetter(90) != "A" || GradeLetter(80) != "B" || GradeLetter(70) != "C" || GradeLetter(60) != "D" || GradeLetter(59) != "F" {
+	if scorecard.GradeStd(90) != "A" || scorecard.GradeStd(80) != "B" || scorecard.GradeStd(70) != "C" || scorecard.GradeStd(60) != "D" || scorecard.GradeStd(59) != "F" {
 		t.Fatalf("grade boundaries changed")
 	}
 }

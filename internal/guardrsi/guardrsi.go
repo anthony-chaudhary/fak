@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -17,6 +18,8 @@ const (
 	FoldSchema       = "guard-verdict-rsi.fold/1"
 	ScorecardSchema  = "fak-guard-rsi-scorecard/1"
 	defaultAuditPath = ".dispatch-runs/guard-audit"
+	// DebtKey is the headline integer the control-pane folds (corpus.guard_rsi_debt).
+	DebtKey = "guard_rsi_debt"
 )
 
 var KnownVerdicts = map[string]bool{
@@ -69,29 +72,6 @@ type KPIResult struct {
 	Axis   string `json:"axis"`
 	Passed bool   `json:"passed"`
 	Detail string `json:"detail"`
-}
-
-type KPIPayload struct {
-	KPI     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   int      `json:"score"`
-	Detail  string   `json:"detail"`
-	Defects []string `json:"defects"`
-	Soft    []string `json:"soft"`
-}
-
-type ScorecardPayload struct {
-	Schema     string         `json:"schema"`
-	OK         bool           `json:"ok"`
-	Verdict    string         `json:"verdict"`
-	Finding    string         `json:"finding"`
-	Reason     string         `json:"reason"`
-	NextAction string         `json:"next_action"`
-	Workspace  string         `json:"workspace"`
-	Corpus     map[string]any `json:"corpus"`
-	KPIs       []KPIPayload   `json:"kpis"`
-	Maturity   []KPIResult    `json:"maturity"`
-	Realized   []KPIResult    `json:"realized"`
 }
 
 func JournalPaths(root, explicit string) []string {
@@ -334,158 +314,111 @@ func RenderIteration(it Iteration) string {
 	return strings.Join(lines, "\n")
 }
 
-func BuildScorecard(root string) ScorecardPayload {
+// axisWeight is the composite share each axis contributes (BuildScorecard's historical
+// 0.4*maturity + 0.6*realized split). Folding through scorecard.Fold's per-KPI Key weight
+// (weight = axisWeight * the KPI's own Weight) reproduces that exact composite: both axes'
+// KPI weights (maturityResults/realizedResults) sum to the same total (11), so the weighted
+// mean over all KPIs collapses back to axisWeight[axis]*axisScore(axis) summed across axes.
+const (
+	maturityAxisWeight = 0.4
+	realizedAxisWeight = 0.6
+)
+
+// toKPI converts one maturity/realized KPIResult into the shared kernel's scorecard.KPI: a
+// HARD failure becomes a Defect (counted debt), a SOFT (non-hard) failure becomes a Soft
+// advisory (never debt) -- exactly mirroring the pre-kernel kpiPayloads mapping.
+func toKPI(r KPIResult, axisWeight float64) (scorecard.KPI, float64) {
+	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
+	if r.Passed {
+		k.Score = 100
+	} else if r.Hard {
+		k.Defects = []string{r.Key + ": " + r.Detail}
+	} else {
+		k.Soft = []string{r.Key + ": " + r.Detail}
+	}
+	return k, axisWeight * float64(r.Weight)
+}
+
+// BuildScorecard folds the guard-RSI loop's maturity/realized KPIs into the control-pane
+// payload via the shared pkg/scorecard kernel (#1511), mirroring internal/conflationscore.
+// The KPIs, their hard/soft classification, their weights, and the resulting composite/grade
+// are byte-for-byte unchanged from the pre-kernel fold -- only the plumbing moved.
+func BuildScorecard(root string) scorecard.Payload {
 	ctx := loadContext(root)
 	maturity := maturityResults(ctx)
 	realized := realizedResults(ctx)
-	all := append(append([]KPIResult{}, maturity...), realized...)
+
+	kpis := make([]scorecard.KPI, 0, len(maturity)+len(realized))
+	weights := make(map[string]float64, len(maturity)+len(realized))
+	for _, r := range maturity {
+		k, w := toKPI(r, maturityAxisWeight)
+		kpis = append(kpis, k)
+		weights[k.Key] = w
+	}
+	for _, r := range realized {
+		k, w := toKPI(r, realizedAxisWeight)
+		kpis = append(kpis, k)
+		weights[k.Key] = w
+	}
+
 	mScore := axisScore(maturity)
 	rScore := axisScore(realized)
-	composite := int(math.Round(0.4*float64(mScore) + 0.6*float64(rScore)))
+
 	var hardFail []KPIResult
-	for _, r := range all {
+	for _, r := range append(append([]KPIResult{}, maturity...), realized...) {
 		if r.Hard && !r.Passed {
 			hardFail = append(hardFail, r)
 		}
 	}
-	debt := len(hardFail)
-	grade := GradeLetter(composite)
-	ok := debt == 0
-	verdict, finding, reason, next := "OK", "guard_rsi_loop_mature_and_useful", "", ""
-	if ok {
-		reason = fmt.Sprintf("guard RSI loop: maturity %d/100, realized %d/100, composite %d/100 (%s); zero hard gaps; %d real journal row(s)", mScore, rScore, composite, grade, ctx.auditRows)
-		next = "hold the line; re-run after a change to either guard RSI loop, or run `fak guard-verdict-rsi run` after a fresh guarded session"
-	} else {
-		verdict, finding = "ACTION", "guard_rsi_debt"
+
+	finding, next := "guard_rsi_loop_mature_and_useful", "hold the line; re-run after a change to either guard RSI loop, or run `fak guard-verdict-rsi run` after a fresh guarded session"
+	findingClean, nextClean := finding, next
+	if len(hardFail) > 0 {
 		keys := make([]string, len(hardFail))
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		reason = fmt.Sprintf("guard RSI loop carries %d hard gap(s) (maturity %d/100, realized %d/100, composite %d/100 %s): %s", debt, mScore, rScore, composite, grade, strings.Join(keys, ", "))
+		finding = "guard_rsi_debt"
 		lead := hardFail[0]
 		next = fmt.Sprintf("retire worst-first: %s -- %s", lead.Key, lead.Detail)
 	}
-	return ScorecardPayload{
-		Schema:     ScorecardSchema,
-		OK:         ok,
-		Verdict:    verdict,
-		Finding:    finding,
-		Reason:     reason,
-		NextAction: next,
-		Workspace:  root,
-		Corpus: map[string]any{
-			"guard_rsi_debt":  debt,
-			"score":           composite,
-			"grade":           grade,
+
+	p := scorecard.Fold(ScorecardSchema, kpis, DebtKey, weights, scorecard.Messages{
+		Grade:           scorecard.GradeStd,
+		Finding:         finding,
+		FindingClean:    findingClean,
+		NextAction:      next,
+		NextActionClean: nextClean,
+		Reason:          scorecardReason(hardFail, mScore, rScore, ctx),
+		ExtraCorpus: map[string]any{
 			"maturity_score":  mScore,
+			"maturity_value":  scorecard.Round3(scorecard.ValueFromScore(float64(mScore))),
 			"realized_score":  rScore,
+			"realized_value":  scorecard.Round3(scorecard.ValueFromScore(float64(rScore))),
 			"audit_rows":      ctx.auditRows,
 			"verdict_quality": ctx.verdictQuality,
 		},
-		KPIs:     kpiPayloads(all),
-		Maturity: maturity,
-		Realized: realized,
-	}
+	})
+	p.Workspace = root
+	return p
 }
 
-func RenderScorecard(p ScorecardPayload) string {
-	c := p.Corpus
-	vq := ""
-	if c["verdict_quality"] != nil {
-		vq = fmt.Sprintf("   verdict-quality %.3g", c["verdict_quality"])
+// scorecardReason renders the human reason line, matching the pre-kernel BuildScorecard
+// prose exactly (composite/grade come from the caller's fold, so this recomputes just the
+// grade label for the message text).
+func scorecardReason(hardFail []KPIResult, mScore, rScore int, ctx context) string {
+	composite := int(math.Round(maturityAxisWeight*float64(mScore) + realizedAxisWeight*float64(rScore)))
+	grade := scorecard.GradeStd(float64(composite))
+	if len(hardFail) == 0 {
+		return fmt.Sprintf("guard RSI loop: maturity value %.3f, realized value %.3f, composite value %.3f (%s, legacy score %d); zero hard gaps; %d real journal row(s)",
+			scorecard.ValueFromScore(float64(mScore)), scorecard.ValueFromScore(float64(rScore)), scorecard.ValueFromScore(float64(composite)), grade, composite, ctx.auditRows)
 	}
-	lines := []string{
-		fmt.Sprintf("guard RSI loop -- %s (%s)", p.Verdict, p.Finding),
-		fmt.Sprintf("  guard_rsi_debt: %v   composite %v/100 [%v]   (maturity %v; realized %v)", c["guard_rsi_debt"], c["score"], c["grade"], c["maturity_score"], c["realized_score"]),
-		fmt.Sprintf("  real journal: %v row(s)%s", c["audit_rows"], vq),
-		"",
-		"  MATURITY (can the loop honestly close?):",
+	keys := make([]string, len(hardFail))
+	for i, r := range hardFail {
+		keys[i] = r.Key
 	}
-	for _, r := range p.Maturity {
-		lines = append(lines, scorecardLine(r))
-		if !r.Passed {
-			lines = append(lines, "           -> "+r.Detail)
-		}
-	}
-	lines = append(lines, "  REALIZED (operationalised on our usage?):")
-	for _, r := range p.Realized {
-		lines = append(lines, scorecardLine(r))
-		if !r.Passed {
-			lines = append(lines, "           -> "+r.Detail)
-		}
-	}
-	lines = append(lines, "", "  -> "+p.NextAction)
-	return strings.Join(lines, "\n")
-}
-
-func Markdown(p ScorecardPayload) string {
-	c := p.Corpus
-	var b strings.Builder
-	fmt.Fprintln(&b, "---")
-	fmt.Fprintln(&b, `title: "fak guard RSI loop scorecard"`)
-	fmt.Fprintln(&b, `description: "How mature and realized the RSI loop(s) for fak guard are, scored from the tree plus the real decision journal."`)
-	fmt.Fprintln(&b, "---")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "# fak guard RSI loop scorecard")
-	fmt.Fprintln(&b)
-	fmt.Fprintf(&b, "**guard_rsi_debt: %v**; composite **%v/100 (%v)**; maturity %v/100; realized %v/100; real journal rows %v\n\n", c["guard_rsi_debt"], c["score"], c["grade"], c["maturity_score"], c["realized_score"], c["audit_rows"])
-	fmt.Fprintf(&b, "> %s\n\n", p.Reason)
-	writeKPITable(&b, "## Maturity -- can the loop honestly close?", p.Maturity, false)
-	fmt.Fprintln(&b)
-	writeKPITable(&b, "## Realized -- does it run on our own usage?", p.Realized, true)
-	fmt.Fprintf(&b, "\n**Next:** %s\n", p.NextAction)
-	return b.String()
-}
-
-// writeKPITable renders one markdown section into b: a `## ` header line, a blank
-// line, then a criterion table. With detail it carries the 3-column (ok/criterion/
-// detail) shape; without, the 2-column (ok/criterion) shape.
-func writeKPITable(b *strings.Builder, header string, rows []KPIResult, withDetail bool) {
-	fmt.Fprintln(b, header)
-	fmt.Fprintln(b)
-	if withDetail {
-		fmt.Fprintln(b, "| ok | criterion | detail |")
-		fmt.Fprintln(b, "|---|---|---|")
-		for _, r := range rows {
-			fmt.Fprintf(b, "| %s | %s | %s |\n", passMark(r.Passed), r.Label, r.Detail)
-		}
-		return
-	}
-	fmt.Fprintln(b, "| ok | criterion |")
-	fmt.Fprintln(b, "|---|---|")
-	for _, r := range rows {
-		fmt.Fprintf(b, "| %s | %s |\n", passMark(r.Passed), r.Label)
-	}
-}
-
-func Compare(current ScorecardPayload, baseline map[string]any) string {
-	bc, _ := baseline["corpus"].(map[string]any)
-	if bc == nil {
-		bc = baseline
-	}
-	bDebt := anyInt(bc["guard_rsi_debt"])
-	if bDebt == 0 {
-		bDebt = anyInt(bc["score"])
-	}
-	cDebt := anyInt(current.Corpus["guard_rsi_debt"])
-	delta := bDebt - cDebt
-	lines := []string{
-		"guard-rsi compare:",
-		fmt.Sprintf("  guard_rsi_debt: %d -> %d  (retired %d)", bDebt, cDebt, delta),
-		fmt.Sprintf("  composite: %v -> %v  grade %v -> %v", bc["score"], current.Corpus["score"], bc["grade"], current.Corpus["grade"]),
-		fmt.Sprintf("  real journal rows: %v -> %v", bc["audit_rows"], current.Corpus["audit_rows"]),
-	}
-	switch {
-	case bDebt > 0 && cDebt*3 <= bDebt:
-		lines = append(lines, fmt.Sprintf("  VERDICT: >=3x improvement (debt %d -> %d, <= 1/3 of baseline)", bDebt, cDebt))
-	case bDebt > 0 && cDebt*2 <= bDebt:
-		lines = append(lines, fmt.Sprintf("  VERDICT: >=2x improvement (debt %d -> %d)", bDebt, cDebt))
-	case bDebt > 0 && cDebt < bDebt:
-		lines = append(lines, fmt.Sprintf("  VERDICT: improved but < 2x (debt %d -> %d)", bDebt, cDebt))
-	case bDebt > 0:
-		lines = append(lines, fmt.Sprintf("  VERDICT: no improvement (debt %d -> %d)", bDebt, cDebt))
-	}
-	return strings.Join(lines, "\n")
+	return fmt.Sprintf("guard RSI loop carries %d hard gap(s) (maturity value %.3f, realized value %.3f, composite value %.3f %s, legacy score %d): %s",
+		len(hardFail), scorecard.ValueFromScore(float64(mScore)), scorecard.ValueFromScore(float64(rScore)), scorecard.ValueFromScore(float64(composite)), grade, composite, strings.Join(keys, ", "))
 }
 
 type context struct {
@@ -579,56 +512,6 @@ func axisScore(rows []KPIResult) int {
 	return int(math.Round(100 * float64(got) / float64(total)))
 }
 
-func GradeLetter(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
-func kpiPayloads(rows []KPIResult) []KPIPayload {
-	out := make([]KPIPayload, 0, len(rows))
-	for _, r := range rows {
-		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
-		if r.Passed {
-			k.Score = 100
-		} else if r.Hard {
-			k.Defects = []string{r.Key + ": " + r.Detail}
-		} else {
-			k.Soft = []string{r.Key + ": " + r.Detail}
-		}
-		out = append(out, k)
-	}
-	return out
-}
-
-func scorecardLine(r KPIResult) string {
-	mark := "PASS"
-	if !r.Passed {
-		if r.Hard {
-			mark = "FAIL"
-		} else {
-			mark = "----"
-		}
-	}
-	return fmt.Sprintf("    [%s] %s", mark, r.Label)
-}
-
-func passMark(ok bool) string {
-	if ok {
-		return "yes"
-	}
-	return "no"
-}
-
 func configHome() string {
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
 		return v
@@ -704,20 +587,4 @@ func mapString(m map[string]int) string {
 	}
 	b, _ := json.Marshal(m)
 	return string(b)
-}
-
-func anyInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case json.Number:
-		i, _ := n.Int64()
-		return int(i)
-	default:
-		return 0
-	}
 }
