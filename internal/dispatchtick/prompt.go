@@ -68,7 +68,7 @@ func RenderIssuePrompt(in IssuePromptInput) string {
 	labels := labelsLine(in.Labels)
 	return fmt.Sprintf(`your goal: resolve GitHub issue #%[1]d (%[2]s) with the smallest correct change that genuinely closes it, then ship it on the configured development branch `+"`%[8]s`"+` citing `+"`#%[1]d`"+` in the commit subject - OR end with a final report naming the exact gate you could not reach and why. Do NOT fabricate a pass.
 
-read first: run `+"`gh issue view %[1]d`"+` for the live issue, then orient with `+"`AGENTS.md`"+` (build/test/run + the hard rules) and `+"`llms.txt`"+` (the doc map). Then run `+"`python tools/memory_read.py`"+` for the committed fleet memory (lane quirks, known blockers, host gotchas) - a Claude worker gets this auto-injected, an opencode worker does NOT, so this read is how both backends start warm (it is a harmless no-op if the mirror is absent). This issue routed to the `+"`%[3]s`"+` lane (its file-tree). Labels: %[4]s.
+read first: run `+"`gh issue view %[1]d`"+` for the live issue, then orient with `+"`AGENTS.md`"+` (build/test/run + the hard rules) and `+"`llms.txt`"+` (the doc map). Then run `+"`fak memory-read`"+` for the committed fleet memory (lane quirks, known blockers, host gotchas) - a Claude worker gets this auto-injected, an opencode worker does NOT, so this read is how both backends start warm (it is a harmless no-op if the mirror is absent). This issue routed to the `+"`%[3]s`"+` lane (its file-tree). Labels: %[4]s.
 
 %[7]s
 

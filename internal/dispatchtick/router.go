@@ -17,6 +17,21 @@ const BlockedByHumanLabel = "blocked-by-human"
 const MaxDispatchExpectedSteps = 8
 const ReasonDuplicateRisk = "ISSUE_DUPLICATE_RISK"
 
+// ReasonBlockedByHuman is the skip reason a SkippedIssue carries when it was held back from
+// dispatch because it wears the blocked-by-human label — the subset a human must unblock. It
+// is exported so a consumer (e.g. `fak dispatch skipped`) can select exactly the human-blocked
+// rows out of the router's full skipped set without re-deriving the string.
+const ReasonBlockedByHuman = "BLOCKED_BY_HUMAN"
+
+// ReasonHumanBlockUnverified marks an issue that carries the blocked-by-human
+// label but does NOT witness the block: no structured blocker section naming a
+// genuine external/human-only action. The bare label is the difficulty dodge the
+// BlockedByHumanLabel comment warns against, so it is not parked in the true
+// human-blocked bucket -- it is routed to a fresh-context decision ("decide"
+// repair queue) that confirms a real blocker or drops the label. This hardening
+// keeps the witnessed BLOCKED_BY_HUMAN skip count near zero.
+const ReasonHumanBlockUnverified = "ISSUE_HUMAN_BLOCK_UNVERIFIED"
+
 var TriageOnlyLabels = map[string]bool{
 	"guard-complaint": true,
 	"idea-scout":      true,
@@ -1169,8 +1184,10 @@ func skippedIssueChildIssueBudget(issue SkippedIssue, kind string) int {
 
 func routerRepairKind(reason string) string {
 	switch reason {
-	case "BLOCKED_BY_HUMAN":
+	case ReasonBlockedByHuman:
 		return "human"
+	case ReasonHumanBlockUnverified:
+		return "decide"
 	case ReasonDuplicateRisk:
 		return "duplicate"
 	case "ISSUE_NOT_DISPATCH_LEAF", "ISSUE_OVERSIZED_EXPECTED_STEPS":
@@ -1200,12 +1217,14 @@ func routerRepairRank(kind string) int {
 		return 3
 	case "route":
 		return 4
-	case "noise":
+	case "decide":
 		return 5
-	case "private":
+	case "noise":
 		return 6
-	case "human":
+	case "private":
 		return 7
+	case "human":
+		return 8
 	default:
 		return 9
 	}
@@ -1227,6 +1246,8 @@ func routerRepairAction(kind string) string {
 		return "add trigger, batch policy, agent context, and live dedupe/cap evidence"
 	case "private":
 		return "remove private/operator-only evidence or move the work to the private companion repo"
+	case "decide":
+		return "spawn a fresh-context decision agent (meta issue) to confirm a genuine external/human blocker or drop the blocked-by-human label so a worker can dispatch it"
 	case "human":
 		return "wait for the human blocker to clear before worker dispatch"
 	default:
@@ -1283,8 +1304,19 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	triageLabel := triageOnlyLabel(issue)
 	switch {
 	case IsBlockedByHuman(issue, blockedLabel):
-		reason = "BLOCKED_BY_HUMAN"
-		next = "wait for the human blocker to clear before worker dispatch"
+		if humanBlockVerified(issue) {
+			// Witnessed: the block names a genuine external/human-only action. This
+			// is the hardened, narrow bucket -- the only issues a worker truly cannot
+			// close, kept visible for a human.
+			reason = ReasonBlockedByHuman
+			next = "wait for the named external/human blocker to clear before worker dispatch"
+		} else {
+			// Bare or agent-clearable label: do NOT park it in the human-blocked
+			// bucket. Hand it to a fresh-context decision (meta issue) that confirms a
+			// real blocker or drops the label so a worker can pick it up.
+			reason = ReasonHumanBlockUnverified
+			next = "spawn a fresh-context decision (meta issue): confirm a genuine external/human blocker in a '## Human blocker' section, or drop the blocked-by-human label so a worker can dispatch it"
+		}
 	case IsEpic(issue):
 		reason = "ISSUE_NOT_DISPATCH_LEAF"
 		next = "decompose the epic into path-scoped leaf issues before dispatch"
@@ -1318,6 +1350,74 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 		WorkUnit:      workUnit,
 		ExpectedSteps: expectedSteps,
 	}
+}
+
+// humanBlockerSectionHeadings name the issue-body sections whose content, when it
+// names a genuine external/human-only action, WITNESSES a blocked-by-human claim.
+// The evidence must live in a dedicated section: a witness scattered anywhere in a
+// long body is exactly the unverifiable dodge this hardening rejects.
+var humanBlockerSectionHeadings = []string{
+	"human blocker", "human blockers", "human dependency", "human-owned action",
+	"external blocker", "external dependency", "blocked by", "blocked-by",
+	"waiting on", "waiting for", "external action", "operator action",
+}
+
+// humanGatedActionCues name actions no agent can perform inside the repo -- only a
+// human or an external party can complete them. A blocked-by-human claim is
+// witnessed only when its blocker section names one of these; anything an agent
+// could land itself (edit a file, run a gate, open a PR) is not a human block.
+var humanGatedActionCues = []string{
+	// legal / brand / contract
+	"trademark", "legal", "licens", "patent", "contract", "nda",
+	"sign-off", "signoff", "signature", "counsel", "attorney", "filing", "file a ",
+	// money / procurement
+	"payment", "purchase", "invoice", "billing", "procure", "budget",
+	"credit card", "wire transfer", "reimburse", "subscription",
+	// credentials / access an agent cannot mint
+	"credential", "secret", "api key", "api-key", "access token", "oauth app",
+	"account creation", "provision access", "grant access", "permission grant",
+	"2fa", "mfa", "sso", "registrar", "dns record", "domain registration",
+	// physical / infra owned by a human
+	"physical", "hardware", "datacenter", "data center", "on-site", "on site",
+	"ship the device", "power cycle",
+	// third-party / vendor / upstream / leadership human decision
+	"vendor", "third party", "third-party", "upstream maintainer", "upstream fix",
+	"support ticket", "sla response", "external review", "human review",
+	"leadership", "policy sign-off", "executive", "stakeholder decision",
+	"government", "regulatory", "compliance approval",
+}
+
+// humanBlockVerified reports whether an issue carrying the blocked-by-human label
+// also WITNESSES the block: a dedicated blocker section that names a genuine
+// external/human-only action. A bare label, or a "blocker" an agent could clear
+// itself, is not verified -- the caller routes it to a fresh-context decision
+// instead of parking it in the human-blocked bucket forever.
+func humanBlockVerified(issue Issue) bool {
+	section, ok := humanBlockerSection(issue.Body)
+	if !ok {
+		return false
+	}
+	return namesHumanGatedAction(section)
+}
+
+func humanBlockerSection(body string) (string, bool) {
+	sections := promptMarkdownSections(body)
+	for _, name := range humanBlockerSectionHeadings {
+		if value := strings.TrimSpace(sections[normalizePromptHeading(name)]); value != "" && !promptPlaceholder(value) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func namesHumanGatedAction(text string) bool {
+	lower := strings.ToLower(text)
+	for _, cue := range humanGatedActionCues {
+		if strings.Contains(lower, cue) {
+			return true
+		}
+	}
+	return false
 }
 
 func classifyDuplicateRiskIssue(issue Issue) SkippedIssue {

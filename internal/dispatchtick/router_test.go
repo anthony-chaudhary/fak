@@ -397,7 +397,7 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 		Issues: []Issue{
 			routerIssue(1, "fix(gateway): a", nil, scopedGatewayIssueBody("3")),
 			routerIssue(2, "epic(gateway): umbrella", []string{"epic"}, ""),
-			routerIssue(3, "needs a filing", []string{BlockedByHumanLabel}, ""),
+			routerIssue(3, "needs a filing", []string{BlockedByHumanLabel}, "## Human blocker\n\nUSPTO trademark filing must be submitted by counsel before the mark can ship."),
 			routerIssue(4, "idea: maybe do a thing", []string{"idea-scout"}, ""),
 			routerIssue(5, "guard complaint [false-positive]", []string{"guard-complaint"}, ""),
 			routerIssue(6, "needs scope", []string{"triage-only"}, ""),
@@ -448,6 +448,52 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	if p.Lanes["gateway"].Issues[0] != 1 {
 		t.Fatalf("gateway issues = %#v, want #1", p.Lanes["gateway"].Issues)
 	}
+}
+
+func TestRouterHardensHumanBlockThreshold(t *testing.T) {
+	// A witnessed blocker (a genuine external/human-only action named in a dedicated
+	// section) is the only thing that keeps an issue in the BLOCKED_BY_HUMAN bucket.
+	verifiedBody := "## Human blocker\n\nAwaiting a vendor invoice payment before the license can be renewed."
+	// An "agent-clearable" blocker section names nothing a human is required for, so
+	// it is a difficulty dodge, not a human block.
+	agentDoableBody := "## Human blocker\n\nSomeone should update the docs and rerun the gate."
+	p := RouteIssues(RouterInput{
+		Workspace:  "C:/work/fak",
+		Taxonomy:   routerTestTaxonomy,
+		IssueLimit: 1000,
+		Issues: []Issue{
+			routerIssue(71, "brand: file the trademark", []string{BlockedByHumanLabel}, verifiedBody),
+			routerIssue(72, "gateway: bare human-block dodge", []string{BlockedByHumanLabel}, ""),
+			routerIssue(73, "gateway: agent-clearable block", []string{BlockedByHumanLabel}, agentDoableBody),
+		},
+	})
+	if p.Counts.Routed != 0 {
+		t.Fatalf("routed = %d, want 0 (all three carry the blocked-by-human label)", p.Counts.Routed)
+	}
+	// Hardened threshold: only the witnessed block stays BLOCKED_BY_HUMAN; the bare
+	// and agent-clearable labels drop to the decision bucket.
+	wantReasons := map[string]int{
+		ReasonBlockedByHuman:       1,
+		ReasonHumanBlockUnverified: 2,
+	}
+	if !sameStringIntMap(p.Counts.SkippedByReason, wantReasons) {
+		t.Fatalf("skipped reasons = %#v, want %#v", p.Counts.SkippedByReason, wantReasons)
+	}
+	if got := skippedIssueByNumber(p.SkippedHumanBlocked, 71); got.Reason != ReasonBlockedByHuman {
+		t.Fatalf("witnessed human block #71 = %+v, want %s", got, ReasonBlockedByHuman)
+	}
+	for _, n := range []int{72, 73} {
+		got := skippedIssueByNumber(p.SkippedHumanBlocked, n)
+		if got.Reason != ReasonHumanBlockUnverified {
+			t.Fatalf("unverified human block #%d = %+v, want %s", n, got, ReasonHumanBlockUnverified)
+		}
+	}
+	assertRouterRepairQueue(t, p.RepairQueues, "human", 1, 1, map[string]int{
+		ReasonBlockedByHuman: 1,
+	}, []int{71})
+	assertRouterRepairQueue(t, p.RepairQueues, "decide", 2, 2, map[string]int{
+		ReasonHumanBlockUnverified: 2,
+	}, []int{73, 72})
 }
 
 func TestRouterRepairQueueRecommendsSplitForMultipleDoneConditions(t *testing.T) {
