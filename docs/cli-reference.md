@@ -317,6 +317,35 @@ Every run appends a witnessed run-end to the loop ledger (walked / attention / a
 skipped), so `fak loop health` shows the walk living. `--register` installs the durable
 `garden-item-walk` loop unit (6 h cadence) the same way the stale-work tick registers itself.
 
+### The garden → dispatch boundary
+
+Garden and dispatch are deliberately separate authorities, and it is easy to expect the wrong
+one to spawn workers. The actual contract:
+
+- `fak garden` / `fak garden --check` — **read-only** fold over the ~8 orchestrator members.
+  Mutates nothing.
+- `fak garden tick` — **narrow mechanical cleanup only** (stale-work remediation at the member
+  level), not issue-level work and not a worker spawn.
+- `fak garden walk` — **propose-only**. It classifies the open-issue backlog and emits a
+  budget-bounded, worst-first worklist with the exact `gh`/dispatch command per item, but it
+  never runs any of them — no worker is spawned by `garden walk` itself.
+- **Dispatch loops** (`fak dispatch tick`, the `issue-resolve-dispatch/<backend>` Task Scheduler
+  arm — see [`docs/dispatch-loop.md`](dispatch-loop.md)) are the only path that actually spawns
+  workers, and they own the safety machinery that has to guard that: seat/weekly-cap checks, lane
+  lease / DOS arbitration, and the issue worker prompt + picker semantics.
+
+Today there is no bridge command wired between `garden walk`'s proposed worklist and dispatch's
+spawn path — an operator (or another script) has to carry the `--json` worklist over by hand.
+That gap, and the shape of the bridge that should close it (`fak garden dispatch`, or a
+dispatch-loop source mode consuming `garden walk --json` — running through the same admission
+gates as ordinary issue dispatch rather than bypassing them), is tracked in
+[#1791](https://github.com/anthony-chaudhary/fak/issues/1791), which also names the two dispatch
+issues it builds on: [#1404](https://github.com/anthony-chaudhary/fak/issues/1404) (moving issue
+worker prompt/picker semantics into the Go dispatch tick) and
+[#1462](https://github.com/anthony-chaudhary/fak/issues/1462) (proving the handoff-to-issue-to-close
+path end to end). Until #1791 lands, "make garden's findings turn into worker runs" means going
+through dispatch directly, not `garden walk --apply` (no such flag exists, by design).
+
 `fak slack health` is the watchdog **dual of the Slack feeders**. The cadence feeders
 (`scoreboard-feed.yml`, `bench-feed.yml`, …) POST a card on a schedule and fail OPEN — a
 missing token or channel renders to the step summary and exits 0 — so a misconfigured or
