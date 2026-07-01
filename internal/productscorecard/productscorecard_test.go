@@ -221,6 +221,39 @@ func TestProductScorecardBuildPayloadScenarios(t *testing.T) {
 	}
 }
 
+func TestProductScorecardManagedContextSLODebt(t *testing.T) {
+	tree := testTree()
+	tree.Catalog = []Section{{Section: "Adjudication", Norm: "adjudication"}}
+	data := testData([]Row{testRow(nil)})
+	for _, req := range requiredManagedContextSLOs {
+		slo := req
+		slo.Status = "pass"
+		slo.Source = "unit fixture"
+		slo.Detail = "fixture passes"
+		if req.ID == "context_visibility" {
+			slo.Status = "fail"
+			slo.Detail = "debug report does not yet show known/unknown/assumed buckets"
+			slo.NextAction = "add the visible managed-context report fixture"
+		}
+		data.ManagedContextSLOs = append(data.ManagedContextSLOs, slo)
+	}
+
+	p := BuildPayload(".", data, tree, "")
+	if p.OK || p.Finding != "managed_context_debt" || intValue(p.Corpus["managed_context_debt"]) != 1 || intValue(p.Corpus["product_debt"]) != 1 {
+		t.Fatalf("managed-context payload = %#v, want one hard SLO debt", p)
+	}
+	mc := mapValue(p.Corpus["managed_context"])
+	if intValue(mc["debt"]) != 1 || intValue(mc["total"]) != len(requiredManagedContextSLOs) || intValue(mc["passed"]) != len(requiredManagedContextSLOs)-1 {
+		t.Fatalf("managed-context report = %#v, want one failing SLO", mc)
+	}
+	out := Render(p)
+	for _, want := range []string{"managed-context SLOs:", "managed-context SLO work-list:", "context_visibility [fail]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestProductScorecardRenderersAndDocFolder(t *testing.T) {
 	tree := testTree()
 	tree.Catalog = []Section{{Section: "Adjudication", Norm: "adjudication"}}

@@ -20,8 +20,8 @@ func Render(p Payload) string {
 		fmt.Sprintf("product-scorecard: %s (%s)", p.Verdict, p.Finding),
 		fmt.Sprintf("  %s", p.Reason),
 		"",
-		fmt.Sprintf("score %s/100 (grade %s) - PRODUCT-DEBT %d (honesty %d + coverage %d) - %d advisory",
-			formatNumber(c["score"]), stringAny(c["grade"]), intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"]), intValue(c["soft_signals"])),
+		fmt.Sprintf("score %s/100 (grade %s) - PRODUCT-DEBT %d (honesty %d + coverage %d + managed-context %d) - %d advisory",
+			formatNumber(c["score"]), stringAny(c["grade"]), intValue(c["product_debt"]), intValue(c["honesty_defects"]), intValue(c["coverage_debt"]), intValue(c["managed_context_debt"]), intValue(c["soft_signals"])),
 		fmt.Sprintf("coverage: %s%% (%d/%d concept sections positioned) - %d concepts scored - %d durable products",
 			formatNumber(cov["coverage_pct"]), intValue(cov["covered"]), intValue(cov["catalog_total"]), intValue(c["rows"]), intValue(c["durable_products"])),
 		fmt.Sprintf("standing: %d durable-product - %d usable-today - %d real-not-easy - %d honest-stub - %d concept-only",
@@ -31,6 +31,10 @@ func Render(p Payload) string {
 		"product concepts (best verdict first):",
 		fmt.Sprintf("  %-16s %-10s %-11s %-7s concept", "verdict", "maturity", "cat", "today?"),
 	)
+	if mc := mapValue(c["managed_context"]); len(mc) > 0 {
+		lines = append(lines, fmt.Sprintf("managed-context SLOs: score %s/100 - debt %d/%d - passed %d",
+			formatNumber(mc["score"]), intValue(mc["debt"]), intValue(mc["total"]), intValue(mc["passed"])), "")
+	}
 	for _, row := range sortedLeaderboard(c["leaderboard"]) {
 		verdict := stringAny(row["verdict"])
 		today := "-"
@@ -86,6 +90,18 @@ func Render(p Payload) string {
 	}
 	if !anyDefect {
 		lines = append(lines, "  (none - zero honesty-debt; every product claim is honest)")
+	}
+	if mc := mapValue(c["managed_context"]); len(mc) > 0 && intValue(mc["debt"]) > 0 {
+		lines = append(lines, "", "managed-context SLO work-list:")
+		for _, row := range mapSlice(mc["rows"]) {
+			if intValue(row["debt"]) == 0 {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("  %s [%s]: %s", stringAny(row["id"]), stringAny(row["status"]), stringAny(row["detail"])))
+			if next := stringAny(row["next_action"]); next != "" {
+				lines = append(lines, "      - "+next)
+			}
+		}
 	}
 	lines = append(lines, "", "next: "+p.NextAction)
 	return strings.Join(lines, "\n")

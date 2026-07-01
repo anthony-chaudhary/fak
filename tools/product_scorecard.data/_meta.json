@@ -13,5 +13,67 @@
     {"id": "model", "name": "In-kernel model", "group": "throughput"},
     {"id": "tooling", "name": "Agent tooling", "group": "trust"},
     {"id": "platform", "name": "Platform / adoption", "group": "adoption"}
+  ],
+  "managed_context_slos": [
+    {
+      "id": "context_visibility",
+      "name": "Context visibility",
+      "area": "visibility",
+      "status": "fail",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No managed-context scorecard pane yet shows known, unknown, and assumed context buckets with source refs.",
+      "next_action": "add the report fixture and mark this SLO pass only when the rendered buckets are witnessed"
+    },
+    {
+      "id": "deterministic_resets",
+      "name": "Deterministic resets",
+      "area": "reset",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No product scorecard fixture yet proves hidden resets preserve deterministic continuity over a long run.",
+      "next_action": "add a reset fixture with before/after session state and continuation evidence"
+    },
+    {
+      "id": "budget_compliance",
+      "name": "Budget compliance",
+      "area": "budget",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No product scorecard fixture yet proves context/token/time budgets are enforced across reset boundaries.",
+      "next_action": "add a budget exhaustion fixture that proves the drain/reset decision and remaining-budget accounting"
+    },
+    {
+      "id": "query_correctness",
+      "name": "Query correctness",
+      "area": "query",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No product scorecard fixture yet proves missing context becomes a typed query with a recorded answer.",
+      "next_action": "add a context-query fixture with known, unknown, assumed, and answered states"
+    },
+    {
+      "id": "cache_preservation",
+      "name": "Cache preservation",
+      "area": "cache",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No product scorecard fixture yet proves managed context preserves the cacheable prefix across turns and resets.",
+      "next_action": "add a prefix-stability fixture with the first divergent span or a prefix-stable witness"
+    },
+    {
+      "id": "memory_promotion_safety",
+      "name": "Memory-promotion safety",
+      "area": "memory",
+      "status": "unknown",
+      "hard": true,
+      "source": "issue #1624 seed fixture",
+      "detail": "No product scorecard fixture yet proves raw observations cannot silently become durable standing assumptions.",
+      "next_action": "add a promotion-safety fixture that distinguishes witnessed facts from raw observations"
+    }
   ]
 }

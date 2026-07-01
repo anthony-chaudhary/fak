@@ -21,9 +21,21 @@ const (
 
 type Row map[string]any
 type Data struct {
-	Meta       map[string]any
-	Categories []map[string]any
-	Rows       []Row
+	Meta               map[string]any
+	Categories         []map[string]any
+	Rows               []Row
+	ManagedContextSLOs []ManagedContextSLO
+}
+
+type ManagedContextSLO struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Area       string `json:"area"`
+	Status     string `json:"status"`
+	Hard       bool   `json:"hard"`
+	Source     string `json:"source,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	NextAction string `json:"next_action,omitempty"`
 }
 
 type Section struct {
@@ -62,13 +74,21 @@ type Payload struct {
 }
 
 var (
-	maturities  = set("shipped", "simulated", "stub", "concept")
-	claimsTags  = set("SHIPPED", "SIMULATED", "STUB")
-	audiences   = set("buyer", "platform", "developer", "researcher")
-	surfaces    = set("product", "benchmark", "subsystem", "seam")
-	verdicts    = []string{"durable-product", "usable-today", "real-not-easy", "honest-stub", "concept-only"}
-	groups      = []string{"well-formed", "honesty", "usefulness", "durability"}
-	nonConcepts = set("what fak is not", "prior-art posture")
+	maturities                 = set("shipped", "simulated", "stub", "concept")
+	claimsTags                 = set("SHIPPED", "SIMULATED", "STUB")
+	audiences                  = set("buyer", "platform", "developer", "researcher")
+	surfaces                   = set("product", "benchmark", "subsystem", "seam")
+	verdicts                   = []string{"durable-product", "usable-today", "real-not-easy", "honest-stub", "concept-only"}
+	groups                     = []string{"well-formed", "honesty", "usefulness", "durability", "managed-context"}
+	nonConcepts                = set("what fak is not", "prior-art posture")
+	requiredManagedContextSLOs = []ManagedContextSLO{
+		{ID: "context_visibility", Name: "Context visibility", Area: "visibility", Hard: true},
+		{ID: "deterministic_resets", Name: "Deterministic resets", Area: "reset", Hard: true},
+		{ID: "budget_compliance", Name: "Budget compliance", Area: "budget", Hard: true},
+		{ID: "query_correctness", Name: "Query correctness", Area: "query", Hard: true},
+		{ID: "cache_preservation", Name: "Cache preservation", Area: "cache", Hard: true},
+		{ID: "memory_promotion_safety", Name: "Memory-promotion safety", Area: "memory", Hard: true},
+	}
 
 	maturityTag = map[string]string{"shipped": "SHIPPED", "simulated": "SIMULATED", "stub": "STUB"}
 	kpiGroup    = map[string]string{
@@ -481,6 +501,75 @@ func RunKPIs(rows []Row, categories map[string]bool, tree Tree) []KPI {
 	}
 }
 
+func ManagedContextSLOReport(slos []ManagedContextSLO) map[string]any {
+	if len(slos) == 0 {
+		return nil
+	}
+	byID := map[string]ManagedContextSLO{}
+	for _, slo := range slos {
+		id := strings.TrimSpace(slo.ID)
+		if id == "" {
+			continue
+		}
+		if strings.TrimSpace(slo.Status) == "" {
+			slo.Status = "unknown"
+		}
+		if strings.TrimSpace(slo.Area) == "" {
+			for _, req := range requiredManagedContextSLOs {
+				if req.ID == id {
+					slo.Area = req.Area
+					break
+				}
+			}
+		}
+		if strings.TrimSpace(slo.Name) == "" {
+			for _, req := range requiredManagedContextSLOs {
+				if req.ID == id {
+					slo.Name = req.Name
+					break
+				}
+			}
+		}
+		byID[id] = slo
+	}
+	rows := make([]map[string]any, 0, len(requiredManagedContextSLOs))
+	debt, passed := 0, 0
+	for _, req := range requiredManagedContextSLOs {
+		slo, ok := byID[req.ID]
+		if !ok {
+			slo = req
+			slo.Status = "missing"
+			slo.Detail = "no managed-context SLO fixture declared"
+			slo.NextAction = "declare the fixture and witness before calling this SLO green"
+		}
+		hard := slo.Hard || req.Hard
+		status := strings.ToLower(strings.TrimSpace(slo.Status))
+		if status == "" {
+			status = "unknown"
+		}
+		failing := hard && status != "pass"
+		if failing {
+			debt++
+		} else if status == "pass" {
+			passed++
+		}
+		rows = append(rows, map[string]any{
+			"id": slo.ID, "name": slo.Name, "area": slo.Area, "status": status,
+			"hard": hard, "debt": boolToInt(failing), "source": slo.Source,
+			"detail": slo.Detail, "next_action": slo.NextAction,
+		})
+	}
+	score := 100.0
+	total := len(requiredManagedContextSLOs)
+	if total > 0 {
+		score = math.Round((100.0*float64(total-debt)/float64(total))*10) / 10
+	}
+	return map[string]any{
+		"schema": "fak-managed-context-slos/1", "debt": debt, "score": score,
+		"passed": passed, "total": total, "rows": rows,
+	}
+}
+
 func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Payload {
 	if readErr != "" || data == nil {
 		reason := readErr
@@ -519,9 +608,14 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	}
 	cov := CoverageReport(tree.Catalog, rows)
 	coverageDebt := intValue(cov["coverage_debt"])
-	productDebt := honestyDefects + coverageDebt
+	managedContext := ManagedContextSLOReport(data.ManagedContextSLOs)
+	managedContextDebt := intValue(managedContext["debt"])
+	productDebt := honestyDefects + coverageDebt + managedContextDebt
 	covPct := floatValue(cov["coverage_pct"])
 	score := math.Round((0.60*honestyScore+0.40*covPct)*10) / 10
+	if len(managedContext) > 0 {
+		score = math.Round((0.50*honestyScore+0.30*covPct+0.20*floatValue(managedContext["score"]))*10) / 10
+	}
 	grade := GradeLetter(score)
 	debtByGroup := map[string]any{}
 	for _, g := range groups {
@@ -530,6 +624,7 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	for _, k := range kpis {
 		debtByGroup[k.Group] = intValue(debtByGroup[k.Group]) + len(k.Defects)
 	}
+	debtByGroup["managed-context"] = managedContextDebt
 	breakdown := make([]map[string]any, 0, len(kpis))
 	for _, k := range kpis {
 		breakdown = append(breakdown, map[string]any{
@@ -555,7 +650,8 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	corpus := map[string]any{
 		"score": score, "grade": grade, "honesty_score": honestyScore,
 		"product_debt": productDebt, "honesty_defects": honestyDefects,
-		"coverage_debt": coverageDebt, "coverage": cov, "soft_signals": softSignals,
+		"coverage_debt": coverageDebt, "managed_context_debt": managedContextDebt,
+		"managed_context": managedContext, "coverage": cov, "soft_signals": softSignals,
 		"rows": len(rows), "durable_products": nDurable, "as_of": stringMapValue(data.Meta, "as_of"),
 		"fak_version": stringMapValue(data.Meta, "fak_version"), "standing": anyIntMap(pos),
 		"debt_by_group": debtByGroup, "kpi_scores": kpiScores, "debt_by_kpi": debtByKPI,
@@ -571,14 +667,19 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 		ok, verdict, finding = true, "OK", "product_map_complete_and_honest"
 		reason = fmt.Sprintf("product map complete + honest: score %.1f/100 (grade %s); %s; zero product-debt across %d KPIs over %d concepts (%s; %d advisory)", score, grade, covLine, len(kpis), len(rows), standingLine, softSignals)
 		next = "hold the line; when CLAIMS.md adds a concept section, coverage drops - position it; when a stub ships, raise its verdict; re-run to keep debt at 0"
+	case honestyDefects == 0 && managedContextDebt > 0:
+		finding = "managed_context_debt"
+		reason = fmt.Sprintf("%d managed-context SLO fixture(s) failing + %d coverage gap(s) = product-debt %d; %s; score %.1f/100 (grade %s); standing %s",
+			managedContextDebt, coverageDebt, productDebt, covLine, score, grade, standingLine)
+		next = "retire managed-context SLO debt: make each hard fixture pass with a witness for visibility, resets, budgets, queries, cache preservation, and memory-promotion safety; re-run"
 	case honestyDefects == 0 && coverageDebt > 0:
 		finding = "coverage_debt"
 		reason = fmt.Sprintf("%d concept section(s) not yet positioned; %s; score %.1f/100 (grade %s); rows are honest (0 honesty-debt); standing %s", coverageDebt, covLine, score, grade, standingLine)
 		next = "close coverage (see --gaps): add an honest product row for each uncovered CLAIMS.md concept section (a real-not-easy / honest-stub row is valid); re-run"
 	default:
 		worst := breakdown[0]
-		reason = fmt.Sprintf("%d honesty/quality defect(s) + %d coverage gap(s) = product-debt %d; score %.1f/100 (grade %s); heaviest KPI: %s (%d); %s; standing %s",
-			honestyDefects, coverageDebt, productDebt, score, grade, worst["kpi"], intValue(worst["debt"]), covLine, standingLine)
+		reason = fmt.Sprintf("%d honesty/quality defect(s) + %d coverage gap(s) + %d managed-context SLO defect(s) = product-debt %d; score %.1f/100 (grade %s); heaviest KPI: %s (%d); %s; standing %s",
+			honestyDefects, coverageDebt, managedContextDebt, productDebt, score, grade, worst["kpi"], intValue(worst["debt"]), covLine, standingLine)
 		next = "retire product-debt worst-first (--critical + per-KPI defects): fix overclaims, command targets, witnesses, entry docs, then close coverage (--gaps); re-run to prove the drop"
 	}
 	return Payload{
@@ -669,7 +770,12 @@ func LoadDataDir(dir string) (*Data, string) {
 	if !ok {
 		return nil, "_meta.json is not a JSON object"
 	}
-	out := &Data{Meta: mapValue(metaObj["meta"]), Categories: mapList(metaObj["categories"]), Rows: []Row{}}
+	out := &Data{
+		Meta:               mapValue(metaObj["meta"]),
+		Categories:         mapList(metaObj["categories"]),
+		Rows:               []Row{},
+		ManagedContextSLOs: managedContextSLOList(metaObj["managed_context_slos"]),
+	}
 	entries, e := os.ReadDir(dir)
 	if e != nil {
 		return nil, fmt.Sprintf("cannot read data directory: %v", e)
@@ -751,6 +857,41 @@ func rowList(v any) []Row {
 		}
 	}
 	return out
+}
+
+func managedContextSLOList(v any) []ManagedContextSLO {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]ManagedContextSLO, 0, len(raw))
+	for _, it := range raw {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		slo := ManagedContextSLO{
+			ID:         stringMapValue(m, "id"),
+			Name:       stringMapValue(m, "name"),
+			Area:       stringMapValue(m, "area"),
+			Status:     stringMapValue(m, "status"),
+			Source:     stringMapValue(m, "source"),
+			Detail:     stringMapValue(m, "detail"),
+			NextAction: stringMapValue(m, "next_action"),
+		}
+		if hard, ok := m["hard"].(bool); ok {
+			slo.Hard = hard
+		}
+		out = append(out, slo)
+	}
+	return out
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func ParseClaimsCatalog(text string) ([]Section, map[string]map[string]bool) {
