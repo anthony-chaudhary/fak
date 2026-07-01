@@ -70,6 +70,7 @@ type dispatchSpawnResult struct {
 	Issue      int            `json:"issue"`
 	Lane       string         `json:"lane"`
 	Backend    string         `json:"backend"`
+	LeaseID    string         `json:"lease_id,omitempty"`
 	Tree       []string       `json:"tree,omitempty"`
 	Account    map[string]any `json:"account,omitempty"`
 	Membership any            `json:"membership,omitempty"`
@@ -77,6 +78,7 @@ type dispatchSpawnResult struct {
 }
 
 const dispatchLeaseTreeSidecarSuffix = ".lease-tree.json"
+const dispatchLeaseIDSidecarSuffix = ".lease-id"
 
 var dispatchResolvePIDRE = regexp.MustCompile(`^resolve-\d+-\d{8}-\d{6}\.pid$`)
 
@@ -235,7 +237,8 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	liveIssues := liveResolutionIssues(runsDir)
+	liveIssueDetails := liveResolutionIssueDetails(runsDir)
+	liveIssues := liveIssueSet(liveIssueDetails)
 	cooled := recentlyAttemptedIssues(runsDir, opts.CooldownMin)
 	skip := map[int]bool{}
 	for n := range liveIssues {
@@ -317,6 +320,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["action"] = "no_lane"
 		payload["verdict"] = "NO_LANE"
 		payload["reason"] = "no lane has open issues (router empty/error)"
+		return finish(payload), nil
+	}
+	if live, ok := inFlightDuplicateForPick(opts, pick.Numbers, hasTarget, liveIssueDetails); ok {
+		payload["ok"] = false
+		payload["action"] = "in_flight_duplicate"
+		payload["verdict"] = "IN_FLIGHT_DUPLICATE"
+		payload["target_issue"] = live.Issue
+		payload["in_flight_duplicate"] = dispatchLiveScopeMap(live)
+		payload["reason"] = fmt.Sprintf("issue #%d already has live worker %s (pid %d, lease %q)", live.Issue, live.Worker, live.PID, live.LeaseID)
 		return finish(payload), nil
 	}
 	if hasTarget {
@@ -408,12 +420,49 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	return dispatchTickLiveSpawn(root, runsDir, opts, pick, account, model, target, promptRec, payload, finish)
 }
 
+func liveIssueSet(details map[int]dispatchLiveScope) map[int]bool {
+	out := map[int]bool{}
+	for issue := range details {
+		out[issue] = true
+	}
+	return out
+}
+
+func inFlightDuplicateForPick(opts dispatchTickOptions, numbers []int, hasTarget bool, details map[int]dispatchLiveScope) (dispatchLiveScope, bool) {
+	if opts.TargetIssue > 0 {
+		live, ok := details[opts.TargetIssue]
+		return live, ok
+	}
+	if hasTarget {
+		return dispatchLiveScope{}, false
+	}
+	for _, issue := range numbers {
+		if live, ok := details[issue]; ok {
+			return live, true
+		}
+	}
+	return dispatchLiveScope{}, false
+}
+
+func dispatchLiveScopeMap(live dispatchLiveScope) map[string]any {
+	return map[string]any{
+		"issue":    live.Issue,
+		"lane":     live.Lane,
+		"tree":     append([]string(nil), live.Tree...),
+		"log":      live.Log,
+		"pid":      live.PID,
+		"worker":   live.Worker,
+		"lease_id": live.LeaseID,
+	}
+}
+
 // dispatchTickLiveSpawn performs the live spawn once every dry-run gate has passed: acquire
 // the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
 // the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
 // returns the shared payload through finish, mirroring the dry-run return sites it splits off.
 func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, account dispatchtick.Account, model string, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
-	lease := acquireDispatchLaneLease(root, firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane)), pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
+	leaseID := firstString(opts.LeaseID, dispatchLaneLeaseID(pick.Lane))
+	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS)
 	payload["lease"] = lease
 	if refused, _ := lease["refused"].(bool); refused {
 		payload["ok"] = false
@@ -444,7 +493,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		}
 	}
 	baseSHA := currentGitSHA(root)
-	spawned, err := spawnDispatchIssueWorker(launchCommand, env, root, runsDir, target, pick.Lane, opts.Backend, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
+	spawned, err := spawnDispatchIssueWorker(launchCommand, env, root, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
 	if err != nil {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -951,7 +1000,7 @@ func augmentGuardEnvDefaults() {
 	}
 }
 
-func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
+func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
 	if len(command) == 0 {
 		return dispatchSpawnResult{}, errors.New("empty worker command")
 	}
@@ -990,6 +1039,9 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	stem := strings.TrimSuffix(outLog, filepath.Ext(outLog))
 	_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 	_ = os.WriteFile(stem+".backend", []byte(backend), 0o644)
+	if leaseID != "" {
+		_ = os.WriteFile(stem+dispatchLeaseIDSidecarSuffix, []byte(leaseID), 0o644)
+	}
 	tree = dispatchTrimTree(tree)
 	if len(tree) > 0 {
 		if b, err := json.Marshal(tree); err == nil {
@@ -1012,7 +1064,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 			_ = os.WriteFile(stem+dispatchtick.WaveSidecarSuffix, b, 0o644)
 		}
 	}
-	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, Tree: tree, Account: acct, Membership: mem}
+	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID, Tree: tree, Account: acct, Membership: mem}
 	if probeS > 0 {
 		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
@@ -1064,6 +1116,9 @@ func dispatchSpawnMap(s dispatchSpawnResult) map[string]any {
 	}
 	if len(s.Account) > 0 {
 		out["account"] = s.Account
+	}
+	if s.LeaseID != "" {
+		out["lease_id"] = s.LeaseID
 	}
 	if len(s.Tree) > 0 {
 		out["tree"] = append([]string(nil), s.Tree...)

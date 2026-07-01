@@ -597,6 +597,53 @@ func TestDispatchTickRefusesSameFileLiveWorkerCollision(t *testing.T) {
 	}
 }
 
+// TestDispatchTickRefusesInFlightDuplicateIssue is the #1766 witness: when the
+// selected issue already has a live resolver worker, the tick must refuse the duplicate
+// issue by name with worker/lease evidence instead of falling through to generic
+// LANE_BUSY or NO_ISSUE.
+func TestDispatchTickRefusesInFlightDuplicateIssue(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	oldRoute := dispatchRouteIssues
+	dispatchRouteIssues = func(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+		return dispatchtick.RouterPayload{
+			Schema: dispatchtick.RouterSchema,
+			OK:     true,
+			Lanes: map[string]dispatchtick.RouterLaneGroup{
+				"docs": {Tree: []string{"docs/**"}, Issues: []int{1766}, Count: 1},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	stem := "resolve-1766-20260701-111111"
+	dispatchWriteResolveWorker(t, root, stem,
+		"# fak-spawn 20260701-111111 issue=1766 lane=docs backend=claude argv0=claude\n",
+		strings.Repeat("streaming real work output line\n", 40))
+	if err := os.WriteFile(filepath.Join(runsDir, stem+dispatchLeaseIDSidecarSuffix), []byte("resolve-docs"), 0o644); err != nil {
+		t.Fatalf("write lease-id sidecar: %v", err)
+	}
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (in-flight duplicate must refuse) (stderr: %s)\n%s", code, errb, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["verdict"] != "IN_FLIGHT_DUPLICATE" || got["action"] != "in_flight_duplicate" || got["target_issue"] != float64(1766) {
+		t.Fatalf("duplicate tick = verdict %v action %v target %v, want IN_FLIGHT_DUPLICATE/in_flight_duplicate/1766", got["verdict"], got["action"], got["target_issue"])
+	}
+	dup := mapAt(got, "in_flight_duplicate")
+	if dispatchMapInt(dup, "issue") != 1766 || dispatchMapString(dup, "worker") != stem || dispatchMapString(dup, "lease_id") != "resolve-docs" {
+		t.Fatalf("in_flight_duplicate = %#v, want issue 1766 worker %s lease resolve-docs", dup, stem)
+	}
+	if dispatchMapInt(dup, "pid") == 0 || dispatchMapString(dup, "log") == "" {
+		t.Fatalf("in_flight_duplicate missing pid/log evidence: %#v", dup)
+	}
+}
+
 // TestDispatchTickDefaultPicksOldestIssue / WithPreferNewestPicksNewest pin the
 // backlog-draining policy: by default the tick picks the OLDEST open issue on the
 // busiest lane (#1338 here), and --prefer-newest restores the historical newest-first
@@ -974,6 +1021,7 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 		1338,
 		"cmd",
 		"claude",
+		"resolve-cmd",
 		[]string{"cmd/fak/dispatch_tick.go"},
 		account,
 		&membership,
@@ -985,6 +1033,7 @@ func TestSpawnDispatchIssueWorkerWritesAuditSidecars(t *testing.T) {
 	}
 	stem := strings.TrimSuffix(spawned.Log, filepath.Ext(spawned.Log))
 	assertFileContains(t, stem+".backend", "claude")
+	assertFileContains(t, stem+dispatchLeaseIDSidecarSuffix, "resolve-cmd")
 	assertFileContains(t, stem+dispatchtick.BaseSHASidecarSuffix, "abc123")
 	assertFileContains(t, stem+dispatchLeaseTreeSidecarSuffix, "cmd/fak/dispatch_tick.go")
 	assertJSONField(t, stem+dispatchtick.AccountSidecarSuffix, "tag", "acct-a")

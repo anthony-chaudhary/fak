@@ -23,24 +23,30 @@ import (
 )
 
 type dispatchLiveScope struct {
-	Issue int
-	Lane  string
-	Tree  []string
-	Log   string
+	Issue   int
+	Lane    string
+	Tree    []string
+	Log     string
+	PID     int
+	Worker  string
+	LeaseID string
 }
 
 var dispatchResolveLogRE = regexp.MustCompile(`^resolve-(\d+)-.*\.log$`)
 
 func liveResolutionIssues(runsDir string) map[int]bool {
 	out := map[int]bool{}
-	for _, log := range resolveLogs(runsDir) {
-		issue, ok := issueFromResolveLog(filepath.Base(log))
-		if !ok {
-			continue
-		}
-		pid, ok := readPID(strings.TrimSuffix(log, filepath.Ext(log)) + ".pid")
-		if ok && dispatchPIDAlive(pid) {
-			out[issue] = true
+	for issue := range liveResolutionIssueDetails(runsDir) {
+		out[issue] = true
+	}
+	return out
+}
+
+func liveResolutionIssueDetails(runsDir string) map[int]dispatchLiveScope {
+	out := map[int]dispatchLiveScope{}
+	for _, live := range liveResolutionScopes(runsDir) {
+		if _, exists := out[live.Issue]; !exists {
+			out[live.Issue] = live
 		}
 	}
 	return out
@@ -98,20 +104,21 @@ func liveResolutionScopes(runsDir string) []dispatchLiveScope {
 		if !ok {
 			continue
 		}
-		pid, ok := readPID(strings.TrimSuffix(log, filepath.Ext(log)) + ".pid")
+		stem := strings.TrimSuffix(log, filepath.Ext(log))
+		pid, ok := readPID(stem + ".pid")
 		if !ok || !dispatchPIDAlive(pid) || dispatchLogIsBannerNoop(log) {
 			continue
 		}
-		stem := strings.TrimSuffix(log, filepath.Ext(log))
+		lane := laneFromSpawnHeader(log)
 		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
-		if len(tree) == 0 {
-			continue
-		}
 		out = append(out, dispatchLiveScope{
-			Issue: issue,
-			Lane:  laneFromSpawnHeader(log),
-			Tree:  tree,
-			Log:   log,
+			Issue:   issue,
+			Lane:    lane,
+			Tree:    tree,
+			Log:     log,
+			PID:     pid,
+			Worker:  filepath.Base(stem),
+			LeaseID: readResolveLeaseID(stem, lane),
 		})
 	}
 	return out
@@ -127,6 +134,19 @@ func readResolveLeaseTree(path string) []string {
 		return nil
 	}
 	return dispatchTrimTree(tree)
+}
+
+func readResolveLeaseID(stem, lane string) string {
+	b, err := os.ReadFile(stem + dispatchLeaseIDSidecarSuffix)
+	if err == nil {
+		if id := strings.TrimSpace(string(b)); id != "" {
+			return id
+		}
+	}
+	if lane != "" {
+		return dispatchLaneLeaseID(lane)
+	}
+	return ""
 }
 
 func dispatchTrimTree(tree []string) []string {
