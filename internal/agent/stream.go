@@ -81,23 +81,6 @@ type upstreamCall struct {
 	authRefreshable bool
 }
 
-// refreshAPIKey re-resolves the upstream credential from the planner's live APIKeyFunc
-// (a fresh on-disk read — nothing memoizes the token) and adopts it for the next retry.
-// It reports whether the key actually changed: a no-op (func gone, empty result, or the
-// SAME token that just 401'd) returns false so the caller does NOT burn a retry re-sending
-// a credential the upstream already rejected. Only meaningful when authRefreshable is set.
-func (c *upstreamCall) refreshAPIKey(p *HTTPPlanner) bool {
-	if !c.authRefreshable || p == nil || p.APIKeyFunc == nil {
-		return false
-	}
-	fresh := p.effectiveAPIKey()
-	if fresh == "" || fresh == c.apiKey {
-		return false
-	}
-	c.apiKey = fresh
-	return true
-}
-
 // Auth-refresh outcomes reported to HTTPPlanner.AuthRefreshNotify. A 401 on the rotating-
 // subscription path either RECOVERED (a fresh token was adopted and the call re-sent in place,
 // so the live session healed across a re-login) or was EXHAUSTED (no fresher token appeared
