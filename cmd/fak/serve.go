@@ -323,8 +323,22 @@ func cmdServe(argv []string) {
 		defer group.Close()
 		inKernelModel.SetExpertParallelRanks(ep.ranks)
 		inKernelModel.SetExpertParallelRank(ep.rank)
-		inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
-		fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", ep.rank, ep.ranks)
+		// Opt-in upgrade: on a backend that implements the multi-process NCCL process group
+		// (compute.ProcessGroupBackend, -tags cuda,nccl on a real device), form it now and
+		// reduce through the device-NCCL tensor rung instead of the host DistComm reduce. Any
+		// other build (no cuda/nccl tag, or a backend without the seam) falls through unchanged
+		// to today's NewDistCommCollective(group) — zero behavior change on every existing path.
+		devColl, devErr := joinDevicePGIfSupported(chatBackend, group, ep)
+		if devErr != nil {
+			fmt.Printf("fak: expert-parallel rank %d/%d: device-NCCL process group unavailable (%v) — falling back to host DistComm reduce\n", ep.rank, ep.ranks, devErr)
+		}
+		if devColl != nil {
+			inKernelModel.SetExpertParallelCollective(devColl)
+			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (device-NCCL tensor reduce, #971 follow-on)\n", ep.rank, ep.ranks)
+		} else {
+			inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
+			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", ep.rank, ep.ranks)
+		}
 	}
 	// Per-GPU residency pre-check for an expert-parallel serve: refuse an --expert-parallel N whose
 	// per-card shard (replicated weights + the largest expert band) exceeds a GPU, BEFORE binding the

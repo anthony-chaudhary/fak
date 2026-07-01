@@ -6,6 +6,7 @@ The CUDA backend is three files that have to agree on one flat C ABI:
     internal/compute/cuda_backend.h   the prototypes (`fcuda_*`)  — the typed seam
     internal/compute/cuda_kernels.cu  the base definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda_nccl.cu     the NCCL definitions (`extern "C" … fcuda_*`)
+    internal/compute/cuda_nccl_pg.cu  the multi-process NCCL PG definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda*.go         the cgo call sites (`C.fcuda_*`)
 
 When they DISAGREE — a header prototype with no kernel definition, a `C.fcuda_…`
@@ -55,9 +56,9 @@ from typing import Any
 SCHEMA = "fak-cuda-abi-parity/1"
 
 HEADER = "internal/compute/cuda_backend.h"
-KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu")
+KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu", "internal/compute/cuda_nccl_pg.cu")
 KERNELS_LABEL = ", ".join(KERNELS)
-BINDINGS = ("internal/compute/cuda.go", "internal/compute/cuda_collective.go")
+BINDINGS = ("internal/compute/cuda.go", "internal/compute/cuda_collective.go", "internal/compute/cuda_collective_pg.go")
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 # A CUDA-seam symbol: the `fcuda_` prefix plus a tail that MAY carry an uppercase

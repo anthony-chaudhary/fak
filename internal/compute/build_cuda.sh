@@ -174,6 +174,10 @@ echo "[cuda] nvcc compile kernels ($ARCH) ..."
     "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
         -Xcompiler -fPIC -c cuda_nccl.cu -o cuda_nccl.o
     objs="$objs cuda_nccl.o"
+    echo "[cuda] nvcc compile multi-process NCCL process group ($ARCH) ..."
+    "$NVCC" -O3 -std=c++14 -arch="$ARCH" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $INC \
+        -Xcompiler -fPIC -c cuda_nccl_pg.cu -o cuda_nccl_pg.o
+    objs="$objs cuda_nccl_pg.o"
   fi
   ar rcs libfakcuda.a $objs
   echo "[cuda] built $(ls -la libfakcuda.a | awk '{print $5}') byte libfakcuda.a" )

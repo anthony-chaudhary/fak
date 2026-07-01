@@ -79,6 +79,7 @@ type distOp byte
 const (
 	opAllReduceSum distOp = 1
 	opAllGather    distOp = 2
+	opBroadcast    distOp = 3
 )
 
 func (o distOp) String() string {
@@ -87,6 +88,8 @@ func (o distOp) String() string {
 		return "AllReduceSum"
 	case opAllGather:
 		return "AllGather"
+	case opBroadcast:
+		return "Broadcast"
 	default:
 		return fmt.Sprintf("distOp(%d)", byte(o))
 	}
@@ -218,6 +221,70 @@ func (g *DistComm) AllGather(myPart []float32, plan TPPlan) ([]float32, error) {
 		return g.coordinate(opAllGather, myPart, plan)
 	}
 	return g.worker(opAllGather, myPart)
+}
+
+// BroadcastFromRoot distributes payload — produced only on rank 0 — to every rank, returning it
+// unchanged on every rank; ranks 1..size-1's payload argument is ignored, only rank 0's is sent.
+// Unlike AllReduceSum/AllGather (gather-then-scatter), a broadcast is root-produces/all-consume,
+// so it has its own coordinator/worker pair rather than reusing coordinate(). Every rank must
+// call this together in the same round; a rank calling a different op fails closed, exactly as
+// coordinate() does. size==1 is the identity: payload is returned unchanged with no network I/O.
+// This is the primitive the sharded EP serve reuses to distribute an NCCL unique ID to every
+// rank before forming a device process-group communicator (cmd/fak/serve.go).
+func (g *DistComm) BroadcastFromRoot(payload []byte) ([]byte, error) {
+	if g.size == 1 {
+		return payload, nil
+	}
+	if g.rank == 0 {
+		return g.broadcastCoordinate(payload)
+	}
+	return g.broadcastWorker()
+}
+
+// broadcastCoordinate runs rank 0's half: read (and discard) every worker's op-tagged
+// announcement request — detecting a process-group desync exactly like coordinate() — then
+// write the SAME payload to every worker as the response. Read-all-then-write-all keeps this
+// deadlock-free, matching coordinate()'s shape.
+func (g *DistComm) broadcastCoordinate(payload []byte) ([]byte, error) {
+	var gatherErr error
+	for r := 1; r < g.size; r++ {
+		gotOp, _, err := readRequestRaw(g.workers[r])
+		if err != nil {
+			if gatherErr == nil {
+				gatherErr = fmt.Errorf("model: Broadcast read rank %d announce: %w", r, err)
+			}
+			continue
+		}
+		if gotOp != opBroadcast && gatherErr == nil {
+			gatherErr = fmt.Errorf("model: rank %d called %s but coordinator is running %s (process-group desync)", r, gotOp, opBroadcast)
+		}
+	}
+	err := gatherErr
+	for r := 1; r < g.size; r++ {
+		if g.workers[r] == nil {
+			continue
+		}
+		if werr := writeResponseRaw(g.workers[r], payload, err); werr != nil && err == nil {
+			err = fmt.Errorf("model: write broadcast response to rank %d: %w", r, werr)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+// broadcastWorker runs a non-coordinator rank's half: announce readiness, then read the
+// coordinator's broadcast payload (or its fail-closed error verbatim).
+func (g *DistComm) broadcastWorker() ([]byte, error) {
+	if err := writeRequestRaw(g.coord, opBroadcast, nil); err != nil {
+		return nil, fmt.Errorf("model: rank %d send %s announce: %w", g.rank, opBroadcast, err)
+	}
+	out, err := readResponseRaw(g.coord)
+	if err != nil {
+		return nil, fmt.Errorf("model: rank %d recv %s response: %w", g.rank, opBroadcast, err)
+	}
+	return out, nil
 }
 
 // coordinate runs the rank-0 gather→reduce→scatter for one collective: read each worker's
@@ -391,6 +458,54 @@ func readResponse(conn net.Conn) ([]float32, error) {
 	case statusOK:
 		v, _, err := decodeF32(payload[1:])
 		return v, err
+	default:
+		return nil, fmt.Errorf("model: dist response status byte = %d, want 0(ok)/1(err)", payload[0])
+	}
+}
+
+// writeRequestRaw frames an op-tagged request carrying raw bytes rather than a float32 vector —
+// used by BroadcastFromRoot, whose payload (e.g. a 128-byte NCCL unique ID) is not a float
+// vector and must not go through the encodeF32 codec.
+func writeRequestRaw(conn net.Conn, op distOp, payload []byte) error {
+	return writeFrame(conn, append([]byte{byte(op)}, payload...))
+}
+
+// readRequestRaw decodes a frame written by writeRequestRaw.
+func readRequestRaw(conn net.Conn) (distOp, []byte, error) {
+	payload, err := readFrame(conn)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(payload) < 1 {
+		return 0, nil, fmt.Errorf("model: dist request frame is empty")
+	}
+	return distOp(payload[0]), payload[1:], nil
+}
+
+// writeResponseRaw frames the coordinator's verdict for a raw-byte collective: a status byte
+// then, on success, the raw result bytes, else the error text.
+func writeResponseRaw(conn net.Conn, result []byte, opErr error) error {
+	if opErr != nil {
+		return writeFrame(conn, append([]byte{statusErr}, []byte(opErr.Error())...))
+	}
+	return writeFrame(conn, append([]byte{statusOK}, result...))
+}
+
+// readResponseRaw decodes a frame written by writeResponseRaw, surfacing the coordinator's
+// fail-closed error as an error on this rank so a refusal propagates to every rank.
+func readResponseRaw(conn net.Conn) ([]byte, error) {
+	payload, err := readFrame(conn)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) < 1 {
+		return nil, fmt.Errorf("model: dist response frame is empty")
+	}
+	switch payload[0] {
+	case statusErr:
+		return nil, fmt.Errorf("model: coordinator refused the collective: %s", string(payload[1:]))
+	case statusOK:
+		return payload[1:], nil
 	default:
 		return nil, fmt.Errorf("model: dist response status byte = %d, want 0(ok)/1(err)", payload[0])
 	}

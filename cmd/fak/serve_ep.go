@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -132,4 +133,52 @@ func dialEPGroup(cfg epRankConfig) (*fakmodel.DistComm, error) {
 		return nil, fmt.Errorf("expert-parallel rank %d join: %w", cfg.rank, err)
 	}
 	return g, nil
+}
+
+// joinDevicePGIfSupported is the opt-in upgrade over the host DistComm reduce: on a backend that
+// implements compute.ProcessGroupBackend (the multi-process NCCL bootstrap, -tags cuda,nccl on a
+// real device), form the process-group communicator and return a model.Collective that reduces
+// through it. On any other build (be is nil, or does not implement the seam) it returns
+// (nil, nil) — NOT an error — so the caller's existing NewDistCommCollective(group) path is
+// unchanged; every non-cuda/nccl build takes this branch today.
+//
+// The unique-ID rendezvous reuses `group`, the ALREADY-OPEN DistComm this rank joined via
+// dialEPGroup — no new listener/socket. Only rank 0 mints the ID (ProcessGroupUniqueID); every
+// rank (including rank 0) then calls BroadcastFromRoot together, exactly like every other
+// DistComm collective, and joins with its own rank/device via InitProcessGroup. device is fixed
+// at 0: the sharded-EP topology is one GPU visible per process (CUDA_VISIBLE_DEVICES), so device
+// 0 is always this process's own GPU, never a peer's.
+//
+// STATUS: unverified end-to-end — compute.ProcessGroupBackend has no implementation reachable
+// on a GPU-free host (cuda_collective_pg.go builds only under -tags cuda,nccl), so this path has
+// never run against real GPUs. See dist_device_collective.go's honesty note.
+func joinDevicePGIfSupported(be compute.Backend, group *fakmodel.DistComm, cfg epRankConfig) (fakmodel.Collective, error) {
+	if be == nil {
+		return nil, nil
+	}
+	pg, ok := be.(compute.ProcessGroupBackend)
+	if !ok {
+		return nil, nil
+	}
+	var id []byte
+	var err error
+	if cfg.rank == 0 {
+		id, err = pg.ProcessGroupUniqueID()
+		if err != nil {
+			return nil, fmt.Errorf("mint NCCL process-group unique id: %w", err)
+		}
+	}
+	id, err = group.BroadcastFromRoot(id)
+	if err != nil {
+		return nil, fmt.Errorf("broadcast NCCL process-group unique id to %d ranks: %w", cfg.ranks, err)
+	}
+	const device = 0
+	if err := pg.InitProcessGroup(id, cfg.ranks, cfg.rank, device); err != nil {
+		return nil, fmt.Errorf("join %d-rank NCCL process group as rank %d: %w", cfg.ranks, cfg.rank, err)
+	}
+	coll, err := fakmodel.NewDevicePGCollective(be)
+	if err != nil {
+		return nil, err
+	}
+	return coll, nil
 }

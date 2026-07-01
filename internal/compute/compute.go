@@ -357,6 +357,33 @@ type CollectiveInitializer interface {
 	InitCollective(world int) error
 }
 
+// ProcessGroupBackend is an OPTIONAL extension for backends that support forming a genuine
+// MULTI-PROCESS device collective communicator (NCCL's ncclGetUniqueId/ncclCommInitRank
+// bootstrap) — as opposed to CollectiveBackend's single-process, ncclCommInitAll shape. A
+// sharded expert-parallel serve (one OS process per GPU, internal/model/serve_ep.go's topology)
+// type-asserts the Backend for this and, when present, forms the process group once at startup
+// (distributing the unique ID over an existing out-of-band channel, e.g.
+// model.DistComm.BroadcastFromRoot) before the live decode's reduce sees any tensor — instead of
+// falling back to the host DistComm reduce. Discovered exactly like CollectiveInitializer/
+// RankUploader: an absent implementation never changes the forward loop.
+type ProcessGroupBackend interface {
+	// ProcessGroupUniqueID mints a fresh bootstrap ID (called ONCE, by the rank forming the
+	// group — conventionally rank 0). The caller distributes the returned bytes to every other
+	// rank out-of-band before every rank calls InitProcessGroup.
+	ProcessGroupUniqueID() ([]byte, error)
+	// InitProcessGroup joins this process to a `world`-rank group as `rank`, on device
+	// `device`, using the IDENTICAL id every rank received. Blocks until every rank has joined.
+	InitProcessGroup(id []byte, world, rank, device int) error
+	// AllReduceSumPG in-place all-reduce-SUMs a SINGLE device tensor — this process's own
+	// rank's part — across the process group. Unlike CollectiveBackend.AllReduceSum (every
+	// rank's tensor passed in one in-process call), this process holds exactly one buffer on
+	// exactly one device, the natural one-rank-per-process NCCL shape.
+	AllReduceSumPG(t Tensor) (Tensor, error)
+	// DestroyProcessGroup tears down this process's communicator (serve shutdown). Safe to
+	// call when no group is active.
+	DestroyProcessGroup()
+}
+
 // ---- CollectiveBackend (the tensor-parallel cross-rank seam) ---------------------
 //
 // CollectiveBackend is the OPTIONAL cross-rank reduction interface a backend implements to

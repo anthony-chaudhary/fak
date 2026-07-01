@@ -216,6 +216,26 @@ void fcuda_graph_abort(void);
  * entirely from the free list and never hits an illegal mid-capture cudaMalloc (#969). */
 void fcuda_graph_prewarm(int extra);
 
+/* NK/CKR: shared NCCL/CUDA error-handling macros for the NCCL device-collective .cu files
+ * (cuda_nccl.cu, cuda_nccl_pg.cu) — one copy instead of each file duplicating the same
+ * boilerplate. The guard lets a .cu file define its own before including this header if it
+ * ever needs different behavior. The macro bodies name ncclResult_t/cudaError_t/fprintf,
+ * which must be visible at the point of USE (not at this definition) — every .cu file in this
+ * repo includes cuda_backend.h first and only expands these macros later, after
+ * <cuda_runtime.h>/<nccl.h>/<stdio.h> follow, so this stays a standalone-parseable plain-C
+ * header (no expansion happens here). */
+#ifndef NK
+#define NK(call) do { ncclResult_t _r = (call); if (_r != ncclSuccess) { \
+  fprintf(stderr, "fak-nccl: %s:%d %s\n", __FILE__, __LINE__, ncclGetErrorString(_r)); \
+  return (int)_r; } } while (0)
+#endif
+
+#ifndef CKR
+#define CKR(call) do { cudaError_t _e = (call); if (_e != cudaSuccess) { \
+  fprintf(stderr, "fak-nccl: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(_e)); \
+  return (int)_e + 1000; } } while (0)
+#endif
+
 /* ---- NCCL device collectives (#971, multi-GPU expert/tensor parallelism) ----------------
  *
  * The cross-DEVICE reduction seam the CollectiveBackend interface needs to be REAL: a true
@@ -259,6 +279,47 @@ int fcuda_nccl_allgather_f32(void **dsend, void **drecv, int n, int sendcount);
  * drecv[r] (recvcount f32 on device r) holds rank r's 1/n band of the reduced vector — the
  * dual of all-gather (AllReduceSum == AllGather(ReduceScatter)). Returns 0 on success. */
 int fcuda_nccl_reducescatter_f32(void **dsend, void **drecv, int n, int recvcount);
+
+/* ---- Multi-process NCCL process group (ncclGetUniqueId/ncclCommInitRank) ---------------
+ *
+ * The multi-PROCESS follow-on the block above documents as deferred: one OS process holds
+ * ONE GPU and joins a group of `world` such processes via an out-of-band-distributed unique
+ * ID, instead of one process owning every device (ncclCommInitAll above). This is the shape
+ * a sharded EP serve needs — N separate `fak serve --expert-parallel N` processes, one per
+ * GPU — to swap its host DistComm reduce (internal/model/dist_collective.go) for a real
+ * device-tensor reduce. Distinct globals from the ncclCommInitAll path above: the two
+ * collectives are independent and must not share communicator state.
+ *
+ * Build/link gating is identical to the block above (`-tags cuda,nccl`, FAK_CUDA_NCCL=1). */
+
+/* fcuda_nccl_pg_get_unique_id(out_id): fills out_id (caller-owned buffer, exactly
+ * NCCL_UNIQUE_ID_BYTES==128 bytes) via ncclGetUniqueId. Called ONCE by the rank that will
+ * bootstrap the group (rank 0); the resulting bytes are distributed to every other rank by
+ * the caller (over DistComm.BroadcastFromRoot, an existing host TCP primitive — no new
+ * transport needed for a 128-byte out-of-band payload). Returns 0 on success. */
+int fcuda_nccl_pg_get_unique_id(void *out_id);
+
+/* fcuda_nccl_pg_init(id, world, rank, device): cudaSetDevice(device), then
+ * ncclCommInitRank(&g_pg_comm, world, id, rank) — every process in the group calls this with
+ * the SAME id (from fcuda_nccl_pg_get_unique_id, distributed by the caller) and ITS OWN
+ * rank/device. This call blocks until every rank in the group has called it (NCCL's
+ * rendezvous). Returns 0 on success, an NCCL/CUDA error code otherwise; on failure the
+ * process group is left uninitialized (a retry needs a fresh unique ID). */
+int fcuda_nccl_pg_init(const void *id, int world, int rank, int device);
+
+/* fcuda_nccl_pg_allreduce_f32(dbuf, count): in-place NCCL all-reduce-SUM of `count` f32
+ * elements at dbuf, resident on THIS process's device, through g_pg_comm. Unlike
+ * fcuda_nccl_allreduce_f32 above (one process, N device pointers, ncclGroupStart/End over
+ * all of them), this process holds exactly one buffer on exactly one device — no group
+ * bracket needed, mirroring the natural one-rank-per-process NCCL call shape. Returns 0 on
+ * success, the NCCL/CUDA error code otherwise. Fails closed (returns non-zero, does not
+ * silently no-op) if the process group has not been initialized. */
+int fcuda_nccl_pg_allreduce_f32(void *dbuf, int count);
+
+/* fcuda_nccl_pg_destroy(): ncclCommDestroy(g_pg_comm) and resets the process-group globals so
+ * a later fcuda_nccl_pg_init can form a fresh group. Safe to call when no group is active
+ * (no-op). Called on serve shutdown. */
+void fcuda_nccl_pg_destroy(void);
 
 #ifdef __cplusplus
 }

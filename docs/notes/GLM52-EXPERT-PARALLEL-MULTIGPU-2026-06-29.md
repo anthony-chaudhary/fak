@@ -204,3 +204,55 @@ seam, gated by `Caps().Collective`), still `not yet` and still gated on the on-b
 binary (residual item 2, unchanged). The remaining residual to a live multi-GPU tok/s number is: run
 the sharded serve on the GPU box (host DistComm across the A100s' processes gets residency today),
 then swap the DistComm reduce for the device-NCCL tensor reduce for the on-GPU expert GEMMs.
+
+## Update (2026-06-30 continued): multi-process device-NCCL primitive built
+
+The previous update's closing sentence named the exact next primitive: "swap the DistComm reduce
+for the device-NCCL tensor reduce." That primitive is now built and wired, opt-in, on trunk:
+
+- **`compute.ProcessGroupBackend`** (`internal/compute/compute.go`) — a new optional HAL seam,
+  distinct from `CollectiveBackend`'s single-process `ncclCommInitAll` shape. It is the
+  multi-**process** bootstrap (`ncclGetUniqueId`/`ncclCommInitRank`, the torchrun/MPI convention):
+  `ProcessGroupUniqueID()` (rank 0 mints an ID), `InitProcessGroup(id, world, rank, device)` (every
+  rank joins with the identical ID), `AllReduceSumPG(t Tensor)` (this process's single device
+  tensor, all-reduced across the group), `DestroyProcessGroup()`.
+- **`internal/compute/cuda_nccl_pg.cu` + `cuda_collective_pg.go`** (`-tags cuda,nccl`) — the C/cgo
+  implementation of the seam above, with its own `g_pg_comm`/`g_pg_rank`/`g_pg_world` globals kept
+  separate from `cuda_nccl.cu`'s single-process communicator state (the two collectives can coexist
+  in one process without sharing state).
+- **`model.DistComm.BroadcastFromRoot`** (`internal/model/dist_collective.go`) — the new primitive
+  that distributes rank 0's NCCL unique ID (128 bytes) to every rank over the sharded serve's
+  *existing* TCP group (no new transport). Bit-exact gates: `TestDistCommBroadcastFromRootMatches`
+  (sizes 1/2/3/5), plus a fail-closed op-desync witness.
+- **`model.NewDevicePGCollective`** (`internal/model/dist_device_collective.go`) — bridges
+  `compute.ProcessGroupBackend` to the `model.Collective` seam the EP decode path consumes, the
+  device-process-group twin of `BackendCollective`.
+- **`cmd/fak/serve_ep.go`'s `joinDevicePGIfSupported`**, wired into `cmd/fak/serve.go`'s sharded-EP
+  block — the opt-in upgrade. It type-asserts `chatBackend` for `compute.ProcessGroupBackend`; when
+  absent (every build except `-tags cuda,nccl` with a real device), it returns `(nil, nil)` and the
+  serve falls through unchanged to today's `NewDistCommCollective(group)` — zero behavior change on
+  every existing path. When present, it performs the ID-broadcast rendezvous over the already-open
+  DistComm group and sets `SetExpertParallelCollective` to the device-PG collective instead.
+
+**What is verified here (Go-only, no CUDA toolchain needed):** `go test ./internal/model/...`
+passes (the broadcast primitive + its fail-closed gate, plus the full existing DistComm suite);
+`python tools/cuda_abi_parity.py --check` passes with the new `.cu`/`.go` files recognized in the
+`KERNELS`/`BINDINGS` tuples; `go build ./cmd/fak/... ./internal/model/... ./internal/compute/...`
+and `go vet` are clean, including the opt-in `serve.go`/`serve_ep.go` wiring.
+
+**What is STILL `not yet` — none of it host-codeable:**
+
+1. **The CUDA/NCCL compile itself.** `cuda_nccl_pg.cu` and `cuda_collective_pg.go` have never been
+   built — no nvcc/CUDA/NCCL toolchain exists on this dev box. Next checkable step:
+   `internal/compute/build_cuda.sh test` with `FAK_CUDA_NCCL=1` on a real CUDA+NCCL host.
+2. **A live multi-process, multi-GPU witness.** No `devicePGCollective` has ever run against real
+   GPUs — the rendezvous, the `ncclCommInitRank` join, and `AllReduceSumPG` are unverified beyond
+   their Go-level shape/error-contract match to `distCommCollective`. Next checkable step: 2+
+   `fak serve --expert-parallel N` processes on distinct GPUs of the GPU-server box, built with
+   `-tags cuda,nccl`, producing a bit-exact-vs-cpu-ref (or cosine-1.0-Approx, matching
+   `cuda_collective.go`'s documented device-reduction-order caveat) EP decode step.
+
+So the residual named at the end of the previous update — "swap the DistComm reduce for the
+device-NCCL tensor reduce" — now has a concrete, code-complete, opt-in swap on trunk; what remains
+is exclusively the hardware-gated compile-and-run step, unchanged in kind from residual item 2
+above (an on-box multi-GPU `-tags cuda,nccl` binary), now sharpened to a specific test command.

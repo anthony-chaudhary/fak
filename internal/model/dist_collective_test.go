@@ -89,6 +89,102 @@ func runGroup(t *testing.T, size int, fn func(g *DistComm) ([]float32, error)) (
 	return results, errs
 }
 
+// runGroupBytes is runGroup's twin for BroadcastFromRoot, whose payload is raw bytes rather
+// than a float32 vector.
+func runGroupBytes(t *testing.T, size int, fn func(g *DistComm) ([]byte, error)) ([][]byte, []error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+
+	results := make([][]byte, size)
+	errs := make([]error, size)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		g, cerr := Coordinate(ln, size)
+		if cerr != nil {
+			errs[0] = cerr
+			return
+		}
+		defer g.Close()
+		results[0], errs[0] = fn(g)
+	}()
+
+	for r := 1; r < size; r++ {
+		wg.Add(1)
+		go func(rank int) {
+			defer wg.Done()
+			conn, derr := net.Dial("tcp", addr)
+			if derr != nil {
+				errs[rank] = derr
+				return
+			}
+			g, jerr := Join(conn, rank, size)
+			if jerr != nil {
+				conn.Close()
+				errs[rank] = jerr
+				return
+			}
+			defer g.Close()
+			results[rank], errs[rank] = fn(g)
+		}(r)
+	}
+	wg.Wait()
+	return results, errs
+}
+
+// TestDistCommBroadcastFromRootMatches pins BroadcastFromRoot: only rank 0 supplies a real
+// payload (every other rank passes nil, proving it is ignored), and every rank — including
+// rank 0 — must come back with rank 0's exact bytes. size=1 exercises the no-wire identity.
+// This is the primitive an on-GPU sharded serve reuses to distribute an NCCL unique ID to
+// every rank before forming a device process-group communicator.
+func TestDistCommBroadcastFromRootMatches(t *testing.T) {
+	for _, size := range []int{1, 2, 3, 5} {
+		want := []byte(fmt.Sprintf("nccl-unique-id-fixture-size-%d-01234567890123456789012345678901", size))
+		results, errs := runGroupBytes(t, size, func(g *DistComm) ([]byte, error) {
+			if g.Rank() == 0 {
+				return g.BroadcastFromRoot(want)
+			}
+			return g.BroadcastFromRoot(nil)
+		})
+		for r := 0; r < size; r++ {
+			if errs[r] != nil {
+				t.Fatalf("size=%d rank %d BroadcastFromRoot: %v", size, r, errs[r])
+			}
+			if string(results[r]) != string(want) {
+				t.Fatalf("size=%d rank %d BroadcastFromRoot = %q, want %q", size, r, results[r], want)
+			}
+		}
+	}
+}
+
+// TestDistCommFailsClosedBroadcastOpDesync proves BroadcastFromRoot refuses a process-group
+// desync (a peer calling a different collective in the same round) on every rank, the same
+// contract TestDistCommFailsClosedOpDesync pins for AllReduceSum/AllGather.
+func TestDistCommFailsClosedBroadcastOpDesync(t *testing.T) {
+	const size = 2
+	_, errsFloat := (func() ([][]float32, []error) {
+		return runGroup(t, size, func(g *DistComm) ([]float32, error) {
+			if g.Rank() == 0 {
+				return g.AllReduceSum([]float32{1, 2, 3})
+			}
+			_, err := g.BroadcastFromRoot(nil)
+			return nil, err
+		})
+	})()
+	for r := 0; r < size; r++ {
+		if errsFloat[r] == nil {
+			t.Fatalf("rank %d: broadcast/allreduce op desync should fail closed, got nil error", r)
+		}
+	}
+}
+
 // TestDistCommAllReduceSumMatchesLocal pins the cross-process all-reduce byte-for-byte
 // against LocalCollective over several rank counts, each rank holding only its own part.
 // A reduction that reordered, dropped, or double-counted a rank over the wire would be

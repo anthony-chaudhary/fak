@@ -29,13 +29,7 @@
 #include <stdio.h>
 #include <vector>
 
-#define NK(call) do { ncclResult_t _r = (call); if (_r != ncclSuccess) { \
-  fprintf(stderr, "fak-nccl: %s:%d %s\n", __FILE__, __LINE__, ncclGetErrorString(_r)); \
-  return (int)_r; } } while (0)
-
-#define CKR(call) do { cudaError_t _e = (call); if (_e != cudaSuccess) { \
-  fprintf(stderr, "fak-nccl: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(_e)); \
-  return (int)_e + 1000; } } while (0)
+// NK/CKR are defined in cuda_backend.h (shared with cuda_nccl_pg.cu).
 
 // One communicator per device, all in this process (ncclCommInitAll). g_world is the rank
 // count once init succeeds; 0 means uninitialized, which keeps Caps().Collective false on the
