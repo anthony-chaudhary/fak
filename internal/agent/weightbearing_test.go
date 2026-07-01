@@ -8,7 +8,6 @@ import (
 )
 
 func TestToolEnginesSelfDeclareClassical(t *testing.T) {
-	abi.ResetForTest()
 	cases := []struct {
 		id  string
 		eng abi.EngineDriver
