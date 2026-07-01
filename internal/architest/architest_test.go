@@ -268,6 +268,7 @@ var tier = map[string]int{
 	"timeoutphase":     1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":   1,
+	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

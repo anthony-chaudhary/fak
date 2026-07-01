@@ -174,6 +174,7 @@ concurrent = [
   "selfquery",
   "harnessprofile",
   "livecodebench",
+  "devexmeter",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -255,6 +256,7 @@ autopick = [
   "selfquery",
   "harnessprofile",
   "livecodebench",
+  "devexmeter",
   # new-leaf:lane
 ]
 
@@ -418,6 +420,7 @@ sessionaudit = ["internal/sessionaudit/**"]
 selfquery = ["internal/selfquery/**"]
 harnessprofile = ["internal/harnessprofile/**"]
 livecodebench = ["internal/livecodebench/**"]
+devexmeter = ["internal/devexmeter/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
