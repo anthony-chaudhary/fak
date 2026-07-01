@@ -46,21 +46,22 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"agenticbench":     1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
-	"ailuminate":       1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
-	"apihostprobe":     1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
-	"benchcatalog":     1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
-	"sotamatrix":       1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
-	"branchrole":       1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
-	"benchloop":        1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
-	"benchruns":        1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
-	"benchlineagegate": 1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
-	"cachevalueledger": 1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
-	"benchcli":         1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
-	"benchids":         1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
-	"benchscore":       1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
-	"callavoid":        1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
-	"accounts":         1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"agenticbench":       1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"ailuminate":         1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
+	"apihostprobe":       1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
+	"benchcatalog":       1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"sotamatrix":         1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
+	"branchrole":         1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
+	"benchloop":          1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"benchruns":          1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
+	"benchlineagegate":   1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
+	"cachevalueledger":   1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
+	"gatewayusageledger": 1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
+	"benchcli":           1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
+	"benchids":           1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
+	"benchscore":         1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
+	"callavoid":          1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"accounts":           1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1, "sessionaudit": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; imports scoreboard(1)+stdlib, off the hot path.
@@ -140,12 +141,13 @@ var tier = map[string]int{
 	"snapshot":        3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	"rungobs":         2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
 	"sharedtask":      2, // in-memory collaborative task-record fold: user patches, conflicts, held verdicts, event rows, scoped views, and a2achan live subscriptions. Mechanism, off the hot path.
-	"vcachegov":       2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set â€” pin/lazy/evict (Â§5.4), rate-limit warm budget (Â§5.5), cross-shard affinity routing + rehash/burst guards (Â§9/D3), and the Law-D4 secret classifier. Pure decision layer: imports cachemeta(1)+stdlib, off the hot path (NOT registered; M1â€“M3 wire the live loop).
+	"vcachegov":       2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set â€” pin/lazy/evict (Â§5.4), rate-limit warm budget (Â§5.5), cross-shard affinity routing + rehash/burst guards (Â§9/D3), and the Law-D4 secret classifier. Classifier itself: imports cachemeta(1)+stdlib. The live loop (loop.go, journal.go, quality.go, #1492) additionally imports vcacheqa(2) from its own qa_test.go only; loop.go itself stays cachemeta(1)+stdlib. Blank-imported by internal/registrations (env-gated by FAK_VCACHE_GOVERNOR / --vcache-governor, default OFF) -- no longer "NOT registered".
 	"vcachechain":     2, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the Â§11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
 	"vcachecal":       2, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (Â§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (Â§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only â€” no warming in M1).
 	"vcachescore":     2, // vCache operator scorecard: composes vcachecal/vcachechain/vcachegov proof leaves into the offline 2x readiness gate and hot-anchor index artifact; pure off-path decision layer.
 	"vcachestar":      2, // vCache M2 star anchors (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path.
 	"vcachewarm":      2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
+	"vcacheqa":        2, // vCache gate QA harness (#1495, child of #1490): the shared honesty-lint (Law A2 elision AST scan) + forced-cache-MISS helper (drives vcachestar.FoldTelemetry) + non-forgeable witness (journal.Row-shaped hash chain, verified via journal.VerifyRows) + provenance fence (OBSERVED/WITNESSED, cachewitness vocabulary) + determinism check every M1-M5 gate imports before flipping default-on. Imports journal(2)+guardrsi(1)+cachewitness(1)+vcachestar(2)+cachemeta(1)+stdlib, off the hot path, not registered.
 	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"issuecontract":   1, // pure spine-first GitHub issue candidate contract; stdlib-only, off the hot path.
@@ -239,6 +241,9 @@ var tier = map[string]int{
 	"workerenvelope":  1, // machine-readable worker-result envelope (sha/issue/tests/blocker/witness) + witness-gated validation; stdlib-only, off the hot path.
 	"launchlatency":   1, // dispatch→heartbeat worker launch-latency histogram + p50/p95 (reuses fleetmetrics percentiles); stdlib-only, off the hot path.
 	"closurerate":     1, // closure-rate + witnessed-close-rate + claimed-without-witness honesty counters over a close ledger; stdlib-only, off the hot path.
+	"issuecost":       1, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
+	"mutationbudget":  1, // GitHub mutation throttle guard: holds close/comment bursts with an actionable reason when remaining API budget < reserve; stdlib-only, off the hot path.
+	"completiondist":  1, // fold historical issue-closure durations into a distribution (median/p95/buckets) for the capacity model; reuses fleetmetrics+fleetcap; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
