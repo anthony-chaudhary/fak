@@ -259,6 +259,7 @@ var tier = map[string]int{
 	"corelockaudit":    1, // read-only changed-path core-lock audit fold (#1680): classifies changed paths via the corelocks(1) taxonomy into a closed-schema, deterministic Report (measurement-only warnings); imports only corelocks(1), shells to git in a thin off-hot-path I/O layer.
 	"frontierswe":      1, // typed FrontierSWE dataset spine (#1707, epic #1706): the Task model + Category enum + 17-task Catalog + hand-rolled task.toml/job.yaml/oracle.yaml loaders, mirroring internal/swebench's Instance; stdlib-only, imports nothing internal, off the hot path.
 	"fleetcap":         1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
+	"fleetcompare":     1, // pure fleet sweep slice builder that decomposes shared vs isolated/cross-cache gains; stdlib-only, off the hot path.
 	"workflowaudit":    1, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	"fleetsim":         1, // synthetic 400-issues/hour dry-run replay fixture: deterministic ledger generator + closes/hour fold; stdlib-only, off the hot path.
 	"fleetmetrics":     1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
