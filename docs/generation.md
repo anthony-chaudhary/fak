@@ -32,6 +32,10 @@ Generation is independent of shared trunk. All streams still land through
 `main`, by explicit path, with the same witness, DCO, and ship-stamp rules as
 any other fak work. A stream label never authorizes a feature branch, a side
 worktree escape, or stale trunk hygiene.
+The branchless team workflow is spelled out in
+[`docs/generation-concurrent-trunk-playbook.md`](generation-concurrent-trunk-playbook.md):
+stream labels partition evidence and horizon, while `dos arbitrate`, path scope,
+and runtime gates decide whether concurrent work can safely run.
 
 Generation is independent of runtime feature gates. A generation label says why
 the work exists and what evidence promotes it. A feature gate decides whether
