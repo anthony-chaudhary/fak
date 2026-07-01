@@ -84,6 +84,9 @@ mid-trial to witness the prefix-reuse this routing unlocks is **C8**.
 python3 fak_routed_test.py     # stdlib only — no fak, no harbor_ext, no GPU, no network egress
 ```
 
+Expected runtime: the stdlib-only test completes in a few seconds on a normal developer
+machine.
+
 The test stands up a mock OpenAI-compatible endpoint and a stub harbor_ext agent, then
 asserts the shim (a) reroutes traffic to the gateway, (b) leaves every non-base-URL field
 byte-identical to an un-routed instance, and (c) refuses an external gateway under
