@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -76,7 +77,7 @@ func newCapacityPressureSweeper(backend compute.Backend, adapter *engine.Capacit
 			Adapter:        adapter,
 			ResidentBytes:  residentBytes,
 			TargetPressure: target,
-			Candidates:     lowerPressureCandidates(cands),
+			Candidates:     lowerPressureCandidates(backend, residentBytes, cands),
 		})
 		if err != nil {
 			// A sweep error (e.g. a nil adapter slipping through) is fail-open: report no relief
@@ -95,19 +96,33 @@ func newCapacityPressureSweeper(backend compute.Backend, adapter *engine.Capacit
 
 // lowerPressureCandidates translates the gateway's wire-neutral KVPressureCandidate list into the
 // engine's CapacityPressureCandidate (a cachemeta.PlacementRequest carrying the retain-vs-evict
-// economics + an engine.PlacementMove carrying the span's executable identity). The placement
-// request is built resident-on-HBM so the planner, under device pressure, demotes the span one
-// tier colder rather than evicting it — the exact shape the engine sweep tests exercise.
-func lowerPressureCandidates(cands []gateway.KVPressureCandidate) []engine.CapacityPressureCandidate {
+// economics + an engine.PlacementMove carrying the span's executable identity).
+//
+// #1468 (Phase-2 child of #1463): the placement request is built against the box that ACTUALLY
+// exists rather than cachemeta.DefaultTierProfiles' representative order-of-magnitude placeholders.
+// The tier ladder comes from cachemeta.ProbedTierProfiles (already shipped, MLCACHE4 / #988) sized
+// from the live HBM/DRAM/disk capacity probes, and the per-tier fullness comes from the already-
+// shipped live pressure probes (DeviceHBMPressure, HostDRAMPressure, the disk free-space probe,
+// MLCACHE1/MLCACHE2) instead of an empty (zero-value) cachemeta.TierPressure. Both folds are
+// fail-open PER TIER: a probe that reports known=false (no GPU, an unsupported host-memory
+// platform, an unprobeable disk path) leaves that one tier at ProbedTierProfiles'/the representative
+// default rather than dragging every tier back to the placeholder ladder.
+func lowerPressureCandidates(backend compute.Backend, residentBytes int64, cands []gateway.KVPressureCandidate) []engine.CapacityPressureCandidate {
+	if len(cands) == 0 {
+		return nil
+	}
+	profiles := probedTierProfilesForHost(backend, residentBytes)
+	pressure := liveTierPressure(backend, residentBytes)
+
 	out := make([]engine.CapacityPressureCandidate, 0, len(cands))
 	for _, c := range cands {
-		profiles := cachemeta.DefaultTierProfiles()
 		lc := cachemeta.NewLifecycle(cachemeta.TierHBM, 0).MarkResident(profiles, 0)
 		req := cachemeta.PlacementRequest{
 			Lifecycle:            lc,
 			SizeBytes:            c.SizeBytes,
 			Tokens:               int64(c.Tokens),
 			Profiles:             profiles,
+			Pressure:             pressure,
 			Policy:               cachemeta.LifecyclePolicy{DemoteOnExpiry: true},
 			PerTokenPrefillNanos: c.PerTokenPrefillNanos,
 		}
@@ -126,4 +141,52 @@ func lowerPressureCandidates(cands []gateway.KVPressureCandidate) []engine.Capac
 		})
 	}
 	return out
+}
+
+// kvPressureSpillPath is the filesystem the disk-tier capacity probe reads free space from when
+// lowering a candidate's tier ladder. There is no dedicated spill-directory config yet (pure
+// wiring per #1468's fence — no new policy), so this uses the same generic scratch filesystem
+// cmd/fak already probes for other host-capacity purposes (os.TempDir()).
+func kvPressureSpillPath() string { return os.TempDir() }
+
+// probedTierProfilesForHost builds the tier ladder cachemeta plans candidates against from the box
+// THIS process can prove it has: HBM sized from backend's device-memory probe (dropped entirely
+// when the backend cannot report one, e.g. cpu-ref — the no-GPU-box fix #1468 calls out), DRAM
+// sized from the host's real physical memory, and disk sized from the scratch filesystem's real
+// free space. Each capacity reading is independently fail-open (cachemeta.ProbedTierProfiles keeps
+// the representative default for a tier whose probe reads non-positive/absent).
+func probedTierProfilesForHost(backend compute.Backend, residentBytes int64) map[cachemeta.ResidencyTier]cachemeta.TierProfile {
+	probe := cachemeta.CapacityProbe{}
+	if hbmTotal, _, ok := compute.DeviceMemoryInfo(backend); ok && hbmTotal > 0 {
+		probe.HBMPresent = true
+		probe.HBMBytes = hbmTotal
+	}
+	if dramTotal, _, ok := compute.HostSystemMemoryInfo(); ok && dramTotal > 0 {
+		probe.DRAMBytes = dramTotal
+	}
+	if diskTotal, _, ok := compute.DiskInfo(kvPressureSpillPath()); ok && diskTotal > 0 {
+		probe.DiskBytes = diskTotal
+	}
+	return cachemeta.ProbedTierProfiles(probe)
+}
+
+// liveTierPressure assembles the per-tier fullness the planner's coldest-colder-with-room walk
+// reads, from the same already-shipped live probes the engine's PlanPlacementForDeviceHostAndDisk
+// wire folds (capacity_pressure.go / capacity_dram.go / capacity_disk.go) — reused here rather than
+// reinvented, since RunCapacityPressureSweep independently re-derives HBM pressure from Backend for
+// its own high-water gate. A probe that reports known=false leaves that tier absent from the
+// returned TierPressure, which cachemeta.TierPressure.HasRoom treats as "has room" (unknown != full)
+// — the fail-open contract every capacity plank in this codebase honors.
+func liveTierPressure(backend compute.Backend, residentBytes int64) cachemeta.TierPressure {
+	pressure := cachemeta.TierPressure{}
+	if p, _, known := engine.DeviceHBMPressure(backend, residentBytes); known {
+		pressure[cachemeta.TierHBM] = p
+	}
+	if p, _, known := engine.HostDRAMPressure(residentBytes); known {
+		pressure[cachemeta.TierDRAM] = p
+	}
+	if p, _, known := engine.DiskPressure(kvPressureSpillPath()); known {
+		pressure[cachemeta.TierDisk] = p
+	}
+	return pressure
 }

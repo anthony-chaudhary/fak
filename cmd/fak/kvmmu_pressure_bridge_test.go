@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -144,6 +145,116 @@ func TestNewCapacityPressureSweeperDemotes(t *testing.T) {
 		t.Fatalf("bridge did not stage-then-evict the lowered span: stage=%d evicts=%+v", kv.stageCalls, kv.evicts)
 	}
 }
+
+// TestLowerPressureCandidatesUsesProbedProfilesAndLivePressure is the #1468 acceptance (Phase-2
+// child of #1463): lowerPressureCandidates must plan against cachemeta.ProbedTierProfiles + the
+// live per-tier TierPressure (HostDRAMPressure/DiskPressure/DeviceHBMPressure), not
+// cachemeta.DefaultTierProfiles' representative placeholders with an empty (zero-pressure)
+// request — the exact gap the issue names in lowerPressureCandidates around cmd/fak/
+// kvmmu_pressure_bridge.go:101.
+//
+// Structured as the issue's own refute guard: first assert the OLD construction (DefaultTierProfiles
+// + a probed ladder that OMITS HBM, i.e. a no-GPU box, with DRAM maximally pressured) would still
+// have planned a demote INTO DRAM — proving the placeholder target really is what the unfixed code
+// produces. Then assert the NEW construction (ProbedTierProfiles for the same no-GPU box + real
+// DRAM pressure 1.0 folded into the request) picks a DIFFERENT, correct ToTier — the coldest-colder-
+// with-room walk must skip the full DRAM tier. Finally, calls the REAL lowerPressureCandidates (not
+// a hand-rolled stand-in) to prove the shipped wiring produces the same shape: Profiles keyed by
+// ProbedTierProfiles' tier set (no TierHBM against a backend that cannot probe device memory) and a
+// non-nil Pressure map, which is what makes the flip possible on a real box.
+func TestLowerPressureCandidatesUsesProbedProfilesAndLivePressure(t *testing.T) {
+	const sizeBytes = 64 << 20
+	const tokens = 4000
+	const perTokenPrefillNanos = 2_000_000
+
+	// The no-GPU ladder #1468 calls out: ProbedTierProfiles with HBMPresent=false drops TierHBM
+	// entirely, exactly as a box with no device would. DRAM/Disk stay representative-sized here
+	// (0 probe reading keeps the default) — only the PRESSURE differs between old and new below.
+	noHBMProbedProfiles := cachemeta.ProbedTierProfiles(cachemeta.CapacityProbe{})
+
+	// Candidates start resident in HBM, exactly as lowerPressureCandidates builds every live
+	// candidate's Lifecycle (NewLifecycle(cachemeta.TierHBM, 0).MarkResident(...)) — the sweep only
+	// ever fires when HBM is under pressure, so HBM pressure 1.0 puts both requests below in the
+	// same demote-or-evict branch PlanPlacement takes on the real serve path.
+	baseReq := func(profiles map[cachemeta.ResidencyTier]cachemeta.TierProfile) cachemeta.PlacementRequest {
+		lc := cachemeta.NewLifecycle(cachemeta.TierHBM, 0).MarkResident(profiles, 0)
+		return cachemeta.PlacementRequest{
+			Lifecycle:            lc,
+			SizeBytes:            sizeBytes,
+			Tokens:               tokens,
+			Profiles:             profiles,
+			Policy:               cachemeta.LifecyclePolicy{DemoteOnExpiry: true},
+			PerTokenPrefillNanos: perTokenPrefillNanos,
+		}
+	}
+
+	// REFUTE GUARD: the OLD construction — DefaultTierProfiles (the placeholder ladder, which
+	// still advertises a TierHBM+TierDRAM a no-GPU/full-DRAM box does not really have room in) with
+	// only HBM pressured (DRAM left at its unfixed, never-injected empty pressure) — must plan the
+	// demote INTO DRAM, because the placeholder ladder assumes DRAM has room. If this ever fails,
+	// the "placeholder target" this test flips away from was never the placeholder target, so the
+	// flip below proves nothing.
+	oldReq := baseReq(cachemeta.DefaultTierProfiles())
+	oldReq.Pressure = cachemeta.TierPressure{cachemeta.TierHBM: 1.0}
+	oldDecision := cachemeta.PlanPlacement(oldReq)
+	if oldDecision.Action != cachemeta.ActionDemote || oldDecision.ToTier != cachemeta.TierDRAM {
+		t.Fatalf("refute guard: DefaultTierProfiles + HBM-only pressure must demote into DRAM, got %s->%s",
+			oldDecision.Action, oldDecision.ToTier)
+	}
+
+	// NEW construction: the probed (no-HBM-tier) ladder + real per-tier pressure with BOTH HBM and
+	// DRAM maximally pressured (1.0), exactly as DeviceHBMPressure+HostDRAMPressure would report on
+	// a pressured, no-GPU-relief host. The coldest-colder-with-room walk must skip the full DRAM tier
+	// and land on the next colder tier the probed ladder still carries: Disk (NUMA-far/CXL are not
+	// local-probeable, so ProbedTierProfiles leaves them out of the proved ladder entirely — see its
+	// own doc comment — and coldestColderWithRoom skips any tier absent from Profiles).
+	newReq := baseReq(noHBMProbedProfiles)
+	newReq.Pressure = cachemeta.TierPressure{cachemeta.TierHBM: 1.0, cachemeta.TierDRAM: 1.0}
+	newDecision := cachemeta.PlanPlacement(newReq)
+	if newDecision.ToTier == oldDecision.ToTier {
+		t.Fatalf("probed profiles + live DRAM pressure did not move the target off the placeholder's DRAM pick: got %s->%s",
+			newDecision.Action, newDecision.ToTier)
+	}
+	if newDecision.Action != cachemeta.ActionSpill || newDecision.ToTier != cachemeta.TierDisk {
+		t.Fatalf("with HBM and DRAM full on the probed no-GPU ladder, the candidate should spill to disk (the only colder tier the ladder proves), got %s->%s",
+			newDecision.Action, newDecision.ToTier)
+	}
+
+	// Now prove the SHIPPED wiring (the real lowerPressureCandidates, not a hand-rolled stand-in)
+	// actually builds requests shaped this way: on a backend that cannot probe device memory
+	// (cpu-ref-like — bridgeFakeBackend with CapacityProbe:false below reports known=false, so HBM
+	// is correctly dropped from the ladder) the lowered candidate's Profiles must NOT contain
+	// TierHBM (the no-GPU fix) and its Pressure must be non-nil (populated from the live probes,
+	// not the old unset zero value) so a real box's fullness — not an assumed-empty placeholder —
+	// is what the planner sees.
+	noProbeBackend := bridgeNoCapacityBackend{}
+	lowered := lowerPressureCandidates(noProbeBackend, 90<<20, []gateway.KVPressureCandidate{{
+		SpanDigest:           "span-1468",
+		From:                 16,
+		N:                    tokens,
+		ModelID:              "bridge-model",
+		SizeBytes:            sizeBytes,
+		Tokens:               tokens,
+		PerTokenPrefillNanos: perTokenPrefillNanos,
+	}})
+	if len(lowered) != 1 {
+		t.Fatalf("want exactly one lowered candidate, got %d", len(lowered))
+	}
+	got := lowered[0].Request
+	if _, hasHBM := got.Profiles[cachemeta.TierHBM]; hasHBM {
+		t.Fatalf("lowerPressureCandidates kept TierHBM in the ladder against a backend that cannot probe device memory: %+v", got.Profiles)
+	}
+	if got.Pressure == nil {
+		t.Fatal("lowerPressureCandidates left Pressure nil — live probes were never folded in (the pre-#1468 gap)")
+	}
+}
+
+// bridgeNoCapacityBackend is a compute.Backend that explicitly cannot probe device memory (its
+// Caps().CapacityProbe is false), the cpu-ref/no-GPU-box shape #1468 names: DeviceMemoryInfo must
+// report known=false against it, so probedTierProfilesForHost drops TierHBM from the ladder.
+type bridgeNoCapacityBackend struct{ compute.Backend }
+
+func (bridgeNoCapacityBackend) Caps() compute.Caps { return compute.Caps{Async: true} }
 
 // TestNewCapacityPressureSweeperNilFailsOpen proves the bridge sweeper is fail-open: a nil backend
 // or adapter, or an empty candidate list, reports no relief rather than panicking.
