@@ -204,6 +204,80 @@ func TestIssueContractFromIssuesReviewsGitHubRows(t *testing.T) {
 	}
 }
 
+func TestIssueContractFromIssuesEmitsTemplateRepairPlan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	body := []issuecontract.IssueDraft{{
+		Number: 1727,
+		Title:  "generation(second-next): build the multi-generation portfolio optimizer",
+		Body:   corruptGenerationIssueBody(),
+		Labels: []issuecontract.IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
+	}}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runIssue(&out, &errb, []string{"contract", "--from-issues", path, "--json"})
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3 for corrupt generated body\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	var got struct {
+		OK                  bool `json:"ok"`
+		TemplateRepairPlans []struct {
+			IssueNumber              int      `json:"issue_number"`
+			DetectedMarker           string   `json:"detected_marker"`
+			DetectedMarkers          []string `json:"detected_markers"`
+			ProposedNormalizedHeader string   `json:"proposed_normalized_header"`
+			DryRunOnly               bool     `json:"dry_run_only"`
+		} `json:"template_repair_plans"`
+		RepairQueues []repairQueueAssertion `json:"repair_queues"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.OK || len(got.TemplateRepairPlans) != 1 {
+		t.Fatalf("result = %+v, want one failed dry-run repair plan", got)
+	}
+	plan := got.TemplateRepairPlans[0]
+	if plan.IssueNumber != 1727 || !plan.DryRunOnly ||
+		plan.DetectedMarker != "$(@{gen=second-next; title=...; labels=...; why=...; scope=...}.gen)" {
+		t.Fatalf("plan = %+v, want issue #1727 dry-run with first marker", plan)
+	}
+	if !hasString(plan.DetectedMarkers, "$(System.Collections.Hashtable.title)") ||
+		!hasString(plan.DetectedMarkers, "- Source: $source, Phase 2") {
+		t.Fatalf("markers = %+v, want 1727-style marker set", plan.DetectedMarkers)
+	}
+	if !strings.Contains(plan.ProposedNormalizedHeader, "- Generation: gen/second-next") ||
+		!strings.Contains(plan.ProposedNormalizedHeader, "- Parent: #1625") ||
+		strings.Contains(plan.ProposedNormalizedHeader, "$(") {
+		t.Fatalf("proposed header = %q, want normalized generation header", plan.ProposedNormalizedHeader)
+	}
+	assertRepairQueue(t, got.RepairQueues, "template", 1, 1, map[string]int{issuecontract.ReasonUnexpandedTemplate: 1})
+
+	out.Reset()
+	errb.Reset()
+	code = runIssue(&out, &errb, []string{"contract", "--from-issues", path})
+	if code != 3 {
+		t.Fatalf("text exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	rendered := out.String()
+	for _, want := range []string{
+		"template_repair_plan[0]: issue=#1727",
+		"detected=\"$(@{gen=second-next; title=...; labels=...; why=...; scope=...}.gen)\" dry_run=true",
+		"marker: $(System.Collections.Hashtable.title)",
+		"marker: - Source: $source, Phase 2",
+		"proposed_header:",
+		"- Generation: gen/second-next",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered output missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestIssueContractReportsGenerationFit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "generation-candidates.json")
 	clean := completeIssueCandidate()
@@ -546,6 +620,25 @@ func TestIssueContractFromIssuesRefusesVagueRows(t *testing.T) {
 
 func completeIssueDraftBody() string {
 	return completeIssueDraftBodyWithSteps("3")
+}
+
+func corruptGenerationIssueBody() string {
+	return strings.Join([]string{
+		"## Generation stream",
+		"- Generation: $(@{gen=second-next; title=...; labels=...; why=...; scope=...}.gen)",
+		"- Milestone: $(System.Collections.Hashtable.title)",
+		"- Parent: #1625",
+		"- Source: $source, Phase 2",
+		"",
+		"## Why",
+		"The generated body below the corrupt header is intact.",
+		"",
+		"## Initial scope",
+		"Repair only the generated metadata header.",
+		"",
+		"## Witness",
+		"Captured dry-run output lists affected issue, marker, and replacement header.",
+	}, "\n")
 }
 
 func completeIssueDraftBodyWithSteps(expectedSteps string) string {

@@ -153,6 +153,59 @@ func TestReviewIssueDraftRefusesUnexpandedTemplateTokens(t *testing.T) {
 	}
 }
 
+func TestBuildTemplateRepairPlanForGenerationMarkers(t *testing.T) {
+	body := strings.Join([]string{
+		"## Generation stream",
+		"- Generation: $(@{gen=second-next; title=...; labels=...; why=...; scope=...}.gen)",
+		"- Milestone: $(System.Collections.Hashtable.title)",
+		"- Parent: #1625",
+		"- Source: $source, Phase 2",
+		"",
+		"## Why",
+		"The generated body below the corrupt header is intact.",
+		"",
+		"## Initial scope",
+		"Repair only the generated metadata header.",
+		"",
+		"## Witness",
+		"Captured dry-run output lists affected issue, marker, and replacement header.",
+	}, "\n")
+	plan, ok := BuildTemplateRepairPlan(IssueDraft{
+		Number: 1727,
+		Title:  "generation(second-next): build the multi-generation portfolio optimizer",
+		Body:   body,
+		Labels: []IssueLabel{{Name: "generation"}, {Name: "gen/second-next"}},
+	})
+	if !ok {
+		t.Fatal("BuildTemplateRepairPlan returned no plan for corrupt generation header")
+	}
+	if !plan.DryRunOnly || plan.IssueNumber != 1727 || plan.Key != "issue/1727" {
+		t.Fatalf("plan identity = %+v, want dry-run #1727 issue key", plan)
+	}
+	for _, want := range []string{
+		"$(@{gen=second-next; title=...; labels=...; why=...; scope=...}.gen)",
+		"$(System.Collections.Hashtable.title)",
+		"- Source: $source, Phase 2",
+	} {
+		if !has(plan.DetectedMarkers, want) {
+			t.Fatalf("markers = %+v, want %q", plan.DetectedMarkers, want)
+		}
+	}
+	for _, want := range []string{
+		"## Generation stream",
+		"- Generation: gen/second-next",
+		"- Milestone: Generation G2 - Second Next",
+		"- Parent: #1625",
+	} {
+		if !strings.Contains(plan.ProposedNormalizedHeader, want) {
+			t.Fatalf("proposed header missing %q:\n%s", want, plan.ProposedNormalizedHeader)
+		}
+	}
+	if strings.Contains(plan.ProposedNormalizedHeader, "$(") || strings.Contains(plan.ProposedNormalizedHeader, "$source") {
+		t.Fatalf("proposed header still contains template tokens:\n%s", plan.ProposedNormalizedHeader)
+	}
+}
+
 func TestReviewCandidateScoresGoldPlatingBelowSpineWork(t *testing.T) {
 	c := completeCandidate()
 	c.PriorityContext = "Nice later: polish helper names after the workflow already works."

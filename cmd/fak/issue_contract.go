@@ -35,18 +35,19 @@ func runIssue(stdout, stderr io.Writer, argv []string) int {
 }
 
 type issueContractResult struct {
-	Schema             string                        `json:"schema"`
-	Mode               string                        `json:"mode"`
-	File               string                        `json:"file"`
-	OK                 bool                          `json:"ok"`
-	Counts             issueContractCounts           `json:"counts"`
-	RepairQueues       []issueContractRepairQueue    `json:"repair_queues,omitempty"`
-	BatchGroups        []issueContractBatchGroup     `json:"batch_groups,omitempty"`
-	DuplicateKeyGroups []issueContractDuplicateGroup `json:"duplicate_key_groups,omitempty"`
-	AssumptionGroups   []issueContractAgentNoteGroup `json:"assumption_groups,omitempty"`
-	ConfusionGroups    []issueContractAgentNoteGroup `json:"confusion_groups,omitempty"`
-	CoordinationGroups []issueContractAgentNoteGroup `json:"coordination_groups,omitempty"`
-	Reviews            []issuecontract.Review        `json:"reviews"`
+	Schema              string                             `json:"schema"`
+	Mode                string                             `json:"mode"`
+	File                string                             `json:"file"`
+	OK                  bool                               `json:"ok"`
+	Counts              issueContractCounts                `json:"counts"`
+	RepairQueues        []issueContractRepairQueue         `json:"repair_queues,omitempty"`
+	BatchGroups         []issueContractBatchGroup          `json:"batch_groups,omitempty"`
+	DuplicateKeyGroups  []issueContractDuplicateGroup      `json:"duplicate_key_groups,omitempty"`
+	AssumptionGroups    []issueContractAgentNoteGroup      `json:"assumption_groups,omitempty"`
+	ConfusionGroups     []issueContractAgentNoteGroup      `json:"confusion_groups,omitempty"`
+	CoordinationGroups  []issueContractAgentNoteGroup      `json:"coordination_groups,omitempty"`
+	TemplateRepairPlans []issuecontract.TemplateRepairPlan `json:"template_repair_plans,omitempty"`
+	Reviews             []issuecontract.Review             `json:"reviews"`
 }
 
 type issueContractCounts struct {
@@ -194,6 +195,9 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 				result.OK = false
 			}
 			result.Reviews = append(result.Reviews, review)
+			if plan, ok := issuecontract.BuildTemplateRepairPlan(issue); ok {
+				result.TemplateRepairPlans = append(result.TemplateRepairPlans, plan)
+			}
 		}
 	} else {
 		candidates, err := decodeIssueContractCandidates(b)
@@ -740,6 +744,8 @@ func issueContractRepairKinds(review issuecontract.Review) []string {
 			add("noise")
 		case issuecontract.ReasonPrivateBoundary:
 			add("private")
+		case issuecontract.ReasonUnexpandedTemplate:
+			add("template")
 		default:
 			add("other")
 		}
@@ -764,6 +770,8 @@ func issueContractRepairRank(kind string) int {
 		return 4
 	case "private":
 		return 5
+	case "template":
+		return 6
 	default:
 		return 9
 	}
@@ -783,6 +791,8 @@ func issueContractRepairAction(kind string) string {
 		return "add trigger, batch policy, agent context, and live dedupe/cap evidence before automated sync"
 	case "private":
 		return "remove private/operator-only evidence or move the work to the private companion repo"
+	case "template":
+		return "dry-run a normalized generated-header repair, review it, then apply explicitly if accepted"
 	default:
 		return "inspect the review reasons and repair the row before dispatch"
 	}
@@ -936,6 +946,26 @@ func renderIssueContract(r issueContractResult) string {
 	lines = renderIssueContractAgentNoteGroups(lines, "assumption", r.AssumptionGroups)
 	lines = renderIssueContractAgentNoteGroups(lines, "confusion", r.ConfusionGroups)
 	lines = renderIssueContractAgentNoteGroups(lines, "coordination", r.CoordinationGroups)
+	for i, plan := range r.TemplateRepairPlans {
+		if i >= 8 {
+			lines = append(lines, fmt.Sprintf("  template_repair_plans: ... %d more", len(r.TemplateRepairPlans)-i))
+			break
+		}
+		line := fmt.Sprintf("  template_repair_plan[%d]: issue=#%d key=%s detected=%q dry_run=%t",
+			i,
+			plan.IssueNumber,
+			issueContractBucketValue(plan.Key, "(missing-key)"),
+			plan.DetectedMarker,
+			plan.DryRunOnly)
+		lines = append(lines, line)
+		for _, marker := range plan.DetectedMarkers {
+			lines = append(lines, "    marker: "+marker)
+		}
+		if strings.TrimSpace(plan.ProposedNormalizedHeader) != "" {
+			lines = append(lines, "    proposed_header:")
+			lines = append(lines, indentIssueContractBlock(plan.ProposedNormalizedHeader, "      ")...)
+		}
+	}
 	for _, queue := range r.RepairQueues {
 		line := fmt.Sprintf("  repair_queue[%s]: count=%d steps=%d",
 			queue.Kind, queue.Count, queue.StepBudget)
@@ -975,6 +1005,15 @@ func renderIssueContract(r issueContractResult) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func indentIssueContractBlock(block, prefix string) []string {
+	raw := strings.Split(strings.ReplaceAll(block, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		out = append(out, prefix+line)
+	}
+	return out
 }
 
 func renderIssueContractAgentNoteGroups(lines []string, label string, groups []issueContractAgentNoteGroup) []string {
