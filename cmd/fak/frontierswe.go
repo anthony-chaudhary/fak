@@ -65,6 +65,7 @@ func frontiersweUsage(w io.Writer) {
 
 usage:
   fak frontierswe describe [--tasks DIR] [--json] [--out FILE]
+                           [--tts [--reuse R] [--workers N,...] [--task NAME]]
         Load the FrontierSWE task catalog (the 17 task names + their scoring
         family) and print, per task: name, category, difficulty, the 20-hour
         [agent] timeout_sec (the HEADLINE cost), the [environment] envelope
@@ -72,6 +73,13 @@ usage:
         (implementation / performance / ml_research). Fully offline: with no
         flags it reads the committed task fixtures (`+frontiersweSampleTasks+`) and
         announces it on stderr — no model, GPU, Modal account, or Docker image.
+
+        --tts adds the deterministic time-to-solution PROJECTION block: per task,
+        the projected TTS ratio T_fak/T_raw at cross-turn reuse rate --reuse plus
+        the A/C work-elimination floor, and a --workers cross-trial sweep (the
+        n_concurrent_trials prefix-sharing axis). --task NAME restricts it to one
+        task. It is a deterministic floor (no model), NOT a measurement — the
+        measured TTS is deferred to C14.
 `)
 }
 
@@ -105,6 +113,12 @@ type FrontierDescribe struct {
 	HeadlineHours float64           `json:"headline_budget_hours"` // the canonical 20h per-task agent budget
 	GateClasses   map[string]int    `json:"gate_classes"`          // count of tasks per scoring family
 	Tasks         []FrontierTaskRow `json:"tasks"`
+
+	// TTS is the optional time-to-solution PROJECTION block, present only when
+	// --tts is given. One entry per (selected) task: the C4 TTSModel projection at
+	// the chosen reuse rate plus the cross-trial sweep. Deterministic floor, not a
+	// measurement (the measured TTS is deferred to C14).
+	TTS []frontierswe.TTSProjection `json:"tts_projection,omitempty"`
 }
 
 func runFrontiersweDescribe(stdout, stderr io.Writer, argv []string) int {
@@ -113,6 +127,10 @@ func runFrontiersweDescribe(stdout, stderr io.Writer, argv []string) int {
 	tasks := fs.String("tasks", "", "task tree to overlay budgets/resources from (dir of <name>/task.toml); default: the committed "+frontiersweSampleTasks+" sample")
 	asJSON := fs.Bool("json", false, "emit only the describe JSON on stdout (no human table on stderr)")
 	out := fs.String("out", "", "write the describe JSON here (default: stdout JSON + human table on stderr)")
+	tts := fs.Bool("tts", false, "add the deterministic time-to-solution PROJECTION block: per-task projected TTS ratio + A/C work-elimination floor (offline; no model)")
+	reuse := fs.Float64("reuse", frontierswe.DefaultReuseRate, "cross-turn reuse rate r in [0,1] for the --tts projection (the value-stack reuse dial; a PROJECTION, not a measurement)")
+	workersArg := fs.String("workers", "", "comma-separated cross-trial counts to sweep for --tts (the n_concurrent_trials prefix-sharing axis); default: 1 + the task's declared trials")
+	task := fs.String("task", "", "restrict the --tts projection to a single task by name (default: all catalog tasks)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -130,6 +148,21 @@ func runFrontiersweDescribe(stdout, stderr io.Writer, argv []string) int {
 
 	d := buildFrontierDescribe(tasksDir)
 
+	// The --tts projection block overlays the C4 TTSModel: per task, the projected
+	// time-to-solution ratio at reuse rate --reuse plus the A/C work-elimination
+	// floor, and a cross-trial sweep. It is deterministic and offline (no model);
+	// it is labeled a PROJECTION (floor) throughout, with the measured TTS deferred
+	// to C14. The block rides on the same JSON payload so the stdout/stderr split is
+	// unchanged.
+	if *tts {
+		trialSweep := parseIntList(*workersArg)
+		d.TTS = buildFrontierTTS(d, tasksDir, *reuse, trialSweep, *task)
+		if len(d.TTS) == 0 {
+			fmt.Fprintf(stderr, "fak frontierswe describe --tts: no task matched --task %q\n", *task)
+			return 1
+		}
+	}
+
 	jb, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak frontierswe describe: %v\n", err)
@@ -146,6 +179,9 @@ func runFrontiersweDescribe(stdout, stderr io.Writer, argv []string) int {
 
 	if !*asJSON {
 		printFrontierSummary(stderr, d, *out)
+		if *tts {
+			printFrontierTTS(stderr, d, *reuse)
+		}
 	}
 	return 0
 }
@@ -221,6 +257,91 @@ func printFrontierSummary(w io.Writer, d FrontierDescribe, out string) {
 	if out != "" {
 		fmt.Fprintf(w, "\nDescribe JSON written: %s\n", out)
 	}
+}
+
+// buildFrontierTTS builds the per-task time-to-solution projection block. For each
+// catalog task (or just --task NAME when given), it loads the committed task.toml
+// when present to derive the agent budget, projects the long-horizon geometry, and
+// runs the C4 TTSModel at reuse rate r over the trial sweep. A task with no
+// committed fixture still gets a projection from the catalog-default budget, marked
+// HasFixture=false so the floor is honest about its input. Deterministic and
+// offline — no model, no GPU, no network.
+func buildFrontierTTS(d FrontierDescribe, tasksDir string, reuse float64, trialSweep []int, only string) []frontierswe.TTSProjection {
+	out := make([]frontierswe.TTSProjection, 0, len(d.Tasks))
+	for _, row := range d.Tasks {
+		if only != "" && row.Name != only {
+			continue
+		}
+		// Load the task so the projection sees the real budget + n_concurrent_trials
+		// where a fixture exists. With no fixture, synthesize a Task carrying just
+		// the canonical 20h headline budget so the catalog task still gets a floor.
+		task, err := frontierswe.LoadTask(filepath.Join(tasksDir, row.Name))
+		if err != nil {
+			task = &frontierswe.Task{Name: row.Name}
+			task.Agent.TimeoutSec = d.HeadlineHours * 3600.0
+		}
+		p := frontierswe.ProjectTTS(task, reuse, trialSweep)
+		p.Name = row.Name
+		p.HasFixture = row.HasFixture
+		out = append(out, p)
+	}
+	return out
+}
+
+// printFrontierTTS writes the human-readable time-to-solution projection table on
+// stderr (keeping stdout clean JSON). It is clearly labeled a deterministic
+// PROJECTION (floor): the per-task projected TTS ratio + A/C work-elimination at
+// the chosen reuse rate, then the cross-trial sweep for tasks that fan out.
+func printFrontierTTS(w io.Writer, d FrontierDescribe, reuse float64) {
+	fmt.Fprintf(w, "\n== time-to-solution PROJECTION (deterministic floor, no model) ==\n")
+	fmt.Fprintf(w, "reuse rate    : r=%.2f (the cross-turn value-stack reuse dial; a PROJECTION, not a measurement)\n", reuse)
+	fmt.Fprintf(w, "geometry      : turns projected from each task's [agent] timeout_sec (measured TTS deferred to C14)\n\n")
+
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "TASK\tTURNS\tA/B TURN-TAX\tA/C @r\tTTS RATIO @r")
+	for _, p := range d.TTS {
+		fmt.Fprintf(tw, "%s\t%d\t%.1fx\t%.1fx\t%.4f\n",
+			p.Name, p.Geometry.Turns, p.Arms.AOverB, p.Arms.AOverC, p.Arms.TTSRatio)
+	}
+	_ = tw.Flush()
+
+	fmt.Fprintf(w, "\n  A/B TURN-TAX  = re-prefill-every-turn vs KV persistence (structural, reuse-independent).\n")
+	fmt.Fprintf(w, "  A/C @r        = net re-prefill work-elimination at reuse rate r (the value-stack floor).\n")
+	fmt.Fprintf(w, "  TTS RATIO @r  = projected T_fak/T_raw = C(r)/A — fraction of the budget fak's run is projected to take.\n")
+
+	// The cross-trial sweep: only meaningful where a task fans out to >1 concurrent
+	// trial (n_concurrent_trials), so concurrent trials of the same task share the
+	// identical prefix. Print it only when at least one task sweeps past 1 trial.
+	if frontierTTSHasCrossTrial(d.TTS) {
+		fmt.Fprintf(w, "\ncross-trial reuse (n_concurrent_trials share the identical prefix):\n")
+		ttw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+		fmt.Fprintln(ttw, "TASK\tTRIALS\tA(all trials)\tD(shared prefix)\tA/D\tTTS RATIO")
+		for _, p := range d.TTS {
+			for _, ta := range p.TrialSweep {
+				if ta.Trials <= 1 {
+					continue
+				}
+				fmt.Fprintf(ttw, "%s\t%d\t%.0f\t%.0f\t%.1fx\t%.4f\n",
+					p.Name, ta.Trials, ta.ATrials, ta.DShared, ta.ATrialsD, ta.TTSTrial)
+			}
+		}
+		_ = ttw.Flush()
+		fmt.Fprintf(w, "\n  A/D = cross-trial work-elimination: N trials re-prefilling vs sharing one prefix (bites at trials>1).\n")
+	}
+}
+
+// frontierTTSHasCrossTrial reports whether any projection's trial sweep fans out
+// past a single trial, so the cross-trial table is only printed when it carries a
+// real cross-trial arm.
+func frontierTTSHasCrossTrial(ps []frontierswe.TTSProjection) bool {
+	for _, p := range ps {
+		for _, ta := range p.TrialSweep {
+			if ta.Trials > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // internetLabel renders allow_internet as a short table cell.

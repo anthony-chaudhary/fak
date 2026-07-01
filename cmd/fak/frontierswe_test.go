@@ -185,3 +185,84 @@ func TestFrontiersweBenchcatalogRowResolves(t *testing.T) {
 		t.Errorf("benchmarks describe missing the run command; got:\n%s", out)
 	}
 }
+
+// TestFrontiersweDescribeTTSOfflineExitsZero is the C5 acceptance: `fak frontierswe
+// describe --tts` exits 0 fully offline (no model/GPU/network), and the JSON payload
+// carries the per-task time-to-solution PROJECTION — a projected TTS ratio in (0,1],
+// an A/C work-elimination floor >= 1, and the derived turn geometry — for every
+// catalog task.
+func TestFrontiersweDescribeTTSOfflineExitsZero(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runFrontierswe(&stdout, &stderr, []string{"describe", "--tts", "--reuse", "0.85", "--tasks", repoRootTasksDir})
+	if code != 0 {
+		t.Fatalf("describe --tts exit = %d, want 0 (offline must succeed)\nstderr:\n%s", code, stderr.String())
+	}
+
+	var d FrontierDescribe
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("stdout is not the describe JSON: %v\nstdout:\n%s", err, stdout.String())
+	}
+	if len(d.TTS) != 17 {
+		t.Fatalf("--tts projected %d tasks, want 17 (one per catalog task)", len(d.TTS))
+	}
+	for _, p := range d.TTS {
+		if p.Geometry.Turns < 1 {
+			t.Errorf("%s: projected turns = %d, want >= 1", p.Name, p.Geometry.Turns)
+		}
+		if p.Reuse != 0.85 {
+			t.Errorf("%s: recorded reuse = %v, want 0.85", p.Name, p.Reuse)
+		}
+		// The TTS ratio is a fraction of the raw budget (a floor < 1 at r=0.85), and
+		// the A/C work-elimination is at least 1 (never negative speedup).
+		if !(p.Arms.TTSRatio > 0 && p.Arms.TTSRatio < 1) {
+			t.Errorf("%s: TTS ratio = %v, want in (0,1) at r=0.85", p.Name, p.Arms.TTSRatio)
+		}
+		if p.Arms.AOverC < 1 {
+			t.Errorf("%s: A/C = %v, want >= 1", p.Name, p.Arms.AOverC)
+		}
+	}
+
+	// The human table on stderr labels the block a deterministic PROJECTION, not a
+	// measurement (the honesty boundary the floor is required to state).
+	se := stderr.String()
+	if !strings.Contains(se, "time-to-solution PROJECTION") {
+		t.Errorf("stderr missing the PROJECTION label; got:\n%s", se)
+	}
+	if !strings.Contains(se, "deferred to C14") {
+		t.Errorf("stderr missing the measured-TTS-deferred note; got:\n%s", se)
+	}
+}
+
+// TestFrontiersweDescribeTTSSingleTaskAndReuseMonotone checks --task restricts the
+// projection to one task and that a higher reuse rate yields a strictly lower
+// projected TTS ratio (the value curve), end to end through the command.
+func TestFrontiersweDescribeTTSSingleTaskAndReuseMonotone(t *testing.T) {
+	tts := func(reuse string) FrontierDescribe {
+		var stdout, stderr bytes.Buffer
+		code := runFrontierswe(&stdout, &stderr, []string{"describe", "--json", "--tts", "--reuse", reuse, "--task", "git-to-zig", "--tasks", repoRootTasksDir})
+		if code != 0 {
+			t.Fatalf("describe --tts --task exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+		}
+		var d FrontierDescribe
+		if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+			t.Fatalf("stdout not JSON: %v", err)
+		}
+		return d
+	}
+
+	lo := tts("0.5")
+	hi := tts("0.9")
+	if len(lo.TTS) != 1 || lo.TTS[0].Name != "git-to-zig" {
+		t.Fatalf("--task git-to-zig projected %d tasks, want exactly git-to-zig", len(lo.TTS))
+	}
+	if !(hi.TTS[0].Arms.TTSRatio < lo.TTS[0].Arms.TTSRatio) {
+		t.Errorf("higher reuse should lower the projected TTS ratio: r=0.9 %v >= r=0.5 %v",
+			hi.TTS[0].Arms.TTSRatio, lo.TTS[0].Arms.TTSRatio)
+	}
+
+	// An unknown --task is a non-silent failure (exit 1), not an empty success.
+	var so, se bytes.Buffer
+	if code := runFrontierswe(&so, &se, []string{"describe", "--tts", "--task", "no-such-task", "--tasks", repoRootTasksDir}); code != 1 {
+		t.Errorf("unknown --task exit = %d, want 1", code)
+	}
+}
