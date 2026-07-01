@@ -31,7 +31,7 @@ func TestProgramReportIncludesHumanOperatorProgram(t *testing.T) {
 	for _, s := range report.Programs.Signals {
 		if s.Class == worktype.HumanOperatorEffectiveness {
 			found = true
-			if s.Label != worktype.HumanOperatorEffectiveness.Label() || s.Metric != 100 || s.Direction != "advancing" {
+			if s.Label != worktype.HumanOperatorEffectiveness.Label() || s.Metric != 1 || s.Direction != "advancing" {
 				t.Fatalf("human operator signal = %+v", s)
 			}
 		}
