@@ -66,6 +66,7 @@ KIND_META: dict[str, dict[str, Any]] = {
     "agent-live":        {"cmd": "go run ./cmd/fak agent --task <task>",            "model": (None, "n/a"),                     "headline": False},
     "turn-tax":          {"cmd": "go run ./cmd/fak turntax --suite turntax-airline", "model": (None, "n/a"),                    "headline": False},
     "parity":            {"cmd": "go run ./cmd/paritybench",                        "model": (None, "n/a"),                     "headline": False},
+    "livecodebench":     {"cmd": "go run ./cmd/livecodebench --check --json",        "model": ("served-coding-model", "official"), "headline": True},
 }
 KINDS: list[str] = list(KIND_META)
 MODEL_KINDS = {k for k, v in KIND_META.items() if v["model"][0] is not None}
@@ -75,6 +76,7 @@ MODEL_KINDS = {k for k, v in KIND_META.items() if v["model"][0] is not None}
 # future Metal-only kind; empty today, so the load-bearing rule is "no CUDA on the mac".
 CUDA_KINDS = {"gpu-benchmark"}
 METAL_KINDS: set[str] = set()
+SERVED_CODING_MODEL_KINDS = {"livecodebench"}
 
 # Per-kind re-check interval (days): how long a recorded measurement stays "fresh"
 # before a re-measure is overdue -- the time analogue of bench_witness.py's
@@ -82,7 +84,7 @@ METAL_KINDS: set[str] = set()
 RECHECK_DAYS = {
     "model-benchmark": 7, "gpu-benchmark": 7,
     "qwen36": 14, "radix-benchmark": 14, "session-benchmark": 14, "fan-benchmark": 14,
-    "agent-live": 30, "turn-tax": 30, "parity": 30,
+    "agent-live": 30, "turn-tax": 30, "parity": 30, "livecodebench": 30,
 }
 DEFAULT_RECHECK_DAYS = 14
 DEFAULT_STALE_HORIZON_DAYS = 14
@@ -186,7 +188,30 @@ def feasible(machine: dict[str, Any], kind: str) -> tuple[bool, str]:
         if not (("macos" in os_ or "darwin" in os_) and "arm64" in arch):
             return False, f"needs Apple Metal (macOS/arm64; is {machine.get('os')}/{machine.get('arch')})"
         return True, "Apple Metal node"
+    if kind in SERVED_CODING_MODEL_KINDS:
+        model = served_coding_model(machine)
+        if not model:
+            return False, "needs a served coding model (machine capabilities.served_coding_model)"
+        return True, f"served coding model present ({model})"
     return True, "hardware-agnostic"
+
+
+def served_coding_model(machine: dict[str, Any]) -> str | None:
+    caps = machine.get("capabilities")
+    if not isinstance(caps, dict):
+        return None
+    model = caps.get("served_coding_model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    if model is True:
+        return "served-coding-model"
+    return None
+
+
+def candidate_model(machine: dict[str, Any], kind: str) -> tuple[str | None, str | None]:
+    if kind in SERVED_CODING_MODEL_KINDS:
+        return served_coding_model(machine), "official"
+    return KIND_META[kind]["model"]
 
 
 def most_common(pairs: list[tuple]) -> tuple | None:
@@ -327,7 +352,7 @@ def build_plan(catalog: dict[str, Any], *, now: datetime, machine_filter: str | 
                 cand_model, cand_prec = most_common(
                     [(r.get("model"), r.get("precision")) for r in cell_runs]) or (None, None)
             else:
-                cand_model, cand_prec = KIND_META[kind]["model"]
+                cand_model, cand_prec = candidate_model(m, kind)
             sc = score_cell(machine={"runs": m.get("runs"), "last_run": m.get("last_run")},
                             kind=kind, cell_runs=cell_runs, now=now, recheck_days=recheck_days,
                             stale_horizon=stale_horizon, model_counts=model_counts,

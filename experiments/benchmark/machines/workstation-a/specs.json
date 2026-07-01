@@ -26,6 +26,9 @@
   },
   "registered_at": "2026-06-22T00:00:00Z",
   "role": "bench-node",
+  "capabilities": {
+    "served_coding_model": "qwen3.6-27b"
+  },
   "runtime": {
     "cuda_driver_version": "12.6"
   },

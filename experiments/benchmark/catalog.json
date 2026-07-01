@@ -315,6 +315,9 @@
       "last_run": "20260625T050017Z",
       "os": "macOS",
       "role": "bench-node",
+      "capabilities": {
+        "served_coding_model": "qwen3.6-27b"
+      },
       "runs": 10
     },
     "workstation-a": {
@@ -326,6 +329,9 @@
       "last_run": "20260620T140700Z",
       "os": "Windows",
       "role": "bench-node",
+      "capabilities": {
+        "served_coding_model": "qwen3.6-27b"
+      },
       "runs": 42
     }
   },

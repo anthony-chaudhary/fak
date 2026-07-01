@@ -50,7 +50,8 @@ def synth_catalog() -> dict:
             "host": {"role": "agent-host", "gpu": "AMD Radeon RX 7600", "os": "Windows",
                      "arch": "x86_64", "runs": 0, "last_run": None},
             "busy": {"role": "bench-node", "gpu": "NVIDIA RTX 4070", "os": "Windows",
-                     "arch": "x86_64", "runs": 40, "last_run": "20260620T000000Z"},
+                     "arch": "x86_64", "runs": 40, "last_run": "20260620T000000Z",
+                     "capabilities": {"served_coding_model": "qwen3.6-27b"}},
             "thin": {"role": "bench-node", "gpu": "NVIDIA L4", "os": "Linux",
                      "arch": "x86_64", "runs": 2, "last_run": "20260620T000000Z"},
         },
@@ -99,6 +100,16 @@ class FeasibilityTest(unittest.TestCase):
         p = plan()
         self.assertTrue(p["matrix"]["busy"]["gpu-benchmark"]["feasible"])
         self.assertIsNotNone(entry(p, "newnv", "gpu-benchmark"))
+
+    def test_livecodebench_needs_served_coding_model(self):
+        p = plan()
+        self.assertFalse(p["matrix"]["newnv"]["livecodebench"]["feasible"])
+        self.assertIn("served coding model", p["matrix"]["newnv"]["livecodebench"]["note"])
+        self.assertTrue(p["matrix"]["busy"]["livecodebench"]["feasible"])
+        e = entry(p, "busy", "livecodebench")
+        self.assertIsNotNone(e)
+        self.assertEqual(e["model"], "qwen3.6-27b")
+        self.assertEqual(e["precision"], "official")
 
 
 class AgentHostExclusionTest(unittest.TestCase):
@@ -163,6 +174,7 @@ class FourIntentTest(unittest.TestCase):
 
     def test_rendered_doc_has_all_four_sections(self):
         md = MOD.render_md(plan())
+        self.assertIn("| machine | model | gpu | qwen36 | radix | session | fan | agent-live | turn-tax | parity | livecodebench |", md)
         for header in ("### Benchmark perf", "### Learn / collect new data",
                        "### Prevent regression", "### Fill coverage gaps"):
             self.assertIn(header, md)

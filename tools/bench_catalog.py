@@ -131,6 +131,9 @@ def scan_machines() -> Dict[str, Dict]:
             "runs": 0,
             "last_run": None
         }
+        caps = specs.get("capabilities")
+        if isinstance(caps, dict) and caps:
+            machines[machine_id]["capabilities"] = caps
     return machines
 
 

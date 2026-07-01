@@ -43,6 +43,32 @@ class TestPaths(unittest.TestCase):
         specs = {"hardware": {"gpu": {"model": "NVIDIA L4 (Ada)"}}}
         self.assertEqual(bc.extract_gpu_name(specs), "NVIDIA L4 (Ada)")
 
+    def test_scan_machines_preserves_capabilities(self):
+        with tempfile.TemporaryDirectory() as td:
+            machines_dir = Path(td) / "machines"
+            spec_dir = machines_dir / "m1"
+            spec_dir.mkdir(parents=True)
+            spec = {
+                "hostname": "m1",
+                "os": {"name": "Linux"},
+                "hardware": {
+                    "cpu": {"architecture": "x86_64", "cores_logical": 8},
+                    "gpu": [{"model": "NVIDIA L4"}],
+                },
+                "role": "bench-node",
+                "capabilities": {"served_coding_model": "qwen3.6-27b"},
+            }
+            (spec_dir / "specs.json").write_text(json.dumps(spec), encoding="utf-8")
+
+            saved = bc.MACHINES_DIR
+            try:
+                bc.MACHINES_DIR = machines_dir
+                machines = bc.scan_machines()
+            finally:
+                bc.MACHINES_DIR = saved
+
+            self.assertEqual(machines["m1"]["capabilities"]["served_coding_model"], "qwen3.6-27b")
+
 
 class TestCommittedCatalog(unittest.TestCase):
     def setUp(self):
