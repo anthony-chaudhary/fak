@@ -75,6 +75,44 @@ Four planes, each a different question:
   tier's physical character and the migration DIRECTIVE it emits to move a span
   between tiers. Policy vs directive, both distinct from the KV cache (the storage).
 
+### cache anchor vs compaction budget - the knobs that confuse everyone
+
+These two are the pair the goal behind this page keeps re-confusing. They shape the
+SAME outbound `/v1/messages` body that `fak guard -- claude` forwards, but they answer
+two orthogonal questions - and the anchor GATES the budget, so setting one without the
+other in mind produces the "I lowered the budget and nothing changed" surprise.
+
+- **cache anchor** (the `cache_control` breakpoint) - WHERE the cached prefix ENDS.
+  It is a positional WRITE mark (prefix order tools -> system -> messages): the provider
+  caches everything BEFORE it, and compaction copies everything THROUGH it verbatim so
+  that cached prefix survives byte-for-byte. It is a boundary, and it says nothing about
+  size. *Not* the budget (an anchor never caps how many tokens ride along).
+
+- **compaction budget** (`--compact-history-budget`, default 48000) - a resident-token
+  TARGET for the span AFTER the anchor. Once that un-cached middle sprawls past the
+  budget, whole old turns are dropped down to it. It is a size threshold on the
+  compactible tail, *not* a cache boundary (it never moves or crosses the anchor).
+
+- **anchor-starved** (the trap, #1407) - because the budget can only shed the span
+  AFTER the anchor, an anchor that lands LATE leaves nothing for the budget to touch.
+  Real Claude Code traffic marks its breakpoint on a RECENT turn, so the default anchor
+  (`CompactAnchorFirstBP`) sits near the end, the protected prefix swallows almost the
+  whole conversation, and **lowering the budget does nothing** - compaction can never
+  fire. The `AnchorStarved` diagnostic names exactly this state (under-budget WITH a
+  protected prefix already past the budget). The lever here is the ANCHOR, not the
+  budget: `CompactAnchorHead` re-anchors on the stable system/tools head so the whole
+  message array becomes compactible - but that bursts the recent breakpoint's cached
+  suffix, so it fires only when the burst repays within the session horizon
+  (`CacheBurstPaysBack`, #1408). Grounded in `internal/agent/anthropic_compact.go`.
+
+- **compact-history-budget** vs **ctx-view-budget** - two DIFFERENT budgets, conflated
+  because both bound the forwarded body. `--compact-history-budget` (48000) DROPS old
+  whole turns past the anchor: a cache-preserving shed. `--ctx-view-budget` (8000) is
+  the O(1) `ctxplan` planner's resident-VIEW budget: it re-materializes history as a
+  bounded planned view in place of the raw transcript. Shed vs planned view - a size
+  cut on the tail vs a re-plan of what stays resident (see the context-management
+  family below).
+
 ---
 
 ## The guard / gate family
