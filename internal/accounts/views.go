@@ -89,6 +89,17 @@ func writeLoginRowFields(b *strings.Builder, h Home) {
 	b.WriteString("    can_serve: " + strconv.FormatBool(h.CanServe()) + "\n")
 }
 
+// writeJobRowHead emits the shared head of every job-view roster row (both the active and the
+// tombstoned loops): name+config_dir, the login vocabulary, then chrome_profile+email. The
+// caller appends the fields that DIFFER between the two loops (enabled true/default vs literal
+// false, reserved, tombstone audit) after this.
+func writeJobRowHead(b *strings.Builder, h Home) {
+	writeNameDirRow(b, h)
+	writeLoginRowFields(b, h)
+	b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
+	b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
+}
+
 // renderDos emits the dos roster: `accounts:` rows of name+config_dir for every active home,
 // the active-default seat + the full role map (so a launcher/watchdog can pick the right seat
 // without re-reading the registry), then the view's config blocks (rotation/defaults).
@@ -132,10 +143,7 @@ func (r Registry) renderJob() string {
 	b.WriteString(generatedHeader)
 	b.WriteString("accounts:\n")
 	for _, h := range r.activeHomes() {
-		writeNameDirRow(&b, h)
-		writeLoginRowFields(&b, h)
-		b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
-		b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
+		writeJobRowHead(&b, h)
 		b.WriteString("    enabled: " + strconv.FormatBool(h.EnabledOrDefault()) + "\n")
 		if h.Reserved {
 			b.WriteString("    reserved: true\n")
@@ -144,10 +152,7 @@ func (r Registry) renderJob() string {
 	if tomb := r.tombstonedHomes(); len(tomb) > 0 {
 		b.WriteString("\ntombstoned_accounts:\n")
 		for _, h := range tomb {
-			writeNameDirRow(&b, h)
-			writeLoginRowFields(&b, h)
-			b.WriteString("    chrome_profile: " + yamlScalar(h.ChromeProfile) + "\n")
-			b.WriteString("    email: " + yamlScalar(h.Identity.Email) + "\n")
+			writeJobRowHead(&b, h)
 			b.WriteString("    enabled: false\n")
 			if h.TombstonedAt != "" {
 				b.WriteString("    tombstoned_at: " + yamlScalar(h.TombstonedAt) + "\n")

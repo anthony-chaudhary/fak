@@ -759,20 +759,34 @@ type claudeConfig struct {
 	} `json:"oauthAccount"`
 }
 
+// statConfigHome is the shared front of every per-home identity reader (Claude's
+// DeriveIdentity and codex's deriveCodexIdentity): it seeds a zero Identity and reports
+// whether dir is a usable config home to read further. When dir is empty or not an existing
+// directory it returns the zero Identity with ok=false (the caller returns it as-is — a
+// missing home reads as "does not exist"); otherwise it returns Identity{Exists: true} with
+// ok=true so the caller can layer on the harness-specific credential/account fields.
+func statConfigHome(dir string) (Identity, bool) {
+	var id Identity
+	if dir == "" {
+		return id, false
+	}
+	fi, err := os.Stat(dir)
+	if err != nil || !fi.IsDir() {
+		return id, false
+	}
+	id.Exists = true
+	return id, true
+}
+
 // DeriveIdentity reads the disk truth for one config-home dir: whether it exists, who
 // it is logged in as (.claude.json oauthAccount), and whether it holds live credentials
 // (.credentials.json). It never returns an error — a missing/unreadable file just
 // leaves the corresponding field zero, so a half-set-up home reads as "exists, no creds".
 func DeriveIdentity(dir string) Identity {
-	var id Identity
-	if dir == "" {
+	id, ok := statConfigHome(dir)
+	if !ok {
 		return id
 	}
-	fi, err := os.Stat(dir)
-	if err != nil || !fi.IsDir() {
-		return id
-	}
-	id.Exists = true
 	if b, err := os.ReadFile(filepath.Join(dir, ".claude.json")); err == nil {
 		var c claudeConfig
 		if json.Unmarshal(b, &c) == nil {

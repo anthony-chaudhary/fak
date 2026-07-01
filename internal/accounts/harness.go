@@ -124,15 +124,10 @@ const codexAuthFile = "auth.json"
 // LoginStatus() reads Ready. A missing/partial file leaves the home "exists, no creds"
 // (LoginNeedsLogin), exactly as a half-set-up Claude home reads.
 func deriveCodexIdentity(dir string) Identity {
-	var id Identity
-	if dir == "" {
+	id, ok := statConfigHome(dir)
+	if !ok {
 		return id
 	}
-	fi, err := os.Stat(dir)
-	if err != nil || !fi.IsDir() {
-		return id
-	}
-	id.Exists = true
 	b, err := os.ReadFile(filepath.Join(dir, codexAuthFile))
 	if err != nil {
 		return id // exists, no creds
