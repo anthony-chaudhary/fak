@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -27,6 +28,13 @@ func TestDurEnv(t *testing.T) {
 	for _, c := range cases {
 		if c.set {
 			t.Setenv(name, c.val)
+		} else {
+			// Actually UNSET the variable: a fleet/dogfood session exports
+			// FAK_HTTP_WRITE_TIMEOUT_S (e.g. 600 for a slow local model), which
+			// leaked into this case and failed it. t.Setenv first so the ambient
+			// value is restored after the test.
+			t.Setenv(name, "")
+			os.Unsetenv(name)
 		}
 		if got := durEnv(name, def); got != c.want {
 			t.Errorf("durEnv(%q=%q) = %v, want %v", name, c.val, got, c.want)
