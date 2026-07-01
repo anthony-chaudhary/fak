@@ -2,15 +2,21 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const testDurationLedgerSchema = "fak.test_duration_ledger.v1"
@@ -24,6 +30,8 @@ type goTestJSONEvent struct {
 
 type testDurationOptions struct {
 	Source        string
+	Command       []string
+	TestExitCode  int
 	PackageBudget time.Duration
 	TestBudget    time.Duration
 }
@@ -31,6 +39,8 @@ type testDurationOptions struct {
 type testDurationLedger struct {
 	Schema          string                `json:"schema"`
 	Source          string                `json:"source,omitempty"`
+	Command         []string              `json:"command,omitempty"`
+	TestExitCode    int                   `json:"test_exit_code,omitempty"`
 	PackageBudgetMS int64                 `json:"package_budget_ms,omitempty"`
 	TestBudgetMS    int64                 `json:"test_budget_ms,omitempty"`
 	Summary         testDurationSummary   `json:"summary"`
@@ -86,10 +96,23 @@ type testDurationTestAccum struct {
 	row testDurationTest
 }
 
+type testDurationRunPlan struct {
+	Target  string
+	GoArgs  []string
+	Argv    []string
+	ViaWSL  bool
+	Source  string
+	Command []string
+}
+
+var testDurationRunCommand = runTestDurationCommand
+
 func runTestDurations(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak test durations", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "go test -json stream to read (default: stdin)")
+	runTarget := fs.String("run", "", "run a fak test tier/package through go test -json before folding (fast, full, race, ./pkg)")
+	outPath := fs.String("out", "", "write the duration ledger JSON to this path in addition to stdout")
 	source := fs.String("source", "", "source label for the ledger (default: input path or stdin)")
 	packageBudget := fs.Duration("package-budget", 0, "rank packages whose elapsed time exceeds this duration")
 	testBudget := fs.Duration("test-budget", 0, "rank tests whose elapsed time exceeds this duration")
@@ -99,6 +122,7 @@ func runTestDurations(stdout, stderr io.Writer, argv []string) int {
 
   go test -json ./... | fak test durations --package-budget 30s --test-budget 5s
   fak test durations --input go-test.jsonl --check
+  fak test durations --run fast --out .fak/test-duration-ledger.json
 
 The output schema is fak.test_duration_ledger.v1. Budget findings are ranked by
 over-budget time so agents see the next slow package or test first.
@@ -115,10 +139,34 @@ over-budget time so agents see the next slow package or test first.
 		fmt.Fprintln(stderr, "fak test durations: budgets must be non-negative")
 		return 2
 	}
+	if *input != "" && *runTarget != "" {
+		fmt.Fprintln(stderr, "fak test durations: --input and --run are mutually exclusive")
+		return 2
+	}
 
 	var r io.Reader = os.Stdin
 	src := *source
-	if *input != "" {
+	var command []string
+	testExitCode := 0
+	if *runTarget != "" {
+		plan, err := planTestDurationRun(runtimeGOOS(), *runTarget)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak test durations: %v\n", err)
+			return 2
+		}
+		fmt.Fprintf(stderr, "fak test durations: running %s\n", strings.Join(plan.Argv, " "))
+		raw, code, err := testDurationRunCommand(plan.Argv[0], plan.Argv[1:], stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak test durations: run %s: %v\n", strings.Join(plan.Argv, " "), err)
+			return 1
+		}
+		r = bytes.NewReader(raw)
+		command = plan.Command
+		testExitCode = code
+		if src == "" {
+			src = plan.Source
+		}
+	} else if *input != "" {
 		f, err := os.Open(*input)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak test durations: open input: %v\n", err)
@@ -136,6 +184,8 @@ over-budget time so agents see the next slow package or test first.
 
 	ledger, err := parseTestDurationLedger(r, testDurationOptions{
 		Source:        src,
+		Command:       command,
+		TestExitCode:  testExitCode,
 		PackageBudget: *packageBudget,
 		TestBudget:    *testBudget,
 	})
@@ -143,9 +193,18 @@ over-budget time so agents see the next slow package or test first.
 		fmt.Fprintf(stderr, "fak test durations: %v\n", err)
 		return 1
 	}
+	if *outPath != "" {
+		if err := writeTestDurationLedgerFile(*outPath, ledger); err != nil {
+			fmt.Fprintf(stderr, "fak test durations: write ledger: %v\n", err)
+			return 1
+		}
+	}
 	if err := writeIndentedJSONNoEscape(stdout, ledger); err != nil {
 		fmt.Fprintf(stderr, "fak test durations: encode json: %v\n", err)
 		return 1
+	}
+	if testExitCode != 0 {
+		return testExitCode
 	}
 	if *check && len(ledger.Findings) > 0 {
 		return 1
@@ -227,10 +286,12 @@ func parseTestDurationLedger(r io.Reader, opts testDurationOptions) (testDuratio
 	})
 
 	ledger := testDurationLedger{
-		Schema:   testDurationLedgerSchema,
-		Source:   opts.Source,
-		Packages: packageRows,
-		Tests:    testRows,
+		Schema:       testDurationLedgerSchema,
+		Source:       opts.Source,
+		Command:      append([]string(nil), opts.Command...),
+		TestExitCode: opts.TestExitCode,
+		Packages:     packageRows,
+		Tests:        testRows,
 	}
 	if opts.PackageBudget > 0 {
 		ledger.PackageBudgetMS = opts.PackageBudget.Milliseconds()
@@ -241,6 +302,67 @@ func parseTestDurationLedger(r io.Reader, opts testDurationOptions) (testDuratio
 	ledger.Findings = buildTestDurationFindings(packageRows, testRows, opts)
 	ledger.Summary = summarizeTestDurations(packageRows, testRows, ledger.Findings)
 	return ledger, nil
+}
+
+func planTestDurationRun(goos, target string) (testDurationRunPlan, error) {
+	if target == "" {
+		target = "fast"
+	}
+	p, err := planTest(goos, []string{target})
+	if err != nil {
+		return testDurationRunPlan{}, err
+	}
+	goArgs := append([]string{"-json"}, p.GoArgs...)
+	argv, viaWSL := resolveGoTestArgv(goos, goArgs)
+	source := "go test " + strings.Join(goArgs, " ")
+	return testDurationRunPlan{
+		Target:  target,
+		GoArgs:  goArgs,
+		Argv:    argv,
+		ViaWSL:  viaWSL,
+		Source:  source,
+		Command: append([]string(nil), argv...),
+	}, nil
+}
+
+func resolveGoTestArgv(goos string, goArgs []string) ([]string, bool) {
+	if goos == "windows" {
+		argv := append([]string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "test.ps1"}, goArgs...)
+		return argv, true
+	}
+	argv := append([]string{"go", "test"}, goArgs...)
+	return argv, false
+}
+
+func runtimeGOOS() string { return runtime.GOOS }
+
+func runTestDurationCommand(name string, args []string, stderr io.Writer) ([]byte, int, error) {
+	cmd := exec.Command(name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = stderr
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return out.Bytes(), ee.ExitCode(), nil
+		}
+		return out.Bytes(), 1, err
+	}
+	return out.Bytes(), 0, nil
+}
+
+func writeTestDurationLedgerFile(path string, ledger testDurationLedger) error {
+	var buf bytes.Buffer
+	if err := writeIndentedJSONNoEscape(&buf, ledger); err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 func isTerminalTestAction(action string) bool {

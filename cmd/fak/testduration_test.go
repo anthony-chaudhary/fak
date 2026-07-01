@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,6 +81,80 @@ func TestRunTestDurationsCommandEmitsLedger(t *testing.T) {
 	}
 	if len(ledger.Findings) != 2 || ledger.Findings[0].Rank != 1 || !strings.Contains(ledger.Findings[0].Action, "slow test") {
 		t.Fatalf("findings = %+v", ledger.Findings)
+	}
+}
+
+func TestPlanTestDurationRunInjectsJSONFlag(t *testing.T) {
+	linux, err := planTestDurationRun("linux", "fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLinux := []string{"go", "test", "-json", "-short", "./..."}
+	if !reflect.DeepEqual(linux.Argv, wantLinux) {
+		t.Fatalf("linux argv = %v, want %v", linux.Argv, wantLinux)
+	}
+
+	windows, err := planTestDurationRun("windows", "./cmd/fak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !windows.ViaWSL || len(windows.Argv) < 7 || windows.Argv[0] != "powershell" ||
+		windows.Argv[len(windows.Argv)-2] != "-json" || windows.Argv[len(windows.Argv)-1] != "./cmd/fak" {
+		t.Fatalf("windows argv = %+v", windows)
+	}
+}
+
+func TestRunTestDurationsRunModeWritesLedger(t *testing.T) {
+	oldRun := testDurationRunCommand
+	t.Cleanup(func() { testDurationRunCommand = oldRun })
+
+	raw, err := os.ReadFile(testDurationFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotName string
+	var gotArgs []string
+	testDurationRunCommand = func(name string, args []string, stderr io.Writer) ([]byte, int, error) {
+		gotName = name
+		gotArgs = append([]string(nil), args...)
+		return raw, 0, nil
+	}
+
+	outPath := filepath.Join(t.TempDir(), "durations", "ledger.json")
+	var out, errb bytes.Buffer
+	rc := runTest(&out, &errb, []string{
+		"durations",
+		"--run", "./cmd/fak",
+		"--out", outPath,
+		"--package-budget", "1s",
+	})
+	if rc != 0 {
+		t.Fatalf("rc = %d, stderr=%s", rc, errb.String())
+	}
+	if gotName == "" || len(gotArgs) == 0 {
+		t.Fatalf("fake runner was not called")
+	}
+	joined := gotName + " " + strings.Join(gotArgs, " ")
+	if !strings.Contains(joined, "-json") || !strings.Contains(joined, "./cmd/fak") {
+		t.Fatalf("runner command = %q, want go test -json ./cmd/fak", joined)
+	}
+
+	var stdoutLedger, fileLedger testDurationLedger
+	if err := json.Unmarshal(out.Bytes(), &stdoutLedger); err != nil {
+		t.Fatalf("stdout json: %v\n%s", err, out.String())
+	}
+	fileBytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(fileBytes, &fileLedger); err != nil {
+		t.Fatalf("file json: %v\n%s", err, string(fileBytes))
+	}
+	if stdoutLedger.Source == "" || !strings.Contains(stdoutLedger.Source, "go test -json") {
+		t.Fatalf("source = %q", stdoutLedger.Source)
+	}
+	if !reflect.DeepEqual(stdoutLedger.Command, fileLedger.Command) || stdoutLedger.Summary != fileLedger.Summary {
+		t.Fatalf("stdout/file ledger mismatch:\nstdout=%+v\nfile=%+v", stdoutLedger, fileLedger)
 	}
 }
 
