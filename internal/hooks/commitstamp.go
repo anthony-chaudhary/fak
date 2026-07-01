@@ -562,18 +562,40 @@ func isGoSourcePath(p string) bool {
 	return true
 }
 
-// abstainHazard returns a non-empty advisory when a verb-led subject still tends to earn an
-// ABSTAIN from the DOS commit-audit referee. Cross-session finding: `gate <X> on <Y>` reads as
-// a noun phrase to the witness grammar despite "gate" being a recognized verb — phrase the work
-// as add/implement/fix/test to earn `diff-witnessed`.
+// abstainHazard returns a non-empty advisory when a verb-led (fak-gradeable) subject will still
+// earn an ABSTAIN from the DOS commit-audit referee, so the code change would land unwitnessed.
+//
+// Two shapes are caught:
+//
+//  1. `gate <X> on <Y>` — reads as a noun phrase to the witness grammar; the specific,
+//     higher-signal hint (a cross-session finding predating the general rule below).
+//  2. The silent verb-set divergence: fak's commitVerbs gate accepts a WIDER set than the
+//     referee's _CODE_VERBS (dos_witness_verbs.go). A `feat`/`perf` commit binds to a code-effect
+//     claim ONLY through its DESCRIPTION verb — the type token `feat`/`perf` is not itself an
+//     effect verb — so a gradeable `feat(x): define/explain/back off …` subject passes fak's gate
+//     yet the referee returns claim_kind=none and ABSTAINs. Audit finding (2026-07-01): real
+//     source + tests shipped through this gap with `dos review` still reporting cleared_rate=1.0.
+//
+// Advisory only (a Note, never an Issue): it nudges toward a verb the referee witnesses; a
+// genuinely descriptive commit still ships.
 func abstainHazard(subject string) string {
 	m := subjectRE.FindStringSubmatch(subject)
 	if m == nil {
 		return ""
 	}
+	typ := m[1]
 	rest := strings.ToLower(strings.TrimSpace(m[4]))
 	if strings.HasPrefix(rest, "gate ") && strings.Contains(rest, " on ") {
 		return "subject is verb-led but `gate X on Y` has been observed to ABSTAIN at the DOS referee (no diff-witness); if you need `diff-witnessed`, phrase as add/implement/fix/test"
+	}
+	// The divergence only bites the types whose witnessing hinges on the description verb: `feat`
+	// and `perf`. `fix`/`refactor` bind through their type token (a DOS code verb); `docs`/`test`/
+	// `ci` classify on their own rung; the rest make no code claim this note would help.
+	if typ != "feat" && typ != "perf" {
+		return ""
+	}
+	if v, abstains := dosWouldAbstainOnCodeEffect(m[4], m[2]); abstains {
+		return "subject is verb-led but the description leads with `" + v + "`, which the DOS commit-audit does not witness as a code-effect claim — a `" + typ + "(...)` commit binds only through its description verb, so this will ABSTAIN (claim_kind=none) and the change lands unwitnessed. Lead the description with a witnessed effect verb (add/implement/wire/expose/introduce/…)."
 	}
 	return ""
 }

@@ -288,6 +288,79 @@ func TestLintCommitMessage_gateOnAbstainAdvisory(t *testing.T) {
 	}
 }
 
+// TestAbstainHazard_predictsReferee drives abstainHazard directly across the divergence class the
+// 2026-07-01 audit surfaced: verbs fak's commitVerbs gate ACCEPTS but the DOS referee ABSTAINs on
+// (silent unwitnessed code), the effect verbs the referee witnesses (no warning), the fix/refactor
+// types that bind through their type token, and the doc/test-shaped feats the referee grades on
+// another rung (no false positive).
+func TestAbstainHazard_predictsReferee(t *testing.T) {
+	cases := []struct {
+		subject string
+		warn    bool
+	}{
+		// Silent divergence — real ABSTAINed subjects (and their shape) from the audit.
+		{"feat(scorecardpane): define the context-health severity vocabulary (fak scorecardpane)", true},
+		{"feat(attemptbudget): back off by repeated failure class (fak attemptbudget)", true},
+		{"feat(promptmmu): explain tool schema mask-vs-remove (fak promptmmu)", true},
+		{"feat(cmd): describe the timeout ledger (fak cmd)", true},
+		{"perf(engine): speed up the decode loop (fak engine)", true},
+		// Effect verbs the referee witnesses → no warning.
+		{"feat(gateway): add the context query audit (fak gateway)", false},
+		{"feat(agent): feed throughput budgets into the planner (fak agent)", false},
+		{"feat(sessionreset): show a before/after diff (fak sessionreset)", false},
+		{"feat(gateway): expose the dropped count (fak gateway)", false},
+		{"perf(engine): optimize the decode loop (fak engine)", false},
+		// fix/refactor bind through the TYPE token (a DOS code verb) — no warning even with a
+		// descriptive description verb.
+		{"fix(gateway): record codex prompt-cache hits (fak gateway)", false},
+		{"refactor(session): simplify the compose path (fak session)", false},
+		// Doc/test-shaped feats: the referee witnesses on another rung → no code-abstain warning.
+		{"feat(docs): clarify the retry semantics (fak docs)", false},
+		{"feat(engine): test the reclaim path (fak engine)", false},
+		{"feat(engine): explain the glossary layout (fak engine)", false},
+		// The specific gate-X-on-Y hint still fires.
+		{"feat(gateway): gate L3 promotion on durability class (fak gateway)", true},
+	}
+	for _, c := range cases {
+		note := abstainHazard(c.subject)
+		if (note != "") != c.warn {
+			t.Errorf("abstainHazard(%q) warn=%v, want %v (note=%q)", c.subject, note != "", c.warn, note)
+		}
+	}
+}
+
+// TestLintCommitMessage_silentAbstainAdvisory — a gradeable `feat` whose description leads with a
+// fak-accepted-but-referee-unwitnessed verb (`define`) surfaces the DOS-abstain advisory through
+// the full lint, and it is advisory only (the commit still lints OK and ships).
+func TestLintCommitMessage_silentAbstainAdvisory(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"feat(gateway): define the severity vocabulary (fak gateway)",
+		[]string{"internal/gateway/severity.go"},
+		root,
+	)
+	if !r.OK {
+		t.Fatalf("a gradeable feat with a descriptive verb must stay OK (advisory), got issues=%v", r.Issues)
+	}
+	if !hasNoteContaining(r, "does not witness as a code-effect claim") {
+		t.Fatalf("want the DOS-abstain advisory note, got notes=%v", r.Notes)
+	}
+}
+
+// TestLintCommitMessage_effectVerbNoAbstainNote — the counterpart: a `feat` leading with an effect
+// verb the referee witnesses (`add`) earns no abstain note, so the advisory stays targeted.
+func TestLintCommitMessage_effectVerbNoAbstainNote(t *testing.T) {
+	root := writeLintRepo(t)
+	r := LintCommitMessage(
+		"feat(gateway): add the severity vocabulary (fak gateway)",
+		[]string{"internal/gateway/severity.go"},
+		root,
+	)
+	if hasNoteContaining(r, "does not witness as a code-effect claim") {
+		t.Fatalf("an effect-verb feat must earn no DOS-abstain note, got notes=%v", r.Notes)
+	}
+}
+
 func TestLintCommitMessage_noTaxonomySkipsRecognition(t *testing.T) {
 	// root="" => dos.toml unreadable => recognition is SKIPPED, never failed. A novel leaf on a
 	// matching-by-convention path is then OK.
