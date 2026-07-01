@@ -138,7 +138,7 @@ def fetch_open_issues(workspace: Path, *, fetch_cap: int = FETCH_CAP) -> list[di
         ["gh", "issue", "list", "--state", "open", "--limit", str(fetch_cap),
          "--json", "number,title,body,labels"],
         cwd=str(workspace), capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=60)
+        errors="replace", timeout=60, creationflags=ird.no_window_creationflags())
     if proc.returncode != 0:
         raise RuntimeError(f"gh issue list failed (rc={proc.returncode}): "
                            f"{(proc.stderr or '').strip() or 'no stderr'}")
