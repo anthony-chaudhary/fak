@@ -180,6 +180,37 @@ func TestStoreDrainPlansStaleBase(t *testing.T) {
 	}
 }
 
+func TestStoreMarkStatesPersistsDoneIntent(t *testing.T) {
+	store := Store{
+		Dir: filepath.Join(t.TempDir(), ".fak", StoreDirName),
+		Now: func() time.Time { return time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC) },
+	}
+	for _, id := range []string{"done", "pending"} {
+		if _, _, err := store.Submit(Intent{
+			ID:      id,
+			BaseSHA: baseA,
+			Paths:   []string{"internal/commitintent/" + id + ".go"},
+			Subject: "feat(commitintent): persist submit queue (#1788) (fak commitintent)",
+		}); err != nil {
+			t.Fatalf("submit %s: %v", id, err)
+		}
+	}
+	if _, err := store.MarkStates(map[string]State{"done": StateDone}); err != nil {
+		t.Fatalf("MarkStates: %v", err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	states := map[string]State{}
+	for _, rec := range loaded.Records {
+		states[rec.Intent.ID] = rec.State
+	}
+	if states["done"] != StateDone || states["pending"] != StatePending {
+		t.Fatalf("states = %+v", states)
+	}
+}
+
 func TestPathDigestStable(t *testing.T) {
 	a := PathDigest([]string{"internal/commitintent/doc.go", `internal\commitintent\commitintent.go`, "./internal/commitintent/doc.go"})
 	b := PathDigest([]string{`.\internal\commitintent\commitintent.go`, "internal/commitintent/doc.go"})

@@ -50,7 +50,7 @@ func TestPlanBatchBatchesDisjointCompatibleIntents(t *testing.T) {
 	if len(got.Refusals) != 0 {
 		t.Fatalf("refusals = %+v, want none", got.Refusals)
 	}
-	for _, want := range []string{"roll up commit intents intent-a, intent-b", "(fak gateway)"} {
+	for _, want := range []string{"implement commit intent rollup intent-a, intent-b", "(fak gateway)"} {
 		if !strings.Contains(got.Subject, want) {
 			t.Fatalf("subject %q missing %q", got.Subject, want)
 		}

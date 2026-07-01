@@ -180,6 +180,34 @@ func Drain(records []SubmitRecord, currentBaseSHA string, limit int) DrainPlan {
 	return plan
 }
 
+func MarkStates(q Queue, states map[string]State) (Queue, error) {
+	if len(states) == 0 {
+		return q, nil
+	}
+	if strings.TrimSpace(q.Schema) == "" {
+		q.Schema = QueueSchema
+	}
+	if err := ValidateQueue(q); err != nil {
+		return Queue{}, err
+	}
+	for _, state := range states {
+		if err := ValidateState(state); err != nil {
+			return Queue{}, err
+		}
+	}
+	next := q
+	next.Records = append([]SubmitRecord(nil), q.Records...)
+	for i := range next.Records {
+		if state, ok := states[next.Records[i].Intent.ID]; ok {
+			next.Records[i].State = state
+		}
+	}
+	if err := ValidateQueue(next); err != nil {
+		return Queue{}, err
+	}
+	return next, nil
+}
+
 func Ordered(records []SubmitRecord) []SubmitRecord {
 	out := append([]SubmitRecord(nil), records...)
 	sort.SliceStable(out, func(i, j int) bool {
@@ -276,12 +304,19 @@ func ValidateRecord(rec SubmitRecord) error {
 	if rec.SubmittedAt.IsZero() {
 		return fieldError("submitted_at", ErrMissingField, "submitted time is required")
 	}
-	switch rec.State {
-	case StatePending, StateDraining, StateDone, StateFailed:
-	default:
-		return fieldError("state", ErrInvalidField, string(rec.State))
+	if err := ValidateState(rec.State); err != nil {
+		return err
 	}
 	return ValidateIntent(rec.Intent)
+}
+
+func ValidateState(state State) error {
+	switch state {
+	case StatePending, StateDraining, StateDone, StateFailed:
+		return nil
+	default:
+		return fieldError("state", ErrInvalidField, string(state))
+	}
 }
 
 func MarshalRecord(rec SubmitRecord) ([]byte, error) {

@@ -67,6 +67,22 @@ func (s Store) Drain(currentBaseSHA string, limit int) (DrainPlan, error) {
 	return Drain(q.Records, currentBaseSHA, limit), nil
 }
 
+func (s Store) MarkStates(states map[string]State) (Queue, error) {
+	var next Queue
+	err := s.withLock(func() error {
+		q, err := s.Load()
+		if err != nil {
+			return err
+		}
+		next, err = MarkStates(q, states)
+		if err != nil {
+			return err
+		}
+		return s.save(next)
+	})
+	return next, err
+}
+
 func MarshalQueue(q Queue) ([]byte, error) {
 	if stringsTrim(q.Schema) == "" {
 		q.Schema = QueueSchema

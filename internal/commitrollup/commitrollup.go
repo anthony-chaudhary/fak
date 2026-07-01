@@ -243,7 +243,7 @@ func (p Plan) AssertPathset(actual []string) PathsetAssertion {
 }
 
 func subjectFor(stamp string, ids []string) string {
-	return fmt.Sprintf("chore(%s): roll up commit intents %s (fak %s)", stamp, strings.Join(ids, ", "), stamp)
+	return fmt.Sprintf("chore(%s): implement commit intent rollup %s (fak %s)", stamp, strings.Join(ids, ", "), stamp)
 }
 
 func normalizeStamp(raw string) (string, Reason) {

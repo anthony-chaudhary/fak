@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/commitintent"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -101,6 +102,180 @@ func TestRunCommitSubmit_refusesMissingStampBeforeWritingQueue(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(queueDir, "queue.json")); !os.IsNotExist(err) {
 		t.Fatalf("queue should not be written on refusal, stat err=%v", err)
+	}
+}
+
+func TestRunCommitDrainDryRunPlansRollup(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{`internal\commitintent\a.go`}, "worker-a")
+	submitDrainIntent(t, queueDir, "intent-b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/b.go"}, "worker-b")
+
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain",
+		"--json",
+		"--dry-run",
+		"--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if !res.DryRun || res.Drained || !res.Plan.OK {
+		t.Fatalf("drain result = %+v", res)
+	}
+	assertStrings(t, res.Plan.IntentIDs, []string{"intent-a", "intent-b"})
+	assertStrings(t, res.Plan.Submitters, []string{"worker-a", "worker-b"})
+	assertStrings(t, res.Plan.UnionPaths, []string{"internal/commitintent/a.go", "internal/commitintent/b.go"})
+	if res.Commit != nil {
+		t.Fatalf("dry-run should not call commit, got %+v", res.Commit)
+	}
+	if !strings.Contains(res.Plan.Subject, "intent-a, intent-b") || !strings.Contains(res.Plan.Subject, "(fak commitintent)") {
+		t.Fatalf("subject should include ids and stamp, got %q", res.Plan.Subject)
+	}
+	states := drainQueueStates(t, queueDir)
+	if states["intent-a"] != commitintent.StatePending || states["intent-b"] != commitintent.StatePending {
+		t.Fatalf("dry-run should leave intents pending, states=%+v", states)
+	}
+}
+
+func TestRunCommitDrainExecutesRollupWithUnionPathsAndMarksDone(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
+	submitDrainIntent(t, queueDir, "intent-b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/b.go"}, "worker-b")
+
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain",
+		"--json",
+		"--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 0 {
+		t.Fatalf("want exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	assertStrings(t, got.Paths, []string{"internal/commitintent/a.go", "internal/commitintent/b.go"})
+	if !got.SignOff {
+		t.Fatalf("drain commit should sign off by default")
+	}
+	if !strings.Contains(got.Message, "intent-a, intent-b") || !strings.Contains(got.Message, "(fak commitintent)") {
+		t.Fatalf("commit message should include rollup ids and stamp, got %q", got.Message)
+	}
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if !res.Drained || res.Pathset == nil || !res.Pathset.OK {
+		t.Fatalf("result should be drained with pathset witness, got %+v", res)
+	}
+	assertStrings(t, res.MarkedDone, []string{"intent-a", "intent-b"})
+	states := drainQueueStates(t, queueDir)
+	if states["intent-a"] != commitintent.StateDone || states["intent-b"] != commitintent.StateDone {
+		t.Fatalf("successful drain should mark intents done, states=%+v", states)
+	}
+}
+
+func TestRunCommitDrainDryRunRefusesStaleAndOverlap(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
+	submitDrainIntent(t, queueDir, "overlap", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-b")
+	submitDrainIntent(t, queueDir, "stale", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", []string{"internal/commitintent/stale.go"}, "worker-c")
+
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain",
+		"--json",
+		"--dry-run",
+		"--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 0 {
+		t.Fatalf("want dry-run exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	assertStrings(t, res.Plan.IntentIDs, []string{"base"})
+	if len(res.Stale) != 1 || res.Stale[0].Intent.ID != "stale" {
+		t.Fatalf("stale records = %+v", res.Stale)
+	}
+	if !drainHasRefusal(res, "overlap", "OVERLAPPING_PATH") || !drainHasRefusal(res, "stale", "STALE_INPUT") {
+		t.Fatalf("refusals = %+v", res.Plan.Refusals)
+	}
+}
+
+func TestRunCommitDrainNoRollupKeepsOneIntentMode(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "first", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
+	submitDrainIntent(t, queueDir, "second", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/b.go"}, "worker-b")
+
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain",
+		"--json",
+		"--dry-run",
+		"--no-rollup",
+		"--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 0 {
+		t.Fatalf("want dry-run exit 0, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if res.Plan.RollupEnabled {
+		t.Fatalf("--no-rollup should disable rollup: %+v", res.Plan)
+	}
+	assertStrings(t, res.Plan.IntentIDs, []string{"first"})
+	if !drainHasRefusal(res, "second", "ROLLUP_DISABLED") {
+		t.Fatalf("refusals = %+v", res.Plan.Refusals)
+	}
+}
+
+func TestRunCommitDrainPathsetMismatchDoesNotMarkDone(t *testing.T) {
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
+
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{
+			Committed: true,
+			Verified:  true,
+			SHA:       "abc123",
+			Paths:     append(append([]string(nil), o.Paths...), "internal/commitintent/extra.go"),
+		}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain",
+		"--json",
+		"--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 1 {
+		t.Fatalf("pathset mismatch should exit 1, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if res.Drained || res.Pathset == nil || res.Pathset.OK {
+		t.Fatalf("pathset mismatch should block drain, got %+v", res)
+	}
+	states := drainQueueStates(t, queueDir)
+	if states["intent-a"] != commitintent.StatePending {
+		t.Fatalf("mismatched pathset should leave intent pending, states=%+v", states)
 	}
 }
 
@@ -352,6 +527,55 @@ func TestRunCommitReviewPassRecordsLoopEvidence(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Reason != "REVIEW_PASS" || events[0].EvidenceRefs[0].Ref != "pass" {
 		t.Fatalf("review event = %+v", events)
+	}
+}
+
+func submitDrainIntent(t *testing.T, queueDir, id, base string, paths []string, requester string) {
+	t.Helper()
+	store := commitintent.Store{
+		Dir: queueDir,
+		Now: func() time.Time { return time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC) },
+	}
+	if _, _, err := store.Submit(commitintent.Intent{
+		ID:      id,
+		BaseSHA: base,
+		Paths:   paths,
+		Subject: "feat(commitintent): add drain rollup (#1789) (fak commitintent)",
+		Metadata: commitintent.StampMetadata{
+			Issue:     1789,
+			Requester: requester,
+		},
+	}); err != nil {
+		t.Fatalf("submit drain intent %s: %v", id, err)
+	}
+}
+
+func drainQueueStates(t *testing.T, queueDir string) map[string]commitintent.State {
+	t.Helper()
+	q, err := (commitintent.Store{Dir: queueDir}).Load()
+	if err != nil {
+		t.Fatalf("Load queue: %v", err)
+	}
+	out := map[string]commitintent.State{}
+	for _, rec := range q.Records {
+		out[rec.Intent.ID] = rec.State
+	}
+	return out
+}
+
+func drainHasRefusal(res commitDrainResult, id, reason string) bool {
+	for _, refusal := range res.Plan.Refusals {
+		if refusal.IntentID == id && string(refusal.Reason) == reason {
+			return true
+		}
+	}
+	return false
+}
+
+func assertStrings(t *testing.T, got, want []string) {
+	t.Helper()
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("strings = %v, want %v", got, want)
 	}
 }
 
