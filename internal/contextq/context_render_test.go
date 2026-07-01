@@ -108,6 +108,42 @@ func TestRenderContextDoesNotPromoteUnknownToKnown(t *testing.T) {
 	}
 }
 
+func TestDebugContextRenderStableBucketsAndSourceRefs(t *testing.T) {
+	res := Result{
+		Query: "account refund",
+		Slices: []SliceRef{
+			{Step: 5, Role: "assistant", Descriptor: "later.md", Source: testEntryID("known-later"), MaterializedBy: MaterializationFault},
+			{Step: 2, Role: "tool", Descriptor: "account.json", Source: testEntryID("known-account"), MaterializedBy: MaterializationHit},
+		},
+		Refused: []Refusal{
+			{Step: 4, Role: "tool", Descriptor: "refund_policy.txt", Reason: "sealed_by_trust_gate", Entry: testEntryID("unknown-policy")},
+		},
+		Omissions: []Omission{
+			{Step: 3, Role: "assistant", Descriptor: "old-tail", Reason: "not_selected_by_ranker", Entry: testEntryID("unknown-tail")},
+		},
+	}
+
+	rendered := RenderKnownUnknownAssumedContext(res, []AssumedContext{
+		{Key: "zeta", Statement: "later assumption", Source: "operator"},
+		{Key: "account-tier", Statement: "customer remains gold", Source: "operator"},
+	})
+	if got, want := rendered.Known[0].Step, 2; got != want {
+		t.Fatalf("known rows are not stable step order: first step = %d, want %d", got, want)
+	}
+	if got, want := rendered.Unknown[0].Step, 3; got != want {
+		t.Fatalf("unknown rows are not stable step order: first step = %d, want %d", got, want)
+	}
+	if got, want := rendered.Assumed[0].Key, "account-tier"; got != want {
+		t.Fatalf("assumed rows are not stable key order: first key = %q, want %q", got, want)
+	}
+	if rendered.Known[0].SourceDigest != "known-account" {
+		t.Fatalf("known row source digest = %q, want known-account", rendered.Known[0].SourceDigest)
+	}
+	if rendered.Unknown[1].SourceDigest != "unknown-policy" {
+		t.Fatalf("unknown row source digest = %q, want unknown-policy", rendered.Unknown[1].SourceDigest)
+	}
+}
+
 func testEntryID(digest string) cachemeta.EntryID {
 	return cachemeta.EntryID{
 		Digest:    digest,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -39,6 +40,7 @@ func cmdDebug(argv []string) {
 	budgetBytes := fs.Int64("budget-bytes", 0, "max rendered bytes to materialize in cmd=context-query (0 = unbounded)")
 	policyVersion := fs.String("policy-version", "", "policy version label to stamp on memory views in cmd=context-query")
 	preferView := fs.String("prefer-view", "", "derived view type to prefer in cmd=context-query (e.g. summary); runs a cold-then-warm two-pass demo showing FAULT then HIT")
+	assumptions := fs.String("assumptions", "", "path to JSON array of assumed context rows to include in cmd=report")
 	reason := fs.String("reason", "requested context tombstone", "reason to record for cmd=tombstone")
 	requestedBy := fs.String("requested-by", "operator", "requester identity to record for cmd=tombstone")
 	out := fs.String("out", "cdb-report.json", "report output path (cmd=report)")
@@ -150,7 +152,7 @@ func cmdDebug(argv []string) {
 		fmt.Print(diff.Markdown())
 		fmt.Printf("\n(full JSON diff -> %s)\n", *out)
 	case "report":
-		debugReport(im, *dir, *session, *query, *out)
+		debugReport(im, *dir, *session, *query, *out, loadAssumedContext(*assumptions))
 	case "html":
 		debugHTMLReport(im, *dir, *session, *query, *out)
 	default:
@@ -162,10 +164,12 @@ func cmdDebug(argv []string) {
 // debugReport runs the full attach->inspect->demand-page demonstration and emits a
 // committed-style JSON artifact plus a human summary — the cdb analogue of recall's
 // report.
-func debugReport(im *cdb.Image, dir, session, query, out string) {
+func debugReport(im *cdb.Image, dir, session, query, out string, assumed []contextq.AssumedContext) {
 	info := im.Info()
 	frames := im.Backtrace()
 	ws := im.WorkingSet(ctx(), query, 0)
+	contextRes := contextq.Query(ctx(), im, contextq.Request{Query: query})
+	contextEvidence := contextq.RenderKnownUnknownAssumedContext(contextRes, assumed)
 
 	// examine one benign page (resolves) and one sealed page (refused) to show the gate
 	// still stands on every page-in from the reloaded image.
@@ -215,12 +219,13 @@ func debugReport(im *cdb.Image, dir, session, query, out string) {
 		source = "synthetic committed fixture (testdata/cdb/session.jsonl)"
 	}
 	report := map[string]any{
-		"app_version": appversion.Current(),
-		"demo":        "context-debugger: attach to a finished session as a core dump; demand-page only the working set",
-		"source":      source,
-		"image_dir":   dir,
-		"info":        info,
-		"query":       query,
+		"app_version":      appversion.Current(),
+		"demo":             "context-debugger: attach to a finished session as a core dump; demand-page only the working set",
+		"source":           source,
+		"image_dir":        dir,
+		"info":             info,
+		"query":            query,
+		"context_evidence": contextEvidence,
 		"working_set": map[string]any{
 			"pages_touched": ws.PagesTouched, "pages_benign": ws.PagesBenign, "pages_total": ws.PagesTotal,
 			"sealed_skipped": ws.SealedSkipped, "tombstoned_skipped": ws.TombstonedSkipped,
@@ -245,11 +250,27 @@ func debugReport(im *cdb.Image, dir, session, query, out string) {
 	printBacktrace(im)
 	fmt.Printf("\nfollow-up: %q\n", query)
 	printWorkingSet(ws)
+	fmt.Printf("\n")
+	fmt.Print(contextEvidence.Markdown())
 	fmt.Println("\nexamine (the gate still stands on every page-in):")
 	for _, e := range exs {
 		fmt.Printf("  step %d %-14s -> %s\n", e.Step, e.Role, e.Outcome)
 	}
 	fmt.Printf("\nreport written   : %s\n", out)
+}
+
+func loadAssumedContext(path string) []contextq.AssumedContext {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(pathutil.ExpandTilde(path))
+	must(err)
+	var rows []contextq.AssumedContext
+	if err := json.Unmarshal(b, &rows); err != nil {
+		must(fmt.Errorf("read assumptions %s: %w", path, err))
+	}
+	return rows
 }
 
 // debugHTMLReport emits the "context debugger as a product" artifact (#574): a
