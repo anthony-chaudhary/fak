@@ -78,3 +78,50 @@ func TestResolveCodexHome_flagThenEnv(t *testing.T) {
 		t.Errorf("CODEX_HOME must resolve when no flag; got home=%q source=%q", home, src)
 	}
 }
+
+// TestMemoryExplainPromotionDemoStoreCoversDurableCells is the `cmd/fak`-side witness
+// for #1595's done condition: every non-turn-class cell in the demo corpus that
+// `fak memory explain-promotion` runs against must resolve to a Found explanation
+// built purely from its PromotionRecord — the same store and ledger
+// cmdMemoryExplainPromotion (memory.go) reads. It also pins that a cell with NO
+// promotion (a turn-class "it's 3pm"-shaped observation) is reported honestly as
+// unexplained rather than silently narrated from its body.
+func TestMemoryExplainPromotionDemoStoreCoversDurableCells(t *testing.T) {
+	store := memq.NewDemoStore()
+	cells, err := store.Cells(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawDurable, sawTurn := false, false
+	for _, c := range cells {
+		exp := store.Promotions().Explain(c.ID)
+		if c.Durability == memq.DurabilityTurn {
+			sawTurn = true
+			if exp.Found {
+				t.Errorf("turn-class cell %s must have no promotion record; got Found=true", c.ID)
+			}
+			continue
+		}
+		sawDurable = true
+		if !exp.Found {
+			t.Errorf("promoted cell %s (durability=%s) must be explainable from its audit record", c.ID, c.Durability)
+		}
+		if exp.Durability != c.Durability {
+			t.Errorf("explanation durability %q does not match cell durability %q for %s", exp.Durability, c.Durability, c.ID)
+		}
+		if exp.Producer == "" {
+			t.Errorf("explanation for %s must never carry an empty producer", c.ID)
+		}
+		if exp.Narrative == "" {
+			t.Errorf("explanation for %s must carry a non-empty narrative built from the record", c.ID)
+		}
+	}
+	if !sawDurable || !sawTurn {
+		t.Fatalf("demo corpus fixture assumption broken: sawDurable=%v sawTurn=%v (need both classes present to exercise the split)", sawDurable, sawTurn)
+	}
+
+	// An unknown cell ID (what a typo'd --cell would produce) must fail honestly.
+	if exp := store.Promotions().Explain("cell:not-a-real-id"); exp.Found {
+		t.Error("Explain on an unknown cell ID must report Found=false, not fabricate an explanation")
+	}
+}

@@ -9,19 +9,53 @@ import (
 // blob map. It implements Backend, Tombstoner, and Pruner, so the whole algebra runs
 // with zero setup (no disk, no recall image) — the substrate for the demo and the
 // tests. A sealed cell's bytes stay in the CAS (audit), but Materialize refuses them,
-// exactly as recall does.
+// exactly as recall does. It also owns a PromotionLedger (#1595): every Add whose
+// resulting durability crosses past turn-class mints a PromotionRecord, so a caller can
+// later explain that write from structure alone.
 type MemStore struct {
-	cells []Cell
-	cas   map[string][]byte // by digest (so aliases share one blob, and orphans can exist)
+	cells  []Cell
+	cas    map[string][]byte // by digest (so aliases share one blob, and orphans can exist)
+	ledger *PromotionLedger
 }
 
-// NewMemStore returns an empty store.
-func NewMemStore() *MemStore { return &MemStore{cas: map[string][]byte{}} }
+// NewMemStore returns an empty store with an empty promotion ledger.
+func NewMemStore() *MemStore {
+	return &MemStore{cas: map[string][]byte{}, ledger: NewPromotionLedger()}
+}
+
+// Promotions returns the store's promotion ledger — the audit trail behind every
+// non-turn-class cell this store holds (#1595). Callers (notably `fak memory
+// explain-promotion`) read it to explain a fact without asking a model to narrate.
+func (m *MemStore) Promotions() *PromotionLedger { return m.ledger }
 
 // Add appends a cell whose bytes are `body`, computing the digest and a safe
 // descriptor. A sealed cell gets a sealed-metadata descriptor (never its bytes), just
-// as recall.Recorder does. id is assigned as "cell:<n>" by insertion order.
+// as recall.Recorder does. id is assigned as "cell:<n>" by insertion order. This is the
+// ConsentInferred, producer-defaulted convenience used by the demo corpus and existing
+// callers; a caller that has real consent/producer/expiry provenance should call
+// AddPromoted instead so the ledger records it faithfully.
 func (m *MemStore) Add(role, kind, durability string, body []byte, sealed bool) Cell {
+	return m.AddPromoted(role, kind, durability, body, sealed, PromotionMeta{})
+}
+
+// PromotionMeta is the caller-supplied provenance for a promoting Add: whether the
+// promotion was explicitly consented to, who/what produced it, and (for a bounded
+// class) its expiry. A zero PromotionMeta defaults to ConsentInferred / an
+// empty-producer-defaults-to-"unknown" / no expiry — the honest floor when a caller has
+// no better information, never a silent upgrade to explicit consent.
+type PromotionMeta struct {
+	Consent  string
+	Producer string
+	Expiry   string
+	Reason   string
+}
+
+// AddPromoted is Add plus an explicit PromotionMeta: it appends the cell exactly as Add
+// does, then — if the resulting durability is not DurabilityTurn — records a
+// PromotionRecord on the store's ledger capturing the source span, durability class,
+// consent, producer, and expiry (#1595). A turn-class cell records nothing (it was
+// never promoted; see PromotionLedger.Record).
+func (m *MemStore) AddPromoted(role, kind, durability string, body []byte, sealed bool, meta PromotionMeta) Cell {
 	digest := Digest(body)
 	c := Cell{
 		ID:         fmt.Sprintf("cell:%d", len(m.cells)),
@@ -40,6 +74,26 @@ func (m *MemStore) Add(role, kind, durability string, body []byte, sealed bool) 
 	}
 	m.cas[digest] = append([]byte(nil), body...)
 	m.cells = append(m.cells, c)
+
+	producer := meta.Producer
+	if producer == "" {
+		producer = role
+	}
+	consent := meta.Consent
+	if consent == "" {
+		consent = ConsentInferred
+	}
+	m.ledger.Record(PromotionRecord{
+		CellID: c.ID,
+		SourceSpan: SourceSpan{
+			Step: c.Step, Role: role, Descriptor: c.Descriptor, Digest: digest,
+		},
+		Durability: c.Durability,
+		Consent:    consent,
+		Producer:   producer,
+		Expiry:     meta.Expiry,
+		Reason:     meta.Reason,
+	})
 	return c
 }
 

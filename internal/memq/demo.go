@@ -13,8 +13,12 @@ func NewDemoStore() *MemStore {
 	m := NewMemStore()
 
 	// Durable standing preferences — the only class that earns an unconditional keep.
-	m.Add("user", "user", DurabilityDurable, []byte("I prefer concise answers and I always want a confirmation before deletes."), false)
-	m.Add("user", "user", DurabilityDurable, []byte("I'm a Go developer; on this box I run tests through WSL."), false)
+	// The user stated these directly, so the promotion ledger (#1595) records explicit
+	// consent, not an inferred classification.
+	m.AddPromoted("user", "user", DurabilityDurable, []byte("I prefer concise answers and I always want a confirmation before deletes."), false,
+		PromotionMeta{Consent: ConsentExplicit, Producer: "user", Reason: "user stated a standing preference"})
+	m.AddPromoted("user", "user", DurabilityDurable, []byte("I'm a Go developer; on this box I run tests through WSL."), false,
+		PromotionMeta{Consent: ConsentExplicit, Producer: "user", Reason: "user stated a standing fact about themselves"})
 
 	// Ephemeral turn-class observations — true now, misleading later. The clean driver
 	// expires these; they must never be promoted.

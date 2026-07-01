@@ -30,6 +30,8 @@ func cmdMemory(args []string) {
 		cmdMemoryDrivers(args[1:])
 	case "explain":
 		cmdMemoryExplain(args[1:])
+	case "explain-promotion":
+		cmdMemoryExplainPromotion(args[1:])
 	case "run":
 		cmdMemoryRun(args[1:])
 	case "-h", "--help", "help":
@@ -57,6 +59,13 @@ func memoryUsage() {
                  [--query-file PLAN.json] [--dir IMAGE] [--apply] [--out report.json] [--json]
       execute the query against a backend (the in-memory demo corpus, or a recall
       core image with --dir). Mutations are PROPOSED unless --apply is given.
+
+  fak memory explain-promotion --cell ID [--json]
+      explain WHY a promoted cell is in durable memory, using ONLY the structured
+      promotion-audit record (source span, durability class, consent, producer,
+      expiry) captured at write time — never by asking a model to narrate/summarize
+      (#1595). Runs against the in-memory demo corpus, which is the only backend that
+      currently records promotions.
 
 An agent authors its OWN strategy by emitting a Query JSON (--query-file) instead of
 picking a built-in driver — the same executor runs both.
@@ -240,4 +249,53 @@ func cmdMemoryRun(argv []string) {
 		res.Stats.CellsScanned, res.Stats.CellsSelected, res.Stats.Rendered, res.Stats.Refused,
 		res.Stats.EffectsProposed, res.Stats.EffectsApplied)
 	fmt.Printf("report written: %s\n", *out)
+}
+
+// cmdMemoryExplainPromotion answers "why is this fact in durable memory" for one cell,
+// using ONLY the structured PromotionRecord memq.MemStore captured at write time
+// (#1595 done condition) — never a model call. Today only the in-memory demo corpus
+// (memq.NewDemoStore) records promotions, so this subcommand runs against it directly
+// rather than through the generic memq.Backend interface (which does not expose a
+// ledger — a backend that never promotes, like the read-only Codex backend, has
+// nothing to explain).
+func cmdMemoryExplainPromotion(argv []string) {
+	fs := flag.NewFlagSet("memory explain-promotion", flag.ExitOnError)
+	cell := fs.String("cell", "", "cell ID to explain (see `fak memory run --json` for IDs)")
+	asJSON := fs.Bool("json", false, "emit the explanation as JSON")
+	_ = fs.Parse(argv)
+	if *cell == "" {
+		fmt.Fprintln(os.Stderr, "fak memory explain-promotion: --cell is required")
+		os.Exit(2)
+	}
+
+	store := memq.NewDemoStore()
+	exp := store.Promotions().Explain(*cell)
+	if *asJSON {
+		fmt.Println(string(jsonIndent(exp)))
+		if !exp.Found {
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Printf("== fak memory explain-promotion (%s) — from the promotion audit record only, no model narration ==\n", *cell)
+	if !exp.Found {
+		fmt.Println(exp.Narrative)
+		os.Exit(1)
+	}
+	fmt.Printf("source span:  step=%d role=%q descriptor=%q\n", exp.SourceSpan.Step, exp.SourceSpan.Role, exp.SourceSpan.Descriptor)
+	fmt.Printf("durability:   %s\n", exp.Durability)
+	fmt.Printf("consent:      %s\n", exp.Consent)
+	fmt.Printf("producer:     %s\n", exp.Producer)
+	expiry := exp.Expiry
+	if expiry == "" {
+		expiry = "none stated"
+	}
+	fmt.Printf("expiry:       %s\n", expiry)
+	reason := exp.Reason
+	if reason == "" {
+		reason = "none recorded"
+	}
+	fmt.Printf("reason:       %s\n", reason)
+	fmt.Printf("\n%s\n", exp.Narrative)
 }
