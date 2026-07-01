@@ -129,6 +129,9 @@ func (e *SGLangEngine) Caps() []abi.Capability {
 	}
 }
 
+// WeightBearing declares that SGLang runs a model-forward, not a deterministic tool.
+func (e *SGLangEngine) WeightBearing() bool { return true }
+
 // Residency exposes the per-worker prefix-residency index the radix poll feeds, so a
 // router can read it for cache-aware dispatch.
 func (e *SGLangEngine) Residency() *PrefixResidencyIndex { return e.residency }

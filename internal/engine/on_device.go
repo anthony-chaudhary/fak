@@ -87,6 +87,9 @@ func (e *OnDeviceEngine) Caps() []abi.Capability {
 	return []abi.Capability{"engine.ondevice", abi.Capability("engine.ondevice." + e.ID)}
 }
 
+// WeightBearing declares that the on-device runtime runs a local model-forward.
+func (e *OnDeviceEngine) WeightBearing() bool { return true }
+
 // Complete runs the tool call against the on-device runtime and returns the assembled
 // result. It FAILS CLOSED: a nil runtime or a runtime error yields a StatusError result
 // (never a panic, never a silent StatusOK), so the dispatch chain sees the miss rather

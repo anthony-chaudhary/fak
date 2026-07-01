@@ -44,6 +44,9 @@ type readEngine struct {
 // Caps reports no optional capabilities — a plain read engine advertises none.
 func (readEngine) Caps() []abi.Capability { return nil }
 
+// WeightBearing declares that fak_read is a deterministic classical tool engine.
+func (readEngine) WeightBearing() bool { return false }
+
 // Complete reads the file named by the call's `file_path` (or `path`) argument and returns
 // its bytes, confined to the engine root. It is the Read tool's miss path; on a hit the
 // vDSO served the result and this never runs.

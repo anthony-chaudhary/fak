@@ -217,6 +217,9 @@ type localEngine struct{}
 // Caps reports no optional capabilities — the local toolset engine advertises none.
 func (localEngine) Caps() []abi.Capability { return nil }
 
+// WeightBearing declares that localtools is a deterministic classical tool engine.
+func (localEngine) WeightBearing() bool { return false }
+
 func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
 	body, m := decodeCallArgs(ctx, c.Args)
 	out, isErr := execTool(c.Tool, m)

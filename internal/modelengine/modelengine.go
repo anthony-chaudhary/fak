@@ -175,6 +175,9 @@ func (e *Engine) Caps() []abi.Capability {
 	return []abi.Capability{"engine.inkernel", "engine.continuous-batching", abi.EngineLifecycleCap}
 }
 
+// WeightBearing declares that the in-kernel engine runs a model-forward.
+func (e *Engine) WeightBearing() bool { return true }
+
 // Complete runs the call's arguments through a real in-kernel-model decode and
 // returns the generated tokens as the result. This is the EngineDriver seam: the
 // kernel folds adjudication at Submit, then dispatches an ALLOWED call here at Reap.

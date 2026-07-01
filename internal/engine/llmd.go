@@ -99,6 +99,9 @@ func (e *LLMDEngine) Caps() []abi.Capability {
 	}
 }
 
+// WeightBearing declares that llm-d dispatch runs a model-forward, not a deterministic tool.
+func (e *LLMDEngine) WeightBearing() bool { return true }
+
 // Admit submits one request to the llm-d OpenAI-compatible frontend with
 // stream=true and returns a live request handle. llm-d owns placement behind that
 // frontend; fak records the served result under engine="llm-d".

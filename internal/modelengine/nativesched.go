@@ -111,6 +111,9 @@ func (s *NativeScheduler) Caps() []abi.Capability {
 	return []abi.Capability{"engine.native-sched", "engine.continuous-batching", abi.EngineLifecycleCap}
 }
 
+// WeightBearing declares that the native scheduler runs model-forwards.
+func (s *NativeScheduler) WeightBearing() bool { return true }
+
 // Admit registers one request: it prefills the prompt synchronously (so the lane
 // enters the batch with its first logits ready), enqueues the lane on the WAITING
 // queue, and nudges the scheduler loop. The loop promotes it into the running set

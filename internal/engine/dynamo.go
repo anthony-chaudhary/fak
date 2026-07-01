@@ -84,6 +84,9 @@ func (e *DynamoEngine) Caps() []abi.Capability {
 	}
 }
 
+// WeightBearing declares that Dynamo dispatch runs a model-forward, not a deterministic tool.
+func (e *DynamoEngine) WeightBearing() bool { return true }
+
 // Admit submits one request to Dynamo's OpenAI-compatible frontend with stream=true
 // and returns a live request handle. Dynamo owns routing across its P/D pool behind
 // that frontend; fak stays in front as the governance plane.

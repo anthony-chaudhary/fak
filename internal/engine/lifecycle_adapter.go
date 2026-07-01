@@ -69,6 +69,9 @@ func (a *AdapterEngine) Caps() []abi.Capability {
 	return []abi.Capability{abi.Capability("engine.adapter." + a.ID), abi.EngineLifecycleCap}
 }
 
+// WeightBearing declares that an external lifecycle adapter streams model tokens.
+func (a *AdapterEngine) WeightBearing() bool { return true }
+
 // Admit opens the upstream stream and starts a reader goroutine that pumps its
 // tokens onto the returned handle, honoring ctx (or handle.Cancel) so an abort
 // stops mid-stream and propagates to the upstream via ctx.

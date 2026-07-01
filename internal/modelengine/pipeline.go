@@ -57,6 +57,9 @@ func (e *PipelineEngine) Caps() []abi.Capability {
 	return []abi.Capability{"engine.inkernel.pipeline", abi.EngineLifecycleCap}
 }
 
+// WeightBearing declares that the pipeline engine runs model-forwards.
+func (e *PipelineEngine) WeightBearing() bool { return true }
+
 // Complete is the one-shot EngineDriver shim over Admit, matching Engine and NativeScheduler.
 func (e *PipelineEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
 	req, err := e.Admit(ctx, c)

@@ -99,6 +99,9 @@ func (e *VLLMEngine) Caps() []abi.Capability {
 	}
 }
 
+// WeightBearing declares that vLLM runs a model-forward, not a deterministic tool.
+func (e *VLLMEngine) WeightBearing() bool { return true }
+
 // Admit submits one request to vLLM with stream=true and returns a live request
 // handle whose Tokens channel receives SSE deltas as vLLM emits them.
 func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
