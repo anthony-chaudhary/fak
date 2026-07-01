@@ -440,6 +440,65 @@ def build_break_hint(errored: list[dict[str, Any]]) -> str:
     )
 
 
+def _compact_error(error: str, *, limit: int = 180) -> str:
+    """One-line error preview for reason text.
+
+    The full per-card error remains in ``metrics[].error``. The control-pane
+    reason needs a compact root-cause preview so repeated Go build failures do
+    not drown the operator in the same stderr copied once per card.
+    """
+    compact = " ".join(str(error or "unknown error").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def error_groups(errored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group errored cards by identical error text.
+
+    This is the #2043 observability affordance: when one dirty-tree compile
+    failure breaks N Go-backed cards, the control pane should say "one blocker
+    hit N cards" instead of making the reader infer that from repeated rows.
+    """
+    grouped: dict[str, dict[str, Any]] = {}
+    for metric in errored:
+        raw = str(metric.get("error") or "unknown error")
+        group = grouped.setdefault(raw, {
+            "error": raw,
+            "summary": _compact_error(raw),
+            "labels": [],
+            "keys": [],
+            "go_backed": False,
+        })
+        group["labels"].append(str(metric.get("label") or metric.get("key") or "unknown"))
+        group["keys"].append(str(metric.get("key") or ""))
+        group["go_backed"] = bool(group["go_backed"] or metric.get("key") in GO_BACKED_KEYS)
+    out = []
+    for group in grouped.values():
+        labels = sorted(group["labels"])
+        keys = sorted(k for k in group["keys"] if k)
+        out.append({
+            "count": len(labels),
+            "labels": labels,
+            "keys": keys,
+            "go_backed": bool(group["go_backed"]),
+            "summary": group["summary"],
+            "error": group["error"],
+        })
+    return sorted(out, key=lambda g: (-int(g["count"]), str(g["summary"])))
+
+
+def _error_group_reason(groups: list[dict[str, Any]]) -> str:
+    if not groups:
+        return ""
+    previews = [
+        f"{g['count']} card(s): {g['summary']}"
+        for g in groups[:3]
+    ]
+    suffix = "" if len(groups) <= 3 else f"; and {len(groups) - 3} more"
+    return "; unique blocker(s): " + "; ".join(previews) + suffix
+
+
 def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
          *, workspace: str, commit: str) -> dict[str, Any]:
     """Fold per-scorecard metrics into one control-pane payload + trend."""
@@ -478,12 +537,16 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
                                for e in early_warning)
                    + " rose vs baseline under a green portfolio — a hidden per-metric "
                      "regression; review before --pin re-floors it")
+    grouped_errors = error_groups(errors)
+
     if errors:
         ok, verdict, finding = False, "ACTION", "scorecard_unmeasured"
         reason = (f"{len(errors)} scorecard(s) failed to report a debt integer "
                   f"({', '.join(m['label'] for m in errors)}); portfolio debt "
-                  f"{total_debt} across {len(measured)} measured")
+                  f"{total_debt} across {len(measured)} measured"
+                  + _error_group_reason(grouped_errors))
         next_action = ("repair the failing scorecard(s) so the fold is complete; "
+                       "start with the unique blocker(s) in error_groups; "
                        "re-run python tools/scorecard_control_pane.py"
                        + build_break_hint(errors))
     elif regressed:
@@ -530,6 +593,7 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
         "grade_breakdown": grade_breakdown,
         "measured": len(measured),
         "errored": len(errors),
+        "error_groups": grouped_errors,
         "early_warning": early_warning,
         "metrics": metrics,
         "trend": trend,

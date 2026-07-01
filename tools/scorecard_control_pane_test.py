@@ -685,9 +685,29 @@ def test_build_break_hint_fires_for_go_backed_card_error() -> None:
     assert "maturity" in hint and "clean-read recipe" in hint
 
 
+def test_error_groups_dedupes_repeated_go_backed_errors() -> None:
+    metrics = full_metrics()
+    same = "non-JSON output (exit 1): cmd/fak/guard.go:27:2: imported and not used"
+    metrics = _error_card(metrics, "maturity", error=same)
+    metrics = _error_card(metrics, "loopindex", error=same)
+    metrics = _error_card(metrics, "doc", error="timed out")
+    errored = [m for m in metrics if not isinstance(m.get("debt"), int)]
+
+    groups = scp.error_groups(errored)
+    assert [g["count"] for g in groups] == [2, 1]
+    assert groups[0]["go_backed"] is True
+    assert groups[0]["labels"] == ["loop-index", "maturity"]
+    assert "guard.go" in groups[0]["summary"]
+    assert groups[1]["labels"] == ["docs"]
+
+
 def test_fold_unmeasured_go_card_carries_build_break_hint() -> None:
-    metrics = _error_card(full_metrics(code=2), "conflation")
+    metrics = _error_card(full_metrics(code=2), "conflation",
+                          error="non-JSON output (exit 1): build failed")
     out = scp.fold(metrics, None, workspace=".", commit="c0")
+    assert out["error_groups"][0]["count"] == 1
+    assert "unique blocker" in out["reason"]
+    assert "error_groups" in out["next_action"]
     assert out["finding"] == "scorecard_unmeasured" and out["errored"] == 1
     assert "go build ./..." in out["next_action"]
 
