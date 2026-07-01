@@ -109,7 +109,7 @@ type HandoffReview struct {
 // TestReviewHandoffStrictScopeAcceptsDispatchableNextStep, and
 // TestHandoffIssueBodyIncludesStrictScopeSections, with cmd/fak/taskmgr.go's live
 // sync path already wiring StrictScope: true. The work shipped citing #1639 and a
-// generic worktree-sync subject, never #1460 itself; history on origin/main cannot
+// generic worktree-sync subject, never #1460 itself; published history cannot
 // be rewritten, so this comment restates the closure binding explicitly for the
 // grep-based referee.
 type HandoffReviewOptions struct {
