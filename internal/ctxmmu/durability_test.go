@@ -105,6 +105,35 @@ func TestClassifyTextAgreesWithAdmitPath(t *testing.T) {
 	}
 }
 
+func TestDurabilityPolicyCoversAllContextLedgerClasses(t *testing.T) {
+	cases := []struct {
+		class          string
+		wantExpiry     string
+		requiresExpiry bool
+	}{
+		{ctxmmu.DurabilityTurn, ctxmmu.ExpiryPolicyTurn, false},
+		{ctxmmu.DurabilitySession, ctxmmu.ExpiryPolicySession, false},
+		{ctxmmu.DurabilityBounded, ctxmmu.ExpiryPolicyRequired, true},
+		{ctxmmu.DurabilityDurable, ctxmmu.ExpiryPolicyNone, false},
+		{"unknown", ctxmmu.ExpiryPolicyTurn, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.class, func(t *testing.T) {
+			p := ctxmmu.PolicyForDurability(tc.class)
+			if p.ExpiryPolicy != tc.wantExpiry || p.RequiresExpiry != tc.requiresExpiry {
+				t.Fatalf("PolicyForDurability(%q) = %+v, want expiry=%q requires=%v",
+					tc.class, p, tc.wantExpiry, tc.requiresExpiry)
+			}
+			if tc.class == "unknown" && p.Class != ctxmmu.DurabilityTurn {
+				t.Fatalf("unknown class normalized to %q, want %q", p.Class, ctxmmu.DurabilityTurn)
+			}
+			if label := ctxmmu.DurabilityLabel(tc.class); label == "" {
+				t.Fatalf("DurabilityLabel(%q) is empty", tc.class)
+			}
+		})
+	}
+}
+
 // TestDurabilityTagIsAdditiveOnTransform confirms an oversize-benign Transform verdict
 // also carries the durability class (the paged-out result is still a write-time fact),
 // not only the Allow path.

@@ -43,12 +43,13 @@ func (durabilityFacts) Contribute(in Input) (Part, bool) {
 		return Part{Name: "durability_facts", Order: 10,
 			Meta: map[string]string{"durable": "0", "dropped": strconv.Itoa(dropped)}}, false
 	}
-	text := "Durable facts to keep:\n- " + strings.Join(kept, "\n- ")
+	label := ctxmmu.DurabilityLabel(ctxmmu.DurabilityDurable)
+	text := "Durable facts to keep:\n- " + strings.Join(labelFacts(kept, label), "\n- ")
 	return Part{
 		Name:  "durability_facts",
 		Order: 10,
 		Text:  text,
-		Meta:  map[string]string{"durable": strconv.Itoa(durable), "dropped": strconv.Itoa(dropped)},
+		Meta:  map[string]string{"durable": strconv.Itoa(durable), "dropped": strconv.Itoa(dropped), "expiry_policy": ctxmmu.ExpiryPolicyNone},
 	}, true
 }
 
@@ -76,6 +77,14 @@ func classifyTranscript(msgs []Msg) (kept []string, durable, dropped int) {
 		}
 	}
 	return kept, durable, dropped
+}
+
+func labelFacts(facts []string, label string) []string {
+	out := make([]string, 0, len(facts))
+	for _, fact := range facts {
+		out = append(out, fact+" ("+label+")")
+	}
+	return out
 }
 
 // --- Contributor 2: taskDistill ---------------------------------------------

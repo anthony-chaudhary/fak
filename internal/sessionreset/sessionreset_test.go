@@ -36,6 +36,12 @@ func TestDurabilityFactsKeepsDurableDropsEphemera(t *testing.T) {
 	if p.Meta["durable"] != "1" {
 		t.Fatalf("durable count = %q, want 1", p.Meta["durable"])
 	}
+	if p.Meta["expiry_policy"] != "none" {
+		t.Fatalf("expiry_policy = %q, want none for durable facts", p.Meta["expiry_policy"])
+	}
+	if !strings.Contains(p.Text, "durability=durable expiry=none") {
+		t.Fatalf("durability label missing from rendered fact: %q", p.Text)
+	}
 }
 
 // TestTaskDistillExtractsObjectiveAndLatest proves the deterministic recap names the

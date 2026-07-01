@@ -501,15 +501,61 @@ func ScreenBytes(body []byte) (abi.ReasonCode, bool) {
 
 // Durability classes ride the OPEN Verdict.Meta map under DurabilityKey — orthogonal
 // to the trust Kind, additive over the frozen ABI (TestABIGoldenFreeze does not move).
-// v1 emits {turn, session, durable}; `bounded` is a RESERVED value the lexical prior
-// does not emit (it has no validity-interval home until rung 2). Readers degrade an
-// unknown/`bounded` value fail-closed to turn.
+// v1 emits {turn, session, durable}; `bounded` is accepted as the explicit-expiry
+// class even though the lexical prior does not infer it on its own. Readers degrade
+// unknown values fail-closed to turn.
 const (
 	DurabilityKey     = "durability"
 	DurabilityTurn    = "turn"    // true only this turn; the fail-closed default
 	DurabilitySession = "session" // true for this session
+	DurabilityBounded = "bounded" // true until a caller-supplied expiry
 	DurabilityDurable = "durable" // true across sessions until revised — the only promotable class
 )
+
+const (
+	ExpiryPolicyTurn     = "turn_end"
+	ExpiryPolicySession  = "session_end"
+	ExpiryPolicyRequired = "requires_expiry"
+	ExpiryPolicyNone     = "none"
+)
+
+// DurabilityPolicy is the renderable context-ledger policy for a fact's truth duration.
+type DurabilityPolicy struct {
+	Class          string `json:"class"`
+	ExpiryPolicy   string `json:"expiry_policy"`
+	RequiresExpiry bool   `json:"requires_expiry,omitempty"`
+}
+
+// NormalizeDurabilityClass maps unknown durability tags to the fail-closed turn class.
+func NormalizeDurabilityClass(class string) string {
+	switch class {
+	case DurabilityTurn, DurabilitySession, DurabilityBounded, DurabilityDurable:
+		return class
+	default:
+		return DurabilityTurn
+	}
+}
+
+// PolicyForDurability maps a durability class to its deterministic expiry policy.
+func PolicyForDurability(class string) DurabilityPolicy {
+	class = NormalizeDurabilityClass(class)
+	switch class {
+	case DurabilitySession:
+		return DurabilityPolicy{Class: class, ExpiryPolicy: ExpiryPolicySession}
+	case DurabilityBounded:
+		return DurabilityPolicy{Class: class, ExpiryPolicy: ExpiryPolicyRequired, RequiresExpiry: true}
+	case DurabilityDurable:
+		return DurabilityPolicy{Class: class, ExpiryPolicy: ExpiryPolicyNone}
+	default:
+		return DurabilityPolicy{Class: DurabilityTurn, ExpiryPolicy: ExpiryPolicyTurn}
+	}
+}
+
+// DurabilityLabel renders the compact ledger label a context fact can carry.
+func DurabilityLabel(class string) string {
+	p := PolicyForDurability(class)
+	return "durability=" + p.Class + " expiry=" + p.ExpiryPolicy
+}
 
 var (
 	// durableFrame: habitual/stative frames => durable (stated preferences, identity).
