@@ -11,18 +11,19 @@ import (
 )
 
 type debugVarsResponse struct {
-	Gateway        debugGatewayVars               `json:"gateway"`
-	Runtime        debugRuntimeVars               `json:"runtime"`
-	Kernel         debugKernelVars                `json:"kernel"`
-	Inference      debugInferenceVars             `json:"inference"`
-	VCache         *debugVCacheVars               `json:"vcache,omitempty"`
-	VCacheFamilies *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
-	VCacheGovernor []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
-	VCacheWarmth   []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
-	ModelLoad      *debugModelLoadVars            `json:"model_load,omitempty"`
-	KVMemory       *debugKVMemoryVars             `json:"kv_memory,omitempty"`
-	RequestMemory  *debugRequestMemoryVars        `json:"request_memory,omitempty"`
-	Metrics        debugMetricsVars               `json:"metrics"`
+	Gateway          debugGatewayVars               `json:"gateway"`
+	Runtime          debugRuntimeVars               `json:"runtime"`
+	Kernel           debugKernelVars                `json:"kernel"`
+	Inference        debugInferenceVars             `json:"inference"`
+	VCache           *debugVCacheVars               `json:"vcache,omitempty"`
+	CacheAttribution *debugCacheAttributionVars     `json:"cache_attribution,omitempty"`
+	VCacheFamilies   *debugVCacheFamiliesVars       `json:"vcache_families,omitempty"`
+	VCacheGovernor   []vcacheGovernorDecisionRecord `json:"vcache_governor_journal,omitempty"`
+	VCacheWarmth     []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
+	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
+	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
+	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
+	Metrics          debugMetricsVars               `json:"metrics"`
 }
 
 // debugInferenceVars surfaces the model-generation throughput the kernel/vDSO counters
@@ -365,14 +366,15 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},
-		Inference:      inferenceVarsFromSnapshot(infer, inflightMaxAge),
-		VCache:         vcacheVarsFromSnapshot(infer),
-		VCacheFamilies: vcacheFamiliesVars(vcacheTurns, vcacheCapped),
-		VCacheGovernor: m.vcacheGovernorDecisionRecords(),
-		VCacheWarmth:   m.vcacheWarmthDemotionRecords(),
-		ModelLoad:      debugModelLoadProfile(s.modelLoadProfile()),
-		KVMemory:       debugKVMemory(s.planner),
-		RequestMemory:  debugRequestMemory(s.planner),
+		Inference:        inferenceVarsFromSnapshot(infer, inflightMaxAge),
+		VCache:           vcacheVarsFromSnapshot(infer),
+		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
+		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
+		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
+		VCacheWarmth:     m.vcacheWarmthDemotionRecords(),
+		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
+		KVMemory:         debugKVMemory(s.planner),
+		RequestMemory:    debugRequestMemory(s.planner),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -475,6 +477,54 @@ func vcacheVarsFromSnapshot(snap inferenceSnapshot) *debugVCacheVars {
 		HitRate:             hit,
 		Multiplier:          mult,
 		Status:              string(proof.Status),
+	}
+}
+
+// debugCacheAttributionVars surfaces the provider-vs-fak owner split for cache-like savings
+// LIVE on /debug/vars, mirroring the /metrics fak_cache_saved_*_by_owner and _by_mechanism
+// families (writeCacheAttributionMetrics) field-for-field so an operator watching a session
+// sees the SAME split the guard-exit banner prints — not a provider-only "saved X" that
+// conflates the provider's default cache with fak-authored savings (#1490/#1844). Every
+// token-equiv value is the same input-token currency as the vcache block; VDSO is a separate
+// avoided-call counter (its witness is skipped engine calls, not prompt tokens). Nil until
+// the split has anything nonzero to say.
+type debugCacheAttributionVars struct {
+	ProviderTokenEquiv float64 `json:"provider_token_equiv"` // net: read rebate minus write premium
+	FakTokenEquiv      float64 `json:"fak_token_equiv"`      // compaction shed + in-kernel KV-prefix reuse
+	TotalTokenEquiv    float64 `json:"total_token_equiv"`
+
+	ProviderPromptCacheReadTokenEquiv         float64 `json:"provider_prompt_cache_read_token_equiv"`
+	ProviderPromptCacheWritePremiumTokenEquiv float64 `json:"provider_prompt_cache_write_premium_token_equiv"` // negative until reads repay writes
+	FakCompactionShedTokens                   uint64  `json:"fak_compaction_shed_tokens"`
+	FakKVPrefixReusedTokens                   uint64  `json:"fak_kv_prefix_reused_tokens"`
+	FakVDSOAvoidedCalls                       uint64  `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
+}
+
+// cacheAttributionVars builds the /debug/vars owner-split block from the SAME inputs the
+// /metrics renderer folds (m.adjudicationSummary().MechanismSavings() + kernel VDSOHits +
+// inline-served turns), so the two surfaces report identical owner totals on one session (the
+// acceptance contract of #1849). It returns nil — omitting the block — until the split has a
+// nonzero token slice OR an avoided call, so a cold session stays quiet rather than emitting
+// an all-zero object. When the fak slice is anchor-starved (#1407) the block still renders
+// the provider slice with fak reading ~0, honestly.
+func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline uint64) *debugCacheAttributionVars {
+	ms := sum.MechanismSavings()
+	if vdsoHits > 0 {
+		ms.FakVDSOAvoidedCalls += uint64(vdsoHits)
+	}
+	ms.FakVDSOAvoidedCalls += servedInline
+	if !ms.HasAnyTokenActivity() && ms.FakVDSOAvoidedCalls == 0 {
+		return nil
+	}
+	return &debugCacheAttributionVars{
+		ProviderTokenEquiv:                        ms.ProviderTokenEquiv(),
+		FakTokenEquiv:                             ms.FakTokenEquiv(),
+		TotalTokenEquiv:                           ms.TotalTokenEquiv(),
+		ProviderPromptCacheReadTokenEquiv:         ms.ProviderPromptCacheReadTokenEquiv,
+		ProviderPromptCacheWritePremiumTokenEquiv: ms.ProviderPromptCacheWritePremiumTokenEquiv,
+		FakCompactionShedTokens:                   ms.FakCompactionShedTokens,
+		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
+		FakVDSOAvoidedCalls:                       ms.FakVDSOAvoidedCalls,
 	}
 }
 
