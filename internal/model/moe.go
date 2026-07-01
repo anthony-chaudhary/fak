@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -74,6 +75,12 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 		// of a hardcoded host-side reduce.
 		if m.epRanks > 1 {
 			if plan, err := ExpertParallelPlan(m.Cfg.NumExperts, m.epRanks); err == nil {
+				// A sharded rank (epRankSet — this process loaded only its band) takes the
+				// rank-local path: compute only plan.Shards[epRank] and reduce across the process
+				// group. Otherwise the single-process all-band path (every existing serve / test).
+				if rank, ok := m.expertParallelRankLocal(); ok {
+					return glmMoeEPFFN{plan: plan, coll: m.expertParallelCollective(), rankLocal: true, rank: rank}
+				}
 				return glmMoeEPFFN{plan: plan, coll: m.expertParallelCollective()}
 			}
 		}
@@ -361,17 +368,40 @@ type moeFFN struct{}
 func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	H := m.Cfg.HiddenSize
 	delta := make([]float32, H)
+	picks := route(m, layer, xn, mat)
+	// Lever 2 for the Mixtral/Qwen3-MoE router (mlp.experts.<e>.*): on the resident host path,
+	// batch the routed experts' GEMVs into ONE parFor per projection instead of ~3 per expert
+	// (moe_host_batch.go) — the same hostBatchedGLMExperts primitive glmMoeFFN uses, bit-identical
+	// to the per-expert loop below (TestBatchedExpertDeltaMatchesLoop; the SwiGLU math, activation,
+	// and route-order accumulation are the same reductions). This retires the mlp_decode
+	// command-buffer count that the MAC-QWEN36-27B decode diagnosis named as the dominant lever:
+	// a q4_k_m checkpoint's experts are resident (gate/up Q4_K in q4kw, down Q6_K in kqw), the exact
+	// shape hostBatchedGLMExperts reads, so the top-k experts' 3*K host dispatches per MoE layer
+	// collapse to 3. GPT-OSS is excluded (its expertGPTOSS clamp is not the plain SwiGLU the batched
+	// path models); any config the fast path does not model (per-expert bias, active LoRA, a
+	// non-resident expert) declines it — writes nothing, returns false — and falls through to the
+	// proven loop. The qwen3_5 gated shared expert below is unchanged either way.
+	batched := false
+	if !m.Cfg.isGPTOSS() {
+		if _, host := mat.(residentKernel); host {
+			if xf, ok := xn.([]float32); ok {
+				batched = m.hostBatchedGLMExperts(layer, xf, delta, picks)
+			}
+		}
+	}
 	// Accumulate in selection order (highest gate weight first) so the reduction
 	// order is fixed and reproducible across runs.
-	for _, pk := range route(m, layer, xn, mat) {
-		var out []float32
-		if m.Cfg.isGPTOSS() {
-			out = expertGPTOSS(m, layer, pk.expert, xn, mat)
-		} else {
-			out = expertSwiGLU(m, layer, pk.expert, xn, mat)
-		}
-		for i := 0; i < H; i++ {
-			delta[i] += pk.weight * out[i]
+	if !batched {
+		for _, pk := range picks {
+			var out []float32
+			if m.Cfg.isGPTOSS() {
+				out = expertGPTOSS(m, layer, pk.expert, xn, mat)
+			} else {
+				out = expertSwiGLU(m, layer, pk.expert, xn, mat)
+			}
+			for i := 0; i < H; i++ {
+				delta[i] += pk.weight * out[i]
+			}
 		}
 	}
 	// Qwen3.5-MoE (Ornith-1.0-35B/397B) adds an always-on, sigmoid-GATED shared expert
@@ -479,17 +509,41 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 // It FAILS CLOSED to the monolith: any plan/wrapper error (a degenerate ExpertParallelPlan, the
 // qwen3.5 singular gated shared expert expertParallelGLMMoEDelta refuses) falls back to
 // glmMoeFFN{}.apply for this token rather than dropping a term — the routed result stays correct.
+//
+// rankLocal switches this between the two EP topologies. FALSE (the default) is the single-process
+// all-band path: this process holds the full expert set and computes every band's partial locally
+// (expertParallelGLMMoEDelta), reducing through coll — bit-exact, but no residency win, and the
+// path every existing serve and bit-exact test takes. TRUE is the SHARDED (multi-process) path:
+// this process holds ONLY plan.Shards[rank]'s experts and computes only that band
+// (expertParallelRankLocalGLMMoEDelta), reducing its single part across the process group through
+// coll (a distCommCollective) — the residency the A100 fleet needs (#971). rank is this process's
+// rank; it is meaningful only when rankLocal.
 type glmMoeEPFFN struct {
-	plan TPPlan
-	coll Collective
+	plan      TPPlan
+	coll      Collective
+	rankLocal bool
+	rank      int
 }
 
 func (k glmMoeEPFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	picks := glmRoute(m, layer, xn, mat)
+	if k.rankLocal {
+		// Sharded rank: compute ONLY this rank's band and reduce across the process group. It must
+		// NOT fall back to the monolith on error — this process holds only its band, so glmMoeFFN
+		// (and the all-band expertParallelGLMMoEDelta) would call expertSwiGLU on peer experts it
+		// does not hold and panic. Surface the error WITH context instead of silently mis-serving;
+		// a correct sharded serve never hits it (the load admitted exactly this band).
+		delta, err := m.expertParallelRankLocalGLMMoEDelta(layer, xn, mat, picks, k.plan, k.rank, k.coll)
+		if err != nil {
+			panic(fmt.Sprintf("model: rank-local EP forward failed at layer %d rank %d: %v", layer, k.rank, err))
+		}
+		return delta
+	}
 	delta, err := m.expertParallelGLMMoEDelta(layer, xn, mat, picks, k.plan, k.coll)
 	if err != nil {
 		// Fail closed to the proven monolith rather than mis-serve (e.g. the qwen3.5 singular
-		// gated shared expert this EP wrapper does not add). Same routed-then-shared math.
+		// gated shared expert this EP wrapper does not add). Same routed-then-shared math. Safe
+		// only on the all-band path, where this process holds every expert.
 		return glmMoeFFN{}.apply(m, layer, xn, mat)
 	}
 	return delta

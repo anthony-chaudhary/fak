@@ -114,6 +114,53 @@ func (m *Model) expertParallelPartials(layer int, xn any, mat matKernel, picks [
 	return parts, nil
 }
 
+// expertParallelRankPartial computes ONLY rank r's [H] gate-weighted residual partial — the
+// single-band primitive a SHARDED (multi-process) EP serve needs, where this process's Model
+// holds only plan.Shards[rank]'s experts (ggufload.WithExpertShard). It is the one-band slice of
+// expertParallelPartials: the same expert-ascending w·expertSwiGLU sum over the picks e ∈ [Lo,Hi),
+// so the per-rank partials are byte-identical to the all-band path's parts[rank] — the invariant
+// that keeps a sharded serve bit-exact vs full-model EP once the partials are reduced in rank order.
+//
+// Unlike expertParallelPartials (which owns the full expert set and never misses a weight), a
+// sharded rank must FAIL CLOSED on an absent band expert: expertSwiGLU calls mat.mul on the
+// expert weight name, which PANICS on a missing resident weight (glmDsaWeightHAL). So this guards
+// each owned pick with hasWeight and returns a typed error the rank-local forward propagates
+// (never a monolith fallback — that would call expertSwiGLU for peer experts this rank does not
+// hold). gptoss fails closed identically to expertParallelPartials (a separate sub-lever).
+func (m *Model) expertParallelRankPartial(layer int, xn any, mat matKernel, picks []routePick, plan TPPlan, rank int) ([]float32, error) {
+	if err := plan.Validate(); err != nil {
+		return nil, err
+	}
+	if plan.Dim != m.Cfg.NumExperts {
+		return nil, fmt.Errorf("model: expertParallelRankPartial plan.Dim = %d, want NumExperts = %d", plan.Dim, m.Cfg.NumExperts)
+	}
+	if m.Cfg.isGPTOSS() {
+		return nil, fmt.Errorf("model: expert-parallel does not shard gptoss experts (they use the expertGPTOSS form, not expertSwiGLU — a separate sub-lever)")
+	}
+	if rank < 0 || rank >= len(plan.Shards) {
+		return nil, fmt.Errorf("model: expertParallelRankPartial rank %d outside [0,%d)", rank, len(plan.Shards))
+	}
+	H := m.Cfg.HiddenSize
+	s := plan.Shards[rank]
+	p := make([]float32, H)
+	for _, pk := range picks {
+		if pk.expert < s.Lo || pk.expert >= s.Hi {
+			continue
+		}
+		// This rank OWNS this pick — its expert weights must be resident. On a sharded load they
+		// are (WithExpertShard admitted exactly [Lo,Hi)); a miss means a mis-sized load or a plan/
+		// shard disagreement, so refuse rather than let mat.mul panic on the absent weight.
+		if !m.hasWeight(expertName(layer, pk.expert, "gate_proj.weight")) {
+			return nil, fmt.Errorf("model: expert-parallel rank %d missing resident band expert %d at layer %d (sharded load did not admit [%d,%d))", rank, pk.expert, layer, s.Lo, s.Hi)
+		}
+		out := expertSwiGLU(m, layer, pk.expert, xn, mat)
+		for i := 0; i < H; i++ {
+			p[i] += pk.weight * out[i]
+		}
+	}
+	return p, nil
+}
+
 // ExpertParallelDelta computes the ROUTED-expert residual delta for layer l with the experts
 // sharded across `plan`, reduced through the Collective (one AllReduceSum). It is bit-exact
 // vs the monolith routed loop at ranks=1 and matches it within the AllReduce reassociation
@@ -172,6 +219,50 @@ func (m *Model) expertParallelGLMMoEDelta(layer int, xn any, mat matKernel, pick
 	return delta, nil
 }
 
+// expertParallelRankLocalGLMMoEDelta is the SHARDED (multi-process) twin of
+// expertParallelGLMMoEDelta: this process computes ONLY its own band partial
+// (expertParallelRankPartial(rank)) and reduces it across the process group through coll — a
+// distCommCollective wrapping the DistComm this rank joined. Where expertParallelGLMMoEDelta
+// reduces every band's partial computed locally on a full model (the single-process all-band
+// path), this reduces ONE local part supplied by every rank, so no process holds the full expert
+// set — the residency win #971 needs. It is bit-exact vs expertParallelGLMMoEDelta at the same
+// rank count when each rank's band-only model holds exactly plan.Shards[rank] (the per-rank
+// partials are identical and the reduction is rank-ordered), matching within the AllReduce
+// reassociation round-off vs the monolith.
+//
+// The GLM plural shared expert (mlp.shared_experts.*) is REPLICATED on every rank (WithExpertShard
+// filters only the routed .mlp.experts.* band, never the shared expert), so it is added ONCE here
+// AFTER the reduce — the identical routed-then-shared order glmMoeFFN uses. Adding it before the
+// reduce would sum it N times. The qwen3.5 singular-shared fail-closed guard mirrors
+// expertParallelGLMMoEDelta; the caller (glmMoeEPFFN.apply, rank-local branch) HARD-fails on the
+// returned error rather than falling back to the monolith (which would touch peer experts this
+// rank does not hold).
+func (m *Model) expertParallelRankLocalGLMMoEDelta(layer int, xn any, mat matKernel, picks []routePick, plan TPPlan, rank int, coll Collective) ([]float32, error) {
+	if m.has(qwen35SharedExpertName(layer, "gate.weight")) {
+		return nil, fmt.Errorf("model: expertParallelRankLocalGLMMoEDelta is the glmMoeFFN twin and does not add the qwen3.5 singular gated shared expert")
+	}
+	part, err := m.expertParallelRankPartial(layer, xn, mat, picks, plan, rank)
+	if err != nil {
+		return nil, err
+	}
+	if coll == nil {
+		coll = LocalCollective{}
+	}
+	// Each rank contributes ONLY its own part; the collective (a distCommCollective over the
+	// process group, or the LocalCollective identity at ranks=1) sums them in rank order.
+	delta, err := coll.AllReduceSum([][]float32{part})
+	if err != nil {
+		return nil, err
+	}
+	if m.Cfg.NSharedExperts > 0 && m.hasWeight(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
+		shared := glmSharedExperts(m, layer, xn, mat)
+		for i := range delta {
+			delta[i] += shared[i]
+		}
+	}
+	return delta, nil
+}
+
 // SetExpertParallelRanks records the expert-parallel rank count the live MoE forward shards the
 // routed delta across (Model.epRanks). 0 or 1 leaves the forward on the monolith glmMoeFFN (the
 // no-op default); >1 makes ffnForLayer dispatch routed glm_moe_dsa layers through glmMoeEPFFN.
@@ -182,6 +273,20 @@ func (m *Model) SetExpertParallelRanks(ranks int) { m.epRanks = ranks }
 
 // ExpertParallelRanks reports the configured expert-parallel rank count (0/1 == monolith).
 func (m *Model) ExpertParallelRanks() int { return m.epRanks }
+
+// SetExpertParallelRank marks this Model as a SHARDED EP rank: it holds only plan.Shards[rank]'s
+// experts, so the live MoE forward computes only this rank's band and reduces across the process
+// group (expertParallelRankLocalGLMMoEDelta) instead of the single-process all-band path. It is
+// the setter the serve drives from FAK_EP_RANK once a sharded load (ggufload.WithExpertShard)
+// succeeded and the DistComm process group formed. Calling it flips epRankSet, so the rank-local
+// forward path is entered ONLY on an explicit sharded serve — never by an existing serve or a
+// bit-exact EP test, which leave it unset and keep the all-band path byte-for-byte. Pair with
+// SetExpertParallelRanks (the world size) and SetExpertParallelCollective (the process group).
+func (m *Model) SetExpertParallelRank(rank int) { m.epRank, m.epRankSet = rank, true }
+
+// expertParallelRankLocal reports this Model's sharded EP rank and whether it was set. Unset
+// (the default) keeps the live forward on the single-process all-band path.
+func (m *Model) expertParallelRankLocal() (int, bool) { return m.epRank, m.epRankSet }
 
 // SetExpertParallelCollective records the Collective the live decode EP path reduces the
 // per-rank expert partials through (Model.epColl). nil restores the single-box, bit-exact

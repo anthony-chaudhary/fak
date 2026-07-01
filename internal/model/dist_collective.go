@@ -395,3 +395,37 @@ func readResponse(conn net.Conn) ([]float32, error) {
 		return nil, fmt.Errorf("model: dist response status byte = %d, want 0(ok)/1(err)", payload[0])
 	}
 }
+
+// distCommCollective adapts a DistComm (this rank's handle to the process group) to the model
+// Collective seam so the SHARDED EP forward can reduce through it. The impedance match is the
+// number of parts: model.Collective.AllReduceSum takes EVERY rank's part in one process (the
+// in-process orchestrator shape LocalCollective/BackendCollective serve), while a genuine
+// distributed collective has each rank hold ONLY its own part — DistComm's natural signature. So
+// this adapter accepts exactly ONE part (this rank's) and forwards it to DistComm.AllReduceSum,
+// which gathers the peers over the wire and reduces in rank order — byte-identical to the
+// in-process reduce (dist_collective_test.go pins DistComm == LocalCollective at max|Δ|=0). At
+// size 1 DistComm is the identity, so a one-process sharded EP still reduces correctly.
+//
+// The rank-local EP forward only ever all-reduces its [H] routed partial; it never gathers bands
+// (AllGather recombines a column-parallel matmul's output, which EP does not do). AllGather
+// therefore refuses rather than silently mis-reduce — the fail-closed contract every collective
+// here keeps.
+type distCommCollective struct{ g *DistComm }
+
+// NewDistCommCollective wraps a rank's DistComm handle as a model Collective for the sharded EP
+// decode path (SetExpertParallelCollective). The caller owns g's lifecycle (Close on serve exit).
+func NewDistCommCollective(g *DistComm) Collective { return distCommCollective{g: g} }
+
+func (d distCommCollective) AllReduceSum(parts [][]float32) ([]float32, error) {
+	if len(parts) != 1 {
+		return nil, fmt.Errorf("model: distCommCollective.AllReduceSum expects this rank's single part, got %d (a distributed collective holds only its own part)", len(parts))
+	}
+	return d.g.AllReduceSum(parts[0])
+}
+
+func (d distCommCollective) AllGather(parts [][]float32, p TPPlan) ([]float32, error) {
+	return nil, fmt.Errorf("model: distCommCollective does not implement AllGather (expert-parallel reduces [H] partials through AllReduceSum, it never gathers expert bands)")
+}
+
+// distCommCollective is a drop-in for the model Collective seam.
+var _ Collective = distCommCollective{}

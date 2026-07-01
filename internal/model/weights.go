@@ -262,6 +262,20 @@ type Model struct {
 	// to LocalCollective (collective_bridge_test.go), so wiring it changes no host-tested bytes;
 	// on NCCL the same call issues a real cross-GPU all-reduce. Set via SetExpertParallelCollective.
 	epColl Collective
+
+	// epRank + epRankSet identify THIS process's expert-parallel rank in a SHARDED (multi-
+	// process) EP serve, where each rank loaded ONLY its expert band (ggufload.WithExpertShard)
+	// and so holds only plan.Shards[epRank]'s experts. When epRankSet, the live MoE forward
+	// computes only this rank's band partial (expertParallelRankLocalGLMMoEDelta) and reduces it
+	// across the process group through epColl (a distCommCollective) — the residency win #971
+	// needs, since no single process holds the full expert set. When epRankSet is FALSE (the
+	// default — the setter is never called), the forward keeps the single-process all-band path
+	// (expertParallelPartials on a full model), so every existing serve and every bit-exact EP
+	// test is byte-for-byte unchanged. epRank is an explicit-flag sentinel, NOT epRank==0: rank 0
+	// is a valid sharded rank, so presence must be tracked by epRankSet, not by a zero value.
+	// Set via SetExpertParallelRank from the serve's FAK_EP_RANK.
+	epRank    int
+	epRankSet bool
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying
