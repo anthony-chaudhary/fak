@@ -11,6 +11,8 @@ package relay
 import (
 	"os/exec"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ResolveVerdict is the closed outcome of resolving one artifact pointer against its
@@ -91,7 +93,9 @@ func (r CommitResolver) Resolve(a Artifact) Resolution {
 // run git at all (e.g. git not installed) surfaces as a real error (-> ResolveUnknown).
 func GitCommitExists(dir string) func(ref string) (bool, error) {
 	return func(ref string) (bool, error) {
-		out, err := exec.Command("git", "-C", dir, "cat-file", "-t", ref).Output()
+		cmd := exec.Command("git", "-C", dir, "cat-file", "-t", ref)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.Output()
 		if err != nil {
 			if _, ok := err.(*exec.ExitError); ok {
 				return false, nil // git ran; the ref is not a known object
