@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -336,6 +337,54 @@ func dogfoodResults(ev Evidence) []KPIResult {
 
 // ---- fold -------------------------------------------------------------------------
 
+// axisWeights names the top-level axis weight for each KPIResult.Axis, mirroring the
+// durabilityWeight/selfReportWeight/dogfoodWeight constants so kpiWeights below can
+// derive the shared kernel's per-KPI weight from exactly the same numbers this card
+// has always graded with (no retune).
+var axisWeights = map[string]float64{
+	"durability":  durabilityWeight,
+	"self_report": selfReportWeight,
+	"dogfood":     dogfoodWeight,
+}
+
+// toKPI converts one KPIResult into a scorecard.KPI, preserving the HARD/SOFT split
+// (Fold sums len(Defects) as debt; Soft entries never gate). Score is 100/0 per-row
+// exactly as kpiPayloads has always rendered it.
+func toKPI(r KPIResult) scorecard.KPI {
+	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
+	if r.Passed {
+		k.Score = 100
+	} else if r.Hard {
+		k.Defects = []string{r.Key + ": " + r.Detail}
+	} else {
+		k.Soft = []string{r.Key + ": " + r.Detail}
+	}
+	return k
+}
+
+// kpiWeights derives the shared kernel's per-KPI weight (keyed by KPI Key, since Fold
+// tries Group before Key and every row's Group is its shared axis name) from each
+// row's own within-axis Weight and that axis's top-level weight. Scaling each row's
+// weight by axisWeight/axisWeightSum reproduces, bit-for-bit, the two-level weighted
+// mean this card has always computed (per-axis weighted share of axisScore, then the
+// three axes combined by durability/self-report/dogfood weight) as a SINGLE weighted
+// mean over all rows -- which is exactly what scorecard.Fold's weightedMean takes.
+func kpiWeights(all []KPIResult) map[string]float64 {
+	axisWeightSum := map[string]float64{}
+	for _, r := range all {
+		axisWeightSum[r.Axis] += float64(r.Weight)
+	}
+	w := make(map[string]float64, len(all))
+	for _, r := range all {
+		sum := axisWeightSum[r.Axis]
+		if sum == 0 {
+			continue
+		}
+		w[r.Key] = axisWeights[r.Axis] * float64(r.Weight) / sum
+	}
+	return w
+}
+
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
 	root, _ := filepath.Abs(opts.Root)
@@ -352,7 +401,17 @@ func Build(opts Options) ScorecardPayload {
 	dScore := axisScore(durability)
 	sScore := axisScore(selfReport)
 	gScore := axisScore(dogfood)
+	// composite is rounded to an int BEFORE grading, exactly as this card has always
+	// done (GradeLetter graded the already-rounded display value, not the raw mean) --
+	// preserved here so porting onto the shared kernel cannot shift a grade at a
+	// boundary the old int-rounding-then-grade order would not have crossed.
 	composite := int(math.Round(durabilityWeight*float64(dScore) + selfReportWeight*float64(sScore) + dogfoodWeight*float64(gScore)))
+	grade := GradeLetter(composite)
+
+	kpis := make([]scorecard.KPI, len(all))
+	for i, r := range all {
+		kpis[i] = toKPI(r)
+	}
 
 	var hardFail []KPIResult
 	for _, r := range all {
@@ -360,20 +419,18 @@ func Build(opts Options) ScorecardPayload {
 			hardFail = append(hardFail, r)
 		}
 	}
-	// loopscore_debt = one per HARD gap. A fire-and-forget, unregistered, unguarded
-	// loop fleet surfaces here as a real, halvable integer the loop program drives
-	// down by actually registering + running the loops through fak's surface.
+	// loopscore_debt = one per HARD gap, unchanged: Fold sums len(Defects) across the
+	// KPIs, and toKPI puts exactly one Defect on each failing HARD row.
 	debt := len(hardFail)
-	grade := GradeLetter(composite)
 	ok := debt == 0
-	verdict, finding, reason, next := "OK", "loops_durable_observable_native", "", ""
+
+	finding, next, reason := "loops_durable_observable_native", "hold the line; re-run after a loop session — keep firing loops registered and guard-wrapped", ""
 	if ok {
 		reason = "loop-score: durability " + itoa(dScore) + "/100, self-report " + itoa(sScore) +
 			"/100, dogfood " + itoa(gScore) + "/100, composite " + itoa(composite) + "/100 (" + grade +
 			"); the background loops are registered, observable, and fak-native; zero hard gaps"
-		next = "hold the line; re-run after a loop session — keep firing loops registered and guard-wrapped"
 	} else {
-		verdict, finding = "ACTION", "loopscore_debt"
+		finding = "loopscore_debt"
 		keys := make([]string, len(hardFail))
 		for i, r := range hardFail {
 			keys[i] = r.Key
@@ -384,15 +441,20 @@ func Build(opts Options) ScorecardPayload {
 		lead := hardFail[0]
 		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
 	}
-	return ScorecardPayload{
-		Schema:     Schema,
-		OK:         ok,
-		Verdict:    verdict,
-		Finding:    finding,
-		Reason:     reason,
-		NextAction: next,
-		Workspace:  root,
-		Corpus: map[string]any{
+
+	// Grade ignores the kernel's own raw weighted-mean input and instead grades the
+	// pre-rounded int composite computed above, so the letter grade is bit-identical
+	// to the pre-port fold; ExtraCorpus likewise overrides the kernel-written score
+	// (Round1 of the raw mean) with the same int composite this card has always
+	// reported, and loopscore_debt/grade with the values just derived.
+	p := scorecard.Fold(Schema, kpis, "loopscore_debt", kpiWeights(all), scorecard.Messages{
+		Grade:           func(float64) string { return grade },
+		Finding:         finding,
+		FindingClean:    finding,
+		NextAction:      next,
+		NextActionClean: next,
+		Reason:          reason,
+		ExtraCorpus: map[string]any{
 			"loopscore_debt":    debt,
 			"score":             composite,
 			"grade":             grade,
@@ -406,6 +468,17 @@ func Build(opts Options) ScorecardPayload {
 			"guard_wrapped":     ev.GuardWrapped,
 			"witnessed":         ev.Witnessed,
 		},
+	})
+
+	return ScorecardPayload{
+		Schema:     p.Schema,
+		OK:         p.OK,
+		Verdict:    p.Verdict,
+		Finding:    p.Finding,
+		Reason:     p.Reason,
+		NextAction: p.NextAction,
+		Workspace:  root,
+		Corpus:     p.Corpus,
 		KPIs:       kpiPayloads(all),
 		Durability: durability,
 		SelfReport: selfReport,
@@ -543,18 +616,13 @@ func GradeLetter(score int) string {
 	}
 }
 
+// kpiPayloads renders the local KPIPayload JSON shape from the same per-row
+// hard/soft judgment toKPI uses for the shared kernel, so the two can never drift.
 func kpiPayloads(rows []KPIResult) []KPIPayload {
 	out := make([]KPIPayload, 0, len(rows))
 	for _, r := range rows {
-		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
-		if r.Passed {
-			k.Score = 100
-		} else if r.Hard {
-			k.Defects = []string{r.Key + ": " + r.Detail}
-		} else {
-			k.Soft = []string{r.Key + ": " + r.Detail}
-		}
-		out = append(out, k)
+		sk := toKPI(r)
+		out = append(out, KPIPayload{KPI: sk.Key, Group: sk.Group, Score: int(sk.Score), Detail: sk.Detail, Defects: sk.Defects, Soft: sk.Soft})
 	}
 	return out
 }
