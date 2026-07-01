@@ -680,7 +680,14 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	var hp uintptr
 	if len(f) > 0 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
-		if cached, ok := uploadCache[ucKey{hp, store, t.Layout}]; ok {
+		// Guard against host-address reuse: a uintptr key does NOT keep the host slice alive, so
+		// after GC a freed slice's address can be reused by a DIFFERENT tensor, false-hitting a
+		// stale entry. Require the resident element count to match before sharing; a size mismatch
+		// (e.g. a freed 1-D activation address reused for a 2-D weight) falls through to a fresh
+		// upload, which overwrites the stale entry at this key below. Without this, a witness that
+		// uploads both weights and 1-D activation vectors through this cache panicked in MatMul with
+		// "index out of range [1] with length 1" when a 2-D weight aliased a stale 1-D entry.
+		if cached, ok := uploadCache[ucKey{hp, store, t.Layout}]; ok && cached.Numel() == t.Numel() {
 			return cached // same host buffer already resident at this dtype/layout; share it
 		}
 	}
@@ -774,7 +781,8 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	var hp uintptr
 	if len(codes) > 0 {
 		hp = uintptr(unsafe.Pointer(&codes[0]))
-		if cached, ok := uploadCache[ucKey{hp, Q8_0, t.Layout}]; ok {
+		// element-count guard against host-address reuse (see uploadClass F32 path).
+		if cached, ok := uploadCache[ucKey{hp, Q8_0, t.Layout}]; ok && cached.Numel() == t.Numel() {
 			return cached
 		}
 	}
@@ -797,7 +805,8 @@ func (c *cudaBackend) uploadQ4K(t Tensor, hb HostBuffer) Tensor {
 	var hp uintptr
 	if len(raw) > 0 {
 		hp = uintptr(unsafe.Pointer(&raw[0]))
-		if cached, ok := uploadCache[ucKey{hp, Q4_K, t.Layout}]; ok {
+		// element-count guard against host-address reuse (see uploadClass F32 path).
+		if cached, ok := uploadCache[ucKey{hp, Q4_K, t.Layout}]; ok && cached.Numel() == t.Numel() {
 			return cached
 		}
 	}
