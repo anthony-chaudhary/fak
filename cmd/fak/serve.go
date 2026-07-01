@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -130,6 +131,7 @@ func cmdServe(argv []string) {
 	native := fs.Bool("native", false, "NATIVE HARNESS (#1316): drive fak's OWN agent loop (agent.RunArm) for a non-streaming /v1/messages turn instead of the single-shot proxy turn — fak owns dispatch, the in-kernel syscall boundary is the sole tool path, and the per-turn session gate + per-call routing + operator steer bus run on the served loop. The loop is seeded with the request's last user message and drives the kernel-owned tool catalog to a final answer; the per-turn ArmMetrics ride back on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged). A streaming request falls through to the proxy path.")
 	nativeMaxTurns := fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
 	vdsoProxyFill := fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
+	metricsSnapshot := fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, docs/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -222,7 +224,21 @@ func cmdServe(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel must be >= 1")
 		os.Exit(2)
 	}
-	if *expertParallel > 1 || *tensorParallel > 1 {
+	// Resolve this process's place in a SHARDED expert-parallel serve (FAK_EP_RANK / FAK_EP_COORD_ADDR).
+	// When ep.sharded, N separate processes each load only their band and reduce across a DistComm
+	// process group (the host multi-process topology, #971) — so it takes the DistComm path below,
+	// NOT the single-process device-collective gate. When not sharded, ep is inert and the serve is
+	// byte-identical to today.
+	ep, err := resolveEPRankConfig(*expertParallel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	if *expertParallel > 1 && ep.sharded && *tensorParallel > 1 {
+		fmt.Fprintln(os.Stderr, "fak serve: sharded --expert-parallel (FAK_EP_COORD_ADDR) does not combine with --tensor-parallel>1 yet (#971)")
+		os.Exit(2)
+	}
+	if (*expertParallel > 1 || *tensorParallel > 1) && !ep.sharded {
 		if *expertParallel > 1 && *tensorParallel > 1 && *expertParallel != *tensorParallel {
 			fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel currently must match when both are >1; the single-process NCCL backend has one communicator world and no subgroup split yet (#971)")
 			os.Exit(2)
@@ -270,9 +286,45 @@ func cmdServe(argv []string) {
 	// The loaded *model.Model is ALSO kept for the gateway chat planner: with a tokenizer
 	// (explicit --tokenizer or the GGUF's embedded one) and no --base-url,
 	// /v1/chat/completions and /v1/messages serve it directly.
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, chatBackend, *cpuOffloadExperts, *contextBudgetTokens)
+	//
+	// For a SHARDED EP rank, size this process's expert band from the GGUF header BEFORE the load so
+	// it admits only [Lo,Hi) into the resident store (the #971 residency). nil = the full model, as
+	// today. numExperts is a cheap header read (no tensor bytes).
+	var expertShard *ggufload.ExpertShard
+	if ep.sharded {
+		numExperts, err := ggufNumExperts(*ggufPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: read GGUF expert count for the expert-parallel shard: %v\n", err)
+			os.Exit(2)
+		}
+		shard, err := expertShardForConfig(ep, numExperts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+			os.Exit(2)
+		}
+		expertShard = shard
+		fmt.Printf("fak: expert-parallel rank %d/%d loads experts [%d,%d) of %d resident (sharded serve, #971)\n", ep.rank, ep.ranks, shard.Lo, shard.Hi, numExperts)
+	}
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, chatBackend, *cpuOffloadExperts, *contextBudgetTokens, expertShard)
 	if loadPhase.Name != "" {
 		startupPhases = append(startupPhases, loadPhase)
+	}
+	// A sharded EP rank now joins the DistComm process group and wires the rank-local forward: each
+	// rank computes only its band and reduces its single [H] partial across the group. The group is
+	// formed AFTER the load (a load failure must not block peers) and BEFORE binding the listener.
+	// The rank-local forward path is entered ONLY here — an ordinary serve leaves the model on the
+	// single-process all-band path, byte-identical to today.
+	if ep.sharded && inKernelModel != nil {
+		group, err := dialEPGroup(ep)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: form the %d-rank expert-parallel group: %v\n", ep.ranks, err)
+			os.Exit(2)
+		}
+		defer group.Close()
+		inKernelModel.SetExpertParallelRanks(ep.ranks)
+		inKernelModel.SetExpertParallelRank(ep.rank)
+		inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
+		fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", ep.rank, ep.ranks)
 	}
 	// Per-GPU residency pre-check for an expert-parallel serve: refuse an --expert-parallel N whose
 	// per-card shard (replicated weights + the largest expert band) exceeds a GPU, BEFORE binding the
@@ -530,6 +582,14 @@ func cmdServe(argv []string) {
 		}
 	}
 
+	// #1610 (child B of epic #1601): the optional periodic gateway-usage snapshot runs
+	// for the lifetime of ctx, appending an interim "periodic" counter row every
+	// --metrics-snapshot tick so a crash before a clean exit still leaves a trail. Off
+	// (0 duration, the default) is a byte-for-byte no-op; the exit-time "exit" row below
+	// is always written regardless of this flag.
+	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, srv, *metricsSnapshot, "serve")
+	defer stopMetricsSnapshot()
+
 	if *stdio {
 		// MCP over stdio: stdout carries the protocol; the log package writes to
 		// stderr, so diagnostics never corrupt the frames.
@@ -538,6 +598,8 @@ func cmdServe(argv []string) {
 		}
 		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
 		persistCacheValueObservations(srv, "serve", "stdio", *provider)
+		// Append the full served-turn counter-family snapshot (#1610).
+		persistGatewayUsageObservation(srv, "serve", "stdio")
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 		return
 	}
@@ -550,6 +612,8 @@ func cmdServe(argv []string) {
 	}
 	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
 	persistCacheValueObservations(srv, "serve", "http", *provider)
+	// Append the full served-turn counter-family snapshot (#1610).
+	persistGatewayUsageObservation(srv, "serve", "http")
 	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
 }
 
@@ -567,6 +631,100 @@ func persistCacheValueObservations(srv *gateway.Server, kind, name, provider str
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
 		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns)
 	}
+}
+
+// gatewayUsageCounters folds a live gateway Server's exported counter accessors
+// (KernelCounters + AdjudicationSummary) into a gatewayusageledger.Counters snapshot
+// — the #1610 bridge between the gateway's in-memory-only counter family and the
+// durable ledger. It is the ONLY place cmd/fak knows the shape of both source
+// structs; internal/gatewayusageledger itself stays free of any internal/gateway or
+// internal/kernel import.
+func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
+	kc := srv.KernelCounters()
+	adj := srv.AdjudicationSummary()
+	return gatewayusageledger.Counters{
+		Submits:      kc.Submits,
+		VDSOHits:     kc.VDSOHits,
+		EngineCalls:  kc.EngineCalls,
+		Denies:       kc.Denies,
+		Transforms:   kc.Transforms,
+		Quarantines:  kc.Quarantines,
+		ResultDenies: kc.ResultDenies,
+		Admitted:     kc.Admitted,
+
+		Total:       adj.Total,
+		Allowed:     adj.Allowed,
+		Denied:      adj.Denied,
+		Transformed: adj.Transformed,
+		Quarantined: adj.Quarantined,
+		Deferred:    adj.Deferred,
+		Escalated:   adj.Escalated,
+		Errored:     adj.Errored,
+
+		InputTokens:          adj.InputTokens,
+		OutputTokens:         adj.OutputTokens,
+		CachedPromptTokens:   adj.CachedPromptTokens,
+		CachedTurns:          adj.CachedTurns,
+		CacheCreationTokens:  adj.CacheCreationTokens,
+		KVPrefixPromptTokens: adj.KVPrefixPromptTokens,
+		KVPrefixReusedTokens: adj.KVPrefixReusedTokens,
+
+		CompactionFired:           adj.CompactionFired,
+		CompactionBailed:          adj.CompactionBailed,
+		CompactionOff:             adj.CompactionOff,
+		CompactionDroppedTurns:    adj.CompactionDroppedTurns,
+		CompactionShedTokens:      adj.CompactionShedTokens,
+		CompactionCacheReadTokens: adj.CompactionCacheReadTokens,
+
+		ToolPruneTurns: adj.ToolPruneTurns,
+		ToolPruneCount: adj.ToolPruneCount,
+
+		DenyAllStops: adj.DenyAllStops,
+
+		ByReason: adj.ByReason,
+	}
+}
+
+// persistGatewayUsageObservation appends ONE "exit" row to the gateway-usage ledger
+// (#1610) — the full served-turn counter-family snapshot, restart-durable via the
+// same append-only JSONL pattern persistCacheValueObservations already uses for the
+// narrower cache-value axis (#1303). Best-effort: a write failure never fails the
+// session. context is a free-form label (e.g. "http"/"stdio").
+func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string) {
+	row := gatewayusageledger.NewRow("exit", sessionType, context, "", 0, gatewayUsageCounters(srv), time.Now())
+	if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
+		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)
+	}
+}
+
+// startGatewayUsageSnapshotLoop starts the optional --metrics-snapshot periodic
+// ledger writer (#1610) for a long-lived `fak serve`: every interval it appends a
+// "periodic" row so a crash before a clean exit still leaves an OBSERVED counter
+// trail on disk. interval<=0 disables it (byte-for-byte no-op, the default). The
+// returned stop func cancels the loop; it is safe to call even when the loop was
+// never started. The loop also exits on its own once ctx is done, so a caller that
+// forgets to invoke stop still cannot leak the goroutine past the serve lifecycle.
+func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, interval time.Duration, sessionType string) func() {
+	if interval <= 0 {
+		return func() {}
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-t.C:
+				row := gatewayusageledger.NewRow("periodic", sessionType, "snapshot", "", 0, gatewayUsageCounters(srv), time.Now())
+				if err := gatewayusageledger.Append(gatewayusageledger.DefaultLedgerRel, row); err != nil {
+					fmt.Fprintf(os.Stderr, "fak: gateway-usage periodic snapshot failed (non-fatal): %v\n", err)
+				}
+			}
+		}
+	}()
+	return cancel
 }
 
 // restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD
@@ -1048,11 +1206,25 @@ func serveGGUFCPUOffloadPathMemoryPlan(ggufPath string, contextBudgetTokens int,
 	})
 }
 
-func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if ggufPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
 	tLoad := time.Now()
+	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
+	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
+	// the resident-Q4_K arms (cpu-offload, device FAK_Q4K, pure-CPU FAK_Q4K): those carry the
+	// WithExpertShard seam (the raw-super-block splitter filters the batched routed experts). The
+	// Q8/f32 arms have no shard seam, so a sharded serve that would land on one is REFUSED here —
+	// loading a full model on a rank sized only for its band would OOM or silently defeat the shard.
+	var q4kOpts []ggufload.Q4KLoadOption
+	if expertShard != nil {
+		q4kOpts = append(q4kOpts, ggufload.WithExpertShard(expertShard.Lo, expertShard.Hi))
+		q4kArm := cpuOffloadExperts || os.Getenv("FAK_Q4K") != ""
+		if !q4kArm {
+			must(fmt.Errorf("fak serve: --expert-parallel sharded load requires the resident-Q4K path; set FAK_Q4K=1 (or --cpu-offload-experts) so this rank admits only its expert band"))
+		}
+	}
 	// #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed — the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe
@@ -1083,7 +1255,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// pool against the box's real MemAvailable so a load that would OOM-kill the host (or a second
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
-		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend)
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, q4kOpts...)
 	case backend != nil && os.Getenv("FAK_Q4K") != "" && backend.Caps().UploadDtype:
 		// Standard-arch device serve with FAK_Q4K: hold raw Q4_K matmul tensors RESIDENT on the
 		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
@@ -1097,7 +1269,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
 		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 		must(err)
-		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend)
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, q4kOpts...)
 	case backend != nil:
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
@@ -1147,7 +1319,7 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 		// (dequant≈0) or the slow f32 round-trip. Thread a real profiler here too (parity with
 		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
 		// profile carry the resident-vs-dequant breakdown — the witness #975 needs.
-		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad)
+		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
 		profile := toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos))
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
@@ -1171,10 +1343,14 @@ func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffload
 // confirms the mixed-quant expert bulk loaded resident, the slow f32 round-trip avoided), and
 // returns the model, the profiler (the caller folds prof.Snapshot into its own profile), and
 // the elapsed load nanos.
-func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
+func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
 	prof := ggufload.NewLoadProfiler()
 	prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
-	mm, err := ggufload.LoadModelQ4KProfile(ggufPath, prof)
+	// opts carries the per-rank expert shard (ggufload.WithExpertShard) for a sharded expert-
+	// parallel serve: this process admits ONLY its band's routed experts into the resident store,
+	// so its footprint is the replicated remainder + one band (≈ model/ranks), not the full model.
+	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
+	mm, err := ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
 	must(err)
 	modelengine.PreloadQ4K(mm)
 	fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
@@ -1184,9 +1360,10 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time) (*fakmodel.Model,
 
 // loadResidentQ4KDevice is the device Q4_K arm's shared tail: it runs the profiled resident
 // load and folds the host/device memory plan into the streamed profile. The cpu-offload and
-// device-resident arms differ only in how memPlan is derived upstream.
-func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
-	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad)
+// device-resident arms differ only in how memPlan is derived upstream. opts threads the per-rank
+// expert shard (see loadResidentQ4KProfiled).
+func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
+	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, opts...)
 	profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 }

@@ -162,6 +162,18 @@ func cmdGuard(argv []string) {
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(argv)
+	// Boot-timeline instrumentation: mirror serve.go's StartupPhases (internal/gateway/startup.go)
+	// so a slow `fak guard` launch is diagnosable from THIS session's own boot timeline instead of
+	// only fak_gateway_startup_phase_duration_seconds on an ephemeral port that closes with the
+	// session. Populated as each phase completes below; wired into gateway.Config near the bind.
+	parseDur := time.Since(t0)
+	var (
+		localDetectDur     time.Duration
+		remotePreflightDur time.Duration
+		upstreamResolveDur time.Duration
+		pathLookupDur      time.Duration
+		tokenizerLoadDur   time.Duration
+	)
 
 	// Which flags did the operator set EXPLICITLY (vs leave at their default)? Used below so
 	// an explicit --debug-stats can win over the interactive auto-suppress that keeps the
@@ -272,6 +284,7 @@ func cmdGuard(argv []string) {
 		err         error
 		floorSource string
 	)
+	tPolicy := time.Now()
 	if *policyPath != "" {
 		rt, err = policy.LoadRuntime(*policyPath)
 		floorSource = *policyPath
@@ -282,6 +295,7 @@ func cmdGuard(argv []string) {
 	must(err)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
+	policyDur := time.Since(tPolicy)
 
 	// 1b. Default the durable DECISION JOURNAL on. fak guard is the disinterested
 	//     referee; a tamper-evident, hash-chained record of every verdict is what
@@ -332,7 +346,9 @@ func cmdGuard(argv []string) {
 			fmt.Fprintln(os.Stderr, "fak guard: --local auto-detects the upstream server, so it is mutually exclusive with --base-url / --remote-serve — pass only one")
 			os.Exit(2)
 		}
+		tLocal := time.Now()
 		detBase, detModel, detLabel, found := guardDetectLocalBackend()
+		localDetectDur = time.Since(tLocal)
 		if !found {
 			fmt.Fprintln(os.Stderr, guardLocalNothingDetectedMessage())
 			os.Exit(2)
@@ -364,8 +380,11 @@ func cmdGuard(argv []string) {
 		// Preflight: a remote serve that is not answering is the most common failure here
 		// (box not started, wrong port). Fail loud with the next step, mirroring the
 		// exec.LookPath check above, rather than binding a gateway that 502s on first call.
-		if err := guardPreflightRemoteServe(remoteBase); err != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve %s is not reachable: %v\n  start it on the box with `fak serve --gguf <weights> --backend cuda --addr 0.0.0.0:8080`, or check the host/port.\n", remoteBase, err)
+		tRemote := time.Now()
+		preflightErr := guardPreflightRemoteServe(remoteBase)
+		remotePreflightDur = time.Since(tRemote)
+		if preflightErr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --remote-serve %s is not reachable: %v\n  start it on the box with `fak serve --gguf <weights> --backend cuda --addr 0.0.0.0:8080`, or check the host/port.\n", remoteBase, preflightErr)
 			os.Exit(2)
 		}
 	}
@@ -394,6 +413,7 @@ func cmdGuard(argv []string) {
 		// would 401 even after a fresh /login.
 		apiKeyFunc func() string
 	)
+	tUpstream := time.Now()
 	if localModel {
 		up, providerAutodetected = resolveGuardProvider(*provider, command[0])
 	} else {
@@ -440,6 +460,7 @@ func cmdGuard(argv []string) {
 			}
 		}
 	}
+	upstreamResolveDur = time.Since(tUpstream)
 
 	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
 	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
@@ -448,12 +469,14 @@ func cmdGuard(argv []string) {
 	// in automation, the credential refusal is the actionable failure even on hosts whose
 	// test image does not have the wrapped binary installed. A command given as an explicit
 	// path is left to exec to resolve.
+	tPath := time.Now()
 	if !strings.ContainsAny(command[0], "/\\") {
 		if _, lookErr := exec.LookPath(command[0]); lookErr != nil {
 			fmt.Fprintf(os.Stderr, "fak guard: %q is not on your PATH. Install it (Claude Code: https://claude.com/claude-code), or pass the full path / a different agent after `--`.\n", command[0])
 			os.Exit(2)
 		}
 	}
+	pathLookupDur = time.Since(tPath)
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
 	if !ok {
@@ -509,6 +532,8 @@ func cmdGuard(argv []string) {
 		inKernelTok   *tokenizer.Tokenizer
 		inKernelQ4K   bool
 		chatBackend   compute.Backend
+		loadProfile   *gateway.ModelLoadProfile
+		loadPhase     gateway.StartupPhase
 	)
 	if localModel {
 		// Alias (`qwen2.5:7b`) → target ref, then an hf:// URI → a locally cached file.
@@ -535,13 +560,15 @@ func cmdGuard(argv []string) {
 		if chatBackend != nil {
 			fmt.Fprintf(os.Stderr, "fak guard: in-kernel decode → device backend %q\n", chatBackend.Name())
 		}
-		inKernelModel, inKernelQ4K, _, _ = loadServeInKernelModel(*ggufPath, chatBackend, false, *contextBudgetTokens)
+		inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, *contextBudgetTokens, nil)
 		if inKernelModel == nil {
 			fmt.Fprintf(os.Stderr, "fak guard: failed to load %q into the in-kernel engine\n", *ggufPath)
 			os.Exit(1)
 		}
+		tTok := time.Now()
 		var tokOK bool
 		inKernelTok, tokOK = resolveServeTokenizer(*tokPath, *ggufPath)
+		tokenizerLoadDur = time.Since(tTok)
 		if !tokOK || inKernelTok == nil {
 			fmt.Fprintf(os.Stderr, "fak guard: %q has no usable tokenizer; pass --tokenizer or use a GGUF with an embedded tokenizer\n", *ggufPath)
 			os.Exit(1)
@@ -555,8 +582,10 @@ func cmdGuard(argv []string) {
 	if listenAddr == "" {
 		listenAddr = "127.0.0.1:0" // an OS-picked free loopback port.
 	}
+	tListen := time.Now()
 	ln, err := net.Listen("tcp", listenAddr)
 	must(err)
+	listenDur := time.Since(tListen)
 	gwURL := "http://" + ln.Addr().String()
 
 	// A gateway bound BEYOND loopback with no required key is an UNAUTHENTICATED kernel
@@ -566,6 +595,30 @@ func cmdGuard(argv []string) {
 	if requireKey == "" && !guardLoopbackOnly(ln.Addr().String()) {
 		fmt.Fprintf(os.Stderr, "fak guard: WARNING — binding %s with no --require-key-env: the kernel gateway is reachable off-host with NO authentication. Bind a loopback --addr or set --require-key-env.\n", ln.Addr().String())
 	}
+
+	// Boot timeline for THIS guard process (mirrors fak serve's StartupPhases,
+	// internal/gateway/startup.go): flag-parse and policy-load always fire; the rest are
+	// zero-and-omitted when their flag wasn't used, so a plain `fak guard -- claude` launch
+	// reports a short, honest phase list rather than a wall of zero-duration rows.
+	startupPhases := []gateway.StartupPhase{
+		{Name: "flag-parse", Dur: parseDur},
+		{Name: "policy-load", Dur: policyDur},
+	}
+	if localDetectDur > 0 {
+		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "local-detect", Dur: localDetectDur})
+	}
+	if remotePreflightDur > 0 {
+		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "remote-serve-preflight", Dur: remotePreflightDur})
+	}
+	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "upstream-resolve", Dur: upstreamResolveDur})
+	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "path-lookup", Dur: pathLookupDur})
+	if loadPhase.Name != "" {
+		startupPhases = append(startupPhases, loadPhase)
+	}
+	if tokenizerLoadDur > 0 {
+		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: tokenizerLoadDur})
+	}
+	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "listener-bind", Dur: listenDur})
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID: "inkernel",
@@ -603,6 +656,7 @@ func cmdGuard(argv []string) {
 		OnBudgetExhausted:     restarter.OnBudgetExhausted,
 		DefaultTraceID:        guardTraceID,
 		StartTime:             t0,
+		StartupPhases:         startupPhases,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
 		Logf: gwLogf,
@@ -622,6 +676,9 @@ func cmdGuard(argv []string) {
 		ToolFloorDenies: rt.Adjudicator.NeverAdmits,
 	})
 	must(err)
+	if loadProfile != nil {
+		srv.SetModelLoadProfile(loadProfile)
+	}
 
 	// 4. Serve in the background. The gateway lives EXACTLY as long as the child: its
 	//    context is cancelled when the agent exits. We deliberately do NOT tear it down

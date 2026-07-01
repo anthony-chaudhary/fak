@@ -148,7 +148,7 @@ func buildRunPlanner(ctx context.Context, modelRef, backendName string) *agent.I
 		fmt.Fprintf(os.Stderr, "fak run: %v\n", err)
 		os.Exit(2)
 	}
-	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0)
+	model, q4k, _, _ := loadServeInKernelModel(ref, backend, false, 0, nil)
 	if model == nil {
 		fmt.Fprintf(os.Stderr, "fak run: failed to load %q into the in-kernel engine\n", ref)
 		os.Exit(1)
