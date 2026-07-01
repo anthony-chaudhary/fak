@@ -213,19 +213,7 @@ func accountLoginBlockReason(row AccountRow) string {
 }
 
 func RouteAccount(in AccountRouteInput) AccountRouteResult {
-	product := strings.ToLower(strings.TrimSpace(in.Product))
-	target := targetTierForWorkKind(in.WorkKind)
-	workers := []AccountRow{}
-	for _, raw := range in.Rows {
-		row := NormalizeAccountRow(raw)
-		if !routableAccount(row) {
-			continue
-		}
-		if product != "" && row.Product != product {
-			continue
-		}
-		workers = append(workers, row)
-	}
+	product, target, workers := normalizeWorkerPool(in.Rows, in.Product, in.WorkKind)
 	if len(workers) == 0 {
 		reason := "no worker accounts"
 		if product != "" {
@@ -238,12 +226,7 @@ func RouteAccount(in AccountRouteInput) AccountRouteResult {
 		tierOrder = append(tierOrder, 1)
 	}
 	for _, tier := range tierOrder {
-		candidates := []AccountRow{}
-		for _, row := range workers {
-			if row.Available && row.ModelTier == tier {
-				candidates = append(candidates, row)
-			}
-		}
+		candidates := availableTierCandidates(workers, tier)
 		if len(candidates) == 0 {
 			continue
 		}
@@ -275,19 +258,7 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 	if n < 0 {
 		n = 0
 	}
-	product := strings.ToLower(strings.TrimSpace(in.Product))
-	target := targetTierForWorkKind(in.WorkKind)
-	workers := []AccountRow{}
-	for _, raw := range in.Rows {
-		row := NormalizeAccountRow(raw)
-		if !routableAccount(row) {
-			continue
-		}
-		if product != "" && row.Product != product {
-			continue
-		}
-		workers = append(workers, row)
-	}
+	product, target, workers := normalizeWorkerPool(in.Rows, in.Product, in.WorkKind)
 	tierOrder := []int{target}
 	if target == 2 {
 		tierOrder = append(tierOrder, 1)
@@ -298,12 +269,7 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 		if len(lanes) >= n {
 			break
 		}
-		candidates := []AccountRow{}
-		for _, row := range workers {
-			if row.Available && row.ModelTier == tier {
-				candidates = append(candidates, row)
-			}
-		}
+		candidates := availableTierCandidates(workers, tier)
 		sort.Slice(candidates, func(i, j int) bool { return accountRouteLess(candidates[i], candidates[j]) })
 		for _, row := range candidates {
 			if len(lanes) >= n {
@@ -515,6 +481,39 @@ func PoolKey(row AccountRow) string {
 		return "dir:" + row.Account
 	}
 	return "dir:" + row.Dir
+}
+
+// normalizeWorkerPool normalizes rawRows, drops the non-routable ones, and (when
+// a product filter is set) keeps only rows matching it. It returns the normalized
+// lower-cased product filter, the target model tier for workKind, and the routable
+// worker rows — the shared front matter of RouteAccount and AllocateWave.
+func normalizeWorkerPool(rawRows []AccountRow, product, workKind string) (string, int, []AccountRow) {
+	normProduct := strings.ToLower(strings.TrimSpace(product))
+	target := targetTierForWorkKind(workKind)
+	workers := []AccountRow{}
+	for _, raw := range rawRows {
+		row := NormalizeAccountRow(raw)
+		if !routableAccount(row) {
+			continue
+		}
+		if normProduct != "" && row.Product != normProduct {
+			continue
+		}
+		workers = append(workers, row)
+	}
+	return normProduct, target, workers
+}
+
+// availableTierCandidates returns the available worker rows whose ModelTier equals
+// tier, preserving input order (callers sort with accountRouteLess afterward).
+func availableTierCandidates(workers []AccountRow, tier int) []AccountRow {
+	candidates := []AccountRow{}
+	for _, row := range workers {
+		if row.Available && row.ModelTier == tier {
+			candidates = append(candidates, row)
+		}
+	}
+	return candidates
 }
 
 func routableAccount(row AccountRow) bool {

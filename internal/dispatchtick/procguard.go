@@ -165,8 +165,14 @@ func EvaluateProcGuard(in ProcGuardInput) ProcGuardResult {
 }
 
 func (r ProcGuardResult) ActionableNames() []string {
+	return actionableFindingNames(r.Flagged)
+}
+
+// actionableFindingNames returns the sorted display names of the non-protected
+// flagged findings, formatting each as "name(pid N)" when a PID is present.
+func actionableFindingNames(flagged []ProcGuardFinding) []string {
 	names := []string{}
-	for _, row := range r.Flagged {
+	for _, row := range flagged {
 		if row.Protected {
 			continue
 		}
@@ -184,21 +190,10 @@ func procGuardNextAction(flagged []ProcGuardFinding, collectError string) string
 	if strings.TrimSpace(collectError) != "" {
 		return "process scan failed; rerun the guard and inspect collect_error"
 	}
-	names := []string{}
-	for _, row := range flagged {
-		if row.Protected {
-			continue
-		}
-		name := row.Name
-		if row.PID > 0 {
-			name = fmt.Sprintf("%s(pid %d)", name, row.PID)
-		}
-		names = append(names, name)
-	}
+	names := actionableFindingNames(flagged)
 	if len(names) == 0 {
 		return "no runaway process; no action"
 	}
-	sort.Strings(names)
 	return "inspect or reap flagged runaway process(es): " + strings.Join(names, ", ")
 }
 
