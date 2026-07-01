@@ -21,9 +21,9 @@ import (
 //
 // This is the observation seam for epic #1010 / child #1011: after the Claude
 // harness drives `fak swebench run --agent fleet` (or `fak guard --base-url`)
-// against the gateway, the repeated system+tools+repo prefix is served from the
-// cached KV on turns 2..N. This command reads that off /metrics and emits the
-// reused-token count as WITNESSED (fak's own RadixAttention), beside the provider
+// against the gateway, the repeated system+tools+repo prefix can be served from
+// cached KV. This command reads the aggregate reused-token count off /metrics
+// and emits it as WITNESSED (fak's own RadixAttention), beside the provider
 // cache_read as OBSERVED — the trust split the DOS / conflation discipline owes.
 //
 // Two input modes, because the GLM-5.2 box is often reachable only over the Slack
@@ -108,12 +108,16 @@ func runSwebenchCacheWitness(stdout, stderr io.Writer, argv []string) int {
 	// and keeps the WITNESSED/OBSERVED line explicit so the operator reads the
 	// provenance, not just the number.
 	k := rec.KVPrefix
+	scope := rec.CacheBitScope
+	if scope == "" {
+		scope = cachewitness.CacheBitScopeAggregateRun
+	}
 	bit := "did NOT bite (all-cold; reuse 0)"
 	if rec.CacheBit() {
 		bit = fmt.Sprintf("BIT — reused %d/%d prefill tokens (%.1f%%) across %d turns (frozen=%d partial=%d cold=%d)",
 			k.ReusedTokens, k.PromptTokens, 100*k.ReuseRatio(), k.Turns, k.FrozenTurns, k.PartialTurns, k.ColdTurns)
 	}
-	fmt.Fprintf(stderr, "fak in-kernel KV-prefix cache (WITNESSED): %s\n", bit)
+	fmt.Fprintf(stderr, "fak in-kernel KV-prefix cache (WITNESSED, %s): %s\n", scope, bit)
 	fmt.Fprintf(stderr, "provider cache_read (OBSERVED, relayed): %d tokens\n", rec.ProviderCacheReadTokens)
 	if rec.WitnessWindow != nil {
 		fmt.Fprintf(stderr, "witness window: %s -> %s (gateway uptime turns %d)\n",

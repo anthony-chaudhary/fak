@@ -53,10 +53,16 @@ fak_gateway_inference_cached_prompt_tokens_total 150
 	if rec.ProviderCacheReadTokens != 50 || rec.GatewayUptimeTurns != 13 {
 		t.Fatalf("provider/uptime = %d/%d, want 50/13", rec.ProviderCacheReadTokens, rec.GatewayUptimeTurns)
 	}
+	if rec.CacheBitScope != cachewitness.CacheBitScopeAggregateRun {
+		t.Fatalf("cache bit scope = %q, want %q", rec.CacheBitScope, cachewitness.CacheBitScopeAggregateRun)
+	}
 	if rec.WitnessWindow == nil || rec.WitnessWindow.StartScrape != "file://"+before || rec.WitnessWindow.EndScrape != "file://"+after {
 		t.Fatalf("witness window = %+v, want before->after file labels", rec.WitnessWindow)
 	}
 	if !strings.Contains(stderr.String(), "witness window:") || !strings.Contains(stderr.String(), "gateway uptime turns 13") {
 		t.Fatalf("stderr missing witness-window summary:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "WITNESSED, aggregate-run-kv-prefix-reuse") {
+		t.Fatalf("stderr missing aggregate cache-bit scope:\n%s", stderr.String())
 	}
 }

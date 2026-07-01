@@ -48,6 +48,9 @@ func TestParseFoldsCacheFamily(t *testing.T) {
 	if r.GatewayUptimeTurns != 7 {
 		t.Errorf("gateway uptime turns = %d, want cumulative 7", r.GatewayUptimeTurns)
 	}
+	if r.CacheBitScope != CacheBitScopeAggregateRun {
+		t.Errorf("cache bit scope = %q, want %q", r.CacheBitScope, CacheBitScopeAggregateRun)
+	}
 }
 
 func TestRecordSubSubtractsCumulativeGatewayCounters(t *testing.T) {
@@ -94,6 +97,9 @@ fak_gateway_inference_cached_prompt_tokens_total 150
 	if delta.CacheValue.ReusedTokens != 4500 || delta.CacheValue.PromptTokens != 9000 {
 		t.Fatalf("cache value = %+v, want recomputed from delta", delta.CacheValue)
 	}
+	if delta.CacheBitScope != CacheBitScopeAggregateRun {
+		t.Fatalf("delta cache bit scope = %q, want %q", delta.CacheBitScope, CacheBitScopeAggregateRun)
+	}
 }
 
 func TestRecordSubTreatsCounterResetAsFreshWindow(t *testing.T) {
@@ -115,6 +121,30 @@ func TestReuseRatioAndCacheBit(t *testing.T) {
 	}
 	if !r.CacheBit() {
 		t.Error("CacheBit() = false, want true (reused 15000 > 0)")
+	}
+}
+
+func TestCacheBitIsAggregateRunScopeNotSolvedTurnAttribution(t *testing.T) {
+	r, err := Parse("u", sampleMetrics)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !r.CacheBit() {
+		t.Fatal("CacheBit() = false, want true from aggregate reused_tokens > 0")
+	}
+	if r.CacheBitScope != CacheBitScopeAggregateRun {
+		t.Fatalf("CacheBitScope = %q, want %q", r.CacheBitScope, CacheBitScopeAggregateRun)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	js := string(b)
+	if !strings.Contains(js, `"cache_bit_scope":"aggregate-run-kv-prefix-reuse"`) {
+		t.Fatalf("cache bit scope missing from JSON: %s", js)
+	}
+	if strings.Contains(js, "solved_ticket") || strings.Contains(js, "solved-ticket") {
+		t.Fatalf("cache bit JSON claimed solved-ticket attribution: %s", js)
 	}
 }
 
@@ -175,6 +205,9 @@ func TestRecordRoundTripsJSON(t *testing.T) {
 	}
 	if back.KVPrefix.ReusedTokens != r.KVPrefix.ReusedTokens || back.Provenance["kv_prefix"] != Witnessed {
 		t.Errorf("round-trip lost the witnessed cache value or its provenance: %+v", back)
+	}
+	if back.CacheBitScope != CacheBitScopeAggregateRun {
+		t.Errorf("round-trip lost cache bit scope: %+v", back)
 	}
 }
 

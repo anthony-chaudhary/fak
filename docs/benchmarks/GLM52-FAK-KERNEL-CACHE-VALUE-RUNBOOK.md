@@ -9,8 +9,8 @@ description: "The end-to-end path to observe fak's OWN in-kernel KV-prefix cache
 > serve GLM-5.2 from fak's **own** CUDA forward pass on our sm_80 8-GPU datacenter server box, drive the
 > **Claude harness** against it over a **real, already-solved** SWE-bench Verified instance,
 > and **observe the cache value** — the repeated system+tools+repo prefix fak's RadixAttention
-> serves from the cached KV on turns 2..N, the prefill the kernel did **not** redo. That
-> reused-token count, reported as WITNESSED, is this runbook's headline datum.
+> serves from cached KV when reuse is available, reported as aggregate prefill the kernel did
+> **not** redo. That reused-token count, reported as WITNESSED, is this runbook's headline datum.
 >
 > **Status: the observation seam is SHIPPED and tested; the live GLM-5.2 number is the box
 > residual.** `fak swebench cache-witness` (commit `52dfea0d`, child #1011) reads the cache
@@ -30,8 +30,8 @@ not "GLM-5.2 writes the whole patch fast." It is:
    checkable from evidence rather than dependent on a slow full generation.
 2. Drive it through the **Claude harness wired to the GLM-5.2 fak-kernel gateway**.
 3. **Observe the cache value** — the lever the goal names. This routes *around* the throughput
-   wall (#996), not *through* it: the cache biting on a real solved-ticket turn proves the
-   in-kernel cache-value lever end-to-end even if the full patch is not generated.
+   wall (#996), not *through* it: aggregate KV-prefix reuse during the solved-ticket run proves
+   the in-kernel cache-value lever end-to-end even if the full patch is not generated.
 
 ## 2. The data observation, in DOS terms (two numbers, two trust classes)
 
@@ -46,7 +46,9 @@ requires. `fak swebench cache-witness` folds it into one record:
 | `provider_cache_read_tokens` | `fak_gateway_inference_cached_prompt_tokens_total` | **OBSERVED** | the upstream provider's `cache_read`, relayed verbatim. **0 on the pure in-kernel path** (no provider). Never proof fak preserved anything. |
 
 The record **never sums** the two — they are distinct caches over distinct paths. `CacheBit()`
-reports honestly whether fak's own cache engaged (`reused_tokens > 0`) versus an all-cold run.
+reports honestly whether fak's own cache engaged in the aggregate run/window
+(`reused_tokens > 0`) versus an all-cold run; the /metrics family does not attribute reuse to a
+specific solved-ticket turn.
 
 ## 3. Serve GLM-5.2 from the pure kernel (on the box)
 
@@ -88,9 +90,10 @@ fak swebench cache-witness --gateway 127.0.0.1:8080 --out run-glm52-cache/cache-
 
 ## 5. The honest result fence
 
-- **Milestone 2 (this runbook's bar):** the cache **bites** on a real solved-ticket turn —
-  `cache-witness.json` shows `reused_tokens > 0` on turns 2..N from a live GLM-5.2 fak-kernel
-  serve. That proves the cache-value lever end-to-end through fak's own kernel.
+- **Milestone 2 (this runbook's bar):** the cache **bites** during the solved-ticket run —
+  `cache-witness.json` shows aggregate `reused_tokens > 0` from a live GLM-5.2 fak-kernel serve,
+  with `cache_bit_scope: "aggregate-run-kv-prefix-reuse"`. That proves the cache-value lever
+  end-to-end through fak's own kernel without claiming per-turn solved-ticket attribution.
 - **Stretch (gated on #996/#971):** a non-zero resolve-rate from GLM-5.2-fak-kernel, graded by
   the official harness (`fak swebench eval`). Not required to close #1010.
 - **`not yet`, not a failure:** if the box is RAM-blocked (one GLM-5.2 serve fits at a time) or

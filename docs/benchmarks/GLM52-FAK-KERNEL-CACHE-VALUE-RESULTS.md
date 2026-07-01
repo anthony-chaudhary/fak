@@ -22,7 +22,7 @@
 
 This benchmark measures the **cache value** — the prefilled tokens served from fak's in-kernel KV-prefix cache that the kernel did NOT recompute. Specifically:
 
-- The work saved on turns 2..N when the Claude harness drives a real, already-solved SWE-bench ticket against a GLM-5.2 fak-kernel gateway
+- The aggregate work saved when the Claude harness drives a real, already-solved SWE-bench ticket against a GLM-5.2 fak-kernel gateway
 - The cached KV prefix (system + tools + repo) is served on every turn, avoiding the expensive prefill cost
 - This is a **WITNESSED** metric from fak's own kernel, not an observed upstream provider number
 
@@ -142,7 +142,7 @@ See [GLM52-FAK-KERNEL-CACHE-VALUE-RUNBOOK.md](GLM52-FAK-KERNEL-CACHE-VALUE-RUNBO
 
 ## Milestone 2 — The Bar for Epic #1010
 
-The cache **BIT** milestone: `cache-witness.json` shows `reused_tokens > 0` on turns 2..N from a live GLM-5.2 fak-kernel serve. This proves the cache-value lever end-to-end through fak's own kernel.
+The cache **BIT** milestone: `cache-witness.json` shows aggregate `reused_tokens > 0` from a live GLM-5.2 fak-kernel serve, with `cache_bit_scope: "aggregate-run-kv-prefix-reuse"`. This proves the cache-value lever end-to-end through fak's own kernel without claiming per-turn solved-ticket attribution.
 
 **Stretch (gated on #996/#971):** A non-zero resolve-rate from GLM-5.2-fak-kernel, graded by the official harness (`fak swebench eval`). Not required to close #1010.
 
@@ -165,7 +165,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 
 | Number | Trust class | Missing witness |
 |---|---|---|
-| Live in-kernel `kv_prefix.reused_tokens` > 0 on turns 2..N | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server GPU-server box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
+| Live in-kernel aggregate `kv_prefix.reused_tokens` > 0 | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server GPU-server box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
 When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.

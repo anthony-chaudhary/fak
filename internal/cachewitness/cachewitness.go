@@ -6,9 +6,9 @@
 // This is the observation seam for the GLM-5.2-fak-kernel-cache epic (#1010,
 // child #1011): an agentic run against a fak serve gateway (the Claude harness
 // driving `fak swebench run --agent fleet`, or `fak guard --base-url`) repeats a
-// large system+tools+repo prefix every turn; fak's RadixAttention serves that
-// prefix from the cached KV on turns 2..N — the prefill the kernel did NOT redo.
-// That reused-token count is the cache value the epic measures.
+// large system+tools+repo prefix across the run; fak's RadixAttention reports
+// aggregate reused prefix tokens from the cached KV — the prefill the kernel did
+// NOT redo. That reused-token count is the cache value the epic measures.
 //
 // The provenance discipline (the DOS / conflation-scorecard line, drawn the same
 // way internal/gateway/metrics.go draws it):
@@ -67,6 +67,10 @@ type Record struct {
 	// KVPrefix is the in-kernel RadixAttention cache family. Provenance: WITNESSED.
 	KVPrefix KVPrefixWitness `json:"kv_prefix"`
 
+	// CacheBitScope names the exact guarantee behind CacheBit(): aggregate
+	// run/window-level KV-prefix reuse, not solved-ticket turn attribution.
+	CacheBitScope string `json:"cache_bit_scope"`
+
 	// --- OBSERVED: the upstream provider's prompt cache (relayed, not fak's) ---
 
 	// ProviderCacheReadTokens is the cumulative cache_read the upstream provider
@@ -98,6 +102,11 @@ type WitnessWindow struct {
 // cross-worker shared-prefix win, which is ~1.0x on a single session and grows to
 // ~1.0–1.31x at modest fleets, reaching ~4.1x only on a 50×5 fleet.
 const WarmKVMarginalFamily = "marginal-over-tuned-warm-KV (internal/swebench cost.go B/C; ~1.0x single-session, ~1.0-1.31x modest fleet, ~4.1x only on a 50x5 fleet)"
+
+// CacheBitScopeAggregateRun is the scope the gateway /metrics scrape can
+// witness: aggregate KV-prefix reuse across the parsed run or witness window.
+// It deliberately does not claim per-turn solved-ticket attribution.
+const CacheBitScopeAggregateRun = "aggregate-run-kv-prefix-reuse"
 
 // CacheValue expresses the realized in-kernel reuse as a *publishable* cache
 // number under #1066's honesty fence. The trap it guards: a long R2E-Gym
@@ -175,11 +184,12 @@ func (k KVPrefixWitness) ReuseRatio() float64 {
 	return float64(k.ReusedTokens) / float64(k.PromptTokens)
 }
 
-// CacheBit reports whether fak's own cache actually bit on this run: at least one
-// turn reused a non-zero prefix. This is the milestone-2 witness for #1012 — the
-// cache biting on the prefix of a real solved-ticket turn — independent of
-// whether the full patch was generated. A run with ReusedTokens == 0 means the
-// cache never engaged (all-cold), which is reported honestly as "did not bite".
+// CacheBit reports whether fak's own cache engaged in the aggregate run/window:
+// the parsed /metrics scrape has non-zero KV-prefix reused tokens. The gateway
+// metrics consumed here do not identify which solved-ticket turn produced reuse,
+// so this bit is intentionally not a per-turn attribution witness. A run with
+// ReusedTokens == 0 means the cache never engaged (all-cold), which is reported
+// honestly as "did not bite".
 func (r Record) CacheBit() bool {
 	return r.KVPrefix.ReusedTokens > 0
 }
@@ -197,6 +207,9 @@ func (r Record) Sub(baseline Record) Record {
 		out.GatewayUptimeTurns = r.KVPrefix.Turns
 	}
 	out.WitnessWindow = &WitnessWindow{StartScrape: baseline.GatewayURL, EndScrape: r.GatewayURL}
+	if out.CacheBitScope == "" {
+		out.CacheBitScope = CacheBitScopeAggregateRun
+	}
 	out.CacheValue = cacheValue(out.KVPrefix)
 	if out.Provenance == nil {
 		out.Provenance = map[string]Provenance{
@@ -244,7 +257,8 @@ var requiredKVPrefixSeries = []string{mTurns, mPromptTok, mReusedTok}
 // gatewayURL is recorded verbatim for provenance.
 func Parse(gatewayURL string, metricsBody string) (Record, error) {
 	r := Record{
-		GatewayURL: gatewayURL,
+		GatewayURL:    gatewayURL,
+		CacheBitScope: CacheBitScopeAggregateRun,
 		Provenance: map[string]Provenance{
 			"kv_prefix":                  Witnessed,
 			"provider_cache_read_tokens": Observed,
