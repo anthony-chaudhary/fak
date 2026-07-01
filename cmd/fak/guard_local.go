@@ -219,6 +219,21 @@ func guardOllamaHostBase(host string) string {
 	return "http://" + strings.TrimRight(h, "/")
 }
 
+// guardLocalDetectedBanner is the positive --local detection render. It is pure so the
+// exact bytes are pinned without standing up a local server.
+func guardLocalDetectedBanner(label, base, model string) string {
+	l := strings.TrimSpace(label)
+	if l == "" {
+		l = "unknown"
+	}
+	b := strings.TrimSpace(base)
+	m := strings.TrimSpace(model)
+	if m == "" {
+		m = "server default"
+	}
+	return fmt.Sprintf("-> local backend: %s %s (model: %s)", l, b, m)
+}
+
 // guardLocalNothingDetectedMessage is the fail-loud one-liner printed when --local found no
 // running server and no --gguf was passed. It names the two ways forward: install/run a
 // local server, or use the no-server in-kernel path.

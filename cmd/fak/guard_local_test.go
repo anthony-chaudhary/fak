@@ -146,3 +146,17 @@ func TestGuardOllamaHostBase(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardLocalDetectedBannerBytes(t *testing.T) {
+	got := guardLocalDetectedBanner("Ollama", "http://127.0.0.1:11434/v1", "qwen2.5-coder:7b") + "\n"
+	want := "-> local backend: Ollama http://127.0.0.1:11434/v1 (model: qwen2.5-coder:7b)\n"
+	if got != want {
+		t.Fatalf("banner bytes = %q, want %q", got, want)
+	}
+
+	got = guardLocalDetectedBanner("LM Studio", "http://127.0.0.1:1234/v1", "") + "\n"
+	want = "-> local backend: LM Studio http://127.0.0.1:1234/v1 (model: server default)\n"
+	if got != want {
+		t.Fatalf("default-model banner bytes = %q, want %q", got, want)
+	}
+}

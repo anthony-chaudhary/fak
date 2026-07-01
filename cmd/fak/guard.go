@@ -390,11 +390,7 @@ func cmdGuard(argv []string) {
 			*model = detModel
 		}
 		if !*quiet {
-			modelNote := detModel
-			if modelNote == "" {
-				modelNote = "(server default)"
-			}
-			fmt.Fprintf(os.Stderr, "fak guard --local: detected %s at %s, using model %s\n", detLabel, detBase, modelNote)
+			fmt.Fprintln(os.Stderr, guardLocalDetectedBanner(detLabel, detBase, detModel))
 		}
 	} else if *localAuto && localModel && !*quiet {
 		fmt.Fprintln(os.Stderr, "fak guard: --gguf is set, so --local is ignored (the in-kernel model is the upstream)")
