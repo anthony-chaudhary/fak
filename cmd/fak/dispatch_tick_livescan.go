@@ -189,22 +189,102 @@ func dispatchLogIsBannerNoop(path string) bool {
 }
 
 func recentlyAttemptedIssues(runsDir string, cooldownMin int) map[int]bool {
+	return recentlyAttemptedIssuesAt(runsDir, cooldownMin, time.Now())
+}
+
+func recentlyAttemptedIssuesAt(runsDir string, cooldownMin int, now time.Time) map[int]bool {
 	out := map[int]bool{}
 	if cooldownMin <= 0 {
 		return out
 	}
-	cutoff := time.Now().Add(-time.Duration(cooldownMin) * time.Minute)
-	for _, log := range resolveLogs(runsDir) {
-		st, err := os.Stat(log)
-		if err != nil || st.ModTime().Before(cutoff) {
-			continue
-		}
-		issue, ok := issueFromResolveLog(filepath.Base(log))
-		if ok {
-			out[issue] = true
+	for _, row := range cooldownIssueRowsAt(runsDir, cooldownMin, now) {
+		if row.Cooling {
+			out[row.Issue] = true
 		}
 	}
 	return out
+}
+
+type dispatchCooldownRow struct {
+	Issue                    int
+	LastAttemptUnix          int64
+	LastAttemptAgeSeconds    int
+	CooldownRemainingSeconds int
+	NextEligibleUnix         int64
+	Cooling                  bool
+}
+
+func cooldownIssueRows(runsDir string, cooldownMin int) []map[string]any {
+	rows := cooldownIssueRowsAt(runsDir, cooldownMin, time.Now())
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Map())
+	}
+	return out
+}
+
+func cooldownIssueRowsAt(runsDir string, cooldownMin int, now time.Time) []dispatchCooldownRow {
+	if cooldownMin <= 0 {
+		return nil
+	}
+	cooldown := time.Duration(cooldownMin) * time.Minute
+	latest := map[int]time.Time{}
+	for _, log := range resolveLogs(runsDir) {
+		st, err := os.Stat(log)
+		if err != nil {
+			continue
+		}
+		issue, ok := issueFromResolveLog(filepath.Base(log))
+		if !ok {
+			continue
+		}
+		if prev, exists := latest[issue]; !exists || st.ModTime().After(prev) {
+			latest[issue] = st.ModTime()
+		}
+	}
+	issues := make([]int, 0, len(latest))
+	for issue := range latest {
+		issues = append(issues, issue)
+	}
+	sort.Ints(issues)
+	out := make([]dispatchCooldownRow, 0, len(issues))
+	for _, issue := range issues {
+		last := latest[issue]
+		if last.After(now) {
+			last = now
+		}
+		next := last.Add(cooldown)
+		remaining := int(next.Sub(now).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		age := int(now.Sub(last).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		out = append(out, dispatchCooldownRow{
+			Issue:                    issue,
+			LastAttemptUnix:          last.Unix(),
+			LastAttemptAgeSeconds:    age,
+			CooldownRemainingSeconds: remaining,
+			NextEligibleUnix:         next.Unix(),
+			Cooling:                  remaining > 0,
+		})
+	}
+	return out
+}
+
+func (r dispatchCooldownRow) Map() map[string]any {
+	return map[string]any{
+		"issue":                      r.Issue,
+		"last_attempt_unix":          r.LastAttemptUnix,
+		"last_attempt_utc":           time.Unix(r.LastAttemptUnix, 0).UTC().Format(time.RFC3339),
+		"last_attempt_age_seconds":   r.LastAttemptAgeSeconds,
+		"cooldown_remaining_seconds": r.CooldownRemainingSeconds,
+		"next_eligible_unix":         r.NextEligibleUnix,
+		"next_eligible_utc":          time.Unix(r.NextEligibleUnix, 0).UTC().Format(time.RFC3339),
+		"cooling":                    r.Cooling,
+	}
 }
 
 func resolveLogs(runsDir string) []string {

@@ -243,6 +243,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	liveIssueDetails := liveResolutionIssueDetails(runsDir)
 	liveIssues := liveIssueSet(liveIssueDetails)
 	cooled := recentlyAttemptedIssues(runsDir, opts.CooldownMin)
+	cooldownStatus := cooldownIssueRows(runsDir, opts.CooldownMin)
 	skip := map[int]bool{}
 	for n := range liveIssues {
 		skip[n] = true
@@ -261,7 +262,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		pick.Tree = append([]string(nil), opts.LeaseTree...)
 	}
 
-	startup := dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled)
+	startup := dispatchStartupBundle(root, opts, pre, account, pick, target, hasTarget, held, liveIssues, cooled, cooldownStatus)
 	payload := map[string]any{
 		"schema":           dispatchtick.Schema,
 		"workspace":        root,
@@ -283,6 +284,7 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		"lane_issue_count": len(pick.Numbers),
 		"lane_step_budget": pick.ByLaneStepBudget[pick.Lane],
 		"cooled_recently":  sortedSet(cooled),
+		"cooldown_status":  cooldownStatus,
 		"target_issue":     nil,
 		"already_live":     sortedSet(liveIssues),
 		"held_lanes":       sortedStringSet(held),
@@ -1127,7 +1129,7 @@ func recordDispatchPayload(runsDir, backend string, payload map[string]any) {
 	_ = os.WriteFile(filepath.Join(runsDir, "last-resolve-tick.json"), blob, 0o644)
 }
 
-func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool) map[string]any {
+func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string]any, account dispatchtick.Account, pick dispatchLanePick, target int, hasTarget bool, held map[string]bool, liveIssues map[int]bool, cooled map[int]bool, cooldownStatus []map[string]any) map[string]any {
 	route := map[string]any{
 		"lane":             pick.Lane,
 		"target_issue":     nil,
@@ -1138,6 +1140,7 @@ func dispatchStartupBundle(root string, opts dispatchTickOptions, pre map[string
 		"held_lanes":       sortedStringSet(held),
 		"already_live":     sortedSet(liveIssues),
 		"cooled_recently":  sortedSet(cooled),
+		"cooldown_status":  cooldownStatus,
 	}
 	if hasTarget {
 		route["target_issue"] = target
@@ -1377,6 +1380,22 @@ func renderDispatchTick(p map[string]any) string {
 	if n := dispatchMapInt(p, "target_issue"); n != 0 {
 		fmt.Fprintf(&b, "  target    : #%d  %.54s\n", n, dispatchMapString(p, "issue_title"))
 	}
+	if rows := anySlice(p["cooldown_status"]); len(rows) > 0 {
+		fmt.Fprintln(&b, "  cooldowns : issue age_s remaining_s next_eligible_utc state")
+		for _, raw := range rows {
+			row, _ := raw.(map[string]any)
+			state := "ready"
+			if dispatchMapBool(row, "cooling") {
+				state = "cooling"
+			}
+			fmt.Fprintf(&b, "              #%d %d %d %s %s\n",
+				dispatchMapInt(row, "issue"),
+				dispatchMapInt(row, "last_attempt_age_seconds"),
+				dispatchMapInt(row, "cooldown_remaining_seconds"),
+				dispatchMapString(row, "next_eligible_utc"),
+				state)
+		}
+	}
 	if launch := stringSlice(p["launch_command"]); len(launch) > 0 {
 		fmt.Fprintf(&b, "  launch    : %s\n", strings.Join(launch, " "))
 	}
@@ -1543,6 +1562,13 @@ func intPtrFromAny(v any) *int {
 func anySlice(v any) []any {
 	if arr, ok := v.([]any); ok {
 		return arr
+	}
+	if arr, ok := v.([]map[string]any); ok {
+		out := make([]any, 0, len(arr))
+		for _, item := range arr {
+			out = append(out, item)
+		}
+		return out
 	}
 	return nil
 }

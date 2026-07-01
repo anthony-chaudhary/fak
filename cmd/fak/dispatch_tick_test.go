@@ -597,6 +597,62 @@ func dispatchWriteResolveWorker(t *testing.T, root, stem, header, body string) {
 	}
 }
 
+func TestDispatchTickRendersCooldownStatusForCoolingAndReadyIssues(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatalf("mkdir runs dir: %v", err)
+	}
+	now := time.Unix(1700000000, 0).UTC()
+	writeAttempt := func(issue int, stamp string, mod time.Time) {
+		t.Helper()
+		path := filepath.Join(runsDir, fmt.Sprintf("resolve-%d-%s.log", issue, stamp))
+		if err := os.WriteFile(path, []byte("# fak-spawn\n"), 0o644); err != nil {
+			t.Fatalf("write attempt log: %v", err)
+		}
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatalf("chtime attempt log: %v", err)
+		}
+	}
+	writeAttempt(1775, "20260701-010000", now.Add(-30*time.Minute))
+	writeAttempt(1776, "20260701-000000", now.Add(-3*time.Hour))
+
+	rows := cooldownIssueRowsAt(runsDir, 120, now)
+	if len(rows) != 2 || !rows[0].Cooling || rows[1].Cooling {
+		t.Fatalf("cooldown rows = %+v, want first cooling and second ready", rows)
+	}
+	cooled := recentlyAttemptedIssuesAt(runsDir, 120, now)
+	if !cooled[1775] || cooled[1776] {
+		t.Fatalf("recently attempted = %#v, want only #1775 cooling", cooled)
+	}
+	status := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		status = append(status, row.Map())
+	}
+	out := renderDispatchTick(map[string]any{
+		"verdict":         "WOULD_SPAWN",
+		"ok":              true,
+		"backend":         "claude",
+		"live":            false,
+		"preflight":       map[string]any{"verdict": "SPAWN_OK", "live": 0, "cap": 4},
+		"account":         map[string]any{"tag": "acct", "tier": 1, "model": "claude"},
+		"lane":            "docs",
+		"target_issue":    1777,
+		"issue_title":     "cooldown render",
+		"reason":          "safe to spawn",
+		"cooldown_status": status,
+	})
+	for _, want := range []string{
+		"cooldowns : issue age_s remaining_s next_eligible_utc state",
+		"#1775 1800 5400 2023-11-14T23:43:20Z cooling",
+		"#1776 10800 0 2023-11-14T21:13:20Z ready",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered cooldown status missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestDispatchTickDocsLaneHeldOnlyByDeadNoopReturnsWouldSpawn is the #1398 END-TO-END
 // witness: the full `fak dispatch tick --lane docs` verb -- not just the liveResolutionLanes
 // helper -- must return WOULD_SPAWN, NOT LANE_BUSY, when the docs lane is "held" only by an
