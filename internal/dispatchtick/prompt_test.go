@@ -25,6 +25,20 @@ func TestIssuePromptCitesIssueNumberAsCloseLink(t *testing.T) {
 	}
 }
 
+func TestIssuePromptHasStableIssueLinkRule(t *testing.T) {
+	p := RenderIssuePrompt(sampleIssuePrompt())
+	for _, want := range []string{
+		"commit binding (required for this issue):",
+		"Your commit subject must contain `#465`",
+		"a bare title, another issue number, or only a final message does not bind closure",
+		"The same subject must end with `(fak docs)`",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing stable issue-link rule %q:\n%s", want, p)
+		}
+	}
+}
+
 func TestIssuePromptEmbedsIssueFacts(t *testing.T) {
 	in := sampleIssuePrompt()
 	in.Lane = "gateway"

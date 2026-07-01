@@ -75,6 +75,10 @@ how to work it:
 - Run the gate yourself before claiming done: the lane's own test (`+"`go test ./... -count=1`"+` for the touched package, or the doc/lint check the issue names). A claim with no gate run is not done.
 - Proof by default checklist: visual/TUI bugs need a captured render or screenshot witness; logic/behavior bugs need a failing-before and passing-after repro test; docs/operator changes need a lint, render, or exact-output fixture; shipped/done claims need a witnessed commit tied to `+"`#%[1]d`"+` and `+"`(fak %[3]s)`"+`. Do not stop on narrative alone.
 
+commit binding (required for this issue):
+- Your commit subject must contain `+"`#%[1]d`"+`; a bare title, another issue number, or only a final message does not bind closure.
+- The same subject must end with `+"`(fak %[3]s)`"+` so the closure audit can match the issue to the changed lane.
+
 git laws (enforced below the agent - breaking them refuses your commit):
 - Work on the configured development branch `+"`%[8]s`"+` ONLY. Never branch / new-worktree (the OFF_TRUNK guard refuses it).
 - `+"`git commit -s -- <explicit paths>`"+` - sign-off (DCO), commit BY PATH only. NEVER `+"`git add -A`"+` (shared multi-session tree - a blanket add steals a sibling's in-flight files). Stage only the files you wrote.
