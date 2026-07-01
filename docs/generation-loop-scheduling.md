@@ -162,7 +162,12 @@ work around the failure by creating generation branches.
 
 The next code slice should be small and witnessed. Reasonable options:
 
-- Add a generation decision column to `fak dispatch route --json`.
+- ~~Add a generation decision column to `fak dispatch route --json`.~~ Done:
+  `IssueRoute.Generation` and `RouterLaneGroup.Generation` (both
+  `omitempty`) surface the classified bucket, and `fak dispatch tick`'s
+  `--generation now|next|second-next|future|all` flag threads it through
+  `pickDispatchLane` via `OrderEligibleGenerationCandidates` (fak dispatchtick,
+  see git history for `internal/dispatchtick/generation.go`).
 - Add a dry-run `fak dispatch tick` readout that explains held
   `gen/second-next` and `gen/future` issues.
 - Add a fixture test proving a wave admits disjoint `gen/now` plus `gen/next`
