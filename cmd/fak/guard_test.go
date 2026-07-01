@@ -419,6 +419,31 @@ func TestBuildGuardChildIncludesRestartEnv(t *testing.T) {
 	}
 }
 
+func TestGuardRestartLimitStatusIsManagedContextVisible(t *testing.T) {
+	ev := guardBudgetRestartEvent{
+		FromTraceID: "guard",
+		ToTraceID:   "win-child",
+		Reason:      "BUDGET_CONTEXT_EXHAUSTED",
+		SeedFile:    filepath.Join("seeds", "reset.json"),
+		SeedText:    "carryover",
+	}
+	line := guardRestartLimitStatus(1, ev)
+	for _, want := range []string{
+		"managed-context status",
+		"reset_limit",
+		"limit=1",
+		"reason=BUDGET_CONTEXT_EXHAUSTED",
+		"continuity=degraded",
+		"next_action=",
+		"FAK_RESET_TRACE_ID=win-child",
+		"FAK_RESET_SEED_FILE=" + ev.SeedFile,
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("restart-limit status missing %q:\n%s", want, line)
+		}
+	}
+}
+
 func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
 	const trace = "guard-restart-test"
 	var child string

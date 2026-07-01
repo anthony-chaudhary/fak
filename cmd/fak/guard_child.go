@@ -720,6 +720,26 @@ func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
 	return env
 }
 
+func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
+	reason := strings.TrimSpace(ev.Reason)
+	if reason == "" {
+		reason = "BUDGET_CONTEXT_EXHAUSTED"
+	}
+	continuity := "degraded"
+	if strings.TrimSpace(ev.ToTraceID) == "" && strings.TrimSpace(ev.SeedFile) == "" && strings.TrimSpace(ev.SeedText) == "" {
+		continuity = "blocked"
+	}
+	next := "raise --restart-limit or restart manually after the budget window clears"
+	if trace := strings.TrimSpace(ev.ToTraceID); trace != "" {
+		next = "raise --restart-limit or restart the child with FAK_RESET_TRACE_ID=" + trace
+	}
+	if seed := strings.TrimSpace(ev.SeedFile); seed != "" {
+		next += " and FAK_RESET_SEED_FILE=" + seed
+	}
+	return fmt.Sprintf("fak guard: managed-context status reset_limit limit=%d reason=%s continuity=%s next_action=%q",
+		limit, reason, continuity, next)
+}
+
 // runGuardChildAndReport runs the wrapped agent to completion, tears the gateway down,
 // prints the session's adjudication + journal summary (unless quiet), flushes the durable
 // trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
@@ -766,7 +786,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		case ev := <-restarter.events:
 			if restarter.limit > 0 && restarts >= restarter.limit {
 				if restarter.stderr != nil {
-					fmt.Fprintf(restarter.stderr, "fak guard: restart limit %d reached; leaving child on drained session %s\n", restarter.limit, ev.FromTraceID)
+					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
 				}
 				runErr := <-wait
 				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
