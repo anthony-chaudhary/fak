@@ -39,22 +39,81 @@ ROOT = Path(__file__).resolve().parents[1]
 SCORE_SCHEMA = "fak.vcache.score.v1"
 
 
-def fak_cmd() -> list[str]:
+def binary_build_info(path: str) -> dict:
+    """Return Go build provenance for a built binary when available."""
+    info = {"vcs_revision": None, "vcs_modified": None}
+    try:
+        proc = subprocess.run(
+            ["go", "version", "-m", path],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return info
+    if proc.returncode != 0:
+        return info
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("build\tvcs.revision="):
+            info["vcs_revision"] = line.split("=", 1)[1]
+        elif line.startswith("build\tvcs.modified="):
+            info["vcs_modified"] = line.split("=", 1)[1]
+    return info
+
+
+def built_binary_provenance(cmd: list[str], source: str, path: str) -> dict:
+    p = Path(path)
+    resolved = str(p.resolve()) if p.exists() else path
+    prov = {
+        "cmd": cmd,
+        "path": resolved,
+        "source": source,
+        "source_built": False,
+        "built_from_source": False,
+    }
+    prov.update(binary_build_info(resolved))
+    return prov
+
+
+def go_run_provenance(cmd: list[str]) -> dict:
+    return {
+        "cmd": cmd,
+        "path": "./cmd/fak",
+        "source": "go-run-fallback",
+        "source_built": True,
+        "built_from_source": True,
+        "warning": "go run builds from the current working tree; output may reflect dirty or uncommitted code",
+        "vcs_revision": None,
+        "vcs_modified": None,
+    }
+
+
+def resolve_fak() -> tuple[list[str], dict]:
     """Resolve the fak binary the gate drives, mirroring the dogfood packet's order:
     an explicit $FAK_BIN, then a built binary in the repo/tools/.bin, then $PATH, then
     a `go run` fallback so the gate works in a clean checkout with only the Go toolchain.
     """
     configured = os.environ.get("FAK_BIN", "").strip()
     if configured:
-        return [configured]
+        cmd = [configured]
+        return cmd, built_binary_provenance(cmd, "env:FAK_BIN", configured)
     for rel in ("fak.exe", "fak", "tools/.bin/fak"):
         p = ROOT / rel
         if p.exists():
-            return [str(p)]
+            cmd = [str(p)]
+            return cmd, built_binary_provenance(cmd, f"repo:{rel}", str(p))
     found = shutil.which("fak")
     if found:
-        return [found]
-    return ["go", "run", "./cmd/fak"]
+        cmd = [found]
+        return cmd, built_binary_provenance(cmd, "PATH", found)
+    cmd = ["go", "run", "./cmd/fak"]
+    return cmd, go_run_provenance(cmd)
+
+
+def fak_cmd() -> list[str]:
+    return resolve_fak()[0]
 
 
 def run_score(extra: list[str], timeout: int) -> tuple[int, dict]:
@@ -112,8 +171,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--two-x", type=float, default=2.0,
                     help="the multiplier floor the default score must clear (default 2.0)")
     ap.add_argument("--timeout", type=int, default=120, help="per-command timeout, seconds")
+    ap.add_argument("--strict", action="store_true",
+                    help="reject the go-run source-built fallback; require a resolved binary")
     ap.add_argument("--json", action="store_true", help="emit a machine-readable verdict")
     args = ap.parse_args(argv)
+
+    _, fak = resolve_fak()
+    if args.strict and fak.get("source_built"):
+        msg = "strict mode refuses source-built fak fallback (go run ./cmd/fak)"
+        if args.json:
+            print(json.dumps({"schema": "fak.vcache-scorecard-gate.v1", "ok": False,
+                              "fak": fak, "error": msg}))
+        else:
+            print(f"vcache-scorecard-gate: {msg}", file=sys.stderr)
+        return 2
 
     try:
         fails = check_default(args.two_x, args.timeout) + check_negative(args.timeout)
@@ -121,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         msg = f"vcache-scorecard-gate: could not run fak: {e}"
         if args.json:
             print(json.dumps({"schema": "fak.vcache-scorecard-gate.v1", "ok": False,
-                              "error": str(e)}))
+                              "fak": fak, "error": str(e)}))
         else:
             print(msg, file=sys.stderr)
         return 2
@@ -129,8 +200,12 @@ def main(argv: list[str] | None = None) -> int:
     ok = not fails
     if args.json:
         print(json.dumps({"schema": "fak.vcache-scorecard-gate.v1", "ok": ok,
-                          "two_x_threshold": args.two_x, "failures": fails}))
+                          "two_x_threshold": args.two_x, "failures": fails,
+                          "fak": fak}))
     else:
+        print(f"vcache-scorecard-gate: fak={fak.get('path')} source={fak.get('source')}")
+        if fak.get("source_built"):
+            print(f"vcache-scorecard-gate: WARNING -- {fak.get('warning')}", file=sys.stderr)
         if ok:
             print(f"vcache-scorecard-gate: OK -- vCache 2x floor holds (threshold {args.two_x}x)")
         else:

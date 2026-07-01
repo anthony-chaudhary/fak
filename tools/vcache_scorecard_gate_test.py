@@ -43,6 +43,11 @@ def _restore(orig):
     gate.run_score = orig  # type: ignore[assignment]
 
 
+def _source_built_resolution():
+    fak = gate.go_run_provenance(["go", "run", "./cmd/fak"])
+    return fak["cmd"], fak
+
+
 def test_passes_on_2x_ready():
     orig = gate.run_score
     try:
@@ -128,9 +133,56 @@ def test_json_verdict_shape():
         out = json.loads(buf.getvalue())
         assert out["schema"] == "fak.vcache-scorecard-gate.v1"
         assert out["ok"] is True
+        assert "fak" in out
+        assert "path" in out["fak"]
+        assert "source_built" in out["fak"]
         assert out["failures"] == []
     finally:
         _restore(orig)
+
+
+def test_json_records_source_built_fallback():
+    orig_run = gate.run_score
+    orig_resolve = gate.resolve_fak
+    try:
+        _patch({"default": (0, READY), "neg": (1, {"two_x_better": False})})
+        gate.resolve_fak = _source_built_resolution  # type: ignore[assignment]
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate.main(["--json"])
+        assert rc == 0
+        out = json.loads(buf.getvalue())
+        assert out["ok"] is True
+        assert out["fak"]["source_built"] is True
+        assert out["fak"]["built_from_source"] is True
+        assert out["fak"]["source"] == "go-run-fallback"
+        assert "dirty or uncommitted" in out["fak"]["warning"]
+    finally:
+        gate.resolve_fak = orig_resolve  # type: ignore[assignment]
+        _restore(orig_run)
+
+
+def test_strict_rejects_source_built_fallback():
+    orig_run = gate.run_score
+    orig_resolve = gate.resolve_fak
+    try:
+        _patch({"default": (0, READY), "neg": (1, {"two_x_better": False})})
+        gate.resolve_fak = _source_built_resolution  # type: ignore[assignment]
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate.main(["--json", "--strict"])
+        assert rc == 2
+        out = json.loads(buf.getvalue())
+        assert out["ok"] is False
+        assert out["fak"]["source_built"] is True
+        assert "strict mode refuses" in out["error"]
+    finally:
+        gate.resolve_fak = orig_resolve  # type: ignore[assignment]
+        _restore(orig_run)
 
 
 def _run() -> int:
