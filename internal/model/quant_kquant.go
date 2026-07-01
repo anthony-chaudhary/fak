@@ -198,18 +198,10 @@ func kQuantMatRowsInto(qt *kQuantTensor, x, y []float32) {
 		if qt.kind == kindQ6K {
 			ranger = q6kMatRowsRangeInt8
 		}
-		if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-			ranger(qt, qv, y, 0, qt.out)
-			return
-		}
-		parFor(qt.out, numWorkers, func(lo, hi int) { ranger(qt, qv, y, lo, hi) })
+		parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { ranger(qt, qv, y, lo, hi) })
 		return
 	}
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		kQuantMatRowsRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { kQuantMatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { kQuantMatRowsRange(qt, x, y, lo, hi) })
 }
 
 // kQuantMatRowsRange computes y[lo:hi] with the SAME fixed-order four-accumulator dot and

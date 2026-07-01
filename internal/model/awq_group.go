@@ -89,11 +89,7 @@ func awqGroupMatRows(qt *awqGroupTensor, x []float32) []float32 {
 // awqGroupMatRowsInto computes y = W·x writing into a caller-provided buffer.
 func awqGroupMatRowsInto(qt *awqGroupTensor, x, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		awqGroupMatRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { awqGroupMatRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { awqGroupMatRange(qt, x, y, lo, hi) })
 }
 
 // awqGroupMatRange computes y[lo:hi] by dequantizing each row and dotting with x.
@@ -121,11 +117,7 @@ func awqGroupGemm(qt *awqGroupTensor, X []float32, P int) []float32 {
 // awqGroupGemmInto is awqGroupGemm writing into a caller-provided Y buffer.
 func awqGroupGemmInto(qt *awqGroupTensor, X []float32, P int, Y []float32) {
 	Y = Y[:P*qt.out]
-	if numWorkers <= 1 || qt.out*qt.in*P < parThreshold {
-		awqGroupGemmRange(qt, X, P, Y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { awqGroupGemmRange(qt, X, P, Y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in*P, func(lo, hi int) { awqGroupGemmRange(qt, X, P, Y, lo, hi) })
 }
 
 // awqGroupGemmRange computes Y[t*out+o] for o in [lo,hi), all t in [0,P).

@@ -78,11 +78,7 @@ func awqMatRows(qt *awqTensor, x []float32) []float32 {
 // awqMatRowsInto computes y = Awx where A is the AWQ 4-bit weight matrix.
 func awqMatRowsInto(qt *awqTensor, x, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		awxMatRowsRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { awxMatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { awxMatRowsRange(qt, x, y, lo, hi) })
 }
 
 // awxMatRowsRange computes y[lo:hi] by dequantizing each row and dotting with x.
@@ -116,11 +112,7 @@ func awqGemm(qt *awqTensor, X []float32, P int) []float32 {
 // awqGemmInto is awqGemm writing into a caller-provided Y buffer.
 func awqGemmInto(qt *awqTensor, X []float32, P int, Y []float32) {
 	Y = Y[:P*qt.out]
-	if numWorkers <= 1 || qt.out*qt.in*P < parThreshold {
-		awxGemmRange(qt, X, P, Y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { awxGemmRange(qt, X, P, Y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in*P, func(lo, hi int) { awxGemmRange(qt, X, P, Y, lo, hi) })
 }
 
 // awxGemmRange computes Y[t*out+o] for o in [lo,hi), all t in [0,P).

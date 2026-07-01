@@ -97,13 +97,7 @@ func NewSynthetic(cfg Config) *Model {
 			ts{p + "input_layernorm.weight", []int{H}},
 		)
 		if cfg.isLinearAttnLayer(l) {
-			nK := cfg.LinearNumKeyHeads
-			nV := cfg.LinearNumValueHeads
-			kHd := cfg.LinearKeyHeadDim
-			vHd := cfg.LinearValueHeadDim
-			keyDim := nK * kHd
-			valDim := nV * vHd
-			convDim := 2*keyDim + valDim
+			_, nV, _, vHd, _, valDim, convDim := cfg.linearAttnDims()
 			K := cfg.LinearConvKernelDim
 			tensors = append(tensors,
 				ts{p + "linear_attn.in_proj_qkv.weight", []int{convDim, H}},

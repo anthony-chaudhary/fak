@@ -66,13 +66,7 @@ func (m *Model) residentMatMulBatch(name string, X []float32, out, in, P int) []
 func (m *Model) linearAttnSeqBatched(l int, xn [][]float32) [][]float32 {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
-	nK := cfg.LinearNumKeyHeads
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	keyDim := nK * kHd
-	valDim := nV * vHd
-	convDim := 2*keyDim + valDim
+	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	seq := len(xn)
 	eps := float32(cfg.RMSNormEps)

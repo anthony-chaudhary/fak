@@ -312,6 +312,21 @@ func parFor(n, workers int, body func(lo, hi int)) {
 	parDispatchMu.Unlock()
 }
 
+// parForRange runs body over [0,n) exactly once per index, deciding serial-vs-parallel the
+// way every row-parallel quant kernel does: run inline when parallelism is disabled
+// (numWorkers <= 1) or the work estimate is below parThreshold (goroutine dispatch isn't
+// worth it for a tiny op), otherwise split across numWorkers via parFor. Both paths call
+// body with the same [lo,hi) contract, so the result is bit-identical to the serial reference
+// regardless of which branch runs. work is the caller's cost estimate (typically out×in,
+// or out×in×P for a batched GEMM).
+func parForRange(n, work int, body func(lo, hi int)) {
+	if numWorkers <= 1 || work < parThreshold {
+		body(0, n)
+		return
+	}
+	parFor(n, numWorkers, body)
+}
+
 // parMatRows is matRows parallelized across OUTPUT ROWS. y[o] = sum_i w[o*in+i]*x[i] is
 // computed by exactly one worker in the SAME i-order as the serial matRows, so the
 // result is BIT-IDENTICAL regardless of worker count. This is the decode-path speedup:

@@ -154,13 +154,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func([]float32, int, int) *q8Panel) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
-	nK := cfg.LinearNumKeyHeads
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	keyDim := nK * kHd
-	valDim := nV * vHd
-	convDim := 2*keyDim + valDim
+	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	eps := float32(cfg.RMSNormEps)
 	p := func(str string) string { return layerName(l, str) }

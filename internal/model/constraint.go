@@ -153,35 +153,10 @@ func (s *Session) GenerateConstrained(prompt []int, n int, c *DecodeConstraint) 
 // slice, a missing lane entry, or an inert constraint is the identity: selection falls
 // through sampleConstrained's bit-exact-off path and matches GenerateBatch token-for-token.
 func (bs *BatchSession) GenerateBatchConstrained(prompts [][]int, n int, constraints []*DecodeConstraint) [][]int {
-	B := len(bs.Seqs)
 	logits := bs.PrefillEach(prompts)
-	out := make([][]int, B)
-	done := make([]bool, B)
-	next := make([]int, B)
-	active := make([]bool, B)
-	for i := 0; i < n; i++ {
-		anyLive := false
-		for b := 0; b < B; b++ {
-			active[b] = false
-			if done[b] {
-				continue
-			}
-			t := sampleConstrained(out[b], logits[b], constraintForLane(constraints, b))
-			out[b] = append(out[b], t)
-			next[b] = t
-			if bs.M.Cfg.IsEOS(t) {
-				done[b] = true
-			} else {
-				active[b] = true
-				anyLive = true
-			}
-		}
-		if !anyLive {
-			break
-		}
-		logits = bs.StepBatchActive(next, active)
-	}
-	return out
+	return bs.generateBatchDecode(logits, n, func(b int, prior []int, laneLogits []float32) int {
+		return sampleConstrained(prior, laneLogits, constraintForLane(constraints, b))
+	})
 }
 
 func constraintForLane(constraints []*DecodeConstraint, lane int) *DecodeConstraint {

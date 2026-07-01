@@ -140,8 +140,21 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 // continuous-batching scheduler modelengine.NativeScheduler runs over the same StepBatch
 // primitive); it just no longer burns decode compute on slots that are already done.
 func (bs *BatchSession) GenerateBatch(prompts [][]int, n int) [][]int {
-	B := len(bs.Seqs)
 	logits := bs.PrefillEach(prompts)
+	return bs.generateBatchDecode(logits, n, func(_ int, _ []int, laneLogits []float32) int {
+		return argmaxF32(laneLogits)
+	})
+}
+
+// generateBatchDecode is the shared lockstep ragged-batch decode loop behind GenerateBatch
+// and GenerateBatchConstrained. After prefill produced logits, it decodes up to n tokens for
+// every lane, selecting each lane's next id via pick(lane, prior, laneLogits) — greedy argmax
+// or a per-lane native constraint — and RECLAIMS a lane the instant it emits EOS: the slot
+// leaves the active set (active[b] stays false) so it is neither decoded nor re-fed its own
+// EOS, keeping the batch rectangular. Each surviving lane's output stays identical to serial
+// Generate. The two callers differ only in pick.
+func (bs *BatchSession) generateBatchDecode(logits [][]float32, n int, pick func(lane int, prior []int, laneLogits []float32) int) [][]int {
+	B := len(bs.Seqs)
 	out := make([][]int, B)
 	done := make([]bool, B)
 	next := make([]int, B)
@@ -153,7 +166,7 @@ func (bs *BatchSession) GenerateBatch(prompts [][]int, n int) [][]int {
 			if done[b] {
 				continue // finished slot is reclaimed: not decoded, not re-fed its EOS
 			}
-			t := argmaxF32(logits[b])
+			t := pick(b, out[b], logits[b])
 			out[b] = append(out[b], t)
 			next[b] = t
 			if bs.M.Cfg.IsEOS(t) {

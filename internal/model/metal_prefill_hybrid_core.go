@@ -149,13 +149,7 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 // reads.
 func (s *Session) prefillQwen35LinearLayerMM(l int, Xn []float32, P int, mm hybridGemmFn) []float32 {
 	m, cfg := s.M, s.M.Cfg
-	nK := cfg.LinearNumKeyHeads
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	keyDim := nK * kHd
-	valDim := nV * vHd
-	convDim := 2*keyDim + valDim
+	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	H := cfg.HiddenSize
 	eps := float32(cfg.RMSNormEps)

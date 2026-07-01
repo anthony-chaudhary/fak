@@ -132,18 +132,10 @@ func q4kMatRowsInto(qt *q4kTensor, x, y []float32) {
 		// 32-wide sub-blocks align 1:1 with q8Vec's blocks, so no padding/re-quant. The f32 path
 		// below is untouched and stays byte-identical (TestQ4KMatRowsMatchesF32).
 		qv := quantizeVecQ8(x)
-		if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-			q4kMatRowsRangeInt8(qt, qv, y, 0, qt.out)
-			return
-		}
-		parFor(qt.out, numWorkers, func(lo, hi int) { q4kMatRowsRangeInt8(qt, qv, y, lo, hi) })
+		parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q4kMatRowsRangeInt8(qt, qv, y, lo, hi) })
 		return
 	}
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		q4kMatRowsRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { q4kMatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q4kMatRowsRange(qt, x, y, lo, hi) })
 }
 
 // q4kMatRowsRange computes y[lo:hi] by dequanting each super-block inline and dotting it
@@ -219,18 +211,10 @@ func q4kGemmInto(qt *q4kTensor, X []float32, P int, Y []float32) {
 		for t := 0; t < P; t++ {
 			qvs[t] = quantizeVecQ8(X[t*qt.in : (t+1)*qt.in])
 		}
-		if numWorkers <= 1 || out*qt.in*P < parThreshold {
-			q4kGemmRangeInt8(qt, qvs, P, Y, 0, out)
-			return
-		}
-		parFor(out, numWorkers, func(lo, hi int) { q4kGemmRangeInt8(qt, qvs, P, Y, lo, hi) })
+		parForRange(out, out*qt.in*P, func(lo, hi int) { q4kGemmRangeInt8(qt, qvs, P, Y, lo, hi) })
 		return
 	}
-	if numWorkers <= 1 || out*qt.in*P < parThreshold {
-		q4kGemmRange(qt, X, P, Y, 0, out)
-		return
-	}
-	parFor(out, numWorkers, func(lo, hi int) { q4kGemmRange(qt, X, P, Y, lo, hi) })
+	parForRange(out, out*qt.in*P, func(lo, hi int) { q4kGemmRange(qt, X, P, Y, lo, hi) })
 }
 
 type q4kExtractedGemm struct {

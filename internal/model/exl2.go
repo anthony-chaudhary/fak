@@ -155,11 +155,7 @@ func exl2MatRows(qt *exl2Tensor, x []float32) []float32 {
 // exl2MatRowsInto computes y = W·x into a caller-provided buffer.
 func exl2MatRowsInto(qt *exl2Tensor, x, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		exl2MatRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { exl2MatRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { exl2MatRange(qt, x, y, lo, hi) })
 }
 
 // exl2MatRange computes y[lo:hi] by dequantizing each row and dotting with x.
@@ -187,11 +183,7 @@ func exl2Gemm(qt *exl2Tensor, X []float32, P int) []float32 {
 // exl2GemmInto is exl2Gemm writing into a caller-provided Y buffer.
 func exl2GemmInto(qt *exl2Tensor, X []float32, P int, Y []float32) {
 	Y = Y[:P*qt.out]
-	if numWorkers <= 1 || qt.out*qt.in*P < parThreshold {
-		exl2GemmRange(qt, X, P, Y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { exl2GemmRange(qt, X, P, Y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in*P, func(lo, hi int) { exl2GemmRange(qt, X, P, Y, lo, hi) })
 }
 
 // exl2GemmRange computes Y[t*out+o] for o in [lo,hi), all t in [0,P).

@@ -36,11 +36,7 @@ func batchExpertRows(K, rowsPer, inDim int, fn func(e, rlo, rhi int)) {
 			g = e*rowsPer + rhi
 		}
 	}
-	if numWorkers <= 1 || total*inDim < parThreshold {
-		body(0, total)
-		return
-	}
-	parFor(total, numWorkers, body)
+	parForRange(total, total*inDim, body)
 }
 
 // q4kBatchRows computes, for K resident q4kTensors that all share the SAME activation xn

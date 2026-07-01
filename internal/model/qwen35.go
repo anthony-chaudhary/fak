@@ -253,6 +253,21 @@ func copyLinearConvRow(dst, row []float32) []float32 {
 	return dst
 }
 
+// linearAttnDims derives the per-layer Gated-DeltaNet linear-attention head geometry from
+// Config: the key/value head counts (nK/nV) and per-head dims (kHd/vHd), and the derived
+// projection widths keyDim = nK*kHd, valDim = nV*vHd, convDim = 2*keyDim+valDim. Every
+// linear-attn prefill/decode path reads exactly this geometry, so the derivation lives once.
+func (cfg Config) linearAttnDims() (nK, nV, kHd, vHd, keyDim, valDim, convDim int) {
+	nK = cfg.LinearNumKeyHeads
+	nV = cfg.LinearNumValueHeads
+	kHd = cfg.LinearKeyHeadDim
+	vHd = cfg.LinearValueHeadDim
+	keyDim = nK * kHd
+	valDim = nV * vHd
+	convDim = 2*keyDim + valDim
+	return
+}
+
 // linearAttnSeq is the Gated-DeltaNet linear-attention token mixer over a whole sequence
 // of already-(input_layernorm)-normalized inputs. It returns the per-position out_proj
 // results (pre residual). The recurrent state is initialized to zero (cacheless prefill);
@@ -260,13 +275,7 @@ func copyLinearConvRow(dst, row []float32) []float32 {
 func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
-	nK := cfg.LinearNumKeyHeads
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	keyDim := nK * kHd
-	valDim := nV * vHd
-	convDim := 2*keyDim + valDim
+	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	seq := len(xn)
 	eps := float32(cfg.RMSNormEps)
@@ -399,13 +408,7 @@ func (m *Model) linearAttnSeq(l int, xn [][]float32) [][]float32 {
 func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
-	nK := cfg.LinearNumKeyHeads
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	keyDim := nK * kHd
-	valDim := nV * vHd
-	convDim := 2*keyDim + valDim
+	nK, nV, kHd, vHd, keyDim, valDim, convDim := cfg.linearAttnDims()
 	K := cfg.LinearConvKernelDim
 	eps := float32(cfg.RMSNormEps)
 	p := func(str string) string { return layerName(l, str) }

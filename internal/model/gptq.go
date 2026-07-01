@@ -497,11 +497,7 @@ func gptqMatRows(qt *gptqTensor, x []float32) []float32 {
 
 func gptqMatRowsInto(qt *gptqTensor, x, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		gptqMatRowsRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { gptqMatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { gptqMatRowsRange(qt, x, y, lo, hi) })
 }
 
 func gptqMatRowsRange(qt *gptqTensor, x, y []float32, lo, hi int) {

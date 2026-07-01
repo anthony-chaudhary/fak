@@ -150,11 +150,7 @@ func q2MatRows(qt *q2Tensor, x []float32) []float32 {
 
 func q2MatRowsInto(qt *q2Tensor, x, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
-		q2MatRowsRange(qt, x, y, 0, qt.out)
-		return
-	}
-	parFor(qt.out, numWorkers, func(lo, hi int) { q2MatRowsRange(qt, x, y, lo, hi) })
+	parForRange(qt.out, qt.out*qt.in, func(lo, hi int) { q2MatRowsRange(qt, x, y, lo, hi) })
 }
 
 func q2MatRowsRange(qt *q2Tensor, x, y []float32, lo, hi int) {
