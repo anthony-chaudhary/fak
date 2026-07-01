@@ -213,16 +213,11 @@ func BuildX() scorecard.Payload {
 	face := Coverage()
 
 	undefined := undefinedXCells(cells)
-	kpiUndefined := scorecard.KPI{
-		Key:    "no_undefined_cross_cells",
-		Group:  "correctness",
-		Detail: fmt.Sprintf("%d (family,backend,precision) cross cell(s) reachable with neither a fence nor a CI witness", len(undefined)),
-		Score:  pct(len(cells)-len(undefined), len(cells)),
-	}
+	defectLabels := make([]string, 0, len(undefined))
 	for _, c := range undefined {
-		kpiUndefined.Defects = append(kpiUndefined.Defects,
-			fmt.Sprintf("%s × %s × %s is reachable but neither fenced nor witnessed", c.Family, c.Backend, c.Precision))
+		defectLabels = append(defectLabels, fmt.Sprintf("%s × %s × %s", c.Family, c.Backend, c.Precision))
 	}
+	kpiUndefined := undefinedCorrectnessKPI("no_undefined_cross_cells", "(family,backend,precision) cross cell(s)", len(cells), defectLabels)
 
 	// Cross-support coverage is advisory: a FENCED (backend refuses the precision) or
 	// PROOF-PATH-ONLY cell is honest, not a defect. Surfacing the gaps as SOFT keeps the gate

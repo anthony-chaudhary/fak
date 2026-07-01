@@ -241,16 +241,11 @@ func Build() scorecard.Payload {
 	counts := countBy(cells)
 
 	undefined := undefinedCells(cells)
-	kpiUndefined := scorecard.KPI{
-		Key:    "no_undefined_cells",
-		Group:  "correctness",
-		Detail: fmt.Sprintf("%d (family,backend) cell(s) reachable with neither a fence nor a CI witness", len(undefined)),
-		Score:  pct(len(cells)-len(undefined), len(cells)),
-	}
+	defectLabels := make([]string, 0, len(undefined))
 	for _, c := range undefined {
-		kpiUndefined.Defects = append(kpiUndefined.Defects,
-			fmt.Sprintf("%s × %s is reachable but neither fenced nor witnessed", c.Family, c.Backend))
+		defectLabels = append(defectLabels, fmt.Sprintf("%s × %s", c.Family, c.Backend))
 	}
+	kpiUndefined := undefinedCorrectnessKPI("no_undefined_cells", "(family,backend) cell(s)", len(cells), defectLabels)
 
 	// Accelerated coverage is advisory: a FENCED or PROOF-PATH-ONLY cell is honest, not a
 	// defect. Surfacing it as SOFT keeps the gate from reding on honest gaps while still
@@ -321,4 +316,24 @@ func pct(n, total int) float64 {
 		return 100
 	}
 	return 100 * float64(n) / float64(total)
+}
+
+// undefinedCorrectnessKPI builds the shared "no undefined cells" correctness KPI that both
+// the 2-D matrix (Build) and the 3-D cross tensor (BuildX) emit. key is the KPI id, cellNoun
+// names the cell kind in the Detail line (e.g. "(family,backend) cell(s)"), total is the whole
+// axis size, and defectLabels are the pre-formatted "A × B[ × C]" labels for each undefined
+// cell (empty/nil when clean — the cell types differ, so each caller formats its own labels).
+// The Group, Detail, Score, and per-defect suffix are byte-identical to the form both callers
+// inlined before this extraction.
+func undefinedCorrectnessKPI(key, cellNoun string, total int, defectLabels []string) scorecard.KPI {
+	kpi := scorecard.KPI{
+		Key:    key,
+		Group:  "correctness",
+		Detail: fmt.Sprintf("%d %s reachable with neither a fence nor a CI witness", len(defectLabels), cellNoun),
+		Score:  pct(total-len(defectLabels), total),
+	}
+	for _, label := range defectLabels {
+		kpi.Defects = append(kpi.Defects, label+" is reachable but neither fenced nor witnessed")
+	}
+	return kpi
 }
