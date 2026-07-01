@@ -790,6 +790,10 @@ func cmdGuard(argv []string) {
 	if *resourceStats {
 		resSampler = harnessres.New()
 		resSampler.Start(guardResourceSampleInterval)
+		// Expose the live harness resource snapshot on the gateway's /metrics as the
+		// fak_harness_* family, so a running session's CPU/mem/IO is scrapeable — not
+		// only printed at exit (epic #2044 / #2047). Pull-only: rendered per scrape.
+		srv.SetHarnessMetricsProvider(func() string { return resSampler.Snapshot().PrometheusText() })
 	}
 
 	// Deferred session durability (#1833): only now — after the gateway is bound and
@@ -932,6 +936,7 @@ func cmdGuard(argv []string) {
 		}
 		printGuardCodexNote(os.Stderr, codexInstall)
 		printGuardMCPNote(os.Stderr, mcpInstall)
+		printGuardCapabilitiesNote(os.Stderr, mcpInstall)
 		switch {
 		case debugStatsStderr:
 			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")

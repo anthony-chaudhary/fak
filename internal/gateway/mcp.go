@@ -391,6 +391,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
 			return s.featureQuery(req)
 		})
+	case "fak_capabilities":
+		return mcpDecodeCall[CapabilitiesRequest](p.Arguments, "fak_capabilities", func(req CapabilitiesRequest) (any, error) {
+			return s.capabilities(req)
+		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -670,6 +674,11 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_feature_query",
 			"description": "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
 			"inputSchema": featureQueryInputSchema,
+		},
+		{
+			"name":        "fak_capabilities",
+			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
+			"inputSchema": capabilitiesInputSchema,
 		},
 	}
 }

@@ -193,6 +193,8 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "feature":
 		cmdFeature(os.Args[2:])
+	case "capabilities":
+		cmdCapabilities(os.Args[2:])
 	case "index":
 		cmdIndex(os.Args[2:])
 	case "workflow":
@@ -289,6 +291,28 @@ func main() {
 		cmdFleetAccounts(os.Args[2:])
 	case "fleet":
 		cmdFleet(os.Args[2:])
+	case "memory-read":
+		cmdMemoryRead(os.Args[2:])
+	case "node-compare":
+		cmdNodeCompare(os.Args[2:])
+	case "amd-gpu-facts":
+		cmdAMDGPUFacts(os.Args[2:])
+	case "plan-audit":
+		cmdPlanAudit(os.Args[2:])
+	case "memgate":
+		cmdMemgate(os.Args[2:])
+	case "memory-stability-governor":
+		cmdMemoryStabilityGovernor(os.Args[2:])
+	case "readme-visual-audit":
+		cmdReadmeVisualAudit(os.Args[2:])
+	case "qwen36-parity-witness-gate":
+		cmdQwen36ParityWitnessGate(os.Args[2:])
+	case "qwen36-node-reports":
+		cmdQwen36NodeReports(os.Args[2:])
+	case "tool-coverage-audit":
+		cmdToolCoverageAudit(os.Args[2:])
+	case "commit-subject-coverage":
+		cmdCommitSubjectCoverage(os.Args[2:])
 	case "garden":
 		cmdGarden(os.Args[2:])
 	case "cadence":

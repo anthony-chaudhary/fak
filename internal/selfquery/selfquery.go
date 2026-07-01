@@ -490,7 +490,7 @@ func toolEffect(name string) (Effect, string) {
 		return EffectPropose, "memq.apply"
 	case "fak_adjudicate", "fak_read", "fak_memory_drivers", "fak_memory_explain", "fak_tools_search",
 		"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs", "fak_index_work",
-		"fak_feature_query":
+		"fak_feature_query", "fak_capabilities":
 		return EffectRead, ""
 	default:
 		if strings.Contains(name, "run") || strings.Contains(name, "syscall") || strings.Contains(name, "admit") ||
