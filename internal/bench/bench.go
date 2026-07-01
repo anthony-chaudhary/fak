@@ -125,9 +125,11 @@ func RunArm(ctx context.Context, t *Trace, engineID string, vdsoOn bool, label s
 		if err != nil {
 			continue
 		}
-		in, out := tokens(r)
+		in, out, cacheRead, cacheCreate := tokens(r)
 		arm.InTokens += in
 		arm.OutTokens += out
+		arm.ProviderCacheReadTokens += cacheRead
+		arm.ProviderCacheCreationTokens += cacheCreate
 	}
 	cc := k.Counters()
 	arm.EngineCalls = cc.EngineCalls
@@ -141,13 +143,21 @@ func RunArm(ctx context.Context, t *Trace, engineID string, vdsoOn bool, label s
 	return arm, nil
 }
 
-func tokens(r *abi.Result) (in, out int64) {
+// tokens extracts the 4-way usage split from a result's Meta: the mock engine
+// stamps only input_tokens/output_tokens (cacheRead/cacheCreate default to 0), while
+// a CassetteEngine built from a captured session (engine.NewCassette) additionally
+// carries cache_read_tokens/cache_creation_tokens — the real provider cache axes
+// (issue #1846) — so an ablate arm replayed against a session cassette reports the
+// SAME 4 columns the session was billed on.
+func tokens(r *abi.Result) (in, out, cacheRead, cacheCreate int64) {
 	if r == nil || r.Meta == nil {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 	in, _ = strconv.ParseInt(r.Meta["input_tokens"], 10, 64)
 	out, _ = strconv.ParseInt(r.Meta["output_tokens"], 10, 64)
-	return in, out
+	cacheRead, _ = strconv.ParseInt(r.Meta["cache_read_tokens"], 10, 64)
+	cacheCreate, _ = strconv.ParseInt(r.Meta["cache_creation_tokens"], 10, 64)
+	return in, out, cacheRead, cacheCreate
 }
 
 // MeasureSpawnedBaseline spawns `binPath hook` once per sample, piping a call on
