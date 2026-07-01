@@ -205,6 +205,13 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/FRONTIERSWE-SCORING-PARITY.md",
 	},
 	{
+		Name: "livecodebench", Kind: KindCmd, Need: NeedNone, Level: LevelSmoke,
+		Summary: "Honesty-fenced LiveCodeBench fixture smoke: shape-validates the committed fixture and refuses any result claim without official lcb_runner grading (epic #2085).",
+		Run:     "go run ./cmd/livecodebench -check",
+		Flags:   []string{"-fixture  -  committed smoke fixture path", "-check  -  fail on shape drift or a result_claim_allowed fixture", "-json  -  print the smoke report as JSON"},
+		Doc:     "docs/benchmarks/LIVECODEBENCH-RUNBOOK.md",
+	},
+	{
 		Name: "longctxbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Renders the exact contention-free work floor for the long-context regime.",
 		Run:     "go run ./cmd/longctxbench",
