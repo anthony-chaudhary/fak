@@ -201,6 +201,53 @@ body:
         - `cmd/fak/issue_contract.go`
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### Hot-tree landing plan
+
+        This tree is usually dirty — a peer may hold uncommitted hunks in the files this fix
+        touches, and `OFF_TRUNK` forbids escaping to a worktree. Do the collision math ONCE, now,
+        so the agent who picks this up doesn't have to re-derive it from a live tree.
+
+        Compute it from `dos.toml` + `git status` (or `fak issue landing-plan <paths...>` once it
+        exists, see #1838). Fill in the fields below.
+  - type: textarea
+    id: hot-tree-owning-lanes
+    attributes:
+      label: Owning lane(s)
+      description: The dos.toml lane key for EACH file the fix touches (the actual lane, not prose). One line per lane.
+      placeholder: |
+        - `agent` — internal/agent/** (retry.go, stream.go) — usually clean
+        - `cmd` — cmd/fak/guard.go — frequently HOT
+    validations:
+      required: true
+  - type: input
+    id: hot-tree-contention-check
+    attributes:
+      label: Contention check
+      description: The exact command(s) a picker runs to learn if the lane is hot NOW.
+      placeholder: "dos arbitrate --workspace . --lane cmd  &&  git status -sb -- cmd/fak/guard.go"
+    validations:
+      required: true
+  - type: textarea
+    id: hot-tree-partition
+    attributes:
+      label: Partition plan (clean-now vs hot-later)
+      description: If the fix spans a hot lane and a clean lane, which sub-part lands independently in the clean lane vs which must wait for the hot lane to quiesce. This is the field that turns "blocked" into "half-landable now." Write "single clean lane — land directly" or "single hot lane — must wait / pair with peer" if it doesn't split.
+      placeholder: |
+        - CLEAN NOW: the seam in internal/agent/** (part 1) — pure, testable, land immediately.
+        - HOT LATER: the production wiring in cmd/fak/guard.go (part 2) — defer until `cmd` quiesces.
+    validations:
+      required: true
+  - type: input
+    id: hot-tree-commit-recipe
+    attributes:
+      label: Commit recipe
+      description: The narrow-pathspec commit (never `git add -A`; no worktrees — OFF_TRUNK). Reconcile a diverged tree in place.
+      placeholder: 'fak commit --path internal/agent/retry.go -m "feat(agent): ... (fak agent)"'
+    validations:
+      required: true
   - type: textarea
     id: boundary-notes
     attributes:
