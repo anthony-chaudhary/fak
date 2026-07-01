@@ -174,11 +174,21 @@ func plannerRetryBudget() time.Duration {
 // needs a beat to refresh and rewrite .credentials.json. A single boot-time-style read at
 // the 401 instant usually still sees the SAME stale token, so a one-shot refresh gives up
 // and the 401 surfaces to the wrapped agent — which then drops into its OWN /login and the
-// live guarded session is lost. Polling for ~a few seconds lets the re-login land and the
+// live guarded session is lost. Polling for a few seconds lets the re-login land and the
 // session self-heal in place. The common case (token already rotated on disk) returns on
 // the first poll with zero added latency, and a genuinely-dead credential with no re-login
 // coming still fails within this bounded window rather than looping forever.
-const defaultAuthRefreshWindow = 3 * time.Second
+//
+// Raised from 3s to 10s (#1834): 3s assumed an INTERACTIVE Claude Code process was always
+// concurrently rewriting .credentials.json, which a headless `fak accounts launch` never has
+// — every headless 401 was timing out this window by construction. cmd/fak/guard.go now runs
+// a PROACTIVE freshness check (accounts.NewRehydrateCredRung, #1183) before the first request
+// so a headless launch should rarely reach this reactive path at all; this default is now
+// purely a backstop for a refresh that lands slightly after the proactive check gave up (or
+// for callers that bypass guard's launch path entirely), so it is widened rather than left at
+// the too-tight value the fleet was measurably blocked on. FAK_AUTH_REFRESH_WINDOW still
+// overrides it for an operator who needs to tune either window without a rebuild.
+const defaultAuthRefreshWindow = 10 * time.Second
 
 // maxAuthRefreshWindow clamps FAK_AUTH_REFRESH_WINDOW so a fat-fingered value cannot wedge
 // a turn waiting on a re-login that is never coming; the caller's context is the real
