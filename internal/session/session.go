@@ -202,6 +202,19 @@ type Pace struct {
 	MinTurnGapMs     int `json:"min_turn_gap_ms"`     // 0 = no inter-turn delay
 }
 
+// Assumption is one active fact-like row the session is relying on. It is data-only:
+// the planner/self-query leaves decide whether a row is safe to use; the session
+// table keeps the visible ledger so operator surfaces can show what is being
+// assumed without reading hidden transcript text.
+type Assumption struct {
+	Key        string  `json:"key"`
+	Statement  string  `json:"statement,omitempty"`
+	Source     string  `json:"source"` // user_stated, inferred, queried, witnessed, stale, unknown
+	Confidence float64 `json:"confidence,omitempty"`
+	Expiry     string  `json:"expiry,omitempty"`
+	SourceRef  string  `json:"source_ref,omitempty"`
+}
+
 // State is the full drive record for one session, keyed by TraceID. It carries its
 // own TraceID so a Snapshot row is self-describing for a scheduler (which sorts a
 // []State without re-keying). Rev is a monotonic revision bumped on every write —
@@ -265,6 +278,11 @@ type State struct {
 	// envelope behaves byte-identically to a pre-#1584 State (omitzero keeps the wire
 	// shape unchanged when unused).
 	Time TimeBudget `json:"time,omitempty,omitzero"`
+	// Assumptions is the live, visible ledger of facts the session is relying on.
+	// It carries provenance, confidence, and expiry only; it never carries hidden
+	// transcript bytes and it does not gate behavior by itself. Empty means the
+	// session has no active assumptions to report.
+	Assumptions []Assumption `json:"assumptions,omitempty"`
 	// ResetTransaction is the latest context-budget reset row that minted this trace.
 	// It binds old trace, new trace, seed digest, contributor list, omitted spans, and
 	// fresh budget re-arm to the child state, so a continuation can be audited from

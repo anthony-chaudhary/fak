@@ -435,7 +435,21 @@ type SessionState struct {
 	Generation       int                     `json:"generation,omitempty"`
 	CacheAffinity    SessionCacheAffinity    `json:"cache_affinity,omitempty,omitzero"`
 	ResetTransaction SessionResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	Assumptions      []SessionAssumption     `json:"assumptions,omitempty"`
 	Rev              uint64                  `json:"rev"`
+}
+
+// SessionAssumption is the gateway's wire-neutral projection of an active
+// session assumption. The host owns how rows are minted; gateway only carries
+// provenance, confidence, and expiry to operator/debug surfaces.
+type SessionAssumption struct {
+	TraceID    string  `json:"trace_id,omitempty"`
+	Key        string  `json:"key"`
+	Statement  string  `json:"statement,omitempty"`
+	Source     string  `json:"source"` // user_stated, inferred, queried, witnessed, stale, unknown
+	Confidence float64 `json:"confidence,omitempty"`
+	Expiry     string  `json:"expiry,omitempty"`
+	SourceRef  string  `json:"source_ref,omitempty"`
 }
 
 // SessionCacheAffinity is the gateway wire form of session.CacheAffinityDecision.

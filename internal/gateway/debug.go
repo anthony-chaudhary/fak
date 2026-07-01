@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"runtime"
 	"strings"
@@ -24,6 +25,7 @@ type debugVarsResponse struct {
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
+	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
 	Metrics          debugMetricsVars               `json:"metrics"`
 }
 
@@ -301,10 +303,14 @@ func (s *Server) handleDebugVars(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.debugVars(time.Now()))
+	writeJSON(w, http.StatusOK, s.debugVarsContext(r.Context(), time.Now()))
 }
 
 func (s *Server) debugVars(now time.Time) debugVarsResponse {
+	return s.debugVarsContext(context.Background(), now)
+}
+
+func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsResponse {
 	m := s.metrics
 	if m == nil {
 		m = newGatewayMetrics(now)
@@ -387,6 +393,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
+		Assumptions:      s.debugAssumptions(ctx),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -408,6 +415,26 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+}
+
+func (s *Server) debugAssumptions(ctx context.Context) []SessionAssumption {
+	if s.listSessions == nil {
+		return nil
+	}
+	sessions := s.listSessions(ctx)
+	var out []SessionAssumption
+	for _, st := range sessions {
+		if strings.EqualFold(strings.TrimSpace(st.Run), "stopped") {
+			continue
+		}
+		for _, a := range st.Assumptions {
+			if strings.TrimSpace(a.TraceID) == "" {
+				a.TraceID = strings.TrimSpace(st.TraceID)
+			}
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {

@@ -1097,8 +1097,27 @@ func toGatewaySessionState(s session.State) gateway.SessionState {
 			Reason:      s.CacheAffinity.Reason,
 		},
 		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
+		Assumptions:      toGatewaySessionAssumptions(s.Assumptions),
 		Rev:              s.Rev,
 	}
+}
+
+func toGatewaySessionAssumptions(in []session.Assumption) []gateway.SessionAssumption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]gateway.SessionAssumption, 0, len(in))
+	for _, a := range in {
+		out = append(out, gateway.SessionAssumption{
+			Key:        a.Key,
+			Statement:  a.Statement,
+			Source:     a.Source,
+			Confidence: a.Confidence,
+			Expiry:     a.Expiry,
+			SourceRef:  a.SourceRef,
+		})
+	}
+	return out
 }
 
 func toGatewayResetTransaction(tx session.ResetTransaction) gateway.SessionResetTransaction {
