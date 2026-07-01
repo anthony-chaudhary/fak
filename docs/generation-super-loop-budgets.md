@@ -55,6 +55,9 @@ The default recurring envelope is conservative:
 The exact percentages belong in a future measured report, not this contract.
 Until measurement exists, a super loop must at least report which streams received
 capacity, which were held, and why.
+The hardware-style sizing model for worker seats, GPU/model seats, tokens,
+attention/context, review bandwidth, and lane leases lives in
+[`docs/generation-agent-capacity-model.md`](generation-agent-capacity-model.md).
 
 ## Admission Rules
 
