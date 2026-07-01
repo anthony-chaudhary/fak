@@ -86,6 +86,22 @@ func TestCorpusHashStableAcrossPresentationOrder(t *testing.T) {
 	}
 }
 
+func TestConfigMatrixRowsMarksProductionAndDiagnosticBrackets(t *testing.T) {
+	rows := configMatrixRows([]agentdojo.ConfigReport{
+		{Config: agentdojo.DefenseConfig{Name: "prod"}, Report: agentdojo.Report{Total: 10, Succeeded: 0}},
+		{Config: agentdojo.DefenseConfig{Name: "loose"}, Report: agentdojo.Report{Total: 10, Succeeded: 2, ASR: 0.2}},
+	})
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if rows[0].Name != "prod" || rows[0].Role != "production" || rows[0].Gate != "PASS" {
+		t.Fatalf("production row = %+v", rows[0])
+	}
+	if rows[1].Name != "loose" || rows[1].Role != "bracket" || rows[1].Gate != "diagnostic" || rows[1].ASR != 0.2 {
+		t.Fatalf("bracket row = %+v", rows[1])
+	}
+}
+
 func TestGitTreeModifiedIncludesUntrackedFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

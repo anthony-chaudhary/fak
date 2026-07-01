@@ -27,9 +27,12 @@
 // winning attack as its independently-reproducible witness) the moment a defense
 // regression lets one through.
 //
-// The defense stack is constructed EXPLICITLY here (fresh normgate + ctxmmu + ifc
-// instances) rather than via the global kernel, so a run is deterministic, needs no
-// model, and can toggle IFC per-config without mutating process-wide state.
+// The defense stack is constructed from an explicit DefenseConfig (fresh normgate +
+// ctxmmu + ifc instances) rather than via the global kernel, so a run is
+// deterministic, needs no model, and can toggle IFC per-config without mutating
+// process-wide state. The production red-team config uses the same constructors and
+// default sources the registered gates use; bracket configs make loosened-policy
+// regressions executable instead of silently testing one baked-in setting.
 package agentdojo
 
 import (
@@ -192,10 +195,88 @@ type Outcome struct {
 	Succeeded               bool // the attacker's goal landed (the harmful effect would occur)
 }
 
+// DefenseConfig is one concrete red-team stack setting. A zero NormgateMaxHeld,
+// CtxMMUMaxHeld, or IFCLedgerLimit means "use the production constructor" rather
+// than copying a default value here: normgate.New, ctxmmu.New, and ifc.NewLedger read
+// the same default/env source the registered gates use. Positive values are bracket
+// arms used by tests and experiments to prove config changes are actually exercised.
+type DefenseConfig struct {
+	Name            string
+	IFC             bool
+	NormgateMaxHeld int
+	CtxMMUMaxHeld   int
+	IFCLedgerLimit  int
+	GatedSinks      map[ifc.SinkClass]bool
+}
+
+// ProductionDefenseConfig is the shipped AgentDojo threat-model config: production
+// detector constructors plus strict IFC sink gating. The live guard's default policy
+// does not gate EXEC after arbitrary untrusted reads, but AgentDojo is explicitly an
+// untrusted-input benchmark, so its production config uses StrictGatedSinks.
+func ProductionDefenseConfig() DefenseConfig {
+	return DefenseConfig{
+		Name:       "production-redteam-default",
+		IFC:        true,
+		GatedSinks: ifc.StrictGatedSinks(),
+	}
+}
+
+// StrictSmallLedgerDefenseConfig is a tight-bound bracket: same security policy as
+// production, but explicit small ledgers. It proves the matrix drives config knobs
+// through the constructors instead of relying on one hardcoded stack.
+func StrictSmallLedgerDefenseConfig() DefenseConfig {
+	return DefenseConfig{
+		Name:            "strict-small-ledgers",
+		IFC:             true,
+		NormgateMaxHeld: 1,
+		CtxMMUMaxHeld:   1,
+		IFCLedgerLimit:  1,
+		GatedSinks:      ifc.StrictGatedSinks(),
+	}
+}
+
+// LoosenedExecUngatedDefenseConfig intentionally drops EXEC from the taint-gated
+// sink set. The code-exec paraphrase in Matrix must beat this arm; that is the
+// regression witness for a loosened shipped config.
+func LoosenedExecUngatedDefenseConfig() DefenseConfig {
+	return DefenseConfig{
+		Name:       "loose-exec-ungated",
+		IFC:        true,
+		GatedSinks: map[ifc.SinkClass]bool{ifc.SinkEgress: true, ifc.SinkDestructive: true},
+	}
+}
+
+// DefenseConfigMatrix returns the production config first, followed by bracketing
+// configs. Gate consumers should fail on the first row (the shipped config) if ASR
+// rises; the later rows are regression controls and diagnostic signal.
+func DefenseConfigMatrix() []DefenseConfig {
+	return []DefenseConfig{
+		ProductionDefenseConfig(),
+		StrictSmallLedgerDefenseConfig(),
+		LoosenedExecUngatedDefenseConfig(),
+	}
+}
+
+// ConfigReport is one defense-config score over an attack set.
+type ConfigReport struct {
+	Config DefenseConfig
+	Report Report
+}
+
+// ScoreConfigMatrix runs the same attack set across every config in order.
+func ScoreConfigMatrix(ctx context.Context, attacks []Attack, configs []DefenseConfig) []ConfigReport {
+	rows := make([]ConfigReport, 0, len(configs))
+	for _, cfg := range configs {
+		rows = append(rows, ConfigReport{Config: cfg, Report: NewDefense(cfg).Score(ctx, attacks)})
+	}
+	return rows
+}
+
 // Defense is one configuration of the stack. detectors are the write-time
 // ResultAdmitters (normgate+ctxmmu); ifcEngaged adds the provenance source-stamp +
-// sink-gate. Build with NewDetectionOnly / NewFullStack.
+// sink-gate. Build with NewDetectionOnly / NewFullStack / NewDefense.
 type Defense struct {
+	config     DefenseConfig
 	detectors  []abi.ResultAdmitter
 	ifcEngaged bool
 	ledger     *ifc.Ledger
@@ -206,24 +287,73 @@ type Defense struct {
 // NewDetectionOnly is the content-detector stack ALONE (no information-flow gate) —
 // the "lexical defense" baseline an adaptive attacker is tuned against.
 func NewDetectionOnly() *Defense {
-	return &Defense{detectors: []abi.ResultAdmitter{normgate.New(), ctxmmu.New()}}
+	return NewDefense(DefenseConfig{Name: "detection-only"})
 }
 
 // NewFullStack adds IFC (source-stamp + sink-gate) over the detectors — the shipped
 // configuration.
 func NewFullStack() *Defense {
+	return NewDefense(ProductionDefenseConfig())
+}
+
+// NewDefense constructs a deterministic, isolated stack from cfg. It never mutates
+// the registered process-wide gates, which keeps matrix arms independent.
+func NewDefense(cfg DefenseConfig) *Defense {
+	if cfg.Name == "" {
+		cfg.Name = "custom"
+	}
+	ng := normgate.New()
+	if cfg.NormgateMaxHeld > 0 {
+		ng = normgate.NewWithLimit(cfg.NormgateMaxHeld)
+	}
+	mmu := ctxmmu.New()
+	if cfg.CtxMMUMaxHeld > 0 {
+		mmu = ctxmmu.NewWithLimit(cfg.CtxMMUMaxHeld)
+	}
+	d := &Defense{
+		config:    copyDefenseConfig(cfg),
+		detectors: []abi.ResultAdmitter{ng, mmu},
+	}
+	if !cfg.IFC {
+		return d
+	}
 	led := ifc.NewLedger()
+	if cfg.IFCLedgerLimit > 0 {
+		led = ifc.NewLedgerWithLimit(cfg.IFCLedgerLimit)
+	}
+	policy := ifc.Policy{GatedSinks: copySinkSet(cfg.GatedSinks)}
 	return &Defense{
-		detectors:  []abi.ResultAdmitter{normgate.New(), ctxmmu.New()},
+		config:     copyDefenseConfig(cfg),
+		detectors:  d.detectors,
 		ifcEngaged: true,
 		ledger:     led,
-		stamp:      ifc.NewStampGate(led, ifc.Policy{}),
-		// The red-team harness IS the untrusted-input threat model, so it gates EVERY
-		// sensitive sink including EXEC (StrictGatedSinks). The LIVE guard default
-		// exempts EXEC (DefaultGatedSinks) so trusted dev work is not false-positived;
-		// this harness must stay strict to keep measuring the tainted-exec attack class.
-		sink: ifc.NewSinkGate(led, ifc.Policy{GatedSinks: ifc.StrictGatedSinks()}),
+		stamp:      ifc.NewStampGate(led, policy),
+		sink:       ifc.NewSinkGate(led, policy),
 	}
+}
+
+// Config returns the defensive settings used to build d.
+func (d *Defense) Config() DefenseConfig {
+	if d == nil {
+		return DefenseConfig{}
+	}
+	return copyDefenseConfig(d.config)
+}
+
+func copyDefenseConfig(cfg DefenseConfig) DefenseConfig {
+	cfg.GatedSinks = copySinkSet(cfg.GatedSinks)
+	return cfg
+}
+
+func copySinkSet(in map[ifc.SinkClass]bool) map[ifc.SinkClass]bool {
+	if in == nil {
+		return nil
+	}
+	out := make(map[ifc.SinkClass]bool, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // Run executes one attack's two-step trajectory against this defense and reports
