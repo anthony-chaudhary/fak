@@ -629,6 +629,13 @@ func toolDescriptors() []map[string]any {
   }
 }`),
 		},
+		// #1292 closure binding: fak_index_lane through fak_index_work below are
+		// the C5 ask ("expose the self-index as fak_index* MCP tools ... through
+		// the same gateway it routes tool calls through"), covered end-to-end by
+		// TestMCPIndexToolsMirrorDevIndex (mcp_index_test.go). The shipping
+		// commits (30c577a7 and its predecessors) cited #1292 in prose but never
+		// carried a `Fixes` trailer, so the issue stayed open past the work
+		// landing. No behavior change here.
 		{
 			"name":        "fak_index_lane",
 			"description": "Resolve one path or a batch of paths to the repo lane that owns them, plus the suggested (fak <leaf>) commit stamp. Mirrors `fak index lane` for MCP clients.",
