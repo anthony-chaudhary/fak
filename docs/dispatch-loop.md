@@ -65,6 +65,70 @@ override evidence without changing the dispatch loop's shared-trunk rules.
 Use the [dispatch SLO glossary](dispatch-slo-glossary.md) for report and status
 terms shared by the loop, close arm, and operator summaries.
 
+## Capacity equation for 400 issues/hour
+
+Use this equation before raising worker count or claiming the fleet can hit the
+400 issues/hour target:
+
+```text
+effective_workers = min(worker_count, host_cap, seat_cap, lease_cap, routeable_issue_cap)
+cycle_sec = median_session_sec + median_witness_latency_sec
+raw_attempts_per_hour = effective_workers * 3600 / cycle_sec
+net_issues_per_hour = raw_attempts_per_hour * close_rate / (1 + retry_rate)
+```
+
+Variables:
+
+- `worker_count`: the operator-requested worker population.
+- `host_cap`: the host resource ceiling from CPU/RAM/process headroom.
+- `seat_cap`: routable account seats available for worker launches.
+- `lease_cap`: the DOS/lane lease ceiling for non-overlapping file trees.
+- `routeable_issue_cap`: open issues with enough scope, path, and dependency
+  clearance to launch now.
+- `median_session_sec`: median wall time from worker spawn to exit.
+- `median_witness_latency_sec`: median parent-side time to rerun tests,
+  `dos commit-audit`, issue-state checks, and close-arm verification.
+- `close_rate`: witnessed closes divided by completed attempts. Worker
+  self-reports do not count.
+- `retry_rate`: retry attempts per witnessed close. Use `0.20` when every five
+  witnessed closes consumed one additional retry attempt.
+
+The target test is:
+
+```text
+net_issues_per_hour >= 400
+```
+
+The reverse form tells you how many effective workers are needed:
+
+```text
+required_effective_workers =
+  ceil(400 * cycle_sec * (1 + retry_rate) / (3600 * close_rate))
+```
+
+Example that reaches the target:
+
+```text
+worker_count=120, host_cap=110, seat_cap=105, lease_cap=100, routeable_issue_cap=140
+effective_workers = min(120, 110, 105, 100, 140) = 100
+cycle_sec = 600s median session + 30s witness latency = 630s
+raw_attempts_per_hour = 100 * 3600 / 630 = 571.4
+net_issues_per_hour = 571.4 * 0.85 / (1 + 0.15) = 422.4
+result: reaches 400 issues/hour
+```
+
+Example that misses the target:
+
+```text
+worker_count=120, host_cap=80, seat_cap=60, lease_cap=90, routeable_issue_cap=100
+effective_workers = min(120, 80, 60, 90, 100) = 60
+cycle_sec = 720s median session + 60s witness latency = 780s
+raw_attempts_per_hour = 60 * 3600 / 780 = 276.9
+net_issues_per_hour = 276.9 * 0.75 / (1 + 0.25) = 166.2
+required_effective_workers = ceil(400 * 780 * 1.25 / (3600 * 0.75)) = 145
+result: misses 400 issues/hour; the next limiter is seat_cap, not worker_count
+```
+
 ## The load-bearing invariants
 
 These are the rules that make it safe to hand autonomous spawning to an unattended
