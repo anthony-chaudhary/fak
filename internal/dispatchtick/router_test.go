@@ -386,11 +386,72 @@ func TestRouterRouteIssuesSkipsNonDispatchable(t *testing.T) {
 	}
 }
 
+func TestRouterRepairQueueRecommendsSplitForMultipleDoneConditions(t *testing.T) {
+	p := RouteIssues(RouterInput{
+		Workspace:  "C:/work/fak",
+		Taxonomy:   routerTestTaxonomy,
+		IssueLimit: 1000,
+		Issues: []Issue{
+			routerIssue(57, "dispatchtick: split bundled router follow-up", nil, multiDoneConditionIssueBody()),
+		},
+	})
+	if p.Counts.Routed != 0 || p.Counts.SkippedHumanBlocked != 1 {
+		t.Fatalf("route counts = %+v skipped=%+v, want no routed and one skipped split candidate", p.Counts, p.SkippedHumanBlocked)
+	}
+	skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 57)
+	if skipped.Reason != "ISSUE_NOT_DISPATCH_LEAF" || !strings.Contains(skipped.NextAction, "multiple done conditions") {
+		t.Fatalf("skipped issue = %+v, want non-leaf split recommendation for multiple done conditions", skipped)
+	}
+	assertRouterRepairQueue(t, p.RepairQueues, "split", 1, 3, map[string]int{
+		"ISSUE_NOT_DISPATCH_LEAF": 1,
+	}, []int{57}, 1)
+}
+
 func TestRouterKeepsSmallExpectedStepLeafDispatchable(t *testing.T) {
 	issue := routerIssue(11, "gateway: scoped leaf", nil, scopedGatewayIssueBody("4"))
 	if !IsDispatchable(issue, BlockedByHumanLabel) {
 		t.Fatalf("small expected-step leaf was not dispatchable")
 	}
+}
+
+func multiDoneConditionIssueBody() string {
+	return strings.Join([]string{
+		"## Parent context",
+		"fleet dispatch backlog",
+		"## Current state",
+		"The backlog can route scoped worker leaves.",
+		"## Why this is next",
+		"Bundled issues should become split recommendations before dispatch.",
+		"## Working spine",
+		"router report -> split bucket -> child worker issues",
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		"3",
+		"## Trigger",
+		"Generated issue body carries more than one done condition.",
+		"## Batch policy",
+		"One repair recommendation per bundled issue marker.",
+		"## In scope",
+		"Classify the bundled row as split-needed.",
+		"## Out of scope",
+		"Do not implement either child task.",
+		"## Done condition",
+		"- The router emits a split repair queue row.",
+		"- The close arm renders a dry-run close table.",
+		"## Witness",
+		"go test ./internal/dispatchtick",
+		"## Acceptance gate",
+		"go test ./internal/dispatchtick",
+		"## Lane",
+		"dispatchtick",
+		"## Path hints",
+		"- `internal/dispatchtick/router.go`",
+		"## Boundary notes",
+		"Public issue only.",
+		"## Closure binding",
+		"Resolving commit cites #1757 and carries `(fak dispatchtick)`.",
+	}, "\n\n")
 }
 
 func scopedDispatchIssueBody(expectedSteps, path string) string {

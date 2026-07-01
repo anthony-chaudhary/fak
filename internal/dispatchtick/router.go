@@ -917,6 +917,9 @@ func IsTriageOnly(issue Issue) bool {
 	if nonDispatchWorkUnit(issueWorkUnit(issue)) {
 		return true
 	}
+	if multiDoneConditionIssue(issue) {
+		return true
+	}
 	if oversizedWorkUnit(issue) {
 		return true
 	}
@@ -949,6 +952,9 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 	case nonDispatchWorkUnit(workUnit):
 		reason = "ISSUE_NOT_DISPATCH_LEAF"
 		next = "split the non-leaf work unit into worker-ready leaf issues"
+	case multiDoneConditionIssue(issue):
+		reason = "ISSUE_NOT_DISPATCH_LEAF"
+		next = "split the multiple done conditions into worker-ready leaf issues"
 	case expectedSteps > MaxDispatchExpectedSteps:
 		reason = "ISSUE_OVERSIZED_EXPECTED_STEPS"
 		next = fmt.Sprintf("split into child issues with <= %d expected steps each", MaxDispatchExpectedSteps)
@@ -981,6 +987,45 @@ func triageOnlyLabel(issue Issue) string {
 func bodyTriageOnly(issue Issue) bool {
 	text := strings.ToLower(issue.Title + "\n" + issue.Body)
 	return strings.Contains(text, "dispatchability") && strings.Contains(text, "triage_only")
+}
+
+func multiDoneConditionIssue(issue Issue) bool {
+	sections := promptMarkdownSections(issue.Body)
+	return doneConditionItemCount(firstPromptSection(sections, "done condition", "done conditions")) > 1
+}
+
+func doneConditionItemCount(section string) int {
+	listItems := 0
+	plainLines := 0
+	for _, raw := range strings.Split(section, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || promptPlaceholder(line) {
+			continue
+		}
+		if isMarkdownListItem(line) {
+			listItems++
+			continue
+		}
+		plainLines++
+	}
+	if listItems > 0 {
+		return listItems
+	}
+	if plainLines > 0 {
+		return 1
+	}
+	return 0
+}
+
+func isMarkdownListItem(line string) bool {
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		return true
+	}
+	i := 0
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+	return i > 0 && i+1 < len(line) && (line[i] == '.' || line[i] == ')') && line[i+1] == ' '
 }
 
 func issueWorkUnit(issue Issue) string {
