@@ -17,7 +17,7 @@ flowchart TD
   MN --> Quality["code: quality-score"]
   MN --> Audit["read-mostly audit: bottleneck-map, trajectory-audit"]
   Pack --> DOS["DOS trust gates<br/>(witness, price, dispatch)"]
-  Pack --> Fleet["Fleet / bulk dispatch<br/>(super-loop: launch headless waves)"]
+  Pack --> Fleet["Fleet / bulk dispatch<br/>(super-loop launch + wave-harvest reconcile)"]
 ```
 
 *The page's skill families — and, within Maintenance, the surface each skill tends.*
@@ -57,7 +57,9 @@ discipline (PLAN first, price the fan-out, respect the no-DoS cap).
 | Skill | What it does |
 |---|---|
 | [`super-loop`](super-loop/SKILL.md) | Launch N detached `/goal` workers in bulk — tree-disjoint in one checkout (`issue_dispatch.py --wave`) or one-per-distinct-account for rate-limit headroom (`launch_wave_detached.ps1`). PLAN by default; prices collisions + account-distinctness before spawning; re-checks the preflight cap per spawn; holds the fan-out to the honesty boundary (a launch is not a ship — ancestry closes issues). Fuel: [`resolve-top-issue-witnessed`](../goal-prompts/resolve-top-issue-witnessed.md). |
+| [`wave-harvest`](wave-harvest/SKILL.md) | The closing half of a super loop: after a wave runs, witness what each worker *actually* shipped from git (not its log), re-queue the claimed-but-unshipped leaves, stop workers spinning without net gain, and surface any stranded lane. Read-mostly; never closes an issue by narration. |
 
+The pair is the full loop: `super-loop` launches, `wave-harvest` reconciles.
 Contrast with [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md) (an *in-session*
 dispatch⇄replan cadence on one lane) and [`run-it-all-night`](run-it-all-night/SKILL.md)
 (unattended *data collection*, not issue resolution).
