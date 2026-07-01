@@ -83,6 +83,61 @@ func TestFusedClassifyFromFile(t *testing.T) {
 	}
 }
 
+func TestFusedRunExecutesBothFamiliesThroughKernel(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runFused(&out, &errb, []string{"run", "--json"}); rc != 0 {
+		t.Fatalf("rc = %d, want 0; stderr=%s", rc, errb.String())
+	}
+
+	var report struct {
+		Summary struct {
+			Classical int  `json:"classical"`
+			Weight    int  `json:"weight"`
+			Fused     bool `json:"fused"`
+		} `json:"summary"`
+		EngineCalls int `json:"engine_calls"`
+		Ops         []struct {
+			Tool    string `json:"tool"`
+			Class   string `json:"class"`
+			Verdict string `json:"verdict"`
+			Status  string `json:"status"`
+			Result  string `json:"result"`
+		} `json:"ops"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out.String())
+	}
+	if !report.Summary.Fused || report.Summary.Classical < 1 || report.Summary.Weight < 1 {
+		t.Fatalf("run should report a fused turn spanning both families: %+v", report.Summary)
+	}
+	if report.EngineCalls < 2 {
+		t.Fatalf("run should dispatch both calls through Engine.Complete, engine_calls=%d", report.EngineCalls)
+	}
+
+	var classicalResult, weightResult bool
+	for _, op := range report.Ops {
+		if op.Verdict != "allow" {
+			t.Errorf("%s verdict = %q, want allow", op.Tool, op.Verdict)
+		}
+		if op.Status != "ok" {
+			t.Errorf("%s status = %q, want ok", op.Tool, op.Status)
+		}
+		if op.Result == "" {
+			t.Errorf("%s should carry a real result payload", op.Tool)
+		}
+		switch op.Class {
+		case "classical":
+			classicalResult = classicalResult || strings.Contains(op.Result, "classical result:")
+		case "weight":
+			weightResult = weightResult || strings.Contains(op.Result, "weight result:")
+		}
+	}
+	if !classicalResult || !weightResult {
+		t.Fatalf("run should produce real results for both families; classical=%v weight=%v output=%s",
+			classicalResult, weightResult, out.String())
+	}
+}
+
 func TestFusedUnknownSubcommand(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runFused(&out, &errb, []string{"bogus"}); rc != 2 {
