@@ -43,6 +43,9 @@ context change is either behaviorally neutral or visible as a typed decision wit
 7. **Cache state is never authority.** Provider prompt-cache warmth can lower cost and
    latency, but it never decides whether a fact may be omitted. A cold cache is a pricing
    event, not a continuity failure.
+8. **Relay mode is pointer-or-nothing.** A relay leg may carry forward durable pointers,
+   not a transcript summary. A load-bearing fact is either externalized and queryable by
+   the next leg, or it does not survive the rotation.
 
 ## What Fak Surfaces
 
@@ -62,6 +65,28 @@ The continuous-usage surface is a small evidence bundle, not a transcript dump:
 The intended product shape is simple: a long run can show the current objective, remaining
 budget envelope, active resident view, unresolved assumptions, last reset transaction, and
 recent memory-promotion decisions without asking the user to read the whole prompt.
+
+## Relay Mode: No Compaction
+
+Relay mode is the stricter continuous-usage contract planned by the perpetual-sessions
+spine. It is not enforcement yet; it is the product promise future relay rungs must satisfy.
+
+- **No-compaction promise:** relay mode never asks a model to summarize the old transcript
+  and treat that summary as state. A closing leg writes a baton of durable pointers; the
+  transcript is disposable once those pointers pass the externalize gate.
+- **Pointer-or-nothing:** every load-bearing fact must be in a durable store first — a
+  commit, ledger row, memory slug, issue, file path, or other witnessed reference. If a
+  fact lives only in the transcript, rotation is refused rather than laundered into prose.
+- **Flat-context invariant:** peak resident context is bounded by the per-leg envelope, not
+  by total goal duration, number of rotations, or total work done. A relay that runs for a
+  week should peak no higher than one leg with the same budget.
+- **Re-derive by query:** a successor leg uses the baton to re-query the durable store and
+  re-verify progress. The baton is an index and lineage record, not a trusted progress
+  report.
+
+This is stricter than ordinary hidden reset continuity. A reset may carry a deterministic
+seed built from approved contributors; a relay rotation carries only the baton and the
+ability to query durable evidence. Model-written recaps are not a third state.
 
 ## When Fak Asks Instead Of Guessing
 
@@ -121,7 +146,9 @@ witnessed records, the system should say `not yet` rather than claim continuity.
 
 - [`managed-context-glossary.md`](managed-context-glossary.md) - the vocabulary this page
   relies on: assumption, resident view, pinned objective, budget envelope, reset
-  transaction, context query, memory promotion, and cache state.
+  transaction, context query, memory promotion, cache state, and relay vocabulary.
+- [`notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md`](notes/CONCEPT-PERPETUAL-SESSIONS-2026-07-01.md) -
+  the relay concept spine for flat-context, no-compaction perpetual sessions.
 - [`CONTEXT-IS-NOT-MEMORY.md`](CONTEXT-IS-NOT-MEMORY.md) - why context survival and durable
   memory promotion are separate decisions.
 - [`explainers/o1-context-window-economics.md`](explainers/o1-context-window-economics.md) -
