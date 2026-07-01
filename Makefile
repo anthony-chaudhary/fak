@@ -1,8 +1,11 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet architest-gate test test-fast test-affected test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate claims-lint salience dos-lint index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 VERIFY_LOOP_BUDGET ?= 30s
+TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
+TEST_PACKAGE_BUDGET ?= 30s
+TEST_TEST_BUDGET ?= 5s
 ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRootImportsNothingInternal|TestSingleOpenAIChatClient)$$
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
@@ -63,6 +66,10 @@ test-fast: build vet architest-gate
 test-affected: build
 	go run ./cmd/fak affected --budget $(VERIFY_LOOP_BUDGET) --report .fak/verify-loop-affected.json
 	@echo "test-affected OK (affected packages only, budget $(VERIFY_LOOP_BUDGET); run 'make test' for the full oracle)"
+
+test-durations:
+	go run ./cmd/fak test durations --run fast --out $(TEST_DURATION_LEDGER) --package-budget $(TEST_PACKAGE_BUDGET) --test-budget $(TEST_TEST_BUDGET)
+	@echo "test-durations OK (ledger: $(TEST_DURATION_LEDGER); budgets package=$(TEST_PACKAGE_BUDGET) test=$(TEST_TEST_BUDGET))"
 
 # test-race (#1311): the fast LOCAL correctness gate for the inner loop — the
 # data-race signal CI has (the separate `race detector` job in .github/workflows/ci.yml)
