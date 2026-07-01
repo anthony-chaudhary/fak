@@ -807,6 +807,26 @@ func cmdGuard(argv []string) {
 				return rx, tx, true
 			})
 		}
+		// Feed the GPU/accelerator VRAM axis when a model runs IN-KERNEL (--gguf/--backend):
+		// the harness's hardware footprint then includes the device. The default proxy path
+		// has no local GPU, so the provider reports ok=false and the axis stays honestly n/a
+		// (#2052). Sourced from the same compute HAL the serve capacity checks use.
+		if chatBackend != nil {
+			resSampler.SetGPUProvider(func() (used, total uint64, ok bool) {
+				t, free, known := compute.DeviceMemoryInfo(chatBackend)
+				if !known || t <= 0 {
+					return 0, 0, false
+				}
+				u := t - free
+				if free < 0 || u < 0 {
+					u = 0
+				}
+				if u > t {
+					u = t
+				}
+				return uint64(u), uint64(t), true
+			})
+		}
 		resSampler.Start(guardResourceSampleInterval)
 		// Expose the live harness resource snapshot on the gateway's /metrics as the
 		// fak_harness_* family, so a running session's CPU/mem/IO is scrapeable — not
