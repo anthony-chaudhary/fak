@@ -74,14 +74,9 @@ func (t *Tree) WarmInsert(tokens []int, kv *model.KVCache) int {
 	if len(tokens) == 0 {
 		return 0
 	}
-	n, nlen, pc, oi := t.walk(tokens)
-	boundary, matched := n, nlen
-	if oi > 0 {
-		// The warm diverges mid-edge from a cached span: split so a real node boundary exists
-		// at the shared prefix, exactly as Lookup would, then hang the warm suffix off it.
-		boundary = t.split(n, pc, oi)
-		matched = nlen + oi
-	}
+	// walk then split-if-mid-edge to a real node boundary, exactly as Lookup does, then hang
+	// the warm suffix off it (shared boundaryFor preamble).
+	boundary, matched := t.boundaryFor(tokens)
 	suffix := tokens[matched:]
 	if len(suffix) == 0 {
 		return 0 // the whole byte-known prefix is already cached — already hot, nothing to warm

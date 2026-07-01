@@ -114,6 +114,24 @@ func (t *Tree) walk(tokens []int) (n *node, nlen int, pc *node, oi int) {
 	return n, i, nil, 0
 }
 
+// boundaryFor walks the longest cached prefix of tokens and, when the match lands mid-edge
+// (oi>0), SPLITS that edge so a real node boundary with a reusable cache exists exactly at
+// the matched length — returning that boundary node and the total matched token count. It is
+// the shared "walk then split-to-boundary" preamble both the demand path (Lookup) and the
+// prefetch path (WarmInsert) run before they attach a suffix; it performs the same structural
+// split (t.splits bumps once, via t.split) and mutates nothing else, so both callers observe
+// byte-identical tree state. It does NOT touch recency or leases — each caller applies its own
+// residency policy afterward.
+func (t *Tree) boundaryFor(tokens []int) (boundary *node, matched int) {
+	n, nlen, pc, oi := t.walk(tokens)
+	boundary, matched = n, nlen
+	if oi > 0 {
+		boundary = t.split(n, pc, oi)
+		matched = nlen + oi
+	}
+	return boundary, matched
+}
+
 // MatchLen is the read-only accounting probe: the number of leading tokens of `tokens`
 // already cached (a node boundary or mid-edge), with no mutation, no lock, no split. This
 // is the hit-rate measurement seam — sum it over a workload and divide by total tokens to
@@ -169,12 +187,7 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 //	... prefill (may fail) ...
 //	leaf = tree.Insert(b, req[m:], kv)   // moves the lease onto the leaf
 func (t *Tree) Lookup(tokens []int) (*node, int) {
-	n, nlen, pc, oi := t.walk(tokens)
-	boundary, matched := n, nlen
-	if oi > 0 {
-		boundary = t.split(n, pc, oi)
-		matched = nlen + oi
-	}
+	boundary, matched := t.boundaryFor(tokens)
 	for p := boundary; p != nil; p = p.parent {
 		p.lastUsed = t.clock + 1 // freshen the whole hot path
 	}
