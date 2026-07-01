@@ -511,12 +511,13 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
-	"agent":      "the single outbound chat-completions client (HTTPPlanner)",
-	"engine":     "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
-	"gateway":    "the inbound /v1/chat/completions server route (adjudication proxy)",
-	"chatrelay":  "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
-	"webbench":   "the off-path serving-parity benchmark client (not a live planner)",
-	"guardtrace": "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
+	"agent":       "the single outbound chat-completions client (HTTPPlanner)",
+	"engine":      "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
+	"gateway":     "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"chatrelay":   "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
+	"webbench":    "the off-path serving-parity benchmark client (not a live planner)",
+	"guardtrace":  "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
+	"frontierswe": "the off-path FrontierSWE co-resident env adapter/smoke witness against fak serve (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
