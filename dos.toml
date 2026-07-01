@@ -175,6 +175,13 @@ concurrent = [
   "harnessprofile",
   "livecodebench",
   "devexmeter",
+  # reconciled 2026-07-01: internal/superloop is a real committed leaf (the operator-intent
+  # meta-loop: `fak superloop list/explain/walk`) that had NO declared lane — the deferred
+  # follow-on named at ship time. Declared so a `(fak superloop)` ship-stamp binds and the
+  # arbiter detects a same-tree collision on internal/superloop/** edits; its
+  # cmd/fak/superloop.go shim stays in the `cmd` lane, keeping every leaf tree
+  # pairwise-disjoint per the header invariant.
+  "superloop",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -257,6 +264,7 @@ autopick = [
   "harnessprofile",
   "livecodebench",
   "devexmeter",
+  "superloop", # internal/superloop leaf (the operator-intent meta-loop), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -421,6 +429,7 @@ selfquery = ["internal/selfquery/**"]
 harnessprofile = ["internal/harnessprofile/**"]
 livecodebench = ["internal/livecodebench/**"]
 devexmeter = ["internal/devexmeter/**"]
+superloop = ["internal/superloop/**"] # operator-intent meta-loop (cmd/fak/superloop.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
