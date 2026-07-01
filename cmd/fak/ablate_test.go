@@ -30,7 +30,7 @@ func TestAblateTableTwoArms(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb)
 	}
-	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "provider_tokeq", "fak_tokeq", "deltas vs all-off"} {
+	for _, want := range []string{"fak ablate", "workload hash", "all-off", "vdso", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "deltas vs all-off"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table missing %q:\n%s", want, out)
 		}
@@ -57,6 +57,10 @@ func TestAblateJSONReport(t *testing.T) {
 			MechanismSavings struct {
 				FakVDSOAvoidedCalls uint64 `json:"fak_vdso_avoided_calls"`
 			} `json:"mechanism_savings"`
+			PrefixIntegrity struct {
+				Checked        bool   `json:"checked"`
+				PrefixMismatch uint64 `json:"prefix_mismatch"`
+			} `json:"prefix_integrity"`
 			ProviderTokenEquiv float64 `json:"provider_tokeq"`
 			FakTokenEquiv      float64 `json:"fak_tokeq"`
 		} `json:"runs"`
@@ -91,6 +95,59 @@ func TestAblateJSONReport(t *testing.T) {
 	if onAvoided <= offAvoided {
 		t.Errorf("vdso arm avoided calls (%d) must exceed all-off (%d)", onAvoided, offAvoided)
 	}
+}
+
+func TestAblateWireCacheLeversReportFakDeltaAndPrefixIntegrity(t *testing.T) {
+	withFakeArmRunner(t)
+	code, out, errb := runAB("--sweep", "ttl_1h,uncached_trim", "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	var rep struct {
+		Runs []struct {
+			ArmID           string             `json:"arm_id"`
+			Features        map[string]string  `json:"features"`
+			ProviderTokenEq float64            `json:"provider_tokeq"`
+			FakTokenEq      float64            `json:"fak_tokeq"`
+			PrefixIntegrity ablatePrefixShadow `json:"prefix_integrity"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	byID := map[string]struct {
+		ArmID           string             `json:"arm_id"`
+		Features        map[string]string  `json:"features"`
+		ProviderTokenEq float64            `json:"provider_tokeq"`
+		FakTokenEq      float64            `json:"fak_tokeq"`
+		PrefixIntegrity ablatePrefixShadow `json:"prefix_integrity"`
+	}{}
+	for _, r := range rep.Runs {
+		byID[r.ArmID] = r
+	}
+	for _, id := range []string{"ttl_1h", "uncached_trim"} {
+		r, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing %s arm in %+v", id, byID)
+		}
+		if r.Features[id] != "on" {
+			t.Fatalf("%s descriptor = %v, want %s=on", id, r.Features, id)
+		}
+		if r.ProviderTokenEq != 0 {
+			t.Fatalf("%s provider_tokeq = %v, want 0 in mock wire-lever arm", id, r.ProviderTokenEq)
+		}
+		if r.FakTokenEq <= 0 {
+			t.Fatalf("%s fak_tokeq = %v, want > 0", id, r.FakTokenEq)
+		}
+		if !r.PrefixIntegrity.Checked || r.PrefixIntegrity.PrefixMismatch != 0 {
+			t.Fatalf("%s prefix integrity = %+v, want checked with prefix_mismatch=0", id, r.PrefixIntegrity)
+		}
+	}
+}
+
+type ablatePrefixShadow struct {
+	Checked        bool   `json:"checked"`
+	PrefixMismatch uint64 `json:"prefix_mismatch"`
 }
 
 func TestAblateCompressorReportsFakTokenEquivOnly(t *testing.T) {
@@ -148,7 +205,7 @@ func TestAblateCompressorTableShowsOwnerDeltas(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, errb)
 	}
-	for _, want := range []string{"provider_tokeq", "fak_tokeq", "compressor", "provider_tokeq 0", "fak_tokeq +"} {
+	for _, want := range []string{"provider_tokeq", "fak_tokeq", "prefix_mismatch", "compressor", "provider_tokeq 0", "fak_tokeq +", "prefix_mismatch +0"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("table missing %q:\n%s", want, out)
 		}

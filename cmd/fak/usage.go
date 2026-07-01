@@ -143,7 +143,7 @@ func usageCoreVerbs() {
                  surface. drive runs benchmark GOAL.md work through fresh-context
                  witness/token budgets; run delegates to fak nightrun run,
                  dry-run unless --apply is passed)
-  fak ablate    --sweep vdso[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
+  fak ablate    --sweep vdso|ttl_1h|uncached_trim[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
                 (self-ablation: replay one frozen trace under N feature configs;
                  one row per arm, deltas off the kernel counters, same-trace guard)
   fak turntax   --suite NAME [--out turntax-report.json]

@@ -119,6 +119,50 @@ func TestRunOneArm_CompressorReportsFakTokenEquivOnly(t *testing.T) {
 	}
 }
 
+func TestWireCacheFeaturesSweepAndReportPrefixIntegrity(t *testing.T) {
+	tr, err := bench.LoadTrace(smokeTrace)
+	if err != nil {
+		t.Fatalf("LoadTrace(%q): %v", smokeTrace, err)
+	}
+	configs, err := BuildSweep([]string{FeatureTTL1H, FeatureUncachedTrim})
+	if err != nil {
+		t.Fatalf("BuildSweep: %v", err)
+	}
+	if len(configs) != 4 {
+		t.Fatalf("BuildSweep([ttl_1h,uncached_trim]) = %d arms, want 4", len(configs))
+	}
+
+	rep, err := Sweep(context.Background(), tr, "mock", "mock-offline", configs, "all-off")
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	ttl := rep.ArmByID(FeatureTTL1H)
+	trim := rep.ArmByID(FeatureUncachedTrim)
+	if ttl == nil || trim == nil {
+		t.Fatalf("expected ttl_1h and uncached_trim arms, got %+v", armIDs(rep))
+	}
+	if ttl.Features[FeatureTTL1H] != "on" || ttl.Features[FeatureUncachedTrim] != "off" {
+		t.Fatalf("ttl_1h descriptor = %v, want ttl_1h=on uncached_trim=off", ttl.Features)
+	}
+	if trim.Features[FeatureUncachedTrim] != "on" || trim.Features[FeatureTTL1H] != "off" {
+		t.Fatalf("uncached_trim descriptor = %v, want uncached_trim=on ttl_1h=off", trim.Features)
+	}
+	for _, run := range []*AblationRun{ttl, trim} {
+		if !run.PrefixIntegrity.Checked {
+			t.Fatalf("%s prefix integrity was not reported", run.ArmID)
+		}
+		if run.PrefixIntegrity.PrefixMismatch != 0 {
+			t.Fatalf("%s prefix_mismatch = %d, want 0", run.ArmID, run.PrefixIntegrity.PrefixMismatch)
+		}
+		if run.FakTokenEquiv() <= 0 {
+			t.Fatalf("%s fak_tokeq = %v, want > 0", run.ArmID, run.FakTokenEquiv())
+		}
+		if run.ProviderTokenEquiv() != 0 {
+			t.Fatalf("%s provider_tokeq = %v, want 0 in the mock wire-lever arm", run.ArmID, run.ProviderTokenEquiv())
+		}
+	}
+}
+
 func TestAblationRunJSONIncludesOwnerTokenEquiv(t *testing.T) {
 	run := AblationRun{
 		ArmID: "split",
@@ -128,13 +172,14 @@ func TestAblationRunJSONIncludesOwnerTokenEquiv(t *testing.T) {
 			FakCompactionShedTokens:                   300,
 			FakKVPrefixReusedTokens:                   400,
 		},
+		PrefixIntegrity: PrefixIntegrity{Checked: true},
 	}
 	b, err := json.Marshal(run)
 	if err != nil {
 		t.Fatalf("marshal AblationRun: %v", err)
 	}
 	s := string(b)
-	for _, want := range []string{`"provider_tokeq":850`, `"fak_tokeq":700`, `"total_tokeq":1550`, `"mechanism_savings":`} {
+	for _, want := range []string{`"provider_tokeq":850`, `"fak_tokeq":700`, `"total_tokeq":1550`, `"mechanism_savings":`, `"prefix_integrity":{"checked":true,"prefix_mismatch":0}`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("AblationRun JSON missing %q: %s", want, s)
 		}
@@ -179,6 +224,9 @@ func TestBuildSweep_UnknownAndDuplicate(t *testing.T) {
 	}
 	if _, err := BuildSweep(nil); err == nil {
 		t.Error("BuildSweep(nil) should fail with no features to sweep")
+	}
+	if _, err := BuildSweep([]string{FeatureTTL1H, FeatureUncachedTrim}); err != nil {
+		t.Errorf("BuildSweep([ttl_1h,uncached_trim]) should accept wire cache levers: %v", err)
 	}
 	configs, err := BuildSweep([]string{"vdso", "vdso"})
 	if err != nil {

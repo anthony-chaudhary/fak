@@ -297,3 +297,19 @@ func TestChildEnv_RendersFakVarsDeterministically(t *testing.T) {
 		t.Errorf("vdso-only childEnv = %v, want empty (vdso is runtime, not env-gated)", env)
 	}
 }
+
+func TestChildEnv_RendersWireCacheLevers(t *testing.T) {
+	c := FeatureConfig{Name: "wire"}
+	c.apply(FeatureTTL1H, true)
+	c.apply(FeatureUncachedTrim, true)
+	got := c.childEnv()
+	want := []string{"FAK_ABLATE_TTL_1H=1", "FAK_ABLATE_UNCACHED_TRIM=1"}
+	if len(got) != len(want) {
+		t.Fatalf("childEnv = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("childEnv[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+}

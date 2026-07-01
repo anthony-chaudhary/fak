@@ -169,15 +169,15 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 	fmt.Fprintf(w, "arms           : %d   baseline: %s   (same trace each arm; deltas are apples-to-apples)\n\n",
 		len(rep.Runs), rep.Baseline)
 
-	fmt.Fprintf(w, "%-10s %-12s %6s %9s %7s %7s %9s %9s %14s %9s %8s\n",
-		"arm", "features", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "provider_tokeq", "fak_tokeq", "wall_s")
+	fmt.Fprintf(w, "%-10s %-12s %6s %9s %7s %7s %9s %9s %14s %9s %15s %8s\n",
+		"arm", "features", "calls", "vdso_hits", "denies", "quar", "p50_ns", "tokens", "provider_tokeq", "fak_tokeq", "prefix_mismatch", "wall_s")
 	for i := range rep.Runs {
 		r := &rep.Runs[i]
-		fmt.Fprintf(w, "%-10s %-12s %6d %9d %7d %7d %9d %9d %14s %9s %8.3f\n",
+		fmt.Fprintf(w, "%-10s %-12s %6d %9d %7d %7d %9d %9d %14s %9s %15d %8.3f\n",
 			r.ArmID, featStr(r.Features), r.Arm.Calls, r.Arm.VDSOHits, r.Arm.Denies,
 			r.Arm.Quarantines, r.Arm.P50Ns, r.Tokens(),
 			formatAblationTokenEquiv(r.ProviderTokenEquiv()), formatAblationTokenEquiv(r.FakTokenEquiv()),
-			r.WallSeconds)
+			r.PrefixIntegrity.PrefixMismatch, r.WallSeconds)
 	}
 
 	base := rep.ArmByID(rep.Baseline)
@@ -190,7 +190,7 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 		if r.ArmID == rep.Baseline {
 			continue
 		}
-		fmt.Fprintf(w, "  %-10s vdso_hits %+d   denies %+d   quar %+d   p50_ns %+d   tokens %+d   provider_tokeq %s   fak_tokeq %s\n",
+		fmt.Fprintf(w, "  %-10s vdso_hits %+d   denies %+d   quar %+d   p50_ns %+d   tokens %+d   provider_tokeq %s   fak_tokeq %s   prefix_mismatch %+d\n",
 			r.ArmID,
 			r.Arm.VDSOHits-base.Arm.VDSOHits,
 			r.Arm.Denies-base.Arm.Denies,
@@ -198,7 +198,8 @@ func printAblation(w io.Writer, rep *ablate.Report) {
 			r.Arm.P50Ns-base.Arm.P50Ns,
 			r.Tokens()-base.Tokens(),
 			formatAblationTokenEquivDelta(r.ProviderTokenEquiv()-base.ProviderTokenEquiv()),
-			formatAblationTokenEquivDelta(r.FakTokenEquiv()-base.FakTokenEquiv()))
+			formatAblationTokenEquivDelta(r.FakTokenEquiv()-base.FakTokenEquiv()),
+			int64(r.PrefixIntegrity.PrefixMismatch)-int64(base.PrefixIntegrity.PrefixMismatch))
 	}
 }
 

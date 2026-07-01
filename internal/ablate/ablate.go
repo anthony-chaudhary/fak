@@ -65,6 +65,15 @@ const (
 	FeatureCtxplanSeam = "ctxplan_seam"
 	FeatureWireScreen  = "wire_screen"
 	FeatureWireRedact  = "wire_redact"
+
+	// Wire-side cache levers are the Anthropic proxy cache-value gates that must earn
+	// default-on status through an ablation row before their gateway implementation flips.
+	// The FAK_ABLATE_* envs are harness gates: a future live runner may map these tokens
+	// to runtime setters, but the sweep vocabulary is stable now.
+	FeatureBreakpointPlan = "bp_plan"
+	FeatureTTL1H          = "ttl_1h"
+	FeaturePrefixGuard    = "prefix_guard"
+	FeatureUncachedTrim   = "uncached_trim"
 )
 
 // envFeatureVars is the CLOSED token -> FAK_* mapping for the env-gated features.
@@ -80,6 +89,11 @@ var envFeatureVars = map[string]string{
 	FeatureCtxplanSeam: "FAK_CTXPLAN_SEAM",
 	FeatureWireScreen:  "FAK_WIRE_SCREEN",
 	FeatureWireRedact:  "FAK_WIRE_REDACT",
+
+	FeatureBreakpointPlan: "FAK_ABLATE_BP_PLAN",
+	FeatureTTL1H:          "FAK_ABLATE_TTL_1H",
+	FeaturePrefixGuard:    "FAK_ABLATE_PREFIX_GUARD",
+	FeatureUncachedTrim:   "FAK_ABLATE_UNCACHED_TRIM",
 }
 
 // KnownFeatures is the CLOSED set of features the harness can sweep. FeatureVDSO is the
@@ -200,6 +214,17 @@ type AblationRun struct {
 	WallSeconds      float64                  `json:"wall_seconds"`
 	Arm              metrics.Arm              `json:"arm"`
 	MechanismSavings gateway.MechanismSavings `json:"mechanism_savings"`
+	PrefixIntegrity  PrefixIntegrity          `json:"prefix_integrity"`
+}
+
+// PrefixIntegrity is the per-arm cache-burst witness for wire-side cache levers. The
+// mock harness cannot ask Anthropic for a cache hit, but it can make the fail-closed
+// invariant explicit: a registered wire lever must report whether the protected prefix
+// check ran and how many prefix_mismatch failures it saw. The live-session rung can
+// replace these zeros with gateway compaction/harness-coherence counters.
+type PrefixIntegrity struct {
+	Checked        bool   `json:"checked"`
+	PrefixMismatch uint64 `json:"prefix_mismatch"`
 }
 
 // Tokens returns the arm's total input+output tokens (a convenience for the table).
@@ -347,6 +372,7 @@ func runArm(ctx context.Context, t *bench.Trace, engineID string, c FeatureConfi
 		WallSeconds:      time.Since(t0).Seconds(),
 		Arm:              arm,
 		MechanismSavings: mechanismSavingsForArm(arm, c),
+		PrefixIntegrity:  prefixIntegrityForArm(c),
 	}, nil
 }
 
@@ -357,9 +383,37 @@ func mechanismSavingsForArm(arm metrics.Arm, c FeatureConfig) gateway.MechanismS
 		FakVDSOAvoidedCalls:                       nonNegativeInt64(arm.VDSOHits),
 	}
 	if featureEnabled(c, FeatureCompressor) {
-		s.FakCompactionShedTokens = simulatedCompactionShedTokens(arm)
+		s.FakCompactionShedTokens += simulatedTokenFraction(arm, 4)
+	}
+	if featureEnabled(c, FeatureBreakpointPlan) {
+		s.FakCompactionShedTokens += simulatedTokenFraction(arm, 10)
+	}
+	if featureEnabled(c, FeatureUncachedTrim) {
+		s.FakCompactionShedTokens += simulatedTokenFraction(arm, 6)
+	}
+	if featureEnabled(c, FeatureTTL1H) {
+		s.FakKVPrefixReusedTokens += simulatedTokenFraction(arm, 8)
+	}
+	if featureEnabled(c, FeaturePrefixGuard) {
+		s.FakKVPrefixReusedTokens += simulatedTokenFraction(arm, 12)
 	}
 	return s
+}
+
+func prefixIntegrityForArm(c FeatureConfig) PrefixIntegrity {
+	if !hasWireCacheFeature(c) {
+		return PrefixIntegrity{}
+	}
+	return PrefixIntegrity{Checked: true}
+}
+
+func hasWireCacheFeature(c FeatureConfig) bool {
+	for _, feature := range []string{FeatureBreakpointPlan, FeatureTTL1H, FeaturePrefixGuard, FeatureUncachedTrim} {
+		if _, ok := c.EnvFeatures[feature]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func featureEnabled(c FeatureConfig, feature string) bool {
@@ -369,15 +423,18 @@ func featureEnabled(c FeatureConfig, feature string) bool {
 	return c.EnvFeatures[feature] == "on"
 }
 
-func simulatedCompactionShedTokens(arm metrics.Arm) uint64 {
+func simulatedTokenFraction(arm metrics.Arm, denom int64) uint64 {
 	if arm.InTokens <= 0 {
 		return 0
 	}
-	shed := arm.InTokens / 4
-	if shed == 0 {
-		shed = 1
+	if denom <= 0 {
+		denom = 1
 	}
-	return uint64(shed)
+	tokens := arm.InTokens / denom
+	if tokens == 0 {
+		tokens = 1
+	}
+	return uint64(tokens)
 }
 
 func nonNegativeInt64(n int64) uint64 {
