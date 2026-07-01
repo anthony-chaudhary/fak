@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -94,6 +95,7 @@ type KPIPayload struct {
 	KPI     string   `json:"kpi"`
 	Group   string   `json:"group"`
 	Score   int      `json:"score"`
+	Value   float64  `json:"value"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
 	Soft    []string `json:"soft"`
@@ -422,6 +424,43 @@ func witnessResults(ev Evidence) []KPIResult {
 
 // ---- fold -------------------------------------------------------------------------
 
+// axisKPIs converts this card's KPIResult rows into shared-kernel scorecard.KPI rows for
+// one axis, scaling each KPI's own int Weight by axisWeight/axisTotalWeight so that
+// scorecard.Fold's overall weighted mean (Sigma(w*score)/Sigma(w) across usage+witness
+// together) reproduces exactly usageAxisWeight*uScore + witnessAxisWeight*wScore -- the
+// same two-axis composite this card has always reported, now computed by the shared
+// fold instead of a bespoke axisScore. A HARD fail becomes exactly one Defect (so
+// Fold's debt = Sigma(len(Defects)) equals the legacy hard-fail count); a SOFT fail
+// becomes exactly one Soft entry, which Fold never counts as debt.
+func axisKPIs(rows []KPIResult, axisWeight float64, weights map[string]float64) []scorecard.KPI {
+	total := 0
+	for _, r := range rows {
+		total += r.Weight
+	}
+	out := make([]scorecard.KPI, 0, len(rows))
+	for _, r := range rows {
+		score := 0.0
+		if r.Passed {
+			score = 100.0
+		}
+		k := scorecard.KPI{Key: r.Key, Group: r.Axis, Score: score, Detail: r.Detail}
+		if !r.Passed {
+			if r.Hard {
+				k.Defects = []string{r.Key + ": " + r.Detail}
+			} else {
+				k.Soft = []string{r.Key + ": " + r.Detail}
+			}
+		}
+		out = append(out, k)
+		w := float64(r.Weight)
+		if total > 0 {
+			w = axisWeight * float64(r.Weight) / float64(total)
+		}
+		weights[r.Key] = w
+	}
+	return out
+}
+
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
 	root, _ := filepath.Abs(opts.Root)
@@ -434,9 +473,13 @@ func Build(opts Options) ScorecardPayload {
 	witness := witnessResults(ev)
 	all := append(append([]KPIResult{}, usage...), witness...)
 
+	// weights is keyed by KPI Key (each key is unique across both axes) with a value
+	// scaled so scorecard.Fold's weighted mean reproduces the usage/witness axis blend.
+	weights := map[string]float64{}
+	kpis := append(axisKPIs(usage, usageAxisWeight, weights), axisKPIs(witness, witnessAxisWeight, weights)...)
+
 	uScore := axisScore(usage)
 	wScore := axisScore(witness)
-	composite := int(math.Round(usageAxisWeight*float64(uScore) + witnessAxisWeight*float64(wScore)))
 
 	var hardFail []KPIResult
 	for _, r := range all {
@@ -444,52 +487,61 @@ func Build(opts Options) ScorecardPayload {
 			hardFail = append(hardFail, r)
 		}
 	}
-	// conceptusage_debt = one per HARD gap. A thin witness axis (the common case)
-	// surfaces here as a real, halvable integer the 3x program drives down by actually
-	// witnessing more during development.
+	finding, next := "concept_usage_healthy", "hold the line; re-run after a dev session — keep witnessing claims via the verify syscall, not self-report"
+	findingClean, nextClean := finding, next
+	if len(hardFail) > 0 {
+		finding = "conceptusage_debt"
+		lead := hardFail[0]
+		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
+	}
+
+	p := scorecard.Fold(Schema, kpis, "conceptusage_debt", weights, scorecard.Messages{
+		Grade:           scorecard.GradeStd,
+		Finding:         finding,
+		FindingClean:    findingClean,
+		NextAction:      next,
+		NextActionClean: nextClean,
+		ExtraCorpus: map[string]any{
+			"usage_score":     uScore,
+			"usage_value":     scorecard.Round3(scorecard.ValueFromScore(float64(uScore))),
+			"witness_score":   wScore,
+			"witness_value":   scorecard.Round3(scorecard.ValueFromScore(float64(wScore))),
+			"commits_scanned": ev.Commits,
+			"verify_syscalls": ev.VerifySyscalls,
+			"recall_rows":     ev.RecallRows,
+			"lane_acquires":   ev.LaneAcquires,
+		},
+	})
 	debt := len(hardFail)
-	grade := GradeLetter(composite)
-	ok := debt == 0
-	verdict, finding, reason, next := "OK", "concept_usage_healthy", "", ""
-	if ok {
-		reason = "concept-usage: usage " + itoa(uScore) + "/100, witness " + itoa(wScore) +
-			"/100, composite " + itoa(composite) + "/100 (" + grade + "); dev routes through the fak concepts; zero hard gaps"
-		next = "hold the line; re-run after a dev session — keep witnessing claims via the verify syscall, not self-report"
+	grade := anyStr(p.Corpus["grade"])
+	if p.OK {
+		p.Reason = "concept-usage: usage value " + anyStr(p.Corpus["usage_value"]) + ", witness value " + anyStr(p.Corpus["witness_value"]) +
+			", composite value " + anyStr(p.Corpus["value"]) + " (" + grade + ", legacy score " + anyStr(p.Corpus["score"]) + "); dev routes through the fak concepts; zero hard gaps"
 	} else {
-		verdict, finding = "ACTION", "conceptusage_debt"
 		keys := make([]string, len(hardFail))
 		for i, r := range hardFail {
 			keys[i] = r.Key
 		}
-		reason = "concept-usage carries " + itoa(debt) + " debt (usage " + itoa(uScore) +
-			"/100, witness " + itoa(wScore) + "/100, composite " + itoa(composite) + " " + grade + "): " +
+		p.Reason = "concept-usage carries " + itoa(debt) + " debt (usage value " + anyStr(p.Corpus["usage_value"]) +
+			", witness value " + anyStr(p.Corpus["witness_value"]) + ", composite value " + anyStr(p.Corpus["value"]) +
+			" " + grade + ", legacy score " + anyStr(p.Corpus["score"]) + "): " +
 			strings.Join(keys, ", ")
-		lead := hardFail[0]
-		next = "retire worst-first: " + lead.Key + " — " + lead.Detail
 	}
+	p.Workspace = root
+
 	return ScorecardPayload{
-		Schema:     Schema,
-		OK:         ok,
-		Verdict:    verdict,
-		Finding:    finding,
-		Reason:     reason,
-		NextAction: next,
-		Workspace:  root,
-		Corpus: map[string]any{
-			"conceptusage_debt": debt,
-			"score":             composite,
-			"grade":             grade,
-			"usage_score":       uScore,
-			"witness_score":     wScore,
-			"commits_scanned":   ev.Commits,
-			"verify_syscalls":   ev.VerifySyscalls,
-			"recall_rows":       ev.RecallRows,
-			"lane_acquires":     ev.LaneAcquires,
-		},
-		KPIs:     kpiPayloads(all),
-		Usage:    usage,
-		Witness:  witness,
-		Evidence: ev,
+		Schema:     p.Schema,
+		OK:         p.OK,
+		Verdict:    p.Verdict,
+		Finding:    p.Finding,
+		Reason:     p.Reason,
+		NextAction: p.NextAction,
+		Workspace:  p.Workspace,
+		Corpus:     p.Corpus,
+		KPIs:       kpiPayloads(all),
+		Usage:      usage,
+		Witness:    witness,
+		Evidence:   ev,
 	}
 }
 
@@ -499,8 +551,8 @@ func Render(p ScorecardPayload) string {
 	c := p.Corpus
 	lines := []string{
 		"concept-usage — " + p.Verdict + " (" + p.Finding + ")",
-		"  conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "   composite " + anyStr(c["score"]) +
-			"/100 [" + anyStr(c["grade"]) + "]   (usage " + anyStr(c["usage_score"]) + "; witness " + anyStr(c["witness_score"]) + ")",
+		"  conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "   value " + anyStr(c["value"]) +
+			" [" + anyStr(c["grade"]) + "]   (legacy score " + anyStr(c["score"]) + "; usage value " + anyStr(c["usage_value"]) + "; witness value " + anyStr(c["witness_value"]) + ")",
 		"  evidence: " + anyStr(c["commits_scanned"]) + " commit(s); " + anyStr(c["verify_syscalls"]) +
 			" verify syscall(s); " + anyStr(c["recall_rows"]) + " recall(s); " + anyStr(c["lane_acquires"]) + " lane acquire(s)",
 		"",
@@ -525,9 +577,10 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString(`description: "How much the agentic DEVELOPMENT of fak routes through fak's own concepts — the ship-stamp/DCO/binding-verb commit discipline and lane arbitration (usage breadth), and the verify/improve witness syscalls over passive recall (witness depth), all re-derived from git and the .dos journals."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# fak concept-usage scorecard\n\n")
-	b.WriteString("**conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "**; composite **" + anyStr(c["score"]) +
-		"/100 (" + anyStr(c["grade"]) + ")**; usage " + anyStr(c["usage_score"]) + "/100; witness " +
-		anyStr(c["witness_score"]) + "/100\n\n")
+	b.WriteString("**conceptusage_debt: " + anyStr(c["conceptusage_debt"]) + "**; value **" + anyStr(c["value"]) +
+		" (" + anyStr(c["grade"]) + ")**; legacy score " + anyStr(c["score"]) +
+		"; usage value " + anyStr(c["usage_value"]) + "; witness value " +
+		anyStr(c["witness_value"]) + "\n\n")
 	b.WriteString("> " + p.Reason + "\n\n")
 	b.WriteString("The question: when an agent builds fak, how much does that development route through fak's *own* concepts — committing with the witness contract (ship-stamp, DCO, a binding verb), arbitrating disjoint lanes, and **witnessing its own claims via the verify syscall instead of trusting a self-report** — versus generic agentic dev? Every number is re-derived from `git log` and the `.dos` journals fak's tooling wrote; the score moves only when development actually uses the concepts more.\n\n")
 	b.WriteString("## Usage — does the development OUTPUT carry the fak discipline?\n\n| ok | criterion | detail |\n|---|---|---|\n")
@@ -561,7 +614,8 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 	lines := []string{
 		"concept-usage compare:",
 		"  conceptusage_debt: " + itoa(bDebt) + " -> " + itoa(cDebt) + "  (retired " + itoa(bDebt-cDebt) + ")",
-		"  composite: " + anyStr(bc["score"]) + " -> " + anyStr(current.Corpus["score"]) +
+		"  value: " + anyStr(bc["value"]) + " -> " + anyStr(current.Corpus["value"]) +
+			"  legacy score " + anyStr(bc["score"]) + " -> " + anyStr(current.Corpus["score"]) +
 			"  grade " + anyStr(bc["grade"]) + " -> " + anyStr(current.Corpus["grade"]),
 		"  witness_score: " + itoa(bWit) + " -> " + itoa(cWit),
 	}
@@ -619,6 +673,7 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
 		if r.Passed {
 			k.Score = 100
+			k.Value = 1
 		} else if r.Hard {
 			k.Defects = []string{r.Key + ": " + r.Detail}
 		} else {
