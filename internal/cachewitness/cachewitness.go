@@ -53,6 +53,15 @@ type Record struct {
 	// GatewayURL is the /metrics endpoint this record was scraped from.
 	GatewayURL string `json:"gateway_url"`
 
+	// WitnessWindow records the baseline/end scrape pair when this record is a
+	// run delta rather than a whole-gateway cumulative snapshot.
+	WitnessWindow *WitnessWindow `json:"witness_window,omitempty"`
+
+	// GatewayUptimeTurns is the end-scrape cumulative gateway turn counter. When
+	// WitnessWindow is present, KVPrefix.Turns is the run delta and this field
+	// shows how much prior gateway lifetime was excluded.
+	GatewayUptimeTurns uint64 `json:"gateway_uptime_turns"`
+
 	// --- WITNESSED: fak's OWN in-kernel KV-prefix cache (the epic's lever) ---
 
 	// KVPrefix is the in-kernel RadixAttention cache family. Provenance: WITNESSED.
@@ -72,6 +81,13 @@ type Record struct {
 	// Provenance maps each top-level number to its trust class, so the record is
 	// self-describing — a reader never has to know which field is fak's.
 	Provenance map[string]Provenance `json:"provenance"`
+}
+
+// WitnessWindow names the cumulative metrics scrape used as the start baseline
+// and the scrape used as the end of the measured run window.
+type WitnessWindow struct {
+	StartScrape string `json:"start_scrape"`
+	EndScrape   string `json:"end_scrape"`
 }
 
 // WarmKVMarginalFamily names the ONLY cache-value framing #1066's honesty fence
@@ -168,6 +184,49 @@ func (r Record) CacheBit() bool {
 	return r.KVPrefix.ReusedTokens > 0
 }
 
+// Sub returns the per-run delta from a cumulative end scrape and a cumulative
+// baseline scrape. Prometheus counters may reset across a gateway restart; when
+// an end counter is lower than the baseline, the end value is treated as the
+// post-reset run value rather than underflowing.
+func (r Record) Sub(baseline Record) Record {
+	out := r
+	out.KVPrefix = r.KVPrefix.Sub(baseline.KVPrefix)
+	out.ProviderCacheReadTokens = counterDelta(r.ProviderCacheReadTokens, baseline.ProviderCacheReadTokens)
+	out.GatewayUptimeTurns = r.GatewayUptimeTurns
+	if out.GatewayUptimeTurns == 0 {
+		out.GatewayUptimeTurns = r.KVPrefix.Turns
+	}
+	out.WitnessWindow = &WitnessWindow{StartScrape: baseline.GatewayURL, EndScrape: r.GatewayURL}
+	out.CacheValue = cacheValue(out.KVPrefix)
+	if out.Provenance == nil {
+		out.Provenance = map[string]Provenance{
+			"kv_prefix":                  Witnessed,
+			"provider_cache_read_tokens": Observed,
+			"cache_value":                Witnessed,
+		}
+	}
+	return out
+}
+
+// Sub returns a per-window in-kernel KV-prefix delta from cumulative counters.
+func (k KVPrefixWitness) Sub(baseline KVPrefixWitness) KVPrefixWitness {
+	return KVPrefixWitness{
+		Turns:        counterDelta(k.Turns, baseline.Turns),
+		PromptTokens: counterDelta(k.PromptTokens, baseline.PromptTokens),
+		ReusedTokens: counterDelta(k.ReusedTokens, baseline.ReusedTokens),
+		FrozenTurns:  counterDelta(k.FrozenTurns, baseline.FrozenTurns),
+		PartialTurns: counterDelta(k.PartialTurns, baseline.PartialTurns),
+		ColdTurns:    counterDelta(k.ColdTurns, baseline.ColdTurns),
+	}
+}
+
+func counterDelta(end, start uint64) uint64 {
+	if end >= start {
+		return end - start
+	}
+	return end
+}
+
 // metric name → field the scraper folds it into.
 const (
 	mTurns      = "fak_gateway_kv_prefix_turns_total"
@@ -233,6 +292,7 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 	if !seen {
 		return Record{}, fmt.Errorf("no fak_gateway_kv_prefix_* / inference cache series found in %s — is this a fak gateway /metrics body?", gatewayURL)
 	}
+	r.GatewayUptimeTurns = r.KVPrefix.Turns
 	r.CacheValue = cacheValue(r.KVPrefix)
 	return r, nil
 }

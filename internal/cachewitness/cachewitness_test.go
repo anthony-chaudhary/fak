@@ -45,6 +45,64 @@ func TestParseFoldsCacheFamily(t *testing.T) {
 	if r.GatewayURL != "http://box:8080/metrics" {
 		t.Errorf("gateway url not recorded: %q", r.GatewayURL)
 	}
+	if r.GatewayUptimeTurns != 7 {
+		t.Errorf("gateway uptime turns = %d, want cumulative 7", r.GatewayUptimeTurns)
+	}
+}
+
+func TestRecordSubSubtractsCumulativeGatewayCounters(t *testing.T) {
+	const before = `fak_gateway_kv_prefix_turns_total 10
+fak_gateway_kv_prefix_prompt_tokens_total 10000
+fak_gateway_kv_prefix_reused_tokens_total 4000
+fak_gateway_kv_prefix_turns_by_regime_total{regime="frozen"} 2
+fak_gateway_kv_prefix_turns_by_regime_total{regime="partial"} 3
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 5
+fak_gateway_inference_cached_prompt_tokens_total 100
+`
+	const after = `fak_gateway_kv_prefix_turns_total 13
+fak_gateway_kv_prefix_prompt_tokens_total 19000
+fak_gateway_kv_prefix_reused_tokens_total 8500
+fak_gateway_kv_prefix_turns_by_regime_total{regime="frozen"} 3
+fak_gateway_kv_prefix_turns_by_regime_total{regime="partial"} 5
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 5
+fak_gateway_inference_cached_prompt_tokens_total 150
+`
+	base, err := Parse("file://before.prom", before)
+	if err != nil {
+		t.Fatalf("Parse before: %v", err)
+	}
+	end, err := Parse("file://after.prom", after)
+	if err != nil {
+		t.Fatalf("Parse after: %v", err)
+	}
+	delta := end.Sub(base)
+	if delta.KVPrefix.Turns != 3 || delta.KVPrefix.PromptTokens != 9000 || delta.KVPrefix.ReusedTokens != 4500 {
+		t.Fatalf("delta kv = %+v, want 3 turns / 9000 prompt / 4500 reused", delta.KVPrefix)
+	}
+	if delta.KVPrefix.FrozenTurns != 1 || delta.KVPrefix.PartialTurns != 2 || delta.KVPrefix.ColdTurns != 0 {
+		t.Fatalf("delta regimes = %+v, want frozen=1 partial=2 cold=0", delta.KVPrefix)
+	}
+	if delta.ProviderCacheReadTokens != 50 {
+		t.Fatalf("delta provider cache_read = %d, want 50", delta.ProviderCacheReadTokens)
+	}
+	if delta.GatewayUptimeTurns != 13 {
+		t.Fatalf("gateway uptime turns = %d, want end-scrape cumulative 13", delta.GatewayUptimeTurns)
+	}
+	if delta.WitnessWindow == nil || delta.WitnessWindow.StartScrape != "file://before.prom" || delta.WitnessWindow.EndScrape != "file://after.prom" {
+		t.Fatalf("witness window = %+v, want before->after scrape labels", delta.WitnessWindow)
+	}
+	if delta.CacheValue.ReusedTokens != 4500 || delta.CacheValue.PromptTokens != 9000 {
+		t.Fatalf("cache value = %+v, want recomputed from delta", delta.CacheValue)
+	}
+}
+
+func TestRecordSubTreatsCounterResetAsFreshWindow(t *testing.T) {
+	end := Record{KVPrefix: KVPrefixWitness{Turns: 2, PromptTokens: 700, ReusedTokens: 300}, ProviderCacheReadTokens: 9}
+	base := Record{KVPrefix: KVPrefixWitness{Turns: 10, PromptTokens: 10000, ReusedTokens: 4000}, ProviderCacheReadTokens: 100}
+	delta := end.Sub(base)
+	if delta.KVPrefix.Turns != 2 || delta.KVPrefix.PromptTokens != 700 || delta.KVPrefix.ReusedTokens != 300 || delta.ProviderCacheReadTokens != 9 {
+		t.Fatalf("reset delta = %+v provider=%d, want end counters as fresh run", delta.KVPrefix, delta.ProviderCacheReadTokens)
+	}
 }
 
 func TestReuseRatioAndCacheBit(t *testing.T) {

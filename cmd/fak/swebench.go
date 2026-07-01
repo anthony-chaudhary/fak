@@ -121,7 +121,7 @@ usage:
         adapter, same model id and budget, raw/fak endpoint routing, official grader
         commands, and the gates that must pass before any result claim is allowed.
 
-  fak swebench cache-witness [--gateway URL | --metrics-file PATH] [--out FILE]
+  fak swebench cache-witness [--gateway URL | --metrics-file PATH] [--baseline PATH] [--out FILE]
         Scrape a live fak serve gateway's /metrics and fold the in-kernel KV-prefix
         cache family into ONE provenance-labeled record: the cache VALUE a fak-served
         model (e.g. GLM-5.2 on the pure kernel) realized across the run — reused
