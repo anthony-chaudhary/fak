@@ -276,8 +276,8 @@ func planeVerdict(items []Item) string {
 // honesty (the marquee S/N), throughput vs target, dead backends, silent workers,
 // and witnessed-closable issues a human could close now.
 func interpretDispatch(in PlaneInput) (PlaneStatus, []Item) {
-	if in.Err != "" || in.Payload == nil {
-		return unmeasuredPlane("dispatch", in.Err), nil
+	if ps, ok := planeGuard(in, "dispatch"); !ok {
+		return ps, nil
 	}
 	var items []Item
 
@@ -361,8 +361,8 @@ func dispatchSummary(p map[string]any) string {
 // agentic automation that has silently stopped ticking — is the canonical "the
 // human thinks an agent is running but it is not" failure, so it is surfaced.
 func interpretLoops(in PlaneInput) (PlaneStatus, []Item) {
-	if in.Err != "" || in.Payload == nil {
-		return unmeasuredPlane("loops", in.Err), nil
+	if ps, ok := planeGuard(in, "loops"); !ok {
+		return ps, nil
 	}
 	var items []Item
 	roll, _ := in.Payload["rollup"].(map[string]any)
@@ -390,8 +390,8 @@ func interpretLoops(in PlaneInput) (PlaneStatus, []Item) {
 // when the (~4-minute) scorecard pane was run. A missing scores block is "not
 // run", not a regression, so it never fabricates a warn.
 func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
-	if in.Err != "" || in.Payload == nil {
-		return unmeasuredPlane("cadence", in.Err), nil
+	if ps, ok := planeGuard(in, "cadence"); !ok {
+		return ps, nil
 	}
 	var items []Item
 	work, _ := in.Payload["work"].(map[string]any)
@@ -452,8 +452,8 @@ func interpretCadence(in PlaneInput) (PlaneStatus, []Item) {
 // emits a ranked "what needs me now" Attention list (box liveness / GPU waste);
 // this lifts its crit/warn rows into the unified list, dropping its OK noise.
 func interpretFleet(in PlaneInput) (PlaneStatus, []Item) {
-	if in.Err != "" || in.Payload == nil {
-		return unmeasuredPlane("fleet", in.Err), nil
+	if ps, ok := planeGuard(in, "fleet"); !ok {
+		return ps, nil
 	}
 	var items []Item
 	if att, ok := in.Payload["attention"].([]any); ok {
@@ -483,6 +483,17 @@ func interpretFleet(in PlaneInput) (PlaneStatus, []Item) {
 
 func unmeasuredPlane(name, err string) PlaneStatus {
 	return PlaneStatus{Name: name, Measured: false, Verdict: PlaneUnmeasured, Err: orNoPayload(err)}
+}
+
+// planeGuard is the shared front-of-interpreter check: when the input carries an
+// error or no payload the plane is unmeasured and the interpreter returns early
+// (ok=false). Otherwise ok=true and the returned PlaneStatus is a zero value the
+// caller ignores. Keeps every interpret* function's guard byte-identical.
+func planeGuard(in PlaneInput, name string) (PlaneStatus, bool) {
+	if in.Err != "" || in.Payload == nil {
+		return unmeasuredPlane(name, in.Err), false
+	}
+	return PlaneStatus{}, true
 }
 
 // signalNoise builds the marquee from the dispatch (closure) and cadence (work)
@@ -581,6 +592,19 @@ func narrate(r Rollup, nCrit, nWarn int) (finding, reason, next string) {
 	return
 }
 
+// writeItemTail renders the shared trailing part of an Attention/NextWork bullet:
+// the optional provenance tag, the line break, and the optional indented detail.
+// The two lists differ only in their leading marker, so this keeps the tail single-sourced.
+func writeItemTail(b *strings.Builder, it Item) {
+	if it.Prov != "" {
+		fmt.Fprintf(b, " _[%s]_", it.Prov)
+	}
+	b.WriteString("\n")
+	if it.Detail != "" {
+		fmt.Fprintf(b, "  - %s\n", it.Detail)
+	}
+}
+
 // Render produces the human markdown body for the roll-up doc. Deterministic;
 // it takes no clock (GeneratedAt is carried on the Rollup).
 func Render(r Rollup) string {
@@ -614,13 +638,7 @@ func Render(r Rollup) string {
 				mark = "🔴"
 			}
 			fmt.Fprintf(&b, "- %s **%s** `%s`", mark, it.Title, it.Plane)
-			if it.Prov != "" {
-				fmt.Fprintf(&b, " _[%s]_", it.Prov)
-			}
-			b.WriteString("\n")
-			if it.Detail != "" {
-				fmt.Fprintf(&b, "  - %s\n", it.Detail)
-			}
+			writeItemTail(&b, it)
 		}
 		b.WriteString("\n")
 	}
@@ -630,13 +648,7 @@ func Render(r Rollup) string {
 		b.WriteString("### Useful next work\n\n")
 		for _, it := range r.NextWork {
 			fmt.Fprintf(&b, "- **%s** `%s`", it.Title, it.Plane)
-			if it.Prov != "" {
-				fmt.Fprintf(&b, " _[%s]_", it.Prov)
-			}
-			b.WriteString("\n")
-			if it.Detail != "" {
-				fmt.Fprintf(&b, "  - %s\n", it.Detail)
-			}
+			writeItemTail(&b, it)
 		}
 		b.WriteString("\n")
 	}
