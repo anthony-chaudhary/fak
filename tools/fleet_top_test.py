@@ -388,5 +388,55 @@ class LifecycleGateTest(unittest.TestCase):
         self.assertIn("HEALTHY", fleet_top.slack_text(snap))
 
 
+class TrendWiringTest(unittest.TestCase):
+    """The trend hook (#2041): slack renders an injected `trend`, and post_to_slack
+    with a history ledger appends this tick and folds a trend line into the body."""
+
+    def _snap(self):
+        return fleet_top.build_snapshot(
+            _doc(), workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
+
+    def test_slack_renders_injected_trend_line(self):
+        snap = self._snap()
+        snap["trend"] = "trend: usable 3→1 ▇▁ (-2 over 2)"
+        text = fleet_top.slack_text(snap)
+        self.assertIn("trend: usable 3→1", text)
+
+    def test_no_trend_key_means_no_trend_line(self):
+        # build_snapshot stays a pure snapshot: no trend unless the CLI injects one.
+        self.assertNotIn("trend:", fleet_top.slack_text(self._snap()))
+
+    def test_attach_trend_appends_and_injects(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / "hist.jsonl")
+            fleet_top.attach_trend(self._snap(), path, now="2026-06-23T17:00:00Z")
+            snap = self._snap()
+            fleet_top.attach_trend(snap, path, now="2026-06-23T18:00:00Z")
+            self.assertIn("trend:", snap.get("trend", ""))
+            import fleet_trend
+            self.assertEqual(len(fleet_trend.tail(path, 24)), 2)  # both ticks recorded
+
+    def test_post_to_slack_dry_run_does_not_record(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / "hist.jsonl")
+
+            def transport(url, body, headers, timeout):
+                return 200, '{"ok": true, "ts": "1.2", "channel": "C0FLEET"}'
+
+            import os
+            os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test"
+            os.environ["FAK_DISPATCH_CHANNEL"] = "C0FLEET"
+            self.addCleanup(lambda: (os.environ.pop("FAK_SCOREBOARD_TOKEN", None),
+                                     os.environ.pop("FAK_DISPATCH_CHANNEL", None)))
+            fleet_top.post_to_slack(self._snap(), dry_run=True, transport=transport,
+                                    history_path=path)
+            import fleet_trend
+            self.assertEqual(fleet_trend.tail(path, 24), [])  # dry-run never records
+
+
 if __name__ == "__main__":
     unittest.main()

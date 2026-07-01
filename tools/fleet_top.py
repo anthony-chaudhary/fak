@@ -582,6 +582,13 @@ def slack_compact(snap: dict[str, Any]) -> str:
     asum = _acct_summary(acc)
     if asum:
         lines.append("accounts: " + asum)
+    # Direction, not just "now": a pre-computed trend line (sparkline + delta per
+    # load-bearing metric) injected by the CLI when a history ledger is wired. Absent on
+    # a first-ever tick or when the caller passes no history, so build_snapshot stays a
+    # pure snapshot and the line simply doesn't appear.
+    trend = str(snap.get("trend") or "").strip()
+    if trend:
+        lines.append(trend)
     # Partition by whether a lifecycle owns the remediation, NOT by crit/warn: an
     # escalation is the only thing that needs a human; self-healing items are folded
     # into one quiet line so the operator sees the system IS handling them without an
@@ -635,17 +642,42 @@ def slack_text(snap: dict[str, Any]) -> str:
     return headline + "\n" + slack_compact(snap)
 
 
+def attach_trend(snap: dict[str, Any], history_path: str, *, now: str = "",
+                 window: int = 24, record: bool = True) -> dict[str, Any]:
+    """Append this tick's metrics to the history ledger and inject a ``trend`` line
+    (sparkline + delta per metric) into ``snap`` so the card shows direction, not just
+    "now". Best-effort: any failure (import, disk) leaves the snapshot a plain one-off
+    and never raises — a status post must not break on its own history. With
+    ``record=False`` (a dry-run) it renders the existing history without appending, so a
+    preview never pollutes the ledger."""
+    try:
+        import fleet_trend  # sibling module in tools/
+        if record:
+            stamp = now or snap.get("generated_utc") or fleet_trend._iso_now()
+            fleet_trend.append(history_path, fleet_trend.metrics_of(snap), stamp)
+        line = fleet_trend.render_line(fleet_trend.tail(history_path, window))
+        if line:
+            snap["trend"] = line
+    except Exception:  # noqa: BLE001 — history is a nicety, never a failure mode
+        pass
+    return snap
+
+
 def post_to_slack(snap: dict[str, Any], *, channel: str = "",
-                  dry_run: bool = False, transport: Any | None = None) -> dict[str, Any]:
+                  dry_run: bool = False, transport: Any | None = None,
+                  history_path: str = "", trend_window: int = 24) -> dict[str, Any]:
     """Post the session/account-health snapshot to Slack via tools/slack_post. Never
     raises — a missing poster or a Slack failure becomes a typed verdict the caller logs.
     Channel/token resolve through slack_post ($FAK_DISPATCH_CHANNEL / the shared
     scoreboard token) unless ``channel`` is set, so fleet status lands in the same ops
-    channel as the dispatch card."""
+    channel as the dispatch card. When ``history_path`` is set the snapshot's metrics
+    are appended to that trend ledger (unless dry-run) and a trend line is folded in."""
     try:
         import slack_post  # sibling module in tools/
     except Exception as exc:  # noqa: BLE001
         return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
+    if history_path:
+        attach_trend(snap, history_path, window=trend_window, record=not dry_run)
     return slack_post.send(slack_text(snap), channel=channel, dry_run=dry_run,
                            transport=transport, include_signal_noise=False)
 
@@ -703,6 +735,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--slack-dry-run", action="store_true",
                     help="with --slack: resolve the channel/token and report what WOULD "
                          "be posted without sending")
+    ap.add_argument("--history", default="",
+                    help="with --slack: trend ledger path (default: docs/nightrun/"
+                         "fleet-status-history.jsonl under the workspace)")
+    ap.add_argument("--no-trend", action="store_true",
+                    help="with --slack: do not append to / show the trend ledger")
+    ap.add_argument("--trend-window", type=int, default=24,
+                    help="with --slack: how many trailing ticks the trend line folds")
     args = ap.parse_args(argv)
 
     try:
@@ -720,7 +759,10 @@ def main(argv: list[str] | None = None) -> int:
         # A Slack post is a one-shot snapshot, never the 5s live loop.
         snap = snapshot(root, args.window)
         channel = "" if args.slack == "__env__" else args.slack
-        verdict = post_to_slack(snap, channel=channel, dry_run=args.slack_dry_run)
+        history = "" if args.no_trend else (
+            args.history or str(root / "docs" / "nightrun" / "fleet-status-history.jsonl"))
+        verdict = post_to_slack(snap, channel=channel, dry_run=args.slack_dry_run,
+                                history_path=history, trend_window=args.trend_window)
         if verdict.get("posted"):
             print(f"slack: posted fleet status to {verdict.get('channel')} "
                   f"(ts={verdict.get('ts')})")
