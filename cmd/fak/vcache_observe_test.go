@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
+
+var updateVCacheObserveGolden = flag.Bool("update-vcache-observe-golden", false, "regenerate cmd/fak/testdata/vcache_observe_transcript.golden.json")
 
 // writeLines writes JSONL content to a temp file and returns its path.
 func writeLines(t *testing.T, name string, lines ...string) string {
@@ -115,6 +118,71 @@ func TestRunVCacheObserveTranscript(t *testing.T) {
 	}
 	if rep.Aggregate.CacheReadTokens != 40000 {
 		t.Fatalf("cache read tokens: got %.0f want 40000", rep.Aggregate.CacheReadTokens)
+	}
+}
+
+func TestRunVCacheObserveTranscriptGolden(t *testing.T) {
+	fixture := filepath.Join("testdata", "vcache_observe_transcript.jsonl")
+	golden := filepath.Join("testdata", "vcache_observe_transcript.golden.json")
+
+	var out, errb bytes.Buffer
+	code := runVCacheObserve(&out, &errb, []string{"--transcript", fixture, "--json"})
+	if code != 0 {
+		t.Fatalf("exit %d, stderr=%s", code, errb.String())
+	}
+	var rep vcacheobserve.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	assertVCacheObserveGoldenShape(t, rep)
+
+	if *updateVCacheObserveGolden {
+		if err := os.WriteFile(golden, out.Bytes(), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		t.Logf("updated golden %s", golden)
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden (run with -update-vcache-observe-golden to create): %v", err)
+	}
+	if got := out.Bytes(); !bytes.Equal(got, want) {
+		t.Fatalf("vcache observe transcript golden drifted; regenerate with -update-vcache-observe-golden if intended\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func assertVCacheObserveGoldenShape(t *testing.T, rep vcacheobserve.Report) {
+	t.Helper()
+	if rep.Schema != vcacheobserve.Schema {
+		t.Fatalf("schema = %q, want %q", rep.Schema, vcacheobserve.Schema)
+	}
+	if rep.Turns != 3 || rep.FamilyCount != 1 || len(rep.Families) != 1 {
+		t.Fatalf("unexpected transcript fold: turns=%d families=%d rows=%d", rep.Turns, rep.FamilyCount, len(rep.Families))
+	}
+	fam := rep.Families[0]
+	if fam.Key != "vcache_observe_transcript" || fam.Turns != 3 || fam.CacheReadTokens != 80000 {
+		t.Fatalf("family row = %+v", fam)
+	}
+	wantPanels := map[string]bool{
+		"M1 concentration":     false,
+		"M1 warmth belief":     false,
+		"M2 star anchors":      false,
+		"M3 dedicated warming": false,
+		"M4 chains & recall":   false,
+		"M5 governor":          false,
+	}
+	for _, p := range rep.Panels {
+		if _, ok := wantPanels[p.Name]; ok {
+			if p.Verdict == "" || p.Witness == "" {
+				t.Fatalf("panel %q missing verdict/witness: %+v", p.Name, p)
+			}
+			wantPanels[p.Name] = true
+		}
+	}
+	for name, seen := range wantPanels {
+		if !seen {
+			t.Fatalf("golden transcript missing panel %q", name)
+		}
 	}
 }
 

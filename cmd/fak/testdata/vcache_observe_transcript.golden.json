@@ -1,0 +1,213 @@
+{
+  "schema": "fak.vcache.observe.v1",
+  "turns": 3,
+  "family_count": 1,
+  "families": [
+    {
+      "key": "vcache_observe_transcript",
+      "turns": 3,
+      "elapsed_seconds": 20,
+      "input_tokens": 290,
+      "cache_read_tokens": 80000,
+      "cache_creation_tokens": 41000,
+      "mean_prefix_tokens": 40430,
+      "hit_rate": 0.6595762222771869,
+      "arrival_rate_per_sec": 0.15,
+      "governor_decision": "ride_natural",
+      "economics": {
+        "status": "PROVEN",
+        "reason": "observed provider telemetry shows positive realized cache savings",
+        "requests": 3,
+        "baseline_token_equiv": 121290,
+        "actual_token_equiv": 90290,
+        "saved_token_equiv": 31000,
+        "saved_pct": 25.558578613240993,
+        "cache_read_tokens": 80000,
+        "cache_creation_tokens": 41000,
+        "ephemeral_1h_input_tokens": 41000,
+        "ephemeral_5m_input_tokens": 0,
+        "first_positive_request": 3,
+        "correctness_depends_on_hit": false
+      },
+      "prediction": {
+        "Total": 3,
+        "TrueWarm": 1,
+        "FalseWarm": 0,
+        "TrueCold": 1,
+        "FalseCold": 1
+      }
+    }
+  ],
+  "aggregate": {
+    "status": "PROVEN",
+    "reason": "observed provider telemetry shows positive realized cache savings",
+    "requests": 3,
+    "baseline_token_equiv": 121290,
+    "actual_token_equiv": 90290,
+    "saved_token_equiv": 31000,
+    "saved_pct": 25.558578613240993,
+    "cache_read_tokens": 80000,
+    "cache_creation_tokens": 41000,
+    "ephemeral_1h_input_tokens": 41000,
+    "ephemeral_5m_input_tokens": 0,
+    "first_positive_request": 3,
+    "correctness_depends_on_hit": false
+  },
+  "hit_rate": 0.6595762222771869,
+  "multiplier": 1.3433381326835752,
+  "mean_prefix_tokens": 40430,
+  "concentration": {
+    "ZipfS": 0,
+    "Measured": false,
+    "Defeated": true,
+    "TopNCoverage": {
+      "1": 1
+    },
+    "Recommendation": "workload is flat (s\u003c=1): vCache will not help — manufacture skew (canonicalize/aggregate) or abstain"
+  },
+  "prediction": {
+    "Total": 3,
+    "TrueWarm": 1,
+    "FalseWarm": 0,
+    "TrueCold": 1,
+    "FalseCold": 1
+  },
+  "recall": {
+    "status": "refuted",
+    "decision": "cold_prefill",
+    "reason": "cost gate refused: P·r \u003e= S·U — recall-by-rebuild is net-negative (§11.0); send the unit cold",
+    "prefix_tokens": 40430,
+    "unit_tokens": 10,
+    "read_mult": 0.1,
+    "siblings": 1,
+    "replay_cost": 4043,
+    "fresh_prefill_cost": 10,
+    "amortized_savings": 10,
+    "break_even_siblings": 405,
+    "loss_ratio": 404.3,
+    "correctness_depends_on": false
+  },
+  "grade_measured": "F",
+  "score_measured": 30,
+  "grade_synthetic": "C",
+  "score_synthetic": 70,
+  "owner_slices": [
+    {
+      "owner": "provider",
+      "mechanism": "prompt_cache",
+      "saved_token_equiv": 31000,
+      "cache_read_tokens": 80000,
+      "cache_creation_tokens": 41000,
+      "provenance": "OBSERVED",
+      "evidence": "provider usage.cache_read_input_tokens and cache_creation_input_tokens"
+    },
+    {
+      "owner": "fak",
+      "mechanism": "authored_cache",
+      "saved_token_equiv": 0,
+      "provenance": "NOT_OBSERVED",
+      "evidence": "transcript/session telemetry has no fak compaction, KV-prefix reuse, or vDSO avoided-call counters"
+    }
+  ],
+  "panels": [
+    {
+      "name": "base provider cache",
+      "package": "internal/cachemeta",
+      "milestone": "tier-1 (passive)",
+      "question": "is the Anthropic prefix cache being reused at all?",
+      "value": "hit 66.0% — 80,000 cached input tokens served over 3 turns",
+      "provenance": "OBSERVED",
+      "verdict": "WORKS",
+      "witness": "fak vcache observe (aggregate.cache_read_tokens)",
+      "detail": "the obvious base case — cache_read\u003e0 every turn; this is what 'base cache works' means."
+    },
+    {
+      "name": "M2 star anchors",
+      "package": "internal/vcachestar",
+      "milestone": "M2 (#717)",
+      "question": "does a warmed prefix pay for itself within a family?",
+      "value": "saved 25.6% (31,000 token-equiv) across 1 families; first-positive turn 3",
+      "provenance": "OBSERVED",
+      "verdict": "WORKS",
+      "witness": "fak vcache prove-telemetry --file \u003ctelemetry\u003e",
+      "detail": "within-family reuse: the shared system prefix is warmed once and read by every later turn."
+    },
+    {
+      "name": "M1 concentration",
+      "package": "internal/vcachecal",
+      "milestone": "M1 (#716) §5.2",
+      "question": "is reuse CONCENTRATED enough for cross-family warming to help?",
+      "value": "measured Zipf s=0.00 over 1 families (defeated=true)",
+      "provenance": "DECISION",
+      "verdict": "DEFEATED",
+      "witness": "fak vcache score --anchors-file \u003cmeasured-anchors\u003e",
+      "detail": "workload is flat (s\u003c=1): vCache will not help — manufacture skew (canonicalize/aggregate) or abstain"
+    },
+    {
+      "name": "M1 warmth belief",
+      "package": "internal/vcachecal",
+      "milestone": "M1 (#716) §7 / Law A1",
+      "question": "does the warmth estimator ever book a save it did not get?",
+      "value": "false-warm 0.00% (the lethal one) · false-cold 50.00% (benign under-claim) over 3 turns",
+      "provenance": "OBSERVED",
+      "verdict": "SAFE",
+      "witness": "fak vcache observe (prediction.false_warm)",
+      "detail": "false-warm is the dangerous direction (manifest says HIT, provider says MISS); 0% means verify-then-trust holds on real traffic."
+    },
+    {
+      "name": "M3 dedicated warming",
+      "package": "internal/vcachewarm",
+      "milestone": "M3 (#718)",
+      "question": "should we spend a dedicated max_tokens:0 / decode-1 warm?",
+      "value": "0/1 families net-positive from natural traffic by turn 1",
+      "provenance": "DECISION",
+      "verdict": "NATURAL-FIRST",
+      "witness": "fak vcache observe (families[].economics.first_positive_request)",
+      "detail": "the first natural request warms the prefix for free; a dedicated warm would only add a write — spend it only for latency or a TTL gap."
+    },
+    {
+      "name": "M4 chains \u0026 recall",
+      "package": "internal/vcachechain",
+      "milestone": "M4 (#719) §11.0",
+      "question": "should a single unit be recalled by replaying the chain?",
+      "value": "at the account's mean 40,430-token prefix: 404x loss, break-even 405 siblings",
+      "provenance": "DECISION",
+      "verdict": "REFUSED",
+      "witness": "fak vcache prove-recall --prefix-tokens \u003cmean\u003e",
+      "detail": "single-unit chain rebuild is a large net loss; the cost gate correctly refuses it and reserves rebuild for amortized fan-out."
+    },
+    {
+      "name": "M5 governor",
+      "package": "internal/vcachegov",
+      "milestone": "M5 (#720) §5.4",
+      "question": "pin, lazy-rebuild, or ride natural traffic per prefix?",
+      "value": "ride_natural (the dominant verdict across 1 families' observed arrival rates)",
+      "provenance": "DECISION",
+      "verdict": "RIDE-NATURAL",
+      "witness": "fak vcache observe (families[].governor_decision)",
+      "detail": "active sessions arrive faster than the 5m TTL (λT≥1), so natural traffic holds the prefix warm — no pin, no dedicated warm."
+    },
+    {
+      "name": "score composite",
+      "package": "internal/vcachescore",
+      "milestone": "agent-dev 2x gate",
+      "question": "what grade does the run earn — measured vs synthetic?",
+      "value": "MEASURED F (30/100) vs SYNTHETIC C (70/100)",
+      "provenance": "DECISION",
+      "verdict": "CONTEXT-DEPENDENT",
+      "witness": "fak vcache score --telemetry \u003ct\u003e --anchors-file \u003ca\u003e",
+      "detail": "same realized economics; the grade gap is almost entirely the concentration assumption (35 of 40 pts; the other 5 are the benign false-cold risk penalty) — synthetic steep (s=1.74) vs the account's measured-flat distribution."
+    },
+    {
+      "name": "cachemeta canonicalization",
+      "package": "internal/cachemeta",
+      "milestone": "tier-1 §6",
+      "question": "is the cacheable prefix staying byte-stable?",
+      "value": "inferred HOLDING — 0.00% false-warm (a canonicalization break would show as believed-warm, cache_read=0)",
+      "provenance": "OBSERVED",
+      "verdict": "HOLDING",
+      "witness": "fak vcache observe (prediction.false_warm == 0)",
+      "detail": "a volatile byte in the prefix (timestamp/UUID) would silently break reuse; 0 false-warms is the proxy that the prefix is canonical."
+    }
+  ]
+}
