@@ -66,6 +66,15 @@ var commitVerbs = setOf(
 	// commit-gardening surface itself, #1326) names a real, checkable change. The gate was
 	// abstaining on "advise"/"nudge"/"recommend" despite each leading a concrete diff.
 	"advise", "nudge", "recommend", "warn", "remind", "hint",
+	// Imperative base forms the DOS commit-audit referee witnesses as a code effect
+	// (dos_witness_verbs.go dosCodeEffectVerbs) that fak's gate was REJECTING as ungradeable —
+	// the mirror image of the abstainHazard divergence (#2089). fak's accept-set must be a
+	// SUPERSET of the referee's imperative code verbs so a subject that BINDS at the referee is
+	// never red-flagged by `fak commit --preview`. Asserted by TestCommitVerbsSupersetOfRefereeCodeVerbs.
+	"accumulate", "arm", "attribute", "author", "bind", "bridge", "carry",
+	"consume", "dequant", "dequantize", "derive", "downgrade", "floor", "hook",
+	"invert", "memoize", "optimise", "price", "refuse", "require", "reserve",
+	"reset", "show", "splice", "synthesize",
 )
 
 var subjectRE = regexp.MustCompile(`^([a-z]+)(\([^)]+\))?(!)?:\s+(.+)$`)
