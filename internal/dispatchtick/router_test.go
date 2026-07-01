@@ -407,11 +407,75 @@ func TestRouterRepairQueueRecommendsSplitForMultipleDoneConditions(t *testing.T)
 	}, []int{57}, 1)
 }
 
+func TestRouterRepairQueueFlagsDuplicateRiskBeforeDispatch(t *testing.T) {
+	p := RouteIssues(RouterInput{
+		Workspace:  "C:/work/fak",
+		Taxonomy:   routerTestTaxonomy,
+		IssueLimit: 1000,
+		Issues: []Issue{
+			routerIssue(101, "gateway: retry budget leak", nil, duplicateRiskIssueBody("internal/gateway/http.go", "The retry budget leak fixture is deduped before worker launch.")),
+			routerIssue(102, "gateway: retry budget accounting", nil, duplicateRiskIssueBody("internal/gateway/http.go", "The retry budget accounting fixture is deduped before worker launch.")),
+			routerIssue(103, "gateway: cache owner report", nil, duplicateRiskIssueBody("internal/gateway/cache.go", "The cache owner report remains a safe candidate.")),
+		},
+	})
+	if p.Counts.Routed != 1 || p.Counts.SkippedHumanBlocked != 2 {
+		t.Fatalf("route counts = %+v skipped=%+v, want one routed and two duplicate-risk skipped", p.Counts, p.SkippedHumanBlocked)
+	}
+	if got := p.Lanes["gateway"].Issues; len(got) != 1 || got[0] != 103 {
+		t.Fatalf("gateway safe candidates = %+v, want only unrelated issue 103", got)
+	}
+	assertRouterRepairQueue(t, p.RepairQueues, "duplicate", 2, 6, map[string]int{
+		ReasonDuplicateRisk: 2,
+	}, []int{102, 101})
+	if skipped := skippedIssueByNumber(p.SkippedHumanBlocked, 102); skipped.Reason != ReasonDuplicateRisk {
+		t.Fatalf("duplicate skipped issue = %+v, want reason %s", skipped, ReasonDuplicateRisk)
+	}
+}
+
 func TestRouterKeepsSmallExpectedStepLeafDispatchable(t *testing.T) {
 	issue := routerIssue(11, "gateway: scoped leaf", nil, scopedGatewayIssueBody("4"))
 	if !IsDispatchable(issue, BlockedByHumanLabel) {
 		t.Fatalf("small expected-step leaf was not dispatchable")
 	}
+}
+
+func duplicateRiskIssueBody(path, done string) string {
+	return strings.Join([]string{
+		"## Parent context",
+		"gateway retry dispatch backlog",
+		"## Current state",
+		"Gateway retry budget rows are open in the worker queue.",
+		"## Why this is next",
+		"Duplicate worker launches waste account slots before dispatch.",
+		"## Working spine",
+		"route report -> duplicate-risk bucket -> one safe worker issue",
+		"## Work unit",
+		"leaf",
+		"## Expected steps",
+		"3",
+		"## Trigger",
+		"Two open issues carry the same title prefix and path hint.",
+		"## Batch policy",
+		"One duplicate-risk bucket per shared title prefix and linked path.",
+		"## In scope",
+		"Classify likely duplicate worker rows before spawning.",
+		"## Out of scope",
+		"Do not close or merge the duplicate issues automatically.",
+		"## Done condition",
+		done,
+		"## Witness",
+		"go test ./internal/dispatchtick",
+		"## Acceptance gate",
+		"go test ./internal/dispatchtick",
+		"## Lane",
+		"gateway",
+		"## Path hints",
+		"- `" + path + "`",
+		"## Boundary notes",
+		"Public issue only.",
+		"## Closure binding",
+		"Resolving commit cites #1756 and carries `(fak dispatchtick)`.",
+	}, "\n\n")
 }
 
 func multiDoneConditionIssueBody() string {

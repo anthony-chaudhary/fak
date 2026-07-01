@@ -15,6 +15,7 @@ const RouterSchema = "fleet-issue-lane-router/1"
 
 const BlockedByHumanLabel = "blocked-by-human"
 const MaxDispatchExpectedSteps = 8
+const ReasonDuplicateRisk = "ISSUE_DUPLICATE_RISK"
 
 var TriageOnlyLabels = map[string]bool{
 	"guard-complaint": true,
@@ -288,6 +289,16 @@ func RouteIssues(in RouterInput) RouterPayload {
 		}
 		routable = append(routable, issue)
 	}
+	duplicateRisk := DuplicateRiskIssueNumbers(routable)
+	duplicateSkipped := []Issue{}
+	dispatchable := []Issue{}
+	for _, issue := range routable {
+		if duplicateRisk[issue.Number] {
+			duplicateSkipped = append(duplicateSkipped, issue)
+			continue
+		}
+		dispatchable = append(dispatchable, issue)
+	}
 
 	fetchError := strings.TrimSpace(in.FetchError)
 	if fetchError == "" && len(in.Taxonomy.Concurrent) == 0 {
@@ -296,9 +307,9 @@ func RouteIssues(in RouterInput) RouterPayload {
 		fetchError = "gh returned no open issues (auth/network?)"
 	}
 
-	routes := make([]IssueRoute, 0, len(routable))
+	routes := make([]IssueRoute, 0, len(dispatchable))
 	priority := map[int]int{}
-	for _, issue := range routable {
+	for _, issue := range dispatchable {
 		routes = append(routes, RouteIssue(issue, in.Taxonomy, RouteOptions{
 			ScopeAlias:   in.ScopeAlias,
 			LabelAlias:   in.LabelAlias,
@@ -317,6 +328,7 @@ func RouteIssues(in RouterInput) RouterPayload {
 		FetchError:       fetchError,
 		Coverage:         coverage,
 		SkippedBlocked:   blocked,
+		SkippedDuplicate: duplicateSkipped,
 		BlockedLabelName: blockedLabel,
 	})
 }
@@ -510,6 +522,177 @@ func PathMatchesLane(path string, trees map[string][]string) []string {
 	return hits
 }
 
+func DuplicateRiskIssueNumbers(issues []Issue) map[int]bool {
+	out := map[int]bool{}
+	for i := 0; i < len(issues); i++ {
+		for j := i + 1; j < len(issues); j++ {
+			if duplicateRiskPair(issues[i], issues[j]) {
+				out[issues[i].Number] = true
+				out[issues[j].Number] = true
+			}
+		}
+	}
+	return out
+}
+
+func duplicateRiskPair(a, b Issue) bool {
+	prefix := duplicateTitlePrefix(a.Title)
+	if prefix == "" || prefix != duplicateTitlePrefix(b.Title) {
+		return false
+	}
+	if !issuePathsOverlap(a, b) {
+		return false
+	}
+	return issueBodySimilarity(a.Body, b.Body) >= 0.35
+}
+
+func duplicateTitlePrefix(title string) string {
+	scope := normalizeDuplicateToken(scopeToken(title))
+	if idx := strings.Index(title, ":"); idx > 0 {
+		subject := duplicateSubjectPrefix(title[idx+1:], 2)
+		if scope != "" && subject != "" {
+			return scope + "/" + subject
+		}
+		if subject != "" {
+			return normalizeDuplicateToken(title[:idx]) + "/" + subject
+		}
+		return normalizeDuplicateToken(title[:idx])
+	}
+	return scope
+}
+
+func normalizeDuplicateToken(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '/':
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func duplicateSubjectPrefix(s string, n int) string {
+	words := []string{}
+	var b strings.Builder
+	flush := func() {
+		if b.Len() >= 3 {
+			words = append(words, b.String())
+		}
+		b.Reset()
+	}
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			flush()
+		}
+		if len(words) >= n {
+			break
+		}
+	}
+	if len(words) < n {
+		flush()
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > n {
+		words = words[:n]
+	}
+	return strings.Join(words, "-")
+}
+
+func issuePathsOverlap(a, b Issue) bool {
+	left := normalizeRepoPaths(ExtractIssueRepoPaths(a.Title, a.Body))
+	right := normalizeRepoPaths(ExtractIssueRepoPaths(b.Title, b.Body))
+	for _, lp := range left {
+		for _, rp := range right {
+			if duplicatePathOverlaps(lp, rp) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func duplicatePathOverlaps(a, b string) bool {
+	a = strings.Trim(strings.TrimSuffix(strings.ReplaceAll(a, "\\", "/"), "/**"), "/")
+	b = strings.Trim(strings.TrimSuffix(strings.ReplaceAll(b, "\\", "/"), "/**"), "/")
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	if duplicatePathIsDir(a) && strings.HasPrefix(b, a+"/") {
+		return true
+	}
+	if duplicatePathIsDir(b) && strings.HasPrefix(a, b+"/") {
+		return true
+	}
+	return false
+}
+
+func duplicatePathIsDir(path string) bool {
+	base := path
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	return !strings.Contains(base, ".")
+}
+
+func issueBodySimilarity(a, b string) float64 {
+	left := duplicateBodyTokens(a)
+	right := duplicateBodyTokens(b)
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+	intersection := 0
+	for tok := range left {
+		if right[tok] {
+			intersection++
+		}
+	}
+	union := len(left) + len(right) - intersection
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
+}
+
+func duplicateBodyTokens(body string) map[string]bool {
+	out := map[string]bool{}
+	var b strings.Builder
+	flush := func() {
+		if b.Len() < 3 {
+			b.Reset()
+			return
+		}
+		out[b.String()] = true
+		b.Reset()
+	}
+	for _, r := range strings.ToLower(body) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
 func ComputeRouterCoverage(issuesFetched, issueLimit int) RouterCoverage {
 	if issueLimit <= 0 {
 		issueLimit = 1000
@@ -540,6 +723,7 @@ type RouterPayloadInput struct {
 	FetchError       string
 	Coverage         RouterCoverage
 	SkippedBlocked   []Issue
+	SkippedDuplicate []Issue
 	BlockedLabelName string
 }
 
@@ -621,6 +805,13 @@ func BuildRouterPayload(in RouterPayloadInput) RouterPayload {
 	skippedByReason := map[string]int{}
 	for _, issue := range in.SkippedBlocked {
 		sk := classifySkippedIssue(issue, in.BlockedLabelName)
+		skipped = append(skipped, sk)
+		if sk.Reason != "" {
+			skippedByReason[sk.Reason]++
+		}
+	}
+	for _, issue := range in.SkippedDuplicate {
+		sk := classifyDuplicateRiskIssue(issue)
 		skipped = append(skipped, sk)
 		if sk.Reason != "" {
 			skippedByReason[sk.Reason]++
@@ -832,6 +1023,8 @@ func routerRepairKind(reason string) string {
 	switch reason {
 	case "BLOCKED_BY_HUMAN":
 		return "human"
+	case ReasonDuplicateRisk:
+		return "duplicate"
 	case "ISSUE_NOT_DISPATCH_LEAF", "ISSUE_OVERSIZED_EXPECTED_STEPS":
 		return "split"
 	case "ISSUE_SCOPE_INCOMPLETE", "ISSUE_TRIAGE_ONLY":
@@ -851,18 +1044,20 @@ func routerRepairRank(kind string) int {
 	switch kind {
 	case "dispatch":
 		return 0
-	case "split":
+	case "duplicate":
 		return 1
-	case "scope":
+	case "split":
 		return 2
-	case "route":
+	case "scope":
 		return 3
-	case "noise":
+	case "route":
 		return 4
-	case "private":
+	case "noise":
 		return 5
-	case "human":
+	case "private":
 		return 6
+	case "human":
+		return 7
 	default:
 		return 9
 	}
@@ -872,6 +1067,8 @@ func routerRepairAction(kind string) string {
 	switch kind {
 	case "dispatch":
 		return "launch scoped leaf issues through their routed lanes"
+	case "duplicate":
+		return "dedupe duplicate-risk rows before spawning a worker"
 	case "split":
 		return fmt.Sprintf("decompose non-leaves or oversized rows into child issues with <= %d expected steps", MaxDispatchExpectedSteps)
 	case "scope":
@@ -972,6 +1169,17 @@ func classifySkippedIssue(issue Issue, blockedLabel string) SkippedIssue {
 		NextAction:    next,
 		WorkUnit:      workUnit,
 		ExpectedSteps: expectedSteps,
+	}
+}
+
+func classifyDuplicateRiskIssue(issue Issue) SkippedIssue {
+	return SkippedIssue{
+		Number:        issue.Number,
+		Title:         truncateRunes(issue.Title, 80),
+		Reason:        ReasonDuplicateRisk,
+		NextAction:    "dedupe this duplicate-risk issue before spawning a worker",
+		WorkUnit:      issueWorkUnit(issue),
+		ExpectedSteps: issueExpectedSteps(issue),
 	}
 }
 
