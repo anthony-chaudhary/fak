@@ -212,6 +212,7 @@ func (c *Catalog) Cards(plane Plane) []FeatureCard {
 	}
 	if plane == PlaneAll || plane == PlaneLive {
 		out = append(out, c.contextPlanCards()...)
+		out = append(out, c.askPolicyCards()...)
 		out = append(out, c.memoryCards()...)
 		out = append(out, c.toolCards()...)
 		out = append(out, c.capabilityCards()...)
@@ -316,6 +317,23 @@ func (c *Catalog) contextPlanCards() []FeatureCard {
 			RequestShape{
 				Route: "library",
 				Note:  "call ctxplan.AssessAssumptions or supply PlanQuery.Assumptions; low-confidence, stale, and unknown assumptions return query/refresh actions before effects",
+			}),
+	}
+}
+
+func (c *Catalog) askPolicyCards() []FeatureCard {
+	tags := []string{
+		"live", "managed-context", "ask", "assume", "assumption", "clarification",
+		"policy", "stakes", "reversibility", "confidence", "threshold",
+	}
+	return []FeatureCard{
+		card("ask-policy", "ask-policy:should-ask",
+			"decide whether fak asks the user instead of silently assuming, by stakes, reversibility, and confidence",
+			tags,
+			"internal/selfquery/ask_policy.go", EffectRead, "", "selfquery", digestOf("ask-policy:should-ask"),
+			RequestShape{
+				Route: "library",
+				Note:  "call selfquery.ShouldAsk(AskInput{Confidence, Stakes, Reversibility}); below the applicable threshold it returns ShouldAsk=true instead of assuming",
 			}),
 	}
 }

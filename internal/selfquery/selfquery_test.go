@@ -297,6 +297,46 @@ func TestAssumptionConfidenceFeatureCard(t *testing.T) {
 	}
 }
 
+// TestAskPolicyFeatureCard pins that #1580's general ask-vs-assume policy is
+// discoverable through the same feature catalog as every other selfquery surface —
+// the "grounded in a real call site" half of the issue: a caller (or `fak feature
+// query`) can find selfquery.ShouldAsk without already knowing the file exists.
+func TestAskPolicyFeatureCard(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Query(Request{Query: "ask policy stakes reversibility confidence", Plane: PlaneLive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *FeatureCard
+	for i := range resp.Cards {
+		if resp.Cards[i].Name == "ask-policy:should-ask" {
+			found = &resp.Cards[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("ask policy query missing ask-policy card: %v", sortedNames(resp.Cards))
+	}
+	if found.Source != "selfquery" || found.DetailRef != "internal/selfquery/ask_policy.go" {
+		t.Fatalf("ask policy card source/ref = %s %s, want selfquery ask_policy.go", found.Source, found.DetailRef)
+	}
+	if found.Effect != EffectRead || found.Request.Executed {
+		t.Fatalf("ask policy card request = effect %s request %+v, want read-only discovery", found.Effect, found.Request)
+	}
+	tags := map[string]bool{}
+	for _, tag := range found.Tags {
+		tags[tag] = true
+	}
+	for _, want := range []string{"ask", "assume", "stakes", "reversibility", "confidence", "policy"} {
+		if !tags[want] {
+			t.Fatalf("ask policy card tags missing %q: %+v", want, found.Tags)
+		}
+	}
+}
+
 func TestQueryClarificationBrokerTurnsMissingContextIntoBoundedQuestion(t *testing.T) {
 	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
 	if err != nil {
