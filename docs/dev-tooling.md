@@ -43,11 +43,15 @@ authoritative gates — with one host caveat that bites on Windows.
 For changed-package work, use `fak test affected ...`: it delegates to `fak affected`
 so the agent-facing front door still gets the affected planner's `--json`, `--list`,
 `--file`, `--budget`, report, and pass-through `go test` flags.
+For slow-test triage, pipe a `go test -json` stream into `fak test durations` (or pass
+`--input`) to get the stable `fak.test_duration_ledger.v1` package/test ledger with
+ranked budget findings.
 
 | Command | What it runs | When |
 |---|---|---|
 | `fak test [fast\|full\|race\|<pkg>]` | the host-aware wrapper over `go test` (default tier `fast`); on Windows routes to WSL via `test.ps1`; `fak test fast -- -run TestX` passes flags through | the one-verb inner loop over the targets below |
 | `fak test affected [--json\|--list\|--file P\|--budget DUR] [-- go test args]` | delegates to `fak affected`, selecting changed packages plus transitive importers, with JSON/list dry-runs and budget/report flags preserved | the default agent loop before paying for the full suite |
+| `go test -json ./... \| fak test durations --package-budget 30s --test-budget 5s` | folds `go test -json` events into a stable package/test duration ledger; `--check` exits non-zero on budget findings | find the slowest next package or test before widening CI shards |
 | `make test-fast` | `build` + `vet` + `go test -short ./...` (~2s smoke tier; skips the weight-backed model witnesses) | the pre-commit / pre-push floor — ~95% of logic regressions in seconds |
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
