@@ -56,11 +56,13 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeScan(stdout, stderr, argv[1:])
 	case "admit":
 		return runResumeAdmit(stdout, stderr, argv[1:])
+	case "resolve":
+		return runResumeResolve(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, or admit)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, admit, or resolve)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -834,6 +836,9 @@ func resumeUsage(w io.Writer) {
                    [--min-spacing-sec S] [--ledger FILE] [--policy FILE]
                    [--json] [--quiet]
 
+  fak resume resolve <session-id> [--home DIR] [--cwd DIR] [--dry-run]
+                     [--no-probe] [--json]
+
 plan answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
 prices RESUME_FULL / CUT / RESET, and recommends a cut-by-default re-entry. Pure and
@@ -850,6 +855,12 @@ validate back-tests that projection against billed reality: it scans a corpus of
 Claude Code transcripts, scores how often the cold/warm posture call agreed with the
 provider's own cache_read / cache_creation records, and measures how exactly the cold-cost
 premise held. The deterministic, observable answer to "is the cache-value call effective?".
+
+resolve decides which account "claude --resume <sid>" should pin to: it locates the
+owner (host-last, newest-mtime) across ~/.claude*, and — when the owner is throttled —
+re-homes the transcript onto the least-loaded healthy Claude worker and pins there
+(PIN / REHOME / PIN_BLOCKED). stdout is the CLAUDE_CONFIG_DIR to set; --dry-run decides
+without copying. The Go port of tools/resume_resolver.py.
 
 scan walks a whole transcript store and finds the sessions that crashed on a rate limit
 and never resumed — the ones that need a managed restart — then prints each one's cache
