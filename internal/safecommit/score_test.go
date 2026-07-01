@@ -10,8 +10,8 @@ import (
 
 func TestScoreResultVerifiedCommit(t *testing.T) {
 	res := ScoreResult(Result{Committed: true, Verified: true})
-	if res.Score != 100 || res.Grade != "A" || len(res.ScoreNotes) != 0 {
-		t.Fatalf("verified score = %d/%s notes=%v, want 100/A/no notes", res.Score, res.Grade, res.ScoreNotes)
+	if res.Score != 100 || res.Value != 1 || res.ValueUnit != "quality_ratio" || res.LegacyScore != 100 || res.LegacyScoreScale != 100 || res.Grade != "A" || len(res.ScoreNotes) != 0 {
+		t.Fatalf("verified score = %+v notes=%v, want value 1/A/no notes", res, res.ScoreNotes)
 	}
 }
 
@@ -21,8 +21,8 @@ func TestScoreResultReviewUnavailablePenalty(t *testing.T) {
 		Verified:  true,
 		Review:    &modelroute.ReviewResult{Verdict: modelroute.ReviewUnavailable},
 	})
-	if res.Score != 94 || res.Grade != "A" {
-		t.Fatalf("review-unavailable score = %d/%s, want 94/A", res.Score, res.Grade)
+	if res.Score != 94 || res.Value != 0.94 || res.Grade != "A" {
+		t.Fatalf("review-unavailable score = %+v, want value 0.94/A", res)
 	}
 	if len(res.ScoreNotes) != 1 || !strings.Contains(res.ScoreNotes[0], "review unavailable") {
 		t.Fatalf("review-unavailable notes = %v", res.ScoreNotes)
@@ -46,7 +46,7 @@ func TestCommitWithScoresResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected infra error: %v", err)
 	}
-	if res.Score != 100 || res.Grade != "A" {
-		t.Fatalf("CommitWith score = %d/%s, want 100/A", res.Score, res.Grade)
+	if res.Score != 100 || res.Value != 1 || res.Grade != "A" {
+		t.Fatalf("CommitWith score = %+v, want value 1/A", res)
 	}
 }

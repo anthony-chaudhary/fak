@@ -4,14 +4,20 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
-// ScoreResult annotates a safecommit outcome with a deterministic 0-100 score and A-F grade.
-// The score is an operator-facing summary of commit health: a verified commit is full credit,
-// retryable pre-commit refusals retain more credit than post-commit integrity failures, and
-// reviewer unavailability is a small penalty on an otherwise verified commit.
+// ScoreResult annotates a safecommit outcome with a deterministic continuous value,
+// legacy score, and A-F grade. The value is an operator-facing summary of commit
+// health: a verified commit is full credit, retryable pre-commit refusals retain
+// more credit than post-commit integrity failures, and reviewer unavailability is a
+// small penalty on an otherwise verified commit.
 func ScoreResult(res Result) Result {
 	res.Score, res.ScoreNotes = resultScore(res)
+	res.Value = scorecard.Round3(scorecard.ValueFromScore(float64(res.Score)))
+	res.ValueUnit = "quality_ratio"
+	res.LegacyScore = res.Score
+	res.LegacyScoreScale = 100
 	res.Grade = resultGrade(res.Score)
 	return res
 }

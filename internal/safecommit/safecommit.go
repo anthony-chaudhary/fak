@@ -155,22 +155,26 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed       bool                     `json:"committed"`
-	SHA             string                   `json:"committed_sha,omitempty"`
-	Paths           []string                 `json:"paths"`
-	Verified        bool                     `json:"verified"`
-	Pushed          bool                     `json:"pushed"`
-	Score           int                      `json:"score"`
-	Grade           string                   `json:"grade"`
-	ScoreNotes      []string                 `json:"score_notes,omitempty"`
-	Reason          string                   `json:"reason,omitempty"`
-	Detail          string                   `json:"detail,omitempty"`
-	RacedExtra      []string                 `json:"raced_extra_paths,omitempty"`
-	HeadBefore      string                   `json:"head_before,omitempty"`
-	LockHoldNS      int64                    `json:"lock_hold_ns,omitempty"`
-	CoreLockPaths   []string                 `json:"core_lock_paths,omitempty"`
-	CoreLockWitness string                   `json:"core_lock_witness,omitempty"`
-	Review          *modelroute.ReviewResult `json:"review,omitempty"`
+	Committed        bool                     `json:"committed"`
+	SHA              string                   `json:"committed_sha,omitempty"`
+	Paths            []string                 `json:"paths"`
+	Verified         bool                     `json:"verified"`
+	Pushed           bool                     `json:"pushed"`
+	Value            float64                  `json:"value"`
+	ValueUnit        string                   `json:"value_unit,omitempty"`
+	Score            int                      `json:"score"`
+	LegacyScore      int                      `json:"legacy_score,omitempty"`
+	LegacyScoreScale int                      `json:"legacy_score_scale,omitempty"`
+	Grade            string                   `json:"grade"`
+	ScoreNotes       []string                 `json:"score_notes,omitempty"`
+	Reason           string                   `json:"reason,omitempty"`
+	Detail           string                   `json:"detail,omitempty"`
+	RacedExtra       []string                 `json:"raced_extra_paths,omitempty"`
+	HeadBefore       string                   `json:"head_before,omitempty"`
+	LockHoldNS       int64                    `json:"lock_hold_ns,omitempty"`
+	CoreLockPaths    []string                 `json:"core_lock_paths,omitempty"`
+	CoreLockWitness  string                   `json:"core_lock_witness,omitempty"`
+	Review           *modelroute.ReviewResult `json:"review,omitempty"`
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory
