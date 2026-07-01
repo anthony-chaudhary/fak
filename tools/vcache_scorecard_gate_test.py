@@ -31,21 +31,37 @@ READY = {
 }
 
 _ORIG_SNAPSHOT_EXPECTATION = gate.snapshot_expectation
+_ORIG_RUN_VCACHE_JSON = gate.run_vcache_json
 
 
-def _patch(monkeypatch_pairs, snapshot_reason=""):
+def _patch(monkeypatch_pairs, snapshot_reason="", schema_payloads=None):
     """Replace gate.run_score with a stub that returns (code, payload) keyed on whether
     the `--two-x 99` negative arg is present. monkeypatch_pairs maps "default"/"neg" to
     a (code, payload) tuple."""
     def stub(extra, timeout):
         key = "neg" if "99" in extra else "default"
         return monkeypatch_pairs[key]
+
+    schemas = {
+        "prove": (0, {"schema": gate.PROVE_SCHEMA}),
+        "prove-recall": (0, {"schema": gate.PROVE_RECALL_SCHEMA}),
+        "prove-telemetry": (0, {"schema": gate.PROVE_TELEMETRY_SCHEMA}),
+        "observe": (0, {"schema": gate.OBSERVE_SCHEMA}),
+    }
+    if schema_payloads:
+        schemas.update(schema_payloads)
+
+    def json_stub(args, timeout):
+        return schemas.get(args[0], (0, {}))
+
     gate.run_score = stub  # type: ignore[assignment]
+    gate.run_vcache_json = json_stub  # type: ignore[assignment]
     gate.snapshot_expectation = lambda: snapshot_reason  # type: ignore[assignment]
 
 
 def _restore(orig):
     gate.run_score = orig  # type: ignore[assignment]
+    gate.run_vcache_json = _ORIG_RUN_VCACHE_JSON  # type: ignore[assignment]
     gate.snapshot_expectation = _ORIG_SNAPSHOT_EXPECTATION  # type: ignore[assignment]
 
 
@@ -90,6 +106,23 @@ def test_fails_on_wrong_schema():
         bad = dict(READY, schema="fak.something.else.v1")
         _patch({"default": (0, bad), "neg": (1, {"two_x_better": False})})
         assert gate.main([]) == 1
+    finally:
+        _restore(orig)
+
+
+def test_fails_on_auxiliary_schema_mismatch():
+    orig = gate.run_score
+    try:
+        _patch({"default": (0, READY), "neg": (1, {"two_x_better": False})},
+               schema_payloads={"prove": (0, {"schema": "fak.vcache.old.v1"})})
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate.main(["--json"])
+        assert rc == 1
+        out = json.loads(buf.getvalue())
+        assert any("prove --json" in f and "schema" in f for f in out["failures"])
     finally:
         _restore(orig)
 

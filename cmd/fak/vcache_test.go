@@ -136,6 +136,9 @@ func TestRunVCacheProveRecallJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &proof); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, out.String())
 	}
+	if proof.Schema != vcachechain.RecallProofSchema {
+		t.Fatalf("schema = %q, want %q", proof.Schema, vcachechain.RecallProofSchema)
+	}
 	if proof.Status != vcachechain.ProofProven || proof.Decision != vcachechain.DecisionRebuild {
 		t.Fatalf("proof = %+v, want proven/rebuild at the 301 break-even", proof)
 	}
@@ -153,8 +156,29 @@ func TestRunVCacheProveJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &proof); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, out.String())
 	}
+	if proof.Schema != vcachegov.StarSavingsSchema {
+		t.Fatalf("schema = %q, want %q", proof.Schema, vcachegov.StarSavingsSchema)
+	}
 	if proof.Status != vcachegov.ProofProven || proof.SavedTokenEquiv <= 0 {
 		t.Fatalf("proof = %+v, want proven positive savings", proof)
+	}
+}
+
+func TestRunVCacheProveTelemetryJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openai.jsonl")
+	if err := os.WriteFile(path, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"prove-telemetry", "--file", path, "--json"}); code != 0 {
+		t.Fatalf("json prove-telemetry exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var proof vcachegov.TelemetrySavingsProof
+	if err := json.Unmarshal(out.Bytes(), &proof); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if proof.Schema != vcachegov.TelemetrySavingsSchema || proof.Status != vcachegov.ProofProven {
+		t.Fatalf("proof = %+v, want schema %q and proven status", proof, vcachegov.TelemetrySavingsSchema)
 	}
 }
 

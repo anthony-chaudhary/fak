@@ -15,6 +15,7 @@
       "arrival_rate_per_sec": 0.15,
       "governor_decision": "ride_natural",
       "economics": {
+        "schema": "fak.vcache.prove-telemetry.v1",
         "status": "PROVEN",
         "reason": "observed provider telemetry shows positive realized cache savings",
         "requests": 3,
@@ -39,6 +40,7 @@
     }
   ],
   "aggregate": {
+    "schema": "fak.vcache.prove-telemetry.v1",
     "status": "PROVEN",
     "reason": "observed provider telemetry shows positive realized cache savings",
     "requests": 3,
@@ -73,6 +75,7 @@
     "FalseCold": 1
   },
   "recall": {
+    "schema": "fak.vcache.prove-recall.v1",
     "status": "refuted",
     "decision": "cold_prefill",
     "reason": "cost gate refused: P·r \u003e= S·U — recall-by-rebuild is net-negative (§11.0); send the unit cold",

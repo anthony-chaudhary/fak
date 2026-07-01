@@ -16,6 +16,8 @@ package vcachechain
 type ProofStatus string
 
 const (
+	RecallProofSchema = "fak.vcache.prove-recall.v1"
+
 	// ProofProven — the cost gate CLEARED: amortized fan-out makes one chain replay
 	// cheaper than the S fresh prefills it saves (P·r < S·U). Exit 0.
 	ProofProven ProofStatus = "proven"
@@ -27,6 +29,7 @@ const (
 
 // RecallProof is the self-describing output of ProveRecall.
 type RecallProof struct {
+	Schema               string         `json:"schema"`
 	Status               ProofStatus    `json:"status"`
 	Decision             RecallDecision `json:"decision"`
 	Reason               string         `json:"reason"`
@@ -64,6 +67,7 @@ func ProveRecall(in ProveRecallInput) RecallProof {
 	savings := float64(siblings) * fresh
 	net := RebuildNetPositive(in.PrefixTokens, in.UnitTokens, siblings, in.ReadMult)
 	p := RecallProof{
+		Schema:               RecallProofSchema,
 		PrefixTokens:         in.PrefixTokens,
 		UnitTokens:           in.UnitTokens,
 		ReadMult:             in.ReadMult,

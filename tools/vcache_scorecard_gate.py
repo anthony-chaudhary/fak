@@ -37,7 +37,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCORE_SCHEMA = "fak.vcache.score.v1"
+PROVE_SCHEMA = "fak.vcache.prove.v1"
+PROVE_RECALL_SCHEMA = "fak.vcache.prove-recall.v1"
+PROVE_TELEMETRY_SCHEMA = "fak.vcache.prove-telemetry.v1"
+OBSERVE_SCHEMA = "fak.vcache.observe.v1"
 SNAPSHOT_ENV = "FAK_VCACHE_SNAPSHOT"
+OBSERVE_FIXTURE = ROOT / "cmd" / "fak" / "testdata" / "vcache_observe_transcript.jsonl"
+TELEMETRY_FIXTURE = ROOT / "cmd" / "fak" / "testdata" / "vcache_prove_telemetry.jsonl"
 
 
 def default_snapshot_path() -> Path:
@@ -152,12 +158,12 @@ def fak_cmd() -> list[str]:
     return resolve_fak()[0]
 
 
-def run_score(extra: list[str], timeout: int) -> tuple[int, dict]:
-    """Run `fak vcache score --json [extra]` and return (exit_code, payload). A payload
+def run_vcache_json(args: list[str], timeout: int) -> tuple[int, dict]:
+    """Run `fak vcache <args>` and return (exit_code, payload). A payload
     that does not parse as a JSON object is returned as {} so the caller's assertions
     fail with a clear message rather than a traceback.
     """
-    cmd = fak_cmd() + ["vcache", "score", "--json"] + extra
+    cmd = fak_cmd() + ["vcache"] + args
     proc = subprocess.run(
         cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout
     )
@@ -168,6 +174,20 @@ def run_score(extra: list[str], timeout: int) -> tuple[int, dict]:
     if not isinstance(payload, dict):
         payload = {}
     return proc.returncode, payload
+
+
+def run_score(extra: list[str], timeout: int) -> tuple[int, dict]:
+    return run_vcache_json(["score", "--json"] + extra, timeout)
+
+
+def check_schema(name: str, args: list[str], want: str, timeout: int, ok_codes=(0,)) -> list[str]:
+    fails: list[str] = []
+    code, payload = run_vcache_json(args, timeout)
+    if code not in ok_codes:
+        fails.append(f"`fak vcache {name}` exited {code}, want one of {list(ok_codes)}")
+    if payload.get("schema") != want:
+        fails.append(f"`fak vcache {name}` schema = {payload.get('schema')!r}, want {want!r}")
+    return fails
 
 
 def check_default(threshold: float, timeout: int) -> tuple[list[str], list[str]]:
@@ -214,6 +234,15 @@ def check_negative(timeout: int) -> list[str]:
     return fails
 
 
+def check_auxiliary_schemas(timeout: int) -> list[str]:
+    fails: list[str] = []
+    fails += check_schema("prove --json", ["prove", "--json"], PROVE_SCHEMA, timeout)
+    fails += check_schema("prove-recall --json", ["prove-recall", "--json", "--siblings", "301"], PROVE_RECALL_SCHEMA, timeout)
+    fails += check_schema("prove-telemetry --json", ["prove-telemetry", "--file", str(TELEMETRY_FIXTURE), "--json"], PROVE_TELEMETRY_SCHEMA, timeout)
+    fails += check_schema("observe --json", ["observe", "--transcript", str(OBSERVE_FIXTURE), "--json"], OBSERVE_SCHEMA, timeout)
+    return fails
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--two-x", type=float, default=2.0,
@@ -236,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         default_fails, warnings = check_default(args.two_x, args.timeout)
-        fails = default_fails + check_negative(args.timeout)
+        fails = default_fails + check_negative(args.timeout) + check_auxiliary_schemas(args.timeout)
     except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
         msg = f"vcache-scorecard-gate: could not run fak: {e}"
         if args.json:

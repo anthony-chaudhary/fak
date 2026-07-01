@@ -8,8 +8,10 @@ import "math"
 type ProofStatus string
 
 const (
-	ProofProven  ProofStatus = "PROVEN"
-	ProofRefuted ProofStatus = "REFUTED"
+	StarSavingsSchema                  = "fak.vcache.prove.v1"
+	TelemetrySavingsSchema             = "fak.vcache.prove-telemetry.v1"
+	ProofProven            ProofStatus = "PROVEN"
+	ProofRefuted           ProofStatus = "REFUTED"
 )
 
 // StarSavingsInput describes the low-risk vCache M2 shape: one stable anchor plus
@@ -29,6 +31,7 @@ type StarSavingsInput struct {
 // shape. Token counts are "uncached input-token equivalents": the same convention
 // used by the design note's read/write multipliers.
 type StarSavingsProof struct {
+	Schema               string      `json:"schema"`
 	Status               ProofStatus `json:"status"`
 	Reason               string      `json:"reason"`
 	Requests             int         `json:"requests"`
@@ -67,6 +70,7 @@ type TelemetrySavingsInput struct {
 
 // TelemetrySavingsProof is the realized-input-token-equivalent proof for a run.
 type TelemetrySavingsProof struct {
+	Schema                 string      `json:"schema"`
 	Status                 ProofStatus `json:"status"`
 	Reason                 string      `json:"reason"`
 	Requests               int         `json:"requests"`
@@ -87,6 +91,7 @@ type TelemetrySavingsProof struct {
 // trust claim, and correctness_depends_on_hit is always false.
 func ProveStarSavings(in StarSavingsInput) StarSavingsProof {
 	p := StarSavingsProof{
+		Schema:               StarSavingsSchema,
 		Requests:             in.Requests,
 		AnchorTokens:         in.AnchorTokens,
 		SuffixTokens:         in.SuffixTokens,
@@ -152,6 +157,7 @@ func ProveStarSavings(in StarSavingsInput) StarSavingsProof {
 // hit.
 func ProveTelemetrySavings(in TelemetrySavingsInput) TelemetrySavingsProof {
 	p := TelemetrySavingsProof{
+		Schema:               TelemetrySavingsSchema,
 		Requests:             len(in.Rows),
 		CorrectnessDependsOn: false,
 	}
