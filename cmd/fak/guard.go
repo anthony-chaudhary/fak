@@ -188,6 +188,10 @@ func cmdGuard(argv []string) {
 	// per-turn economy line out of an attended agent's full-screen UI.
 	guardSetFlags := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { guardSetFlags[f.Name] = true })
+	guardTraceID := strings.TrimSpace(*sessionID)
+	if guardTraceID == "" {
+		guardTraceID = "guard"
+	}
 	var guardBudgetEnvelope session.BudgetEnvelope
 	hasGuardBudgetEnvelope := strings.TrimSpace(*budgetEnvelopeSpec) != ""
 	if hasGuardBudgetEnvelope {
@@ -335,8 +339,10 @@ func cmdGuard(argv []string) {
 	//     the emitter is registered before the first decision crosses the floor.
 	auditLabel, auditJournal := guardEnableAudit(*auditPath, *noAudit)
 	var auditSeq0 uint64
+	var refusalCarryForward []guardRefusalCarry
 	if auditJournal != nil {
 		auditSeq0, _, _ = auditJournal.Stats()
+		refusalCarryForward = guardReadRefusalCarryForward(auditJournal.Path(), guardTraceID, guardFindReasonRoot())
 	}
 
 	// 2. --remote-serve sugar: run the guarded turn's INFERENCE on a lab box you chose.
@@ -571,10 +577,6 @@ func cmdGuard(argv []string) {
 	// defaultSessionIDFromMeta's own zero-cache-key fallback) rather than a git-SHA-derived
 	// cache key nothing will read back.
 	guardDurabilityWanted := guardSetFlags["session-id"] || contextBudgetLimit > 0 || maxDurationLimit > 0 || hasGuardBudgetEnvelope
-	guardTraceID := strings.TrimSpace(*sessionID)
-	if guardTraceID == "" {
-		guardTraceID = "guard"
-	}
 	// Wall-clock budget (issue #1584): an INDEPENDENT axis from --context-budget-tokens
 	// above — a managed run may be fine on tokens but out of real time, or vice versa.
 	// StartTimeBudget both configures the envelope and arms the clock at the current
@@ -920,7 +922,7 @@ func cmdGuard(argv []string) {
 		if localModel {
 			localLabel = filepath.Base(*ggufPath)
 		}
-		printGuardBanner(os.Stderr, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, remoteBase != "", localModel, localLabel, command)
+		printGuardBanner(os.Stderr, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
 		if preCompactInstall.Applied {
 			fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
 		}
@@ -969,10 +971,10 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode, resSampler)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode, resSampler)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
@@ -1296,7 +1298,7 @@ func guardClaudeConfigDir() string {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, remoteServe, local bool, localLabel string, command []string) {
+func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, refusalCarryForward []guardRefusalCarry, remoteServe, local bool, localLabel string, command []string) {
 	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", version, strings.Join(command, " "))
 	// The embedded build stamp, not the version, is the reliable "is THIS guard binary current?"
 	// signal: the version reads the tree's VERSION file, so a stale binary still looks current
@@ -1327,6 +1329,7 @@ func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL
 	// numbers that answer "what did fak's owned KV cache actually save this session?".
 	fmt.Fprintf(w, "  cache value: scrape %s/metrics for the fak_vcache_* family (saved_token_equiv, hit_rate, multiplier, proven)\n", gwURL)
 	fmt.Fprintf(w, "  audit log  : %s\n", auditLabel)
+	fmt.Fprint(w, formatGuardRefusalCarryForward(refusalCarryForward))
 	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
 	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
 }

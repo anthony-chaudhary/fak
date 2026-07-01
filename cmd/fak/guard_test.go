@@ -1163,6 +1163,70 @@ func TestGuardEnableAuditEnablesVerifiableTrail(t *testing.T) {
 	}
 }
 
+func TestGuardRefusalCarryForwardTopReasonsWithFixes(t *testing.T) {
+	docs := map[string]guardReasonDoc{
+		"OFF_TRUNK":    {Fix: "commit directly to main"},
+		"STALE_RECALL": {Fix: "refresh from the source witness"},
+	}
+	rows := []journal.Row{
+		{Seq: 1, TraceID: "task", Kind: "DECIDE", Verdict: "ALLOW"},
+		{Seq: 2, TraceID: "task", Kind: "DENY", Verdict: "DENY", Reason: "OFF_TRUNK"},
+		{Seq: 3, TraceID: "other", Kind: "DENY", Verdict: "DENY", Reason: "DEFAULT_DENY"},
+		{Seq: 4, TraceID: "task", Kind: "DENY", Verdict: "DENY", Reason: "STALE_RECALL"},
+		{Seq: 5, TraceID: "task", Kind: "DENY", Verdict: "DENY", Reason: "OFF_TRUNK"},
+	}
+	got := guardRefusalCarryForwardFromRows(rows, "task", docs, 3)
+	if len(got) != 2 {
+		t.Fatalf("carry-forward reasons = %+v, want 2", got)
+	}
+	if got[0].Reason != "OFF_TRUNK" || got[0].Count != 2 || !strings.Contains(got[0].Fix, "main") {
+		t.Fatalf("top reason = %+v, want OFF_TRUNK x2 with fix", got[0])
+	}
+	if got[1].Reason != "STALE_RECALL" || got[1].Count != 1 || !strings.Contains(got[1].Fix, "source witness") {
+		t.Fatalf("second reason = %+v, want STALE_RECALL x1 with fix", got[1])
+	}
+}
+
+func TestGuardRefusalCarryForwardCleanSessionIsEmpty(t *testing.T) {
+	rows := []journal.Row{
+		{Seq: 1, TraceID: "task", Kind: "DECIDE", Verdict: "ALLOW"},
+		{Seq: 2, TraceID: "task", Kind: "DECIDE", Verdict: "ALLOW"},
+	}
+	if got := guardRefusalCarryForwardFromRows(rows, "task", nil, 3); len(got) != 0 {
+		t.Fatalf("clean prior session should surface nothing, got %+v", got)
+	}
+	if out := formatGuardRefusalCarryForward(nil); out != "" {
+		t.Fatalf("empty carry-forward should render nothing, got %q", out)
+	}
+}
+
+func TestGuardRefusalCarryForwardFileAddsDosFixes(t *testing.T) {
+	root := t.TempDir()
+	auditPath := filepath.Join(root, "guard-audit.jsonl")
+	dos := `[reasons.OFF_TRUNK]
+fix = "commit directly to the configured trunk"
+`
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte(dos), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := guardWriteRefusalCarryForwardFile(auditPath, "task", []guardRefusalCarry{{Reason: "OFF_TRUNK", Count: 1}}, time.Unix(10, 0)); err != nil {
+		t.Fatalf("write carry-forward: %v", err)
+	}
+	got := guardReadRefusalCarryForward(auditPath, "task", root)
+	if len(got) != 1 || got[0].Reason != "OFF_TRUNK" || !strings.Contains(got[0].Fix, "configured trunk") {
+		t.Fatalf("read carry-forward = %+v, want OFF_TRUNK with dos.toml fix", got)
+	}
+	if wrongTrace := guardReadRefusalCarryForward(auditPath, "other", root); len(wrongTrace) != 0 {
+		t.Fatalf("carry-forward should be trace-scoped, got %+v", wrongTrace)
+	}
+	if err := guardWriteRefusalCarryForwardFile(auditPath, "task", nil, time.Unix(20, 0)); err != nil {
+		t.Fatalf("overwrite carry-forward with clean session: %v", err)
+	}
+	if clean := guardReadRefusalCarryForward(auditPath, "task", root); len(clean) != 0 {
+		t.Fatalf("clean prior session should clear prior refusals, got %+v", clean)
+	}
+}
+
 func TestGuardWaitHealthy(t *testing.T) {
 	never := make(chan error) // a Serve channel that never fires (gateway stays up)
 
@@ -1672,7 +1736,7 @@ func TestPrintGuardBannerShowsVersionAndBuild(t *testing.T) {
 		"9.9.9", "abc123def456 +uncommitted  (committed 2026-06-30T00:00:00Z)",
 		"http://127.0.0.1:9", "anthropic", "https://api.anthropic.com", "examples/floor.json",
 		"ANTHROPIC_BASE_URL", "http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
-		false /*remoteServe*/, false /*local*/, "", []string{"claude"})
+		nil, false /*remoteServe*/, false /*local*/, "", []string{"claude"})
 	out := b.String()
 
 	if !strings.Contains(out, "fak guard 9.9.9 — kernel-adjudicated: claude") {
@@ -1680,6 +1744,25 @@ func TestPrintGuardBannerShowsVersionAndBuild(t *testing.T) {
 	}
 	if !strings.Contains(out, "build      : abc123def456 +uncommitted") {
 		t.Fatalf("banner missing build-stamp row (the staleness signal); got:\n%s", out)
+	}
+}
+
+func TestPrintGuardBannerShowsPriorRefusals(t *testing.T) {
+	var b strings.Builder
+	printGuardBanner(&b,
+		"9.9.9", "abc123def456",
+		"http://127.0.0.1:9", "anthropic", "https://api.anthropic.com", "examples/floor.json",
+		"ANTHROPIC_BASE_URL", "http://127.0.0.1:9", "off", "~/.fak/audit.jsonl",
+		[]guardRefusalCarry{
+			{Reason: "OFF_TRUNK", Count: 1, Fix: "commit directly to main"},
+			{Reason: "STALE_RECALL", Count: 1, Fix: "refresh from the source witness"},
+		},
+		false /*remoteServe*/, false /*local*/, "", []string{"claude"})
+	out := b.String()
+	for _, want := range []string{"prior run", "OFF_TRUNK x1", "commit directly to main", "STALE_RECALL x1", "refresh from the source witness"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("banner missing %q:\n%s", want, out)
+		}
 	}
 }
 
