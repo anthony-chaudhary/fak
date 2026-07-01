@@ -52,6 +52,24 @@ kernel reuse.
 
 A cache-value card should be read top-down:
 
+- **Owner/mechanism attribution first.** Before the reuse trend below, read the
+  per-mechanism + per-owner split (issue #1491): `gateway.AdjudicationSummary
+  .MechanismSavings()` decomposes every served-turn saving into five owned
+  slices — provider-read, provider-write-premium, compaction-shed, kv-reuse,
+  vdso-avoid — and folds to one headline, `provider P% + fak F%`
+  (`fak guard`'s exit-summary "avoided-spend attribution" line, and
+  `TwoTrackReport.OwnerAttribution` in the weekly fold). This is the fix for
+  the historical failure mode where the headline read as ~100% "the
+  provider's prompt cache" even when fak's own mechanisms (compaction-shed,
+  KV-prefix reuse, vDSO call-avoidance) contributed. A provider-only session
+  reports `fak F%=0` explicitly with a diagnostic reason (never silently
+  blended) — see `formatFakSliceDiagnostic` in `cmd/fak/guard_format.go`. The
+  same split is on `/metrics` as `fak_cache_saved_by_owner{owner}` and
+  `fak_cache_saved_by_mechanism{mechanism}`, and the conflation/provenance
+  scorecard (`fak conflation-scorecard`, `internal/conflationscore` — the Go
+  port that replaced the retired `tools/conflation_scorecard.py`) fails on an
+  unlabeled cache number (owner not named OBSERVED-provider vs
+  WITNESSED-fak).
 - **Verdict** says whether the current window is measured or still insufficient.
 - **Latest reuse** is the most recent Track-1 weekly realized reuse ratio, over
   multi-turn sessions only.
