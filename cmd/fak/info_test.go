@@ -7,9 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
 func TestGroupThousands(t *testing.T) {
@@ -328,5 +332,249 @@ func TestGuardInfoFetchErrorLineFriendlyAndPassthrough(t *testing.T) {
 	}
 	if got, want := guardInfoFetchErrorLine(base, httpErr), "fak info: GET /debug/vars: status 401"; got != want {
 		t.Fatalf("status error must pass through verbatim: got %q want %q", got, want)
+	}
+}
+
+// --- issue #1602: managed-context prefix-stability score ---
+
+func TestGuardInfoPrefixStabilityTextNilIsSilent(t *testing.T) {
+	// A gateway build that has not wired PrefixStability yet must render NOTHING extra —
+	// distinct from an explicit "unknown" verdict, which DOES render (see below).
+	if got := guardInfoPrefixStabilityText(nil); got != "" {
+		t.Fatalf("nil prefix-stability block should render empty, got %q", got)
+	}
+}
+
+func TestGuardInfoPrefixStabilityTextStates(t *testing.T) {
+	cases := []struct {
+		name string
+		p    *guardInfoPrefixStability
+		want []string
+	}{
+		{
+			name: "stable",
+			p:    &guardInfoPrefixStability{State: string(cachemeta.PrefixStable)},
+			want: []string{"prefix: stable"},
+		},
+		{
+			name: "unknown",
+			p:    &guardInfoPrefixStability{State: string(cachemeta.PrefixUnknown)},
+			want: []string{"prefix: unknown", "no baseline yet"},
+		},
+		{
+			name: "mutated",
+			p: &guardInfoPrefixStability{
+				State:                     string(cachemeta.PrefixMutated),
+				FirstDivergentSegment:     1,
+				FirstDivergentTokenOffset: 100,
+				FirstDivergentKind:        string(cachemeta.SegToolSchema),
+			},
+			want: []string{"prefix: mutated", "segment 1", "offset 100 tokens", "tool_schema"},
+		},
+		{
+			name: "mutated-sealed",
+			p: &guardInfoPrefixStability{
+				State:                 string(cachemeta.PrefixMutated),
+				FirstDivergentSegment: 1,
+				ProtectedSpanBroken:   true,
+			},
+			want: []string{"prefix: mutated", "[sealed]"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := guardInfoPrefixStabilityText(tc.p)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("%s: text %q missing %q", tc.name, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderGuardInfoLineAppendsPrefixStability proves the status line grows a
+// "· prefix: ..." suffix once the gateway reports the block, and stays unchanged (no
+// trailing " · " or stray text) when the block is absent.
+func TestRenderGuardInfoLineAppendsPrefixStability(t *testing.T) {
+	var v guardInfoVars
+	v.Inference.Turns = 1
+	base := renderGuardInfoLine(v)
+	if strings.Contains(base, "prefix:") {
+		t.Fatalf("no PrefixStability block should not mention prefix: %s", base)
+	}
+
+	v.PrefixStability = &guardInfoPrefixStability{State: string(cachemeta.PrefixStable)}
+	withPrefix := renderGuardInfoLine(v)
+	if !strings.Contains(withPrefix, "prefix: stable") {
+		t.Fatalf("line missing prefix-stability suffix: %s", withPrefix)
+	}
+	if !strings.HasPrefix(withPrefix, base) {
+		t.Fatalf("prefix-stability text should be appended, not alter the existing line: base=%q got=%q", base, withPrefix)
+	}
+}
+
+// TestGuardInfoVarsDecodesPrefixStability mirrors TestGuardInfoVarsDecodesCacheAttribution:
+// the JSON wire shape must round-trip field-for-field, and the block must stay a nil
+// pointer (omitted) when absent so "no field" and "explicitly unknown" are distinguishable.
+func TestGuardInfoVarsDecodesPrefixStability(t *testing.T) {
+	raw := []byte(`{
+		"prefix_stability":{
+			"state":"prefix-mutated",
+			"first_divergent_segment":2,
+			"first_divergent_token_offset":150,
+			"first_divergent_kind":"tool_schema",
+			"protected_span_broken":false,
+			"reason":"protected span diverged at segment 2 (token offset 150)"
+		}
+	}`)
+	var v guardInfoVars
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode guardInfoVars prefix_stability block: %v", err)
+	}
+	if v.PrefixStability == nil {
+		t.Fatal("prefix_stability did not decode")
+	}
+	if v.PrefixStability.State != "prefix-mutated" || v.PrefixStability.FirstDivergentSegment != 2 || v.PrefixStability.FirstDivergentTokenOffset != 150 {
+		t.Fatalf("prefix_stability fields not decoded: %+v", v.PrefixStability)
+	}
+
+	var absent guardInfoVars
+	if err := json.Unmarshal([]byte(`{}`), &absent); err != nil {
+		t.Fatalf("decode empty object: %v", err)
+	}
+	if absent.PrefixStability != nil {
+		t.Fatalf("prefix_stability must stay nil when the gateway omits the block, got %+v", absent.PrefixStability)
+	}
+}
+
+// TestGuardInfoPrefixStabilityFromScoreLowersAllFields proves the live-score-to-wire-shape
+// lowering used by a future gateway wire-up (and by runInfoPrefixTranscript) carries every
+// field the renderer reads.
+func TestGuardInfoPrefixStabilityFromScoreLowersAllFields(t *testing.T) {
+	score := cachemeta.PrefixStabilityScore{
+		State:                     cachemeta.PrefixMutated,
+		FirstDivergentSegment:     3,
+		FirstDivergentTokenOffset: 42,
+		FirstDivergentKind:        cachemeta.SegSealed,
+		ProtectedSpanBroken:       true,
+		Reason:                    "protected span sealed",
+	}
+	got := guardInfoPrefixStabilityFromScore(score)
+	if got.State != string(cachemeta.PrefixMutated) || got.FirstDivergentSegment != 3 || got.FirstDivergentTokenOffset != 42 {
+		t.Fatalf("lowered fields mismatch: %+v", got)
+	}
+	if got.FirstDivergentKind != string(cachemeta.SegSealed) || !got.ProtectedSpanBroken || got.Reason != score.Reason {
+		t.Fatalf("lowered fields mismatch: %+v", got)
+	}
+}
+
+// writePrefixTranscriptFixture writes a minimal Claude-Code-style JSONL transcript with
+// THREE assistant turns: turn 1 seeds the baseline (system + tool schema), turn 2 repeats
+// the same system+tool schema byte-for-byte (stable), and turn 3 changes the tool schema
+// (mutated) — the same three-state arc prefix_score_test.go exercises directly on the
+// tracker, but round-tripped through the JSONL parsing path this file adds.
+func writePrefixTranscriptFixture(t *testing.T) string {
+	t.Helper()
+	lines := []string{
+		`{"message":{"role":"system","content":"You are a coding agent. Follow the rules."}}`,
+		`{"message":{"role":"assistant","content":[{"type":"tool_use","content":"{\"tools\":[\"read\",\"write\"]}"}]}}`,
+		`{"message":{"role":"user","content":"do the first thing"}}`,
+		`{"message":{"role":"assistant","content":[{"type":"text","text":"ok, done"}]}}`,
+		`{"message":{"role":"user","content":"do the second thing"}}`,
+		`{"message":{"role":"assistant","content":[{"type":"text","text":"ok, also done"}]}}`,
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
+}
+
+// TestRunInfoPrefixTranscriptReportsStates proves the `--prefix-transcript` offline path
+// (issue #1602's done condition: "a live session reports prefix-stable, prefix-mutated,
+// or unknown with the first divergent span") actually computes and prints a verdict for a
+// recorded transcript with no gateway involved.
+func TestRunInfoPrefixTranscriptReportsStates(t *testing.T) {
+	path := writePrefixTranscriptFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runInfo(&stdout, &stderr, []string{"--prefix-transcript", path})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "turn 1") || !strings.Contains(out, string(cachemeta.PrefixUnknown)) {
+		t.Fatalf("turn 1 should report unknown (seeds the baseline):\n%s", out)
+	}
+	if !strings.Contains(out, "summary:") {
+		t.Fatalf("missing summary line:\n%s", out)
+	}
+}
+
+// TestRunInfoPrefixTranscriptJSON proves --json emits a decodable prefixTranscriptReport
+// whose turns carry the real cachemeta.PrefixStabilityScore fields (not just prose).
+func TestRunInfoPrefixTranscriptJSON(t *testing.T) {
+	path := writePrefixTranscriptFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runInfo(&stdout, &stderr, []string{"--prefix-transcript", path, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, stderr.String())
+	}
+	var report prefixTranscriptReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("json output did not round-trip: %v\n%s", err, stdout.String())
+	}
+	if len(report.Turns) == 0 {
+		t.Fatalf("no turns decoded from JSON report:\n%s", stdout.String())
+	}
+	if report.Turns[0].Score.State != cachemeta.PrefixUnknown {
+		t.Fatalf("turn 1 state = %q, want %q", report.Turns[0].Score.State, cachemeta.PrefixUnknown)
+	}
+	if report.Summary == nil {
+		t.Fatal("summary not populated")
+	}
+}
+
+// TestRunInfoPrefixTranscriptMissingFileFails proves a bad path is a clean, reported
+// failure (exit 1 with a stderr message) rather than a panic or a silent empty report.
+func TestRunInfoPrefixTranscriptMissingFileFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runInfo(&stdout, &stderr, []string{"--prefix-transcript", filepath.Join(t.TempDir(), "does-not-exist.jsonl")})
+	if code == 0 {
+		t.Fatalf("missing transcript should fail, got exit 0: stdout=%s", stdout.String())
+	}
+	if stderr.String() == "" {
+		t.Fatal("missing transcript should report an error on stderr")
+	}
+}
+
+// TestProtectedSpanOfCapsAtFirstMessage proves protectedSpanOf keeps only the leading
+// stable/tool-schema/volatile run (and a capping sealed span), never spilling into
+// ordinary message/tool-result content — the span PrefixStabilityTracker is meant to
+// score turn over turn.
+func TestProtectedSpanOfCapsAtFirstMessage(t *testing.T) {
+	turn := []cachemeta.PromptSegment{
+		{Kind: cachemeta.SegStable, Tokens: 100},
+		{Kind: cachemeta.SegToolSchema, Tokens: 200},
+		{Kind: cachemeta.SegMessage, Tokens: 10},
+		{Kind: cachemeta.SegToolResult, Tokens: 20},
+	}
+	got := protectedSpanOf(turn)
+	if len(got) != 2 {
+		t.Fatalf("protectedSpanOf returned %d segments, want 2 (stable+tool-schema only): %+v", len(got), got)
+	}
+
+	sealedTurn := []cachemeta.PromptSegment{
+		{Kind: cachemeta.SegStable, Tokens: 100},
+		{Kind: cachemeta.SegSealed, Tokens: 50},
+		{Kind: cachemeta.SegMessage, Tokens: 10},
+	}
+	gotSealed := protectedSpanOf(sealedTurn)
+	if len(gotSealed) != 2 {
+		t.Fatalf("protectedSpanOf with a sealed cap returned %d segments, want 2 (stable+sealed): %+v", len(gotSealed), gotSealed)
+	}
+	if gotSealed[1].Kind != cachemeta.SegSealed {
+		t.Fatalf("protectedSpanOf must include the capping sealed segment itself, got %+v", gotSealed[1])
 	}
 }
