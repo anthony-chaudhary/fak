@@ -110,16 +110,63 @@ func fleetUserHome() string {
 	return ""
 }
 
-// registryMatch finds the registry session row that best matches a plan worker
-// (by account, else the row whose project/last references the session/issue).
+// registryMatch finds the registry session row that best matches a plan worker:
+// explicit session/issue evidence in project/last wins, with account match as a
+// fallback. A registry can carry several rows for one account, so returning the
+// first account row can pin a worker to an unrelated auth block.
 func registryMatch(reg fleetaccounts.Registry, w fleetmon.PlanWorker) (disp, action string) {
+	var best fleetaccounts.Session
+	bestScore := 0
 	for _, s := range reg.Sessions {
-		if w.Account != "" && s.Account == w.Account {
-			return s.Disp, s.Action
+		score := registryMatchScore(s, w)
+		if score > bestScore {
+			best, bestScore = s, score
 		}
+	}
+	if bestScore > 0 {
+		return best.Disp, best.Action
 	}
 	return "", ""
 }
+
+func registryMatchScore(s fleetaccounts.Session, w fleetmon.PlanWorker) int {
+	score := 0
+	if w.Account != "" && s.Account == w.Account {
+		score += 10
+	}
+	if registryTextMatchesWorker(s, w) {
+		score += 100
+	}
+	return score
+}
+
+func registryTextMatchesWorker(s fleetaccounts.Session, w fleetmon.PlanWorker) bool {
+	hay := strings.ToLower(s.Project + " " + s.Last)
+	if w.Session != "" && strings.Contains(hay, strings.ToLower(w.Session)) {
+		return true
+	}
+	return w.Issue > 0 && containsIssueNumber(hay, w.Issue)
+}
+
+func containsIssueNumber(hay string, issue int) bool {
+	needle := fmt.Sprintf("%d", issue)
+	for start := strings.Index(hay, needle); start >= 0; {
+		end := start + len(needle)
+		beforeOK := start == 0 || !isASCIIDigit(hay[start-1])
+		afterOK := end == len(hay) || !isASCIIDigit(hay[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		next := strings.Index(hay[end:], needle)
+		if next < 0 {
+			break
+		}
+		start = end + next
+	}
+	return false
+}
+
+func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // --- monitor (#1856) ------------------------------------------------------ //
 
@@ -167,8 +214,13 @@ func runFleetMonitor(stdout, stderr io.Writer, argv []string) int {
 		workers = discoverWorkers(*home)
 	}
 
-	// One janitor scan attributes stale children to worker roots.
-	janitor := scanJanitor(procs, workers, fleetmon.DefaultJanitorPolicy(), now)
+	// One janitor scan attributes stale children to worker roots. The monitor's
+	// child-staleness flags must feed this scan; otherwise the classifier sees
+	// stale children under default ceilings no matter what the operator passed.
+	janitorPolicy := fleetmon.DefaultJanitorPolicy()
+	janitorPolicy.SimpleShell = *staleSimple
+	janitorPolicy.Test = *staleTest
+	janitor := scanJanitor(procs, workers, janitorPolicy, now)
 	staleByWorker := map[int][]fleetmon.ChildCommand{}
 	for _, c := range janitor.Stale {
 		staleByWorker[c.WorkerPID] = append(staleByWorker[c.WorkerPID], c)
@@ -372,9 +424,12 @@ func runFleetFold(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak fleet fold: no workers (pass --plan with a worker set)")
 		return 2
 	}
-	procs, _ := fleetCollectRelations()
+	procs, collectErr := fleetCollectRelations()
 	live := livePIDs(procs)
 	now := fleetNow()
+	if collectErr != "" {
+		fmt.Fprintf(stderr, "fak fleet fold: process scan warning: %s\n", collectErr)
+	}
 
 	// Which issues have a replacement (a later session for the same issue)?
 	replacedBy := map[string]string{} // original session -> replacement session
@@ -391,8 +446,8 @@ func runFleetFold(stdout, stderr io.Writer, argv []string) int {
 		if tPath != "" {
 			sig = fleetmon.ReadTranscript(tPath)
 		}
-		in := fleetmon.FoldInput{RunID: plan.RunID, Worker: w, Transcript: sig, Now: now}
-		if w.PID > 0 {
+		in := fleetmon.FoldInput{RunID: plan.RunID, Worker: w, Transcript: sig, ProcessScanError: collectErr, Now: now}
+		if w.PID > 0 && collectErr == "" {
 			alive := live[w.PID]
 			in.PIDAlive = &alive
 		}

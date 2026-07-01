@@ -65,14 +65,15 @@ type LedgerRow struct {
 
 // FoldInput is the per-worker evidence the fold classifies into a ledger row.
 type FoldInput struct {
-	RunID        string
-	Worker       PlanWorker
-	Transcript   TranscriptSignal
-	PIDAlive     *bool // nil = unknown; false = the worker process is gone
-	Idle         bool  // the transcript is not advancing (a settled worker)
-	Superseded   bool  // a replacement session exists for this issue
-	SupersededBy string
-	Now          time.Time
+	RunID            string
+	Worker           PlanWorker
+	Transcript       TranscriptSignal
+	PIDAlive         *bool  // nil = unknown; false = the worker process is gone
+	ProcessScanError string // non-empty means PID liveness is unknown for this fold
+	Idle             bool   // the transcript is not advancing (a settled worker)
+	Superseded       bool   // a replacement session exists for this issue
+	SupersededBy     string
+	Now              time.Time
 }
 
 // FoldWorker folds one worker's transcript + liveness into a witnessed ledger
@@ -99,7 +100,10 @@ func FoldWorker(in FoldInput) LedgerRow {
 		row.FollowUp = "replaced by " + in.SupersededBy
 
 	case !t.FinalReport:
-		if in.PIDAlive != nil && !*in.PIDAlive {
+		if in.ProcessScanError != "" {
+			row.Outcome = string(OutcomeStaleIncomplete)
+			row.FollowUp = "process scan failed: " + in.ProcessScanError + "; PID liveness unknown, rerun fold/monitor before classifying a crash"
+		} else if in.PIDAlive != nil && !*in.PIDAlive {
 			row.Outcome = string(OutcomeCrashedNoFinal)
 			row.FollowUp = "worker process gone with no final report; re-dispatch or inspect the transcript tail"
 		} else {

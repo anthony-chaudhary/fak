@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/fleetmon"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
@@ -17,8 +18,13 @@ import (
 // them, so no live fleet or process is ever touched.
 func withFleetSeams(t *testing.T, procs []procguard.Proc, now time.Time, killer func(int) (bool, string)) {
 	t.Helper()
+	withFleetSeamsErr(t, procs, "", now, killer)
+}
+
+func withFleetSeamsErr(t *testing.T, procs []procguard.Proc, collectErr string, now time.Time, killer func(int) (bool, string)) {
+	t.Helper()
 	origCollect, origKill, origNow := fleetCollectRelations, fleetKillPID, fleetNow
-	fleetCollectRelations = func() ([]procguard.Proc, string) { return procs, "" }
+	fleetCollectRelations = func() ([]procguard.Proc, string) { return procs, collectErr }
 	if killer != nil {
 		fleetKillPID = killer
 	}
@@ -85,6 +91,48 @@ func proc4242() procguard.Proc {
 	return procguard.Proc{PID: pid, Name: "claude", Cmdline: "claude -p"}
 }
 
+func TestFleetMonitorUsesChildStalenessFlagsForJanitorScan(t *testing.T) {
+	now := time.Now()
+	tx := writeJSONL(t,
+		`{"type":"user","timestamp":"`+now.Add(-40*time.Minute).UTC().Format(time.RFC3339)+`","message":{"role":"user","content":[{"type":"tool_result","content":"still working"}]}}`,
+	)
+	rootAge := 3600
+	childAge := 400
+	ppid := 100
+	procs := []procguard.Proc{
+		{PID: 100, Name: "claude", Cmdline: "claude -p", Start: now.Add(-60 * time.Minute).UTC().Format(time.RFC3339), AgeSec: &rootAge},
+		{PID: 200, PPID: &ppid, Name: "ls", Cmdline: "ls -la", Start: now.Add(-7 * time.Minute).UTC().Format(time.RFC3339), AgeSec: &childAge},
+	}
+	plan := fleetmon.RunPlan{RunID: "r1", Workers: []fleetmon.PlanWorker{
+		{Issue: 2134, Session: "issue-2134", PID: 100, TranscriptPath: tx},
+	}}
+	withFleetSeams(t, procs, now, nil)
+
+	var out, errb bytes.Buffer
+	code := runFleetMonitor(&out, &errb, []string{"--plan", writePlan(t, plan), "--json", "--stale-child-simple", "10m"})
+	if code != 0 {
+		t.Fatalf("monitor exit %d, stderr=%s", code, errb.String())
+	}
+	var payload fleetmon.MonitorPayload
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got := payload.Workers[0].Class; got != fleetmon.ClassStaleTranscript {
+		t.Fatalf("10m simple-child threshold should keep 400s ls out of stale-child; got %s (%+v)", got, payload.Workers[0])
+	}
+}
+
+func TestRegistryMatchPrefersSessionRowOverFirstAccountRow(t *testing.T) {
+	reg := fleetaccounts.Registry{Sessions: []fleetaccounts.Session{
+		{Account: ".claude-a", Project: "unrelated", Last: "please run /login", Disp: "INFRA_AUTH", Action: "BLOCKED_AUTH"},
+		{Account: ".claude-a", Project: "C:/work/fak issue-2134", Last: "issue-2134 worker is live", Disp: "LIVE", Action: "OK"},
+	}}
+	disp, action := registryMatch(reg, fleetmon.PlanWorker{Issue: 2134, Session: "issue-2134", Account: ".claude-a"})
+	if disp != "LIVE" || action != "OK" {
+		t.Fatalf("registry match should prefer the row that names the worker session, got %s/%s", disp, action)
+	}
+}
+
 func TestFleetJanitorDryRunThenApply(t *testing.T) {
 	now := time.Now()
 	rootStart := now.Add(-60 * time.Minute).UTC().Format(time.RFC3339)
@@ -147,6 +195,38 @@ func TestFleetFoldWritesLedger(t *testing.T) {
 	rows := fleetmon.ParseLedger(string(data))
 	if len(rows) != 1 || rows[0].Outcome != string(fleetmon.OutcomeReadOnlyAudit) {
 		t.Fatalf("want one read-only-audit row, got %+v", rows)
+	}
+}
+
+func TestFleetFoldSurfacesProcessCollectionError(t *testing.T) {
+	now := time.Now()
+	tx := writeJSONL(t,
+		`{"type":"user","timestamp":"`+now.Add(-30*time.Minute).UTC().Format(time.RFC3339)+`","message":{"role":"user","content":[{"type":"tool_result","content":"working"}]}}`,
+	)
+	plan := fleetmon.RunPlan{RunID: "r1", Workers: []fleetmon.PlanWorker{{Issue: 2134, Session: "issue-2134", PID: 100, TranscriptPath: tx}}}
+	withFleetSeamsErr(t, nil, "process collector unavailable", now, nil)
+
+	var out, errb bytes.Buffer
+	code := runFleetFold(&out, &errb, []string{"--plan", writePlan(t, plan), "--json"})
+	if code != 0 {
+		t.Fatalf("fold exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "process scan warning: process collector unavailable") {
+		t.Fatalf("fold should surface the collection error on stderr, got %q", errb.String())
+	}
+	var summary fleetmon.RunLedgerSummary
+	if err := json.Unmarshal(out.Bytes(), &summary); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if len(summary.Rows) != 1 {
+		t.Fatalf("want one folded row, got %+v", summary)
+	}
+	row := summary.Rows[0]
+	if row.Outcome == string(fleetmon.OutcomeCrashedNoFinal) {
+		t.Fatalf("collection failure must not be reported as a worker crash: %+v", row)
+	}
+	if row.Outcome != string(fleetmon.OutcomeStaleIncomplete) || !strings.Contains(row.FollowUp, "process scan failed: process collector unavailable") {
+		t.Fatalf("collection failure should be carried in the row, got %+v", row)
 	}
 }
 
