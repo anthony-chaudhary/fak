@@ -81,6 +81,12 @@ func usageCoreVerbs() {
                  it to WSL via test.ps1 (native go test is OS-policy-blocked). -n prints the
                  resolved command without running. The make targets and fak affected stay
                  the authoritative gates; this is the host-routing convenience layer.)
+  fak done      [--paths P ...] [--test TARGET|none] [--witness CRITERION] [--json]
+                (PRE-CLAIM SELF-CHECK: before saying "done", compose the existing witnesses:
+                 selected paths clean, fak test TARGET, make claims-lint, and the loopgate/DOS
+                 witness criterion such as 'commit-audit HEAD' or 'verify PLAN PHASE'. Returns
+                 GREEN/RED plus the missing witness and next checkable step. Exit 0 green,
+                 1 red, 2 usage.)
   fak profile   <pkg> [--bench RE] [--benchtime DUR] [--cpuprofile F] [--memprofile F] [--top] [-n]
                 (HOST-AWARE PROFILER: capture a CPU + allocation profile of a package's
                  benchmarks (go test -bench -cpuprofile -memprofile), Windows->WSL routed

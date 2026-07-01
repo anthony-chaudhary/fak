@@ -103,6 +103,7 @@ var verbManifest = []Verb{
 	{Name: "debug", Synopsis: "the context debugger: attach to a finished session as a core dump and demand-page its working set", Lane: "cmd"},
 	{Name: "dispatch", Synopsis: "the witness-gated issue-dispatch loop: spawn, ship #N, witness, close", Lane: "cmd"},
 	{Name: "doctor", Synopsis: "operator diagnostic: run the answer-shape witness + the real kernel admit verdict and recommend", Lane: "cmd"},
+	{Name: "done", Synopsis: "pre-claim self-check: tests, claims-lint, and loopgate/DOS witness in one GREEN/RED verdict", Lane: "cmd"},
 	{Name: "dogfood-issues", Synopsis: "file dogfood issues from observed agent-experience defects", Lane: "cmd"},
 	{Name: "dogfood-score", Synopsis: "scores the launched-session dogfooding loop: wired to run honestly + truthful self-report", Lane: "cmd"},
 	{Name: "dojo", Synopsis: "the prediction-vs-reality gym: score each calibration lever's claimed vs realized behavior", Lane: "cmd"},

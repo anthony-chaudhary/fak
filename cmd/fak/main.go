@@ -147,6 +147,8 @@ func main() {
 		cmdTask(os.Args[2:])
 	case "test":
 		cmdTest(os.Args[2:])
+	case "done":
+		cmdDone(os.Args[2:])
 	case "profile":
 		cmdProfile(os.Args[2:])
 	case "c":
