@@ -58,6 +58,10 @@ _PATH_RE = re.compile(
 # Lanes that are exclusive in dos.toml — NEVER auto-route a worker onto these from
 # a heuristic; that is exactly the collision the arbiter exists to prevent.
 EXCLUSIVE_LANES = {"abi", "release", "global"}
+EXCLUSIVE_UNBLOCK_ACTION = (
+    "operator: handle this issue on the human-owned lane or split out a non-exclusive "
+    "scope; do not spawn an issue worker for the blocked lane"
+)
 
 # Scope token -> lane, when the scope is not itself a lane name. Conservative and
 # derived from real issue scopes vs the real lane roster. Override via --config.
@@ -368,10 +372,21 @@ def route_issue(
             keyword, keyword_lane = key, lane
             break
 
+    blocked_path_lanes = sorted(l for l in path_lanes if l in EXCLUSIVE_LANES)
+    if blocked_path_lanes:
+        lane = blocked_path_lanes[0]
+        return _blocked_route(issue, lane, f"path:{lane}", "exclusive")
+
     # Exclusive-lane scope is operator-gated, never auto-routed.
     if scope in EXCLUSIVE_LANES:
-        return _route(issue, None, "none", f"exclusive-scope:{scope}", False,
-                      unrouted_reason=f"exclusive-lane scope '{scope}'; operator-gated")
+        return _blocked_route(issue, scope, f"exclusive-scope:{scope}", "exclusive")
+    if scope_lane in EXCLUSIVE_LANES:
+        token = scope if scope in scope_alias else typ
+        return _blocked_route(issue, scope_lane, f"scope:{token}->{scope_lane}", "exclusive")
+    if label_lane in EXCLUSIVE_LANES:
+        return _blocked_route(issue, label_lane, f"label->{label_lane}", "exclusive")
+    if keyword_lane in EXCLUSIVE_LANES:
+        return _blocked_route(issue, keyword_lane, f"keyword:{keyword}->{keyword_lane}", "exclusive")
 
     # Resolve with override: path_lane wins outright (it's the non-forgeable signal).
     if path_lane is not None:
@@ -382,8 +397,11 @@ def route_issue(
 
     if path_ambiguous:
         # Tie-break: prefer the lane also matching scope/label; else lexicographic.
-        prefer = scope_lane if scope_lane in path_lanes else (label_lane if label_lane in path_lanes else None)
-        pick = prefer or sorted(path_lanes)[0]
+        routable_path_lanes = [l for l in path_lanes
+                               if l not in EXCLUSIVE_LANES]
+        prefer = (scope_lane if scope_lane in routable_path_lanes
+                  else (label_lane if label_lane in routable_path_lanes else None))
+        pick = prefer or sorted(routable_path_lanes)[0]
         return _route(issue, pick, "path-confirmed", f"path-ambiguous:{'|'.join(sorted(path_lanes))}",
                       True, unrouted_reason=None)
 
@@ -409,6 +427,19 @@ def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None) -
         "signal_conflict": bool(conflict),
         "unrouted_reason": unrouted_reason,
     }
+
+
+def _blocked_route(issue, lane: str, signal: str, policy: str) -> dict[str, Any]:
+    lane = str(lane)
+    out = _route(
+        issue, None, "none", signal, False,
+        unrouted_reason=(
+            f"lane-policy:{policy} lane '{lane}' is human-owned/operator-gated; "
+            f"held before spawn"))
+    out["blocked_lane"] = lane
+    out["blocked_policy"] = policy
+    out["unblock_action"] = EXCLUSIVE_UNBLOCK_ACTION
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -721,7 +752,9 @@ def render(payload: dict[str, Any]) -> str:
     if unrouted:
         lines.append(f"  UNROUTED ({len(unrouted)}) — operator triage:")
         for r in unrouted[:10]:
-            lines.append(f"    #{r['number']:<5} {r['unrouted_reason']}: {r['title']}")
+            action = f" -> {r['unblock_action']}" if r.get("unblock_action") else ""
+            policy = f" [{r.get('blocked_policy')}:{r.get('blocked_lane')}]" if r.get("blocked_lane") else ""
+            lines.append(f"    #{r['number']:<5} {r['unrouted_reason']}{policy}: {r['title']}{action}")
     return "\n".join(lines)
 
 
@@ -749,10 +782,17 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     ]
     for lane, grp in (payload.get("lanes") or {}).items():
         out.append(f"| {lane} | {grp['count']} | {', '.join('#'+str(n) for n in grp['issues'])} |")
-    out += ["", "## UNROUTED (operator triage)", "", "| # | reason | title |", "|---|---|---|"]
+    out += ["", "## UNROUTED (operator triage)", "",
+            "| # | reason | blocked lane | unblock action | title |",
+            "|---|---|---|---|---|"]
     for r in payload.get("issues", []):
         if r["lane"] is None:
-            out.append(f"| #{r['number']} | {r['unrouted_reason']} | {r['title']} |")
+            blocked = ""
+            if r.get("blocked_lane"):
+                blocked = f"{r.get('blocked_policy')}:{r.get('blocked_lane')}"
+            out.append(f"| #{r['number']} | {r['unrouted_reason']} | "
+                       f"{blocked or '—'} | {r.get('unblock_action') or '—'} | "
+                       f"{r['title']} |")
     return "\n".join(out) + "\n"
 
 

@@ -198,7 +198,21 @@ class RoutingRungTest(unittest.TestCase):
         # abi is exclusive — never auto-route, even though it IS a lane name.
         r = route(issue(7, "abi: hoist the public ABI surface"))
         self.assertIsNone(r["lane"])
-        self.assertIn("exclusive", r["unrouted_reason"])
+        self.assertEqual(r["blocked_lane"], "abi")
+        self.assertEqual(r["blocked_policy"], "exclusive")
+        self.assertEqual(
+            r["unrouted_reason"],
+            "lane-policy:exclusive lane 'abi' is human-owned/operator-gated; held before spawn")
+        self.assertIn("do not spawn", r["unblock_action"])
+
+    def test_exclusive_lane_path_refused_even_when_path_confirmed(self):
+        r = route(issue(10, "fix: ABI table",
+                        body="touches fak/internal/abi/types.go"))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["blocked_lane"], "abi")
+        self.assertEqual(r["blocked_policy"], "exclusive")
+        self.assertEqual(r["signal"], "path:abi")
+        self.assertIn("held before spawn", r["unrouted_reason"])
 
     def test_multi_lane_path_ambiguity_is_deterministic(self):
         body = "touches fak/internal/gateway/a.go and fak/internal/compute/b.go"
@@ -213,6 +227,12 @@ class RoutingRungTest(unittest.TestCase):
         body = "fak/internal/gateway/a.go and fak/internal/compute/b.go"
         r = route(issue(9, "fix(compute): shared", body=body))
         self.assertEqual(r["lane"], "compute")
+
+    def test_ambiguity_with_exclusive_lane_is_held(self):
+        body = "fak/internal/gateway/a.go and fak/internal/abi/types.go"
+        r = route(issue(11, "fix(gateway): shared with ABI", body=body))
+        self.assertIsNone(r["lane"])
+        self.assertEqual(r["blocked_lane"], "abi")
 
 
 class PayloadTest(unittest.TestCase):
@@ -533,6 +553,16 @@ class LaneConfTagTest(unittest.TestCase):
         text = m.render(m.build_payload(workspace="C:/work/fleet", routes=routes,
                                         trees=TREES))
         self.assertIn("[path 1·scope 1]", text)
+
+    def test_render_shows_exclusive_lane_policy_and_unblock_action(self):
+        routes = [route(issue(7, "abi: hoist the public ABI surface"))]
+        payload = m.build_payload(workspace="C:/work/fleet", routes=routes, trees=TREES)
+        text = m.render(payload)
+        self.assertIn("[exclusive:abi]", text)
+        self.assertIn("do not spawn an issue worker", text)
+        md = m.render_md(payload, date="2026-07-01")
+        self.assertIn("| #7 | lane-policy:exclusive lane 'abi' is human-owned/operator-gated; held before spawn | exclusive:abi |", md)
+        self.assertIn("do not spawn an issue worker", md)
 
 
 if __name__ == "__main__":
