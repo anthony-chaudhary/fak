@@ -41,6 +41,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -86,7 +87,14 @@ type Options struct {
 	Recorder *witness.Recorder // optional decisions-note sink for post-commit assertions
 	Window   *Window           // optional adaptive process-local writer window
 	Review   *ReviewOptions    // optional pre-commit cross-model review rung
-	Now      func() time.Time  // optional test clock for lock-hold measurement
+	// CoreLockMaintenanceWitness is an independent witness claim that may clear a
+	// hard-self core-lock pathset. Empty means ordinary in-agent hard-self edits are
+	// refused before staging with CORE_SELF_MODIFY.
+	CoreLockMaintenanceWitness string
+	// CoreLockWitnessResolver is injectable for tests; nil uses the real git-backed
+	// resolver through the same runner seam as the rest of safecommit.
+	CoreLockWitnessResolver abi.WitnessResolver
+	Now                     func() time.Time // optional test clock for lock-hold measurement
 }
 
 type ReviewFunc func(context.Context, modelroute.ReviewRequest) (modelroute.ReviewResult, error)
@@ -132,6 +140,7 @@ const (
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
 	ReasonReviewRefuted   = "REVIEW_REFUTED"    // opt-in scout review refuted the diff before commit
+	ReasonCoreSelfModify  = "CORE_SELF_MODIFY"  // hard-self core-lock path requires external maintenance witness
 	// ReasonPreStagedPathOverlap ("PRESTAGED_PATH_OVERLAP") is part of this vocabulary too;
 	// it lives in prestaged.go with the same-file staged-hunk ambiguity guard.
 	// ReasonStaleBaseDeletion ("STALE_BASE_DELETION") is part of this closed vocabulary too;
@@ -144,20 +153,22 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed  bool                     `json:"committed"`
-	SHA        string                   `json:"committed_sha,omitempty"`
-	Paths      []string                 `json:"paths"`
-	Verified   bool                     `json:"verified"`
-	Pushed     bool                     `json:"pushed"`
-	Score      int                      `json:"score"`
-	Grade      string                   `json:"grade"`
-	ScoreNotes []string                 `json:"score_notes,omitempty"`
-	Reason     string                   `json:"reason,omitempty"`
-	Detail     string                   `json:"detail,omitempty"`
-	RacedExtra []string                 `json:"raced_extra_paths,omitempty"`
-	HeadBefore string                   `json:"head_before,omitempty"`
-	LockHoldNS int64                    `json:"lock_hold_ns,omitempty"`
-	Review     *modelroute.ReviewResult `json:"review,omitempty"`
+	Committed       bool                     `json:"committed"`
+	SHA             string                   `json:"committed_sha,omitempty"`
+	Paths           []string                 `json:"paths"`
+	Verified        bool                     `json:"verified"`
+	Pushed          bool                     `json:"pushed"`
+	Score           int                      `json:"score"`
+	Grade           string                   `json:"grade"`
+	ScoreNotes      []string                 `json:"score_notes,omitempty"`
+	Reason          string                   `json:"reason,omitempty"`
+	Detail          string                   `json:"detail,omitempty"`
+	RacedExtra      []string                 `json:"raced_extra_paths,omitempty"`
+	HeadBefore      string                   `json:"head_before,omitempty"`
+	LockHoldNS      int64                    `json:"lock_hold_ns,omitempty"`
+	CoreLockPaths   []string                 `json:"core_lock_paths,omitempty"`
+	CoreLockWitness string                   `json:"core_lock_witness,omitempty"`
+	Review          *modelroute.ReviewResult `json:"review,omitempty"`
 }
 
 // Commit runs the safe-commit algorithm against the real git binary and a real advisory
@@ -223,6 +234,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		if recordPathspec {
 			recordPathspecAssertion(ctx, opts, res, recordVerdict, recordReason, recordAssertion)
 		}
+		recordCoreLockMaintenance(ctx, opts, res)
 	}()
 
 	if reviewEnabled(opts.Review) {
@@ -446,11 +458,28 @@ func precommitGates(ctx context.Context, run Runner, opts Options, trunk string,
 	// (4) Does the pathspec actually have a change? Fail fast, lock-free; never
 	// --allow-empty. Advisory only — step 7 is the authoritative check.
 	statusArgs := append([]string{"status", "--porcelain", "--"}, paths...)
+	statusOut := ""
 	if out, _, err := run(ctx, opts.Dir, statusArgs...); err != nil {
 		return res, false, fmt.Errorf("safecommit: git not executable: %w", err)
 	} else if strings.TrimSpace(out) == "" {
 		res.Reason = ReasonNothingStaged
 		return res, true, nil
+	} else {
+		statusOut = out
+	}
+
+	changedForCoreLock := statusChangedPaths(statusOut)
+	if len(changedForCoreLock) == 0 {
+		changedForCoreLock = paths
+	}
+	if f, ok := coreLockHardSelfFinding(changedForCoreLock); ok {
+		if detail, fired := checkCoreLockHardSelf(ctx, run, opts, changedForCoreLock); fired {
+			res.Reason = ReasonCoreSelfModify
+			res.Detail = detail
+			return res, true, nil
+		}
+		res.CoreLockPaths = append([]string(nil), f.Paths...)
+		res.CoreLockWitness = strings.TrimSpace(opts.CoreLockMaintenanceWitness)
 	}
 
 	// (4b) STALE-BASE-DELETION guard — content-level, lock-free, before any `git add`. The

@@ -589,6 +589,17 @@ summary  = "a pathspec commit would silently drop a peer's pushed block -- the w
 fix      = "fetch + rebase/merge origin/<trunk> so the working-tree base includes the peer's block, then re-commit; never escape into a side tree. FAK_STALE_BASE_GUARD=warn for advisory mode, =off to disable. Floor: internal/safecommit checkStaleBaseDeletion (fail-open on a fresh base / absent ref)."
 see_also = ["fak/internal/safecommit/stalebase.go", "fak/CLAUDE.md", "fak/AGENTS.md"]
 
+# Hard-self core-lock enforcement (#1683): the commit path refuses an in-agent edit
+# to self-grading machinery unless an independent maintenance witness is confirmed.
+# The class is declared in internal/corelocks; safecommit consumes only the hard-self
+# rows and leaves ordinary leaves plus softer classes on the existing advisory path.
+[reasons.CORE_SELF_MODIFY]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a pathspec commit touches hard-self core-lock machinery -- a surface that can weaken the admission, witness, or ship-grade machinery that would catch its own bad edit"
+fix      = "do not clear this by self-report. Use an operator/release maintenance path, or rerun `fak commit` with `--core-lock-maintenance-witness <claim>` only after an independent witness resolver confirms the maintenance claim. The accepted commit records the confirmed witness on refs/notes/fak/decisions."
+see_also = ["internal/corelocks", "internal/corelockaudit", "internal/safecommit/corelock.go", "dos commit-audit"]
+
 # Public-copy leak scan: the private canonical repo is the source for every
 # future public export, so the redact-needles listed in PUBLIC-SCRUB-POLICY.md
 # (operator Tailscale IPs, SSH user, machine paths, the .claude-agent-*

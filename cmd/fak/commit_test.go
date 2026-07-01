@@ -421,6 +421,26 @@ func TestRunCommit_reviewModelWiresSafecommitReview(t *testing.T) {
 	}
 }
 
+func TestRunCommit_coreLockMaintenanceWitnessWiresSafecommit(t *testing.T) {
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--path", "internal/corelocks/corelocks.go",
+		"-m", "feat(corelocks): tighten hard-self enforcement (#1683) (fak corelocks)",
+		"--core-lock-maintenance-witness", "ancestor:reviewed-maintenance-sha",
+	})
+	if code != 0 {
+		t.Fatalf("want 0, got %d stderr=%q", code, errb.String())
+	}
+	if got.CoreLockMaintenanceWitness != "ancestor:reviewed-maintenance-sha" {
+		t.Fatalf("core-lock witness did not reach safecommit: %+v", got)
+	}
+}
+
 func TestParseCommitReviewScoutLabelAcceptsFencedJSON(t *testing.T) {
 	label, err := parseCommitReviewScoutLabel("```json\n{\"verdict\":\"refute\",\"reason\":\"missing test\"}\n```")
 	if err != nil {

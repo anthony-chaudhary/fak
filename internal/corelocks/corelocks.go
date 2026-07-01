@@ -56,8 +56,15 @@ var knownReasons = map[string]bool{
 	"": true,
 }
 
-// ClassOpenLeaf is the fall-through class for a path no declared glob claims.
-const ClassOpenLeaf = "open-leaf"
+// Exported class/reason constants are the stable labels other gates key on when
+// they consume this taxonomy. The mappings stay data-driven; these constants
+// only prevent string drift at enforcement call sites.
+const (
+	ClassHardSelf = "hard-self"
+	ClassOpenLeaf = "open-leaf"
+
+	ReasonCoreSelfModify = "CORE_SELF_MODIFY"
+)
 
 // ReasonUnclassified is returned for a path that matches a declared class which
 // itself carries no reason wiring — the data names a lock but cannot say why.

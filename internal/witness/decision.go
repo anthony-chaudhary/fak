@@ -73,7 +73,9 @@ type Decision struct {
 	// assert-fail).
 	Verdict string `json:"verdict"`
 	// ReasonClass is the closed refusal-vocabulary token for a refusal (e.g.
-	// "OFF_TRUNK", "PATHSPEC_RACE", "LEASE_HELD"). Empty for a plain allow.
+	// "OFF_TRUNK", "PATHSPEC_RACE", "LEASE_HELD"). Empty for a plain allow,
+	// unless an allow is clearing a named guard and needs that guard class
+	// recorded for read-back (e.g. CORE_SELF_MODIFY maintenance).
 	ReasonClass string `json:"reason_class,omitempty"`
 	// Lane is the lease lane the decision was made under (forensics).
 	Lane string `json:"lane,omitempty"`
@@ -87,6 +89,9 @@ type Decision struct {
 	// committed-set==requested-set check), for an assert-pass / assert-fail
 	// verdict. Empty for a pre-commit decision.
 	PathspecAssertion string `json:"pathspec_assertion,omitempty"`
+	// Witness is the independent claim/evidence string that cleared an allow or
+	// assertion when a guard required read-back instead of self-report.
+	Witness string `json:"witness,omitempty"`
 }
 
 // Recorder appends decisions to refs/fak/decisions through the package's existing

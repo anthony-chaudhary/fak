@@ -76,6 +76,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL for --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
+	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -120,13 +121,14 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	res, err := commitFn(context.Background(), safecommit.Options{
-		Dir:     *dir,
-		Paths:   paths,
-		Message: message,
-		Trunk:   *trunk,
-		SignOff: !*noSignoff,
-		Push:    *push,
-		Review:  review,
+		Dir:                        *dir,
+		Paths:                      paths,
+		Message:                    message,
+		Trunk:                      *trunk,
+		SignOff:                    !*noSignoff,
+		Push:                       *push,
+		Review:                     review,
+		CoreLockMaintenanceWitness: *coreLockWitness,
 	})
 	if err != nil {
 		// Infrastructure failure (git not executable, lock unopenable): not a refusal.
@@ -527,7 +529,8 @@ func commitExitCode(res safecommit.Result) int {
 		safecommit.ReasonMergeInProgress, safecommit.ReasonNothingStaged,
 		safecommit.ReasonLockBusy, safecommit.ReasonWindowFull,
 		safecommit.ReasonReviewRefuted, safecommit.ReasonStaleBaseDeletion,
-		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap:
+		safecommit.ReasonSpuriousStagedDeletion, safecommit.ReasonPreStagedPathOverlap,
+		safecommit.ReasonCoreSelfModify:
 		return 3
 	default: // PATHSPEC_RACE, HOOK_REFUSED, PUSH_REJECTED
 		return 1

@@ -1,14 +1,16 @@
 ---
 title: "Core soft locks: coherence locks for fast-moving agent code"
-description: "Explores a DOS-shaped lock doctrine for fak: hard locks protect self-grading machinery, soft locks make coherence-bearing edits explicit and witnessed, and ordinary leaf work stays fast. No runtime behavior is claimed."
+description: "Explores a DOS-shaped lock doctrine for fak: hard locks protect self-grading machinery, soft locks make coherence-bearing edits explicit and witnessed, and ordinary leaf work stays fast."
 date: 2026-06-30
 ---
 
 # Core soft locks
 
-Status: concept note. This is not a shipped feature and does not add a gate. It
-extracts the lock doctrine already implicit in fak and DOS, then proposes where a
-softer layer could preserve code coherence while many sections move quickly.
+Status: concept note plus shipped Phase 3 note. The staged doctrine below was
+written before the gate shipped. As of 2026-07-01, `fak commit` enforces only the
+narrow `hard-self` class: a pathspec that touches declared hard-self machinery is
+refused with `CORE_SELF_MODIFY` unless an independent maintenance witness claim
+is confirmed. Softer classes remain advisory.
 
 ## The problem
 
@@ -222,6 +224,13 @@ rate is known.
 The first enforcement target should be narrow: surfaces that can weaken their
 own witness. Most other classes should remain warn or serial-only until measured.
 
+Shipped maintenance path (2026-07-01): `fak commit` refuses hard-self pathsets
+before staging. A privileged maintenance flow may pass
+`--core-lock-maintenance-witness <claim>`; the witness resolver must confirm that
+claim, and a verified accepted commit records a `corelock-maintenance` decision
+with the claim on `refs/notes/fak/decisions`. A self-report that the witness ran
+is not enough, and ordinary leaf commits do not enter this path.
+
 ### Phase 4: promote by evidence
 
 Promote a `shadow-learn` surface to `soft-contract` only after repeated drift
@@ -267,4 +276,3 @@ change would move the map underneath other agents.
 That is the balance: make dangerous authority changes visible and witnessed, but
 keep ordinary implementation work cheap enough that nobody has a reason to route
 around the system.
-

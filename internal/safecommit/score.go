@@ -43,6 +43,8 @@ func resultScore(res Result) (int, []string) {
 		return 60, []string{"push rejected before a verified local result"}
 	case ReasonStaleBaseDeletion, ReasonSpuriousStagedDeletion, ReasonPreStagedPathOverlap:
 		return 72, []string{"pre-commit guard prevented a likely stale or ambiguous path commit"}
+	case ReasonCoreSelfModify:
+		return 72, []string{"pre-commit guard refused a hard-self core-lock edit without independent maintenance witness"}
 	case ReasonOffTrunk, ReasonMergeInProgress, ReasonNotARepo:
 		return 62, []string{"repository state blocks a safe path-scoped commit"}
 	case ReasonReviewRefuted:
