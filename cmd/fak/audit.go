@@ -39,6 +39,8 @@ func cmdAudit(args []string) {
 		cmdAuditExport(args[1:])
 	case "diagnose":
 		cmdAuditDiagnose(args[1:])
+	case "usage":
+		cmdAuditUsage(args[1:])
 	case "-h", "--help", "help":
 		auditUsage()
 	default:
@@ -52,6 +54,7 @@ func auditUsage() {
 	fmt.Fprintln(os.Stderr, "usage: fak audit verify <journal.jsonl>   (validate the tamper-evident hash chain; exit 1 if edited)")
 	fmt.Fprintln(os.Stderr, "       fak audit export <journal.jsonl>   (re-emit the journal as JSONL on stdout)")
 	fmt.Fprintln(os.Stderr, "       fak audit diagnose [<journal.jsonl>] (tell concurrent-writer interleave apart from real tampering)")
+	fmt.Fprintln(os.Stderr, "       fak audit usage [--since DUR] [--json] [--root DIR ...] (cross-session usage rollup over every durable journal/ledger)")
 }
 
 // cmdAuditVerify re-reads a decision journal and validates its hash chain. A clean
