@@ -50,6 +50,7 @@ var tier = map[string]int{
 	"ailuminate":         1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":       1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":       1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
+	"dispatchstatus":     1, // pure dispatch lease-status classifier (refs/fak/locks records -> LIVE/EXPIRED + tree-overlap candidate-blocking) ported from tools/dispatch_status.py; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":       1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"sotamatrix":         1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"branchrole":         1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
