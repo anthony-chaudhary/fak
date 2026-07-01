@@ -66,3 +66,18 @@ func GradeVCache(score float64) string {
 func Round1(x float64) float64 {
 	return math.Round(x*10) / 10
 }
+
+// Round3 rounds to three decimal places for continuous value ratios. The extra
+// precision keeps small improvements visible without pretending the value is a
+// percent-style integer.
+func Round3(x float64) float64 {
+	return math.Round(x*1000) / 1000
+}
+
+// ValueFromScore converts the legacy 0-100 score scale into the continuous quality
+// ratio used by new scorecard readers. It deliberately does not clamp: if an old
+// producer emits a value outside its expected band, the ratio should expose that fact
+// instead of hiding it at 0 or 1.
+func ValueFromScore(score float64) float64 {
+	return score / 100
+}
