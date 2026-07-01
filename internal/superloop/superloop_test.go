@@ -284,6 +284,130 @@ func TestWalkUnmeasuredBeatsDark(t *testing.T) {
 	}
 }
 
+// TestSubwalkStatusHonest pins the DESCEND fold's conservative mapping: a satisfied
+// sub-walk arrives as a clean measured leaf; an UNSATISFIED sub-walk with zero
+// measured debt (unmeasured/dark members inside) still carries one unit of debt at
+// the parent's altitude — it can never read clean; measured debt passes through and
+// a dark member below propagates the Dark bit.
+func TestSubwalkStatusHonest(t *testing.T) {
+	m := Member{Kind: KindSuperloop, Ref: "sub"}
+
+	sat := SubwalkStatus(m, WalkReport{Satisfied: true, TotalDebt: 0, Verdict: "OK", Finding: "superloop_satisfied"})
+	if !sat.Measured || sat.Container || sat.Debt != 0 || sat.Dark {
+		t.Errorf("satisfied sub-walk should fold to a clean measured leaf, got %+v", sat)
+	}
+
+	unm := SubwalkStatus(m, WalkReport{Satisfied: false, TotalDebt: 0, Unmeasured: 2, Verdict: "ACTION", Finding: "superloop_unmeasured"})
+	if unm.Debt < 1 {
+		t.Errorf("an unsatisfied sub-walk must carry at least one unit of debt (got %d) — it can never read clean", unm.Debt)
+	}
+	if !unm.Measured {
+		t.Error("a descended sub-walk was actually read; it must be Measured")
+	}
+
+	deep := SubwalkStatus(m, WalkReport{Satisfied: false, TotalDebt: 42, Dark: 1, Verdict: "ACTION", Finding: "superloop_dark"})
+	if deep.Debt != 42 {
+		t.Errorf("measured sub-debt must pass through, want 42 got %d", deep.Debt)
+	}
+	if !deep.Dark {
+		t.Error("a dark member below must propagate the Dark bit to the parent")
+	}
+}
+
+// TestSuperloopMembersResolveAcyclic is the recursion no-drift witness: every
+// KindSuperloop member ref must resolve in the registry (the shell reds an unknown
+// ref as UNMEASURED, so drift would permanently red its parent), and the
+// KindSuperloop edge graph must be acyclic so the shell's descent terminates without
+// tripping its cycle guard.
+func TestSuperloopMembersResolveAcyclic(t *testing.T) {
+	for _, s := range Registry() {
+		for _, m := range s.Members {
+			if m.Kind != KindSuperloop {
+				continue
+			}
+			if m.Ref == s.Name {
+				t.Errorf("super loop %q lists itself as a member (self-cycle)", s.Name)
+			}
+			if _, ok := Lookup(m.Ref); !ok {
+				t.Errorf("super loop %q member %q is not a registered super loop (registry drift)", s.Name, m.Ref)
+			}
+		}
+	}
+
+	// DFS over KindSuperloop edges: a back edge is a cycle.
+	const (
+		visiting = 1
+		done     = 2
+	)
+	state := map[string]int{}
+	var visit func(name string, path []string)
+	visit = func(name string, path []string) {
+		switch state[name] {
+		case visiting:
+			t.Fatalf("super-loop registry cycle: %v -> %s", path, name)
+		case done:
+			return
+		}
+		state[name] = visiting
+		if s, ok := Lookup(name); ok {
+			for _, m := range s.Members {
+				if m.Kind == KindSuperloop {
+					visit(m.Ref, append(path, name))
+				}
+			}
+		}
+		state[name] = done
+	}
+	for _, name := range Names() {
+		visit(name, nil)
+	}
+}
+
+// TestTendWalksEveryOtherSuperloop pins the ROOT intent: every other registered
+// intent must be a KindSuperloop member of "tend", so a new intent cannot silently
+// escape the root walk.
+func TestTendWalksEveryOtherSuperloop(t *testing.T) {
+	tend, ok := Lookup("tend")
+	if !ok {
+		t.Fatal("root intent \"tend\" not registered")
+	}
+	members := map[string]bool{}
+	for _, m := range tend.Members {
+		if m.Kind != KindSuperloop {
+			t.Errorf("tend member %q must be a sub-super-loop, got kind %q", m.Ref, m.Kind)
+			continue
+		}
+		members[m.Ref] = true
+	}
+	for _, s := range Registry() {
+		if s.Name == "tend" {
+			continue
+		}
+		if !members[s.Name] {
+			t.Errorf("tend must walk registered intent %q (add it as a KindSuperloop member or deliberately exclude it here)", s.Name)
+		}
+	}
+
+	// A descended-status walk folds like leaves: two unsatisfied subs red the root.
+	rep := Walk(tend, []MemberStatus{
+		SubwalkStatus(tend.Members[0], WalkReport{Satisfied: false, TotalDebt: 5}),
+		SubwalkStatus(tend.Members[1], WalkReport{Satisfied: false, TotalDebt: 0, Unmeasured: 1}),
+		SubwalkStatus(tend.Members[2], WalkReport{Satisfied: true, TotalDebt: 0}),
+	})
+	if rep.Satisfied {
+		t.Error("root walk with unsatisfied sub-intents must not be satisfied")
+	}
+	if rep.TotalDebt != 6 {
+		t.Errorf("root debt should fold sub-debts 5+1+0=6, got %d", rep.TotalDebt)
+	}
+	if rep.Unmeasured != 0 {
+		t.Errorf("descended subs are measured; want 0 unmeasured, got %d", rep.Unmeasured)
+	}
+	if len(rep.Worklist) != 2 || rep.Worklist[0].Member.Ref != tend.Members[0].Ref {
+		t.Errorf("worst-first: want the debt-5 sub ranked first and the clean sub dropped, got %+v", rep.Worklist)
+	}
+}
+
 func containsProp(v Verdict, name string, holds bool) bool {
 	for _, p := range v.Properties {
 		if p.Name == name {

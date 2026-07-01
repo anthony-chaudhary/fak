@@ -139,6 +139,23 @@ var registry = []Super{
 			{Kind: KindSurface, Ref: "fak bench-loop status", Why: "the benchmark domain super-loop folds registry, catalog, local next selection, request/rollup surfaces, and the authority gap"},
 		},
 	},
+	{
+		// tend is the ROOT intent — the recursion case made real: a super loop whose
+		// every member is itself a super loop. Walking it descends each registered
+		// intent (the shell walks sub-super-loops inline and folds each sub-report via
+		// [SubwalkStatus]), so one command answers "across every operator intent, what
+		// is worst right now?". The no-drift test pins that every other registered
+		// intent is a member here, so a new intent cannot silently escape the root.
+		Name:  "tend",
+		Title: "tend every operator intent — the super loop of super loops",
+		About: "walk every other registered super loop as a member, descend each one, and enter the worst-first intent",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindSuperloop, Ref: "improve-quality", Why: "quality debt is the broadest drag on everything the fleet ships"},
+			{Kind: KindSuperloop, Ref: "improve-loops", Why: "the loops keep everything else tended; a dark loop below starves the rest"},
+			{Kind: KindSuperloop, Ref: "manage-benchmarks", Why: "benchmark collection feeds the outward-facing numbers"},
+		},
+	},
 }
 
 // Registry returns a copy of the named super loops in declaration order.
@@ -311,12 +328,14 @@ func LeafFacts(name string) LoopFacts {
 // marks a member loop gone quiet or a member that errored. Measured is false when
 // the member's status could not be read — surfaced, never silently treated as clean.
 //
-// Container marks a member (a garden or a super loop) whose status is only knowable
-// by DESCENDING into its own walk — it is a recursion pointer, not a leaf to weigh.
-// A container is always surfaced in the worklist as a "descend" item, but it is NOT
-// counted toward aggregate debt or the measured/unmeasured tally and never blocks
-// Satisfied: this walk did not claim to have read it, so it neither inflates the
-// debt nor is slandered as an unreadable failure.
+// Container marks a member whose status this walk did NOT read — a descend pointer,
+// not a leaf to weigh. A container is always surfaced in the worklist as a "descend"
+// item, but it is NOT counted toward aggregate debt or the measured/unmeasured tally
+// and never blocks Satisfied: this walk did not claim to have read it, so it neither
+// inflates the debt nor is slandered as an unreadable failure. In practice only a
+// garden or an external surface stays a container: a registered sub-super-loop is
+// DESCENDED inline by the shell (recursion) and arrives here as a measured leaf via
+// [SubwalkStatus].
 type MemberStatus struct {
 	Member    Member `json:"member"`
 	Debt      int    `json:"debt"`
@@ -327,14 +346,17 @@ type MemberStatus struct {
 }
 
 // WorkItem is one worst-first entry in the walk's plan: enter this member next, and
-// why. Rank is 1-based in worst-first order.
+// why. Rank is 1-based in worst-first order. Container carries the status's descend-
+// pointer bit through to the renderer, so an unread container shows "→" while a
+// descended sub-super-loop shows its real folded debt.
 type WorkItem struct {
-	Rank   int    `json:"rank"`
-	Member Member `json:"member"`
-	Debt   int    `json:"debt"`
-	Dark   bool   `json:"dark"`
-	Action string `json:"action"`
-	Detail string `json:"detail"`
+	Rank      int    `json:"rank"`
+	Member    Member `json:"member"`
+	Debt      int    `json:"debt"`
+	Dark      bool   `json:"dark"`
+	Container bool   `json:"container"`
+	Action    string `json:"action"`
+	Detail    string `json:"detail"`
 }
 
 // WalkReport is the folded intent-level verdict + the worst-first worklist: the
@@ -417,11 +439,12 @@ func Walk(s Super, statuses []MemberStatus) WalkReport {
 			continue
 		}
 		rep.Worklist = append(rep.Worklist, WorkItem{
-			Member: st.Member,
-			Debt:   st.Debt,
-			Dark:   st.Dark,
-			Action: actionFor(st),
-			Detail: workDetail(st),
+			Member:    st.Member,
+			Debt:      st.Debt,
+			Dark:      st.Dark,
+			Container: st.Container,
+			Action:    actionFor(st),
+			Detail:    workDetail(st),
 		})
 	}
 	// Re-rank the filtered worklist 1..N so the printed ranks are contiguous.
@@ -432,6 +455,29 @@ func Walk(s Super, statuses []MemberStatus) WalkReport {
 	rep.Satisfied = rep.Unmeasured == 0 && rep.Dark == 0 && rep.TotalDebt <= s.Floor
 	rep.Verdict, rep.Finding, rep.Reason, rep.NextAction = walkVerdict(s, rep)
 	return rep
+}
+
+// SubwalkStatus folds a completed sub-walk into the member status the parent walk
+// weighs — the DESCEND move made real for a sub-super-loop member. The mapping is
+// conservative-honest: the member is Measured (the walk actually read it, so it is
+// no longer a container), it carries the sub-walk's aggregate debt, and an
+// UNSATISFIED sub-intent can never read as clean — when its own measured debt is
+// zero (unmeasured or dark members inside), it still carries one unit of debt at
+// the parent's altitude. Dark propagates when any member loop below has gone dark,
+// so the parent's SELECT ranks a dark subtree with leaf-dark urgency.
+func SubwalkStatus(m Member, rep WalkReport) MemberStatus {
+	debt := rep.TotalDebt
+	if !rep.Satisfied && debt <= 0 {
+		debt = 1
+	}
+	return MemberStatus{
+		Member:   m,
+		Measured: true,
+		Debt:     debt,
+		Dark:     rep.Dark > 0,
+		Detail: fmt.Sprintf("descended: %s (%s) — debt %d, unmeasured %d, dark %d across %d member(s)",
+			rep.Verdict, rep.Finding, rep.TotalDebt, rep.Unmeasured, rep.Dark, rep.Members),
+	}
 }
 
 // tier ranks a member status into a worst-first band (lower = enter sooner):
