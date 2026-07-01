@@ -78,6 +78,36 @@ func TestRouterRungs(t *testing.T) {
 	}
 }
 
+func TestRouterLaneHintRung(t *testing.T) {
+	// #1854: an issue whose ONLY routing signal is the rendered "## Lane" section (as a
+	// `fak task handoff` step writes HandoffNextStep.Lane) must route to that lane at
+	// the weakest "lane-hint" confidence, instead of going UNROUTED as it did before.
+	laneBody := "## Lane\n\ntools\n\n## Done condition\n\nship it\n"
+	got := routeTestIssue(routerIssue(1854, "make the thing better", nil, laneBody))
+	if got.Lane != "tools" || got.Confidence != "lane-hint" || got.Signal != "lane-hint:tools" {
+		t.Fatalf("lane-hint route = lane %q confidence %q signal %q, want tools/lane-hint/lane-hint:tools (%+v)",
+			got.Lane, got.Confidence, got.Signal, got)
+	}
+
+	// The handoff "not specified" fallback in the section must NOT route.
+	fallback := "## Lane\n\nNot specified by this handoff.\n"
+	if got := routeTestIssue(routerIssue(1855, "still vague", nil, fallback)); got.Lane != "" || got.Confidence != "none" {
+		t.Fatalf("fallback lane section routed unexpectedly: %+v", got)
+	}
+
+	// A lane name that is not a live concurrent lane must fall through to UNROUTED.
+	unknown := "## Lane\n\nnot-a-real-lane\n"
+	if got := routeTestIssue(routerIssue(1857, "unknown lane hint", nil, unknown)); got.Lane != "" || got.Confidence != "none" {
+		t.Fatalf("unknown lane hint routed unexpectedly: %+v", got)
+	}
+
+	// A stronger signal (exact scope) still wins over the lane hint.
+	both := routerIssue(1856, "fix(gateway): real scope", nil, "## Lane\n\ntools\n")
+	if got := routeTestIssue(both); got.Lane != "gateway" || got.Confidence != "exact-scope" {
+		t.Fatalf("scope must override lane hint: %+v", got)
+	}
+}
+
 func TestRouterLabelFallbackDeterminism(t *testing.T) {
 	tests := []struct {
 		name           string

@@ -115,12 +115,16 @@ var KeywordAlias = map[string]string{
 }
 
 var ConfidenceRank = map[string]int{
-	"path-confirmed": 5,
-	"exact-scope":    4,
-	"alias":          3,
-	"label":          2,
-	"keyword":        1,
-	"none":           0,
+	"path-confirmed": 6,
+	"exact-scope":    5,
+	"alias":          4,
+	"label":          3,
+	"keyword":        2,
+	// lane-hint is the weakest positive rung: a handoff author's declared lane read
+	// from the issue body's "## Lane" section, honored only when scope, path, label,
+	// and keyword all fail to route (see RouteIssue / #1854).
+	"lane-hint": 1,
+	"none":      0,
 }
 
 type LaneTaxonomy struct {
@@ -348,6 +352,16 @@ type RouteOptions struct {
 	KeywordAlias map[string]string
 }
 
+// RouteIssue picks the dos.toml lane an issue belongs to via a confidence ladder,
+// strongest signal first: repo paths named in the body (path-confirmed) > a
+// Conventional-Commit title scope that is or aliases a lane (exact-scope / alias) >
+// an aliasable label > an explicit keyword > the "## Lane" section a `fak task
+// handoff` issue body carries (lane-hint, the weakest rung). The lane-hint rung
+// consumes internal/taskmgr.HandoffNextStep.Lane, which the handoff renders into the
+// issue body: a handoff author's declared lane is honored only as a last resort,
+// after every independently re-derived signal has failed, so a mislabeled Lane never
+// overrides a real scope/path (the cross-check #1854 asked for) yet a plain-English
+// handoff step with a correct Lane no longer routes UNROUTED.
 func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRoute {
 	scopeAlias := opts.ScopeAlias
 	if scopeAlias == nil {
@@ -421,6 +435,15 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 		}
 	}
 
+	// Weakest rung: a lane named in the body's "## Lane" section (a `fak task handoff`
+	// step's declared Lane). Only a real, non-exclusive concurrent lane is accepted;
+	// an exclusive lane stays operator-gated and a garbage/fallback value falls through
+	// to UNROUTED.
+	laneHintLane := ""
+	if hint := issueLaneHint(body); hint != "" && laneSet[hint] && !ExclusiveRouterLanes[hint] {
+		laneHintLane = hint
+	}
+
 	if ExclusiveRouterLanes[scope] {
 		return route(issue, "", "none", "exclusive-scope:"+scope, false, paths,
 			fmt.Sprintf("exclusive-lane scope '%s'; operator-gated", scope))
@@ -457,6 +480,9 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 	}
 	if keywordLane != "" {
 		return route(issue, keywordLane, "keyword", "keyword:"+keyword+"->"+keywordLane, false, nil, "")
+	}
+	if laneHintLane != "" {
+		return route(issue, laneHintLane, "lane-hint", "lane-hint:"+laneHintLane, false, nil, "")
 	}
 	reason := "no scope/path/label signal"
 	if scope != "" {
@@ -503,6 +529,27 @@ func issuePathHintSection(body string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// handoffLaneNotSpecified is the fallback text internal/taskmgr.HandoffIssueBody writes
+// into the "## Lane" section when a handoff step named no lane; it must never route.
+const handoffLaneNotSpecified = "Not specified by this handoff."
+
+// issueLaneHint returns the bare lane token named in the body's "## Lane" section (the
+// lane a `fak task handoff` step declared via HandoffNextStep.Lane), or "" when the
+// section is absent or holds the "not specified" fallback. The rendered section is a
+// bare token, so the first whitespace-delimited word (lowercased, backtick/emphasis
+// stripped) is the hint; the caller still validates it against the live lane set.
+func issueLaneHint(body string) string {
+	value := firstPromptSection(promptMarkdownSections(body), "lane")
+	if value == "" || strings.EqualFold(value, handoffLaneNotSpecified) {
+		return ""
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.Trim(fields[0], "`*_"))
 }
 
 func PathMatchesLane(path string, trees map[string][]string) []string {
