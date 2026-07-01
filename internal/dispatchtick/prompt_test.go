@@ -125,6 +125,41 @@ func TestIssuePromptIncludesProofByDefaultChecklist(t *testing.T) {
 	}
 }
 
+func TestIssuePromptRedactsPrivateControlDetails(t *testing.T) {
+	in := sampleIssuePrompt()
+	in.Title = "dispatch: route gpu-lab-01 capacity"
+	in.Body = strings.Join([]string{
+		"## Working spine",
+		"Keep public workers away from fak-private control details.",
+		"## In scope",
+		"Replace Slack control bridge references and docs/private-comms-channel.md links.",
+		"## Done condition",
+		"gpu-lab-01 and GPU-server reservation details are not visible in the public prompt.",
+		"## Witness",
+		"go test ./internal/dispatchtick",
+	}, "\n")
+	p := RenderIssuePrompt(in)
+	lower := strings.ToLower(p)
+	for _, forbidden := range []string{
+		"fak-private",
+		"slack control",
+		"private-control",
+		"private control bridge",
+		"docs/private-comms-channel.md",
+		"gpu-lab-01",
+		"gpu-server reservation",
+	} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("prompt leaked private-control token %q:\n%s", forbidden, p)
+		}
+	}
+	for _, want := range []string{"[companion repo boundary]", "[companion repo control path]", "GPU/cloud capacity", "GPU/cloud host"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing redaction replacement %q:\n%s", want, p)
+		}
+	}
+}
+
 func TestIssuePromptLocksTrunkOnlyAndForbidsBranchEscape(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
 	for _, want := range []string{

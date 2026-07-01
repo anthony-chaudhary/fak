@@ -2,6 +2,7 @@ package dispatchtick
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -42,13 +43,14 @@ func BuildIssuePrompt(in IssuePromptInput) IssuePromptRecord {
 }
 
 func RenderIssuePrompt(in IssuePromptInput) string {
-	title := strings.TrimSpace(in.Title)
+	title := redactPrivatePromptText(strings.TrimSpace(in.Title))
 	if title == "" {
 		title = fmt.Sprintf("issue #%d", in.Number)
 	}
 	developmentBranch := promptDevelopmentBranch(in.DevelopmentBranch)
-	agentBrief := renderAgentIssueBrief(in.Body)
-	body := strings.TrimSpace(in.Body)
+	redactedBody := redactPrivatePromptText(in.Body)
+	agentBrief := renderAgentIssueBrief(redactedBody)
+	body := strings.TrimSpace(redactedBody)
 	if len(body) > 1800 {
 		body = body[:1800] + "\n...(truncated - read the full issue with `gh issue view`)"
 	}
@@ -91,6 +93,28 @@ func promptDevelopmentBranch(branch string) string {
 		return "main"
 	}
 	return branch
+}
+
+var privatePromptRedactions = []struct {
+	re          *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`(?i)\bfak-private\b`), "[companion repo boundary]"},
+	{regexp.MustCompile(`(?i)\bdocs/private-comms-channel\.md\b`), "[companion repo control path]"},
+	{regexp.MustCompile(`(?i)\bprivate[- ]control(?: bridge| channel)?\b`), "[companion repo control path]"},
+	{regexp.MustCompile(`(?i)\bprivate comms channel\b`), "[companion repo control path]"},
+	{regexp.MustCompile(`(?i)\bslack[- ]control\b`), "[companion repo control path]"},
+	{regexp.MustCompile(`(?i)\bgpu-server(?: reservation| control| bridge)?\b`), "GPU/cloud capacity"},
+	{regexp.MustCompile(`(?i)\blab gpu servers?\b`), "GPU/cloud capacity"},
+	{regexp.MustCompile(`(?i)\b(?:gpu|a100|h100)[-_][a-z0-9][a-z0-9._-]*\b`), "GPU/cloud host"},
+}
+
+func redactPrivatePromptText(text string) string {
+	out := text
+	for _, rule := range privatePromptRedactions {
+		out = rule.re.ReplaceAllString(out, rule.replacement)
+	}
+	return out
 }
 
 func labelsLine(labels []string) string {
