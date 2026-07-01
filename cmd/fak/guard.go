@@ -806,7 +806,7 @@ func cmdGuard(argv []string) {
 	// (configureServeSessionDurability/registerServeSessionDurability) or
 	// publishBestEffort's warnf, so a late or failed write is observable but never fatal.
 	if guardDurabilityWanted {
-		go func(traceID string) {
+		go func(traceID string, command []string) {
 			meta := sessionDescriptorMeta(command)
 			if err := configureServeSessionDurability(serveSessions, "", os.Stderr, meta); err != nil {
 				fmt.Fprintln(os.Stderr, "fak guard:", err)
@@ -815,7 +815,7 @@ func cmdGuard(argv []string) {
 			if err := registerServeSessionDurability(context.Background(), traceID); err != nil {
 				fmt.Fprintln(os.Stderr, "fak guard:", err)
 			}
-		}(guardTraceID)
+		}(guardTraceID, command)
 	}
 
 	// Default-launch UI: open the 20% `fak info` pane beside the (inline) 80% agent pane, so
