@@ -256,6 +256,7 @@ var tier = map[string]int{
 	"attemptbudget":    1, // pure per-issue attempt-budget fold (#1777): counts an issue's recorded failed attempts against a budget and holds it for triage once crossed, naming the last failure class; stdlib-only, off the hot path.
 	"timeoutphase":     1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
+	"harnessprofile":   1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
