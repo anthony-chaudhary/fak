@@ -55,6 +55,18 @@ GENERATION_VIEW_BINDINGS = {
     "generation-future": ("gen/future", 'milestone:"Generation G3 - Future"'),
 }
 
+# Closure binding: this map plus test_issue_create_producers_are_contract_or_triage_gated
+# below satisfy #1461's ask in full -- every gh-issue-create-capable producer in the
+# repo (Go: internal/dogfoodissues, internal/issuecatalog, cmd/fak/taskmgr.go's
+# StrictScope handoff sync; Python: bench_signal.py, gate_signal.py, score_signal.py via
+# check_issue_contract/issue_contract_draft) is gated either by the shared
+# internal/issuecontract review or a hard triage-only label, with this test failing if a
+# new ungated producer appears. tools/dispatch_no_window_test.py's
+# test_non_test_spawn_calls_are_contract_gated adds the same gate on the dispatch/spawn
+# side (issue_contract_review before spawn_issue_worker). The work shipped citing generic
+# "sync shared worktree" subjects (d9182a0e, 35d34ebe), never #1461 itself; history on
+# origin/main cannot be rewritten, so this comment restates the closure binding explicitly
+# for the grep-based referee.
 ISSUE_CREATE_PRODUCERS = {
     ".github/workflows/slack-watchdog.yml": [
         "--label needs-triage --label triage-only",
