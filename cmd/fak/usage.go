@@ -257,6 +257,12 @@ func usageOpsVerbs() {
 	fmt.Fprint(os.Stderr, `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
+  fak recover   <REASON> [--dry-run|--execute] [--json]
+                (closed-vocabulary refusal recovery: map a guard/DOS reason token
+                 such as OFF_TRUNK, STALE_BASE_DELETION, MERGE_IN_PROGRESS, or
+                 STALE_RECALL to concrete recovery commands. Dry-run by default;
+                 --execute runs only steps marked safe and local. Unknown tokens
+                 fail closed.)
   fak snapshot  kinds | demo | info | dump-fleet | restore-fleet
                 (DUMP/RESTORE any primitive on the loops ladder  -  a turn, a tool, a
                  session, a fleet, an RSI loop  -  to a portable, sha256-integrity bundle.

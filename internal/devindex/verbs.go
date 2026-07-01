@@ -160,6 +160,7 @@ var verbManifest = []Verb{
 	{Name: "ps", Synopsis: "the read-only process table: one aligned row per live served session", Lane: "cmd"},
 	{Name: "pull", Synopsis: "alias for 'fak model pull': the Ollama-style run-by-name model download", Lane: "cmd"},
 	{Name: "recall", Synopsis: "persist a finished session as a core dump and reload it in a fresh store (quarantine survives)", Lane: "cmd"},
+	{Name: "recover", Synopsis: "closed-vocabulary refusal recovery: print or run the safe commands for a reason token", Lane: "cmd"},
 	{Name: "release", Synopsis: "the release front door over the tools/release_*.py helpers (status/cut/tag/publish/...)", Lane: "cmd"},
 	{Name: "release-staleness", Synopsis: "the publish-freshness signal: how far the latest @latest tag lags HEAD (commits + days)", Lane: "cmd"},
 	{Name: "replay", Synopsis: "explicit spelling of the trace-replay path (fak run --trace)", Lane: "cmd"},

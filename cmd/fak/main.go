@@ -121,6 +121,8 @@ func main() {
 		cmdAPIHost(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
+	case "recover":
+		cmdRecover(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
 	case "session-audit":
