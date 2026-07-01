@@ -47,6 +47,7 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 	// fireKind/fire capture which budget event (if any) this debit triggers; the observer
 	// itself runs AFTER the lock is released so a slow webhook never stalls other sessions.
 	fireKind, fire := BudgetWarn, false
+	relayFire := false
 	if u.ContextTokens > 0 && cur.Budget.contextBounded() {
 		prevLeft := cur.Budget.ContextTokensLeft
 		cur.Budget.ContextTokensLeft -= u.ContextTokens
@@ -64,6 +65,9 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 		case t.crossedWarnLocked(cur.Budget, prevLeft):
 			fireKind, fire = BudgetWarn, true
 		}
+		if t.crossedRelaySoftLocked(trace, cur.Budget, u.ContextTokens) {
+			relayFire = true
+		}
 	}
 	if !changed {
 		t.mu.Unlock()
@@ -71,13 +75,21 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 	}
 	out := t.putLocked(cur)
 	obs := t.obs
+	relayObs := t.relayObs
 	var ev BudgetEvent
 	if fire && obs != nil {
 		ev = budgetEvent(out, fireKind, u.ContextTokens)
 	}
+	var relayEv RelayShadowEvent
+	if relayFire && relayObs != nil {
+		relayEv = relayShadowEvent(out, u.ContextTokens, t.relaySoftMark)
+	}
 	t.mu.Unlock()
 	if fire && obs != nil {
 		obs(ev)
+	}
+	if relayFire && relayObs != nil {
+		relayObs(relayEv)
 	}
 	return out
 }

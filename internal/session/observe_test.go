@@ -115,6 +115,71 @@ func TestRelayResidentContextMeterReportsPerLegFraction(t *testing.T) {
 	}
 }
 
+// relayRecorder collects relay shadow events thread-safely for assertions.
+type relayRecorder struct {
+	mu     sync.Mutex
+	events []RelayShadowEvent
+}
+
+func (r *relayRecorder) observe(ev RelayShadowEvent) {
+	r.mu.Lock()
+	r.events = append(r.events, ev)
+	r.mu.Unlock()
+}
+
+func (r *relayRecorder) snapshot() []RelayShadowEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]RelayShadowEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+func TestRelayShadowWouldRotateAtSoftMarkOnce(t *testing.T) {
+	const trace = "relay-shadow"
+	tbl := NewTable()
+	rec := &relayRecorder{}
+	tbl.WatchRelayShadow(0.30, rec.observe)
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 5000})
+
+	st := tbl.DebitUsage(trace, Usage{ContextTokens: 1000}) // resident 20%: below soft mark
+	if st.Run != Running {
+		t.Fatalf("below soft mark state = %+v, want Running", st)
+	}
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("below soft mark events = %+v, want none", got)
+	}
+
+	st = tbl.DebitUsage(trace, Usage{ContextTokens: 1600}) // resident 32%: advisory arm
+	if st.Run != Running || st.Reason != "" {
+		t.Fatalf("soft mark must not transition state: %+v", st)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("after crossing soft mark events = %+v, want exactly one", got)
+	}
+	if got[0].TraceID != trace || got[0].Reason != ReasonRelayArmed || got[0].Rev != st.Rev {
+		t.Fatalf("relay shadow identity = %+v, want trace=%s reason=%s rev=%d", got[0], trace, ReasonRelayArmed, st.Rev)
+	}
+	if got[0].ResidentContextTokens != 1600 || got[0].ResidentContextCap != 5000 {
+		t.Fatalf("relay shadow resident meter = %+v, want resident=1600 cap=5000", got[0])
+	}
+	if got[0].ResidentContextFraction < 0.319 || got[0].ResidentContextFraction > 0.321 {
+		t.Fatalf("relay shadow resident fraction = %v, want ~0.32", got[0].ResidentContextFraction)
+	}
+	if got[0].SoftMark != 0.30 {
+		t.Fatalf("relay shadow soft mark = %v, want 0.30", got[0].SoftMark)
+	}
+
+	st = tbl.DebitUsage(trace, Usage{ContextTokens: 1500}) // above soft mark again, still no duplicate
+	if st.Run != Running {
+		t.Fatalf("second above-soft debit state = %+v, want Running", st)
+	}
+	if got := rec.snapshot(); len(got) != 1 {
+		t.Fatalf("relay shadow must fire once; events = %+v", got)
+	}
+}
+
 func TestWatchBudgetExhaustionCarriesCacheAffinityDecision(t *testing.T) {
 	const trace = "watch-affinity"
 	tbl := NewTable()

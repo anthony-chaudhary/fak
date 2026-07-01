@@ -33,6 +33,8 @@ const (
 	BudgetExhausted
 )
 
+const ReasonRelayArmed = "RELAY_ARMED"
+
 // String renders the event kind as its lowercase wire token ("warn"/"exhausted"); an
 // out-of-range value renders "unknown" rather than panicking.
 func (k BudgetEventKind) String() string {
@@ -68,6 +70,27 @@ type BudgetEvent struct {
 // without holding up other sessions. The host owns fan-out and failure policy — cmd/fak
 // fires the webhook fire-and-forget, fail-open; the table only delivers the typed event.
 type BudgetObserver func(BudgetEvent)
+
+// RelayShadowEvent is the advisory, behavior-free relay soft-mark signal. It uses the
+// closed RELAY_ARMED reason token from the relay vocabulary but does not change State.Run:
+// a relay driver may rotate at a later safe point, while non-relay sessions ignore it.
+type RelayShadowEvent struct {
+	TraceID                 string  `json:"trace_id"`
+	Reason                  string  `json:"reason"`
+	Rev                     uint64  `json:"rev"`
+	SoftMark                float64 `json:"soft_mark"`
+	ContextTokensLeft       int     `json:"context_tokens_left"`
+	ContextTokensCap        int     `json:"context_tokens_cap,omitempty"`
+	ResidentContextTokens   int     `json:"resident_context_tokens,omitempty"`
+	ResidentContextCap      int     `json:"resident_context_cap,omitempty"`
+	ResidentContextFraction float64 `json:"resident_context_fraction"`
+	FractionConsumed        float64 `json:"fraction_consumed"`
+}
+
+// RelayShadowObserver receives the RELAY_ARMED would-fire event when a session's
+// resident-context meter first crosses the configured soft mark. The callback runs after
+// the table lock is released, matching BudgetObserver's slow-sink discipline.
+type RelayShadowObserver func(RelayShadowEvent)
 
 // TransitionEvent is the immutable snapshot a TransitionObserver receives when an
 // operator run-state change lands. It is built under the table lock and delivered
@@ -113,6 +136,22 @@ func (t *Table) WatchBudget(warnFraction float64, obs BudgetObserver) {
 	t.mu.Unlock()
 }
 
+// WatchRelayShadow wires the relay soft-mark observer. softMark is the resident-context
+// fraction (current debit's context tokens / leg cap) at which the advisory RELAY_ARMED
+// signal fires. Values outside (0,1] disable the signal; obs==nil clears it.
+func (t *Table) WatchRelayShadow(softMark float64, obs RelayShadowObserver) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.relayObs = obs
+	t.relaySoftMark = softMark
+	if obs == nil || softMark <= 0 || softMark > 1 {
+		t.relayArmed = nil
+	}
+	t.mu.Unlock()
+}
+
 // WatchTransitions wires the run-state transition observer. obs==nil clears the
 // seam. Safe to call on a live table; a nil receiver is a no-op.
 func (t *Table) WatchTransitions(obs TransitionObserver) {
@@ -148,6 +187,23 @@ func (t *Table) crossedWarnLocked(b Budget, prevLeft int) bool {
 	}
 	w := warnWatermark(b.ContextTokensCap, t.warnFrac)
 	return b.ContextTokensLeft > 0 && prevLeft > w && b.ContextTokensLeft <= w
+}
+
+func (t *Table) crossedRelaySoftLocked(trace string, b Budget, residentContextTokens int) bool {
+	if t.relayObs == nil || t.relaySoftMark <= 0 || t.relaySoftMark > 1 || b.ContextTokensCap <= 0 || residentContextTokens <= 0 {
+		return false
+	}
+	if boundedFraction(residentContextTokens, b.ContextTokensCap) < t.relaySoftMark {
+		return false
+	}
+	if t.relayArmed == nil {
+		t.relayArmed = map[string]bool{}
+	}
+	if t.relayArmed[trace] {
+		return false
+	}
+	t.relayArmed[trace] = true
+	return true
 }
 
 // warnWatermark is the remaining-token level at which the consumed share first reaches
@@ -195,6 +251,22 @@ func boundedFraction(numerator, denominator int) float64 {
 		return 1
 	}
 	return frac
+}
+
+func relayShadowEvent(st State, residentContextTokens int, softMark float64) RelayShadowEvent {
+	capacity := st.Budget.ContextTokensCap
+	return RelayShadowEvent{
+		TraceID:                 st.TraceID,
+		Reason:                  ReasonRelayArmed,
+		Rev:                     st.Rev,
+		SoftMark:                softMark,
+		ContextTokensLeft:       st.Budget.ContextTokensLeft,
+		ContextTokensCap:        capacity,
+		ResidentContextTokens:   residentContextTokens,
+		ResidentContextCap:      capacity,
+		ResidentContextFraction: boundedFraction(residentContextTokens, capacity),
+		FractionConsumed:        boundedFraction(capacity-st.Budget.ContextTokensLeft, capacity),
+	}
 }
 
 func transitionEvent(st State, from, to RunState) TransitionEvent {

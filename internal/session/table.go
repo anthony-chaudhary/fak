@@ -39,6 +39,14 @@ type Table struct {
 	warnFrac float64
 	transObs TransitionObserver
 
+	// relayObs + relaySoftMark are the Phase-0 relay shadow seam (#1866): when wired,
+	// DebitUsage emits one advisory RELAY_ARMED would-fire signal when the resident-
+	// context meter first crosses the configured soft mark. relayArmed remembers which
+	// live traces already emitted it, so shadow mode is noisy exactly once per trace/leg.
+	relayObs      RelayShadowObserver
+	relaySoftMark float64
+	relayArmed    map[string]bool
+
 	// revObs is the optional every-revision sink (#630): when wired via
 	// WatchRevisions, putLocked invokes it on every Rev bump, in Rev order, under
 	// the lock — the source of the gateway's /v1/fak/session/changes drive-state
