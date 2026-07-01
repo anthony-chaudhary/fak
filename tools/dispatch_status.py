@@ -1068,6 +1068,46 @@ def read_seat_inventory(root: Path, *, product: str | None = None) -> dict[str, 
         return {"_error": str(exc)}
 
 
+def _seat_label(seat: dict[str, Any]) -> str:
+    return str(seat.get("tag") or seat.get("account") or seat.get("seat") or "?")
+
+
+def _limited_seat_labels(labels: list[str], *, limit: int = 4) -> str:
+    kept = labels[:limit]
+    if len(labels) > limit:
+        kept.append(f"+{len(labels) - limit} more")
+    return ", ".join(kept)
+
+
+def _auth_failed_seat_action(seat_inventory: dict[str, Any]) -> str:
+    tags = [
+        _seat_label(s)
+        for s in seat_inventory.get("seats", [])
+        if str(s.get("hold_reason") or "") == "auth_failed"
+    ]
+    if not tags:
+        return ""
+    return (
+        f"auth_failed={len(tags)} [{_limited_seat_labels(tags)}]; "
+        "next action: run `fak accounts status` and re-login or remove the named seat(s)"
+    )
+
+
+def _seat_inventory_summary_line(seat_inventory: dict[str, Any]) -> str:
+    if not seat_inventory.get("schema"):
+        return ""
+    by_state = seat_inventory.get("by_dispatch_state") or {}
+    line = (
+        f"seat inventory: {seat_inventory.get('total_seats', 0)} seat(s) - "
+        f"available={by_state.get('available', 0)} busy={by_state.get('busy', 0)} "
+        f"cooling={by_state.get('cooling', 0)} unavailable={by_state.get('unavailable', 0)}"
+    )
+    auth_action = _auth_failed_seat_action(seat_inventory)
+    if auth_action:
+        line += f"; {auth_action}"
+    return line
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -1341,11 +1381,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     if seat_inventory.get("_error"):
         reasons.append(f"seat inventory unavailable: {seat_inventory.get('_error')}")
     elif seat_inventory.get("schema"):
-        by_state = seat_inventory.get("by_dispatch_state") or {}
-        reasons.append(
-            f"seat inventory: {seat_inventory.get('total_seats', 0)} seat(s) — "
-            f"available={by_state.get('available', 0)} busy={by_state.get('busy', 0)} "
-            f"cooling={by_state.get('cooling', 0)} unavailable={by_state.get('unavailable', 0)}")
+        reasons.append(_seat_inventory_summary_line(seat_inventory))
 
     return {
         "schema": SCHEMA,
@@ -1493,6 +1529,9 @@ def render(p: dict[str, Any]) -> str:
         f"plans={(s.get('plans') or {}).get('total_plans')} "
         f"units={(s.get('plans') or {}).get('total_units')}",
     ]
+    seat_line = _seat_inventory_summary_line(p.get("seat_inventory") or {})
+    if seat_line:
+        lines.append("║ seats     : " + seat_line.removeprefix("seat inventory: "))
     if b.get("na"):
         lines.append("║ backlog   : n/a (--fast or gh timeout)")
     else:
@@ -1621,6 +1660,9 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         f"- **supervisor**: `{s.get('verdict')}` "
         f"(alive {s.get('alive')}/{s.get('target')})",
     ]
+    seat_line = _seat_inventory_summary_line(payload.get("seat_inventory") or {})
+    if seat_line:
+        out.append(f"- **seat inventory**: {seat_line.removeprefix('seat inventory: ')}")
     rs = payload.get("run_status") or {}
     if rs.get("count"):
         out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
@@ -2056,6 +2098,9 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
         buckets["action"].append("host resource guard flagged a process; inspect before growing")
     if preflight == "REFUSE_INSPECT":
         buckets["action"].append("spawn preflight could not run; inspect the preflight error")
+    auth_seat_action = _auth_failed_seat_action(payload.get("seat_inventory") or {})
+    if auth_seat_action:
+        buckets["action"].append(auth_seat_action)
 
     workers = payload.get("workers") or {}
     if workers.get("silent_count"):

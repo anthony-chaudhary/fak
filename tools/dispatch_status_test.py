@@ -769,6 +769,22 @@ class SeatInventoryPayloadTest(unittest.TestCase):
             and "cooling=1" in r and "unavailable=1" in r
             for r in p["reasons"]))
 
+    def test_auth_failed_seat_is_actionable_and_excluded_from_capacity(self) -> None:
+        mod = load()
+        p = build(mod, seat_inventory=self._pool())
+        self.assertEqual(p["seat_inventory"]["free_seats"], 1)
+        self.assertTrue(any(
+            "auth_failed=1 [auth1]" in r and "next action: run `fak accounts status`" in r
+            for r in p["reasons"]))
+
+        rendered = mod.render(p)
+        self.assertIn("auth_failed=1 [auth1]", rendered)
+        self.assertIn("next action: run `fak accounts status`", rendered)
+
+        slack = mod.slack_text(p)
+        self.assertIn("*dispatch scheduler:* `READY_TO_GROW` (ACTION)", slack)
+        self.assertIn("action: auth_failed=1 [auth1]", slack)
+
     def test_seat_inventory_error_degrades_gracefully(self) -> None:
         mod = load()
         p = build(mod, seat_inventory={"_error": "boom"})
