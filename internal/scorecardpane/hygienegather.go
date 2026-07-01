@@ -451,12 +451,7 @@ func fmtDenseSignal(ease float64, f string) string {
 
 // localMDTargets returns the repo-relative .md targets a doc links to (local links).
 func localMDTargets(text, docRel, root string) []string {
-	base := docRel
-	if idx := strings.LastIndex(docRel, "/"); idx >= 0 {
-		base = docRel[:idx]
-	} else {
-		base = ""
-	}
+	base := docDir(docRel)
 	var out []string
 	for _, m := range linkRE.FindAllStringSubmatch(text, -1) {
 		t := strings.TrimSpace(m[2])
@@ -483,12 +478,7 @@ type localLink struct {
 // allLocalLinks returns every local link in a doc as (target_display, exists).
 // Non-.md included (an index manifest can point at any file).
 func allLocalLinks(text, docRel, root string) []localLink {
-	base := docRel
-	if idx := strings.LastIndex(docRel, "/"); idx >= 0 {
-		base = docRel[:idx]
-	} else {
-		base = ""
-	}
+	base := docDir(docRel)
 	var out []localLink
 	seen := map[string]bool{}
 	for _, m := range linkRE.FindAllStringSubmatch(text, -1) {
@@ -616,4 +606,13 @@ func stripAfter(s, sep string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+// docDir returns the directory portion of a repo-relative doc path ("" when the doc
+// sits at the repo root).
+func docDir(docRel string) string {
+	if idx := strings.LastIndex(docRel, "/"); idx >= 0 {
+		return docRel[:idx]
+	}
+	return ""
 }

@@ -302,10 +302,7 @@ func KPIPlacement(datedMisplaced []string) HygieneKPI {
 	for _, p := range sorted {
 		defects = append(defects, fmt.Sprintf("dated/research doc outside %s/: %s → move it and index it", notesDir, p))
 	}
-	detail := fmt.Sprintf("dated docs live under %s/", notesDir)
-	if len(defects) > 0 {
-		detail = fmt.Sprintf("%d misplaced dated doc(s)", len(defects))
-	}
+	detail := detailOrDebt(fmt.Sprintf("dated docs live under %s/", notesDir), "%d misplaced dated doc(s)", len(defects))
 	return kpiResult("placement", "organization", clampScore(100-10*float64(len(defects))), detail, defects, nil)
 }
 
@@ -353,10 +350,7 @@ func KPIDirDiscipline(dirs []string) HygieneKPI {
 			}
 		}
 	}
-	detail := "no near-duplicate sibling directories"
-	if len(defects) > 0 {
-		detail = fmt.Sprintf("%d near-duplicate dir group(s)", len(defects))
-	}
+	detail := detailOrDebt("no near-duplicate sibling directories", "%d near-duplicate dir group(s)", len(defects))
 	return kpiResult("dir_discipline", "organization", clampScore(100-12*float64(len(defects))), detail, defects, nil)
 }
 
@@ -369,10 +363,7 @@ func KPIIndexPresence(present map[string]bool) HygieneKPI {
 			defects = append(defects, fmt.Sprintf("missing index surface: %s (readers and guards are pointed here)", name))
 		}
 	}
-	detail := "all expected index surfaces present"
-	if len(defects) > 0 {
-		detail = fmt.Sprintf("%d missing index surface(s)", len(defects))
-	}
+	detail := detailOrDebt("all expected index surfaces present", "%d missing index surface(s)", len(defects))
 	return kpiResult("index_presence", "indexing", clampScore(100-25*float64(len(defects))), detail, defects, nil)
 }
 
@@ -388,10 +379,7 @@ func KPIIndexIntegrity(deadByIndex map[string][]string) HygieneKPI {
 			defects = append(defects, fmt.Sprintf("dead index entry in %s: %s", idx, t))
 		}
 	}
-	detail := "every index entry resolves"
-	if len(defects) > 0 {
-		detail = fmt.Sprintf("%d dead index entr(y/ies)", len(defects))
-	}
+	detail := detailOrDebt("every index entry resolves", "%d dead index entr(y/ies)", len(defects))
 	return kpiResult("index_integrity", "indexing", clampScore(100-15*float64(len(defects))), detail, defects, nil)
 }
 
@@ -430,10 +418,7 @@ func KPIAltText(perDoc []AltDoc) HygieneKPI {
 			defects = append(defects, fmt.Sprintf("image without alt-text in %s: %s — add descriptive alt-text", d.Path, src))
 		}
 	}
-	detail := "every doc image carries alt-text"
-	if len(defects) > 0 {
-		detail = fmt.Sprintf("%d image(s) missing alt-text", len(defects))
-	}
+	detail := detailOrDebt("every doc image carries alt-text", "%d image(s) missing alt-text", len(defects))
 	return kpiResult("alt_text", "accessibility", clampScore(100-6*float64(len(defects))), detail, defects, nil)
 }
 
@@ -679,6 +664,16 @@ func pct0(f float64) string { return fmt.Sprintf("%d%%", roundInt(f*100)) }
 func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
 func roundInt(f float64) int { return int(math.Round(f)) }
+
+// detailOrDebt is the per-KPI detail idiom: the clean one-liner when there is no
+// debt, else debtFmt formatted with the defect count. Collapses the repeated
+// `detail := clean; if len(defects) > 0 { detail = fmt.Sprintf(fmt, len(defects)) }`.
+func detailOrDebt(clean, debtFmt string, nDefects int) string {
+	if nDefects > 0 {
+		return fmt.Sprintf(debtFmt, nDefects)
+	}
+	return clean
+}
 
 // fmtFloat renders a float like Python: an integral value as "N.0"? Python prints a
 // trailing .0 for floats (e.g. 96.9, 100.0). Go's %g drops the .0; use a 1-decimal
