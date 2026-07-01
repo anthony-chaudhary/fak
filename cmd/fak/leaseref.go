@@ -114,8 +114,10 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
   fak leaseref audit [--dir DIR]
       READ-ONLY staleness report over refs/fak/locks/*: list every lease, classify
       live-vs-expired against now, and emit the garden control-pane envelope
-      (ok/verdict/reason). Reaps NOTHING — verdict ACTION when an expired lease lingers
-      is the signal to run 'fak leaseref reap'. This is the member 'fak garden' folds.
+      (ok/verdict/reason) plus would_reap[] dry-run evidence: owner, lane, tree,
+      age, TTL threshold, and the exact expiry comparison that selected the stale
+      lease. Reaps NOTHING — verdict ACTION when an expired lease lingers is the
+      signal to run 'fak leaseref reap'. This is the member 'fak garden' folds.
 
   fak leaseref acquire --id ID --holder H [--tree GLOB ...] [--ttl SEC] [--dir DIR]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
@@ -247,11 +249,14 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	now := time.Now()
 	var liveIDs, expiredIDs []string
+	var liveRows, expiredRows []map[string]any
 	for _, r := range recs {
 		if r.Expired(now) {
 			expiredIDs = append(expiredIDs, r.ID)
+			expiredRows = append(expiredRows, leaserefAuditLeaseRow(r, now, true))
 		} else {
 			liveIDs = append(liveIDs, r.ID)
+			liveRows = append(liveRows, leaserefAuditLeaseRow(r, now, false))
 		}
 	}
 	verdict := "OK"
@@ -269,8 +274,87 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 		"live_count":    len(liveIDs),
 		"expired_count": len(expiredIDs),
 		"expired_ids":   expiredIDs,
+		"live":          liveRows,
+		"would_reap":    expiredRows,
 	}
 	return emitLeaserefJSON(stdout, stderr, env, "audit")
+}
+
+func leaserefAuditLeaseRow(r leaseref.Record, now time.Time, expired bool) map[string]any {
+	active := r.AcquiredAt
+	if r.RenewedAt > active {
+		active = r.RenewedAt
+	}
+	age := int64(0)
+	if active > 0 {
+		age = now.Unix() - active
+		if age < 0 {
+			age = 0
+		}
+	}
+	expiresAt := int64(0)
+	if r.TTLSeconds > 0 && active > 0 {
+		expiresAt = active + r.TTLSeconds
+	}
+	reason := "TTL_LIVE"
+	evidence := "ttl_seconds<=0 so the lease has no expiry threshold"
+	if r.TTLSeconds > 0 {
+		evidence = fmt.Sprintf("now_unix=%d >= active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
+			now.Unix(), active, r.TTLSeconds, expiresAt)
+		if !expired {
+			evidence = fmt.Sprintf("now_unix=%d < active_unix=%d + ttl_seconds=%d (expires_at_unix=%d)",
+				now.Unix(), active, r.TTLSeconds, expiresAt)
+		}
+	}
+	if expired {
+		reason = "TTL_EXPIRED"
+	}
+	return map[string]any{
+		"id":                    r.ID,
+		"lane":                  leaserefAuditLane(r.ID),
+		"owner":                 r.Holder,
+		"holder":                r.Holder,
+		"tree":                  append([]string(nil), r.TreeGlobs...),
+		"age_seconds":           age,
+		"age_threshold_seconds": r.TTLSeconds,
+		"ttl_seconds":           r.TTLSeconds,
+		"active_unix":           active,
+		"acquired_unix":         r.AcquiredAt,
+		"renewed_unix":          r.RenewedAt,
+		"expires_at_unix":       expiresAt,
+		"stale":                 expired,
+		"reason":                reason,
+		"evidence":              evidence,
+	}
+}
+
+func leaserefAuditLane(id string) string {
+	id = strings.TrimSpace(id)
+	if !strings.HasPrefix(id, "resolve-") {
+		return id
+	}
+	lane := strings.TrimPrefix(id, "resolve-")
+	if i := strings.LastIndex(lane, "-"); i > 0 {
+		if leaserefAuditAllDigits(lane[i+1:]) {
+			lane = lane[:i]
+		}
+	}
+	if lane == "" {
+		return id
+	}
+	return lane
+}
+
+func leaserefAuditAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {

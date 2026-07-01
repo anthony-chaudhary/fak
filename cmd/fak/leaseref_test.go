@@ -92,6 +92,46 @@ func TestLeaserefLiveEndToEnd(t *testing.T) {
 		t.Fatalf("list missing the expired lease: %q", listing)
 	}
 
+	// `audit` is the read-only dry-run evidence for the reaper: it explains
+	// exactly which stale lease WOULD be reaped and why, while keeping the fresh
+	// lease visible but unselected.
+	out.Reset()
+	errb.Reset()
+	if code := runLeaseref(&out, &errb, []string{"audit", "--dir", dir}); code != 0 {
+		t.Fatalf("leaseref audit exit=%d stderr=%q", code, errb.String())
+	}
+	var audit struct {
+		LiveCount    int              `json:"live_count"`
+		ExpiredCount int              `json:"expired_count"`
+		Live         []map[string]any `json:"live"`
+		WouldReap    []map[string]any `json:"would_reap"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &audit); err != nil {
+		t.Fatalf("audit JSON unmarshal: %v\nout=%s", err, out.String())
+	}
+	if audit.LiveCount != 1 || audit.ExpiredCount != 1 {
+		t.Fatalf("audit counts live=%d expired=%d, want 1/1", audit.LiveCount, audit.ExpiredCount)
+	}
+	if len(audit.WouldReap) != 1 {
+		t.Fatalf("audit would_reap = %+v, want exactly the stale lease", audit.WouldReap)
+	}
+	stale := audit.WouldReap[0]
+	if stale["id"] != "dead-lane" || stale["owner"] != "B:2" || stale["lane"] != "dead-lane" {
+		t.Fatalf("stale evidence = %+v, want dead-lane owner B:2 lane dead-lane", stale)
+	}
+	if stale["stale"] != true || stale["reason"] != "TTL_EXPIRED" {
+		t.Fatalf("stale verdict = %+v, want TTL_EXPIRED stale=true", stale)
+	}
+	if stale["age_threshold_seconds"] != float64(10) {
+		t.Fatalf("stale threshold = %+v, want ttl threshold 10s", stale["age_threshold_seconds"])
+	}
+	if ev, _ := stale["evidence"].(string); !strings.Contains(ev, "ttl_seconds=10") || !strings.Contains(ev, "expires_at_unix=") {
+		t.Fatalf("stale evidence string = %q, want ttl/expires comparison", ev)
+	}
+	if len(audit.Live) != 1 || audit.Live[0]["id"] != "docs-lane" || audit.Live[0]["stale"] != false {
+		t.Fatalf("audit live rows = %+v, want fresh docs-lane not selected", audit.Live)
+	}
+
 	// `reap` deletes the one expired lease.
 	out.Reset()
 	errb.Reset()
