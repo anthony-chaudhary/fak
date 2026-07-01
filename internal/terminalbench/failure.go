@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // FailureTaxonomySchema identifies the machine-readable failure-taxonomy
@@ -232,22 +234,22 @@ func classifyFromOutcomes(s FailureSignals) (FailureClassification, bool) {
 		c.Category = FailureTimeout
 		c.Reason = "TIMEOUT:command_exceeded_budget"
 		c.Recovery = RecoveryRestoreCheckpointAndRetry
-	case containsAny(stderr, installNeedles):
+	case strmatch.ContainsAny(stderr, installNeedles...):
 		// Specific causes are checked before the textual timeout fallback so a
 		// transient "Read timed out" line in an install log cannot shadow the
 		// real install failure.
 		c.Category = FailurePackageInstall
 		c.Reason = "PKG_INSTALL:dependency_install_failed"
 		c.Recovery = RecoveryRetryPackageInstall
-	case containsAny(stderr, editNeedles):
+	case strmatch.ContainsAny(stderr, editNeedles...):
 		c.Category = FailureBadFileEdit
 		c.Reason = "BAD_FILE_EDIT:broken_file_after_edit"
 		c.Recovery = RecoveryRestoreCheckpointAndRetry
-	case containsAny(stderr, envNeedles):
+	case strmatch.ContainsAny(stderr, envNeedles...):
 		c.Category = FailureEnvSetupMiss
 		c.Reason = "ENV_SETUP_MISS:missing_path_or_permission"
 		c.Recovery = RecoveryRepairFailedCommand
-	case containsAny(stderr, timeoutNeedles):
+	case strmatch.ContainsAny(stderr, timeoutNeedles...):
 		c.Category = FailureTimeout
 		c.Reason = "TIMEOUT:command_exceeded_budget"
 		c.Recovery = RecoveryRestoreCheckpointAndRetry
@@ -451,15 +453,6 @@ func lastFailedOutcome(outcomes []CommandOutcome) (CommandOutcome, bool) {
 		}
 	}
 	return CommandOutcome{}, false
-}
-
-func containsAny(haystack string, needles []string) bool {
-	for _, n := range needles {
-		if strings.Contains(haystack, n) {
-			return true
-		}
-	}
-	return false
 }
 
 func eventEvidence(events []CommandEvent) []string {

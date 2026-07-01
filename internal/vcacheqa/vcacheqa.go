@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cachewitness"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/vcachestar"
 )
 
@@ -71,7 +72,7 @@ func HonestyLint(pkgDir string) ([]HonestyDefect, error) {
 			// Comments: the most common place a shortcut gets rationalized in prose.
 			for _, cg := range f.Comments {
 				text := cg.Text()
-				if phrase, ok := containsAny(text, elisionPhrases); ok {
+				if phrase, ok := strmatch.FirstContained(strings.ToLower(text), elisionPhrases); ok {
 					pos := fset.Position(cg.Pos())
 					defects = append(defects, HonestyDefect{Path: path, Line: pos.Line, Text: phrase})
 				}
@@ -86,7 +87,7 @@ func HonestyLint(pkgDir string) ([]HonestyDefect, error) {
 				if err != nil {
 					return true
 				}
-				if phrase, ok := containsAny(v, elisionPhrases); ok {
+				if phrase, ok := strmatch.FirstContained(strings.ToLower(v), elisionPhrases); ok {
 					pos := fset.Position(lit.Pos())
 					defects = append(defects, HonestyDefect{Path: path, Line: pos.Line, Text: phrase})
 				}
@@ -101,16 +102,6 @@ func HonestyLint(pkgDir string) ([]HonestyDefect, error) {
 		return defects[i].Line < defects[j].Line
 	})
 	return defects, nil
-}
-
-func containsAny(haystack string, needles []string) (string, bool) {
-	low := strings.ToLower(haystack)
-	for _, n := range needles {
-		if strings.Contains(low, n) {
-			return n, true
-		}
-	}
-	return "", false
 }
 
 // ---------------------------------------------------------------------------

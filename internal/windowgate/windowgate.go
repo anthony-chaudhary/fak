@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Reason codes: the closed-vocabulary forms the gate refuses with.
@@ -376,7 +378,7 @@ func liveProcessAutomationOwned(proc LiveProcess) bool {
 		proc.GrandparentName,
 		proc.GrandparentCommandLine,
 	}, " "))
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
 		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
 		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex")
@@ -384,7 +386,7 @@ func liveProcessAutomationOwned(proc LiveProcess) bool {
 
 func liveProcessIgnored(proc LiveProcess) bool {
 	text := strings.ToLower(proc.CommandLine + " " + proc.ParentCommandLine + " " + proc.GrandparentCommandLine)
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		"fak windowgate",
 		"get-ciminstance win32_process",
 		"go run ./cmd/fak windowgate")
@@ -401,7 +403,7 @@ func liveBrowserAutomationProcess(proc LiveProcess) bool {
 	if strings.Contains(text, "--type=") {
 		return false
 	}
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		"--remote-debugging-port",
 		"chrome-cdp",
 		"playwright",
@@ -511,7 +513,7 @@ func visibleConsoleTool(win VisibleWindow) bool {
 
 func visibleAutomationOwned(win VisibleWindow) bool {
 	text := strings.ToLower(win.Path + " " + win.CommandLine + " " + win.Title)
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
 		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`)
 }
@@ -522,7 +524,7 @@ func visibleBrowserAutomation(win VisibleWindow) bool {
 		return false
 	}
 	text := strings.ToLower(win.CommandLine)
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		"--remote-debugging-port",
 		"chrome-cdp",
 		"playwright",
@@ -577,18 +579,6 @@ func browserWindowPositionOffscreen(pos string) bool {
 		return false
 	}
 	return x <= -10000 || y <= -10000
-}
-
-// containsAny reports whether s contains any of subs. It folds the repeated
-// `strings.Contains(s, …) || …` chains and `for _, marker := range []string{…}`
-// membership loops in this file into one call; callers lowercase s beforehand.
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
 }
 
 // appendBrowserParts appends the non-empty browser-automation fields of browser
@@ -699,7 +689,7 @@ func liveTaskInteractive(logonType string) bool {
 
 func liveTaskWindowless(task LiveScheduledTask) bool {
 	text := strings.ToLower(task.Execute + " " + task.Arguments)
-	return containsAny(text,
+	return strmatch.ContainsAny(text,
 		"conhost.exe --headless",
 		"-windowstyle hidden",
 		"-nonewwindow",
