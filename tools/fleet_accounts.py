@@ -570,8 +570,10 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
     parsed reset, and None when the format is unknown.
 
     Two shapes occur in the wild:
-      * DATED weekly resets -- "Jun 25, 1pm" -- anchored to this year (rolled to
-        next year only when the parse lands implausibly far in the past).
+      * DATED weekly resets -- "Jun 25, 1pm" -- anchored to this year. A
+        yearless month/day that already passed this year is expired; it is not
+        rolled forward to next year, because stale throttle records would
+        otherwise re-block seats months after the real reset.
       * BARE daily resets -- "3pm", "12:30am" -- a clock time with no date. These
         belong to the ~5h rolling daily window, so the answer is the NEAREST
         occurrence around now, bounded by ``_DAILY_RESET_WINDOW``: today's
@@ -608,8 +610,6 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
             continue
         if "%b" in fmt:
             candidate = parsed.replace(year=now.year, tzinfo=now.tzinfo)
-            if candidate < now and (now - candidate).days > 180:
-                candidate = candidate.replace(year=now.year + 1)
             return candidate > now
         # Bare time: anchor to the nearest occurrence within the daily window.
         candidate = parsed.replace(year=now.year, month=now.month, day=now.day,
@@ -626,8 +626,9 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
     return None
 
 
-def throttle_is_active(info: dict | str | None) -> bool:
-    reset_state = _reset_is_future(_reset_text(info))
+def throttle_is_active(info: dict | str | None,
+                       now: dt.datetime | None = None) -> bool:
+    reset_state = _reset_is_future(_reset_text(info), now)
     if reset_state is False:
         return False
     return True

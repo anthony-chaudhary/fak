@@ -1008,8 +1008,10 @@ class ResetIsFutureTests(unittest.TestCase):
     except Exception:  # pragma: no cover
         LA = _dt.timezone.utc
 
-    def _at(self, h: int, m: int = 0) -> _dt.datetime:
-        return self._dt.datetime(2026, 6, 24, h, m, tzinfo=self.LA)
+    def _at(
+        self, h: int, m: int = 0, *, month: int = 6, day: int = 24
+    ) -> _dt.datetime:
+        return self._dt.datetime(2026, month, day, h, m, tzinfo=self.LA)
 
     def test_passed_early_morning_reset_is_expired(self) -> None:
         # THE BUG: "12:30am" seen at 1:22pm is ~13h in the past -> reset, not tomorrow.
@@ -1043,16 +1045,20 @@ class ResetIsFutureTests(unittest.TestCase):
         self.assertFalse(
             fleet_accounts._reset_is_future("Jun 23, 8pm (America/Los_Angeles)",
                                             self._at(13, 22)))
+        self.assertFalse(
+            fleet_accounts._reset_is_future("Jan 1, 1am (America/Los_Angeles)",
+                                            self._at(13, 22, month=7, day=1)))
 
     def test_throttle_is_active_delegates_to_reset(self) -> None:
         # throttle_is_active is "active unless the reset parses as expired": a clearly
         # past DATED reset clears it; an unparseable reset stays active (fail-safe).
+        now = self._at(13, 22, month=7, day=1)
         self.assertFalse(fleet_accounts.throttle_is_active(
-            {"reset": "Jan 1, 1am (America/Los_Angeles)"}))  # long past -> expired
+            {"reset": "Jan 1, 1am (America/Los_Angeles)"}, now))  # long past -> expired
         self.assertTrue(fleet_accounts.throttle_is_active(
-            {"reset": "sometime never"}))  # unparseable -> stay active
+            {"reset": "sometime never"}, now))  # unparseable -> stay active
         self.assertTrue(fleet_accounts.throttle_is_active(
-            {"reset": "Dec 31, 11pm (America/Los_Angeles)"}))  # year-end -> future
+            {"reset": "Dec 31, 11pm (America/Los_Angeles)"}, now))  # year-end -> future
 
 
 class ProbeLedgerConsultTest(unittest.TestCase):
