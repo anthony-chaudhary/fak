@@ -7,6 +7,12 @@
       "env": {
         "PYTHONIOENCODING": "utf-8"
       }
+    },
+    "fak": {
+      "args": ["serve", "--stdio", "--policy", "examples/dev-agent-policy.json"],
+      "command": "fak",
+      "cwd": ".",
+      "env": {}
     }
   }
 }
