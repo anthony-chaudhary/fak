@@ -21,6 +21,7 @@ package adjudicator
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"path"
 	"regexp"
 	"sort"
@@ -104,6 +105,12 @@ type Policy struct {
 	// internal secrets service, a corp metadata mirror) without a code change. Empty by
 	// default (hardwired set only), so this is additive.
 	EgressExtraDenyHosts []string
+	// ResearchEgressAllowHosts is the positive WebFetch allowlist for research
+	// sub-agents. When non-empty, WebFetch is allowed only for URL hosts matching
+	// one of these exact hosts or subdomains; every other WebFetch host is refused
+	// with POLICY_BLOCK and a bounded host witness. Fetched bytes still flow
+	// through the result-admission chain as untrusted data.
+	ResearchEgressAllowHosts []string
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -404,6 +411,9 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 			}
 		}
 	}
+	if v, ok := researchEgressVerdict(c.Tool, args, p.ResearchEgressAllowHosts); ok {
+		return v
+	}
 
 	// LINT-WRITES (opt-in, #536): a whole-file write of unparseable code is a
 	// PROVABLE refusal — Deny(MALFORMED) with a bounded file:line:col witness,
@@ -496,10 +506,13 @@ func (p Policy) NeverAdmits(tool string) bool {
 	// "the floor was never installed" rather than "deliberately deny all advertised
 	// tools." Pruning every tool-def against a zero floor would be a catastrophic
 	// over-drop, so we refuse to prune anything when there is nothing to admit. A real
-	// floor (any Allow entry or any AllowPrefix) re-enables pruning of the names it
-	// genuinely never admits.
-	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 {
+	// floor (any Allow entry, AllowPrefix, or research WebFetch allowlist) re-enables
+	// pruning of the names it genuinely never admits.
+	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
 		return false
+	}
+	if _, denied := p.Deny[tool]; denied {
+		return true
 	}
 	if p.Allow[tool] {
 		return false
@@ -508,6 +521,9 @@ func (p Policy) NeverAdmits(tool string) bool {
 		if strings.HasPrefix(tool, pre) {
 			return false
 		}
+	}
+	if strings.EqualFold(tool, "WebFetch") && len(p.ResearchEgressAllowHosts) > 0 {
+		return false
 	}
 	return !p.admitAndLog(tool)
 }
@@ -528,6 +544,68 @@ func defaultDeny(p Policy, tool string) abi.Verdict {
 		}
 	}
 	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "monitor"}
+}
+
+func researchEgressVerdict(tool string, args map[string]any, allowHosts []string) (abi.Verdict, bool) {
+	if !strings.EqualFold(tool, "WebFetch") || len(allowHosts) == 0 {
+		return abi.Verdict{}, false
+	}
+	raw, _ := args["url"].(string)
+	scheme, host := webURLParts(raw)
+	if host == "" {
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonMalformed,
+			By:      "monitor/research-egress",
+			Payload: abi.WitnessPayload{Claim: "research egress missing WebFetch.url"},
+		}, true
+	}
+	if scheme != "http" && scheme != "https" {
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonPolicyBlock,
+			By:      "monitor/research-egress",
+			Payload: abi.WitnessPayload{Claim: "research egress unsupported WebFetch scheme: " + scheme},
+		}, true
+	}
+	if researchHostAllowed(host, allowHosts) {
+		return abi.Verdict{
+			Kind: abi.VerdictAllow,
+			By:   "monitor/research-egress",
+			Meta: map[string]string{
+				"research_egress": "allowlisted",
+				"host":            host,
+			},
+		}, true
+	}
+	return abi.Verdict{
+		Kind:    abi.VerdictDeny,
+		Reason:  abi.ReasonPolicyBlock,
+		By:      "monitor/research-egress",
+		Payload: abi.WitnessPayload{Claim: "research egress host not allowlisted: " + host},
+	}, true
+}
+
+func webURLParts(raw string) (scheme, host string) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", ""
+	}
+	return strings.ToLower(u.Scheme), strings.ToLower(strings.Trim(u.Hostname(), "[]"))
+}
+
+func researchHostAllowed(host string, allowHosts []string) bool {
+	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+	for _, allowed := range allowHosts {
+		a := strings.ToLower(strings.Trim(strings.TrimSpace(allowed), "[]"))
+		if a == "" {
+			continue
+		}
+		if host == a || strings.HasSuffix(host, "."+a) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeArgs(ctx context.Context, c *abi.ToolCall) map[string]any {

@@ -96,10 +96,10 @@ type Manifest struct {
 	// See RateLimitRule. This is manifest/runtime-only — NOT an adjudicator.Policy
 	// field (rate config is separate from the name-level allow/deny floor).
 	RateLimit *RateLimitRule `json:"rate_limit,omitempty"`
-	// Egress (optional) extends the hardwired cloud-metadata / link-local egress floor
-	// with operator-declared destinations. It only TIGHTENS the floor — the hardwired
-	// metadata block (169.254.169.254 & peers) is always on and cannot be disabled here.
-	// Absent leaves the floor at the hardwired set. Maps to adjudicator.Policy.EgressExtraDenyHosts.
+	// Egress (optional) extends the hardwired cloud-metadata / link-local egress floor.
+	// deny_hosts only TIGHTENS the floor; research_allow_hosts is a positive,
+	// WebFetch-only allowlist for research sub-agents. The hardwired metadata block
+	// (169.254.169.254 & peers) is always on and cannot be disabled here.
 	Egress *EgressRule `json:"egress,omitempty"`
 	// Isolation (issue #2013, epic #2000 M13) is the declarative trust-level →
 	// ToolExec-backend dial. Absent leaves the dial unset (resolution fails
@@ -108,12 +108,15 @@ type Manifest struct {
 	Isolation *IsolationRule `json:"isolation,omitempty"`
 }
 
-// EgressRule is the manifest's network-egress block (issue: cloud-metadata SSRF floor).
+// EgressRule is the manifest's network-egress block.
 // deny_hosts is a list of exact host names / IP literals refused IN ADDITION to the
 // hardwired cloud-metadata / link-local class, so a deployment blocks its own sensitive
-// endpoints (an internal secrets service, a corp metadata mirror) without a code change.
+// endpoints without a code change. research_allow_hosts is a positive WebFetch-only
+// allowlist for research agents; matching hosts are admitted after deny_hosts/metadata
+// checks, and non-matching WebFetch URLs are refused with POLICY_BLOCK.
 type EgressRule struct {
-	DenyHosts []string `json:"deny_hosts,omitempty"`
+	DenyHosts          []string `json:"deny_hosts,omitempty"`
+	ResearchAllowHosts []string `json:"research_allow_hosts,omitempty"`
 }
 
 // AuthorizeRule releases a tainted flow into one exact sink tool/class. It is
@@ -284,6 +287,9 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if m.Egress != nil && len(m.Egress.DenyHosts) > 0 {
 		p.EgressExtraDenyHosts = cloneSlice(m.Egress.DenyHosts)
 	}
+	if m.Egress != nil && len(m.Egress.ResearchAllowHosts) > 0 {
+		p.ResearchEgressAllowHosts = cloneSlice(m.Egress.ResearchAllowHosts)
+	}
 	if len(m.Allow) > 0 {
 		p.Allow = make(map[string]bool, len(m.Allow))
 		for _, t := range m.Allow {
@@ -404,6 +410,12 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 			m.Deny[t] = abi.ReasonName(c)
 		}
 	}
+	if len(p.EgressExtraDenyHosts) > 0 || len(p.ResearchEgressAllowHosts) > 0 {
+		m.Egress = &EgressRule{
+			DenyHosts:          cloneSlice(p.EgressExtraDenyHosts),
+			ResearchAllowHosts: cloneSlice(p.ResearchEgressAllowHosts),
+		}
+	}
 	if len(p.ArgPredicates) > 0 {
 		m.ArgRules = make([]ArgRule, 0, len(p.ArgPredicates))
 		for _, pred := range p.ArgPredicates {
@@ -457,13 +469,15 @@ func Summary(p adjudicator.Policy) string {
 	for _, t := range maputil.SortedKeys(p.Deny) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", t, abi.ReasonName(p.Deny[t]))
 	}
+	fmt.Fprintf(&b, "egress deny hosts  : %s\n", joinOrNone(p.EgressExtraDenyHosts))
+	fmt.Fprintf(&b, "research egress    : %s\n", joinOrNone(p.ResearchEgressAllowHosts))
 	fmt.Fprintf(&b, "self-modify globs  : %s\n", joinOrNone(p.SelfModifyGlobs))
 	fmt.Fprintf(&b, "redact arg fields  : %s\n", joinOrNone(p.RedactFields))
 	fmt.Fprintf(&b, "arg rules          : %d rule(s)\n", len(p.ArgPredicates))
 	for _, pred := range p.ArgPredicates {
 		fmt.Fprintf(&b, "                     %s\n", describeArgPredicate(pred))
 	}
-	if allowN == 0 && len(p.AllowPrefix) == 0 {
+	if allowN == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
 		if p.Posture == adjudicator.PostureAdmitAndLog {
 			b.WriteString("\nNOTE: nothing is affirmatively allowed; read-shaped DEFAULT_DENY\n" +
 				"calls are admitted with posture=admit_and_log/would_deny=DEFAULT_DENY,\n" +

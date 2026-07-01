@@ -42,7 +42,17 @@
     "token",
     "authorization"
   ],
+  "egress": {
+    "research_allow_hosts": [
+      "arxiv.org",
+      "docs.python.org",
+      "go.dev",
+      "pkg.go.dev",
+      "developer.mozilla.org"
+    ]
+  },
   "sources": {
+    "WebFetch": "untrusted",
     "fetch_url": "untrusted",
     "read_file": "trusted_local",
     "read_webpage": "untrusted"

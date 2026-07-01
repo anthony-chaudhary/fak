@@ -12,7 +12,10 @@ func TestEgressDenyHostsParse(t *testing.T) {
 	rt, err := ParseRuntime([]byte(`{
 		"version": "fak-policy/v1",
 		"allow": ["WebFetch"],
-		"egress": { "deny_hosts": ["secrets.corp.internal", "10.0.0.53"] }
+		"egress": {
+			"deny_hosts": ["secrets.corp.internal", "10.0.0.53"],
+			"research_allow_hosts": ["arxiv.org", "docs.python.org"]
+		}
 	}`))
 	if err != nil {
 		t.Fatalf("ParseRuntime: %v", err)
@@ -21,6 +24,15 @@ func TestEgressDenyHostsParse(t *testing.T) {
 	want := []string{"secrets.corp.internal", "10.0.0.53"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("EgressExtraDenyHosts = %v, want %v", got, want)
+	}
+	gotResearch := rt.Adjudicator.ResearchEgressAllowHosts
+	wantResearch := []string{"arxiv.org", "docs.python.org"}
+	if !reflect.DeepEqual(gotResearch, wantResearch) {
+		t.Fatalf("ResearchEgressAllowHosts = %v, want %v", gotResearch, wantResearch)
+	}
+	dumped := FromPolicy(rt.Adjudicator)
+	if dumped.Egress == nil || !reflect.DeepEqual(dumped.Egress.ResearchAllowHosts, wantResearch) {
+		t.Fatalf("FromPolicy egress research hosts = %+v, want %v", dumped.Egress, wantResearch)
 	}
 }
 
