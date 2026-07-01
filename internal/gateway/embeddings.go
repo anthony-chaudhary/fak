@@ -89,8 +89,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req EmbeddingsRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	items, ok := normalizeTextInput(req.Input)

@@ -125,8 +125,7 @@ func (s *Server) handleFakSessionChanges(w http.ResponseWriter, r *http.Request)
 	var since uint64
 	if r.Method == http.MethodPost {
 		var req ChangesRequest
-		if err := decodeJSON(w, r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		if !decodeRequestBody(w, r, &req) {
 			return
 		}
 		since = req.Since

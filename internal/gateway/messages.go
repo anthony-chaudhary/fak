@@ -1244,8 +1244,7 @@ func (s *Server) handleAnthropicCountTokens(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var raw json.RawMessage
-	if err := decodeJSON(w, r, &raw); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &raw) {
 		return
 	}
 	req, err := agent.DecodeAnthropicMessagesRequest(raw)

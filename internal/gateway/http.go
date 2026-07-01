@@ -363,8 +363,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req ChatRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	// An empty/missing messages array is a CLIENT error, not an upstream failure.
@@ -381,8 +380,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// rather than forwarding bad input that the upstream silently answers anyway (a
 	// wire-contract deviation the proxy used to swallow). Same well-formedness floor
 	// as the empty-messages check above, applied before an upstream round-trip is spent.
-	if msg := validateSampling(req); msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
+	if rejectInvalidSampling(w, validateSampling(req)) {
 		return
 	}
 	ctx := r.Context()
@@ -989,8 +987,7 @@ func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req AdmitRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
@@ -1037,8 +1034,7 @@ func (s *Server) handleFakChanges(w http.ResponseWriter, r *http.Request) {
 	var bodyPrincipal string
 	if r.Method == http.MethodPost {
 		var req ChangesRequest
-		if err := decodeJSON(w, r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		if !decodeRequestBody(w, r, &req) {
 			return
 		}
 		since = req.Since
@@ -1086,8 +1082,7 @@ func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
 	var since uint64
 	if r.Method == http.MethodPost {
 		var req ChangesRequest
-		if err := decodeJSON(w, r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		if !decodeRequestBody(w, r, &req) {
 			return
 		}
 		since = req.Since
@@ -1119,8 +1114,7 @@ func (s *Server) handleFakRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req RevokeRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	if req.Witness == "" {
@@ -1139,8 +1133,7 @@ func (s *Server) handleFakContextChange(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req ContextChangeRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	resp, err := s.contextChange(r.Context(), req)
@@ -1186,8 +1179,7 @@ func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req TraceResetRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	traceID := strings.TrimSpace(req.TraceID)
@@ -1272,8 +1264,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			var sr SteerRequest
-			if err := decodeJSON(w, r, &sr); err != nil {
-				writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+			if !decodeRequestBody(w, r, &sr) {
 				return
 			}
 			if strings.TrimSpace(sr.Text) == "" {
@@ -1293,8 +1284,7 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req SessionControlRequest
-		if err := decodeJSON(w, r, &req); err != nil {
-			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		if !decodeRequestBody(w, r, &req) {
 			return
 		}
 		st, ok, err := s.controlSession(r.Context(), traceID, verb, req)
@@ -1343,8 +1333,7 @@ func (s *Server) decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallR
 		return SyscallRequest{}, false
 	}
 	var req SyscallRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return SyscallRequest{}, false
 	}
 	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
@@ -1359,6 +1348,31 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	// Anthropic wire, so it gets the larger transcript cap, not the tool-args cap.
 	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptBody)
 	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// decodeRequestBody decodes the request body into v via decodeJSON. On a malformed
+// body it writes the standard 400 ("malformed request body: ...") and returns false
+// so the caller returns immediately; on success it returns true. It centralizes the
+// decode-or-400 block repeated across every JSON handler entry (parallel to
+// requireMethod). Handlers that need a different error phrasing keep their own block.
+func decodeRequestBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := decodeJSON(w, r, v); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		return false
+	}
+	return true
+}
+
+// rejectInvalidSampling writes the sampling-validation 400 and returns true when a
+// validator reports a problem (a non-empty msg), so the caller returns immediately;
+// an empty msg returns false to continue. It folds the "validator message → 400"
+// block the chat, completions, and responses sampling wires share (#326).
+func rejectInvalidSampling(w http.ResponseWriter, msg string) bool {
+	if msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return true
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

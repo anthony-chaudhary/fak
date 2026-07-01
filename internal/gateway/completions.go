@@ -24,8 +24,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CompletionRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	prompt := normalizePrompt(req.Prompt)
@@ -33,8 +32,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "prompt: field required")
 		return
 	}
-	if msg := validateCompletionSampling(req); msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
+	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
 		return
 	}
 	ctx := r.Context()

@@ -145,8 +145,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req ResponsesRequest
-	if err := decodeJSON(w, r, &req); err != nil {
-		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	if !decodeRequestBody(w, r, &req) {
 		return
 	}
 	messages, err := decodeResponsesInput(req.Input, req.Instructions)
@@ -161,8 +160,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "input: field required")
 		return
 	}
-	if msg := validateResponsesSampling(req); msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
+	if rejectInvalidSampling(w, validateResponsesSampling(req)) {
 		return
 	}
 	tools := responsesToolsToToolDefs(req.Tools)
