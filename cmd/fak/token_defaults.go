@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,20 +36,94 @@ type lever struct {
 }
 
 func cmdTokenDefaultsScorecard(argv []string) {
-	p, c, asMarkdown, done := scorecardCmdSetup("fak token-defaults-scorecard", argv, collectTokenDefaultsScorecard)
-	if done {
-		return
+	os.Exit(runTokenDefaultsScorecard(os.Stdout, os.Stderr, argv))
+}
+
+func runTokenDefaultsScorecard(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak token-defaults-scorecard", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable scorecard JSON")
+	asMarkdown := fs.Bool("markdown", false, "emit markdown")
+	comparePath := fs.String("compare", "", "compare against a prior --json payload")
+	if err := fs.Parse(argv); err != nil {
+		return 2
 	}
-	if asMarkdown {
-		fmt.Print(renderTokenDefaultsMarkdown(c))
-		return
+	p := collectTokenDefaultsScorecard(repoRoot())
+	c := p["corpus"].(map[string]any)
+
+	if *comparePath != "" {
+		base, ok := readCompareBase(stderr, "fak token-defaults-scorecard", *comparePath)
+		if !ok {
+			return 2
+		}
+		fmt.Fprintln(stdout, compareTokenDefaults(c, base))
+		return okExit(p["ok"].(bool))
 	}
-	fmt.Printf("token-defaults-scorecard: %s (%s)\n  token_defaults_debt: %v   grade: %v   stacked: %v/%v\n",
+	if *asJSON {
+		if err := writeIndentedJSON(stdout, p); err != nil {
+			fmt.Fprintf(stderr, "fak token-defaults-scorecard: encode json: %v\n", err)
+			return 1
+		}
+		return okExit(p["ok"].(bool))
+	}
+	if *asMarkdown {
+		fmt.Fprint(stdout, renderTokenDefaultsMarkdown(c))
+		return okExit(p["ok"].(bool))
+	}
+	fmt.Fprintf(stdout, "token-defaults-scorecard: %s (%s)\n  token_defaults_debt: %v   grade: %v   stacked: %v/%v\n",
 		p["verdict"], p["finding"], c["token_defaults_debt"], c["grade"], c["stacked_on"], c["levers_total"])
 	if defects, _ := c["defects"].([]string); len(defects) > 0 {
 		for _, d := range defects {
-			fmt.Println("  - " + d)
+			fmt.Fprintln(stdout, "  - "+d)
 		}
+	}
+	return okExit(p["ok"].(bool))
+}
+
+// compareTokenDefaults prints the token-defaults-debt delta against a prior --json
+// payload, mirroring the shared scorecard-family --compare convention (see
+// pkg/scorecard.Compare / internal/conceptusage.Compare / internal/dogfoodscore.Compare):
+// a compact "debt P -> C" line plus the composite/grade movement. This card's corpus is a
+// plain map (not a scorecard.Payload), so the delta is computed directly off the corpus
+// maps rather than via pkg/scorecard.Compare.
+func compareTokenDefaults(current, baseline map[string]any) string {
+	bc, _ := baseline["corpus"].(map[string]any)
+	if bc == nil {
+		bc = baseline
+	}
+	bDebt := anyIntTokenDefaults(bc["token_defaults_debt"])
+	cDebt := anyIntTokenDefaults(current["token_defaults_debt"])
+	delta := cDebt - bDebt
+	verdict := "flat"
+	if delta < 0 {
+		verdict = "improved"
+	} else if delta > 0 {
+		verdict = "regressed"
+	}
+	abs := delta
+	if abs < 0 {
+		abs = -abs
+	}
+	lines := []string{
+		fmt.Sprintf("token-defaults-scorecard: %v (score %v, token_defaults_debt %v)", current["grade"], current["score"], cDebt),
+		fmt.Sprintf("  compare: token_defaults_debt %d -> %d (%s by %d)", bDebt, cDebt, verdict, abs),
+		fmt.Sprintf("  composite: %v -> %v  grade %v -> %v", bc["score"], current["score"], bc["grade"], current["grade"]),
+	}
+	return strings.Join(lines, "\n")
+}
+
+// anyIntTokenDefaults coerces a JSON-decoded debt count (int from a fresh build, float64
+// from a --compare baseline decoded via encoding/json) to int.
+func anyIntTokenDefaults(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
 	}
 }
 

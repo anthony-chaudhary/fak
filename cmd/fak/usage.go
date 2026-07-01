@@ -452,7 +452,7 @@ func usageScorecardVerbs() {
                 (scores the launched-session dogfooding loop: is it WIRED to run honestly,
                  and does the model report itself truthfully  -  the keystone defect is a turn
                  that claims success over an OBSERVED Stop-hook error, read from real transcripts)
-  fak token-defaults-scorecard [--json] [--markdown]
+  fak token-defaults-scorecard [--json] [--markdown] [--compare FILE]
                 (native token-saving-defaults control-pane payload)
   fak skill-effectiveness-scorecard [--json] [--markdown]
                 (native skill-pack effectiveness control-pane payload)
