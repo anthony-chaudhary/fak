@@ -93,6 +93,15 @@ type Record struct {
 	// expiry window forward without a transition; 0 means never renewed since acquisition,
 	// in which case the window is measured from AcquiredAt exactly as a pre-fence record was.
 	RenewedAt int64 `json:"renewed_unix,omitempty"`
+	// SessionID binds the lease to its OWNING SESSION — the id of the session descriptor
+	// published at refs/fak/locks/session-<SessionID> (session.go). Unlike Holder (a
+	// free-form identity string) or the acquiring pid (dead almost instantly, #2164), the
+	// session descriptor carries a HEARTBEAT, so a reader can classify this lease
+	// self / peer-live / peer-dead by the session's liveness (liveness.go) instead of
+	// guessing from a pid. Empty on a legacy/unbound record — such a lease classifies
+	// peer-unknown, which fails closed to not-reclaimable. omitempty keeps a pre-#2164
+	// record byte-identical.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // effectiveActiveAt is the later of AcquiredAt and RenewedAt — the instant the lease's

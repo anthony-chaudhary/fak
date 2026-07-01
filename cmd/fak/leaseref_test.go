@@ -149,6 +149,100 @@ func TestLeaserefLiveEndToEnd(t *testing.T) {
 	}
 }
 
+// TestLeaserefLivenessEndToEnd drives `fak leaseref liveness` against a REAL git temp
+// repo (skipped when git is unavailable): leases bound to a heartbeating, a lapsed, and
+// no session classify peer-live / peer-dead / peer-unknown, the reader's own lease
+// classifies self, and reclaimable is peer-dead-only (#2164).
+func TestLeaserefLivenessEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	store := leaseref.NewInDir(dir)
+	ctx := context.Background()
+	now := time.Now().Unix()
+	for _, r := range []leaseref.Record{
+		{ID: "lane-peer", TreeGlobs: []string{"a/**"}, Holder: "A", SessionID: "sess-peer", AcquiredAt: now, TTLSeconds: 3600},
+		{ID: "lane-dead", TreeGlobs: []string{"b/**"}, Holder: "B", SessionID: "sess-dead", AcquiredAt: now, TTLSeconds: 3600},
+		{ID: "lane-legacy", TreeGlobs: []string{"c/**"}, Holder: "C", AcquiredAt: now, TTLSeconds: 3600},
+		{ID: "lane-mine", TreeGlobs: []string{"d/**"}, Holder: "D", SessionID: "sess-me", AcquiredAt: now, TTLSeconds: 3600},
+	} {
+		if _, err := store.Acquire(ctx, r); err != nil {
+			t.Fatalf("Acquire %s: %v", r.ID, err)
+		}
+	}
+	for _, d := range []leaseref.SessionDescriptor{
+		{ID: "sess-peer", Host: "h1", PCBState: "RUNNING", UpdatedAt: now, TTLSecs: 1800},
+		{ID: "sess-dead", Host: "h2", PCBState: "RUNNING", UpdatedAt: now - 7200, TTLSecs: 60},
+		{ID: "sess-me", Host: "h3", PCBState: "RUNNING", UpdatedAt: now, TTLSecs: 1800},
+	} {
+		if _, err := store.PublishSession(ctx, d); err != nil {
+			t.Fatalf("PublishSession %s: %v", d.ID, err)
+		}
+	}
+
+	var out, errb bytes.Buffer
+	if code := runLeaseref(&out, &errb, []string{"liveness", "--session", "sess-me", "--dir", dir}); code != 0 {
+		t.Fatalf("leaseref liveness exit=%d stderr=%q", code, errb.String())
+	}
+	var rows []leaseref.ClassifiedLease
+	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+		t.Fatalf("liveness JSON unmarshal: %v\nout=%s", err, out.String())
+	}
+	got := map[string]leaseref.ClassifiedLease{}
+	for _, r := range rows {
+		got[r.ID] = r
+	}
+	want := map[string]struct {
+		class       string
+		reclaimable bool
+	}{
+		"lane-peer":   {leaseref.LivenessPeerLive, false},
+		"lane-dead":   {leaseref.LivenessPeerDead, true},
+		"lane-legacy": {leaseref.LivenessPeerUnknown, false},
+		"lane-mine":   {leaseref.LivenessSelf, false},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("classified %d leases, want %d: %+v", len(rows), len(want), rows)
+	}
+	for id, w := range want {
+		row, ok := got[id]
+		if !ok {
+			t.Fatalf("lease %s missing from liveness view", id)
+		}
+		if row.Liveness != w.class || row.Reclaimable != w.reclaimable {
+			t.Fatalf("%s = {%s reclaimable=%v}, want {%s reclaimable=%v} (evidence=%q)",
+				id, row.Liveness, row.Reclaimable, w.class, w.reclaimable, row.Evidence)
+		}
+	}
+
+	// The --session binding rides the fenced acquire verb end to end.
+	out.Reset()
+	errb.Reset()
+	if code := runLeaseref(&out, &errb, []string{"acquire", "--id", "lane-cli", "--holder", "E", "--session", "sess-me", "--ttl", "3600", "--tree", "e/**", "--dir", dir}); code != 0 {
+		t.Fatalf("acquire exit=%d stderr=%q out=%q", code, errb.String(), out.String())
+	}
+	var acq fencedResult
+	if err := json.Unmarshal(out.Bytes(), &acq); err != nil {
+		t.Fatalf("acquire JSON: %v\nout=%s", err, out.String())
+	}
+	if !acq.Verdict.OK || acq.Record == nil || acq.Record.SessionID != "sess-me" {
+		t.Fatalf("acquire = %+v, want ok with session sess-me bound", acq)
+	}
+}
+
 // TestLeaserefFenceEndToEnd drives the fenced acquire/fence/renew verbs against a REAL git
 // temp repo, exercising the actual `git update-ref` compare-and-swap and
 // `git rev-parse --show-object-format` (skipped when git is unavailable). It seeds an EXPIRED

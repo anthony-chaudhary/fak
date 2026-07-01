@@ -47,6 +47,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 	switch sub {
 	case "live":
 		return runLeaserefLive(stdout, stderr, rest)
+	case "liveness":
+		return runLeaserefLiveness(stdout, stderr, rest)
 	case "list":
 		return runLeaserefList(stdout, stderr, rest)
 	case "reap":
@@ -100,6 +102,16 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       the source that makes a peer's lease (fetched into the local ref store)
       visible at admission. Pipe it: dos arbitrate ... --leases "$(fak leaseref live)".
 
+  fak leaseref liveness [--session ME] [--dir DIR]
+      Classify each LIVE lease by its OWNING SESSION's liveness (#2164):
+      self | peer-live | peer-dead | peer-unknown, keyed on the session descriptor
+      heartbeat at refs/fak/locks/session-<id> — never the ephemeral acquiring pid.
+      Emits [{...record, liveness, reclaimable, evidence}, ...]. FAIL-CLOSED:
+      only a POSITIVELY dead session (lapsed heartbeat or terminal STOPPED) is
+      reclaimable; a heartbeating peer's lane is never stolen, and a lease with no
+      session binding (or no descriptor) is peer-unknown, not reclaimable.
+      --session ME tags your own leases self.
+
   fak leaseref list [--json] [--dir DIR]
       List every record under refs/fak/locks/* (incl. expired), one per line with
       its LIVE/EXPIRED status; --json emits the raw records.
@@ -119,12 +131,15 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       lease. Reaps NOTHING — verdict ACTION when an expired lease lingers is the
       signal to run 'fak leaseref reap'. This is the member 'fak garden' folds.
 
-  fak leaseref acquire --id ID --holder H [--tree GLOB ...] [--ttl SEC] [--dir DIR]
+  fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
       Fresh -> generation 1; reaping an EXPIRED holder -> generation bumps (a
       transition); the SAME holder reacquiring a live lease -> a renew (generation
       kept). A DIFFERENT live holder is refused LEASE_HELD. Emits {verdict, record};
       the record carries the assigned 'generation' you must present to 'fence'.
+      --session S binds the lease to its owning session descriptor so 'liveness'
+      can classify it by heartbeat (#2164); a renew adopts a binding a legacy
+      record lacked but never rebinds an existing one.
 
   fak leaseref fence --id ID --holder H --generation N [--dir DIR]
       The GATE an agent runs BEFORE a write: is the lease you hold still current?
@@ -156,6 +171,28 @@ func runLeaserefLive(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return emitLeaserefJSON(stdout, stderr, leases, "live")
+}
+
+// runLeaserefLiveness is the #2164 witness: each LIVE lease tagged by its owning
+// session's liveness (self | peer-live | peer-dead | peer-unknown), keyed on the session
+// descriptor heartbeat — never the ephemeral acquiring pid. reclaimable is true ONLY on
+// peer-dead (a positively-dead session); everything else fails closed.
+func runLeaserefLiveness(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref liveness", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	session := fs.String("session", "", "this agent's own session id (its leases classify 'self')")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	*dir = pathutil.ExpandTilde(*dir)
+	store := leaseref.NewInDir(*dir)
+	rows, err := store.ClassifyLive(context.Background(), *session, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref liveness: %v\n", err)
+		return 1
+	}
+	return emitLeaserefJSON(stdout, stderr, rows, "liveness")
 }
 
 func runLeaserefList(stdout, stderr io.Writer, argv []string) int {
@@ -363,6 +400,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	id := fs.String("id", "", "lease id (one safe ref segment under refs/fak/locks/)")
 	holder := fs.String("holder", "", "holder identity (machine/session); required to fence a write")
+	session := fs.String("session", "", "owning session id (the descriptor at refs/fak/locks/session-<id>) for liveness classification")
 	ttl := fs.Int64("ttl", 0, "lease lifetime in seconds (0 = no expiry)")
 	var trees repeatedString
 	fs.Var(&trees, "tree", "repo-relative tree glob this lease covers (repeatable)")
@@ -379,6 +417,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 		ID:         *id,
 		TreeGlobs:  trees,
 		Holder:     *holder,
+		SessionID:  *session,
 		TTLSeconds: *ttl,
 	}, time.Now())
 	if err != nil {

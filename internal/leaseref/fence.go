@@ -194,6 +194,12 @@ func (s *Store) AcquireFenced(ctx context.Context, rec Record, now time.Time) (R
 		if rec.TTLSeconds > 0 {
 			out.TTLSeconds = rec.TTLSeconds
 		}
+		if out.SessionID == "" && rec.SessionID != "" {
+			// Adopt a session binding a legacy record lacked (#2164). Only ever fills an
+			// EMPTY binding — a renew never rebinds a lease to a different session, the
+			// same no-silent-mutation rule that keeps the tree fixed across renews.
+			out.SessionID = rec.SessionID
+		}
 	default:
 		return Record{}, FenceVerdict{
 			Reason:  ReasonLeaseHeld,
