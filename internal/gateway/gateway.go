@@ -297,6 +297,19 @@ type Config struct {
 	// other wire. Sibling of CtxViewBudget: compaction drops a contiguous suffix of old
 	// turns, ctxview stubs the planner's non-contiguous resident-set misses (#927).
 	CompactHistoryBudget int
+	// CompactAnchorHead, when true, re-anchors CompactHistoryBudget's protected prefix on
+	// the stable provider head (agent.CompactAnchorHead) instead of the default first-
+	// breakpoint anchor (agent.CompactAnchorFirstBP). This is the #1407 anchor-starved fix:
+	// real Claude Code traffic marks its cache_control breakpoint on a RECENT message, so
+	// the default anchor protects almost the whole conversation and the budget can never
+	// shed anything (CompactionAnchorStarved). Re-anchoring on the head makes the WHOLE
+	// message array compactible, but it bursts the recent breakpoint's cached suffix once,
+	// so agent.CompactAnthropicHistoryWithOptions only fires it when the burst repays
+	// (agent.CacheBurstPaysBack, #1408) — without a wired session-turn horizon this gateway
+	// leaves TotalTurns/CurrentTurn unset, so it only fires on a zero-penalty burst. False
+	// (the default) reproduces the pre-#1407 CompactAnchorFirstBP behavior byte-for-byte;
+	// this is an explicit opt-in, not a default-on lever, because it can burst a warm cache.
+	CompactAnchorHead bool
 	// ElideResultBytes is the off-by-default oversized tool-result elision threshold.
 	// 0 keeps the transform inert; a positive value arms the documented head+tail
 	// shrinker for results outside the active working set.
@@ -665,6 +678,11 @@ type Server struct {
 	// (the default) leaves the body byte-for-byte unchanged.
 	compactHistoryBudget int
 
+	// compactAnchorHead mirrors Config.CompactAnchorHead: false (the default) keeps the
+	// warm-cache-safe agent.CompactAnchorFirstBP anchor; true re-anchors compaction on
+	// agent.CompactAnchorHead, the opt-in #1407/#1408 fix for anchor-starved sessions.
+	compactAnchorHead bool
+
 	// elideResultBytes mirrors Config.ElideResultBytes: when > 0 the flagship Anthropic
 	// passthrough shrinks oversized tool_result bodies in the un-cached, non-recent middle to a
 	// bounded head+tail form (agent.ElideAnthropicResults), keeping the cached-prefix bytes
@@ -945,6 +963,7 @@ func New(cfg Config) (*Server, error) {
 		admissionCtl:               admissionCtl,
 		ctxView:                    ctxView,
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
+		compactAnchorHead:          cfg.CompactAnchorHead,
 		elideResultBytes:           cfg.ElideResultBytes,
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		cacheStream:                cacheStream,

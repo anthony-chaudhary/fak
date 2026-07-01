@@ -92,7 +92,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 			// This is the dormant-on-real-Claude-Code-traffic pathology (#1407), the opposite of
 			// "nothing sprawled" — call it out so a tighter budget isn't misread as the fix.
 			if sum.CompactionAnchorStarved > 0 {
-				status = fmt.Sprintf("ENABLED but ANCHOR-STARVED, budget %d tok — the cache_control anchor protects MORE than the budget so it cannot fire (NOT a short session; #1407)", sum.CompactionBudget)
+				status = fmt.Sprintf("ENABLED but ANCHOR-STARVED, budget %d tok — the cache_control anchor protects MORE than the budget so it cannot fire (NOT a short session; pass --compact-anchor-head to re-anchor, #1407)", sum.CompactionBudget)
 			}
 		}
 		fmt.Fprintf(&b, "fak guard: compaction [%s] — %d fired, %d bailed, %d off; shed %d token(s)\n",
@@ -124,7 +124,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary, kcOpt ...kernel.Counter
 		// one means the anchor swallowed the conversation so no budget tightening can ever make it
 		// fire — only a re-anchor (#1407 / opt-in head-anchored firing #1408) can.
 		if sum.CompactionAnchorStarved > 0 {
-			fmt.Fprintf(&b, "  ⚠ anchor-starved x%d — protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (re-anchor needed, not a tighter budget — #1407)\n",
+			fmt.Fprintf(&b, "  ⚠ anchor-starved x%d — protected prefix exceeds the %d-tok budget; compaction cannot fire on this traffic regardless of session length (pass --compact-anchor-head to re-anchor, not a tighter budget — #1407)\n",
 				sum.CompactionAnchorStarved, sum.CompactionBudget)
 		}
 	}
@@ -199,7 +199,7 @@ func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
 	}
 	reasons := make([]string, 0, 3)
 	if sum.CompactionAnchorStarved > 0 {
-		reasons = append(reasons, fmt.Sprintf("anchor-starved x%d (protected prefix exceeds the %d-tok compaction budget; re-anchor/M2 needed)", sum.CompactionAnchorStarved, sum.CompactionBudget))
+		reasons = append(reasons, fmt.Sprintf("anchor-starved x%d (protected prefix exceeds the %d-tok compaction budget; pass --compact-anchor-head to re-anchor)", sum.CompactionAnchorStarved, sum.CompactionBudget))
 	}
 	switch {
 	case sum.KVPrefixPromptTokens == 0:

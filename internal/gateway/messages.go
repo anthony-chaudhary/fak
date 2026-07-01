@@ -212,7 +212,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// kernel adjudicates below are untouched, so the trust boundary is unchanged. Placed
 	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
 	// cached message prefix) and before either passthrough consumer of req.Raw.
-	compacted, compactReason := s.compactAnthropicRawWithReason(req)
+	//
+	// turnsLeft rides sessionTurn.state.Budget.TurnsLeft — the ONLY live session-horizon
+	// signal this request boundary carries — through to the --compact-anchor-head burst
+	// economics gate (#1407/#1408). Only a genuinely bounded positive value counts as a
+	// known horizon; 0 (no DecideSession wired, or a session with no turns left) and -1
+	// (session.Unbounded) both leave the gate's TotalTurns unset, so an un-budgeted or
+	// unbounded session never bursts the cache on a guess.
+	compacted, compactReason := s.compactAnthropicRawWithReason(req, sessionTurn.state.Budget.TurnsLeft)
 	// fakBail is the harness-coherence view of fak's own compaction this turn: "" for a clean fire
 	// AND for a healthy under_budget no-op, the real reason for any actual bail. Threaded into the
 	// observation below so the coordinator can count a sustained fak-bail streak (when it yields the
@@ -425,8 +432,12 @@ func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
 // WITNESSED, what fak authored) so a silent failure is visible, and returns whether it FIRED —
 // the caller threads that through so the post-response provider cache_read (an OBSERVED value
 // fak relays, never a fak claim) is recorded only on turns this actually compacted.
+//
+// Callers outside the live request boundary (tests, and any future non-session caller) have no
+// turn horizon to offer, so this defaults turnsLeft to 0 — the same conservative "unknown
+// horizon" behavior compactAnthropicRawWithReason has always had.
 func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
-	fired, _ = s.compactAnthropicRawWithReason(req)
+	fired, _ = s.compactAnthropicRawWithReason(req, 0)
 	return fired
 }
 
@@ -435,7 +446,14 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 // clean fire ("") and a healthy under_budget no-op apart from a real bail (prefix_mismatch,
 // cached_span, …). A configured-off lever returns ("", false) — no compaction attempt was made,
 // so there is no fak-side compaction signal to fold into the observation.
-func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest) (fired bool, reason string) {
+//
+// turnsLeft is the session's remaining-turns budget (session.Budget.TurnsLeft on the wire:
+// SessionBudget.TurnsLeft), the ONLY session-horizon signal --compact-anchor-head's burst
+// economics gate (#1407/#1408) can use. Only turnsLeft > 0 (a genuinely bounded remaining-turn
+// count from a wired DecideSession) counts as a known horizon; <= 0 — no DecideSession wired, a
+// session with 0 turns left, or session.Unbounded (-1) — leaves the gate's TotalTurns unset, so
+// an un-budgeted or unbounded session is never guessed at.
+func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int) (fired bool, reason string) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
 		return false, ""
 	}
@@ -452,7 +470,22 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	// is unchanged. The net effect is visible on the SAME readback: placement makes compaction
 	// fire (CompactionFired) and the provider cache_read it relays now covers the cached head.
 	req.Raw = agent.PlaceAnthropicCacheBreakpoint(req.Raw)
-	out, outcome := agent.CompactAnthropicHistoryWithOutcome(req.Raw, s.compactHistoryBudget)
+	opts := agent.CompactOptions{Budget: s.compactHistoryBudget, Anchor: agent.CompactAnchorFirstBP}
+	if s.compactAnchorHead {
+		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can
+		// shed. When turnsLeft carries a genuine bounded horizon, hand CacheBurstPaysBack a
+		// {TotalTurns, CurrentTurn} pair whose difference is exactly turnsLeft (CurrentTurn=1,
+		// TotalTurns=1+turnsLeft) — an adapter, not a guess: the gate still only fires when the
+		// remaining turns repay the one-time burst. Otherwise TotalTurns/CurrentTurn stay 0 and
+		// the gate stays fully conservative — it only fires this anchor when the burst has zero
+		// one-time penalty, never guessing at an unknown or unbounded session length.
+		opts.Anchor = agent.CompactAnchorHead
+		if turnsLeft > 0 {
+			opts.CurrentTurn = 1
+			opts.TotalTurns = 1 + turnsLeft
+		}
+	}
+	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	return outcome.Reason == agent.CompactReasonNone, outcome.Reason

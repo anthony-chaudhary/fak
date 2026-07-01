@@ -373,3 +373,122 @@ func TestSpliceMaxTokensPreservesPrefix(t *testing.T) {
 		t.Fatalf("expected ok=false when max_tokens is absent")
 	}
 }
+
+// headOrderedWireBody models real Claude Code traffic for the head anchor (#1407/#1408): a
+// stable `system` cache_control breakpoint serialized BEFORE messages[] (struct field order is
+// JSON key order), with the ONLY messages[] breakpoint on a RECENT turn (recentBpBack from the
+// end). This is the dormant #1407 shape: the default first-breakpoint anchor protects almost the
+// whole conversation, so compaction cannot fire no matter the budget. Mirrors headOrderedBody in
+// internal/agent/anthropic_compact_test.go (gateway can't reach that unexported test helper).
+func headOrderedWireBody(t *testing.T, nMsgs, recentBpBack int) []byte {
+	t.Helper()
+	type block map[string]any
+	recentBpIdx := nMsgs - 1 - recentBpBack
+	msgs := make([]map[string]any, 0, nMsgs)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		blk := block{"type": "text", "text": strings.Repeat("conversation turn body words. ", 12)}
+		if i == recentBpIdx {
+			blk["cache_control"] = map[string]any{"type": "ephemeral"}
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": []block{blk}})
+	}
+	ordered := struct {
+		Model     string           `json:"model"`
+		MaxTokens int              `json:"max_tokens"`
+		System    []block          `json:"system"`
+		Messages  []map[string]any `json:"messages"`
+	}{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 1024,
+		System: []block{
+			{"type": "text", "text": "You are a coding agent."},
+			{"type": "text", "text": strings.Repeat("policy text. ", 40), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		Messages: msgs,
+	}
+	raw, err := json.Marshal(ordered)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// TestMaybeCompactAnchorHeadDormantWithoutTurnsLeft: --compact-anchor-head is opt-in but the
+// request boundary carries no session-turns horizon (turnsLeft=0, e.g. DecideSession unwired) —
+// the #1407/#1408 burst-economics gate stays conservative and does NOT fire, same as the default
+// anchor. Proves the flag alone does not start bursting caches; it needs a real horizon too.
+func TestMaybeCompactAnchorHeadDormantWithoutTurnsLeft(t *testing.T) {
+	raw := headOrderedWireBody(t, 120, 2)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	fired, reason := s.compactAnthropicRawWithReason(req, 0)
+	if fired {
+		t.Fatalf("head anchor with no turns-left horizon must NOT fire, got fired=true reason=%q", reason)
+	}
+	if reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("reason=%q, want %q (bail must name the economics gate, not just stay silent)", reason, agent.CompactReasonBurstUnprofitable)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("a burst_unprofitable bail must leave req.Raw byte-identical")
+	}
+}
+
+// TestMaybeCompactAnchorHeadFiresWithTurnsLeft is the #1407/#1408 end-to-end witness on the LIVE
+// gateway wiring: the default first-breakpoint anchor stays dormant on the real-traffic shape (a
+// recent-only message breakpoint), but --compact-anchor-head + a wired DecideSession session with
+// turns left to repay the one-time burst actually FIRES — sheds the middle and keeps the stable
+// system head byte-identical, so the dominant cache read survives.
+func TestMaybeCompactAnchorHeadFiresWithTurnsLeft(t *testing.T) {
+	raw := headOrderedWireBody(t, 120, 2)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(orig, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	_, spans, ok := decodeArrayElementsFromTest(t, orig, obj["messages"])
+	if !ok {
+		t.Fatal("decodeArrayElements failed")
+	}
+	headEnd := spans[0].start // verbatim head region a head-anchored fire must preserve
+
+	// 1. Confirm the default anchor is genuinely dormant on this shape first (the #1407 bug).
+	def := anthropicPassthroughServer(1200)
+	if fired, reason := def.compactAnthropicRawWithReason(req, 1000); fired || reason != agent.CompactReasonUnderBudget {
+		t.Fatalf("default anchor must stay dormant (under_budget) even with turnsLeft supplied (it only gates head mode); got fired=%v reason=%q", fired, reason)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("default-anchor dormant bail must leave req.Raw unchanged")
+	}
+
+	// 2. Head anchor + a generous turns-left horizon (the wired DecideSession case): FIRES.
+	head := anthropicPassthroughServer(1200)
+	head.compactAnchorHead = true
+	fired, reason := head.compactAnthropicRawWithReason(req, 1000)
+	if !fired || reason != "" {
+		t.Fatalf("head anchor with a paying turns-left horizon must FIRE, got fired=%v reason=%q", fired, reason)
+	}
+	if bytes.Equal(req.Raw, orig) || len(req.Raw) >= len(orig) {
+		t.Fatalf("a head-anchored fire must shrink the body, got %d (in %d)", len(req.Raw), len(orig))
+	}
+	if headEnd > len(req.Raw) || !bytes.Equal(orig[:headEnd], req.Raw[:headEnd]) {
+		t.Fatalf("head-anchored fire changed the stable head bytes [0,%d) — would burst the dominant cache", headEnd)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
+		t.Fatalf("head-anchored body failed to decode: %v", err)
+	}
+}

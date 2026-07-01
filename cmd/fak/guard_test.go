@@ -609,7 +609,7 @@ func TestFormatAuditSummary(t *testing.T) {
 		CompactionBudget:        48000,
 		CompactionAnchorStarved: 1,
 	})
-	for _, want := range []string{"fak-slice diagnostic", "anchor-starved x1", "re-anchor/M2 needed"} {
+	for _, want := range []string{"fak-slice diagnostic", "anchor-starved x1", "--compact-anchor-head"} {
 		if !strings.Contains(anchorStarved, want) {
 			t.Errorf("anchor-starved zero-slice diagnostic missing %q:\n%s", want, anchorStarved)
 		}
