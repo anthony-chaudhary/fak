@@ -13,6 +13,11 @@ package main
 //	    --baseline real|strawman|none [--baseline-desc D] --net \
 //	    --scope "..." --provenance WITNESSED|OBSERVED|MODELED|SIMULATED \
 //	    --witness "..." [--realized=false --gate-reason "..."]
+//	fak claim-check --witness-for "<claim>" [--json]   -> the #2153 scaffold: classify
+//	    the claim (shipped|visual|perf|logic) and emit the cheapest proving command or
+//	    test skeleton (a plan, never a verdict)
+//	fak claim-check --witness-self-test [--json]       -> grade the one-claim-per-class
+//	    scaffold corpus (exit 0 iff every sample classifies as labeled)
 //
 // Exit codes are designed for `fak claim-check ... && ship`: 0 = net-true (a real
 // gain at the stated scope), 3 = graded but NOT a pass (strawman or not-yet), 2 =
@@ -50,6 +55,8 @@ func runClaimCheck(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 		witness    = fs.String("witness", "", "Q5: how a third party re-derives it (a test name, an artifact + reproduce command)")
 		realized   = fs.Bool("realized", true, "Q6: on by default (true), or off (false) — pair --realized=false with --gate-reason")
 		gateReason = fs.String("gate-reason", "", "Q6: the stated reason a gain ships OFF by default (makes it an honest gate, not a seam)")
+		witnessFor = fs.String("witness-for", "", "emit the cheapest witness scaffold for this claim (shipped|visual|perf|logic) — a plan, never a verdict (#2153)")
+		witnessST  = fs.Bool("witness-self-test", false, "grade the built-in one-claim-per-class witness-scaffold corpus and exit 0 iff every sample classifies as labeled")
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, claimCheckUsage) }
 	if err := fs.Parse(argv); err != nil {
@@ -58,6 +65,12 @@ func runClaimCheck(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 
 	if *selfTest {
 		return runClaimCheckSelfTest(stdout, *asJSON)
+	}
+	if *witnessST {
+		return runClaimCheckWitnessSelfTest(stdout, *asJSON)
+	}
+	if *witnessFor != "" {
+		return runClaimCheckWitnessFor(stdout, stderr, *witnessFor, *asJSON)
 	}
 
 	// Build the claim to grade: from a JSON file/stdin, or from the flags.
@@ -133,6 +146,56 @@ func runClaimCheckSelfTest(stdout io.Writer, asJSON bool) int {
 	return 1
 }
 
+// runClaimCheckWitnessFor emits the #2153 scaffold: the claim's failure class and the
+// cheapest command/skeleton that would prove it. Always exit 0 on a well-formed claim —
+// the plan is advice that lowers the cost of proof; it never asserts the proof passed.
+func runClaimCheckWitnessFor(stdout, stderr io.Writer, claim string, asJSON bool) int {
+	plan := claimcheck.WitnessFor(claim)
+	if asJSON {
+		if err := writeIndentedJSON(stdout, plan); err != nil {
+			fmt.Fprintf(stderr, "fak claim-check: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "claim:     %s\nclass:     %s\nrationale: %s\ncommand:   %s\nreference: %s\n",
+		plan.Claim, plan.Class, plan.Rationale, plan.Command, plan.Reference)
+	if plan.Skeleton != "" {
+		fmt.Fprintf(stdout, "skeleton:\n\n%s\n", plan.Skeleton)
+	}
+	fmt.Fprintln(stdout, "\nnote: a scaffold is a plan, not a verdict — run the command / land the test to hold the claim.")
+	return 0
+}
+
+// runClaimCheckWitnessSelfTest grades the one-claim-per-class scaffold corpus and
+// reports whether every sample classified as labeled with a runnable plan. Exit 0 iff
+// all pass — the scaffold's own witness, the same discipline as --self-test.
+func runClaimCheckWitnessSelfTest(stdout io.Writer, asJSON bool) int {
+	cases, passed := claimcheck.RunWitnessFixture()
+	allOK := passed == len(cases)
+	if asJSON {
+		_ = writeIndentedJSON(stdout, map[string]any{
+			"cases":  cases,
+			"passed": passed,
+			"total":  len(cases),
+			"ok":     allOK,
+		})
+	} else {
+		for _, c := range cases {
+			mark := "ok"
+			if !c.OK {
+				mark = "MISMATCH"
+			}
+			fmt.Fprintf(stdout, "  %-30s expect=%-8s got=%-8s %s\n", c.Name, c.Expect, c.Got, mark)
+		}
+		fmt.Fprintf(stdout, "claim-check witness-self-test: %d/%d classified as expected\n", passed, len(cases))
+	}
+	if allOK {
+		return 0
+	}
+	return 1
+}
+
 // parseBaselineKind maps the --baseline flag word to a BaselineKind. An empty value
 // is the explicit "none" (no "vs what" stated) so a claim built from flags without a
 // baseline honestly fails Q1 rather than erroring.
@@ -174,6 +237,11 @@ usage:
   fak claim-check --statement S --baseline real|strawman|none [--baseline-desc D]
                   [--net] --scope S --provenance WITNESSED|OBSERVED|MODELED|SIMULATED
                   --witness S [--realized=false --gate-reason R] [--json]
+  fak claim-check --witness-for "<claim>" [--json]      (#2153: classify the claim
+                  shipped|visual|perf|logic and emit the cheapest proving command or
+                  test skeleton — a scaffold, never a verdict; always exit 0)
+  fak claim-check --witness-self-test [--json]          (grade the scaffold's own
+                  one-claim-per-class corpus; exit 0 iff all classify as labeled)
 
 the six questions (docs/standards/net-true-value.md):
   Q1 baseline    measured against the real (tuned) alternative, not a strawman
