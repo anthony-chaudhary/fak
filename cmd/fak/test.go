@@ -39,6 +39,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/testroute"
 )
 
 func cmdTest(argv []string) { os.Exit(runTest(os.Stdout, os.Stderr, argv)) }
@@ -90,16 +92,14 @@ func planTest(goos string, args []string) (testPlan, error) {
 	}
 	p.GoArgs = append(p.GoArgs, passthrough...)
 
-	if goos == "windows" {
-		// Native `go test` is OS-policy-blocked here; route through test.ps1, which
-		// forwards every arg verbatim to `go test` inside WSL.
-		p.ViaWSL = true
-		p.Note = "windows host: routing go test to WSL via test.ps1 (native go test is OS-policy-blocked)"
-		p.Argv = append([]string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "test.ps1"}, p.GoArgs...)
-	} else {
-		p.Note = goos + " host: running go test directly"
-		p.Argv = append([]string{"go", "test"}, p.GoArgs...)
-	}
+	route := testroute.Decide(testroute.Probe{
+		GOOS:              goos,
+		NativeTestAllowed: goos != "windows",
+		WSLPresent:        goos == "windows",
+	})
+	p.ViaWSL = route.Kind == testroute.KindWSL
+	p.Note = route.Reason
+	p.Argv = testroute.Command(route.CommandTemplate, p.GoArgs)
 	return p, nil
 }
 
