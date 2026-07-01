@@ -281,6 +281,50 @@ dos verify --workspace . <PLAN> <PHASE> --json
 For non-git effects that have no DOS CLI witness, gather an independent read-back from the
 owning system and record `unwitnessed` if no such read-back exists.
 
+## 8. Failed reverify reopen drill
+
+If an issue was closed and a later reverify fails (`dos commit-audit`, `dos verify`,
+parent-rerun tests, or an independent created-file read-back), reopen it as a new
+recovery item. Do not edit away the original close comment; append the failed reverify
+evidence so the close arm can learn from the false close.
+
+Required reopen comment fields:
+
+- `failed_sha`: the commit that originally justified the close.
+- `failed_witness`: the command or read-back that failed.
+- `failure`: the closed-vocabulary reason when one exists, or the shortest concrete
+  reason from the verifier output.
+- `requeue_as`: the new worker id or queue row that will retry the issue.
+- `expected_paths`: the narrow path scope for the retry.
+- `next_witness`: the witness required before the issue can close again.
+
+Dry-run example for fake issue `#0000`:
+
+```text
+Reopening after failed reverify.
+
+failed_sha: deadbee
+failed_witness: dos commit-audit --workspace . deadbee
+failure: missing diff witness for the claimed fix
+requeue_as: w-0000-r1
+expected_paths: docs/example.md
+next_witness: commit-audit OK plus parent-rerun markdown check
+
+The previous close is not accepted as witnessed. The retry keeps the issue open until
+an independent witness corroborates the new claim.
+```
+
+Safe sequence:
+
+```bash
+gh issue reopen 0000 --comment "$(cat reopen-comment.txt)"
+```
+
+Then add a retry row to the dispatch manifest (`w-0000-r1`) and exclude the failed SHA
+from the verified-close denominator. If the reverify failure was itself a false alarm,
+add a follow-up comment with the recovered witness command and close only after the
+recovered witness is independently reproducible.
+
 ## Definition of done for a dispatch run
 
 - [ ] Every selected issue has a manifest row with issue, worker id, lane, and expected
