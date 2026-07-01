@@ -5,7 +5,7 @@ fields a real LiveCodeBench result must carry, but it does not report any pass r
 
 Upstream: [LiveCodeBench](https://github.com/livecodebench/livecodebench) (official
 `lcb_runner` harness). Repo epic: [#2085](https://github.com/anthony-chaudhary/fak/issues/2085).
-Runbook stub: [LIVECODEBENCH-RUNBOOK.md](LIVECODEBENCH-RUNBOOK.md).
+Runbook: [LIVECODEBENCH-RUNBOOK.md](LIVECODEBENCH-RUNBOOK.md).
 
 ## Result Ledger
 
