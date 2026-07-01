@@ -52,8 +52,8 @@ func TestResidentMatMulBatchMatchesPerToken(t *testing.T) {
 	ap := layerPrefix(0) + "self_attn."
 
 	cases := []struct {
-		name     string
-		out, in  int
+		name    string
+		out, in int
 	}{
 		{ap + "q_a_proj.weight", qLora, H},
 		{ap + "q_b_proj.weight", nH * qkHead, qLora},

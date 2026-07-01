@@ -67,15 +67,15 @@ func gardenDispatchRouterFor(t *testing.T) {
 }
 
 type gardenDispatchResultJSON struct {
-	Schema     string `json:"schema"`
-	DryRun     bool   `json:"dry_run"`
-	Walked     int    `json:"walked"`
-	Considered int    `json:"considered"`
-	Admitted   int    `json:"admitted"`
-	Spawned    int    `json:"spawned"`
+	Schema     string         `json:"schema"`
+	DryRun     bool           `json:"dry_run"`
+	Walked     int            `json:"walked"`
+	Considered int            `json:"considered"`
+	Admitted   int            `json:"admitted"`
+	Spawned    int            `json:"spawned"`
 	SkippedBy  map[string]int `json:"skipped_by"`
-	Verdict    string `json:"verdict"`
-	LoopAdmit  bool   `json:"loop_admit"`
+	Verdict    string         `json:"verdict"`
+	LoopAdmit  bool           `json:"loop_admit"`
 	Results    []struct {
 		ID          int    `json:"id"`
 		Lane        string `json:"lane"`

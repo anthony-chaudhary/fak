@@ -51,6 +51,7 @@ var SuccessClaimRe = regexp.MustCompile(
 		`no (issues|errors|problems)( on my end)?|no action needed|nothing (to fix|else needed|further needed)|` +
 		`all good|all clear|looks good( to me)?|hook (ran|runs|executed|worked|behaved) ` +
 		`(successfully|cleanly|correctly|properly|as expected)|completed without issue)\b`)
+
 // stopErrorRe matches how a FAILED Stop hook genuinely surfaces in a live transcript.
 // The harness renders it as a user-role isMeta event whose content begins "Stop hook
 // feedback:" and carries a failure tail — "No stderr output" is the one the memory_sync
@@ -289,6 +290,7 @@ func claimLooksQuoted(text string, start, end int) bool {
 	}
 	return false
 }
+
 // assistantText pulls human-readable assistant text out of one transcript JSON event,
 // or "" if the event is not assistant prose. Tolerant of the two common shapes:
 // {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}} and a

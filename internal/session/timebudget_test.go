@@ -279,8 +279,8 @@ func TestTimeBudgetAndTokenBudgetAreIndependentAxes(t *testing.T) {
 	tbl2 := NewTable()
 	tbl2.SetBudget("s2", Budget{TurnsLeft: 1, TokensLeft: Unbounded})
 	tbl2.StartTimeBudget("s2", time.Hour, t0)
-	tbl2.Decide("s2")                  // consumes the one turn
-	turnVerdict := tbl2.Decide("s2")   // now exhausted on turns
+	tbl2.Decide("s2")                // consumes the one turn
+	turnVerdict := tbl2.Decide("s2") // now exhausted on turns
 	if turnVerdict.Proceed || turnVerdict.Reason != ReasonBudgetTurns {
 		t.Fatalf("token/turn axis should be exhausted: %+v", turnVerdict)
 	}
