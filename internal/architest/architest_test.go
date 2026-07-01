@@ -83,6 +83,7 @@ var tier = map[string]int{
 	"taskdecision":         1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
 	"whatschanged":         1,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
 	"livecodebench":        1,                // pure LiveCodeBench fixture/report smoke; no network/model, off the hot path.
+	"readmevisualaudit":    1,                // README visual-audit fold over git ls-files + text parsing; imports strmatch(1)+windowgate(1), off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
 	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
