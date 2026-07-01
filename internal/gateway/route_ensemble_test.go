@@ -6,6 +6,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/engine"
+	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -143,6 +144,34 @@ func TestEnsembleMembersAdjudicatedIndividually(t *testing.T) {
 	}
 	if got := after.EngineCalls - before.EngineCalls; got != 3 {
 		t.Fatalf("ensemble dispatched %d engine calls, want 3 (all members allowed + local)", got)
+	}
+}
+
+func TestGatewayStampsFusedTurnFamilies(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	toolCall, err := s.buildCall(ctx, "allow_read", `{}`, true, "", "turn-fused")
+	if err != nil {
+		t.Fatalf("buildCall: %v", err)
+	}
+	member := memberCall(toolCall, "test")
+
+	if got := fusedturn.Classify(toolCall); got != fusedturn.ClassClassical {
+		t.Fatalf("gateway tool call class = %v, want classical", got)
+	}
+	if got := fusedturn.Classify(member); got != fusedturn.ClassWeight {
+		t.Fatalf("gateway ensemble member class = %v, want weight", got)
+	}
+
+	ft := fusedturn.Fuse([]*abi.ToolCall{member, toolCall})
+	if !ft.Fused() {
+		t.Fatalf("fused turn was not recognized: summary=%+v", ft.Summary())
+	}
+	rows := ft.Adjudicate(ctx, s.k)
+	families := fusedturn.GovernedFamilies(rows)
+	if len(families) != 2 || families[0] != fusedturn.ClassClassical || families[1] != fusedturn.ClassWeight {
+		t.Fatalf("governed families = %v, want [classical weight]; rows=%+v", families, rows)
 	}
 }
 

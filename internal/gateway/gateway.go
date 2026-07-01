@@ -44,6 +44,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
+	"github.com/anthony-chaudhary/fak/internal/fusedturn"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -1649,13 +1650,13 @@ func memberCall(base *abi.ToolCall, model string) *abi.ToolCall {
 	for k, v := range base.Meta {
 		meta[k] = v
 	}
-	return &abi.ToolCall{
+	return fusedturn.Tag(&abi.ToolCall{
 		Tool:    base.Tool,
 		Args:    base.Args,
 		TraceID: base.TraceID,
 		Meta:    meta,
 		Engine:  model,
-	}
+	}, fusedturn.ClassWeight)
 }
 
 // buildCall converts untrusted wire input into an abi.ToolCall. The raw argument
@@ -1695,7 +1696,7 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// cross-call correlation; absent, we mint a fresh non-empty id rather than fall
 	// back to the empty shared-default trace (which would pool every served session
 	// onto one taint high-water mark).
-	tc := &abi.ToolCall{Tool: tool, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}
+	tc := fusedturn.Tag(&abi.ToolCall{Tool: tool, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, fusedturn.ClassClassical)
 	// Per-call model routing (opt-in): classify this tool call into a routing Subject
 	// and, for a single-model PICK, bind the chosen model to Engine HERE — before the
 	// caller hands tc to k.Syscall. That is the load-bearing residency contract: the
