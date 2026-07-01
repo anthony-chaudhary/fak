@@ -108,6 +108,9 @@ var offWithReason = map[string]string{
 	// Proxy-filled vDSO changes cross-turn cache residency and is only sound in a
 	// proxy-closed world where the principal is named and writes route through fak.
 	"vdso-proxy-fill": "warms vDSO from admitted inbound proxy tool_result blocks -- opt-in until the principal is named and writes touching the same resource reach fak (proxy-closed world)",
+	// Re-anchoring can intentionally burst the recent provider-cache breakpoint once;
+	// it stays opt-in until a live session-turn horizon proves the burst pays back.
+	"compact-anchor-head": "re-anchors the protected compact-history prefix and can burst the recent provider-cache breakpoint once -- opt-in until a live session-turn horizon proves the burst pays back",
 	// Self-hosted serving-engine cache-reset family: every knob needs an external engine +
 	// its control URL/admin key, so none can default on without a configured engine. The
 	// whole family is gated behind --engine-cache-engine being set.
