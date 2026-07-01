@@ -69,6 +69,24 @@ func TestBuildLaunchArgv(t *testing.T) {
 			opts: launchOpts{command: "opencode", useGuard: true, skipPermissions: true},
 			want: []string{fakBin, "guard", "--", "opencode"},
 		},
+		{
+			// Ultracode injects the session-only --settings for Claude, after the bypass flag
+			// and before any passthrough — parity with the `f` shortcut's workflow-on default.
+			name: "claude ultracode on adds --settings after the bypass flag",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true},
+			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--settings", `{"ultracode":true}`},
+		},
+		{
+			name: "claude ultracode on with passthrough keeps --settings before passthrough",
+			opts: launchOpts{command: "claude", useGuard: true, skipPermissions: true, ultracode: true, passthrough: []string{"-p", "hi"}},
+			want: []string{fakBin, "guard", "--", "claude", "--dangerously-skip-permissions", "--settings", `{"ultracode":true}`, "-p", "hi"},
+		},
+		{
+			// Ultracode is Claude-specific; --settings is never handed to a non-Claude agent.
+			name: "codex ultracode on gets no --settings",
+			opts: launchOpts{command: "codex", useGuard: true, skipPermissions: true, ultracode: true},
+			want: []string{fakBin, "guard", "--", "codex", "--dangerously-bypass-approvals-and-sandbox"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

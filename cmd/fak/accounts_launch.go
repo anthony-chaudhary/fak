@@ -35,8 +35,16 @@ type launchOpts struct {
 	command         string   // agent command to start (default "claude")
 	useGuard        bool     // wrap the agent in `fak guard` (kernel adjudication + vCache)
 	skipPermissions bool     // pass --dangerously-skip-permissions to the agent
+	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
+
+// ultracodeSettingsArg is the session-only knob the `f` shortcut injects to put Claude in
+// ultracode: xhigh per-message reasoning PLUS dynamic multi-agent workflow orchestration. It is
+// NOT a persisted settings.json value (writing it there would make it sticky, and it is not how
+// Claude Code models the mode) — it must be handed per-launch via --settings. buildLaunchArgv
+// only emits it for Claude, since --settings is Claude-specific.
+const ultracodeSettingsArg = `{"ultracode":true}`
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
@@ -78,6 +86,16 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 			agentCmd = append(agentCmd, flag)
 		}
 	}
+	// Ultracode (workflow mode) is Claude-only and session-only: emit --settings for a Claude
+	// launch so a fak launch defaults to the same workflow-on posture the `f` shortcut sets.
+	// Gated on the agent being Claude exactly as launchSkipPermsFlag gates, since --settings is
+	// a Claude-specific flag; other agents get nothing.
+	if o.ultracode {
+		switch guardAgentBaseName(o.command) {
+		case "claude", "claude-code":
+			agentCmd = append(agentCmd, "--settings", ultracodeSettingsArg)
+		}
+	}
 	agentCmd = append(agentCmd, o.passthrough...)
 	if !o.useGuard {
 		return agentCmd
@@ -100,6 +118,7 @@ type launchParams struct {
 	useHeadroom  bool // default true — order the rotation by the live runtime headroom signal
 	useGuard     bool // default true
 	skipPerms    bool // default true
+	ultracode    bool // default true — put Claude in ultracode (workflow) mode via --settings
 	dryRun       bool // print the plan, do not exec
 	passthrough  []string
 	registryPath string
@@ -192,6 +211,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		command:         command,
 		useGuard:        p.useGuard,
 		skipPermissions: p.skipPerms,
+		ultracode:       p.ultracode,
 		passthrough:     p.passthrough,
 	})
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
@@ -214,8 +234,18 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
 	}
 	fmt.Fprintf(stderr, "  login             = %s (can_serve=%t)\n", home.LoginStatus(), home.CanServe())
+	ultracodeWord := "off (--ultracode=false)"
+	if p.ultracode {
+		switch guardAgentBaseName(command) {
+		case "claude", "claude-code":
+			ultracodeWord = `on (--settings '{"ultracode":true}' — xhigh reasoning + workflow orchestration)`
+		default:
+			ultracodeWord = fmt.Sprintf("n/a (%s is not Claude; --settings not applied)", command)
+		}
+	}
 	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
+	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
 	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(argv, " "))
 
 	if p.dryRun {

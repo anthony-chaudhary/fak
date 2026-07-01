@@ -44,7 +44,9 @@ import (
 //	fak accounts status [--json]       observable login report: closed status, can_serve, warnings, next action
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
-//	fak accounts sync                  project the registry into the dos + job roster views
+//	fak accounts sync                  project the registry into the dos + job roster views AND
+//	                                   deep-merge defaults.settings into each account's settings.json
+//	                                   (the in-tree replacement for the external csync chore)
 //	fak accounts check                 RED (exit 1) if a generated view drifts from the registry
 //	fak accounts validate              load the registry and check every invariant (incl. tombstones resolve)
 //	fak accounts version               this binary's build + the registry schema/family it supports + verb set
@@ -88,6 +90,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
+	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
@@ -255,6 +258,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			useHeadroom:  !*noHeadroom,
 			useGuard:     *launchGuard,
 			skipPerms:    *launchSkipPerms,
+			ultracode:    *launchUltracode,
 			dryRun:       *dryRun,
 			passthrough:  fs.Args(),
 			registryPath: *registryPath,
@@ -657,7 +661,46 @@ func syncViews(stdout, stderr io.Writer, registryPath, dosView, jobView string) 
 		fmt.Fprintf(stdout, "synced %s view -> %s\n", t.view, t.path)
 		wrote++
 	}
+	// Project the registry's per-account settings defaults (defaults.settings) into every active
+	// account's own settings.json — the in-tree replacement for the external csync chore, so a
+	// `sync` leaves the whole roster's bypass/permission defaults consistent, not just the roster
+	// view files. A registry with no defaults.settings block is a clean no-op.
+	if code := projectSettingsForHomes(stdout, stderr, reg, reg.Homes); code != 0 {
+		return wrote, code
+	}
 	return wrote, 0
+}
+
+// projectSettingsForHomes deep-merges the registry's defaults.settings block into each home's
+// own settings.json (via the atomic writeSettingsFile) and prints the per-account report csync
+// used to: one "updated"/"ok (no change)" line per acted-on seat and a trailing count. A
+// registry with no defaults.settings block prints one note and returns 0 (nothing to project).
+// It returns a process exit code (0 on success, 1 on a write failure). Shared by the `sync`
+// verb and `add`'s final step so both seed settings.json identically.
+func projectSettingsForHomes(stdout, stderr io.Writer, reg accounts.Registry, homes []accounts.Home) int {
+	results, ok, err := reg.ProjectSettings(homes, writeSettingsFile)
+	if !ok {
+		fmt.Fprintln(stdout, "settings: registry has no defaults.settings block — nothing to project")
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: project settings: %v\n", err)
+		return 1
+	}
+	changed := 0
+	for _, r := range results {
+		switch {
+		case r.Skipped != "":
+			fmt.Fprintf(stdout, "  settings %-24s skipped (%s)\n", r.Name, r.Skipped)
+		case r.Changed:
+			fmt.Fprintf(stdout, "  settings %-24s updated -> %s\n", r.Name, r.Path)
+			changed++
+		default:
+			fmt.Fprintf(stdout, "  settings %-24s ok (no change)\n", r.Name)
+		}
+	}
+	fmt.Fprintf(stdout, "settings: %d account(s) changed\n", changed)
+	return 0
 }
 
 // viewTarget pairs a view name with its on-disk path.
@@ -693,6 +736,30 @@ func writeViewFile(path, text string) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 	if _, err := tmp.WriteString(text); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// writeSettingsFile writes an account's settings.json atomically (temp + rename), creating the
+// config dir if absent so a brand-new seat's file lands. It is the []byte sibling of
+// writeViewFile — same crash-safe shape, a distinct temp prefix — and is the writeFn the
+// settings projection is handed.
+func writeSettingsFile(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
 		return err
 	}

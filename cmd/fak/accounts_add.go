@@ -56,9 +56,12 @@ type addParams struct {
 //  4. probe the OAuth profile endpoint for the email + account UUID — ground truth that also
 //     proves the credential works.
 //  5. seed the dir's markers so every consumer recognizes it: .claude.json (identity, so the
-//     roster shows WHO it is, not "-") and projects/ (the fleet discovery gate).
+//     roster shows WHO it is, not "-"), projects/ (the fleet discovery gate), and settings.json
+//     (the registry's defaults.settings, so the seat launches WITH the bypass/permission
+//     defaults instead of "losing" them until a later sync).
 //  6. upsert the canonical registry record (identity + policy) and SaveRegistry.
-//  7. regenerate the roster views (sync) so the dos + job rosters reflect the new account.
+//  7. regenerate the roster views (sync) so the dos + job rosters reflect the new account (this
+//     also re-projects settings.json across the whole roster).
 func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	if p.name == "" {
 		fmt.Fprintln(stderr, "usage: fak accounts add --name <name> [--reserved] [--chrome-profile P] [--no-login [--token -]]")
@@ -147,6 +150,17 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
 		fmt.Fprintf(stderr, "fak accounts: warning: create projects/ marker: %v\n", err)
+	}
+	// Seed the seat's settings.json from the registry's per-account defaults (defaults.settings)
+	// so the new account launches WITH the bypass/permission defaults, not without them until a
+	// later `sync`. Claude reads only its own settings.json, so this is what stops the bypass
+	// default "getting lost" for a brand-new seat. Scoped to the just-added home, and — like the
+	// .claude.json/projects markers above — done regardless of --no-sync, since it is part of
+	// making the seat usable, not a roster-view refresh. A registry with no defaults.settings
+	// block is a clean no-op.
+	newHome := accounts.Home{Name: rosterName, Dir: dir}
+	if code := projectSettingsForHomes(stdout, stderr, reg, []accounts.Home{newHome}); code != 0 {
+		fmt.Fprintln(stderr, "fak accounts: warning: could not seed settings.json for the new seat")
 	}
 
 	// Step 6: upsert the canonical registry record.
