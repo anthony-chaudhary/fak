@@ -24,12 +24,51 @@ import (
 // REAL Claude Code transcript (driving every tool result back through the SHIPPED gate,
 // so heavy results page out and an injection/secret result seals); with no --session it
 // runs a hermetic demo over the committed synthetic fixture and emits cdb-report.json.
+// stripFlags removes any `--name value` or `--name=value` occurrence (for the given bare
+// names, with either one or two leading dashes) from argv, so a sub-dispatch's own
+// flag.ExitOnError FlagSet — which does not declare the caller's already-consumed flags —
+// does not fatally choke on them (e.g. cmdDebug's --cmd/--dir forwarded into
+// cmdDebugContextPlanPreview's own, disjoint flag set).
+func stripFlags(argv []string, names ...string) []string {
+	strip := make(map[string]bool, len(names))
+	for _, n := range names {
+		strip["-"+n] = true
+		strip["--"+n] = true
+	}
+	out := make([]string, 0, len(argv))
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if eq := strings.Index(a, "="); eq > 0 && strip[a[:eq]] {
+			continue // --name=value: one token, no following value to skip
+		}
+		if strip[a] {
+			i++ // --name value: also skip the following value token
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 func cmdDebug(argv []string) {
+	// context-plan-preview (#1574) takes its own flag set (--intent/--pins/--budget-tokens/
+	// etc., not the cdb ingest/attach flags below), so it must dispatch BEFORE the top-level
+	// FlagSet below parses argv — that parse uses flag.ExitOnError and would otherwise kill
+	// the process on the first preview-only flag it doesn't recognize (e.g. --intent).
+	for i, a := range argv {
+		isPreview := (a == "--cmd" && i+1 < len(argv) && argv[i+1] == "context-plan-preview") ||
+			a == "-cmd=context-plan-preview" || a == "--cmd=context-plan-preview"
+		if isPreview {
+			cmdDebugContextPlanPreview(stripFlags(argv, "cmd", "dir", "session", "list"))
+			return
+		}
+	}
+
 	fs := flag.NewFlagSet("debug", flag.ExitOnError)
 	list := fs.Bool("list", false, "discover real Claude Code session transcripts on this machine and print the `fak debug --session <path>` to run for each (most-recent first)")
 	session := fs.String("session", "", "path to a Claude Code session .jsonl to ingest as a core image (default: the committed fixture)")
 	dir := fs.String("dir", "cdb-image", "directory for the persisted core image (attached if it already holds one and --session is empty)")
-	cmd := fs.String("cmd", "report", "report | html | info | bt | x | ws | grep | tombstone | context-query | context-diff")
+	cmd := fs.String("cmd", "report", "report | html | info | bt | x | ws | grep | tombstone | context-query | context-diff | context-plan-preview")
 	query := fs.String("query", "what refund fee did the user's account show?", "the follow-up question to demand-page a working set for (cmd=ws/report)")
 	step := fs.Int("step", 0, "page step to examine (cmd=x)")
 	grepPat := fs.String("grep", "", "descriptor pattern to search the page table for (cmd=grep)")
