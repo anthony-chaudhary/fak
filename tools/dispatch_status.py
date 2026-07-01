@@ -128,6 +128,37 @@ def _last_json(text: str) -> dict[str, Any]:
     return {}
 
 
+def git_path(root: Path, name: str) -> Path:
+    try:
+        proc = subprocess.run(["git", "rev-parse", "--git-path", name], cwd=root,
+                              capture_output=True, text=True, timeout=5,
+                              creationflags=_win_creationflags())
+    except (subprocess.TimeoutExpired, OSError):
+        return root / ".git" / name
+    if proc.returncode != 0:
+        return root / ".git" / name
+    path = (proc.stdout or "").strip()
+    return (root / path).resolve() if path else root / ".git" / name
+
+
+def merge_state(root: Path) -> dict[str, Any]:
+    merge_head = git_path(root, "MERGE_HEAD")
+    present = False
+    try:
+        present = merge_head.exists() and bool(merge_head.read_text(encoding="utf-8").strip())
+    except OSError:
+        present = False
+    out: dict[str, Any] = {
+        "merge_in_progress": present,
+        "merge_head": str(merge_head),
+    }
+    if present:
+        out["next_action"] = (
+            "wait for MERGE_HEAD to clear before starting new worker edits; "
+            "partial path commits are unsafe while a peer merge is in progress")
+    return out
+
+
 def has_key_named(obj: Any, key: str) -> bool:
     if isinstance(obj, dict):
         return key in obj or any(has_key_named(v, key) for v in obj.values())
@@ -634,6 +665,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     hook_failures = backend_hook_failures(root / RUNS_DIRNAME)
     guard = guard_coverage(root / RUNS_DIRNAME)
     run_status = read_run_status_digests(root)
+    merge = merge_state(root)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -641,7 +673,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          backend_health=backend_health,
                          backend_stub_rate=backend_stub_rate,
                          hook_failures=hook_failures, guard=guard,
-                         run_status=run_status)
+                         run_status=run_status, merge=merge)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -653,7 +685,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   backend_stub_rate: list[dict[str, Any]] | None = None,
                   hook_failures: list[dict[str, Any]] | None = None,
                   guard: dict[str, Any] | None = None,
-                  run_status: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  run_status: list[dict[str, Any]] | None = None,
+                  merge: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -719,6 +752,13 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         reasons = [f"account '{acct.get('tag')}' weekly-capped — resets "
                    f"{weekly_cap.get('reset_text') or '?'} (holding spawn until "
                    f"{weekly_cap.get('until')}); the t2 glm/docs pool is unaffected"]
+
+    merge = merge or {}
+    if merge.get("merge_in_progress"):
+        ok = False
+        verdict = "MERGE_IN_PROGRESS"
+        reasons.insert(0, merge.get("next_action") or
+                       "wait for MERGE_HEAD to clear before starting worker edits")
 
     if wd.get("installed") is False:
         reasons.append("always-on watchdog NOT installed (register_dos_dispatch_watchdog.ps1)")
@@ -871,6 +911,11 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "errors": status_errors,
             "digests": run_status,
         },
+        "git": {
+            "merge_in_progress": bool(merge.get("merge_in_progress")),
+            "merge_head": merge.get("merge_head"),
+            "next_action": merge.get("next_action"),
+        },
         "fast": fast,
     }
 
@@ -946,6 +991,9 @@ def render(p: dict[str, Any]) -> str:
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
         lines.append(f"║ run truth : dos status {rs.get('count')} RID(s), errors={rs.get('errors')} [{bits}]")
+    git = p.get("git") or {}
+    if git.get("merge_in_progress"):
+        lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
     lines.append("╚═ " + " | ".join(p.get("reasons") or []))
     return "\n".join(lines)
 
@@ -1001,6 +1049,9 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     if rs.get("count"):
         out.append(f"- **run status source**: `dos status` digests for {rs.get('count')} RID(s), "
                    f"errors={rs.get('errors')}")
+    git = payload.get("git") or {}
+    if git.get("merge_in_progress"):
+        out.append(f"- **git wait state**: `MERGE_HEAD` present — {git.get('next_action')}")
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -1368,6 +1419,11 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     rs = payload.get("run_status") or {}
     if rs.get("errors"):
         buckets["action"].append(f"dos status had {rs.get('errors')} digest error(s)")
+    git = payload.get("git") or {}
+    if git.get("merge_in_progress"):
+        buckets["action"].append(
+            "peer merge in progress (MERGE_HEAD present); "
+            f"{git.get('next_action') or 'wait before starting worker edits'}")
 
     return buckets
 

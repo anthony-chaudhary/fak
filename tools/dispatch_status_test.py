@@ -209,6 +209,24 @@ class RenderTest(unittest.TestCase):
         self.assertIn("1 silent", text)
         self.assertIn("#465", text)
 
+    def test_merge_in_progress_reports_wait_action(self) -> None:
+        mod = load()
+        p = build(mod, merge={
+            "merge_in_progress": True,
+            "merge_head": "C:/work/fak/.git/MERGE_HEAD",
+            "next_action": "wait for MERGE_HEAD to clear before starting new worker edits",
+        })
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "MERGE_IN_PROGRESS")
+        self.assertTrue(p["git"]["merge_in_progress"])
+        self.assertIn("MERGE_HEAD", p["git"]["next_action"])
+        text = mod.render(p)
+        self.assertIn("MERGE_HEAD present", text)
+        self.assertIn("wait for MERGE_HEAD to clear", text)
+        slack = mod.slack_text(p)
+        self.assertIn("peer merge in progress", slack)
+        self.assertIn("wait for MERGE_HEAD", slack)
+
 
 class SilentWorkersFoldTest(unittest.TestCase):
     """build_payload folds the injected silent list into payload['workers'] and a reason."""
