@@ -47,10 +47,10 @@ class BindingClassifierTest(unittest.TestCase):
         refs = m.parse_git_log(_log(("abc1234", "fix(gateway): drop bad tool call", "Fixes #142.")))
         self.assertEqual(refs[142][0]["kind"], m.RESOLVING)
 
-    def test_ref_in_subject_is_resolving(self):
-        # A bare #N in the SUBJECT counts as resolving (fleet's loose convention).
+    def test_ref_in_subject_is_mention_without_close_verb(self):
+        # A bare #N in the SUBJECT is only a mention; resolving needs a close verb.
         refs = m.parse_git_log(_log(("abc1234", "fix(tools): NameError (#178)", "body")))
-        self.assertEqual(refs[178][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[178][0]["kind"], m.MENTION)
 
     def test_relates_to_in_body_is_mention_only(self):
         refs = m.parse_git_log(_log(("abc1234", "docs(memory): note", "Relates to #118 #130; context.")))
@@ -77,16 +77,30 @@ class BindingClassifierTest(unittest.TestCase):
         kinds = {r["kind"] for r in refs[50]}
         self.assertIn(m.RESOLVING, kinds)
 
-    def test_issue_noun_form_binds_resolving(self):
-        # The house close convention 'issue #N' (noun form, not a close-verb).
+    def test_issue_noun_form_is_mention_without_close_verb(self):
+        # Noun-form issue refs are prose mentions unless the same number also has
+        # an explicit close/fix/resolve #N binding.
         refs = m.parse_git_log(_log(("efc0e78", "feat(recall): persist index", "Close the false-exact gap (issue #501).")))
-        self.assertEqual(refs[501][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[501][0]["kind"], m.MENTION)
 
-    def test_issues_list_form_binds_all(self):
-        # 'issues #N, #M' must bind every number in the comma list.
+    def test_issues_list_form_is_mention_only(self):
+        # 'issues #N, #M' is often dependency prose; it must not resolve either number.
         refs = m.parse_git_log(_log(("e60b92e", "feat(agent): planner", "Lands the planner (issues #558, #565).")))
-        self.assertEqual(refs[558][0]["kind"], m.RESOLVING)
-        self.assertEqual(refs[565][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[558][0]["kind"], m.MENTION)
+        self.assertEqual(refs[565][0]["kind"], m.MENTION)
+
+    def test_issue_noun_dependency_regression_is_mention(self):
+        refs = m.parse_git_log(_log((
+            "1d00c878",
+            "docs(cli-reference): document the garden -> dispatch boundary",
+            "Fixes #1792.\n\n"
+            "This links the two dispatch issues #1791 builds on: #1404 and #1462.\n"
+            "The #1791 feature does not exist yet.",
+        )))
+        self.assertEqual(refs[1792][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[1791][0]["kind"], m.MENTION)
+        self.assertEqual(refs[1404][0]["kind"], m.MENTION)
+        self.assertEqual(refs[1462][0]["kind"], m.MENTION)
 
     def test_bare_prose_hash_is_still_mention(self):
         # The false-binding hazard: a bare '#499' with NO 'issue' anchor stays MENTION.
@@ -98,10 +112,8 @@ class BindingClassifierTest(unittest.TestCase):
         refs = m.parse_git_log(_log(("c0ffee1", "docs: note", "see #500 for context")))
         self.assertEqual(refs[500][0]["kind"], m.MENTION)
 
-    def test_open_witnessed_discovered_via_issue_noun_form(self):
-        # The rung's real payoff: 'issue #N' on a witnessed commit surfaces a
-        # shipped-but-still-OPEN fix as OPEN_WITNESSED (closable now).
-        refs = m.parse_git_log(_log(("ship777", "feat(recall): candidate index", "Close the gap (issue #74).")))
+    def test_open_witnessed_discovered_via_close_verb(self):
+        refs = m.parse_git_log(_log(("ship777", "feat(recall): candidate index", "Fixes #74.")))
         self.assertEqual(refs[74][0]["kind"], m.RESOLVING)
         g = m.grade_issue(_issue(74, state="OPEN"), refs[74], {"ship777": _audit()})
         self.assertEqual(g["bucket"], m.OPEN_WITNESSED)
