@@ -576,10 +576,12 @@ it resolves the target's gateway URL + model and gates an interactive launch on 
 /healthz probe. An unknown leading token still forwards to claude unchanged.
 
 --auto picks the backend for you: it probes every registered target's /healthz and ranks
-them by a documented policy — healthy or assumed-reachable first, then cheapest/most-local
-(cost_class asc: local < mac < gcp < anthropic), failing over past a DEAD choice (a down
-/healthz). It never lands on a dead gateway. Over-quota failover is not yet wired: the
-quota signal is an honest [stub] (not yet a live `+"`fak accounts`"+` read) that never
+them by a documented policy — LAUNCHABLE first (reachable AND its credential present), then
+cheapest/most-local (cost_class asc: local < mac < gcp < anthropic). It fails over past a
+DEAD choice (a down /healthz) OR a reachable-but-un-credentialed one (an empty bearer env
+var — the Mac gateway's /healthz is unauthenticated, so liveness alone is not launchability),
+never landing on a gateway it cannot launch against. Over-quota failover is not yet wired:
+the quota signal is an honest [stub] (not yet a live `+"`fak accounts`"+` read) that never
 excludes a target. `+"`--auto --json`"+` emits the ranked decision instead of launching.
 
 The overview pane composes selected pane models into one ranked spine so
