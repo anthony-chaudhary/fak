@@ -195,6 +195,8 @@ func main() {
 		cmdFeature(os.Args[2:])
 	case "index":
 		cmdIndex(os.Args[2:])
+	case "orient":
+		cmdOrient(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
 	case "workflow-audit":

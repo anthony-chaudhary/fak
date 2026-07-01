@@ -241,6 +241,11 @@ func usageCoreVerbs() {
                  dos.toml lane taxonomy by name/tree/description; 'docs' ranks the
                  curated INDEX.md doc map by relevance. A VIEW over dos.toml + INDEX.md,
                  never a competing source of truth. --json for tooling/MCP)
+  fak orient    --paths GLOB[,GLOB...] [--paths GLOB] [--json] [--root DIR]
+                (TASK-SCOPED ORIENTATION: for the files you are about to touch, print
+                 the owning lane/tree, architest tier, owning go test target, expected
+                 (fak <leaf>) stamp, and any live refs/fak/locks lease that overlaps
+                 the tree. This is the one-command orientation path before editing.)
 `)
 }
 

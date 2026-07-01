@@ -148,6 +148,7 @@ var verbManifest = []Verb{
 	{Name: "node", Synopsis: "the compute-node registry (register/list nodes)", Lane: "cmd"},
 	{Name: "nodeusage", Synopsis: "the compute-node-usage Slack surface for #node-usage", Lane: "cmd"},
 	{Name: "operator", Synopsis: "the human pacing brief: fold cadence/program/milestone into human/agent/watch/background buckets", Lane: "cmd"},
+	{Name: "orient", Synopsis: "task-scoped convention orientation for path globs: lane, arch tier, owning tests, stamp, and live lease", Lane: "devindex"},
 	{Name: "opt", Synopsis: "the optimization-fuser / RSI opt-target loop", Lane: "cmd"},
 	{Name: "policy", Synopsis: "the deployable capability floor: --dump | --check a policy manifest", Lane: "cmd"},
 	{Name: "preflight", Synopsis: "adjudicate one tool call against a policy (ALLOW/DENY by structure, no model in the loop)", Lane: "cmd"},

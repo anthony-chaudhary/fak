@@ -86,6 +86,7 @@ type Catalog struct {
 	// exact maps a bare file entry ("version") to its lane. Both lowercased.
 	prefixes map[string]string
 	exact    map[string]string
+	tiers    map[string]int
 }
 
 // FindRoot walks up from start looking for the dos.toml that marks the repo root,
@@ -117,12 +118,15 @@ func FindRoot(start string) string {
 // taxonomy is the load-bearing half. Load only errors when dos.toml is unreadable,
 // because without it there is no taxonomy to serve.
 func Load(root string) (*Catalog, error) {
-	c := &Catalog{Root: root, prefixes: map[string]string{}, exact: map[string]string{}}
+	c := &Catalog{Root: root, prefixes: map[string]string{}, exact: map[string]string{}, tiers: map[string]int{}}
 	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
 	if err != nil {
 		return nil, err
 	}
 	c.parseLanes(string(b))
+	if tiers, err := os.ReadFile(filepath.Join(root, "internal", "architest", "architest_test.go")); err == nil {
+		c.parseTiers(string(tiers))
+	}
 
 	if idx, err := os.ReadFile(filepath.Join(root, "INDEX.md")); err == nil {
 		c.parseDocs(string(idx))
