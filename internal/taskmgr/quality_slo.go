@@ -62,13 +62,9 @@ func (m *Manager) taskShapeWitness(taskID string) (ShapeWitness, error) {
 func (m *Manager) stepShapeWitness(taskID, stepID string) (ShapeWitness, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	task, ok := m.tasks[taskID]
-	if !ok {
-		return ShapeWitness{}, fmt.Errorf("taskmgr: task %q not found", taskID)
-	}
-	step, ok := task.steps[stepID]
-	if !ok {
-		return ShapeWitness{}, fmt.Errorf("taskmgr: step %q not found on task %q", stepID, taskID)
+	step, err := m.stepLocked(taskID, stepID)
+	if err != nil {
+		return ShapeWitness{}, err
 	}
 	return shapeWitnessForSLO(step.spec.QualitySLO), nil
 }

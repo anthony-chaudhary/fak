@@ -160,14 +160,9 @@ func (m *Manager) WitnessTask(taskID string, w Witness, refs []EvidenceRef) (Wit
 	claim := Claim{TaskID: taskID, State: task.state, Refs: refs}
 	m.mu.Unlock()
 
-	rec := w.WitnessClaim(claim)
-	if rec.CheckedUnixNano == 0 {
-		rec.CheckedUnixNano = m.clock().UnixNano()
-	}
-	if err := m.SetTaskWitness(taskID, rec); err != nil {
-		return WitnessRecord{}, err
-	}
-	return rec, nil
+	return m.applyWitness(claim, w, func(rec WitnessRecord) error {
+		return m.SetTaskWitness(taskID, rec)
+	})
 }
 
 // WitnessStep builds a Claim from the step's current claimed state plus refs, runs
@@ -191,11 +186,21 @@ func (m *Manager) WitnessStep(taskID, stepID string, w Witness, refs []EvidenceR
 	claim := Claim{TaskID: taskID, StepID: stepID, State: step.state, Refs: refs}
 	m.mu.Unlock()
 
+	return m.applyWitness(claim, w, func(rec WitnessRecord) error {
+		return m.SetStepWitness(taskID, stepID, rec)
+	})
+}
+
+// applyWitness runs w against claim outside the lock, stamps the check time when
+// the witness left it zero, stores the record via store, and returns it. The two
+// WitnessTask/WitnessStep tails share this body byte-for-byte apart from which
+// setter store binds.
+func (m *Manager) applyWitness(claim Claim, w Witness, store func(WitnessRecord) error) (WitnessRecord, error) {
 	rec := w.WitnessClaim(claim)
 	if rec.CheckedUnixNano == 0 {
 		rec.CheckedUnixNano = m.clock().UnixNano()
 	}
-	if err := m.SetStepWitness(taskID, stepID, rec); err != nil {
+	if err := store(rec); err != nil {
 		return WitnessRecord{}, err
 	}
 	return rec, nil
