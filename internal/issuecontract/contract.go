@@ -14,7 +14,7 @@
 // dispatchable/triage_only/refused verdict with closed-vocabulary reasons,
 // covered by contract_test.go and cmd/fak/issue_contract_test.go. The work
 // shipped incrementally citing narrower issues (#1727, #1755, #1761, and
-// others); history on origin/main cannot be rewritten, so this comment
+// others); published history cannot be rewritten, so this comment
 // restates the #1459 closure binding explicitly for the grep-based referee.
 package issuecontract
 
