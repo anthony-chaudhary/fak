@@ -164,3 +164,88 @@ func TestCassetteReplayHitAndMiss(t *testing.T) {
 		t.Fatalf("miss error meta = %q, want a cassette-miss message", miss.Meta["error"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1846 — NewCassette: the in-memory (non-file) constructor a captured
+// session builds its replay cassette through, carrying the 4-way usage split
+// (input/output/cache_read/cache_creation) onto the Complete() Meta.
+// ---------------------------------------------------------------------------
+
+func TestNewCassetteCarriesFourWayUsage(t *testing.T) {
+	ctx := context.Background()
+	tool, args := "search", []byte(`{"q":"hello"}`)
+	cas := engine.NewCassette([]engine.CassetteEntry{
+		{
+			Tool: tool,
+			Args: args,
+			Usage: engine.Usage{
+				InputTokens:         120,
+				OutputTokens:        30,
+				CacheReadTokens:     40,
+				CacheCreationTokens: 15,
+			},
+		},
+	})
+	ce := engine.NewCassetteEngine(cas)
+
+	res, err := ce.Complete(ctx, inlineCall(tool, string(args)))
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if res.Status != abi.StatusOK {
+		t.Fatalf("status = %v, want StatusOK; meta=%v", res.Status, res.Meta)
+	}
+	want := map[string]string{
+		"input_tokens":          "120",
+		"output_tokens":         "30",
+		"cache_read_tokens":     "40",
+		"cache_creation_tokens": "15",
+	}
+	for k, v := range want {
+		if res.Meta[k] != v {
+			t.Errorf("Meta[%q] = %q, want %q", k, res.Meta[k], v)
+		}
+	}
+}
+
+// A CassetteEntry with no Response gets a synthesized ok:true echo so Complete
+// always has a payload, even when the caller (e.g. a session-derived cassette)
+// never recorded the raw response body.
+func TestNewCassetteSynthesizesResponseWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+	tool, args := "search", []byte(`{"q":"hi"}`)
+	cas := engine.NewCassette([]engine.CassetteEntry{{Tool: tool, Args: args}})
+	ce := engine.NewCassetteEngine(cas)
+
+	res, err := ce.Complete(ctx, inlineCall(tool, string(args)))
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	body := resolvePayload(t, ctx, res.Payload)
+	if !strings.Contains(string(body), "search") || !strings.Contains(string(body), "ok") {
+		t.Fatalf("synthesized payload = %s, want a tool+ok echo", body)
+	}
+}
+
+// Two entries keyed by DIFFERENT (tool, args) pairs never collide — NewCassette
+// hashes each entry's own Tool+Args via CallKey.
+func TestNewCassetteKeysEachEntryIndependently(t *testing.T) {
+	ctx := context.Background()
+	cas := engine.NewCassette([]engine.CassetteEntry{
+		{Tool: "a", Args: []byte(`{"x":1}`), Usage: engine.Usage{InputTokens: 1}},
+		{Tool: "b", Args: []byte(`{"x":1}`), Usage: engine.Usage{InputTokens: 2}},
+	})
+	ce := engine.NewCassetteEngine(cas)
+
+	ra, err := ce.Complete(ctx, inlineCall("a", `{"x":1}`))
+	if err != nil {
+		t.Fatalf("Complete(a): %v", err)
+	}
+	rb, err := ce.Complete(ctx, inlineCall("b", `{"x":1}`))
+	if err != nil {
+		t.Fatalf("Complete(b): %v", err)
+	}
+	if ra.Meta["input_tokens"] != "1" || rb.Meta["input_tokens"] != "2" {
+		t.Fatalf("cross-tool key collision: a=%q b=%q", ra.Meta["input_tokens"], rb.Meta["input_tokens"])
+	}
+}

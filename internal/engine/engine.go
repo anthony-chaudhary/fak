@@ -27,10 +27,16 @@ import (
 )
 
 // Usage is the token accounting extracted from a completion (unit 42).
+// CacheReadTokens / CacheCreationTokens carry the provider prompt-prefix cache
+// axes (issue #1846) so a cassette built from a captured live session can report
+// the SAME 4-way usage split (input / cache_read / cache_creation / output) the
+// provider billed, not just the mock engine's synthesized input/output pair.
 type Usage struct {
-	InputTokens  int `json:"prompt_tokens"`
-	OutputTokens int `json:"completion_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens         int `json:"prompt_tokens"`
+	OutputTokens        int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +104,39 @@ func callKey(tool string, args []byte) string {
 // cassette entries whose keys the CassetteEngine will match on replay.
 func CallKey(tool string, args []byte) string { return callKey(tool, args) }
 
+// CassetteEntry is the exported shape of one recorded (tool, args) -> usage
+// interaction, for a caller that builds a Cassette IN-PROCESS (e.g. from a
+// captured guard/serve session) rather than loading one from a JSON file on disk.
+// Key is computed by NewCassette from Tool+Args via CallKey, so a caller never
+// hand-rolls the content hash.
+type CassetteEntry struct {
+	Tool     string
+	Args     []byte
+	Response json.RawMessage // raw result payload bytes ("" => a synthesized ok:true echo)
+	Usage    Usage
+	Meta     map[string]string
+}
+
+// NewCassette builds a Cassette from in-memory entries (the counterpart to
+// LoadCassette's from-disk path). Each entry is keyed by CallKey(Tool, Args), so a
+// CassetteEngine built from it replays the REAL usage the entry carries for that
+// exact (tool, args) pair — this is what lets `fak ablate --from-session` report
+// actual provider token usage instead of the mock engine's payload-size synthesis.
+// A missing Response is filled with a minimal synthesized echo so Complete always
+// has a payload to return.
+func NewCassette(entries []CassetteEntry) *Cassette {
+	c := &Cassette{entries: map[string]cassetteEntry{}}
+	for _, e := range entries {
+		resp := e.Response
+		if len(resp) == 0 {
+			resp = json.RawMessage(fmt.Sprintf(`{"tool":%q,"ok":true}`, e.Tool))
+		}
+		key := callKey(e.Tool, e.Args)
+		c.entries[key] = cassetteEntry{Key: key, Tool: e.Tool, Response: resp, Usage: e.Usage, Meta: e.Meta}
+	}
+	return c
+}
+
 // LoadCassette reads a cassette JSON file ({"entries":[...]}).
 func LoadCassette(path string) (*Cassette, error) {
 	b, err := os.ReadFile(path)
@@ -140,9 +179,11 @@ func (e *CassetteEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Re
 	ref := putBytes(ctx, ent.Response)
 	return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK,
 		Meta: map[string]string{
-			"engine":        "cassette",
-			"input_tokens":  itoa(ent.Usage.InputTokens),
-			"output_tokens": itoa(ent.Usage.OutputTokens),
+			"engine":                "cassette",
+			"input_tokens":          itoa(ent.Usage.InputTokens),
+			"output_tokens":         itoa(ent.Usage.OutputTokens),
+			"cache_read_tokens":     itoa(ent.Usage.CacheReadTokens),
+			"cache_creation_tokens": itoa(ent.Usage.CacheCreationTokens),
 		}}, nil
 }
 
