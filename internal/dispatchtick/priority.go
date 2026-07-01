@@ -88,3 +88,55 @@ func OrderLaneCandidates(cands []LaneCandidate, preferNewest bool) []int {
 	}
 	return out
 }
+
+// SmallnessCandidate is one orderable issue plus the two independent facts a
+// small-issue-first pass needs: its priority weight (see OrderLaneCandidates)
+// and whether it passed the 30-minute smallness lint (internal/issuesmallness
+// LintBody/ReportOpen, verdict == Pass). Small is a plain bool rather than the
+// lint's tri-state (pass/warn/fail) because the scheduler only ever needs a
+// binary "safe to fast-track" signal; a warn or fail issue is equally
+// ineligible for the small-first lane.
+type SmallnessCandidate struct {
+	Number int
+	Weight int
+	Small  bool
+}
+
+// OrderLaneCandidatesSmallFirst is the opt-in small-issue-first ordering (#1779):
+// a dry-run scheduler mode that lets an operator drain quick, lint-clean issues
+// ahead of slower ones WITHOUT bypassing priority or safety refusals. It never
+// replaces OrderLaneCandidates -- it is a distinct function a caller opts into
+// explicitly, exactly as OrderEligibleGenerationCandidates opts into generation
+// filtering. The tiering is, in order:
+//
+//  1. Priority weight, descending (identical to OrderLaneCandidates: a P0
+//     issue always outranks a P1/P2/default issue, small or not -- priority
+//     is never bypassed).
+//  2. Within an equal-weight tier, lint-small issues (Small == true) before
+//     non-small ones -- a small SAFE issue outranks a large one only when
+//     priority is already tied, never above a higher tier.
+//  3. The existing oldest/newest-by-number tiebreak, exactly as
+//     OrderLaneCandidates applies it.
+//
+// A caller that never sets Small gets byte-for-byte the same order as
+// OrderLaneCandidates, since every candidate ties on the new dimension.
+func OrderLaneCandidatesSmallFirst(cands []SmallnessCandidate, preferNewest bool) []int {
+	ordered := append([]SmallnessCandidate(nil), cands...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Weight != ordered[j].Weight {
+			return ordered[i].Weight > ordered[j].Weight
+		}
+		if ordered[i].Small != ordered[j].Small {
+			return ordered[i].Small
+		}
+		if preferNewest {
+			return ordered[i].Number > ordered[j].Number
+		}
+		return ordered[i].Number < ordered[j].Number
+	})
+	out := make([]int, len(ordered))
+	for i, c := range ordered {
+		out[i] = c.Number
+	}
+	return out
+}

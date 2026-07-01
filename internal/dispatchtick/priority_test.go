@@ -72,6 +72,60 @@ func TestOrderLaneCandidatesTierThenRecency(t *testing.T) {
 	}
 }
 
+func TestOrderLaneCandidatesSmallFirstWitness(t *testing.T) {
+	// The #1779 witness: within the SAME priority tier, a small issue that passed
+	// the 30-minute smallness lint (#200) outranks a large one that failed it
+	// (#100), even though #100 is older (would win the plain by-number tiebreak).
+	cands := []SmallnessCandidate{
+		{Number: 100, Weight: PriorityWeightDefault, Small: false},
+		{Number: 200, Weight: PriorityWeightDefault, Small: true},
+	}
+	if got := OrderLaneCandidatesSmallFirst(cands, false); !reflect.DeepEqual(got, []int{200, 100}) {
+		t.Fatalf("small-first order = %v, want [200 100] (small safe issue before large one)", got)
+	}
+}
+
+func TestOrderLaneCandidatesSmallFirstNeverBypassesPriority(t *testing.T) {
+	// Small-first only breaks ties WITHIN a priority tier -- it must never let a
+	// small P2/default issue jump ahead of a large P0/P1 issue. #1779's done
+	// condition: select small issues first "without bypassing priority or
+	// safety refusals."
+	cands := []SmallnessCandidate{
+		{Number: 900, Weight: PriorityWeightDefault, Small: true}, // small, but unlabeled
+		{Number: 10, Weight: PriorityWeightP0, Small: false},      // large, but P0
+		{Number: 500, Weight: PriorityWeightP1, Small: true},      // small AND P1
+	}
+	got := OrderLaneCandidatesSmallFirst(cands, false)
+	want := []int{10, 500, 900} // P0 first regardless of size, then P1, then default
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("small-first order = %v, want %v (priority tier always wins over size)", got, want)
+	}
+}
+
+func TestOrderLaneCandidatesSmallFirstMatchesPlainOrderWhenNoneMarkedSmall(t *testing.T) {
+	// Backward-compatible: when Small is never set (every candidate ties on the
+	// new dimension), OrderLaneCandidatesSmallFirst must reproduce
+	// OrderLaneCandidates byte-for-byte, both recency directions.
+	plain := []LaneCandidate{
+		{Number: 10, Weight: PriorityWeightDefault},
+		{Number: 900, Weight: PriorityWeightP2},
+		{Number: 50, Weight: PriorityWeightP0},
+		{Number: 800, Weight: PriorityWeightP1},
+		{Number: 40, Weight: PriorityWeightP1},
+	}
+	small := make([]SmallnessCandidate, len(plain))
+	for i, c := range plain {
+		small[i] = SmallnessCandidate{Number: c.Number, Weight: c.Weight}
+	}
+	for _, preferNewest := range []bool{false, true} {
+		want := OrderLaneCandidates(plain, preferNewest)
+		got := OrderLaneCandidatesSmallFirst(small, preferNewest)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("preferNewest=%v: small-first order = %v, want %v (must match plain order)", preferNewest, got, want)
+		}
+	}
+}
+
 func TestBuildRouterPayloadOrdersLaneByPriority(t *testing.T) {
 	// RouteIssues end-to-end: an old P1 issue sorts ahead of a newer unlabeled one
 	// in the lane group, and the group carries the weight for the labeled issue
