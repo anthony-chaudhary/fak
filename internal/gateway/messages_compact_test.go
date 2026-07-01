@@ -479,6 +479,28 @@ func TestMaybeCompactAnchorHeadDormantWithoutTurnsLeft(t *testing.T) {
 	}
 }
 
+func TestMaybeCompactAnchorHeadBreakEvenKeepsWarmSpanWhenUnprofitable(t *testing.T) {
+	raw := headOrderedWireBody(t, 120, 2)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+
+	s := anthropicPassthroughServer(2400)
+	s.compactAnchorHead = true
+	fired, reason := s.compactAnthropicRawWithReason(req, 1)
+	if fired {
+		t.Fatalf("head anchor with a too-short break-even horizon must NOT fire, got fired=true reason=%q", reason)
+	}
+	if reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("reason=%q, want %q", reason, agent.CompactReasonBurstUnprofitable)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatal("unprofitable cache-burst gate must retain the warm span byte-for-byte")
+	}
+}
+
 // TestMaybeCompactAnchorHeadFiresWithTurnsLeft is the #1407/#1408 end-to-end witness on the LIVE
 // gateway wiring: the default first-breakpoint anchor stays dormant on the real-traffic shape (a
 // recent-only message breakpoint), but --compact-anchor-head + a wired DecideSession session with
