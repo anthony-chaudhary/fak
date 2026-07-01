@@ -2,10 +2,10 @@ package scorecardpane
 
 // hygiene.go — the native port of tools/repo_hygiene_scorecard.py: the deterministic
 // repo-hygiene fold over the git-tracked tree. Twelve mechanical KPIs in four groups
-// (verbosity, organization, indexing, accessibility), folded into a composite score,
-// an A-F grade, and the headline hygiene-debt integer. The JSON payload shape
-// (schema/corpus/kpis with corpus.hygiene_debt etc.) is byte-compatible with the
-// Python --json so the control-pane fold reads it identically.
+// (verbosity, organization, indexing, accessibility), folded into a continuous value,
+// an A-F grade, the legacy score, and the headline hygiene-debt integer. The JSON
+// payload shape keeps the Python --json fields and adds continuous value fields so
+// the control-pane fold reads old and new payloads identically.
 //
 // The pure KPI checks (KPIRedundancy … KPIPlainLanguage, BuildHygienePayload) are
 // the tested surface. Gather (disk + git) is the impure shell in hygienegather.go.
@@ -15,6 +15,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // HygieneSchema mirrors the Python SCHEMA constant.
@@ -45,7 +47,7 @@ const generatedSnapshot = "docs/REPO-HYGIENE-SCORECARD.md"
 // hygieneGroups is the canonical KPI group order.
 var hygieneGroups = []string{"verbosity", "organization", "indexing", "accessibility"}
 
-// kpiWeights is the composite weighting; sums to 1.0 so the score tops out at 100.
+// kpiWeights is the composite weighting; sums to 1.0 so the legacy score tops out at 100.
 var kpiWeights = map[string]float64{
 	"redundancy":      0.10,
 	"bloat":           0.06,
@@ -112,6 +114,7 @@ var rootAllowedOther = map[string]bool{
 type HygieneKPI struct {
 	KPI     string   `json:"kpi"`
 	Group   string   `json:"group"`
+	Value   float64  `json:"value"`
 	Score   int      `json:"score"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
@@ -135,25 +138,31 @@ type HygienePayload struct {
 // HygieneCorpus is the corpus-level summary (the control-pane reads corpus.grade +
 // corpus.hygiene_debt from here).
 type HygieneCorpus struct {
-	Score           float64               `json:"score"`
-	Grade           string                `json:"grade"`
-	HygieneDebt     int                   `json:"hygiene_debt"`
-	A11yDebt        int                   `json:"a11y_debt"`
-	SoftSignals     int                   `json:"soft_signals"`
-	DebtByGroup     map[string]int        `json:"debt_by_group"`
-	KPIScores       map[string]int        `json:"kpi_scores"`
-	DebtByKPI       map[string]int        `json:"debt_by_kpi"`
-	Breakdown       []HygieneBreakdownRow `json:"breakdown"`
-	WorktreeClutter []string              `json:"worktree_clutter"`
+	Value            float64               `json:"value"`
+	ValueUnit        string                `json:"value_unit"`
+	Score            float64               `json:"score"`
+	LegacyScore      float64               `json:"legacy_score"`
+	LegacyScoreScale int                   `json:"legacy_score_scale"`
+	Grade            string                `json:"grade"`
+	HygieneDebt      int                   `json:"hygiene_debt"`
+	A11yDebt         int                   `json:"a11y_debt"`
+	SoftSignals      int                   `json:"soft_signals"`
+	DebtByGroup      map[string]int        `json:"debt_by_group"`
+	KPIScores        map[string]int        `json:"kpi_scores"`
+	KPIValues        map[string]float64    `json:"kpi_values"`
+	DebtByKPI        map[string]int        `json:"debt_by_kpi"`
+	Breakdown        []HygieneBreakdownRow `json:"breakdown"`
+	WorktreeClutter  []string              `json:"worktree_clutter"`
 }
 
 // HygieneBreakdownRow is one row of the worst-first KPI breakdown.
 type HygieneBreakdownRow struct {
-	KPI    string `json:"kpi"`
-	Group  string `json:"group"`
-	Score  int    `json:"score"`
-	Debt   int    `json:"debt"`
-	Detail string `json:"detail"`
+	KPI    string  `json:"kpi"`
+	Group  string  `json:"group"`
+	Value  float64 `json:"value"`
+	Score  int     `json:"score"`
+	Debt   int     `json:"debt"`
+	Detail string  `json:"detail"`
 }
 
 func clampScore(score float64) int {
@@ -192,7 +201,7 @@ func kpiResult(kpi, group string, score int, detail string, defects, soft []stri
 	if soft == nil {
 		soft = []string{}
 	}
-	return HygieneKPI{KPI: kpi, Group: group, Score: score, Detail: detail, Defects: defects, Soft: soft}
+	return HygieneKPI{KPI: kpi, Group: group, Value: hygieneValue(float64(score)), Score: score, Detail: detail, Defects: defects, Soft: soft}
 }
 
 // --- pure per-KPI checks ---------------------------------------------------
@@ -512,9 +521,13 @@ func KPIPlainLanguage(signals []string, nDense, nAcroDocs, nIdiom, nReader int) 
 // advisory concurrency canary (never debt).
 func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []string) HygienePayload {
 	byName := map[string]HygieneKPI{}
+	normKPIs := make([]HygieneKPI, 0, len(kpis))
 	for _, k := range kpis {
+		k.Value = hygieneValueFor(k.Value, float64(k.Score))
+		normKPIs = append(normKPIs, k)
 		byName[k.KPI] = k
 	}
+	kpis = normKPIs
 	score := 0.0
 	for n, w := range kpiWeights {
 		if k, ok := byName[n]; ok {
@@ -522,6 +535,7 @@ func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []
 		}
 	}
 	score = round1(score)
+	value := hygieneValue(score)
 	hygieneDebt := 0
 	nSoft := 0
 	for _, k := range kpis {
@@ -537,15 +551,17 @@ func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []
 		debtByGroup[k.Group] += len(k.Defects)
 	}
 	kpiScores := map[string]int{}
+	kpiValues := map[string]float64{}
 	debtByKPI := map[string]int{}
 	for _, k := range kpis {
 		kpiScores[k.KPI] = k.Score
+		kpiValues[k.KPI] = k.Value
 		debtByKPI[k.KPI] = len(k.Defects)
 	}
 	breakdown := make([]HygieneBreakdownRow, 0, len(kpis))
 	for _, k := range kpis {
 		breakdown = append(breakdown, HygieneBreakdownRow{
-			KPI: k.KPI, Group: k.Group, Score: k.Score, Debt: len(k.Defects), Detail: k.Detail,
+			KPI: k.KPI, Group: k.Group, Value: k.Value, Score: k.Score, Debt: len(k.Defects), Detail: k.Detail,
 		})
 	}
 	// sort by (-debt, score) — worst-first, ties by ascending score (Python key).
@@ -560,9 +576,10 @@ func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []
 		worktreeClutter = []string{}
 	}
 	corpus := HygieneCorpus{
-		Score: score, Grade: grade, HygieneDebt: hygieneDebt,
+		Value: value, ValueUnit: "quality_ratio", Score: score, LegacyScore: score, LegacyScoreScale: 100,
+		Grade: grade, HygieneDebt: hygieneDebt,
 		A11yDebt: debtByGroup["accessibility"], SoftSignals: nSoft,
-		DebtByGroup: debtByGroup, KPIScores: kpiScores, DebtByKPI: debtByKPI,
+		DebtByGroup: debtByGroup, KPIScores: kpiScores, KPIValues: kpiValues, DebtByKPI: debtByKPI,
 		Breakdown: breakdown, WorktreeClutter: worktreeClutter,
 	}
 
@@ -570,14 +587,14 @@ func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []
 	var verdict, finding, reason, nextAction string
 	if hygieneDebt == 0 {
 		ok, verdict, finding = true, "OK", "repo_clean"
-		reason = fmt.Sprintf("repo clean: score %s/100 (grade %s), zero hygiene-debt across %d KPIs (%d advisory signal(s))",
-			fmtFloat(score), grade, len(kpis), nSoft)
+		reason = fmt.Sprintf("repo clean: value %.3f (grade %s, legacy score %s), zero hygiene-debt across %d KPIs (%d advisory signal(s))",
+			value, grade, fmtFloat(score), len(kpis), nSoft)
 		nextAction = "no required edit; re-run after the next structural change"
 	} else {
 		ok, verdict, finding = false, "ACTION", "hygiene_debt"
 		worst := breakdown[0]
-		reason = fmt.Sprintf("%d unit(s) of hygiene-debt; score %s/100 (grade %s); heaviest: %s (%d defect(s))",
-			hygieneDebt, fmtFloat(score), grade, worst.KPI, worst.Debt)
+		reason = fmt.Sprintf("%d unit(s) of hygiene-debt; value %.3f (grade %s, legacy score %s); heaviest: %s (%d defect(s))",
+			hygieneDebt, value, grade, fmtFloat(score), worst.KPI, worst.Debt)
 		nextAction = "retire hygiene-debt worst-first (see corpus.breakdown + per-KPI defects): " +
 			"consolidate duplicates, split/trim oversized docs, clear root clutter, " +
 			"move dated docs to docs/notes/, index orphans, cut AI-tell phrases; " +
@@ -664,6 +681,17 @@ func pct0(f float64) string { return fmt.Sprintf("%d%%", roundInt(f*100)) }
 func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
 func roundInt(f float64) int { return int(math.Round(f)) }
+
+func hygieneValue(score float64) float64 {
+	return scorecard.Round3(scorecard.ValueFromScore(score))
+}
+
+func hygieneValueFor(value, legacyScore float64) float64 {
+	if value != 0 || legacyScore == 0 {
+		return scorecard.Round3(value)
+	}
+	return hygieneValue(legacyScore)
+}
 
 // detailOrDebt is the per-KPI detail idiom: the clean one-liner when there is no
 // debt, else debtFmt formatted with the defect count. Collapses the repeated

@@ -16,7 +16,7 @@ func fixtureMetrics() []Metric {
 	return []Metric{
 		{Key: "code", Label: "code", DebtKey: "code_debt", Debt: intp(15), Grade: strp("B"), OK: false, Verdict: "ACTION"},
 		{Key: "slop", Label: "code-slop", DebtKey: "slop_debt", Debt: intp(535), Grade: strp("F"), OK: false, Verdict: "ACTION"},
-		{Key: "seo", Label: "seo", DebtKey: "seo_debt", Debt: intp(1), Score: fltp(92.5), OK: false, Verdict: "ACTION"},
+		{Key: "seo", Label: "seo", DebtKey: "seo_debt", Debt: intp(1), Value: fltp(0.925), Score: fltp(92.5), OK: false, Verdict: "ACTION"},
 		{Key: "readme", Label: "readme-freshness", DebtKey: "readme_debt", Debt: intp(0), OK: true, Verdict: "OK"},
 	}
 }
@@ -24,7 +24,7 @@ func fixtureMetrics() []Metric {
 func TestMetricFromPayloadExtractsCorpusDebt(t *testing.T) {
 	card := Card{Key: "code", Debt: "code_debt", Label: "code"}
 	payload := map[string]any{
-		"corpus": map[string]any{"code_debt": float64(15), "grade": "B"},
+		"corpus": map[string]any{"code_debt": float64(15), "grade": "B", "value": 0.81, "score": 81.0},
 		"ok":     false, "verdict": "ACTION",
 	}
 	m := MetricFromPayload(card, payload, "")
@@ -33,6 +33,9 @@ func TestMetricFromPayloadExtractsCorpusDebt(t *testing.T) {
 	}
 	if m.Grade == nil || *m.Grade != "B" {
 		t.Fatalf("grade: want B, got %v", m.Grade)
+	}
+	if m.Value == nil || *m.Value != 0.81 {
+		t.Fatalf("value: want 0.81, got %v", m.Value)
 	}
 	if m.Verdict != "ACTION" || m.OK {
 		t.Fatalf("ok/verdict mismatch: ok=%v verdict=%q", m.OK, m.Verdict)
@@ -84,6 +87,38 @@ func TestOperatorHeavinessScorecardRegistered(t *testing.T) {
 	}
 	if *got != want {
 		t.Fatalf("operator-heaviness card = %+v, want %+v", *got, want)
+	}
+}
+
+func TestNativeRosterIncludesPythonParityCards(t *testing.T) {
+	want := map[string]Card{
+		"milestone": {
+			Key: "milestone", Debt: "milestone_debt",
+			Cmd: "go run ./cmd/fak milestone-scorecard --json", Label: "milestone",
+		},
+		"milestone_climb": {
+			Key: "milestone_climb", Debt: "climb_ratchet_debt",
+			Cmd: "go run ./cmd/fak milestone-scorecard --ratchet --json", Label: "milestone-climb",
+		},
+		"propagation": {
+			Key: "propagation", Debt: "propagation_debt",
+			Cmd: "go run ./cmd/fak propagation-scorecard --json", Label: "propagation",
+		},
+		"sota_coverage": {
+			Key: "sota_coverage", Debt: "sota_debt",
+			Cmd: "go run ./cmd/fak sota-coverage-scorecard --json", Label: "sota-coverage",
+		},
+	}
+	got := map[string]Card{}
+	for _, c := range Cards {
+		if _, ok := want[c.Key]; ok {
+			got[c.Key] = c
+		}
+	}
+	for key, card := range want {
+		if got[key] != card {
+			t.Fatalf("card %s = %+v, want %+v", key, got[key], card)
+		}
 	}
 }
 
@@ -155,6 +190,49 @@ func TestFoldEarlyWarningHiddenUnderGreenPortfolio(t *testing.T) {
 	}
 }
 
+func TestGradeRatchetFailsOnFlatRawDebtSeveritySlip(t *testing.T) {
+	t.Setenv(GradeRatchetEnv, "1")
+	metrics := []Metric{
+		{Key: "stability", Label: "stability", DebtKey: "stability_debt", Debt: intp(0), Grade: strp("B"), OK: false, Verdict: "ACTION"},
+	}
+	base := &Baseline{
+		Schema: BaselineSchema, Commit: "old0000", TotalDebt: 0, GradeDebt: 0,
+		Metrics:      map[string]int{"stability": 0},
+		GradeWeights: map[string]int{"stability": 0},
+	}
+	p := Fold(metrics, base, "/repo", "new1111")
+	if p.Trend.Direction != "flat" || p.TotalDebt != 0 {
+		t.Fatalf("fixture must be raw-debt flat, got direction=%q debt=%d", p.Trend.Direction, p.TotalDebt)
+	}
+	if len(p.Trend.GradeRegressed) != 1 || p.Trend.GradeRegressed[0].Key != "stability" {
+		t.Fatalf("grade regression not attributed: %+v", p.Trend.GradeRegressed)
+	}
+	code, msg := CheckGate(p)
+	if code != 1 || !strings.Contains(msg, "GRADE-RATCHET FAIL") || !strings.Contains(msg, "stability A->B") {
+		t.Fatalf("flat raw-debt grade slip must fail with culprit, code=%d msg=%q", code, msg)
+	}
+	if !strings.Contains(Render(p), "GRADE REGRESSION: stability slipped to B") {
+		t.Fatalf("human render missing grade-regression line:\n%s", Render(p))
+	}
+}
+
+func TestGradeRatchetCanBeDemotedToAdvisory(t *testing.T) {
+	t.Setenv(GradeRatchetEnv, "0")
+	metrics := []Metric{
+		{Key: "stability", Label: "stability", DebtKey: "stability_debt", Debt: intp(0), Grade: strp("B"), OK: false, Verdict: "ACTION"},
+	}
+	base := &Baseline{
+		Schema: BaselineSchema, Commit: "old0000", TotalDebt: 0, GradeDebt: 0,
+		Metrics:      map[string]int{"stability": 0},
+		GradeWeights: map[string]int{"stability": 0},
+	}
+	p := Fold(metrics, base, "/repo", "new1111")
+	code, msg := CheckGate(p)
+	if code != 0 || !strings.Contains(msg, "GRADE-DEBT WARN") || !strings.Contains(msg, GradeRatchetEnv+"=0") {
+		t.Fatalf("demoted grade ratchet should warn but pass, code=%d msg=%q", code, msg)
+	}
+}
+
 func TestFoldRatchetHoldsAtBaseline(t *testing.T) {
 	base := &Baseline{
 		Schema: BaselineSchema, Commit: "old0000", TotalDebt: 551, GradeDebt: 9,
@@ -213,17 +291,26 @@ func TestBaselineDocRoundTrip(t *testing.T) {
 	if doc.Metrics["slop"] != 535 {
 		t.Fatalf("baseline per-metric: slop want 535, got %d", doc.Metrics["slop"])
 	}
+	if doc.GradeWeights["slop"] != 8 || doc.GradeWeights["seo"] != 0 {
+		t.Fatalf("baseline grade weights not pinned: %+v", doc.GradeWeights)
+	}
 	// re-folding against the just-pinned baseline must read flat (the ratchet floor).
 	p2 := Fold(fixtureMetrics(), &doc, "/repo", "abc1234")
 	if p2.Trend.Direction != "flat" {
 		t.Fatalf("re-fold against own pin must be flat, got %q", p2.Trend.Direction)
 	}
+	if len(p2.Trend.GradeRegressed) != 0 {
+		t.Fatalf("fresh baseline should have no grade regressions, got %+v", p2.Trend.GradeRegressed)
+	}
 }
 
 func TestDisplayGradePrecedence(t *testing.T) {
-	// emitted letter beats score beats debt.
-	if g := displayGrade(Metric{Grade: strp("C"), Score: fltp(95), Debt: intp(0)}); g != "C" {
+	// emitted letter beats value beats legacy score beats debt.
+	if g := displayGrade(Metric{Grade: strp("C"), Value: fltp(0.99), Score: fltp(95), Debt: intp(0)}); g != "C" {
 		t.Fatalf("emitted letter must win, got %q", g)
+	}
+	if g := displayGrade(Metric{Value: fltp(0.805), Score: fltp(55), Debt: intp(900)}); g != "B" {
+		t.Fatalf("value must beat legacy score and debt magnitude, got %q", g)
 	}
 	if g := displayGrade(Metric{Score: fltp(92.5), Debt: intp(900)}); g != "A" {
 		t.Fatalf("score must beat debt magnitude, got %q", g)

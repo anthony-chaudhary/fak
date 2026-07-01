@@ -22,20 +22,21 @@ func ParseHygienePayload(b []byte) (HygienePayload, error) {
 // RenderHygiene is the human scorecard, ported from the Python render().
 func RenderHygiene(p HygienePayload) string {
 	c := p.Corpus
+	value := hygieneValueFor(c.Value, c.Score)
 	var b strings.Builder
 	fmt.Fprintf(&b, "repo-hygiene-scorecard: %s (%s)\n", p.Verdict, p.Finding)
 	fmt.Fprintf(&b, "  %s\n\n", p.Reason)
-	fmt.Fprintf(&b, "score %s/100 (grade %s) · HYGIENE-DEBT %d (a11y-debt %d) · %d advisory\n",
-		fmtFloat(c.Score), orQ(c.Grade), c.HygieneDebt, c.A11yDebt, c.SoftSignals)
+	fmt.Fprintf(&b, "value %s (grade %s, legacy score %s) · HYGIENE-DEBT %d (a11y-debt %d) · %d advisory\n",
+		fmtValue(value), orQ(c.Grade), fmtFloat(c.Score), c.HygieneDebt, c.A11yDebt, c.SoftSignals)
 	var grpParts []string
 	for _, g := range hygieneGroups {
 		grpParts = append(grpParts, fmt.Sprintf("%s:%d", g, c.DebtByGroup[g]))
 	}
 	fmt.Fprintf(&b, "debt by group: %s\n\n", strings.Join(grpParts, "  "))
 	b.WriteString("per-KPI (worst first):\n")
-	fmt.Fprintf(&b, "  %5s %4s  %-13s %-15s detail\n", "score", "debt", "group", "kpi")
+	fmt.Fprintf(&b, "  %5s %6s %4s  %-13s %-15s detail\n", "value", "legacy", "debt", "group", "kpi")
 	for _, row := range c.Breakdown {
-		fmt.Fprintf(&b, "  %5d %4d  %-13s %-15s %s\n", row.Score, row.Debt, row.Group, row.KPI, row.Detail)
+		fmt.Fprintf(&b, "  %5s %6d %4d  %-13s %-15s %s\n", fmtValue(hygieneValueFor(row.Value, float64(row.Score))), row.Score, row.Debt, row.Group, row.KPI, row.Detail)
 	}
 	b.WriteString("\nhygiene-debt work-list:\n")
 	anyDefect := false
@@ -75,12 +76,13 @@ func RenderHygiene(p HygienePayload) string {
 // Python render_markdown().
 func RenderHygieneMarkdown(p HygienePayload, stamp string) string {
 	c := p.Corpus
+	value := hygieneValueFor(c.Value, c.Score)
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString(`title: "fak repo-hygiene scorecard — the hygiene-debt measuring stick"` + "\n")
 	b.WriteString(`description: "fak's deterministic repo-hygiene scorecard: eleven KPIs across ` +
-		`verbosity, organization, indexing, and accessibility, folded into a composite ` +
-		`score and the headline hygiene-debt metric, re-derived from the git-tracked tree."` + "\n")
+		`verbosity, organization, indexing, and accessibility, folded into a continuous ` +
+		`value and the headline hygiene-debt metric, re-derived from the git-tracked tree."` + "\n")
 	b.WriteString("---\n\n")
 	b.WriteString("# Repo-hygiene scorecard\n\n")
 	if stamp != "" {
@@ -100,19 +102,19 @@ func RenderHygieneMarkdown(p HygienePayload, stamp string) string {
 	b.WriteString("|---|---|\n")
 	fmt.Fprintf(&b, "| **Hygiene-debt (total HARD defects)** | **%d** |\n", c.HygieneDebt)
 	fmt.Fprintf(&b, "| **a11y-debt (accessibility HARD defects)** | **%d** |\n", c.A11yDebt)
-	fmt.Fprintf(&b, "| Composite score | %s/100 (grade %s) |\n", fmtFloat(c.Score), orQ(c.Grade))
+	fmt.Fprintf(&b, "| Composite value | %s (grade %s; legacy score %s) |\n", fmtValue(value), orQ(c.Grade), fmtFloat(c.Score))
 	fmt.Fprintf(&b, "| Advisory (soft) signals | %d |\n", c.SoftSignals)
 	fmt.Fprintf(&b, "| Debt by group | verbosity:%d · organization:%d · indexing:%d · accessibility:%d |\n",
 		c.DebtByGroup["verbosity"], c.DebtByGroup["organization"], c.DebtByGroup["indexing"], c.DebtByGroup["accessibility"])
 	b.WriteString("\n## Per-KPI\n\n")
-	b.WriteString("Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. " +
+	b.WriteString("Twelve KPIs, each rendered as a continuous value, in four groups. `debt` = units of HARD hygiene-debt. " +
 		"The accessibility group's HARD KPIs (`alt_text`, `ai_tells`) sum to **a11y-debt**. " +
-		"`jargon` and `plain_language` are advisory (they score but emit no hard debt — " +
+		"`jargon` and `plain_language` are advisory (they lower value but emit no hard debt — " +
 		"gaming a gloss is not clarity).\n\n")
-	b.WriteString("| Group | KPI | Score | Debt | Detail |\n")
-	b.WriteString("|---|---|---:|:--:|---|\n")
+	b.WriteString("| Group | KPI | Value | Legacy score | Debt | Detail |\n")
+	b.WriteString("|---|---|---:|---:|:--:|---|\n")
 	for _, row := range c.Breakdown {
-		fmt.Fprintf(&b, "| %s | `%s` | %d | %d | %s |\n", row.Group, row.KPI, row.Score, row.Debt, row.Detail)
+		fmt.Fprintf(&b, "| %s | `%s` | %s | %d | %d | %s |\n", row.Group, row.KPI, fmtValue(hygieneValueFor(row.Value, float64(row.Score))), row.Score, row.Debt, row.Detail)
 	}
 	b.WriteString("\n## Hygiene-debt work-list\n\n")
 	anyDefect := false
@@ -121,7 +123,7 @@ func RenderHygieneMarkdown(p HygienePayload, stamp string) string {
 			continue
 		}
 		anyDefect = true
-		fmt.Fprintf(&b, "### `%s` (%s) — %d defect(s), score %d\n", k.KPI, k.Group, len(k.Defects), k.Score)
+		fmt.Fprintf(&b, "### `%s` (%s) — %d defect(s), value %s (legacy score %d)\n", k.KPI, k.Group, len(k.Defects), fmtValue(hygieneValueFor(k.Value, float64(k.Score))), k.Score)
 		for _, it := range k.Defects {
 			fmt.Fprintf(&b, "- %s\n", it)
 		}
@@ -140,6 +142,7 @@ func RenderHygieneCompare(baseline, current HygienePayload) string {
 	cur := current.Corpus
 	bd, cd := b.HygieneDebt, cur.HygieneDebt
 	bo, co := b.Score, cur.Score
+	bv, cv := hygieneValueFor(b.Value, b.Score), hygieneValueFor(cur.Value, cur.Score)
 	ba, ca := b.A11yDebt, cur.A11yDebt
 	ratio := "∞ (zero)"
 	if cd != 0 {
@@ -148,7 +151,8 @@ func RenderHygieneCompare(baseline, current HygienePayload) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "hygiene-debt: %d -> %d   (%s fewer defects)\n", bd, cd, ratio)
 	fmt.Fprintf(&sb, "a11y-debt:    %d -> %d\n", ba, ca)
-	fmt.Fprintf(&sb, "score:        %s/100 -> %s/100   (+%s)\n", fmtFloat(bo), fmtFloat(co), fmtFloat(round1(co-bo)))
+	fmt.Fprintf(&sb, "value:        %s -> %s   (%+.3f)\n", fmtValue(bv), fmtValue(cv), cv-bv)
+	fmt.Fprintf(&sb, "legacy score: %s -> %s   (+%s)\n", fmtFloat(bo), fmtFloat(co), fmtFloat(round1(co-bo)))
 	for _, gp := range hygieneGroups {
 		fmt.Fprintf(&sb, "  %-13s %d -> %d\n", gp, b.DebtByGroup[gp], cur.DebtByGroup[gp])
 	}
@@ -175,4 +179,8 @@ func orQ(s string) string {
 		return "?"
 	}
 	return s
+}
+
+func fmtValue(f float64) string {
+	return fmt.Sprintf("%.3f", f)
 }

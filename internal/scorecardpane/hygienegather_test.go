@@ -96,6 +96,9 @@ func TestHygieneMarkdownRoundTrip(t *testing.T) {
 	if !strings.Contains(md, "Hygiene-debt (total HARD defects)") {
 		t.Fatalf("markdown must carry the headline table")
 	}
+	if !strings.Contains(md, "Composite value") || strings.Contains(md, "Composite score") {
+		t.Fatalf("markdown must lead with continuous value, got:\n%s", md)
+	}
 	if !strings.Contains(md, "2026-06-29") {
 		t.Fatalf("markdown must embed the stamp")
 	}
@@ -116,5 +119,8 @@ func TestHygieneCompareNxVerdict(t *testing.T) {
 	out := RenderHygieneCompare(baseline, current)
 	if !strings.Contains(out, "hygiene-debt:") || !strings.Contains(out, "VERDICT:") {
 		t.Fatalf("compare must render the debt delta + verdict: %q", out)
+	}
+	if !strings.Contains(out, "value:") || strings.Contains(out, "/100") {
+		t.Fatalf("compare must render continuous value instead of /100 score: %q", out)
 	}
 }

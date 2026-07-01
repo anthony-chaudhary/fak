@@ -104,6 +104,12 @@ func TestBuildHygienePayloadCleanTree(t *testing.T) {
 	if p.Corpus.HygieneDebt != 0 || p.Corpus.Grade != "A" {
 		t.Fatalf("clean tree want debt 0 grade A, got debt=%d grade=%s", p.Corpus.HygieneDebt, p.Corpus.Grade)
 	}
+	if p.Corpus.Value != 1 || p.Corpus.ValueUnit != "quality_ratio" || p.Corpus.LegacyScore != 100 || p.Corpus.LegacyScoreScale != 100 {
+		t.Fatalf("clean tree value/legacy fields not stamped: %+v", p.Corpus)
+	}
+	if p.Corpus.KPIValues["redundancy"] != 1 || p.KPIs[0].Value != 1 {
+		t.Fatalf("per-KPI values not stamped: corpus=%v kpi=%+v", p.Corpus.KPIValues, p.KPIs[0])
+	}
 }
 
 func TestBuildHygienePayloadDebtRanksWorstFirst(t *testing.T) {
@@ -118,6 +124,9 @@ func TestBuildHygienePayloadDebtRanksWorstFirst(t *testing.T) {
 	}
 	if p.Corpus.Breakdown[0].KPI != "orphans" {
 		t.Fatalf("worst-first must put orphans (3 defects) first, got %q", p.Corpus.Breakdown[0].KPI)
+	}
+	if p.Corpus.Breakdown[0].Value != 0.5 {
+		t.Fatalf("breakdown must carry continuous value for orphans, got %.3f", p.Corpus.Breakdown[0].Value)
 	}
 	if !p.OK == false && p.Finding != "hygiene_debt" {
 		t.Fatalf("debt tree must find hygiene_debt, got %s", p.Finding)

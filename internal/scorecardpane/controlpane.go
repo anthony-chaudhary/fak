@@ -18,6 +18,7 @@ package scorecardpane
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 )
@@ -29,6 +30,8 @@ const (
 	BaselineSchema = "fak-scorecard-control-pane.baseline/1"
 	// BaselineRel is the tracked baseline file the trend is pinned in.
 	BaselineRel = "tools/scorecard_baseline.json"
+	// GradeRatchetEnv demotes the native grade ratchet to advisory when set to 0/false/no/off.
+	GradeRatchetEnv = "FAK_SCORECARD_GRADE_RATCHET"
 )
 
 // gradeDebt maps a letter grade to the severity weight one metric contributes to
@@ -36,11 +39,10 @@ const (
 // weighs exactly as much as a stability A->B regression (units-invariant).
 var gradeDebt = map[string]int{"A": 0, "B": 1, "C": 2, "D": 4, "F": 8}
 
-// scoreKeys maps the metric key -> the corpus-level aggregate score field for the
-// scorecards that grade per-item but emit no corpus-level letter (docs/seo/demo/
-// robustness/learning). The severity lens derives their TRUE grade from the score
-// on the shared 90/80/70/60 ladder instead of from raw debt magnitude. Keyed on
-// the SCORECARDS key (the docs metric's key is "doc", not "docs").
+// scoreKeys maps the metric key -> the legacy corpus-level aggregate score field for
+// Python-era scorecards that grade per-item but emit no corpus-level letter
+// (docs/seo/demo/robustness/learning). New scorecards should emit corpus.value; this
+// map remains only as a fallback while Python cards are migrated.
 var scoreKeys = map[string]string{
 	"doc":        "mean_score",
 	"seo":        "overall_score",
@@ -96,10 +98,14 @@ var Cards = []Card{
 	{Key: "maturity", Debt: "maturity_debt", Cmd: "go run ./cmd/fak maturity --json", Label: "maturity"},
 	{Key: "growth", Debt: "growth_debt", Cmd: "go run ./cmd/fak coverage-matrix --json", Label: "growth-debt"},
 	{Key: "support_maturity", Debt: "support_maturity_debt", Cmd: "go run ./cmd/fak support-maturity-scorecard --json", Label: "support-maturity"},
+	{Key: "milestone", Debt: "milestone_debt", Cmd: "go run ./cmd/fak milestone-scorecard --json", Label: "milestone"},
+	{Key: "milestone_climb", Debt: "climb_ratchet_debt", Cmd: "go run ./cmd/fak milestone-scorecard --ratchet --json", Label: "milestone-climb"},
 	{Key: "loopindex", Debt: "loopindex_debt", Cmd: "go run ./cmd/fak loop-index-scorecard --json", Label: "loop-index"},
 	{Key: "heaviness", Debt: "heaviness_debt", Cmd: "go run ./cmd/fak operator heaviness --json", Label: "operator-heaviness"},
+	{Key: "propagation", Debt: "propagation_debt", Cmd: "go run ./cmd/fak propagation-scorecard --json", Label: "propagation"},
 	{Key: "claim_repro", Debt: "claim_repro_debt", Script: "claim_repro_scorecard.py", Label: "claim-repro"},
 	{Key: "release", Debt: "release_debt", Script: "release_readiness_scorecard.py", Label: "release-readiness"},
+	{Key: "sota_coverage", Debt: "sota_debt", Cmd: "go run ./cmd/fak sota-coverage-scorecard --json", Label: "sota-coverage"},
 	{Key: "observability", Debt: "observability_debt", Script: "observability_scorecard.py", Label: "observability"},
 	{Key: "learning", Debt: "learning_debt", Script: "learning_scorecard.py", Label: "learning"},
 	{Key: "rsi_maturity", Debt: "rsi_debt", Script: "rsi_maturity_scorecard.py", Label: "rsi-maturity"},
@@ -121,22 +127,27 @@ func goBackedKey(key string) bool {
 	return false
 }
 
-// gradeFromScore maps a score onto the family's shared 90/80/70/60 ladder — the
-// SAME thresholds every scorecard's own grade_letter uses, so a score-derived grade
-// reproduces exactly the letter the scorecard would have emitted.
-func gradeFromScore(score float64) string {
+// gradeFromValue maps a continuous quality value onto the family's shared
+// 0.90/0.80/0.70/0.60 ladder. This is the primary severity lens for new payloads.
+func gradeFromValue(value float64) string {
 	switch {
-	case score >= 90:
+	case value >= 0.90:
 		return "A"
-	case score >= 80:
+	case value >= 0.80:
 		return "B"
-	case score >= 70:
+	case value >= 0.70:
 		return "C"
-	case score >= 60:
+	case value >= 0.60:
 		return "D"
 	default:
 		return "F"
 	}
+}
+
+// gradeFromScore maps a legacy 0-100 score onto the same ladder. It exists only for
+// old Python payloads that have not grown corpus.value yet.
+func gradeFromScore(score float64) string {
+	return gradeFromValue(score / 100)
 }
 
 // deriveGrade is the last-resort grade for a scorecard that emits neither a letter
@@ -158,15 +169,16 @@ func deriveGrade(debt int) string {
 }
 
 // Metric is one scorecard's extracted control-pane row. Field tags match the
-// Python dict keys so the JSON shape is byte-compatible. Debt and Score are
-// pointers so a missing/null value serializes as JSON null (the Python contract:
-// an errored card has "debt": null), distinct from a measured zero.
+// Python dict keys so the JSON shape stays compatibility-friendly. Debt, Value, and
+// Score are pointers so a missing/null value serializes as JSON null (the Python
+// contract: an errored card has "debt": null), distinct from a measured zero.
 type Metric struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	DebtKey     string   `json:"debt_key"`
 	Debt        *int     `json:"debt"`
 	Grade       *string  `json:"grade"`
+	Value       *float64 `json:"value"`
 	Score       *float64 `json:"score"`
 	OK          bool     `json:"ok"`
 	Verdict     string   `json:"verdict"`
@@ -177,14 +189,18 @@ type Metric struct {
 
 // displayGrade is the single source of truth for a metric's effective letter grade.
 // Three-tier precedence: the scorecard's own EMITTED letter (scale-invariant) > a
-// SCORE-derived letter on the shared ladder (scale-invariant) > a DEBT-derived
-// letter by magnitude (scale-variant, last resort).
+// continuous VALUE-derived letter on the shared ladder (scale-invariant) > a
+// legacy SCORE-derived letter (Python fallback) > a DEBT-derived letter by magnitude
+// (scale-variant, last resort).
 func displayGrade(m Metric) string {
 	if m.Grade != nil {
 		g := strings.ToUpper(*m.Grade)
 		if _, ok := gradeDebt[g]; ok {
 			return g
 		}
+	}
+	if m.Value != nil {
+		return gradeFromValue(*m.Value)
 	}
 	if m.Score != nil {
 		return gradeFromScore(*m.Score)
@@ -211,14 +227,20 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 		}
 	}
 	debt := findInt(payload, card.Debt)
+	valuePtr := findValue(payload)
 	var scorePtr *float64
 	if sk := scoreKeys[card.Key]; sk != "" {
 		scorePtr = findScore(payload, sk)
+		if valuePtr == nil && scorePtr != nil {
+			v := *scorePtr / 100
+			valuePtr = &v
+		}
 	}
 	m := Metric{
 		Key: card.Key, Label: card.Label, DebtKey: card.Debt,
 		Debt:    debt,
 		Grade:   findGrade(payload),
+		Value:   valuePtr,
 		Score:   scorePtr,
 		OK:      asBool(payload["ok"]),
 		Verdict: asString(payload["verdict"]),
@@ -264,31 +286,44 @@ type EarlyWarning struct {
 	To    int    `json:"to"`
 }
 
+// GradeRegression is one metric whose severity weight rose vs the pinned baseline
+// even if its raw debt stayed flat. This is the native parity for the Python
+// grade_regressed list that powers the hard A->B scorecard ratchet.
+type GradeRegression struct {
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	FromWeight int    `json:"from_weight"`
+	ToWeight   int    `json:"to_weight"`
+	ToGrade    string `json:"to_grade"`
+}
+
 // Trend is the per-metric + portfolio delta vs a pinned baseline. Field tags and
 // shape match the Python compute_trend return dict.
 type Trend struct {
-	Direction      string         `json:"direction"`
-	Summary        string         `json:"summary"`
-	TotalDelta     int            `json:"total_delta"`
-	GradeDelta     int            `json:"grade_delta"`
-	BaselineCommit string         `json:"baseline_commit"`
-	BaselineTotal  *int           `json:"baseline_total"`
-	BaselineGrade  *int           `json:"baseline_grade"`
-	GradeDebt      int            `json:"grade_debt"`
-	Deltas         map[string]int `json:"deltas"`
-	Worsened       []string       `json:"worsened"`
-	Improved       []string       `json:"improved"`
-	EarlyWarning   []EarlyWarning `json:"early_warning"`
+	Direction      string            `json:"direction"`
+	Summary        string            `json:"summary"`
+	TotalDelta     int               `json:"total_delta"`
+	GradeDelta     int               `json:"grade_delta"`
+	BaselineCommit string            `json:"baseline_commit"`
+	BaselineTotal  *int              `json:"baseline_total"`
+	BaselineGrade  *int              `json:"baseline_grade"`
+	GradeDebt      int               `json:"grade_debt"`
+	Deltas         map[string]int    `json:"deltas"`
+	Worsened       []string          `json:"worsened"`
+	Improved       []string          `json:"improved"`
+	EarlyWarning   []EarlyWarning    `json:"early_warning"`
+	GradeRegressed []GradeRegression `json:"grade_regressed"`
 }
 
 // Baseline is the pinned per-metric baseline body (the tracked baseline file shape).
 type Baseline struct {
-	Schema    string         `json:"schema"`
-	Commit    string         `json:"commit"`
-	TotalDebt int            `json:"total_debt"`
-	GradeDebt int            `json:"grade_debt"`
-	Metrics   map[string]int `json:"metrics"`
-	Doc       string         `json:"_doc,omitempty"`
+	Schema       string         `json:"schema"`
+	Commit       string         `json:"commit"`
+	TotalDebt    int            `json:"total_debt"`
+	GradeDebt    int            `json:"grade_debt"`
+	Metrics      map[string]int `json:"metrics"`
+	GradeWeights map[string]int `json:"grade_weights,omitempty"`
+	Doc          string         `json:"_doc,omitempty"`
 }
 
 // Payload is the folded control-pane payload. Field order/tags match the Python
@@ -461,7 +496,7 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 			TotalDelta: 0, GradeDelta: 0, BaselineCommit: baseCommit,
 			BaselineTotal: baseTotal, BaselineGrade: baseGrade, GradeDebt: gradeDebtTotal,
 			Deltas: map[string]int{}, Worsened: []string{}, Improved: []string{},
-			EarlyWarning: []EarlyWarning{},
+			EarlyWarning: []EarlyWarning{}, GradeRegressed: []GradeRegression{},
 		}
 	}
 
@@ -469,6 +504,7 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 	worsened := []string{}
 	improved := []string{}
 	earlyWarning := []EarlyWarning{}
+	gradeRegressed := []GradeRegression{}
 	for _, m := range metrics {
 		if m.Debt == nil {
 			continue
@@ -486,6 +522,11 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 			})
 		} else if delta < 0 {
 			improved = append(improved, m.Label)
+		}
+		if priorW, ok := baseGradeWeight(baseline, m.Key); ok && m.GradeWeight != nil && *m.GradeWeight > priorW {
+			gradeRegressed = append(gradeRegressed, GradeRegression{
+				Key: m.Key, Label: m.Label, FromWeight: priorW, ToWeight: *m.GradeWeight, ToGrade: m.EffGrade,
+			})
 		}
 	}
 
@@ -513,26 +554,39 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 		Direction: direction, Summary: summary, TotalDelta: totalDelta, GradeDelta: gradeDelta,
 		BaselineCommit: baseCommit, BaselineTotal: baseTotal, BaselineGrade: baseGrade,
 		GradeDebt: gradeDebtTotal, Deltas: deltas, Worsened: worsened, Improved: improved,
-		EarlyWarning: earlyWarning,
+		EarlyWarning: earlyWarning, GradeRegressed: gradeRegressed,
 	}
+}
+
+func baseGradeWeight(baseline *Baseline, key string) (int, bool) {
+	if baseline == nil || baseline.GradeWeights == nil {
+		return 0, false
+	}
+	v, ok := baseline.GradeWeights[key]
+	return v, ok
 }
 
 // BaselineDoc builds the baseline file body to pin from a folded payload. Ported
 // from the Python baseline_doc.
 func BaselineDoc(p Payload) Baseline {
 	metrics := map[string]int{}
+	gradeWeights := map[string]int{}
 	for _, m := range p.Metrics {
 		if m.Debt != nil {
 			metrics[m.Key] = *m.Debt
+			if m.GradeWeight != nil {
+				gradeWeights[m.Key] = *m.GradeWeight
+			}
 		}
 	}
 	return Baseline{
 		Schema: BaselineSchema, Commit: p.Commit, TotalDebt: p.TotalDebt,
-		GradeDebt: p.GradeDebt, Metrics: metrics,
+		GradeDebt: p.GradeDebt, Metrics: metrics, GradeWeights: gradeWeights,
 		Doc: "Pinned per-metric scorecard-debt baseline for the unified " +
 			"control pane. total_debt is the raw-unit ratchet gate; grade_debt " +
-			"is the scale-invariant severity companion. Re-pin after a debt " +
-			"drop to ratchet the trend down: " +
+			"is the scale-invariant severity companion, and grade_weights pins " +
+			"each metric's letter-grade severity so an A->B slip reds the gate " +
+			"even at flat raw debt. Re-pin after a debt drop to ratchet the trend down: " +
 			"python tools/scorecard_control_pane.py --pin",
 	}
 }
@@ -567,6 +621,21 @@ func CheckGate(p Payload) (int, string) {
 		}
 		return 1, fmt.Sprintf("RATCHET FAIL: %s; worsened: %s", p.Trend.Summary, worsened)
 	}
+	if (len(p.Trend.GradeRegressed) > 0 || p.Trend.GradeDelta > 0) && gradeRatchetHard() {
+		who := p.GradeBreakdown
+		if len(p.Trend.GradeRegressed) > 0 {
+			parts := make([]string, 0, len(p.Trend.GradeRegressed))
+			for _, g := range p.Trend.GradeRegressed {
+				parts = append(parts, fmt.Sprintf("%s %s->%s", g.Label, weightLetter(g.FromWeight), g.ToGrade))
+			}
+			who = strings.Join(parts, ", ")
+		}
+		return 1, fmt.Sprintf("GRADE-RATCHET FAIL: grade-debt rose %+d to %d vs baseline @%s "+
+			"-- a scorecard slipped a letter the raw-unit total held flat: %s. Retire it with "+
+			"the owning scorecard's skill, then re-pin (`--pin`); or set %s=0 to demote this "+
+			"gate to advisory for a deliberate one-off pin.",
+			p.Trend.GradeDelta, p.GradeDebt, p.Trend.BaselineCommit, who, GradeRatchetEnv)
+	}
 	msg := fmt.Sprintf("RATCHET OK: %s (debt %d held at-or-below baseline)",
 		p.Trend.Summary, p.TotalDebt)
 	if len(p.Trend.EarlyWarning) > 0 {
@@ -577,13 +646,34 @@ func CheckGate(p Payload) (int, string) {
 		msg += "; EARLY-WARNING (advisory, gate still green): " + strings.Join(ws, ", ") +
 			" rose vs baseline — a hidden per-metric regression; review before --pin"
 	}
-	if p.Trend.GradeDelta > 0 {
-		msg += fmt.Sprintf("; GRADE-DEBT WARN (advisory, gate still green): severity rose "+
-			"%+d to %d vs baseline (%s) — a scale-invariant regression "+
-			"the raw-unit sum can mask; review before --pin",
-			p.Trend.GradeDelta, p.GradeDebt, p.GradeBreakdown)
+	if p.Trend.GradeDelta > 0 && !gradeRatchetHard() {
+		msg += fmt.Sprintf("; GRADE-DEBT WARN (advisory -- ratchet demoted via %s=0): severity rose "+
+			"%+d to %d vs baseline (%s) -- review before --pin",
+			GradeRatchetEnv, p.Trend.GradeDelta, p.GradeDebt, p.GradeBreakdown)
 	}
 	return 0, msg
+}
+
+func gradeRatchetHard() bool {
+	raw, ok := os.LookupEnv(GradeRatchetEnv)
+	if !ok {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func weightLetter(weight int) string {
+	for letter, w := range gradeDebt {
+		if w == weight {
+			return letter
+		}
+	}
+	return "?"
 }
 
 // Render is the human control-pane snapshot, ported from the Python render().
@@ -612,6 +702,13 @@ func Render(p Payload) string {
 		for _, e := range p.EarlyWarning {
 			fmt.Fprintf(&b, "  WARN early-warning: %s rose %d->%d (+%d) vs baseline — hidden under a green portfolio\n",
 				e.Label, e.From, e.To, e.Delta)
+		}
+	}
+	if len(p.Trend.GradeRegressed) > 0 {
+		b.WriteString("\n")
+		for _, g := range p.Trend.GradeRegressed {
+			fmt.Fprintf(&b, "  GRADE REGRESSION: %s slipped to %s vs pinned grade — reds the grade ratchet\n",
+				g.Label, g.ToGrade)
 		}
 	}
 	fmt.Fprintf(&b, "\n  → %s\n", p.NextAction)

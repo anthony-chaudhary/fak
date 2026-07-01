@@ -1,7 +1,8 @@
 package scorecardpane
 
 // extract.go — the tolerant payload-walk helpers ported from the Python tool's
-// find_int / find_grade / find_score. Each scorecard nests its debt integer under
+// find_int / find_grade / find_score, with find_value added for the continuous
+// scorecard migration. Each scorecard nests its debt integer under
 // corpus.<debt> (most) or doc.<debt> (doc-appeal); these searches keep the fold
 // from caring which nesting a given scorecard chose. The payloads are decoded with
 // encoding/json into map[string]any, so numbers arrive as float64 — asInt rejects
@@ -101,7 +102,7 @@ func findGrade(payload any) *string {
 // findScore is the corpus/doc/top-level aggregate score stored under key, if any.
 // Scoped to corpus/doc/top ONLY (unlike findInt's deep walk) so a page's score
 // never stands in for the corpus aggregate. Used to derive the TRUE grade for the
-// scorecards that emit a score but no corpus letter.
+// legacy scorecards that emit a 0-100 score but no corpus letter.
 func findScore(payload any, key string) *float64 {
 	if key == "" {
 		return nil
@@ -121,4 +122,11 @@ func findScore(payload any, key string) *float64 {
 		return &f
 	}
 	return nil
+}
+
+// findValue is the corpus/doc/top-level continuous aggregate value, if any. It is
+// intentionally scoped like findScore so a per-KPI value never stands in for the
+// scorecard-level value.
+func findValue(payload any) *float64 {
+	return findScore(payload, "value")
 }
