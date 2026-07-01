@@ -199,6 +199,7 @@ var verbManifest = []Verb{
 	{Name: "vcache", Synopsis: "the virtual provider-cache status/proof surface (status/prove/prove-telemetry)", Lane: "cmd"},
 	{Name: "version", Synopsis: "print the fak version", Aliases: []string{"-v", "--version"}, Lane: "cmd"},
 	{Name: "webbench", Synopsis: "frontier web/browser-agent benchmarking (describe/eval/compare)", Lane: "cmd"},
+	{Name: "workflow-audit", Synopsis: "classify every branch/tag ref in .github/workflows against the branch-role contract (#1697); gate on unclassified dev-path refs", Lane: "cmd"},
 }
 
 // Verbs returns the structured CLI-verb catalog, sorted by name. It is a live VIEW,

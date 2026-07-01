@@ -1,0 +1,62 @@
+# Intentional non-role branch references in .github/workflows/*.yml.
+#
+# Each line is `<file>:<token>` -- a (workflow file, branch token) pair that the audit
+# classifies as ClassLegacy instead of failing the gate. Blank lines and lines starting
+# with `#` are ignored. The token is matched case-sensitively against the literal found
+# in the workflow.
+#
+# This is the seam #1697 / #1701 require: it lets the gate tell a KNOWN, reviewed,
+# intentional reference apart from a NEWLY-introduced unclassified development-path one.
+# It only ever SHRINKS -- when the dev/main cutover retargets a workflow, the legacy arm
+# is removed from the YAML and its line is deleted here. A new raw branch filter that is
+# not added here reds `go test ./internal/workflowaudit` (TestLiveTreeFullyClassified).
+#
+# Captured 2026-06-30 from the no-cutover tree (all four branch roles == "main").
+
+# --- `master`: the legacy second arm of nearly every dev filter and front-door gate ---
+# The repo's old default-branch name, kept as a compatibility arm until the cutover. Not
+# a currently-configured role, so it is classified here as intentional legacy.
+bench.yml:master
+bench-feed.yml:master
+bench-signal.yml:master
+backlog-feed.yml:master
+blockers-feed.yml:master
+cachevalue-feed.yml:master
+cadence.yml:master
+capacity-feed.yml:master
+ci.yml:master
+ci-fast.yml:master
+cross-platform.yml:master
+dogfood.yml:master
+dogfood-coverage.yml:master
+dojo-feed.yml:master
+dojo-rsi-feed.yml:master
+garden.yml:master
+gate-signal.yml:master
+milestone-tick.yml:master
+node-usage-feed.yml:master
+product-feed.yml:master
+release-cadence.yml:master
+score-signal.yml:master
+scoreboard-feed.yml:master
+security-audit.yml:master
+slack-beat.yml:master
+slack-watchdog.yml:master
+steering-guard.yml:master
+
+# --- `fak-v0.1`: the legacy compatibility release branch ---
+# Accepted on dev filters and the bench baseline-upload gate so the v0.1 line keeps a
+# green gate during the migration.
+bench.yml:fak-v0.1
+ci.yml:fak-v0.1
+ci-fast.yml:fak-v0.1
+cross-platform.yml:fak-v0.1
+security-audit.yml:fak-v0.1
+
+# --- hidden development-trunk assumption (documented, follow-on filed) ---
+# bench.yml fetches the benchmark baseline with `gh run list --branch main`, so it always
+# compares against main's last green run regardless of the current branch. This is a real
+# trunk assumption the dev/main cutover must revisit (the baseline-discovery branch should
+# track the development role), but it is correct on today's no-cutover tree. Allowlisted
+# with this note so the gate surfaces it without redding the green trunk.
+bench.yml:main

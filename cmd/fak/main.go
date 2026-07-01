@@ -80,6 +80,8 @@ func main() {
 		cmdBench(os.Args[2:])
 	case "benchmarks":
 		cmdBenchmarks(os.Args[2:])
+	case "frontierswe":
+		cmdFrontierswe(os.Args[2:])
 	case "sota":
 		cmdSota(os.Args[2:])
 	case "bench-runs":
@@ -172,6 +174,8 @@ func main() {
 		cmdIndex(os.Args[2:])
 	case "workflow":
 		cmdWorkflow(os.Args[2:])
+	case "workflow-audit":
+		cmdWorkflowAudit(os.Args[2:])
 	case "tree-doctor":
 		cmdTreeDoctor(os.Args[2:])
 	case "self-update":
@@ -216,6 +220,8 @@ func main() {
 		cmdAudit(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
+	case "fleetcap":
+		cmdFleetcap(os.Args[2:])
 	case "vcache":
 		cmdVCache(os.Args[2:])
 	case "hook":
@@ -280,6 +286,8 @@ func main() {
 		cmdLoopMap(os.Args[2:])
 	case "superloop":
 		cmdSuperloop(os.Args[2:])
+	case "fused":
+		cmdFused(os.Args[2:])
 	case "experiments":
 		cmdExperiments(os.Args[2:])
 	case "coverage-matrix":
