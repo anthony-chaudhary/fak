@@ -173,6 +173,33 @@ func TestFleetJanitorDryRunThenApply(t *testing.T) {
 	}
 }
 
+func TestFleetJanitorRecordsDecisions(t *testing.T) {
+	now := time.Now()
+	rootStart := now.Add(-60 * time.Minute).UTC().Format(time.RFC3339)
+	ppid := 100
+	age := 400
+	procs := []procguard.Proc{
+		{PID: 100, Name: "claude", Cmdline: "claude -p", Start: rootStart, AgeSec: &age},
+		{PID: 200, PPID: &ppid, Name: "ls", Cmdline: "ls -la", Start: now.Add(-7 * time.Minute).UTC().Format(time.RFC3339), AgeSec: &age},
+	}
+	plan := fleetmon.RunPlan{Workers: []fleetmon.PlanWorker{{Issue: 1, Session: "issue-1", PID: 100}}}
+	planPath := writePlan(t, plan)
+	ledger := filepath.Join(t.TempDir(), "janitor.jsonl")
+
+	withFleetSeams(t, procs, now, func(pid int) (bool, string) { return true, "ok" })
+	var out, errb bytes.Buffer
+	if code := runFleetJanitor(&out, &errb, []string{"--plan", planPath, "--apply", "--ledger", ledger}); code != 0 {
+		t.Fatalf("janitor exit %d: %s", code, errb.String())
+	}
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("janitor ledger not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"action":"terminated"`) || !strings.Contains(string(data), `"root_pid":200`) {
+		t.Fatalf("termination decision not recorded: %s", string(data))
+	}
+}
+
 func TestFleetFoldWritesLedger(t *testing.T) {
 	now := time.Now()
 	tx := writeJSONL(t,
@@ -262,6 +289,43 @@ func TestFleetReplaceEligibleDeadJSON(t *testing.T) {
 	}
 	if d.LedgerRow == nil || d.LedgerRow.Outcome != string(fleetmon.OutcomeSuperseded) {
 		t.Fatalf("expected a superseded ledger row, got %+v", d.LedgerRow)
+	}
+}
+
+func TestFleetReplaceWritesSupersedingLedgerRow(t *testing.T) {
+	now := time.Now()
+	withFleetSeams(t, nil, now, nil)
+	plan := fleetmon.RunPlan{RunID: "r1", Workers: []fleetmon.PlanWorker{{Issue: 1856, Session: "issue-1856"}}}
+	ledger := filepath.Join(t.TempDir(), "run.jsonl")
+	var out, errb bytes.Buffer
+	code := runFleetReplace(&out, &errb, []string{"--plan", writePlan(t, plan), "--session", "issue-1856", "--class", "dead", "--ledger", ledger, "--write", "--json"})
+	if code != 0 {
+		t.Fatalf("replace exit %d: %s", code, errb.String())
+	}
+	rows := fleetmon.ParseLedger(readFile(t, ledger))
+	if len(rows) != 1 || rows[0].Outcome != string(fleetmon.OutcomeSuperseded) || rows[0].SupersededBy != "issue-1856-replacement-1" {
+		t.Fatalf("superseding row not written correctly: %+v", rows)
+	}
+}
+
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestFleetReplaceRefusedDoesNotWriteLedger(t *testing.T) {
+	now := time.Now()
+	withFleetSeams(t, nil, now, nil)
+	plan := fleetmon.RunPlan{Workers: []fleetmon.PlanWorker{{Issue: 1, Session: "issue-1"}}}
+	ledger := filepath.Join(t.TempDir(), "run.jsonl")
+	var out, errb bytes.Buffer
+	runFleetReplace(&out, &errb, []string{"--plan", writePlan(t, plan), "--session", "issue-1", "--class", "healthy", "--ledger", ledger, "--write"})
+	if _, err := os.Stat(ledger); err == nil {
+		t.Fatal("a refused replacement must not write a ledger row")
 	}
 }
 

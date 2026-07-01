@@ -236,16 +236,17 @@ func runFleetMonitor(stdout, stderr io.Writer, argv []string) int {
 		}
 		disp, action := registryMatch(reg, w)
 		ev := fleetmon.WorkerEvidence{
-			Issue:          w.Issue,
-			Session:        w.Session,
-			Account:        w.Account,
-			RegistryDisp:   disp,
-			RegistryAction: action,
-			HasPID:         w.PID > 0,
-			PID:            w.PID,
-			PIDAlive:       w.PID > 0 && live[w.PID],
-			Transcript:     sig,
-			StaleChildren:  staleByWorker[w.PID],
+			Issue:            w.Issue,
+			Session:          w.Session,
+			Account:          w.Account,
+			RegistryDisp:     disp,
+			RegistryAction:   action,
+			HasPID:           w.PID > 0,
+			PID:              w.PID,
+			PIDAlive:         w.PID > 0 && live[w.PID],
+			PIDLivenessKnown: collectErr == "", // a failed scan => liveness unknown => never a false dead
+			Transcript:       sig,
+			StaleChildren:    staleByWorker[w.PID],
 		}
 		if pr, ok := prev.Workers[w.Session]; ok {
 			pl := pr.Lines
@@ -315,6 +316,7 @@ func runFleetJanitor(stdout, stderr io.Writer, argv []string) int {
 	planPath := fs.String("plan", "", "run plan JSON (worker roots to protect + attribute children to)")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	apply := fs.Bool("apply", false, "TERMINATE the stale child trees (default is a dry-run listing)")
+	ledgerPath := fs.String("ledger", "", "append every termination decision (reason, command, age, affected PIDs) to this JSONL ledger")
 	simple := fs.Duration("stale-simple", 5*time.Minute, "simple-shell staleness ceiling")
 	test := fs.Duration("stale-test", 10*time.Minute, "test staleness ceiling")
 	scan := fs.Duration("stale-scan", 5*time.Minute, "broad-scan staleness ceiling")
@@ -347,6 +349,27 @@ func runFleetJanitor(stdout, stderr io.Writer, argv []string) int {
 		for _, c := range result.Stale {
 			ok, detail := fleetKillPID(c.RootPID)
 			reaped = append(reaped, applied{c.RootPID, c.Name, ok, detail})
+		}
+	}
+
+	// Record every termination decision (reason, command, age, affected PIDs) to
+	// the audit ledger: the real action under --apply, else "would-terminate".
+	if *ledgerPath != "" {
+		var decisions []fleetmon.JanitorDecision
+		for _, c := range result.Stale {
+			action, detail := fleetmon.JanitorActionWouldTerminate, ""
+			if *apply {
+				action = fleetmon.JanitorActionTerminated
+				for _, r := range reaped {
+					if r.RootPID == c.RootPID && !r.OK {
+						action, detail = fleetmon.JanitorActionKillFailed, r.Detail
+					}
+				}
+			}
+			decisions = append(decisions, fleetmon.NewJanitorDecision(c, action, detail, now))
+		}
+		if err := appendJanitorDecisions(*ledgerPath, decisions); err != nil {
+			fmt.Fprintf(stderr, "fak fleet janitor: append ledger: %v\n", err)
 		}
 	}
 
@@ -489,6 +512,24 @@ func appendLedgerRows(path string, rows []fleetmon.LedgerRow) error {
 	return nil
 }
 
+func appendJanitorDecisions(path string, decisions []fleetmon.JanitorDecision) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for _, d := range decisions {
+		line, err := fleetmon.AppendJanitorDecisionLine(d)
+		if err != nil {
+			return err
+		}
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func renderFoldMarkdown(s fleetmon.RunLedgerSummary) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Fleet run ledger")
@@ -531,6 +572,8 @@ func runFleetReplace(stdout, stderr io.Writer, argv []string) int {
 	account := fs.String("account", "", "account/config bucket override")
 	templatePath := fs.String("template", "", "corrected prompt template file (optional)")
 	force := fs.Bool("force", false, "treat the original as explicitly unrecoverable (override the class gate)")
+	ledgerPath := fs.String("ledger", "", "run ledger to update with the superseding row (with --write)")
+	write := fs.Bool("write", false, "append the superseding ledger row (original -> replacement) to --ledger")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a human preview")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -569,6 +612,15 @@ func runFleetReplace(stdout, stderr io.Writer, argv []string) int {
 		RunID:    plan.RunID,
 		Now:      fleetNow(),
 	})
+
+	// Update the run ledger with the superseding row (original -> replacement,
+	// reason, timestamp) — only for an eligible, non-refused replacement.
+	if decision.Eligible && *write && *ledgerPath != "" && decision.LedgerRow != nil {
+		if err := appendLedgerRows(*ledgerPath, []fleetmon.LedgerRow{*decision.LedgerRow}); err != nil {
+			fmt.Fprintf(stderr, "fak fleet replace: append ledger: %v\n", err)
+			return 1
+		}
+	}
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, decision, "fak fleet replace")
