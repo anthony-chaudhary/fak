@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 )
 
 func TestBuildLaunchArgv(t *testing.T) {
@@ -206,6 +207,56 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("env missing CLAUDE_CONFIG_DIR=%s", seat)
+	}
+}
+
+func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	const oldRev = "1111111111111111111111111111111111111111"
+	const headRev = "2222222222222222222222222222222222222222"
+	origRun := accountsLaunchRun
+	origStamp := accountsLaunchStamp
+	origHead := accountsLaunchHeadRev
+	t.Cleanup(func() {
+		accountsLaunchRun = origRun
+		accountsLaunchStamp = origStamp
+		accountsLaunchHeadRev = origHead
+	})
+
+	launched := false
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+		launched = true
+		if len(argv) < 3 || argv[1] != "guard" {
+			t.Fatalf("stale warning should not disable the default guard launch: %#v", argv)
+		}
+		return 0
+	}
+	accountsLaunchStamp = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: oldRev, HasVCS: true}
+	}
+	accountsLaunchHeadRev = func() string { return headRev }
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch rc=%d stderr=%s", rc, errb.String())
+	}
+	if !launched {
+		t.Fatal("launch exec seam was not called")
+	}
+	got := errb.String()
+	for _, want := range []string{
+		"WARNING: running fak binary",
+		"built from 111111111111",
+		"checkout is at 222222222222",
+		"fak self-update",
+		"guard will re-exec the same stale file",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stale launch warning missing %q:\n%s", want, got)
+		}
 	}
 }
 

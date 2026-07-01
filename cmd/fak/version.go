@@ -12,12 +12,12 @@ import (
 
 // cmdVersion prints the application version AND the build provenance of THIS binary.
 //
-// Why the second part matters: appversion.Current() resolves the version by walking up
-// from the current directory to the nearest VERSION file (then $FAK_APP_VERSION, then the
-// -ldflags BuildVersion). So a STALE `fak` binary run from inside an up-to-date checkout
-// reports the TREE's version, not its own — it cannot reveal that the binary itself is
-// old. That is exactly the "it still seems like an old `fak guard` is running" confusion:
-// the version line looks current even when the running binary is not.
+// Why the second part matters: appversion.Current() resolves the friendly application
+// version from $FAK_APP_VERSION, a release -ldflags BuildVersion, or a repo-bounded VERSION
+// file. So a STALE dev `fak` binary run from inside an up-to-date checkout can still report
+// the TREE's version, not its own — it cannot reveal that the binary itself is old. That is
+// exactly the "it still seems like an old `fak guard` is running" confusion: the version
+// line looks current even when the running binary is not.
 //
 // The embedded build stamp can tell them apart. The Go toolchain records the VCS revision,
 // commit time, and a dirty flag in the binary at build (default for `go build`/`go install`

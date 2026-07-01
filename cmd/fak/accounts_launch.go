@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // `fak accounts launch` — the account-switcher LAUNCHER. It resolves a seat (the active
@@ -130,6 +132,14 @@ type launchParams struct {
 // it to capture the plan without spawning a real agent. Production uses execLaunchChild.
 var accountsLaunchRun = execLaunchChild
 
+// accountsLaunchStamp/accountsLaunchHeadRev are freshness seams. A stale launcher is a
+// special footgun because the default guard path re-execs this same binary; without a warning,
+// a user can keep starting the old guard forever even while the checkout is newer.
+var (
+	accountsLaunchStamp   = binstamp.Self
+	accountsLaunchHeadRev = accountsLaunchGitHeadRev
+)
+
 // runAccountsLaunch resolves the seat, builds the (guard-wrapped, skip-permissions) launch
 // argv, and execs it under that seat's CLAUDE_CONFIG_DIR. With dryRun it prints the plan and
 // returns without launching.
@@ -207,6 +217,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	if err != nil || strings.TrimSpace(fakBin) == "" {
 		fakBin = "fak" // fall back to PATH resolution if the binary path can't be read
 	}
+	warnIfAccountsLaunchStaleBinary(stderr, fakBin, p.useGuard)
 	argv := buildLaunchArgv(fakBin, launchOpts{
 		command:         command,
 		useGuard:        p.useGuard,
@@ -255,6 +266,41 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		return 0
 	}
 	return accountsLaunchRun(stdout, stderr, argv, env)
+}
+
+func warnIfAccountsLaunchStaleBinary(stderr io.Writer, fakBin string, useGuard bool) {
+	stamp := accountsLaunchStamp()
+	headRev := accountsLaunchHeadRev()
+	if binstamp.Compare(stamp, headRev) != binstamp.Stale {
+		return
+	}
+	reexecNote := "before launching"
+	if useGuard {
+		reexecNote = "before launching; otherwise fak guard will re-exec the same stale file"
+	}
+	fmt.Fprintf(stderr, "fak accounts launch: WARNING: running fak binary %q was built from %s, but this checkout is at %s; run `fak self-update` or rebuild/install fak %s.\n",
+		fakBin, shortLaunchRev(stamp.Revision), shortLaunchRev(headRev), reexecNote)
+}
+
+func accountsLaunchGitHeadRev() string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func shortLaunchRev(rev string) string {
+	rev = strings.TrimSpace(rev)
+	if len(rev) > 12 {
+		return rev[:12]
+	}
+	if rev == "" {
+		return "(unknown)"
+	}
+	return rev
 }
 
 // activeLaunchSeatName picks the seat a bare `fak accounts launch` (no --name) starts: the

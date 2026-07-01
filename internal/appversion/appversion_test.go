@@ -26,10 +26,53 @@ func TestFromDirWalksUpToVersionMarker(t *testing.T) {
 	}
 }
 
+func TestFromDirStopsAtRepositoryBoundary(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(parent, "VERSION"), []byte("parent-version\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(parent, "sibling-repo")
+	nested := filepath.Join(repo, "cmd", "fak")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := FromDir(nested); ok {
+		t.Fatalf("FromDir crossed the repo boundary and returned %q", got)
+	}
+}
+
 func TestCurrentPrefersEnvironment(t *testing.T) {
 	t.Setenv("FAK_APP_VERSION", "9.9.9-test")
 	if got := Current(); got != "9.9.9-test" {
 		t.Fatalf("Current()=%q, want environment override", got)
+	}
+}
+
+func TestCurrentPrefersBuildVersionOverTreeVersion(t *testing.T) {
+	oldBuildVersion := BuildVersion
+	BuildVersion = "7.7.7-release"
+	t.Cleanup(func() { BuildVersion = oldBuildVersion })
+	t.Setenv("FAK_APP_VERSION", "")
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	if got := Current(); got != "7.7.7-release" {
+		t.Fatalf("Current()=%q, want BuildVersion override", got)
 	}
 }
 

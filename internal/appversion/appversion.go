@@ -14,8 +14,8 @@ const fallback = "dev"
 //
 //	-ldflags "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=0.8.0"
 //
-// The repo VERSION file still wins when present so local benchmark artifacts pin
-// the checked-out application version.
+// BuildVersion wins over VERSION when present so a release binary reports the version it
+// was built with instead of inheriting a parent checkout's marker.
 var BuildVersion string
 
 // Current returns the best available application version.
@@ -23,18 +23,20 @@ func Current() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_APP_VERSION")); v != "" {
 		return v
 	}
+	if v := strings.TrimSpace(BuildVersion); v != "" {
+		return v
+	}
 	for _, start := range candidateStarts() {
 		if v, ok := FromDir(start); ok {
 			return v
 		}
 	}
-	if v := strings.TrimSpace(BuildVersion); v != "" {
-		return v
-	}
 	return fallback
 }
 
-// FromDir walks upward from start until it finds a VERSION file.
+// FromDir walks upward from start until it finds a VERSION file, but it does not cross a
+// repository boundary. A sibling checkout without VERSION must not inherit one from its
+// parent directory.
 func FromDir(start string) (string, bool) {
 	if strings.TrimSpace(start) == "" {
 		return "", false
@@ -49,6 +51,9 @@ func FromDir(start string) (string, bool) {
 	for {
 		if v, ok := readVersionFile(filepath.Join(dir, "VERSION")); ok {
 			return v, true
+		}
+		if hasRepoBoundary(dir) {
+			return "", false
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -79,4 +84,14 @@ func readVersionFile(path string) (string, bool) {
 		return "", false
 	}
 	return v, true
+}
+
+func hasRepoBoundary(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	return false
 }
