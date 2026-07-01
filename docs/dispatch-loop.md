@@ -45,6 +45,11 @@ scoped worker per issue — while keeping every safety primitive the plan path h
 | 5. **Harvest** | `fak dispatch progress` / [`issue_resolve_progress.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_progress.py) | Native `progress` snapshots open / closed-by-loop / witnessed counts to `.dispatch-runs/progress.jsonl` (the curve), records the baseline, and emits loop-ledger witness rows. The legacy Python progress script still drives `--close` until the native witnessed close arm lands. Counts only closes carrying the close-arm's signature as the loop's own work. |
 | 6. **Surface** | [`dispatch_status.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_status.py) | One-touch operator card; `--md` writes the operator-local `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane, closure honesty, silent-worker scan). |
 
+For generation-specific concurrent loop scheduling, use
+[`generation-loop-scheduling.md`](generation-loop-scheduling.md). It defines the
+held/default-admitted buckets, shared-lease contention behavior, and operator
+override evidence without changing the dispatch loop's shared-trunk rules.
+
 ## The load-bearing invariants
 
 These are the rules that make it safe to hand autonomous spawning to an unattended

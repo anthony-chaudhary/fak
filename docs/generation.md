@@ -36,6 +36,10 @@ The branchless team workflow is spelled out in
 [`docs/generation-concurrent-trunk-playbook.md`](generation-concurrent-trunk-playbook.md):
 stream labels partition evidence and horizon, while `dos arbitrate`, path scope,
 and runtime gates decide whether concurrent work can safely run.
+Loop scheduling for concurrent generation workers is pinned in
+[`docs/generation-loop-scheduling.md`](generation-loop-scheduling.md): generation
+labels select readiness checks and override gates, while lane pressure, priority,
+and path leases still decide the admitted wave.
 
 Generation is independent of runtime feature gates. A generation label says why
 the work exists and what evidence promotes it. A feature gate decides whether
