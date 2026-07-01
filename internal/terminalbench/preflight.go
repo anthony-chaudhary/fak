@@ -95,6 +95,10 @@ type RehearsalPreflight struct {
 // benchmark.
 func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 	p := in.Probe
+	dataset := strings.TrimSpace(in.Dataset)
+	if dataset == "" {
+		dataset = OfficialTerminalBench21Dataset
+	}
 	oracleReady := p.HarborPresent && p.DockerEngineUp
 	oracleArtifactBlocked := p.OracleArtifactRequired && !p.OracleArtifactPresent
 	rawReady := oracleReady && p.OpenAIKeyPresent && !oracleArtifactBlocked
@@ -143,7 +147,7 @@ func BuildRehearsalPreflight(in RehearsalPreflightInput) RehearsalPreflight {
 		GeneratedAt:       strings.TrimSpace(in.GeneratedAt),
 		Benchmark:         "Terminal-Bench 2.1 raw/fak rehearsal preflight",
 		Issue:             strings.TrimSpace(in.Issue),
-		Dataset:           strings.TrimSpace(in.Dataset),
+		Dataset:           dataset,
 		Status:            status,
 		EvidenceClass:     "REHEARSAL_PREFLIGHT",
 		ClaimBoundary:     "Host-readiness preflight only: probes whether this host can attempt the Terminal-Bench 2.1 raw/fak rehearsal (Harbor, Docker engine, OPENAI_API_KEY, fak gateway). It is never a benchmark result; result_claim_allowed stays false. The oracle smoke and the credentialed raw-vs-fak compare remain the result-bearing artifacts.",

@@ -26,6 +26,9 @@ func TestBuildRehearsalPreflightNeverAllowsResultClaim(t *testing.T) {
 		if p.EvidenceClass != "REHEARSAL_PREFLIGHT" {
 			t.Fatalf("case %d: evidence class = %q", i, p.EvidenceClass)
 		}
+		if p.Dataset != OfficialTerminalBench21Dataset {
+			t.Fatalf("case %d: dataset = %q", i, p.Dataset)
+		}
 		if len(p.KnownDependencies) == 0 {
 			t.Fatalf("case %d: known dependencies must be recorded", i)
 		}
@@ -134,13 +137,13 @@ func TestBuildRehearsalPreflightCarriesContext(t *testing.T) {
 	p := BuildRehearsalPreflight(RehearsalPreflightInput{
 		GeneratedAt:      "2026-06-26T00:00:00Z",
 		Probe:            PreflightProbe{HarborPresent: true, HarborVersion: "0.15.0", DockerEngineUp: false, DockerDetail: "engine not reachable"},
-		Dataset:          "terminal-bench/terminal-bench-2-1",
+		Dataset:          OfficialTerminalBench21Dataset,
 		Issue:            "#900",
 		OfficialContract: "experiments/agent-live/terminalbench-official-run-contract-20260626.json",
 		SubmissionPacket: "docs/benchmarks/TERMINAL-BENCH-2.1-SUBMISSION-PACKET.md",
 		CandidateTaskIDs: []string{"go-cli-help-benign", "python-config-fix-danger-after-tests"},
 	})
-	if p.Issue != "#900" || p.Dataset != "terminal-bench/terminal-bench-2-1" {
+	if p.Issue != "#900" || p.Dataset != OfficialTerminalBench21Dataset {
 		t.Fatalf("context not carried: issue=%q dataset=%q", p.Issue, p.Dataset)
 	}
 	if p.OfficialContract == "" || p.SubmissionPacket == "" || len(p.CandidateTaskIDs) != 2 {

@@ -6,7 +6,12 @@ import (
 	"strings"
 )
 
-const OfficialRunContractSchema = "fak.terminalbench-official-run-contract.v1"
+const (
+	OfficialRunContractSchema = "fak.terminalbench-official-run-contract.v1"
+
+	OfficialTerminalBench21Dataset       = "terminal-bench/terminal-bench-2-1"
+	OfficialTerminalBench21TopAgentModel = "gpt-5.5"
+)
 
 type OfficialRunContractInput struct {
 	GeneratedAt          string
@@ -71,6 +76,7 @@ type ContractModel struct {
 	FakAgent            string `json:"fak_agent"`
 	PublicAgentLabel    string `json:"public_agent_label,omitempty"`
 	Model               string `json:"model"`
+	TopAgentModel       string `json:"top_agent_model,omitempty"`
 	FakGateway          string `json:"fak_gateway"`
 	SameAgentRequired   bool   `json:"same_agent_required"`
 	SameModelRequired   bool   `json:"same_model_required"`
@@ -107,10 +113,10 @@ type ContractGate struct {
 
 func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 	if in.DatasetName == "" {
-		in.DatasetName = "terminal-bench/terminal-bench-2-1"
+		in.DatasetName = OfficialTerminalBench21Dataset
 	}
 	if in.Model == "" {
-		in.Model = "gpt-5.5"
+		in.Model = OfficialTerminalBench21TopAgentModel
 	}
 	if in.Agent == "" {
 		in.Agent = "codex"
@@ -128,12 +134,13 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 	taskIDs := contractTaskIDs(tasks)
 	gates := []ContractGate{
 		{Name: "candidate_task_ids", OK: len(taskIDs) > 0, Detail: candidateTaskDetail(len(taskIDs))},
-		{Name: "official_dataset_pin", OK: strings.TrimSpace(in.DatasetName) != "", Detail: datasetPin(in.DatasetName, in.DatasetVersion)},
+		{Name: "official_dataset_pin", OK: officialDatasetPinReady(in.DatasetName, in.DatasetVersion), Detail: datasetPin(in.DatasetName, in.DatasetVersion)},
 		{Name: "same_task_ids_required", OK: true, Detail: "raw and fak official runs must use the same benchmark-native Terminal-Bench task ids"},
 		{Name: "same_image_required", OK: true, Detail: "raw and fak official runs must use the same benchmark-provided image or environment setup for each task"},
 		{Name: "same_budget_required", OK: true, Detail: "raw and fak official runs must use the same task budget and retry policy"},
 		{Name: "same_agent_required", OK: strings.TrimSpace(in.Agent) == strings.TrimSpace(in.FakAgent), Detail: fmt.Sprintf("raw=%s fak=%s", strings.TrimSpace(in.Agent), strings.TrimSpace(in.FakAgent))},
 		{Name: "same_model_required", OK: strings.TrimSpace(in.Model) != "", Detail: strings.TrimSpace(in.Model)},
+		{Name: "top_agent_model_current", OK: strings.TrimSpace(in.Model) == OfficialTerminalBench21TopAgentModel, Detail: OfficialTerminalBench21TopAgentModel},
 		{Name: "harbor_codex_adapter", OK: strings.TrimSpace(in.Agent) == "codex" && strings.TrimSpace(in.FakAgent) == "codex", Detail: "Harbor adapter name must be codex; codex-cli is only the public leaderboard label"},
 		{Name: "raw_arm_command", OK: strings.TrimSpace(in.RawCommand) != "", Detail: strings.TrimSpace(in.RawCommand)},
 		{Name: "fak_arm_command", OK: strings.TrimSpace(in.FakCommand) != "", Detail: strings.TrimSpace(in.FakCommand)},
@@ -166,6 +173,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 			FakAgent:            strings.TrimSpace(in.FakAgent),
 			PublicAgentLabel:    strings.TrimSpace(in.PublicAgentLabel),
 			Model:               strings.TrimSpace(in.Model),
+			TopAgentModel:       OfficialTerminalBench21TopAgentModel,
 			FakGateway:          strings.TrimSpace(in.FakGateway),
 			SameAgentRequired:   true,
 			SameModelRequired:   true,
@@ -265,10 +273,15 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "- Candidate suite: `%s`\n", c.TaskSelection.CandidateSuite)
 	fmt.Fprintf(&b, "- Candidate task ids: `%s`\n", strings.Join(c.TaskSelection.CandidateTaskIDs, ", "))
 	fmt.Fprintf(&b, "- Official dataset: `%s`\n", datasetPin(c.TaskSelection.OfficialDataset, c.TaskSelection.OfficialDatasetVersion))
-	fmt.Fprintf(&b, "- Concurrent tasks: `%d`\n\n", c.TaskSelection.NConcurrent)
-	if c.Model.PublicAgentLabel != "" {
-		fmt.Fprintf(&b, "- Public agent label: `%s`\n\n", c.Model.PublicAgentLabel)
+	fmt.Fprintf(&b, "- Concurrent tasks: `%d`\n", c.TaskSelection.NConcurrent)
+	fmt.Fprintf(&b, "- Shared model: `%s`\n", c.Model.Model)
+	if c.Model.TopAgentModel != "" {
+		fmt.Fprintf(&b, "- Terminal-Bench 2.1 top-agent model: `%s`\n", c.Model.TopAgentModel)
 	}
+	if c.Model.PublicAgentLabel != "" {
+		fmt.Fprintf(&b, "- Public agent label: `%s`\n", c.Model.PublicAgentLabel)
+	}
+	fmt.Fprintf(&b, "\n")
 	if len(c.TaskSelection.CandidateTasks) > 0 {
 		fmt.Fprintf(&b, "| Candidate | Image | Budget turns | Test oracle |\n")
 		fmt.Fprintf(&b, "|---|---|---:|---|\n")
@@ -391,6 +404,10 @@ func datasetPin(name, version string) string {
 		return name
 	}
 	return name + "==" + version
+}
+
+func officialDatasetPinReady(name, version string) bool {
+	return strings.TrimSpace(name) == OfficialTerminalBench21Dataset && strings.TrimSpace(version) == ""
 }
 
 func contractStatus(gates []ContractGate) string {

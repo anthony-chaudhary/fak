@@ -1,6 +1,6 @@
 {
   "schema": "fak.terminalbench-official-run-contract.v1",
-  "generated_at": "2026-06-29T19:15:36Z",
+  "generated_at": "2026-07-01T15:42:19Z",
   "benchmark": "Terminal-Bench Harbor/Codex official-run contract",
   "status": "READY_FOR_EXTERNAL_HARNESS",
   "evidence_class": "EXTERNAL_RUN_CONTRACT",
@@ -39,6 +39,7 @@
     "fak_agent": "codex",
     "public_agent_label": "codex-cli",
     "model": "gpt-5.5",
+    "top_agent_model": "gpt-5.5",
     "fak_gateway": "http://host.docker.internal:18080/v1",
     "same_agent_required": true,
     "same_model_required": true,
@@ -148,6 +149,11 @@
     },
     {
       "name": "same_model_required",
+      "ok": true,
+      "detail": "gpt-5.5"
+    },
+    {
+      "name": "top_agent_model_current",
       "ok": true,
       "detail": "gpt-5.5"
     },

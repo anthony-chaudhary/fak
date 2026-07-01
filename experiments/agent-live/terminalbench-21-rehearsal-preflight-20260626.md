@@ -18,6 +18,7 @@
 |---|:---:|---|
 | `harbor_present` | yes | harbor 0.15.0 |
 | `docker_engine_up` | no | docker engine not reachable |
+| `oracle_smoke_artifact` | yes | not required (pass --oracle-artifact to enforce oracle-before-paid) |
 | `openai_api_key_present` | no | OPENAI_API_KEY not set in this shell |
 | `fak_gateway_reachable` | no | not probed (http://localhost:8080/v1); pass --probe-gateway to check |
 
@@ -35,6 +36,6 @@
 
 - a running Docker engine for every Harbor task container (oracle, raw, and fak arms)
 - OPENAI_API_KEY in the rehearsal shell for the credentialed raw baseline (#900)
-- the fak Codex /v1/responses client wire so the fak arm routes through the gateway (#925)
+- a running, reachable fak gateway so the fak arm routes through it (the client-facing /v1/responses inbound route shipped in #925; the remaining requirement is that the gateway is up on this host)
 - explicit paid-spend authority before the credentialed raw/fak smoke pair
 - the official Harbor grader output as the sole authority for any pass-rate number
