@@ -197,6 +197,8 @@ func TestReleaseStatusNativeJSONEnvelope(t *testing.T) {
 				"last_tag":       "v0.1.0",
 				"latest_any_tag": "v0.1.0",
 			}, 2, nil
+		case "release_lock.py":
+			return map[string]any{"held": true, "lock": map[string]any{"owner": "peer"}}, 0, nil
 		default:
 			t.Fatalf("unexpected helper script %s", script)
 		}
@@ -226,8 +228,56 @@ func TestReleaseStatusNativeJSONEnvelope(t *testing.T) {
 	if gh := got["github_release"].(map[string]any); gh["status"] != "skipped" {
 		t.Fatalf("github_release = %#v, want skipped", gh)
 	}
-	if len(scripts) != 2 || scripts[0] != "release_context.py" || scripts[1] != "release_decide.py" {
-		t.Fatalf("helpers = %#v, want context+decide only", scripts)
+	if _, ok := got["development_head"]; !ok {
+		t.Fatalf("top-level development_head missing: %#v", got)
+	}
+	if _, ok := got["release_head"]; !ok {
+		t.Fatalf("top-level release_head missing: %#v", got)
+	}
+	if got["development_branch"] == "" || got["release_branch"] == "" || got["latest_tag"] != "v0.1.0" {
+		t.Fatalf("top-level branch fields missing: %#v", got)
+	}
+	regime := got["branch_regime"].(map[string]any)
+	if regime["latest_tag"] != "v0.1.0" || regime["release_lock_held"] != true {
+		t.Fatalf("branch_regime = %#v, want latest tag and held lock", regime)
+	}
+	blockers, _ := regime["promotion_blockers"].([]any)
+	if len(blockers) == 0 {
+		t.Fatalf("branch_regime promotion blockers empty: %#v", regime)
+	}
+	if len(scripts) != 3 || scripts[0] != "release_context.py" || scripts[1] != "release_decide.py" || scripts[2] != "release_lock.py" {
+		t.Fatalf("helpers = %#v, want context+decide+release_lock", scripts)
+	}
+}
+
+func TestReleaseStatusRenderIncludesBranchRegime(t *testing.T) {
+	status := map[string]any{
+		"rolling": map[string]any{
+			"last_tag":          "v1.2.3",
+			"commits_since_tag": 9,
+			"decision":          map[string]any{"decision": "hold", "reason": "waiting"},
+		},
+		"stable":      map[string]any{"latest_stable": nil},
+		"next_action": map[string]any{"kind": "wait", "detail": "nothing release-worthy pending"},
+		"branch_regime": map[string]any{
+			"development_branch": "dev",
+			"release_branch":     "main",
+			"development_ahead":  float64(3),
+			"release_ahead":      float64(0),
+			"drift":              "development_ahead",
+			"promotion_blocked":  true,
+			"promotion_blockers": []string{"DEVELOPMENT_CI_RED"},
+		},
+	}
+	out := renderReleaseStatus(status)
+	for _, want := range []string{
+		"last tag: v1.2.3",
+		"branch regime: dev is 3 commit(s) ahead of main; promotion blocked: DEVELOPMENT_CI_RED",
+		"commits since tag: 9",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render missing %q:\n%s", want, out)
+		}
 	}
 }
 

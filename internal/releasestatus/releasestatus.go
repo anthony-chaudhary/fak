@@ -235,6 +235,46 @@ type NextAction struct {
 	Detail string `json:"detail"`
 }
 
+// BranchRegimeFacts is the injected evidence for the dev/main promotion-status slice.
+// It is intentionally separate from the rolling/stable release fold: the branch-regime
+// view answers whether development has drifted from the release front door, while the
+// rolling fold answers whether the latest tag/release is stale.
+type BranchRegimeFacts struct {
+	DevelopmentBranch string
+	DevelopmentHead   string
+	ReleaseBranch     string
+	ReleaseHead       string
+	ReleaseSource     string
+	PublicFrontDoor   string
+	LatestTag         string
+	DevelopmentAhead  int
+	ReleaseAhead      int
+	DevelopmentCI     string
+	ReleaseLockHeld   bool
+	RoleError         string
+}
+
+// BranchRegime is the machine-readable dev/main drift and promotion-blocker summary.
+type BranchRegime struct {
+	DevelopmentBranch  string   `json:"development_branch"`
+	DevelopmentHead    string   `json:"development_head,omitempty"`
+	ReleaseBranch      string   `json:"release_branch"`
+	ReleaseHead        string   `json:"release_head,omitempty"`
+	ReleaseSource      string   `json:"release_source,omitempty"`
+	PublicFrontDoor    string   `json:"public_front_door,omitempty"`
+	LatestTag          string   `json:"latest_tag,omitempty"`
+	DevelopmentAhead   int      `json:"development_ahead"`
+	ReleaseAhead       int      `json:"release_ahead"`
+	Drift              string   `json:"drift"`
+	DevelopmentCI      string   `json:"development_ci,omitempty"`
+	PromotionCandidate string   `json:"promotion_candidate,omitempty"`
+	PromotionBlocked   bool     `json:"promotion_blocked"`
+	PromotionBlockers  []string `json:"promotion_blockers"`
+	ReleaseLockHeld    bool     `json:"release_lock_held"`
+	NextAction         string   `json:"next_action"`
+	RoleError          string   `json:"role_error,omitempty"`
+}
+
 // Status is the full folded record — the typed Go port of the python JSON.
 type Status struct {
 	Schema               string        `json:"schema"`
@@ -283,6 +323,105 @@ func Fold(f Facts) Status {
 		OK:                   ok,
 		Verdict:              verdict,
 		Detail:               detail,
+	}
+}
+
+// FoldBranchRegime turns branch-role/git/CI/lock facts into the dev/main drift view.
+func FoldBranchRegime(f BranchRegimeFacts) BranchRegime {
+	devBranch := branchDefault(f.DevelopmentBranch, "main")
+	releaseBranch := branchDefault(f.ReleaseBranch, "main")
+	out := BranchRegime{
+		DevelopmentBranch: devBranch,
+		DevelopmentHead:   strings.TrimSpace(f.DevelopmentHead),
+		ReleaseBranch:     releaseBranch,
+		ReleaseHead:       strings.TrimSpace(f.ReleaseHead),
+		ReleaseSource:     strings.TrimSpace(f.ReleaseSource),
+		PublicFrontDoor:   strings.TrimSpace(f.PublicFrontDoor),
+		LatestTag:         strings.TrimSpace(f.LatestTag),
+		DevelopmentAhead:  f.DevelopmentAhead,
+		ReleaseAhead:      f.ReleaseAhead,
+		Drift:             branchRegimeDrift(f),
+		DevelopmentCI:     strings.TrimSpace(f.DevelopmentCI),
+		ReleaseLockHeld:   f.ReleaseLockHeld,
+		RoleError:         strings.TrimSpace(f.RoleError),
+	}
+	out.PromotionBlockers = branchRegimeBlockers(out)
+	out.PromotionBlocked = len(out.PromotionBlockers) > 0
+	if out.Drift == "development_ahead" && !out.PromotionBlocked {
+		out.PromotionCandidate = out.DevelopmentHead
+	}
+	out.NextAction = branchRegimeNextAction(out)
+	return out
+}
+
+func branchDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func branchRegimeDrift(f BranchRegimeFacts) string {
+	switch {
+	case strings.TrimSpace(f.DevelopmentHead) == "" || strings.TrimSpace(f.ReleaseHead) == "":
+		return "unknown"
+	case f.DevelopmentAhead > 0 && f.ReleaseAhead > 0:
+		return "diverged"
+	case f.ReleaseAhead > 0:
+		return "release_ahead"
+	case f.DevelopmentAhead > 0:
+		return "development_ahead"
+	default:
+		return "no_drift"
+	}
+}
+
+func branchRegimeBlockers(r BranchRegime) []string {
+	var blockers []string
+	if r.RoleError != "" {
+		blockers = append(blockers, "BRANCH_ROLE_CONFIG")
+	}
+	if r.DevelopmentHead == "" {
+		blockers = append(blockers, "DEVELOPMENT_HEAD_UNKNOWN")
+	}
+	if r.ReleaseHead == "" {
+		blockers = append(blockers, "RELEASE_HEAD_UNKNOWN")
+	}
+	if r.ReleaseAhead > 0 {
+		blockers = append(blockers, "RELEASE_AHEAD")
+	}
+	if branchRegimeCIBlocks(r.DevelopmentCI) {
+		blockers = append(blockers, "DEVELOPMENT_CI_RED")
+	}
+	if r.ReleaseLockHeld {
+		blockers = append(blockers, "RELEASE_LOCK_HELD")
+	}
+	return nonNil(blockers)
+}
+
+func branchRegimeCIBlocks(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "failure", "failed", "red", "cancelled", "timed_out", "action_required":
+		return true
+	default:
+		return false
+	}
+}
+
+func branchRegimeNextAction(r BranchRegime) string {
+	if r.PromotionBlocked {
+		return "hold promotion; clear blocker(s): " + strings.Join(r.PromotionBlockers, ", ")
+	}
+	switch r.Drift {
+	case "development_ahead":
+		return fmt.Sprintf("promotion candidate: %s %s is %d commit(s) ahead of %s", r.DevelopmentBranch, shortSHA(r.DevelopmentHead), r.DevelopmentAhead, r.ReleaseBranch)
+	case "no_drift":
+		return fmt.Sprintf("hold; %s and %s point at the same release source", r.DevelopmentBranch, r.ReleaseBranch)
+	case "unknown":
+		return "refresh branch heads before deciding promotion status"
+	default:
+		return "inspect branch divergence before promotion"
 	}
 }
 

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/releasestatus"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -112,9 +114,16 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 	}
 	dirty := releaseStatusDirtySummary(root)
 	ciDiag := releaseStatusCIDiagnosis(root)
+	branchRegime := releaseStatusBranchRegimeMap(releaseStatusBranchRegime(root, lastTag))
 	status := map[string]any{
-		"schema": releaseStatusSchema,
-		"root":   root,
+		"schema":             releaseStatusSchema,
+		"root":               root,
+		"development_branch": branchRegime["development_branch"],
+		"development_head":   branchRegime["development_head"],
+		"release_branch":     branchRegime["release_branch"],
+		"release_head":       branchRegime["release_head"],
+		"latest_tag":         branchRegime["latest_tag"],
+		"promotion_blockers": branchRegime["promotion_blockers"],
 		"head": map[string]any{
 			"sha":    releaseStatusFirstString(releaseStatusString(contextPayload["head_sha"]), releaseStatusGitOutput(root, "rev-parse", "HEAD")),
 			"branch": releaseStatusFirstString(releaseStatusString(contextPayload["current_branch"]), releaseStatusGitOutput(root, "rev-parse", "--abbrev-ref", "HEAD")),
@@ -135,6 +144,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 		"github_release": releaseStatusGitHubReleaseView(root, lastTag, opts.SkipGH),
 		"stable":         stable,
 		"cadence":        releaseStatusCadence(root),
+		"branch_regime":  branchRegime,
 	}
 	action := releaseStatusNextAction(decision, stable, dirty, ciDiag)
 	status["next_action"] = action
@@ -142,6 +152,119 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 		status[k] = v
 	}
 	return status
+}
+
+func releaseStatusBranchRegime(root, latestTag string) releasestatus.BranchRegime {
+	roles, roleErr := branchrole.Load(root)
+	devHead := releaseStatusBranchHead(root, roles.DevelopmentBranch)
+	releaseHead := releaseStatusBranchHead(root, roles.ReleaseBranch)
+	releaseAhead, developmentAhead := releaseStatusBranchAhead(root, releaseHead, devHead)
+	roleErrText := ""
+	if roleErr != nil {
+		roleErrText = roleErr.Error()
+	}
+	return releasestatus.FoldBranchRegime(releasestatus.BranchRegimeFacts{
+		DevelopmentBranch: roles.DevelopmentBranch,
+		DevelopmentHead:   devHead,
+		ReleaseBranch:     roles.ReleaseBranch,
+		ReleaseHead:       releaseHead,
+		ReleaseSource:     roles.ReleaseSource,
+		PublicFrontDoor:   roles.PublicFrontDoor,
+		LatestTag:         latestTag,
+		DevelopmentAhead:  developmentAhead,
+		ReleaseAhead:      releaseAhead,
+		DevelopmentCI:     releaseStatusBranchCI(root, roles.DevelopmentBranch, devHead),
+		ReleaseLockHeld:   releaseStatusReleaseLockHeld(root),
+		RoleError:         roleErrText,
+	})
+}
+
+func releaseStatusBranchRegimeMap(r releasestatus.BranchRegime) map[string]any {
+	return map[string]any{
+		"development_branch":  r.DevelopmentBranch,
+		"development_head":    releaseStatusNilIfEmpty(r.DevelopmentHead),
+		"release_branch":      r.ReleaseBranch,
+		"release_head":        releaseStatusNilIfEmpty(r.ReleaseHead),
+		"release_source":      releaseStatusNilIfEmpty(r.ReleaseSource),
+		"public_front_door":   releaseStatusNilIfEmpty(r.PublicFrontDoor),
+		"latest_tag":          releaseStatusNilIfEmpty(r.LatestTag),
+		"development_ahead":   r.DevelopmentAhead,
+		"release_ahead":       r.ReleaseAhead,
+		"drift":               r.Drift,
+		"development_ci":      releaseStatusNilIfEmpty(r.DevelopmentCI),
+		"promotion_candidate": releaseStatusNilIfEmpty(r.PromotionCandidate),
+		"promotion_blocked":   r.PromotionBlocked,
+		"promotion_blockers":  append([]string(nil), r.PromotionBlockers...),
+		"release_lock_held":   r.ReleaseLockHeld,
+		"next_action":         r.NextAction,
+		"role_error":          releaseStatusNilIfEmpty(r.RoleError),
+	}
+}
+
+func releaseStatusBranchHead(root, branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return ""
+	}
+	for _, ref := range []string{
+		branch,
+		"refs/heads/" + branch,
+		"origin/" + branch,
+		"refs/remotes/origin/" + branch,
+	} {
+		if sha := releaseStatusGitOutput(root, "rev-parse", "--verify", ref+"^{commit}"); sha != "" {
+			return strings.Fields(sha)[0]
+		}
+	}
+	return ""
+}
+
+func releaseStatusBranchAhead(root, releaseHead, developmentHead string) (int, int) {
+	releaseHead = strings.TrimSpace(releaseHead)
+	developmentHead = strings.TrimSpace(developmentHead)
+	if releaseHead == "" || developmentHead == "" || releaseHead == developmentHead {
+		return 0, 0
+	}
+	out := releaseStatusGitOutput(root, "rev-list", "--left-right", "--count", releaseHead+"..."+developmentHead)
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, 0
+	}
+	releaseAhead, _ := strconv.Atoi(fields[0])
+	developmentAhead, _ := strconv.Atoi(fields[1])
+	return releaseAhead, developmentAhead
+}
+
+func releaseStatusBranchCI(root, branch, head string) string {
+	if head != "" {
+		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "status,conclusion,headSha,url")
+		if len(row) > 0 {
+			return releaseStatusFirstString(releaseStatusString(row["conclusion"]), releaseStatusString(row["status"]))
+		}
+	}
+	if branch != "" {
+		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--branch", branch, "--status", "completed", "--limit", "1", "--json", "status,conclusion,headSha,url")
+		if len(row) > 0 {
+			return releaseStatusFirstString(releaseStatusString(row["conclusion"]), releaseStatusString(row["status"]))
+		}
+	}
+	return "unknown"
+}
+
+func releaseStatusCIRow(root string, args ...string) map[string]any {
+	run, err := releaseStatusRunExternalJSON(root, 30*time.Second, "gh", args...)
+	if err != nil {
+		return nil
+	}
+	return releaseStatusFirstArrayObject(run)
+}
+
+func releaseStatusReleaseLockHeld(root string) bool {
+	payload, _, err := releaseStatusRunJSON(root, 30*time.Second, "release_lock.py", "status")
+	if err != nil {
+		return false
+	}
+	return releaseStatusBool(payload["held"])
 }
 
 func releaseStatusDecision(root string, opts releaseStatusOptions) (map[string]any, map[string]any) {
@@ -625,9 +748,11 @@ func renderReleaseStatus(status map[string]any) string {
 	decision := releaseStatusMap(rolling["decision"])
 	stable := releaseStatusMap(status["stable"])
 	action := releaseStatusMap(status["next_action"])
+	branchRegime := releaseStatusMap(status["branch_regime"])
 	lines := []string{
 		fmt.Sprintf("release-status: %s - %s", strings.ToUpper(releaseStatusFirstString(releaseStatusString(decision["decision"]), "unknown")), releaseStatusString(decision["reason"])),
 		fmt.Sprintf("  last tag: %s", releaseStatusFirstString(releaseStatusString(rolling["last_tag"]), "(none)")),
+		releaseStatusRenderBranchRegime(branchRegime),
 		fmt.Sprintf("  commits since tag: %d", releaseStatusInt(rolling["commits_since_tag"])),
 		fmt.Sprintf("  next action: %s - %s", releaseStatusString(action["kind"]), releaseStatusString(action["detail"])),
 	}
@@ -637,6 +762,37 @@ func renderReleaseStatus(status map[string]any) string {
 		lines = append(lines, "  stable: none")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func releaseStatusRenderBranchRegime(branchRegime map[string]any) string {
+	if len(branchRegime) == 0 {
+		return "  branch regime: unavailable"
+	}
+	dev := releaseStatusString(branchRegime["development_branch"])
+	release := releaseStatusString(branchRegime["release_branch"])
+	drift := releaseStatusString(branchRegime["drift"])
+	devAhead := releaseStatusInt(branchRegime["development_ahead"])
+	releaseAhead := releaseStatusInt(branchRegime["release_ahead"])
+	blocked := releaseStatusBool(branchRegime["promotion_blocked"])
+	blockers := releaseStatusStringSlice(branchRegime["promotion_blockers"])
+	detail := fmt.Sprintf("%s vs %s: %s", dev, release, drift)
+	switch drift {
+	case "development_ahead":
+		detail = fmt.Sprintf("%s is %d commit(s) ahead of %s", dev, devAhead, release)
+	case "release_ahead":
+		detail = fmt.Sprintf("%s is %d commit(s) ahead of %s", release, releaseAhead, dev)
+	case "diverged":
+		detail = fmt.Sprintf("%s and %s diverged (%s ahead=%d, %s ahead=%d)", dev, release, dev, devAhead, release, releaseAhead)
+	case "no_drift":
+		detail = fmt.Sprintf("%s and %s have no drift", dev, release)
+	}
+	if blocked {
+		detail += "; promotion blocked"
+		if len(blockers) > 0 {
+			detail += ": " + strings.Join(blockers, ", ")
+		}
+	}
+	return "  branch regime: " + detail
 }
 
 func releaseStatusSemverTags(root string, merged bool) []string {
@@ -878,6 +1034,9 @@ func releaseStatusString(v any) string {
 }
 
 func releaseStatusStringSlice(v any) []string {
+	if typed, ok := v.([]string); ok {
+		return append([]string(nil), typed...)
+	}
 	raw, _ := v.([]any)
 	out := make([]string, 0, len(raw))
 	for _, item := range raw {

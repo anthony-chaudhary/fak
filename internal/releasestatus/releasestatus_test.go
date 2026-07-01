@@ -301,6 +301,72 @@ func TestStableLagAndRecommendation(t *testing.T) {
 	}
 }
 
+func TestBranchRegimeFold(t *testing.T) {
+	cases := []struct {
+		name          string
+		facts         BranchRegimeFacts
+		wantDrift     string
+		wantBlocked   bool
+		wantBlocker   string
+		wantCandidate string
+	}{
+		{
+			name:        "no drift",
+			facts:       BranchRegimeFacts{DevelopmentBranch: "dev", DevelopmentHead: "aaa111", ReleaseBranch: "main", ReleaseHead: "aaa111", LatestTag: "v1.2.3", DevelopmentCI: "success"},
+			wantDrift:   "no_drift",
+			wantBlocked: false,
+		},
+		{
+			name:          "development ahead is a promotion candidate",
+			facts:         BranchRegimeFacts{DevelopmentBranch: "dev", DevelopmentHead: "bbb222", ReleaseBranch: "main", ReleaseHead: "aaa111", LatestTag: "v1.2.3", DevelopmentAhead: 4, DevelopmentCI: "success"},
+			wantDrift:     "development_ahead",
+			wantBlocked:   false,
+			wantCandidate: "bbb222",
+		},
+		{
+			name:        "release ahead blocks promotion",
+			facts:       BranchRegimeFacts{DevelopmentBranch: "dev", DevelopmentHead: "bbb222", ReleaseBranch: "main", ReleaseHead: "ccc333", DevelopmentAhead: 2, ReleaseAhead: 1, DevelopmentCI: "success"},
+			wantDrift:   "diverged",
+			wantBlocked: true,
+			wantBlocker: "RELEASE_AHEAD",
+		},
+		{
+			name:        "red development ci blocks promotion",
+			facts:       BranchRegimeFacts{DevelopmentBranch: "dev", DevelopmentHead: "bbb222", ReleaseBranch: "main", ReleaseHead: "aaa111", DevelopmentAhead: 3, DevelopmentCI: "failure"},
+			wantDrift:   "development_ahead",
+			wantBlocked: true,
+			wantBlocker: "DEVELOPMENT_CI_RED",
+		},
+		{
+			name:        "release lock blocks promotion",
+			facts:       BranchRegimeFacts{DevelopmentBranch: "dev", DevelopmentHead: "bbb222", ReleaseBranch: "main", ReleaseHead: "aaa111", DevelopmentAhead: 3, DevelopmentCI: "success", ReleaseLockHeld: true},
+			wantDrift:   "development_ahead",
+			wantBlocked: true,
+			wantBlocker: "RELEASE_LOCK_HELD",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FoldBranchRegime(tc.facts)
+			if got.Drift != tc.wantDrift || got.PromotionBlocked != tc.wantBlocked {
+				t.Fatalf("drift/blocked = %q/%v, want %q/%v (%+v)", got.Drift, got.PromotionBlocked, tc.wantDrift, tc.wantBlocked, got)
+			}
+			if tc.wantCandidate != "" && got.PromotionCandidate != tc.wantCandidate {
+				t.Fatalf("promotion candidate = %q, want %q", got.PromotionCandidate, tc.wantCandidate)
+			}
+			if tc.wantBlocker != "" && !contains(got.PromotionBlockers, tc.wantBlocker) {
+				t.Fatalf("promotion blockers = %v, want %s", got.PromotionBlockers, tc.wantBlocker)
+			}
+			if got.LatestTag != tc.facts.LatestTag {
+				t.Fatalf("latest tag = %q, want %q", got.LatestTag, tc.facts.LatestTag)
+			}
+			if got.NextAction == "" {
+				t.Fatalf("next action empty: %+v", got)
+			}
+		})
+	}
+}
+
 // TestRenderHumanShape proves Render emits the python render_human() head lines.
 func TestRenderHumanShape(t *testing.T) {
 	s := Fold(Facts{
