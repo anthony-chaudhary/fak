@@ -177,6 +177,11 @@ type gatewayMetrics struct {
 	// duplicate Prometheus family headers.
 	servingMu       sync.Mutex
 	servingEmitters []ServingMetricsEmitter
+	// harnessProvider is a host-injected pull source for the fak_harness_* family
+	// (epic #2044): fak guard sets it to its live harness resource sampler's
+	// PrometheusText so a running session's CPU/mem/IO is scrapeable, not only printed
+	// at exit. Guarded by servingMu; nil renders nothing (the default serve path).
+	harnessProvider func() string
 
 	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
 	// exhaustion faults: either recovered compute.DeviceAllocError allocations or a request
@@ -1405,6 +1410,7 @@ func (s *Server) renderMetrics() string {
 	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	s.writeServingMetrics(&b, inf)
+	m.writeHarnessMetrics(&b) // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
