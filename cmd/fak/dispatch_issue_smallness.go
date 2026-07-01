@@ -34,7 +34,13 @@ func runDispatchIssueSmallnessLint(stdout, stderr io.Writer, stdin io.Reader, ar
 	open := fs.Bool("open", false, "fetch and lint open issues via gh (dry-run backlog report)")
 	limit := fs.Int("limit", 500, "max open issues to scan with --open")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	asScorecard := fs.Bool("scorecard", false, "with --open: fold the rated backlog into a control-pane payload for `fak scoreboard post --from -`")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+
+	if *asScorecard && !*open {
+		fmt.Fprintln(stderr, "fak dispatch issue-smallness-lint: --scorecard only applies to --open")
 		return 2
 	}
 
@@ -86,6 +92,16 @@ func runDispatchIssueSmallnessLint(stdout, stderr io.Writer, stdin io.Reader, ar
 			return 2
 		}
 		report := issuesmallness.ReportOpen(issues)
+		if *asScorecard {
+			// The card carries its own OK/ACTION verdict + debt; emit it and return 0 so
+			// it pipes cleanly into `fak scoreboard post --from -`. The gate lives on the
+			// consumer that reads corpus[issue_smallness_debt], not on this producer.
+			if err := writeIndentedJSON(stdout, issueSmallnessScorecard(report)); err != nil {
+				fmt.Fprintf(stderr, "fak dispatch issue-smallness-lint: encode json: %v\n", err)
+				return 1
+			}
+			return 0
+		}
 		if *asJSON {
 			if err := writeIndentedJSON(stdout, report); err != nil {
 				fmt.Fprintf(stderr, "fak dispatch issue-smallness-lint: encode json: %v\n", err)

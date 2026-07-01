@@ -240,7 +240,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch progress [--workspace DIR] [--target N] [--audit-json FILE] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]
-  fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json]
+  fak dispatch issue-smallness-lint (--body-file FILE | --issue N | --open) [--limit N] [--json] [--scorecard]
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most
@@ -268,6 +268,7 @@ multiple account seats and drives ticks; sweep repeats ticks until the queue dra
 refuses. progress snapshots the open-issue curve, witnessed-open count, and loop ledger. Spawn
 commands are dry-run until --live. issue-smallness-lint is a filing/backlog dry-run report: it
 checks that each issue has one primary deliverable and exactly one witness, flagging bundled
-work before it enters the worker queue.
+work before it enters the worker queue. With --open --scorecard it folds the rated backlog into
+a control-pane payload (fail count == headline debt) for "fak scoreboard post --from -".
 `)
 }
