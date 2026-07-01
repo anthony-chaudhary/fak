@@ -52,7 +52,7 @@ The continuous-usage surface is a small evidence bundle, not a transcript dump:
 |---|---|---|
 | Pinned objective | The active goal survived unchanged, or drift was detected | [`ctxplan.ObjectivePin`](../internal/ctxplan/objective.go) |
 | Resident view plan | Which spans are resident, which are elided, and why | [`ctxplan.PlanView`](../internal/ctxplan/query.go) |
-| Page-fault outcome | Whether a cold span was served back in or refused | [`ctxplan.PageFaultOutcome`](../internal/ctxplan/fault.go) |
+| Page-fault outcome | Whether a cold span was served back in or refused | [`ctxplan.PageFaultOutcome`](../internal/ctxplan/pagefault.go) |
 | Reset transaction | What the reset carried, omitted, and rearmed | [`session.ResetTransaction`](../internal/session/reset_transaction.go) |
 | Budget envelope | Which budget axis is near exhaustion or exhausted | [`session.Budget`](../internal/session/session.go) |
 | Time budget | How wall-clock time carries across resets | [`session.TimeBudget`](../internal/session/timebudget.go) |
