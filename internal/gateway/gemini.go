@@ -242,6 +242,9 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
 		parts = prependGeminiTextPart(parts, note)
 	}
+	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
+		parts = prependGeminiTextPart(parts, note)
+	}
 	// Every proposed call refused and no surviving prose: carry the deny summary as
 	// a text part so even a fak-unaware client gets something actionable, rather
 	// than an empty candidate (parity with the OpenAI denySummary behavior).

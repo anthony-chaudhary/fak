@@ -836,6 +836,11 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if note := s.resultAdmissionNoteOnce(reqTrace, resultAdmissions); note != "" {
 		blocks = prependTextBlock(blocks, note)
 	}
+	// If the client reports the known Windows Bash git/gh exit-143 hang, give the
+	// model the closed failure token plus the native PowerShell retry command.
+	if note := s.toolFailureNoteOnce(reqTrace, req.Messages); note != "" {
+		blocks = prependTextBlock(blocks, note)
+	}
 	// Echo the model the client asked for (Anthropic reflects the requested id);
 	// fall back to the gateway's configured model when the client omitted it.
 	if model == "" {

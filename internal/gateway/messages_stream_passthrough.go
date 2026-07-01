@@ -194,8 +194,11 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		p.start()
 		p.promptTok, p.cacheRead, p.cacheCreate = anthropicStartUsage(ev.Data)
 		p.send("message_start", ev.Data)
-		// The model is about to read a quarantine stub where an inbound tool result
-		// was paged out — say so in-band, as a LEADING text block, before its prose.
+		// The model is about to read kernel-originated diagnostics for inbound tool
+		// results before its prose: executor failures first, then quarantine stubs.
+		if note := p.s.toolFailureNoteOnce(p.reqTrace, p.req.Messages); note != "" {
+			emitAnthropicTextBlock(p.send, &p.outIdx, note)
+		}
 		if note := p.s.resultAdmissionNoteOnce(p.reqTrace, p.resultAdms); note != "" {
 			emitAnthropicTextBlock(p.send, &p.outIdx, note)
 		}

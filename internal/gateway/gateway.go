@@ -748,6 +748,13 @@ type Server struct {
 	notedResultsMu sync.Mutex
 	notedResults   map[string]map[string]struct{}
 
+	// notedToolFailures is the sibling dedup set for in-band diagnostic notes about
+	// tool executor failures that are not policy refusals. A replayed Bash exit-143
+	// git/gh result should surface the PowerShell retry once per trace, not on every
+	// transcript replay.
+	notedToolFailuresMu sync.Mutex
+	notedToolFailures   map[string]map[string]struct{}
+
 	// originSeq maps an admitted origin call to the sequence stamped on its DECIDE row,
 	// so a later client-produced tool_result can journal its QUARANTINE against the
 	// originating call. Native fak_syscall records the kernel submission SeqNo by
