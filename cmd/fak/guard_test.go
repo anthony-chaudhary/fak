@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -436,11 +437,54 @@ func TestGuardRestartLimitStatusIsManagedContextVisible(t *testing.T) {
 		"continuity=degraded",
 		"next_action=",
 		"FAK_RESET_TRACE_ID=win-child",
-		"FAK_RESET_SEED_FILE=" + ev.SeedFile,
+		// The seed path is forward-slash-normalized in the rendered line (see
+		// TestGuardRestartLimitStatusSeedPathSurvivesQuoting) — assert on the
+		// slash form so this test is platform-independent (filepath.Join above
+		// still exercises the native separator as the ev.SeedFile input).
+		"FAK_RESET_SEED_FILE=seeds/reset.json",
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("restart-limit status missing %q:\n%s", want, line)
 		}
+	}
+}
+
+// TestGuardRestartLimitStatusSeedPathSurvivesQuoting is a regression test for a
+// Windows-only bug: guardRestartLimitStatus renders next_action through %q, which
+// escapes backslashes, so an un-normalized filepath.Join seed path (native
+// separator "\" on Windows) rendered as "seeds\\reset.json" in the quoted
+// next_action field — a doubled backslash neither a human reading the line nor a
+// caller grepping for the plain "FAK_RESET_SEED_FILE=<path>" token would expect.
+// guardRestartLimitStatus now runs the seed path through filepath.ToSlash before
+// embedding it, so the emitted path is stable across OSes; this test builds the
+// event with an explicit backslash-bearing path (as filepath.Join would produce on
+// Windows) regardless of the OS running the test, so it catches a regression on
+// any platform.
+func TestGuardRestartLimitStatusSeedPathSurvivesQuoting(t *testing.T) {
+	ev := guardBudgetRestartEvent{
+		FromTraceID: "guard",
+		ToTraceID:   "win-child",
+		Reason:      "BUDGET_CONTEXT_EXHAUSTED",
+		SeedFile:    `seeds\reset.json`,
+		SeedText:    "carryover",
+	}
+	line := guardRestartLimitStatus(1, ev)
+	if strings.Contains(line, `seeds\\reset.json`) {
+		t.Fatalf("restart-limit status doubled the seed path backslash (unnormalized %%q escaping):\n%s", line)
+	}
+	if !strings.Contains(line, "FAK_RESET_SEED_FILE=seeds/reset.json") {
+		t.Fatalf("restart-limit status missing forward-slash-normalized seed path:\n%s", line)
+	}
+	// Round-trip through Go's own unquoting to prove the field is still validly
+	// quoted (a %q consumer, e.g. a human copy-pasting or a strconv.Unquote
+	// caller, gets the same normalized path back out).
+	nextField := line[strings.Index(line, "next_action=")+len("next_action="):]
+	unquoted, err := strconv.Unquote(nextField)
+	if err != nil {
+		t.Fatalf("next_action field is not validly quoted: %v\nline: %s", err, line)
+	}
+	if !strings.Contains(unquoted, "FAK_RESET_SEED_FILE=seeds/reset.json") {
+		t.Fatalf("unquoted next_action missing normalized seed path: %s", unquoted)
 	}
 }
 
