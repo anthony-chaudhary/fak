@@ -103,9 +103,6 @@ func TestConfigMatrixRowsMarksProductionAndDiagnosticBrackets(t *testing.T) {
 }
 
 func TestGitTreeModifiedIncludesUntrackedFiles(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "config", "user.email", "agentdojo@example.invalid")
