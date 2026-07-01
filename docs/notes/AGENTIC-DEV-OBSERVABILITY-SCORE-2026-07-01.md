@@ -16,72 +16,56 @@ hard debt, and is tracked by #1997.
 
 ## Portfolio fold
 
-The initial full `python tools/scorecard_control_pane.py --json` run reported:
+The current full `python tools/scorecard_control_pane.py --json` run reports:
 
 - `finding=scorecard_unmeasured`
-- `total_debt=1126`
-- `grade_debt=31`
-- `measured=27`
-- `errored=14`
+- `total_debt=1151`
+- `grade_debt=32`
+- `measured=32`
+- `errored=9`
 
-The failing set is Go-backed scorecards, so this is not yet a trustworthy full-family
-score. The checkout does not compile, and the control pane repeats the same build
-failure across many scorecards instead of summarizing the unique blockers.
+This is still not a complete full-family score because nine Go-backed cards error before
+emitting JSON: `concept-usage`, `maturity`, `growth-debt`, `support-maturity`,
+`milestone`, `milestone-climb`, `loop-index`, `operator-heaviness`, and `propagation`.
+A direct command build succeeds when written to a temp output path, so this is now a
+scorecard-helper failure, not a whole-`cmd/fak` compile failure.
 
-Observed compile blockers:
+Representative scorecard errors:
 
 ```text
-cmd/fak/fleet.go:590:6: truncate redeclared in this block
-    cmd/fak/benchmarks.go:209:6: other declaration of truncate
+pkg\scorecard\scorecard.go:191:20: undefined: ValueFromScore
 ```
 
 ```text
-internal/vcacheextract/codex.go:17:2: "github.com/anthony-chaudhary/fak/internal/vcacheobserve" imported and not used
+pkg\scorecard\scorecard.go:133:19: undefined: anyFloat
 ```
 
-The top severity buckets visible in the partial fold are:
+The top severity buckets visible in the measured part of the fold are:
 
 ```text
 code F(8), code-slop F(8), tooling-quality F(8),
 repo-hygiene C(2), release-readiness C(2),
-seo B(1), steerability B(1), claim-repro B(1)
+seo B(1), ui-quality B(1), dogfood-loop B(1), claim-repro B(1)
 ```
 
-Post-push refresh: after the shared trunk moved again, the dirty shared worktree
-remained compile-blocked, but the first reported package changed as peers advanced.
-Direct compile witnesses observed during this run included:
-
-```text
-cmd/fak/dogfoodissues.go:62:69: undefined: time
-```
-
-```text
-internal/taskmgr/quality_slo.go:59:38: task.spec.QualitySLO undefined
-internal/taskmgr/quality_slo.go:73:38: step.spec.QualitySLO undefined
-```
-
-The default control-pane refresh hit the 124s command cap before emitting JSON. A
-bounded diagnostic read, `python tools/scorecard_control_pane.py --json --timeout 1`,
-still returned `finding=scorecard_unmeasured`, with `total_debt=6`, `grade_debt=0`,
-`measured=16`, and `errored=25`. Those timeout-capped numbers are useful for shape,
-not as a replacement full-family score. The stable finding is that agentic-dev
-observability needs either a clean-scorecard read path or a unique-blocker summary;
-the exact dirty-tree compile line is volatile.
+Earlier in the same read, dirty-tree compile blockers were volatile as peers advanced.
+That remains an observability problem for the control pane: repeated Go-backed failures
+need one unique blocker summary rather than 9-25 per-card echoes.
 
 ## Tickets filed
 
 - #1997 - tier and surface the `metric_doc_coverage` tail.
 - #1998 - surface and gate stale dogfood report age before live issue sync.
 - #2043 - surface unique Go compile blockers when control-pane cards are unmeasured.
+- #2066 - restore the `pkg/scorecard` helper symbols blocking Go-backed cards.
 
 ## Next measurement gate
 
-Clear or isolate the dirty-tree Go build blockers, then rerun:
+Fix #2066, then rerun:
 
 ```bash
-go build ./cmd/fak
 python tools/scorecard_control_pane.py --json
 ```
 
-Only after the control pane measures every scorecard should the remaining grade-debt rows
-be treated as the next dispatch list.
+Only after `errored=0` should the remaining grade-debt rows be treated as the next
+dispatch list.
