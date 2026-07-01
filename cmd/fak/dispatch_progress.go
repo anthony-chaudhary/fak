@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 const (
 	dispatchProgressSchema    = "fleet-issue-resolve-progress/1"
+	dispatchWeeklySchema      = "fleet-issue-resolve-weekly-retro/1"
 	dispatchProgressLoopID    = "issue-resolve-progress"
 	dispatchProgressRunsDir   = ".dispatch-runs"
 	dispatchProgressLogName   = "progress.jsonl"
@@ -36,6 +38,9 @@ type dispatchProgressOptions struct {
 	LoopLedger string
 	RecordLoop bool
 	AsJSON     bool
+	Weekly     bool
+	Since      string
+	Until      string
 }
 
 var dispatchProgressNow = func() time.Time { return time.Now().UTC() }
@@ -50,6 +55,22 @@ func runDispatchProgress(stdout, stderr io.Writer, argv []string) int {
 	if opts.Close {
 		fmt.Fprintln(stderr, "fak dispatch progress: native --close is not implemented yet; use tools/issue_resolve_progress.py --close until #1406 lands")
 		return 2
+	}
+	if opts.Weekly {
+		report, err := evaluateDispatchWeeklyReport(opts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak dispatch progress: %v\n", err)
+			return 1
+		}
+		if opts.AsJSON {
+			if err := writeIndentedJSON(stdout, report); err != nil {
+				fmt.Fprintf(stderr, "fak dispatch progress: encode json: %v\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, renderDispatchWeeklyReport(report))
+		}
+		return 0
 	}
 	payload, err := evaluateDispatchProgress(opts, stderr)
 	if err != nil {
@@ -81,6 +102,9 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 	live := fs.Bool("live", false, "reserved for --close")
 	loopLedger := fs.String("loop-ledger", "", "append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
 	noLoopLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for this tick")
+	weekly := fs.Bool("weekly", false, "render a ledger-only weekly throughput retrospective without live mutation")
+	since := fs.String("since", "", "weekly report window start (RFC3339 or YYYY-MM-DD; default: now-7d)")
+	until := fs.String("until", "", "weekly report window end (RFC3339 or YYYY-MM-DD; default: now)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if err := fs.Parse(argv); err != nil {
 		return dispatchProgressOptions{}, 2
@@ -116,6 +140,9 @@ func parseDispatchProgressFlags(stderr io.Writer, argv []string) (dispatchProgre
 		LoopLedger: *loopLedger,
 		RecordLoop: !*noLoopLedger,
 		AsJSON:     *asJSON,
+		Weekly:     *weekly,
+		Since:      strings.TrimSpace(*since),
+		Until:      strings.TrimSpace(*until),
 	}, 0
 }
 
@@ -201,6 +228,208 @@ func evaluateDispatchProgress(opts dispatchProgressOptions, stderr io.Writer) (m
 		rec["loop_ledger"] = recordDispatchProgressLoop(root, opts.LoopLedger, rec)
 	}
 	return rec, nil
+}
+
+type dispatchWeeklyReport struct {
+	Schema                         string                  `json:"schema"`
+	WindowStartUTC                 string                  `json:"window_start_utc"`
+	WindowEndUTC                   string                  `json:"window_end_utc"`
+	WindowHours                    float64                 `json:"window_hours"`
+	RowsConsidered                 int                     `json:"rows_considered"`
+	TargetIssuesPerHour            float64                 `json:"target_issues_per_hour"`
+	WitnessedCloses                int                     `json:"witnessed_closes"`
+	AchievedWitnessedClosesPerHour float64                 `json:"achieved_witnessed_closes_per_hour"`
+	CapacityLossIssues             float64                 `json:"capacity_loss_issues"`
+	TopBlockers                    []dispatchWeeklyBlocker `json:"top_blockers"`
+	NextSafeCapChange              string                  `json:"next_safe_cap_change"`
+	ProgressLedger                 string                  `json:"progress_ledger"`
+}
+
+type dispatchWeeklyBlocker struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+}
+
+func evaluateDispatchWeeklyReport(opts dispatchProgressOptions) (dispatchWeeklyReport, error) {
+	root, err := filepath.Abs(opts.Workspace)
+	if err != nil {
+		return dispatchWeeklyReport{}, err
+	}
+	since, until, err := dispatchWeeklyWindow(opts.Since, opts.Until)
+	if err != nil {
+		return dispatchWeeklyReport{}, err
+	}
+	runsDir := filepath.Join(root, dispatchProgressRunsDir)
+	return buildDispatchWeeklyReport(runsDir, since, until)
+}
+
+func dispatchWeeklyWindow(sinceText, untilText string) (time.Time, time.Time, error) {
+	now := dispatchProgressNow().UTC()
+	until := now
+	var err error
+	if untilText != "" {
+		until, err = dispatchParseReportTime(untilText, false)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("parse --until: %w", err)
+		}
+	}
+	since := until.Add(-7 * 24 * time.Hour)
+	if sinceText != "" {
+		since, err = dispatchParseReportTime(sinceText, true)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("parse --since: %w", err)
+		}
+	}
+	if !until.After(since) {
+		return time.Time{}, time.Time{}, fmt.Errorf("--until must be after --since")
+	}
+	return since.UTC(), until.UTC(), nil
+}
+
+func dispatchParseReportTime(s string, startOfDay bool) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !startOfDay {
+		t = t.Add(24*time.Hour - time.Nanosecond)
+	}
+	return t.UTC(), nil
+}
+
+func buildDispatchWeeklyReport(runsDir string, since, until time.Time) (dispatchWeeklyReport, error) {
+	if !until.After(since) {
+		return dispatchWeeklyReport{}, fmt.Errorf("weekly report window must be positive")
+	}
+	rows := dispatchProgressReadRows(runsDir)
+	targetIPH := dispatchProgressTargetIPH
+	closed := 0
+	considered := 0
+	blockers := map[string]int{}
+	for _, row := range rows {
+		at, err := time.Parse(time.RFC3339, dispatchMapString(row, "utc"))
+		if err != nil || at.Before(since) || at.After(until) {
+			continue
+		}
+		considered++
+		closed += dispatchMapInt(row, "closed_now")
+		if target := dispatchMapFloat(row, "target_issues_per_hour"); target > 0 {
+			targetIPH = target
+		}
+		for _, reason := range dispatchProgressRowBlockers(row) {
+			blockers[reason]++
+		}
+	}
+	windowHours := until.Sub(since).Hours()
+	achieved := 0.0
+	if windowHours > 0 {
+		achieved = float64(closed) / windowHours
+	}
+	loss := targetIPH*windowHours - float64(closed)
+	if loss < 0 {
+		loss = 0
+	}
+	top := dispatchWeeklyTopBlockers(blockers, 5)
+	return dispatchWeeklyReport{
+		Schema:                         dispatchWeeklySchema,
+		WindowStartUTC:                 dispatchProgressProjectionStamp(since),
+		WindowEndUTC:                   dispatchProgressProjectionStamp(until),
+		WindowHours:                    dispatchProgressRound2(windowHours),
+		RowsConsidered:                 considered,
+		TargetIssuesPerHour:            dispatchProgressRound1(targetIPH),
+		WitnessedCloses:                closed,
+		AchievedWitnessedClosesPerHour: dispatchProgressRound1(achieved),
+		CapacityLossIssues:             dispatchProgressRound1(loss),
+		TopBlockers:                    top,
+		NextSafeCapChange:              dispatchWeeklyNextCapChange(targetIPH, achieved, top),
+		ProgressLedger:                 filepath.Join(runsDir, dispatchProgressLogName),
+	}, nil
+}
+
+func dispatchProgressReadRows(runsDir string) []map[string]any {
+	path := filepath.Join(runsDir, dispatchProgressLogName)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	rows := []map[string]any{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err == nil {
+			rows = append(rows, rec)
+		}
+	}
+	return rows
+}
+
+func dispatchProgressRowBlockers(row map[string]any) []string {
+	reasons := []string{}
+	if reason := dispatchBlockerReason(dispatchMapString(row, "reason")); reason != "" {
+		reasons = append(reasons, reason)
+	}
+	if dispatchMapString(row, "audit_error") != "" {
+		reasons = append(reasons, "AUDIT_UNAVAILABLE")
+	}
+	if dispatchMapString(row, "open_error") != "" {
+		reasons = append(reasons, "OPEN_COUNT_UNAVAILABLE")
+	}
+	if closeResult, ok := row["close_result"].(map[string]any); ok {
+		for _, key := range []string{"reason", "blocker_reason", "error"} {
+			if reason := dispatchBlockerReason(dispatchMapString(closeResult, key)); reason != "" {
+				reasons = append(reasons, reason)
+			}
+		}
+	}
+	if _, hasOK := row["ok"]; len(reasons) == 0 && hasOK && !dispatchMapBool(row, "ok") {
+		reasons = append(reasons, "PROGRESS_NOT_OK")
+	}
+	return reasons
+}
+
+func dispatchBlockerReason(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "ok") {
+		return ""
+	}
+	return strings.ToUpper(strings.Join(strings.Fields(s), "_"))
+}
+
+func dispatchWeeklyTopBlockers(counts map[string]int, limit int) []dispatchWeeklyBlocker {
+	out := make([]dispatchWeeklyBlocker, 0, len(counts))
+	for reason, count := range counts {
+		out = append(out, dispatchWeeklyBlocker{Reason: reason, Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Reason < out[j].Reason
+	})
+	if limit >= 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func dispatchWeeklyNextCapChange(target, achieved float64, blockers []dispatchWeeklyBlocker) string {
+	if len(blockers) > 0 {
+		return "hold cap; clear " + blockers[0].Reason + " before raising"
+	}
+	switch {
+	case achieved >= target:
+		return "raise cap by 10% after one more witnessed green week"
+	case achieved >= target*0.8:
+		return "hold cap; collect one more near-target witnessed week"
+	default:
+		return "hold cap; recover witnessed close rate before raising"
+	}
 }
 
 func dispatchProgressOpenCountGH(root string) (int, error) {
@@ -548,6 +777,32 @@ func renderDispatchProgress(p map[string]any) string {
 	if errText := dispatchMapString(p, "open_error"); errText != "" {
 		fmt.Fprintf(&b, "  ! open-count error: %s\n", errText)
 	}
+	return b.String()
+}
+
+func renderDispatchWeeklyReport(r dispatchWeeklyReport) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, "# Dispatch Weekly Throughput Retrospective")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "| metric | value |")
+	fmt.Fprintln(&b, "|---|---:|")
+	fmt.Fprintf(&b, "| window | %s to %s (%.2fh) |\n", r.WindowStartUTC, r.WindowEndUTC, r.WindowHours)
+	fmt.Fprintf(&b, "| progress rows | %d |\n", r.RowsConsidered)
+	fmt.Fprintf(&b, "| target witnessed closes/hour | %.1f |\n", r.TargetIssuesPerHour)
+	fmt.Fprintf(&b, "| achieved witnessed closes/hour | %.1f |\n", r.AchievedWitnessedClosesPerHour)
+	fmt.Fprintf(&b, "| witnessed closes | %d |\n", r.WitnessedCloses)
+	fmt.Fprintf(&b, "| capacity loss | %.1f issue(s) |\n", r.CapacityLossIssues)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Top Blockers")
+	if len(r.TopBlockers) == 0 {
+		fmt.Fprintln(&b, "- none")
+	} else {
+		for _, blocker := range r.TopBlockers {
+			fmt.Fprintf(&b, "- %s: %d\n", blocker.Reason, blocker.Count)
+		}
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "Next safe cap change: %s\n", r.NextSafeCapChange)
 	return b.String()
 }
 
