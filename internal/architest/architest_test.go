@@ -49,6 +49,7 @@ var tier = map[string]int{
 	"agenticbench":       1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":         1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":       1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
+	"accountprobe":       1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":       1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"sotamatrix":         1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"branchrole":         1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
@@ -61,6 +62,7 @@ var tier = map[string]int{
 	"benchids":           1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
 	"benchscore":         1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":          1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"harnessres":         1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"accounts":           1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "guardtrace": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1, "sessionaudit": 1,
