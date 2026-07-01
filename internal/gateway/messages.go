@@ -634,6 +634,10 @@ func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) 
 	return pruned
 }
 
+func auditPromptSerialization(raw []byte) promptmmu.SerializationAudit {
+	return promptmmu.AuditJSONRemarshal(raw)
+}
+
 func inboundSystemBlockPlans(raw []byte, drop func(block, name string) bool) []promptmmu.BlockPlan {
 	if drop == nil {
 		return nil
