@@ -1144,14 +1144,27 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 	// --log off and --debug-stats off. The family is the session/trace prefix; the token
 	// axes are the provider's own counters (OBSERVED). This is purely observational — it
 	// never feeds the request path (Law A2).
+	//
+	// The cache-read axis is the PROVIDER-NORMALIZED hit (CachedPromptTokens), not the
+	// Anthropic-only cache_read_input_tokens field: OpenAI (chat + the codex Responses
+	// wire) and Gemini report their prompt-cache hit in prompt_tokens_details, leaving
+	// cache_read_input_tokens at 0, so reading the raw field made every codex/OpenAI cache
+	// hit register as read=0 — the families/governor/warmth plane saw those sessions as
+	// permanently COLD even when the upstream served a real cache. Pairing the normalized
+	// read with the uncached remainder (UncachedPromptTokens — OpenAI/Gemini fold the hit
+	// INTO prompt_tokens, so it is peeled back off) keeps input+read == the full resident
+	// prompt on every provider, so a codex family's hit-rate/economics read identically to
+	// a Claude family's rather than being understated by the double-counted cached span.
+	cacheRead := usage.CachedPromptTokens()
+	uncachedPrompt := usage.UncachedPromptTokens()
 	s.metrics.observeVCacheTurn(traceID, time.Now().UnixMilli(),
-		usage.PromptTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
+		uncachedPrompt, cacheRead, usage.CacheCreationInputTokens)
 	// The per-turn human debug render (#793) fires independently of the JSON --log sink, so
 	// --debug-stats works on a clean (--log off) terminal. It is a no-op unless debugStatsf is
 	// wired, and reuses the #792 rolling health (read-only peek; no double-roll).
 	if s.debugStatsf != nil {
 		s.renderTurnDebugStats(traceID, wire, stream, finishReason,
-			usage.PromptTokens, usage.CompletionTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, compacted)
+			uncachedPrompt, usage.CompletionTokens, cacheRead, usage.CacheCreationInputTokens, compacted)
 	}
 	if s.logf == nil {
 		return

@@ -248,6 +248,32 @@ func (u Usage) CachedPromptTokens() int {
 	return 0
 }
 
+// UncachedPromptTokens is the prompt the model actually re-ingested this turn — the
+// full prompt minus the provider's cache-read hit — normalized so the count means the
+// same thing across providers. Anthropic already reports prompt/input_tokens as the
+// UNCACHED remainder (cache_read_input_tokens is a separate field), so it is returned
+// as-is. OpenAI (chat + Responses) and Gemini fold the cached hit INTO prompt_tokens,
+// so the cached portion is peeled back off to leave the uncached remainder. The result
+// is never negative, and UncachedPromptTokens() + CachedPromptTokens() == the full
+// resident prompt on every provider. This is the companion of CachedPromptTokens(): a
+// consumer that splits a turn into (uncached, cached) — e.g. the vCache observe plane's
+// baseline-token-equiv — gets a provider-consistent split from the pair.
+func (u Usage) UncachedPromptTokens() int {
+	n := u.PromptTokens
+	// OpenAI/Gemini shape: prompt_tokens INCLUDES the cache-read hit (reported in
+	// prompt_tokens_details/input_tokens_details), so subtract it to match Anthropic's
+	// already-uncached input_tokens. The Anthropic shape carries its cache read in the
+	// separate CacheReadInputTokens field and is left untouched.
+	if (u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > 0) ||
+		(u.InputTokensDetails != nil && u.InputTokensDetails.CachedTokens > 0) {
+		n -= u.CachedPromptTokens()
+	}
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
 // ContextWindowTokens is the prompt/context size that should count against a
 // long-session context budget. OpenAI-style prompt_tokens already include cached
 // prompt tokens, so their details are NOT added again. Anthropic reports

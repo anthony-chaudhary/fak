@@ -472,6 +472,54 @@ func TestProviderAdaptersParseCachedPromptTokens(t *testing.T) {
 	}
 }
 
+// TestProviderAdaptersUncachedPromptTokens proves the (uncached, cached) split reads
+// the SAME way across providers: OpenAI/Gemini fold the cache hit into prompt_tokens so
+// the cached portion is peeled back off, while Anthropic already reports input_tokens as
+// the uncached remainder. The invariant every downstream cache-value consumer relies on —
+// UncachedPromptTokens() + CachedPromptTokens() == the full resident prompt — is asserted
+// for each wire shape, so a codex turn's cache split is not silently distorted relative to
+// a Claude turn's.
+func TestProviderAdaptersUncachedPromptTokens(t *testing.T) {
+	cases := []struct {
+		name         string
+		provider     Provider
+		raw          string
+		wantUncached int
+		wantCached   int
+		wantResident int // uncached + cached == the full prompt the model attended to
+	}{
+		// OpenAI chat: prompt_tokens=13 INCLUDES the 5 cached, so uncached=8.
+		{"openai_chat", ProviderOpenAI, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":2,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":5}}}`, 8, 5, 13},
+		// OpenAI Responses (the codex wire): input_tokens=13 INCLUDES the 6 cached, so uncached=7.
+		{"openai_responses_codex", ProviderOpenAIResponses, `{"status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15,"input_tokens_details":{"cached_tokens":6}}}`, 7, 6, 13},
+		// Anthropic: input_tokens=13 EXCLUDES the 7 cache_read, so uncached=13 and resident=20.
+		{"anthropic", ProviderAnthropic, `{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":13,"output_tokens":2,"cache_read_input_tokens":7}}`, 13, 7, 20},
+		// Gemini: promptTokenCount=13 INCLUDES the 8 cached, so uncached=5.
+		{"gemini", ProviderGemini, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":2,"totalTokenCount":15,"cachedContentTokenCount":8}}`, 5, 8, 13},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			adapter, err := NewTranscriptAdapter(c.provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			comp, err := adapter.ParseResponse([]byte(c.raw))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if got := comp.Usage.UncachedPromptTokens(); got != c.wantUncached {
+				t.Fatalf("UncachedPromptTokens() = %d, want %d", got, c.wantUncached)
+			}
+			if got := comp.Usage.CachedPromptTokens(); got != c.wantCached {
+				t.Fatalf("CachedPromptTokens() = %d, want %d", got, c.wantCached)
+			}
+			if got := comp.Usage.UncachedPromptTokens() + comp.Usage.CachedPromptTokens(); got != c.wantResident {
+				t.Fatalf("uncached+cached = %d, want full resident prompt %d", got, c.wantResident)
+			}
+		})
+	}
+}
+
 // TestAnthropicParsesCacheCreationTokens proves the upstream's cache-write counter
 // reaches Usage so the gateway can forward it back to Claude Code.
 func TestAnthropicParsesCacheCreationTokens(t *testing.T) {
