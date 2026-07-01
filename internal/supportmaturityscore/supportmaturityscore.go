@@ -238,8 +238,8 @@ func MatrixBlock() string {
 	var b strings.Builder
 	b.WriteString(MatrixBegin)
 	b.WriteString("\n\n")
-	fmt.Fprintf(&b, "**Grade %v** - score %v - support_maturity_debt **%v** (sum(target-current) rungs over %v cell(s) below their declared target) - %v/%v cells SUPPORTED\n\n",
-		c["grade"], c["score"], c[DebtKey], c["cells_below_target"], c["supported"], c["cells"])
+	fmt.Fprintf(&b, "**Grade %v** - value %v - legacy score %v - support_maturity_debt **%v** (sum(target-current) rungs over %v cell(s) below their declared target) - %v/%v cells SUPPORTED\n\n",
+		c["grade"], c["value"], c["score"], c[DebtKey], c["cells_below_target"], c["supported"], c["cells"])
 	b.WriteString(matrixLegend)
 
 	b.WriteString("| Model family | Topology |")
