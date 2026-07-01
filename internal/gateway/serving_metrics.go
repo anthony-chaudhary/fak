@@ -430,16 +430,17 @@ type ServingScrapeEmitter struct {
 	labels ServingMetricLabels
 
 	mu              sync.Mutex
-	row             ServingMetricRow
-	previousSuccess float64
-	previousAt      time.Time
-	havePrevious    bool
+	rows            []ServingMetricRow
+	previousSuccess map[string]servingScrapeSuccess
 }
 
 var defaultServingMetricsHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func NewServingScrapeEmitter(labels ServingMetricLabels) *ServingScrapeEmitter {
-	return &ServingScrapeEmitter{labels: labels}
+	return &ServingScrapeEmitter{
+		labels:          labels,
+		previousSuccess: map[string]servingScrapeSuccess{},
+	}
 }
 
 func (e *ServingScrapeEmitter) Scrape(ctx context.Context, endpoint string) error {
@@ -477,8 +478,8 @@ func (e *ServingScrapeEmitter) IngestPrometheusAt(text string, at time.Time) err
 	if e == nil {
 		return nil
 	}
-	row := ServingMetricRow{Labels: e.labels}
-	var counters servingScrapeCounters
+	rows := map[string]*ServingMetricRow{}
+	counters := map[string]*servingScrapeCounters{}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -486,29 +487,44 @@ func (e *ServingScrapeEmitter) IngestPrometheusAt(text string, at time.Time) err
 		if !ok {
 			continue
 		}
-		if row.Labels.Model == "" {
-			row.Labels.Model = firstNonEmpty(sample.labels["model_name"], sample.labels["model"])
+		labels := servingLabelsForPromSample(e.labels, sample.labels)
+		key := servingLabelKey(labels)
+		row := rows[key]
+		if row == nil {
+			rows[key] = &ServingMetricRow{Labels: labels}
+			row = rows[key]
 		}
-		applyServingPromSample(&row, sample, &counters)
+		counter := counters[key]
+		if counter == nil {
+			counters[key] = &servingScrapeCounters{}
+			counter = counters[key]
+		}
+		applyServingPromSample(row, sample, counter)
 	}
 	if err := sc.Err(); err != nil {
 		return err
 	}
-	if counters.prefixQueries > 0 {
-		row.PrefixCacheHitRate = ServingGaugeValue(counters.prefixHits / counters.prefixQueries)
+	for key, counter := range counters {
+		if counter.prefixQueries > 0 {
+			rows[key].PrefixCacheHitRate = ServingGaugeValue(counter.prefixHits / counter.prefixQueries)
+		}
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if counters.haveSuccess && e.havePrevious && at.After(e.previousAt) && counters.successTotal >= e.previousSuccess {
-		row.Goodput = ServingGaugeValue((counters.successTotal - e.previousSuccess) / at.Sub(e.previousAt).Seconds())
+	if e.previousSuccess == nil {
+		e.previousSuccess = map[string]servingScrapeSuccess{}
 	}
-	if counters.haveSuccess {
-		e.previousSuccess = counters.successTotal
-		e.previousAt = at
-		e.havePrevious = true
+	for key, counter := range counters {
+		if !counter.haveSuccess {
+			continue
+		}
+		if previous, ok := e.previousSuccess[key]; ok && at.After(previous.at) && counter.successTotal >= previous.total {
+			rows[key].Goodput = ServingGaugeValue((counter.successTotal - previous.total) / at.Sub(previous.at).Seconds())
+		}
+		e.previousSuccess[key] = servingScrapeSuccess{total: counter.successTotal, at: at}
 	}
-	e.row = row
+	e.rows = coalesceModelessServingRows(servingRowsFromMap(rows))
 	return nil
 }
 
@@ -518,10 +534,13 @@ func (e *ServingScrapeEmitter) SnapshotServingMetrics() []ServingMetricRow {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.row.present() {
-		return nil
+	rows := make([]ServingMetricRow, 0, len(e.rows))
+	for _, row := range e.rows {
+		if row.present() {
+			rows = append(rows, row)
+		}
 	}
-	return []ServingMetricRow{e.row}
+	return rows
 }
 
 // NativeServingMetricsEmitter is the native step-loop seam for the same schema.
@@ -624,6 +643,105 @@ type servingScrapeCounters struct {
 	haveSuccess   bool
 	prefixHits    float64
 	prefixQueries float64
+}
+
+type servingScrapeSuccess struct {
+	total float64
+	at    time.Time
+}
+
+func servingLabelsForPromSample(defaults ServingMetricLabels, labels map[string]string) ServingMetricLabels {
+	out := defaults
+	if out.Worker == "" {
+		out.Worker = firstNonEmpty(labels["worker"], labels["worker_id"], labels["instance"])
+	}
+	if out.Engine == "" {
+		out.Engine = firstNonEmpty(labels["engine"], labels["engine_name"])
+	}
+	if out.Model == "" {
+		out.Model = firstNonEmpty(labels["model_name"], labels["model"], labels["served_model_name"])
+	}
+	return out
+}
+
+func servingRowsFromMap(rows map[string]*ServingMetricRow) []ServingMetricRow {
+	out := make([]ServingMetricRow, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.present() {
+			out = append(out, *row)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return servingLabelKey(out[i].Labels) < servingLabelKey(out[j].Labels)
+	})
+	return out
+}
+
+func coalesceModelessServingRows(rows []ServingMetricRow) []ServingMetricRow {
+	type workerEngine struct {
+		worker string
+		engine string
+	}
+	target := map[workerEngine]int{}
+	count := map[workerEngine]int{}
+	for i, row := range rows {
+		labels := normalizeServingLabels(row.Labels)
+		if labels.Model == "unknown" {
+			continue
+		}
+		key := workerEngine{worker: labels.Worker, engine: labels.Engine}
+		target[key] = i
+		count[key]++
+	}
+
+	drop := make([]bool, len(rows))
+	for i, row := range rows {
+		labels := normalizeServingLabels(row.Labels)
+		if labels.Model != "unknown" {
+			continue
+		}
+		key := workerEngine{worker: labels.Worker, engine: labels.Engine}
+		if count[key] != 1 {
+			continue
+		}
+		fillServingMetricRowGaps(&rows[target[key]], row)
+		drop[i] = true
+	}
+
+	out := rows[:0]
+	for i, row := range rows {
+		if !drop[i] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func fillServingMetricRowGaps(dst *ServingMetricRow, src ServingMetricRow) {
+	if !dst.TTFT.Present() && src.TTFT.Present() {
+		dst.TTFT = src.TTFT
+	}
+	if !dst.TPOT.Present() && src.TPOT.Present() {
+		dst.TPOT = src.TPOT
+	}
+	if !dst.ITL.Present() && src.ITL.Present() {
+		dst.ITL = src.ITL
+	}
+	if !dst.Goodput.Set && src.Goodput.Set {
+		dst.Goodput = src.Goodput
+	}
+	if !dst.Running.Set && src.Running.Set {
+		dst.Running = src.Running
+	}
+	if !dst.Waiting.Set && src.Waiting.Set {
+		dst.Waiting = src.Waiting
+	}
+	if !dst.KVUtilization.Set && src.KVUtilization.Set {
+		dst.KVUtilization = src.KVUtilization
+	}
+	if !dst.PrefixCacheHitRate.Set && src.PrefixCacheHitRate.Set {
+		dst.PrefixCacheHitRate = src.PrefixCacheHitRate
+	}
 }
 
 func parsePromSample(line string) (promSample, bool) {
@@ -738,6 +856,11 @@ func parsePromQuoted(s string) (string, int, bool) {
 
 func applyServingPromSample(row *ServingMetricRow, sample promSample, counters *servingScrapeCounters) {
 	base, suffix := promMetricBase(sample.name)
+	if suffix == "_count" && strings.HasSuffix(base, "func_latency_seconds") && sample.labels["name"] == "generate_request" {
+		counters.successTotal += sample.value
+		counters.haveSuccess = true
+		return
+	}
 	switch servingPromMetricKind(base) {
 	case "ttft":
 		applyPromHistogramSample(&row.TTFT, suffix, sample)
@@ -807,10 +930,12 @@ func servingPromMetricKind(base string) string {
 		return "waiting"
 	case strings.HasSuffix(base, "gpu_cache_usage_perc") ||
 		strings.HasSuffix(base, "kv_cache_usage_perc") ||
-		strings.HasSuffix(base, "kv_cache_utilization"):
+		strings.HasSuffix(base, "kv_cache_utilization") ||
+		strings.HasSuffix(base, "token_usage"):
 		return "kv_util"
 	case strings.HasSuffix(base, "gpu_prefix_cache_hit_rate") ||
-		strings.HasSuffix(base, "prefix_cache_hit_rate"):
+		strings.HasSuffix(base, "prefix_cache_hit_rate") ||
+		strings.HasSuffix(base, "cache_hit_rate"):
 		return "prefix_hit"
 	case strings.HasSuffix(base, "goodput_requests_per_second") ||
 		strings.HasSuffix(base, "request_goodput_requests_per_second"):

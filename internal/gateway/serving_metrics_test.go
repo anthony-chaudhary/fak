@@ -34,6 +34,8 @@ func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
 		`fak_serving_time_to_first_token_seconds_count{` + labels + `} 5`,
 		`fak_serving_time_per_output_token_seconds_bucket{` + labels + `,le="0.02"} 4`,
 		`fak_serving_time_per_output_token_seconds_count{` + labels + `} 5`,
+		`fak_serving_inter_token_latency_seconds_bucket{` + labels + `,le="0.015"} 4`,
+		`fak_serving_inter_token_latency_seconds_count{` + labels + `} 5`,
 		`fak_serving_num_requests_running{` + labels + `} 4`,
 		`fak_serving_num_requests_waiting{` + labels + `} 7`,
 		`fak_serving_kv_cache_usage_perc{` + labels + `} 0.75`,
@@ -50,6 +52,7 @@ func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
 	for _, family := range []string{
 		"fak_serving_time_to_first_token_seconds",
 		"fak_serving_time_per_output_token_seconds",
+		"fak_serving_inter_token_latency_seconds",
 		"fak_serving_goodput_requests_per_second",
 		"fak_serving_num_requests_running",
 		"fak_serving_num_requests_waiting",
@@ -62,6 +65,73 @@ func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
 		if got := strings.Count(out, "# TYPE "+family+" "); got != 1 {
 			t.Fatalf("%s TYPE count = %d, want 1", family, got)
 		}
+	}
+}
+
+func TestServingScrapeEmitterRelabelsSGLangIntoFakSchema(t *testing.T) {
+	srv := newTestServer(t)
+	emitter := NewServingScrapeEmitter(ServingMetricLabels{
+		Worker: "sglang-a",
+		Engine: "sglang",
+	})
+
+	t0 := time.Unix(200, 0)
+	if err := emitter.IngestPrometheusAt(sglangServingFixture("20"), t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := emitter.IngestPrometheusAt(sglangServingFixture("44"), t0.Add(12*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetServingMetricsEmitters(emitter)
+
+	out := srv.renderMetrics()
+	labels := `worker="sglang-a",engine="sglang",model="meta-llama/Llama-3.1-8B-Instruct"`
+	for _, want := range []string{
+		`fak_serving_time_to_first_token_seconds_bucket{` + labels + `,le="0.04"} 1`,
+		`fak_serving_time_to_first_token_seconds_count{` + labels + `} 6`,
+		`fak_serving_time_per_output_token_seconds_bucket{` + labels + `,le="0.02"} 5`,
+		`fak_serving_time_per_output_token_seconds_count{` + labels + `} 6`,
+		`fak_serving_inter_token_latency_seconds_bucket{` + labels + `,le="0.02"} 5`,
+		`fak_serving_inter_token_latency_seconds_count{` + labels + `} 6`,
+		`fak_serving_num_requests_running{` + labels + `} 3`,
+		`fak_serving_num_requests_waiting{` + labels + `} 9`,
+		`fak_serving_kv_cache_usage_perc{` + labels + `} 0.28`,
+		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0.125`,
+		`fak_serving_goodput_requests_per_second{` + labels + `} 2`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("SGLang serving scrape surface missing %q\n--- metrics ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "sglang:") {
+		t.Fatalf("upstream SGLang metric name leaked instead of relabeling:\n%s", out)
+	}
+}
+
+func TestServingScrapeEmitterKeepsModelRowsSeparate(t *testing.T) {
+	emitter := NewServingScrapeEmitter(ServingMetricLabels{
+		Worker: "vllm-shared",
+		Engine: "vllm",
+	})
+	if err := emitter.IngestPrometheus(`vllm:num_requests_running{model_name="llama-70b"} 1
+vllm:num_requests_running{model_name="mistral-8x7b"} 2
+`); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := emitter.SnapshotServingMetrics()
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %+v", len(rows), rows)
+	}
+	got := map[string]float64{}
+	for _, row := range rows {
+		got[row.Labels.Model] = row.Running.Value
+		if row.Labels.Worker != "vllm-shared" || row.Labels.Engine != "vllm" {
+			t.Fatalf("labels = %+v, want worker/engine preserved", row.Labels)
+		}
+	}
+	if got["llama-70b"] != 1 || got["mistral-8x7b"] != 2 {
+		t.Fatalf("running rows = %+v, want llama=1 mistral=2", got)
 	}
 }
 
@@ -174,10 +244,52 @@ vllm:time_per_output_token_seconds_bucket{model_name="llama-70b",le="0.02"} 4
 vllm:time_per_output_token_seconds_bucket{model_name="llama-70b",le="+Inf"} 5
 vllm:time_per_output_token_seconds_sum{model_name="llama-70b"} 0.11
 vllm:time_per_output_token_seconds_count{model_name="llama-70b"} 5
+# HELP vllm:inter_token_latency_seconds ITL
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_bucket{model_name="llama-70b",le="0.015"} 4
+vllm:inter_token_latency_seconds_bucket{model_name="llama-70b",le="+Inf"} 5
+vllm:inter_token_latency_seconds_sum{model_name="llama-70b"} 0.09
+vllm:inter_token_latency_seconds_count{model_name="llama-70b"} 5
 vllm:num_requests_running{model_name="llama-70b"} 4
 vllm:num_requests_waiting{model_name="llama-70b"} 7
 vllm:kv_cache_usage_perc{model_name="llama-70b"} 0.75
 vllm:prefix_cache_queries{model_name="llama-70b"} 10
 vllm:prefix_cache_hits{model_name="llama-70b"} 6
 vllm:request_success_total{model_name="llama-70b"} ` + success + "\n"
+}
+
+func sglangServingFixture(completed string) string {
+	return `# HELP sglang:token_usage The token usage
+# TYPE sglang:token_usage gauge
+sglang:token_usage{model_name="meta-llama/Llama-3.1-8B-Instruct"} 0.28
+# HELP sglang:cache_hit_rate The cache hit rate
+# TYPE sglang:cache_hit_rate gauge
+sglang:cache_hit_rate{model_name="meta-llama/Llama-3.1-8B-Instruct"} 0.125
+# HELP sglang:time_to_first_token_seconds Histogram of time to first token in seconds.
+# TYPE sglang:time_to_first_token_seconds histogram
+sglang:time_to_first_token_seconds_sum{model_name="meta-llama/Llama-3.1-8B-Instruct"} 0.9
+sglang:time_to_first_token_seconds_bucket{le="0.04",model_name="meta-llama/Llama-3.1-8B-Instruct"} 1
+sglang:time_to_first_token_seconds_bucket{le="+Inf",model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+sglang:time_to_first_token_seconds_count{model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+# HELP sglang:time_per_output_token_seconds Histogram of time per output token in seconds.
+# TYPE sglang:time_per_output_token_seconds histogram
+sglang:time_per_output_token_seconds_bucket{le="0.02",model_name="meta-llama/Llama-3.1-8B-Instruct"} 5
+sglang:time_per_output_token_seconds_bucket{le="+Inf",model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+sglang:time_per_output_token_seconds_sum{model_name="meta-llama/Llama-3.1-8B-Instruct"} 0.18
+sglang:time_per_output_token_seconds_count{model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+# HELP sglang:inter_token_latency_seconds Histogram of inter-token latency in seconds.
+# TYPE sglang:inter_token_latency_seconds histogram
+sglang:inter_token_latency_seconds_bucket{le="0.02",model_name="meta-llama/Llama-3.1-8B-Instruct"} 5
+sglang:inter_token_latency_seconds_bucket{le="+Inf",model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+sglang:inter_token_latency_seconds_sum{model_name="meta-llama/Llama-3.1-8B-Instruct"} 0.18
+sglang:inter_token_latency_seconds_count{model_name="meta-llama/Llama-3.1-8B-Instruct"} 6
+# HELP sglang:num_running_reqs The number of running requests
+# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{model_name="meta-llama/Llama-3.1-8B-Instruct"} 3
+# HELP sglang:num_queue_reqs The number of requests in the waiting queue
+# TYPE sglang:num_queue_reqs gauge
+sglang:num_queue_reqs{model_name="meta-llama/Llama-3.1-8B-Instruct"} 9
+# HELP sglang:func_latency_seconds Function latency in seconds
+# TYPE sglang:func_latency_seconds histogram
+sglang:func_latency_seconds_count{name="generate_request"} ` + completed + "\n"
 }
