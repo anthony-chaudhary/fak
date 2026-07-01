@@ -134,7 +134,8 @@ func TestRunTest_ListExitsZero(t *testing.T) {
 	if rc := runTest(&out, &errb, []string{"--list"}); rc != 0 {
 		t.Fatalf("--list rc = %d", rc)
 	}
-	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") || !strings.Contains(out.String(), "affected") {
+	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") ||
+		!strings.Contains(out.String(), "affected") || !strings.Contains(out.String(), "durations") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }

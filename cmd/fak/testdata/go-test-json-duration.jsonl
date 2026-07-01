@@ -1,0 +1,8 @@
+{"Time":"2026-06-30T00:00:00Z","Action":"run","Package":"example.com/fak/internal/foo","Test":"TestFast"}
+{"Time":"2026-06-30T00:00:00Z","Action":"pass","Package":"example.com/fak/internal/foo","Test":"TestFast","Elapsed":0.01}
+{"Time":"2026-06-30T00:00:01Z","Action":"run","Package":"example.com/fak/internal/foo","Test":"TestSlow"}
+{"Time":"2026-06-30T00:00:02Z","Action":"pass","Package":"example.com/fak/internal/foo","Test":"TestSlow","Elapsed":1.234}
+{"Time":"2026-06-30T00:00:02Z","Action":"pass","Package":"example.com/fak/internal/foo","Elapsed":1.5}
+{"Time":"2026-06-30T00:00:03Z","Action":"run","Package":"example.com/fak/internal/bar","Test":"TestBar"}
+{"Time":"2026-06-30T00:00:03Z","Action":"fail","Package":"example.com/fak/internal/bar","Test":"TestBar","Elapsed":0.25}
+{"Time":"2026-06-30T00:00:03Z","Action":"fail","Package":"example.com/fak/internal/bar","Elapsed":0.33}

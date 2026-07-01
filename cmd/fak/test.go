@@ -12,6 +12,7 @@ package main
 //	fak test full                the full suite (go test ./...)
 //	fak test race                the race tier (go test -short -race ./...)
 //	fak test affected            run fak affected for the changed package closure
+//	fak test durations           fold go test -json into a duration ledger
 //	fak test ./internal/ctxmmu/  one package (any ./... or import-path arg)
 //	fak test fast -- -run TestX -count=1   pass extra flags through to go test
 //	fak test --list              print the tiers and exit
@@ -118,6 +119,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
   fak test full                full suite (go test ./...)
   fak test race                race tier (go test -short -race ./...)
   fak test affected            affected-package loop (delegates to fak affected)
+  fak test durations           fold go test -json into a duration ledger
   fak test ./internal/ctxmmu/  one package (any ./... or import-path target)
   fak test fast -- -run TestX  pass extra flags through to go test
   fak test --list              list tiers
@@ -130,13 +132,18 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		return 2
 	}
 	if *list {
-		fmt.Fprint(stdout, "tiers:\n  fast      go test -short ./...   (default; pre-commit smoke)\n  full      go test ./...          (authoritative suite)\n  race      go test -short -race ./...\n  affected  fak affected ...       (changed packages plus importers)\n  <pkg>     a ./... or import-path target\n")
+		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  <pkg>      a ./... or import-path target\n")
 		return 0
 	}
 
 	args := fs.Args()
-	if len(args) > 0 && args[0] == "affected" {
-		return runAffected(stdout, stderr, args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "affected":
+			return runAffected(stdout, stderr, args[1:])
+		case "durations", "duration", "duration-ledger":
+			return runTestDurations(stdout, stderr, args[1:])
+		}
 	}
 
 	p, err := planTest(runtime.GOOS, args)
