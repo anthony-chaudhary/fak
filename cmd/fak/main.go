@@ -87,6 +87,8 @@ func main() {
 		cmdSweep(os.Args[2:])
 	case "sync":
 		cmdSync(os.Args[2:])
+	case "merge":
+		cmdMerge(os.Args[2:])
 	case "affected":
 		cmdAffected(os.Args[2:])
 	case "preflight":

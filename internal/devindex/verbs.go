@@ -140,6 +140,7 @@ var verbManifest = []Verb{
 	{Name: "marketing", Synopsis: "the marketing Slack surface", Lane: "cmd"},
 	{Name: "maturity", Synopsis: "the feature-lifecycle maturity ladder report", Lane: "cmd"},
 	{Name: "memory", Synopsis: "the memory-operation algebra: author a render/clean/compact/dream Op pipeline (drivers/explain/run)", Lane: "cmd"},
+	{Name: "merge", Synopsis: "shared-trunk merge dry-run: predict empty-net-diff vs clean changed files vs conflicts", Lane: "cmd"},
 	{Name: "milestone", Synopsis: "the roadmap/milestone report (discrete-deliverable epics, completion %)", Lane: "cmd"},
 	{Name: "milestone-scorecard", Synopsis: "native milestone-roadmap scorecard control-pane payload", Lane: "cmd"},
 	{Name: "model", Synopsis: "resolve an hf:// URI to a locally cached file path (Hub download + SHA256 verify)", Lane: "cmd"},

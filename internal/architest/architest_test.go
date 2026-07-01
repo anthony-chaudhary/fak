@@ -74,6 +74,7 @@ var tier = map[string]int{
 	"releasestatus":        1,                // pure read-only release-posture fold (Compute over injected Facts) porting tools/release_status.py; the broader sibling of releasestale. Stdlib-only, imports nothing internal, off the hot path.
 	"affectedtests":        1,                // pure reverse-dependency closure for the `fak affected` fast test gate: changed packages + every package that (transitively, test imports included) imports one; stdlib-only, imports nothing internal, off the hot path.
 	"testroute":            1,                // pure host test-route fold (native / WSL / CI) over caller-supplied probe data; stdlib-only, no I/O.
+	"mergepreview":         1,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"modelladder":          2,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             2,                // model registry; imports hfhub(1)+stdlib, off the hot path.
 	"skillenv":             4,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.

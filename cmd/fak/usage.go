@@ -58,6 +58,12 @@ func usageCoreVerbs() {
                  write is clean at HEAD or already byte-identical to the remote-tracking
                  version, preserving unrelated local work. Never uses pull, stash, reset,
                  clean, or add. Exit 0 safe/applied/in-sync, 2 usage, 3 refused, 4 internal.)
+  fak merge     --dry-run [--dir DIR] [--target REF | REF] [--trunk B] [--json]
+                (SHARED-TRUNK MERGE PREVIEW: predict 'git merge origin/<trunk>' before
+                 starting it. Uses Git's merge-tree machinery without touching the
+                 index/worktree and reports either empty_net_diff (cached diff would be
+                 empty), clean_merge with changed files, or conflicts with the files named.
+                 Exit 0 clean preview, 2 usage, 3 conflicts predicted, 1 git/internal.)
   fak affected  [--base REF] [--file P] [--budget DUR] [--report FILE]
                 [--list] [--json] [--short] [--run RE] [--] [go test args]
                 (the FAST INNER LOOP: run go test for only the packages your
