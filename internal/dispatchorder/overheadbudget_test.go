@@ -9,6 +9,9 @@ import (
 )
 
 func TestFanoutPlanningOverheadBudget(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("overhead-budget envelope is not meaningful under go test -race instrumentation")
+	}
 	budget, ok := turntaxmeter.DefaultBudget("dispatch", "plan_fanout")
 	if !ok {
 		t.Fatalf("dispatch/plan_fanout overhead budget is not declared")
