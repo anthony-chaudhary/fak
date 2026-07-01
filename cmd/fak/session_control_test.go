@@ -305,6 +305,17 @@ func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
 	if tx.BudgetRearm.ContextTokensLeft != 50 || tx.BudgetRearm.ContextTokensCap != 50 {
 		t.Fatalf("reset transaction budget rearm = %+v, want 50/50", tx.BudgetRearm)
 	}
+
+	logged, ok := resetTransactions.Latest()
+	if !ok {
+		t.Fatal("resetServedSessionOnBudget must append every reset to the process reset-transaction log")
+	}
+	if logged.OldTrace != trace || logged.NewTrace != child || logged.SeedDigest != tx.SeedDigest {
+		t.Fatalf("logged transaction = %+v, want it to match the child's own reset transaction %+v", logged, tx)
+	}
+	if verdicts, allMatch := resetTransactions.Replay(); !allMatch {
+		t.Fatalf("process reset-transaction log must replay clean: %+v", verdicts)
+	}
 }
 
 func TestSessionPauseResumeDurableWriteThrough(t *testing.T) {

@@ -811,6 +811,15 @@ func observeTrace(_ context.Context, traceID string) (string, bool) {
 // IFC-internals-blind for the trace routes.
 var serveSessions = session.NewTable()
 
+// resetTransactions is the process-local, append-only audit trail of every
+// budget-triggered reset resetServedSessionOnBudget performs (issue #1582): a
+// ResetTransactionLog row is appended immediately after each successful
+// Table.RecontinueWithTransaction call, so the full reset history for the process
+// survives independent of any single trace's State (which only carries the LATEST
+// transaction in its own lineage). Safe for concurrent resets across traces — see
+// ResetTransactionLog's own locking.
+var resetTransactions session.ResetTransactionLog
+
 // observeSession is the read side of the /v1/fak/session control surface (#620): it
 // returns one served session's current DRIVE state so an operator can read how hard
 // a live session is running without reconstructing it from git + a process scan. An
@@ -905,6 +914,7 @@ func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFun
 			TokensLeft:        session.Unbounded,
 			ContextTokensLeft: freshContextTokens,
 		}, resetTx)
+		resetTransactions.Append(childState.ResetTransaction)
 		persistServeSessionRevision(ctx, child, childState)
 		return child, []agent.Message{{Role: agent.RoleSystem, Content: seed.Recap}}, true
 	}
