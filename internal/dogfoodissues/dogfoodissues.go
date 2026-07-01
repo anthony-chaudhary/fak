@@ -1,6 +1,7 @@
 package dogfoodissues
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -17,6 +19,11 @@ import (
 const Schema = "fak.dogfood-action-issues.v1"
 
 var markerRE = regexp.MustCompile(`<!--\s*fak-dogfood-action-key:\s*([^>\s]+)\s*-->`)
+var issueURLRE = regexp.MustCompile(`https?://\S+/issues/([0-9]+)`)
+
+// DefaultGhTimeout bounds each gh subprocess so a stuck network call cannot
+// wedge the dogfood issue sync indefinitely.
+const DefaultGhTimeout = 30 * time.Second
 
 // ActionItem is one scorecard ACTION item extracted from a dogfood report.json.
 type ActionItem struct {
@@ -86,11 +93,14 @@ type SkippedRow struct {
 
 // SyncRow is one gh create/edit outcome on a --live run.
 type SyncRow struct {
-	Key    string `json:"key"`
-	Action string `json:"action"`
-	OK     bool   `json:"ok"`
-	Stdout string `json:"stdout"`
-	Stderr string `json:"stderr"`
+	Key      string `json:"key"`
+	Action   string `json:"action"`
+	OK       bool   `json:"ok"`
+	Number   *int   `json:"number,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Verified bool   `json:"verified"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
 }
 
 // Result is the machine-readable plan/result fold.
@@ -551,14 +561,30 @@ func planRow(item ActionItem) PlanRow {
 // a real gh.
 type Runner func(args []string) (stdout, stderr string, ok bool)
 
+// SyncOptions tunes effectful sync behavior. Zero values use conservative
+// defaults.
+type SyncOptions struct {
+	Timeout time.Duration
+}
+
 // defaultRunner shells out to the real `gh` CLI.
 func defaultRunner(args []string) (string, string, bool) {
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultGhTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		stderr := strings.TrimSpace(errb.String())
+		if stderr != "" {
+			stderr += "\n"
+		}
+		stderr += fmt.Sprintf("gh timed out after %s", DefaultGhTimeout)
+		return out.String(), stderr, false
+	}
 	return out.String(), errb.String(), err == nil
 }
 
@@ -587,18 +613,37 @@ func FetchExistingIssues(repo string, limit int) ([]Issue, error) {
 // Sync creates or edits each planned issue via gh. The body is passed inline with
 // --body so no temp file is needed. runner defaults to the real gh CLI when nil.
 func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow {
+	return SyncWithOptions(plan, repo, labels, runner, SyncOptions{})
+}
+
+// SyncWithOptions is Sync plus testable timeout control. Each create/edit is
+// followed by a marker read-back (`gh issue view`) before the row is marked OK.
+func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner, opt SyncOptions) []SyncRow {
 	run := runner
 	if run == nil {
 		run = defaultRunner
+	}
+	timeout := opt.Timeout
+	if timeout <= 0 {
+		timeout = DefaultGhTimeout
+	}
+	call := func(args []string) (string, string, bool) {
+		return runWithTimeout(run, args, timeout)
 	}
 	results := make([]SyncRow, 0, len(plan))
 	for _, row := range plan {
 		var args []string
 		if row.Action == "update" {
-			num := ""
-			if row.Number != nil {
-				num = strconv.Itoa(*row.Number)
+			if row.Number == nil {
+				results = append(results, SyncRow{
+					Key:    row.Key,
+					Action: row.Action,
+					OK:     false,
+					Stderr: "cannot update issue: missing issue number",
+				})
+				continue
 			}
+			num := strconv.Itoa(*row.Number)
 			args = []string{"issue", "edit", num, "--title", row.Title, "--body", row.Body}
 		} else {
 			args = []string{"issue", "create", "--title", row.Title, "--body", row.Body}
@@ -609,16 +654,119 @@ func Sync(plan []PlanRow, repo string, labels []string, runner Runner) []SyncRow
 		if repo != "" {
 			args = append(args, "--repo", repo)
 		}
-		stdout, stderr, ok := run(args)
+		stdout, stderr, ok := call(args)
+		number := row.Number
+		url := ""
+		verified := false
+		if ok {
+			if row.Action == "create" {
+				var parsed int
+				var parsedURL string
+				var parsedOK bool
+				parsed, parsedURL, parsedOK = CreatedIssue(stdout)
+				if !parsedOK {
+					ok = false
+					stderr = appendSyncStderr(stderr, "gh issue create succeeded but stdout did not contain a created issue URL")
+				} else {
+					number = &parsed
+					url = parsedURL
+				}
+			}
+		}
+		if ok && number != nil {
+			var verifyErr string
+			var verifiedURL string
+			verifiedURL, verifyErr, verified = verifySyncedIssue(call, repo, row, *number)
+			if verifiedURL != "" {
+				url = verifiedURL
+			}
+			if !verified {
+				ok = false
+				stderr = appendSyncStderr(stderr, verifyErr)
+			}
+		}
 		results = append(results, SyncRow{
-			Key:    row.Key,
-			Action: row.Action,
-			OK:     ok,
-			Stdout: strings.TrimSpace(stdout),
-			Stderr: strings.TrimSpace(stderr),
+			Key:      row.Key,
+			Action:   row.Action,
+			OK:       ok,
+			Number:   number,
+			URL:      url,
+			Verified: verified,
+			Stdout:   strings.TrimSpace(stdout),
+			Stderr:   strings.TrimSpace(stderr),
 		})
 	}
 	return results
+}
+
+func runWithTimeout(run Runner, args []string, timeout time.Duration) (string, string, bool) {
+	if timeout <= 0 {
+		return run(args)
+	}
+	type result struct {
+		stdout, stderr string
+		ok             bool
+	}
+	ch := make(chan result, 1)
+	go func() {
+		stdout, stderr, ok := run(args)
+		ch <- result{stdout: stdout, stderr: stderr, ok: ok}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.stdout, r.stderr, r.ok
+	case <-timer.C:
+		return "", fmt.Sprintf("gh timed out after %s", timeout), false
+	}
+}
+
+// CreatedIssue parses the URL gh prints after `gh issue create`.
+func CreatedIssue(stdout string) (number int, url string, ok bool) {
+	match := issueURLRE.FindStringSubmatch(strings.TrimSpace(stdout))
+	if match == nil {
+		return 0, "", false
+	}
+	n, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return n, match[0], true
+}
+
+func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, stderr string, ok bool) {
+	args := []string{"issue", "view", strconv.Itoa(number), "--json", "number,title,body,state,url"}
+	if repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	stdout, stderr, runOK := run(args)
+	if !runOK {
+		return "", strings.TrimSpace(stderr), false
+	}
+	var issue Issue
+	if err := json.Unmarshal([]byte(stdout), &issue); err != nil {
+		return "", fmt.Sprintf("verify issue #%d: parse gh issue view JSON: %v", number, err), false
+	}
+	if issue.Number != 0 && issue.Number != number {
+		return issue.URL, fmt.Sprintf("verify issue #%d: gh returned issue #%d", number, issue.Number), false
+	}
+	if got := MarkerKey(issue.Body); got != row.Key {
+		return issue.URL, fmt.Sprintf("verify issue #%d: marker key %q != planned key %q", number, got, row.Key), false
+	}
+	return issue.URL, "", true
+}
+
+func appendSyncStderr(stderr, msg string) string {
+	stderr = strings.TrimSpace(stderr)
+	msg = strings.TrimSpace(msg)
+	if stderr == "" {
+		return msg
+	}
+	if msg == "" {
+		return stderr
+	}
+	return stderr + "\n" + msg
 }
 
 func mergeDogfoodIssueLabels(base, extra []string) []string {

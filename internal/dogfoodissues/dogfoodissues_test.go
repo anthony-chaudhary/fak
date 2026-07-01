@@ -2,8 +2,10 @@ package dogfoodissues
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixtureReport mirrors the Python test's fixture_report(): a recent-feature
@@ -262,8 +264,13 @@ func TestSyncUsesPlanLabelsAndGlobalLabels(t *testing.T) {
 		t.Fatalf("plan=%+v skipped=%+v, want one plan row", plan, skipped)
 	}
 	var calls [][]string
+	createdBody := ""
 	rows := Sync(plan, "owner/repo", []string{"guardrsi", "backlog"}, func(args []string) (string, string, bool) {
 		calls = append(calls, args)
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "view" {
+			return dogfoodIssueViewJSON(2, createdBody), "", true
+		}
+		createdBody = dogfoodArgAfter(args, "--body")
 		return "https://example/issues/2", "", true
 	})
 	if len(rows) != 1 || !rows[0].OK {
@@ -292,9 +299,21 @@ func TestSyncUsesInjectedRunnerWithoutGh(t *testing.T) {
 	}}
 	plan := BuildPlan(items, existing)
 	var calls [][]string
+	viewBodies := map[string]string{}
 	runner := func(args []string) (string, string, bool) {
 		calls = append(calls, args)
-		return "https://example/issues/1", "", true
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "view" {
+			return dogfoodIssueViewJSON(toIntForTest(args[2]), viewBodies[args[2]]), "", true
+		}
+		if len(args) >= 3 && args[0] == "issue" && args[1] == "edit" {
+			viewBodies[args[2]] = dogfoodArgAfter(args, "--body")
+			return "", "", true
+		}
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "create" {
+			viewBodies["1"] = dogfoodArgAfter(args, "--body")
+			return "https://example/issues/1", "", true
+		}
+		return "", "unexpected call", false
 	}
 	rows := Sync(plan, "owner/repo", []string{"backlog"}, runner)
 	if len(rows) != len(plan) {
@@ -330,4 +349,115 @@ func TestSyncUsesInjectedRunnerWithoutGh(t *testing.T) {
 	if !sawLabel {
 		t.Error("label not passed on create")
 	}
+}
+
+func TestSyncRecordsPartialProgressAndRerunUpdatesVerifiedCreate(t *testing.T) {
+	first := scopedGuardActionItem()
+	second := scopedGuardActionItem()
+	second.Key = "guard-rsi-route/guard-journal:second_blank_reason"
+	second.Title = "guardrsi: close second blank-reason hole"
+	second.Finding = "guard-journal:second_blank_reason"
+	plan := []PlanRow{planRow(first), planRow(second)}
+
+	var calls [][]string
+	runner := func(args []string) (string, string, bool) {
+		calls = append(calls, args)
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "view" {
+			if args[2] != "42" {
+				return "", "not found", false
+			}
+			return dogfoodIssueViewJSON(42, IssueBody(first)), "", true
+		}
+		body := dogfoodArgAfter(args, "--body")
+		if strings.Contains(body, first.Key) {
+			return "https://github.com/owner/repo/issues/42\n", "", true
+		}
+		return "", "network down after first create", false
+	}
+	rows := SyncWithOptions(plan, "owner/repo", []string{"backlog"}, runner, SyncOptions{Timeout: time.Second})
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if !rows[0].OK || !rows[0].Verified || rows[0].Number == nil || *rows[0].Number != 42 {
+		t.Fatalf("first row should record verified partial progress: %+v", rows[0])
+	}
+	if rows[1].OK || !strings.Contains(rows[1].Stderr, "network down") {
+		t.Fatalf("second row should record failure and continue: %+v", rows[1])
+	}
+	if len(calls) < 3 {
+		t.Fatalf("expected create, verify, second create calls; got %+v", calls)
+	}
+
+	rerun := BuildPlan([]ActionItem{first, second}, []Issue{{
+		Number: 42,
+		State:  "OPEN",
+		Body:   IssueBody(first),
+	}})
+	if rerun[0].Action != "update" || rerun[0].Number == nil || *rerun[0].Number != 42 {
+		t.Fatalf("rerun should update the verified created issue instead of duplicating: %+v", rerun[0])
+	}
+	if rerun[1].Action != "create" {
+		t.Fatalf("rerun should still create the failed row, got %+v", rerun[1])
+	}
+}
+
+func TestSyncRejectsCreatedIssueWhenMarkerVerificationFails(t *testing.T) {
+	item := scopedGuardActionItem()
+	rows := SyncWithOptions([]PlanRow{planRow(item)}, "", nil, func(args []string) (string, string, bool) {
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "view" {
+			return dogfoodIssueViewJSON(77, "body without marker"), "", true
+		}
+		return "https://github.com/owner/repo/issues/77", "", true
+	}, SyncOptions{Timeout: time.Second})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].OK || rows[0].Verified {
+		t.Fatalf("unverified create should not be OK: %+v", rows[0])
+	}
+	if rows[0].Number == nil || *rows[0].Number != 77 {
+		t.Fatalf("failed verification should still record created issue number: %+v", rows[0])
+	}
+	if !strings.Contains(rows[0].Stderr, "marker key") {
+		t.Fatalf("verification failure should explain marker mismatch: %+v", rows[0])
+	}
+}
+
+func TestSyncBoundsHungRunner(t *testing.T) {
+	item := scopedGuardActionItem()
+	start := time.Now()
+	rows := SyncWithOptions([]PlanRow{planRow(item)}, "", nil, func(args []string) (string, string, bool) {
+		select {}
+	}, SyncOptions{Timeout: 10 * time.Millisecond})
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("hung runner was not bounded, elapsed=%s rows=%+v", elapsed, rows)
+	}
+	if len(rows) != 1 || rows[0].OK || !strings.Contains(rows[0].Stderr, "timed out") {
+		t.Fatalf("timeout row = %+v, want failed timeout", rows)
+	}
+}
+
+func dogfoodArgAfter(args []string, flag string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func dogfoodIssueViewJSON(number int, body string) string {
+	b, _ := json.Marshal(Issue{
+		Number: number,
+		Title:  "dogfood issue",
+		Body:   body,
+		State:  "OPEN",
+		URL:    "https://github.com/owner/repo/issues/" + strconv.Itoa(number),
+	})
+	return string(b)
+}
+
+func toIntForTest(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
