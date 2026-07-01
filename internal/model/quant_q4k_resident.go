@@ -16,6 +16,21 @@ func IsQuantWeight(name string) bool { return isQuantWeight(name) }
 // into the unexported maps.
 func (m *Model) HasQ4K(name string) bool { return m.q4kw != nil && m.q4kw[name] != nil }
 func (m *Model) HasQ8(name string) bool  { return m.q8w != nil && m.q8w[name] != nil }
+
+// Q4KRaw returns a resident Q4_K tensor's raw super-block bytes and true, or nil/false if the name
+// is not resident. It is the exported read-back (twin of KQuantRaw) for load witnesses and sharded-
+// load tests that must prove an admitted expert band carries the RIGHT expert's bytes, not merely
+// the right tensor count. The slice aliases the resident store; callers must not mutate it.
+func (m *Model) Q4KRaw(name string) ([]byte, bool) {
+	if m.q4kw == nil {
+		return nil, false
+	}
+	qt := m.q4kw[name]
+	if qt == nil {
+		return nil, false
+	}
+	return qt.raw, true
+}
 func (m *Model) q4kHeadName() string {
 	if _, ok := m.q4kw["lm_head.weight"]; ok {
 		return "lm_head.weight"

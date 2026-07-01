@@ -266,6 +266,22 @@ func (m *Model) HasKQuant(name string) bool { return m.hasKQuant(name) }
 // KQuantCount returns how many tensors hold a resident raw expert-quant copy (loader diagnostic).
 func (m *Model) KQuantCount() int { return len(m.kqw) }
 
+// KQuantRaw returns a resident raw expert-quant tensor's super-block bytes and true, or nil/false
+// if the name is not resident. It is the exported read-back for load witnesses and sharded-load
+// tests that must prove not just WHICH band was admitted (HasKQuant) but that the admitted band
+// carries the RIGHT expert's bytes — the fidelity a zeroed-payload residency check cannot see. The
+// slice aliases the resident store; callers must not mutate it.
+func (m *Model) KQuantRaw(name string) ([]byte, bool) {
+	if m.kqw == nil {
+		return nil, false
+	}
+	qt := m.kqw[name]
+	if qt == nil {
+		return nil, false
+	}
+	return qt.raw, true
+}
+
 // ResidentKQuantEligible reports whether a canonical tensor name should be held as resident raw
 // expert quant. It is the same identity-normalization gate as ResidentQ4KEligible (a matmul weight
 // that normalizeCanonicalTensorData does NOT transform), so a transformed tensor's raw bytes are

@@ -825,7 +825,7 @@ func New(cfg Config) (*Server, error) {
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
 		// Expert parallelism is model state, set on the in-kernel Model here (the EP rank
 		// lives on the Model, consumed by ffnForLayer); 0/1 is the no-op default.
-		if cfg.ExpertParallelRanks > 1 {
+		if cfg.ExpertParallelRanks > 1 && !cfg.InKernelModel.IsExpertParallelRankLocal() {
 			cfg.InKernelModel.SetExpertParallelRanks(cfg.ExpertParallelRanks)
 			// Reduce the routed-expert partials through the DEVICE collective the serve
 			// initialized — serve.go gates ranks>1 on a backend advertising Caps().Collective
@@ -842,6 +842,12 @@ func New(cfg Config) (*Server, error) {
 					logf("gateway: expert-parallel ranks=%d: backend %q exposes no device collective (%v) — reducing host-side via LocalCollective (correct, single-box)", cfg.ExpertParallelRanks, cfg.Backend.Name(), err)
 				}
 			}
+		} else if cfg.ExpertParallelRanks > 1 && cfg.InKernelModel.IsExpertParallelRankLocal() {
+			// A SHARDED EP rank: the serve already set the rank, the world size, and the DistComm
+			// process-group collective (each rank holds only its band, reduces cross-process). Do
+			// NOT re-wire a single-process device/Local collective here — it would clobber the
+			// cross-process reduce and break the sharded serve (#971).
+			logf("gateway: expert-parallel ranks=%d rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped", cfg.ExpertParallelRanks)
 		}
 		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
 	default:

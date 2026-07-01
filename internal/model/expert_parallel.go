@@ -288,6 +288,13 @@ func (m *Model) SetExpertParallelRank(rank int) { m.epRank, m.epRankSet = rank, 
 // (the default) keeps the live forward on the single-process all-band path.
 func (m *Model) expertParallelRankLocal() (int, bool) { return m.epRank, m.epRankSet }
 
+// IsExpertParallelRankLocal reports whether this Model is a SHARDED EP rank (SetExpertParallelRank
+// was called). The gateway checks it to AVOID clobbering the sharded serve's DistComm collective
+// with a device/Local collective: a rank-local model already holds only its band and reduces
+// through the process group the serve wired, so re-wiring a single-process device collective would
+// break the cross-process reduce.
+func (m *Model) IsExpertParallelRankLocal() bool { return m.epRankSet }
+
 // SetExpertParallelCollective records the Collective the live decode EP path reduces the
 // per-rank expert partials through (Model.epColl). nil restores the single-box, bit-exact
 // LocalCollective default. The serve sets a BackendCollective wrapping the device NCCL
