@@ -331,8 +331,8 @@ func TestNativeServeLoopStreamsRunArmDeltasAndMetrics(t *testing.T) {
 	})
 	select {
 	case <-planner.firstDelta:
-	case <-time.After(2 * time.Second):
-		t.Fatal("test planner did not signal its first delta after the client observed it")
+	default:
+		t.Fatal("test planner had not reached its first delta before the client observed it")
 	}
 	close(planner.releaseSecond)
 	frames = append(frames, readAnthropicSSE(t, reader)...)
