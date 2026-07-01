@@ -109,12 +109,14 @@ they are not the same claim:
 | **GLM-MoE-DSA** (GLM-5.2 lineage; DSA sparse attention + MoE) | `glm_moe_dsa` | Forward-pass proven (cacheless + session-cache oracle); DSA forward is research-grade | `TestOptionalGLMMoeDsaOracleForwardMatchesHFCacheless`, `…SessionCacheMatchesHF` |
 | **GPT-OSS** (MoE, yarn RoPE, sliding-window layers, attention sinks) | `gpt_oss` | Config + architecture-axis | `config_test.go` `TestConfigDerivesArchitectureAxesFromMetadata` (gpt-oss case); attention-sink + softcap axes in `arch.go`. No committed HF forward oracle for this family |
 | **Mistral** (sliding-window attention) | `mistral` | Forward-pass proven (SWA oracle, when exported) | `TestOptionalMistralSWAOracleNonVacuous` |
+| **OLMo2** (post-norm, full-projection-width qk-norm) | `olmo2` | CPU forward numerically witnessed in CI (weight-free oracle) | `family_cpu_oracle_test.go` `TestOlmo2CPUNumericOracle` — the production forward vs an independent HF-semantics scalar reference on a deterministic synthetic fixture, prefill + decode, with a non-vacuity perturbation gate. No real-checkpoint HF export yet |
 
-The mechanical-axis loader also parses several more families' metadata (OLMo2 post-norm,
-GPT-NeoX / Cohere / Falcon parallel-residual, MPT ALiBi, StableLM, DeepSeek-V2 MLA, MiniMax-M3
+The mechanical-axis loader also parses several more families' metadata (GPT-NeoX /
+Cohere / Falcon parallel-residual, MPT ALiBi, StableLM, DeepSeek-V2 MLA, MiniMax-M3
 MSA). Those are wiring-and-config support exercised on synthetic configs in
 `config_test.go` and `arch_test.go`; per-family numeric forward correctness needs a
-re-exported HF oracle, so they are not listed above as forward-pass-proven. DeepSeek-V2,
+CI numeric oracle (the OLMo2 row's pattern) or a re-exported HF oracle, so they are
+not listed above as forward-pass-proven. DeepSeek-V2,
 for example, has an oracle that documents the MLA tensor boundary but does not assert a
 full forward. Treat any family not in the table above as parse-and-axis support, not a
 proven forward.

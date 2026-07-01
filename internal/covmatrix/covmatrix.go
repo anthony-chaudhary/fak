@@ -70,9 +70,11 @@ type Family struct {
 	// Topology is the block topology this family lowers to (topologyForFamily, weights.go).
 	Topology Topology
 	// OracleInCI is true only when a weight-free, checkpoint-independent numeric witness
-	// runs in CI for this family. Today only Llama (the SmolLM2 anchor + Float32bits gate)
-	// qualifies; every other family's HF oracle is the checkpoint-gated #474 set that
-	// SKIPs under -short. This is the honest "asserted, not proven" boundary the epic names.
+	// runs in CI for this family. Llama qualifies via the SmolLM2 anchor + Float32bits
+	// gate (refactor_test.go's legacy hand-copy web); OLMo2 via the independent
+	// HF-semantics reference in internal/model/family_cpu_oracle_test.go (#1271 Lane 1).
+	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
+	// -short. This is the honest "asserted, not proven" boundary the epic names.
 	OracleInCI bool
 }
 
@@ -87,7 +89,7 @@ var Families = []Family{
 	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: false},
 	{Name: "StableLM", ResolverToken: "stablelm", Topology: PreNorm, OracleInCI: false},
-	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: false},
+	{Name: "OLMo2", ResolverToken: "olmo2", Topology: PostNorm, OracleInCI: true},
 	{Name: "Cohere", ResolverToken: "cohere", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "Gemma2/3", ResolverToken: "gemma", Topology: SandwichNorm, OracleInCI: false},
 	{Name: "Mixtral-MoE", ResolverToken: "mixtral", Topology: PreNorm, OracleInCI: false},
@@ -199,7 +201,7 @@ type StaleCell struct {
 
 // StaleCells returns the honest-but-incomplete residual: every cell that RUNS
 // (SUPPORTED or PROOF-PATH-ONLY) whose family carries no CI-runnable numeric
-// oracle. Llama (the only OracleInCI family today) never appears; FENCED cells
+// oracle. The OracleInCI families (Llama, OLMo2) never appear; FENCED cells
 // (honest refusals) and UNDEFINED cells (growth_debt) are excluded by design.
 // Output is deterministic: Grid() is already in (family, backend) order.
 func StaleCells() []StaleCell {
