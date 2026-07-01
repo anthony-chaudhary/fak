@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -54,6 +56,7 @@ type Tree struct {
 type KPI struct {
 	KPI     string   `json:"kpi"`
 	Group   string   `json:"group"`
+	Value   float64  `json:"value"`
 	Score   int      `json:"score"`
 	Detail  string   `json:"detail"`
 	Defects []string `json:"defects"`
@@ -139,6 +142,17 @@ func stringValue(r Row, key string) string {
 		return v
 	}
 	return ""
+}
+
+// rowID returns the row's declared id, falling back to its zero-based index
+// when the id is absent. It is the shared preamble every per-row KPI loop uses
+// to label a defect.
+func rowID(r Row, i int) string {
+	rid := stringValue(r, "id")
+	if rid == "" {
+		rid = fmt.Sprint(i)
+	}
+	return rid
 }
 
 func boolValue(r Row, key string) bool {
@@ -259,7 +273,18 @@ func makeKPI(name string, defects []string, okDetail string, soft []string, badD
 		}
 	}
 	score := clamp(float64(100-kpiPenalty[name]*len(defects)) - math.Min(10, float64(2*len(soft))))
-	return KPI{KPI: name, Group: kpiGroup[name], Score: score, Detail: detail, Defects: defects, Soft: soft}
+	return KPI{KPI: name, Group: kpiGroup[name], Value: productValue(float64(score)), Score: score, Detail: detail, Defects: defects, Soft: soft}
+}
+
+func productValue(score float64) float64 {
+	return scorecard.Round3(scorecard.ValueFromScore(score))
+}
+
+func productValueFor(value, legacyScore float64) float64 {
+	if value != 0 || legacyScore == 0 {
+		return scorecard.Round3(value)
+	}
+	return productValue(legacyScore)
 }
 
 func KPIWellFormed(rows []Row, categories map[string]bool) KPI {
@@ -320,10 +345,7 @@ func KPIWellFormed(rows []Row, categories map[string]bool) KPI {
 func KPIClaimHonest(rows []Row, sectionTags map[string]map[string]bool) KPI {
 	var defects, soft []string
 	for i, r := range rows {
-		rid := stringValue(r, "id")
-		if rid == "" {
-			rid = fmt.Sprint(i)
-		}
+		rid := rowID(r, i)
 		mat, tag := stringValue(r, "maturity"), stringValue(r, "claims_tag")
 		if expected, ok := maturityTag[mat]; ok && claimsTags[tag] && expected != tag {
 			defects = append(defects, fmt.Sprintf("%s: maturity '%s' disagrees with claims_tag '%s' (expected %s)", rid, mat, tag, expected))
@@ -350,10 +372,7 @@ func KPIClaimHonest(rows []Row, sectionTags map[string]map[string]bool) KPI {
 func KPICommandResolves(rows []Row, cmdDirs, docVerbs map[string]bool) KPI {
 	var defects []string
 	for i, r := range rows {
-		rid := stringValue(r, "id")
-		if rid == "" {
-			rid = fmt.Sprint(i)
-		}
+		rid := rowID(r, i)
 		cmd := stringValue(r, "first_command")
 		verbField := stringValue(r, "first_command_verb")
 		if strings.TrimSpace(cmd) == "" {
@@ -381,10 +400,7 @@ func KPICommandResolves(rows []Row, cmdDirs, docVerbs map[string]bool) KPI {
 func KPIWitnessed(rows []Row, exists func(string) bool) KPI {
 	var defects []string
 	for i, r := range rows {
-		rid := stringValue(r, "id")
-		if rid == "" {
-			rid = fmt.Sprint(i)
-		}
+		rid := rowID(r, i)
 		mat := stringValue(r, "maturity")
 		if mat == "shipped" || mat == "simulated" {
 			wp := stringValue(r, "witness_path")
@@ -401,10 +417,7 @@ func KPIWitnessed(rows []Row, exists func(string) bool) KPI {
 func KPIDiscoverable(rows []Row, exists func(string) bool) KPI {
 	var defects []string
 	for i, r := range rows {
-		rid := stringValue(r, "id")
-		if rid == "" {
-			rid = fmt.Sprint(i)
-		}
+		rid := rowID(r, i)
 		if stringValue(r, "maturity") == "concept" {
 			continue
 		}
@@ -445,10 +458,7 @@ func ExpectedVerdict(row Row) (string, string) {
 func KPIVerdictConsistency(rows []Row) KPI {
 	var defects []string
 	for i, r := range rows {
-		rid := stringValue(r, "id")
-		if rid == "" {
-			rid = fmt.Sprint(i)
-		}
+		rid := rowID(r, i)
 		exp, why := ExpectedVerdict(r)
 		if stringValue(r, "verdict") != exp {
 			defects = append(defects, fmt.Sprintf("%s: claims '%s' but evidence implies '%s' - %s", rid, stringValue(r, "verdict"), exp, why))
@@ -566,8 +576,10 @@ func ManagedContextSLOReport(slos []ManagedContextSLO) map[string]any {
 	if total > 0 {
 		score = math.Round((100.0*float64(total-debt)/float64(total))*10) / 10
 	}
+	value := productValue(score)
 	return map[string]any{
-		"schema": "fak-managed-context-slos/1", "debt": debt, "score": score,
+		"schema": "fak-managed-context-slos/1", "debt": debt,
+		"value": value, "value_unit": "quality_ratio", "score": score, "legacy_score": score, "legacy_score_scale": 100,
 		"passed": passed, "total": total, "rows": rows,
 	}
 }
@@ -593,8 +605,9 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	rows := data.Rows
 	kpis := RunKPIs(rows, categories, tree)
 	byName := map[string]KPI{}
-	for _, k := range kpis {
-		byName[k.KPI] = k
+	for i := range kpis {
+		kpis[i].Value = productValueFor(kpis[i].Value, float64(kpis[i].Score))
+		byName[kpis[i].KPI] = kpis[i]
 	}
 	honestyScore := 0.0
 	for name, w := range kpiWeight {
@@ -618,6 +631,7 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	if len(managedContext) > 0 {
 		score = math.Round((0.50*honestyScore+0.30*covPct+0.20*floatValue(managedContext["score"]))*10) / 10
 	}
+	value := productValue(score)
 	grade := GradeLetter(score)
 	debtByGroup := map[string]any{}
 	for _, g := range groups {
@@ -630,7 +644,7 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	breakdown := make([]map[string]any, 0, len(kpis))
 	for _, k := range kpis {
 		breakdown = append(breakdown, map[string]any{
-			"kpi": k.KPI, "group": k.Group, "score": k.Score, "debt": len(k.Defects), "detail": k.Detail,
+			"kpi": k.KPI, "group": k.Group, "value": k.Value, "score": k.Score, "debt": len(k.Defects), "detail": k.Detail,
 		})
 	}
 	sort.SliceStable(breakdown, func(i, j int) bool {
@@ -644,19 +658,22 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	rowDebt := PerRowDebt(rows, kpis)
 	crit := CriticalBacklog(rows, rowDebt)
 	nDurable := pos["durable-product"]
-	kpiScores, debtByKPI := map[string]any{}, map[string]any{}
+	kpiScores, kpiValues, debtByKPI := map[string]any{}, map[string]any{}, map[string]any{}
 	for _, k := range kpis {
 		kpiScores[k.KPI] = k.Score
+		kpiValues[k.KPI] = k.Value
 		debtByKPI[k.KPI] = len(k.Defects)
 	}
 	corpus := map[string]any{
-		"score": score, "grade": grade, "honesty_score": honestyScore,
-		"product_debt": productDebt, "honesty_defects": honestyDefects,
+		"value": value, "value_unit": "quality_ratio", "score": score, "legacy_score": score, "legacy_score_scale": 100,
+		"grade": grade, "honesty_value": productValue(honestyScore), "honesty_score": honestyScore,
+		"coverage_value": productValue(covPct),
+		"product_debt":   productDebt, "honesty_defects": honestyDefects,
 		"coverage_debt": coverageDebt, "managed_context_debt": managedContextDebt,
 		"managed_context": managedContext, "coverage": cov, "soft_signals": softSignals,
 		"rows": len(rows), "durable_products": nDurable, "as_of": stringMapValue(data.Meta, "as_of"),
 		"fak_version": stringMapValue(data.Meta, "fak_version"), "standing": anyIntMap(pos),
-		"debt_by_group": debtByGroup, "kpi_scores": kpiScores, "debt_by_kpi": debtByKPI,
+		"debt_by_group": debtByGroup, "kpi_scores": kpiScores, "kpi_values": kpiValues, "debt_by_kpi": debtByKPI,
 		"breakdown": breakdown, "leaderboard": Leaderboard(rows), "critical": crit,
 	}
 	standingLine := fmt.Sprintf("%d durable - %d usable-today - %d real-not-easy - %d honest-stub - %d concept",
@@ -667,21 +684,21 @@ func BuildPayload(workspace string, data *Data, tree Tree, readErr string) Paylo
 	switch {
 	case productDebt == 0:
 		ok, verdict, finding = true, "OK", "product_map_complete_and_honest"
-		reason = fmt.Sprintf("product map complete + honest: score %.1f/100 (grade %s); %s; zero product-debt across %d KPIs over %d concepts (%s; %d advisory)", score, grade, covLine, len(kpis), len(rows), standingLine, softSignals)
+		reason = fmt.Sprintf("product map complete + honest: value %.3f (grade %s, legacy score %.1f); %s; zero product-debt across %d KPIs over %d concepts (%s; %d advisory)", value, grade, score, covLine, len(kpis), len(rows), standingLine, softSignals)
 		next = "hold the line; when CLAIMS.md adds a concept section, coverage drops - position it; when a stub ships, raise its verdict; re-run to keep debt at 0"
 	case honestyDefects == 0 && managedContextDebt > 0:
 		finding = "managed_context_debt"
-		reason = fmt.Sprintf("%d managed-context SLO fixture(s) failing + %d coverage gap(s) = product-debt %d; %s; score %.1f/100 (grade %s); standing %s",
-			managedContextDebt, coverageDebt, productDebt, covLine, score, grade, standingLine)
+		reason = fmt.Sprintf("%d managed-context SLO fixture(s) failing + %d coverage gap(s) = product-debt %d; %s; value %.3f (grade %s, legacy score %.1f); standing %s",
+			managedContextDebt, coverageDebt, productDebt, covLine, value, grade, score, standingLine)
 		next = "retire managed-context SLO debt: make each hard fixture pass with a witness for visibility, resets, budgets, queries, cache preservation, and memory-promotion safety; re-run"
 	case honestyDefects == 0 && coverageDebt > 0:
 		finding = "coverage_debt"
-		reason = fmt.Sprintf("%d concept section(s) not yet positioned; %s; score %.1f/100 (grade %s); rows are honest (0 honesty-debt); standing %s", coverageDebt, covLine, score, grade, standingLine)
+		reason = fmt.Sprintf("%d concept section(s) not yet positioned; %s; value %.3f (grade %s, legacy score %.1f); rows are honest (0 honesty-debt); standing %s", coverageDebt, covLine, value, grade, score, standingLine)
 		next = "close coverage (see --gaps): add an honest product row for each uncovered CLAIMS.md concept section (a real-not-easy / honest-stub row is valid); re-run"
 	default:
 		worst := breakdown[0]
-		reason = fmt.Sprintf("%d honesty/quality defect(s) + %d coverage gap(s) + %d managed-context SLO defect(s) = product-debt %d; score %.1f/100 (grade %s); heaviest KPI: %s (%d); %s; standing %s",
-			honestyDefects, coverageDebt, managedContextDebt, productDebt, score, grade, worst["kpi"], intValue(worst["debt"]), covLine, standingLine)
+		reason = fmt.Sprintf("%d honesty/quality defect(s) + %d coverage gap(s) + %d managed-context SLO defect(s) = product-debt %d; value %.3f (grade %s, legacy score %.1f); heaviest KPI: %s (%d); %s; standing %s",
+			honestyDefects, coverageDebt, managedContextDebt, productDebt, value, grade, score, worst["kpi"], intValue(worst["debt"]), covLine, standingLine)
 		next = "retire product-debt worst-first (--critical + per-KPI defects): fix overclaims, command targets, witnesses, entry docs, then close coverage (--gaps); re-run to prove the drop"
 	}
 	return Payload{
