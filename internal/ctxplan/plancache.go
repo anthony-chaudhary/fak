@@ -41,6 +41,94 @@ type PlanFingerprint struct {
 	Budget   int    `json:"budget"`   // the token cap (a different budget is a different plan)
 }
 
+// PlanRenderPolicy is the schema/version of the managed-context render the plan id binds
+// to. If the rendering contract changes, identical planner selections must no longer share
+// a plan_id, because the bytes a downstream caller adopts may differ.
+const PlanRenderPolicy = "ctxplan.render.v1"
+
+// StampPlanID returns p with a deterministic plan id bound to the forecast, budget,
+// selected resident spans, elided recovery handles, and render policy. It does not read
+// from the store; callers pass the forecast fingerprint they already planned against.
+func StampPlanID(p Plan, forecastID string) Plan {
+	p.ID = PlanID(p, forecastID)
+	return p
+}
+
+// PlanID is the stable identity of the managed-context render plan. The existing
+// ForecastFingerprint captures the query side; this digest captures the renderable output
+// side so a caller can tell when two rendered contexts are materially the same.
+func PlanID(p Plan, forecastID string) string {
+	h := sha256.New()
+	field := func(s string) {
+		_, _ = h.Write([]byte(strconv.Itoa(len(s))))
+		_, _ = h.Write([]byte{':'})
+		_, _ = h.Write([]byte(s))
+		_, _ = h.Write([]byte{0})
+	}
+	intField := func(n int) { field(strconv.Itoa(n)) }
+	floatField := func(x float64) { field(strconv.FormatFloat(x, 'g', -1, 64)) }
+	boolField := func(b bool) {
+		if b {
+			field("1")
+		} else {
+			field("0")
+		}
+	}
+
+	field("ctxplan.plan-id.v1")
+	field("render_policy")
+	field(PlanRenderPolicy)
+	field("forecast")
+	field(forecastID)
+	field("budget")
+	intField(p.Budget)
+	field("objective")
+	field(p.Objective)
+	field("horizon")
+	intField(p.Horizon)
+	field("candidates")
+	intField(p.Candidates)
+	field("cost_used")
+	intField(p.CostUsed)
+	field("pinned_tokens")
+	intField(p.PinnedTokens)
+	field("benefit")
+	floatField(p.Benefit)
+	field("over_budget")
+	boolField(p.OverBudget)
+
+	field("selected")
+	intField(len(p.Selected))
+	for _, s := range p.Selected {
+		field(s.ID)
+		intField(s.Step)
+		field(s.Role)
+		field(s.Descriptor)
+		field(s.Area)
+		field(s.Precision)
+		intField(s.Cost)
+		floatField(s.Benefit)
+		floatField(s.Density)
+		boolField(s.Pinned)
+	}
+
+	field("elided")
+	intField(len(p.Elided))
+	for _, e := range p.Elided {
+		field(e.ID)
+		intField(e.Step)
+		field(e.Role)
+		field(e.Area)
+		field(e.Precision)
+		field(e.Digest)
+		intField(e.Cost)
+		floatField(e.Benefit)
+		field(e.Reason)
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // ForecastFingerprint is the deterministic identity of a forecast's PLANNING inputs.
 // It is canonical: the SAME forecast (up to intent order, pin order, and a zero-vs-
 // default weight vector) always hashes to the SAME value, and any change that would

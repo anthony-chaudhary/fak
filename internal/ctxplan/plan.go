@@ -164,6 +164,7 @@ const (
 // plan plus its EXPLAIN. Selected+Elided partition every candidate (faithful.go proves
 // it), so a Plan never destroys a span; it only decides which are resident.
 type Plan struct {
+	ID           string      `json:"plan_id,omitempty"`
 	Budget       int         `json:"budget"`
 	Objective    string      `json:"objective"`
 	Horizon      int         `json:"horizon,omitempty"`
@@ -620,6 +621,9 @@ func elisionOf(c Candidate, reason string) Elision {
 func (p Plan) Explain() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ctxplan %s: budget=%d tokens, %d candidate(s)", p.Objective, p.Budget, p.Candidates)
+	if p.ID != "" {
+		fmt.Fprintf(&b, ", plan_id=%s", p.ID)
+	}
 	if p.Horizon > 0 {
 		fmt.Fprintf(&b, ", horizon=%d turn(s)", p.Horizon)
 	}

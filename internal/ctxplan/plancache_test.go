@@ -1,6 +1,9 @@
 package ctxplan
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // turnSpans builds a small, deterministic store the planner can score against a
 // forecast: a system pin, a relevant span the forecast wants, and an irrelevant one.
@@ -55,6 +58,71 @@ func TestPlanCacheStableForecastHits(t *testing.T) {
 	}
 	if p2.Explain() != fresh.Explain() {
 		t.Fatalf("reused plan must be byte-identical to a fresh re-plan (issue #561 witness)")
+	}
+}
+
+func TestPlanIDDeterministicAndMovesOnMaterialChange(t *testing.T) {
+	spans := turnSpans()
+	spans[1].Digest = "sha256:refund-v1"
+	spans[2].Digest = "sha256:weather-v1"
+	f := refundForecast()
+	budget := Budget{Tokens: 64}
+
+	a := PlanCells(spans, f, budget, nil)
+	b := PlanCells(append([]Span(nil), spans...), f, budget, nil)
+	if a.ID == "" {
+		t.Fatal("managed-context plans must carry a deterministic plan_id")
+	}
+	if a.ID != b.ID {
+		t.Fatalf("identical managed-context inputs must produce the same plan_id: %q != %q", a.ID, b.ID)
+	}
+	if want := PlanID(a, ForecastFingerprint(f)); a.ID != want {
+		t.Fatalf("plan_id must be the canonical PlanID digest: got %q want %q", a.ID, want)
+	}
+	if !strings.Contains(a.Explain(), "plan_id="+a.ID) {
+		t.Fatalf("Explain must emit the plan_id, got:\n%s", a.Explain())
+	}
+
+	budgetChanged := PlanCells(spans, f, Budget{Tokens: budget.Tokens - 1}, nil)
+	if budgetChanged.ID == a.ID {
+		t.Fatalf("a budget change must move the plan_id")
+	}
+
+	forecastChanged := f
+	forecastChanged.Intents = []string{"weather forecast"}
+	if got := PlanCells(spans, forecastChanged, budget, nil); got.ID == a.ID {
+		t.Fatalf("a forecast change must move the plan_id")
+	}
+
+	selectedChanged := append([]Span(nil), spans...)
+	selectedChanged[1].Descriptor = "the refund fee dispute escalated"
+	if got := PlanCells(selectedChanged, f, budget, nil); got.ID == a.ID {
+		t.Fatalf("a selected span material change must move the plan_id")
+	}
+}
+
+func TestPlanIDBindsElidedHandlesAndQueryView(t *testing.T) {
+	spans := turnSpans()
+	spans[1].Digest = "sha256:refund-v1"
+	spans[2].Digest = "sha256:weather-v1"
+	f := refundForecast()
+	budget := Budget{Tokens: 10} // fits the pinned system span, leaving the others recoverable.
+
+	a := PlanCells(spans, f, budget, nil)
+	if len(a.Elided) == 0 {
+		t.Fatal("test setup must leave at least one span elided")
+	}
+
+	handleChanged := append([]Span(nil), spans...)
+	handleChanged[1].Digest = "sha256:refund-v2"
+	if got := PlanCells(handleChanged, f, budget, nil); got.ID == a.ID {
+		t.Fatalf("an elided recovery-handle change must move the plan_id")
+	}
+
+	query := PlanQuery{Intents: f.Intents, Budget: &budget, Horizon: f.Horizon, Pins: f.Pins}
+	view := query.Plan(spans, nil)
+	if view.PlanID == "" || view.PlanID != view.Plan.ID {
+		t.Fatalf("PlanView must emit the same plan_id as the embedded plan: view=%q plan=%q", view.PlanID, view.Plan.ID)
 	}
 }
 

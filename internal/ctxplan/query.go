@@ -85,6 +85,9 @@ type PlanQuery struct {
 // view's selected/elided sets are bit-for-bit the plan's, and faithful.go's audit applies
 // unchanged.
 type PlanView struct {
+	// PlanID is the deterministic identity of the rendered context plan. Identical planning
+	// inputs and selected/elided outputs produce the same id; a material render change moves it.
+	PlanID string `json:"plan_id,omitempty"`
 	// Selected is the resident working set in RENDER order (step ascending) — the history the
 	// model would set up and continue from. Identical to Plan.Selected.
 	Selected []Selection `json:"selected"`
@@ -178,6 +181,7 @@ func (q PlanQuery) resolveBudget(f Forecast) Budget {
 // projection (no re-planning), so a view's selected/elided/cost are the plan's exactly.
 func viewOf(p Plan) PlanView {
 	return PlanView{
+		PlanID:   p.ID,
 		Selected: p.Selected,
 		Elided:   p.Elided,
 		CostUsed: p.CostUsed,

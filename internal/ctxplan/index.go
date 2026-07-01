@@ -321,7 +321,7 @@ func (ix *Index) PlanCells(f Forecast, b Budget, cost CostModel, opts ProbeOptio
 	cands := Candidates(spans, f, cost)
 	p := Optimize(cands, b, pinSet(f.Pins), ObjGreedy)
 	p.Horizon = f.Horizon
-	return p
+	return StampPlanID(p, ForecastFingerprint(f))
 }
 
 // IndexBoundedPlannerCompute is the cumulative re-planning WORK through turn n when the

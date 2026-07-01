@@ -64,7 +64,7 @@ func PlanCells(spans []Span, f Forecast, budget Budget, cost CostModel) Plan {
 	cands := Candidates(spans, f, cost)
 	p := Optimize(cands, budget, pinSet(f.Pins), ObjGreedy)
 	p.Horizon = f.Horizon
-	return p
+	return StampPlanID(p, ForecastFingerprint(f))
 }
 
 // pinSet turns the forecast's pin id list into a lookup set.

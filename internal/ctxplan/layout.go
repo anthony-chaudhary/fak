@@ -332,7 +332,7 @@ func (ix *Index) PlanLayout(f Forecast, b Budget, cost CostModel, layout Layout)
 	p.Elided = append(p.Elided, pointer...)
 	p.Horizon = f.Horizon
 	finalize(&p, p.CostUsed)
-	return p
+	return StampPlanID(p, ForecastFingerprint(f))
 }
 
 func pointerElision(c Candidate) Elision {
