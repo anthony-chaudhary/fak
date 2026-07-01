@@ -133,12 +133,13 @@ func TestAffectedBlameAttribution(t *testing.T) {
 		return 1, nil
 	}
 	var baselineAsked []string
-	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, error) {
+	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
 		if ref != "HEAD" {
 			t.Errorf("baseline ref = %q, want HEAD (no --base given)", ref)
 		}
 		baselineAsked = append([]string(nil), pkgs...)
-		return map[string]bool{"m/a": true}, nil // m/a was red before any working-tree change
+		// m/a was red before any working-tree change; both produced a baseline verdict.
+		return map[string]bool{"m/a": true}, map[string]bool{"m/a": true, "m/b": true}, nil
 	}
 
 	// Every red is a peer's: m/a is red at clean HEAD (peer-preexisting), m/b is outside
@@ -185,10 +186,22 @@ func TestAffectedBlameAttribution(t *testing.T) {
 		t.Fatalf("mine attribution missing from stderr:\n%s", s)
 	}
 
+	// A --mine file that is not among the changed files (a typo) must void the closure
+	// rung entirely — otherwise a mistyped path would shrink the closure and exonerate
+	// every red as peer-wip. m/b stays mine (baseline-green) -> exit 1, with the warn.
+	out.Reset()
+	errb.Reset()
+	if code := runAffected(&out, &errb, []string{"--blame", "--mine", "typo/nope.go"}); code != 1 {
+		t.Fatalf("typo'd --mine run exit = %d, want 1 (closure rung voided)\nstderr=%s", code, errb.String())
+	}
+	if s := errb.String(); !strings.Contains(s, "not among the changed files") || !strings.Contains(s, "m/b — mine") {
+		t.Fatalf("typo'd --mine narration missing from stderr:\n%s", s)
+	}
+
 	// Baseline unavailable: nothing is exonerated by that rung (fail-closed), but the
 	// closure rung still works; with a red inside the closure the exit stays 1.
-	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, error) {
-		return nil, fmt.Errorf("git worktree unavailable")
+	affectedBaselineRed = func(root, ref string, pkgs []string) (map[string]bool, map[string]bool, error) {
+		return nil, nil, fmt.Errorf("git worktree unavailable")
 	}
 	out.Reset()
 	errb.Reset()
@@ -197,6 +210,19 @@ func TestAffectedBlameAttribution(t *testing.T) {
 	}
 	if s := errb.String(); !strings.Contains(s, "fail-closed") {
 		t.Fatalf("fail-closed narration missing from stderr:\n%s", s)
+	}
+}
+
+// TestBaselineHarnessFailure pins the exoneration guard: output carrying a
+// binary-could-not-run marker names the marker, clean test output does not match.
+func TestBaselineHarnessFailure(t *testing.T) {
+	blocked := "--- FAIL: TestX\nfork/exec C:\\tmp\\pkg.test.exe: Access is denied.\nFAIL\tm/a\t0.00s\n"
+	if m := baselineHarnessFailure(blocked); m == "" {
+		t.Fatalf("blocked-binary output not detected as a harness failure")
+	}
+	clean := "--- FAIL: TestX (0.00s)\n    x_test.go:10: want 1, got 2\nFAIL\tm/a\t0.42s\nok  \tm/b\t0.01s\n"
+	if m := baselineHarnessFailure(clean); m != "" {
+		t.Fatalf("clean red output misread as harness failure (marker %q)", m)
 	}
 }
 

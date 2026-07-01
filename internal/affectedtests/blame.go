@@ -55,11 +55,15 @@ type Blame struct {
 // Attribute classifies each failing package. mineClosure is the affected-set closure of
 // the caller's declared --mine files (nil = nothing declared, so every red is
 // closure-attributable to the caller); baselineRed is the set of packages red at a
-// clean checkout of baselineRef (nil = the baseline rerun was unavailable — no
-// exoneration from that rung, fail-closed). Precedence: a baseline red wins
-// (peer-preexisting), then the closure rung (peer-wip), else mine. The result is
-// sorted by package and deduplicated. Pure and deterministic.
-func Attribute(failing []string, mineClosure map[string]bool, baselineRed map[string]bool, baselineRef string) []Blame {
+// clean checkout of baselineRef and baselineSeen the set the baseline actually PRODUCED
+// A VERDICT for (red or ok) — nil on both means the baseline rerun was unavailable, so
+// no exoneration from that rung, fail-closed. Precedence: a baseline red wins
+// (peer-preexisting), then the closure rung (peer-wip), else mine; the mine evidence
+// distinguishes "green at the baseline" from "the baseline never tested it" (a package
+// new in the diff does not exist at the base ref) so the sentence never claims evidence
+// that was not gathered. The result is sorted by package and deduplicated. Pure and
+// deterministic.
+func Attribute(failing []string, mineClosure, baselineRed, baselineSeen map[string]bool, baselineRef string) []Blame {
 	seen := make(map[string]bool, len(failing))
 	pkgs := make([]string, 0, len(failing))
 	for _, p := range failing {
@@ -83,20 +87,26 @@ func Attribute(failing []string, mineClosure map[string]bool, baselineRed map[st
 			})
 		case mineClosure != nil && !mineClosure[p]:
 			out = append(out, Blame{
-				Package: p,
-				Class:   BlamePeerWIP,
+				Package:  p,
+				Class:    BlamePeerWIP,
 				Evidence: "outside the affected-set closure of your declared --mine files — the red comes from other working-tree changes (a peer's WIP), not your diff",
 			})
-		case baselineRed != nil:
+		case baselineSeen != nil && baselineSeen[p]:
 			out = append(out, Blame{
-				Package: p,
-				Class:   BlameMine,
+				Package:  p,
+				Class:    BlameMine,
 				Evidence: fmt.Sprintf("green at a clean checkout of %s and reachable from your declared change — the red arrives with your diff", baselineRef),
+			})
+		case baselineSeen != nil:
+			out = append(out, Blame{
+				Package:  p,
+				Class:    BlameMine,
+				Evidence: fmt.Sprintf("not testable at a clean checkout of %s (the package is likely new in your diff) — attributed mine", baselineRef),
 			})
 		default:
 			out = append(out, Blame{
-				Package: p,
-				Class:   BlameMine,
+				Package:  p,
+				Class:    BlameMine,
 				Evidence: "no baseline evidence available and reachable from your declared change — fail-closed to mine (exoneration needs positive evidence)",
 			})
 		}
@@ -110,20 +120,35 @@ func Attribute(failing []string, mineClosure map[string]bool, baselineRed map[st
 //
 //	FAIL<tab>example.com/pkg<tab>0.42s
 //	FAIL<tab>example.com/pkg [build failed]
-//	ok  <tab>example.com/pkg<tab>0.01s
 //
-// — and ignores test-level noise ("--- FAIL: TestX"), so it works on the exact stream
-// the shell already tees to the operator. An output with no such lines yields an empty
-// slice: the caller must treat "red run, nothing parsed" as unattributable and keep the
-// red exit, never guess. Pure and deterministic.
+// — matched by the "FAIL\t" COLUMN-ZERO prefix go itself prints, so test-level noise
+// ("--- FAIL: TestX"), the bare trailing "FAIL" summary line, and INDENTED test-log
+// lines that happen to start with FAIL are all excluded. (A test that itself prints a
+// forged "FAIL\tpkg" at column zero to stdout can still spoof a row — un-forgeable
+// attribution would need `go test -json`; named residual, not covered.) An output with
+// no such lines yields an empty slice: the caller must treat "red run, nothing parsed"
+// as unattributable and keep the red exit, never guess. Pure and deterministic.
 func FailedPackages(output string) []string {
+	return packageVerdicts(output, "FAIL\t")
+}
+
+// PassedPackages is FailedPackages' dual for the "ok  \texample.com/pkg\t0.01s" (or
+// "(cached)") verdict lines. The union of the two is the set of packages a run actually
+// PRODUCED A VERDICT for — the baseline-rerun coverage evidence Attribute needs to
+// phrase a mine row honestly.
+func PassedPackages(output string) []string {
+	return packageVerdicts(output, "ok  \t")
+}
+
+// packageVerdicts collects field 2 of every line carrying go test's column-zero
+// package-verdict prefix, sorted and deduplicated.
+func packageVerdicts(output, prefix string) []string {
 	set := map[string]bool{}
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		// The package verdict line starts the line with the literal token FAIL; the
-		// test-level "--- FAIL:" lines start with "---" and are skipped by this exact
-		// match.
-		if len(fields) >= 2 && fields[0] == "FAIL" {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		if fields := strings.Fields(line); len(fields) >= 2 {
 			set[fields[1]] = true
 		}
 	}

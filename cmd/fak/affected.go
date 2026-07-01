@@ -219,7 +219,7 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 		baselineRef = "HEAD"
 	}
 	if *blame && verdict == "TEST_FAILED" {
-		blames = attributeAffectedFailures(stderr, root, baselineRef, teed.String(), mineFiles, fileToPkg, edges)
+		blames = attributeAffectedFailures(stderr, root, baselineRef, teed.String(), mineFiles, changedFiles, fileToPkg, edges)
 		mineCount := 0
 		for _, b := range blames {
 			if b.Class == affectedtests.BlameMine {
@@ -234,6 +234,12 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 			reason = fmt.Sprintf("all %d failing package(s) attributed to peers (peer-wip / peer-preexisting); green for your diff — make ci on the merged tree stays the oracle", len(blames))
 			fmt.Fprintf(stderr, "fak affected: %s\n", reason)
 			exitCode = 0
+			// Exoneration clears the red, not the clock: a budget breach the TEST_FAILED
+			// verdict pre-empted still fails the gate.
+			if *budget > 0 && elapsed > *budget {
+				verdict = "GATE_LATENCY_REGRESSION"
+				reason = fmt.Sprintf("elapsed %s exceeded budget %s (all reds peer-attributed)", roundDuration(elapsed), *budget)
+			}
 		} else if len(blames) > 0 {
 			reason = fmt.Sprintf("go test exited %d; %d/%d failing package(s) attributed mine", code, mineCount, len(blames))
 		}
@@ -268,9 +274,11 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 // consumes (#2138): the per-package FAIL lines parsed from the teed test output, the
 // affected-set closure of the caller's declared --mine files, and the clean-baseline
 // rerun via the affectedBaselineRed seam. Every degradation fails CLOSED and is
-// narrated: unparseable output attributes nothing (the red exit stands), and an
-// unavailable baseline exonerates nothing.
-func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput string, mineFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
+// narrated: unparseable output attributes nothing (the red exit stands), an unavailable
+// baseline exonerates nothing, and a --mine file that is not among the changed files
+// (a typo'd path would otherwise shrink the closure and exonerate everything as
+// peer-wip) voids the closure rung entirely.
+func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput string, mineFiles, changedFiles []string, fileToPkg map[string]string, edges map[string][]string) []affectedtests.Blame {
 	failing := affectedtests.FailedPackages(testOutput)
 	if len(failing) == 0 {
 		fmt.Fprintln(stderr, "fak affected: --blame could not parse per-package FAIL lines from the test output; keeping the red exit unattributed")
@@ -278,21 +286,32 @@ func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput s
 	}
 	var mineClosure map[string]bool
 	if len(mineFiles) > 0 {
+		changed := make(map[string]bool, len(changedFiles))
+		for _, f := range changedFiles {
+			changed[f] = true
+		}
 		mine := make([]string, len(mineFiles))
+		valid := true
 		for i, f := range mineFiles {
 			mine[i] = repoSlash(f)
+			if !changed[mine[i]] {
+				fmt.Fprintf(stderr, "fak affected: --mine %s is not among the changed files; the closure rung is voided (fail-closed — a mistyped declaration must not exonerate)\n", mine[i])
+				valid = false
+			}
 		}
-		mineClosure = map[string]bool{}
-		for _, p := range affectedtests.Select(edges, affectedtests.ChangedPackages(fileToPkg, mine)) {
-			mineClosure[p] = true
+		if valid {
+			mineClosure = map[string]bool{}
+			for _, p := range affectedtests.Select(edges, affectedtests.ChangedPackages(fileToPkg, mine)) {
+				mineClosure[p] = true
+			}
 		}
 	}
-	baselineRed, err := affectedBaselineRed(root, baselineRef, failing)
+	baselineRed, baselineSeen, err := affectedBaselineRed(root, baselineRef, failing)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak affected: baseline rerun at %s unavailable (%v); no baseline exoneration — fail-closed\n", baselineRef, err)
-		baselineRed = nil
+		baselineRed, baselineSeen = nil, nil
 	}
-	return affectedtests.Attribute(failing, mineClosure, baselineRed, baselineRef)
+	return affectedtests.Attribute(failing, mineClosure, baselineRed, baselineSeen, baselineRef)
 }
 
 // runAffectedBaselineRed answers "was this package ALREADY red before any working-tree
@@ -300,21 +319,33 @@ func attributeAffectedFailures(stderr io.Writer, root, baselineRef, testOutput s
 // (no branch is created, nothing is committed, the worktree is removed before
 // returning — the trunk stays untouched). The rerun invokes `go test` directly rather
 // than through the test.ps1/WSL routing: that routing mirrors the MAIN working tree, so
-// it would re-test the very tree the baseline must exclude. If the direct run cannot
-// execute here, the error propagates and the caller exonerates nothing (fail-closed).
-// A non-zero test exit is the signal being measured, not an error.
-func runAffectedBaselineRed(root, ref string, pkgs []string) (map[string]bool, error) {
+// it would re-test the very tree the baseline must exclude.
+//
+// It returns (red, seen): the packages whose baseline verdict was FAIL, and every
+// package that produced a verdict at all (FAIL or ok) — the coverage evidence that
+// keeps a mine row's sentence honest for a package that does not exist at the base
+// ref. FAIL-CLOSED on every degraded outcome: a go binary that cannot run, output
+// carrying a harness-execution-failure marker (a blocked/unexecutable test binary
+// prints FAIL lines indistinguishable from real reds — they must not exonerate), or a
+// run that produced NO verdict at all (a module-load abort) each return an error, and
+// the caller exonerates nothing. A plain non-zero test exit is the signal being
+// measured, not an error.
+func runAffectedBaselineRed(root, ref string, pkgs []string) (red, seen map[string]bool, err error) {
 	tmp, err := os.MkdirTemp("", "fak-affected-baseline-")
 	if err != nil {
-		return nil, fmt.Errorf("temp dir: %w", err)
+		return nil, nil, fmt.Errorf("temp dir: %w", err)
 	}
 	wt := filepath.Join(tmp, "wt")
 	if _, err := gitOut(root, "worktree", "add", "--detach", wt, ref); err != nil {
 		os.RemoveAll(tmp)
-		return nil, fmt.Errorf("worktree add %s: %w", ref, err)
+		return nil, nil, fmt.Errorf("worktree add %s: %w", ref, err)
 	}
 	defer func() {
-		_, _ = gitOut(root, "worktree", "remove", "--force", wt)
+		if _, rerr := gitOut(root, "worktree", "remove", "--force", wt); rerr != nil {
+			// A locked test binary can hold the dir on Windows; prune the registration
+			// so no stale .git/worktrees entry lingers, then best-effort delete.
+			_, _ = gitOut(root, "worktree", "prune")
+		}
 		os.RemoveAll(tmp)
 	}()
 
@@ -326,14 +357,48 @@ func runAffectedBaselineRed(root, ref string, pkgs []string) (map[string]bool, e
 	cmd.Stderr = &out
 	if err := cmd.Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); !ok {
-			return nil, fmt.Errorf("baseline go test: %w", err)
+			return nil, nil, fmt.Errorf("baseline go test: %w", err)
 		}
 	}
-	red := map[string]bool{}
+	if marker := baselineHarnessFailure(out.String()); marker != "" {
+		return nil, nil, fmt.Errorf("baseline go test could not execute test binaries (%q in output) — its FAIL lines are harness failures, not evidence", marker)
+	}
+	red = map[string]bool{}
+	seen = map[string]bool{}
 	for _, p := range affectedtests.FailedPackages(out.String()) {
 		red[p] = true
+		seen[p] = true
 	}
-	return red, nil
+	for _, p := range affectedtests.PassedPackages(out.String()) {
+		seen[p] = true
+	}
+	if len(seen) == 0 {
+		return nil, nil, fmt.Errorf("baseline go test produced no package verdicts (module-load failure?)")
+	}
+	return red, seen, nil
+}
+
+// baselineHarnessFailure scans baseline go-test output for the markers of a test BINARY
+// that could not run at all (OS exec policy, wrong arch, missing loader). go test still
+// prints a package-level FAIL for these, so without this guard a broken harness would
+// masquerade as "everything was already red" and wrongly exonerate. Returns the matched
+// marker, or "" when none is present.
+func baselineHarnessFailure(output string) string {
+	low := strings.ToLower(output)
+	for _, marker := range []string{
+		"could not execute",
+		"fork/exec",
+		"exec format error",
+		"permission denied",
+		"access is denied",
+		"blocked by group policy",
+		"operation not permitted",
+	} {
+		if strings.Contains(low, marker) {
+			return marker
+		}
+	}
+	return ""
 }
 
 func runAffectedGoTest(root string, args []string, stdout, stderr io.Writer) (int, error) {
