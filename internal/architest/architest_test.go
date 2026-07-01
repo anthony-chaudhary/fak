@@ -82,6 +82,7 @@ var tier = map[string]int{
 	"mergepreview":         1,                // read-only shared-trunk merge preview over git merge-tree; stdlib-only, off the hot path.
 	"taskdecision":         1,                // task-scoped append-only decision log loaded into reset carryover; stdlib-only, off the hot path.
 	"taskidentity":         1,                // canonical task directive/signature derivation for session transcript heads; stdlib-only, off the hot path.
+	"sweepconfig":          1,                // agent sweep profile load/save/list helpers over JSON/YAML-lite config; stdlib-only, off the hot path.
 	"whatschanged":         1,                // read-only peer code-diff readout over git log/diff-tree; stdlib-only, off the hot path.
 	"livecodebench":        1,                // pure LiveCodeBench fixture/report smoke; no network/model, off the hot path.
 	"readmevisualaudit":    1,                // README visual-audit fold over git ls-files + text parsing; imports strmatch(1)+windowgate(1), off the hot path.
