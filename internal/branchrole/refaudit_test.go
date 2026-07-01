@@ -28,6 +28,33 @@ func TestClassifyHardcodedRef(t *testing.T) {
 	}
 }
 
+func TestScanHardcodedRefFileHandlesLongLines(t *testing.T) {
+	dir := t.TempDir()
+	// A single data line far larger than bufio.Scanner's 64 KiB token cap, with a
+	// hard-coded ref embedded mid-line. The pre-fix scanner aborted this file with
+	// "bufio.Scanner: token too long", which reds the whole audit gate on any tree
+	// carrying a generated .json/.jsonl/.txt with a long line.
+	huge := strings.Repeat("x", 70*1024) + " origin/main " + strings.Repeat("y", 70*1024)
+	path := filepath.Join(dir, "big.json")
+	content := "first line\n" + huge + "\n" + "git switch master\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := scanHardcodedRefFile(path, "experiments/big.json")
+	if err != nil {
+		t.Fatalf("scanHardcodedRefFile on a >64 KiB line: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 findings (long line + trailing line), got %d: %+v", len(rows), rows)
+	}
+	if rows[0].Line != 2 {
+		t.Fatalf("embedded ref line number = %d, want 2", rows[0].Line)
+	}
+	if rows[1].Line != 3 || rows[1].Text != "git switch master" {
+		t.Fatalf("line after the long line misread: %+v", rows[1])
+	}
+}
+
 func TestHardcodedRefAuditCurrentTreeClassified(t *testing.T) {
 	root := repoRootForRefAudit(t)
 	findings, err := AuditHardcodedRefs(root)

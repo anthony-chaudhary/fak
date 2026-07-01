@@ -2,8 +2,10 @@ package branchrole
 
 import (
 	"bufio"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -54,6 +56,12 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 		}
 	}
 	var findings []RefFinding
+	// The audit walks the filesystem, so without ignore-awareness it descends
+	// gitignored scratch (.fak, scratchpad, .dispatch-runs, tools/_registry, ...)
+	// and flags refs in throwaway data as unclassified -- reddening the gate on any
+	// working tree that has scratch dirs. Prune what git ignores; best-effort, so a
+	// git failure just falls back to the static skip list below.
+	ignored := gitIgnoredPaths(root)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -64,9 +72,15 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
+			if rel != "." && ignored[rel] {
+				return filepath.SkipDir
+			}
 			if skipRefAuditDir(rel) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if ignored[rel] {
 			return nil
 		}
 		if !scanRefAuditFile(rel) {
@@ -82,6 +96,27 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 	return findings, err
 }
 
+// gitIgnoredPaths returns the set of repo-relative paths git ignores under root,
+// collapsed to directories where git can (`ls-files --directory`). Best-effort:
+// a git failure (not a repo, git missing) yields nil so the audit still runs,
+// just without ignore-awareness. NUL-delimited so paths with odd characters are
+// exact, not git-quoted.
+func gitIgnoredPaths(root string) map[string]bool {
+	cmd := exec.Command("git", "-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		entry = strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(entry)), "/")
+		if entry != "" {
+			set[entry] = true
+		}
+	}
+	return set
+}
+
 func scanHardcodedRefFile(path, rel string) ([]RefFinding, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -89,22 +124,33 @@ func scanHardcodedRefFile(path, rel string) ([]RefFinding, error) {
 	}
 	defer f.Close()
 	var out []RefFinding
-	scanner := bufio.NewScanner(f)
+	// bufio.Scanner caps a token at 64 KiB and fails "token too long" on any
+	// longer line; the audit walks generated data files (.json/.jsonl/.txt) that
+	// can carry a single multi-KB line, so read with an unbounded bufio.Reader
+	// instead and keep the newline-stripping / 1-based line-number semantics.
+	reader := bufio.NewReader(f)
 	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		text := scanner.Text()
-		if !hardcodedRefLine(text) {
-			continue
+	for {
+		line, readErr := reader.ReadString('\n')
+		if len(line) > 0 {
+			lineNo++
+			text := strings.TrimRight(line, "\r\n")
+			if hardcodedRefLine(text) {
+				out = append(out, RefFinding{
+					Path:  rel,
+					Line:  lineNo,
+					Class: ClassifyHardcodedRef(rel, text),
+					Text:  strings.TrimSpace(text),
+				})
+			}
 		}
-		out = append(out, RefFinding{
-			Path:  rel,
-			Line:  lineNo,
-			Class: ClassifyHardcodedRef(rel, text),
-			Text:  strings.TrimSpace(text),
-		})
+		if readErr != nil {
+			if readErr == io.EOF {
+				return out, nil
+			}
+			return out, readErr
+		}
 	}
-	return out, scanner.Err()
 }
 
 func hardcodedRefLine(line string) bool {
