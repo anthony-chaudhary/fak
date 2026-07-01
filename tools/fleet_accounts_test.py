@@ -1127,14 +1127,16 @@ class ProbeLedgerConsultTest(unittest.TestCase):
 
 def _seat_row(tag: str, *, available: bool = True, block_kind: str | None = None,
               block_reason: str = "", throttled: bool = False,
-              reset: str | None = None, weekly: str | None = None) -> dict:
+              reset: str | None = None, weekly: str | None = None,
+              throttled_since: str | None = None) -> dict:
     """A minimal routable-worker row shaped like an ``annotate_accounts()`` output --
-    just the fields ``seat_pool``/``_seat_hold_reason`` read."""
+    just the fields ``seat_pool``/``_seat_hold_reason``/``_seat_cooldown`` read."""
     return {
         "kind": "worker", "product": "claude", "account": f".claude-{tag}", "tag": tag,
         "model_tier": 1, "available": available, "blocked": not available,
         "block_kind": block_kind, "block_reason": block_reason,
         "throttled": throttled, "reset": reset, "weekly": weekly,
+        "throttled_since": throttled_since,
     }
 
 
@@ -1174,6 +1176,46 @@ class SeatInventoryTest(unittest.TestCase):
         pool = fleet_accounts.seat_pool(rows, [])
         self.assertEqual(pool["seats"][0]["dispatch_state"], "cooling")
         self.assertEqual(pool["seats"][0]["hold_reason"], "rate_limited")
+
+    def test_throttled_seat_records_cooldown_and_is_excluded_from_capacity(self) -> None:
+        """#1801 witness: a throttled seat renders a structured cooldown (start, reason,
+        next-eligible) AND is excluded from offerable capacity -- so dispatch status
+        explains the capacity loss from named fields, not a parsed string."""
+        rows = [_seat_row("cool3", available=False, block_kind="usage", throttled=True,
+                          reset="Dec 31, 11pm (America/Los_Angeles)",
+                          weekly="Jan 3, 11pm",
+                          throttled_since="2026-06-30T18:00:00Z")]
+        pool = fleet_accounts.seat_pool(rows, [])
+        seat = pool["seats"][0]
+        self.assertEqual(seat["dispatch_state"], "cooling")
+        self.assertEqual(seat["cooldown"], {
+            "reason": "usage",
+            "since": "2026-06-30T18:00:00Z",
+            "until": "Dec 31, 11pm (America/Los_Angeles)",
+            "weekly": "Jan 3, 11pm",
+        })
+        # excluded from available capacity -- the throttled seat is not offerable headroom
+        self.assertEqual(pool["free_seats"], 0)
+        self.assertTrue(pool["depleted"])
+        self.assertEqual(seat["state"], "blocked")
+        self.assertFalse(seat["available"])
+
+    def test_cooling_seat_without_recorded_start_has_since_none(self) -> None:
+        """Forward-compatible: a throttle record with no recorded start still renders a
+        structured cooldown (since=None), so the field is always present to read."""
+        rows = [_seat_row("cool4", available=False, block_kind="usage", throttled=True,
+                          reset="9pm")]
+        seat = fleet_accounts.seat_pool(rows, [])["seats"][0]
+        self.assertEqual(seat["cooldown"],
+                         {"reason": "usage", "since": None, "until": "9pm"})
+
+    def test_available_and_busy_seats_have_no_cooldown(self) -> None:
+        rows = [_seat_row("free9", available=True), _seat_row("busy9", available=True)]
+        leases = [{"worker": "w9", "tag": "busy9", "dir": ".claude-busy9"}]
+        by_tag = {s["tag"]: s for s in fleet_accounts.seat_pool(rows, leases)["seats"]}
+        self.assertIsNone(by_tag["free9"]["cooldown"])
+        self.assertEqual(by_tag["busy9"]["dispatch_state"], "busy")
+        self.assertIsNone(by_tag["busy9"]["cooldown"])
 
     def test_auth_blocked_seat_is_unavailable_auth_failed(self) -> None:
         rows = [_seat_row("auth1", available=False, block_kind="auth",

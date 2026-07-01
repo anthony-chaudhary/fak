@@ -789,6 +789,10 @@ def runtime_status(account: str, registry: dict | None = None,
             "block_reason": reason,
             "reset": reset,
             "weekly": weekly,
+            # Cooldown START, when the throttle ledger record carried one (#1801). The
+            # throttle map is read whole via _normalize_throttle, so a `since` the recorder
+            # stamped survives here; None when it did not, so this stays forward-compatible.
+            "throttled_since": thr.get("since"),
             "throttled": True,
         })
         return status
@@ -1774,6 +1778,29 @@ def _seat_hold_reason(row: dict) -> tuple[str, str]:
     return "unavailable", reason or "no_capacity"
 
 
+def _seat_cooldown(row: dict) -> dict | None:
+    """Structured cooldown for a rate-limited / usage-throttled seat, so dispatch status
+    explains throttle-related capacity loss from NAMED fields instead of re-parsing the
+    packed ``hold_reason`` string (#1801). Derived from the SAME ``runtime_status`` fields
+    ``_seat_hold_reason`` reads, so a seat is cooling here iff it is cooling there:
+    ``reason`` is the block kind (``usage``) or ``rate_limited`` when none is known,
+    ``since`` the cooldown start when the throttle ledger record stamped one
+    (``throttled_since``), ``until`` the next-eligible reset, ``weekly`` the weekly window
+    when present. Returns None when the seat is not cooling."""
+    kind = str(row.get("block_kind") or "")
+    if not (bool(row.get("throttled")) or kind == "usage"):
+        return None
+    cd = {
+        "reason": kind or "rate_limited",
+        "since": row.get("throttled_since"),
+        "until": row.get("reset"),
+    }
+    weekly = row.get("weekly")
+    if weekly:
+        cd["weekly"] = weekly
+    return cd
+
+
 def _lease_matches_seat(lease: dict, row: dict) -> bool:
     """Does a live-worker lease record (parsed from its ``.account`` sidecar) bind to
     this seat row? Match on the account DIR first (the precise key the sidecar stamps),
@@ -1846,8 +1873,13 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
         # unavailable to a second dispatch, so that takes precedence over cooling).
         if workers:
             dispatch_state, hold_reason = "busy", f"leased to {', '.join(workers)}"
+            cooldown = None
         else:
             dispatch_state, hold_reason = _seat_hold_reason(row)
+            # Structured start/reason/next-eligible for a cooling seat (#1801); None for a
+            # busy seat even if the account also reads throttled -- the live worker (not the
+            # rate limit) is the stated reason it is unavailable to a second dispatch.
+            cooldown = _seat_cooldown(row) if dispatch_state == "cooling" else None
         seat = {
             "seat": _pool_key(row),
             "tag": row.get("tag"),
@@ -1859,6 +1891,7 @@ def seat_pool(rows: list[dict], leases: list[dict] | None = None,
             "state": state,
             "dispatch_state": dispatch_state,
             "hold_reason": hold_reason,
+            "cooldown": cooldown,
             "workers": workers,
         }
         seats.append(seat)
