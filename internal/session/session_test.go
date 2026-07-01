@@ -276,7 +276,7 @@ func TestDecideTokenBudgetExhaustion(t *testing.T) {
 	}
 }
 
-func TestQueryBudgetDebitsSeparatelyFromTokenBudgets(t *testing.T) {
+func TestQueryBudgetDebitsClarificationQueriesSeparatelyFromTokenBudgets(t *testing.T) {
 	tbl := NewTable()
 	tbl.SetBudget("s", Budget{
 		TurnsLeft:                Unbounded,

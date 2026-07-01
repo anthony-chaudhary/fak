@@ -372,7 +372,7 @@ func TestQueryClarificationBrokerTurnsMissingContextIntoBoundedQuestion(t *testi
 	}
 }
 
-func TestPlanClarificationsBoundsQuestionsAndBudget(t *testing.T) {
+func TestQueryBudgetPlanClarificationsBoundsQuestionsAndBudget(t *testing.T) {
 	report := ctxplan.AssessAssumptions([]ctxplan.Assumption{
 		{Key: "a", Source: ctxplan.AssumptionUnknown},
 		{Key: "b", Source: ctxplan.AssumptionUnknown},
