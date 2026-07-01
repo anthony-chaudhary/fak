@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPathWitnessReadsBackEvidence(t *testing.T) {
@@ -85,6 +86,95 @@ func TestWitnessTaskPathEvidenceEndToEnd(t *testing.T) {
 	}
 	if err := ValidateSnapshot(m.Snapshot()); err != nil {
 		t.Fatalf("witnessed snapshot failed validation: %v", err)
+	}
+}
+
+func TestOriginWitnessRunsWhenTaskStartsWithEvidence(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	var got Claim
+	m := NewManager(
+		WithClock(func() time.Time { return now }),
+		WithOriginWitness(WitnessFunc(func(c Claim) WitnessRecord {
+			got = c
+			return WitnessRecord{
+				VerifiedState: VerifiedDone,
+				Source:        "origin-test",
+				Detail:        "origin evidence checked",
+				EvidenceRefs:  cloneEvidenceRefs(c.Refs),
+			}
+		})),
+	)
+
+	ref := EvidenceRef{Kind: "path", Ref: "artifact.txt", Note: "declared before dispatch"}
+	if _, err := m.StartTask(TaskSpec{TaskID: "task_origin", EvidenceRefs: []EvidenceRef{ref}}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if got.TaskID != "task_origin" || got.StepID != "" || got.State != StateRunning {
+		t.Fatalf("origin claim = %+v, want running task claim", got)
+	}
+
+	snap := m.Snapshot()
+	if err := ValidateSnapshot(snap); err != nil {
+		t.Fatalf("validate origin-witnessed snapshot: %v", err)
+	}
+	task := snap.Tasks[0]
+	if len(task.EvidenceRefs) != 1 || task.EvidenceRefs[0] != ref {
+		t.Fatalf("task evidence refs = %+v, want %+v", task.EvidenceRefs, []EvidenceRef{ref})
+	}
+	if task.Witness == nil || task.Witness.VerifiedState != VerifiedDone || task.Witness.Source != "origin-test" {
+		t.Fatalf("origin witness = %+v, want verified_done from origin-test", task.Witness)
+	}
+	if task.Witness.CheckedUnixNano != now.UnixNano() {
+		t.Fatalf("origin witness timestamp = %d, want %d", task.Witness.CheckedUnixNano, now.UnixNano())
+	}
+}
+
+func TestOriginWitnessRunsWhenStepStartsWithEvidence(t *testing.T) {
+	var got Claim
+	m := NewManager(WithOriginWitness(WitnessFunc(func(c Claim) WitnessRecord {
+		got = c
+		return WitnessRecord{VerifiedState: VerifiedDone, Source: "origin-step", EvidenceRefs: cloneEvidenceRefs(c.Refs)}
+	})))
+	task, err := m.StartTask(TaskSpec{TaskID: "task_step_origin"})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+
+	ref := EvidenceRef{Kind: OutputRefKind, Ref: coherentOutput}
+	if _, err := task.StartStep(StepSpec{StepID: "step_origin", EvidenceRefs: []EvidenceRef{ref}}); err != nil {
+		t.Fatalf("start step: %v", err)
+	}
+	if got.TaskID != "task_step_origin" || got.StepID != "step_origin" || got.State != StateRunning {
+		t.Fatalf("origin step claim = %+v, want running step claim", got)
+	}
+	step := m.Snapshot().Tasks[0].Steps[0]
+	if len(step.EvidenceRefs) != 1 || step.EvidenceRefs[0] != ref {
+		t.Fatalf("step evidence refs = %+v, want %+v", step.EvidenceRefs, []EvidenceRef{ref})
+	}
+	if step.Witness == nil || step.Witness.VerifiedState != VerifiedDone || step.Witness.Source != "origin-step" {
+		t.Fatalf("step origin witness = %+v, want verified_done from origin-step", step.Witness)
+	}
+}
+
+func TestOriginWitnessIsSkippedWithoutEvidenceRefs(t *testing.T) {
+	called := false
+	m := NewManager(WithOriginWitness(WitnessFunc(func(Claim) WitnessRecord {
+		called = true
+		return WitnessRecord{VerifiedState: VerifiedDone}
+	})))
+	task, err := m.StartTask(TaskSpec{TaskID: "task_no_refs"})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if _, err := task.StartStep(StepSpec{StepID: "step_no_refs"}); err != nil {
+		t.Fatalf("start step: %v", err)
+	}
+	if called {
+		t.Fatalf("origin witness ran for records with no evidence refs")
+	}
+	snap := m.Snapshot()
+	if snap.Tasks[0].Witness != nil || snap.Tasks[0].Steps[0].Witness != nil {
+		t.Fatalf("witnesses should stay nil without evidence refs: %+v / %+v", snap.Tasks[0].Witness, snap.Tasks[0].Steps[0].Witness)
 	}
 }
 

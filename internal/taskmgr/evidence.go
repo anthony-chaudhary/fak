@@ -170,6 +170,23 @@ func (m *Manager) WitnessTask(taskID string, w Witness, refs []EvidenceRef) (Wit
 	return rec, nil
 }
 
+// originWitnessRecord grades task/step evidence at record creation time when the
+// manager has an origin witness configured. No witness or no refs stays nil so the
+// legacy claimed-only path is byte-stable for existing callers.
+func (m *Manager) originWitnessRecord(claim Claim) (*WitnessRecord, error) {
+	if m.originWitness == nil || len(claim.Refs) == 0 {
+		return nil, nil
+	}
+	rec := m.originWitness.WitnessClaim(claim)
+	if rec.CheckedUnixNano == 0 {
+		rec.CheckedUnixNano = m.clock().UnixNano()
+	}
+	if err := validateVerifiedState(rec.VerifiedState); err != nil {
+		return nil, err
+	}
+	return cloneWitness(&rec), nil
+}
+
 func validateVerifiedState(s VerifiedState) error {
 	switch s {
 	case VerifiedUnknown, VerifiedDone, VerifiedRefused, VerifiedUnavailable:
@@ -196,11 +213,15 @@ func cloneWitness(w *WitnessRecord) *WitnessRecord {
 		return nil
 	}
 	out := *w
-	if len(w.EvidenceRefs) > 0 {
-		out.EvidenceRefs = make([]EvidenceRef, len(w.EvidenceRefs))
-		copy(out.EvidenceRefs, w.EvidenceRefs)
-	} else {
-		out.EvidenceRefs = nil
-	}
+	out.EvidenceRefs = cloneEvidenceRefs(w.EvidenceRefs)
 	return &out
+}
+
+func cloneEvidenceRefs(refs []EvidenceRef) []EvidenceRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]EvidenceRef, len(refs))
+	copy(out, refs)
+	return out
 }

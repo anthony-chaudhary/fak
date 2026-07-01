@@ -65,21 +65,32 @@ func WithLivenessTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithOriginWitness runs w immediately when a task or step is started with
+// EvidenceRefs. This moves the quality check to the origin record instead of
+// relying on an after-the-fact scorecard pass to discover missing or bad evidence.
+func WithOriginWitness(w Witness) Option {
+	return func(m *Manager) {
+		m.originWitness = w
+	}
+}
+
 type TaskSpec struct {
-	TaskID string            `json:"task_id"`
-	Title  string            `json:"title,omitempty"`
-	Total  float64           `json:"total,omitempty"`
-	Unit   string            `json:"unit,omitempty"`
-	Labels map[string]string `json:"labels,omitempty"`
+	TaskID       string            `json:"task_id"`
+	Title        string            `json:"title,omitempty"`
+	Total        float64           `json:"total,omitempty"`
+	Unit         string            `json:"unit,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EvidenceRefs []EvidenceRef     `json:"evidence_refs,omitempty"`
 }
 
 type StepSpec struct {
-	StepID  string            `json:"step_id"`
-	Title   string            `json:"title,omitempty"`
-	Concept string            `json:"concept,omitempty"`
-	Total   float64           `json:"total,omitempty"`
-	Unit    string            `json:"unit,omitempty"`
-	Labels  map[string]string `json:"labels,omitempty"`
+	StepID       string            `json:"step_id"`
+	Title        string            `json:"title,omitempty"`
+	Concept      string            `json:"concept,omitempty"`
+	Total        float64           `json:"total,omitempty"`
+	Unit         string            `json:"unit,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	EvidenceRefs []EvidenceRef     `json:"evidence_refs,omitempty"`
 }
 
 type Snapshot struct {
@@ -118,6 +129,7 @@ type TaskSnapshot struct {
 	Steps              []StepSnapshot    `json:"steps,omitempty"`
 	Concepts           []ConceptUsage    `json:"concepts,omitempty"`
 	Labels             map[string]string `json:"labels,omitempty"`
+	EvidenceRefs       []EvidenceRef     `json:"evidence_refs,omitempty"`
 	// Witness is the optional, independently-attested completion rung. It is nil
 	// for a claimed-only task; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
@@ -141,6 +153,7 @@ type StepSnapshot struct {
 	ETAUnixNano        *int64            `json:"estimated_completion_unix_nano,omitempty"`
 	Resource           ResourceWindow    `json:"resource"`
 	Labels             map[string]string `json:"labels,omitempty"`
+	EvidenceRefs       []EvidenceRef     `json:"evidence_refs,omitempty"`
 	// Witness is the optional, independently-attested completion rung for this
 	// step. Nil means claimed-only; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
@@ -193,6 +206,7 @@ type Manager struct {
 	clock           func() time.Time
 	sampler         Sampler
 	livenessTimeout time.Duration
+	originWitness   Witness
 	started         time.Time
 	startResource   ResourceSample
 	tasks           map[string]*taskState
@@ -269,6 +283,14 @@ func (m *Manager) StartTask(spec TaskSpec) (*Task, error) {
 	if err := validateTaskSpec(spec); err != nil {
 		return nil, err
 	}
+	witness, err := m.originWitnessRecord(Claim{
+		TaskID: spec.TaskID,
+		State:  StateRunning,
+		Refs:   cloneEvidenceRefs(spec.EvidenceRefs),
+	})
+	if err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.tasks[spec.TaskID]; exists {
@@ -285,6 +307,7 @@ func (m *Manager) StartTask(spec TaskSpec) (*Task, error) {
 		start:    m.sampleAt(now),
 		progress: progressState{total: spec.Total, unit: spec.Unit},
 		steps:    map[string]*stepState{},
+		witness:  witness,
 	}
 	m.tasks[spec.TaskID] = st
 	m.order = append(m.order, spec.TaskID)
@@ -327,6 +350,15 @@ func (m *Manager) StartStep(taskID string, spec StepSpec) (*Step, error) {
 	if err := validateStepSpec(spec); err != nil {
 		return nil, err
 	}
+	witness, err := m.originWitnessRecord(Claim{
+		TaskID: taskID,
+		StepID: spec.StepID,
+		State:  StateRunning,
+		Refs:   cloneEvidenceRefs(spec.EvidenceRefs),
+	})
+	if err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task, ok := m.tasks[taskID]
@@ -349,6 +381,7 @@ func (m *Manager) StartStep(taskID string, spec StepSpec) (*Step, error) {
 		started:  now,
 		start:    m.sampleAt(now),
 		progress: progressState{total: spec.Total, unit: spec.Unit},
+		witness:  witness,
 	}
 	task.stepOrder = append(task.stepOrder, spec.StepID)
 	return &Step{manager: m, taskID: taskID, stepID: spec.StepID}, nil
@@ -576,6 +609,7 @@ func (m *Manager) taskSnapshotLocked(task *taskState, now time.Time, current Res
 		Steps:              steps,
 		Concepts:           conceptUsage([]TaskSnapshot{{Steps: steps}}),
 		Labels:             cloneLabels(task.spec.Labels),
+		EvidenceRefs:       cloneEvidenceRefs(task.spec.EvidenceRefs),
 		Witness:            cloneWitness(task.witness),
 	}
 }
@@ -608,6 +642,7 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 		ETAUnixNano:        etaAt,
 		Resource:           ResourceWindow{Start: step.start, Current: cur, Delta: resourceDelta(step.start, cur)},
 		Labels:             cloneLabels(step.spec.Labels),
+		EvidenceRefs:       cloneEvidenceRefs(step.spec.EvidenceRefs),
 		Witness:            cloneWitness(step.witness),
 	}
 }
@@ -794,11 +829,13 @@ func unixNanoOrZero(t time.Time) int64 {
 
 func cloneTaskSpec(spec TaskSpec) TaskSpec {
 	spec.Labels = cloneLabels(spec.Labels)
+	spec.EvidenceRefs = cloneEvidenceRefs(spec.EvidenceRefs)
 	return spec
 }
 
 func cloneStepSpec(spec StepSpec) StepSpec {
 	spec.Labels = cloneLabels(spec.Labels)
+	spec.EvidenceRefs = cloneEvidenceRefs(spec.EvidenceRefs)
 	return spec
 }
 
