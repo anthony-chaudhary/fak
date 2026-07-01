@@ -69,6 +69,41 @@ func TestFormatTurnDebugStats_LeadsWithVerdictAndNetSaving(t *testing.T) {
 	}
 }
 
+func TestFormatTurnDebugStats_BudgetLineWarnsNearCompactionThreshold(t *testing.T) {
+	line := formatTurnDebugStatsWithBudget("t1", "w", true, "end_turn",
+		20_000, 100, 20_000, 0, false, 48_000, ResetDecision{Reason: ResetReasonHealthy}, true)
+	for _, want := range []string{
+		"budget=spent:40.1k",
+		"ctx:40.0k/48.0k",
+		"dist:8.0k-to-compact",
+		"nudge=checkpoint-soon",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("near-threshold budget line missing %q: %s", want, line)
+		}
+	}
+	if strings.Contains(line, "past-inversion-checkpoint-now") {
+		t.Fatalf("near-threshold line must not claim the threshold is already crossed: %s", line)
+	}
+}
+
+func TestFormatTurnDebugStats_BudgetLineNudgesPastInversionCheckpoint(t *testing.T) {
+	line := formatTurnDebugStatsWithBudget("t1", "w", true, "end_turn",
+		10_000, 100, 39_000, 0, false, 48_000, ResetDecision{Reason: ResetReasonHealthy}, true)
+	for _, want := range []string{
+		"budget=spent:49.1k",
+		"ctx:49.0k/48.0k",
+		"dist:1.0k-past-compact",
+		"payback=600t",
+		"nudge=past-inversion-checkpoint-now",
+		"ledger=task_decision_log",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("past-threshold budget line missing %q: %s", want, line)
+		}
+	}
+}
+
 func TestFormatTurnDebugStats_ColdWriteIsWarmingWithNegativeSaving(t *testing.T) {
 	// A cold write the reads have not yet repaid: prompt=20, cacheRead=0, cacheCreate=100.
 	// baseline = 120; actual = 20 + 0 + 100*1.25 = 145; saved = -25 (REFUTED). This is the
@@ -286,6 +321,22 @@ func TestRenderTurnDebugStats_UntrackedSessionReadsNA(t *testing.T) {
 	}
 	if s.resetHealth != nil {
 		t.Fatalf("the read-only peek must not mint a record for an untracked session")
+	}
+}
+
+func TestRenderTurnDebugStats_UsesServerCompactionBudget(t *testing.T) {
+	s := newResetShadowServer()
+	s.compactHistoryBudget = 100
+	var sb strings.Builder
+	s.debugStatsf = func(format string, args ...any) { fmt.Fprintf(&sb, format, args...); sb.WriteByte('\n') }
+
+	s.logInferenceTurn("budgeted", "anthropic_messages", true,
+		agent.Usage{PromptTokens: 80, CompletionTokens: 5, CacheReadInputTokens: 20}, "end_turn", time.Millisecond, false)
+	out := sb.String()
+	for _, want := range []string{"ctx:100/100", "dist:0-past-compact", "nudge=past-inversion-checkpoint-now", "ledger=task_decision_log"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("live debug line missing %q: %s", want, out)
+		}
 	}
 }
 

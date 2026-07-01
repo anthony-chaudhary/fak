@@ -14,6 +14,10 @@ package gateway
 //     disagree with the scrape. A cold-write turn reads NEGATIVE until later reads repay
 //     the write, where the old read-only rebate would have overstated it.
 //   - the rolling compaction HEALTH and the compaction action.
+//   - the compaction budget suffix when history compaction is configured: resident
+//     context vs the threshold, distance to the cut line, and the cache-curve inversion
+//     nudge to checkpoint verified facts into the durable task decision log before the
+//     context window rewrites itself.
 //
 // What it deliberately OMITS: the provider's own raw usage counters (cache_read /
 // cache_creation / request_tokens / cache_hit). Those measure Anthropic's cache, not whether
@@ -157,7 +161,7 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// Take (and clear) this turn's safety delta so the line carries the blocked/repaired/
 	// quarantined half alongside the cache/token value. Clearing keeps it per-turn.
 	safety := s.takeTurnSafety(trace)
-	s.debugStatsf("%s", formatTurnDebugStats(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, d, have, safety))
+	s.debugStatsf("%s", formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety))
 }
 
 // renderTurnDebugError emits one per-turn debug line on a FAILED turn — the missing half of the
@@ -226,6 +230,10 @@ func formatTurnDebugError(trace, wire, reason string, elapsed time.Duration) str
 // wire/stream/completion are retained in the signature (the JSON --log and callers carry them)
 // but are intentionally not rendered on this glanceable line.
 func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, d ResetDecision, have bool, safetyOpt ...turnSafetyDelta) string {
+	return formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, 0, d, have, safetyOpt...)
+}
+
+func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish string, prompt, completion, cacheRead, cacheCreate int, compacted bool, compactBudget int, d ResetDecision, have bool, safetyOpt ...turnSafetyDelta) string {
 	if finish == "" {
 		finish = "unknown"
 	}
@@ -262,6 +270,9 @@ func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt
 		b.WriteString(" prov=0 tok fak=0 tok")
 	}
 	fmt.Fprintf(&b, " cache=%s compact=%s finish=%s", health, compact, debugField(finish))
+	if nudge := formatCompactionBudgetNudge(prompt, completion, cacheRead, cacheCreate, compactBudget); nudge != "" {
+		b.WriteString(nudge)
+	}
 	if safety.any() {
 		fmt.Fprintf(&b, " safety=blocked:%d repaired:%d quarantined:%d", safety.blocked, safety.repaired, safety.quarantined)
 		if safety.topReason != "" {
@@ -269,6 +280,55 @@ func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt
 		}
 	}
 	return b.String()
+}
+
+const compactionNudgeNearPercent = 80
+
+func formatCompactionBudgetNudge(prompt, completion, cacheRead, cacheCreate, compactBudget int) string {
+	if compactBudget <= 0 {
+		return ""
+	}
+	resident := maxNonNeg(prompt) + maxNonNeg(cacheRead) + maxNonNeg(cacheCreate)
+	if resident <= 0 {
+		return ""
+	}
+	spent := resident + maxNonNeg(completion)
+	remaining := compactBudget - resident
+
+	var b strings.Builder
+	fmt.Fprintf(&b, " budget=spent:%s ctx:%s/%s",
+		HumanTokenEquiv(float64(spent)),
+		HumanTokenEquiv(float64(resident)),
+		HumanTokenEquiv(float64(compactBudget)))
+	if remaining > 0 {
+		fmt.Fprintf(&b, " dist:%s-to-compact", HumanTokenEquiv(float64(remaining)))
+		if resident*100 >= compactBudget*compactionNudgeNearPercent {
+			b.WriteString(" nudge=checkpoint-soon")
+		}
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, " dist:%s-past-compact", HumanTokenEquiv(float64(-remaining)))
+	if payback, ok := compactionCutBreakEvenTurns(resident, compactBudget); ok {
+		fmt.Fprintf(&b, " payback=%st", debugTurns(payback))
+	}
+	b.WriteString(" nudge=past-inversion-checkpoint-now ledger=task_decision_log")
+	return b.String()
+}
+
+func compactionCutBreakEvenTurns(prefixNow, batonPrefix int) (float64, bool) {
+	gap := prefixNow - batonPrefix
+	if gap <= 0 || batonPrefix <= 0 {
+		return 0, false
+	}
+	return CacheWrite5mMultiplier * float64(batonPrefix) / (CacheReadMultiplier * float64(gap)), true
+}
+
+func debugTurns(v float64) string {
+	if v >= 100 {
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return strconv.FormatFloat(v, 'f', 1, 64)
 }
 
 // turnVerdict folds the net-saving proof, the rolling reset health, and the cache activity into
