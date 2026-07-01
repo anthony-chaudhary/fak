@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const (
@@ -103,6 +105,7 @@ func AuditHardcodedRefs(root string) ([]RefFinding, error) {
 // exact, not git-quoted.
 func gitIgnoredPaths(root string) map[string]bool {
 	cmd := exec.Command("git", "-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
