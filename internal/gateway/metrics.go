@@ -1741,6 +1741,11 @@ func writeVDSOMetrics(b *strings.Builder) {
 	for _, r := range missReasons {
 		fmt.Fprintf(b, "fak_vdso_misses_total{reason=\"%s\"} %d\n", promQuote(r), misses[r])
 	}
+
+	// Emission drops: a tier-2 key that fails FromVDSOKey parsing silently shrinks
+	// the cache-event stream unless this is watched (#1939).
+	writeHelpType(b, "fak_vdso_cachemeta_emit_dropped_total", "cachemeta cache-event emissions dropped because the tier-2 key failed to parse (FromVDSOKey error), by reason.", "counter")
+	fmt.Fprintf(b, "fak_vdso_cachemeta_emit_dropped_total{reason=\"key_parse\"} %d\n", vdso.Default.EmitDropped())
 }
 
 // writeBlobMetrics renders the content-addressed blob store (internal/blob) — the ONE

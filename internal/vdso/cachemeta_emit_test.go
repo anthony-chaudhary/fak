@@ -261,6 +261,43 @@ func TestCacheEmission_Miss(t *testing.T) {
 	}
 }
 
+// #1939: emitCache silently dropped the event when the tier-2 key failed to parse,
+// with no signal — a key-format regression would read as "less cache activity"
+// rather than "the emitter is dropping events". The drop must be counted (and a
+// well-formed key must not bump that counter).
+func TestCacheEmission_DropsMalformedKeyAreCounted(t *testing.T) {
+	v := New(8)
+	events, mu := collectEvents(v)
+
+	if got := v.EmitDropped(); got != 0 {
+		t.Fatalf("EmitDropped() = %d, want 0 on a fresh vDSO", got)
+	}
+
+	ref := abi.Ref{Kind: abi.RefInline, Inline: []byte("x")}
+	v.emitCache(CacheFill, "malformed-key-no-colons", ref, "")
+	if got := v.EmitDropped(); got != 1 {
+		t.Fatalf("EmitDropped() = %d, want 1 after one malformed-key emit", got)
+	}
+	mu.Lock()
+	n := len(*events)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a dropped emit must not reach the sink, got %d events", n)
+	}
+
+	// A well-formed key must NOT bump the drop counter.
+	v.emitCache(CacheFill, "tool:argsdigest:epoch1", ref, "")
+	if got := v.EmitDropped(); got != 1 {
+		t.Fatalf("EmitDropped() = %d, want unchanged at 1 after a well-formed emit", got)
+	}
+	mu.Lock()
+	n = len(*events)
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("the well-formed emit should reach the sink, got %d events", n)
+	}
+}
+
 // §2.5: a per-tool witness adapter governs admission instead of the internal epoch.
 // Registering one for get_doc makes a fill's cachemeta entry carry the adapter's
 // witness, and revoking that witness evicts the entry.

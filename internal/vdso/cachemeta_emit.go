@@ -1,6 +1,8 @@
 package vdso
 
 import (
+	"sync/atomic"
+
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
@@ -125,7 +127,9 @@ func (v *VDSO) resolveWitness(c *abi.ToolCall, r *abi.Result) string {
 
 // emitCache builds a cachemeta entry from a tier-2 identity and dispatches it to the
 // installed sink, if any. It is safe to call with a key that fails to parse (the
-// event is dropped); in practice every emit site holds a well-formed tier-2 key.
+// event is dropped, and the drop is counted — see emitDropped/EmitDropped — so a
+// key-format regression is visible instead of silently shrinking the cache-event
+// stream, #1939); in practice every emit site holds a well-formed tier-2 key.
 // Called OUTSIDE v.mu by every emit site.
 func (v *VDSO) emitCache(kind CacheEventKind, key string, ref abi.Ref, witness string, opts ...cachemeta.Option) {
 	v.regMu.RLock()
@@ -136,9 +140,17 @@ func (v *VDSO) emitCache(kind CacheEventKind, key string, ref abi.Ref, witness s
 	}
 	entry, err := cachemeta.FromVDSOKey(key, ref, append([]cachemeta.Option{cachemeta.WithWitness(witness)}, opts...)...)
 	if err != nil {
+		atomic.AddInt64(&v.emitDropped, 1)
 		return
 	}
 	sink(CacheEvent{Kind: kind, Entry: entry})
+}
+
+// EmitDropped returns the cumulative count of cachemeta cache-event emissions
+// dropped because the tier-2 key failed to parse (#1939) — rendered as
+// fak_vdso_cachemeta_emit_dropped_total{reason="key_parse"}.
+func (v *VDSO) EmitDropped() uint64 {
+	return uint64(atomic.LoadInt64(&v.emitDropped))
 }
 
 // emitStaticHit lowers a tier-3 (static-table) serve into a first-class cachemeta hit

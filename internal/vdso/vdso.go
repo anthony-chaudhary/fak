@@ -115,6 +115,13 @@ type VDSO struct {
 	cacheSink       func(CacheEvent)
 	witnessAdapters map[string]WitnessFunc
 
+	// emitDropped counts cachemeta emissions dropped because the tier-2 key could
+	// not be parsed by FromVDSOKey (#1939). Without this, a key-format regression
+	// silently shrinks the cache-event stream — it reads as "less cache activity"
+	// rather than "the emitter is dropping events". Exposed via EmitDropped(),
+	// rendered as fak_vdso_cachemeta_emit_dropped_total{reason="key_parse"}.
+	emitDropped int64
+
 	// now is the clock the tier-2 fill timestamp + hit-age are read from. nil => time.Now
 	// (production). A test sets it to a controllable clock so age assertions never depend
 	// on wall-clock. Read via v.clock().
