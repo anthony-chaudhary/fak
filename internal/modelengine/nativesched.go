@@ -286,26 +286,41 @@ func (s *NativeScheduler) run() {
 	}
 }
 
+// emitToken advances the lane by one token: it argmaxes the current logits, delivers
+// the token on the stream, and records it. It finishes the lane (KV reclaim + stream
+// close) on cancellation — before or during delivery — or once the lane hits EOS or the
+// generation budget. It returns the emitted token id and whether the lane is still
+// running: ok==false means the lane was finished and the caller must not touch it again.
+// The solo and shared-batch step paths differ only in what they do with a still-running
+// lane, so this is the copy-identical per-lane emit both of them share.
+func (ln *schedLane) emitToken() (next int, ok bool) {
+	if ln.ctx.Err() != nil { // cancelled between steps
+		ln.finish(nil, ln.ctx.Err())
+		return 0, false
+	}
+	next = argmax(ln.logits)
+	select {
+	case ln.tokens <- abi.EngineToken{ID: next}:
+	case <-ln.ctx.Done(): // cancelled while delivering
+		ln.finish(nil, ln.ctx.Err())
+		return 0, false
+	}
+	ln.gen = append(ln.gen, next)
+	ln.emitted++
+	if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
+		ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
+		return 0, false
+	}
+	return next, true
+}
+
 // stepSolo advances one lane without rebuilding the scheduler batch between every token.
 // It returns to run() whenever another Admit/Close signal arrives, preserving in-flight
 // batch addition while keeping uncontended B=1 latency off the shared-batch bookkeeping path.
 func (s *NativeScheduler) stepSolo(ln *schedLane) {
 	for {
-		if ln.ctx.Err() != nil {
-			ln.finish(nil, ln.ctx.Err())
-			return
-		}
-		next := argmax(ln.logits)
-		select {
-		case ln.tokens <- abi.EngineToken{ID: next}:
-		case <-ln.ctx.Done():
-			ln.finish(nil, ln.ctx.Err())
-			return
-		}
-		ln.gen = append(ln.gen, next)
-		ln.emitted++
-		if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
-			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
+		next, ok := ln.emitToken()
+		if !ok {
 			return
 		}
 		ln.logits = ln.sess.Step(next)
@@ -324,21 +339,8 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	cont := make([]*schedLane, 0, len(active))
 	ids := make([]int, 0, len(active))
 	for _, ln := range active {
-		if ln.ctx.Err() != nil { // cancelled between steps
-			ln.finish(nil, ln.ctx.Err())
-			continue
-		}
-		next := argmax(ln.logits)
-		select {
-		case ln.tokens <- abi.EngineToken{ID: next}:
-		case <-ln.ctx.Done(): // cancelled while delivering
-			ln.finish(nil, ln.ctx.Err())
-			continue
-		}
-		ln.gen = append(ln.gen, next)
-		ln.emitted++
-		if ln.sess.M.Cfg.IsEOS(next) || ln.emitted >= genTokens {
-			ln.finish(assembleResult(ln.putCtx, ln.tool, ln.promptLen, ln.gen, ln.tok), nil)
+		next, ok := ln.emitToken()
+		if !ok {
 			continue
 		}
 		cont = append(cont, ln)
