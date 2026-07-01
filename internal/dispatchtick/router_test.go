@@ -153,6 +153,55 @@ func TestRouterCarriesPathScope(t *testing.T) {
 	}
 }
 
+func TestRouterExtractsIssueBodyFileScopes(t *testing.T) {
+	taxonomy := LaneTaxonomy{
+		Concurrent: []string{"dispatch"},
+		Trees: map[string][]string{
+			"dispatch": {"cmd/**", "internal/dispatchtick/**"},
+		},
+	}
+	tests := []struct {
+		name      string
+		body      string
+		wantPaths []string
+	}{
+		{
+			name:      "cmd fak directory hint",
+			body:      "## Path hints\n\n- `cmd/fak`\n",
+			wantPaths: []string{"cmd/fak"},
+		},
+		{
+			name:      "internal dispatchtick directory hint",
+			body:      "## Path hints\n\n- `internal/dispatchtick`\n",
+			wantPaths: []string{"internal/dispatchtick"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RouteIssue(routerIssue(41, "unscoped worker row", nil, tt.body), taxonomy, RouteOptions{})
+			if got.Lane != "dispatch" || got.Confidence != "path-confirmed" || got.Signal != "path:dispatch" {
+				t.Fatalf("route = lane %q confidence %q signal %q, want dispatch/path-confirmed/path:dispatch (%+v)",
+					got.Lane, got.Confidence, got.Signal, got)
+			}
+			if len(got.Paths) != len(tt.wantPaths) {
+				t.Fatalf("paths = %#v, want %#v", got.Paths, tt.wantPaths)
+			}
+			for i := range tt.wantPaths {
+				if got.Paths[i] != tt.wantPaths[i] {
+					t.Fatalf("paths = %#v, want %#v", got.Paths, tt.wantPaths)
+				}
+			}
+		})
+	}
+
+	unrouted := RouteIssue(routerIssue(43, "unscoped worker row", nil,
+		"## Path hints\n\n- command runner only\n\n## Witness\n\ngo test ./internal/dispatchtick\n"), taxonomy, RouteOptions{})
+	if unrouted.Lane != "" || unrouted.Confidence != "none" || unrouted.Signal != "unrouted" || unrouted.UnroutedReason != "no scope/path/label signal" {
+		t.Fatalf("no-path route = %+v, want explicit unrouted fallback", unrouted)
+	}
+}
+
 func TestRouterCarriesAgentSchedulingMetadata(t *testing.T) {
 	body := scopedGatewayIssueBody("5")
 	issue := routerIssue(12, "gateway: retry class", nil, body)
@@ -200,7 +249,7 @@ func TestRouterSuggestsSubLaneSplitsForOverloadedTree(t *testing.T) {
 	})
 	grp := p.Lanes["dispatch"]
 	if grp.Count != 2 || len(grp.SubLanes) != 2 {
-		t.Fatalf("dispatch lane = %+v, want two sub-lane suggestions", grp)
+		t.Fatalf("dispatch lane = %+v issues=%+v, want two sub-lane suggestions", grp, p.Issues)
 	}
 	assertRouterSubLane(t, grp.SubLanes, "cmd/fak", 1, 3, []int{21})
 	assertRouterSubLane(t, grp.SubLanes, "internal/dispatchtick", 1, 2, []int{22})

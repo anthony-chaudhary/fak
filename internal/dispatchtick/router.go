@@ -30,7 +30,7 @@ var (
 	scopeRE      = regexp.MustCompile(`\b(\w+)\(([^)]+)\)`)
 	barePrefixRE = regexp.MustCompile(`^([A-Za-z][\w-]*):\s`)
 	epicTitleRE  = regexp.MustCompile(`(?i)^\s*epic\b\s*[\(:]`)
-	pathRE       = regexp.MustCompile(`(?:fak/(?:internal|cmd|experiments)|tools|docs|visuals|\.(?:github|claude))/[A-Za-z0-9_./-]+`)
+	pathRE       = regexp.MustCompile(`(?:(?:fak/)?(?:internal|cmd|experiments|tools|docs|visuals)|\.(?:github|claude))/[A-Za-z0-9_./-]+`)
 )
 
 var ExclusiveRouterLanes = map[string]bool{
@@ -348,7 +348,7 @@ func RouteIssue(issue Issue, taxonomy LaneTaxonomy, opts RouteOptions) IssueRout
 		laneSet[lane] = true
 	}
 
-	paths := ExtractRepoPaths(title + "\n" + body)
+	paths := ExtractIssueRepoPaths(title, body)
 	pathLanes := []string{}
 	seenPathLane := map[string]bool{}
 	for _, p := range paths {
@@ -465,6 +465,25 @@ func ExtractRepoPaths(text string) []string {
 	return out
 }
 
+func ExtractIssueRepoPaths(title, body string) []string {
+	if hints, ok := issuePathHintSection(body); ok {
+		return ExtractRepoPaths(hints)
+	}
+	return ExtractRepoPaths(title + "\n" + body)
+}
+
+func issuePathHintSection(body string) (string, bool) {
+	sections := promptMarkdownSections(body)
+	for _, name := range []string{"path hints", "paths", "file scope", "file scopes", "files"} {
+		key := normalizePromptHeading(name)
+		value, ok := sections[key]
+		if ok {
+			return value, true
+		}
+	}
+	return "", false
+}
+
 func PathMatchesLane(path string, trees map[string][]string) []string {
 	p := strings.ReplaceAll(path, "\\", "/")
 	if strings.HasPrefix(p, "./") {
@@ -477,6 +496,10 @@ func PathMatchesLane(path string, trees map[string][]string) []string {
 	hits := []string{}
 	for _, lane := range lanes {
 		for _, glob := range trees[lane] {
+			if prefix, ok := strings.CutSuffix(strings.ReplaceAll(glob, "\\", "/"), "/**"); ok && p == prefix {
+				hits = append(hits, lane)
+				break
+			}
 			re := globToRegexp(glob)
 			if re.MatchString(p) {
 				hits = append(hits, lane)
