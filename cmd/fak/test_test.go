@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -89,12 +91,50 @@ func TestRunTest_DryRunPrintsCommand(t *testing.T) {
 	}
 }
 
+func TestRunTest_AffectedDelegatesToAffectedPlanner(t *testing.T) {
+	oldListGraph := affectedListGraph
+	oldRunGoTest := affectedRunGoTest
+	t.Cleanup(func() {
+		affectedListGraph = oldListGraph
+		affectedRunGoTest = oldRunGoTest
+	})
+
+	affectedListGraph = func(root string) (map[string]string, map[string][]string, int, error) {
+		return map[string]string{
+				"internal/foo/foo.go": "example.com/fak/internal/foo",
+			}, map[string][]string{
+				"example.com/fak/cmd/fak": {"example.com/fak/internal/foo"},
+			}, 2, nil
+	}
+	affectedRunGoTest = func(root string, args []string, stdout, stderr io.Writer) (int, error) {
+		t.Fatalf("fak test affected --json must not run go test; args=%v", args)
+		return 1, nil
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{
+		"affected",
+		"--json",
+		"--file", "internal/foo/foo.go",
+	}); rc != 0 {
+		t.Fatalf("affected json rc = %d, stderr=%s", rc, errb.String())
+	}
+	var plan affectedPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("bad affected json: %v\n%s", err, out.String())
+	}
+	want := []string{"example.com/fak/cmd/fak", "example.com/fak/internal/foo"}
+	if !reflect.DeepEqual(plan.SelectedPackages, want) {
+		t.Fatalf("selected = %v, want %v", plan.SelectedPackages, want)
+	}
+}
+
 func TestRunTest_ListExitsZero(t *testing.T) {
 	var out, errb bytes.Buffer
 	if rc := runTest(&out, &errb, []string{"--list"}); rc != 0 {
 		t.Fatalf("--list rc = %d", rc)
 	}
-	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") {
+	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") || !strings.Contains(out.String(), "affected") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }
