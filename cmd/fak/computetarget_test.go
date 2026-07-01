@@ -206,6 +206,50 @@ func TestProbeReflectsRealHealth(t *testing.T) {
 	}
 }
 
+// TestRenderComputeTargetTableKeepsHealthColumnCompact proves a verbose down
+// detail (the Windows "connectex … actively refused it" dial error) never lands in
+// the aligned HEALTH column — where it would pad every row and shove `up`/MODEL
+// off-screen — but is still surfaced, verbatim, in the health-notes block.
+func TestRenderComputeTargetTableKeepsHealthColumnCompact(t *testing.T) {
+	longDetail := `Get "http://127.0.0.1:8200/health": dial tcp 127.0.0.1:8200: ` +
+		`connectex: No connection could be made because the target machine actively refused it.`
+	rep := targetListReport{
+		Schema: computeTargetListSchema,
+		Targets: []targetListing{
+			{Name: "mac", Kind: targetGatewayURL, GatewayURL: "http://mac:8080", Locality: localityRemote,
+				Model: "qwen3.6-27b", Health: targetHealth{State: "up"}},
+			{Name: "gcp", Kind: targetGatewayURL, GatewayURL: "http://127.0.0.1:8200/v1", Locality: localityRemote,
+				Model: "glm-5.2", Health: targetHealth{State: "down", Detail: longDetail}},
+		},
+	}
+	var buf strings.Builder
+	renderComputeTargetTable(&buf, rep)
+	out := buf.String()
+
+	// The table body (everything before the notes block) must NOT carry the long
+	// dial error — that is what blew out the column width.
+	table := out
+	if i := strings.Index(out, "health notes:"); i >= 0 {
+		table = out[:i]
+	}
+	if strings.Contains(table, "actively refused") {
+		t.Errorf("HEALTH column leaked the verbose dial error into the aligned table:\n%s", table)
+	}
+
+	// The mac row's `up` must sit close to its columns, not be shoved right by a
+	// sibling row's long detail: the mac line stays comfortably narrow.
+	for _, line := range strings.Split(table, "\n") {
+		if strings.HasPrefix(line, "mac") && len(line) > 100 {
+			t.Errorf("mac row is %d cols wide — a down row's detail is still bleeding into alignment:\n%q", len(line), line)
+		}
+	}
+
+	// The reason is not dropped: it appears once, verbatim, in the notes block.
+	if !strings.Contains(out, "health notes:") || !strings.Contains(out, longDetail) {
+		t.Errorf("down target's detail must survive in the health-notes block; got:\n%s", out)
+	}
+}
+
 // TestHealthzURLUsesOrigin proves the probe targets /healthz at the gateway ORIGIN,
 // not appended to a /v1 base (the gcp glm case).
 func TestHealthzURLUsesOrigin(t *testing.T) {

@@ -406,24 +406,38 @@ func (r *targetRegistry) listing(parent context.Context, hc *http.Client, perPro
 }
 
 // renderComputeTargetTable writes the human table: name, kind, gateway, locality,
-// live health, model. A down/n-a target shows its reason inline so an unreachable
-// gateway is never a silent or phantom "up".
+// live health, model. The HEALTH column shows the STATE only; a down/n-a target's
+// reason is relocated to the "health notes" block below the table so an
+// unreachable gateway is never silent, yet a single long dial error cannot wreck
+// the layout.
 func renderComputeTargetTable(w io.Writer, rep targetListReport) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tKIND\tGATEWAY\tLOCALITY\tHEALTH\tMODEL")
+	// Keep only the state in the aligned HEALTH cell and collect any detail for the
+	// notes block. Inlining the detail here made tabwriter pad every row to the
+	// widest cell, so one verbose "connectex: … actively refused it" on a down
+	// target shoved `up`/`n/a` and the MODEL column hundreds of columns right and
+	// off-screen. State-only stays aligned; the reason is printed once per target
+	// underneath and the untruncated detail still rides on --json.
+	var notes []string
 	for _, t := range rep.Targets {
 		gateway := t.GatewayURL
 		if gateway == "" {
 			gateway = t.SpawnSpec
 		}
-		health := t.Health.State
-		if t.Health.State != "up" && t.Health.Detail != "" {
-			health = fmt.Sprintf("%s (%s)", t.Health.State, t.Health.Detail)
-		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			t.Name, t.Kind, blankDash(gateway), t.Locality, health, blankDash(t.Model))
+			t.Name, t.Kind, blankDash(gateway), t.Locality, t.Health.State, blankDash(t.Model))
+		if t.Health.State != "up" && strings.TrimSpace(t.Health.Detail) != "" {
+			notes = append(notes, fmt.Sprintf("  %s (%s): %s", t.Name, t.Health.State, strings.TrimSpace(t.Health.Detail)))
+		}
 	}
 	tw.Flush()
+	if len(notes) > 0 {
+		fmt.Fprintln(w, "\nhealth notes:")
+		for _, n := range notes {
+			fmt.Fprintln(w, n)
+		}
+	}
 	fmt.Fprintln(w, "\ncredential: env-var NAME only — fak never stores or prints a secret.")
 	fmt.Fprintln(w, "override built-ins additively via ~/.fak/targets.json (or FAK_TARGETS_FILE).")
 }
