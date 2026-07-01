@@ -259,39 +259,7 @@ func stampNode() string {
 // JSONL line) are both safe. The lineage block is indented to match b's own
 // members.
 func (l Lineage) Into(b []byte) []byte {
-	if len(b) == 0 || b[0] != '{' {
-		return b
-	}
-	nl := bytes.IndexByte(b, '\n')
-	if nl < 0 {
-		return b // compact/single-line object: nothing to align to, leave it.
-	}
-	// The member indent is the leading whitespace of the line after "{\n".
-	indent := leadingWhitespace(b[nl+1:])
-	if indent == "" {
-		indent = "  "
-	}
-	if bytes.Contains(b, []byte("\n"+indent+`"lineage":`)) {
-		return b // already stamped.
-	}
-	blk, err := json.MarshalIndent(l, indent, indent)
-	if err != nil {
-		return b
-	}
-	var out bytes.Buffer
-	out.Grow(len(b) + len(blk) + len(indent) + 16)
-	out.Write(b[:nl+1])
-	out.WriteString(indent)
-	out.WriteString(`"lineage": `)
-	out.Write(blk)
-	// An empty object ("{\n}") has no following member, so no separating comma.
-	if firstNonSpaceIsBrace(b[nl+1:]) {
-		out.WriteByte('\n')
-	} else {
-		out.WriteString(",\n")
-	}
-	out.Write(b[nl+1:])
-	return out.Bytes()
+	return spliceTopLevelObject(b, "lineage", l)
 }
 
 // ArtifactFromJSON derives the #416 artifact envelope from the already-rendered
