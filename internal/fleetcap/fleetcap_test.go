@@ -127,3 +127,92 @@ func TestRenderContainsCounts(t *testing.T) {
 		}
 	}
 }
+
+// TestAssessCapacityVerdict is the issue #1749 (fleet-400iph[04]) acceptance
+// witness: the dry-run estimator must return an UNDER_CAPACITY verdict when the
+// available workers fall short of the Little's-law demand and a SUFFICIENT verdict
+// when they meet or exceed it. At 400/hr with 10-min sessions the demand is 67
+// workers (66.67 -> ceil 67), so 50 available is under capacity (short 17) and 80
+// available is over capacity (sufficient, no shortfall).
+func TestAssessCapacityVerdict(t *testing.T) {
+	const rate, session = 400.0, 10.0
+
+	under := Assess(rate, session, 50) // under-capacity fixture
+	if under.Verdict != UnderCapacity {
+		t.Errorf("Assess(%g,%g,50).Verdict = %q, want %q", rate, session, under.Verdict, UnderCapacity)
+	}
+	if under.RequiredWorkers != 67 {
+		t.Errorf("under.RequiredWorkers = %d, want 67", under.RequiredWorkers)
+	}
+	if under.ShortfallWorkers != 17 {
+		t.Errorf("under.ShortfallWorkers = %d, want 17 (67-50)", under.ShortfallWorkers)
+	}
+
+	over := Assess(rate, session, 80) // over-capacity fixture
+	if over.Verdict != Sufficient {
+		t.Errorf("Assess(%g,%g,80).Verdict = %q, want %q", rate, session, over.Verdict, Sufficient)
+	}
+	if over.ShortfallWorkers != 0 {
+		t.Errorf("over.ShortfallWorkers = %d, want 0 when sufficient", over.ShortfallWorkers)
+	}
+
+	// Meeting demand exactly is SUFFICIENT, not under — the boundary is >=.
+	exact := Assess(rate, session, 67)
+	if exact.Verdict != Sufficient || exact.ShortfallWorkers != 0 {
+		t.Errorf("Assess at exactly required (67) = {%q, short %d}, want {SUFFICIENT, 0}",
+			exact.Verdict, exact.ShortfallWorkers)
+	}
+}
+
+// TestAssessEdgeAvailability documents the fail-safe edges: zero/negative available
+// workers against a positive demand is UNDER_CAPACITY with the whole demand as the
+// shortfall (and availability clamped to 0), while zero demand (a non-positive
+// rate) is SUFFICIENT regardless of availability.
+func TestAssessEdgeAvailability(t *testing.T) {
+	if e := Assess(400, 10, 0); e.Verdict != UnderCapacity || e.ShortfallWorkers != 67 {
+		t.Errorf("Assess(400,10,0) = {%q, short %d}, want {UNDER_CAPACITY, 67}", e.Verdict, e.ShortfallWorkers)
+	}
+	if e := Assess(400, 10, -5); e.Verdict != UnderCapacity || e.AvailableWorkers != 0 {
+		t.Errorf("Assess(400,10,-5) = {%q, avail %d}, want {UNDER_CAPACITY, 0}", e.Verdict, e.AvailableWorkers)
+	}
+	if e := Assess(0, 10, 0); e.Verdict != Sufficient || e.RequiredWorkers != 0 {
+		t.Errorf("Assess(0,10,0) = {%q, req %d}, want {SUFFICIENT, 0}", e.Verdict, e.RequiredWorkers)
+	}
+}
+
+// TestAvailableFrom checks the concurrency-ceiling fold: available workers is the
+// MINIMUM positive limit (the tightest of cap/seats/...); non-positive limits carry
+// no ceiling and are ignored; an all-non-positive or empty set yields 0.
+func TestAvailableFrom(t *testing.T) {
+	cases := []struct {
+		limits []int
+		want   int
+	}{
+		{[]int{16, 3}, 3},    // seat-bound: 3 seats is tighter than a 16 host cap
+		{[]int{3, 16}, 3},    // order-independent
+		{[]int{0, 16, 3}, 3}, // a 0 (unset) ceiling is ignored, not treated as the min
+		{[]int{-1, 0}, 0},    // no positive limit -> 0 (no known capacity)
+		{nil, 0},             // nothing supplied -> 0
+		{[]int{67}, 67},      // a single ceiling passes through
+	}
+	for _, c := range cases {
+		if got := AvailableFrom(c.limits...); got != c.want {
+			t.Errorf("AvailableFrom(%v) = %d, want %d", c.limits, got, c.want)
+		}
+	}
+}
+
+// TestEstimateLine checks the operator-facing one-liner carries the verdict, the
+// need/have counts, and (only when short) the shortfall — wired to the same numbers
+// Assess returns, so the rendered line can't drift from the verdict.
+func TestEstimateLine(t *testing.T) {
+	line := Assess(400, 10, 50).Line()
+	for _, want := range []string{"UNDER_CAPACITY", "67", "50", "short 17"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("under-capacity Line() = %q, missing %q", line, want)
+		}
+	}
+	if ok := Assess(400, 10, 80).Line(); strings.Contains(ok, "short") {
+		t.Errorf("sufficient Line() should not mention a shortfall: %q", ok)
+	}
+}

@@ -355,6 +355,14 @@ func usageOpsVerbs() {
                  opens beside the agent;
                  also runnable by hand in a second pane. Read-only; loopback needs
                  no bearer)
+  fak fleetcap  [--rate 400] [--session 10] [--cap N] [--seats N] [--available N] [--json]
+                (DRY-RUN FLEET CAPACITY (Little's law L = lambda*W): turn a target
+                 issue-resolution rate + median session duration into the concurrent
+                 workers required to sustain it (a 5/10/15/30-min table). Supply an
+                 available-worker ceiling (--cap/--seats folded to the tightest, or an
+                 explicit --available) to get an UNDER_CAPACITY/SUFFICIENT verdict + the
+                 worker shortfall. Pure planning arithmetic — launches, counts, observes
+                 NO real worker. One leaf of the fleet-400iph throughput program)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the

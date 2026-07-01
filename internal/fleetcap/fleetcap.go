@@ -149,3 +149,88 @@ func trimFixed(x float64) string {
 	}
 	return fmt.Sprintf("%.2f", x)
 }
+
+// Verdict is the capacity judgment of an Estimate: whether the workers a fleet has
+// available can sustain the target rate the demand side implies.
+type Verdict string
+
+const (
+	// Sufficient means the available concurrency meets or exceeds the required
+	// worker count (available >= required): the fleet can sustain the target rate.
+	Sufficient Verdict = "SUFFICIENT"
+	// UnderCapacity means the available concurrency is below the required worker
+	// count (available < required): the fleet cannot sustain the target rate and
+	// must add workers.
+	UnderCapacity Verdict = "UNDER_CAPACITY"
+)
+
+// Estimate is a dry-run capacity assessment: the Little's-law worker demand for a
+// (rate, session) pair, the available worker concurrency it is measured against,
+// and the verdict + shortfall that comparison yields. It launches, counts, and
+// observes NO real worker — it is the planning answer to "can this fleet sustain
+// the target rate?", not a reading of one that is running.
+type Estimate struct {
+	Capacity                 // the demand side: target, session, exact load, required workers
+	AvailableWorkers int     // the supply side: the concurrent-worker ceiling on offer
+	ShortfallWorkers int     // max(0, RequiredWorkers - AvailableWorkers); 0 when sufficient
+	Verdict          Verdict // SUFFICIENT when available >= required, else UNDER_CAPACITY
+}
+
+// Assess resolves an Estimate for a (rate, session) pair against availableWorkers
+// concurrent workers. The verdict is UNDER_CAPACITY when the Little's-law required
+// worker count exceeds what is available, otherwise SUFFICIENT — meeting demand
+// exactly is sufficient (the boundary is >=). A negative availableWorkers is
+// clamped to zero (no negative concurrency); zero demand (a non-positive rate or
+// session) is always SUFFICIENT because it needs no standing worker.
+func Assess(targetRatePerHour, medianSessionMinutes float64, availableWorkers int) Estimate {
+	c := Compute(targetRatePerHour, medianSessionMinutes)
+	if availableWorkers < 0 {
+		availableWorkers = 0
+	}
+	shortfall := c.RequiredWorkers - availableWorkers
+	verdict := Sufficient
+	if shortfall > 0 {
+		verdict = UnderCapacity
+	} else {
+		shortfall = 0
+	}
+	return Estimate{
+		Capacity:         c,
+		AvailableWorkers: availableWorkers,
+		ShortfallWorkers: shortfall,
+		Verdict:          verdict,
+	}
+}
+
+// AvailableFrom folds a set of concurrency limits — a host cap, a seat inventory, a
+// cadence budget, any other ceiling on how many workers may run at once — into the
+// single available-worker count Assess measures demand against: the MINIMUM of the
+// positive limits, because a fleet can run no more workers than its tightest
+// constraint allows. Non-positive limits carry no ceiling and are ignored; if no
+// limit is positive the result is 0 (no known available capacity).
+func AvailableFrom(limits ...int) int {
+	avail := 0
+	seen := false
+	for _, l := range limits {
+		if l <= 0 {
+			continue
+		}
+		if !seen || l < avail {
+			avail, seen = l, true
+		}
+	}
+	return avail
+}
+
+// Line renders the estimate as one operator-facing line: the verdict, the required
+// vs available worker counts, the target rate and session it assumed, and — only
+// when under capacity — the worker shortfall to close.
+func (e Estimate) Line() string {
+	line := fmt.Sprintf("%s: need %d workers, have %d (target %s issues/hour, %s-min sessions)",
+		e.Verdict, e.RequiredWorkers, e.AvailableWorkers,
+		trim(e.TargetRatePerHour), trim(e.MedianSessionMinutes))
+	if e.Verdict == UnderCapacity {
+		line += fmt.Sprintf("; short %d", e.ShortfallWorkers)
+	}
+	return line
+}
