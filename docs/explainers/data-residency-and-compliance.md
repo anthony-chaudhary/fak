@@ -1,12 +1,13 @@
 ---
 title: "Data residency & compliance — keep inference and data in-country behind one binary"
-description: "How fak's self-host-first, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act and China's PIPL/DSL/CSL — an enforcement boundary you run on infrastructure you control. Not legal advice."
+description: "How fak's self-host-first, fail-closed, default-deny, audit-logged boundary maps to India's DPDP Act, China's PIPL/DSL/CSL, and Europe's GDPR + EU AI Act — an enforcement boundary you run on infrastructure you control. Not legal advice."
 ---
 
 # Data residency & compliance — inference and data stay where you put them
 
-Startups in regulated markets — India under the **DPDP Act, 2023** and China under
-**PIPL / the Data Security Law / the Cybersecurity Law** — face the same structural
+Startups in regulated markets — India under the **DPDP Act, 2023**, China under
+**PIPL / the Data Security Law / the Cybersecurity Law**, and Europe under the **GDPR**
+and the incoming **EU AI Act** — face the same structural
 pressure: personal data (and, in China, "important data") should be processed on
 infrastructure the operator controls, and cross-border transfer is constrained. A hosted,
 cross-border AI API is the awkward shape here. fak is the opposite shape by construction.
@@ -42,7 +43,7 @@ these are new for this doc — they are the same properties described in the
    [gateway API reference](../fak/api-reference.md) and
    [trajectory observability](../observability/trajectory.md).
 
-## Mapping to the two regimes
+## Mapping to the three regimes
 
 ### India — Digital Personal Data Protection Act, 2023
 
@@ -69,8 +70,32 @@ data" and expects local security controls. fak's role:
   wired to exist at all, which is a stronger control than after-the-fact detection.
 - **Records:** the audit trail supports the "demonstrate your controls" expectation.
 
+### Europe — GDPR and the EU AI Act
+
+The GDPR pushes controllers toward data-minimization and purpose limitation
+(Article 5(1)), demonstrable safeguards (the Article 5(2) accountability principle), and
+constrained third-country transfers (Chapter V). The EU AI Act adds, for high-risk
+systems, a mandatory tamper-evident logging obligation (Article 12, enforceable
+August 2, 2026). fak's role:
+
+- **Locality and transfers:** run the model and tool execution on your own EU-region
+  infrastructure — or fully local with `fak guard --gguf` — and the inference path simply
+  has no third-country transfer on it. The Chapter V question dissolves for that path
+  instead of needing a transfer mechanism; fak is the in-process gate, not another
+  processor in the chain.
+- **Data-minimization as capability:** the default-deny allow-list *is* the enforced list
+  of what the agent may do with the data — a technical expression of Article 5(1)(c)
+  minimization, decided on the call path rather than promised in a policy document.
+- **Accountability and Article 12:** every decision lands in an append-only,
+  SHA-256-hash-chained journal that `fak audit verify` re-validates offline. The full
+  requirement-by-requirement mapping to the AI Act's logging obligation is in
+  [EU AI Act Article 12 conformance](../standards/eu-ai-act-article-12-conformance.md) —
+  the mechanism shipped for fak's own integrity story and happens to be the regulated
+  artifact.
+
 See the localized front doors for the in-language version of this pitch:
-[हिन्दी](../i18n/hi/README.md) · [简体中文](../i18n/zh/README.md).
+[हिन्दी](../i18n/hi/README.md) · [简体中文](../i18n/zh/README.md) ·
+[Deutsch](../i18n/de/README.md) · [français](../i18n/fr/README.md).
 
 ## What this does *not* claim
 
