@@ -586,6 +586,30 @@ page must later default to **`durable`** — it crossed the old promotion-free g
 OPPOSITE of the in-gate `turn` default for a live observation. That inverse default lands
 with rung 2's read gate; conflating the two would silently expire the existing recall store.
 
+### Disposition-minting gate — the generalization boundary, one level up (#1598)
+
+Rung 1 answers *"how long is this span true"* per write. It does not answer a narrower,
+downstream question a consolidation step can still get wrong: *may ONE situational
+observation be generalized into a standing trait about the user at all?* "I am tired
+today" is `turn`-class and correctly evicted on schedule — but nothing stopped a
+summarizer from free-associating it into "user prefers short answers" and minting THAT
+as `durable`, which is the ephemeral-promoted failure (§2) one level up: not a raw fact
+outliving its turn, but a fabricated durable belief the raw fact never supported.
+
+`internal/ctxmmu/disposition.go` closes that gap with a small, pure, additive type set —
+`Observation` (the raw remark), `Disposition` (the standing trait a caller wants to
+derive from it), `Evidence` (what backs the generalization: `EvidenceCorroboration` with
+independent corroborating observations reaching `MinCorroboration`, `EvidenceUserConfirmed`,
+or `EvidenceEstablishedPattern`) — and one pure decision function, `GateDisposition`, that
+returns a closed, typed `DispositionOutcome` (`OutcomeMinted` /
+`OutcomeRefusedUnsupported` / `OutcomeRefusedInsufficientCorroboration`). It never
+silently drops and never silently promotes. The default is refuse: a single
+observation with no evidence is `OutcomeRefusedUnsupported` regardless of how
+durable-shaped its own tense is, because one utterance minting a cross-session belief is
+the expensive direction (§4). This is a second, narrower gate that sits *above*
+`classifyDurability`, not a replacement for it — a minted `Disposition` carries
+`DurabilityDurable`, the same vocabulary rung 1 already shipped.
+
 ---
 
 ## See also
