@@ -73,6 +73,10 @@ type Violation struct {
 	Target   string `json:"target"`
 	Resolved string `json:"resolved"`
 	Why      string `json:"why"`
+	// Fix pre-fills the runnable non-interactive equivalent for an
+	// INTERACTIVE_HANG finding. omitempty keeps the OUT_OF_TREE_WRITE JSON
+	// shape byte-identical to the Python original.
+	Fix string `json:"fix,omitempty"`
 }
 
 // target is an (op, raw-path) pair extracted from a command.
@@ -633,7 +637,9 @@ func dedup(in []string) []string {
 func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, safeRoots []string) []Violation {
 	switch toolName {
 	case "Bash":
-		return classifyCommand(stringField(toolInput, "command"), workspaceRoot, safeRoots)
+		command := stringField(toolInput, "command")
+		violations := classifyCommand(command, workspaceRoot, safeRoots)
+		return append(violations, classifyInteractive(command)...)
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":
 		fp := stringField(toolInput, "file_path")
 		if fp == "" {
@@ -660,6 +666,25 @@ func stringField(m map[string]any, key string) string {
 }
 
 func renderReason(violations []Violation) string {
+	var outOfTree, interactive []Violation
+	for _, v := range violations {
+		if v.Reason == ReasonInteractiveHang {
+			interactive = append(interactive, v)
+		} else {
+			outOfTree = append(outOfTree, v)
+		}
+	}
+	var blocks []string
+	if len(outOfTree) > 0 {
+		blocks = append(blocks, renderOutOfTreeReason(outOfTree))
+	}
+	if len(interactive) > 0 {
+		blocks = append(blocks, renderInteractiveReason(interactive))
+	}
+	return strings.Join(blocks, " | ")
+}
+
+func renderOutOfTreeReason(violations []Violation) string {
 	parts := make([]string, len(violations))
 	for i, v := range violations {
 		parts[i] = v.Op + " -> " + v.Target + " (" + v.Why + ": " + v.Resolved + ")"
@@ -668,6 +693,17 @@ func renderReason(violations []Violation) string {
 		strings.Join(parts, "; ") +
 		". Operate inside the workspace, or write scratch to a temp dir. " +
 		"If this is intentional, re-run with FAK_REPO_GUARD=warn (advisory) or off."
+}
+
+func renderInteractiveReason(violations []Violation) string {
+	parts := make([]string, len(violations))
+	for i, v := range violations {
+		parts[i] = v.Op + " " + v.Why + " — fix: " + v.Fix
+	}
+	return ReasonInteractiveHang + ": this command waits for a human and this session has no TTY — a silent hang or EOF'd no-op, either way a wasted turn. " +
+		strings.Join(parts, "; ") +
+		". Re-run the suggested non-interactive form. " +
+		"If a human IS attached, re-run with FAK_REPO_GUARD=warn (advisory) or off."
 }
 
 // RenderReason formats the human-readable denial message for violations.

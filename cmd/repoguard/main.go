@@ -126,6 +126,7 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	ws := repoguard.FindRepoRoot(orCwd(workspace))
 	safeRoots := repoguard.SafeRootsForWorkspace(ws)
 	violations := repoguard.ClassifyCommand(command, ws, safeRoots)
+	violations = append(violations, repoguard.ClassifyInteractive(command)...)
 	if violations == nil {
 		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
 	}
@@ -143,7 +144,7 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	} else if len(violations) > 0 {
 		fmt.Fprintf(stdout, "DENY  %s\n", repoguard.RenderReason(violations))
 	} else {
-		fmt.Fprintf(stdout, "ALLOW  no out-of-tree write in: %s\n", command)
+		fmt.Fprintf(stdout, "ALLOW  no out-of-tree write or would-hang interactive form in: %s\n", command)
 	}
 	if len(violations) > 0 {
 		return 1
@@ -188,6 +189,12 @@ func runSelftest(stdout io.Writer) int {
 		{"Write", fp("C:/Users/u/work/fak-private-evil/x.md")},
 		{"Write", fp("C:/Users/u/work/fak-ci/x.md")},
 		{"Write", fp("C:/Users/u/.claudex/leak.md")},
+		// would-hang interactive forms (#2080): refused pre-execution.
+		{"Bash", cmd("git rebase -i HEAD~3")},
+		{"Bash", cmd("git commit")},
+		{"Bash", cmd("git add -p")},
+		{"Bash", cmd("vim cmd/fak/main.go")},
+		{"Bash", cmd("gh auth login")},
 	}
 	allow := []tc{
 		{"Bash", cmd("go build -o fak.exe ./cmd/fak")},
@@ -208,6 +215,13 @@ func runSelftest(stdout io.Writer) int {
 		{"Bash", cmd("make ci > /dev/null 2>&1")},
 		{"Bash", cmd("go test ./... > /dev/null")},
 		{"Bash", cmd("echo done >> /dev/stderr")},
+		// benign non-interactive forms of the #2080 curated set pass unchanged.
+		{"Bash", cmd(`git commit -s -m "fix(x): y" -- cmd/fak/main.go`)},
+		{"Bash", cmd("git add -- cmd/fak/main.go")},
+		{"Bash", cmd("git commit --amend --no-edit")},
+		{"Bash", cmd("gh auth login --with-token < token.txt")},
+		{"Bash", cmd("git log --oneline | less")},
+		{"Bash", cmd("GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~3")},
 	}
 
 	fails := 0
