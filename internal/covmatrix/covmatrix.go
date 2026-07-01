@@ -71,10 +71,11 @@ type Family struct {
 	Topology Topology
 	// OracleInCI is true only when a weight-free, checkpoint-independent numeric witness
 	// runs in CI for this family. Llama qualifies via the SmolLM2 anchor + Float32bits
-	// gate (refactor_test.go's legacy hand-copy web); OLMo2 via the independent
-	// HF-semantics reference in internal/model/family_cpu_oracle_test.go (#1271 Lane 1).
-	// Every other family's HF oracle is the checkpoint-gated #474 set that SKIPs under
-	// -short. This is the honest "asserted, not proven" boundary the epic names.
+	// gate (refactor_test.go's legacy hand-copy web); OLMo2 and Qwen2/3.x via the
+	// independent HF-semantics references in internal/model/family_cpu_oracle_test.go
+	// (#1271 Lane 1). Every other family's HF oracle is the checkpoint-gated #474 set
+	// that SKIPs under -short. This is the honest "asserted, not proven" boundary the
+	// epic names.
 	OracleInCI bool
 }
 
@@ -84,7 +85,7 @@ type Family struct {
 // test (covmatrix_test.go) reds the trunk on drift.
 var Families = []Family{
 	{Name: "Llama", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
-	{Name: "Qwen2/3.x", ResolverToken: "", Topology: PreNorm, OracleInCI: false},
+	{Name: "Qwen2/3.x", ResolverToken: "", Topology: PreNorm, OracleInCI: true},
 	{Name: "GPT-NeoX", ResolverToken: "gptneox", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "Falcon", ResolverToken: "falcon", Topology: ParallelResidual, OracleInCI: false},
 	{Name: "MPT", ResolverToken: "mpt", Topology: PreNorm, OracleInCI: false},
@@ -201,7 +202,7 @@ type StaleCell struct {
 
 // StaleCells returns the honest-but-incomplete residual: every cell that RUNS
 // (SUPPORTED or PROOF-PATH-ONLY) whose family carries no CI-runnable numeric
-// oracle. The OracleInCI families (Llama, OLMo2) never appear; FENCED cells
+// oracle. The OracleInCI families (Llama, Qwen2/3.x, OLMo2) never appear; FENCED cells
 // (honest refusals) and UNDEFINED cells (growth_debt) are excluded by design.
 // Output is deterministic: Grid() is already in (family, backend) order.
 func StaleCells() []StaleCell {

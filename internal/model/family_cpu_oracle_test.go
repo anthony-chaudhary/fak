@@ -349,6 +349,280 @@ func TestOlmo2CPUNumericOracle(t *testing.T) {
 	}
 }
 
+// qwenOracleCfg is the tiny Qwen2/3.x fixture config. The Qwen2/3.x covmatrix family
+// spans two HF lineages with different distinctive axes — Qwen2/2.5 carries q/k/v
+// projection BIASES (attention_bias legacy default), Qwen3 carries PER-HEAD qk-norm
+// (RMSNorm(head_dim), unlike OLMo2's full-projection-width norm) — so the oracle
+// runs one fixture per lineage through the shared PreNorm reference below.
+func qwenOracleCfg(modelType string) Config {
+	return Config{
+		HiddenSize:        24,
+		NumLayers:         3,
+		NumHeads:          4,
+		NumKVHeads:        2,
+		HeadDim:           8,
+		IntermediateSize:  40,
+		VocabSize:         53,
+		ModelType:         modelType,
+		RMSNormEps:        1e-5,
+		RopeTheta:         10000,
+		TieWordEmbeddings: true,
+	}
+}
+
+// newQwenOracleModel builds the fixture on the Qwen tensor roster (Llama names +
+// the lineage's distinctive tensors): projection biases for qwen2, per-head
+// q_norm/k_norm (length head_dim) for qwen3.
+func newQwenOracleModel(modelType string) *Model {
+	cfg := qwenOracleCfg(modelType)
+	nH, nKV, hd := cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim
+	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize
+	qwen3 := modelType == "qwen3"
+
+	type ts = synthTensor
+	var tensors []ts
+	tensors = append(tensors, ts{"model.embed_tokens.weight", []int{V, H}})
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		tensors = append(tensors,
+			ts{p + "input_layernorm.weight", []int{H}},
+			ts{p + "self_attn.q_proj.weight", []int{nH * hd, H}},
+			ts{p + "self_attn.k_proj.weight", []int{nKV * hd, H}},
+			ts{p + "self_attn.v_proj.weight", []int{nKV * hd, H}},
+			ts{p + "self_attn.o_proj.weight", []int{H, nH * hd}},
+		)
+		if qwen3 {
+			tensors = append(tensors,
+				ts{p + "self_attn.q_norm.weight", []int{hd}},
+				ts{p + "self_attn.k_norm.weight", []int{hd}},
+			)
+		} else {
+			tensors = append(tensors,
+				ts{p + "self_attn.q_proj.bias", []int{nH * hd}},
+				ts{p + "self_attn.k_proj.bias", []int{nKV * hd}},
+				ts{p + "self_attn.v_proj.bias", []int{nKV * hd}},
+			)
+		}
+		tensors = append(tensors,
+			ts{p + "post_attention_layernorm.weight", []int{H}},
+			ts{p + "mlp.gate_proj.weight", []int{I, H}},
+			ts{p + "mlp.up_proj.weight", []int{I, H}},
+			ts{p + "mlp.down_proj.weight", []int{H, I}},
+		)
+	}
+	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
+
+	man, raw := synthBuildRaw(tensors, func(name string, next func() float32) float32 {
+		if isCPUOracleNormWeight(name) {
+			return 1 + 0.25*next()
+		}
+		return synthMatmulFill(name, next)
+	})
+	return &Model{Cfg: cfg, manifest: man, raw: raw}
+}
+
+// qwenReference runs the independent Qwen2/3 forward: the HF Qwen dataflow is the
+// Llama PreNorm block — x += attn(rmsnorm(x)), x += SwiGLU(rmsnorm(x)) — with the
+// lineage axes applied explicitly: projection bias added after each q/k/v matmul
+// (Qwen2), per-head RMSNorm(head_dim) on q and k after projection, before RoPE
+// (Qwen3). Hardcoded dataflow, production machinery unused.
+func qwenReference(t *testing.T, m *Model, ids []int, qwen3 bool) [][]float32 {
+	t.Helper()
+	cfg := m.Cfg
+	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize
+	nH, nKV, hd := cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim
+	grp := nH / nKV
+	eps := float32(cfg.RMSNormEps)
+	theta := cfg.RopeTheta
+	seq := len(ids)
+
+	embed := cpuOracleTensor(t, m, "model.embed_tokens.weight")
+	x := make([][]float32, seq)
+	for tt, id := range ids {
+		x[tt] = append([]float32(nil), embed[id*H:(id+1)*H]...)
+	}
+
+	addVec := func(y, b []float32) {
+		for i := range y {
+			y[i] += b[i]
+		}
+	}
+
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		inNorm := cpuOracleTensor(t, m, p+"input_layernorm.weight")
+		wq := cpuOracleTensor(t, m, p+"self_attn.q_proj.weight")
+		wk := cpuOracleTensor(t, m, p+"self_attn.k_proj.weight")
+		wv := cpuOracleTensor(t, m, p+"self_attn.v_proj.weight")
+		wo := cpuOracleTensor(t, m, p+"self_attn.o_proj.weight")
+		postNorm := cpuOracleTensor(t, m, p+"post_attention_layernorm.weight")
+		wg := cpuOracleTensor(t, m, p+"mlp.gate_proj.weight")
+		wu := cpuOracleTensor(t, m, p+"mlp.up_proj.weight")
+		wd := cpuOracleTensor(t, m, p+"mlp.down_proj.weight")
+
+		// --- attention sub-layer, Pre-Norm: x += attn(rmsnorm(x)) ---
+		q := make([][]float32, seq)
+		k := make([][]float32, seq)
+		v := make([][]float32, seq)
+		for tt := 0; tt < seq; tt++ {
+			xn := cpuOracleRMSNorm(x[tt], inNorm, eps)
+			q[tt] = cpuOracleMatVec(wq, xn, nH*hd, H)
+			k[tt] = cpuOracleMatVec(wk, xn, nKV*hd, H)
+			v[tt] = cpuOracleMatVec(wv, xn, nKV*hd, H)
+			if qwen3 {
+				// HF Qwen3: RMSNorm(head_dim) per head on q and k, before RoPE.
+				qnw := cpuOracleTensor(t, m, p+"self_attn.q_norm.weight")
+				knw := cpuOracleTensor(t, m, p+"self_attn.k_norm.weight")
+				for h := 0; h < nH; h++ {
+					copy(q[tt][h*hd:(h+1)*hd], cpuOracleRMSNorm(q[tt][h*hd:(h+1)*hd], qnw, eps))
+				}
+				for h := 0; h < nKV; h++ {
+					copy(k[tt][h*hd:(h+1)*hd], cpuOracleRMSNorm(k[tt][h*hd:(h+1)*hd], knw, eps))
+				}
+			} else {
+				// HF Qwen2: q/k/v projections carry biases.
+				addVec(q[tt], cpuOracleTensor(t, m, p+"self_attn.q_proj.bias"))
+				addVec(k[tt], cpuOracleTensor(t, m, p+"self_attn.k_proj.bias"))
+				addVec(v[tt], cpuOracleTensor(t, m, p+"self_attn.v_proj.bias"))
+			}
+			for h := 0; h < nH; h++ {
+				cpuOracleRope(q[tt][h*hd:(h+1)*hd], tt, hd, theta)
+			}
+			for h := 0; h < nKV; h++ {
+				cpuOracleRope(k[tt][h*hd:(h+1)*hd], tt, hd, theta)
+			}
+		}
+		scale := float32(1.0 / math.Sqrt(float64(hd)))
+		for tt := 0; tt < seq; tt++ {
+			concat := make([]float32, nH*hd)
+			for h := 0; h < nH; h++ {
+				kvh := h / grp
+				qh := q[tt][h*hd : (h+1)*hd]
+				scores := make([]float32, tt+1)
+				for j := 0; j <= tt; j++ {
+					kh := k[j][kvh*hd : (kvh+1)*hd]
+					var s float32
+					for d := 0; d < hd; d++ {
+						s += qh[d] * kh[d]
+					}
+					scores[j] = s * scale
+				}
+				cpuOracleSoftmax(scores)
+				o := concat[h*hd : (h+1)*hd]
+				for j := 0; j <= tt; j++ {
+					vh := v[j][kvh*hd : (kvh+1)*hd]
+					for d := 0; d < hd; d++ {
+						o[d] += scores[j] * vh[d]
+					}
+				}
+			}
+			attnOut := cpuOracleMatVec(wo, concat, H, nH*hd)
+			for i := 0; i < H; i++ {
+				x[tt][i] += attnOut[i]
+			}
+		}
+
+		// --- MLP sub-layer, Pre-Norm: x += SwiGLU(rmsnorm(x)) ---
+		for tt := 0; tt < seq; tt++ {
+			xn := cpuOracleRMSNorm(x[tt], postNorm, eps)
+			gate := cpuOracleMatVec(wg, xn, I, H)
+			up := cpuOracleMatVec(wu, xn, I, H)
+			for i := 0; i < I; i++ {
+				gate[i] = cpuOracleSilu(gate[i]) * up[i]
+			}
+			mlpOut := cpuOracleMatVec(wd, gate, H, I)
+			for i := 0; i < H; i++ {
+				x[tt][i] += mlpOut[i]
+			}
+		}
+	}
+
+	norm := cpuOracleTensor(t, m, "model.norm.weight")
+	logits := make([][]float32, seq)
+	for tt := 0; tt < seq; tt++ {
+		xf := cpuOracleRMSNorm(x[tt], norm, eps)
+		logits[tt] = cpuOracleMatVec(embed, xf, V, H)
+	}
+	return logits
+}
+
+// TestQwenCPUNumericOracle is the Qwen2/3.x×cpu M4 witness: one lineage fixture per
+// distinctive axis (qwen2 projection bias, qwen3 per-head qk-norm), each gated
+// against the independent reference on prefill (every position) and decode.
+func TestQwenCPUNumericOracle(t *testing.T) {
+	for _, lineage := range []struct {
+		modelType string
+		qwen3     bool
+	}{
+		{"qwen2", false},
+		{"qwen3", true},
+	} {
+		t.Run(lineage.modelType, func(t *testing.T) {
+			m := newQwenOracleModel(lineage.modelType)
+			if err := m.Cfg.deriveConfigAxes(configJSONHints{}); err != nil {
+				t.Fatalf("deriveConfigAxes: %v", err)
+			}
+			if m.Cfg.BlockTopology != PreNorm {
+				t.Fatalf("%s derived topology = %v, want PreNorm", lineage.modelType, m.Cfg.BlockTopology)
+			}
+			if lineage.qwen3 && !m.Cfg.QKNorm {
+				t.Fatal("qwen3 derived QKNorm = false, want true")
+			}
+			if !lineage.qwen3 && !m.Cfg.AttentionBias {
+				t.Fatal("qwen2 derived AttentionBias = false, want true (legacy projection-bias default)")
+			}
+
+			ids := []int{3, 17, 5, 23, 41, 2, 19}
+			ref := qwenReference(t, m, ids, lineage.qwen3)
+
+			act := m.Forward(ids)
+			for tt := range ids {
+				if d := cpuOracleMaxAbsDiff(act.Logits[tt], ref[tt]); d > cpuOracleTol {
+					t.Errorf("Forward logits pos %d: max|delta| vs reference = %.3e (tol %.0e)", tt, d, cpuOracleTol)
+				}
+			}
+
+			s := m.NewSession()
+			pf := s.Prefill(ids)
+			if d := cpuOracleMaxAbsDiff(pf, ref[len(ids)-1]); d > cpuOracleTol {
+				t.Errorf("Prefill last logits: max|delta| vs reference = %.3e (tol %.0e)", d, cpuOracleTol)
+			}
+			next := 11
+			st := s.Step(next)
+			extRef := qwenReference(t, m, append(append([]int(nil), ids...), next), lineage.qwen3)
+			if d := cpuOracleMaxAbsDiff(st, extRef[len(ids)]); d > cpuOracleTol {
+				t.Errorf("Step logits: max|delta| vs reference = %.3e (tol %.0e)", d, cpuOracleTol)
+			}
+		})
+	}
+}
+
+// TestQwenCPUNumericOracleIsSensitive proves the Qwen reference comparison is
+// non-vacuous: perturbing one qwen3 k_norm gain must red the gate.
+func TestQwenCPUNumericOracleIsSensitive(t *testing.T) {
+	m := newQwenOracleModel("qwen3")
+	if err := m.Cfg.deriveConfigAxes(configJSONHints{}); err != nil {
+		t.Fatalf("deriveConfigAxes: %v", err)
+	}
+	ids := []int{3, 17, 5, 23, 41, 2, 19}
+	ref := qwenReference(t, m, ids, true)
+
+	meta := m.manifest["model.layers.0.self_attn.k_norm.weight"]
+	orig := math.Float32frombits(binary.LittleEndian.Uint32(m.raw[meta.Offset:]))
+	binary.LittleEndian.PutUint32(m.raw[meta.Offset:], math.Float32bits(orig+0.5))
+
+	act := m.Forward(ids)
+	var worst float64
+	for tt := range ids {
+		if d := cpuOracleMaxAbsDiff(act.Logits[tt], ref[tt]); d > worst {
+			worst = d
+		}
+	}
+	if worst <= cpuOracleTol {
+		t.Fatalf("perturbed fixture still within tolerance (max|delta|=%.3e) — the oracle is vacuous", worst)
+	}
+}
+
 // TestOlmo2CPUNumericOracleIsSensitive proves the oracle is non-vacuous: perturbing
 // ONE weight element must move the compared logits by far more than the tolerance.
 // A comparison that stays green under a perturbed fixture would be a fake witness.
