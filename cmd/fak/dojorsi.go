@@ -381,7 +381,7 @@ func parseDojoRSILoopFlags(fs *flag.FlagSet, oneShot bool) *dojoRSILoopOpts {
 	fs.StringVar(&opts.WitnessJSON, "witness", "", "JSON witness object not authored by the loop, e.g. {\"ok\":true}")
 	fs.StringVar(&opts.Now, "now", "", "pin run time (RFC3339 or YYYY-MM-DD)")
 	fs.IntVar(&opts.K, "k", 3, "breaker: ESCALATE after K consecutive non-keeps")
-	fs.IntVar(&opts.MinSample, "min-sample", dojocal.DefaultMinSample, "minimum measured samples for a RECALIBRATE KEEP")
+	fs.IntVar(&opts.MinSample, "min-sample", dojocal.DefaultMinSample, "global minimum measured samples for a RECALIBRATE KEEP; per-cell policy may raise it")
 	fs.BoolVar(&opts.AppendJournal, "append-journal", true, "append the tick(s) to the dojo-RSI journal")
 	fs.BoolVar(&opts.AsJSON, "json", false, "emit JSON")
 	fs.BoolVar(&opts.DosObserve, "dos-observe", false, "emit dos improve --observe receipts (record-only telemetry)")

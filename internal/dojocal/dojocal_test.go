@@ -1,6 +1,7 @@
 package dojocal
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dojo"
@@ -206,6 +207,46 @@ func TestRevertOnFloorTarget(t *testing.T) {
 	}
 }
 
+func TestNeverRecalibrateRoutesWithoutFloorFlag(t *testing.T) {
+	// A malformed report dropped IntentionalFloor, but false_warm_rate is still a
+	// deny-listed guard. It must route to the floor arm, not become a mechanical
+	// RECALIBRATE just because the flag is absent.
+	eps := []dojo.Episode{
+		scoreEp(t, "vcache-warmth", "false_warm_rate", 0.0, 0.30, 6, false, true),
+		scoreEp(t, "vcache-warmth", "false_warm_rate", 0.0, 0.20, 6, false, true),
+	}
+	r := report(eps)
+	pl := ProposeRecals(r)
+
+	if pl.Worst.Kind != RouteFloor {
+		t.Fatalf("false_warm_rate kind = %s, want ROUTE_FLOOR from NeverRecalibrate (%+v)", pl.Worst.Kind, pl.Worst)
+	}
+	if !pl.Worst.NeverRecalibrate {
+		t.Fatalf("false_warm_rate should carry NeverRecalibrate marker: %+v", pl.Worst)
+	}
+	for _, c := range pl.Candidates {
+		if c.Lever == "vcache-warmth" && c.Metric == "false_warm_rate" && c.Kind == RecalibrateKind {
+			t.Fatalf("deny-listed metric was proposed as RECALIBRATE: %+v", c)
+		}
+	}
+
+	forced := pl.Worst
+	forced.Kind = RecalibrateKind
+	forced.NewClaimed = forced.MeasuredMean
+	forced.IntentionalFloor = false
+	forced.NeverRecalibrate = false
+	it := RunIteration(r, forced, 1, map[string]any{"ok": true})
+	if it.Kept {
+		t.Fatalf("forced NeverRecalibrate candidate kept: %+v", it)
+	}
+	if !it.Candidate.NeverRecalibrate {
+		t.Fatalf("forced deny-list iteration should mark candidate NeverRecalibrate: %+v", it.Candidate)
+	}
+	if !strings.Contains(it.Reason, "NeverRecalibrate") {
+		t.Fatalf("forced deny-list revert reason should cite NeverRecalibrate, got %q", it.Reason)
+	}
+}
+
 // TestRefuseOnUnmeasuredCorpus — a corpus with no ground truth is uncandidatable:
 // the proposer surfaces a ROUTE_UNMEASURED floor and RunIteration refuses it.
 func TestRefuseOnUnmeasuredCorpus(t *testing.T) {
@@ -253,6 +294,43 @@ func TestRevertWithoutWitness(t *testing.T) {
 	tooFew := RunIteration(r, pl.Worst, 99, map[string]any{"ok": true})
 	if tooFew.Kept {
 		t.Fatalf("kept with sample %d below min 99: %+v", pl.Worst.Sample, tooFew)
+	}
+}
+
+func TestPerCellMinSampleOverrideBlocksSparseLever(t *testing.T) {
+	eps := []dojo.Episode{
+		scoreEp(t, "compaction", "token_shed_ratio", 0.80, 0.30, 1, false, false),
+		scoreEp(t, "compaction", "token_shed_ratio", 0.80, 0.40, 1, false, false),
+		scoreEp(t, "compaction", "token_shed_ratio", 0.80, 0.50, 1, false, false),
+	}
+	r := report(eps)
+	pl := ProposeRecals(r)
+	if pl.Worst.Kind != RecalibrateKind {
+		t.Fatalf("sparse lever candidate kind = %s, want RECALIBRATE (%+v)", pl.Worst.Kind, pl.Worst)
+	}
+	if pl.Worst.MinSample != SparseLeverMinSample {
+		t.Fatalf("sparse lever min sample = %d, want %d", pl.Worst.MinSample, SparseLeverMinSample)
+	}
+
+	it := RunIteration(r, pl.Worst, DefaultMinSample, map[string]any{"ok": true})
+	if it.Kept {
+		t.Fatalf("sparse lever kept with sample %d below min %d: %+v", pl.Worst.Sample, it.MinSample, it)
+	}
+	if it.MinSample != SparseLeverMinSample {
+		t.Fatalf("iteration min sample = %d, want sparse override %d", it.MinSample, SparseLeverMinSample)
+	}
+	if it.MeasuredDelta <= 0 {
+		t.Fatalf("expected a real gain so the revert is sample-floor driven, delta=%v reason=%s", it.MeasuredDelta, it.Reason)
+	}
+	if !strings.Contains(it.Reason, "min 6") {
+		t.Fatalf("sparse floor reason should name min 6, got %q", it.Reason)
+	}
+
+	fabricated := it
+	fabricated.Kept = true
+	v := CheckIteration(fabricated)
+	if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), "sample 3 < min 6") {
+		t.Fatalf("fabricated sparse keep violations = %v, want sample-floor failure", v)
 	}
 }
 

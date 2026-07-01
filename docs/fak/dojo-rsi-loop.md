@@ -84,13 +84,19 @@ the scalar gain plus the suite/truth witnesses above.
    disjoint corpus shards** — overfitting the seen shard raises `calib_err` on the held-out one
    and REVERTs. (b) For a floor, `IntentionalFloor` flips the sign of incentive (closing the gap
    *raises* `FloorRespectErr`).
-3. **`Claimed := Realized` is not free.** The estimate levers carry pinned-claim tests; a
+3. **Safety floors are deny-listed independently of report flags.** `false_warm_rate` is
+   `NeverRecalibrate`: even if a malformed report drops `IntentionalFloor`, the proposer routes
+   it to the floor arm and the keep gate refuses any forced `RECALIBRATE` swap.
+4. **Sparse levers owe stricter sample floors.** The global `DefaultMinSample` is only a lower
+   bound; cells such as `compaction/token_shed_ratio` can require a higher `MinSample` before a
+   mechanical recalibration may KEEP.
+5. **`Claimed := Realized` is not free.** The estimate levers carry pinned-claim tests; a
    silent rewrite turns the suite RED → REVERT. An honest recalibration updates the test too —
    a two-file change, so mechanical `treeChangedOnly` forbids it and routes it to the agent arm.
-4. **UNMEASURED is uncandidatable by construction.** `compaction` returns `Measured:false`;
+6. **UNMEASURED is uncandidatable by construction.** `compaction` returns `Measured:false`;
    `Fold` skips it, the board never lists it, and the candidate picker can only select a
    measured, non-floor episode. The honesty constraint is structural.
-5. **Per-lever non-regression.** A big drop on a noisy lever cannot mask a small regression on a
+7. **Per-lever non-regression.** A big drop on a noisy lever cannot mask a small regression on a
    critical one — the gate also requires no per-lever `calib_err` increase between Before/After.
 
 ## The candidate + the mechanical/agent split
@@ -104,8 +110,10 @@ type Recal struct {
     OldClaimed, NewClaimed float64
     MeasuredMean           float64
     Sample                 int
+    MinSample              int    // effective per-cell floor
     Verdict                string // OVER_CLAIM | UNDER_CLAIM
     IntentionalFloor       bool   // mirrored from the Prediction; gates routing
+    NeverRecalibrate       bool   // structural deny-list, independent of the flag
 }
 ```
 

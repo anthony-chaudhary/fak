@@ -4,8 +4,8 @@
 // pointed at the dojo's calibration journal instead of the guard's verdict
 // journal: where guardrsi folds a verdict journal and proposes the worst-bucket
 // honesty hole, dojocal folds a dojo report's scored episodes (reusing
-// dojo.BoardFromEpisodes) and proposes the worst-calibrated MEASURED, NON-FLOOR
-// (lever, metric) cell to recalibrate.
+// dojo.BoardFromEpisodes) and proposes the worst-calibrated MEASURED,
+// NON-DENY-LISTED, NON-FLOOR (lever, metric) cell to recalibrate.
 //
 // What makes the loop safe to run unattended is what it does NOT do: it never
 // opens a worktree, never rewrites a claim literal, never touches a file. It
@@ -20,10 +20,11 @@
 // check here: an INTENTIONAL FLOOR (false_warm_rate must stay 0.0) folds by its
 // breach, not its calib_err, so "recalibrating" a floor up to its empirical rate
 // RAISES the fold and is reverted. The candidate picker refuses to target a floor
-// at all (it is routed, never recalibrated), and dojo.FoldCalibrable refuses to
-// fold an UNMEASURED episode — so the two ways the loop could optimise itself into
-// dishonesty are both closed by construction, the same way guardrsi can only ever
-// repair an honesty hole and never invent a row.
+// at all (it is routed, never recalibrated). A small NeverRecalibrate deny-list
+// repeats that safety rule independently of the episode's IntentionalFloor bit,
+// and dojo.FoldCalibrable refuses to fold an UNMEASURED episode — so the ways the
+// loop could optimise itself into dishonesty are closed by construction, the same
+// way guardrsi can only ever repair an honesty hole and never invent a row.
 package dojocal
 
 import (
@@ -45,7 +46,44 @@ const (
 	// guard's worst-bucket loop has no analogue (a journal row is its own witness);
 	// the dojo's claim is a population estimate, so it owes a sample floor.
 	DefaultMinSample = 3
+	// SparseLeverMinSample is the stricter floor for sparse, high-variance dojo
+	// levers whose corpus has fewer natural boundaries than resume-posture.
+	SparseLeverMinSample = 6
 )
+
+// MinSampleOverride reports a stricter per-(lever,metric) sample floor. Absence
+// means the caller's requested floor (or DefaultMinSample) is sufficient.
+func MinSampleOverride(lever, metric string) (int, bool) {
+	switch [2]string{lever, metric} {
+	case [2]string{"compaction", "token_shed_ratio"}:
+		return SparseLeverMinSample, true
+	default:
+		return 0, false
+	}
+}
+
+// EffectiveMinSample returns the sample floor for a candidate cell. The caller's
+// requested floor is a global lower bound; per-cell policy can only raise it.
+func EffectiveMinSample(lever, metric string, requested int) int {
+	if requested <= 0 {
+		requested = DefaultMinSample
+	}
+	if override, ok := MinSampleOverride(lever, metric); ok && override > requested {
+		return override
+	}
+	return requested
+}
+
+// NeverRecalibrateReason reports metrics that must never be converted into a
+// RECALIBRATE claim swap, even if a malformed report omits IntentionalFloor.
+func NeverRecalibrateReason(lever, metric string) (string, bool) {
+	switch [2]string{lever, metric} {
+	case [2]string{"vcache-warmth", "false_warm_rate"}:
+		return "false_warm_rate is the lethal false-warm floor: a believed-warm call that bills cache_read=0 must stay pinned at claim 0.0", true
+	default:
+		return "", false
+	}
+}
 
 // RecalKind names what a proposal asks for, mirroring the design doc's split
 // (docs/fak/dojo-rsi-loop.md "The candidate"). Only RECALIBRATE is self-KEEPable
@@ -88,6 +126,8 @@ type Recal struct {
 	MeasuredMean float64 `json:"measured_mean"`
 	// Sample is how many measured episodes stand behind MeasuredMean.
 	Sample int `json:"sample"`
+	// MinSample is the effective sample floor this cell must clear to KEEP.
+	MinSample int `json:"min_sample"`
 	// Verdict is the worst measured episode's verdict for this cell (OVER_CLAIM /
 	// UNDER_CLAIM / CALIBRATED), carried for the operator's context.
 	Verdict string `json:"verdict"`
@@ -97,6 +137,9 @@ type Recal struct {
 	// IntentionalFloor is mirrored from the episode so a reader can see at a glance
 	// why a ROUTE_FLOOR candidate is routed rather than recalibrated.
 	IntentionalFloor bool `json:"intentional_floor"`
+	// NeverRecalibrate marks a safety-critical deny-list entry whose claim may not
+	// be swapped even if the input report accidentally drops IntentionalFloor.
+	NeverRecalibrate bool `json:"never_recalibrate,omitempty"`
 	// Reason is the one-line rationale (why this cell, why this kind).
 	Reason string `json:"reason"`
 	// DeclaredPaths is the path allow-list the agent arm must stay within for a
@@ -135,10 +178,11 @@ type cell struct {
 //
 // It is pure and total. For each MEASURED, NON-FLOOR (lever, metric) cell it
 // proposes a RECALIBRATE re-pointing the claim at the cell's measured mean; an
-// INTENTIONAL FLOOR cell is emitted as a ROUTE_FLOOR (never a claim swap — a
-// floor breach is a bug to escalate, the design's structural anti-gaming rule);
-// a lever whose episodes were ALL UNMEASURED contributes a ROUTE_UNMEASURED so the
-// floor of the honesty constraint is visible rather than silently dropped.
+// explicit NeverRecalibrate entry or INTENTIONAL FLOOR cell is emitted as a
+// ROUTE_FLOOR (never a claim swap — a floor breach is a bug to escalate, the
+// design's structural anti-gaming rule); a lever whose episodes were ALL
+// UNMEASURED contributes a ROUTE_UNMEASURED so the floor of the honesty
+// constraint is visible rather than silently dropped.
 // Candidates are sorted worst-first by calib_err (a measured recalibration always
 // ahead of a routed one), then lever, then metric, for determinism.
 func ProposeRecals(r dojo.Report) ProposePayload {
@@ -166,6 +210,9 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 			cells[key] = c
 			order = append(order, key)
 		}
+		if e.IntentionalFloor {
+			c.intentionalFloor = true
+		}
 		c.anyMeasured = true
 		c.measured++
 		c.sumRealized += e.Realized
@@ -185,11 +232,17 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 			OldClaimed:       c.oldClaimed,
 			MeasuredMean:     mean,
 			Sample:           c.measured,
+			MinSample:        EffectiveMinSample(c.lever, c.metric, DefaultMinSample),
 			Verdict:          c.worstVerdict,
 			CalibErr:         mathx.Round3(c.worstCalibErr),
 			IntentionalFloor: c.intentionalFloor,
 		}
-		if c.intentionalFloor {
+		if reason, denied := NeverRecalibrateReason(c.lever, c.metric); denied {
+			rc.Kind = RouteFloor
+			rc.NewClaimed = c.oldClaimed // never swap a deny-listed floor's claim
+			rc.NeverRecalibrate = true
+			rc.Reason = fmt.Sprintf("%s/%s is in NeverRecalibrate (%s); routed, not kept, even if IntentionalFloor is absent from the report", c.lever, c.metric, reason)
+		} else if c.intentionalFloor {
 			rc.Kind = RouteFloor
 			rc.NewClaimed = c.oldClaimed // never swap a floor's claim
 			rc.Reason = fmt.Sprintf("%s/%s is an intentional floor (claim %.3g) — a breach is a belief-code bug to escalate, never a recalibration; routed, not kept", c.lever, c.metric, c.oldClaimed)
@@ -205,7 +258,7 @@ func ProposeRecals(r dojo.Report) ProposePayload {
 		} else {
 			rc.Kind = RecalibrateKind
 			rc.NewClaimed = mean
-			rc.Reason = fmt.Sprintf("re-point %s/%s estimate from %.3g toward its corpus mean %.3g (worst calib_err %.3g over %d sample(s), %s)", c.lever, c.metric, c.oldClaimed, mean, rc.CalibErr, c.measured, c.worstVerdict)
+			rc.Reason = fmt.Sprintf("re-point %s/%s estimate from %.3g toward its corpus mean %.3g (worst calib_err %.3g over %d sample(s), min %d, %s)", c.lever, c.metric, c.oldClaimed, mean, rc.CalibErr, c.measured, rc.MinSample, c.worstVerdict)
 		}
 		candidates = append(candidates, rc)
 	}
@@ -336,10 +389,16 @@ type Iteration struct {
 // closing the gap RAISES Value (negative delta) and REVERTs — the structural
 // guarantee, surfaced here as a normal no-strict-gain revert. An UNMEASURED-routed
 // or floor-routed candidate is refused before any replay (it carries no swap).
-// minSample<=0 falls back to DefaultMinSample.
+// minSample<=0 falls back to DefaultMinSample; per-cell policy can only raise it.
 func RunIteration(r dojo.Report, candidate Recal, minSample int, witness map[string]any) Iteration {
-	if minSample <= 0 {
-		minSample = DefaultMinSample
+	minSample = EffectiveMinSample(candidate.Lever, candidate.Metric, minSample)
+	if candidate.MinSample > minSample {
+		minSample = candidate.MinSample
+	}
+	candidate.MinSample = minSample
+	denyReason, denyListed := NeverRecalibrateReason(candidate.Lever, candidate.Metric)
+	if denyListed {
+		candidate.NeverRecalibrate = true
 	}
 	base := dojo.FoldCalibrable(r.Episodes)
 	it := Iteration{
@@ -351,6 +410,13 @@ func RunIteration(r dojo.Report, candidate Recal, minSample int, witness map[str
 		MinSample:      minSample,
 		Witness:        witness,
 		KeepRevertRule: "KEEP iff measured-rows>0 AND replayed FoldCalibrable.Value strictly LOWER than baseline AND candidate sample >= minSample AND an external witness (suite green) confirms no regression; else REVERT. A floor target raises Value (breach folded) and an unmeasured corpus is uncandidatable — both REVERT by construction. Worst-cell-first.",
+	}
+
+	if denyListed {
+		it.ReplayedFold = base
+		it.ReplayedValue = base.Value
+		it.Reason = fmt.Sprintf("REVERT: %s/%s is in NeverRecalibrate (%s); recalibrating it would erase a safety-critical guard even if the report omitted IntentionalFloor", candidate.Lever, candidate.Metric, denyReason)
+		return it
 	}
 
 	// A routed candidate carries no claim swap — refuse before any replay.
@@ -506,9 +572,12 @@ func CheckIteration(it Iteration) []string {
 	if it.ReplayedFold.FloorBreachErr > it.BaselineFold.FloorBreachErr+epsilon {
 		out = append(out, fmt.Sprintf("kept=true but the floor-breach term ROSE (%.4g -> %.4g) — a kept iteration may never raise a floor breach", it.BaselineFold.FloorBreachErr, it.ReplayedFold.FloorBreachErr))
 	}
-	min := it.MinSample
-	if min <= 0 {
-		min = DefaultMinSample
+	if reason, denied := NeverRecalibrateReason(it.Candidate.Lever, it.Candidate.Metric); denied {
+		out = append(out, fmt.Sprintf("kept=true on NeverRecalibrate cell %s/%s (%s)", it.Candidate.Lever, it.Candidate.Metric, reason))
+	}
+	min := EffectiveMinSample(it.Candidate.Lever, it.Candidate.Metric, it.MinSample)
+	if it.Candidate.MinSample > min {
+		min = it.Candidate.MinSample
 	}
 	if it.Candidate.Sample < min {
 		out = append(out, fmt.Sprintf("kept=true with sample %d < min %d — a recalibration fitted to too few boundaries", it.Candidate.Sample, min))
