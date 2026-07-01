@@ -186,6 +186,71 @@ func TestShapeWitnessEndToEndConfirmsCoherent(t *testing.T) {
 	}
 }
 
+func TestBeatTaskWithEvidenceShapeWitnessRefusesDegenerateOutput(t *testing.T) {
+	m := NewManager()
+	task, err := m.StartTask(TaskSpec{TaskID: "task_beat_shape"})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	garbage := []byte(strings.Repeat("LOOP ", 80))
+	rec, err := task.BeatWithEvidence(garbage)
+	if err != nil {
+		t.Fatalf("beat with evidence: %v", err)
+	}
+	if rec.VerifiedState != VerifiedRefused {
+		t.Fatalf("beat witness = %q, want verified_refused", rec.VerifiedState)
+	}
+
+	got := m.Snapshot().Tasks[0]
+	if got.BeatsSeen != 1 || got.LivenessClass != LivenessLive {
+		t.Fatalf("beat state = %d/%s, want one live beat", got.BeatsSeen, got.LivenessClass)
+	}
+	if got.Witness == nil || got.Witness.VerifiedState != VerifiedRefused {
+		t.Fatalf("task witness = %+v, want verified_refused", got.Witness)
+	}
+	if got.VerifiedProgressing() {
+		t.Fatalf("beat-time shape refusal must flip VerifiedProgressing() false")
+	}
+	if b, _ := json.Marshal(got.Witness); strings.Contains(string(b), strings.Repeat("LOOP ", 20)) {
+		t.Fatalf("beat witness JSON dumped raw output: %s", b)
+	}
+}
+
+func TestBeatStepWithEvidenceShapeWitnessRefusesDegenerateOutput(t *testing.T) {
+	m := NewManager()
+	task, err := m.StartTask(TaskSpec{TaskID: "task_step_beat_shape"})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	step, err := task.StartStep(StepSpec{StepID: "step_beat_shape"})
+	if err != nil {
+		t.Fatalf("start step: %v", err)
+	}
+
+	rec, err := step.BeatWithEvidence([]byte(strings.Repeat("BAD ", 90)))
+	if err != nil {
+		t.Fatalf("step beat with evidence: %v", err)
+	}
+	if rec.VerifiedState != VerifiedRefused {
+		t.Fatalf("step beat witness = %q, want verified_refused", rec.VerifiedState)
+	}
+
+	got := m.Snapshot().Tasks[0]
+	if got.BeatsSeen != 1 || got.Steps[0].BeatsSeen != 1 {
+		t.Fatalf("beats task/step = %d/%d, want 1/1", got.BeatsSeen, got.Steps[0].BeatsSeen)
+	}
+	if got.Steps[0].Witness == nil || got.Steps[0].Witness.VerifiedState != VerifiedRefused {
+		t.Fatalf("step witness = %+v, want verified_refused", got.Steps[0].Witness)
+	}
+	if got.Steps[0].VerifiedProgressing() {
+		t.Fatalf("step refusal must flip step VerifiedProgressing() false")
+	}
+	if got.VerifiedProgressing() {
+		t.Fatalf("refused step witness must flip parent task VerifiedProgressing() false")
+	}
+}
+
 // TestVerifiedProgressingDerivation pins the derived view directly: only a witness
 // that ran and REFUSED flips the bit to false; a claimed-only task and every other
 // verified state report as progressing. The method is read-only — it reads State and
@@ -202,6 +267,7 @@ func TestVerifiedProgressingDerivation(t *testing.T) {
 		{"running + unavailable", TaskSnapshot{State: StateRunning, Witness: &WitnessRecord{VerifiedState: VerifiedUnavailable}}, true},
 		{"running + unknown", TaskSnapshot{State: StateRunning, Witness: &WitnessRecord{VerifiedState: VerifiedUnknown}}, true},
 		{"done + refused", TaskSnapshot{State: StateDone, Witness: &WitnessRecord{VerifiedState: VerifiedRefused}}, false},
+		{"child step refused", TaskSnapshot{State: StateRunning, Steps: []StepSnapshot{{Witness: &WitnessRecord{VerifiedState: VerifiedRefused}}}}, false},
 	}
 	for _, tc := range cases {
 		if got := tc.ts.VerifiedProgressing(); got != tc.want {

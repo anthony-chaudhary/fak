@@ -170,6 +170,37 @@ func (m *Manager) WitnessTask(taskID string, w Witness, refs []EvidenceRef) (Wit
 	return rec, nil
 }
 
+// WitnessStep builds a Claim from the step's current claimed state plus refs, runs
+// w against it (outside the lock, so a witness may do I/O), stores the resulting
+// record, and returns it. The claimed State is never overwritten.
+func (m *Manager) WitnessStep(taskID, stepID string, w Witness, refs []EvidenceRef) (WitnessRecord, error) {
+	if w == nil {
+		return WitnessRecord{}, fmt.Errorf("taskmgr: nil witness")
+	}
+	m.mu.Lock()
+	task, ok := m.tasks[taskID]
+	if !ok {
+		m.mu.Unlock()
+		return WitnessRecord{}, fmt.Errorf("taskmgr: task %q not found", taskID)
+	}
+	step, ok := task.steps[stepID]
+	if !ok {
+		m.mu.Unlock()
+		return WitnessRecord{}, fmt.Errorf("taskmgr: step %q not found on task %q", stepID, taskID)
+	}
+	claim := Claim{TaskID: taskID, StepID: stepID, State: step.state, Refs: refs}
+	m.mu.Unlock()
+
+	rec := w.WitnessClaim(claim)
+	if rec.CheckedUnixNano == 0 {
+		rec.CheckedUnixNano = m.clock().UnixNano()
+	}
+	if err := m.SetStepWitness(taskID, stepID, rec); err != nil {
+		return WitnessRecord{}, err
+	}
+	return rec, nil
+}
+
 // originWitnessRecord grades task/step evidence at record creation time when the
 // manager has an origin witness configured. No witness or no refs stays nil so the
 // legacy claimed-only path is byte-stable for existing callers.

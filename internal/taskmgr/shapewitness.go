@@ -157,9 +157,8 @@ func boundText(s string) string {
 
 // VerifiedProgressing reports whether the task is making REAL progress, as opposed to
 // "advancing on garbage". It is a read-only DERIVED view over the claimed State and
-// the witness rung beside it: it never mutates either. The answer is true UNLESS a
-// witness ran and refused — i.e. it is false exactly when t.Witness != nil &&
-// t.Witness.VerifiedState == VerifiedRefused.
+// witness rungs beside it: it never mutates either. The answer is true UNLESS a
+// task or child-step witness ran and refused.
 //
 // That single refused case is the "alive but emitting garbage" signal: a task can be
 // StateRunning and beating (liveness says live) while a ShapeWitness has graded its
@@ -170,5 +169,23 @@ func boundText(s string) string {
 // all reported as progressing — only an affirmative refusal flips the bit, so the
 // derived view never invents a problem the witness did not attest.
 func (t TaskSnapshot) VerifiedProgressing() bool {
-	return !(t.Witness != nil && t.Witness.VerifiedState == VerifiedRefused)
+	if witnessRefused(t.Witness) {
+		return false
+	}
+	for _, step := range t.Steps {
+		if !step.VerifiedProgressing() {
+			return false
+		}
+	}
+	return true
+}
+
+// VerifiedProgressing reports whether the step is making REAL progress by the
+// same refused-witness rule TaskSnapshot uses.
+func (s StepSnapshot) VerifiedProgressing() bool {
+	return !witnessRefused(s.Witness)
+}
+
+func witnessRefused(w *WitnessRecord) bool {
+	return w != nil && w.VerifiedState == VerifiedRefused
 }
