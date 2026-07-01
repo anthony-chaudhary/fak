@@ -75,6 +75,95 @@ func TestRespectsExistingBreakpointInMessages(t *testing.T) {
 	}
 }
 
+func TestUpgradeStableCacheTTL1hOnSystemBreakpoint(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"stable head","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"recent","cache_control":{"type":"ephemeral"}}]}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonNone || oc.Target != "system" {
+		t.Fatalf("outcome = %+v, want system upgrade", oc)
+	}
+	if !bytes.Contains(out, []byte(`"cache_control":{"type":"ephemeral","ttl":"1h"}`)) {
+		t.Fatalf("system cache_control was not upgraded to 1h:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte(`"text":"recent","cache_control":{"type":"ephemeral"}`)) {
+		t.Fatalf("message-tail breakpoint must stay 5m:\n%s", out)
+	}
+	cc := bytes.Index(raw, []byte(`"cache_control"`))
+	if cc < 0 {
+		t.Fatal("fixture sanity: missing cache_control")
+	}
+	if !bytes.Equal(raw[:cc], out[:cc]) {
+		t.Fatalf("bytes before cache_control object changed:\nraw=%s\nout=%s", raw[:cc], out[:cc])
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("upgraded body failed to re-decode: %v", err)
+	}
+}
+
+func TestUpgradeStableCacheTTL1hOnToolsBreakpoint(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"tools":[{"name":"search","description":"stable","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonNone || oc.Target != "tools" {
+		t.Fatalf("outcome = %+v, want tools upgrade", oc)
+	}
+	if !bytes.Contains(out, []byte(`"cache_control":{"type":"ephemeral","ttl":"1h"}`)) {
+		t.Fatalf("tools cache_control was not upgraded to 1h:\n%s", out)
+	}
+	cc := bytes.Index(raw, []byte(`"cache_control"`))
+	if cc < 0 {
+		t.Fatal("fixture sanity: missing cache_control")
+	}
+	if !bytes.Equal(raw[:cc], out[:cc]) {
+		t.Fatalf("bytes before cache_control object changed:\nraw=%s\nout=%s", raw[:cc], out[:cc])
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("upgraded body failed to re-decode: %v", err)
+	}
+}
+
+func TestUpgradeStableCacheTTL1hIgnoresMessageOnlyBreakpoint(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"stable but unmarked"}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"recent","cache_control":{"type":"ephemeral"}}]}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonNoStableBreakpoint {
+		t.Fatalf("reason=%q, want no stable breakpoint", oc.Reason)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("message-only breakpoint must be left unchanged")
+	}
+}
+
+func TestUpgradeStableCacheTTL1hRespectsExistingTTL(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"stable","cache_control":{"type":"ephemeral","ttl":"1h"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonAlready1h || oc.Target != "system" {
+		t.Fatalf("outcome=%+v, want already_1h on system", oc)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("already-1h breakpoint must be identity")
+	}
+}
+
+func TestUpgradeStableCacheTTL1hRefusesVolatileHead(t *testing.T) {
+	raw := []byte(`{"model":"m","max_tokens":1,` +
+		`"system":[{"type":"text","text":"trace 550e8400-e29b-41d4-a716-446655440000"},` +
+		`{"type":"text","text":"stable","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	out, oc := UpgradeAnthropicStableCacheTTL1h(raw)
+	if oc.Reason != TTLUpgradeReasonVolatileHead || oc.Target != "system" {
+		t.Fatalf("outcome=%+v, want volatile system refusal", oc)
+	}
+	if !bytes.Equal(out, raw) {
+		t.Fatal("volatile head must be identity")
+	}
+}
+
 // TestPlaceOnLastToolWhenNoSystem: no system array ⇒ fall back to the last tools[] entry.
 func TestPlaceOnLastToolWhenNoSystem(t *testing.T) {
 	raw := []byte(`{"model":"m","max_tokens":1,` +

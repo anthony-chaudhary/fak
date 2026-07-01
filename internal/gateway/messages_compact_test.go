@@ -61,6 +61,42 @@ func anthropicPassthroughServer(budget int) *Server {
 	}
 }
 
+func TestMaybeUpgradeCacheTTL1HGate(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":1024,` +
+		`"system":[{"type":"text","text":"stable policy","cache_control":{"type":"ephemeral"}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	reqOff, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode off: %v", err)
+	}
+	if anthropicPassthroughServer(1200).maybeUpgradeAnthropicCacheTTL1H(reqOff) {
+		t.Fatal("TTL upgrade must be gated off by default")
+	}
+	if !bytes.Equal(reqOff.Raw, raw) {
+		t.Fatal("gated-off TTL upgrade must leave req.Raw unchanged")
+	}
+
+	reqOn, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode on: %v", err)
+	}
+	s := anthropicPassthroughServer(1200)
+	s.cacheTTL1H = true
+	if !s.maybeUpgradeAnthropicCacheTTL1H(reqOn) {
+		t.Fatal("TTL upgrade gate should fire on a stable system breakpoint")
+	}
+	if !bytes.Contains(reqOn.Raw, []byte(`"cache_control":{"type":"ephemeral","ttl":"1h"}`)) {
+		t.Fatalf("stable system breakpoint was not upgraded to 1h:\n%s", reqOn.Raw)
+	}
+	cc := bytes.Index(raw, []byte(`"cache_control"`))
+	if cc < 0 {
+		t.Fatal("fixture sanity: missing cache_control")
+	}
+	if !bytes.Equal(raw[:cc], reqOn.Raw[:cc]) {
+		t.Fatalf("bytes before cache_control changed:\nraw=%s\nout=%s", raw[:cc], reqOn.Raw[:cc])
+	}
+}
+
 // TestMaybeCompactOffIsIdentity: budget 0 forwards the body byte-for-byte unchanged.
 func TestMaybeCompactOffIsIdentity(t *testing.T) {
 	raw := compactWireBody(t, 16)

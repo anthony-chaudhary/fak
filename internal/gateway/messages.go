@@ -195,14 +195,19 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// history (auto-compaction), never fak. The observation is folded after the served turn, once
 	// the provider's cache counters are known.
 	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
+	// TTL ablation (#1850): when explicitly enabled, extend an existing stable-head
+	// cache_control breakpoint to Anthropic's 1h tier before any body shrinker touches
+	// req.Raw. This is gate-only until the live read/write economics are attributed.
+	s.maybeUpgradeAnthropicCacheTTL1H(req)
 	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
 	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident
 	// view and materialize it onto req.Raw by stubbing each elided middle turn in place
 	// (same role → alternation preserved), while the cache_control prefix bytes and every
 	// resident message's original bytes stay byte-identical so the upstream cache hit
-	// survives. Runs FIRST so it operates on the original body (its content match keys off
-	// the decoded req.Messages); the siblings below then see the already-bounded body and
-	// bail (under-budget) in the common case. OFF (identity) by default; fail-safe.
+	// survives. Runs before the shrinkers so it operates on the original conversation body
+	// (its content match keys off the decoded req.Messages); the siblings below then see the
+	// already-bounded body and bail (under-budget) in the common case. OFF (identity) by
+	// default; fail-safe.
 	viewPlanned := s.maybePlanAnthropicRaw(ctx, reqTrace, req)
 	// Cache-prefix-preserving history compaction (#555): on the Anthropic passthrough,
 	// shrink the OUTBOUND body's OLD turns to the configured resident-token budget while
@@ -489,6 +494,18 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	return outcome.Reason == agent.CompactReasonNone, outcome.Reason
+}
+
+func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesRequest) bool {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || !s.cacheTTL1H {
+		return false
+	}
+	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
+	if outcome.Reason != agent.TTLUpgradeReasonNone {
+		return false
+	}
+	req.Raw = out
+	return true
 }
 
 // maybeElideAnthropicRaw shrinks oversized tool_result bodies in the outbound passthrough body

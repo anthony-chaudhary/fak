@@ -53,6 +53,8 @@ import (
 // cache prefix boundary — an ephemeral (5-minute) breakpoint, the Anthropic default tier.
 const cacheControlBreakpoint = `"cache_control":{"type":"ephemeral"}`
 
+const cacheControlTTL1h = `"ttl":"1h"`
+
 // Breakpoint-placement bail vocabulary — the closed set of outcomes, mirroring CompactReason*.
 // BreakpointReasonNone means a breakpoint was PLACED (the body was rewritten); every other
 // value means the body was returned unchanged (identity).
@@ -75,6 +77,24 @@ type BreakpointOutcome struct {
 	Rewritten       bool   // true when M2 hoisted volatile system blocks behind the cacheable anchor
 	MovedVolatile   int
 	PredictedUplift int64
+}
+
+const (
+	TTLUpgradeReasonNone               = "" // UPGRADED: ttl:"1h" was spliced into a stable-head cache_control object.
+	TTLUpgradeReasonNonJSON            = "non_json"
+	TTLUpgradeReasonNoStableBreakpoint = "no_stable_breakpoint" // no cache_control on system/tools; message-tail breakpoints are not stable head.
+	TTLUpgradeReasonAlready1h          = "already_1h"           // the stable-head breakpoint is already on the 1h tier.
+	TTLUpgradeReasonTTLAlreadySet      = "ttl_already_set"      // another ttl value exists; respect the caller's choice.
+	TTLUpgradeReasonVolatileHead       = "volatile_head"        // the candidate head carries an obvious per-request token.
+	TTLUpgradeReasonSpliceFailed       = "splice_failed"
+	TTLUpgradeReasonRedecodeFail       = "redecode_failed"
+)
+
+// TTLUpgradeOutcome reports whether UpgradeAnthropicStableCacheTTL1h changed the existing
+// stable-head cache_control object. Reason==TTLUpgradeReasonNone means Target was upgraded.
+type TTLUpgradeOutcome struct {
+	Reason string
+	Target string // "system" | "tools"
 }
 
 // PlaceAnthropicCacheBreakpoint splices a cache_control breakpoint onto the stable system+tools
@@ -202,6 +222,118 @@ func PlaceAnthropicCacheBreakpointWithOutcome(raw []byte) ([]byte, BreakpointOut
 		return raw, BreakpointOutcome{Reason: BreakpointReasonRedecodeFail}
 	}
 	return out, BreakpointOutcome{Reason: BreakpointReasonNone, Target: target}
+}
+
+// UpgradeAnthropicStableCacheTTL1h upgrades an EXISTING stable-head cache_control breakpoint
+// (system first, then tools) from the default 5-minute ephemeral tier to the 1-hour tier by
+// splicing `"ttl":"1h"` into the cache_control object. Message-tail breakpoints are ignored:
+// those cache volatile conversation history, not the stable provider head #1850 targets.
+//
+// The edit is deliberately narrower than placement: it never moves a breakpoint and never
+// re-marshals the body. Bytes before the cache_control object are copied verbatim; the only change
+// is inside that existing metadata object. On ambiguity, an existing non-1h ttl, or an obviously
+// volatile head, the body is returned unchanged.
+func UpgradeAnthropicStableCacheTTL1h(raw []byte) ([]byte, TTLUpgradeOutcome) {
+	if len(raw) == 0 {
+		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNonJSON}
+	}
+	if out, oc, ok := upgradeStableCacheTTLInArray(raw, obj["system"], "system", headValueIsVolatile(obj["tools"])); ok {
+		return out, oc
+	}
+	if out, oc, ok := upgradeStableCacheTTLInArray(raw, obj["tools"], "tools", false); ok {
+		return out, oc
+	}
+	return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNoStableBreakpoint}
+}
+
+func upgradeStableCacheTTLInArray(raw []byte, arr json.RawMessage, target string, inheritedVolatile bool) ([]byte, TTLUpgradeOutcome, bool) {
+	elems, spans, ok := decodeArrayElements(raw, arr)
+	if !ok || len(elems) == 0 {
+		return raw, TTLUpgradeOutcome{}, false
+	}
+	for i := len(elems) - 1; i >= 0; i-- {
+		el := elems[i]
+		if !rawHasCacheControl(el) {
+			continue
+		}
+		if inheritedVolatile || anyHeadElementVolatile(elems[:i+1]) {
+			return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonVolatileHead, Target: target}, true
+		}
+		out, reason := spliceCacheControlTTL1h(raw, el, spans[i].start)
+		if reason != TTLUpgradeReasonNone {
+			return raw, TTLUpgradeOutcome{Reason: reason, Target: target}, true
+		}
+		if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+			return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonRedecodeFail, Target: target}, true
+		}
+		return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: target}, true
+	}
+	return raw, TTLUpgradeOutcome{}, false
+}
+
+func anyHeadElementVolatile(elems []json.RawMessage) bool {
+	for _, el := range elems {
+		if headValueIsVolatile(el) {
+			return true
+		}
+	}
+	return false
+}
+
+func spliceCacheControlTTL1h(raw, el []byte, elemAbs int) ([]byte, string) {
+	ccStart, ccEnd, ok := objectValueSpan(el, "cache_control")
+	if !ok {
+		return nil, TTLUpgradeReasonSpliceFailed
+	}
+	cc := el[ccStart:ccEnd]
+	var parsed struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl"`
+	}
+	if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+		return nil, TTLUpgradeReasonSpliceFailed
+	}
+	switch parsed.TTL {
+	case "1h":
+		return raw, TTLUpgradeReasonAlready1h
+	case "":
+	default:
+		return raw, TTLUpgradeReasonTTLAlreadySet
+	}
+	out, ok := spliceTTL1hIntoObject(raw, elemAbs+ccStart, cc)
+	if !ok {
+		return nil, TTLUpgradeReasonSpliceFailed
+	}
+	return out, TTLUpgradeReasonNone
+}
+
+func spliceTTL1hIntoObject(raw []byte, objAbs int, obj []byte) ([]byte, bool) {
+	if len(obj) < 2 || obj[0] != '{' || obj[len(obj)-1] != '}' {
+		return nil, false
+	}
+	insert := objAbs + len(obj) - 1
+	var b bytes.Buffer
+	b.Grow(len(raw) + len(cacheControlTTL1h) + 1)
+	b.Write(raw[:insert])
+	if objectHasContent(obj) {
+		b.WriteByte(',')
+	}
+	b.WriteString(cacheControlTTL1h)
+	b.Write(raw[insert:])
+	return b.Bytes(), true
+}
+
+func objectHasContent(obj []byte) bool {
+	for _, c := range obj[1 : len(obj)-1] {
+		if !isJSONSpace(c) {
+			return true
+		}
+	}
+	return false
 }
 
 type anthropicSystemAnchorPlan struct {

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -315,6 +316,10 @@ type Config struct {
 	// shrinker for results outside the active working set. The command surfaces default this
 	// to DefaultElideResultBytes.
 	ElideResultBytes int
+	// CacheTTL1H upgrades an existing stable-head Anthropic cache_control breakpoint to the
+	// 1-hour tier. It is gate-only for now; the ablation harness also enables it with
+	// FAK_ABLATE_TTL_1H=1.
+	CacheTTL1H bool
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
 	// every possible argument?" — true ONLY for a name the policy admits under no args
@@ -691,6 +696,10 @@ type Server struct {
 	// byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
 	elideResultBytes int
 
+	// cacheTTL1H mirrors Config.CacheTTL1H or FAK_ABLATE_TTL_1H. When true, the Anthropic
+	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
+	cacheTTL1H bool
+
 	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
 	// tool name (true ⇔ the floor DEFAULT_DENYs it for every arg). When non-nil the
 	// Anthropic passthrough prunes those provably-unreachable tool DEFINITIONS from the
@@ -966,6 +975,7 @@ func New(cfg Config) (*Server, error) {
 		compactHistoryBudget:       cfg.CompactHistoryBudget,
 		compactAnchorHead:          cfg.CompactAnchorHead,
 		elideResultBytes:           cfg.ElideResultBytes,
+		cacheTTL1H:                 cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		toolFloorDenies:            cfg.ToolFloorDenies,
 		cacheStream:                cacheStream,
 		rungObs:                    rungObs,
@@ -998,6 +1008,15 @@ func New(cfg Config) (*Server, error) {
 	s.loops = newBgloopSupervisor(s)
 
 	return s, nil
+}
+
+func envEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // onUpstreamRetry is the planner's RetryNotify hook: count the retry and surface it on the
