@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // tasksSnapshotProvider, when non-nil, supplies the read-only task-manager
@@ -45,6 +46,14 @@ func (s *Server) handleFakTasks(w http.ResponseWriter, r *http.Request) {
 		writeTasksDisabled(w)
 		return
 	}
+	filter, ok := parseTasksWitnessFilter(r.URL.Query().Get("origin_witness"))
+	if !ok {
+		http.Error(w, "bad origin_witness filter; use failed, refused, unavailable, unwitnessed, or all", http.StatusBadRequest)
+		return
+	}
+	if filter != tasksWitnessAll {
+		snap = filterTasksSnapshotByWitness(snap, filter)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snap)
 }
@@ -53,4 +62,98 @@ func writeTasksDisabled(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write([]byte(`{"error":"task manager disabled; enable with FAK_TASKMGR=1"}` + "\n"))
+}
+
+type tasksWitnessFilter string
+
+const (
+	tasksWitnessAll         tasksWitnessFilter = ""
+	tasksWitnessFailed      tasksWitnessFilter = "failed"
+	tasksWitnessRefused     tasksWitnessFilter = "refused"
+	tasksWitnessUnavailable tasksWitnessFilter = "unavailable"
+	tasksWitnessUnwitnessed tasksWitnessFilter = "unwitnessed"
+)
+
+func parseTasksWitnessFilter(raw string) (tasksWitnessFilter, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "all":
+		return tasksWitnessAll, true
+	case "failed", "failure", "failures", "problem", "problems":
+		return tasksWitnessFailed, true
+	case "refused":
+		return tasksWitnessRefused, true
+	case "unavailable":
+		return tasksWitnessUnavailable, true
+	case "unwitnessed":
+		return tasksWitnessUnwitnessed, true
+	default:
+		return tasksWitnessAll, false
+	}
+}
+
+func filterTasksSnapshotByWitness(snap any, filter tasksWitnessFilter) any {
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return snap
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return snap
+	}
+	tasks, ok := doc["tasks"].([]any)
+	if !ok {
+		return doc
+	}
+	filtered := make([]any, 0, len(tasks))
+	for _, task := range tasks {
+		if taskMatchesWitnessFilter(task, filter) {
+			filtered = append(filtered, task)
+		}
+	}
+	doc["tasks"] = filtered
+	doc["origin_witness_filter"] = string(filter)
+	doc["origin_witness_filter_count"] = len(filtered)
+	return doc
+}
+
+func taskMatchesWitnessFilter(task any, filter tasksWitnessFilter) bool {
+	obj, ok := task.(map[string]any)
+	if !ok {
+		return false
+	}
+	if witnessStateMatches(witnessState(obj["witness"]), filter) {
+		return true
+	}
+	steps, _ := obj["steps"].([]any)
+	for _, step := range steps {
+		stepObj, ok := step.(map[string]any)
+		if ok && witnessStateMatches(witnessState(stepObj["witness"]), filter) {
+			return true
+		}
+	}
+	return false
+}
+
+func witnessState(witness any) string {
+	obj, ok := witness.(map[string]any)
+	if !ok || obj == nil {
+		return ""
+	}
+	state, _ := obj["verified_state"].(string)
+	return strings.TrimSpace(state)
+}
+
+func witnessStateMatches(state string, filter tasksWitnessFilter) bool {
+	switch filter {
+	case tasksWitnessFailed:
+		return state == "verified_refused" || state == "verified_unavailable"
+	case tasksWitnessRefused:
+		return state == "verified_refused"
+	case tasksWitnessUnavailable:
+		return state == "verified_unavailable"
+	case tasksWitnessUnwitnessed:
+		return state == "" || state == "verified_unknown"
+	default:
+		return true
+	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -53,5 +54,27 @@ func TestTaskManagerEnabledParsing(t *testing.T) {
 func TestTasksProviderInstalledByInit(t *testing.T) {
 	if !gateway.TasksSnapshotProviderInstalled() {
 		t.Fatalf("init did not install the gateway tasks provider")
+	}
+}
+
+func TestServeTasksSnapshotWitnessFilterProviderShape(t *testing.T) {
+	t.Setenv("FAK_TASKMGR", "1")
+	snap, ok := serveTasksSnapshot()
+	if !ok {
+		t.Fatalf("serveTasksSnapshot disabled, want enabled provider")
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal provider snapshot: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(b, &body); err != nil {
+		t.Fatalf("provider snapshot not json object: %v", err)
+	}
+	if body["schema"] != taskmgr.SchemaSnapshot {
+		t.Fatalf("schema = %v, want %s", body["schema"], taskmgr.SchemaSnapshot)
+	}
+	if _, ok := body["tasks"].([]any); !ok {
+		t.Fatalf("provider snapshot missing JSON tasks array: %s", b)
 	}
 }
