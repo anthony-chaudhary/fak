@@ -943,6 +943,15 @@ class ExcludeLaneTest(unittest.TestCase):
         picked = mod.lane_issue_numbers(ROOT, "docs", exclude={"docs"})
         self.assertEqual(picked["lane"], "docs")   # explicit wins over exclude
 
+    def test_numbers_are_oldest_first_despite_router_newest_first_input(self) -> None:
+        # gh issue list (and the router's per-lane "issues") is newest-first; this
+        # fold must explicitly reverse it so pick_target_issue's "first not in skip"
+        # lands on the OLDEST open issue, per the fleet's stated dispatch priority.
+        mod = load()
+        mod.issue_dispatch.run_json = lambda cmd, root, timeout: self.ROUTER
+        picked = mod.lane_issue_numbers(ROOT, "docs")
+        self.assertEqual(picked["numbers"], [7, 8, 9])   # ascending, not [9, 8, 7]
+
 
 class LaneIssueNumbersSelfModifyHoldTest(unittest.TestCase):
     """Proactive pre-route hold on the ACTUAL production picker: this module

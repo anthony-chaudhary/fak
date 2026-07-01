@@ -246,10 +246,17 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
                        exclude: set[str] | None = None,
                        guarded: bool | None = None) -> dict[str, Any]:
     """Pick the lane (busiest, or explicit) and return its OPEN issue numbers,
-    most-recent first. Reuses the same router fold issue_dispatch.pick_lane uses,
-    but keeps the per-issue numbers (which pick_lane discards). ``exclude`` drops
-    lanes from the busiest-pick (e.g. an opus task excludes 'docs' so the glm task
-    owns it) -- ignored when an explicit lane is named.
+    OLDEST first (ascending issue number -- GitHub issue numbers are assigned
+    monotonically at creation, so the lowest number is the oldest open issue).
+    ``gh issue list`` itself returns newest-first, and issue_lane_router.py's
+    per-lane "issues" list inherits that native order; this fold explicitly
+    reverses it rather than keeping the router's order, so the age-of-backlog
+    priority is a decision this module makes on purpose, not an accident
+    inherited from an unrelated API default. Reuses the same router fold
+    issue_dispatch.pick_lane uses, but keeps the per-issue numbers (which
+    pick_lane discards). ``exclude`` drops lanes from the busiest-pick (e.g.
+    an opus task excludes 'docs' so the glm task owns it) -- ignored when an
+    explicit lane is named.
 
     ``guarded`` (default: ``dispatch_worker.guard_enabled()``) additionally
     EXCLUDES a self-source lane (``issue_dispatch.is_self_source_tree``,
@@ -290,7 +297,7 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
                 nums.append(int(n))
             except (TypeError, ValueError):
                 continue
-        nums_by_lane[ln] = sorted(nums, reverse=True)
+        nums_by_lane[ln] = sorted(nums)  # oldest (lowest issue #) first
     exclude = exclude or set()
     by_lane_count = {k: len(v) for k, v in nums_by_lane.items()}
     if explicit_lane:
