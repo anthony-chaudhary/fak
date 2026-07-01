@@ -260,6 +260,42 @@ func TestStableOrderingAndSourceAttribution(t *testing.T) {
 	}
 }
 
+func TestAssumptionConfidenceFeatureCard(t *testing.T) {
+	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cat.Query(Request{Query: "assumption confidence stale unknown witnessed", Plane: PlaneLive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *FeatureCard
+	for i := range resp.Cards {
+		if resp.Cards[i].Name == "context-plan:assumptions" {
+			found = &resp.Cards[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("assumption confidence query missing context-plan card: %v", sortedNames(resp.Cards))
+	}
+	if found.Source != "ctxplan" || found.DetailRef != "internal/ctxplan/assumption.go" {
+		t.Fatalf("assumption card source/ref = %s %s, want ctxplan assumption source", found.Source, found.DetailRef)
+	}
+	if found.Effect != EffectRead || found.Request.Executed {
+		t.Fatalf("assumption card request = effect %s request %+v, want read-only discovery", found.Effect, found.Request)
+	}
+	tags := map[string]bool{}
+	for _, tag := range found.Tags {
+		tags[tag] = true
+	}
+	for _, want := range []string{"user_stated", "witnessed", "inferred", "stale", "unknown", "confidence"} {
+		if !tags[want] {
+			t.Fatalf("assumption card tags missing %q: %+v", want, found.Tags)
+		}
+	}
+}
+
 func TestDetailFaultsOnlySelectedSchemaOrPlan(t *testing.T) {
 	cat, err := Load(writeRepo(t), Options{Tools: testTools()})
 	if err != nil {

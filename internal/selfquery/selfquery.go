@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/internal/memq"
 )
@@ -204,6 +205,7 @@ func (c *Catalog) Cards(plane Plane) []FeatureCard {
 		out = append(out, c.devCards()...)
 	}
 	if plane == PlaneAll || plane == PlaneLive {
+		out = append(out, c.contextPlanCards()...)
 		out = append(out, c.memoryCards()...)
 		out = append(out, c.toolCards()...)
 		out = append(out, c.capabilityCards()...)
@@ -285,6 +287,30 @@ func (c *Catalog) devSurfaceCards() []FeatureCard {
 			[]string{"dev", "index", "verbs", "cli", "command"},
 			"fak index verbs <query>", EffectRead, "", "devindex", digestOf("index-verbs"),
 			RequestShape{Route: "cli", Command: []string{"fak", "index", "verbs", "<query>"}, Executed: false}),
+	}
+}
+
+func (c *Catalog) contextPlanCards() []FeatureCard {
+	sources := []ctxplan.AssumptionSource{
+		ctxplan.AssumptionUserStated,
+		ctxplan.AssumptionWitnessed,
+		ctxplan.AssumptionInferred,
+		ctxplan.AssumptionStale,
+		ctxplan.AssumptionUnknown,
+	}
+	tags := []string{"live", "managed-context", "context", "plan", "assumption", "assumptions", "confidence", "query", "refresh"}
+	for _, source := range sources {
+		tags = append(tags, string(source))
+	}
+	return []FeatureCard{
+		card("context-plan", "context-plan:assumptions",
+			"score context assumptions by source class and confidence before effect use",
+			tags,
+			"internal/ctxplan/assumption.go", EffectRead, "", "ctxplan", digestOf(sources),
+			RequestShape{
+				Route: "library",
+				Note:  "call ctxplan.AssessAssumptions or supply PlanQuery.Assumptions; low-confidence, stale, and unknown assumptions return query/refresh actions before effects",
+			}),
 	}
 }
 
