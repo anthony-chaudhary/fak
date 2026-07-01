@@ -122,7 +122,6 @@ def evaluate(root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     """Compute the dogfood-coverage KPIs. `env` defaults to the process env so the
     LIVE opt-out (FLEET_DOGFOOD_GUARD=0) shows up in the score."""
     e = env if env is not None else dict(os.environ)
-    dw = _load_module("dispatch_worker", root / "tools" / "dispatch_worker.py")
 
     kpis: list[dict[str, Any]] = []
 
@@ -130,26 +129,44 @@ def evaluate(root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
         kpis.append({"key": key, "ok": bool(ok), "hard": hard,
                      "detail": detail, "evidence": evidence})
 
-    # 1. The supervised leaf launcher fronts a claude worker with the kernel, on THIS
-    #    host, RIGHT NOW. This is the real behavior cross-check — not a grep.
-    raw = dw.build_command("probe", "claude")
-    launch_cmd, guarded = dw.guarded_launch_command(raw, "probe", "claude", root, env=e)
-    add("fleet_leaf_guarded", guarded, True,
-        "dispatch_worker.guarded_launch_command fronts a claude worker with `fak guard`",
-        evidence=" ".join(launch_cmd[:3]) if guarded else "UNWRAPPED (coverage=0 on this host)")
+    # KPIs 1-3 cross-check the LIVE dispatch_worker surface (a real call, not a grep).
+    # If that module moves or a symbol it calls gets renamed, this must degrade the
+    # three dependent KPIs to an honest unmet-with-reason -- not raise ImportError/
+    # AttributeError/OSError and crash the whole scorecard (#1941).
+    try:
+        dw = _load_module("dispatch_worker", root / "tools" / "dispatch_worker.py")
+        raw = dw.build_command("probe", "claude")
+        launch_cmd, guarded = dw.guarded_launch_command(raw, "probe", "claude", root, env=e)
+        fak_bin = dw.resolve_fak_bin(root, e)
+        live_on = dw.guard_enabled(e)
+    except (ImportError, AttributeError, OSError) as exc:
+        reason = f"dispatch surface moved: {exc}"
+        add("fleet_leaf_guarded", False, True,
+            "dispatch_worker.guarded_launch_command fronts a claude worker with `fak guard`",
+            evidence=reason)
+        add("fak_bin_resolvable", False, True,
+            "a `fak` binary resolves (FAK_BIN / tools/.bin / PATH) so guard-wrapping engages",
+            evidence=reason)
+        add("guard_default_on", False, True,
+            "FLEET_DOGFOOD_GUARD is not disabled in the live environment (default ON)",
+            evidence=reason)
+    else:
+        # 1. The supervised leaf launcher fronts a claude worker with the kernel, on
+        #    THIS host, RIGHT NOW. This is the real behavior cross-check — not a grep.
+        add("fleet_leaf_guarded", guarded, True,
+            "dispatch_worker.guarded_launch_command fronts a claude worker with `fak guard`",
+            evidence=" ".join(launch_cmd[:3]) if guarded else "UNWRAPPED (coverage=0 on this host)")
 
-    # 2. A `fak` binary resolves, so the fail-open path is not silently dropping the
-    #    fleet to 0% coverage.
-    fak_bin = dw.resolve_fak_bin(root, e)
-    add("fak_bin_resolvable", bool(fak_bin), True,
-        "a `fak` binary resolves (FAK_BIN / tools/.bin / PATH) so guard-wrapping engages",
-        evidence=fak_bin or "no fak binary found — workers run UNGUARDED")
+        # 2. A `fak` binary resolves, so the fail-open path is not silently dropping the
+        #    fleet to 0% coverage.
+        add("fak_bin_resolvable", bool(fak_bin), True,
+            "a `fak` binary resolves (FAK_BIN / tools/.bin / PATH) so guard-wrapping engages",
+            evidence=fak_bin or "no fak binary found — workers run UNGUARDED")
 
-    # 3. Dogfood mode is ON in the live env (default-on, not opted out here).
-    live_on = dw.guard_enabled(e)
-    add("guard_default_on", live_on, True,
-        "FLEET_DOGFOOD_GUARD is not disabled in the live environment (default ON)",
-        evidence=f"FLEET_DOGFOOD_GUARD={e.get('FLEET_DOGFOOD_GUARD', '<unset=ON>')}")
+        # 3. Dogfood mode is ON in the live env (default-on, not opted out here).
+        add("guard_default_on", live_on, True,
+            "FLEET_DOGFOOD_GUARD is not disabled in the live environment (default ON)",
+            evidence=f"FLEET_DOGFOOD_GUARD={e.get('FLEET_DOGFOOD_GUARD', '<unset=ON>')}")
 
     # 4. The scheduled-task lane (issue_dispatch) is wired to the same guard path.
     wired = _grep(root / "tools" / "issue_dispatch.py", "guarded_launch_command")

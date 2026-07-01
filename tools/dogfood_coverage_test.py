@@ -48,6 +48,37 @@ class DogfoodCoverageTest(unittest.TestCase):
         off_keys = {k["key"]: k["ok"] for k in off["kpis"]}
         self.assertFalse(off_keys["guard_default_on"])
 
+    def test_evaluate_degrades_when_dispatch_worker_missing(self) -> None:
+        """#1941: a moved/deleted dispatch_worker.py must degrade the three dependent
+        HARD KPIs with a named reason, not raise and crash the whole scorecard."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools").mkdir()
+            payload = mod.evaluate(root, env={})  # no tools/dispatch_worker.py at all
+        kpis = {k["key"]: k for k in payload["kpis"]}
+        for key in ("fleet_leaf_guarded", "fak_bin_resolvable", "guard_default_on"):
+            self.assertFalse(kpis[key]["ok"], key)
+            self.assertTrue(kpis[key]["hard"], key)
+            self.assertIn("dispatch surface moved", kpis[key]["evidence"], key)
+
+    def test_evaluate_degrades_when_dispatch_worker_symbol_renamed(self) -> None:
+        """#1941: dispatch_worker.py loads fine but is missing a symbol this scorecard
+        calls (simulating a rename) -> AttributeError degrades, doesn't raise."""
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tools").mkdir()
+            # build_command exists; guarded_launch_command (renamed away) does not.
+            (root / "tools" / "dispatch_worker.py").write_text(
+                "def build_command(*a, **k):\n    return ['claude']\n", encoding="utf-8")
+            payload = mod.evaluate(root, env={})
+        kpis = {k["key"]: k for k in payload["kpis"]}
+        for key in ("fleet_leaf_guarded", "fak_bin_resolvable", "guard_default_on"):
+            self.assertFalse(kpis[key]["ok"], key)
+            self.assertTrue(kpis[key]["hard"], key)
+            self.assertIn("dispatch surface moved", kpis[key]["evidence"], key)
+
     def test_count_audit_rows_counts_nonblank_jsonl_lines(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as cfg:
