@@ -419,9 +419,11 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 	return 0
 }
 
-// headroomLabel renders a rotation headroom score as a short, honest word for the one-liner:
-// the score is a coarse offerability tier (see accounts_headroom.go), not a quota percentage,
-// so it reads as room/unknown/walled rather than a false-precision number.
+// headroomLabel renders a rotation headroom score as a short, honest word for the one-liner.
+// The score is a banded offerability tier (see accounts_headroom.go): the SIGN is the tier and
+// the fraction is only a within-tier tie-break (soonest-reset / least-loaded), NOT a quota
+// percentage — so the label keys off the sign and reads as room/unknown/walled rather than
+// leaking a false-precision number.
 func headroomLabel(score float64) string {
 	switch {
 	case score > 0:

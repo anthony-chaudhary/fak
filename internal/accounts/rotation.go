@@ -15,11 +15,15 @@ package accounts
 // HONESTY. The plan is witnessed end to end: every seat's inclusion or exclusion is
 // derived from registry fields (Active/Enabled/Reserved/Identity), and two seats sharing
 // one account bucket are deduped so the pool never double-counts a single rate-limit
-// window as independent capacity. It deliberately does NOT claim a `by_reset` / near-cap
-// ordering: the registry carries no per-account usage or reset-time telemetry, so the
-// applied order is a deterministic stable-by-name round-robin, and the requested policy
-// is surfaced alongside it (RotationResult.OrderApplied vs Policy.Order) rather than
-// pretended. A near-cap-aware ordering is a follow-on that first needs a usage signal.
+// window as independent capacity. This package on its own carries no per-account usage or
+// reset-time telemetry, so its default applied order is a deterministic stable-by-name
+// round-robin, and the requested policy is surfaced alongside it (RotationResult.OrderApplied
+// vs Policy.Order) rather than pretended. A reset-time / near-cap ordering IS available, but
+// only when the runtime layer INJECTS it via RotationHeadroom: the caller derives a per-bucket
+// score (see cmd/fak/accounts_headroom.go) whose sign is the offerability tier and whose
+// fraction breaks ties by soonest-reset (walled) / least-loaded (offerable). It stays a
+// tie-break over an injected signal, not a continuous remaining-quota number this package
+// claims to own.
 //
 // Pure over the homes' disk-derived Identity, exactly like Reconcile — Refresh the
 // registry first for a live answer.
