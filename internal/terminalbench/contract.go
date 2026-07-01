@@ -144,6 +144,8 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		{Name: "harbor_codex_adapter", OK: strings.TrimSpace(in.Agent) == "codex" && strings.TrimSpace(in.FakAgent) == "codex", Detail: "Harbor adapter name must be codex; codex-cli is only the public leaderboard label"},
 		{Name: "raw_arm_command", OK: strings.TrimSpace(in.RawCommand) != "", Detail: strings.TrimSpace(in.RawCommand)},
 		{Name: "fak_arm_command", OK: strings.TrimSpace(in.FakCommand) != "", Detail: strings.TrimSpace(in.FakCommand)},
+		{Name: "raw_arm_official_dataset", OK: harborCommandDatasetReady(in.RawCommand), Detail: "raw Harbor arm must pass -d/--dataset terminal-bench/terminal-bench-2-1 with no dataset version"},
+		{Name: "fak_arm_official_dataset", OK: harborCommandDatasetReady(in.FakCommand), Detail: "fak Harbor arm must pass -d/--dataset terminal-bench/terminal-bench-2-1 with no dataset version"},
 		{Name: "fak_gateway_agent_env", OK: fakGatewayAgentEnvReady(in.FakCommand), Detail: "fak Harbor arm must pass OPENAI_BASE_URL, OPENAI_API_BASE, and OPENAI_API_KEY through --agent-env"},
 		{Name: "fak_gateway_host_allowlist", OK: strings.Contains(in.FakCommand, "--allow-agent-host"), Detail: "fak Harbor arm must allow the Docker agent to reach the host fak gateway"},
 		{Name: "official_harness_required", OK: true, Detail: "external Harbor run output with benchmark-native test results is required before promotion"},
@@ -408,6 +410,32 @@ func datasetPin(name, version string) string {
 
 func officialDatasetPinReady(name, version string) bool {
 	return strings.TrimSpace(name) == OfficialTerminalBench21Dataset && strings.TrimSpace(version) == ""
+}
+
+func harborCommandDatasetReady(command string) bool {
+	fields := strings.Fields(command)
+	sawDataset := false
+	for i, field := range fields {
+		field = strings.Trim(field, `"'`)
+		switch {
+		case field == "-d" || field == "--dataset":
+			sawDataset = true
+			if i+1 >= len(fields) || strings.Trim(fields[i+1], `"'`) != OfficialTerminalBench21Dataset {
+				return false
+			}
+		case strings.HasPrefix(field, "-d="):
+			sawDataset = true
+			if strings.Trim(strings.TrimPrefix(field, "-d="), `"'`) != OfficialTerminalBench21Dataset {
+				return false
+			}
+		case strings.HasPrefix(field, "--dataset="):
+			sawDataset = true
+			if strings.Trim(strings.TrimPrefix(field, "--dataset="), `"'`) != OfficialTerminalBench21Dataset {
+				return false
+			}
+		}
+	}
+	return sawDataset
 }
 
 func contractStatus(gates []ContractGate) string {
