@@ -505,3 +505,4 @@ memqdemo-report.json
 # learning-scorecard HARD defect already filed as a triage issue; its durable
 # anti-re-file rung (tools/learning_debt_dispatch.py). Peer of .idea-scout/.
 .learning-debt-dispatch/
+docs/dispatch-status.md
