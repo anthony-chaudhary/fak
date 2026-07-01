@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -88,11 +89,11 @@ func Classify(src string) Verdict {
 		return Exempt
 	}
 	code := stripLineComments(src)
-	emits := containsAny(code, fileSinkSignals) && containsAny(code, marshalSignals)
+	emits := strmatch.ContainsAny(code, fileSinkSignals...) && strmatch.ContainsAny(code, marshalSignals...)
 	if !emits {
 		return NotEmitter
 	}
-	if containsAny(code, lineageSignals) {
+	if strmatch.ContainsAny(code, lineageSignals...) {
 		return Stamped
 	}
 	return Unstamped
@@ -165,15 +166,6 @@ func isBenchSource(p string) bool {
 	}
 	parts := strings.Split(p, "/")
 	return len(parts) >= 2 && parts[0] == "cmd" && strings.Contains(parts[1], "bench")
-}
-
-func containsAny(s string, subs []string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
 }
 
 // stripLineComments removes // ... EOL from each line so signal detection ignores
