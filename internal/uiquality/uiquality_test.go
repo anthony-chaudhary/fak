@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // writeTree materializes a minimal render-source tree under a temp root so the
@@ -95,10 +97,10 @@ func TestBuildCleanTreeScoresZeroDebt(t *testing.T) {
 	p := Build(Options{Root: root})
 	if !p.OK {
 		t.Fatalf("clean tree should be OK; got verdict=%s debt=%v\nkpis:\n%s",
-			p.Verdict, p.Corpus["ui_quality_debt"], Render(p))
+			p.Verdict, p.Corpus["ui_quality_debt"], scorecard.Render(p, DebtKey))
 	}
 	if got := p.Corpus["ui_quality_debt"]; got != 0 {
-		t.Fatalf("clean tree ui_quality_debt = %v, want 0\n%s", got, Render(p))
+		t.Fatalf("clean tree ui_quality_debt = %v, want 0\n%s", got, scorecard.Render(p, DebtKey))
 	}
 	if p.Corpus["grade"] != "A" {
 		t.Fatalf("clean tree grade = %v, want A", p.Corpus["grade"])
@@ -131,11 +133,11 @@ func tuiUsage(w io.Writer) {
 	root := writeTree(t, f)
 	p := Build(Options{Root: root})
 	if p.OK {
-		t.Fatalf("buggy tree graded clean — scorecard failed to catch byte-slice truncation\n%s", Render(p))
+		t.Fatalf("buggy tree graded clean — scorecard failed to catch byte-slice truncation\n%s", scorecard.Render(p, DebtKey))
 	}
 	rune := kpiByKey(p, "rune_safety")
 	if len(rune.Defects) == 0 {
-		t.Fatalf("rune_safety reported no defects on the buggy tree\n%s", Render(p))
+		t.Fatalf("rune_safety reported no defects on the buggy tree\n%s", scorecard.Render(p, DebtKey))
 	}
 	joined := strings.Join(rune.Defects, "\n")
 	if !strings.Contains(joined, "s[:width-3]") {
@@ -181,7 +183,7 @@ func renderTUIGuard() {
 	p := Build(Options{Root: root})
 	wc := kpiByKey(p, "width_consistency")
 	if len(wc.Defects) == 0 {
-		t.Fatalf("a %%-24s consuming a bare trimTUI was NOT flagged (false negative)\n%s", Render(p))
+		t.Fatalf("a %%-24s consuming a bare trimTUI was NOT flagged (false negative)\n%s", scorecard.Render(p, DebtKey))
 	}
 }
 
@@ -214,12 +216,12 @@ func TestHelpCompletenessCatchesUndocumented(t *testing.T) {
 func TestCompareReportsRetiredDebt(t *testing.T) {
 	cur := Build(Options{Root: writeTree(t, cleanFixtures())})
 	base := map[string]any{"corpus": map[string]any{"ui_quality_debt": 4}}
-	out := Compare(cur, base)
-	if !strings.Contains(out, "4 -> 0") || !strings.Contains(out, "retired 4") {
+	out := scorecard.Compare(cur, base, DebtKey)
+	if !strings.Contains(out, "4 -> 0") || !strings.Contains(out, "improved by 4") {
 		t.Fatalf("compare did not report the retired delta: %s", out)
 	}
-	if !strings.Contains(out, "PASS") {
-		t.Fatalf("compare should PASS when debt drops: %s", out)
+	if !strings.Contains(out, "improved") {
+		t.Fatalf("compare should report improved when debt drops: %s", out)
 	}
 }
 
@@ -239,7 +241,7 @@ func TestHeaderAlignmentPassesWhenPinnedPairPresent(t *testing.T) {
 		t.Fatalf("aligned pinned pair flagged as drift: %v", ha.Defects)
 	}
 	if ha.Score != 100 {
-		t.Fatalf("header_alignment score = %d, want 100\n%s", ha.Score, Render(p))
+		t.Fatalf("header_alignment score = %v, want 100\n%s", ha.Score, scorecard.Render(p, DebtKey))
 	}
 }
 
@@ -258,18 +260,18 @@ func TestHeaderAlignmentCatchesOneSidedDrift(t *testing.T) {
 	p := Build(Options{Root: root})
 	ha := kpiByKey(p, "header_alignment")
 	if len(ha.Defects) == 0 {
-		t.Fatalf("one-sided header/row drift was NOT flagged (false negative)\n%s", Render(p))
+		t.Fatalf("one-sided header/row drift was NOT flagged (false negative)\n%s", scorecard.Render(p, DebtKey))
 	}
 	if p.OK {
-		t.Fatalf("payload should be DEBT on a header-drift defect\n%s", Render(p))
+		t.Fatalf("payload should be DEBT on a header-drift defect\n%s", scorecard.Render(p, DebtKey))
 	}
 }
 
-func kpiByKey(p Payload, key string) KPI {
+func kpiByKey(p scorecard.Payload, key string) scorecard.KPI {
 	for _, k := range p.KPIs {
 		if k.Key == key {
 			return k
 		}
 	}
-	return KPI{}
+	return scorecard.KPI{}
 }

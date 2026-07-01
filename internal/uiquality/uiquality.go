@@ -34,6 +34,13 @@
 // edits nothing. The emitted payload is the control-pane shape (schema/ok/verdict/
 // finding/reason/next_action + corpus.ui_quality_debt + corpus.grade) so the unified
 // scorecard control pane folds it like every sibling.
+//
+// The fold/grade machinery rides the shared pkg/scorecard kernel (scorecard.Fold),
+// the same pattern internal/conflationscore and internal/propagationscore use, so this
+// card's grade table cannot drift from the family's and the control-pane envelope is
+// byte-identical across cards. This package holds only the render-KPI logic; --json/
+// --markdown/--compare rendering is the shared scorecard.Render/Markdown/Compare in
+// cmd/fak/uiqualityscore.go.
 package uiquality
 
 import (
@@ -43,10 +50,15 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the payload schema id (control-pane convention: <name>/<n>).
 const Schema = "fak-ui-quality-scorecard/1"
+
+// DebtKey is the headline integer the control-pane folds (corpus.ui_quality_debt).
+const DebtKey = "ui_quality_debt"
 
 // renderFiles are the TUI render sources this scorecard grades. They are the files
 // whose job is to turn a model into terminal bytes — the panes, the info overlay,
@@ -68,7 +80,10 @@ type Options struct {
 	Root string // workspace root (repo root); "" means the caller resolves it
 }
 
-// KPI is one graded dimension.
+// KPI is one graded dimension, in this package's own shape (it carries Label/Hard/
+// Weight, which the shared scorecard.KPI does not, since only this card needs them
+// to compute the weighted composite and route a finding into Defects vs Soft). Build
+// converts each KPI into a scorecard.KPI right before folding.
 type KPI struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
@@ -79,19 +94,6 @@ type KPI struct {
 	Detail  string   `json:"detail"`  // one-line summary
 	Defects []string `json:"defects"` // HARD findings (each is one unit of debt)
 	Soft    []string `json:"soft"`    // advisory signals (no debt)
-}
-
-// Payload is the control-pane-compatible result.
-type Payload struct {
-	Schema     string         `json:"schema"`
-	OK         bool           `json:"ok"`
-	Verdict    string         `json:"verdict"`
-	Finding    string         `json:"finding"`
-	Reason     string         `json:"reason"`
-	NextAction string         `json:"next_action"`
-	Workspace  string         `json:"workspace"`
-	Corpus     map[string]any `json:"corpus"`
-	KPIs       []KPI          `json:"kpis"`
 }
 
 // ---------------------------------------------------------------------------
@@ -156,8 +158,12 @@ var kpiOrder = []string{
 // Build — the scan.
 // ---------------------------------------------------------------------------
 
-// Build scans the render sources and folds the KPIs into a control-pane payload.
-func Build(opts Options) Payload {
+// Build scans the render sources and folds the KPIs into a control-pane payload via
+// the shared pkg/scorecard kernel (scorecard.Fold), mirroring how
+// internal/conflationscore and internal/propagationscore ride the same kernel. The
+// KPI scoring, weights, and grade table are unchanged from before the port -- only
+// the fold/grade/envelope plumbing moved to the shared package.
+func Build(opts Options) scorecard.Payload {
 	root := opts.Root
 	src := loadSources(root)
 
@@ -186,28 +192,55 @@ func Build(opts Options) Payload {
 			debt += len(k.Defects)
 		}
 	}
-	composite := compositeScore(ordered)
-	grade := GradeLetter(composite)
 
-	verdict, finding, reason, next := summarize(debt, composite, ordered)
-	ok := debt == 0
+	finding, reason, next := summarize(debt, ordered)
 
-	return Payload{
-		Schema:     Schema,
-		OK:         ok,
-		Verdict:    verdict,
-		Finding:    finding,
-		Reason:     reason,
-		NextAction: next,
-		Workspace:  root,
-		Corpus: map[string]any{
-			"ui_quality_debt": debt,
-			"score":           composite,
-			"grade":           grade,
-			"render_files":    len(src),
+	p := scorecard.Fold(Schema, toScorecardKPIs(ordered), DebtKey, kpiWeights(), scorecard.Messages{
+		Grade:           scorecard.GradeStd,
+		Finding:         finding,
+		FindingClean:    finding,
+		NextAction:      next,
+		NextActionClean: next,
+		Reason:          reason,
+		ExtraCorpus: map[string]any{
+			"render_files": len(src),
 		},
-		KPIs: ordered,
+	})
+	p.Workspace = root
+	return p
+}
+
+// kpiWeights mirrors kpiWeight (float64, as scorecard.Fold's weights map wants) so
+// the composite stays the same weighted mean it was before the port. It is keyed by
+// KPI Key; scorecard.Fold tries Group first, then Key, and none of these keys
+// collide with a Group name ("correctness"/"legibility"/"hygiene"), so the Key match
+// always applies.
+func kpiWeights() map[string]float64 {
+	w := make(map[string]float64, len(kpiWeight))
+	for k, v := range kpiWeight {
+		w[k] = float64(v)
 	}
+	return w
+}
+
+// toScorecardKPIs converts this package's KPI shape into the shared scorecard.KPI
+// shape the kernel folds. Label/Hard/Weight are this card's own scoring inputs (used
+// above to compute weights and to decide Defects vs Soft) and are not part of the
+// shared envelope, matching how every other Fold-adopted card only carries
+// Key/Group/Score/Detail/Defects/Soft into the fold.
+func toScorecardKPIs(kpis []KPI) []scorecard.KPI {
+	out := make([]scorecard.KPI, len(kpis))
+	for i, k := range kpis {
+		out[i] = scorecard.KPI{
+			Key:     k.Key,
+			Group:   k.Group,
+			Score:   float64(k.Score),
+			Detail:  k.Detail,
+			Defects: k.Defects,
+			Soft:    k.Soft,
+		}
+	}
+	return out
 }
 
 // source is one loaded render file.
@@ -647,55 +680,21 @@ func newKPI(key string) KPI {
 	}
 }
 
-func compositeScore(kpis []KPI) int {
-	num, den := 0, 0
-	for _, k := range kpis {
-		num += k.Score * k.Weight
-		den += k.Weight
-	}
-	if den == 0 {
-		return 0
-	}
-	return clamp((num + den/2) / den)
-}
-
-func clamp(v int) int {
-	if v < 0 {
-		return 0
-	}
-	if v > 100 {
-		return 100
-	}
-	return v
-}
-
-// GradeLetter maps a 0..100 score to an A–F grade (the family's shared scale).
-func GradeLetter(score int) string {
-	switch {
-	case score >= 90:
-		return "A"
-	case score >= 80:
-		return "B"
-	case score >= 70:
-		return "C"
-	case score >= 60:
-		return "D"
-	default:
-		return "F"
-	}
-}
-
-func summarize(debt, score int, kpis []KPI) (verdict, finding, reason, next string) {
+// summarize builds the finding/reason/next-action prose the fold needs. The score
+// and grade are no longer computed here -- scorecard.Fold derives them from the
+// weighted KPIs (kpiWeights) and scorecard.GradeStd, the same 90/80/70/60 table
+// GradeLetter used -- so the finding text names only the debt count, matching the
+// other Fold-adopted cards whose Finding/FindingClean do not embed the score (the
+// composite/grade are reported via corpus.score/corpus.grade instead).
+func summarize(debt int, kpis []KPI) (finding, reason, next string) {
 	if debt == 0 {
-		verdict = "CLEAN"
-		finding = fmt.Sprintf("ui_quality_debt=0, score %d (%s)", score, GradeLetter(score))
+		finding = "ui_quality_debt=0: every graded render KPI is clean"
 		reason = "every graded render KPI is clean: rune-safe truncation, honored width budgets, empty-state branches, complete legend + help."
 		next = "keep the panes clean on the next render change; re-run with --compare to prove no regression."
 		return
 	}
 	worst := worstHard(kpis)
-	verdict = "DEBT"
-	finding = fmt.Sprintf("ui_quality_debt=%d, score %d (%s)", debt, score, GradeLetter(score))
+	finding = fmt.Sprintf("ui_quality_debt=%d: the render surface carries a hard UI defect", debt)
 	reason = fmt.Sprintf("the render surface carries %d hard UI defect(s); worst KPI: %s.", debt, worst.Label)
 	next = "retire the worst KPI first: " + firstDefect(worst) + "."
 	return
@@ -719,76 +718,6 @@ func firstDefect(k KPI) string {
 		return k.Label
 	}
 	return k.Defects[0]
-}
-
-// Render produces the human scorecard.
-func Render(p Payload) string {
-	var b strings.Builder
-	debt := anyInt(p.Corpus["ui_quality_debt"])
-	score := anyInt(p.Corpus["score"])
-	fmt.Fprintf(&b, "fak UI/UX-quality scorecard — %s (%s)\n", p.Verdict, p.Finding)
-	fmt.Fprintf(&b, "  score %d (%s)   ui_quality_debt %d   render files %d\n",
-		score, p.Corpus["grade"], debt, anyInt(p.Corpus["render_files"]))
-	fmt.Fprintln(&b, "")
-	for _, k := range p.KPIs {
-		mark := "ok "
-		if k.Hard && len(k.Defects) > 0 {
-			mark = "HARD"
-		} else if len(k.Soft) > 0 {
-			mark = "soft"
-		}
-		fmt.Fprintf(&b, "  [%s] %-22s %3d  %s\n", mark, k.Label, k.Score, k.Detail)
-		for _, d := range k.Defects {
-			fmt.Fprintf(&b, "        - %s\n", d)
-		}
-		for _, s := range k.Soft {
-			fmt.Fprintf(&b, "        ~ %s\n", s)
-		}
-	}
-	fmt.Fprintf(&b, "\n  -> %s\n", p.NextAction)
-	return b.String()
-}
-
-// Markdown produces the committed snapshot body.
-func Markdown(p Payload) string {
-	var b strings.Builder
-	b.WriteString("# UI/UX-quality scorecard\n\n")
-	fmt.Fprintf(&b, "**%s** — %s\n\n", p.Verdict, p.Finding)
-	b.WriteString("> " + p.Reason + "\n\n")
-	b.WriteString("| KPI | group | score | hard | detail |\n")
-	b.WriteString("|---|---|---:|:---:|---|\n")
-	for _, k := range p.KPIs {
-		hard := ""
-		if k.Hard {
-			hard = "✓"
-		}
-		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s |\n", k.Label, k.Group, k.Score, hard, k.Detail)
-	}
-	fmt.Fprintf(&b, "\n**ui_quality_debt:** %d\n", anyInt(p.Corpus["ui_quality_debt"]))
-	b.WriteString("\n**Next:** " + p.NextAction + "\n")
-	return b.String()
-}
-
-// Compare renders a before/after debt delta against a prior --json payload.
-func Compare(cur Payload, base map[string]any) string {
-	bDebt := corpusInt(base, "ui_quality_debt")
-	cDebt := anyInt(cur.Corpus["ui_quality_debt"])
-	delta := bDebt - cDebt
-	var b strings.Builder
-	b.WriteString("UI/UX-quality scorecard — compare\n")
-	verb := "retired"
-	n := delta
-	if delta < 0 {
-		verb = "ADDED"
-		n = -delta
-	}
-	fmt.Fprintf(&b, "  ui_quality_debt: %d -> %d  (%s %d)\n", bDebt, cDebt, verb, n)
-	if delta >= 0 {
-		fmt.Fprintf(&b, "  PASS: debt did not regress (%s)\n", cur.Verdict)
-	} else {
-		fmt.Fprintf(&b, "  FAIL: debt regressed by %d\n", -delta)
-	}
-	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -996,31 +925,4 @@ func splitTopArgs(args string) []string {
 		}
 	}
 	return out
-}
-
-func anyInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	}
-	return 0
-}
-
-func corpusInt(m map[string]any, key string) int {
-	if m == nil {
-		return 0
-	}
-	if c, ok := m["corpus"].(map[string]any); ok {
-		if v, ok := c[key]; ok {
-			return anyInt(v)
-		}
-	}
-	if v, ok := m[key]; ok {
-		return anyInt(v)
-	}
-	return 0
 }
