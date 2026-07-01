@@ -45,6 +45,18 @@ scoped worker per issue — while keeping every safety primitive the plan path h
 | 5. **Harvest** | `fak dispatch progress` / [`issue_resolve_progress.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_progress.py) | Native `progress` snapshots open / closed-by-loop / witnessed counts to `.dispatch-runs/progress.jsonl` (the curve), records the baseline, and emits loop-ledger witness rows. The legacy Python progress script still drives `--close` until the native witnessed close arm lands. Counts only closes carrying the close-arm's signature as the loop's own work. |
 | 6. **Surface** | [`dispatch_status.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_status.py) | One-touch operator card; `--md` writes the operator-local `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane, closure honesty, silent-worker scan). |
 
+Close-arm dry-runs render the per-candidate decision table before any GitHub
+mutation:
+
+```text
+resolve-witnessed: PLANNED (ok)  live=False  candidates=2 planned=2
+  issue   sha        audit                  decision  reason
+  #1800   45d88e28ab OK/diff-witnessed      close     witness ok; dry-run only
+  #1801   abcdef1234 DENY/?                 hold      commit-audit verdict=DENY witness=?
+  -> closed=0 would_close=1 skipped=1 unpushed=0 failed=0  (gate=active, closure_rate before=0.91)
+  DRY-RUN - re-run with --live to execute the gh closes
+```
+
 For generation-specific concurrent loop scheduling, use
 [`generation-loop-scheduling.md`](generation-loop-scheduling.md). It defines the
 held/default-admitted buckets, shared-lease contention behavior, and operator

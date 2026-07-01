@@ -228,20 +228,42 @@ def render(p: dict[str, Any]) -> str:
     lines = [f"resolve-witnessed: {p.get('verdict')} ({'ok' if p.get('ok') else 'action'})  "
              f"live={p.get('live')}  candidates={p.get('candidates_total')} "
              f"planned={p.get('planned_count')}"]
+    if p.get("results"):
+        lines.append("  issue   sha        audit                  decision  reason")
     for r in p.get("results") or []:
-        mark = {"closed": "[CLOSED]", "would_close": "[would-close]",
-                "skip_unwitnessed": "[SKIP no-witness]",
-                "skip_unpushed": "[SKIP unpushed]", "close_failed": "[FAILED]"}.get(
-                    r.get("action"), "[?]")
-        lines.append(f"  {mark} #{r.get('number')} {r.get('sha','')[:10]}  "
-                     f"{(r.get('title') or '')[:50]}")
+        action = str(r.get("action") or "")
+        audit = f"{r.get('verdict') or '?'}/{r.get('witness') or '?'}"
+        decision = close_decision(action)
+        reason = close_reason(action, r)
+        lines.append(f"  #{r.get('number')!s:<6} {str(r.get('sha',''))[:10]:<10} "
+                     f"{audit:<22} {decision:<9} {reason}")
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
                  f"skipped={c.get('skipped_unwitnessed')} "
                  f"unpushed={c.get('skipped_unpushed')} failed={c.get('failed')}  "
                  f"(gate={p.get('pushed_gate')}, closure_rate before={p.get('closure_rate_before')})")
     if not p.get("live"):
-        lines.append("  DRY-RUN — re-run with --live to execute the gh closes")
+        lines.append("  DRY-RUN - re-run with --live to execute the gh closes")
     return "\n".join(lines)
+
+
+def close_decision(action: str) -> str:
+    if action in {"closed", "would_close"}:
+        return "close"
+    if action in {"skip_unwitnessed", "skip_unpushed"}:
+        return "hold"
+    if action == "close_failed":
+        return "failed"
+    return action or "unknown"
+
+
+def close_reason(action: str, row: dict[str, Any]) -> str:
+    if row.get("reason"):
+        return str(row["reason"])
+    if action == "would_close":
+        return "witness ok; dry-run only"
+    if action == "closed":
+        return "closed by live close arm"
+    return (row.get("title") or "")[:80]
 
 
 def main(argv: list[str] | None = None) -> int:
