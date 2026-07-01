@@ -86,7 +86,9 @@ cannot prove a single accepted development branch, keep the old `main` regime.
    and release-source freshness in status views.
 10. **#1703 - reversible shadow cutover.** Run a shadow mode that reports what
     would happen under `dev` before switching agents. Cut over only after the
-    report is clean.
+    report is clean. Use
+    [`docs/branch-regime-shadow-cutover.md`](branch-regime-shadow-cutover.md)
+    as the proof checklist for that run.
 
 Global agent prompt changes are last-mile work: they belong after #1695, #1696,
 #1697, and #1703 prove the target branch is enforceable and observable.
