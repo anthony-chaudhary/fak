@@ -58,7 +58,7 @@ LIVE = ("--live" in sys.argv) or _env_flag("FAK_LIVE")
 SLACK = ("--slack" in sys.argv) or _env_flag("FAK_DISPATCH_SLACK")
 SLACK_DRY = "--slack-dry-run" in sys.argv
 WINDOW_H = float(os.environ.get("FAK_WINDOW_H", "6"))
-MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
+MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "4"))
 # How many times a session may be auto-resumed before the gate gives up and leaves
 # it for a human. The original gate burned a session on the FIRST launch regardless
 # of outcome, so a resume that died 2s later on a usage-limit wall was permanently
@@ -66,7 +66,7 @@ MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
 # revived it). Now a resume that fails RECOVERABLY (limit wall / transient) stays
 # eligible up to this many attempts; a CLEAN finish or an unrecoverable auth wall
 # still burns it once. Override with FAK_MAX_ATTEMPTS.
-MAX_ATTEMPTS = int(os.environ.get("FAK_MAX_ATTEMPTS", "3"))
+MAX_ATTEMPTS = int(os.environ.get("FAK_MAX_ATTEMPTS", "8"))
 # Seconds to wait BETWEEN spawning each resume in a single tick. Without spacing the
 # launcher fires all MAX_PER_TICK resumes within the same second, and a burst that big
 # trips the server-side "temporarily limiting requests (not your usage limit)" 529 --

@@ -274,7 +274,10 @@ def default_config(root: Path) -> dict[str, Any]:
                 "task_name": "FleetResumeWatchdog",
                 "script": "tools/fleet_resume_watchdog.ps1",
                 "register_script": "tools/register_resume_watchdog.ps1",
-                "interval_min": 10,
+                # 5-min cadence (matches the supervisor) so the AUTO_RESUME queue drains
+                # faster; actual launch rate is still bounded by MaxPerTick + the
+                # per-source concurrency gate + REHOME_CAP.
+                "interval_min": 5,
             },
         },
         "supervisor_status_cmd": [

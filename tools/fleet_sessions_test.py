@@ -554,8 +554,9 @@ class DedupTaskTest(unittest.TestCase):
         sids = self._sids(3)
         ledger = os.path.join(self._tmp, "resume_ledger.jsonl")
         import json as _json
+        cap = int(os.environ.get("FAK_MAX_ATTEMPTS", "8"))  # track the code's default
         with open(ledger, "w", encoding="utf-8") as fh:
-            for _ in range(3):     # 3 launch rows for sids[2] -> >= MAX_ATTEMPTS
+            for _ in range(cap):   # MAX_ATTEMPTS launch rows for sids[2] -> ledger-blocked
                 fh.write(_json.dumps({"session": sids[2], "phase": "launched"}) + "\n")
         rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[0], task_sig="SIG", records=10),
                 _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[1], task_sig="SIG", records=20),
@@ -565,6 +566,94 @@ class DedupTaskTest(unittest.TestCase):
         primary = next(r for r in rows if r["action"] == "AUTO_RESUME")
         self.assertEqual(primary["session"], sids[1])   # records=20, not the blocked 99
 
+
+class ResumeEscalationTest(unittest.TestCase):
+    """A session that keeps dying IN PLACE on its own (healthy) account is re-homed onto a
+    fresh seat after RESUME_ESCALATE_AFTER in-place attempts, instead of being re-pinned to
+    the account it keeps dying on (#1342/#1345/#1859). The owner-throttled paths already
+    re-home; this is the healthy-owner-but-repeatedly-crashing path they missed."""
+
+    def setUp(self):
+        # isolate the ledger read so _ledger_inplace_attempts sees ONLY what we write
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def _seed_ledger(self, sid, *, inplace=0, rehomed=0):
+        import json as _json
+        with open(os.path.join(self._tmp, "resume_ledger.jsonl"), "w", encoding="utf-8") as fh:
+            for _ in range(inplace):
+                fh.write(_json.dumps({"session": sid, "phase": "launched", "rehomed": False}) + "\n")
+            for _ in range(rehomed):
+                fh.write(_json.dumps({"session": sid, "phase": "launched", "rehomed": True}) + "\n")
+
+    def _two_seat_avail(self):
+        return [_avail(".claude-owner-acct", available=True, live=2),
+                _avail(".claude-other-acct", available=True, live=0)]
+
+    def test_first_crashes_resume_in_place(self) -> None:
+        # under the threshold (1 prior in-place attempt < RESUME_ESCALATE_AFTER=2) -> owner
+        sid = "aaaa1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, inplace=1)
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+
+    def test_repeat_crasher_escalates_to_another_seat(self) -> None:
+        # at/over the threshold -> re-home onto the OTHER healthy seat, not the failing owner
+        sid = "bbbb1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, inplace=2)
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-other-acct")
+        self.assertNotEqual(r["resume_account"], r["account"])
+        # the plan/watchdog copies the transcript across before resuming
+        self.assertIn("Copy-Item", r["resume_cmd"])
+
+    def test_apierr_repeat_crasher_escalates(self) -> None:
+        sid = "cccc1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, inplace=3)
+        rows = [_row(".claude-owner-acct", "STOPPED_APIERR", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        self.assertTrue(rows[0]["rehomed"])
+        self.assertEqual(rows[0]["resume_account"], ".claude-other-acct")
+
+    def test_escalation_falls_back_in_place_when_no_other_seat(self) -> None:
+        # repeatedly crashing but the owner is the ONLY healthy seat -> stay in place
+        sid = "dddd1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, inplace=5)
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL", session=sid)]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-owner-acct", available=True)])
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+
+    def test_rehomed_attempts_do_not_count_as_in_place(self) -> None:
+        # a session that was only ever RE-HOMED has an in-place streak of 0 -> in place,
+        # so the escalation keys on failures on the OWN account, not total launches
+        sid = "eeee1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, rehomed=4)
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        self.assertFalse(rows[0]["rehomed"])
+
+    def test_no_ledger_resumes_in_place(self) -> None:
+        # first-ever crash (empty ledger) -> plain in-place resume, no escalation
+        sid = "ffff1111-2222-3333-4444-555555555555"
+        rows = [_row(".claude-owner-acct", "DEAD_MIDTOOL", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        self.assertFalse(rows[0]["rehomed"])
 
 class TaskSigClassifyTest(unittest.TestCase):
     """task_sig must come from the real first instruction, ignoring harness wrappers

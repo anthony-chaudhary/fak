@@ -623,6 +623,14 @@ def resume_cmd(r):
 # must stay under it. Override with FAK_REHOME_CAP for hosts with fatter accounts.
 REHOME_CAP = int(os.environ.get("FAK_REHOME_CAP", "4"))
 
+# After this many IN-PLACE auto-resumes that did not stick, a session that keeps dying
+# on its OWN account is re-homed onto a different healthy seat instead of being re-pinned
+# to the owner -- the "retrying on the same account isn't working, use another one"
+# escalation (#1342/#1345/#1859). The owner-throttled/org-disabled paths already re-home
+# on the first pass; THIS is the healthy-owner-but-repeatedly-crashing path they missed.
+# 0 disables escalation (always in-place). Override with FAK_RESUME_ESCALATE_AFTER.
+RESUME_ESCALATE_AFTER = int(os.environ.get("FAK_RESUME_ESCALATE_AFTER", "2"))
+
 
 def _has_positive_evidence(a) -> bool:
     """The launch-boundary admission predicate (#619): True iff an account's health
@@ -751,7 +759,7 @@ def _ledger_blocked_sids(reg_dir=None):
     manual/operator settle, OR its last recorded outcome is 'unrecoverable'. Absent
     or unreadable ledger => empty set (fail-open: dedup still elects a primary)."""
     reg_dir = reg_dir or REG_DIR
-    max_attempts = int(os.environ.get("FAK_MAX_ATTEMPTS", "3"))
+    max_attempts = int(os.environ.get("FAK_MAX_ATTEMPTS", "8"))
     path = os.path.join(reg_dir, "resume_ledger.jsonl")
     launches: dict[str, int] = {}
     blocked: set[str] = set()
@@ -780,6 +788,38 @@ def _ledger_blocked_sids(reg_dir=None):
         if n >= max_attempts:
             blocked.add(sid)
     return blocked
+
+
+def _ledger_inplace_attempts(reg_dir=None):
+    """Per-sid count of prior IN-PLACE (non-rehomed) auto-resume launches from the durable
+    ledger. decide() consults this to ESCALATE a session that keeps dying on its OWN
+    account: after RESUME_ESCALATE_AFTER in-place attempts that did not stick, the next
+    resume is re-homed onto a different healthy seat rather than re-pinning the owner
+    (#1342/#1345/#1859). A re-homed launch (rehomed=True) is NOT counted -- once a session
+    has moved seats its in-place streak is over, so it stays escalated instead of
+    ping-ponging back to the failing owner. Absent/unreadable ledger => empty (fail-open:
+    no escalation, plain in-place resume exactly as before)."""
+    reg_dir = reg_dir or REG_DIR
+    path = os.path.join(reg_dir, "resume_ledger.jsonl")
+    counts: dict[str, int] = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for ln in fh:
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    rec = json.loads(ln)
+                except ValueError:
+                    continue
+                sid = rec.get("session")
+                if not sid or rec.get("rehomed"):
+                    continue
+                if rec.get("phase") in ("launched", "resumed") or rec.get("cause"):
+                    counts[sid] = counts.get(sid, 0) + 1
+    except OSError:
+        return {}
+    return counts
 
 
 def _resumable_disp(r):
@@ -854,6 +894,33 @@ def _desc(s):
     return tuple(-ord(c) for c in (s or ""))
 
 
+def _resume_inplace_or_escalate(r, availability, assigned, inplace_counts):
+    """Stamp a resumable IN-PLACE row (an agent crash or a transient API error whose OWN
+    account is healthy) AUTO_RESUME. Normally that resumes on the owner. But if this
+    session has already been resumed in place >= RESUME_ESCALATE_AFTER times and an
+    admissible seat on ANOTHER account exists, re-home it there instead of re-pinning the
+    owner -- so a session that keeps dying on one seat MOVES to a fresh one rather than
+    looping on the same failing account (#1342/#1345/#1859). The re-home reuses the exact
+    machinery the throttle path uses (_admissible_targets ranks least-loaded proven-healthy
+    seats excluding the owner; the watchdog copies the transcript across on rehomed=True),
+    and folds the target into ``assigned`` so a burst spreads instead of stampeding one
+    seat. Falls back to plain in-place resume when escalation is disabled, the attempt
+    threshold is not met, or no other healthy seat is admissible."""
+    r["action"] = "AUTO_RESUME"
+    if RESUME_ESCALATE_AFTER <= 0:
+        return
+    if inplace_counts.get(r["session"], 0) < RESUME_ESCALATE_AFTER:
+        return
+    targets = _admissible_targets(availability, r["account"], assigned)
+    if not targets:
+        return
+    tgt = targets[0]
+    r["rehomed"] = True
+    r["resume_account"] = tgt["account"]
+    r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
+    assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
+
+
 def decide(rows, throttle, availability=None):
     """Stamp each row with a deterministic action + an account-correct resume command.
     Only AUTONOMOUS, genuinely-DEAD (crashed/killed) sessions are auto-resumable.
@@ -881,6 +948,8 @@ def decide(rows, throttle, availability=None):
     here and skip the decision ladder entirely, so they never consume a re-home slot."""
     _dedup_defer(rows)                       # pre-pass: stamp duplicate-task losers
     assigned: dict[str, int] = {}
+    # prior in-place resume counts per sid -> escalate a repeat-crasher to another seat
+    inplace_counts = _ledger_inplace_attempts()
     for r in rows:
         cwd_ok = bool(r["cwd"]) and os.path.isdir(r["cwd"])
         # resume target defaults to the owning account; re-home overrides it below
@@ -961,9 +1030,12 @@ def decide(rows, throttle, availability=None):
         elif r["disp"] == "INFRA_AUTH":
             r["action"] = "BLOCKED_AUTH"            # INFRA: needs human re-login; resume won't help
         elif r["disp"] == "STOPPED_APIERR":
-            r["action"] = "AUTO_RESUME"             # INFRA: transient API error -> retry (#1353: any autonomy; server interrupted it)
+            # INFRA: transient API error -> retry (#1353: any autonomy; server interrupted it).
+            # Repeated in-place retries that don't stick escalate to another seat.
+            _resume_inplace_or_escalate(r, availability, assigned, inplace_counts)
         elif r["disp"] in DEAD and r["autonomous"]:
-            r["action"] = "AUTO_RESUME"             # AGENT crash, autonomous -> resume
+            # AGENT crash, autonomous -> resume; escalate to another seat if it keeps dying here.
+            _resume_inplace_or_escalate(r, availability, assigned, inplace_counts)
         elif r["disp"] in DEAD or r["disp"] == "STOPPED_QUIET":
             r["action"] = "SURFACE"                 # agent crash / quiet stop but interactive -> human
         else:

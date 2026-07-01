@@ -6,10 +6,12 @@ Each tick:
   1. EXTRACT-IN-ADVANCE: refresh the on-disk session registry
      (tools/_registry/sessions.json) and the AUTO_RESUME plan
      (tools/_registry/resume_plan.json) via fleet_sessions.py.
-  2. Resume each AUTO_RESUME session ONCE EVER, under its owning account's
-     CLAUDE_CONFIG_DIR. "Once ever" is enforced by a durable ledger
-     (tools/_registry/resume_ledger.jsonl) -- a session that dies again after
-     being auto-resumed is left for a human, never re-resumed in a loop.
+  2. Resume each AUTO_RESUME session under its resume-target account's
+     CLAUDE_CONFIG_DIR, up to -MaxAttempts times (default 8). Attempts are counted in
+     a durable ledger (tools/_registry/resume_ledger.jsonl); a session that keeps dying
+     in place is re-homed onto a fresh seat by the planner, and once the attempt cap is
+     hit it is left for a human. Operator-settled / unrecoverable-auth sids are never
+     retried.
   3. Notify (Windows Action Center + notifications.log) on relevant actions:
      a resume, and an account that needs human re-login (BLOCKED_AUTH).
 
@@ -17,7 +19,9 @@ Safety rails:
   * DRY-RUN by default (pass -Live to actually resume).
   * Interactive sessions are SURFACE (never auto-resumed); supervisor workers are
     SUPERVISED (left to run_supervise_loop); throttled accounts are deferred.
-  * RESUME ONCE: ledger-gated, survives state-file loss.
+  * BOUNDED RETRY: up to -MaxAttempts (default 8) ledger-counted attempts; a repeat
+    crasher is re-homed to a fresh seat by the planner and finally left for a human.
+    Ledger-gated, survives state-file loss. Operator-settled / auth-wall sids never retry.
   * Per-tick launch cap.
 
   .\fleet_resume_watchdog.ps1                 # dry-run: log what it WOULD resume
@@ -28,7 +32,12 @@ param(
   [switch]$Live,
   [string]$FleetDir   = 'C:\work\fleet',
   [int]$WindowH       = 6,
-  [int]$MaxPerTick    = 2,
+  [int]$MaxPerTick    = 4,
+  # Ledger-counted resume attempts per session before it is left for a human. Was an
+  # implicit 1 ("resume once ever"); raised so a session that keeps dying is retried --
+  # and re-homed onto a fresh seat by the planner after repeated in-place failures --
+  # instead of stranded on the first re-crash. Override per-invocation with -MaxAttempts.
+  [int]$MaxAttempts   = 8,
   [string]$ClaudeExe  = '',
   [string]$LogDir     = '',
   [string]$RegistryDir = '',
@@ -131,11 +140,23 @@ try {
   foreach ($a in @($acctDoc.accounts | Where-Object { $_.kind -eq 'worker' })) { $workerAccts[$a.account] = $true }
 } catch {}
 
-# durable resume-once ledger: a session that appears here was already resumed once.
+# durable resume ledger: count prior launches per session and flag operator-settled /
+# unrecoverable sids, so a session is retried up to -MaxAttempts times (and moved to a
+# fresh seat by the planner after repeated in-place failures) instead of once ever.
 $ledgerPath = Join-Path $regDir 'resume_ledger.jsonl'
-$resumed = @{}
+$launchCount = @{}
+$ledgerBlocked = @{}
 if (Test-Path $ledgerPath) {
-  Get-Content $ledgerPath | ForEach-Object { try { $resumed[($_ | ConvertFrom-Json).session] = $true } catch {} }
+  Get-Content $ledgerPath | ForEach-Object {
+    try {
+      $r = $_ | ConvertFrom-Json
+      $s = $r.session
+      if (-not $s) { return }
+      if ($r.manual_override -or ("$($r.action)").StartsWith('consolidate')) { $ledgerBlocked[$s] = $true }
+      if ($r.outcome -eq 'unrecoverable') { $ledgerBlocked[$s] = $true }
+      if (($r.phase -eq 'launched') -or ($r.phase -eq 'resumed') -or $r.cause) { $launchCount[$s] = [int]$launchCount[$s] + 1 }
+    } catch {}
+  }
 }
 $nowIso = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 $launched = 0
@@ -147,7 +168,9 @@ foreach ($p in @($plan)) {
   if ($workerAccts.Count -and -not $workerAccts.ContainsKey($p.account)) {
     Note "  SKIP $sid8 -- account $($p.account) is not an offered worker (policy/tombstoned)"; continue
   }
-  if ($resumed.ContainsKey($sid)) { Note "  SKIP $sid8 -- already resumed once (ledger)"; continue }
+  if ($ledgerBlocked.ContainsKey($sid)) { Note "  SKIP $sid8 -- ledger-blocked (operator-settled or unrecoverable auth wall)"; continue }
+  $attempts = [int]$launchCount[$sid]
+  if ($attempts -ge $MaxAttempts) { Note "  SKIP $sid8 -- attempt cap reached ($attempts/$MaxAttempts) -- left for a human"; continue }
   if (-not $Live) {
     $rh = if ($p.rehomed) { " -> $($p.resume_account) (re-home)" } else { "" }
     Note "  WOULD RESUME $sid8 acct=$acct proj=$($p.project)$rh"; continue
@@ -179,11 +202,12 @@ foreach ($p in @($plan)) {
     -WorkingDirectory $wd -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $out -RedirectStandardError "$out.err"
   # record in the durable ledger BEFORE anything else, so a crash can't double-resume
-  $rec = @{ ts = $nowIso; session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp } | ConvertTo-Json -Compress
+  $attempt = [int]$launchCount[$sid] + 1
+  $rec = @{ ts = $nowIso; session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp; phase = 'launched'; attempt = $attempt } | ConvertTo-Json -Compress
   Add-Content -Path $ledgerPath -Value $rec
-  $resumed[$sid] = $true
+  $launchCount[$sid] = $attempt
   $launched++
-  Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) (ledger-recorded; will not resume again)"
+  Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) (attempt $attempt/$MaxAttempts; re-eligible if it dies again)"
   Toast "Resumed dead session" "$sid8  ($acct / $($p.project))" 'info' "resume:$sid" 1440
 }
 
@@ -213,7 +237,7 @@ if (Test-Path $sessPath) {
   ($notified | ConvertTo-Json) | Set-Content -Path $notifiedPath -Encoding UTF8
 }
 
-Note "  done: launched=$launched resumed_total=$($resumed.Count)"
+Note "  done: launched=$launched sessions_in_ledger=$($launchCount.Count)"
 # refresh the observability card on disk
 try { & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $FleetDir 'tools\fleet_status.ps1') -Quiet -RegistryDir $regDir -LogDir $LogDir } catch {}
 exit 0
