@@ -57,3 +57,35 @@ func TestProbeTokenEmptyToken(t *testing.T) {
 		t.Fatalf("empty token should error")
 	}
 }
+
+func TestIsScopeError(t *testing.T) {
+	// The real body a `claude setup-token` credential draws from the profile endpoint: a valid,
+	// serveable token that just lacks the profile scope. This must classify as a scope error so
+	// enrollment treats it as "identity pending", not a bad-token failure.
+	scopeBody := `{"type":"error","error":{"type":"permission_error","message":"OAuth token does not meet scope requirement any_of(user:profile, user:office)"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(scopeBody))
+	}))
+	defer srv.Close()
+	_, err := ProbeToken(srv.Client(), srv.URL, "sk-ant-oat-scoped")
+	if err == nil {
+		t.Fatalf("a 403 should be an error")
+	}
+	if !IsScopeError(err) {
+		t.Errorf("IsScopeError(scope-403) = false, want true; err=%v", err)
+	}
+
+	// A plain 401 (genuinely bad token) is NOT a scope error — it must stay in the loud path.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer bad.Close()
+	_, err = ProbeToken(bad.Client(), bad.URL, "sk-ant-oat-bad")
+	if IsScopeError(err) {
+		t.Errorf("IsScopeError(401) = true, want false")
+	}
+	if IsScopeError(nil) {
+		t.Errorf("IsScopeError(nil) = true, want false")
+	}
+}

@@ -29,6 +29,21 @@ type ProbedIdentity struct {
 	FullName    string
 }
 
+// IsScopeError reports whether err is the SPECIFIC 403 the OAuth profile endpoint returns
+// for a `claude setup-token` credential — a valid, serveable token that simply lacks the
+// `user:profile`/`user:office` scope the profile read requires. This is NOT a bad token:
+// it serves fine, it just cannot answer "who am I" at the profile endpoint. Enrollment
+// treats it as "identity pending" (binds on first interactive login) rather than a failure,
+// so the add flow stops emitting a scary warning for the expected case.
+func IsScopeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "status 403") &&
+		(strings.Contains(s, "scope requirement") || strings.Contains(s, "user:profile") || strings.Contains(s, "permission_error"))
+}
+
 // ProbeToken asks the OAuth profile endpoint who `token` authenticates as. A non-2xx or a
 // transport error is returned as an error (the token does not work / is not a real account),
 // so a caller can refuse to enroll a credential that cannot prove itself. url defaults to
