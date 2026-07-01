@@ -589,16 +589,62 @@ func redact(args map[string]any, fields []string) (map[string]any, bool) {
 }
 
 // matchGlob returns the first glob fragment contained in path, or "".
+//
+// A fragment that names a DOTFILE (leading '.', e.g. ".env", ".aws/") must
+// additionally occur at a token boundary: the byte before the match, if any,
+// may not be a word byte. Bare substring matching turned the most ordinary
+// env READ there is — `python -c "… os.environ …"` — into a SELF_MODIFY deny,
+// because the inline-eval floor hands the whole opaque segment to this matcher
+// as the write target and "os.environ" contains ".env" (witnessed live
+// 2026-07-01: `python -c "import os; print(len(os.environ))"` denied with
+// witness ".env"). A genuine dotfile target always follows a separator —
+// `> .env`, `src/.env`, `--env-file=.env`, `~/.aws/credentials`, a leading
+// `.env` — so every real deny is kept; only the mid-identifier '.' of a dotted
+// name ("os.environ", "config.env", "repo.git/") stops counting as the dotfile.
 func matchGlob(path string, globs []string) string {
 	if path == "" {
 		return ""
 	}
 	for _, g := range globs {
-		if g != "" && strings.Contains(path, g) {
+		if g == "" {
+			continue
+		}
+		if g[0] != '.' {
+			if strings.Contains(path, g) {
+				return g
+			}
+			continue
+		}
+		if dotfileFragmentIn(path, g) {
 			return g
 		}
 	}
 	return ""
+}
+
+// dotfileFragmentIn reports whether the dotfile fragment g occurs in path at a
+// token boundary — the start of the string, or preceded by a non-word byte
+// (a path separator, whitespace, a quote, '=', shell punctuation, …).
+func dotfileFragmentIn(path, g string) bool {
+	for from := 0; ; {
+		i := strings.Index(path[from:], g)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		if at == 0 || !wordByte(path[at-1]) {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+// wordByte reports whether b continues an identifier/word — a byte that, when
+// it precedes a '.', makes that '.' the dot OF a dotted name rather than the
+// start of a dotfile. Everything else is a boundary.
+func wordByte(b byte) bool {
+	return b == '_' || b == '-' ||
+		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // interpreterEvalSpec pairs a general-purpose interpreter with the inline-program flags
