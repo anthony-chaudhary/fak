@@ -3,6 +3,7 @@ package propagationscore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/issuecontract"
@@ -212,25 +213,48 @@ func TestLiveTreeIsDeterministicAndDetectsDrift(t *testing.T) {
 			t.Fatalf("roster drifted from the tree: %v", k.Defects)
 		}
 	}
-	// The card must be measuring REAL drift: the kernel convention has at least one adopter and
-	// at least one laggard on the live tree (it is neither fully propagated nor absent).
-	var kernel struct{ adopters, laggards int }
+	// The probes must be REAL, not a constant stub: every tracked convention's adopter+laggard
+	// count must add up to the resolvable member count (never 0 members probed, which would
+	// mean the roster or the probe wiring silently broke). The card is allowed to find the
+	// family fully converged on a convention -- that is the propagation program's intended
+	// end state, not a broken oracle -- so this no longer demands a laggard survive forever
+	// (a prior version pinned to the "kernel" convention specifically, which went stale the
+	// moment #1510 retired dogfoodscore as the last kernel laggard).
 	probes := ProbeMembers(root, Family)
+	resolvable := 0
 	for _, p := range probes {
-		if !p.Exists {
+		if p.Exists {
+			resolvable++
+		}
+	}
+	if resolvable == 0 {
+		t.Fatal("no family member resolved on the live tree -- the roster or probe wiring is broken")
+	}
+	for _, c := range Conventions {
+		adopters, laggards := 0, 0
+		for _, p := range probes {
+			if !p.Exists {
+				continue
+			}
+			if p.Adopted[c.Key] {
+				adopters++
+			} else {
+				laggards++
+			}
+		}
+		if adopters+laggards != resolvable {
+			t.Fatalf("convention %q: adopters(%d)+laggards(%d) != resolvable members(%d) -- probe miscounted", c.Key, adopters, laggards, resolvable)
+		}
+	}
+	// A convention below 100% adoption (declared or past quorum) must still show up as a real,
+	// dispatchable fan-out gap; a fully converged tree legitimately reports zero gaps.
+	for _, k := range a.KPIs {
+		if !strings.HasPrefix(k.Key, "propagate_") {
 			continue
 		}
-		if p.Adopted["kernel"] {
-			kernel.adopters++
-		} else {
-			kernel.laggards++
+		if k.Score < 100 && len(k.Defects) == 0 && len(k.Soft) == 0 {
+			t.Fatalf("convention %q scores %.1f (<100) but named no laggard -- adoption and defects/soft disagree", k.Key, k.Score)
 		}
-	}
-	if kernel.adopters == 0 || kernel.laggards == 0 {
-		t.Fatalf("kernel adoption is %d adopters / %d laggards -- expected real drift (both > 0)", kernel.adopters, kernel.laggards)
-	}
-	if len(Gaps(root)) == 0 {
-		t.Fatalf("expected at least one HARD propagation gap on the live tree")
 	}
 }
 
