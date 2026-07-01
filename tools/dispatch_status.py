@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,7 @@ _GUARD_QUARANTINE_KIND = "QUARANTINE"
 _GUARD_RECENT_LOOKBACK_MIN = 90
 # resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
 _RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
+_LEASEREF_PREFIX = "refs/fak/locks/"
 # The real-turn byte floor: a log at or below this carried no productive turn — it
 # is a 0-byte spawn or a banner-only stub (e.g. a detached opencode worker that
 # prints `> build · <model>` and exits). Mirrors the canonical
@@ -157,6 +159,263 @@ def merge_state(root: Path) -> dict[str, Any]:
             "wait for MERGE_HEAD to clear before starting new worker edits; "
             "partial path commits are unsafe while a peer merge is in progress")
     return out
+
+
+def _string_list(v: Any) -> list[str]:
+    if isinstance(v, list):
+        return [str(x) for x in v if str(x).strip()]
+    if isinstance(v, str) and v.strip():
+        return [v]
+    return []
+
+
+def _normalize_tree(t: str) -> str:
+    t = str(t or "").strip().replace("\\", "/")
+    if t.startswith("./"):
+        t = t[2:]
+    t = t.rstrip("/")
+    for suffix in ("/**", "/*"):
+        if t.endswith(suffix):
+            t = t[: -len(suffix)]
+    return t.rstrip("/")
+
+
+def _clean_tree(tree: Any) -> list[str]:
+    out: list[str] = []
+    for t in _string_list(tree):
+        n = _normalize_tree(t)
+        if n:
+            out.append(n)
+    return out
+
+
+def _tree_overlap_one(a: str, b: str) -> bool:
+    a, b = _normalize_tree(a), _normalize_tree(b)
+    if not a or not b:
+        return True
+    if a in ("**", "**/*") or b in ("**", "**/*"):
+        return True
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def trees_overlap(a: Any, b: Any) -> bool:
+    ta, tb = _clean_tree(a), _clean_tree(b)
+    if not ta or not tb:
+        return True
+    return any(_tree_overlap_one(x, y) for x in ta for y in tb)
+
+
+def _lease_active_unix(rec: dict[str, Any]) -> int | None:
+    acquired = _int(rec.get("acquired_unix"))
+    renewed = _int(rec.get("renewed_unix"))
+    if acquired is None and renewed is None:
+        return None
+    if acquired is None:
+        return renewed
+    if renewed is None:
+        return acquired
+    return max(acquired, renewed)
+
+
+def _lease_expired(rec: dict[str, Any], now_ts: float) -> bool:
+    ttl = _int(rec.get("ttl_seconds"), 0) or 0
+    if ttl <= 0:
+        return False
+    active = _lease_active_unix(rec)
+    if active is None:
+        return False
+    return now_ts >= active + ttl
+
+
+def _lease_lane(lease_id: str) -> str:
+    lease_id = str(lease_id or "").strip()
+    if not lease_id.startswith("resolve-"):
+        return lease_id
+    lane = lease_id[len("resolve-"):]
+    if re.search(r"-\d+$", lane):
+        lane = re.sub(r"-\d+$", "", lane)
+    return lane or lease_id
+
+
+def _backlog_candidates(backlog: dict[str, Any]) -> list[dict[str, Any]]:
+    lanes = (backlog.get("lanes") or {}) if isinstance(backlog, dict) else {}
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+
+    for row in backlog.get("issues") or []:
+        if not isinstance(row, dict):
+            continue
+        lane = str(row.get("lane") or "")
+        issue = _int(row.get("number"))
+        if not lane or issue is None:
+            continue
+        grp = lanes.get(lane) or {}
+        cand = {
+            "issue": issue,
+            "lane": lane,
+            "confidence": row.get("confidence"),
+            "tree": _string_list(grp.get("tree")),
+        }
+        out.append(cand)
+        seen.add((issue, lane))
+
+    for lane, grp_any in lanes.items():
+        if not isinstance(grp_any, dict):
+            continue
+        lane_s = str(lane)
+        for issue_any in grp_any.get("issues") or []:
+            issue = _int(issue_any)
+            if issue is None or (issue, lane_s) in seen:
+                continue
+            out.append({
+                "issue": issue,
+                "lane": lane_s,
+                "confidence": None,
+                "tree": _string_list(grp_any.get("tree")),
+            })
+            seen.add((issue, lane_s))
+    return out
+
+
+def summarize_leases(records: list[dict[str, Any]], backlog: dict[str, Any],
+                     *, now_ts: float | None = None) -> dict[str, Any]:
+    """Classify refs/fak/locks records for the status card.
+
+    Active leases block a candidate only when their tree overlaps a currently
+    routed issue's lane tree. Expired records stay visible as reapable residue,
+    but never block a candidate.
+    """
+    now_ts = time.time() if now_ts is None else now_ts
+    backlog = backlog if isinstance(backlog, dict) else {}
+    lanes = backlog.get("lanes") or {}
+    candidate_source_available = "_skipped" not in backlog and not ("_error" in backlog and not lanes)
+    candidates = _backlog_candidates(backlog)
+    active: list[dict[str, Any]] = []
+    expired: list[dict[str, Any]] = []
+
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        lease_id = str(rec.get("id") or "").strip()
+        if not lease_id:
+            continue
+        tree = _string_list(rec.get("tree_globs"))
+        active_unix = _lease_active_unix(rec)
+        age_seconds = max(0, int(now_ts - active_unix)) if active_unix is not None else None
+        ttl = _int(rec.get("ttl_seconds"), 0) or 0
+        expires_in = None
+        if ttl > 0 and active_unix is not None:
+            expires_in = int(active_unix + ttl - now_ts)
+        row = {
+            "id": lease_id,
+            "lane": _lease_lane(lease_id),
+            "holder": rec.get("holder"),
+            "tree": tree,
+            "age_seconds": age_seconds,
+            "age_min": round(age_seconds / 60, 1) if age_seconds is not None else None,
+            "ttl_seconds": ttl,
+            "expires_in_seconds": expires_in,
+            "generation": rec.get("generation"),
+        }
+        if _lease_expired(rec, now_ts):
+            row["status"] = "EXPIRED"
+            row["blocks_candidate"] = False
+            row["blocking_candidates"] = []
+            expired.append(row)
+            continue
+        row["status"] = "LIVE"
+        if candidate_source_available:
+            blockers = [
+                c for c in candidates
+                if trees_overlap(tree, c.get("tree"))
+            ]
+            row["blocks_candidate"] = bool(blockers)
+            row["blocking_candidates"] = blockers[:8]
+        else:
+            row["blocks_candidate"] = None
+            row["blocking_candidates"] = []
+        active.append(row)
+
+    active.sort(key=lambda r: (not bool(r.get("blocks_candidate")), str(r.get("lane") or ""), str(r.get("id") or "")))
+    expired.sort(key=lambda r: str(r.get("id") or ""))
+    return {
+        "source": "refs/fak/locks",
+        "candidate_source_available": candidate_source_available,
+        "candidate_count": len(candidates),
+        "active_count": len(active),
+        "expired_count": len(expired),
+        "blocking_count": sum(1 for r in active if r.get("blocks_candidate")),
+        "active": active,
+        "expired": expired[:8],
+    }
+
+
+def read_leaseref_records(root: Path) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        proc = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname)", _LEASEREF_PREFIX],
+            cwd=root, capture_output=True, text=True, timeout=10,
+            creationflags=_win_creationflags())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [], str(exc)
+    if proc.returncode != 0:
+        return [], (proc.stderr or proc.stdout or "git for-each-ref failed").strip()[-500:]
+
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    for ref in (proc.stdout or "").splitlines():
+        ref = ref.strip()
+        if not ref.startswith(_LEASEREF_PREFIX):
+            continue
+        if ref[len(_LEASEREF_PREFIX):].startswith("session-"):
+            continue
+        try:
+            blob = subprocess.run(
+                ["git", "cat-file", "blob", ref],
+                cwd=root, capture_output=True, text=True, timeout=10,
+                creationflags=_win_creationflags())
+        except (OSError, subprocess.TimeoutExpired):
+            skipped += 1
+            continue
+        if blob.returncode != 0:
+            skipped += 1
+            continue
+        try:
+            rec = json.loads(blob.stdout or "{}")
+        except ValueError:
+            skipped += 1
+            continue
+        if isinstance(rec, dict):
+            rec.setdefault("id", ref[len(_LEASEREF_PREFIX):])
+            records.append(rec)
+        else:
+            skipped += 1
+    if skipped:
+        for rec in records:
+            rec.setdefault("_skipped_records", skipped)
+    return records, None
+
+
+def read_lease_state(root: Path, backlog: dict[str, Any],
+                     *, now_ts: float | None = None) -> dict[str, Any]:
+    records, err = read_leaseref_records(root)
+    if err:
+        return {
+            "source": "refs/fak/locks",
+            "read_error": err,
+            "candidate_source_available": False,
+            "candidate_count": 0,
+            "active_count": 0,
+            "expired_count": 0,
+            "blocking_count": 0,
+            "active": [],
+            "expired": [],
+        }
+    state = summarize_leases(records, backlog, now_ts=now_ts)
+    skipped = max((_int(r.get("_skipped_records"), 0) or 0) for r in records) if records else 0
+    if skipped:
+        state["skipped_records"] = skipped
+    return state
 
 
 def has_key_named(obj: Any, key: str) -> bool:
@@ -666,6 +925,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     guard = guard_coverage(root / RUNS_DIRNAME)
     run_status = read_run_status_digests(root)
     merge = merge_state(root)
+    leases = read_lease_state(root, backlog)
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
@@ -673,7 +933,7 @@ def collect(root: Path, *, max_workers: int, fast: bool,
                          backend_health=backend_health,
                          backend_stub_rate=backend_stub_rate,
                          hook_failures=hook_failures, guard=guard,
-                         run_status=run_status, merge=merge)
+                         run_status=run_status, merge=merge, leases=leases)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
@@ -686,7 +946,8 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   hook_failures: list[dict[str, Any]] | None = None,
                   guard: dict[str, Any] | None = None,
                   run_status: list[dict[str, Any]] | None = None,
-                  merge: dict[str, Any] | None = None) -> dict[str, Any]:
+                  merge: dict[str, Any] | None = None,
+                  leases: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -843,6 +1104,31 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         else:
             reasons.append(f"run truth from dos status digest for {len(run_status)} RID(s)")
 
+    leases = leases or {}
+    if leases.get("read_error"):
+        reasons.append(f"lease read unavailable: {leases.get('read_error')}")
+    elif leases.get("active_count"):
+        blocking = _int(leases.get("blocking_count"), 0) or 0
+        if leases.get("candidate_source_available") is False:
+            reasons.append(
+                f"{leases.get('active_count')} active lane lease(s); candidate blocking unknown "
+                "(backlog fold unavailable)")
+        elif blocking:
+            blocked_nums: list[str] = []
+            for row in leases.get("active") or []:
+                if not row.get("blocks_candidate"):
+                    continue
+                for cand in row.get("blocking_candidates") or []:
+                    issue = cand.get("issue")
+                    if issue is not None:
+                        blocked_nums.append(f"#{issue}")
+            suffix = f" ({', '.join(blocked_nums[:6])})" if blocked_nums else ""
+            reasons.append(
+                f"{blocking}/{leases.get('active_count')} active lane lease(s) block "
+                f"current candidate issue(s){suffix}")
+        else:
+            reasons.append(f"{leases.get('active_count')} active lane lease(s), none blocking current candidates")
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -911,6 +1197,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "errors": status_errors,
             "digests": run_status,
         },
+        "leases": leases,
         "git": {
             "merge_in_progress": bool(merge.get("merge_in_progress")),
             "merge_head": merge.get("merge_head"),
@@ -918,6 +1205,40 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         },
         "fast": fast,
     }
+
+
+def _age_text(minutes: Any) -> str:
+    if not isinstance(minutes, (int, float)):
+        return "?"
+    if minutes < 1:
+        return "<1m"
+    if minutes >= 60:
+        hours = f"{minutes / 60:.1f}".rstrip("0").rstrip(".")
+        return hours + "h"
+    return f"{minutes:.1f}".rstrip("0").rstrip(".") + "m"
+
+
+def _lease_block_text(row: dict[str, Any]) -> str:
+    blocking = row.get("blocks_candidate")
+    if blocking is None:
+        return "candidate unknown"
+    if not blocking:
+        return "no candidate"
+    nums = [f"#{c.get('issue')}" for c in (row.get("blocking_candidates") or [])
+            if c.get("issue") is not None]
+    return "blocks " + (",".join(nums[:4]) if nums else "candidate")
+
+
+def _lease_summary_bits(leases: dict[str, Any], *, limit: int = 3) -> list[str]:
+    rows = leases.get("active") or []
+    bits: list[str] = []
+    for row in rows[:limit]:
+        bits.append(
+            f"{row.get('id')} lane={row.get('lane') or '-'} "
+            f"age={_age_text(row.get('age_min'))} {_lease_block_text(row)}")
+    if len(rows) > limit:
+        bits.append(f"+{len(rows) - limit} more")
+    return bits
 
 
 def render(p: dict[str, Any]) -> str:
@@ -991,6 +1312,14 @@ def render(p: dict[str, Any]) -> str:
     if rs.get("count"):
         bits = ", ".join(f"{k}={v}" for k, v in sorted((rs.get("liveness") or {}).items())) or "none"
         lines.append(f"║ run truth : dos status {rs.get('count')} RID(s), errors={rs.get('errors')} [{bits}]")
+    leases = p.get("leases") or {}
+    if leases.get("read_error"):
+        lines.append(f"║ leases    : unavailable ({leases.get('read_error')})")
+    elif leases.get("active_count"):
+        bits = "; ".join(_lease_summary_bits(leases))
+        lines.append(
+            f"║ leases    : {leases.get('active_count')} active, "
+            f"{leases.get('blocking_count', 0)} blocking [{bits}]")
     git = p.get("git") or {}
     if git.get("merge_in_progress"):
         lines.append(f"║ git       : MERGE_HEAD present — {git.get('next_action')}")
@@ -1052,6 +1381,12 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     git = payload.get("git") or {}
     if git.get("merge_in_progress"):
         out.append(f"- **git wait state**: `MERGE_HEAD` present — {git.get('next_action')}")
+    leases = payload.get("leases") or {}
+    if leases.get("read_error"):
+        out.append(f"- **lane leases**: unavailable (`{leases.get('read_error')}`)")
+    elif leases.get("active_count"):
+        out.append(f"- **lane leases**: {leases.get('active_count')} active; "
+                   f"{leases.get('blocking_count', 0)} blocking current candidates")
     out += [
         "",
         "## Backlog by lane (issue → lane sync)",
@@ -1122,6 +1457,41 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
                 + (f"{last} min ago." if last is not None else "**none on record**.")
                 + " A gh-rate far above the loop-rate means humans/peers are draining "
                 "the backlog, not the dispatcher."]
+
+    leases = payload.get("leases") or {}
+    out += ["", "## Active lane leases", ""]
+    if leases.get("read_error"):
+        out.append(f"_Lease read unavailable: `{leases.get('read_error')}`._")
+    elif not leases.get("active_count"):
+        extra = ""
+        if leases.get("expired_count"):
+            extra = f" {leases.get('expired_count')} expired lease record(s) are reapable residue."
+        out.append("No active lane leases under `refs/fak/locks/*`." + extra)
+    else:
+        if leases.get("candidate_source_available") is False:
+            out.append(
+                "_Backlog routing was unavailable, so candidate-blocking status is unknown._")
+        elif leases.get("blocking_count"):
+            out.append(
+                f"**{leases.get('blocking_count')}** active lease(s) overlap current routed "
+                "candidate issues; those candidates should wait or be repartitioned.")
+        else:
+            out.append("Active leases are present, but none overlap the current routed candidates.")
+        if leases.get("expired_count"):
+            out.append(
+                f"{leases.get('expired_count')} expired lease record(s) are visible but non-blocking.")
+        out += [
+            "",
+            "| lease id | lane | age | ttl | blocks candidate | holder | tree |",
+            "|---|---|---:|---:|---|---|---|",
+        ]
+        for row in leases.get("active") or []:
+            tree = ", ".join(f"`{t}`" for t in (row.get("tree") or [])) or "—"
+            holder = str(row.get("holder") or "—")
+            out.append(
+                f"| `{row.get('id')}` | {row.get('lane') or '—'} | "
+                f"{_age_text(row.get('age_min'))} | {row.get('ttl_seconds')}s | "
+                f"{_lease_block_text(row)} | `{holder}` | {tree} |")
 
     bh = payload.get("backend_health") or {}
     dead = bh.get("dead") or []
@@ -1281,6 +1651,7 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
     a = d.get("account") or {}
     b = payload.get("backlog") or {}
     c = payload.get("closure") or {}
+    l = payload.get("leases") or {}
 
     parts: list[str] = []
     if d.get("live") is not None or d.get("cap") is not None:
@@ -1300,6 +1671,9 @@ def _dispatch_capacity_line(payload: dict[str, Any]) -> str:
         hk = c.get("honest_close_rate")
         parts.append(f"closure {_rate_str(c.get('closure_rate'))}"
                      + (f"/{_rate_str(hk)}" if hk is not None else ""))
+    if l.get("active_count"):
+        parts.append(f"leases {l.get('active_count')} active"
+                     + (f" ({l.get('blocking_count')} blocking)" if l.get("blocking_count") else ""))
     return "capacity: " + " · ".join(parts) if parts else ""
 
 
@@ -1424,6 +1798,15 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
         buckets["action"].append(
             "peer merge in progress (MERGE_HEAD present); "
             f"{git.get('next_action') or 'wait before starting worker edits'}")
+    leases = payload.get("leases") or {}
+    if leases.get("read_error"):
+        buckets["action"].append(f"lease read unavailable: {leases.get('read_error')}")
+    elif leases.get("active_count"):
+        bits = _lease_summary_bits(leases, limit=2)
+        buckets["expected"].append(
+            f"{leases.get('active_count')} active lane lease(s), "
+            f"{leases.get('blocking_count', 0)} blocking current candidates"
+            + (f" ({'; '.join(bits)})" if bits else ""))
 
     return buckets
 

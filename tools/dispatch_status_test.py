@@ -187,6 +187,76 @@ class RunStatusDigestTest(unittest.TestCase):
         self.assertIn("run truth", mod.render(p))
 
 
+class LeaseStateTest(unittest.TestCase):
+    def _backlog(self) -> dict:
+        return {
+            "lanes": {
+                "tools": {"tree": ["tools/**"], "issues": [1762]},
+            },
+            "issues": [
+                {"number": 1762, "lane": "tools", "confidence": "path-confirmed"},
+            ],
+        }
+
+    def test_summarize_leases_marks_blocking_and_non_blocking_active_leases(self) -> None:
+        mod = load()
+        state = mod.summarize_leases([
+            {
+                "id": "resolve-tools-1762",
+                "tree_globs": ["tools/**"],
+                "holder": "peer-a",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-model-1700",
+                "tree_globs": ["internal/model/**"],
+                "holder": "peer-b",
+                "acquired_unix": 1_100,
+                "ttl_seconds": 3_600,
+            },
+            {
+                "id": "resolve-docs",
+                "tree_globs": ["docs/**"],
+                "holder": "old-peer",
+                "acquired_unix": 100,
+                "ttl_seconds": 10,
+            },
+        ], self._backlog(), now_ts=1_600)
+
+        self.assertEqual(state["active_count"], 2)
+        self.assertEqual(state["expired_count"], 1)
+        self.assertEqual(state["blocking_count"], 1)
+        by_id = {row["id"]: row for row in state["active"]}
+        self.assertTrue(by_id["resolve-tools-1762"]["blocks_candidate"])
+        self.assertEqual(by_id["resolve-tools-1762"]["lane"], "tools")
+        self.assertEqual(by_id["resolve-tools-1762"]["age_min"], 10.0)
+        self.assertEqual(
+            by_id["resolve-tools-1762"]["blocking_candidates"][0]["issue"], 1762)
+        self.assertFalse(by_id["resolve-model-1700"]["blocks_candidate"])
+        self.assertEqual(state["expired"][0]["id"], "resolve-docs")
+
+    def test_candidate_blocking_is_unknown_when_backlog_fold_unavailable(self) -> None:
+        mod = load()
+        state = mod.summarize_leases([
+            {
+                "id": "resolve-tools-1762",
+                "tree_globs": ["tools/**"],
+                "holder": "peer-a",
+                "acquired_unix": 1_000,
+                "ttl_seconds": 3_600,
+            },
+        ], {"_skipped": "fast"}, now_ts=1_600)
+
+        self.assertFalse(state["candidate_source_available"])
+        self.assertIsNone(state["active"][0]["blocks_candidate"])
+
+    def test_age_text_formats_minutes_and_hours(self) -> None:
+        mod = load()
+        self.assertEqual(mod._age_text(10.0), "10m")
+        self.assertEqual(mod._age_text(120.0), "2h")
+
+
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_minimal_payload(self) -> None:
         mod = load()
@@ -226,6 +296,52 @@ class RenderTest(unittest.TestCase):
         slack = mod.slack_text(p)
         self.assertIn("peer merge in progress", slack)
         self.assertIn("wait for MERGE_HEAD", slack)
+
+    def test_render_surfaces_blocking_and_non_blocking_leases(self) -> None:
+        mod = load()
+        leases = {
+            "source": "refs/fak/locks",
+            "candidate_source_available": True,
+            "candidate_count": 1,
+            "active_count": 2,
+            "expired_count": 0,
+            "blocking_count": 1,
+            "active": [
+                {
+                    "id": "resolve-tools-1762",
+                    "lane": "tools",
+                    "holder": "peer-a",
+                    "tree": ["tools/**"],
+                    "age_min": 10.0,
+                    "ttl_seconds": 3600,
+                    "blocks_candidate": True,
+                    "blocking_candidates": [{"issue": 1762, "lane": "tools"}],
+                },
+                {
+                    "id": "resolve-model-1700",
+                    "lane": "model",
+                    "holder": "peer-b",
+                    "tree": ["internal/model/**"],
+                    "age_min": 5.0,
+                    "ttl_seconds": 3600,
+                    "blocks_candidate": False,
+                    "blocking_candidates": [],
+                },
+            ],
+            "expired": [],
+        }
+
+        p = build(mod, leases=leases)
+        self.assertTrue(any("active lane lease" in r for r in p["reasons"]))
+        text = mod.render(p)
+        self.assertIn("leases", text)
+        self.assertIn("resolve-tools-1762", text)
+        self.assertIn("blocks #1762", text)
+        self.assertIn("resolve-model-1700", text)
+        self.assertIn("no candidate", text)
+        slack = mod.slack_text(p)
+        self.assertIn("leases 2 active (1 blocking)", slack)
+        self.assertIn("active lane lease", slack)
 
 
 class SilentWorkersFoldTest(unittest.TestCase):
@@ -581,6 +697,45 @@ class RenderMdTest(unittest.TestCase):
                            date="2026-06-29")
         self.assertIn("## Hook health", md)
         self.assertIn("| codex | 90m | 3 | 3 | 1.0 | 195 | **UNHOOKED** |", md)
+
+    def test_md_lists_active_lane_leases(self) -> None:
+        mod = load()
+        leases = {
+            "source": "refs/fak/locks",
+            "candidate_source_available": True,
+            "candidate_count": 1,
+            "active_count": 2,
+            "expired_count": 1,
+            "blocking_count": 1,
+            "active": [
+                {
+                    "id": "resolve-tools-1762",
+                    "lane": "tools",
+                    "holder": "peer-a",
+                    "tree": ["tools/**"],
+                    "age_min": 10.0,
+                    "ttl_seconds": 3600,
+                    "blocks_candidate": True,
+                    "blocking_candidates": [{"issue": 1762, "lane": "tools"}],
+                },
+                {
+                    "id": "resolve-model-1700",
+                    "lane": "model",
+                    "holder": "peer-b",
+                    "tree": ["internal/model/**"],
+                    "age_min": 5.0,
+                    "ttl_seconds": 3600,
+                    "blocks_candidate": False,
+                    "blocking_candidates": [],
+                },
+            ],
+            "expired": [{"id": "resolve-docs", "status": "EXPIRED"}],
+        }
+        md = mod.render_md(self._payload(mod, leases=leases), date="2026-06-30")
+        self.assertIn("## Active lane leases", md)
+        self.assertIn("| `resolve-tools-1762` | tools | 10m | 3600s | blocks #1762 |", md)
+        self.assertIn("| `resolve-model-1700` | model | 5m | 3600s | no candidate |", md)
+        self.assertIn("1 expired lease record", md)
 
     def test_md_silent_section_says_none_when_clean(self) -> None:
         mod = load()
