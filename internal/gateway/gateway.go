@@ -748,6 +748,16 @@ type Server struct {
 	notedResultsMu sync.Mutex
 	notedResults   map[string]map[string]struct{}
 
+	// originSeq maps an admitted origin call to the sequence stamped on its DECIDE row,
+	// so a later client-produced tool_result can journal its QUARANTINE against the
+	// originating call. Native fak_syscall records the kernel submission SeqNo by
+	// trace/tool/args; proxy adjudication records a gateway-reserved sequence by
+	// trace/tool_call_id because the client, not fak, executes the tool.
+	originSeqMu   sync.Mutex
+	originSeq     map[string]uint64
+	originSeqByID map[string]uint64
+	originSeqNext uint64
+
 	// resumeProj holds the resume PROJECTED-vs-OBSERVED RESIDUAL accumulators (#941), a
 	// self-contained metric family (resume_projection.go) the host's opt-in resume hook folds one
 	// boundary into via observeResumeProjection. SHADOW / observe-only: nothing here resumes, cuts,
@@ -1580,6 +1590,10 @@ func engineRegistered(id string) bool {
 // args so the client can run the canonical form; that repaired-args string is the
 // second return.
 func (s *Server) adjudicate(ctx context.Context, tool, rawArgs string, readOnly bool, witness, traceID string) (wv WireVerdict, repaired string, err error) {
+	return s.adjudicateWithSeq(ctx, tool, rawArgs, readOnly, witness, traceID, 0)
+}
+
+func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, readOnly bool, witness, traceID string, callSeq uint64) (wv WireVerdict, repaired string, err error) {
 	start := time.Now()
 	opTrace, opTool := traceID, tool
 	defer func() {
@@ -1590,6 +1604,9 @@ func (s *Server) adjudicate(ctx context.Context, tool, rawArgs string, readOnly 
 	tc, err := s.buildCall(ctx, tool, rawArgs, readOnly, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, "", err
+	}
+	if callSeq != 0 {
+		tc.SeqNo = callSeq
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
 	v := s.k.Decide(ctx, tc)
@@ -1631,6 +1648,7 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return wv, env, err
 	}
 	r, v := s.k.Syscall(ctx, tc)
+	s.rememberOriginSeq(tc.TraceID, tc.Tool, string(resolveBytes(ctx, tc.Args)), tc.SeqNo)
 	wv = renderVerdict(v, resultMeta(r))
 	if r != nil {
 		env = &ResultEnvelope{
@@ -1989,6 +2007,10 @@ var errEngineCacheReset = errors.New("engine cache reset failed")
 // (op "admit") and the auto /v1/chat/completions proxy (op "proxy_admit") route
 // through it, so the result-side floor is identical on every served topology.
 func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witness, traceID string) (wv WireVerdict, env *ResultEnvelope, err error) {
+	return s.admitOpWithSeq(ctx, operation, tool, rawResult, witness, traceID, 0)
+}
+
+func (s *Server) admitOpWithSeq(ctx context.Context, operation, tool, rawResult, witness, traceID string, callSeq uint64) (wv WireVerdict, env *ResultEnvelope, err error) {
 	start := time.Now()
 	opTrace, opTool := traceID, tool
 	defer func() {
@@ -1999,6 +2021,9 @@ func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witnes
 	tc, err := s.buildCall(ctx, tool, "", false, witness, traceID)
 	if err != nil {
 		return WireVerdict{}, nil, err
+	}
+	if callSeq != 0 {
+		tc.SeqNo = callSeq
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
 	body := []byte(rawResult)
@@ -2018,6 +2043,75 @@ func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witnes
 	}
 	wv = renderVerdict(v, r.Meta)
 	return wv, env, nil
+}
+
+func (s *Server) rememberOriginSeq(traceID, tool, rawArgs string, seq uint64) {
+	if seq == 0 || traceID == "" || tool == "" {
+		return
+	}
+	s.originSeqMu.Lock()
+	if s.originSeq == nil {
+		s.originSeq = map[string]uint64{}
+	}
+	if len(s.originSeq) >= maxResetHealthSessions {
+		for k := range s.originSeq {
+			delete(s.originSeq, k)
+			break
+		}
+	}
+	s.originSeq[originSeqKey(traceID, tool, rawArgs)] = seq
+	s.originSeqMu.Unlock()
+}
+
+const gatewayOriginSeqBase uint64 = 1 << 63
+
+func (s *Server) nextOriginSeq() uint64 {
+	return gatewayOriginSeqBase | atomic.AddUint64(&s.originSeqNext, 1)
+}
+
+func (s *Server) rememberOriginSeqID(traceID, callID string, seq uint64) {
+	if seq == 0 || traceID == "" || callID == "" {
+		return
+	}
+	s.originSeqMu.Lock()
+	if s.originSeqByID == nil {
+		s.originSeqByID = map[string]uint64{}
+	}
+	if len(s.originSeqByID) >= maxResetHealthSessions {
+		for k := range s.originSeqByID {
+			delete(s.originSeqByID, k)
+			break
+		}
+	}
+	s.originSeqByID[originSeqIDKey(traceID, callID)] = seq
+	s.originSeqMu.Unlock()
+}
+
+func (s *Server) originSeqFor(traceID string, call agent.ToolCall) uint64 {
+	if traceID == "" {
+		return 0
+	}
+	s.originSeqMu.Lock()
+	if call.ID != "" {
+		if seq := s.originSeqByID[originSeqIDKey(traceID, call.ID)]; seq != 0 {
+			s.originSeqMu.Unlock()
+			return seq
+		}
+	}
+	seq := s.originSeq[originSeqKey(traceID, call.Function.Name, call.Function.Arguments)]
+	s.originSeqMu.Unlock()
+	return seq
+}
+
+func originSeqKey(traceID, tool, rawArgs string) string {
+	if rawArgs == "" {
+		rawArgs = "{}"
+	}
+	return traceID + "\x00" + tool + "\x00" + rawArgs
+}
+
+func originSeqIDKey(traceID, callID string) string {
+	return traceID + "\x00id\x00" + callID
 }
 
 // admitInboundResults arms the RESULT-side floor on the auto /v1/chat/completions
@@ -2046,18 +2140,19 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	}
 	// Pair each inbound tool_result to its originating call's (tool, args): the result
 	// block carries only ToolCallID + Content, but the args live on the prior assistant
-	// tool_use whose ID == ToolCallID (decoded into Message.ToolCalls). Build the join
-	// index once, only when the proxy-fill warm path is enabled (otherwise it is dead work).
-	var callByID map[string]agent.ToolCall
-	if s.vdsoProxyFill {
-		callByID = make(map[string]agent.ToolCall)
-		for _, m := range messages {
-			if m.Role != agent.RoleAssistant {
+	// tool_use whose ID == ToolCallID (decoded into Message.ToolCalls). The same index
+	// feeds optional vDSO fill and, when a real kernel sequence was recorded, the journal
+	// call_seq on result-side quarantines.
+	callByID := make(map[string]agent.ToolCall)
+	for _, m := range messages {
+		if m.Role != agent.RoleAssistant {
+			continue
+		}
+		for _, tcc := range m.ToolCalls {
+			if tcc.ID == "" {
 				continue
 			}
-			for _, tcc := range m.ToolCalls {
-				callByID[tcc.ID] = tcc
-			}
+			callByID[tcc.ID] = tcc
 		}
 	}
 	var admissions []ResultAdmission
@@ -2073,7 +2168,13 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			// (provenance treats an unregistered tool as Untrusted).
 			tool = "tool_result"
 		}
-		wv, envlp, aerr := s.admitOp(ctx, "proxy_admit", tool, messages[i].Content, "", traceID)
+		var originSeq uint64
+		if messages[i].ToolCallID != "" {
+			if orig, ok := callByID[messages[i].ToolCallID]; ok {
+				originSeq = s.originSeqFor(traceID, orig)
+			}
+		}
+		wv, envlp, aerr := s.admitOpWithSeq(ctx, "proxy_admit", tool, messages[i].Content, "", traceID, originSeq)
 		if aerr != nil {
 			// A result we cannot even admit is held out fail-closed rather than
 			// forwarded raw to the model.

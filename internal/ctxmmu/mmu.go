@@ -131,7 +131,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 
 	// 1-3. unsafe result bytes -> quarantine (unit 70/68/62).
 	if reason, ok := ScreenBytes(body); ok {
-		return m.quarantineResult(ctx, r, reason, body)
+		return m.quarantineResult(ctx, r, reason, body, detectorFor(reason))
 	}
 	// 3b. SEMANTIC screen — the local-model-on-the-wire seam (RESEARCH-local-model-on
 	// -the-wire-2026-06-23.md). A registered abi.SemanticScreen may ADDITIVELY quarantine
@@ -159,7 +159,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 				reason = abi.ReasonTrustViolation
 			}
 			atomic.AddInt64(&m.screened, 1)
-			return m.quarantineResult(ctx, r, reason, body)
+			return m.quarantineResult(ctx, r, reason, body, semanticDetector(adv.By))
 		case abi.ScreenDigest:
 			// Keep the first authored digest; continue scanning so a later screen can
 			// still escalate to a Quarantine (a held-out body is never digested).
@@ -212,7 +212,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 // quarantineResult pages the offending bytes out, replaces the result payload
 // in-place with a tiny stub so they are absent from context, records the held
 // handle for a gated page-in, and returns the Quarantine verdict.
-func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte) abi.Verdict {
+func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte, detector string) abi.Verdict {
 	atomic.AddInt64(&m.quarantine, 1)
 	id := fmt.Sprintf("q%d", atomic.LoadInt64(&m.quarantine))
 	handle := m.pageOut(ctx, body)
@@ -235,7 +235,38 @@ func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.Re
 	}
 	r.Meta["quarantine_id"] = id
 	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: reason, By: "ctxmmu",
-		Payload: abi.QuarantinePayload{PageOut: true}}
+		Payload: abi.QuarantinePayload{PageOut: true},
+		Meta:    quarantineMeta("ctxmmu", reason, detector, id)}
+}
+
+func detectorFor(reason abi.ReasonCode) string {
+	switch reason {
+	case abi.ReasonSecretExfil:
+		return "secret_pattern"
+	case abi.ReasonTrustViolation:
+		return "injection_marker"
+	case abi.ReasonOversize:
+		return "repeated_chunk"
+	default:
+		return "screen"
+	}
+}
+
+func semanticDetector(by string) string {
+	by = strings.TrimSpace(by)
+	if by == "" {
+		return "semantic_screen"
+	}
+	return "semantic_screen:" + by
+}
+
+func quarantineMeta(by string, reason abi.ReasonCode, detector, id string) map[string]string {
+	reasonName := abi.ReasonName(reason)
+	if reasonName == "" {
+		reasonName = "REASON_UNKNOWN"
+	}
+	claim := by + " " + reasonName + " " + detector + " quarantine_id=" + id
+	return map[string]string{"claim": claim, "quarantine_id": id}
 }
 
 func (m *MMU) pageToPointer(ctx context.Context, orig abi.Ref, body []byte, hint string) (abi.Ref, bool) {

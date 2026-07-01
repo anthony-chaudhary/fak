@@ -171,7 +171,8 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 	dropped := 0
 	for _, tc := range calls {
 		tool := tc.Function.Name
-		wv, repaired, aerr := s.adjudicate(ctx, tool, tc.Function.Arguments, false, "", reqTrace)
+		seq := s.nextOriginSeq()
+		wv, repaired, aerr := s.adjudicateWithSeq(ctx, tool, tc.Function.Arguments, false, "", reqTrace, seq)
 		if aerr != nil {
 			dropped++
 			adjs = append(adjs, ToolAdjudication{ToolCallID: tc.ID, Tool: tool, Admitted: false,
@@ -182,6 +183,8 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 		switch wv.Kind {
 		case "ALLOW":
 			adj.Admitted = true
+			s.rememberOriginSeqID(reqTrace, tc.ID, seq)
+			s.rememberOriginSeq(reqTrace, tool, tc.Function.Arguments, seq)
 			kept = append(kept, tc)
 		case "TRANSFORM":
 			adj.Admitted = true
@@ -189,6 +192,8 @@ func (s *Server) adjudicateProposed(ctx context.Context, calls []agent.ToolCall,
 				tc.Function.Arguments = repaired
 				adj.RepairedArguments = json.RawMessage(repaired)
 			}
+			s.rememberOriginSeqID(reqTrace, tc.ID, seq)
+			s.rememberOriginSeq(reqTrace, tool, tc.Function.Arguments, seq)
 			kept = append(kept, tc)
 		default:
 			dropped++

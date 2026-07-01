@@ -279,7 +279,28 @@ func (g *Gate) quarantineOut(ctx context.Context, r *abi.Result, reason abi.Reas
 	r.Meta["quarantine_id"] = id
 	r.Meta["normgate"] = "quarantined"
 	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: reason, By: "normgate",
-		Payload: abi.QuarantinePayload{PageOut: true}}
+		Payload: abi.QuarantinePayload{PageOut: true},
+		Meta:    quarantineMeta("normgate", reason, detectorFor(reason), id)}
+}
+
+func detectorFor(reason abi.ReasonCode) string {
+	switch reason {
+	case abi.ReasonSecretExfil:
+		return "canonical_secret"
+	case abi.ReasonTrustViolation:
+		return "canonical_injection"
+	default:
+		return "canonical_scan"
+	}
+}
+
+func quarantineMeta(by string, reason abi.ReasonCode, detector, id string) map[string]string {
+	reasonName := abi.ReasonName(reason)
+	if reasonName == "" {
+		reasonName = "REASON_UNKNOWN"
+	}
+	claim := by + " " + reasonName + " " + detector + " quarantine_id=" + id
+	return map[string]string{"claim": claim, "quarantine_id": id}
 }
 
 // Clear records a witness clearance for a quarantined id (the page-in gate). It is
