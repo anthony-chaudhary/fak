@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -46,6 +47,7 @@ func anthropicPassthroughElideServer(threshold int) *Server {
 		planner:          &agent.HTTPPlanner{Provider: agent.ProviderAnthropic},
 		elideResultBytes: threshold,
 		logf:             func(string, ...any) {},
+		metrics:          newGatewayMetrics(time.Now()),
 	}
 }
 
@@ -137,7 +139,8 @@ func TestMaybeElideOnShrinksKeepsPrefix(t *testing.T) {
 	}
 	prefixEnd := spans[0].end
 
-	if !anthropicPassthroughElideServer(2048).maybeElideAnthropicRaw(req) {
+	s := anthropicPassthroughElideServer(2048)
+	if !s.maybeElideAnthropicRaw(req) {
 		t.Fatal("expected elision to FIRE on an oversized old result at threshold 2048")
 	}
 	if len(req.Raw) >= len(orig) {
@@ -148,5 +151,24 @@ func TestMaybeElideOnShrinksKeepsPrefix(t *testing.T) {
 	}
 	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
 		t.Fatalf("rewritten body failed to re-decode: %v", err)
+	}
+
+	sum := s.metrics.adjudicationSummary()
+	if sum.CompactionShedTokens == 0 {
+		t.Fatalf("elision did not reach fak-owned shed attribution: %+v", sum)
+	}
+	if got := sum.MechanismSavings().FakCompactionShedTokens; got != sum.CompactionShedTokens {
+		t.Fatalf("fak mechanism split = %d, want shed total %d", got, sum.CompactionShedTokens)
+	}
+	var b strings.Builder
+	s.metrics.writeCompactionMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_gateway_uncached_trim_results_total 1",
+		"fak_gateway_uncached_trim_shed_tokens_total",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("uncached trim metric missing %q:\n%s", want, out)
+		}
 	}
 }

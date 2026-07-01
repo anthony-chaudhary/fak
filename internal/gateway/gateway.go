@@ -310,9 +310,10 @@ type Config struct {
 	// (the default) reproduces the pre-#1407 CompactAnchorFirstBP behavior byte-for-byte;
 	// this is an explicit opt-in, not a default-on lever, because it can burst a warm cache.
 	CompactAnchorHead bool
-	// ElideResultBytes is the off-by-default oversized tool-result elision threshold.
+	// ElideResultBytes is the oversized tool-result elision threshold.
 	// 0 keeps the transform inert; a positive value arms the documented head+tail
-	// shrinker for results outside the active working set.
+	// shrinker for results outside the active working set. The command surfaces default this
+	// to DefaultElideResultBytes.
 	ElideResultBytes int
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
@@ -686,8 +687,8 @@ type Server struct {
 	// elideResultBytes mirrors Config.ElideResultBytes: when > 0 the flagship Anthropic
 	// passthrough shrinks oversized tool_result bodies in the un-cached, non-recent middle to a
 	// bounded head+tail form (agent.ElideAnthropicResults), keeping the cached-prefix bytes
-	// verbatim and never touching a cache_control-bearing message. 0 (the default) leaves the
-	// body byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
+	// verbatim and never touching a cache_control-bearing message. 0 leaves the body
+	// byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
 	elideResultBytes int
 
 	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
@@ -1316,7 +1317,8 @@ func (s *Server) maybeElideMessages(messages []agent.Message) []agent.Message {
 	if s.elideResultBytes <= 0 || s.anthropicPassthrough() {
 		return messages
 	}
-	out, _ := agent.ElideMessages(messages, s.elideResultBytes)
+	out, outcome := agent.ElideMessages(messages, s.elideResultBytes)
+	s.metrics.observeUncachedTrim(outcome)
 	return out
 }
 

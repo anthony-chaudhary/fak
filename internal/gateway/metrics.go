@@ -126,6 +126,8 @@ type gatewayMetrics struct {
 	compactCacheReads    uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
 	compactLastCacheRd   float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
 	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
+	uncachedTrimResults  uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
+	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
 
 	// toolPruneMu guards the INBOUND tool-definition prune accumulators (the twin of
 	// the compaction family above, for the tools[] axis). maybeCompactInboundTools drops
@@ -516,6 +518,32 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 			m.compactAnchorStarved++
 		}
 	}
+}
+
+// observeUncachedTrim records oversized-result elision as a fak-authored uncached-token saving.
+// It does not increment the history-compaction attempt counters: the transform is a sibling
+// shrinker, not a whole-turn compaction fire. Its shed tokens are still folded into compactShed so
+// the existing owner/mechanism attribution reports them under owner="fak"/compaction_shed.
+func (m *gatewayMetrics) observeUncachedTrim(out agent.ElideOutcome) {
+	if m == nil || out.Reason != agent.ElideReasonNone || out.ShedBytes <= 0 {
+		return
+	}
+	tokens := estimatedTokensFromBytes(out.ShedBytes)
+	if tokens == 0 {
+		return
+	}
+	m.compactMu.Lock()
+	m.uncachedTrimResults += uint64(out.Elided)
+	m.uncachedTrimShed += tokens
+	m.compactShed += tokens
+	m.compactMu.Unlock()
+}
+
+func estimatedTokensFromBytes(n int) uint64 {
+	if n <= 0 {
+		return 0
+	}
+	return uint64(n / 4)
 }
 
 // recordCompactionCacheRead records the provider's cache_read_input_tokens on a turn whose body
@@ -1896,13 +1924,15 @@ type inferenceSnapshot struct {
 }
 
 type compactionSnapshot struct {
-	attempts      map[string]uint64
-	bailReasons   map[string]uint64
-	dropped       uint64
-	shed          uint64
-	cacheReads    uint64
-	lastCacheRd   float64
-	anchorStarved uint64
+	attempts            map[string]uint64
+	bailReasons         map[string]uint64
+	dropped             uint64
+	shed                uint64
+	cacheReads          uint64
+	lastCacheRd         float64
+	anchorStarved       uint64
+	uncachedTrimResults uint64
+	uncachedTrimShed    uint64
 }
 
 type requestMemoryAggregateSnapshot struct {
@@ -1996,13 +2026,15 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		bailReasons[k] = v
 	}
 	return compactionSnapshot{
-		attempts:      attempts,
-		bailReasons:   bailReasons,
-		dropped:       m.compactDropped,
-		shed:          m.compactShed,
-		cacheReads:    m.compactCacheReads,
-		lastCacheRd:   m.compactLastCacheRd,
-		anchorStarved: m.compactAnchorStarved,
+		attempts:            attempts,
+		bailReasons:         bailReasons,
+		dropped:             m.compactDropped,
+		shed:                m.compactShed,
+		cacheReads:          m.compactCacheReads,
+		lastCacheRd:         m.compactLastCacheRd,
+		anchorStarved:       m.compactAnchorStarved,
+		uncachedTrimResults: m.uncachedTrimResults,
+		uncachedTrimShed:    m.uncachedTrimShed,
 	}
 }
 
@@ -2481,11 +2513,13 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 
 	writeCounter(b, "fak_gateway_compaction_anchor_starved_total", "WITNESSED (fak authored): under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation, so compaction structurally cannot fire no matter how long the session grows. A SUBSET of bail_reason{reason=\"under_budget\"}, broken out because the two are opposite: plain under_budget is a benign short session, anchor-starved is the dormant-on-real-Claude-Code-traffic pathology (issue #1407) that no budget tightening fixes.", int64(snap.anchorStarved))
 	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "WITNESSED (fak authored): whole messages stubbed out across all fires.", int64(snap.dropped))
-	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "WITNESSED (fak authored): estimated tokens fak removed from the outbound body across all fires (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.", int64(snap.shed))
+	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "WITNESSED (fak authored): estimated tokens fak removed from the outbound body by history compaction fires plus uncached-tail trim (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.", int64(snap.shed))
 	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "OBSERVED (provider-reported, relayed verbatim): cumulative cache_read_input_tokens on compacted turns. Pair with shed_tokens to see the net effect; attribute nothing to fak from it alone — fak only guarantees the prefix it shipped was byte-identical (see attempts{fired} with prefix_mismatch=0).", int64(snap.cacheReads))
 	writeHelpType(b, "fak_gateway_compaction_post_fire_cache_read_tokens",
 		"OBSERVED (provider-reported): cache_read_input_tokens on the MOST RECENT compacted turn. If this craters while fires climb, the prefix fak shipped was still byte-identical (witnessed by fired with prefix_mismatch=0), so the provider did not reuse it for a reason fak does NOT control: cache TTL expiry, eviction, or the client moving its own breakpoint. Only bail_reason{reason=\"prefix_mismatch\"}>0 is fak's bug.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
+	writeCounter(b, "fak_gateway_uncached_trim_results_total", "WITNESSED (fak authored): oversized old tool_result bodies shrunk in the uncached post-breakpoint region. The transform keeps the protected cache prefix byte-identical and leaves recent/cache_control-bearing results intact.", int64(snap.uncachedTrimResults))
+	writeCounter(b, "fak_gateway_uncached_trim_shed_tokens_total", "WITNESSED (fak authored): estimated tokens removed by uncached-tail oversized-result trim, also folded into fak_gateway_compaction_shed_tokens_total for the owner=\"fak\" cache-savings attribution.", int64(snap.uncachedTrimShed))
 
 	// The INBOUND tool-floor prune family (the tools[] twin of the compaction shed above).
 	// WITNESSED: how many unreachable tool DEFINITIONS fak dropped from the advertised surface,

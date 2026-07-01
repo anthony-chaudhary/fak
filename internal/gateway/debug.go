@@ -205,6 +205,8 @@ type debugCompactionVars struct {
 	BailReasons                 map[string]uint64 `json:"bail_reasons"`
 	DroppedTurns                uint64            `json:"dropped_turns"`
 	ShedTokens                  uint64            `json:"shed_tokens"`
+	UncachedTrimResults         uint64            `json:"uncached_trim_results"`
+	UncachedTrimShedTokens      uint64            `json:"uncached_trim_shed_tokens"`
 	CacheReadTokens             uint64            `json:"cache_read_tokens"`
 	LastPostFireCacheReadTokens float64           `json:"last_post_fire_cache_read_tokens"`
 }
@@ -393,6 +395,8 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 				BailReasons:                 compact.bailReasons,
 				DroppedTurns:                compact.dropped,
 				ShedTokens:                  compact.shed,
+				UncachedTrimResults:         compact.uncachedTrimResults,
+				UncachedTrimShedTokens:      compact.uncachedTrimShed,
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
 			},

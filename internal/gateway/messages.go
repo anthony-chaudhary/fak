@@ -507,6 +507,7 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 	}
 	out, outcome := agent.ElideAnthropicResultsWithOutcome(req.Raw, s.elideResultBytes)
 	req.Raw = out
+	s.metrics.observeUncachedTrim(outcome)
 	return outcome.Reason == agent.ElideReasonNone
 }
 

@@ -276,6 +276,36 @@ func TestAdjudicationSummaryReportsCompaction(t *testing.T) {
 	}
 }
 
+func TestAdjudicationSummaryReportsUncachedTrim(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeUncachedTrim(agent.ElideOutcome{Reason: agent.ElideReasonNone, Elided: 2, ShedBytes: 1200})
+	m.observeUncachedTrim(agent.ElideOutcome{Reason: agent.ElideReasonUnderThreshold})
+
+	s := m.adjudicationSummary()
+	if s.CompactionFired != 0 || s.CompactionBailed != 0 {
+		t.Fatalf("uncached trim must not increment history-compaction attempts: %+v", s)
+	}
+	if s.CompactionShedTokens != 300 {
+		t.Fatalf("uncached trim shed = %d, want 300 token-equivalent", s.CompactionShedTokens)
+	}
+	if got := s.MechanismSavings().FakCompactionShedTokens; got != 300 {
+		t.Fatalf("fak mechanism shed = %d, want 300", got)
+	}
+
+	var b strings.Builder
+	m.writeCompactionMetrics(&b)
+	out := b.String()
+	for _, want := range []string{
+		"fak_gateway_uncached_trim_results_total 2",
+		"fak_gateway_uncached_trim_shed_tokens_total 300",
+		"fak_gateway_compaction_shed_tokens_total 300",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("metrics missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
 // TestAdjudicationSummaryReportsInboundToolPrune pins the observability wire for the INBOUND
 // tool-floor prune lever: before this, maybeCompactInboundTools discarded its result, so a turn
 // that shed unreachable tool defs (a real uncached-token saving) was indistinguishable from one
@@ -1064,6 +1094,7 @@ func TestDebugVarsExposeCompactionStats(t *testing.T) {
 	srv.metrics.observeCompaction(agent.CompactOutcome{}, true)
 	srv.metrics.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: 3, ShedTokens: 800}, false)
 	srv.metrics.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonPrefixMismatch}, false)
+	srv.metrics.observeUncachedTrim(agent.ElideOutcome{Reason: agent.ElideReasonNone, Elided: 1, ShedBytes: 1200})
 	srv.metrics.recordCompactionCacheRead(2048)
 
 	vars := srv.debugVars(time.Now())
@@ -1074,7 +1105,10 @@ func TestDebugVarsExposeCompactionStats(t *testing.T) {
 	if c.BailReasons[agent.CompactReasonPrefixMismatch] != 1 {
 		t.Fatalf("debug compaction bail reasons = %+v, want prefix_mismatch visible", c.BailReasons)
 	}
-	if c.DroppedTurns != 3 || c.ShedTokens != 800 || c.CacheReadTokens != 2048 || c.LastPostFireCacheReadTokens != 2048 {
+	if c.DroppedTurns != 3 || c.ShedTokens != 1100 || c.CacheReadTokens != 2048 || c.LastPostFireCacheReadTokens != 2048 {
 		t.Fatalf("debug compaction totals = %+v, want dropped/shed/cache-read billing truth", c)
+	}
+	if c.UncachedTrimResults != 1 || c.UncachedTrimShedTokens != 300 {
+		t.Fatalf("debug uncached-trim totals = %+v, want 1 result / 300 shed", c)
 	}
 }
