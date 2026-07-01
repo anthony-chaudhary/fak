@@ -128,6 +128,18 @@ func isoWeek(t time.Time) string {
 	return fmt.Sprintf("%04d-W%02d", y, w)
 }
 
+// sortedPeriodKeys returns the string keys of a period-indexed map in chronological
+// order. ISO week keys (and the "\x00"-joined provider/mechanism variants) sort
+// chronologically as plain strings, so a lexical sort is the chronological sort.
+func sortedPeriodKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // Fold rolls a slice of ledger rows up into a weekly trend Report. It is pure: the
 // only time input is `now`, used solely to stamp GeneratedAt — bucketing comes from
 // each row's own Date. Rows with zero turns (no session activity) are skipped, the
@@ -191,11 +203,7 @@ func Fold(rows []cachevalueledger.Row, now time.Time) Report {
 
 	r.TotalSessions = r.TotalRows
 
-	keys := make([]string, 0, len(byPeriod))
-	for k := range byPeriod {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys) // ISO week keys sort chronologically as strings
+	keys := sortedPeriodKeys(byPeriod)
 
 	var prev *Bucket
 	for _, k := range keys {

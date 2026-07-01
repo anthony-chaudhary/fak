@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -401,11 +400,7 @@ func foldSavings(rows []SavingsRow) []SavingsBucket {
 		}
 	}
 
-	keys := make([]string, 0, len(byPeriod))
-	for k := range byPeriod {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys) // ISO week keys sort chronologically as strings
+	keys := sortedPeriodKeys(byPeriod)
 
 	buckets := make([]SavingsBucket, 0, len(keys))
 	var cumulative float64
@@ -588,11 +583,7 @@ func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttrib
 			}
 		}
 	}
-	keys := make([]string, 0, len(byPeriod))
-	for k := range byPeriod {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := sortedPeriodKeys(byPeriod)
 	out := make([]OwnerAttributionBucket, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, *byPeriod[k])
