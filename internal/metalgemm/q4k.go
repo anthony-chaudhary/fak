@@ -22,6 +22,7 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff);
+void mg_q4k_set_use_mm(int on);
 void mg_q4k_reset(void);
 */
 import "C"
@@ -302,6 +303,18 @@ func (w *Q4KWeight) ID() int { return int(w.id) }
 // NoCopy reports whether this handle aliases the caller's pinned raw q4_k bytes through
 // newBufferWithBytesNoCopy instead of owning a copied Metal buffer.
 func (w *Q4KWeight) NoCopy() bool { return w != nil && w.noCopy }
+
+// SetGEMMUseMM selects the batched-GEMM kernel: true prefers the simdgroup-matrix (hardware MMA)
+// q4k_gemm_mm when its pipeline compiled, false (default) uses the proven scalar register-tile
+// q4k_gemm. Gated so the scalar kernel stays default until the MMA variant is A/B-proven faster on
+// the target device; the model layer flips it from FAK_Q4K_MM. No-op if no Metal device.
+func SetGEMMUseMM(on bool) {
+	v := C.int(0)
+	if on {
+		v = 1
+	}
+	C.mg_q4k_set_use_mm(v)
+}
 
 // ResetQ4K releases every resident q4_k weight buffer and the reused scratch (the q4_k twin of
 // Reset). Call only when no Q4KWeight handle is still in use — every prior handle is invalidated.

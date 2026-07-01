@@ -406,6 +406,88 @@ func TestMetalGEMMGroupMatchesCPU(t *testing.T) {
 	}
 }
 
+// TestMetalQ4KGemmMMMatchesCPU is the correctness gate for the simdgroup-matrix (hardware MMA)
+// batched GEMM variant q4k_gemm_mm: with SetGEMMUseMM(true) the GEMM dispatch selects the MMA kernel,
+// which must match the CPU f32 q4kMatRowsRange reference to the same cosine>=0.9999 bound as the
+// scalar kernel. The MMA accumulation order differs from both the scalar kernel and the CPU, so this
+// pins that the different reduction stays within the f32 tolerance. Skips if the MMA pipeline did not
+// build (older Metal); the dispatcher then falls back to the scalar kernel and this is a no-op check.
+func TestMetalQ4KGemmMMMatchesCPU(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	metalgemm.SetGEMMUseMM(true)
+	t.Cleanup(func() { metalgemm.SetGEMMUseMM(false) })
+	cases := []struct{ out, in, P int }{
+		{1024, 1024, 8},
+		{2048, 1024, 22},
+		{17408, 5120, 53}, // real Qwen3.6-27B gate/up panel at the measured prefill P
+		{1024, 512, 300},  // two token tiles (256 + 44)
+	}
+	for _, c := range cases {
+		qt := randomQ4KTensor(c.out, c.in, 99)
+		X := randomVecF(c.P*c.in, 11)
+		ref := make([]float32, c.P*c.out)
+		for tIdx := 0; tIdx < c.P; tIdx++ {
+			row := make([]float32, c.out)
+			q4kMatRowsRange(qt, X[tIdx*c.in:(tIdx+1)*c.in], row, 0, c.out)
+			copy(ref[tIdx*c.out:(tIdx+1)*c.out], row)
+		}
+		w := metalgemm.UploadQ4K(qt.raw, c.out, c.in)
+		if w == nil {
+			t.Fatalf("UploadQ4K(%d,%d) returned nil", c.out, c.in)
+		}
+		got := make([]float32, c.P*c.out)
+		w.GEMM(X, c.P, got) // uses the MMA kernel because SetGEMMUseMM(true)
+		cos, maxRel := cosineAndMaxRel(ref, got)
+		if cos < 0.9999 || maxRel > 5e-3 {
+			t.Errorf("q4k GEMM-MM [%d,%d]x%d: cosine=%.6f maxRel=%.4g (want cos>=0.9999, maxRel<=5e-3)", c.out, c.in, c.P, cos, maxRel)
+		} else {
+			t.Logf("q4k GEMM-MM [%d,%d]x%d: cosine=%.6f maxRel=%.4g OK", c.out, c.in, c.P, cos, maxRel)
+		}
+		metalgemm.ResetQ4K()
+	}
+}
+
+// BenchmarkMetalQ4KGemmMMvsScalar is the prefill-lever A/B: the simdgroup-matrix GEMM (q4k_gemm_mm)
+// vs the scalar register-tile GEMM (q4k_gemm) at the real Qwen3.6-27B gate/up shape [17408,5120],
+// P=53. The scalar kernel saturates at ~1360 GFLOP/s (~19% of the M3 Pro's ~7 TFLOP/s ceiling); the
+// MMA kernel should clear it materially if hardware matrix units are the win. GFLOP/s is reported for
+// both so the speedup (and whether it is worth flipping FAK_Q4K_MM on by default) is measured.
+func BenchmarkMetalQ4KGemmMMvsScalar(b *testing.B) {
+	if !metalgemm.Available() {
+		b.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	out, in, P := 17408, 5120, 53
+	qt := randomQ4KTensor(out, in, 1)
+	X := randomVecF(P*in, 2)
+	w := metalgemm.UploadQ4K(qt.raw, out, in)
+	if w == nil {
+		b.Fatal("UploadQ4K returned nil")
+	}
+	Y := make([]float32, P*out)
+	flops := 2 * float64(out) * float64(in) * float64(P)
+	run := func(name string, useMM bool) {
+		b.Run(name, func(b *testing.B) {
+			metalgemm.SetGEMMUseMM(useMM)
+			defer metalgemm.SetGEMMUseMM(false)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				w.GEMM(X, P, Y)
+			}
+			b.StopTimer()
+			if s := b.Elapsed().Seconds(); s > 0 {
+				b.ReportMetric(flops*float64(b.N)/s/1e9, "GFLOP/s")
+				b.ReportMetric(s/float64(b.N)*1e3, "ms/op")
+			}
+		})
+	}
+	run("scalar", false)
+	run("mma", true)
+}
+
 // BenchmarkMetalQ4KGemvGroupVsSingle is the prefill-wall benchmark: the q/k/v group as ONE command
 // buffer (GEMMGroup) vs three separate Q4KWeight.GEMM calls. If the group collapses the wall-clock
 // materially, the per-op command-buffer submit/sync was the prefill bottleneck (as the P=53 profile

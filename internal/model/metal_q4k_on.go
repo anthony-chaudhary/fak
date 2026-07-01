@@ -38,6 +38,10 @@ var (
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
 	// FAK_Q4K_FREE_CPU=1 only once every q4_k matmul is provably GPU-routed.
 	freeCPUCopyAfterUpload = os.Getenv("FAK_Q4K_FREE_CPU") == "1"
+	// q4kMMOnce guards the one-time FAK_Q4K_MM read that flips the batched GEMM to the simdgroup-
+	// matrix kernel (metalgemm.SetGEMMUseMM). Read lazily on first prefill weight-upload, not at
+	// package init, because it is a cgo call that needs the Metal device present.
+	q4kMMOnce sync.Once
 )
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
@@ -355,6 +359,12 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	if !metalgemm.Available() {
 		return nil
 	}
+	// Opt into the simdgroup-matrix (hardware MMA) batched GEMM when FAK_Q4K_MM=1. Measured ~1.3x
+	// the scalar register-tile GEMM at the Qwen3.6-27B gate/up prefill shape (1465 vs 1113 GFLOP/s
+	// on the M3 Pro), cosine 1.0 vs the CPU f32 reference. Default OFF (the scalar kernel stays the
+	// proven path) until the MMA variant earns auto-enable. Set once per process — cheap and
+	// idempotent on the metalgemm side.
+	q4kMMOnce.Do(func() { metalgemm.SetGEMMUseMM(os.Getenv("FAK_Q4K_MM") == "1") })
 	uploaded := map[string]bool{}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
