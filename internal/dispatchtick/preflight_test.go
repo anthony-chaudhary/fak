@@ -76,6 +76,83 @@ func TestEvaluatePreflightHostCapFolds(t *testing.T) {
 	}
 }
 
+func TestEvaluatePreflightHostPressureTable(t *testing.T) {
+	tests := []struct {
+		name          string
+		resources     HostResources
+		osWorkerProcs int
+		wantCap       int
+		wantHostCap   int
+		wantLive      int
+		wantHeadroom  int
+		wantBinding   string
+		wantVerdict   string
+	}{
+		{
+			name:         "normal resources recover to max workers",
+			resources:    roomyResources(),
+			wantCap:      8,
+			wantHostCap:  32,
+			wantHeadroom: 8,
+			wantBinding:  "cores",
+			wantVerdict:  PreflightOKVerdict,
+		},
+		{
+			name:         "cpu saturation reduces effective cap",
+			resources:    HostResources{Cores: IntPtr(8), FreeRAMMB: IntPtr(64000), TotalThreads: IntPtr(3000)},
+			wantCap:      1,
+			wantHostCap:  1,
+			wantHeadroom: 1,
+			wantBinding:  "threads",
+			wantVerdict:  PreflightOKVerdict,
+		},
+		{
+			name:         "memory pressure reduces effective cap",
+			resources:    HostResources{Cores: IntPtr(16), FreeRAMMB: IntPtr(3000), TotalThreads: IntPtr(0)},
+			wantCap:      2,
+			wantHostCap:  2,
+			wantHeadroom: 2,
+			wantBinding:  "ram",
+			wantVerdict:  PreflightOKVerdict,
+		},
+		{
+			name:          "zero headroom refuses at cap",
+			resources:     HostResources{Cores: IntPtr(8), FreeRAMMB: IntPtr(3000), TotalThreads: IntPtr(3000)},
+			osWorkerProcs: 1,
+			wantCap:       1,
+			wantHostCap:   1,
+			wantLive:      1,
+			wantHeadroom:  0,
+			wantBinding:   "threads",
+			wantVerdict:   PreflightRefuseAtCap,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := preflightInput()
+			in.MaxWorkers = 8
+			in.Kernel.Target = IntPtr(10)
+			in.Resources = tc.resources
+			in.OSWorkerProcs = tc.osWorkerProcs
+
+			got := EvaluatePreflight(in)
+			if got.Cap != tc.wantCap || got.Live != tc.wantLive || got.Headroom != tc.wantHeadroom {
+				t.Fatalf("cap/live/headroom = %d/%d/%d, want %d/%d/%d", got.Cap, got.Live, got.Headroom, tc.wantCap, tc.wantLive, tc.wantHeadroom)
+			}
+			if got.HostCap == nil || *got.HostCap != tc.wantHostCap {
+				t.Fatalf("host cap = %v, want %d", got.HostCap, tc.wantHostCap)
+			}
+			if got.HostCapacity.Binding != tc.wantBinding {
+				t.Fatalf("binding = %q, want %q; components=%v", got.HostCapacity.Binding, tc.wantBinding, got.HostCapacity.Components)
+			}
+			if got.Verdict != tc.wantVerdict {
+				t.Fatalf("verdict = %s, want %s", got.Verdict, tc.wantVerdict)
+			}
+		})
+	}
+}
+
 func TestEvaluatePreflightSeatPoolCapsAndDepletes(t *testing.T) {
 	in := preflightInput()
 	in.MaxWorkers = 100
