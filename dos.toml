@@ -565,6 +565,13 @@ summary  = "change breaks the layered-DAG import contract (an upward/cross-tier 
 fix      = "invert the dependency through a registration seam or push the shared type down a layer; declare a new leaf's tier in internal/architest (or run `fak new-leaf`). Floor: `.\\fak\\test.ps1 ./internal/architest/`"
 see_also = ["fak/internal/architest/architest_test.go", "fak/ARCHITECTURE.md", "fak/GROWTH.md"]
 
+[reasons.NEVER_AMEND_SHARED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a git command would rewrite shared trunk history -- commit --amend, rebase, pull --rebase, or force-push -- risking permanent loss of a peer's witnessed commit."
+fix      = "Do not amend, rebase, or force-push in the shared tree. Make a new path-scoped commit, or fetch and merge the configured trunk in place; push only with a plain fast-forward push. Floor: internal/gitgate refuses the argv-decidable shapes before the command runs."
+see_also = ["internal/gitgate", "AGENTS.md", "tools/githooks/pre-push", "tools/githooks/reference-transaction"]
+
 [reasons.OUT_OF_DIRECTION]
 category = "OPERATOR_GATE"
 refusal  = true
