@@ -614,6 +614,9 @@ func cmdServe(argv []string) {
 		}
 		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
 		persistCacheValueObservations(srv, "serve", "stdio", *provider)
+		if *dojoMode {
+			_ = persistLiveDojoEpisode("serve", srv)
+		}
 		// Append the full served-turn counter-family snapshot (#1610).
 		persistGatewayUsageObservation(srv, "serve", "stdio")
 		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
@@ -628,6 +631,9 @@ func cmdServe(argv []string) {
 	}
 	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
 	persistCacheValueObservations(srv, "serve", "http", *provider)
+	if *dojoMode {
+		_ = persistLiveDojoEpisode("serve", srv)
+	}
 	// Append the full served-turn counter-family snapshot (#1610).
 	persistGatewayUsageObservation(srv, "serve", "http")
 	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume

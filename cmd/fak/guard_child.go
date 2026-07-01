@@ -756,7 +756,7 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 // command with a resume flag appended — so a crash caused by auth expiry self-heals within this
 // guarded session instead of always needing a manual re-run. credPath is empty when guard is not
 // pinning the Claude subscription upstream, which makes the check an unconditional no-op there.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
 	for {
 		child := buildGuardChild(command, injected, pinUpstream)
 		runErr := child.Run()
@@ -764,19 +764,19 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command = next
 			continue
 		}
-		finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+		finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
 		return
 	}
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
 	var extraEnv [][2]string
 	restarts := 0
 	for {
 		child := buildGuardChild(command, injected, pinUpstream, extraEnv...)
 		wait := make(chan error, 1)
 		if err := child.Start(); err != nil {
-			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
 			return
 		}
 		go func() { wait <- child.Wait() }()
@@ -786,7 +786,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command = next
 				continue
 			}
-			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
 			return
 		case ev := <-restarter.events:
 			if restarter.limit > 0 && restarts >= restarter.limit {
@@ -794,7 +794,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					fmt.Fprintln(restarter.stderr, guardRestartLimitStatus(restarter.limit, ev))
 				}
 				runErr := <-wait
-				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider)
+				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName, provider, dojoMode)
 				return
 			}
 			restarts++
@@ -880,7 +880,7 @@ func guardSummaryResetPrefix(isTTY bool) string {
 	return "\x1b[0m\x1b[?25h"
 }
 
-func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string) {
+func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName, provider string, dojoMode bool) {
 
 	// Tear the gateway down and report what the kernel decided this session.
 	cancel()
@@ -906,6 +906,9 @@ func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context
 		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
 	}
 	appendObservedCacheSavings("guard", provider, agentName, srv.AdjudicationSummary())
+	if dojoMode {
+		_ = persistLiveDojoEpisode("guard", srv)
+	}
 	// Persist this session's OBSERVED provider-cache window so a later `fak vcache score`
 	// (a separate process) reports the REALIZED multiplier from real traffic instead of the
 	// synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session,

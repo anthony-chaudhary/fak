@@ -148,7 +148,7 @@ func cmdGuard(argv []string) {
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
-	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
+	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session, then persist a scored vcache live row at shutdown when provider-cache telemetry exists.")
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Mutually exclusive with --base-url / --remote-serve.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, or a llama.cpp server) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
@@ -937,56 +937,19 @@ func cmdGuard(argv []string) {
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0], up, *dojoMode)
 }
 
 const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
 
-// logDojoEpisodeStart records the start of a live dojo episode when --dojo is enabled.
-// This is the minimal implementation for issue #956: create the .dojo/live-episodes
-// corpus directory and write a start-marker with basic metadata (mode, command, started,
-// cwd, workspace).
-//
-// SCOPE (honest boundary): this writes ONLY the start-marker. It does NOT yet capture the
-// session's turn transcript or AdjudicationSummary, and `fak dojo run` does NOT yet read
-// .dojo/live-episodes (it scores Claude Code transcripts passed via --corpus). So the
-// marker is not yet consumed by the scorer — closing that loop (capture the full episode
-// in dojo's scored format + teach `fak dojo run` to discover this corpus) is the rest of
-// #956. The flag help says the same so it does not over-promise a wired scoring path.
+// logDojoEpisodeStart records the start of a live dojo episode when --dojo is
+// enabled. Shutdown writes a second completed row if the gateway observed a
+// provider-cache turn window.
 func logDojoEpisodeStart(mode string) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("getcwd: %w", err)
-	}
-
-	workspaceRoot := findRepoRoot(cwd)
-	dojoDir := filepath.Join(workspaceRoot, ".dojo", "live-episodes")
-	if err := os.MkdirAll(dojoDir, 0755); err != nil {
-		return fmt.Errorf("mkdir dojo corpus: %w", err)
-	}
-
-	episodeFile := filepath.Join(dojoDir, fmt.Sprintf("episode_%s.jsonl", time.Now().Format("20060102_150405")))
-	f, err := os.OpenFile(episodeFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if err != nil {
-		return fmt.Errorf("open episode file: %w", err)
-	}
-	defer f.Close()
-
-	ep := map[string]any{
-		"mode":      "live",
-		"command":   mode,
-		"started":   time.Now().UTC().Format(time.RFC3339),
-		"cwd":       cwd,
-		"workspace": workspaceRoot,
-	}
-	if err := json.NewEncoder(f).Encode(ep); err != nil {
-		return fmt.Errorf("encode episode: %w", err)
-	}
-
-	return nil
+	return logDojoEpisodeFile(mode, nil)
 }
 
 // findRepoRoot walks up from start to the nearest dir containing .git; falls back to start.

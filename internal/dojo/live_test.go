@@ -1,6 +1,7 @@
 package dojo
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,23 @@ func writeMarker(t *testing.T, dir, name, command, started string) {
 	t.Helper()
 	body := `{"mode":"live","command":"` + command + `","started":"` + started + `","cwd":"/x","workspace":"/x"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeScoredMarker(t *testing.T, dir, name string, in ScoredInput) {
+	t.Helper()
+	body, err := json.Marshal(LiveEpisodeMarker{
+		Mode:      "live",
+		Command:   "guard",
+		Started:   "2026-06-27T13:00:00Z",
+		Workspace: "/x",
+		Scored:    []ScoredInput{in},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), append(body, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,6 +97,48 @@ func TestReadLiveCorpusDiscoversStartMarkersDegradesGracefully(t *testing.T) {
 	}
 	if lc.Markers[1].Command != "guard" {
 		t.Fatalf("second marker should be the guard session, got %+v", lc.Markers[1])
+	}
+}
+
+func TestReadLiveCorpusScoresCompletedRows(t *testing.T) {
+	dir := t.TempDir()
+	writeMarker(t, dir, "episode_20260627_120000.jsonl", "guard", "2026-06-27T12:00:00Z")
+	writeScoredMarker(t, dir, "episode_20260627_130000.jsonl", ScoredInput{
+		Prediction: Prediction{
+			Lever:         "vcache-warmth",
+			Metric:        "warm_recall",
+			Claimed:       1.0,
+			Unit:          "fraction",
+			Basis:         "test",
+			LowerIsBetter: false,
+		},
+		Outcome: Outcome{
+			Realized:   0.75,
+			Provenance: Observed,
+			Source:     "test provider cache window",
+			Measured:   true,
+			Sample:     8,
+		},
+	})
+
+	lc, err := ReadLiveCorpus(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lc.Found != 2 || lc.Scorable != 1 {
+		t.Fatalf("mixed corpus found/scorable = %d/%d, want 2/1 (%+v)", lc.Found, lc.Scorable, lc)
+	}
+	if lc.Missing == "" {
+		t.Fatalf("mixed corpus should still explain the legacy start-only row")
+	}
+	inputs := ScorableLiveEpisodes(lc)
+	if len(inputs) != 1 {
+		t.Fatalf("scorable inputs = %d, want 1", len(inputs))
+	}
+	e := Score("live-episodes", inputs[0].Prediction, inputs[0].Outcome, DefaultCalibBand())
+	report := Fold([]Episode{e}, FoldOpts{Workspace: "test"})
+	if report.Measured != 1 || report.Unmeasured != 0 {
+		t.Fatalf("completed live row should fold as measured, got measured=%d unmeasured=%d", report.Measured, report.Unmeasured)
 	}
 }
 

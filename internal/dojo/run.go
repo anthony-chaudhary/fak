@@ -21,8 +21,8 @@ type Scenario struct {
 // ScoredInput is one (prediction, outcome) pair a lever emits for one metric: the
 // theory it declared and the billed reality it measured. Run scores it.
 type ScoredInput struct {
-	Prediction Prediction
-	Outcome    Outcome
+	Prediction Prediction `json:"prediction"`
+	Outcome    Outcome    `json:"outcome"`
 }
 
 // Lever is one optimization under test. Episodes runs it against a scenario and

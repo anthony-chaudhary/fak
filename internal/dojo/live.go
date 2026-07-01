@@ -1,14 +1,12 @@
 package dojo
 
 // live.go is the reader side of the live-episode corpus that `fak guard --dojo` /
-// `fak serve --dojo` write under <repoRoot>/.dojo/live-episodes/. The writer
-// (cmd/fak/guard.go logDojoEpisodeStart) drops one episode_*.jsonl per wrapped
-// session today, but it is a START-MARKER ONLY: a single JSON object carrying
-// {mode, command, started, cwd, workspace} and NOTHING billable — no turns, no
-// AdjudicationSummary, no provider usage records. So this reader does the honest
-// thing the issue (#1093) asks for: DISCOVER the corpus and SURFACE what it found,
-// while reporting CLEARLY that the markers are start-only and therefore carry no
-// ground truth to score yet. It never fabricates a Realized number off a marker.
+// `fak serve --dojo` write under <repoRoot>/.dojo/live-episodes/. The original
+// writer dropped START-MARKERS ONLY: a single JSON object carrying {mode,
+// command, started, cwd, workspace} and NOTHING billable. The current reader keeps
+// those legacy markers visible and unscorable, and also accepts completed-session
+// rows that carry scored dojo inputs derived from observed provider usage. It
+// never fabricates a Realized number off metadata.
 //
 // Keeping the discovery + parse + missing-witness diagnosis pure here (the dir
 // path is passed in, never resolved) makes it unit-testable without a workspace,
@@ -54,13 +52,16 @@ type LiveEpisodeMarker struct {
 	Started string `json:"started"`
 	// Workspace is the repo root the session ran under.
 	Workspace string `json:"workspace"`
+	// Scored carries completed-session prediction/outcome pairs. It is empty on
+	// legacy start-only markers.
+	Scored []ScoredInput `json:"scored,omitempty"`
 }
 
 // LiveCorpus is the folded result of scanning a live-episode directory: the
-// markers discovered, and an honest account of what is MISSING to score them.
-// Scorable is the count of markers that carry enough to produce a scored episode
-// today — zero, while the writer is start-only — so a caller can DEGRADE
-// GRACEFULLY (count + surface + explain) instead of inventing a calibration.
+// markers discovered, and an honest account of what is MISSING to score any
+// start-only rows. Scorable is the count of markers that carry enough measured
+// inputs to produce scored episodes, so a caller can fold completed sessions while
+// still degrading gracefully for legacy markers.
 type LiveCorpus struct {
 	// Dir is the directory scanned (echoed for the human/JSON surface).
 	Dir string `json:"dir"`
@@ -69,8 +70,7 @@ type LiveCorpus struct {
 	Present bool `json:"present"`
 	// Found is how many start-marker files were discovered and parsed.
 	Found int `json:"found"`
-	// Scorable is how many of those carry enough ground truth to score. It is 0
-	// while the marker is start-only; a non-zero value would feed the scorer.
+	// Scorable is how many of those carry enough ground truth to score.
 	Scorable int `json:"scorable"`
 	// Markers are the parsed start-markers, oldest-first by filename.
 	Markers []LiveEpisodeMarker `json:"markers,omitempty"`
@@ -86,9 +86,8 @@ type LiveCorpus struct {
 // "nothing recorded yet", not a failure. A single unreadable/malformed marker is
 // skipped (parity with the corpus scanners), never fatal.
 //
-// It does NOT score: every marker the current writer emits is start-only, so
-// Scorable stays 0 and Missing explains why. The function is pure aside from the
-// directory read, which is the one I/O the discovery inherently needs.
+// The function is pure aside from the directory read, which is the one I/O the
+// discovery inherently needs.
 func ReadLiveCorpus(dir string) (LiveCorpus, error) {
 	lc := LiveCorpus{Dir: dir}
 	entries, err := os.ReadDir(dir)
@@ -124,8 +123,6 @@ func ReadLiveCorpus(dir string) (LiveCorpus, error) {
 	}
 	lc.Found = len(lc.Markers)
 
-	// The writer is start-only, so nothing discovered is scorable yet. Name the
-	// missing witnesses explicitly so the report is actionable, not a silent zero.
 	scorable := 0
 	for _, m := range lc.Markers {
 		if liveMarkerScorable(m) {
@@ -134,10 +131,10 @@ func ReadLiveCorpus(dir string) (LiveCorpus, error) {
 	}
 	lc.Scorable = scorable
 	if lc.Found > 0 && lc.Scorable < lc.Found {
-		lc.Missing = "start-markers only: each episode records {mode, command, started, workspace} " +
-			"but carries no per-turn provider usage records or AdjudicationSummary, so there is no " +
+		lc.Missing = "some live rows are start-markers only: they record {mode, command, started, workspace} " +
+			"but carry no per-turn provider usage records or AdjudicationSummary, so there is no " +
 			"billed reality to score the levers against. Capturing the full episode (turns + " +
-			"adjudication) on the --dojo writer side is the remaining wiring (see #1089/#1093)."
+			"adjudication) on the --dojo writer side is required before those rows can score."
 	}
 	return lc, nil
 }
@@ -195,37 +192,34 @@ func trimToFirstJSONObject(raw []byte) []byte {
 	return raw
 }
 
-// liveMarkerScorable reports whether a parsed marker carries enough to produce a
-// scored episode. Today the writer is start-only so this is always false; it is
-// the single seam a future full-episode writer flips by carrying billed usage on
-// the marker. Kept as a named predicate so the "why is Scorable 0" answer lives
-// in one place rather than being implied by an empty branch.
-func liveMarkerScorable(LiveEpisodeMarker) bool {
-	// A start-marker has no provider usage records and no AdjudicationSummary, so
-	// there is no measured outcome to score. Returns false until the writer side
-	// captures the full episode.
+// liveMarkerScorable reports whether a parsed marker carries enough measured
+// inputs to produce at least one scored episode.
+func liveMarkerScorable(m LiveEpisodeMarker) bool {
+	for _, in := range m.Scored {
+		if in.Outcome.Measured {
+			return true
+		}
+	}
 	return false
 }
 
 // ScorableLiveEpisodes adapts the scorable markers of a LiveCorpus into the
 // dojo's (prediction, outcome) pairs. It is the seam the corpus path's lever
-// adapters mirror: pure, unit-testable, and inventing NO number. While the
-// writer is start-only it returns nil (nothing scorable), so folding a live
-// corpus today yields an honestly-empty run rather than a fabricated one.
+// adapters mirror: pure, unit-testable, and inventing NO number.
 func ScorableLiveEpisodes(lc LiveCorpus) []ScoredInput {
 	if lc.Scorable == 0 {
 		return nil
 	}
 	var out []ScoredInput
-	// Reserved for the full-episode writer: once a marker carries billed usage,
-	// map each scorable marker to its (prediction, outcome) pair here. Until then
-	// Scorable is 0 and this loop never runs — no marker is ever scored on
-	// metadata alone.
 	for _, m := range lc.Markers {
 		if !liveMarkerScorable(m) {
 			continue
 		}
-		_ = m
+		for _, in := range m.Scored {
+			if in.Outcome.Measured {
+				out = append(out, in)
+			}
+		}
 	}
 	return out
 }
