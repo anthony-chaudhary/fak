@@ -17,6 +17,32 @@ const (
 	classJunk sweepClass = "junk"
 )
 
+// originRelation places a dirty path against the upstream trunk (origin/<development_branch>).
+// It answers the one question a stale git-status snapshot cannot on a busy shared trunk: is this
+// dirty path GENUINELY new work, or a stale duplicate of something a peer already pushed? It is a
+// pure blob-OID comparison, complementary to safecommit's STALE_BASE_DELETION line-run guard
+// (which owns commit-time SAFETY); this owns planning-time VISIBILITY.
+type originRelation string
+
+const (
+	// originNew: the path does not exist upstream — genuinely new work to ship.
+	originNew originRelation = "new"
+	// originAhead: the path exists upstream but the working-tree blob differs — a real local change.
+	originAhead originRelation = "ahead"
+	// originAlready: the working-tree blob is byte-identical to the upstream blob — ALREADY shipped,
+	// a no-op to commit (discard the local copy rather than re-commit an unchanged file).
+	originAlready originRelation = "already"
+	// originUnknown: the relation could not be determined (no origin/<trunk> ref on a fresh clone,
+	// or the probe was not run). The safe, fail-open ABSTAIN — never mistaken for new work.
+	originUnknown originRelation = "unknown"
+)
+
+// originProbe resolves a repo-relative path's relation to the upstream trunk. It is injected into
+// classifyDirty so the pure classifier takes no git dependency: tests pass a fake closure exactly
+// as they pass a fake laneResolver. A nil probe means "origin-awareness off" — every entry stays
+// originUnknown and the plan renders exactly as it did before this field existed.
+type originProbe func(path string) originRelation
+
 // dirtyEntry is one `git status --porcelain` record: a path, its XY status, untracked-ness.
 type dirtyEntry struct {
 	Path      string `json:"path"`
@@ -27,8 +53,9 @@ type dirtyEntry struct {
 // sweepEntry is a classified dirty path.
 type sweepEntry struct {
 	dirtyEntry
-	Lane  string     `json:"lane,omitempty"`
-	Class sweepClass `json:"class"`
+	Lane   string         `json:"lane,omitempty"`
+	Class  sweepClass     `json:"class"`
+	Origin originRelation `json:"origin,omitempty"` // relation to origin/<trunk>; "" (omitted) when unprobed
 }
 
 // sweepGroup is the unit one commit would cover: every stampable path in a single lane.
@@ -38,6 +65,13 @@ type sweepGroup struct {
 	Paths        []string `json:"paths"`
 	Score        int      `json:"score"`                   // 0-100 apply-readiness score for this lane group
 	ScoreReasons []string `json:"score_reasons,omitempty"` // why Score dropped below 100
+	// AlreadyShipped lists the paths in this lane whose working-tree blob is byte-identical to
+	// origin/<trunk> — pure no-ops that a commit would not change. Populated only when the origin
+	// probe ran; omitted otherwise so the JSON shape is unchanged for callers that never asked.
+	AlreadyShipped []string `json:"already_shipped,omitempty"`
+	// AllAlready is true when EVERY path in the lane is AlreadyShipped: the whole lane is already on
+	// the trunk and there is nothing to commit — discard the working copies instead.
+	AllAlready bool `json:"all_already,omitempty"`
 }
 
 // sweepPlan is the full grouped view of a dirty working tree.
@@ -52,27 +86,36 @@ type sweepPlan struct {
 type laneResolver func(path string) string
 
 // classifyDirty buckets every dirty entry into a sweepPlan: stampable paths grouped by lane (each
-// sorted, lanes sorted), plus the no-lane and junk residuals. Pure over (entries, resolver), so it
-// is unit-testable with no git tree and no dos.toml.
-func classifyDirty(entries []dirtyEntry, resolve laneResolver) sweepPlan {
+// sorted, lanes sorted), plus the no-lane and junk residuals. It also annotates each committable
+// entry with its relation to the upstream trunk via the injected origin probe. Pure over
+// (entries, resolver, origin) — no git tree, no dos.toml — so it unit-tests with fake closures.
+//
+// origin may be nil: origin-awareness is then off and every entry stays originUnknown (the field
+// is omitted from JSON), so the plan is byte-for-byte what it was before this argument existed.
+func classifyDirty(entries []dirtyEntry, resolve laneResolver, origin originProbe) sweepPlan {
+	if origin == nil {
+		origin = func(string) originRelation { return originUnknown }
+	}
 	plan := sweepPlan{TotalDirty: len(entries)}
-	byLane := map[string][]dirtyEntry{}
+	byLane := map[string][]sweepEntry{}
 	for _, e := range entries {
 		se := sweepEntry{dirtyEntry: e}
 		switch {
 		case isSweepJunk(e):
+			// Junk is never committed, so it needs no origin relation — skip the git probe.
 			se.Class = classJunk
 			plan.Junk = append(plan.Junk, se)
 		default:
 			lane := resolve(e.Path)
 			se.Lane = lane
+			se.Origin = origin(e.Path)
 			if lane == "" {
 				se.Class = classNoLane
 				plan.NoLane = append(plan.NoLane, se)
 				continue
 			}
 			se.Class = classStampable
-			byLane[lane] = append(byLane[lane], e)
+			byLane[lane] = append(byLane[lane], se)
 		}
 	}
 	lanes := make([]string, 0, len(byLane))
@@ -81,19 +124,27 @@ func classifyDirty(entries []dirtyEntry, resolve laneResolver) sweepPlan {
 	}
 	sort.Strings(lanes)
 	for _, lane := range lanes {
-		entries := byLane[lane]
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-		paths := make([]string, len(entries))
-		for i, e := range entries {
-			paths[i] = e.Path
+		laneEntries := byLane[lane]
+		sort.Slice(laneEntries, func(i, j int) bool { return laneEntries[i].Path < laneEntries[j].Path })
+		paths := make([]string, len(laneEntries))
+		dirty := make([]dirtyEntry, len(laneEntries))
+		var already []string
+		for i, se := range laneEntries {
+			paths[i] = se.Path
+			dirty[i] = se.dirtyEntry
+			if se.Origin == originAlready {
+				already = append(already, se.Path)
+			}
 		}
-		score, reasons := scoreSweepGroup(entries)
+		score, reasons := scoreSweepGroup(dirty)
 		plan.Groups = append(plan.Groups, sweepGroup{
-			Lane:         lane,
-			Trailer:      "(fak " + lane + ")",
-			Paths:        paths,
-			Score:        score,
-			ScoreReasons: reasons,
+			Lane:           lane,
+			Trailer:        "(fak " + lane + ")",
+			Paths:          paths,
+			Score:          score,
+			ScoreReasons:   reasons,
+			AlreadyShipped: already,
+			AllAlready:     len(already) > 0 && len(already) == len(paths),
 		})
 	}
 	return plan

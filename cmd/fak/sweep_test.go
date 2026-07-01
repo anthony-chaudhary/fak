@@ -28,10 +28,17 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 		{Path: "experiments/x/.run.err", Status: "??", Untracked: true},        // junk
 		{Path: "stray-scratchpad-in-Temp.json", Status: "??", Untracked: true}, // junk (flattened temp)
 	}
-	plan := classifyDirty(entries, prefixResolver)
+	// A nil origin probe means origin-awareness is off: the plan must be exactly what it was before
+	// the origin field existed — no Origin relation, no AlreadyShipped rollup.
+	plan := classifyDirty(entries, prefixResolver, nil)
 
 	if plan.TotalDirty != 6 {
 		t.Fatalf("TotalDirty = %d, want 6", plan.TotalDirty)
+	}
+	for _, g := range plan.Groups {
+		if len(g.AlreadyShipped) != 0 || g.AllAlready {
+			t.Fatalf("nil probe should leave AlreadyShipped empty and AllAlready false, got %v/%v for lane %s", g.AlreadyShipped, g.AllAlready, g.Lane)
+		}
 	}
 	if len(plan.Groups) != 2 {
 		t.Fatalf("len(Groups) = %d, want 2 (docs, gateway)", len(plan.Groups))
@@ -58,6 +65,59 @@ func TestClassifyDirtyGroupsByLane(t *testing.T) {
 	}
 	if n := stampableCount(plan); n != 3 {
 		t.Fatalf("stampableCount = %d, want 3", n)
+	}
+}
+
+// TestClassifyDirtyOriginRelation proves the injected origin probe annotates every stampable entry
+// and rolls up per lane: a mixed lane surfaces its ALREADY subset without being AllAlready, while a
+// lane whose every path is byte-identical to the trunk is flagged AllAlready (nothing to ship). The
+// probe is a pure closure keyed on path — no git tree, exactly like the laneResolver fakes.
+func TestClassifyDirtyOriginRelation(t *testing.T) {
+	entries := []dirtyEntry{
+		{Path: "resume/new.go", Status: "??", Untracked: true}, // genuinely new work
+		{Path: "resume/old.go", Status: "M"},                   // already on origin (stale dup)
+		{Path: "resume/edit.go", Status: "M"},                  // ahead: real local change
+		{Path: "docs/shipped-a.md", Status: "M"},               // whole docs lane already shipped
+		{Path: "docs/shipped-b.md", Status: "M"},               //
+		{Path: "junk/.run.err", Status: "??", Untracked: true}, // junk: never probed
+	}
+	origin := func(path string) originRelation {
+		switch path {
+		case "resume/new.go":
+			return originNew
+		case "resume/old.go", "docs/shipped-a.md", "docs/shipped-b.md":
+			return originAlready
+		case "resume/edit.go":
+			return originAhead
+		default:
+			t.Fatalf("origin probe called for unexpected path %q (junk must not be probed)", path)
+			return originUnknown
+		}
+	}
+
+	plan := classifyDirty(entries, prefixResolver, origin)
+
+	byLane := map[string]sweepGroup{}
+	for _, g := range plan.Groups {
+		byLane[g.Lane] = g
+	}
+
+	// resume: mixed — one ALREADY of three, so AlreadyShipped names it but AllAlready is false.
+	resume := byLane["resume"]
+	if len(resume.AlreadyShipped) != 1 || resume.AlreadyShipped[0] != "resume/old.go" {
+		t.Fatalf("resume AlreadyShipped = %v, want [resume/old.go]", resume.AlreadyShipped)
+	}
+	if resume.AllAlready {
+		t.Fatalf("resume AllAlready = true, want false (only 1 of 3 paths already shipped)")
+	}
+
+	// docs: every path is ALREADY on origin, so the whole lane is a no-op.
+	docs := byLane["docs"]
+	if !docs.AllAlready {
+		t.Fatalf("docs AllAlready = false, want true (both paths already on origin)")
+	}
+	if len(docs.AlreadyShipped) != 2 {
+		t.Fatalf("docs AlreadyShipped = %v, want both paths", docs.AlreadyShipped)
 	}
 }
 
@@ -92,6 +152,51 @@ func TestRenderSweepPlanIncludesScore(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered sweep plan missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// TestRenderSweepPlanFlagsAlreadyShipped captures the render bytes and proves the two origin
+// call-outs reach the surface: a per-path [ALREADY on origin] tag on the stale path, and the
+// whole-lane no-op line when every path in a lane already matches the trunk. This is the exact
+// output that turns a multi-probe investigation into one glance.
+func TestRenderSweepPlanFlagsAlreadyShipped(t *testing.T) {
+	plan := sweepPlan{
+		TotalDirty: 3,
+		Groups: []sweepGroup{
+			{ // mixed lane: one path already shipped, one still to ship
+				Lane:           "resume",
+				Trailer:        "(fak resume)",
+				Paths:          []string{"resume/edit.go", "resume/old.go"},
+				Score:          100,
+				AlreadyShipped: []string{"resume/old.go"},
+			},
+			{ // whole lane already on origin — nothing to commit
+				Lane:           "docs",
+				Trailer:        "(fak docs)",
+				Paths:          []string{"docs/a.md"},
+				Score:          100,
+				AlreadyShipped: []string{"docs/a.md"},
+				AllAlready:     true,
+			},
+		},
+	}
+	var out bytes.Buffer
+	renderSweepPlan(&out, plan)
+	got := out.String()
+
+	if !strings.Contains(got, "resume/old.go  [ALREADY on origin]") {
+		t.Fatalf("expected the stale path tagged [ALREADY on origin]:\n%s", got)
+	}
+	if !strings.Contains(got, "ALREADY on origin — all 1 path(s) match the trunk") {
+		t.Fatalf("expected the all-already lane no-op call-out:\n%s", got)
+	}
+	// An all-already lane must NOT print the "commit this lane" hint — there is nothing to ship.
+	if strings.Contains(got, "--apply --lane docs") {
+		t.Fatalf("all-already lane should not suggest a commit:\n%s", got)
+	}
+	// The mixed lane still gets its commit hint (it has real work).
+	if !strings.Contains(got, "--apply --lane resume") {
+		t.Fatalf("mixed lane should still suggest a commit:\n%s", got)
 	}
 }
 

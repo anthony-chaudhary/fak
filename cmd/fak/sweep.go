@@ -45,6 +45,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
 	msg := fs.String("m", "", "with --apply: the commit subject (a `(fak <lane>)` trailer is appended if absent)")
 	push := fs.Bool("push", false, "with --apply: push after a VERIFIED commit (plain push, never --force)")
+	noOrigin := fs.Bool("no-origin", false, "skip the per-path origin/<trunk> relation probe (NEW/AHEAD/ALREADY); faster, but a stale already-shipped duplicate is no longer flagged")
 	var only pathList
 	fs.Var(&only, "path", "with --apply: restrict the commit to these repo-relative paths (repeatable; default: every dirty path in the lane)")
 	if err := fs.Parse(argv); err != nil {
@@ -63,7 +64,11 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sweep: %v\n", err)
 		return 1
 	}
-	plan := classifyDirty(entries, hooksLaneResolver(root))
+	var origin originProbe
+	if !*noOrigin {
+		origin = originProbeFor(ctx(), root)
+	}
+	plan := classifyDirty(entries, hooksLaneResolver(root), origin)
 
 	if *apply {
 		return runSweepApply(stdout, stderr, root, plan, *lane, *msg, only, *push)
@@ -174,6 +179,47 @@ func hooksLaneResolver(root string) laneResolver {
 	}
 }
 
+// originProbeFor builds the real origin probe: it places each dirty path against
+// origin/<development_branch> so the sweep can flag an already-shipped stale duplicate before an
+// agent wastes a commit (or a scarce lock-window) re-landing an unchanged file. The trunk name is
+// the same branch-role contract every other verb reads (safecommit.ExpectedTrunk), remote-qualified
+// as "origin/<trunk>".
+//
+// The upstream ref is resolved ONCE up front. If it does not resolve — a fresh clone whose
+// installer never fetched a remote-tracking ref — the probe returns originUnknown for every path
+// (fail-open ABSTAIN, the same posture safecommit's stale-base guard takes on a missing ref), so a
+// sweep on such a clone behaves exactly as before. Each probe call is object-DB only
+// (rev-parse/hash-object) — it never touches .git/index.lock, so it is safe under the commit-storm
+// contention that makes `git status` itself block.
+func originProbeFor(ctx context.Context, root string) originProbe {
+	ref := "origin/" + safecommit.ExpectedTrunk(root, "")
+	// Resolve the tip once; a non-resolving ref means we cannot compare — abstain for everything.
+	if _, code, err := gitRunner(ctx, root, "rev-parse", "--verify", "--quiet", ref); err != nil || code != 0 {
+		return func(string) originRelation { return originUnknown }
+	}
+	return func(path string) originRelation {
+		// Upstream blob OID at ref:path. A non-zero exit means the path does not exist upstream.
+		upstream, code, err := gitRunner(ctx, root, "rev-parse", ref+":"+path)
+		if err != nil || code != 0 {
+			return originNew
+		}
+		upstream = strings.TrimSpace(upstream)
+		if upstream == "" {
+			return originNew
+		}
+		// Working-tree blob OID. hash-object needs the file to exist; a staged/working deletion has
+		// no file to hash, so it is a real tree change vs origin (ahead), never "already".
+		wt, code, err := gitRunner(ctx, root, "hash-object", path)
+		if err != nil || code != 0 {
+			return originAhead
+		}
+		if strings.TrimSpace(wt) == upstream {
+			return originAlready
+		}
+		return originAhead
+	}
+}
+
 func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	if plan.TotalDirty == 0 {
 		fmt.Fprintln(w, "working tree is clean — nothing to sweep")
@@ -185,14 +231,31 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 	if len(plan.Groups) > 0 {
 		fmt.Fprintln(w, "\nstampable lane groups — commit each with an ACCURATE subject:")
 		for _, g := range plan.Groups {
+			already := map[string]bool{}
+			for _, p := range g.AlreadyShipped {
+				already[p] = true
+			}
 			fmt.Fprintf(w, "\n  lane %-12s score %3d  %s  (%d path(s))\n", g.Lane, g.Score, g.Trailer, len(g.Paths))
+			if g.AllAlready {
+				// The whole lane is byte-identical to the trunk: nothing to commit. This is the line
+				// that turns a multi-probe investigation into one glance.
+				fmt.Fprintf(w, "    ALREADY on origin — all %d path(s) match the trunk; discard the working copies, nothing to ship\n", len(g.Paths))
+			} else if len(g.AlreadyShipped) > 0 {
+				fmt.Fprintf(w, "    note: %d of %d path(s) ALREADY match origin (marked below) — a commit would not change them\n", len(g.AlreadyShipped), len(g.Paths))
+			}
 			if len(g.ScoreReasons) > 0 {
 				fmt.Fprintf(w, "    score notes: %s\n", strings.Join(g.ScoreReasons, "; "))
 			}
 			for _, p := range g.Paths {
-				fmt.Fprintf(w, "    %s\n", p)
+				tag := ""
+				if already[p] {
+					tag = "  [ALREADY on origin]"
+				}
+				fmt.Fprintf(w, "    %s%s\n", p, tag)
 			}
-			fmt.Fprintf(w, "    -> fak sweep --apply --lane %s -m \"<type>(%s): <verb> <what>\" [--push]\n", g.Lane, g.Lane)
+			if !g.AllAlready {
+				fmt.Fprintf(w, "    -> fak sweep --apply --lane %s -m \"<type>(%s): <verb> <what>\" [--push]\n", g.Lane, g.Lane)
+			}
 		}
 	}
 	if len(plan.NoLane) > 0 {
