@@ -236,6 +236,8 @@ const (
 	mProviderRd = "fak_gateway_inference_cached_prompt_tokens_total"
 )
 
+var requiredKVPrefixSeries = []string{mTurns, mPromptTok, mReusedTok}
+
 // Parse folds a gateway /metrics body (Prometheus text exposition) into a Record.
 // It reads only the cache family this package owns and ignores every other
 // series, so it is robust to the rest of the gateway's metric surface changing.
@@ -252,6 +254,8 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 	sc := bufio.NewScanner(strings.NewReader(metricsBody))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	seen := false
+	seenKVPrefix := false
+	seenRequired := map[string]bool{}
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -265,16 +269,23 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 		case mTurns:
 			r.KVPrefix.Turns = val
 			seen = true
+			seenKVPrefix = true
+			seenRequired[name] = true
 		case mPromptTok:
 			r.KVPrefix.PromptTokens = val
 			seen = true
+			seenKVPrefix = true
+			seenRequired[name] = true
 		case mReusedTok:
 			r.KVPrefix.ReusedTokens = val
 			seen = true
+			seenKVPrefix = true
+			seenRequired[name] = true
 		case mProviderRd:
 			r.ProviderCacheReadTokens = val
 			seen = true
 		case mByRegime:
+			seenKVPrefix = true
 			switch regimeLabel(label) {
 			case "frozen":
 				r.KVPrefix.FrozenTurns = val
@@ -291,6 +302,17 @@ func Parse(gatewayURL string, metricsBody string) (Record, error) {
 	}
 	if !seen {
 		return Record{}, fmt.Errorf("no fak_gateway_kv_prefix_* / inference cache series found in %s — is this a fak gateway /metrics body?", gatewayURL)
+	}
+	if seenKVPrefix {
+		var missing []string
+		for _, name := range requiredKVPrefixSeries {
+			if !seenRequired[name] {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			return Record{}, fmt.Errorf("missing required cachewitness series in %s: %s", gatewayURL, strings.Join(missing, ", "))
+		}
 	}
 	r.GatewayUptimeTurns = r.KVPrefix.Turns
 	r.CacheValue = cacheValue(r.KVPrefix)

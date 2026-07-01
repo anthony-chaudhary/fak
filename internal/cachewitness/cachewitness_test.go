@@ -184,6 +184,21 @@ func TestParseRejectsNonGatewayBody(t *testing.T) {
 	}
 }
 
+func TestParseRejectsPartialKVPrefixMetricFamily(t *testing.T) {
+	const drifted = `fak_gateway_kv_prefix_turns_total 4
+fak_gateway_kv_prefix_prompt_tokens_total 12000
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 4
+`
+	_, err := Parse("u", drifted)
+	if err == nil {
+		t.Fatal("Parse accepted a partial kv-prefix family with reused_tokens missing")
+	}
+	if !strings.Contains(err.Error(), "missing required cachewitness series") ||
+		!strings.Contains(err.Error(), "fak_gateway_kv_prefix_reused_tokens_total") {
+		t.Fatalf("error = %v, want named missing reused-token series", err)
+	}
+}
+
 // The #1066 honesty fence: the publishable cache-value view must frame the number
 // as marginal-over-tuned-warm-KV and never surface the vs-naive multiple — even
 // though this sample's 91.55% reuse tempts a ~11.8x (1/(1-0.9155)) re-prefill
