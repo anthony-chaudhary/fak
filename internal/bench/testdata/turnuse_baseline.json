@@ -1,0 +1,51 @@
+{
+  "schema": "turnuse-baseline/1",
+  "task": "Customer mia_li_3668 wants to book the cheapest direct flight from SFO to JFK on 2026-07-01. First look up their account, then check the refund policy, then find the flights, tell them the cheapest price converted to EUR, and finally book that flight.",
+  "sub_turns": 8,
+  "turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "hit_turn_cap": false,
+  "final_answer_reached": true,
+  "turn_log": [
+    {
+      "messages_seen": 2,
+      "tools": [
+        "get_user_details"
+      ],
+      "final": false
+    },
+    {
+      "messages_seen": 4,
+      "tools": [
+        "fetch_policy"
+      ],
+      "final": false
+    },
+    {
+      "messages_seen": 6,
+      "tools": [
+        "get_user_details"
+      ],
+      "final": false
+    },
+    {
+      "messages_seen": 8,
+      "tools": [
+        "search_direct_flight"
+      ],
+      "final": false
+    },
+    {
+      "messages_seen": 10,
+      "tools": [
+        "convert_currency"
+      ],
+      "final": false
+    },
+    {
+      "messages_seen": 12,
+      "final": true
+    }
+  ]
+}
