@@ -19,6 +19,49 @@ This page is the manual packet shape that a native command can later mechanize.
 Use the [dispatch SLO glossary](dispatch-slo-glossary.md) for shared report and
 status terms.
 
+## 0. Plan the cohort at creation time
+
+The steps below deconflict a wave *at launch time* with `dos arbitrate`. When you
+are **creating** the batch — an agent emitting anywhere from 1 to 1000 issues in a
+single run — plan the whole cohort *before* any issue is synced, so the collision
+structure is visible while it is still cheap to fix:
+
+```bash
+fak issue cohort --from-plan candidates.json --json
+```
+
+The planner (`internal/issuecohort`, schema `fak.issue-cohort-plan.v1`) reviews
+every candidate through the same `fak issue contract` spine, then folds the batch
+into:
+
+- **waves**: the dispatchable leaves partitioned into concurrency-safe sets using
+  the *same disjoint-tree rule* `dos arbitrate` applies at launch (first-fit graph
+  colouring over lane + path overlap). Every wave is safe to dispatch at once, and
+  the number of waves is the number of sequential rounds the batch needs. This is
+  the creation-time dual of section 3's same-wave arbitration — the collision that
+  would otherwise be caught (and deferred) at launch is instead surfaced before the
+  issues exist.
+- **split-first**: rows declared (or detected) as an epic / non-leaf, or with an
+  expected-step budget over the dispatch cap, each with a child-issue budget — so
+  "the batch is 1000 issues" cannot hide "40 of them are really epics".
+- **triage**: rows not yet scoped/routed/witnessed enough to dispatch.
+- **duplicates**: marker keys that appear more than once, so a rerun that would
+  *create* instead of *update* is visible as cleanup, not silent spam.
+
+Cap a wave to the seat pool or an operator ceiling with `--max-wave N`. The plan is
+advisory (exit 0 on a valid plan); it does not create anything.
+
+To wave-partition the **existing** open backlog instead of a fresh candidate batch,
+feed `gh issue list` output through the same planner:
+
+```bash
+gh issue list --state open --limit 500 --json number,title,body,labels > backlog.json
+fak issue cohort --from-issues backlog.json --json
+```
+
+A cohort deconflicted here is deconflicted the same way the dispatcher re-checks it
+below, so a clean plan turns section 3 into a confirmation instead of a surprise.
+
 ## 1. Select issues
 
 Pick issues that are ready for a worker, not issues that still need product judgment.
