@@ -550,6 +550,7 @@ type dispatchIssueInfo struct {
 	Title      string
 	Body       string
 	Labels     []string
+	State      string
 	FetchError string
 }
 
@@ -568,6 +569,11 @@ func dispatchPrompt(root string, _ io.Writer, issue int, lane string) (map[strin
 		Workspace:         root,
 		DevelopmentBranch: roles.DevelopmentBranch,
 		FetchError:        inf.FetchError,
+		ResumeWitness: dispatchtick.ResumeWitnessState{
+			LastCommitAudit:   dispatchLastCommitAudit(root, issue),
+			LastRouteDecision: dispatchLastRouteDecision(issue, lane),
+			LastIssueStatus:   dispatchLastIssueStatus(inf.State),
+		},
 	})
 	out := map[string]any{
 		"schema":             rec.Schema,
@@ -609,6 +615,7 @@ func dispatchFetchIssueGH(root string, issue int) dispatchIssueInfo {
 		Title:  dispatchMapString(doc, "title"),
 		Body:   dispatchMapString(doc, "body"),
 		Labels: dispatchIssueLabels(doc["labels"]),
+		State:  dispatchMapString(doc, "state"),
 	}
 }
 
@@ -622,6 +629,91 @@ func dispatchIssueLabels(raw any) []string {
 		}
 	}
 	return out
+}
+
+func dispatchLastCommitAudit(root string, issue int) string {
+	if issue <= 0 {
+		return ""
+	}
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	rows := dispatchProgressReadRows(runsDir)
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if !dispatchProgressRowMentionsIssue(row, issue) {
+			continue
+		}
+		if summary := dispatchProgressCommitAuditSummary(row); summary != "" {
+			return summary
+		}
+	}
+	return ""
+}
+
+func dispatchProgressRowMentionsIssue(row map[string]any, issue int) bool {
+	if dispatchMapInt(row, "issue") == issue || dispatchMapInt(row, "target_issue") == issue {
+		return true
+	}
+	for _, n := range dispatchProgressIntSlice(row["witnessed_numbers"]) {
+		if n == issue {
+			return true
+		}
+	}
+	closeResult := mapAt(row, "close_result")
+	return dispatchMapInt(closeResult, "issue") == issue || dispatchMapInt(closeResult, "number") == issue
+}
+
+func dispatchProgressCommitAuditSummary(row map[string]any) string {
+	closeResult := mapAt(row, "close_result")
+	if len(closeResult) > 0 {
+		parts := []string{"commit-audit close_result"}
+		if _, ok := closeResult["ok"]; ok {
+			parts = append(parts, "ok="+strconv.FormatBool(dispatchMapBool(closeResult, "ok")))
+		}
+		if verdict := firstString(
+			dispatchMapString(closeResult, "verdict"),
+			dispatchMapString(closeResult, "status"),
+			dispatchMapString(closeResult, "reason"),
+		); verdict != "" {
+			parts = append(parts, "verdict="+verdict)
+		}
+		if sha := firstString(
+			dispatchMapString(closeResult, "commit_sha"),
+			dispatchMapString(closeResult, "sha"),
+			dispatchMapString(closeResult, "commit"),
+		); sha != "" {
+			parts = append(parts, "sha="+sha)
+		}
+		if reason := firstString(
+			dispatchMapString(closeResult, "blocker_reason"),
+			dispatchMapString(closeResult, "error"),
+		); reason != "" {
+			parts = append(parts, "reason="+reason)
+		}
+		return strings.Join(parts, " ")
+	}
+	if errText := dispatchMapString(row, "audit_error"); errText != "" {
+		return "commit-audit unavailable: " + errText
+	}
+	if len(dispatchProgressIntSlice(row["witnessed_numbers"])) > 0 {
+		return "commit-audit witnessed issue still open"
+	}
+	return ""
+}
+
+func dispatchLastRouteDecision(issue int, lane string) string {
+	lane = strings.TrimSpace(lane)
+	if lane == "" || issue <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("lane=%s target=#%d", lane, issue)
+}
+
+func dispatchLastIssueStatus(state string) string {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return ""
+	}
+	return strings.ToUpper(state)
 }
 
 func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude map[string]bool, preferNewest bool, generation string) (dispatchLanePick, error) {

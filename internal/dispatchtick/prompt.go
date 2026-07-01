@@ -17,6 +17,13 @@ type IssuePromptInput struct {
 	Workspace         string
 	DevelopmentBranch string
 	FetchError        string
+	ResumeWitness     ResumeWitnessState
+}
+
+type ResumeWitnessState struct {
+	LastCommitAudit   string
+	LastRouteDecision string
+	LastIssueStatus   string
 }
 
 type IssuePromptRecord struct {
@@ -50,6 +57,7 @@ func RenderIssuePrompt(in IssuePromptInput) string {
 	developmentBranch := promptDevelopmentBranch(in.DevelopmentBranch)
 	redactedBody := redactPrivatePromptText(in.Body)
 	agentBrief := renderAgentIssueBrief(redactedBody)
+	resumeWitness := renderResumeWitnessState(in.ResumeWitness)
 	body := strings.TrimSpace(redactedBody)
 	if len(body) > 1800 {
 		body = body[:1800] + "\n...(truncated - read the full issue with `gh issue view`)"
@@ -63,6 +71,8 @@ func RenderIssuePrompt(in IssuePromptInput) string {
 read first: run `+"`gh issue view %[1]d`"+` for the live issue, then orient with `+"`AGENTS.md`"+` (build/test/run + the hard rules) and `+"`llms.txt`"+` (the doc map). Then run `+"`python tools/memory_read.py`"+` for the committed fleet memory (lane quirks, known blockers, host gotchas) - a Claude worker gets this auto-injected, an opencode worker does NOT, so this read is how both backends start warm (it is a harmless no-op if the mirror is absent). This issue routed to the `+"`%[3]s`"+` lane (its file-tree). Labels: %[4]s.
 
 %[7]s
+
+%[9]s
 
 issue body (verbatim, may be truncated - re-read live):
 ---
@@ -88,7 +98,7 @@ git laws (enforced below the agent - breaking them refuses your commit):
 acceptance (your stop condition): a committed change on the configured development branch `+"`%[8]s`"+` whose subject cites `+"`#%[1]d`"+` and whose gate you actually ran is green - OR a final report that names the specific missing artifact/host capability and the smallest next step. Honesty over a green-looking lie: the repo keeps a witness ledger and a self-authored "done" is re-checked against git. If you discovered a durable fact worth keeping (a lane quirk, a host gotcha, a blocker), surface it explicitly in your final message so an operator or Claude peer can record it to the memory mirror - an opencode worker has no auto-memory write path of its own.
 
 workspace: %[6]s. lane: %[3]s. issue: #%[1]d.
-`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch)
+`, in.Number, title, strings.TrimSpace(in.Lane), labels, body, strings.TrimSpace(in.Workspace), agentBrief, developmentBranch, resumeWitness)
 }
 
 func promptDevelopmentBranch(branch string) string {
@@ -169,6 +179,28 @@ func renderAgentIssueBrief(body string) string {
 	return "agent issue brief (parsed from standard sections):\n" + strings.Join(lines, "\n") + "\n"
 }
 
+func renderResumeWitnessState(state ResumeWitnessState) string {
+	rows := []struct {
+		label string
+		value string
+	}{
+		{"Last commit audit", state.LastCommitAudit},
+		{"Last route decision", state.LastRouteDecision},
+		{"Last issue status", state.LastIssueStatus},
+	}
+	lines := []string{}
+	for _, row := range rows {
+		value := promptOneLine(redactPrivatePromptText(row.value), 260)
+		if value != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %s", row.label, value))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "resume witness state (independent; not worker self-report):\n" + strings.Join(lines, "\n") + "\n"
+}
+
 func promptMarkdownSections(body string) map[string]string {
 	out := map[string]string{}
 	current := ""
@@ -238,9 +270,16 @@ func promptBriefValue(section string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	value := strings.Join(parts, " / ")
-	if len(value) > 260 {
-		value = value[:260] + "..."
+	return promptOneLine(strings.Join(parts, " / "), 260)
+}
+
+func promptOneLine(value string, limit int) string {
+	value = strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+	if value == "" {
+		return ""
+	}
+	if limit > 0 && len(value) > limit {
+		value = value[:limit] + "..."
 	}
 	return value
 }

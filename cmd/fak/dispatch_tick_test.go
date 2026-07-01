@@ -145,6 +145,53 @@ func TestDispatchPromptCarriesDevelopmentBranchRole(t *testing.T) {
 	}
 }
 
+func TestDispatchPromptCarriesResumeWitnessState(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	writeDispatchProgressRows(t, runsDir, []map[string]any{
+		{"utc": "2026-07-01T00:00:00Z", "witnessed_numbers": []int{12}, "audit_error": "old audit unavailable"},
+		{
+			"utc": "2026-07-01T01:00:00Z",
+			"close_result": map[string]any{
+				"issue":          1794,
+				"ok":             false,
+				"verdict":        "NO_COMMIT",
+				"blocker_reason": "no audited commit bound to #1794",
+			},
+		},
+	})
+	oldFetchIssue := dispatchFetchIssue
+	dispatchFetchIssue = func(root string, issue int) dispatchIssueInfo {
+		return dispatchIssueInfo{
+			Number: issue,
+			Title:  "resume worker prompt",
+			Body:   "Worker self-report: this is done.",
+			Labels: []string{"dispatch"},
+			State:  "OPEN",
+		}
+	}
+	t.Cleanup(func() { dispatchFetchIssue = oldFetchIssue })
+
+	got, err := dispatchPrompt(root, io.Discard, 1794, "cmd")
+	if err != nil {
+		t.Fatalf("dispatchPrompt: %v", err)
+	}
+	prompt := dispatchMapString(got, "prompt")
+	for _, want := range []string{
+		"resume witness state (independent; not worker self-report):",
+		"- Last commit audit: commit-audit close_result ok=false verdict=NO_COMMIT reason=no audited commit bound to #1794",
+		"- Last route decision: lane=cmd target=#1794",
+		"- Last issue status: OPEN",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing resume witness row %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Index(prompt, "resume witness state") > strings.Index(prompt, "issue body (verbatim") {
+		t.Fatalf("resume witness state should render before raw issue body:\n%s", prompt)
+	}
+}
+
 func TestDispatchCodexProcessPIDsCollapseNodeWrapperAndNativeChild(t *testing.T) {
 	rows := []dispatchCodexProcessRow{
 		{

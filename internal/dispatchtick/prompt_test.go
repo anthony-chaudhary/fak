@@ -97,6 +97,30 @@ func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 	}
 }
 
+func TestIssuePromptIncludesResumeWitnessState(t *testing.T) {
+	in := sampleIssuePrompt()
+	in.Body = "Worker self-report: looks fixed."
+	in.ResumeWitness = ResumeWitnessState{
+		LastCommitAudit:   "commit-audit: refuted no commit bound to #465",
+		LastRouteDecision: "lane=docs target=#465 tree=docs/**",
+		LastIssueStatus:   "OPEN",
+	}
+	p := RenderIssuePrompt(in)
+	for _, want := range []string{
+		"resume witness state (independent; not worker self-report):",
+		"- Last commit audit: commit-audit: refuted no commit bound to #465",
+		"- Last route decision: lane=docs target=#465 tree=docs/**",
+		"- Last issue status: OPEN",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing resume witness row %q:\n%s", want, p)
+		}
+	}
+	if strings.Index(p, "resume witness state") > strings.Index(p, "issue body (verbatim") {
+		t.Fatalf("resume witness state should render before raw issue body:\n%s", p)
+	}
+}
+
 func TestIssuePromptOmitsAgentBriefWithoutStandardSections(t *testing.T) {
 	p := RenderIssuePrompt(sampleIssuePrompt())
 	if strings.Contains(p, "agent issue brief") {
