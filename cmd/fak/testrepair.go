@@ -73,6 +73,20 @@ func runTestRepairJSON(stdout, stderr io.Writer, stdin io.Reader, p testPlan) in
 	return writeTestRepairJSON(stdout, stderr, packet)
 }
 
+func runTestPlan(stdout, stderr io.Writer, stdin io.Reader, p testPlan) int {
+	if !p.FailOnStdout {
+		return runTestCommand(p.Argv, stdin, stdout, stderr).ExitCode
+	}
+	var childOut, childErr bytes.Buffer
+	result := runTestCommand(p.Argv, stdin, &childOut, &childErr)
+	_, _ = io.WriteString(stdout, childOut.String())
+	_, _ = io.WriteString(stderr, childErr.String())
+	if result.ExitCode == 0 && strings.TrimSpace(childOut.String()) != "" {
+		return 1
+	}
+	return result.ExitCode
+}
+
 func writeTestRepairJSON(stdout, stderr io.Writer, packet testRepairPacket) int {
 	if err := writeIndentedJSONNoEscape(stdout, packet); err != nil {
 		fmt.Fprintf(stderr, "fak test: encode json: %v\n", err)
@@ -126,6 +140,10 @@ func newTestResolvedRepairPacket(p testPlan) testRepairPacket {
 }
 
 func newTestFinishedRepairPacket(p testPlan, result testCommandResult, stdout, stderr string) testRepairPacket {
+	unexpectedStdout := p.FailOnStdout && result.ExitCode == 0 && strings.TrimSpace(stdout) != ""
+	if unexpectedStdout {
+		result.ExitCode = 1
+	}
 	stdoutTail, stdoutTruncated := tailRunes(stdout, testOutputTailRunes)
 	stderrTail, stderrTruncated := tailRunes(stderr, testOutputTailRunes)
 	packet := testRepairPacket{
@@ -170,11 +188,15 @@ func newTestFinishedRepairPacket(p testPlan, result testCommandResult, stdout, s
 		return packet
 	}
 
-	class, next := classifyTestFailure(stdout + "\n" + stderr)
+	class, next := classifyTestFailure(p.Tier, stdout+"\n"+stderr)
 	packet.OK = false
 	packet.Verdict = "FAIL"
 	packet.Finding = fmt.Sprintf("fak test %s failed with exit %d", p.Tier, result.ExitCode)
-	packet.Reason = fmt.Sprintf("command exited %d", result.ExitCode)
+	if unexpectedStdout {
+		packet.Reason = "command produced output"
+	} else {
+		packet.Reason = fmt.Sprintf("command exited %d", result.ExitCode)
+	}
 	packet.NextAction = next
 	packet.Findings = []testRepairFinding{{
 		Class:      class,
@@ -187,9 +209,15 @@ func newTestFinishedRepairPacket(p testPlan, result testCommandResult, stdout, s
 	return packet
 }
 
-func classifyTestFailure(output string) (class, nextAction string) {
+func classifyTestFailure(tier, output string) (class, nextAction string) {
 	lower := strings.ToLower(output)
 	switch {
+	case tier == "build":
+		return "go_build_failure", "fix the compile/build error named in stdout_tail or stderr_tail, then rerun `fak test build`"
+	case tier == "vet":
+		return "go_vet_failure", "fix the go vet diagnostic named in stdout_tail or stderr_tail, then rerun `fak test vet`"
+	case tier == "gofmt":
+		return "gofmt_failure", "run gofmt -w on the files listed in stdout_tail, then rerun `fak test gofmt`"
 	case strings.Contains(output, "--- FAIL:") || strings.Contains(output, "\nFAIL\t"):
 		return "go_test_failure", "inspect stdout_tail for the first failing test/package, fix it, then rerun the exact command"
 	case strings.Contains(lower, "[build failed]") || strings.Contains(lower, "build failed") || strings.Contains(lower, "syntax error:"):
@@ -228,6 +256,9 @@ func writeTestListJSON(stdout, stderr io.Writer) int {
 		Schema: "fak.test_tiers.v1",
 		Tiers: []testTierInfo{
 			{Name: "fast", Command: "go test -short ./...", When: "default pre-commit smoke tier"},
+			{Name: "build", Command: "go build ./...", When: "compile/build gate"},
+			{Name: "vet", Command: "go vet ./...", When: "static Go analyzer gate"},
+			{Name: "gofmt", Command: "gofmt -l .", When: "formatting gate"},
 			{Name: "full", Command: "go test ./...", When: "authoritative suite"},
 			{Name: "race", Command: "go test -short -race ./...", When: "local race gate"},
 			{Name: "affected", Command: "fak affected ...", When: "changed packages plus transitive importers"},

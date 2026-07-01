@@ -9,6 +9,9 @@ package main
 // of letting you discover the block by hitting it.
 //
 //	fak test                     run the fast smoke tier (go test -short ./...)
+//	fak test build               run the build gate (go build ./...)
+//	fak test vet                 run the vet gate (go vet ./...)
+//	fak test gofmt               run the formatting gate (gofmt -l .)
 //	fak test full                the full suite (go test ./...)
 //	fak test race                the race tier (go test -short -race ./...)
 //	fak test affected            run fak affected for the changed package closure
@@ -39,11 +42,12 @@ func cmdTest(argv []string) { os.Exit(runTest(os.Stdout, os.Stderr, argv)) }
 
 // testPlan is the resolved, reproducible command a `fak test` invocation will run.
 type testPlan struct {
-	Tier   string   // the resolved tier name ("fast" | "full" | "race" | "package")
-	GoArgs []string // the args handed to `go test`, e.g. ["-short", "./..."]
-	Argv   []string // the actual command to exec, host-resolved
-	ViaWSL bool     // true when routed through test.ps1 (Windows -> WSL)
-	Note   string   // a one-line human note about the routing
+	Tier         string   // the resolved tier name ("fast" | "full" | "race" | "package")
+	GoArgs       []string // the args handed to `go test`, e.g. ["-short", "./..."]
+	Argv         []string // the actual command to exec, host-resolved
+	ViaWSL       bool     // true when routed through test.ps1 (Windows -> WSL)
+	Note         string   // a one-line human note about the routing
+	FailOnStdout bool     // true for list-style gates such as gofmt -l
 }
 
 // planTest is the pure resolver: given the host GOOS and the post-verb args, it
@@ -118,6 +122,9 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprint(stderr, `fak test -- host-aware developer test runner
 
   fak test                     fast smoke tier (go test -short ./...)
+  fak test build               build gate (go build ./...)
+  fak test vet                 vet gate (go vet ./...)
+  fak test gofmt               formatting gate (gofmt -l .)
   fak test full                full suite (go test ./...)
   fak test race                race tier (go test -short -race ./...)
   fak test affected            affected-package loop (delegates to fak affected)
@@ -139,13 +146,15 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		if *json {
 			return writeTestListJSON(stdout, stderr)
 		}
-		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  shards     balance packages from a duration ledger\n  <pkg>      a ./... or import-path target\n")
+		fmt.Fprint(stdout, "tiers:\n  fast       go test -short ./...   (default; pre-commit smoke)\n  build      go build ./...\n  vet        go vet ./...\n  gofmt      gofmt -l .\n  full       go test ./...          (authoritative suite)\n  race       go test -short -race ./...\n  affected   fak affected ...       (changed packages plus importers)\n  durations  parse go test -json into a duration ledger\n  shards     balance packages from a duration ledger\n  <pkg>      a ./... or import-path target\n")
 		return 0
 	}
 
 	args := fs.Args()
 	if len(args) > 0 {
 		switch args[0] {
+		case "build", "vet", "gofmt", "fmt":
+			return runTestCheck(stdout, stderr, os.Stdin, args[0], args[1:], *json, *dry || *dry2)
 		case "affected":
 			subArgs := args[1:]
 			if *json && !hasFlag(subArgs, "json") {
@@ -178,5 +187,63 @@ On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-b
 		return 0
 	}
 
-	return runTestCommand(p.Argv, os.Stdin, stdout, stderr).ExitCode
+	return runTestPlan(stdout, stderr, os.Stdin, p)
+}
+
+func runTestCheck(stdout, stderr io.Writer, stdin io.Reader, name string, args []string, asJSON, dry bool) int {
+	p, err := planTestCheck(name, args)
+	if err != nil {
+		if asJSON {
+			return writeTestRepairJSON(stdout, stderr, newTestUsageRepairPacket(err))
+		}
+		fmt.Fprintf(stderr, "fak test: %v\n", err)
+		return 2
+	}
+	if asJSON {
+		if dry {
+			return writeTestRepairJSON(stdout, stderr, newTestResolvedRepairPacket(p))
+		}
+		return runTestRepairJSON(stdout, stderr, stdin, p)
+	}
+	fmt.Fprintf(stdout, "# %s\n# tier=%s -> %s\n", p.Note, p.Tier, strings.Join(p.Argv, " "))
+	if dry {
+		return 0
+	}
+	return runTestPlan(stdout, stderr, stdin, p)
+}
+
+func planTestCheck(name string, args []string) (testPlan, error) {
+	switch name {
+	case "build":
+		targets := defaultArgs(args, "./...")
+		return testPlan{
+			Tier: "build",
+			Argv: append([]string{"go", "build"}, targets...),
+			Note: "running build gate",
+		}, nil
+	case "vet":
+		targets := defaultArgs(args, "./...")
+		return testPlan{
+			Tier: "vet",
+			Argv: append([]string{"go", "vet"}, targets...),
+			Note: "running vet gate",
+		}, nil
+	case "gofmt", "fmt":
+		targets := defaultArgs(args, ".")
+		return testPlan{
+			Tier:         "gofmt",
+			Argv:         append([]string{"gofmt", "-l"}, targets...),
+			Note:         "running gofmt check",
+			FailOnStdout: true,
+		}, nil
+	default:
+		return testPlan{}, fmt.Errorf("unknown check %q", name)
+	}
+}
+
+func defaultArgs(args []string, def string) []string {
+	if len(args) == 0 {
+		return []string{def}
+	}
+	return append([]string(nil), args...)
 }

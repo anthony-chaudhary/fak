@@ -149,6 +149,75 @@ func TestRunTestJSONFailureClassifiesGoTestOutput(t *testing.T) {
 	}
 }
 
+func TestRunTestJSONBuildFailureClassified(t *testing.T) {
+	oldRunTestCommand := runTestCommand
+	t.Cleanup(func() { runTestCommand = oldRunTestCommand })
+	runTestCommand = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) testCommandResult {
+		if !reflect.DeepEqual(argv, []string{"go", "build", "./..."}) {
+			t.Fatalf("unexpected command: %v", argv)
+		}
+		_, _ = io.WriteString(stderr, "cmd/fak/broken.go:12:2: syntax error: unexpected name\n")
+		return testCommandResult{ExitCode: 1}
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "build"}); rc != 1 {
+		t.Fatalf("json build rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "build" || packet.Findings[0].Class != "go_build_failure" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if !strings.Contains(packet.StderrTail, "syntax error") {
+		t.Fatalf("stderr tail = %q", packet.StderrTail)
+	}
+}
+
+func TestRunTestJSONVetFailureClassified(t *testing.T) {
+	oldRunTestCommand := runTestCommand
+	t.Cleanup(func() { runTestCommand = oldRunTestCommand })
+	runTestCommand = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) testCommandResult {
+		if !reflect.DeepEqual(argv, []string{"go", "vet", "./cmd/fak"}) {
+			t.Fatalf("unexpected command: %v", argv)
+		}
+		_, _ = io.WriteString(stderr, "cmd/fak/test.go:1: unreachable code\n")
+		return testCommandResult{ExitCode: 1}
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "vet", "./cmd/fak"}); rc != 1 {
+		t.Fatalf("json vet rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "vet" || packet.Findings[0].Class != "go_vet_failure" {
+		t.Fatalf("packet = %+v", packet)
+	}
+}
+
+func TestRunTestJSONGofmtOutputFails(t *testing.T) {
+	oldRunTestCommand := runTestCommand
+	t.Cleanup(func() { runTestCommand = oldRunTestCommand })
+	runTestCommand = func(argv []string, stdin io.Reader, stdout, stderr io.Writer) testCommandResult {
+		if !reflect.DeepEqual(argv, []string{"gofmt", "-l", "cmd/fak/test.go"}) {
+			t.Fatalf("unexpected command: %v", argv)
+		}
+		_, _ = io.WriteString(stdout, "cmd/fak/test.go\n")
+		return testCommandResult{ExitCode: 0}
+	}
+
+	var out, errb bytes.Buffer
+	if rc := runTest(&out, &errb, []string{"--json", "gofmt", "cmd/fak/test.go"}); rc != 1 {
+		t.Fatalf("json gofmt rc = %d, want 1; stderr=%s", rc, errb.String())
+	}
+	packet := decodeTestRepairPacket(t, out.Bytes())
+	if packet.OK || packet.Tier != "gofmt" || packet.Findings[0].Class != "gofmt_failure" {
+		t.Fatalf("packet = %+v", packet)
+	}
+	if packet.Reason != "command produced output" || !strings.Contains(packet.StdoutTail, "cmd/fak/test.go") {
+		t.Fatalf("packet reason/tail = reason %q stdout %q", packet.Reason, packet.StdoutTail)
+	}
+}
+
 func TestRunTest_AffectedDelegatesToAffectedPlanner(t *testing.T) {
 	oldListGraph := affectedListGraph
 	oldRunGoTest := affectedRunGoTest
@@ -194,7 +263,8 @@ func TestRunTest_ListExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "fast") || !strings.Contains(out.String(), "full") ||
 		!strings.Contains(out.String(), "affected") || !strings.Contains(out.String(), "durations") ||
-		!strings.Contains(out.String(), "shards") {
+		!strings.Contains(out.String(), "shards") || !strings.Contains(out.String(), "build") ||
+		!strings.Contains(out.String(), "vet") || !strings.Contains(out.String(), "gofmt") {
 		t.Errorf("--list output missing tiers: %q", out.String())
 	}
 }
