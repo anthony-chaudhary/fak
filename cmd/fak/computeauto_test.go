@@ -146,6 +146,71 @@ func TestAutoSelectNoHealthyErrors(t *testing.T) {
 	}
 }
 
+// TestCredForTarget covers the launch-credential signal that completes the failover gate:
+// a declared bearer env var must be set (present/absent are witnessed), while the anthropic
+// OAuth proxy and a no-CredEnv local serve need none (n/a).
+func TestCredForTarget(t *testing.T) {
+	getenv := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	gw := computeTarget{Name: "gw", Kind: targetGatewayURL, GatewayURL: "http://mac-host:8080", Locality: localityRemote, CredEnv: "FAK_GATEWAY_KEY"}
+
+	if s := credForTarget(gw, getenv(map[string]string{})); s.State != "absent" || s.Provenance != "witnessed" {
+		t.Errorf("empty cred env: %+v, want witnessed absent", s)
+	}
+	if s := credForTarget(gw, getenv(map[string]string{"FAK_GATEWAY_KEY": "sekret"})); s.State != "present" || s.Provenance != "witnessed" {
+		t.Errorf("set cred env: %+v, want witnessed present", s)
+	}
+	// A target that declares no CredEnv (the local in-kernel serve) needs none.
+	local := computeTarget{Name: "local", Kind: targetLocalSpawn, GatewayURL: "http://127.0.0.1:8080", Locality: localityLocal}
+	if s := credForTarget(local, getenv(map[string]string{})); s.State != "n/a" {
+		t.Errorf("no-cred local target: %+v, want n/a", s)
+	}
+	// The anthropic provider-proxy uses OAuth via guard even with a CredEnv named.
+	anth := computeTarget{Name: "anthropic", Kind: targetProviderProxy, GatewayURL: "https://api.anthropic.com", Locality: localityRemote, CredEnv: "ANTHROPIC_API_KEY"}
+	if s := credForTarget(anth, getenv(map[string]string{})); s.State != "n/a" {
+		t.Errorf("anthropic proxy: %+v, want n/a (OAuth via guard)", s)
+	}
+}
+
+// TestAutoSelectExcludesCredAbsentTarget proves the failover gate is health AND credential:
+// a CHEAPER target that is /healthz-up but whose declared bearer is empty is excluded (not
+// crowned then dead at launch), so --auto falls over to the launchable one — and once the
+// credential is present, the cheaper target wins.
+func TestAutoSelectExcludesCredAbsentTarget(t *testing.T) {
+	up1, up2 := upHealthzServer(t), upHealthzServer(t)
+	// gwSecured is cheaper (local cost class) but DECLARES a credential; gwOpen is pricier
+	// (remote) and declares none, so it is always launchable.
+	gwSecured := computeTarget{Name: "gwSecured", Kind: targetGatewayURL, GatewayURL: up1.URL, Locality: localityLocal, HealthzPath: "/healthz", CredEnv: "FAK_TEST_ABSENT_KEY", CostNote: "no per-token cost"}
+	gwOpen := computeTarget{Name: "gwOpen", Kind: targetGatewayURL, GatewayURL: up2.URL, Locality: localityRemote, HealthzPath: "/healthz", CostNote: "paid GPU compute"}
+	reg := &targetRegistry{targets: []computeTarget{gwSecured, gwOpen}}
+	hc := &http.Client{Timeout: 2 * time.Second}
+
+	// Credential ABSENT: gwSecured is up but excluded; --auto fails over to gwOpen.
+	t.Setenv("FAK_TEST_ABSENT_KEY", "")
+	rep, winner, err := autoSelectComputeTarget(context.Background(), reg, hc, 2*time.Second)
+	if err != nil {
+		t.Fatalf("autoSelect (cred absent): %v", err)
+	}
+	if winner.Name != "gwOpen" {
+		t.Fatalf("winner = %q, want gwOpen (gwSecured is up but un-credentialed)", winner.Name)
+	}
+	sr, _ := autoRowByName(rep, "gwSecured")
+	if sr.Candidate || sr.Rank != 0 || sr.Health.State != "up" || sr.Cred.State != "absent" {
+		t.Fatalf("gwSecured row = %+v, want excluded-with-witnessed-up-health-and-absent-cred", sr)
+	}
+
+	// Credential PRESENT: gwSecured is now launchable and, being cheaper, wins.
+	t.Setenv("FAK_TEST_ABSENT_KEY", "sekret")
+	_, winner2, err := autoSelectComputeTarget(context.Background(), reg, hc, 2*time.Second)
+	if err != nil {
+		t.Fatalf("autoSelect (cred present): %v", err)
+	}
+	if winner2.Name != "gwSecured" {
+		t.Fatalf("winner = %q, want gwSecured (cheaper, now credentialed)", winner2.Name)
+	}
+}
+
 // TestAutoQuotaHonestlyLabeled proves the quota signal is a [stub] for a metered provider
 // seat and n/a otherwise — never a claimed live read.
 func TestAutoQuotaHonestlyLabeled(t *testing.T) {
@@ -269,11 +334,12 @@ func TestRenderAutoDecision(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"gwUp *",                   // the winner row is marked
+		"CRED",                     // the launch-credential column header
 		"assumed-available [stub]", // a stub quota cell is tagged
 		"[n/a]",                    // an n/a cell is tagged, never bare
 		"down",                     // the excluded target shows its witnessed down state
-		"policy: healthy or assumed-reachable first", // the honest policy line
-		"quota is a [stub] signal",                   // the honest quota footer
+		"policy: launchable first", // the honest policy line (health AND credential gate)
+		"quota is a [stub] signal", // the honest quota footer
 		"winner: gwUp",
 	} {
 		if !strings.Contains(out, want) {

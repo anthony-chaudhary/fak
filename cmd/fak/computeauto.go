@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,9 +91,10 @@ type autoTargetRow struct {
 	Locality  targetLocality `json:"locality"`
 	CostClass int            `json:"cost_class"`
 	Health    autoSignal     `json:"health"`
+	Cred      autoSignal     `json:"cred"`
 	Fit       autoSignal     `json:"fit"`
 	Quota     autoSignal     `json:"quota"`
-	Candidate bool           `json:"candidate"`      // passed the health gate (eligible)
+	Candidate bool           `json:"candidate"`      // passed the health+cred gate (launchable)
 	Selected  bool           `json:"selected"`       // the winner
 	Rank      int            `json:"rank,omitempty"` // 1=winner, 2..=fallback order; 0=excluded
 }
@@ -158,9 +160,31 @@ func quotaForTarget(t computeTarget) autoSignal {
 	return autoSignal{State: "n/a", Provenance: "n/a", Detail: "not a metered provider seat"}
 }
 
+// credForTarget reports whether a target's launch credential is present — the signal that
+// completes the failover gate. A target can answer /healthz (which is unauthenticated on
+// the Mac gateway) yet be un-launchable because its declared bearer env var is empty, so
+// selecting on health alone crowns a target that then dies at launch. Exemptions mirror
+// buildTUIAgentGatewayReport's own bearer tolerance: the anthropic provider-proxy uses
+// OAuth via guard (no gateway bearer), and a target that declares no CredEnv (the local
+// in-kernel serve) needs none. A target that DECLARES a CredEnv is taken at its word: the
+// var must be set. present/absent are witnessed (fak read the environment this run).
+func credForTarget(t computeTarget, getenv func(string) string) autoSignal {
+	if t.Kind == targetProviderProxy {
+		return autoSignal{State: "n/a", Provenance: "n/a", Detail: "OAuth via guard; no gateway bearer required here"}
+	}
+	env := strings.TrimSpace(t.CredEnv)
+	if env == "" {
+		return autoSignal{State: "n/a", Provenance: "n/a", Detail: "target declares no credential env"}
+	}
+	if strings.TrimSpace(getenv(env)) != "" {
+		return autoSignal{State: "present", Provenance: "witnessed", Detail: "$" + env + " is set"}
+	}
+	return autoSignal{State: "absent", Provenance: "witnessed", Detail: "$" + env + " is empty — reachable but not launchable; export it or `fak c --list-targets`"}
+}
+
 // autoSelectComputeTarget probes every registered target, wires the dormant gateway
 // Router (CostBased) over the candidates, and returns the ranked decision plus the
-// winning target. It returns an error (no launch) when no target is reachable.
+// winning target. It returns an error (no launch) when no target is launchable.
 func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *http.Client, perProbe time.Duration) (autoDecisionReport, *computeTarget, error) {
 	type probed struct {
 		t      computeTarget
@@ -193,14 +217,21 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 	if err != nil {
 		return autoDecisionReport{}, nil, err
 	}
-	// Health gate: a DOWN probe is unhealthy; up and n/a (unprobed, assumed reachable)
-	// stay candidates. Quota is a [stub] and never marks a seat down.
+	// Launchability gate: a candidate must be BOTH reachable AND credentialed. A DOWN
+	// probe is unhealthy; up and n/a (unprobed, assumed reachable) pass the health half.
+	// The cred half excludes a target whose declared bearer env var is empty — a target
+	// that passes an unauthenticated /healthz but would die at launch. Excluding it here
+	// is what makes --auto fail OVER a credential-gated target instead of crowning it.
+	// Quota is a [stub] and never marks a seat down.
 	candidate := make(map[string]bool, len(ps))
 	healthByName := make(map[string]targetHealth, len(ps))
+	credByName := make(map[string]autoSignal, len(ps))
 	for _, p := range ps {
-		up := p.health.State != "down"
-		router.SetHealth(p.t.Name, up)
-		candidate[p.t.Name] = up
+		cred := credForTarget(p.t, os.Getenv)
+		credByName[p.t.Name] = cred
+		launchable := p.health.State != "down" && cred.State != "absent"
+		router.SetHealth(p.t.Name, launchable)
+		candidate[p.t.Name] = launchable
 		healthByName[p.t.Name] = p.health
 	}
 
@@ -233,6 +264,7 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 			Locality:  p.t.Locality,
 			CostClass: p.t.costClass(),
 			Health:    healthSignal(p.health),
+			Cred:      credByName[p.t.Name],
 			Fit:       fitForTarget(p.t),
 			Quota:     quotaForTarget(p.t),
 			Candidate: candidate[p.t.Name],
@@ -241,7 +273,7 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 		})
 	}
 	if routeErr != nil {
-		return report, nil, fmt.Errorf("no reachable compute target (every registered target is down): %w", routeErr)
+		return report, nil, fmt.Errorf("no launchable compute target (every registered target is down or missing its credential): %w", routeErr)
 	}
 	w := byName[winnerName]
 	return report, &w, nil
@@ -253,7 +285,7 @@ func autoSelectComputeTarget(parent context.Context, reg *targetRegistry, hc *ht
 func renderAutoDecision(w io.Writer, rep autoDecisionReport) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintf(tw, "fak c --auto\tstrategy=%s\n", rep.Strategy)
-	fmt.Fprintln(tw, "RANK\tTARGET\tLOCALITY\tCOST\tHEALTH\tFIT\tQUOTA")
+	fmt.Fprintln(tw, "RANK\tTARGET\tLOCALITY\tCOST\tHEALTH\tCRED\tFIT\tQUOTA")
 	for _, t := range rep.Targets {
 		rankCell := "-"
 		if t.Rank > 0 {
@@ -263,9 +295,9 @@ func renderAutoDecision(w io.Writer, rep autoDecisionReport) {
 		if t.Selected {
 			name += " *"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			rankCell, name, t.Locality, t.CostClass,
-			autoSignalCell(t.Health), autoSignalCell(t.Fit), autoSignalCell(t.Quota))
+			autoSignalCell(t.Health), autoSignalCell(t.Cred), autoSignalCell(t.Fit), autoSignalCell(t.Quota))
 	}
 	tw.Flush()
 	if rep.Winner != "" {
@@ -273,7 +305,7 @@ func renderAutoDecision(w io.Writer, rep autoDecisionReport) {
 	} else {
 		fmt.Fprintf(w, "no winner: %s\n", rep.Reason)
 	}
-	fmt.Fprintln(w, "policy: healthy or assumed-reachable first (live /healthz where present), then cheapest/most-local (cost_class asc: local<mac<gcp<anthropic).")
+	fmt.Fprintln(w, "policy: launchable first — reachable (healthy or assumed-reachable, live /healthz where present) AND its credential present — then cheapest/most-local (cost_class asc: local<mac<gcp<anthropic).")
 	fmt.Fprintln(w, "quota is a [stub] signal — not yet a live `fak accounts` rotation read; it never excludes a target.")
 }
 
