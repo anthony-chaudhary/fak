@@ -210,6 +210,66 @@ func TestRenderSmoke(t *testing.T) {
 	}
 }
 
+func TestWaveLeaseRegionCoversMembersMinimally(t *testing.T) {
+	a := fullCandidate("alpha")
+	a.Paths = []string{"internal/foo/**", "internal/foo/bar.go"} // bar.go is inside foo
+	b := fullCandidate("beta")
+	b.Paths = []string{"internal/baz/x.go"} // disjoint from a
+
+	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	if plan.NumWaves != 1 {
+		t.Fatalf("waves = %d, want 1 (disjoint)", plan.NumWaves)
+	}
+	region := plan.Waves[0].LeaseRegion
+	// foo/bar.go collapses under foo; baz/x.go stays. Minimal roots, sorted.
+	want := []string{"internal/baz/x.go", "internal/foo"}
+	if len(region) != len(want) {
+		t.Fatalf("lease region = %v, want %v", region, want)
+	}
+	for i := range want {
+		if region[i] != want[i] {
+			t.Fatalf("lease region = %v, want %v", region, want)
+		}
+	}
+	// Every member path must be covered by some root.
+	for _, m := range plan.Waves[0].Members {
+		for _, p := range m.Paths {
+			np := normPath(p)
+			covered := false
+			for _, r := range region {
+				if np == r || pathOverlap(r, np) {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				t.Fatalf("member path %q not covered by lease region %v", p, region)
+			}
+		}
+	}
+}
+
+func TestWaveLeaseLanesForLaneOnlyMembers(t *testing.T) {
+	a := fullCandidate("alpha")
+	a.Paths = nil
+	a.Lane = "docs"
+	b := fullCandidate("beta")
+	b.Paths = nil
+	b.Lane = "gateway"
+
+	plan := Build([]issuecontract.Candidate{a, b}, Options{})
+	if plan.NumWaves != 1 {
+		t.Fatalf("waves = %d, want 1 (distinct lanes co-wave)", plan.NumWaves)
+	}
+	lanes := plan.Waves[0].LeaseLanes
+	if len(lanes) != 2 || lanes[0] != "docs" || lanes[1] != "gateway" {
+		t.Fatalf("lease lanes = %v, want [docs gateway]", lanes)
+	}
+	if len(plan.Waves[0].LeaseRegion) != 0 {
+		t.Fatalf("lease region = %v, want empty (no path-scoped members)", plan.Waves[0].LeaseRegion)
+	}
+}
+
 func hasReason(reasons []string, want string) bool {
 	for _, r := range reasons {
 		if r == want {

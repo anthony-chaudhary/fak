@@ -67,6 +67,14 @@ type Wave struct {
 	Size       int          `json:"size"`
 	StepBudget int          `json:"step_budget"`
 	Members    []WaveMember `json:"members"`
+	// LeaseRegion is the minimal normalized union of member path roots — the
+	// exact tree set to hand `dos arbitrate --tree` for the whole wave, so a
+	// concurrency-safe wave maps to one lease call. It covers every path-scoped
+	// member; lane-only members are covered by LeaseLanes instead.
+	LeaseRegion []string `json:"lease_region,omitempty"`
+	// LeaseLanes are the lanes of members that named no explicit paths (they take
+	// their whole lane); pass each as `dos arbitrate --lane`.
+	LeaseLanes []string `json:"lease_lanes,omitempty"`
 }
 
 // SubdivideRow is a candidate that is routeable but declared (or detected) as an
@@ -248,13 +256,58 @@ func partition(leaves []leaf, maxWave int) []Wave {
 	waves := make([]Wave, 0, len(buckets))
 	for i, bucket := range buckets {
 		wave := Wave{Index: i, Size: len(bucket)}
+		var paths []string
+		laneSet := map[string]bool{}
 		for _, lf := range bucket {
 			wave.Members = append(wave.Members, lf.member)
 			wave.StepBudget += stepUnits(lf.member.ExpectedSteps)
+			if len(lf.normPaths) > 0 {
+				paths = append(paths, lf.normPaths...)
+			} else if lf.member.Lane != "" {
+				laneSet[lf.member.Lane] = true
+			}
 		}
+		wave.LeaseRegion = minimalRoots(paths)
+		wave.LeaseLanes = sortedKeys(laneSet)
 		waves = append(waves, wave)
 	}
 	return waves
+}
+
+// minimalRoots reduces a set of normalized paths to the smallest set of tree
+// roots that still covers all of them: a path is dropped when an ancestor of it
+// is already a root. Sorting first guarantees ancestors precede descendants.
+func minimalRoots(paths []string) []string {
+	uniq := map[string]bool{}
+	for _, p := range paths {
+		if p != "" {
+			uniq[p] = true
+		}
+	}
+	sorted := sortedKeys(uniq)
+	var roots []string
+	for _, p := range sorted {
+		covered := false
+		for _, r := range roots {
+			if p == r || strings.HasPrefix(p, r+"/") {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			roots = append(roots, p)
+		}
+	}
+	return roots
+}
+
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func collidesWithAny(lf leaf, bucket []leaf) bool {

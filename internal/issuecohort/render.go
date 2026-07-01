@@ -23,6 +23,9 @@ func Render(p Plan) string {
 
 	for _, w := range p.Waves {
 		fmt.Fprintf(&b, "  wave %d: %d leaf/leaves, step_budget=%d\n", w.Index, w.Size, w.StepBudget)
+		if len(w.LeaseRegion) > 0 || len(w.LeaseLanes) > 0 {
+			fmt.Fprintf(&b, "    lease: dos arbitrate%s%s\n", leaseTreeArg(w.LeaseRegion), leaseLaneArg(w.LeaseLanes))
+		}
 		for _, m := range w.Members {
 			fmt.Fprintf(&b, "    - %s%s%s\n", m.Key, laneSuffix(m.Lane), pathSuffix(m.Paths))
 		}
@@ -61,4 +64,18 @@ func pathSuffix(paths []string) string {
 		return ""
 	}
 	return "  paths=" + strings.Join(paths, ",")
+}
+
+func leaseTreeArg(region []string) string {
+	if len(region) == 0 {
+		return ""
+	}
+	return " --tree " + strings.Join(region, ",")
+}
+
+func leaseLaneArg(lanes []string) string {
+	if len(lanes) == 0 {
+		return ""
+	}
+	return " --lane " + strings.Join(lanes, ",")
 }
