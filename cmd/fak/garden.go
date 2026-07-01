@@ -40,6 +40,17 @@ func runGarden(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "walk" {
 		return runGardenWalk(stdout, stderr, argv[1:])
 	}
+	// `fak garden dispatch` is the BRIDGE (#1791) between garden walk's propose-only
+	// worklist and the guarded worker-spawn machinery in `fak dispatch tick`: it loads
+	// the same candidate set garden walk would propose and hands each one to
+	// evaluateDispatchTick (the same admission pipeline `dispatch tick`/`sweep`/`wave`
+	// already use — loop governor, seat/weekly-cap preflight, lane-lease/DOS
+	// arbitration, issue worker prompt/picker), never a second implementation of any
+	// of them. --dry-run (default) spawns nothing; --apply attempts only admitted
+	// candidates. See garden_dispatch.go.
+	if len(argv) > 0 && argv[0] == "dispatch" {
+		return runGardenDispatch(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("garden", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
