@@ -235,6 +235,13 @@ func EvaluateJanitor(in JanitorInput) JanitorResult {
 	// protected process (a worker root, an MCP server, an ancestor, a predating
 	// process) cannot be reaped — the tree-kill would collaterally kill the
 	// protected process. Demote such a candidate to protected.
+	//
+	// Known conservative limitation: a PREDATING process (a PID-reuse false-child
+	// whose stale PPID points into this subtree) also demotes the reap. That is
+	// deliberate — the same PPID edge that put it in the subtree is the one the
+	// reuse fence distrusts, so we cannot be sure the tree-kill would spare it.
+	// Sparing a genuinely-stale child in that rare case is a MISSED reap, never a
+	// wrong kill; for a destructive reaper that is the correct direction to err.
 	protectedPIDs := map[int]bool{}
 	for _, w := range in.Workers {
 		protectedPIDs[w.PID] = true

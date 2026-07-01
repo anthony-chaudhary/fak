@@ -127,6 +127,46 @@ func TestFoldInterruptedThenRecovered(t *testing.T) {
 	}
 }
 
+// TestFoldRecoveredFromRateLimitIsPatchWitness reproduces the cross-surface
+// inconsistency the review caught: a worker hits a transient 429, RECOVERS, edits
+// a file, runs its witness (go test), and ends with a final report — all within
+// the bounded transcript tail, so the blocker signature is still visible. The fold
+// must record patch-with-witness (the worker completed), NOT blocked-scoped, and
+// it must AGREE with what `fak fleet monitor` reads on the identical signal.
+func TestFoldRecoveredFromRateLimitIsPatchWitness(t *testing.T) {
+	now := time.Now()
+	sig := ReadTranscript(writeTranscript(t,
+		assistantToolUse(t, tsAt(now, 12), "Bash", map[string]any{"command": "go test ./..."}),
+		userToolResult(t, tsAt(now, 11), "API Error: 429 rate_limit_error, retrying shortly", true),
+		assistantToolUse(t, tsAt(now, 8), "Edit", map[string]any{"file_path": "internal/x/x.go"}),
+		assistantToolUse(t, tsAt(now, 5), "Bash", map[string]any{"command": "go test ./internal/x/"}),
+		userToolResult(t, tsAt(now, 4), "ok  internal/x  0.2s", false),
+		assistantText(t, tsAt(now, 1), "Recovered from the earlier limit; fixed internal/x and go test passes.", "end_turn"),
+	))
+	// The blocker signature IS still present in the tail (proving the trigger).
+	if sig.Blocker == "" {
+		t.Fatal("precondition: the 429 signature should still be visible in the tail")
+	}
+	if !sig.FinalReport || len(sig.ChangedFiles) == 0 || len(sig.WitnessCommands) == 0 {
+		t.Fatalf("precondition: expected a witnessed patch + final report, got %+v", sig)
+	}
+
+	// Fold: the recovered, witnessed patch must be patch-with-witness.
+	row := FoldWorker(FoldInput{Worker: PlanWorker{Issue: 9, Session: "issue-9"}, Transcript: sig, PIDAlive: bptr(true), Now: now})
+	if row.Outcome != string(OutcomePatchWitness) {
+		t.Fatalf("a recovered witnessed patch must fold to patch-with-witness, got %s (blocker=%q)", row.Outcome, row.Blocker)
+	}
+
+	// Monitor: the SAME evidence must classify completed-final (cross-surface agreement).
+	sample := Classify(WorkerEvidence{
+		Session: "issue-9", HasPID: true, PID: 10, PIDAlive: true, PIDLivenessKnown: true,
+		Transcript: sig,
+	}, now, DefaultThresholds())
+	if sample.Class != ClassCompletedFinal {
+		t.Fatalf("monitor must agree the recovered worker is completed-final, got %s", sample.Class)
+	}
+}
+
 func TestLedgerRoundTrip(t *testing.T) {
 	row := LedgerRow{Schema: RunLedgerSchema, Issue: 1, Session: "issue-1", Outcome: string(OutcomeReadOnlyAudit), RecordedAt: "2026-07-01T00:00:00Z"}
 	line, err := AppendLedgerLine(row)

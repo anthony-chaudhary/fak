@@ -113,23 +113,31 @@ func FoldWorker(in FoldInput) LedgerRow {
 
 	default: // a final report is present — classify by the witnessed evidence
 		row.Witness = strings.Join(t.WitnessCommands, "; ")
-		// A HARD blocker is a real API/tool error the transcript tail carried
-		// (auth/rate/credit) — that downgrades even a witnessed patch. SOFT scoped
-		// language (a "follow-up"/"not yet" line) does NOT, because the run's own
-		// prompt REQUIRES workers to end with a follow-up line and to say "not yet"
-		// when incomplete — so its mere presence cannot mean a witnessed patch failed.
+		// A WITNESSED PATCH wins first. A blocker signature (auth/rate/credit) can
+		// linger in the bounded transcript tail even after the worker RECOVERED from
+		// it, edited files, ran its witness, and stopped with a final report — the
+		// tail scan cannot tell a resolved error from a live one. When a final report
+		// coincides with a witnessed patch, the worker completed: we must NOT downgrade
+		// it to blocked-scoped just because a stale 429 sits in the tail. This mirrors
+		// `fak fleet monitor`, which gates the blocker on the final report
+		// (monitor.go: `blocked && !FinalReport`) and reads the same evidence as
+		// completed — keeping the two surfaces consistent instead of one saying
+		// "completed-final" while the ledger says "blocked-scoped" (#1858 fold ⇄ #1856).
+		// A HARD blocker with NO witnessed patch still downgrades (the worker did not
+		// recover). SOFT scoped language (a "follow-up"/"not yet" line) never downgrades
+		// a witnessed patch, because the run's own prompt REQUIRES a follow-up line.
 		hardBlocked := t.Blocker != ""
 		softScoped := blockedTextRE.MatchString(t.FinalReportText)
 		hasPatch := len(t.ChangedFiles) > 0 && len(t.WitnessCommands) > 0
 		switch {
+		case hasPatch:
+			row.Outcome = string(OutcomePatchWitness)
+			row.ChangedFiles = t.ChangedFiles
 		case hardBlocked:
 			row.Outcome = string(OutcomeBlockedScoped)
 			row.ChangedFiles = t.ChangedFiles
 			row.Blocker = t.Blocker
 			row.FollowUp = "clear the blocker: " + t.Blocker
-		case hasPatch:
-			row.Outcome = string(OutcomePatchWitness)
-			row.ChangedFiles = t.ChangedFiles
 		case len(t.ChangedFiles) > 0:
 			// Changed files but no captured witness: a claim, not a proof.
 			row.Outcome = string(OutcomeBlockedScoped)
