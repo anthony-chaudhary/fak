@@ -103,6 +103,41 @@ func Classify(c *abi.ToolCall) OpClass {
 	return classFromToken(c.Meta[MetaClassKey])
 }
 
+// WeightBearing is the OPTIONAL self-declaration an abi.EngineDriver implements to
+// mark whether it runs a MODEL FORWARD (a weight-based op) or a deterministic tool
+// (a classical op). It is discovered by a structural type assertion — exactly like
+// abi.LifecycleEngine — so an engine opts in WITHOUT importing this package and the
+// frozen ABI is untouched. An engine that does not implement it is simply not
+// self-classifying (its ops stay ClassUnknown unless declared), the fail-closed
+// default. No shipped engine declares it yet; this is the seam by which the LIVE
+// path classifies engine-routed ops instead of hand-tagged ones.
+type WeightBearing interface{ WeightBearing() bool }
+
+// ClassifyResolved is the registry-aware companion to [Classify]: it honors an
+// explicit declaration FIRST (authoritative), and only when the call is undeclared
+// does it consult the call's routed engine — if abi.Engine(c.Engine) implements
+// [WeightBearing], its answer decides (true => ClassWeight, false => ClassClassical).
+// An undeclared call with no engine, an unregistered route, or a non-self-declaring
+// engine stays ClassUnknown (fail-closed). Unlike [Classify] this reads the process
+// engine registry, so it is NOT pure — use [Classify] when a pure fold is required
+// (the CLI, the recognizer) and ClassifyResolved when live engine routes are in play.
+func ClassifyResolved(c *abi.ToolCall) OpClass {
+	if declared := Classify(c); declared != ClassUnknown {
+		return declared // an explicit declaration always wins
+	}
+	if c == nil || c.Engine == "" {
+		return ClassUnknown
+	}
+	eng := abi.Engine(c.Engine)
+	if wb, ok := eng.(WeightBearing); ok {
+		if wb.WeightBearing() {
+			return ClassWeight
+		}
+		return ClassClassical
+	}
+	return ClassUnknown
+}
+
 // Tag stamps class onto a call's Meta[MetaClassKey] (allocating Meta if needed)
 // and returns the same call for chaining. Tagging with ClassUnknown clears the
 // declaration. It is how a producer that knows an op's family records that fact so

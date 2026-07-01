@@ -147,9 +147,9 @@ func TestAdjudicateCrossesOneFloor(t *testing.T) {
 	k := kernel.New("", kernel.WithAdjudicators([]abi.Adjudicator{floor}))
 
 	ft := fusedturn.Fuse([]*abi.ToolCall{
-		fusedturn.Classical("read_file", abi.Ref{}),        // classical, allowed
+		fusedturn.Classical("read_file", abi.Ref{}),               // classical, allowed
 		fusedturn.Weight("glm-5.2", "chat_completion", abi.Ref{}), // weight, allowed
-		fusedturn.Classical("rm_rf", abi.Ref{}),            // classical, NOT allowed -> denied
+		fusedturn.Classical("rm_rf", abi.Ref{}),                   // classical, NOT allowed -> denied
 	})
 	if !ft.Fused() {
 		t.Fatalf("turn should be fused (has both families)")
@@ -180,6 +180,58 @@ func TestAdjudicateCrossesOneFloor(t *testing.T) {
 	}
 	if got := byTool["rm_rf"]; got.Kind != "deny" {
 		t.Errorf("classical rm_rf verdict = %q, want deny (same floor refuses it)", got.Kind)
+	}
+}
+
+// ftEngine is a fake abi.EngineDriver that self-declares its concept-family via the
+// optional WeightBearing seam — the stand-in for a real model-forward engine vs a
+// deterministic tool engine, so ClassifyResolved can be witnessed without a model.
+type ftEngine struct{ weight bool }
+
+func (ftEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	return &abi.Result{Status: abi.StatusOK}, nil
+}
+func (ftEngine) Caps() []abi.Capability { return nil }
+func (e ftEngine) WeightBearing() bool  { return e.weight }
+
+// ftPlainEngine implements EngineDriver but NOT WeightBearing — the "cannot tell"
+// case that must stay ClassUnknown (fail-closed).
+type ftPlainEngine struct{}
+
+func (ftPlainEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	return &abi.Result{Status: abi.StatusOK}, nil
+}
+func (ftPlainEngine) Caps() []abi.Capability { return nil }
+
+func TestClassifyResolvedReadsEngineSelfDeclaration(t *testing.T) {
+	abi.RegisterEngine("ft-weighty", ftEngine{weight: true})
+	abi.RegisterEngine("ft-tooly", ftEngine{weight: false})
+	abi.RegisterEngine("ft-plain", ftPlainEngine{})
+
+	cases := []struct {
+		name string
+		call *abi.ToolCall
+		want fusedturn.OpClass
+	}{
+		{"weight-bearing engine => weight", &abi.ToolCall{Tool: "chat", Engine: "ft-weighty"}, fusedturn.ClassWeight},
+		{"non-weight engine => classical", &abi.ToolCall{Tool: "bash", Engine: "ft-tooly"}, fusedturn.ClassClassical},
+		{"engine without the seam => unknown", &abi.ToolCall{Tool: "x", Engine: "ft-plain"}, fusedturn.ClassUnknown},
+		{"unregistered route => unknown", &abi.ToolCall{Tool: "x", Engine: "ft-nope"}, fusedturn.ClassUnknown},
+		{"no engine => unknown", &abi.ToolCall{Tool: "x"}, fusedturn.ClassUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fusedturn.ClassifyResolved(tc.call); got != tc.want {
+				t.Fatalf("ClassifyResolved = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// An explicit declaration ALWAYS wins over the engine's self-declaration.
+	c := fusedturn.Classical("x", abi.Ref{})
+	c.Engine = "ft-weighty" // engine says weight, declaration says classical
+	if got := fusedturn.ClassifyResolved(c); got != fusedturn.ClassClassical {
+		t.Fatalf("declaration must win: ClassifyResolved = %v, want ClassClassical", got)
 	}
 }
 
