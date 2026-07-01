@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const recoverSchema = "fak.recover.v1"
@@ -66,6 +67,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *execute && *dryRun {
 		fmt.Fprintln(stderr, "fak recover: choose either --execute or --dry-run, not both")
 		return 2
