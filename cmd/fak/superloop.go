@@ -13,9 +13,12 @@ package main
 // The walk reads CHEAP, committed status surfaces so it stays fast and honest: a
 // scorecard member's debt from the pinned control-pane baseline (the last measured,
 // committed value); a loop member's live/dark state from the cross-ledger loop-health
-// fold (internal/loopfleet). Container members (a garden or a sub-super-loop) are
-// surfaced as DESCEND pointers, not weighed — their status is only knowable by
-// descending, which is the named drive/recursion follow-on. It mutates nothing.
+// fold (internal/loopfleet). A sub-super-loop member is DESCENDED inline — a
+// recursive, cycle-guarded, in-process walk over the same surfaces, folded into one
+// measured status (the recursion case is live; `fak superloop walk tend` exercises
+// it). Garden / surface members stay DESCEND pointers — their status needs live
+// member runs or an external command, which is the named drive follow-on. The walk
+// mutates nothing.
 
 import (
 	"encoding/json"
@@ -164,43 +167,66 @@ func runSuperloopWalk(stdout, stderr io.Writer, argv []string) int {
 	return 1
 }
 
+// superloopCollector holds the cheap committed surfaces read ONCE per walk (the
+// pinned scorecard baseline, the cross-ledger loop-health fold), so a recursive
+// descent through sub-super-loops re-reads nothing.
+type superloopCollector struct {
+	baseline      scorecardpane.Baseline
+	baseErr       error
+	loopByKind    map[string]loopfleet.LoopHealth
+	skippedLedger map[string]string
+}
+
+func newSuperloopCollector(root string) *superloopCollector {
+	c := &superloopCollector{
+		loopByKind:    map[string]loopfleet.LoopHealth{},
+		skippedLedger: map[string]string{},
+	}
+	c.baseline, c.baseErr = loadScorecardBaseline(root)
+	fleet := loopfleet.Fold(root, time.Now(), loopmgr.HealthThresholds{})
+	for _, l := range fleet.Loops {
+		c.loopByKind[l.Kind] = l
+	}
+	for _, sk := range fleet.Skipped {
+		c.skippedLedger[sk.Ledger] = sk.Reason
+	}
+	return c
+}
+
 // collectSuperloopStatuses reads each member's status from the cheap committed
 // surfaces, off the hot path. Scorecard debt comes from the pinned control-pane
-// baseline; loop liveness from the cross-ledger loop-health fold; container members
-// (garden / super loop) are descend pointers, not measured here.
+// baseline; loop liveness from the cross-ledger loop-health fold; a sub-super-loop
+// member is DESCENDED inline (a recursive in-process walk over the same surfaces);
+// garden / surface members stay descend pointers, not measured here.
 func collectSuperloopStatuses(root string, s superloop.Super) []superloop.MemberStatus {
-	baseline, baseErr := loadScorecardBaseline(root)
-	fleet := loopfleet.Fold(root, time.Now(), loopmgr.HealthThresholds{})
-	loopByKind := map[string]loopfleet.LoopHealth{}
-	for _, l := range fleet.Loops {
-		loopByKind[l.Kind] = l
-	}
-	skippedLedger := map[string]string{}
-	for _, sk := range fleet.Skipped {
-		skippedLedger[sk.Ledger] = sk.Reason
-	}
+	c := newSuperloopCollector(root)
+	return c.collect(s, map[string]bool{s.Name: true})
+}
 
+// collect walks one super loop's members. onPath is the set of super-loop names on
+// the current descent path (ancestry), guarding a registry cycle.
+func (c *superloopCollector) collect(s superloop.Super, onPath map[string]bool) []superloop.MemberStatus {
 	out := make([]superloop.MemberStatus, 0, len(s.Members))
 	for _, m := range s.Members {
 		st := superloop.MemberStatus{Member: m}
 		switch m.Kind {
 		case superloop.KindScorecard:
-			if baseErr != nil {
+			if c.baseErr != nil {
 				st.Measured = false
-				st.Detail = "no pinned baseline (run `fak scorecard --pin`): " + baseErr.Error()
+				st.Detail = "no pinned baseline (run `fak scorecard --pin`): " + c.baseErr.Error()
 				break
 			}
-			debt, present := baseline.Metrics[m.Ref]
+			debt, present := c.baseline.Metrics[m.Ref]
 			if !present {
 				st.Measured = false
-				st.Detail = fmt.Sprintf("key %q not in pinned baseline @%s", m.Ref, baseline.Commit)
+				st.Detail = fmt.Sprintf("key %q not in pinned baseline @%s", m.Ref, c.baseline.Commit)
 				break
 			}
 			st.Measured = true
 			st.Debt = debt
-			st.Detail = fmt.Sprintf("baseline debt %d (pinned @%s)", debt, baseline.Commit)
+			st.Detail = fmt.Sprintf("baseline debt %d (pinned @%s)", debt, c.baseline.Commit)
 		case superloop.KindLoop:
-			lh, found := loopByKind[m.Ref]
+			lh, found := c.loopByKind[m.Ref]
 			if found {
 				st.Measured = true
 				st.Dark = lh.Dark
@@ -209,12 +235,14 @@ func collectSuperloopStatuses(root string, s superloop.Super) []superloop.Member
 				break
 			}
 			st.Measured = false
-			if reason, sk := skippedLedger[m.Ref]; sk {
+			if reason, sk := c.skippedLedger[m.Ref]; sk {
 				st.Detail = "ledger " + reason
 			} else {
 				st.Detail = "no ledger on this host (loop has not run here)"
 			}
-		case superloop.KindGarden, superloop.KindSuperloop, superloop.KindSurface:
+		case superloop.KindSuperloop:
+			st = c.descend(m, onPath)
+		case superloop.KindGarden, superloop.KindSurface:
 			st.Container = true
 			st.Measured = false
 			st.Detail = m.Why
@@ -225,6 +253,28 @@ func collectSuperloopStatuses(root string, s superloop.Super) []superloop.Member
 		out = append(out, st)
 	}
 	return out
+}
+
+// descend is the DESCEND move made real for a registered sub-super-loop: walk it
+// in-process over the same already-read surfaces, and fold the sub-report into one
+// measured member status (superloop.SubwalkStatus — an unsatisfied sub can never
+// read clean). An unknown ref or a cycle is refused as UNMEASURED, which blocks
+// Satisfied — a registry bug must red the walk, not vanish.
+func (c *superloopCollector) descend(m superloop.Member, onPath map[string]bool) superloop.MemberStatus {
+	st := superloop.MemberStatus{Member: m, Measured: false}
+	sub, ok := superloop.Lookup(m.Ref)
+	if !ok {
+		st.Detail = fmt.Sprintf("unknown super loop %q (registry drift; try `fak superloop list`)", m.Ref)
+		return st
+	}
+	if onPath[sub.Name] {
+		st.Detail = fmt.Sprintf("cycle: %q is already on this descent path", sub.Name)
+		return st
+	}
+	onPath[sub.Name] = true
+	rep := superloop.Walk(sub, c.collect(sub, onPath))
+	delete(onPath, sub.Name)
+	return superloop.SubwalkStatus(m, rep)
 }
 
 // loopDebt maps a loop-health row to a debt integer for the worst-first fold: a dark
@@ -302,7 +352,9 @@ func renderSuperloopWalk(w io.Writer, rep superloop.WalkReport) {
 			debt := fmt.Sprintf("%d", it.Debt)
 			if it.Dark {
 				debt = "DARK"
-			} else if it.Member.Kind == superloop.KindGarden || it.Member.Kind == superloop.KindSuperloop || it.Member.Kind == superloop.KindSurface {
+			} else if it.Container {
+				// only an UNREAD pointer renders "→"; a descended sub-super-loop
+				// carries its real folded debt.
 				debt = "→"
 			}
 			fmt.Fprintf(tw, "  %d\t%s %s\t%s\t%s\t%s\n",
@@ -346,7 +398,8 @@ A SUPER LOOP is keyed on an operator intent ("improve quality"), not a task. Its
 WALKS its member loops/scorecards/gardens to read their status FIRST, SELECTS the
 worst-first member to enter, and exits on the AGGREGATE clearing — the layer above a
 normal (task + cadence) loop, which just ticks and does one concrete thing. walk reads
-cheap committed surfaces (the pinned scorecard baseline, the loop-health ledger fold)
-and mutates nothing; entering/driving a member is the named follow-on.
+cheap committed surfaces (the pinned scorecard baseline, the loop-health ledger fold),
+DESCENDS sub-super-loops inline ("fak superloop walk tend" walks every intent), and
+mutates nothing; driving a garden/surface member is the named follow-on.
 `)
 }
