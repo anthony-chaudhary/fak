@@ -71,6 +71,7 @@ var tier = map[string]int{
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; imports scoreboard(1)+stdlib, off the hot path.
 	"sessionsignals":       1,                // shared closed vocabulary of terminal-turn transcript signals (limit-reset banners, auth/credit/access walls, transient API errors) ported from tools/fleet_session_signals.py; the one taxonomy the resume sweep/stopped/watchdog family classifies with. Stdlib-only, imports nothing internal, off the hot path.
+	"sessiondesc":          1,                // pure session-descriptor join schema (fak.session.descriptor.v1, #2214): folds gateway drive-state / leaseref / harness-identity rows into one exact-join record with a closed absence vocabulary; stdlib-only, imports nothing internal, off the hot path.
 	"supportmaturityscore": 2,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
 	"supportmaturity":      2,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
 	"releasestale":         1,                // pure publish-staleness verdict (latest tag vs HEAD, in commits+days) + a thin git Gather shell; the publish-axis dual of binstamp's source-axis freshness. Stdlib-only, imports nothing internal, off the hot path.
@@ -288,6 +289,9 @@ var tier = map[string]int{
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":   1,
 	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
+	"toolproc": 2,
+	"laneadmit": 1,
+	"regionadmit": 2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
