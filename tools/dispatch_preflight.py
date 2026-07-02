@@ -173,8 +173,13 @@ def host_check(root: Path, *, max_threads: int | None = None) -> dict[str, Any]:
     surfaced as advisory, never a refusal: the guard's own ``ok`` verdict already
     excludes it as non-actionable, and its reaper refuses the kill — so refusing
     the spawn on it wedges every dispatch behind a recovery step ("reap") that is
-    impossible by design (#2227). Mirrors the Go fold's
-    ``ActionableFlaggedCount`` semantics (cmd/fak/dispatch_tick_preflight.go)."""
+    impossible by design (#2227). The carve-out is for FOREIGN protected
+    processes only (#2252): a flagged process whose image is a fleet agent
+    backend (claude/opencode/node) is fleet-spawned and fleet-reapable, so it
+    keeps the hard refusal even if a protected bit reached it — only a process
+    the fleet never spawned and can never reap demotes to advisory. Mirrors the
+    Go fold's ``ActionableFlaggedCount`` semantics
+    (cmd/fak/dispatch_tick_preflight.go)."""
     guard = root / "tools" / "proc_resource_guard.py"
     if not guard.exists():
         return {"safe": False, "error": f"guard not found: {guard}", "flagged": 0}
@@ -185,8 +190,14 @@ def host_check(root: Path, *, max_threads: int | None = None) -> dict[str, Any]:
     if doc.get("_error") and not doc.get("schema"):
         return {"safe": False, "error": doc["_error"], "flagged": 0}
     flagged = doc.get("flagged") or []
-    actionable = [r for r in flagged if not r.get("protected")]
-    protected = [r for r in flagged if r.get("protected")]
+
+    def _foreign_protected(row: dict[str, Any]) -> bool:
+        # Advisory-eligible = protected AND not a known agent backend image
+        # (#2252): a fleet binary is fleet-reapable, so its flag stays actionable.
+        return bool(row.get("protected")) and not _is_worker_image(str(row.get("name") or ""))
+
+    actionable = [r for r in flagged if not _foreign_protected(r)]
+    protected = [r for r in flagged if _foreign_protected(r)]
     return {"safe": bool(doc.get("ok")) and not actionable,
             "flagged": len(actionable),
             "flagged_names": [str(r.get("name")) for r in actionable][:8],
@@ -1238,6 +1249,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     }
 
 
+def _host_state(host: dict[str, Any]) -> str:
+    """Status-card host state (#2252): ``clean`` | ``ADVISORY(names)`` | ``FLAGGED``.
+
+    ``ADVISORY`` is a SAFE host carrying protected (non-actionable) breaches, so
+    the operator can tell "foreign baseline noted" (spawning proceeds) from
+    "reap before growing" (``FLAGGED``, which refuses)."""
+    if not host.get("safe"):
+        return "FLAGGED"
+    names = [n for n in (host.get("protected_names") or []) if n]
+    return f"ADVISORY({','.join(names)})" if names else "clean"
+
+
 def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
     hc = p.get("host_capacity") or {}
@@ -1250,7 +1273,7 @@ def render(p: dict[str, Any]) -> str:
         f"dispatch preflight: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})",
         f"  reason: {p.get('reason')}",
         f"  live={p.get('live')}/{p.get('cap')} (headroom {p.get('headroom')})  "
-        f"host={'clean' if (p.get('host') or {}).get('safe') else 'FLAGGED'}  "
+        f"host={_host_state(p.get('host') or {})}  "
         f"account={a.get('tag') or '-'} (t{a.get('tier')})  {host_cap_str}",
         f"  limiter={limiter.get('primary') or '-'} ({_capacity_limiter_terms(limiter)})",
     ])

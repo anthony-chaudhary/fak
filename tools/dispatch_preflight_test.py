@@ -156,6 +156,65 @@ class HostCheckProtectedTest(unittest.TestCase):
         self.assertEqual(host["flagged_names"], ["llama-cli"])
         self.assertEqual(host["protected_names"], ["WindowsTerminal"])
 
+    def test_protected_fleet_binary_still_refuses(self) -> None:
+        # #2252: the advisory demotion is for FOREIGN protected processes only.
+        # A fleet agent backend (here a claude worker that landed in the guard's
+        # protected pid set) is fleet-spawned and fleet-reapable, so its flag
+        # stays actionable — safe=False, never an advisory.
+        mod = load()
+        host = self._host(mod, {
+            "schema": "fleet-proc-resource-guard/1", "ok": True,
+            "flagged": [{"pid": 3, "name": "claude.exe",
+                         "reasons": ["threads 5000 > 2000"],
+                         "protected": True, "action": "protected-skip"}]})
+        self.assertFalse(host["safe"])
+        self.assertEqual(host["flagged"], 1)
+        self.assertEqual(host["flagged_names"], ["claude.exe"])
+        self.assertEqual(host["protected_flagged"], 0)
+        self.assertEqual(host["protected_names"], [])
+
+
+class HostAdvisoryStateTest(unittest.TestCase):
+    """#2252: a PROTECTED-only breach must not freeze spawning, and the status
+    card must show a ``host=ADVISORY(name)`` state distinct from ``FLAGGED`` so
+    the operator can tell "foreign baseline noted" from "reap before growing"."""
+
+    _advisory_host = {"safe": True, "flagged": 0, "flagged_names": [],
+                      "protected_flagged": 1,
+                      "protected_names": ["WindowsTerminal"]}
+
+    def test_protected_only_advisory_host_still_spawns(self) -> None:
+        # The liveness carve-out end to end: an advisory host is SPAWN_OK, with
+        # the advisory rows carried in the payload for the status card/JSON.
+        mod = load()
+        patch_checks(mod, host=dict(self._advisory_host))
+        p = run_eval(mod)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+        self.assertEqual(p["host"]["protected_names"], ["WindowsTerminal"])
+
+    def test_render_shows_advisory_distinct_from_flagged(self) -> None:
+        mod = load()
+        patch_checks(mod, host=dict(self._advisory_host))
+        text = mod.render(run_eval(mod))
+        self.assertIn("host=ADVISORY(WindowsTerminal)", text)
+        self.assertNotIn("FLAGGED", text)
+
+    def test_render_flagged_host_stays_flagged(self) -> None:
+        mod = load()
+        patch_checks(mod, host={"safe": False, "flagged": 1,
+                                "flagged_names": ["llama-cli"]})
+        text = mod.render(run_eval(mod))
+        self.assertIn("host=FLAGGED", text)
+        self.assertNotIn("ADVISORY", text)
+
+    def test_render_clean_host_stays_clean(self) -> None:
+        mod = load()
+        patch_checks(mod)
+        text = mod.render(run_eval(mod))
+        self.assertIn("host=clean", text)
+        self.assertNotIn("ADVISORY", text)
+
 
 class EvaluateVerdictTest(unittest.TestCase):
     def test_spawn_ok_when_host_clean_account_free_under_cap(self) -> None:
