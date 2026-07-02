@@ -74,11 +74,15 @@ if [ -z "${STATE_DIR:-}" ]; then
 fi
 mkdir -p "$STATE_DIR"
 JSONL="$STATE_DIR/janitor.jsonl"
+LOGFILE="$STATE_DIR/janitor.log"
 NOW="$(date -u +%s)"
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MODE=$([ "$LIVE" = "1" ] && echo LIVE || echo DRY-RUN)
 
-log()  { printf '%s  %s\n' "$NOW_ISO" "$*" >&2; }
+# Human log -> a durable FILE first (a headless conhost's stderr is discarded, so the
+# sweep's own narration was unrecoverable — #2341), THEN stderr too so an interactive
+# --dry-run still shows it live. Both best-effort; a log write must never fail the sweep.
+log()  { printf '%s  %s\n' "$NOW_ISO" "$*" >> "$LOGFILE" 2>/dev/null || true; printf '%s  %s\n' "$NOW_ISO" "$*" >&2; }
 emit() { printf '%s\n' "$1" >> "$JSONL" 2>/dev/null || true; }
 
 # --- optional: register the unattended Windows scheduled task and exit ------------
@@ -103,9 +107,28 @@ fi
 
 # --- enumerate every GPU instance in the project ----------------------------------
 # RUNNING instances with at least one guestAccelerator. TSV: name<TAB>zone<TAB>start<TAB>label.
-mapfile -t ROWS < <(gcloud compute instances list --project "$PROJECT" \
-  --filter="status=RUNNING AND guestAccelerators:*" \
-  --format="value(name, zone.basename(), lastStartTimestamp, labels.fak-reaper)" 2>/dev/null || true)
+# #2341: the old `... 2>/dev/null || true` swallowed the exit code, so a broken auth /
+# quota error / wrong project looked IDENTICAL to an empty fleet — both left ROWS empty
+# and the sweep exited 0, and the janitor sat silently stale for 2.5 days. Capture the
+# exit code + stderr instead: on failure emit a structured ENUMERATION_FAILED row and
+# exit non-zero, so the scheduled task's LastTaskResult goes red and the jsonl says WHY.
+ENUM_OUT="$STATE_DIR/.enum.out"
+ENUM_ERR="$STATE_DIR/.enum.err"
+if gcloud compute instances list --project "$PROJECT" \
+    --filter="status=RUNNING AND guestAccelerators:*" \
+    --format="value(name, zone.basename(), lastStartTimestamp, labels.fak-reaper)" \
+    >"$ENUM_OUT" 2>"$ENUM_ERR"; then
+  mapfile -t ROWS <"$ENUM_OUT"
+  rm -f "$ENUM_OUT" "$ENUM_ERR" 2>/dev/null || true
+else
+  rc=$?
+  reason="$(tr -d '\r\t' <"$ENUM_ERR" 2>/dev/null | tr '\n' ' ' | sed "s/\"/'/g" | cut -c1-300)"
+  [ -n "$reason" ] || reason="gcloud exited $rc with no stderr"
+  emit "{\"ts\":\"$NOW_ISO\",\"mode\":\"$MODE\",\"event\":\"ENUMERATION_FAILED\",\"rc\":$rc,\"reason\":\"$reason\"}"
+  log "ENUMERATION_FAILED rc=$rc reason=$reason"
+  rm -f "$ENUM_OUT" "$ENUM_ERR" 2>/dev/null || true
+  exit 1
+fi
 
 log "SWEEP $MODE project=$PROJECT gpu-instances=${#ROWS[@]} idle>=${IDLE_MINUTES}m util<=${UTIL_PCT}% grace=${GRACE_MINUTES}m default=$ON_IDLE"
 
@@ -191,4 +214,8 @@ for row in "${ROWS[@]}"; do
   fi
 done
 
-log "SWEEP done: reaped=$reaped (mode=$MODE)."
+# #2341: a per-run summary row so the jsonl's OWN mtime advances every sweep — a stale
+# janitor.jsonl now means "the janitor stopped running", not "there was nothing to do".
+# Distinct from ENUMERATION_FAILED, which already exited non-zero before this point.
+emit "{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"mode\":\"$MODE\",\"event\":\"sweep_done\",\"scanned\":${#ROWS[@]},\"reaped\":$reaped}"
+log "SWEEP done: scanned=${#ROWS[@]} reaped=$reaped (mode=$MODE)."
