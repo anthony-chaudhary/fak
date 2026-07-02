@@ -36,8 +36,14 @@ streamed-output gap is **bridged**: a background launch's announced id
 becomes a second journaled proc (`bg:<id>`) that each output poll pulses
 and a completion poll exits (`toolproc.HookEvents`), so long-running
 background work is subject to the same deadline/stall/orphan machinery its
-launch call escaped by returning early. Seam 3 remains a **labeled next
-step**. The spine is offline-provable: `fak toolproc sample` folds a
+launch call escaped by returning early. Seam 3 is **wired**: the MCP wire's
+native lifecycle semantics map onto the vocabulary
+(`internal/gateway/mcp_toolproc.go`) — a brokered `fak_syscall` journals
+spawn/exit rows into the same journal the guard hooks feed, a client
+`notifications/cancelled` becomes a KILL that also arms the toolprocgate
+revocation table (a completion racing the cancel is quarantined by the
+rank-2 admitter), and `notifications/progress` pulses the named call. The
+spine is offline-provable: `fak toolproc sample` folds a
 deterministic built-in journal, no key, no model, no GPU.
 
 ## The problem: the syscall got a lifetime
@@ -181,11 +187,17 @@ and advice stream. None of this is wired yet.
    legitimate re-entry path). Registered-but-inert by default: with an empty
    table it Defers on every result. Closes failure class 4 in-process; the
    cross-process kill feed rides on seam 1.
-3. **MCP wire** (`fak serve --stdio` / `/mcp`). MCP has native
-   progress-notification and cancellation semantics; a brokered MCP tool call
-   maps 1:1 onto the event vocabulary (progress → `pulse`, cancellation →
-   `kill`). fak, fronting the wire, can enforce a deadline the MCP client
-   never has to know about.
+3. **MCP wire** (`fak serve --stdio` / `/mcp`) — **wired** as
+   `internal/gateway/mcp_toolproc.go`. MCP's native lifecycle semantics map
+   1:1 onto the event vocabulary: a brokered `tools/call` journals
+   spawn/exit (JSON-RPC request id correlated to the kernel trace id, FIFO
+   bounded), `notifications/progress` → `pulse` (known calls only, never
+   guessed), and `notifications/cancelled` → `kill` (`MCP_CANCELLED`) which
+   also arms the in-process revocation table so a completion racing the
+   cancel is quarantined by the seam-2 admitter. Fail-open observation
+   except the revocation arm. What remains is deadline *enforcement* at this
+   seam — the tick that kills an overdue brokered call rides on seam 1's
+   supervisor.
 4. **Harness hooks** (Claude Code). **SHIPPED** in CLI form: `fak toolproc
    hook (pre|post|stop)` reads the hook stdin envelope and appends one
    journal event (pre → `spawn` with the granted envelope, post → `exit`,
