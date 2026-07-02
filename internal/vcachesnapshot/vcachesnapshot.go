@@ -27,8 +27,18 @@ import (
 // live snapshot, or to "off" to suppress the automatic writer.
 const EnvPath = "FAK_VCACHE_SNAPSHOT"
 
+// EnvContextPath is the optional read-side override for a separate context-plane
+// witness. It lets `fak vcache score` compose the ordinary provider-cache window with
+// a no-key guard replay artifact without overwriting the provider snapshot.
+const EnvContextPath = "FAK_VCACHE_CONTEXT_SNAPSHOT"
+
 // DefaultRel is the per-user default snapshot path's basename under the config dir.
 const DefaultRel = "vcache-turns.jsonl"
+
+// DefaultContextRel is the per-user context witness snapshot basename under the
+// config dir. It is intentionally separate from DefaultRel so a context replay never
+// clobbers the live provider telemetry window.
+const DefaultContextRel = "vcache-context-turns.jsonl"
 
 // DefaultPath resolves the well-known snapshot path: <UserConfigDir>/fak/vcache-turns.jsonl,
 // falling back to .fak/vcache-turns.jsonl when no user config dir is available — the same
@@ -39,6 +49,16 @@ func DefaultPath() string {
 		return filepath.Join(dir, "fak", DefaultRel)
 	}
 	return filepath.Join(".fak", DefaultRel)
+}
+
+// DefaultContextPath resolves the well-known context witness snapshot path. It follows
+// the same config-dir convention as DefaultPath, but uses a separate basename so the
+// provider-cache and context planes can be witnessed independently and composed later.
+func DefaultContextPath() string {
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
+		return filepath.Join(dir, "fak", DefaultContextRel)
+	}
+	return filepath.Join(".fak", DefaultContextRel)
 }
 
 // ConfiguredPath resolves the automatic guard/serve snapshot target. It mirrors the
