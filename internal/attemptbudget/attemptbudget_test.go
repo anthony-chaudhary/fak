@@ -127,6 +127,54 @@ func TestBackoff_DistinctWindowsByFailureClass(t *testing.T) {
 	}
 }
 
+// TestClassify_RateLimitShortWindow proves the rate-limit/overload class: a
+// throttled attempt (429/529/overload/rate-limit prose) carries the SHORTEST
+// window of the whole policy — before this class existed it fell to
+// FailureClassOther's 1h, holding an overload-throttled issue ~6x longer than
+// a flaky test even though the capacity window reopens on its own.
+func TestClassify_RateLimitShortWindow(t *testing.T) {
+	throttled := []string{
+		"rate_limit",
+		"429 too many requests",
+		"upstream 529 overloaded",
+		"API rate limit exceeded for installation",
+		"quota exhausted for model",
+	}
+	for _, raw := range throttled {
+		d := Decide(Input{IssueID: "rl", Attempts: []Attempt{{FailureClass: raw, AtUnix: 1000}}})
+		if d.BackoffClass != FailureClassRateLimit {
+			t.Fatalf("%q: want classified %q, got %q", raw, FailureClassRateLimit, d.BackoffClass)
+		}
+	}
+	rl := DefaultBackoffSeconds[FailureClassRateLimit]
+	if rl <= 0 {
+		t.Fatalf("rate-limit window must be positive, got %d", rl)
+	}
+	for class, secs := range DefaultBackoffSeconds {
+		if class != FailureClassRateLimit && secs <= rl {
+			t.Fatalf("rate-limit must carry the shortest window; %q has %ds <= %ds", class, secs, rl)
+		}
+	}
+}
+
+// TestClassify_RateLimitBeatsAuthNeedle pins the ordering trap: GitHub's
+// throttling prose mentions authentication ("... authenticated requests get a
+// higher rate limit"), which substring-matches the auth needle. Rate-limit is
+// classified FIRST, so a reopening capacity window is never cooled 4h as a
+// needs-a-human auth failure.
+func TestClassify_RateLimitBeatsAuthNeedle(t *testing.T) {
+	raw := "API rate limit exceeded (authenticated requests get a higher rate limit)"
+	d := Decide(Input{IssueID: "gh", Attempts: []Attempt{{FailureClass: raw, AtUnix: 1}}})
+	if d.BackoffClass != FailureClassRateLimit {
+		t.Fatalf("want %q, got %q — throttling prose must not be misread as auth", FailureClassRateLimit, d.BackoffClass)
+	}
+	// A genuine auth failure still classifies auth.
+	d = Decide(Input{IssueID: "auth", Attempts: []Attempt{{FailureClass: "auth_error: permission denied", AtUnix: 1}}})
+	if d.BackoffClass != FailureClassAuth {
+		t.Fatalf("want %q for a genuine auth failure, got %q", FailureClassAuth, d.BackoffClass)
+	}
+}
+
 // TestDecide_CoolingDownBeforeWindowElapses proves the new StatusCoolingDown
 // verdict: under budget, but the last failure's class-specific window has not
 // yet elapsed as of the caller-supplied NowUnix.

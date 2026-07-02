@@ -48,10 +48,19 @@ const (
 	// trunk. A moderate backoff gives concurrent peers time to land, after
 	// which trunk has likely moved and a retry may no longer conflict.
 	FailureClassMerge FailureClass = "merge"
-	// FailureClassTest: the attempt failed a test run. The shortest default
+	// FailureClassTest: the attempt failed a test run. A short default
 	// backoff -- test failures are the most likely to be flaky or fixed by a
-	// quick follow-up, so the issue should come back around soonest.
+	// quick follow-up, so the issue should come back around soon.
 	FailureClassTest FailureClass = "test"
+	// FailureClassRateLimit: the attempt failed on provider/forge throttling
+	// (a 429/529, "rate limit exceeded", "overloaded", quota exhaustion). The
+	// SHORTEST backoff of all: nothing about the issue itself failed -- the
+	// fleet just hit a shared capacity window that reopens on its own, usually
+	// within minutes. Before this class existed these fell to
+	// FailureClassOther's 1h window, holding an overload-throttled issue ~6x
+	// longer than a flaky test (#1778's distinct-window rationale, applied to
+	// the transient class high-concurrency fleets actually hit most).
+	FailureClassRateLimit FailureClass = "rate_limit"
 	// FailureClassAmbiguousScope: the attempt failed because the issue's scope
 	// was unclear or contested (e.g. it collided with a concurrent peer's
 	// area, or the worker could not determine the target package). A long
@@ -72,6 +81,13 @@ const (
 func classify(raw string) FailureClass {
 	low := strings.ToLower(raw)
 	switch {
+	// Rate-limit is checked BEFORE auth: throttling prose routinely mentions
+	// authentication (GitHub's "API rate limit exceeded ... authenticated
+	// requests get a higher rate limit" contains "auth"), and misreading a
+	// reopening capacity window as a needs-a-human auth failure would cool the
+	// issue 4h instead of minutes.
+	case strmatch.ContainsAny(low, "rate limit", "rate_limit", "ratelimit", "429", "529", "overloaded", "too many requests", "quota"):
+		return FailureClassRateLimit
 	case strmatch.ContainsAny(low, "auth", "credential", "permission", "unauthorized", "forbidden"):
 		return FailureClassAuth
 	case strmatch.ContainsAny(low, "merge", "conflict", "rebase"):
@@ -90,13 +106,15 @@ func classify(raw string) FailureClass {
 // classified FailureClass. Auth and ambiguous-scope failures usually need a
 // human (rotate a credential, resolve a scope collision) so they cool down
 // the longest; merge conflicts cool down long enough for a concurrent peer to
-// land; test failures cool down the shortest, since they are the cheapest to
-// retry and the most likely to be transient. Every FailureClass has an entry
+// land; test failures cool down briefly, since they are cheap to retry and
+// often flaky; rate-limit/overload failures cool down the shortest of all,
+// since the throttling window reopens on its own. Every FailureClass has an entry
 // -- callers needing a different policy pass their own via Input.Backoff.
 var DefaultBackoffSeconds = map[FailureClass]int64{
 	FailureClassAuth:           4 * 3600, // 4h: needs a human to rotate/grant
 	FailureClassMerge:          30 * 60,  // 30m: give trunk time to move
-	FailureClassTest:           10 * 60,  // 10m: cheapest to retry, often flaky
+	FailureClassTest:           10 * 60,  // 10m: cheap to retry, often flaky
+	FailureClassRateLimit:      5 * 60,   // 5m: a shared capacity window reopening on its own
 	FailureClassAmbiguousScope: 2 * 3600, // 2h: needs a human to resolve scope
 	FailureClassOther:          60 * 60,  // 1h: moderate default
 }
