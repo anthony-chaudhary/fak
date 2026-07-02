@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/regionadmit"
 )
 
 type dispatchTickOptions struct {
@@ -581,17 +582,29 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int) ma
 	if liveErr != nil {
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": liveErr.Error(), "tree": tree}
 	}
-	for _, held := range live {
-		if dispatchorder.TreesOverlap(tree, held.TreeGlobs) {
-			return map[string]any{
-				"acquired": false,
-				"refused":  true,
-				"id":       id,
-				"holder":   holder,
-				"reason":   dispatchorder.ReasonCollisionRisk,
-				"detail":   fmt.Sprintf("requested tree %v overlaps live lease %s tree %v", tree, held.ID, held.TreeGlobs),
-				"tree":     tree,
-			}
+	// One admission contract for every surface (internal/regionadmit): the same
+	// decision `fak loop drive` and `fak loop region` run — tree geometry PLUS
+	// dos.toml lane semantics (a named lane serializes; an exclusive lane runs
+	// alone). A missing taxonomy degrades to the historical geometry-only check.
+	tax, taxErr := regionadmit.LoadTaxonomy(root)
+	if taxErr != nil {
+		tax = regionadmit.Taxonomy{}
+	}
+	// SelfID stays empty on purpose: a live lease under this very id (a previous
+	// worker on this lane, still running) must refuse here exactly as it always
+	// has — with a pinned FAK_LEASE_OWNER the fence would otherwise read the new
+	// tick as the SAME holder and silently renew, double-spawning the lane.
+	dec := regionadmit.Decide(regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}, regionLeases(live), tax)
+	if !dec.Admit {
+		return map[string]any{
+			"acquired": false,
+			"refused":  true,
+			"id":       id,
+			"holder":   holder,
+			"reason":   dec.Reason,
+			"rung":     dec.Rung,
+			"detail":   dec.Detail,
+			"tree":     tree,
 		}
 	}
 	rec := leaseref.Record{ID: id, TreeGlobs: tree, Holder: holder, TTLSeconds: int64(ttlS)}

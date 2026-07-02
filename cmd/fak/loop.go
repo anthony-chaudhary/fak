@@ -44,6 +44,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopRollup(stdout, stderr, argv[1:])
 	case "admit":
 		return runLoopAdmit(stdout, stderr, argv[1:])
+	case "region":
+		return runLoopRegion(stdout, stderr, argv[1:])
 	case "recover":
 		return runLoopRecover(stdout, stderr, argv[1:])
 	case "repair":
@@ -1391,6 +1393,8 @@ func loopUsage(w io.Writer) {
   fak loop health [--ledger FILE] [--registry FILE] [--check] [--json]
   fak loop rollup [--ledger PATH|NODE=PATH ...] [--dir DIR] [--glob '*.jsonl'] [--json]
   fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
+  fak loop region [--lane LANE] [--tree GLOB ...] [--actor ID] [--self LEASE-ID]
+                  [--dir DIR] [--json]
   fak loop recover [--ledger FILE] [--stale-min N] [--now UNIX] [--all] [--json]
   fak loop repair [--ledger FILE] --confirm [--json]
   fak loop drive [--loop ID] [--goal GOAL.md] [--ledger FILE] [--policy FILE]
@@ -1426,6 +1430,13 @@ budget is spent. With --review-model it also exports FAK_REVIEW_* so fak commit
 asks a scout reviewer to pass/refute the turn diff before committing; review
 verdicts are recorded as loop-ledger evidence. A NOT_YET witness refusal is
 appended under Scratch and exposed through FAK_GOAL_LAST_REFUSAL so the next
-fresh-context turn can see it.
+fresh-context turn can see it. A GOAL.md lane:/region: declaration (or --lane/
+--tree) additionally holds a region lease on the shared lease fabric while the
+drive runs, refusing COLLISION_RISK instead of racing a live peer.
+Region is the surface-neutral admission question by itself: "may ACTOR act on
+this lane/tree right now?" answered against the live lease fabric and the
+dos.toml lane taxonomy (exit 0 admit / 3 refuse) — the check a manual session
+or a super-loop enter path runs before touching a region. It decides only;
+holding a lease stays with fak leaseref acquire.
 `)
 }

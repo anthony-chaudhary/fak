@@ -49,6 +49,11 @@ type loopDriveOptions struct {
 	// record to before a witnessed-done completion. Empty means the loop driver
 	// allocates a private per-session file and exposes it to the child.
 	HandoffFile string
+	// Lane / Region override the GOAL.md lane:/region: frontmatter and arm the
+	// drive's region admission (see loop_drive_region.go). Both empty and no
+	// spec declaration = the historical uncoordinated drive.
+	Lane   string
+	Region []string
 }
 
 type loopDriveWitnessResult struct {
@@ -87,6 +92,9 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL exported with --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var name exported with --review-model")
 	handoffFile := fs.String("task-handoff-file", "", "path the wrapped agent writes a fak.task-handoff.v1 record to before a witnessed-done completion; required for the handoff gate (default: a private per-session file exposed as FAK_TASK_HANDOFF_FILE). A missing/empty file is an ordinary non-agent stop and fails open.")
+	lane := fs.String("lane", "", "dos.toml lane this loop's writes stay inside (overrides the GOAL.md lane: field); arms region admission against the live lease fabric")
+	var region repeatedString
+	fs.Var(&region, "tree", "region glob this loop's writes stay inside (repeatable; overrides the GOAL.md region: field); arms region admission against the live lease fabric")
 	template := fs.Bool("template", false, "print a parseable GOAL.md template and exit")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -137,6 +145,8 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 		ReviewEndpoint:  *reviewEndpoint,
 		ReviewAPIKeyEnv: *reviewAPIKeyEnv,
 		HandoffFile:     *handoffFile,
+		Lane:            *lane,
+		Region:          region,
 	})
 }
 
@@ -158,6 +168,8 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 	opt.HandoffFile = handoffFile
 	iterations := 0
 	var tokensUsed int64
+	var regionHold *loopDriveRegionHold
+	defer func() { regionHold.release() }()
 	for {
 		spec, err := loadLoopGoal(goalPath)
 		if err != nil {
@@ -211,11 +223,24 @@ func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
 			return 3
 		}
 
+		// Region admission (loop_drive_region.go): decide against the live
+		// lease fabric and hold/renew the region lease before this turn runs.
+		// A witnessed collision refuses (exit 3); an infra error fails open
+		// with a warning, the dispatch tick's posture.
+		if regionHold == nil {
+			regionHold = newLoopDriveRegionHold(opt, spec)
+		}
+		if refuse, err := regionHold.ensure(clock()); err != nil {
+			fmt.Fprintf(stderr, "fak loop drive: region admission unavailable (fail-open): %v\n", err)
+		} else if refuse != nil {
+			return refuseLoopDriveRegion(stderr, opt, goalPath, spec, regionHold, refuse, iterations, tokensUsed)
+		}
+
 		planIndex, item, unchecked := spec.NextWork()
 		turn := iterations + 1
 		runID := fmt.Sprintf("%s-turn-%d", defaultLoopRunID(spec.Loop), turn)
 		headBefore := dispatchpost.HeadSHA(ctx(), "")
-		baseEvidence := loopDriveEvidence(goalPath, spec.Witness, opt.Command, headBefore, "")
+		baseEvidence := append(loopDriveEvidence(goalPath, spec.Witness, opt.Command, headBefore, ""), regionHold.evidence()...)
 		baseMetrics := loopDriveMetrics(turn, limit, planIndex, unchecked, tokensUsed, tokenLimit)
 
 		if err := appendLoopRunEvent(opt.LedgerPath, loopmgr.Event{
