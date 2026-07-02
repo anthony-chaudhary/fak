@@ -321,6 +321,9 @@ func scanPoisonAuditLine(file string, lineNo int, text string) []poisonAuditFind
 }
 
 func poisonAuditSeverity(base, file, text string) (string, string) {
+	if poisonAuditOwnCatalogLine(file, text) {
+		return "info", "audit rule catalog"
+	}
 	if poisonAuditEvidencePath(file) {
 		if severityRank(base) >= severityRank("high") {
 			return "low", "test/docs/evidence path"
@@ -334,6 +337,22 @@ func poisonAuditSeverity(base, file, text string) (string, string) {
 		return "low", "comment"
 	}
 	return base, ""
+}
+
+func poisonAuditOwnCatalogLine(file, text string) bool {
+	p := strings.ToLower(strings.ReplaceAll(file, "\\", "/"))
+	if p != "cmd/fak/commit_poison_audit.go" {
+		return false
+	}
+	t := strings.TrimSpace(text)
+	return strings.Contains(t, "Code:") ||
+		strings.Contains(t, "Description:") ||
+		strings.Contains(t, "Pattern:") ||
+		strings.Contains(t, "poisonAuditObjective") ||
+		strings.Contains(t, "poisonAuditReviewSystemPrompt") ||
+		strings.Contains(t, "poisonAuditReviewPrompt") ||
+		strings.Contains(t, "poison includes") ||
+		strings.Contains(t, "Refute only if")
 }
 
 func poisonAuditEvidencePath(file string) bool {

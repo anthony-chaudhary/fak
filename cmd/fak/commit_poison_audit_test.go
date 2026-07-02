@@ -55,6 +55,24 @@ func TestScanPoisonAuditDiffTreatsFailOpenAsReviewSignal(t *testing.T) {
 	}
 }
 
+func TestScanPoisonAuditDiffDowngradesOwnRuleCatalog(t *testing.T) {
+	diff := "diff --git a/cmd/fak/commit_poison_audit.go b/cmd/fak/commit_poison_audit.go\n" +
+		"+++ b/cmd/fak/commit_poison_audit.go\n" +
+		"@@ -10,0 +11,3 @@\n" +
+		"+Pattern: regexp.MustCompile(`(?i)\\b(ignore|disregard)\\b.{0,80}\\bsystem\\b.{0,80}\\binstructions\\b`),\n" +
+		"+Description: \"text suggests a default-allow or permit-all security posture\",\n" +
+		"+return \"Definitions:\\n- poison includes secret exfiltration, hidden guard/policy bypasses, hook bypasses, default-allow changes\"\n"
+	findings := scanPoisonAuditDiff(diff)
+	if len(findings) == 0 {
+		t.Fatal("own rule catalog should still be recorded as downgraded findings")
+	}
+	for _, f := range findings {
+		if f.Blocking || f.Severity != "info" || f.Context != "audit rule catalog" {
+			t.Fatalf("own catalog finding should be info/nonblocking, got %+v", f)
+		}
+	}
+}
+
 func TestRunCommitPoisonAuditJSONUsesGitEvidence(t *testing.T) {
 	prev := commitPoisonAuditGit
 	commitPoisonAuditGit = func(_ context.Context, _ string, args ...string) (string, error) {
