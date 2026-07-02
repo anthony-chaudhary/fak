@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 )
 
@@ -61,18 +62,42 @@ func runToolprocHook(stdin io.Reader, stderr io.Writer, argv []string) int {
 	journalPath := fs.String("journal", filepath.Join(".fak", "toolproc", "journal.jsonl"), "journal JSONL to append to")
 	deadlineMS := fs.Int64("deadline-ms", 0, "runtime deadline granted to a spawned call (0 = unbounded)")
 	heartbeatMS := fs.Int64("heartbeat-ms", 0, "liveness cadence expected of a spawned call (0 = none)")
+	policyPath := fs.String("policy", "", "policy manifest whose tool_runtime block grants per-tool envelopes (a resolved row wins; the flag pair fills when no row matches)")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 0
 	}
-	if err := toolprocHookOnce(stdin, kind, *journalPath, toolproc.HookEnvelope{
-		DeadlineMS: *deadlineMS, HeartbeatEveryMS: *heartbeatMS,
-	}, time.Now().UnixMilli()); err != nil {
+	flagEnv := toolproc.HookEnvelope{DeadlineMS: *deadlineMS, HeartbeatEveryMS: *heartbeatMS}
+	envFor := func(string) toolproc.HookEnvelope { return flagEnv }
+	if *policyPath != "" {
+		if rt, err := policy.LoadRuntime(*policyPath); err != nil {
+			fmt.Fprintf(stderr, "fak toolproc hook: policy %s: %v (fail-open, flag envelope applies)\n", *policyPath, err)
+		} else {
+			envFor = func(tool string) toolproc.HookEnvelope {
+				if r, ok := rt.ToolRuntime.EnvelopeFor(tool); ok {
+					return toolproc.HookEnvelope{DeadlineMS: r.DeadlineMS, HeartbeatEveryMS: r.HeartbeatEveryMS}
+				}
+				return flagEnv
+			}
+		}
+	}
+	if err := toolprocHookRun(stdin, kind, *journalPath, envFor, time.Now().UnixMilli()); err != nil {
 		fmt.Fprintf(stderr, "fak toolproc hook: %v (fail-open, not blocking the harness)\n", err)
 	}
 	return 0
 }
 
+// toolprocHookOnce keeps the fixed-envelope form: every spawn gets env,
+// whatever its tool. The seam-5 path goes through toolprocHookRun.
 func toolprocHookOnce(stdin io.Reader, kind, journalPath string, env toolproc.HookEnvelope, nowMS int64) error {
+	return toolprocHookRun(stdin, kind, journalPath, func(string) toolproc.HookEnvelope { return env }, nowMS)
+}
+
+// toolprocHookRun appends one journal event for one hook firing, resolving
+// the spawned call's runtime envelope per tool AFTER the payload parse (the
+// tool name lives in the payload) — the seam-5 grant point for hooked
+// harnesses: the same manifest that admits the tool declares how long it may
+// run and at what cadence it must report.
+func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool string) toolproc.HookEnvelope, nowMS int64) error {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
 	if err != nil {
 		return err
@@ -91,7 +116,7 @@ func toolprocHookOnce(stdin io.Reader, kind, journalPath string, env toolproc.Ho
 			return fmt.Errorf("existing journal unreadable: %w", err)
 		}
 	}
-	ev, emit, err := toolproc.HookEvent(kind, payload, env, nowMS, existing)
+	ev, emit, err := toolproc.HookEvent(kind, payload, envFor(payload.ToolName), nowMS, existing)
 	if err != nil || !emit {
 		return err
 	}
@@ -246,7 +271,7 @@ func toolprocUsage(w io.Writer) {
                   [--stall-mult F] [--json]
   fak toolproc sample [--json | --journal]
   fak toolproc hook (pre | post | stop) [--journal FILE]
-                    [--deadline-ms N] [--heartbeat-ms N]
+                    [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
 
 The adjudicator disposes a tool call at admission; the result floor disposes its
 payload at re-entry. Between the two, a long-running call (a background shell, a
@@ -272,6 +297,10 @@ same one ps folds, so "fak toolproc ps --events .fak/toolproc/journal.jsonl"
 is the live table for a hooked session: a call that never posts stays visible
 as RUNNING, and the stop hook's session_end flags survivors TOOL_ORPHANED.
 hook always exits 0 (fail-open: observation must never wedge the harness).
+--policy grants each spawn its per-tool runtime envelope from the manifest's
+tool_runtime block (seam 5: the capability and its runtime budget are one
+grant); a resolved row wins, the flag pair fills when no row matches, and an
+unreadable manifest falls open to the flags.
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,

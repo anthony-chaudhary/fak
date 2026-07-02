@@ -76,3 +76,72 @@ func TestToolprocHookFailOpen(t *testing.T) {
 		t.Errorf("missing kind must still exit 0, got %d", rc)
 	}
 }
+
+// TestToolprocHookGrantsPolicyEnvelope is the seam-5 wire at the hook: the
+// same manifest that admits a tool declares its runtime envelope, and a pre
+// firing stamps the resolved grant on the spawn event — exact row first,
+// flag pair only when no row matches, fail-open to flags on a bad manifest.
+func TestToolprocHookGrantsPolicyEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(manifest, []byte(`{
+		"version": "fak-policy/v1",
+		"allow": ["Bash", "Fetch"],
+		"tool_runtime": [{"tool": "Bash", "deadline_ms": 600000, "heartbeat_every_ms": 30000}]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	spawn := func(t *testing.T, journal string, argv []string, payload string) toolproc.Event {
+		t.Helper()
+		var errOut strings.Builder
+		if rc := runToolprocHook(strings.NewReader(payload), &errOut, argv); rc != 0 {
+			t.Fatalf("hook exit %d, stderr %q", rc, errOut.String())
+		}
+		f, err := os.Open(journal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		evs, err := toolproc.ParseEvents(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(evs) == 0 {
+			t.Fatal("no journal event appended")
+		}
+		return evs[len(evs)-1]
+	}
+
+	// The manifest row wins over the flag pair for a tool it names.
+	j1 := filepath.Join(dir, "j1.jsonl")
+	ev := spawn(t, j1, []string{"pre", "--journal", j1, "--policy", manifest, "--deadline-ms", "5"},
+		`{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_p1"}`)
+	if ev.DeadlineMS != 600000 || ev.HeartbeatEveryMS != 30000 {
+		t.Fatalf("spawn envelope = %d/%d, want the manifest row 600000/30000", ev.DeadlineMS, ev.HeartbeatEveryMS)
+	}
+
+	// No row and no catch-all: the flag pair fills.
+	j2 := filepath.Join(dir, "j2.jsonl")
+	ev = spawn(t, j2, []string{"pre", "--journal", j2, "--policy", manifest, "--deadline-ms", "5"},
+		`{"session_id":"s1","tool_name":"Fetch","tool_use_id":"toolu_p2"}`)
+	if ev.DeadlineMS != 5 || ev.HeartbeatEveryMS != 0 {
+		t.Fatalf("spawn envelope = %d/%d, want the flag fallback 5/0", ev.DeadlineMS, ev.HeartbeatEveryMS)
+	}
+
+	// An unreadable manifest falls open to the flags — never wedges the hook.
+	j3 := filepath.Join(dir, "j3.jsonl")
+	var errOut strings.Builder
+	if rc := runToolprocHook(strings.NewReader(`{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_p3"}`),
+		&errOut, []string{"pre", "--journal", j3, "--policy", filepath.Join(dir, "absent.json"), "--deadline-ms", "7"}); rc != 0 {
+		t.Fatalf("hook exit %d on unreadable policy, want 0 (fail-open)", rc)
+	}
+	if !strings.Contains(errOut.String(), "fail-open") {
+		t.Fatalf("unreadable policy must be reported, got %q", errOut.String())
+	}
+	ev = spawn(t, j3, []string{"post", "--journal", j3},
+		`{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_p3","tool_response":{"is_error":false}}`)
+	if ev.Kind != toolproc.EvExit {
+		t.Fatalf("post after fail-open spawn = %s, want exit (spawn landed with flag envelope)", ev.Kind)
+	}
+}
