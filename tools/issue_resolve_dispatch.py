@@ -752,6 +752,9 @@ def write_account_sidecar(out_log: Path, account: dict[str, Any] | None) -> dict
     return rec
 
 
+EARLY_EXIT_TAIL_CHARS = 8192
+
+
 def probe_spawned_worker(proc: subprocess.Popen, out_log: Path,
                          wait_s: float = 0.0) -> dict[str, Any]:
     """Briefly check whether a just-spawned worker died before it could log.
@@ -780,7 +783,7 @@ def probe_spawned_worker(proc: subprocess.Popen, out_log: Path,
     }
     if log_bytes:
         try:
-            rec["tail"] = out_log.read_text(encoding="utf-8", errors="replace")[-500:]
+            rec["tail"] = out_log.read_text(encoding="utf-8", errors="replace")[-EARLY_EXIT_TAIL_CHARS:]
         except OSError:
             pass
     return rec
@@ -891,7 +894,9 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # an honest WEEKLY_CAPPED hold. Everything here is FAIL-OPEN: any error resolves to
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
-_CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit|limit\s+exhausted", re.IGNORECASE)
+_CAP_BANNER_RE = re.compile(
+    r"hit your[\w\s]*limit|limit\s+exhausted|rate[_ -]limited|HTTP\s+429",
+    re.IGNORECASE)
 # The codex (OpenAI/ChatGPT) backend hits its own quota wall with a different banner
 # than Claude's: "You've hit your usage limit. Visit https://chatgpt.com/codex/...
 # purchase more credits or try again at Jul 1st, 2026 8:41 PM." It matches the phrase
@@ -978,7 +983,48 @@ def _log_is_cap_banner(log: Path) -> bool:
     """True when ``log``'s tail is the quota-limit banner (Claude or codex). Lets the
     backend-health classifier treat a credit-walled worker as a stub regardless of
     byte size — a codex wall log clears the size floor on its startup banner alone."""
-    return bool(_CAP_BANNER_RE.search(_log_tail_text(log)))
+    return _cap_hit_from_text(_log_tail_text(log)) is not None
+
+
+def _cap_hit_from_text(text: str, *, evidence_log: str = "") -> dict[str, Any] | None:
+    """Parse a quota/rate-limit hit from already-captured worker text."""
+    if not _CAP_BANNER_RE.search(text or ""):
+        return None
+    m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
+         or _CAP_RESET_FALLBACK_RE.search(text))
+    reset_text = m.group(1).strip() if m else ""
+    if _CAP_WEEKLY_RE.search(text):
+        kind = "weekly"
+    elif _CAP_SESSION_RE.search(text):
+        kind = "session"
+    else:
+        kind = "session"
+    return {"reset_text": reset_text, "evidence_log": evidence_log, "kind": kind}
+
+
+def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
+                    hit: dict[str, Any], now_ts: float, fallback_min: int,
+                    source: str) -> dict[str, Any]:
+    now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
+    state_path = runs_dir / f"account-cap-{product}.json"
+    kind = hit.get("kind") or "session"
+    until = (_parse_reset_to_utc(str(hit.get("reset_text") or ""), now_utc)
+             or now_utc + dt.timedelta(minutes=fallback_min))
+    if kind == "session":
+        session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
+        until = min(until, session_cap)
+    state = {"product": product, "account": account_tag, "kind": kind,
+             "reset_text": hit.get("reset_text") or "",
+             "evidence_log": hit.get("evidence_log") or "",
+             "detected": now_utc.isoformat() + "Z", "until": until.isoformat() + "Z"}
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return {"capped": True, "until": state["until"], "kind": kind,
+            "reset_text": state["reset_text"], "source": source,
+            "evidence_log": state["evidence_log"]}
 
 
 def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
@@ -1003,27 +1049,11 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
             continue
         if _backend_of_log(log) != product:
             continue
-        text = _log_tail_text(log)
-        if not _CAP_BANNER_RE.search(text):
+        hit = _cap_hit_from_text(_log_tail_text(log), evidence_log=log.name)
+        if not hit:
             continue
-        # Codex's "try again at <date>" reset wins when present (it has no
-        # "(America/Los_Angeles)" clause the Claude parsers key on); otherwise fall
-        # back to the Claude reset clauses.
-        m = (_CODEX_RESET_RE.search(text) or _RESET_AT_RE.search(text) or _CAP_RESET_RE.search(text)
-             or _CAP_RESET_FALLBACK_RE.search(text))
-        reset_text = m.group(1).strip() if m else ""
-        # weekly is the conservative (longer) hold; default to weekly only when the
-        # banner explicitly says so, treat an explicit "session limit" as session,
-        # and an unlabelled "limit" as session too (the safer short hold — a real
-        # weekly cap will re-banner and upgrade on the next doomed spawn).
-        if _CAP_WEEKLY_RE.search(text):
-            kind = "weekly"
-        elif _CAP_SESSION_RE.search(text):
-            kind = "session"
-        else:
-            kind = "session"
         if best is None or st.st_mtime > best[0]:
-            best = (st.st_mtime, reset_text, log.name, kind)
+            best = (st.st_mtime, str(hit["reset_text"]), str(hit["evidence_log"]), str(hit["kind"]))
     if best is None:
         return None
     return {"reset_text": best[1], "evidence_log": best[2], "kind": best[3]}
@@ -1096,26 +1126,9 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         hit = _scan_recent_cap_banner(runs_dir, product=product,
                                       lookback_min=lookback_min, now_ts=now_ts)
         if hit:
-            kind = hit.get("kind") or "session"
-            until = (_parse_reset_to_utc(hit["reset_text"], now_utc)
-                     or now_utc + dt.timedelta(minutes=fallback_min))
-            # A session limit is a short rolling window — never hold longer than
-            # _SESSION_HOLD_MAX_MIN even if its bare time-of-day reset parsed to a
-            # far-future moment (the stale-banner-pushed-a-day-forward false cap).
-            # A weekly limit keeps the full parsed reset.
-            if kind == "session":
-                session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
-                until = min(until, session_cap)
-            state = {"product": product, "account": account_tag, "kind": kind,
-                     "reset_text": hit["reset_text"], "evidence_log": hit["evidence_log"],
-                     "detected": now_utc.isoformat() + "Z", "until": until.isoformat() + "Z"}
-            try:
-                runs_dir.mkdir(parents=True, exist_ok=True)
-                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-            except OSError:
-                pass
-            return {"capped": True, "until": state["until"], "kind": kind,
-                    "reset_text": hit["reset_text"], "source": "banner"}
+            return _write_cap_hold(runs_dir, product=product, account_tag=account_tag,
+                                   hit=hit, now_ts=now_ts, fallback_min=fallback_min,
+                                   source="banner")
         # No fresh banner: honor a persisted, unexpired hold for THIS account.
         if state_path.exists():
             try:
@@ -2258,6 +2271,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         if lease.get("acquired"):
             payload["lease_held_until_ttl"] = {"id": lease.get("id"),
                                                "holder": lease.get("holder")}
+        cap_hit = _cap_hit_from_text(
+            str(early.get("tail") or ""),
+            evidence_log=Path(str(spawned.get("log") or "")).name)
+        if cap_hit:
+            import time
+            payload["quota_cap"] = _write_cap_hold(
+                runs_dir, product=product, account_tag=acct.get("tag"),
+                hit=cap_hit, now_ts=time.time(), fallback_min=60,
+                source="early_exit")
         payload.update({"ok": False, "action": "spawn_failed",
                         "verdict": "SPAWN_FAILED",
                         "spawned": spawned,

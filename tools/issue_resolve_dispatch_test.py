@@ -749,34 +749,39 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(seen["account"]["tag"], "worker-a")
 
     def test_live_reports_spawn_failed_when_worker_exits_noisily_immediately(self) -> None:
+        import tempfile
         mod = load()
-        self._patch(mod, pre=self.SPAWN_OK,
-                    pick={"lane": "tools", "numbers": [1402], "by_lane_count": {}})
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._patch(mod, pre=self.SPAWN_OK,
+                        pick={"lane": "tools", "numbers": [1402], "by_lane_count": {}})
 
-        def fake_spawn(*_args, **_kwargs):
-            return {
-                "pid": 303,
-                "log": "resolve-1402.log",
-                "issue": 1402,
-                "lane": "tools",
-                "backend": "claude",
-                "early_exit": {
-                    "checked": True,
-                    "alive": False,
-                    "wait_s": 5.0,
-                    "returncode": 1,
-                    "log_bytes": 120,
-                    "silent": False,
-                    "tail": "rate limited",
-                },
-            }
+            def fake_spawn(*_args, **_kwargs):
+                return {
+                    "pid": 303,
+                    "log": str(root / ".dispatch-runs" / "resolve-1402.log"),
+                    "issue": 1402,
+                    "lane": "tools",
+                    "backend": "claude",
+                    "early_exit": {
+                        "checked": True,
+                        "alive": False,
+                        "wait_s": 5.0,
+                        "returncode": 1,
+                        "log_bytes": 120,
+                        "silent": False,
+                        "tail": "API Error: Request rejected (429) - upstream rate-limited",
+                    },
+                }
 
-        mod.spawn_issue_worker = fake_spawn
-        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=True, spawn_probe_s=5.0)
-        self.assertFalse(p["ok"])
-        self.assertEqual(p["verdict"], "SPAWN_FAILED")
-        self.assertIn("with code 1", p["reason"])
+            mod.spawn_issue_worker = fake_spawn
+            p = mod.evaluate(root, max_workers=2, work_kind="engineering",
+                             lane=None, live=True, spawn_probe_s=5.0)
+            self.assertFalse(p["ok"])
+            self.assertEqual(p["verdict"], "SPAWN_FAILED")
+            self.assertIn("with code 1", p["reason"])
+            self.assertEqual(p["quota_cap"]["source"], "early_exit")
+            self.assertTrue((root / ".dispatch-runs" / "account-cap-claude.json").exists())
 
 
 class BuildWorkerCommandTest(unittest.TestCase):
@@ -1070,6 +1075,11 @@ class WeeklyCapGateTest(unittest.TestCase):
     the reset, persist a hold, and make evaluate() refuse with WEEKLY_CAPPED."""
     BANNER = "You've hit your weekly limit · resets Jun 25, 1pm (America/Los_Angeles)"
     GLM_WALL = "Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-07-04 00:56:38"
+    GUARDED_429 = (
+        "fak-turn trace=guard FAILED reason=rate_limited wire=anthropic_messages "
+        "announced_wait=1h12m16s\n"
+        "API Error: Request rejected (429) · upstream rate-limited the request (HTTP 429)\n"
+    )
 
     def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
                       backend: str = "claude") -> None:
@@ -1093,6 +1103,21 @@ class WeeklyCapGateTest(unittest.TestCase):
         self.assertIsNotNone(hit)
         self.assertEqual(hit["reset_text"], "Jun 25, 1pm")
         self.assertEqual(hit["evidence_log"], "resolve-517-a.log")
+
+    def test_scan_detects_guarded_provider_429_as_session_hold(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1475-guard.log", self.GUARDED_429,
+                               mtime=now - 60)
+            hit = mod._scan_recent_cap_banner(runs, product="claude",
+                                              lookback_min=45, now_ts=now)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["kind"], "session")
+        self.assertEqual(hit["reset_text"], "")
+        self.assertEqual(hit["evidence_log"], "resolve-1475-guard.log")
 
     def test_scan_scoped_to_backend(self) -> None:
         import tempfile
@@ -2207,6 +2232,13 @@ class ClassifyNoCommitReasonTest(unittest.TestCase):
         mod = load()
         # _CAP_BANNER_RE: "hit your … limit" (Claude/codex wording).
         p = self._write("You've hit your weekly usage limit for Claude.\n")
+        self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
+
+    def test_auth_wall_guarded_provider_429(self) -> None:
+        mod = load()
+        p = self._write("fak-turn trace=guard FAILED reason=rate_limited\n"
+                        "API Error: Request rejected (429) · upstream rate-limited "
+                        "the request (HTTP 429)\n")
         self.assertEqual(mod.classify_no_commit_reason(p), mod.NO_COMMIT_AUTH_WALL)
 
     def test_off_trunk(self) -> None:
