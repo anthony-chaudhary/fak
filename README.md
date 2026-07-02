@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. -->
+<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced. -->
 
 **fak in one line:** fak is a fused agent kernel. One Go binary sits in front of an agent's
 tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
@@ -12,6 +12,10 @@ loop comes out safer, cheaper, and faster.
 any OpenAI / Anthropic / MCP client. `fak guard -- claude` wraps your normal agent in one
 command: your model, IDE, and keys stay exactly as they are, and `fak` points one base URL
 at itself for you.
+
+[![fak in 41 seconds — the cost curves draw the reuse win, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis benchmark sweep build in](visuals/hero-video.gif)](visuals/hero-video.mp4)
+
+<sub>▶ 41 s, silent, looping — click it for the [full-resolution MP4 (1440p)](visuals/hero-video.mp4). Every chart in it is a still, with its source data and regeneration command, in the [benchmark gallery](BENCHMARK-GALLERY.md).</sub>
 
 ## Pick your path
 
@@ -104,7 +108,8 @@ system prompt five times over. `fak` does the shared work once, two ways:
 
 How and why:
 [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md);
-the paying-off trend: [docs/cache-value-rollup.md](docs/cache-value-rollup.md).
+the paying-off trend: [docs/cache-value-rollup.md](docs/cache-value-rollup.md). Prefer to
+watch: [four wins, by example — a 29-second silent MP4](visuals/worked-examples-video.mp4).
 
 ## More ways to run it
 
@@ -147,7 +152,8 @@ one with `fak guard --policy examples/<file>`. The catalogue:
 [examples/README.md](examples/README.md) and the
 [per-domain table](docs/README-legacy.md#use-cases-by-domain). Every refusal cites a closed
 reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Read
-[POLICY.md](POLICY.md) and [docs/integrations/agent-memory.md](docs/integrations/agent-memory.md).
+[POLICY.md](POLICY.md) and [docs/integrations/agent-memory.md](docs/integrations/agent-memory.md),
+or watch the boundary work: [the agent-kernel explainer — a 44-second silent MP4](visuals/agent-kernel-video.mp4).
 
 ## Install
 
@@ -191,6 +197,7 @@ catalogue, vCache, model routing, the moved front-page detail, and the three-axe
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
 | Security model | [docs/fak/security.md](docs/fak/security.md) |
 | Benchmark authority | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) |
+| Charts, diagrams, videos | [BENCHMARK-GALLERY.md](BENCHMARK-GALLERY.md) · [visuals/](visuals/) |
 | Honesty ledger | [CLAIMS.md](CLAIMS.md) |
 | Machine-readable map | [llms.txt](llms.txt) |
 
