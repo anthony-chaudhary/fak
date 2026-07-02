@@ -237,6 +237,40 @@ func TestSessionAuditSummaryJSON(t *testing.T) {
 	}
 }
 
+func TestSessionAuditActionsJSON(t *testing.T) {
+	root := t.TempDir()
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "heavy.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("opus", 200, 0, 900_000, 50_000, "claude-opus-4-8", ""),
+	})
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "fable.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("fable", 300, 0, 20_000, 1_000, "claude-fable-5", ""),
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"actions", "--root", root, "--all", "--json"})
+	if rc != 0 {
+		t.Fatalf("actions --json rc=%d stderr=%s", rc, stderr.String())
+	}
+	var plan sessionaudit.CompactActionPlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("bad actions json: %v\n%s", err, stdout.String())
+	}
+	if plan.Schema != sessionaudit.CompactActionPlanSchema || plan.Counts.Total != 2 || plan.Counts.High != 2 {
+		t.Fatalf("actions plan = %+v", plan)
+	}
+	byID := map[string]sessionaudit.CompactAction{}
+	for _, action := range plan.Actions {
+		byID[action.ID] = action
+	}
+	if byID["keep_fable_default"].Target != "model_route:fable_default" {
+		t.Fatalf("fable action = %+v", byID["keep_fable_default"])
+	}
+	if byID["checkpoint_reset_top_long_context"].Session != "heavy" ||
+		byID["checkpoint_reset_top_long_context"].Target != "session:C--work-fak/heavy" {
+		t.Fatalf("long-context action = %+v", byID["checkpoint_reset_top_long_context"])
+	}
+}
+
 func TestSessionAuditAliasDefaultsToHereSummary(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "work", "fak")
@@ -275,6 +309,20 @@ func TestSessionAuditAliasDefaultsToHereSummary(t *testing.T) {
 	}
 	if rep.Totals.OutputTokens != 200 || rep.Totals.TotalContextTokens != 950_000 {
 		t.Fatalf("alias summary totals = %+v, want only current-workspace transcript", rep.Totals)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSession(&stdout, &stderr, []string{"audit", "actions", "--root", root, "--days", "7", "--json"})
+	if rc != 0 {
+		t.Fatalf("session audit actions alias rc=%d stderr=%s", rc, stderr.String())
+	}
+	var plan sessionaudit.CompactActionPlan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("bad alias actions json: %v\n%s", err, stdout.String())
+	}
+	if plan.Scope.NamespaceFilter != hereNS || plan.Counts.Total == 0 {
+		t.Fatalf("alias actions plan = %+v, want here-scoped actions", plan)
 	}
 }
 

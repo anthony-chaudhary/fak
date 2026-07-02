@@ -17,7 +17,7 @@ package main
 //	fak session envelope <id> <spec>       # parse/apply one managed-context budget envelope (#1573)
 //	fak session context <id>                # read the managed-context value report
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
-//	fak session audit [summary|discover|audit|deep] ...  # offline transcript audit alias
+//	fak session audit [summary|actions|discover|audit|deep] ...  # offline transcript audit alias
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
 // All write verbs accept --if-rev N: the optimistic-concurrency guard, so a stale
@@ -180,14 +180,14 @@ func runSessionAuditAlias(stdout, stderr io.Writer, argv []string) int {
 		args = append([]string{"summary"}, args...)
 	}
 	switch args[0] {
-	case "discover", "audit", "summary":
+	case "discover", "audit", "summary", "actions":
 		if !sessionAuditArgsHaveScope(args[1:]) {
 			args = append([]string{args[0], "--here"}, args[1:]...)
 		}
 	case "deep", "-h", "--help", "help":
 	default:
 		fmt.Fprintf(stderr, "fak session audit: unknown subcommand %q\n", args[0])
-		fmt.Fprintln(stderr, "usage: fak session audit [summary|discover|audit|deep] [session-audit flags]")
+		fmt.Fprintln(stderr, "usage: fak session audit [summary|actions|discover|audit|deep] [session-audit flags]")
 		return 2
 	}
 	return runSessionAudit(stdout, stderr, args)
@@ -705,7 +705,7 @@ func sessionUsage(w io.Writer) {
                                                spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
   fak session context  <id>                   read the managed-context value report
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
-  fak session audit [summary|discover|audit|deep] [--days N] [--json]
+  fak session audit [summary|actions|discover|audit|deep] [--days N] [--json]
                                                offline recent transcript audit; defaults to summary --here
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset

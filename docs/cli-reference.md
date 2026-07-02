@@ -477,9 +477,12 @@ uncached, and heartbeat/explicit-cache rows remain pending unless a later provid
 executor supplies an independent execution witness.
 
 `fak session-audit summary --here --since-days 7 --max 40 --json` emits the compact
-machine-readable shape behind that `vcache status --sessions` block. It is scoped by
-the current workspace's Claude transcript namespace by default, labels clipped
-`--max` windows, and keeps exact token counts separate from assumed-cost estimates.
+machine-readable shape behind that `vcache status --sessions` block. `fak
+session-audit actions --here --since-days 7 --max 40 --json` lowers its Fable/Opus
+and long-context recommendations into a stable advisory action ledger with witness
+commands. Both are scoped by the current workspace's Claude transcript namespace by
+default, label clipped `--max` windows, and keep exact token counts separate from
+assumed-cost estimates.
 
 `fak vcache score` also reports per-plane evidence and a separate
 `default_usefulness` score. Provider counters populate `planes.provider_observed`
