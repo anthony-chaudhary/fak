@@ -10,6 +10,15 @@ number is hardware- and model-independent (it is a function of *(workload, match
 algorithm)* only), so a 88% reuse is 88% whether the K/V lives in HBM on an H100 or in a Go
 slice on a laptop.
 
+```text
++---------+     +---------------------------+     +---------------------------+
+| request | --> | radix tree:               | --> | cached prefix reused      |
++---------+     | longest-prefix match      |     | (clone the cached KV)     |
+                | over token ids            |     +---------------------------+
+                +---------------------------+ --> | only the suffix prefilled |
+                                                  +---------------------------+
+```
+
 This walkthrough shows an operator how to (a) sweep the four SGLang workload shapes against
 their **own** token-id prompt set, (b) read the hit rate in the context of SGLang's verified
 **50–99%** band, and (c) understand the honesty property that makes the reuse free: serving a

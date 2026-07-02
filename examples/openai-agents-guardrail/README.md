@@ -6,6 +6,15 @@ call `fak_adjudicate` before a tool runs, call `fak_admit` after the tool return
 and translate the `fak` verdict into the OpenAI Agents SDK's tool-guardrail
 behaviors.
 
+```text
++-----------+     +----------------+     +-----------+     +-----------+
+| tool call | --> | fak_adjudicate | --> | tool runs | --> | fak_admit |
++-----------+     | (input         |     +-----------+     | (output   |
+                  |  guardrail)    |                       | guardrail)|
+                  +----------------+                       +-----------+
+   verdict --> allow / reject_content / raise_exception <-- verdict
+```
+
 It is deliberately dependency-free. The runnable proof does not import the Agents SDK,
 does not call OpenAI, and needs no model, key, network, or GPU. In a real Agents SDK
 app, the same mapping belongs inside a tool input guardrail and tool output guardrail.

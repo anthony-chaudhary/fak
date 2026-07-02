@@ -7,6 +7,15 @@ and shows the part that makes recall more than a snapshot — a tool result the 
 **sealed** at write time stays sealed across the process boundary, and a tampered
 image fails closed at load.
 
+```text
++----------------------+     +---------------------------+     +----------------------+
+| process A: fak recall| --> | core image on disk        | --> | process B: fak debug |
+| (write-time gate     |     | manifest.json + cas.json  |     | (sealed pages stay   |
+|  seals poison)       |     +---------------------------+     |  sealed on page-in)  |
++----------------------+                |                      +----------------------+
+                                        +--> tampered blob --> load fails closed
+```
+
 No key, no model, no GPU, no network. Go is the only prerequisite. Expected runtime: the
 sample run completes in seconds and is deterministic over the bundled session fixture.
 

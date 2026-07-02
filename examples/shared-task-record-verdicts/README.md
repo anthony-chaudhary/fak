@@ -18,8 +18,11 @@ reads the fixture files and returns the same verdict on every run.
 Run:
 
 ```bash
-go test ./internal/sharedtask -run TestContractVerdictsFixtureValidates -v
+bash examples/shared-task-record-verdicts/run.sh
 ```
+
+(the script is one command: `go test ./internal/sharedtask -run
+TestContractVerdictsFixtureValidates -v`)
 
 ## What You See
 

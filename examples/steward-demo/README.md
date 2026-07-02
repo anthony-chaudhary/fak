@@ -15,6 +15,14 @@ by the thing under test.
                         ── (a) alone is a self-accusation the model cannot make → ABSTAIN (suppressed) ──
 ```
 
+```text
++---------------------------+     +------------------------------+     +---------+
+| invariant pattern matches | --> | independent witness present? | --> |  RAISE  |
++---------------------------+     +------------------------------+     +---------+
+                                                 |
+                                                 +--> no witness --> ABSTAIN (suppressed)
+```
+
 This demo drives a small frozen scenario through a faithful, dependency-free re-enactment
 of fak's real steward package (`internal/steward/steward.go`) and shows three things:
 

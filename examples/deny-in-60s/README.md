@@ -26,7 +26,7 @@ nothing else. **No model, API key, GPU, or network**: the verdict is a pure func
 so the demo is deterministic and CI-usable.
 
 ```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # or: go build ./cmd/fak
+go build -o fak ./cmd/fak   # from this checkout — zero external deps, so no fetch beyond the Go toolchain
 ```
 
 ## Run it
@@ -34,6 +34,8 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # or: go build ./cm
 ```bash
 bash examples/deny-in-60s/run.sh
 ```
+
+The full run completes in a few seconds — two offline `fak preflight` calls, nothing else.
 
 ## Expected output
 

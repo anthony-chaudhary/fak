@@ -56,6 +56,15 @@ cannot be elided by a rung profile — a security floor narrows, never widens. A
 cites the `EGRESS_BLOCK` reason and a bounded witness naming only the offending host and
 its class, never the policy.
 
+```text
++------------------+     +------------------------+     +---------------------------+
+| agent tool call  | --> | fak guard egress rung  | --> | metadata / link-local     |
+| (on the VM)      |     | (internal/egressfloor) |     | class: EGRESS_BLOCK       |
++------------------+     +------------------------+     +---------------------------+
+                                    |
+                                    +--> everything else: not blocked by this rung
+```
+
 **Extend it for your VM.** The hardwired metadata set is the floor; a policy manifest can
 *tighten* it with your own sensitive destinations (an internal secrets service, a corp
 metadata mirror) — it can never carve a hole in the hardwired block:

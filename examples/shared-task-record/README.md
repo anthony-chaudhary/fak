@@ -21,8 +21,11 @@ reads the fixture files and returns the same verdict on every run.
 Run:
 
 ```bash
-go test ./internal/sharedtask -run TestContractSequenceFixtureValidates -v
+bash examples/shared-task-record/run.sh
 ```
+
+(the script is one command: `go test ./internal/sharedtask -run
+TestContractSequenceFixtureValidates -v`)
 
 ## What You See
 

@@ -6,6 +6,14 @@ the lowest-friction way to see the adjudicator floor decide. This is where
 [`GETTING-STARTED.md` §2](../../GETTING-STARTED.md) points after the one built-in
 trace; this walkthrough shows the schema and how to write your own.
 
+```text
++---------------------+     +------------------+     +----------------------------+
+| trace JSON          | --> | fak run --trace  | --> | verdict per call:          |
+| (slice_id + calls)  |     | (kernel replay)  |     | ALLOW / DENY / TRANSFORM / |
++---------------------+     +------------------+     | QUARANTINE                 |
+                                                     +----------------------------+
+```
+
 Two ready-to-run traces live here:
 
 | File | Shows | Witness |
