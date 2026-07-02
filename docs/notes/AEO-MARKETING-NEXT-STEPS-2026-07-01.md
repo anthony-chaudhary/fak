@@ -19,17 +19,28 @@ description: "Consolidated, evidence-backed next-steps record for fak's answer-e
 - **AEO recency feeds regenerated** from the latest witnessed ships (`HEAD~50..HEAD`, the
   `fak marketing aeo --refresh` default range):
   - `docs/marketing/updates.json` — schema.org `ItemList` an answer engine ingests directly
-    (48 witnessed ships gathered; the feed carries the newest 25, `defaultFeedCap`).
+    (47 witnessed ships gathered; the feed carries the newest 25, `defaultFeedCap`).
   - `llms-updates.txt` — the plain, newest-first feed agents poll.
-  - Both had been stale since 2026-06-30 10:46; each is now a full rewrite anchored to
-    current commit SHAs.
+  - Refreshed twice today; the current rewrite is anchored to 2026-07-01 commit SHAs
+    (newest entry `3444c4d8`).
+- **`llms-full.txt` regenerated — STALE flag cleared.** It now inlines the current
+  `llms.txt` and all 110 source docs; `llms_full`, `llms_full_sources`, and
+  `llms_full_navigable` all read `[ok]`.
+- **"What's new" block reinjected into `llms.txt`** via `fak marketing aeo --inject`
+  (marker-fenced; the 2026-07-01 ships now front the hand-authored map).
+- **3 dead citation links repaired.** One real: redacted private-tool names left inside
+  GitHub URL slots in `docs/benchmarks/SWEBENCH-VERIFIED-GPU-SERVER-RESOLVE-COMPARE.md`
+  (now plain text, honestly marked private). Two were scanner false positives — a markdown
+  link whose text is the URL itself mis-parsed by `SELF_REPO_RE`; the capture now
+  terminates at `]` (`tools/seo_aeo_scorecard.py`). `citation_links` reads `[ok]`.
 
 ## Program status snapshot (SEO/AEO scorecard, `scope=core`)
 
-Verdict: **ACTION (seo_debt)** — overall **89.0/100** (pages 93.1 · site 85.0), **59** units of
-seo-debt across 253 pages. Structurally healthy, with a bounded worst-first backlog:
+Verdict: **ACTION (seo_debt)** — overall **96.5/100** (pages 93.1 · site 100.0), **56** units
+of seo-debt across 253 pages (was 89.0/100 · 59 units · site 17/20 this morning). All site
+checks green; the remaining debt is the in-page front-matter backlog:
 
-- meta coverage **90.5%**; site checks **17/20**; grades **A:228 B:1 C:0 D:0 F:24**.
+- meta coverage **90.5%**; site checks **20/20**; grades **A:228 B:1 C:0 D:0 F:24**.
 - JSON-LD present and valid: SoftwareApplication, FAQPage, WebSite, BreadcrumbList,
   Organization, Person, Question/Answer, ListItem, Offer.
 - robots.txt welcomes all four major answer-engine crawlers (+7 named); sitemap + seo-tag
@@ -37,20 +48,13 @@ seo-debt across 253 pages. Structurally healthy, with a bounded worst-first back
 
 ## Next steps — AEO surface (worst-first, each checkable)
 
-1. **Regenerate `llms-full.txt` — flagged STALE.** It does not contain the current `llms.txt`
-   and misses 8 source docs (incl. `docs/i18n/README.md`, `docs/i18n/hi/README.md`,
-   `docs/i18n/zh/README.md`). Fix: `python tools/gen_llms_full.py`, then re-run the scorecard
-   to prove `llms_full` + `llms_full_sources` flip to `[ok]`.
-2. **Reinject the "What's new" block into `llms.txt`** from the feed refreshed today so the
-   hand-authored front door matches the machine feed: `fak marketing aeo --inject` (runs
-   `tools/gen_structured_data.py`; marker-fenced, so prose is never clobbered).
-3. **Repair 3 dead citation links** — a stale link sends an answer engine/reader to a 404.
-   See `corpus.citation`; repoint each to a published page or an absolute URL.
-4. **Retire the 24 F-grade pages, worst-first** — all fail on missing front-matter
+1. **Retire the 24 F-grade pages, worst-first** — all fail on missing front-matter
    `title:` / `description:` (e.g. `docs/i18n/hi/README.md`, `docs/i18n/zh/README.md`,
    `docs/operator-brief.md`, `docs/INNOVATIONS-INDEX.md`, `docs/WORK-MAP.md`). Front-matter is
    the cheapest AEO win: a title/description is the SERP snippet and the answer-engine anchor.
-5. **Reduce the 33 discovery orphans** (published, not front-door-reachable) by wiring them
+   (In flight: a peer session is adding front-matter + new Indian-language entry points —
+   `docs/i18n/{ta,te,bn,mr}` — as of this refresh.)
+2. **Reduce the 33 discovery orphans** (published, not front-door-reachable) by wiring them
    into an index page so a crawler that lands on the front door can reach them.
 
 ## Next steps — marketing program (bounded, honest)

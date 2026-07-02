@@ -8,10 +8,10 @@
       "position": 1,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: add origin registry proof names #1962",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/76521d8a",
+        "name": "Fixed: add cross-tick account de-confliction to the wave seat picker",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/3444c4d8",
         "dateModified": "2026-07-01",
-        "keywords": "taskmgr"
+        "keywords": "tools"
       }
     },
     {
@@ -19,10 +19,10 @@
       "position": 2,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add origin witness kind registry #1962",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/6a643703",
+        "name": "New: add fleet status trend ledger",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5563b48d",
         "dateModified": "2026-07-01",
-        "keywords": "taskmgr"
+        "keywords": "fleettrend"
       }
     },
     {
@@ -30,10 +30,10 @@
       "position": 3,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: re-verify front page green, re-stamp 2026-07-01",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/d3049dbd",
+        "name": "New: add fleet sweep slice fold",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/535dad54",
         "dateModified": "2026-07-01",
-        "keywords": "docs"
+        "keywords": "fleetcompare"
       }
     },
     {
@@ -41,10 +41,10 @@
       "position": 4,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: expire past bare-month resets (#1999)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c8a28c66",
+        "name": "New: add irreversible call preview gate",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/027107d9",
         "dateModified": "2026-07-01",
-        "keywords": "tools"
+        "keywords": "adjudicator"
       }
     },
     {
@@ -52,10 +52,10 @@
       "position": 5,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Improved: extract placeAndValidateAtSpan/retryBackoffWait dedup helpers (#776)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/fce14fc7",
+        "name": "New: add AMD GPU facts probe",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/4faf9b34",
         "dateModified": "2026-07-01",
-        "keywords": "agent"
+        "keywords": "amdgpu"
       }
     },
     {
@@ -63,10 +63,10 @@
       "position": 6,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Improved: extract shapeAndBytes/applyMoEExpertCounts/glmMoeDsaSkip dedup helpers (#776)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/8a9a20ba",
+        "name": "New: add parity witness gate fold",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5a1824e6",
         "dateModified": "2026-07-01",
-        "keywords": "ggufload"
+        "keywords": "qwen36parity"
       }
     },
     {
@@ -74,10 +74,10 @@
       "position": 7,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add HarnessProfile schema + built-in registry + design note (#1952)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a7083963",
+        "name": "New: add network + GPU VRAM axes to fak guard harness resource tracking (#2049)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/87e627ee",
         "dateModified": "2026-07-01",
-        "keywords": "harnessprofile"
+        "keywords": "cmd"
       }
     },
     {
@@ -85,10 +85,10 @@
       "position": 8,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Improved: route Probe through shared probePaths executor (#776)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/750ffc83",
+        "name": "Shipped: cover net and GPU provider folding",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5470592e",
         "dateModified": "2026-07-01",
-        "keywords": "ctxplan"
+        "keywords": "harnessres"
       }
     },
     {
@@ -96,10 +96,10 @@
       "position": 9,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Improved: extract decodeToolArgs/ensureStampedOutputDir dedup helpers (#776)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/92ea8c06",
+        "name": "New: add transactional multi-file edit #2157",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/25fb110a",
         "dateModified": "2026-07-01",
-        "keywords": "swebench"
+        "keywords": "edittx"
       }
     },
     {
@@ -107,8 +107,8 @@
       "position": 10,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: format pushed trunk before release",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/76f58a8a",
+        "name": "New: wire fak guard's gateway listener to the harness network axis (#2049)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/56dc0689",
         "dateModified": "2026-07-01",
         "keywords": "cmd"
       }
@@ -118,10 +118,10 @@
       "position": 11,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: HarnessProfile schema + built-in registry + design note (#1952)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/eae548b0",
+        "name": "New: add network rx/tx axis (served-bytes CountingListener + upstream CountingRoundTripper) rendered in report/metrics/ledger (#2049)",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/919b1c8b",
         "dateModified": "2026-07-01",
-        "keywords": "harnessprofile"
+        "keywords": "harnessres"
       }
     },
     {
@@ -129,10 +129,10 @@
       "position": 12,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: add remaining refusal recoveries (#1422)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/79035aa0",
+        "name": "New: add sweep profile config fold",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c882f4dc",
         "dateModified": "2026-07-01",
-        "keywords": "docs"
+        "keywords": "sweepconfig"
       }
     },
     {
@@ -140,10 +140,10 @@
       "position": 13,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Improved: extract detailOrDebt/docDir dedup helpers (#776)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/b9cc5bd4",
+        "name": "New: add canonical task signature fold",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/2870dadf",
         "dateModified": "2026-07-01",
-        "keywords": "scorecardpane"
+        "keywords": "taskidentity"
       }
     },
     {
@@ -151,10 +151,10 @@
       "position": 14,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add origin evidence witness gate #1961",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/ac70e13e",
+        "name": "New: add load-bearing tool coverage audit",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/e446ec81",
         "dateModified": "2026-07-01",
-        "keywords": "taskmgr"
+        "keywords": "toolcoverage"
       }
     },
     {
@@ -162,10 +162,10 @@
       "position": 15,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: witness inert async handle slots (#1422)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/900c89e3",
+        "name": "Documented: record GLM-5.2 cpu-offload serve witness on the 40GB box",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a314fa2f",
         "dateModified": "2026-07-01",
-        "keywords": "kernel"
+        "keywords": "nightrun"
       }
     },
     {
@@ -173,10 +173,10 @@
       "position": 16,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: declare internal/relay tier",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/816ad93b",
+        "name": "Fixed: ignore heredoc program comparisons #2167",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/ed0a340e",
         "dateModified": "2026-07-01",
-        "keywords": "architest"
+        "keywords": "repoguard"
       }
     },
     {
@@ -184,10 +184,10 @@
       "position": 17,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: record structured cooldown (start/reason/until) on throttled seats",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/c01f76a8",
+        "name": "Fixed: default audit journals to repo-local sessions #2168",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/1432469e",
         "dateModified": "2026-07-01",
-        "keywords": "tools"
+        "keywords": "cmd"
       }
     },
     {
@@ -195,10 +195,10 @@
       "position": 18,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Documented: bottleneck map 2026-07-01 — recovery-layer CRITICAL, taxonomy regressed",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/2a9b7082",
+        "name": "Fixed: use shared uiquality scorecard render helpers",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/35b10e66",
         "dateModified": "2026-07-01",
-        "keywords": "bottleneck-map"
+        "keywords": "cmd"
       }
     },
     {
@@ -206,10 +206,10 @@
       "position": 19,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: surface publish-staleness on the cadence tick",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/ae43e41c",
+        "name": "New: add NIXL lease and sleep cache-loss witnesses",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/6c8ec8a4",
         "dateModified": "2026-07-01",
-        "keywords": "ci"
+        "keywords": "cachemeta"
       }
     },
     {
@@ -217,10 +217,10 @@
       "position": 20,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add shadow soft-mark signal (#1866)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/70676b3e",
+        "name": "New: surface session no-op caveats #1846",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/f0fc1ef1",
         "dateModified": "2026-07-01",
-        "keywords": "session"
+        "keywords": "ablate"
       }
     },
     {
@@ -228,10 +228,10 @@
       "position": 21,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: internal/relay package + Baton type (closed schema) (#1870)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/5081d12f",
+        "name": "Documented: record 8-GPU full-resident GLM-5.2 serve + measured 23.2 tok/s",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/799ced9a",
         "dateModified": "2026-07-01",
-        "keywords": "relay"
+        "keywords": "docs"
       }
     },
     {
@@ -239,10 +239,10 @@
       "position": 22,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: add paraphrase detection corpus (#1943)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/12b3c46a",
+        "name": "New: add repeated refused-call livelock detector #2159",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/f3772148",
         "dateModified": "2026-07-01",
-        "keywords": "dogfoodscore"
+        "keywords": "gateway"
       }
     },
     {
@@ -250,10 +250,10 @@
       "position": 23,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Shipped: add transcript fixture corpus (#1924)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/a95923f8",
+        "name": "Fixed: keep glm_moe_dsa dense k-quants off the raw resident store",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/fc20bbc5",
         "dateModified": "2026-07-01",
-        "keywords": "dogfoodscore"
+        "keywords": "ggufload"
       }
     },
     {
@@ -261,10 +261,10 @@
       "position": 24,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "Fixed: fix matched harness line (#1923)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/9ccf5712",
+        "name": "Fixed: fix command-argv data race in the deferred durability goroutine",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/3c088a09",
         "dateModified": "2026-07-01",
-        "keywords": "dogfoodscore"
+        "keywords": "guard"
       }
     },
     {
@@ -272,12 +272,12 @@
       "position": 25,
       "item": {
         "@type": "SoftwareSourceCode",
-        "name": "New: add resident context meter (#1865)",
-        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/441c9e13",
+        "name": "Shipped: skip fanout overhead envelope under the race detector",
+        "codeRepository": "https://github.com/anthony-chaudhary/fak/commit/60caebdd",
         "dateModified": "2026-07-01",
-        "keywords": "session"
+        "keywords": "dispatchorder"
       }
     }
   ],
-  "dateModified": "2026-07-01T15:47:11Z"
+  "dateModified": "2026-07-01T22:38:04Z"
 }
