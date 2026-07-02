@@ -109,6 +109,7 @@ var tier = map[string]int{
 	"uiquality":            1,                // UI/UX-quality scorecard over the terminal render source (the fak console panes + fak info overlay + guard --split); stdlib-only, off the hot path.
 	"scoreboard":           1,                // outbound Slack publisher for scorecard/score/run-event status posts; rides slackwire(1) for transport, keeps token resolution + change-gating, off the hot path.
 	"slackmeta":            1,                // common Slack report metadata formatter; stdlib-only, off the hot path.
+	"slackoutbox":          1,                // durable Slack outbox (#2262): JSONL spool + one flock-serialized drainer with nonce idempotency (metadata probe closes the crash window), update coalescing, dead-letter, and the hooks.ScanOutboundText leak fence; imports slackwire(1)+hooks(1)+flock(1), off the hot path.
 	"slackwire":            1,                // the ONE Slack Web API transport (#2261): chat.postMessage/chat.update/conversations.history/auth.test with bounded 429/Retry-After retry + typed *APIError; scoreboard and chatrelay delegate here. Pure stdlib, off the hot path.
 	"benchpost":            1,                // outbound Slack publisher for bench-channel rollups/run-requests; folds catalog/baseline/plan JSON, reuses scoreboard(1) transport, off the hot path.
 	"blockerpost":          1,                // outbound Slack publisher for the central #blockers channel: severity-driven (background status vs surfaced operator page); reuses scoreboard(1) transport, off the hot path.

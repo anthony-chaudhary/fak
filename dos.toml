@@ -86,6 +86,7 @@ concurrent = [
   "dispatchauto",
   "toolprocgate",
   "slackwire",
+  "slackoutbox",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -200,6 +201,7 @@ concurrent = [
   "dispatchauto",
   "toolprocgate",
   "slackwire",
+  "slackoutbox",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -289,6 +291,7 @@ autopick = [
   "dispatchauto",
   "toolprocgate",
   "slackwire",
+  "slackoutbox",
   # new-leaf:lane
 ]
 
@@ -460,6 +463,7 @@ regionadmit = ["internal/regionadmit/**"]
 dispatchauto = ["internal/dispatchauto/**"]
 toolprocgate = ["internal/toolprocgate/**"]
 slackwire = ["internal/slackwire/**"]
+slackoutbox = ["internal/slackoutbox/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

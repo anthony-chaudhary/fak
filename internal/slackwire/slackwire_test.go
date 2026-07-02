@@ -329,6 +329,79 @@ func TestRetryAfterWaitBounds(t *testing.T) {
 	}
 }
 
+// TestPostMessageIdemRidesNonceInMetadata pins the idempotency contract: the nonce
+// travels as message metadata (event_type IdemEventType), and an empty nonce sends
+// no metadata at all (plain PostMessage delegates through with "").
+func TestPostMessageIdemRidesNonceInMetadata(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = io.WriteString(w, `{"ok":true,"ts":"5.5"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv)
+	if _, err := c.PostMessageIdem(context.Background(), "C1", "hi", nil, "", "nonce-42"); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := gotBody["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata not sent: %+v", gotBody)
+	}
+	if meta["event_type"] != IdemEventType {
+		t.Fatalf("event_type = %v", meta["event_type"])
+	}
+	payload, _ := meta["event_payload"].(map[string]any)
+	if payload["nonce"] != "nonce-42" {
+		t.Fatalf("nonce payload wrong: %+v", meta)
+	}
+
+	gotBody = nil
+	if _, err := c.PostMessage(context.Background(), "C1", "hi", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gotBody["metadata"]; ok {
+		t.Fatalf("empty nonce must send no metadata: %+v", gotBody)
+	}
+}
+
+// TestHistoryRequestsAndDecodesMetadata covers the read half of the idempotency
+// contract: History always asks for metadata and IdemNonce recovers the nonce only
+// from a fak-stamped message.
+func TestHistoryRequestsAndDecodesMetadata(t *testing.T) {
+	var gotQuery map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = io.WriteString(w, `{"ok":true,"messages":[
+			{"type":"message","ts":"2.0","text":"posted","metadata":{"event_type":"fak_outbox","event_payload":{"nonce":"n-7"}}},
+			{"type":"message","ts":"3.0","text":"other","metadata":{"event_type":"other_app","event_payload":{"nonce":"n-8"}}},
+			{"type":"message","ts":"4.0","text":"bare"}]}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv)
+	msgs, err := c.History(context.Background(), "C1", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gotQuery["include_all_metadata"]; len(got) != 1 || got[0] != "true" {
+		t.Fatalf("include_all_metadata not requested: %v", gotQuery)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("got %d messages", len(msgs))
+	}
+	if msgs[0].IdemNonce() != "n-7" {
+		t.Fatalf("IdemNonce = %q, want n-7", msgs[0].IdemNonce())
+	}
+	if msgs[1].IdemNonce() != "" {
+		t.Fatalf("foreign event_type must yield no nonce: %q", msgs[1].IdemNonce())
+	}
+	if msgs[2].IdemNonce() != "" {
+		t.Fatalf("bare message must yield no nonce: %q", msgs[2].IdemNonce())
+	}
+}
+
 // TestEmptyTokenSurfacesSlackVerdict pins the deliberate design choice: the wire
 // does not validate credentials; Slack's invalid_auth is the answer.
 func TestEmptyTokenSurfacesSlackVerdict(t *testing.T) {

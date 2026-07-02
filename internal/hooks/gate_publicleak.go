@@ -132,31 +132,45 @@ var messageTrailerRe = regexp.MustCompile(
 	`(?i)^(Signed-off-by|Co-authored-by|Acked-by|Reviewed-by|Reported-by|` +
 		`Suggested-by|Tested-by|Cc|Helped-by|Reported-and-tested-by):\s`)
 
+// needlesWithSidecar returns the base audit needles unioned with the optional gitignored
+// sidecar under root — the runtime twin of effectiveAuditNeedles for callers that have no
+// StagedDiff (commit messages, outbound payloads). root == "" skips the sidecar (the base
+// needles still apply); a missing/malformed sidecar yields the base list byte-identically.
+func needlesWithSidecar(root string) []string {
+	needles := append([]string(nil), auditNeedles...)
+	if root == "" {
+		return needles
+	}
+	b, err := readFileRel(root, privateNeedlesRel)
+	if err != nil {
+		return needles
+	}
+	var priv struct {
+		AuditNeedles       []string `json:"audit_needles"`
+		ExportAuditNeedles []string `json:"export_audit_needles"`
+	}
+	if json.Unmarshal(b, &priv) != nil {
+		return needles
+	}
+	seen := map[string]bool{}
+	for _, n := range needles {
+		seen[n] = true
+	}
+	for _, n := range append(priv.AuditNeedles, priv.ExportAuditNeedles...) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			needles = append(needles, n)
+		}
+	}
+	return needles
+}
+
 // ScanMessageNeedles ports scrub_public_copy.py --audit-message: the SAME needle/regex scan over
 // the lines of a commit message (the commit-msg hook's PUBLIC_LEAK gate). A message line carries
 // no file, so File is "" and Line is the 1-based message line number. Like the Python twin it
 // skips git's scissors block, comment lines, and identity trailers (see messageTrailerRe).
 func ScanMessageNeedles(msg string, root string) []Finding {
-	needles := append([]string(nil), auditNeedles...)
-	// best-effort sidecar union (no StagedDiff here)
-	if b, err := readFileRel(root, privateNeedlesRel); err == nil {
-		var priv struct {
-			AuditNeedles       []string `json:"audit_needles"`
-			ExportAuditNeedles []string `json:"export_audit_needles"`
-		}
-		if json.Unmarshal(b, &priv) == nil {
-			seen := map[string]bool{}
-			for _, n := range needles {
-				seen[n] = true
-			}
-			for _, n := range append(priv.AuditNeedles, priv.ExportAuditNeedles...) {
-				if n != "" && !seen[n] {
-					seen[n] = true
-					needles = append(needles, n)
-				}
-			}
-		}
-	}
+	needles := needlesWithSidecar(root)
 	var findings []Finding
 	for i, line := range strings.Split(msg, "\n") {
 		// Mirror scrub_public_copy.py's message scanner so the Go gate and the Python

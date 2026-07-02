@@ -141,13 +141,36 @@ func (e *APIError) Error() string {
 // Message is one Slack channel message — the subset of conversations.history the
 // inbound surfaces (chatrelay, chatops) decide on.
 type Message struct {
-	Type     string `json:"type"`      // "message" for a real post
-	Subtype  string `json:"subtype"`   // non-empty for edits/joins/bot posts
-	TS       string `json:"ts"`        // "1719600000.000100" — the message id + thread anchor
-	ThreadTS string `json:"thread_ts"` // parent thread ts when the message is a threaded reply
-	User     string `json:"user"`      // posting user id ("" for a bot post)
-	BotID    string `json:"bot_id"`    // non-empty when posted by a bot
-	Text     string `json:"text"`      // message body
+	Type     string           `json:"type"`               // "message" for a real post
+	Subtype  string           `json:"subtype"`            // non-empty for edits/joins/bot posts
+	TS       string           `json:"ts"`                 // "1719600000.000100" — the message id + thread anchor
+	ThreadTS string           `json:"thread_ts"`          // parent thread ts when the message is a threaded reply
+	User     string           `json:"user"`               // posting user id ("" for a bot post)
+	BotID    string           `json:"bot_id"`             // non-empty when posted by a bot
+	Text     string           `json:"text"`               // message body
+	Metadata *MessageMetadata `json:"metadata,omitempty"` // message metadata (History requests it; see IdemNonce)
+}
+
+// MessageMetadata is Slack message metadata — an event_type plus a free-form payload,
+// invisible in the channel UI. fak rides its outbox idempotency nonce here.
+type MessageMetadata struct {
+	EventType    string         `json:"event_type"`
+	EventPayload map[string]any `json:"event_payload,omitempty"`
+}
+
+// IdemEventType is the metadata event_type fak stamps on messages posted with an
+// idempotency nonce (PostMessageIdem).
+const IdemEventType = "fak_outbox"
+
+// IdemNonce returns the idempotency nonce a message was posted with via
+// PostMessageIdem, or "" when the message carries none — the lookup an outbox uses to
+// resolve an ambiguous post failure from History instead of re-posting.
+func (m Message) IdemNonce() string {
+	if m.Metadata == nil || m.Metadata.EventType != IdemEventType {
+		return ""
+	}
+	nonce, _ := m.Metadata.EventPayload["nonce"].(string)
+	return nonce
 }
 
 // AuthInfo is the identity a token resolves to — the auth.test subset a diagnostic
@@ -172,12 +195,29 @@ type envelope struct {
 // when non-empty, attaches a Block Kit payload (text stays the notification
 // fallback). threadTS, when non-empty, posts the message as a reply in that thread.
 func (c *Client) PostMessage(ctx context.Context, channel, text string, blocks []any, threadTS string) (string, error) {
+	return c.PostMessageIdem(ctx, channel, text, blocks, threadTS, "")
+}
+
+// PostMessageIdem is PostMessage plus a client idempotency nonce riding in message
+// metadata (event_type IdemEventType). Slack has no server-side idempotency (verified:
+// the 2018 feature request was never implemented, and the method docs warn a retried
+// internal_error may have half-succeeded), so a caller that must never double-post
+// stamps a nonce here and checks recent History for it (Message.IdemNonce) before
+// retrying an AMBIGUOUS failure — a transport error after the request left may have
+// landed. An empty nonce sends no metadata; the call is then plain PostMessage.
+func (c *Client) PostMessageIdem(ctx context.Context, channel, text string, blocks []any, threadTS, nonce string) (string, error) {
 	body := map[string]any{"channel": channel, "text": text}
 	if len(blocks) > 0 {
 		body["blocks"] = blocks
 	}
 	if threadTS != "" {
 		body["thread_ts"] = threadTS
+	}
+	if nonce != "" {
+		body["metadata"] = MessageMetadata{
+			EventType:    IdemEventType,
+			EventPayload: map[string]any{"nonce": nonce},
+		}
 	}
 	var r struct {
 		envelope
@@ -203,9 +243,12 @@ func (c *Client) UpdateMessage(ctx context.Context, channel, ts, text string, bl
 // History calls conversations.history: messages with ts after oldestTS (""
 // means from the beginning), capped at limit (<=0 lets Slack default). Callers
 // re-filter by ts themselves — the inclusive/exclusive `oldest` nuance stays theirs.
+// Message metadata is always requested (include_all_metadata) so an idempotency
+// probe (Message.IdemNonce) works on the same call every reader already makes.
 func (c *Client) History(ctx context.Context, channel, oldestTS string, limit int) ([]Message, error) {
 	q := url.Values{}
 	q.Set("channel", channel)
+	q.Set("include_all_metadata", "true")
 	if oldestTS != "" {
 		q.Set("oldest", oldestTS)
 	}
