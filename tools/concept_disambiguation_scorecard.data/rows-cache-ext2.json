@@ -100,6 +100,28 @@
       "gaps": []
     },
     {
+      "id": "x2-cache-cachereadshare",
+      "canonical": "CacheReadShare (session cache-read ratio)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "sessionaudit.CacheReadShare is the ratio of cache-read tokens to total context tokens in a session or tier summary, rendered by `fak sessionaudit` and `fak vcache score` as the percentage of observed context served from provider cache.",
+      "distinction": "It is a derived SHARE/RATIO for reporting session reuse, not cache_read the raw provider token count, not ProviderCacheReadTokens the gateway counter, and not CacheReadMultiplier the price coefficient.",
+      "distinct_from": [
+        "cache_read",
+        "provider-cache read/savings metrics",
+        "CacheReadMultiplier (price coeff)"
+      ],
+      "aliases": [
+        "cache_read_share"
+      ],
+      "grounding": "cachereadshare",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x2-cache-lmcachemlcache",
       "canonical": "LMCache/MLCache (external KV-cache study refs)",
       "family": "cache",
