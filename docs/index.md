@@ -239,6 +239,7 @@ fak guard -- claude          # or: fak guard --provider openai -- opencode
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
+| **Every per-run benchmark sheet** (results · runbooks · pending/gated) | [docs/benchmarks index](benchmarks/README.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |
 | **How fak serves at scale** | [Serving plans](serving/README.md) — dual-track · poly-model · hardware-aware & regenerable KV |

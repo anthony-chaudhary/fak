@@ -4,6 +4,8 @@
 
 > **📋 Process:** See **[BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)** for the DOS-centric process that creates, verifies, and publishes these claims. This file is the *what* (the numbers); Governance is the *how* (the discipline).
 
+> **🗂 Sheet directory:** [docs/benchmarks/README.md](docs/benchmarks/README.md) is the navigation index of every per-run sheet under `docs/benchmarks/` — results, runbooks, and pending/gated plans, grouped by theme. A number on a sheet is authoritative only once it has a row here.
+
 > **🏆 Presentation layer:** **[HERO-BENCHMARK-2026-06-21.md](HERO-BENCHMARK-2026-06-21.md)** is the frontier-lab-style *hero comparison* (v1) built **from** this authority — headline number, top-3 SOTA chart, top-10 leaderboard with fak bolded where it wins (and the two single-stream losses shown plainly). It claims no new numbers; every figure traces to a row below.
 
 > **🧠 The *why*:** `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) (v1) argues — and stress-tests — *why* these reuse numbers matter more than the headline alone: reuse is a **different class** of optimization (work-elimination on the `N` axis, not work-acceleration on the `κ` axis), so it's **exact, training-free, and composes multiplicatively** on top of every per-token trick. Follows the v2 SOTA-only framing — leads with the absolute competitive number (**19.0 min vs 78 min = 4.1× less work**, conservative marginal 2.4–2.7×), shows **no naive-loop numbers**, and centers cross-agent reuse as the layer that is `fak`'s. No new numbers; fences where the "works across everything / no fine-tuning" framing is overstated (and where addressable reuse, [#228](https://github.com/anthony-chaudhary/fak/issues/228), widens it).
