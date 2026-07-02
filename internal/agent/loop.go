@@ -330,6 +330,16 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			messages = append(messages, Message{Role: RoleUser, Content: steer})
 		}
 
+		// Context-spike nudge (#2197): when the session's cost ring shows the context
+		// window grew suddenly and materially last turn, splice the advisory into THIS
+		// turn's input so the model corrects its own context use (windowed reads,
+		// summarize-don't-carry) before any gate has to act. Rides after any operator
+		// steer, closest to the model's next turn. Advisory only, and a no-op without
+		// a wired trace/table/gate — the historical loop is byte-for-byte unchanged.
+		if nudge := cfg.contextNudge(); nudge != "" {
+			messages = append(messages, Message{Role: RoleUser, Content: nudge})
+		}
+
 		comp, err := complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)

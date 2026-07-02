@@ -58,6 +58,13 @@ type SessionGate struct {
 	// a PAUSED function-shaped gate; table-based harness callers keep their historical
 	// single-shot "stop this arm" behavior.
 	Wait func(trace string) (resumed bool, reason string)
+	// Nudge returns the model-facing context advisory for this turn boundary ("" =
+	// nothing to say) — the function-shaped twin of session.Table.ContextNudge
+	// (#2197): when the session's cost ring shows the context window grew sharply
+	// last turn, the loop splices the returned line into this turn's input so the
+	// model corrects its own context use. Optional; nil drops the nudge, never the
+	// turn.
+	Nudge func(trace string) string
 }
 
 // WithSessionTable wires a per-session drive-state table and the trace id this run is
@@ -270,6 +277,28 @@ func (c runConfig) drainSteer() string {
 		out += string(msg.Body.Inline)
 	}
 	return out
+}
+
+// contextNudge is the turn-boundary advisory read (#2197), the consumer twin of
+// drainSteer for the CONTEXT-SPIKE signal: when the session's cost ring shows the
+// context window grew suddenly and materially last turn, it returns the rendered
+// model-facing nudge to splice into THIS turn's input; otherwise "". It mirrors
+// gateTurn's source preference — a wired function-shaped gate owns the boundary
+// (its optional Nudge hook answers; a gate without one nudges nothing), else the
+// table answers via session.Table.ContextNudge. With no trace, gate, or table the
+// historical loop is byte-for-byte unchanged. Advisory only: the nudge informs the
+// model's next turn; it never gates, debits, or transitions anything.
+func (c runConfig) contextNudge() string {
+	if c.trace == "" {
+		return ""
+	}
+	if c.gate != nil {
+		if c.gate.Nudge == nil {
+			return ""
+		}
+		return c.gate.Nudge(c.trace)
+	}
+	return c.table.ContextNudge(c.trace)
 }
 
 // debitTurn reports a completed turn's usage to the session table so the output and
