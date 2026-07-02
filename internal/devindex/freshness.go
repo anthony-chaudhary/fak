@@ -16,7 +16,10 @@ package devindex
 //     the tree->index converse of a dead doc link (INDEX.md's own contract is "if a
 //     doc exists, it is reachable from here"). This is the ORPHAN half of the Python
 //     reciprocal sync gate (tools/check_index_sync.py) brought into the pure Go view,
-//     so the whole self-index drift surface is answerable from one queryable place.
+//     so the whole self-index drift surface is answerable from one queryable place;
+//   - a DeadLLMSLink: a local .md link in llms.txt (the answer-engine index) that no
+//     longer resolves — the same dangling check DeadDocLinks does for INDEX.md, applied
+//     to the LLM-facing map so a dead link in the index answer engines read is caught.
 //
 // This file is the DETECTION half (in lane). REDDING THE BUILD on a finding is a CI /
 // *_test.go concern that lives outside internal/devindex — out of lane, reported as
@@ -44,6 +47,8 @@ const (
 	DriftUnknownVerb DriftKind = "unknown-verb"
 	// DriftOrphanNote: a dated docs/notes/ note not listed in INDEX.md.
 	DriftOrphanNote DriftKind = "orphan-note"
+	// DriftDeadLLMSLink: an llms.txt local .md link that no longer resolves on disk.
+	DriftDeadLLMSLink DriftKind = "dead-llms-link"
 )
 
 // Drift is one freshness finding: the kind, the offending token (a leaf name, a doc
@@ -60,11 +65,12 @@ type Drift struct {
 // message. An empty slice means the index agrees with reality — the green state the
 // gate exists to enforce. It reads only the tree under c.Root; no network.
 //
-// It folds three detectors: undeclared leaves, dead local doc links, and main.go
-// verb cases missing from the C3 manifest. A source it cannot read (e.g. no main.go)
-// contributes no finding rather than an error — a missing source is the absence of a
-// claim, not a drift. The detail accessors below back each fold and are exported so a
-// gate can report just the category it cares about.
+// It folds five detectors: undeclared leaves, dead INDEX.md doc links, main.go verb
+// cases missing from the C3 manifest, orphaned dated notes, and dead llms.txt links.
+// A source it cannot read (e.g. no main.go) contributes no finding rather than an
+// error — a missing source is the absence of a claim, not a drift. The detail accessors
+// below back each fold and are exported so a gate can report just the category it cares
+// about.
 func (c *Catalog) CheckFreshness() []Drift {
 	var out []Drift
 	for _, leaf := range c.UndeclaredLeaves() {
@@ -93,6 +99,13 @@ func (c *Catalog) CheckFreshness() []Drift {
 			Kind:    DriftOrphanNote,
 			Subject: note,
 			Reason:  note + " is a dated note under docs/notes/ but is not listed in INDEX.md",
+		})
+	}
+	for _, link := range c.DeadLLMSLinks() {
+		out = append(out, Drift{
+			Kind:    DriftDeadLLMSLink,
+			Subject: link,
+			Reason:  "llms.txt links " + link + " which no longer exists on disk",
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -236,6 +249,52 @@ func (c *Catalog) OrphanNotes() []string {
 	})
 	sort.Strings(out)
 	return out
+}
+
+// llmsLinkRE captures every markdown link target `](target)`. llms.txt carries inline
+// prose links, not just the INDEX.md bullet shape docLineRE matches, so this scans ALL
+// links — the same LINK_RE the Python reciprocal gate uses.
+var llmsLinkRE = regexp.MustCompile(`\]\(([^)]+)\)`)
+
+// DeadLLMSLinks returns the local .md link targets in llms.txt (the answer-engine
+// index) that no longer resolve on disk — the dangling half of the reciprocal sync
+// gate applied to the LLM-facing map, which DeadDocLinks (INDEX.md only) does not
+// cover. It mirrors tools/check_index_sync.py's link filter exactly: an http(s) /
+// mailto / in-page anchor / absolute-path target is skipped, a trailing #anchor or
+// ?query is stripped, and only a .md target is checked. Deduped (by cleaned path),
+// sorted. A missing llms.txt yields nothing — no map to check. Reads only c.Root; no
+// network (tier 1: an external URL is never fetched, only skipped).
+func (c *Catalog) DeadLLMSLinks() []string {
+	b, err := os.ReadFile(filepath.Join(c.Root, "llms.txt"))
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var dead []string
+	for _, m := range llmsLinkRE.FindAllStringSubmatch(string(b), -1) {
+		target := strings.TrimSpace(m[1])
+		if target == "" {
+			continue
+		}
+		if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") ||
+			strings.HasPrefix(target, "mailto:") || strings.HasPrefix(target, "#") ||
+			strings.HasPrefix(target, "/") {
+			continue // external / anchor / absolute: not a local file this gate owns
+		}
+		clean := target
+		if i := strings.IndexAny(clean, "#?"); i >= 0 {
+			clean = clean[:i]
+		}
+		if clean == "" || !strings.HasSuffix(clean, ".md") || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		if _, err := os.Stat(filepath.Join(c.Root, filepath.FromSlash(clean))); err != nil {
+			dead = append(dead, clean)
+		}
+	}
+	sort.Strings(dead)
+	return dead
 }
 
 // mainCaseRE captures the quoted verb tokens of a `case "a", "b":` line in a Go

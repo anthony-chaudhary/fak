@@ -354,6 +354,53 @@ func TestUndeclaredLeavesHonorsLanesSection(t *testing.T) {
 	}
 }
 
+// TestDeadLLMSLinks: llms.txt (the answer-engine index) is checked for dangling local
+// .md links the same way INDEX.md is — a live link resolves, a dead one is flagged, and
+// an external URL / in-page anchor / absolute path is skipped. This closes the
+// LLM-index half of the reciprocal dangling check that DeadDocLinks (INDEX.md) leaves.
+func TestDeadLLMSLinks(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	mustWrite(t, root, "README.md", "# readme\n")
+	llms := "# llms\n" +
+		"See the [readme](README.md) and the [gone doc](docs/vanished.md).\n" +
+		"External [issues](https://github.com/x/y) and an [anchor](#section) are skipped.\n" +
+		"An [absolute](/abs/path.md) target is not ours to check.\n"
+	mustWrite(t, root, "llms.txt", llms)
+
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	dead := c.DeadLLMSLinks()
+	if len(dead) != 1 || dead[0] != "docs/vanished.md" {
+		t.Fatalf("DeadLLMSLinks = %v, want [docs/vanished.md]", dead)
+	}
+	// It also surfaces through the folded view, tagged dead-llms-link.
+	found := false
+	for _, d := range c.CheckFreshness() {
+		if d.Kind == DriftDeadLLMSLink && d.Subject == "docs/vanished.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("CheckFreshness did not carry the dead-llms-link finding")
+	}
+}
+
+// TestDeadLLMSLinksNoFile: a tree with no llms.txt yields no findings (absent source).
+func TestDeadLLMSLinksNoFile(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.DeadLLMSLinks(); got != nil {
+		t.Errorf("no llms.txt should yield nil, got %v", got)
+	}
+}
+
 func TestUndeclaredVerbsNoMainGo(t *testing.T) {
 	// A root with no cmd/fak/main.go yields no verb findings (missing source, not drift).
 	root := t.TempDir()
