@@ -718,6 +718,37 @@ paths:
               schema: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/fak/ctxvalue:
+    get:
+      tags: [fak-native]
+      summary: Read the managed-context value report for long sessions
+      description: |
+        The managed-context arm of the value API: one `fak-ctxvalue-report/1`
+        record per session trace, rolled on every served turn (all wires).
+        Three levels with Law-A2 provenance labels — tokens (resident window,
+        budget headroom, growth per reply; OBSERVED), turns (turns observed,
+        context events fak's own compaction/planned-view transform fired,
+        estimated turns to the next event; WITNESSED with a FORECAST estimate),
+        session (lifecycle phase, cumulative prefill/output volumes;
+        WITNESSED) — plus a closed step-advice verdict (DECISION):
+        any | bounded | checkpoint | rebuild | unknown. Advice-only; nothing
+        acts on it. `?trace=<id>` narrows to one session; a session appears
+        only after a served turn (no phantoms).
+      parameters:
+        - name: trace
+          in: query
+          required: false
+          schema: { type: string }
+          description: Narrow the snapshot to one session trace id.
+      responses:
+        '200':
+          description: The managed-context value snapshot (all or one session).
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/revoke:
     post:
       tags: [fak-native]

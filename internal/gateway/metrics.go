@@ -1189,6 +1189,11 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 	uncachedPrompt := usage.UncachedPromptTokens()
 	s.metrics.observeVCacheTurn(traceID, time.Now().UnixMilli(),
 		uncachedPrompt, cacheRead, usage.CacheCreationInputTokens)
+	// Roll the per-session managed-context record (ctxvalue.go) on the same always-on
+	// rung: every served turn, all wires, before any sink gating, so the long-session
+	// context report is answerable even with --log and --debug-stats off.
+	s.observeCtxValue(traceID, uncachedPrompt, cacheRead, usage.CacheCreationInputTokens,
+		usage.CompletionTokens, compacted)
 	// The per-turn human debug render (#793) fires independently of the JSON --log sink, so
 	// --debug-stats works on a clean (--log off) terminal. It is a no-op unless debugStatsf is
 	// wired, and reuses the #792 rolling health (read-only peek; no double-roll).

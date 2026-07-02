@@ -43,6 +43,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/changes":           "/v1/fak/changes",
 	"/v1/fak/events":            "/v1/fak/events",
 	"/v1/fak/vcache/score":      "/v1/fak/vcache/score",
+	"/v1/fak/ctxvalue":          "/v1/fak/ctxvalue",
 	"/v1/fak/revoke":            "/v1/fak/revoke",
 	"/v1/fak/context/change":    "/v1/fak/context/change",
 	"/v1/fak/policy/reload":     "/v1/fak/policy/reload",
