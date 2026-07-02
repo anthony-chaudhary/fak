@@ -51,14 +51,62 @@ func TestProbedTierProfilesWithGPUSizesHBM(t *testing.T) {
 	}
 }
 
-// TestProbedTierProfilesDropsUnprovableTiers: NUMA-far, CXL, and the off-box Remote pool
-// have no local probe, so they are never asserted into the proved ladder.
+// TestProbedTierProfilesDropsUnprovableTiers: far tiers the probe did NOT confirm
+// (NUMA-far/CXL absent from the probe) and the off-box Remote pool (which still has no
+// local probe at all) are never asserted into the proved ladder.
 func TestProbedTierProfilesDropsUnprovableTiers(t *testing.T) {
 	got := ProbedTierProfiles(CapacityProbe{HBMPresent: true, HBMBytes: 80 << 30, DRAMBytes: 512 << 30, DiskBytes: 8 << 40})
 	for _, tier := range []ResidencyTier{TierNUMAFar, TierCXL, TierRemote} {
 		if _, ok := got[tier]; ok {
-			t.Errorf("unprovable tier %q must not be in the probed ladder", tier)
+			t.Errorf("unproven tier %q must not be in the probed ladder", tier)
 		}
+	}
+}
+
+// TestProbedTierProfilesIncludesProvenFarMemory is the #1470 ladder half: a box whose
+// far-memory probe confirmed NUMA-far and/or CXL gets those tiers in its proved ladder,
+// sized from the probe, with the non-capacity physics staying representative — and a
+// Present flag without positive bytes still drops the tier (a zero-size demote target
+// is not a tier).
+func TestProbedTierProfilesIncludesProvenFarMemory(t *testing.T) {
+	const probedFar = 384 << 30 // the other socket's 384 GiB, unlike the 512 GiB placeholder
+	const probedCXL = 1 << 40   // a 1 TiB expansion pool, unlike the 2 TiB placeholder
+	got := ProbedTierProfiles(CapacityProbe{
+		DRAMBytes:      512 << 30,
+		NUMAFarPresent: true, NUMAFarBytes: probedFar,
+		CXLPresent: true, CXLBytes: probedCXL,
+	})
+
+	far, ok := got[TierNUMAFar]
+	if !ok {
+		t.Fatal("a box that proved far NUMA memory must have TierNUMAFar in its ladder")
+	}
+	if far.CapacityBytes != probedFar {
+		t.Fatalf("NUMA-far capacity = %d; want the probed %d", far.CapacityBytes, int64(probedFar))
+	}
+	cxl, ok := got[TierCXL]
+	if !ok {
+		t.Fatal("a box that proved CXL memory must have TierCXL in its ladder")
+	}
+	if cxl.CapacityBytes != probedCXL {
+		t.Fatalf("CXL capacity = %d; want the probed %d", cxl.CapacityBytes, int64(probedCXL))
+	}
+	// The probe sizes the ladder; it does not re-measure the physics.
+	def := DefaultTierProfiles()
+	if far.BandwidthMBPerSec != def[TierNUMAFar].BandwidthMBPerSec || cxl.BandwidthMBPerSec != def[TierCXL].BandwidthMBPerSec {
+		t.Fatal("far-tier bandwidth must stay at the representative value")
+	}
+	if far.ReadLatencyNanos != def[TierNUMAFar].ReadLatencyNanos || !cxl.AttendableInPlace() {
+		t.Fatal("far-tier physics must stay representative (latency, addressability)")
+	}
+
+	// Present without positive bytes is not a proof.
+	got = ProbedTierProfiles(CapacityProbe{NUMAFarPresent: true, CXLPresent: true})
+	if _, ok := got[TierNUMAFar]; ok {
+		t.Fatal("NUMAFarPresent with zero bytes must not enter the ladder")
+	}
+	if _, ok := got[TierCXL]; ok {
+		t.Fatal("CXLPresent with zero bytes must not enter the ladder")
 	}
 }
 

@@ -163,7 +163,8 @@ func DefaultTierProfiles() map[ResidencyTier]TierProfile {
 // turn DefaultTierProfiles' representative stand-ins into the ladder THIS box can prove.
 // It is plain data, so ProbedTierProfiles stays pure and witnessable with no GPU and no
 // host inspection: the startup caller fills it from the compute probes (DeviceMemoryInfo
-// for HBM, HostSystemMemoryInfo for DRAM, the spill-filesystem free-space probe for Disk)
+// for HBM, HostSystemMemoryInfo for DRAM, the spill-filesystem free-space probe for Disk,
+// NUMAFarMemoryInfo/CXLMemoryInfo for the far tiers)
 // — that wiring lives ABOVE cachemeta so the policy plane never imports the compute HAL —
 // and a test injects synthetic readings to assert the chosen ladder.
 type CapacityProbe struct {
@@ -180,19 +181,31 @@ type CapacityProbe struct {
 	// DiskBytes is the usable capacity of the spill filesystem. Disk is always present; a
 	// non-positive reading keeps the representative default.
 	DiskBytes int64
+	// NUMAFarBytes sizes the far-NUMA tier (another socket's DRAM); NUMAFarPresent gates
+	// whether the box PROVED one (#1470, the far-memory probe). Unlike DRAM/Disk the far
+	// tiers have no always-present default to fall back to: absent a confirming probe the
+	// tier stays out of the proved ladder entirely, exactly as HBM does on a no-GPU box.
+	NUMAFarBytes   int64
+	NUMAFarPresent bool
+	// CXLBytes / CXLPresent size the CXL tier (CPU-less expansion memory, probed as
+	// memory-only NUMA nodes) the same prove-it-or-drop-it way.
+	CXLBytes   int64
+	CXLPresent bool
 }
 
 // ProbedTierProfiles turns the representative DefaultTierProfiles ladder into the one THIS
 // box can prove it has: it sizes each locally-probeable physical tier (HBM, DRAM, Disk)
 // from the live CapacityProbe and DROPS a tier the box cannot prove. A no-GPU box
 // (p.HBMPresent == false) gets a ladder with no TierHBM, so the planner never places a
-// span on device memory that is not there. The speculative far-memory tiers — NUMA-far,
-// CXL, and the off-box Remote pool — have no local probe that can confirm they exist, so
-// they are left OUT of the proved ladder; an operator who has provisioned far memory
-// re-adds those tiers the same way they override any other profile. Only CapacityBytes is
-// taken from the probe — latency, bandwidth, and addressability stay at their
-// representative values, because the probe sizes the ladder, it does not re-measure the
-// physics. The returned map is independent of DefaultTierProfiles' (callers may mutate it).
+// span on device memory that is not there. The far-memory tiers — NUMA-far and CXL —
+// follow the same prove-it-or-drop-it rule via the far-memory probe (#1470): they enter
+// the ladder exactly when the probe confirmed them (Present with positive bytes) and stay
+// out otherwise. Only the off-box Remote pool still has no local probe and is always left
+// OUT; an operator who has provisioned one re-adds it the same way they override any other
+// profile. Only CapacityBytes is taken from the probe — latency, bandwidth, and
+// addressability stay at their representative values, because the probe sizes the ladder,
+// it does not re-measure the physics. The returned map is independent of
+// DefaultTierProfiles' (callers may mutate it).
 func ProbedTierProfiles(p CapacityProbe) map[ResidencyTier]TierProfile {
 	defaults := DefaultTierProfiles()
 	out := make(map[ResidencyTier]TierProfile, 3)
@@ -216,6 +229,20 @@ func ProbedTierProfiles(p CapacityProbe) map[ResidencyTier]TierProfile {
 		hbm := defaults[TierHBM]
 		hbm.CapacityBytes = p.HBMBytes
 		out[TierHBM] = hbm
+	}
+
+	// The far tiers are in the ladder only when the far-memory probe confirmed them
+	// (#1470) — same prove-it-or-drop-it rule as HBM, because a demote target that does
+	// not exist is worse than none: the planner would relocate spans into it forever.
+	if p.NUMAFarPresent && p.NUMAFarBytes > 0 {
+		far := defaults[TierNUMAFar]
+		far.CapacityBytes = p.NUMAFarBytes
+		out[TierNUMAFar] = far
+	}
+	if p.CXLPresent && p.CXLBytes > 0 {
+		cxl := defaults[TierCXL]
+		cxl.CapacityBytes = p.CXLBytes
+		out[TierCXL] = cxl
 	}
 
 	return out
