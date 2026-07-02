@@ -132,6 +132,7 @@ func cmdGuard(argv []string) {
 	denyAllContinue := fs.String("deny-all-continue", guardPreCompactModeEnforce, "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn (the floor refused EVERY proposed tool call, which the wire reports as end_turn — a stop the agent did not choose): off|shadow|enforce. ENFORCE by default (the false-stop fix), bounded by --deny-all-max consecutive continues; shadow logs the would-continue while letting the turn end; off disables. Claude children only.")
 	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the hard give-up — the maximum number of CONSECUTIVE deny-all turns to auto-continue past (with escalating guidance) before letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever. The give-up is LOGGED so it is not a silent false-stop.")
 	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
+	toolprocHooks := fs.String("toolproc-hooks", guardToolprocModeObserve, "Claude Code tool-process observation hooks (off|observe, observe by default): PreToolUse/PostToolUse/SessionEnd append spawn/exit/session_end rows to the workspace toolproc journal (fail-open; `fak toolproc ps --events .fak/toolproc/journal.jsonl` reads the live table). Claude children only.")
 	denyAllFinal := fs.Int("deny-all-final", guardStopHookDefaultFinal, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the guidance escalates to a FINAL warning, the last attempts before the hard give-up at --deny-all-max.")
 	taskHandoffMode := fs.String("task-handoff", guardPreCompactModeEnforce, "Claude Code Stop hook completion handoff gate: off|shadow|enforce. ENFORCE by default: on a clean stop, require a valid fak.task-handoff.v1 JSON with witnessed done + current state + 1-2 next steps or no-next-step reason. The path is exposed as FAK_TASK_HANDOFF_FILE.")
 	taskHandoffFile := fs.String("task-handoff-file", "", "path the wrapped agent must write with fak.task-handoff.v1 before a clean stop (default: a private temp file for this guard session)")
@@ -955,6 +956,22 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 	injected = append(injected, stopHookEnv...)
+	// Seam 4 of the tool process table: observation hooks (PreToolUse/PostToolUse/
+	// SessionEnd -> the toolproc journal), merged into the SAME --settings file the
+	// PreCompact/Stop installers wrote. Observe-by-default and fail-open: the hook
+	// adapter always exits 0, so this can never wedge the child. See guard_toolproc_hooks.go.
+	toolprocSettings := stopHookInstall.SettingsPath
+	if toolprocSettings == "" {
+		toolprocSettings = preCompactInstall.SettingsPath
+	}
+	var toolprocHookEnv [][2]string
+	command, toolprocHookEnv, _, err = installGuardToolprocHooks(command, *toolprocHooks, toolprocSettings)
+	if err != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "fak guard: toolproc hook setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	injected = append(injected, toolprocHookEnv...)
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
