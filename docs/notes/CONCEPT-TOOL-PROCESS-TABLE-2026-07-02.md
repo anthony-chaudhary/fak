@@ -31,10 +31,14 @@ revokes — reap advice has OS teeth once the embedder binds the pid. Seam 5
 is **wired**: the manifest's `tool_runtime` block grants each tool its
 runtime envelope (deadline + heartbeat cadence, validated fail-loud at
 load), and the hook adapter's `--policy` resolves the grant per spawn —
-exact row over `*` catch-all, flags filling when no row matches. Seam
-3 remains a **labeled next step**. The spine is
-offline-provable: `fak toolproc sample` folds a deterministic built-in
-journal, no key, no model, no GPU.
+exact row over `*` catch-all, flags filling when no row matches. The
+streamed-output gap is **bridged**: a background launch's announced id
+becomes a second journaled proc (`bg:<id>`) that each output poll pulses
+and a completion poll exits (`toolproc.HookEvents`), so long-running
+background work is subject to the same deadline/stall/orphan machinery its
+launch call escaped by returning early. Seam 3 remains a **labeled next
+step**. The spine is offline-provable: `fak toolproc sample` folds a
+deterministic built-in journal, no key, no model, no GPU.
 
 ## The problem: the syscall got a lifetime
 
@@ -177,9 +181,15 @@ and advice stream. None of this is wired yet.
    for repeated identical calls; fail-open — observation never wedges the
    harness). The journal is the same one `fak toolproc ps --events` folds,
    so a hooked session has a live table today: a call that never posts stays
-   RUNNING, and session end flags survivors `TOOL_ORPHANED`. **Remaining**:
-   `fak guard` auto-installing the three hook lines (it already installs
-   PreCompact and Stop), and a pulse source for streamed output.
+   RUNNING, and session end flags survivors `TOOL_ORPHANED`. `fak guard`
+   auto-installs the three hook lines for Claude children (`--toolproc-hooks`,
+   observe by default). The streamed-output pulse source is **bridged**:
+   a launch post announcing a background id spawns a second proc `bg:<id>`
+   (tool `<tool>[bg]`, envelope resolved for that tag), each output poll
+   naming the id pulses it (`Via` = the poll call), and a poll reporting
+   completion exits it — a healthy polled job reads LIVE, a silent one
+   STALLED, instead of both hiding behind the launch call's instant exit
+   (`toolproc.HookEvents`). Seam 4 is closed end to end.
 5. **Policy envelope** (`internal/policy`) — **wired**. Deadline and
    heartbeat cadence live in the capability manifest, per tool: the
    `tool_runtime` block declares `deadline_ms` / `heartbeat_every_ms` rows

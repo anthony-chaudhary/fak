@@ -145,3 +145,53 @@ func TestToolprocHookGrantsPolicyEnvelope(t *testing.T) {
 		t.Fatalf("post after fail-open spawn = %s, want exit (spawn landed with flag envelope)", ev.Kind)
 	}
 }
+
+// TestToolprocHookBridgesBackgroundJob is the streamed-output pulse source at
+// the file level: a background launch post spawns the job proc alongside the
+// launch call's exit, each output poll pulses it, and the completion poll
+// exits it — one journal, fold-clean, the job visible the whole way.
+func TestToolprocHookBridgesBackgroundJob(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+	steps := []struct {
+		kind, payload string
+		atMS          int64
+	}{
+		{"pre", `{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_l","tool_input":{"command":"make bench","run_in_background":true}}`, 1_000},
+		{"post", `{"session_id":"s1","tool_name":"Bash","tool_use_id":"toolu_l","tool_input":{"command":"make bench","run_in_background":true},"tool_response":"Command running in background with ID: j1"}`, 2_000},
+		{"pre", `{"session_id":"s1","tool_name":"BashOutput","tool_use_id":"toolu_p1","tool_input":{"bash_id":"j1"}}`, 8_000},
+		{"post", `{"session_id":"s1","tool_name":"BashOutput","tool_use_id":"toolu_p1","tool_input":{"bash_id":"j1"},"tool_response":{"status":"running","stdout":"chunk"}}`, 9_000},
+		{"pre", `{"session_id":"s1","tool_name":"BashOutput","tool_use_id":"toolu_p2","tool_input":{"bash_id":"j1"}}`, 20_000},
+		{"post", `{"session_id":"s1","tool_name":"BashOutput","tool_use_id":"toolu_p2","tool_input":{"bash_id":"j1"},"tool_response":{"status":"completed"}}`, 21_000},
+	}
+	for _, s := range steps {
+		if err := toolprocHookOnce(strings.NewReader(s.payload), s.kind, journal, toolproc.HookEnvelope{}, s.atMS); err != nil {
+			t.Fatalf("hook %s @%d: %v", s.kind, s.atMS, err)
+		}
+	}
+	f, err := os.Open(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	events, err := toolproc.ParseEvents(f)
+	if err != nil {
+		t.Fatalf("journal must be fold-clean: %v", err)
+	}
+	tab, err := toolproc.Fold(events, 30_000, toolproc.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job *toolproc.Proc
+	for i := range tab.Procs {
+		if tab.Procs[i].CallID == "bg:j1" {
+			job = &tab.Procs[i]
+		}
+	}
+	if job == nil {
+		t.Fatalf("bridged job missing from table: %+v", tab.Procs)
+	}
+	if job.Tool != "Bash[bg]" || job.State != toolproc.StateDone || job.ExitStatus != "ok" || job.Pulses != 1 {
+		t.Fatalf("job = tool=%s state=%s exit=%s pulses=%d, want Bash[bg]/DONE/ok/1",
+			job.Tool, job.State, job.ExitStatus, job.Pulses)
+	}
+}

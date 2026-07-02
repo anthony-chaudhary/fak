@@ -92,11 +92,13 @@ func toolprocHookOnce(stdin io.Reader, kind, journalPath string, env toolproc.Ho
 	return toolprocHookRun(stdin, kind, journalPath, func(string) toolproc.HookEnvelope { return env }, nowMS)
 }
 
-// toolprocHookRun appends one journal event for one hook firing, resolving
-// the spawned call's runtime envelope per tool AFTER the payload parse (the
+// toolprocHookRun appends the journal events for one hook firing, resolving
+// each spawned call's runtime envelope per tool AFTER the payload parse (the
 // tool name lives in the payload) — the seam-5 grant point for hooked
 // harnesses: the same manifest that admits the tool declares how long it may
-// run and at what cadence it must report.
+// run and at what cadence it must report. A firing usually appends one line;
+// a background launch or poll appends the bridge event too (the pulse source
+// for streamed output — see toolproc.HookEvents).
 func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool string) toolproc.HookEnvelope, nowMS int64) error {
 	raw, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
 	if err != nil {
@@ -116,13 +118,17 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 			return fmt.Errorf("existing journal unreadable: %w", err)
 		}
 	}
-	ev, emit, err := toolproc.HookEvent(kind, payload, envFor(payload.ToolName), nowMS, existing)
-	if err != nil || !emit {
+	evs, err := toolproc.HookEvents(kind, payload, envFor, nowMS, existing)
+	if err != nil || len(evs) == 0 {
 		return err
 	}
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return err
+	var lines []byte
+	for _, ev := range evs {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, append(line, '\n')...)
 	}
 	if dir := filepath.Dir(journalPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -134,7 +140,7 @@ func toolprocHookRun(stdin io.Reader, kind, journalPath string, envFor func(tool
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(append(line, '\n'))
+	_, err = f.Write(lines)
 	return err
 }
 
@@ -301,6 +307,13 @@ hook always exits 0 (fail-open: observation must never wedge the harness).
 tool_runtime block (seam 5: the capability and its runtime budget are one
 grant); a resolved row wins, the flag pair fills when no row matches, and an
 unreadable manifest falls open to the flags.
+
+hook also bridges BACKGROUND jobs (the pulse source for streamed output): a
+launch post announcing a background id spawns a second proc "bg:<id>" (tool
+"<tool>[bg]", envelope resolved for that tag), each output poll naming that id
+pulses it (Via = the poll call), and a poll reporting completion exits it — so
+a healthy polled job reads LIVE, a silent one STALLED, instead of both hiding
+behind the launch call's instant exit.
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,
