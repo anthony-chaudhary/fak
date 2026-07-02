@@ -146,7 +146,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 		"stable":         stable,
 		"cadence":        releaseStatusCadence(root),
 		"branch_regime":  branchRegime,
-		"shadow_cutover": releaseStatusShadowCutover(branchRegime, cutPlan),
+		"shadow_cutover": releaseStatusShadowCutover(branchRegime, cutPlan, releaseStatusPilot(root)),
 	}
 	action := releaseStatusNextAction(decision, stable, dirty, ciDiag)
 	status["next_action"] = action
@@ -203,7 +203,25 @@ func releaseStatusBranchRegimeMap(r releasestatus.BranchRegime) map[string]any {
 	}
 }
 
-func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]any) map[string]any {
+// releaseStatusPilot reports the #1703 pilot-cohort lever: the declared pilot
+// development branch (inert config) and whether THIS process opted in. It is
+// visibility only — the shadow-cutover decision fold stays blocked on the real
+// role split and proof bundle.
+func releaseStatusPilot(root string) map[string]any {
+	roles, err := branchrole.Load(root)
+	pilot := map[string]any{
+		"declared_branch": releaseStatusNilIfEmpty(roles.PilotDevelopmentBranch),
+		"opt_in_env":      branchrole.PilotEnv,
+		"opted_in":        branchrole.PilotOptedIn(),
+		"active":          roles.PilotActive,
+	}
+	if err != nil {
+		pilot["role_error"] = err.Error()
+	}
+	return pilot
+}
+
+func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]any, pilot map[string]any) map[string]any {
 	dev := releaseStatusString(branchRegime["development_branch"])
 	release := releaseStatusString(branchRegime["release_branch"])
 	source := releaseStatusString(branchRegime["release_source"])
@@ -246,7 +264,7 @@ func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]
 	if len(blockers) > 0 || len(proofGaps) > 0 {
 		decision = "hold"
 	}
-	return map[string]any{
+	out := map[string]any{
 		"schema":         "fak.branch-regime.shadow-cutover.v1",
 		"issue":          "#1703",
 		"checklist":      "docs/branch-regime-shadow-cutover.md",
@@ -256,6 +274,10 @@ func releaseStatusShadowCutover(branchRegime map[string]any, cutPlan map[string]
 		"proof_gaps":     proofGaps,
 		"proof_commands": []string{"fak release status --json --require-ci-green --limit-commits 50", "fak workflow-audit --write-doc", "go test ./internal/workflowaudit -count=1", "fak release ship --json --source-branch dev --trunk main --base origin/dev"},
 	}
+	if len(pilot) > 0 {
+		out["pilot"] = pilot
+	}
+	return out
 }
 
 func releaseStatusBranchHead(root, branch string) string {
@@ -872,6 +894,14 @@ func releaseStatusRenderShadowCutover(shadowCutover map[string]any) string {
 		if len(proofGaps) > 1 {
 			detail += fmt.Sprintf(" (+%d more)", len(proofGaps)-1)
 		}
+	}
+	pilot := releaseStatusMap(shadowCutover["pilot"])
+	if declared := releaseStatusString(pilot["declared_branch"]); declared != "" {
+		detail += fmt.Sprintf("; pilot lever: %s (opt-in %s=1", declared, releaseStatusFirstString(releaseStatusString(pilot["opt_in_env"]), "FLEET_BRANCH_PILOT"))
+		if releaseStatusBool(pilot["active"]) {
+			detail += ", ACTIVE in this process"
+		}
+		detail += ")"
 	}
 	return "  shadow cutover: " + detail
 }

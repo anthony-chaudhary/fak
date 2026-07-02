@@ -261,12 +261,16 @@ func TestReleaseStatusShadowCutoverDecision(t *testing.T) {
 		"release_source":     "main",
 		"public_front_door":  "main",
 		"promotion_blockers": []string{},
-	}, map[string]any{"ok": true})
+	}, map[string]any{"ok": true}, map[string]any{"declared_branch": "dev", "opted_in": false, "active": false})
 	if mainOnly["decision"] != "hold" || mainOnly["ready"] != false {
 		t.Fatalf("main-only shadow decision = %#v, want hold", mainOnly)
 	}
 	if !containsString(releaseStatusStringSlice(mainOnly["blockers"]), "BRANCH_ROLES_NOT_SPLIT") {
 		t.Fatalf("main-only blockers = %#v, want BRANCH_ROLES_NOT_SPLIT", mainOnly["blockers"])
+	}
+	pilot := releaseStatusMap(mainOnly["pilot"])
+	if releaseStatusString(pilot["declared_branch"]) != "dev" || releaseStatusBool(pilot["active"]) {
+		t.Fatalf("pilot lever = %#v, want declared dev + inactive", mainOnly["pilot"])
 	}
 
 	splitRolesWithOpenProofGaps := releaseStatusShadowCutover(map[string]any{
@@ -275,7 +279,7 @@ func TestReleaseStatusShadowCutoverDecision(t *testing.T) {
 		"release_source":     "dev",
 		"public_front_door":  "main",
 		"promotion_blockers": []string{},
-	}, map[string]any{"ok": true})
+	}, map[string]any{"ok": true}, nil)
 	if splitRolesWithOpenProofGaps["decision"] != "hold" || splitRolesWithOpenProofGaps["ready"] != false {
 		t.Fatalf("split-role shadow decision = %#v, want hold until proof gaps clear", splitRolesWithOpenProofGaps)
 	}
@@ -335,6 +339,36 @@ func TestReleaseStatusRenderShowsProofGapWhenNoBlocker(t *testing.T) {
 	})
 	if !strings.Contains(out, "shadow cutover: hold; proof gap: PILOT_COHORT_WITNESS (+1 more)") {
 		t.Fatalf("render missing proof-gap reason:\n%s", out)
+	}
+}
+
+func TestReleaseStatusRenderShowsPilotLever(t *testing.T) {
+	out := releaseStatusRenderShadowCutover(map[string]any{
+		"decision":   "hold",
+		"blockers":   []string{"BRANCH_ROLES_NOT_SPLIT"},
+		"proof_gaps": []string{"PILOT_COHORT_WITNESS"},
+		"pilot": map[string]any{
+			"declared_branch": "dev",
+			"opt_in_env":      "FLEET_BRANCH_PILOT",
+			"opted_in":        false,
+			"active":          false,
+		},
+	})
+	if !strings.Contains(out, "pilot lever: dev (opt-in FLEET_BRANCH_PILOT=1)") {
+		t.Fatalf("render missing pilot lever:\n%s", out)
+	}
+
+	active := releaseStatusRenderShadowCutover(map[string]any{
+		"decision": "hold",
+		"pilot": map[string]any{
+			"declared_branch": "dev",
+			"opt_in_env":      "FLEET_BRANCH_PILOT",
+			"opted_in":        true,
+			"active":          true,
+		},
+	})
+	if !strings.Contains(active, "ACTIVE in this process") {
+		t.Fatalf("render missing active pilot marker:\n%s", active)
 	}
 }
 
