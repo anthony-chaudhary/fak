@@ -32,6 +32,8 @@ type Supervisor struct {
 	events  []toolproc.Event
 	cancels map[string]func() // callID -> cancel lever, cleared once fired or terminal
 	spawned map[string]bool   // callIDs ever spawned (journal identity guard)
+	pids    map[string]int    // callID -> bound OS process-tree root (seam 6), cleared with cancels
+	reaper  OSReaper          // OS lever for bound pids; nil = advice-only (no teeth)
 }
 
 // TickAction is one enforcement act Tick performed or advised.
@@ -43,6 +45,12 @@ type TickAction struct {
 	// False for advisory findings (probe) and for kills whose call had no
 	// registered lever (nothing in flight to cancel; revocation still applies).
 	Cancelled bool `json:"cancelled"`
+	// Reaped reports the bound OS process tree was terminated this tick (the
+	// reaper ran AND reported success). False when no pid was bound, no reaper
+	// is set, or the reaper failed — ReapDetail carries the reaper's message
+	// either way it ran.
+	Reaped     bool   `json:"reaped,omitempty"`
+	ReapDetail string `json:"reap_detail,omitempty"`
 }
 
 // TickReport is what one Tick did: the folded table plus the acts.
@@ -58,6 +66,7 @@ func NewSupervisor(cfg toolproc.Config) *Supervisor {
 		cfg:     cfg,
 		cancels: map[string]func(){},
 		spawned: map[string]bool{},
+		pids:    map[string]int{},
 	}
 }
 
@@ -97,6 +106,7 @@ func (s *Supervisor) Exit(callID string, nowMS int64, status string) error {
 	}
 	s.mu.Lock()
 	delete(s.cancels, callID)
+	delete(s.pids, callID)
 	s.mu.Unlock()
 	return nil
 }
@@ -157,12 +167,20 @@ func (s *Supervisor) Tick(nowMS int64) (TickReport, error) {
 				s.mu.Lock()
 				cancel := s.cancels[p.CallID]
 				delete(s.cancels, p.CallID)
+				pid, bound := s.pids[p.CallID]
+				delete(s.pids, p.CallID)
+				reaper := s.reaper
 				s.events = append(s.events, toolproc.Event{
 					Kind: toolproc.EvKill, CallID: p.CallID, AtMS: nowMS, Reason: f.Reason})
 				s.mu.Unlock()
 				if cancel != nil {
 					cancel()
 					act.Cancelled = true
+				}
+				// The OS lever runs outside the lock: reapers shell out (taskkill)
+				// and must not stall other observers.
+				if bound && reaper != nil {
+					act.Reaped, act.ReapDetail = reaper(pid)
 				}
 			case toolproc.AdviceProbe, toolproc.AdviceQuarantineResult, toolproc.AdviceObserve:
 				// probe: the embedder's move; quarantine_result: the Gate's;
@@ -213,6 +231,7 @@ func (s *Supervisor) PruneTerminal(nowMS, cutoffMS int64) error {
 	for id := range drop {
 		delete(s.spawned, id) // identity retired with its events
 		delete(s.cancels, id)
+		delete(s.pids, id)
 	}
 	return nil
 }
