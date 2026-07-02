@@ -221,7 +221,11 @@ func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, 
 			if lane == "" {
 				lane = "-"
 			}
-			fmt.Fprintf(tw, "fak %s\t%s\t%s\n", v.Name, lane, v.Synopsis)
+			tier := string(v.Tier)
+			if tier == "" {
+				tier = "-" // a curated entry whose verb is not (yet) dispatched
+			}
+			fmt.Fprintf(tw, "fak %s\t%s\t%s\t%s\n", v.Name, tier, lane, v.Synopsis)
 		})
 }
 
