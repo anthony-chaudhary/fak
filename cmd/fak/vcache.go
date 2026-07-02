@@ -611,7 +611,7 @@ func defaultVCacheStatus() vcacheStatusReport {
 	return vcacheStatusReport{
 		Status:       "M5 governor decision witness live; warm/pin/evict actions still gated; full vCache provider loop not yet live",
 		Governor:     "decision witness live (/metrics + /debug/vars journal); pin/lazy/evict actions not registered",
-		Chains:       "up (prefix DAG, topological replay, cost-gated rebuild) — gated OFF by default; off-path",
+		Chains:       "implemented (prefix DAG, topological replay, cost-gated rebuild); gated OFF by default; off-path",
 		LiveProvider: "passive provider-cache window wired; M1-M3 remain open; Codex/OpenAI telemetry #727 proven from replayable artifacts",
 		Proof: vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
 			AnchorTokens:    4096,
