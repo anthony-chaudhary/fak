@@ -46,9 +46,11 @@ func TestProtectedPushFloorVerdictMatrix(t *testing.T) {
 		kind   abi.VerdictKind
 		reason abi.ReasonCode
 	}{
-		// A coding agent legitimately pushes feature branches — allowed.
-		{"push feature branch", "git_push", `{"ref":"feature/x"}`, abi.VerdictAllow, abi.ReasonNone},
-		{"push fix branch", "git_push", `{"ref":"fix/bug-12"}`, abi.VerdictAllow, abi.ReasonNone},
+		// A coding agent may legitimately push feature branches; the protected-ref
+		// floor does not deny them, but the reversibility rung still requires a
+		// preview confirmation before any outward-facing push dispatches.
+		{"push feature branch", "git_push", `{"ref":"feature/x"}`, abi.VerdictRequireWitness, abi.ReasonNone},
+		{"push fix branch", "git_push", `{"ref":"fix/bug-12"}`, abi.VerdictRequireWitness, abi.ReasonNone},
 
 		// Structured route (the gap the Bash regex misses): push to a protected ref,
 		// expressed as a TOOL ARGUMENT, is denied at the floor by value.
@@ -94,14 +96,15 @@ func TestProtectedPushFloorClosesNaiveHole(t *testing.T) {
 	}
 
 	// Naive floor: git_push allowed by NAME, no arg rule. The structured push to a
-	// protected ref is not seen by any command-string regex, so it is ALLOWED — the
-	// exact hole issue #449 describes.
+	// protected ref is not seen by any command-string regex, so the policy floor
+	// does NOT return POLICY_BLOCK. The later reversibility rung now pauses the
+	// outward-facing push, but that is not the protected-ref floor doing its job.
 	naive, err := Parse([]byte(`{"allow":["git_push"]}`))
 	if err != nil {
 		t.Fatalf("parse naive: %v", err)
 	}
-	if v := adjudicator.New(naive).Adjudicate(context.Background(), pushMain); v.Kind != abi.VerdictAllow {
-		t.Fatalf("naive floor should wave protected-ref push through (the hole), got %v/%s",
+	if v := adjudicator.New(naive).Adjudicate(context.Background(), pushMain); v.Kind != abi.VerdictRequireWitness || v.Reason != abi.ReasonNone {
+		t.Fatalf("naive floor should not policy-block protected-ref push (reversibility may pause it), got %v/%s",
 			v.Kind, abi.ReasonName(v.Reason))
 	}
 

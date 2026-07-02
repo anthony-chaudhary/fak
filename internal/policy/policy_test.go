@@ -308,8 +308,9 @@ func TestIFCRuntimeConfigIsLoadBearing(t *testing.T) {
 			Args:    abi.Ref{Kind: abi.RefInline, Inline: []byte(args)},
 		})
 	}
-	if v := call("send_email", `{"to":"ok@partner.example.com","body":"approved update"}`); v.Kind != abi.VerdictAllow {
-		t.Fatalf("authorized egress: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+	if v := call("send_email", `{"to":"ok@partner.example.com","body":"approved update"}`); v.Kind != abi.VerdictRequireWitness || v.Meta["reversibility_class"] != string(adjudicator.ReversibilityOutwardFacing) {
+		t.Fatalf("authorized egress preview: got %v/%s meta=%v, want RequireWitness/outward-facing",
+			v.Kind, abi.ReasonName(v.Reason), v.Meta)
 	}
 	if v := call("Bash", `{"cmd":"echo sensitive"}`); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
 		t.Fatalf("unauthorized exec sink: got %v/%s, want Deny/TRUST_VIOLATION", v.Kind, abi.ReasonName(v.Reason))
