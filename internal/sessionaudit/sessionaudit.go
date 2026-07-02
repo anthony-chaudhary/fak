@@ -438,7 +438,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	fmt.Fprintf(&b, "- **Fresh input tokens (billed, non-cached):** %s\n", fmtInt(t.Input))
 	fmt.Fprintf(&b, "- **Cache-read tokens (prompt-cache / KV reuse):** %s\n", fmtInt(t.CacheRead))
 	fmt.Fprintf(&b, "- **Cache-creation tokens:** %s\n", fmtInt(t.CacheCreate))
-	fmt.Fprintf(&b, "- **Total context ingested:** %s  ->  **machine-wide I:O ratio = %.1f : 1**\n", fmtInt(totalIn), float64(totalIn)/float64(max64(t.Output, 1)))
+	fmt.Fprintf(&b, "- **Total context ingested:** %s  ->  **scope I:O ratio = %.1f : 1**\n", fmtInt(totalIn), float64(totalIn)/float64(max64(t.Output, 1)))
 	fmt.Fprintf(&b, "- **Cache-read share of all ingested context = %.1f%%**\n", float64(t.CacheRead)/float64(max64(totalIn, 1))*100)
 	fmt.Fprintf(&b, "- **Web requests - server-tool (`server_tool_use`, billed):** search %s / fetch %s  .  **client tool:** WebSearch %s / WebFetch %s\n",
 		fmtInt(t.WebSearch), fmtInt(t.WebFetch), fmtInt(agg.ToolMix["WebSearch"]), fmtInt(agg.ToolMix["WebFetch"]))

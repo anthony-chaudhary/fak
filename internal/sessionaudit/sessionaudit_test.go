@@ -324,6 +324,7 @@ func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 		"namespace filter: C--work-fak",
 		"time window: all-time",
 		"## Scope totals (EXACT token counts)",
+		"scope I:O ratio",
 		"NOTE: +1 subagent transcripts uncounted",
 		"re-run with `--include-subagents`",
 		"+2,000 output tok",
@@ -337,7 +338,7 @@ func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 			t.Fatalf("report missing %q:\n%s", want, md)
 		}
 	}
-	if strings.Contains(md, "recent sessions, this machine") || strings.Contains(md, "Machine-wide totals") {
+	if strings.Contains(md, "recent sessions, this machine") || strings.Contains(md, "Machine-wide totals") || strings.Contains(md, "machine-wide I:O") {
 		t.Fatalf("report contains stale scope language:\n%s", md)
 	}
 }
