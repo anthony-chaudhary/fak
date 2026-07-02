@@ -105,8 +105,9 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
 			// buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry` line fires
 			// for the streaming passthrough too), then wait — honoring a named Retry-After, else
-			// the jittered exponential schedule; a spent budget stops. See retryBackoffWait.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, deadline, budgetOn)
+			// the jittered exponential schedule; a spent budget stops; a context cancelled
+			// mid-wait carries the classified 429/5xx truth (#2257). See retryBackoffWait.
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return err
 			}

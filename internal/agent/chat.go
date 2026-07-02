@@ -1030,8 +1030,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if attempt > 0 {
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
 			// budget is the bound a spent budget stops the loop (surface the last error) and a
-			// cancelled context returns promptly. See retryBackoffWait for the shared step.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, deadline, budgetOn)
+			// cancelled context returns promptly — carrying the classified 429/5xx truth when
+			// one is pending (#2257). See retryBackoffWait for the shared step.
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return nil, err
 			}

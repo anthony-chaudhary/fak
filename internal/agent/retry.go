@@ -399,7 +399,16 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 // budget is spent (the caller breaks the loop and surfaces the last error) and a non-nil err
 // when ctx was cancelled during the wait (the caller returns it). The wait is computed ONCE and
 // shared with the hook, so the reported wait carries the same jitter and honored value as the sleep.
-func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus int, lastRetryAfter, lastCapWait string, deadline time.Time, budgetOn bool) (stop bool, err error) {
+//
+// lastStatusErr is the loop's #1358 keepsake — the last error that carried a REAL upstream
+// HTTP status, with its #1362 classification. When the caller's context dies DURING the
+// sleep and that keepsake exists, the returned error is a RetryInterruptedError wrapping
+// BOTH (#2257): the turn was killed mid-wait toward a KNOWN 429/5xx condition, and
+// surfacing only the bare context error would collapse a classified rate-limit park
+// candidate into the catch-all "error" on every downstream readout. With no prior status
+// error (a pure transport-glitch loop) the context error returns unchanged, so a
+// genuinely-unclassified failure still reads exactly as before.
+func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus int, lastRetryAfter, lastCapWait string, lastStatusErr *UpstreamStatusError, deadline time.Time, budgetOn bool) (stop bool, err error) {
 	if lastRetryAfter == "" {
 		lastRetryAfter = lastCapWait
 	}
@@ -416,6 +425,9 @@ func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus 
 		p.RetryNotify(attempt, lastStatus, wait)
 	}
 	if err := sleepCtx(ctx, wait); err != nil {
+		if lastStatusErr != nil {
+			return false, &RetryInterruptedError{Cause: lastStatusErr, Err: err, AnnouncedWait: wait}
+		}
 		return false, err
 	}
 	return false, nil

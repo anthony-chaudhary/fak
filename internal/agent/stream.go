@@ -354,7 +354,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, deadline, budgetOn)
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return nil, err
 			}
