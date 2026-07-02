@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
+	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
@@ -28,8 +30,8 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"gated OFF by default; off-path",
 		"M4 recall cost-gate proof: refuted",
 		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
-		"context witness replay: set FAK_VCACHE_SNAPSHOT=.fak/vcache-context-replay.jsonl",
-		"fak guard --replay-trace cmd/fak/testdata/guard-trace-context-e2e.json --replay-wire openai",
+		"context witness replay: run `fak vcache context-witness`",
+		"vcache-context-turns.jsonl",
 		"fak vcache score --json",
 		"codex-like star proof: PROVEN",
 		"codex/openai verifier: ready",
@@ -65,8 +67,10 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 		!rep.ContextAPI.AdviceOnly ||
 		!strings.Contains(rep.ContextAPI.ScoreIntegration, "after a guard/serve context event fires") ||
 		rep.ContextAPI.NoKeyReplayFixture != "cmd/fak/testdata/guard-trace-context-e2e.json" ||
-		rep.ContextAPI.NoKeyReplaySnapshot != ".fak/vcache-context-replay.jsonl" ||
+		rep.ContextAPI.NoKeyReplaySnapshot != vcachesnapshot.DefaultContextPath() ||
 		!strings.Contains(rep.ContextAPI.NoKeyReplayCommand, "guard --replay-trace") ||
+		rep.ContextAPI.NoKeyWitnessCommand != "fak vcache context-witness" ||
+		rep.ContextAPI.DefaultSnapshot != vcachesnapshot.DefaultContextPath() ||
 		rep.ContextAPI.NoKeyScoreCommand != "fak vcache score --json" {
 		t.Fatalf("context_api status missing live API contract: %+v", rep.ContextAPI)
 	}
@@ -161,6 +165,48 @@ func TestRunVCacheStatusExplainsProviderOnlySnapshotContextGap(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "context MISSING (0 events)") {
 		t.Fatalf("text status did not explain missing context counters:\n%s", out.String())
+	}
+}
+
+func TestRunVCacheStatusComposesSeparateContextSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	providerSnap := filepath.Join(dir, "provider.jsonl")
+	contextSnap := filepath.Join(dir, "context.jsonl")
+	if err := os.WriteFile(providerSnap, []byte(`{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contextSnap, []byte(`{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900,"fak_context_dropped_turns":2,"fak_context_baseline_tokens":2000,"fak_context_cost_tokens":1100}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_VCACHE_SNAPSHOT", providerSnap)
+	t.Setenv("FAK_VCACHE_CONTEXT_SNAPSHOT", contextSnap)
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--json"}); code != 0 {
+		t.Fatalf("status --json exit=%d stderr=%s", code, errb.String())
+	}
+	var rep vcacheStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.RecentObservation == nil {
+		t.Fatalf("status did not attach recent observation:\n%s", out.String())
+	}
+	recent := rep.RecentObservation
+	if recent.ProviderStatus != string(vcachegov.ProofProven) || recent.ContextStatus != "WITNESSED" {
+		t.Fatalf("composed recent observation = %+v, want provider PROVEN and context WITNESSED", recent)
+	}
+	if recent.Path != providerSnap || recent.ContextPath != contextSnap || recent.ContextEvents != 1 || recent.ContextShedTokens != 900 {
+		t.Fatalf("composed context source/counters = %+v, want separate context snapshot", recent)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
+		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "context witness snapshot: "+contextSnap) {
+		t.Fatalf("text status did not print separate context snapshot:\n%s", out.String())
 	}
 }
 
@@ -821,6 +867,82 @@ func TestRunVCacheScoreSnapshotCarriesContextEvidence(t *testing.T) {
 	}
 	if rep.DefaultUsefulness.Facets.AgenticActivation == 0 {
 		t.Fatalf("default-usefulness missed context activation: %+v", rep.DefaultUsefulness)
+	}
+}
+
+func TestRunVCacheScoreComposesSeparateContextSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	providerSnap := filepath.Join(dir, "provider.jsonl")
+	contextSnap := filepath.Join(dir, "context.jsonl")
+	if err := os.WriteFile(providerSnap, []byte(`{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contextSnap, []byte(`{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900,"fak_context_dropped_turns":2,"fak_context_baseline_tokens":2000,"fak_context_cost_tokens":1100}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--snapshot", providerSnap, "--context-snapshot", contextSnap}); code != 0 && code != 1 {
+		t.Fatalf("score composed snapshots exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if !rep.Planes.ProviderObserved.Available || rep.ActiveSource != "telemetry" {
+		t.Fatalf("provider plane/source = %+v/%q, want observed telemetry", rep.Planes.ProviderObserved, rep.ActiveSource)
+	}
+	if !rep.Planes.ContextWitnessed.Available || rep.Planes.ContextWitnessed.Provenance != "WITNESSED" {
+		t.Fatalf("context plane = %+v, want WITNESSED evidence from separate snapshot", rep.Planes.ContextWitnessed)
+	}
+	if rep.Planes.ContextWitnessed.SavedTokenEquiv != 900 ||
+		rep.Planes.ContextWitnessed.BaselineTokenEquiv != 2000 ||
+		rep.Planes.ContextWitnessed.CostTokenEquiv != 1100 {
+		t.Fatalf("context economics=%+v, want 900 saved / 2000 baseline / 1100 cost", rep.Planes.ContextWitnessed)
+	}
+	if rep.AgenticActivation.ContextEvents != 1 {
+		t.Fatalf("agentic activation = %+v, want one separate context event", rep.AgenticActivation)
+	}
+	if !strings.Contains(rep.Planes.ContextWitnessed.Reason, contextSnap) {
+		t.Fatalf("context reason %q does not name separate snapshot %s", rep.Planes.ContextWitnessed.Reason, contextSnap)
+	}
+}
+
+func TestRunVCacheContextWitnessWritesContextSnapshot(t *testing.T) {
+	journal.ResetActiveForTest()
+	t.Cleanup(journal.ResetActiveForTest)
+	snap := filepath.Join(t.TempDir(), "context.jsonl")
+	t.Setenv("FAK_VCACHE_SNAPSHOT", "off")
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{
+		"context-witness",
+		"--json",
+		"--snapshot", snap,
+		"--fixture", "testdata/guard-trace-context-e2e.json",
+	}); code != 0 {
+		t.Fatalf("context-witness exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcacheContextWitnessReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.Schema != "fak.vcache.context-witness.v1" || rep.Snapshot != snap || rep.ReplayExit != 0 {
+		t.Fatalf("context witness report header = %+v", rep)
+	}
+	if !rep.ContextWitnessed.Available || rep.ContextWitnessed.Provenance != "WITNESSED" || rep.ContextEvents != 1 {
+		t.Fatalf("context witness report = %+v, want witnessed one-event context plane", rep)
+	}
+
+	turns, ok, err := vcachesnapshot.Read(snap)
+	if err != nil {
+		t.Fatalf("read context witness snapshot: %v", err)
+	}
+	if !ok || len(turns) == 0 {
+		t.Fatalf("context witness snapshot missing turns: ok=%v turns=%+v", ok, turns)
+	}
+	if turns[0].ContextEvents != 1 || turns[0].ContextShedTokens <= 0 || turns[0].ContextDroppedTurns != 1 {
+		t.Fatalf("written context counters = %+v, want event/shed/drop evidence", turns[0])
 	}
 }
 

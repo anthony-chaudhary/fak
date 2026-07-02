@@ -49,6 +49,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheContextJoin(stdout, stderr, argv[1:])
 	case "codex-session-extract":
 		return runVCacheCodexSessionExtract(stdout, stderr, argv[1:])
+	case "context-witness":
+		return runVCacheContextWitness(stdout, stderr, argv[1:])
 	case "score", "bench":
 		return runVCacheScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -88,11 +90,13 @@ func vcacheUsage(w io.Writer) {
                    [--json] [--before-millis N] [--after-millis N]
   fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
                    [--snapshot-out FILE|default] [--score-out FILE] [--family NAME]
+  fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]
+                   [--wire openai|anthropic]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
                    [--zipf-s F --anchors N --anchors-file FILE --target-coverage F]
-                   [--kernel-ledger FILE|default|off]
+                   [--kernel-ledger FILE|default|off] [--context-snapshot FILE|default|off]
                    [--kernel-kv-events N --context-events N]
                    [--kernel-kv-prompt-tokens N --kernel-kv-reused-tokens N]
                    [--context-shed-tokens N --context-resident-tokens N]
@@ -172,6 +176,7 @@ type vcacheRecentObservation struct {
 	GovernorDecision      string  `json:"governor_decision,omitempty"`
 	ContextStatus         string  `json:"context_status"`
 	ContextReason         string  `json:"context_reason,omitempty"`
+	ContextPath           string  `json:"context_path,omitempty"`
 	ContextEvents         int64   `json:"context_events,omitempty"`
 	ContextShedTokens     int64   `json:"context_shed_tokens,omitempty"`
 	ContextDroppedTurns   int64   `json:"context_dropped_turns,omitempty"`
@@ -200,6 +205,8 @@ type vcacheContextAPIStatus struct {
 	NoKeyReplayFixture  string   `json:"no_key_replay_fixture"`
 	NoKeyReplaySnapshot string   `json:"no_key_replay_snapshot"`
 	NoKeyReplayCommand  string   `json:"no_key_replay_command"`
+	NoKeyWitnessCommand string   `json:"no_key_witness_command"`
+	DefaultSnapshot     string   `json:"default_snapshot"`
 	NoKeyScoreCommand   string   `json:"no_key_score_command"`
 	Reason              string   `json:"reason"`
 }
@@ -245,6 +252,9 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	} else if rep.RecentObservationError != "" {
 		fmt.Fprintf(stdout, "recent snapshot: unreadable (%s)\n", rep.RecentObservationError)
 	}
+	if rep.RecentObservation != nil && rep.RecentObservation.ContextPath != "" && rep.RecentObservation.ContextPath != rep.RecentObservation.Path {
+		fmt.Fprintf(stdout, "context witness snapshot: %s\n", rep.RecentObservation.ContextPath)
+	}
 	if rep.RecentSessions != nil {
 		printVCacheSessionSummary(stdout, *rep.RecentSessions)
 	} else if rep.RecentSessionsError != "" {
@@ -252,8 +262,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "context API: %s (%s; MCP %s; advice_only=%v)\n",
 		rep.ContextAPI.Verifier, rep.ContextAPI.HTTP, rep.ContextAPI.MCPTool, rep.ContextAPI.AdviceOnly)
-	fmt.Fprintf(stdout, "context witness replay: set FAK_VCACHE_SNAPSHOT=%s then run `%s`; score with `%s`\n",
-		rep.ContextAPI.NoKeyReplaySnapshot, rep.ContextAPI.NoKeyReplayCommand, rep.ContextAPI.NoKeyScoreCommand)
+	fmt.Fprintf(stdout, "context witness replay: run `%s` (writes %s); score with `%s`\n",
+		rep.ContextAPI.NoKeyWitnessCommand, rep.ContextAPI.DefaultSnapshot, rep.ContextAPI.NoKeyScoreCommand)
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
@@ -419,6 +429,106 @@ func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
 	return vcacheProofExit(proof.Status)
 }
 
+type vcacheContextWitnessReport struct {
+	Schema            string                       `json:"schema"`
+	Fixture           string                       `json:"fixture"`
+	Wire              string                       `json:"wire"`
+	Snapshot          string                       `json:"snapshot"`
+	ReplayExit        int                          `json:"replay_exit"`
+	ScoreExit         int                          `json:"score_exit"`
+	ScoreStatus       string                       `json:"score_status,omitempty"`
+	ContextWitnessed  vcachescore.PlaneValueReport `json:"context_witnessed"`
+	ContextEvents     int                          `json:"context_events"`
+	ContextShedTokens float64                      `json:"context_shed_tokens"`
+}
+
+func runVCacheContextWitness(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache context-witness", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable witness report")
+	snapshot := fs.String("snapshot", vcachesnapshot.DefaultContextPath(), "context witness snapshot path ('default' uses the per-user context path)")
+	fixture := fs.String("fixture", defaultVCacheContextReplayFixturePath(), "guard replay trace fixture")
+	wire := fs.String("wire", "openai", "replay wire: openai or anthropic")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	snapPath, ok := resolveVCacheContextSnapshotPath(*snapshot)
+	if !ok {
+		fmt.Fprintln(stderr, "fak vcache context-witness: --snapshot off disables the witness target")
+		return 2
+	}
+
+	oldSnapshot, hadSnapshot := os.LookupEnv(vcachesnapshot.EnvPath)
+	if err := os.Setenv(vcachesnapshot.EnvPath, snapPath); err != nil {
+		fmt.Fprintf(stderr, "fak vcache context-witness: set %s: %v\n", vcachesnapshot.EnvPath, err)
+		return 2
+	}
+	defer func() {
+		if hadSnapshot {
+			_ = os.Setenv(vcachesnapshot.EnvPath, oldSnapshot)
+		} else {
+			_ = os.Unsetenv(vcachesnapshot.EnvPath)
+		}
+	}()
+
+	var replay bytes.Buffer
+	replayExit := runGuardReplay(strings.TrimSpace(*fixture), strings.TrimSpace(*wire), "", &replay)
+
+	var scoreOut, scoreErr bytes.Buffer
+	scoreExit := runVCache(&scoreOut, &scoreErr, []string{"score", "--json", "--snapshot", "off", "--context-snapshot", snapPath, "--kernel-ledger", "off"})
+	var score vcachescore.Report
+	if err := json.Unmarshal(scoreOut.Bytes(), &score); err != nil && replayExit == 0 {
+		fmt.Fprintf(stderr, "fak vcache context-witness: parse score: %v\n%s", err, scoreErr.String())
+		return 2
+	}
+
+	report := vcacheContextWitnessReport{
+		Schema:            "fak.vcache.context-witness.v1",
+		Fixture:           strings.TrimSpace(*fixture),
+		Wire:              normalizeReplayWire(*wire),
+		Snapshot:          snapPath,
+		ReplayExit:        replayExit,
+		ScoreExit:         scoreExit,
+		ScoreStatus:       score.Status,
+		ContextWitnessed:  score.Planes.ContextWitnessed,
+		ContextEvents:     score.AgenticActivation.ContextEvents,
+		ContextShedTokens: score.Planes.ContextWitnessed.SavedTokenEquiv,
+	}
+
+	if *asJSON {
+		if code := writeJSON(stdout, report); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Fprint(stdout, replay.String())
+		if strings.TrimSpace(scoreErr.String()) != "" {
+			fmt.Fprintf(stdout, "\nfak vcache context-witness: score stderr:\n%s", scoreErr.String())
+		}
+		if report.ContextWitnessed.Available {
+			fmt.Fprintf(stdout, "\nfak vcache context-witness: context %s - %d event(s), shed %.0f token-equiv; snapshot %s\n",
+				report.ContextWitnessed.Provenance,
+				report.ContextEvents,
+				report.ContextShedTokens,
+				report.Snapshot,
+			)
+			if report.Snapshot == vcachesnapshot.DefaultContextPath() {
+				fmt.Fprintln(stdout, "fak vcache context-witness: default `fak vcache score --json` now composes this context snapshot unless FAK_VCACHE_SNAPSHOT is pinned.")
+			} else {
+				fmt.Fprintf(stdout, "fak vcache context-witness: score this custom snapshot with `fak vcache score --context-snapshot %s --json`.\n", report.Snapshot)
+			}
+		} else {
+			fmt.Fprintf(stdout, "\nfak vcache context-witness: context MISSING after replay; snapshot %s\n", report.Snapshot)
+		}
+	}
+	if replayExit != 0 {
+		return replayExit
+	}
+	if !report.ContextWitnessed.Available || report.ContextEvents == 0 {
+		return 1
+	}
+	return 0
+}
+
 func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	def := vcachescore.DefaultInput()
 	fs := flag.NewFlagSet("vcache score", flag.ContinueOnError)
@@ -429,6 +539,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	anchorsFile := fs.String("anchors-file", "", "optional ranked anchor workload JSONL/JSON/CSV file ('-' for stdin)")
 	snapshotDefault := strings.TrimSpace(os.Getenv(vcachesnapshot.EnvPath))
 	snapshot := fs.String("snapshot", snapshotDefault, "OBSERVED-by-default source: per-turn provider-cache window a finished `fak guard`/`fak serve` session persisted (default: $FAK_VCACHE_SNAPSHOT, then the well-known path under your config dir). When no --telemetry/--anchors-file is given and this snapshot has turns, the score reports the REALIZED cache multiplier from real traffic instead of the synthetic-Zipf FORECAST. Pass 'off' to force the planned forecast; an absent/empty snapshot falls open to the forecast (clearly labeled).")
+	contextSnapshot := fs.String("context-snapshot", strings.TrimSpace(os.Getenv(vcachesnapshot.EnvContextPath)), "optional separate context-plane witness snapshot. With no explicit --snapshot this defaults to the well-known context path, so a no-key replay can prove context without overwriting provider telemetry. Pass 'off' to disable; 'default' uses the context snapshot path under your config dir.")
 	indexOut := fs.String("index-out", "", "write selected hot-anchor index JSON to this file")
 	anchor := fs.Float64("anchor-tokens", def.Star.AnchorTokens, "cacheable anchor size in input tokens")
 	suffix := fs.Float64("suffix-tokens", def.Star.SuffixTokens, "fresh suffix tokens per sibling request")
@@ -469,8 +580,13 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
+	snapshotSet := flagWasSet(fs, "snapshot")
+	contextSnapshotSet := flagWasSet(fs, "context-snapshot")
+	if !contextSnapshotSet && !snapshotSet && snapshotDefault == "" && strings.TrimSpace(*contextSnapshot) == "" {
+		*contextSnapshot = "default"
+	}
 	kernelLedgerSet := flagWasSet(fs, "kernel-ledger")
-	if !kernelLedgerSet && (strings.TrimSpace(*telemetry) != "" || strings.TrimSpace(*anchorsFile) != "" || flagWasSet(fs, "snapshot")) {
+	if !kernelLedgerSet && (strings.TrimSpace(*telemetry) != "" || strings.TrimSpace(*anchorsFile) != "" || snapshotSet) {
 		*kernelLedger = "off"
 	}
 	if strings.TrimSpace(*telemetry) == "-" && strings.TrimSpace(*anchorsFile) == "-" {
@@ -596,25 +712,36 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	// score flips active_source to "telemetry" and reports the REALIZED multiplier; when it is
 	// absent/empty/disabled we leave TelemetryRows nil so Score falls open to the planned
 	// FORECAST (clearly labeled), never a phantom observed 0x.
-	if len(in.TelemetryRows) == 0 && strings.TrimSpace(*anchorsFile) == "" && !strings.EqualFold(strings.TrimSpace(*snapshot), "off") {
-		snapPath := strings.TrimSpace(*snapshot)
-		if snapPath == "" {
-			snapPath = vcachesnapshot.DefaultPath()
-		}
-		turns, ok, err := vcachesnapshot.Read(snapPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
-		} else if ok {
-			providerTurns := vcacheProviderTelemetryTurns(turns)
-			if len(providerTurns) > 0 {
-				observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
-				in.TelemetryRows = vcacheobserve.Rows(providerTurns)
-				in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
-				in.Prediction = observed.Prediction
-				in.AnchorSource = vcachescore.AnchorSourceMeasured
-				in.TurnsObserved = len(providerTurns)
+	contextFromProviderSnapshot := false
+	if len(in.TelemetryRows) == 0 && strings.TrimSpace(*anchorsFile) == "" {
+		snapPath, readProviderSnapshot := resolveVCacheProviderSnapshotPath(*snapshot)
+		if readProviderSnapshot {
+			turns, ok, err := vcachesnapshot.Read(snapPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
+			} else if ok {
+				providerTurns := vcacheProviderTelemetryTurns(turns)
+				if len(providerTurns) > 0 {
+					observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
+					in.TelemetryRows = vcacheobserve.Rows(providerTurns)
+					in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
+					in.Prediction = observed.Prediction
+					in.AnchorSource = vcachescore.AnchorSourceMeasured
+					in.TurnsObserved = len(providerTurns)
+				}
+				contextFromProviderSnapshot = applyVCacheSnapshotContext(&in, turns, "persisted guard/serve context snapshot")
 			}
-			applyVCacheSnapshotContext(&in, turns)
+		}
+	}
+	if !contextFromProviderSnapshot && strings.TrimSpace(*contextSnapshot) != "" {
+		ctxPath, readContextSnapshot := resolveVCacheContextSnapshotPath(*contextSnapshot)
+		if readContextSnapshot {
+			turns, ok, err := vcachesnapshot.Read(ctxPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak vcache score: context snapshot %s: %v (leaving context plane unchanged)\n", ctxPath, err)
+			} else if ok {
+				applyVCacheSnapshotContext(&in, turns, "persisted context snapshot "+ctxPath)
+			}
 		}
 	}
 
@@ -753,7 +880,7 @@ func applyVCacheKernelLedger(in *vcachescore.Input, path string) {
 	}
 }
 
-func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Turn) {
+func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Turn, source string) bool {
 	var events, shed, dropped, baseline, cost int64
 	for _, t := range turns {
 		events += t.ContextEvents
@@ -763,17 +890,22 @@ func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Tur
 		cost += t.ContextCostTokens
 	}
 	if events <= 0 && shed <= 0 && dropped <= 0 {
-		return
+		return false
 	}
 	if events <= 0 && shed > 0 {
 		events = 1
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "persisted context snapshot"
 	}
 	ev := vcachescore.PlaneEvidenceInput{
 		Available:       true,
 		Provenance:      "WITNESSED",
 		SavedTokenEquiv: float64(nonNegInt64(shed)),
 		Reason: fmt.Sprintf(
-			"persisted guard/serve context snapshot witnessed %d context event(s), shed %d token(s), dropped %d turn(s)",
+			"%s witnessed %d context event(s), shed %d token(s), dropped %d turn(s)",
+			source,
 			nonNegInt64(events),
 			nonNegInt64(shed),
 			nonNegInt64(dropped),
@@ -789,6 +921,7 @@ func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Tur
 	if in.AgenticActivation.ContextEvents == 0 {
 		in.AgenticActivation.ContextEvents = int64ToInt(nonNegInt64(events))
 	}
+	return true
 }
 
 func nonNegInt64(n int64) int64 {
@@ -796,6 +929,28 @@ func nonNegInt64(n int64) int64 {
 		return 0
 	}
 	return n
+}
+
+func resolveVCacheProviderSnapshotPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if strings.EqualFold(path, "off") {
+		return "", false
+	}
+	if path == "" || strings.EqualFold(path, "default") {
+		return vcachesnapshot.DefaultPath(), true
+	}
+	return path, true
+}
+
+func resolveVCacheContextSnapshotPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if strings.EqualFold(path, "off") {
+		return "", false
+	}
+	if path == "" || strings.EqualFold(path, "default") {
+		return vcachesnapshot.DefaultContextPath(), true
+	}
+	return path, true
 }
 
 func int64ToInt(n int64) int {
@@ -846,7 +1001,7 @@ func defaultVCacheStatus() vcacheStatusReport {
 		},
 		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
 	}
-	applyRecentVCacheObservation(&rep, statusVCacheSnapshotPath())
+	applyRecentVCacheObservation(&rep, statusVCacheSnapshotPath(), statusVCacheContextSnapshotPath())
 	return rep
 }
 
@@ -858,9 +1013,21 @@ func statusVCacheSnapshotPath() string {
 	return path
 }
 
-func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
+func statusVCacheContextSnapshotPath() string {
+	path := strings.TrimSpace(os.Getenv(vcachesnapshot.EnvContextPath))
+	if path != "" {
+		return path
+	}
+	if strings.TrimSpace(os.Getenv(vcachesnapshot.EnvPath)) != "" {
+		return ""
+	}
+	return vcachesnapshot.DefaultContextPath()
+}
+
+func applyRecentVCacheObservation(rep *vcacheStatusReport, path, contextPath string) {
 	path = strings.TrimSpace(path)
 	if path == "" || strings.EqualFold(path, "off") {
+		applyRecentVCacheContextOnlyObservation(rep, contextPath)
 		return
 	}
 	turns, ok, err := vcachesnapshot.Read(path)
@@ -869,6 +1036,7 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 		return
 	}
 	if !ok {
+		applyRecentVCacheContextOnlyObservation(rep, contextPath)
 		return
 	}
 	providerTurns := vcacheProviderTelemetryTurns(turns)
@@ -898,6 +1066,9 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 		recent.ContextCostTokens += turn.ContextCostTokens
 	}
 	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
+	if recent.ContextStatus == "MISSING" {
+		applyRecentVCacheContextSnapshot(&recent, contextPath)
+	}
 	rep.RecentObservation = &recent
 	if len(providerTurns) > 0 {
 		rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot observed %d provider turn(s) at %.2fx multiplier with %.2f%% false-warm; active warm/pin/evict actions remain gated",
@@ -906,6 +1077,86 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 		rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot has no provider-cache telemetry; context status %s with %d event(s); active warm/pin/evict actions remain gated",
 			recent.ContextStatus, recent.ContextEvents)
 	}
+}
+
+func applyRecentVCacheContextOnlyObservation(rep *vcacheStatusReport, contextPath string) {
+	contextPath = strings.TrimSpace(contextPath)
+	if contextPath == "" || strings.EqualFold(contextPath, "off") {
+		return
+	}
+	contextPath, readContextSnapshot := resolveVCacheContextSnapshotPath(contextPath)
+	if !readContextSnapshot {
+		return
+	}
+	turns, ok, err := vcachesnapshot.Read(contextPath)
+	if err != nil {
+		rep.RecentObservationError = fmt.Sprintf("%s: %v", contextPath, err)
+		return
+	}
+	if !ok {
+		return
+	}
+	recent := vcacheRecentObservation{
+		Source:         "context_snapshot",
+		Path:           contextPath,
+		Turns:          len(turns),
+		ProviderStatus: "MISSING",
+		ContextPath:    contextPath,
+	}
+	for _, turn := range turns {
+		recent.ContextEvents += turn.ContextEvents
+		recent.ContextShedTokens += turn.ContextShedTokens
+		recent.ContextDroppedTurns += turn.ContextDroppedTurns
+		recent.ContextBaselineTokens += turn.ContextBaselineTokens
+		recent.ContextCostTokens += turn.ContextCostTokens
+	}
+	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
+	if recent.ContextStatus != "WITNESSED" {
+		return
+	}
+	recent.ContextReason = "separate context snapshot includes fak_context_* counters from a guard/serve context event"
+	rep.RecentObservation = &recent
+	rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; no provider-cache telemetry found; context status WITNESSED from %s with %d event(s); active warm/pin/evict actions remain gated",
+		contextPath, recent.ContextEvents)
+}
+
+func applyRecentVCacheContextSnapshot(recent *vcacheRecentObservation, contextPath string) bool {
+	if recent == nil {
+		return false
+	}
+	contextPath = strings.TrimSpace(contextPath)
+	if contextPath == "" || strings.EqualFold(contextPath, "off") {
+		return false
+	}
+	resolved, readContextSnapshot := resolveVCacheContextSnapshotPath(contextPath)
+	if !readContextSnapshot || resolved == recent.Path {
+		return false
+	}
+	turns, ok, err := vcachesnapshot.Read(resolved)
+	if err != nil || !ok {
+		return false
+	}
+	var ctx vcacheRecentObservation
+	for _, turn := range turns {
+		ctx.ContextEvents += turn.ContextEvents
+		ctx.ContextShedTokens += turn.ContextShedTokens
+		ctx.ContextDroppedTurns += turn.ContextDroppedTurns
+		ctx.ContextBaselineTokens += turn.ContextBaselineTokens
+		ctx.ContextCostTokens += turn.ContextCostTokens
+	}
+	status, _ := recentVCacheContextStatus(ctx)
+	if status != "WITNESSED" {
+		return false
+	}
+	recent.ContextPath = resolved
+	recent.ContextEvents = ctx.ContextEvents
+	recent.ContextShedTokens = ctx.ContextShedTokens
+	recent.ContextDroppedTurns = ctx.ContextDroppedTurns
+	recent.ContextBaselineTokens = ctx.ContextBaselineTokens
+	recent.ContextCostTokens = ctx.ContextCostTokens
+	recent.ContextStatus = "WITNESSED"
+	recent.ContextReason = "separate context snapshot includes fak_context_* counters from a guard/serve context event"
+	return true
 }
 
 func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) {
@@ -1069,7 +1320,7 @@ func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
 
 func defaultVCacheContextAPIStatus() vcacheContextAPIStatus {
 	const fixture = "cmd/fak/testdata/guard-trace-context-e2e.json"
-	const snapshot = ".fak/vcache-context-replay.jsonl"
+	snapshot := vcachesnapshot.DefaultContextPath()
 	return vcacheContextAPIStatus{
 		Verifier:            "ready",
 		HTTP:                "GET /v1/fak/ctxvalue",
@@ -1080,9 +1331,23 @@ func defaultVCacheContextAPIStatus() vcacheContextAPIStatus {
 		NoKeyReplayFixture:  fixture,
 		NoKeyReplaySnapshot: snapshot,
 		NoKeyReplayCommand:  "fak guard --replay-trace " + fixture + " --replay-wire openai",
+		NoKeyWitnessCommand: "fak vcache context-witness",
+		DefaultSnapshot:     snapshot,
 		NoKeyScoreCommand:   "fak vcache score --json",
 		Reason:              "managed-context value API is wired for running guard/serve sessions; it sizes next steps but does not itself prove a context-saving event",
 	}
+}
+
+func defaultVCacheContextReplayFixturePath() string {
+	const repoRootPath = "cmd/fak/testdata/guard-trace-context-e2e.json"
+	if _, err := os.Stat(repoRootPath); err == nil {
+		return repoRootPath
+	}
+	const packagePath = "testdata/guard-trace-context-e2e.json"
+	if _, err := os.Stat(packagePath); err == nil {
+		return packagePath
+	}
+	return repoRootPath
 }
 
 func writeJSON(w io.Writer, v any) int {
