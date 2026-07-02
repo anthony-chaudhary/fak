@@ -220,6 +220,7 @@ var verbManifest = []Verb{
 	{Name: "test", Synopsis: "host-aware test runner: resolve the right go test invocation (Windows->WSL via test.ps1)", Lane: "cmd"},
 	{Name: "token-defaults-scorecard", Synopsis: "native token-saving-defaults control-pane payload", Lane: "cmd"},
 	{Name: "tool-coverage-audit", Synopsis: "audit load-bearing tool coverage for a workspace against the advisory minimum floor", Lane: "cmd"},
+	{Name: "toolproc", Synopsis: "the kernel's process table for tool calls: fold a lifecycle journal into deadline/stall/orphan/post-kill verdicts", Lane: "cmd", Doc: "docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md"},
 	{Name: "top", Synopsis: "= fak ps --watch (the live process-table top mode)", Lane: "cmd"},
 	{Name: "traj", Synopsis: "the trajectory-corpus toolkit (similar/cluster/score/gc/export) over recorded turns", Lane: "cmd"},
 	{Name: "tree-doctor", Synopsis: "the worktree doctor: detect and prune stray / dead git worktrees", Lane: "cmd"},
