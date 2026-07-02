@@ -61,6 +61,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefFence(stdout, stderr, rest)
 	case "renew":
 		return runLeaserefRenew(stdout, stderr, rest)
+	case "release":
+		return runLeaserefRelease(stdout, stderr, rest)
 	case "sync":
 		return runLeaserefSync(stdout, stderr, rest)
 	case "-h", "--help", "help":
@@ -152,6 +154,15 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
   fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR]
       Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation. A
       lease taken over by a peer is refused STALE_LEASE; a lapsed/absent lease NO_LEASE.
+
+  fak leaseref release --id ID --holder H [--generation N] [--force] [--dir DIR]
+      The release twin of 'acquire': delete YOUR lease the moment the work is
+      done instead of waiting out the TTL (a finished exclusive-lane lease stops
+      stalling the fleet). Holder-checked and CAS-deleted: a live lease held by
+      a DIFFERENT holder is refused STALE_LEASE, a wrong --generation likewise,
+      and a ref that advanced under the delete is LEASE_CONTENDED. An absent
+      lease is an idempotent OK; an EXPIRED record is releasable by anyone
+      (single-id reap). --force skips the holder check (operator override).
 
   fak leaseref sync [--remote R] [--push-only|--fetch-only] [--dir DIR]
       CONVERGE the refs/fak/locks/* namespace with a remote (default origin): push
