@@ -142,6 +142,7 @@ fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> re
 fak ablate    --sweep vdso                             # N-arm self-ablation: one frozen trace, feature on/off, deltas off the kernel counters
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
+fak guard     [--session-pressure-gate high] -- <agent command>  # wrap a real agent through the kernel; optional recent-session gate refuses high Opus/long-context pressure before launch
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
 fak relay     resume (--baton FILE|- | FILE) [--json]   # inspect a fak.relay.baton.v1 leg handoff OFFLINE: exactly what a successor leg would receive (pointer-only, no reload re-verification); --json emits the canonical byte-stable wire form
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA

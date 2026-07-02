@@ -124,6 +124,10 @@ func compactSeverityRank(severity string) (int, bool) {
 	}
 }
 
+func CompactActionSeverityRank(severity string) (int, bool) {
+	return compactSeverityRank(severity)
+}
+
 func compactSeverityName(severity string) string {
 	severity = strings.ToLower(strings.TrimSpace(severity))
 	switch severity {
