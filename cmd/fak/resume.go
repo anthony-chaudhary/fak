@@ -54,6 +54,8 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeValidate(stdout, stderr, argv[1:])
 	case "scan":
 		return runResumeScan(stdout, stderr, argv[1:])
+	case "status":
+		return runResumeStatus(stdout, stderr, argv[1:])
 	case "admit":
 		return runResumeAdmit(stdout, stderr, argv[1:])
 	case "resolve":
@@ -62,7 +64,7 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, admit, or resolve)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, status, admit, or resolve)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -832,6 +834,8 @@ func resumeUsage(w io.Writer) {
   fak resume scan --store DIR [--ttl 5m|1h] [--horizon N] [--shed-budget N]
                   [--input-price F] [--output-price F] [--all] [--json]
 
+  fak resume status --store DIR [--ledger FILE] [--max-attempts N] [--all] [--json]
+
   fak resume admit [--max-live N] [--max-per-window N] [--window-sec S]
                    [--min-spacing-sec S] [--ledger FILE] [--policy FILE]
                    [--json] [--quiet]
@@ -868,6 +872,13 @@ plan (cut/reset vs a cold full re-prefill). The detect-and-plan step before a re
 sizes each session from its last REAL model turn, so the synthetic rate-limit refusal that
 ends a crashed session never mis-sizes it to zero.
 
+status is the PROVE-THE-RESUME-TOOK runbook over the same store plus the durable resume
+ledger. For every crashed-or-resumed session it folds one label (pending / launched /
+took / re-stranded / gave-up / settled) read from the transcript's own turns, not the
+launcher's "launched" ledger row (which alone cannot tell a resume that took from one
+that silently no-op'd). Actionable sessions sort first, so an agent bringing a dead
+batch back reads the ordered list, acts on the top, and re-runs.
+
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200
 
@@ -879,5 +890,8 @@ example (back-test the projection against your real session history):
 
 example (find the rate-limited crashes in a project and plan each managed restart):
   fak resume scan --store ~/.claude/projects/<project>
+
+example (read where every crashed/resumed session stands and what still needs action):
+  fak resume status --store ~/.claude/projects/<project>
 `)
 }
