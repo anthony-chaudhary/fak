@@ -106,6 +106,14 @@ type Manifest struct {
 	// closed); a present block is validated at load — see IsolationRule. Like
 	// RateLimit, this is manifest/runtime-only, NOT an adjudicator.Policy field.
 	Isolation *IsolationRule `json:"isolation,omitempty"`
+	// ToolRuntime (seam 5 of the tool-process table) grants each tool its
+	// runtime envelope — how long it may run and at what heartbeat cadence it
+	// must report — in the same manifest that grants the capability: "you may
+	// run this tool" and "you may run it for this long" are one grant. Rows
+	// are validated at load (see ToolRuntimeRule); embedders of the toolproc
+	// supervisor resolve per-spawn envelopes via Runtime.ToolRuntime. Like
+	// RateLimit, manifest/runtime-only, NOT an adjudicator.Policy field.
+	ToolRuntime []ToolRuntimeRule `json:"tool_runtime,omitempty"`
 }
 
 // EgressRule is the manifest's network-egress block.
@@ -180,6 +188,10 @@ type Runtime struct {
 	// Isolation is the compiled trust-level → ToolExec-backend dial (#2013);
 	// nil when the manifest declares none (BackendFor then fails closed).
 	Isolation *IsolationRule
+	// ToolRuntime is the compiled per-tool runtime-envelope table (seam 5 of
+	// the tool-process table); nil when the manifest declares none
+	// (EnvelopeFor then resolves nothing and the fold defaults apply).
+	ToolRuntime *ToolRuntimeTable
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -350,6 +362,10 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	tr, err := compileToolRuntime(m.ToolRuntime)
+	if err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:    p,
 		Sources:        sources,
@@ -357,6 +373,7 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		AuthorizeRules: auth,
 		RateLimit:      rl,
 		Isolation:      iso,
+		ToolRuntime:    tr,
 	}, nil
 }
 
@@ -530,6 +547,15 @@ func SummaryRuntime(rt Runtime) string {
 		}
 	} else {
 		fmt.Fprintf(&b, "isolation          : (none — dial unset; placement fails closed)\n")
+	}
+	if rows := rt.ToolRuntime.Rules(); len(rows) > 0 {
+		fmt.Fprintf(&b, "tool runtime       : %d envelope(s)\n", len(rows))
+		for _, r := range rows {
+			fmt.Fprintf(&b, "                     %s -> deadline_ms=%d heartbeat_every_ms=%d\n",
+				r.Tool, r.DeadlineMS, r.HeartbeatEveryMS)
+		}
+	} else {
+		fmt.Fprintf(&b, "tool runtime       : (none — fold defaults apply)\n")
 	}
 	return b.String()
 }
