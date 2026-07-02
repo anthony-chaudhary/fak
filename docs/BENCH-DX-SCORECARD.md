@@ -23,16 +23,16 @@ discover what exists, cold-start one, learn one flag set, read a number, compare
 | KPI | step | status | detail |
 |---|---|:---:|---|
 | `catalog_verb` | discover | [x] | fak benchmarks catalog verb is wired and tracked |
-| `catalog_registry` | discover | [x] | internal/benchcatalog/catalog.go registry present (30 entries) |
-| `registry_covers_tree` | discover | [x] | registry covers all 30 surfaces one-to-one |
-| `offline_set` | coldstart | [x] | registry marks the offline set (22 zero-asset benchmarks) |
+| `catalog_registry` | discover | [x] | internal/benchcatalog/catalog.go registry present (34 entries) |
+| `registry_covers_tree` | discover | [x] | registry covers all 34 surfaces one-to-one |
+| `offline_set` | coldstart | [x] | registry marks the offline set (27 zero-asset benchmarks) |
 | `webbench_runs_clean` | coldstart | [x] | fak webbench describe falls back to a committed sample (runnable with zero args) |
 | `swebench_runs_clean` | coldstart | [x] | fak swebench describe falls back to a committed sample (runnable with zero args) |
 | `no_spurious_paths` | coldstart | [x] | no spurious fak/-prefixed default paths in cmd/*bench* |
 | `out_flag_uniform` | learn | [x] | output flag is documented uniformly as -out/--out in the registry |
 | `quant_polarity_consistent` | learn | [x] | -quant default polarity is consistent across benches |
 | `provenance_doc` | read | [x] | BENCHMARK-AUTHORITY.md present (every number traces to it) |
-| `summary_self_describes` | read | [x] | all 30 registry rows carry a one-line 'what this number means' |
-| `bench_cli_path_ok` | compare | [x] | tools/bench_cli.py BENCHMARK_DIR resolves from the repo root |
-| `compare_documented` | compare | [x] | tools/bench_cli.py documents the list/compare loop |
+| `summary_self_describes` | read | [x] | all 34 registry rows carry a one-line 'what this number means' |
+| `bench_cli_path_ok` | compare | [x] | fak bench-runs resolves experiments/benchmark/catalog.json from the repo root |
+| `compare_documented` | compare | [x] | cmd/fak/benchruns.go documents the list/compare loop |
 

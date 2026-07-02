@@ -145,10 +145,9 @@ description: "The memory dimensions that matter in LLM serving, the current SOTA
 
 *Why it matters:* Agent and fleet workloads repeat large identical prefixes (system prompts, tool schemas, few-shot exemplars). Reusing their KV across requests is the single largest lever on prefill cost and TTFT, and is now table-stakes; buyers compare hit-rate and the throughput gain it delivers.
 
-- **SOTA bar:** OBSERVED external-engine KV-cache plane: RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.
+- **SOTA bar (provenance: SGLang-published KV plane):** SGLang RadixAttention's automatic cross-request KV reuse via an LRU radix tree gives up to 6.4x throughput on shared-prefix workloads with 50%-99% cache hit rates; this remains the canonical cross-request prefix-reuse bar in 2026.
 - **Leading systems:** SGLang RadixAttention, vLLM Automatic Prefix Caching, Mooncake KV pool
 - **Source:** [https://www.lmsys.org/blog/2024-01-17-sglang/](https://www.lmsys.org/blog/2024-01-17-sglang/) (2024-01)
 - **fak:** parity — 86.7 % (shipped)
 - **fak note:** fak measured on-box: cache-aware (≡ DFS) scheduling recovers FCFS 62.1% → 86.7% = 100% of optimal, inside SGLang's published band. Split-reuse proven bit-identical to recompute (max|Δ|=0), so the hit is a real reuse, not a numerics shortcut. FENCE: 86.7% is on radixbench's synthetic 'agents' workload (deliberately cache-favorable); on a REAL tau2-airline trace fak's measured addressable purity is ~0.7% (CLAIMS vDSO unit 33/83) — so this is a same-workload-as-SGLang reuse-mechanism parity, not a promise of 86.7% on every production corpus.
 - **Trace:** 92896a4 · experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json · BENCHMARK-AUTHORITY.md RadixAttention ladder; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json (commit 92896a4); CLAIMS.md 'RadixAttention parity vs SGLang' [SHIPPED]
-

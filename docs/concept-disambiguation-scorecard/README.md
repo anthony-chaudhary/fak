@@ -13,9 +13,9 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 
 | Metric | Value |
 |---|---|
-| **Score** | **100.0/100** (grade A) = 10.0/10 |
-| **Coverage** | **100.0%** (1200/1200 confusable tree tokens positioned) |
-| **Disambiguation-debt** | **0** (clarity 0 + coverage 0) |
+| **Score** | **98.5/100** (grade A) = 9.8/10 |
+| **Coverage** | **97.7%** (1200/1228 confusable tree tokens positioned) |
+| **Disambiguation-debt** | **28** (clarity 0 + coverage 28) |
 | Crystal-clear concepts | 109 of 1006 positioned |
 | As of | 2026-06-29 (fak v0.34.0) |
 
@@ -24,7 +24,7 @@ The sibling scorecards grade fak's code, docs, and competitive standing. This on
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 1006 concepts - score 100.0/100 (grade A) - disambiguation-debt 0
+concept-disambiguation chart - 1006 concepts - score 98.5/100 (grade A) - disambiguation-debt 28
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###......................... 109
@@ -53,25 +53,25 @@ clarity mix by family (each cell = one concept):
   witness-proof    *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooo (60 concept(s); 5 crystal)
 
 coverage by family (positioned / discovered):
+  plan             ###########################. 201/210
+  guard-gate       ###########################. 133/139
+  policy-capability ###########################. 73/77
+  session-runtime  ###########################. 97/101
+  context-ctx      ###########################. 96/99
+  render-materialize ############################ 97/98
+  witness-proof    ############################ 71/72
   attention        ############################ 59/59
   cache            ############################ 133/133
-  context-ctx      ############################ 96/96
   cross-cluster    ............................ 0/0
   decision         ############################ 24/24
   evict            ############################ 25/25
   gateway-engine   ############################ 132/132
-  guard-gate       ############################ 133/133
   layout           ############################ 11/11
-  plan             ############################ 201/201
-  policy-capability ############################ 73/73
   pool             ############################ 29/29
-  render-materialize ############################ 97/97
   score-debt       ############################ 51/51
-  session-runtime  ############################ 97/97
   support-maturity ############################ 22/22
-  witness-proof    ############################ 71/71
 
-namespace coverage  [################################] 100.0%  (1200/1200 confusable tokens positioned)
+namespace coverage  [###############################.] 97.7%  (1200/1228 confusable tokens positioned)
 
 legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 ```
@@ -1115,21 +1115,21 @@ legend: * crystal   o defined   ~ drifting   x colliding   . undocumented
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| plan | 201 | 210 | 9 |
+| guard-gate | 133 | 139 | 6 |
+| policy-capability | 73 | 77 | 4 |
+| session-runtime | 97 | 101 | 4 |
+| context-ctx | 96 | 99 | 3 |
+| render-materialize | 97 | 98 | 1 |
+| witness-proof | 71 | 72 | 1 |
 | attention | 59 | 59 | 0 |
 | cache | 133 | 133 | 0 |
-| context-ctx | 96 | 96 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 24 | 24 | 0 |
 | evict | 25 | 25 | 0 |
 | gateway-engine | 132 | 132 | 0 |
-| guard-gate | 133 | 133 | 0 |
 | layout | 11 | 11 | 0 |
-| plan | 201 | 201 | 0 |
-| policy-capability | 73 | 73 | 0 |
 | pool | 29 | 29 | 0 |
-| render-materialize | 97 | 97 | 0 |
 | score-debt | 51 | 51 | 0 |
-| session-runtime | 97 | 97 | 0 |
 | support-maturity | 22 | 22 | 0 |
-| witness-proof | 71 | 71 | 0 |
 

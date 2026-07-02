@@ -4,18 +4,18 @@
 
 ## What's new
 
-- **2026-06-30** — Shipped: sync window gate command ([`04a4eb0a`](https://github.com/anthony-chaudhary/fak/commit/04a4eb0a))
-- **2026-06-30** — Shipped: sync window gate coverage ([`4a564c74`](https://github.com/anthony-chaudhary/fak/commit/4a564c74))
-- **2026-06-30** — Documented: add silicon-vendor answer-engine terms ([`02b1240e`](https://github.com/anthony-chaudhary/fak/commit/02b1240e))
-- **2026-06-30** — Shipped: sync shared worktree ([`e03dd2e6`](https://github.com/anthony-chaudhary/fak/commit/e03dd2e6))
-- **2026-06-30** — Shipped: sync shared worktree ([`d4ba89a9`](https://github.com/anthony-chaudhary/fak/commit/d4ba89a9))
-- **2026-06-30** — Shipped: sync shared worktree ([`3a03db49`](https://github.com/anthony-chaudhary/fak/commit/3a03db49))
-- **2026-06-30** — Documented: add binding-layer AEO vendor routing ([`e6758095`](https://github.com/anthony-chaudhary/fak/commit/e6758095))
-- **2026-06-30** — Shipped: sync shared worktree ([`21996096`](https://github.com/anthony-chaudhary/fak/commit/21996096))
-- **2026-06-30** — Fixed: cover concept-disambiguation ci gaps ([`fd7e46ef`](https://github.com/anthony-chaudhary/fak/commit/fd7e46ef))
-- **2026-06-30** — New: add generation readout (#1633) ([`e0467ea0`](https://github.com/anthony-chaudhary/fak/commit/e0467ea0))
-- **2026-06-30** — Shipped: sync shared worktree ([`a30e8802`](https://github.com/anthony-chaudhary/fak/commit/a30e8802))
-- **2026-06-30** — Shipped: sync shared worktree ([`d7992dca`](https://github.com/anthony-chaudhary/fak/commit/d7992dca))
+- **2026-07-01** — Fixed: add cross-tick account de-confliction to the wave seat picker ([`3444c4d8`](https://github.com/anthony-chaudhary/fak/commit/3444c4d8))
+- **2026-07-01** — New: add fleet status trend ledger ([`5563b48d`](https://github.com/anthony-chaudhary/fak/commit/5563b48d))
+- **2026-07-01** — New: add fleet sweep slice fold ([`535dad54`](https://github.com/anthony-chaudhary/fak/commit/535dad54))
+- **2026-07-01** — New: add irreversible call preview gate ([`027107d9`](https://github.com/anthony-chaudhary/fak/commit/027107d9))
+- **2026-07-01** — New: add AMD GPU facts probe ([`4faf9b34`](https://github.com/anthony-chaudhary/fak/commit/4faf9b34))
+- **2026-07-01** — New: add parity witness gate fold ([`5a1824e6`](https://github.com/anthony-chaudhary/fak/commit/5a1824e6))
+- **2026-07-01** — New: add network + GPU VRAM axes to fak guard harness resource tracking (#2049) ([`87e627ee`](https://github.com/anthony-chaudhary/fak/commit/87e627ee))
+- **2026-07-01** — Shipped: cover net and GPU provider folding ([`5470592e`](https://github.com/anthony-chaudhary/fak/commit/5470592e))
+- **2026-07-01** — New: add transactional multi-file edit #2157 ([`25fb110a`](https://github.com/anthony-chaudhary/fak/commit/25fb110a))
+- **2026-07-01** — New: wire fak guard's gateway listener to the harness network axis (#2049) ([`56dc0689`](https://github.com/anthony-chaudhary/fak/commit/56dc0689))
+- **2026-07-01** — New: add network rx/tx axis (served-bytes CountingListener + upstream CountingRoundTripper) rendered in report/metrics/ledger (#2049) ([`919b1c8b`](https://github.com/anthony-chaudhary/fak/commit/919b1c8b))
+- **2026-07-01** — New: add sweep profile config fold ([`c882f4dc`](https://github.com/anthony-chaudhary/fak/commit/c882f4dc))
 
 <!-- WHATS-NEW:END -->
 
@@ -135,6 +135,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
 - [Shared task record contract](docs/shared-task-record-contract.md): executable JSON envelopes and fixtures for collaborative task records, user patches, conflicts, approval gates, and disaggregated artifact refs.
 - [Multi-agent coordination protocol (RFC)](docs/multi-agent-coordination-protocol.md): the single normative spec for agent-to-agent coordination — the message format (`a2achan`), the shared-state API (`sharedtask`), and the wave coordination primitives (`comm`/`agenttopo`) — every coordination act adjudicated on the same default-deny capability floor as a tool call. The D-007 (#241) capstone.
+- [AgentRun leak-prevention boundary](docs/agent-run-leak-prevention.md): the public contract for nested agent containment — AgentRun identity, SpawnAttempt admission, PolicyDigest pinning, ToolCallID linkage, inherited capability envelopes, unmanaged-spawn default deny, and the witness suite that maps the contract onto `toolprocgate`.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 - [Neo-silicon onboarding](docs/vendor/neo-silicon-onboarding.md): vendor-facing path for a chip maker or backend author to add a `compute.Backend`, starting with the compiling MatMul+Attention example and ending at backend conformance.

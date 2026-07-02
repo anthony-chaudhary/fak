@@ -329,6 +329,76 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # -------------------------------------------------------------------------
+  # Multi-node dev-server read plane (#2297, epic #2254 plane 1)
+  # -------------------------------------------------------------------------
+  /v1/leases:
+    get:
+      tags: [fak-native]
+      summary: Live lock-lease view of the coordinator clone
+      description: |
+        The non-expired lease records under the coordinator clone's
+        `refs/fak/locks/*` namespace, projected into the exact `live_leases`
+        shape a dos_arbitrate-style admission kernel consumes — a node on the
+        same LAN/Tailscale reads peers' leases at HTTP latency instead of a
+        plane-0 git fetch window. Read-only: no admission decision moves here.
+        Every value is OBSERVED from the coordinator's own clone at
+        `observed_unix`, never a relayed client claim. The provider is injected
+        by the host CLI; a deployment that did not wire it returns 404, never a
+        silent empty reading.
+      responses:
+        '200':
+          description: The observed live-lease projection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeasesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Lease read plane is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500':
+          description: The coordinator failed to observe its local ref store.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /v1/sessions:
+    get:
+      tags: [fak-native]
+      summary: Cross-machine session presence and lease liveness
+      description: |
+        The presence half of the dev-server read plane: the live (heartbeating)
+        guard-session descriptors under `refs/fak/locks/session-*`, plus every
+        live lock lease classified by its owning session's liveness
+        (`self | peer-live | peer-dead | peer-unknown`; classification here is
+        from an anonymous reader, so nothing classifies `self`). `reclaimable`
+        is true only on `peer-dead` — a positively dead owner; absence of
+        evidence fails closed. Distinct from `/v1/fak/sessions`, the
+        served-session DRIVE-state snapshot. Values are OBSERVED from the
+        coordinator's own clone; 404 when the host CLI did not wire the
+        provider.
+      responses:
+        '200':
+          description: The observed session descriptors and classified leases.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaseSessionsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Presence read plane is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500':
+          description: The coordinator failed to observe its local ref store.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # -------------------------------------------------------------------------
   # Anthropic Messages surface
   # -------------------------------------------------------------------------
   /v1/messages:
@@ -1623,6 +1693,64 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SessionChangeEvent' }
         cursor: { type: integer, description: The client's next cursor (the highest seq now known). }
+
+    # ----- Multi-node dev-server read plane (#2297) ---------------------------
+    LeasesResponse:
+      type: object
+      description: |
+        One observation of the coordinator clone's live lock leases. The
+        `live_leases` rows are the exact shape a dos_arbitrate-style arbiter
+        consumes as its `live_leases` input.
+      properties:
+        observed_unix: { type: integer, description: Unix seconds the coordinator read its own ref store. }
+        source: { type: string, description: Where the values were read from; carries the OBSERVED qualifier (never a relayed client claim). }
+        live_leases:
+          type: array
+          description: The non-expired leases, projected to the arbiter shape. Empty view is `[]`, never null.
+          items:
+            type: object
+            properties:
+              lane: { type: string, description: The lease id (the ref basename under refs/fak/locks/). }
+              lane_kind: { type: string, example: cluster, description: Always `cluster` — a refs/fak/locks record is a tree-scoped lease. }
+              tree:
+                type: array
+                items: { type: string }
+                description: The repo-relative tree globs the lease covers.
+
+    LeaseSessionsResponse:
+      type: object
+      description: |
+        One observation of cross-machine presence — live guard-session
+        descriptors plus each live lock lease classified by its owning
+        session's liveness (anonymous-reader view; nothing classifies `self`).
+      properties:
+        observed_unix: { type: integer, description: Unix seconds the coordinator read its own ref store. }
+        source: { type: string, description: Where the values were read from; carries the OBSERVED qualifier. }
+        sessions:
+          type: array
+          description: The live (non-expired) session descriptors under refs/fak/locks/session-*. Empty view is `[]`.
+          items:
+            type: object
+            properties:
+              id: { type: string, description: The session id (ref basename minus the session- prefix). }
+              host: { type: string, description: The node the session is live on. }
+              pcb_state: { type: string, description: RUNNING/THROTTLED/PAUSED/DRAINING/STOPPED. }
+              updated_at: { type: integer, description: Unix seconds of the last publish (the heartbeat clock). }
+              ttl_seconds: { type: integer, description: Descriptor lifetime; 0 never expires. }
+        classified_leases:
+          type: array
+          description: Every live lock lease tagged with its session-liveness class. Empty view is `[]`.
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              tree_globs: { type: array, items: { type: string } }
+              holder: { type: string }
+              session_id: { type: string }
+              generation: { type: integer }
+              liveness: { type: string, description: self | peer-live | peer-dead | peer-unknown. }
+              reclaimable: { type: boolean, description: True only on peer-dead (a positively dead owner); everything else fails closed. }
+              evidence: { type: string, description: The comparison that decided the class. }
 
     # ----- OpenAI chat wire ---------------------------------------------------
     ChatRequest:

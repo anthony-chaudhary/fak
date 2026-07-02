@@ -53,14 +53,14 @@ The continuous-usage surface is a small evidence bundle, not a transcript dump:
 
 | Surface | What it proves | Code anchor |
 |---|---|---|
-| Pinned objective | The active goal survived unchanged, or drift was detected | [`ctxplan.ObjectivePin`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/objective.go) |
-| Resident view plan | Which spans are resident, which are elided, and why | [`ctxplan.PlanView`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/query.go) |
-| Page-fault outcome | Whether a cold span was served back in or refused | [`ctxplan.PageFaultOutcome`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/pagefault.go) |
-| Reset transaction | What the reset carried, omitted, and rearmed | [`session.ResetTransaction`](https://github.com/anthony-chaudhary/fak/blob/main/internal/session/reset_transaction.go) |
-| Budget envelope | Which budget axis is near exhaustion or exhausted | [`session.Budget`](https://github.com/anthony-chaudhary/fak/blob/main/internal/session/session.go) |
-| Time budget | How wall-clock time carries across resets | [`session.TimeBudget`](https://github.com/anthony-chaudhary/fak/blob/main/internal/session/timebudget.go) |
-| Assumption report | Which assumptions can be used, queried, or refreshed | [`ctxplan.AssessAssumptions`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/assumption.go) |
-| Promotion record | Why a fact did or did not cross into durable memory | [`memq.PromotionRecord`](https://github.com/anthony-chaudhary/fak/blob/main/internal/memq/promotion.go) |
+| Pinned objective | The active goal survived unchanged, or drift was detected | [`ctxplan.ObjectivePin`](../internal/ctxplan/objective.go) |
+| Resident view plan | Which spans are resident, which are elided, and why | [`ctxplan.PlanView`](../internal/ctxplan/query.go) |
+| Page-fault outcome | Whether a cold span was served back in or refused | [`ctxplan.PageFaultOutcome`](../internal/ctxplan/pagefault.go) |
+| Reset transaction | What the reset carried, omitted, and rearmed | [`session.ResetTransaction`](../internal/session/reset_transaction.go) |
+| Budget envelope | Which budget axis is near exhaustion or exhausted | [`session.Budget`](../internal/session/session.go) |
+| Time budget | How wall-clock time carries across resets | [`session.TimeBudget`](../internal/session/timebudget.go) |
+| Assumption report | Which assumptions can be used, queried, or refreshed | [`ctxplan.AssessAssumptions`](../internal/ctxplan/assumption.go) |
+| Promotion record | Why a fact did or did not cross into durable memory | [`memq.PromotionRecord`](../internal/memq/promotion.go) |
 
 The intended product shape is simple: a long run can show the current objective, remaining
 budget envelope, active resident view, unresolved assumptions, last reset transaction, and
