@@ -1,0 +1,593 @@
+[
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"the tool call is a syscall\" \u2014 the one-page mental model",
+    "concepts": [
+      "syscall",
+      "capgate"
+    ],
+    "deliverable": "A single, tight explainer at `docs/explainers/tool-call-is-a-syscall.md` that teaches the core analogy from scratch: an OS kernel does not trust a user program's word that a write is safe \u2014 the syscall crosses a boundary the program does not control. fak does the same to the LLM. Open with the analogy, show the proposed-call -> verdict path, end with the one sentence a reader can repeat. ~600-900 words, one diagram reference (link to the B-dimension asset when it lands), zero jargon before it is defined.",
+    "why": "This is the keystone explainer. Everyone who 'gets' fak got it through this analogy; right now it is scattered across the README and llms.txt. A dedicated, linkable page is the thing people share when they explain fak to someone else.",
+    "acceptance": "File exists with SEO front-matter (`title:`/`description:`); linked from `docs/explainers/` index and `INDEX.md`; a non-expert can restate 'model proposes, kernel disposes' after reading; `python tools/seo_aeo_scorecard.py` does not regress.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"why default-deny beats a classifier\" for prompt injection",
+    "concepts": [
+      "capgate"
+    ],
+    "deliverable": "`docs/explainers/default-deny-vs-classifier.md`: why a capability lock that was never wired up cannot be argued past, whereas a recognizer that must *catch* an attack fails open. Use a concrete injected-prompt walk-through: the classifier approach vs the fak approach, same attack, different outcome. Tie to OWASP Agentic Top-10 / MCP Top-10 by name.",
+    "why": "The single most common objection is 'isn't this just a guardrail/classifier?'. A crisp explainer that draws the structural line converts skeptics and is citable in comparison threads.",
+    "acceptance": "File exists with front-matter; contains a before/after attack walk-through; names the OWASP and MCP top-10 items it addresses; linked from FAQ and explainers index.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"how a long agent session stops getting expensive\"",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`docs/explainers/long-session-economics.md`: plain-language account of why a growing transcript re-sends everything each turn, why the provider discount only survives while the prefix is byte-identical, and how splicing on original bytes (a memcpy, never a re-marshal) keeps the discount alive. Include the honest boundary: fak guarantees byte-identical prefix; the provider decides reuse.",
+    "why": "Cost is the emotional hook for the largest audience (anyone paying for long agent runs). A readable economics explainer turns an abstract cache claim into felt money saved.",
+    "acceptance": "File exists with front-matter; the honest 'fak relays the provider's number' fence is present; one worked cost example; linked from explainers index and `INDEX.md`.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"what DOS actually checks\" \u2014 the verify-don't-trust primer",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`docs/explainers/verify-dont-trust.md`: the DOS primer for a newcomer \u2014 a commit subject is forgeable, the diff is not; a 'done' claim is checked from git evidence; a refusal carries a reason from a closed vocabulary; a recalled memory is re-verified at read time. Ground each in the real verb (`dos verify`, `dos commit-audit`, `dos recall`).",
+    "why": "DOS is the most transferable idea (it works with zero fak internals) but the least explained to outsiders. A standalone primer makes the trust-substrate pitch portable to any agent-fleet audience.",
+    "acceptance": "File exists with front-matter; every claim maps to a real `dos` verb; a reader can name the three things DOS re-checks; linked from explainers index.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"the addressable KV cache in 5 minutes\" (concept, not internals)",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`docs/explainers/addressable-kv-cache-in-5-min.md`: a gentler on-ramp than the existing internals page \u2014 analogy first (a cache you can reach into and surgically edit vs a cache you can only append to), then the one property that matters (evict a poisoned span, cache stays bit-exact at `max|\u0394|=0`), then a link to the deep page for the mechanics.",
+    "why": "The existing addressable-KV page is correct but dense. A 5-minute version widens the funnel: the concept is genuinely novel-feeling to most readers and deserves an accessible door.",
+    "acceptance": "File exists with front-matter; strictly gentler than the existing page (defined terms, one analogy, no code); cross-links to the deep page; linked from explainers index.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"fak is not a serving engine\" \u2014 the honest boundary",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/explainers/what-fak-is-not.md`: a short, disarming page that says what fak does NOT do \u2014 it does not replace vLLM/SGLang/llama.cpp for raw tokens/sec; it fronts them for the agent boundary. State the 0/29-novel prior-art audit plainly and reframe it as the point (the contribution is the assembly). Detectors are evadable by design; the floor is the cap lock.",
+    "why": "Honesty is attractive and rare in this space. A page that volunteers the limits builds more trust than any hype page, and preempts the 'they're overclaiming' takedown.",
+    "acceptance": "File exists with front-matter; states the serving-engine boundary and the 0/29 audit without hedging; frames scope as a feature; linked from FAQ and explainers index.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): \"engineering is building loops\" \u2014 the worldview page, tightened",
+    "concepts": [
+      "syscall"
+    ],
+    "deliverable": "Tighten and elevate the existing `docs/explainers/engineering-is-building-loops.md` into a shareable manifesto-style piece: modern engineering is increasingly the act of building agentic loops (observe->orient->decide->act->verify), and fak is the kernel they run on. Cut to essentials, add a memorable close line, ensure it reads standalone.",
+    "why": "The worldview framing is the emotional/intellectual hook that makes fak feel inevitable rather than optional. A punchy version is the piece people quote in talks.",
+    "acceptance": "Edited page reads standalone (no prerequisite jargon), has a quotable closing line, and does not lose any existing accurate claim; SEO scorecard does not regress.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "A",
+    "title": "docs(explainer): a 12-term glossary of the fak/DOS vocabulary",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate"
+    ],
+    "deliverable": "`docs/explainers/glossary.md`: one-line, plain definitions for the vocabulary a newcomer trips on \u2014 verdict, capability floor, quarantine, addressable KV cache, bit-exact eviction, witness, lease/arbitration, refusal reason, recall re-verification, syscall boundary, prefix-cache discount, fail-closed. Each term links to its explainer.",
+    "why": "A shared vocabulary is how a concept spreads \u2014 people can only repeat what they can name. A glossary is also the highest-leverage SEO/AEO artifact (each term is a query).",
+    "acceptance": "File exists with front-matter; >=12 terms, each one line + a link; every linked target exists; linked from `INDEX.md` and explainers index.",
+    "lane": "docs-explainers"
+  },
+  {
+    "dim": "B",
+    "title": "docs(visual): the \"proposed call -> kernel -> verdict\" flow diagram (SVG)",
+    "concepts": [
+      "syscall",
+      "capgate"
+    ],
+    "deliverable": "A clean, brand-neutral SVG at `docs/adoption/diagrams/syscall-flow.svg` (+ a source `.md`/mermaid or the dataviz-skill palette) showing: agent proposes a tool call -> fak kernel adjudicates (ALLOW / DENY / TRANSFORM / REQUIRE_WITNESS) -> allowed call executes / denied call never runs / result passes quarantine before entering context. Light+dark safe.",
+    "why": "The syscall analogy is a picture in people's heads; giving them the actual picture makes it shareable in a slide, a README, a tweet. This is the single most reused asset.",
+    "acceptance": "SVG renders in light and dark; four verdict types shown; used in the syscall explainer and README; follows the dataviz skill's palette/accessibility rules.",
+    "lane": "docs-adoption-visuals"
+  },
+  {
+    "dim": "B",
+    "title": "docs(visual): before/after cost curve \u2014 long session with vs without fak",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "A chart asset at `docs/adoption/diagrams/cost-curve.svg` built from the existing `tools/cache_curve.py` output (calibrated to the measured 96.6% ceiling): billed prompt tokens per turn, naive re-send vs fak prefix-preserving, over a 50-turn session. Label the witnessed numbers; do NOT invent data.",
+    "why": "A cost curve is the most persuasive single image for the paying audience \u2014 it makes the KV-cache concept felt, not argued.",
+    "acceptance": "SVG generated from real `cache_curve.py` data (not hand-drawn numbers); axes/units labeled; witnessed-vs-modeled distinction visible; used in the long-session explainer.",
+    "lane": "docs-adoption-visuals"
+  },
+  {
+    "dim": "B",
+    "title": "docs(visual): the DOS \"forgeable vs witnessed\" two-column diagram",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`docs/adoption/diagrams/forgeable-vs-witnessed.svg`: two columns \u2014 LEFT 'what the agent says' (commit subject, 'tests pass', a recalled memory) marked forgeable; RIGHT 'what git proves' (the diff, the file set, ancestry) marked witnessed. A single arrow: DOS trusts the right, re-checks the left.",
+    "why": "The forgeable/witnessed split is the entire DOS thesis in one image. It is the asset that makes the verify-don't-trust idea instantly graspable.",
+    "acceptance": "SVG renders light+dark; the two columns and the trust arrow are unambiguous; used in the verify-don't-trust explainer.",
+    "lane": "docs-adoption-visuals"
+  },
+  {
+    "dim": "B",
+    "title": "docs(visual): the single-binary vs multi-process-stack contrast diagram",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/diagrams/single-binary.svg`: LEFT the usual governed-serving stack (reverse proxy + policy layer + audit sidecar + quarantine service, multi-process) vs RIGHT one fak box containing gateway + capability floor + quarantine + audit. Same responsibilities, one process.",
+    "why": "The operational-surface pitch ('you add flags, not components') is abstract until you see the box count collapse from five to one. This visual sells the ops story.",
+    "acceptance": "SVG renders light+dark; responsibilities are labeled identically on both sides so the collapse is the only difference; used in the README and the 'what fak is not' explainer.",
+    "lane": "docs-adoption-visuals"
+  },
+  {
+    "dim": "B",
+    "title": "docs(visual): a printable one-page \"fak concept card\" (PDF-ready)",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/concept-card.md` designed to render to a single page: the five concepts, each one sentence + a tiny icon/diagram reference, plus the install one-liner and the 60-second proof command. The thing you hand someone at a meetup.",
+    "why": "A one-pager is the physical/portable form of the pitch \u2014 conference tables, internal channels, onboarding decks. It forces the whole story to fit on one page, which sharpens it.",
+    "acceptance": "File renders cleanly to one page; all five concepts present in one sentence each; install one-liner and proof command are copy-pasteable and correct; linked from `INDEX.md`.",
+    "lane": "docs-adoption-visuals"
+  },
+  {
+    "dim": "C",
+    "title": "examples(demo): 60-second \"deny an irreversible call\" runnable proof (no key, no GPU)",
+    "concepts": [
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`examples/deny-in-60s/`: a self-contained script + README that, with only the fak binary and no provider credential or GPU, proposes an irreversible tool call, shows the kernel DENY verdict, and shows the same call ALLOWed under a permissive policy \u2014 proving the floor is structural. Uses the offline adjudication path.",
+    "why": "The fastest possible 'I saw it work' moment. A reader who runs one command and watches a dangerous call get refused is converted in under a minute \u2014 the highest-conversion asset.",
+    "acceptance": "Runs offline with no key/GPU; one command; prints the DENY then the ALLOW; README states the expected output; listed in the examples index.",
+    "lane": "examples-deny-in-60s"
+  },
+  {
+    "dim": "C",
+    "title": "examples(demo): \"catch an over-claiming commit\" \u2014 dos commit-audit in 60 seconds",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`examples/commit-audit-in-60s/`: a script that creates a throwaway git repo, makes a commit whose subject claims 'fix: handle nulls' but whose diff only edits a README, then runs `dos commit-audit` and shows the CLAIM_UNWITNESSED verdict \u2014 vs a commit that actually does what it says returning OK.",
+    "why": "This makes the verify-don't-trust idea concrete and self-serving: the reader watches a lie get caught from evidence. It also demonstrates DOS works on any git repo, zero fak internals.",
+    "acceptance": "Runs standalone (creates its own temp repo); shows both the caught claim and the clean commit; no network needed; README documents expected verdicts; in examples index.",
+    "lane": "examples-commit-audit-60s"
+  },
+  {
+    "dim": "C",
+    "title": "examples(demo): \"evict a poisoned span, cache stays bit-exact\" walkthrough",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`examples/addressable-evict/`: a runnable demonstration (or a faithful recorded transcript if it needs a model, clearly labeled) that evicts one span from a kept run and shows the post-eviction cache is bit-for-bit identical to a run that never saw it (`max|\u0394| = 0`).",
+    "why": "The addressable-KV claim is the most 'no one else does this' concept; a runnable proof of `max|\u0394|=0` is the demo that makes people believe it instead of nodding politely.",
+    "acceptance": "Either runs end-to-end, or ships a clearly-labeled recorded transcript with the exact command to reproduce; the `max|\u0394|=0` line is shown; README states requirements honestly; in index.",
+    "lane": "examples-addressable-evict"
+  },
+  {
+    "dim": "C",
+    "title": "examples(demo): \"quarantine a poisoned tool result\" before it enters context",
+    "concepts": [
+      "capgate"
+    ],
+    "deliverable": "`examples/quarantine-demo/`: feed a tool result shaped like a prompt-injection / secret-exfil into the result-admission path, show it comes back QUARANTINE with the bytes held out of context, and show the taint high-water mark rise so a later egress is gated.",
+    "why": "Prompt-injection is the fear that drives the most searching. A demo where the poison is structurally paged out \u2014 not classified \u2014 is the memorable proof of the containment story.",
+    "acceptance": "Runs offline; shows the QUARANTINE verdict and the withheld bytes; README explains what was injected and why structure (not a classifier) caught it; in examples index.",
+    "lane": "examples-quarantine-demo"
+  },
+  {
+    "dim": "C",
+    "title": "examples(demo): a browser-free interactive `fak` playground script",
+    "concepts": [
+      "syscall",
+      "binary"
+    ],
+    "deliverable": "`examples/playground/`: a single interactive shell/Go script that walks a first-timer through proposing several tool calls and reading the verdicts, with prompts ('now try an rm -rf \u2014 watch it get denied'). A guided REPL, not a wall of docs.",
+    "why": "Guided interactivity beats reading. A playground that narrates each verdict as the user pokes at it turns a passive reader into an active one, which is how concepts stick.",
+    "acceptance": "Runs offline with just the binary; guides through >=3 distinct verdicts; each step explains what happened; README lists it as 'try this first'; in examples index.",
+    "lane": "examples-playground"
+  },
+  {
+    "dim": "C",
+    "title": "docs(demo): an asciinema-style recorded terminal cast of the 60-second proof",
+    "concepts": [
+      "binary",
+      "capgate"
+    ],
+    "deliverable": "Record (as a checked-in cast file + a still frame, or a faithful annotated transcript) the install-to-first-verdict flow so a reader can watch it without running anything. Store under `docs/adoption/casts/`. Link from README's 'Start here'.",
+    "why": "A recorded cast is the zero-friction version of a demo \u2014 it plays in a browser or a README and gets the 'oh, that's it?' reaction that written steps cannot. High shareability.",
+    "acceptance": "Cast/transcript checked in; shows install -> first DENY verdict; annotated so it reads without audio; linked from README; honest about being a recording.",
+    "lane": "docs-adoption-casts"
+  },
+  {
+    "dim": "D",
+    "title": "docs(compare): \"fak vs a guardrails library\" honest side-by-side",
+    "concepts": [
+      "capgate"
+    ],
+    "deliverable": "`docs/adoption/compare/vs-guardrails.md`: a fair, sourced comparison against the guardrails class (Guardrails AI, NeMo Guardrails, LlamaGuard). Draw the line: they recognize/classify content (fail-open); fak is a default-deny capability gate on the call path (fail-closed). Give them their real strengths; state where each fits.",
+    "why": "The '#1 question' audiences ask is 'how is this different from X'. A fair comparison that concedes the other tool's strengths is more persuasive than a strawman and gets cited.",
+    "acceptance": "File exists with front-matter; each compared tool's real strength is stated; the fail-open vs fail-closed distinction is the spine; every factual claim about a competitor is sourced or hedged; in the compare index.",
+    "lane": "docs-adoption-compare"
+  },
+  {
+    "dim": "D",
+    "title": "docs(compare): \"fak vs vLLM/SGLang\" \u2014 different boundary, not a race",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/compare/vs-serving-engines.md`: the operational-surface positioning \u2014 fak does not compete on tokens/sec; it owns the governance band those engines leave open. Use the single-binary vs multi-process contrast. Explicitly recommend using vLLM/SGLang for raw throughput and fronting them with `fak serve`.",
+    "why": "Preempts the most damaging misread ('they claim to beat vLLM'). Positioning fak as a complement that recommends the incumbent is disarming and correct, and it widens the addressable audience to every vLLM user.",
+    "acceptance": "File exists with front-matter; explicitly says 'use vLLM for throughput, front it with fak'; no tokens/sec claim vs a serving engine; links the single-binary diagram; in compare index.",
+    "lane": "docs-adoption-compare"
+  },
+  {
+    "dim": "D",
+    "title": "docs(compare): \"fak vs an API gateway / LLM router\" (OpenRouter, Portkey, LiteLLM)",
+    "concepts": [
+      "syscall",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/compare/vs-routers.md`: routers pick *which model* per request; fak governs *which effects* per tool call and preserves cache legality. Show they compose (fak in front, route through). Reuse the honest categorical positioning already in `docs/integrations/routers.md`.",
+    "why": "Router users are a large, adjacent audience who will ask 'don't I already have this?'. Showing the layers are orthogonal (and composable) turns a perceived competitor into a recommended pairing.",
+    "acceptance": "File exists with front-matter; states the which-model vs which-effect distinction; shows the compose topology; consistent with `docs/integrations/routers.md`; in compare index.",
+    "lane": "docs-adoption-compare"
+  },
+  {
+    "dim": "D",
+    "title": "docs(compare): a one-glance capability matrix across the whole category",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate"
+    ],
+    "deliverable": "`docs/adoption/compare/matrix.md`: a single table \u2014 rows are capabilities (default-deny on-path, result quarantine, addressable KV eviction, commit-level verify, structured refusal, single-binary), columns are fak + the honest set of alternatives. Cells are yes/no/partial with a footnote/source each. No cell without a citation.",
+    "why": "A capability matrix is the artifact people screenshot and paste into buying discussions. It must be scrupulously fair or it backfires \u2014 done right, it is the highest-authority positioning asset.",
+    "acceptance": "File exists with front-matter; every 'no'/'partial' about a competitor has a source or an explicit 'unverified' tag; fak's own rows match CLAIMS.md honesty tags; in compare index.",
+    "lane": "docs-adoption-compare"
+  },
+  {
+    "dim": "D",
+    "title": "docs(compare): \"is this just a firewall?\" \u2014 the boundary FAQ, expanded",
+    "concepts": [
+      "capgate",
+      "syscall"
+    ],
+    "deliverable": "`docs/adoption/compare/vs-firewall.md`: expand the FAQ answer into a standalone page \u2014 a network firewall filters packets by rules on traffic it inspects; fak gates *effects* by capability on a path the model does not control, and it understands tool-call semantics a packet filter cannot. Same instinct, different layer.",
+    "why": "'Firewall' is the metaphor people reach for, and it is close enough to mislead. Owning the comparison (rather than fighting the word) lets fak borrow the firewall's credibility while drawing the real line.",
+    "acceptance": "File exists with front-matter; concedes the firewall analogy's usefulness before drawing the line; consistent with the FAQ; in compare index.",
+    "lane": "docs-adoption-compare"
+  },
+  {
+    "dim": "E",
+    "title": "docs(community): a CONTRIBUTING-friendly \"good first popularization tasks\" board",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`docs/adoption/good-first-tasks.md`: a curated list of small, well-scoped contributions a newcomer can make in an afternoon \u2014 fix a doc link, add a language to an i18n front door, write one comparison row, add an integration recipe for a harness we don't cover. Each entry has a difficulty tag and the file to touch.",
+    "why": "Popularity compounds through contributors, not just readers. A clear on-ramp for small wins is how an outside person becomes an invested one; it is the seed of a community.",
+    "acceptance": "File exists with front-matter; >=10 concrete tasks each naming the file and difficulty; linked from CONTRIBUTING.md and `INDEX.md`; every named file exists.",
+    "lane": "docs-adoption-community"
+  },
+  {
+    "dim": "E",
+    "title": "docs(community): a \"who is this for\" persona gallery with a quote-ready pitch each",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/personas.md`: for each top persona (the indie dev running one agent, the platform team hardening a fleet, the security reviewer, the researcher), a two-line 'this is why you specifically care' pitch and the one door to walk through first. Reuse the persona-readiness scorecard's roster.",
+    "why": "People adopt when they see themselves in the pitch. A persona gallery lets each visitor self-select the value prop that lands for them instead of reading a generic pitch.",
+    "acceptance": "File exists with front-matter; covers >=4 personas from the persona scorecard; each has a distinct pitch + a first-door link; consistent with `tools/persona_readiness_scorecard.py`; in `INDEX.md`.",
+    "lane": "docs-adoption-community"
+  },
+  {
+    "dim": "E",
+    "title": "docs(community): a testimonial/quote scaffold ready for real adopters (honest, empty-safe)",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/voices.md`: a structured, clearly-labeled scaffold for adopter quotes and case notes \u2014 with a template and an explicit 'no fabricated testimonials' rule and a placeholder that reads honestly while empty ('be the first \u2014 here's how to share your story'). NOT invented quotes.",
+    "why": "Social proof is decisive, but only if real. A disciplined scaffold that is honest while empty and ready to fill turns the first real adopter's story into an asset the moment it exists \u2014 without ever tempting fabrication.",
+    "acceptance": "File exists with front-matter; contains a submission template and an explicit anti-fabrication note; the empty state reads as an invitation, not a fake quote; in `INDEX.md`.",
+    "lane": "docs-adoption-community"
+  },
+  {
+    "dim": "E",
+    "title": "docs(community): a public roadmap / \"what we're building next\" reader-facing page",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`docs/adoption/roadmap.md`: a reader-facing (not internal) view of the near-term direction, derived honestly from the open epics (native harness, durable sessions, neo-silicon binding, cache default-on) with the now/next/future taxonomy from `docs/generation.md`. Label what is shipped vs planned.",
+    "why": "A visible roadmap signals momentum and invites people to bet on the project. It also gives the community a place to see themselves in the future of the tool, which drives stars/watch.",
+    "acceptance": "File exists with front-matter; every 'shipped' item is git-witnessed; 'planned' is labeled planned; consistent with `docs/generation.md` taxonomy; in `INDEX.md`.",
+    "lane": "docs-adoption-community"
+  },
+  {
+    "dim": "E",
+    "title": "docs(community): a code-of-conduct + welcoming issue/PR templates pass",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "Add or refine `.github/ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE.md` and a `CODE_OF_CONDUCT.md` so a first-time contributor lands in a structured, welcoming flow (bug/feature/adoption-story templates; a PR checklist that references the ship discipline). Keep it light, not bureaucratic.",
+    "why": "The GitHub-native welcome surface is the first thing a would-be contributor touches. A warm, structured intake is table-stakes social proof \u2014 its absence quietly signals 'not for outsiders'.",
+    "acceptance": "Templates exist and render on new-issue/new-PR; a code of conduct is present; the PR template references the commit/ship discipline; nothing blocks a trivial contribution behind heavy process.",
+    "lane": "github-community-templates"
+  },
+  {
+    "dim": "F",
+    "title": "docs(onramp): a \"copy one line, see one verdict\" hero quickstart above the fold",
+    "concepts": [
+      "binary",
+      "syscall"
+    ],
+    "deliverable": "Refine the top of `START-HERE.md` (and mirror the block into README) so the very first thing a reader sees is a single copy-pasteable command that installs and produces one adjudicated verdict \u2014 no key, no GPU, no config. Everything else moves below it.",
+    "why": "The first 30 seconds decide adoption. A hero command that yields a visible result before any reading is the highest-leverage DX change; every other doc improvement is downstream of this.",
+    "acceptance": "The first code block in START-HERE is a single working command that needs no key/GPU; running it prints a verdict; README mirrors it; the command is tested to exit 0 in CI or a smoke script.",
+    "lane": "docs-onramp"
+  },
+  {
+    "dim": "F",
+    "title": "feat(cli): `fak demo` \u2014 one verb that runs the 60-second proof self-contained",
+    "concepts": [
+      "syscall",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "A `fak demo` subcommand (pure logic in `internal/demo/`, thin shell in `cmd/fak/demo.go` per the Go-not-Python rule) that runs the canonical offline proof end to end: propose a safe call (ALLOW), an irreversible call (DENY), a poisoned result (QUARANTINE), printing a narrated verdict for each. Zero flags needed.",
+    "why": "Turning the demo into a first-class verb (not a script to find) removes all discovery friction \u2014 'just run `fak demo`' is the most repeatable onboarding instruction possible and belongs in every doc and talk.",
+    "acceptance": "`fak demo` runs offline with no args, no key, no GPU; prints ALLOW/DENY/QUARANTINE with a one-line narration each; has a table test; documented in START-HERE and CLI reference.",
+    "lane": "cmd-fak-demo"
+  },
+  {
+    "dim": "F",
+    "title": "docs(onramp): a troubleshooting/\"it didn't work\" page for the first five failures",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/troubleshooting-first-run.md`: the five most likely first-run failures (binary not on PATH, wrong base URL, missing key env for a keyed provider, policy denied the call you expected, port in use) each with the symptom, the cause, and the fix.",
+    "why": "The gap between 'ran the quickstart' and 'it worked' is where adopters silently churn. A targeted first-run troubleshooting page recovers the people who hit a wall and would otherwise leave without saying anything.",
+    "acceptance": "File exists with front-matter; covers >=5 concrete first-run failures with symptom/cause/fix; linked from START-HERE and GETTING-STARTED; in `INDEX.md`.",
+    "lane": "docs-onramp"
+  },
+  {
+    "dim": "F",
+    "title": "docs(onramp): a copy-paste \"put fak in front of Claude Code\" 3-step recipe up top",
+    "concepts": [
+      "binary",
+      "capgate"
+    ],
+    "deliverable": "Promote the Claude Code integration to a 3-step, copy-paste hero recipe (set base URL, launch, watch a verdict) at the top of `docs/integrations/claude.md`, with the full detail below. Because Claude Code is the most likely first harness, this is the highest-traffic recipe.",
+    "why": "The single most common adopter already runs Claude Code. A frictionless three-step recipe for that exact path converts the largest identifiable audience with the least reading.",
+    "acceptance": "The top of claude.md is 3 copy-paste steps that end in a visible verdict; the commands are correct against current flags; detail preserved below; linked from the integration index.",
+    "lane": "docs-integrations-claude"
+  },
+  {
+    "dim": "F",
+    "title": "docs(onramp): a \"install paths\" decision table (binary / go install / source / MCP)",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/install-paths.md`: a small decision table \u2014 'I just want to try it' -> prebuilt binary; 'I have Go' -> `go install`; 'I want to hack on it' -> from source; 'I use an MCP client' -> the one-paste `.mcp.json`. One correct command per row.",
+    "why": "Install ambiguity is silent friction. A decision table that routes each reader to their one correct command in a glance removes the 'which of these do I run' hesitation.",
+    "acceptance": "File exists with front-matter; >=4 rows each with a verified command; consistent with GETTING-STARTED and the MCP example; in `INDEX.md`.",
+    "lane": "docs-onramp"
+  },
+  {
+    "dim": "G",
+    "title": "docs(integration): a recipe for a harness we don't yet cover (Aider or Cline)",
+    "concepts": [
+      "binary",
+      "capgate"
+    ],
+    "deliverable": "Add `docs/integrations/aider.md` (or cline.md \u2014 pick the one with the clearer base-URL repoint) following the house recipe shape: which wire it speaks, the exact repoint key, a 3-step setup, and the honest interop grade. Add its row to the compatibility matrix.",
+    "why": "Each new first-party recipe converts that harness's entire user base from 'unsupported?' to 'drop-in'. Breadth of covered harnesses is directly the breadth of the addressable audience.",
+    "acceptance": "File exists with front-matter; states the wire + repoint key + 3 steps; a matrix row added with a source; consistent with `docs/integrations/compatibility-matrix.md`; in the integration index.",
+    "lane": "docs-integrations-newharness"
+  },
+  {
+    "dim": "G",
+    "title": "examples(integration): a runnable OpenAI-SDK \"set base URL\" minimal repo",
+    "concepts": [
+      "binary",
+      "syscall"
+    ],
+    "deliverable": "`examples/openai-sdk-minimal/`: the smallest possible working repo (one file + README) that points the official OpenAI SDK at `fak serve` and makes one governed call, showing the verdict in the trace. The universal 'set the base URL' recipe as running code.",
+    "why": "The 'set one base URL' claim is central and needs a runnable proof, not just prose. A minimal copy-me repo is what developers fork to start, making adoption a git-clone away.",
+    "acceptance": "Repo runs against a local `fak serve` (offline path documented); one file, clear README; shows the trace/verdict; listed in the examples index and the integration index.",
+    "lane": "examples-openai-sdk-minimal"
+  },
+  {
+    "dim": "G",
+    "title": "docs(integration): a docker-compose \"fak in front of Ollama\" copy-paste stack",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`examples/compose-ollama/`: a `docker-compose.yml` + README that brings up Ollama and `fak serve` in front of it with an allow-list and audit, so a reader gets a governed local model with one `docker compose up`. Reuse the deployment guide's compose patterns.",
+    "why": "Compose is how most developers try a multi-service stack. A one-command governed-local-model stack is a very high-conversion demo for the self-host audience and needs no cloud key.",
+    "acceptance": "`docker compose up` brings up both services; a governed call succeeds and an out-of-policy call is denied; README documents both; consistent with the deployment guide; in examples index.",
+    "lane": "examples-compose-ollama"
+  },
+  {
+    "dim": "G",
+    "title": "docs(integration): an \"adopt fak in an existing repo\" 10-minute migration checklist",
+    "concepts": [
+      "binary",
+      "dos"
+    ],
+    "deliverable": "`docs/adoption/adopt-in-your-repo.md`: a checklist for taking an existing agent project and putting fak in front in 10 minutes \u2014 repoint the base URL, choose a starter policy, wire the DOS trust gate into the runtime's hooks (`dos init --hooks auto .`), verify a verdict appears. Reuse the migration guide + the DOS one-command wire.",
+    "why": "The migration audience already has a working agent and the most to gain; a concrete 'adopt in your repo' checklist lowers the switching cost from 'a project' to 'an afternoon'.",
+    "acceptance": "File exists with front-matter; a numbered checklist ending in a verified verdict + a DOS gate firing; consistent with `docs/fak/migration-guide.md` and the DOS wire answer; in `INDEX.md`.",
+    "lane": "docs-adoption-migrate"
+  },
+  {
+    "dim": "H",
+    "title": "docs(bench-story): \"the 4x that's real\" \u2014 the tuned warm-cache result, told honestly",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`docs/adoption/stories/the-real-4x.md`: narrate the witnessed multi-agent reuse result (~4.1x fewer tokens vs a tuned warm-cache stack on the 50-turn x 5-agent run) as a story \u2014 the setup, what was measured, what the tuned baseline was, and why the honest number beats the naive 60x. Quote only witnessed figures.",
+    "why": "A benchmark becomes persuasive when it is a story with stakes and an honest baseline. Telling the *tuned* number (not the flattering naive one) is itself the credibility move that makes the audience trust every other number.",
+    "acceptance": "File exists with front-matter; every figure is witnessed and matches the bench docs; the tuned baseline is described; the naive vs tuned distinction is explicit; in the stories index.",
+    "lane": "docs-adoption-stories"
+  },
+  {
+    "dim": "H",
+    "title": "docs(bench-story): \"max|\u0394| = 0\" \u2014 the bit-exact eviction result as a claim you can check",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`docs/adoption/stories/bit-exact.md`: tell the addressable-KV eviction result as a falsifiable claim \u2014 here is what bit-exact means, here is the exact assertion (`max|\u0394| = 0`), here is the command/test that checks it, here is what would falsify it. Link the runnable demo (C-dimension).",
+    "why": "'No shipped serving engine offers this' is a strong claim; wrapping it in a checkable assertion and a repro command converts the strlength into credibility instead of skepticism.",
+    "acceptance": "File exists with front-matter; states the assertion, the check command, and the falsifier; links the addressable-evict example; no claim beyond what the test proves; in stories index.",
+    "lane": "docs-adoption-stories"
+  },
+  {
+    "dim": "H",
+    "title": "docs(bench-story): \"the cache cliff\" \u2014 why public prompt-cache hit rates mislead",
+    "concepts": [
+      "kvcache"
+    ],
+    "deliverable": "`docs/adoption/stories/cache-cliff.md`: a reader-facing retelling of the frozen-trajectory cache-cliff explainer as a story \u2014 the 96.6% hit rate is real but only because the trajectory is frozen; it decays toward 0% along editing, tool-call density, and cross-agent fan-out. Use the `cache_curve.py` demonstrator.",
+    "why": "This reframes a 'weakness' (fak's whole reason to exist) into an insight the reader did not have. Teaching someone why a headline number they trusted is misleading earns durable attention.",
+    "acceptance": "File exists with front-matter; the three decay axes are named; the 96.6% calibration is cited; consistent with the existing cache-cliff explainer; in stories index.",
+    "lane": "docs-adoption-stories"
+  },
+  {
+    "dim": "H",
+    "title": "docs(bench-story): \"~100% evadable, on purpose\" \u2014 the detector honesty story",
+    "concepts": [
+      "capgate"
+    ],
+    "deliverable": "`docs/adoption/stories/evadable-on-purpose.md`: tell the counterintuitive story that the result *detector* is ~100% evadable by design and that this is a strength \u2014 the floor is the capability lock plus containment, which do not depend on detection. Explain why a security story that concedes the detector is honest and stronger.",
+    "why": "Volunteering that a component is evadable is a striking honesty move that flips the usual security-marketing script. It makes the structural floor (which is not evadable) far more believable by contrast.",
+    "acceptance": "File exists with front-matter; clearly separates the evadable detector (bonus) from the non-evadable floor; consistent with the 'what fak is not' explainer; in stories index.",
+    "lane": "docs-adoption-stories"
+  },
+  {
+    "dim": "I",
+    "title": "docs(framing): a canonical \"pitch ladder\" \u2014 1 sentence / 1 paragraph / 1 page",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/pitch-ladder.md`: the same pitch at three zoom levels \u2014 one sentence (the tweet), one paragraph (the HN comment), one page (the blog intro) \u2014 each self-consistent and quotable. Anchor on 'treat the tool call like a syscall: the model proposes, the kernel disposes.'",
+    "why": "A concept spreads at the speed of its shortest correct expression. Giving advocates a ready-made pitch at each length means they repeat *our* framing instead of inventing a weaker one.",
+    "acceptance": "File exists with front-matter; three lengths present and mutually consistent; the one-sentence version is <=30 words and memorable; used as the source for README's lead; in `INDEX.md`.",
+    "lane": "docs-adoption-framing"
+  },
+  {
+    "dim": "I",
+    "title": "docs(framing): an \"objections & one-line answers\" card for advocates",
+    "concepts": [
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/objections.md`: the eight most common objections ('isn't this a classifier?', 'doesn't this slow the agent down?', 'why not just use vLLM?', 'is the security real if the detector is evadable?', 'another gateway?') each with a crisp one-to-two-line answer that links to the deeper page.",
+    "why": "Advocates win or lose the concept in comment threads. A pocket set of tight, correct rebuttals lets a supporter defend the idea in real time without misstating it \u2014 the difference between a concept that survives scrutiny and one that dies in a thread.",
+    "acceptance": "File exists with front-matter; >=8 objections each with a short answer + a deeper link; every answer is consistent with the explainers; in `INDEX.md`.",
+    "lane": "docs-adoption-framing"
+  },
+  {
+    "dim": "I",
+    "title": "docs(framing): the search-disambiguation \"how to find and name this\" note, reader-facing",
+    "concepts": [
+      "syscall",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/naming.md`: a short reader-facing note that the bare word 'fak' is dominated by homophone/acronym noise, so the concept travels under 'agent kernel', 'agent tool firewall', 'treat the tool call like a syscall'. Give people the terms to use when they search for or refer to it.",
+    "why": "A concept people cannot find is a concept that cannot spread. Teaching advocates the disambiguated terms (which also feed AEO) means word-of-mouth lands on findable language.",
+    "acceptance": "File exists with front-matter; lists the disambiguated terms from llms.txt; consistent with `internal/marketing/aeo.go`; in `INDEX.md`; SEO scorecard does not regress.",
+    "lane": "docs-adoption-framing"
+  },
+  {
+    "dim": "J",
+    "title": "docs(distribution): a \"Show HN / launch post\" draft kit (honest, ready-to-post)",
+    "concepts": [
+      "syscall",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/launch-kit.md`: a ready-to-adapt launch-post draft (title options, the opening hook, the honest what-it-is/what-it-isn't, the 60-second proof, the ask) plus a checklist of what must be true before posting (green CI, working quickstart, honest scope). Draft only \u2014 posting is human-owned.",
+    "why": "Launch moments are high-leverage but easy to fumble. A pre-written, honest launch kit means the moment a human decides to post, the strongest version is ready \u2014 and the honesty checklist prevents an over-claim that would backfire.",
+    "acceptance": "File exists with front-matter; contains a full draft + a pre-post checklist; every claim in the draft is witnessed/honest-scoped; explicitly marked human-owned to post; in `INDEX.md`.",
+    "lane": "docs-adoption-distribution"
+  },
+  {
+    "dim": "J",
+    "title": "docs(distribution): a social-thread / carousel storyboard for the five concepts",
+    "concepts": [
+      "syscall",
+      "dos",
+      "kvcache",
+      "capgate",
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/social-storyboard.md`: a storyboard for a short thread/carousel \u2014 one card per concept, each with a one-line hook + which diagram (B-dimension) illustrates it + a link. The reusable spine for any social push, referencing the visual assets so it is not text-only.",
+    "why": "Concepts spread on social in cards, not paragraphs. A storyboard that pairs each concept with its diagram gives an advocate a drop-in visual thread \u2014 far more shareable than a link to docs.",
+    "acceptance": "File exists with front-matter; five cards each with a hook + a diagram reference that exists (or is stubbed to the B ticket); no unwitnessed claim; in `INDEX.md`.",
+    "lane": "docs-adoption-distribution"
+  },
+  {
+    "dim": "J",
+    "title": "docs(distribution): a curated \"where to submit\" list of relevant awesome-lists & directories",
+    "concepts": [
+      "binary"
+    ],
+    "deliverable": "`docs/adoption/directories.md`: a maintained list of relevant awesome-lists, tool directories, and registries (LLM-tooling, agent-infra, security, MCP) with the current submission status for each (submitted / merged / not-yet / declined) \u2014 a checklist that prevents duplicate submissions and tracks reach. Reuse the awesome-list campaign state.",
+    "why": "Directory presence is durable, compounding discovery. A single tracked checklist prevents the duplicate-submission waste noted in the campaign memory and turns scattered outreach into a measurable surface.",
+    "acceptance": "File exists with front-matter; each directory has a status; consistent with the existing awesome-list campaign tracking; no duplicate-submission of an already-merged list; in `INDEX.md`.",
+    "lane": "docs-adoption-distribution"
+  },
+  {
+    "dim": "K",
+    "title": "feat(scorecard): a popularization-readiness scorecard (does the front door convert?)",
+    "concepts": [
+      "binary",
+      "syscall"
+    ],
+    "deliverable": "`tools/popularization_scorecard.py` following the scorecard doctrine: deterministic KPIs over the git-tracked tree measuring whether the popularization surface exists and is wired \u2014 a hero quickstart command present, `fak demo` documented, >=N explainers, the compare/matrix present, the concept card, the pitch ladder, every adoption doc reachable from `INDEX.md`, every claim honest-tagged. Emits the control-pane payload and a committed snapshot.",
+    "why": "You cannot improve popularity you cannot measure. A scorecard turns 'is the front door good?' into a debt integer that ratchets down over time and folds into the existing control pane \u2014 making this whole epic self-verifying and repeatable on a /loop.",
+    "acceptance": "Scorecard runs deterministically; emits `popularization_debt` + grade + control-pane payload; regenerates a snapshot with no diff on a clean tree; a missing hero command or an unreachable adoption doc raises debt; wired into `scorecard_control_pane.py`.",
+    "lane": "tools-popularization-scorecard"
+  },
+  {
+    "dim": "K",
+    "title": "docs(measurement): an adoption-signals dashboard spec (stars/forks/mentions, honest)",
+    "concepts": [
+      "dos"
+    ],
+    "deliverable": "`docs/adoption/signals.md`: define the honest, external adoption signals worth watching (stars/forks/watchers, directory listings merged, integration recipes shipped, distinct harnesses covered, docs reachable) and how each is collected \u2014 labeling each as a proxy, not proof of adoption, per the conflation discipline (witnessed vs observed).",
+    "why": "Vanity metrics mislead; a disciplined signals spec that labels each as a proxy keeps the team honest about whether popularity is actually rising and prevents a good-looking-number from masquerading as adoption.",
+    "acceptance": "File exists with front-matter; each signal labeled proxy/observed vs witnessed per the conflation discipline; a collection method per signal; consistent with `tools/conflation_scorecard.py`; in `INDEX.md`.",
+    "lane": "docs-adoption-measurement"
+  }
+]
