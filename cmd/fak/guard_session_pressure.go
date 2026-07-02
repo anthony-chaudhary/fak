@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
@@ -16,6 +17,7 @@ type guardSessionPressureGateConfig struct {
 	NamespacePrefix string
 	Roots           []string
 	Quiet           bool
+	ReportPath      string
 }
 
 func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateConfig) int {
@@ -52,6 +54,12 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 		fmt.Fprintf(stderr, "fak guard: invalid --session-pressure-gate %q (want high, medium, none, or off)\n", cfg.Threshold)
 		return 2
 	}
+	if cfg.ReportPath != "" {
+		if err := writeGuardSessionPressureReport(cfg.ReportPath, plan); err != nil {
+			fmt.Fprintf(stderr, "fak guard: --session-pressure-report: %v\n", err)
+			return 1
+		}
+	}
 	if plan.Gate.Verdict == "refuse" {
 		fmt.Fprintf(stderr, "fak guard: session pressure gate REFUSE threshold=%s refused=%d scope=%s\n",
 			plan.Gate.Threshold, plan.Gate.Refused, plan.Scope.NamespaceFilter)
@@ -70,4 +78,27 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 			plan.Gate.Threshold, plan.Counts.Total, plan.Scope.NamespaceFilter)
 	}
 	return 0
+}
+
+func writeGuardSessionPressureReport(path string, plan sessionaudit.CompactActionPlan) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if path == "-" {
+		return sessionaudit.WriteJSON(os.Stdout, plan)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	err = sessionaudit.WriteJSON(f, plan)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
