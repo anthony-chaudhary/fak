@@ -1,3 +1,18 @@
+// Package livecodebench adapts LiveCodeBench problem suites and run reports
+// into fak-native shapes.
+//
+// Schema constants:
+//   - SuiteSchema ("fak.livecodebench-suite.v1"): a normalized LCB problem
+//     suite (Suite/Problem/TestCase), release-pinned and contest-dated.
+//   - ReportSchema ("fak.livecodebench-report.v1"): a run report
+//     (Report/ArmResult/Summary) over a suite.
+//   - FixtureSchema ("fak.livecodebench.fixture.v1") and FixtureReportSchema
+//     ("fak.livecodebench.report.v1"): the committed CI smoke-fixture shapes.
+//
+// Honesty fence: pass-rate/result fields cannot be carried without a named
+// evidence class, and result_claim_allowed cannot be true unless the evidence
+// class is the official lcb_runner grading — a local run can never promote
+// itself into a claimable score.
 package livecodebench
 
 import (
@@ -10,8 +25,8 @@ import (
 )
 
 const (
-	FixtureSchema = "fak.livecodebench.fixture.v1"
-	ReportSchema  = "fak.livecodebench.report.v1"
+	FixtureSchema       = "fak.livecodebench.fixture.v1"
+	FixtureReportSchema = "fak.livecodebench.report.v1"
 )
 
 var RequiredScenarios = []string{
@@ -36,7 +51,7 @@ type FixtureItem struct {
 	CodeList   []string `json:"code_list,omitempty"`
 }
 
-type Report struct {
+type FixtureReport struct {
 	Schema             string           `json:"schema"`
 	FixtureSchema      string           `json:"fixture_schema"`
 	ReleaseVersion     string           `json:"release_version"`
@@ -106,7 +121,7 @@ func (f Fixture) Validate() error {
 	return nil
 }
 
-func SmokeReport(f Fixture) Report {
+func SmokeReport(f Fixture) FixtureReport {
 	counts := map[string]int{}
 	for _, item := range f.Items {
 		counts[item.Scenario]++
@@ -118,8 +133,8 @@ func SmokeReport(f Fixture) Report {
 		}
 		scenarios = append(scenarios, ScenarioReport{Scenario: name, Questions: counts[name]})
 	}
-	return Report{
-		Schema:             ReportSchema,
+	return FixtureReport{
+		Schema:             FixtureReportSchema,
 		FixtureSchema:      f.Schema,
 		ReleaseVersion:     f.ReleaseVersion,
 		StartDate:          f.StartDate,
@@ -127,7 +142,7 @@ func SmokeReport(f Fixture) Report {
 		Questions:          len(f.Items),
 		Scenarios:          scenarios,
 		ResultClaimAllowed: false,
-		EvidenceClass:      "fixture-smoke",
+		EvidenceClass:      EvidenceFixtureSmoke,
 		PromotionRequired: []string{
 			"official-lcb-runner-grading",
 			"release-version-and-date-window-recorded",
@@ -136,8 +151,8 @@ func SmokeReport(f Fixture) Report {
 	}
 }
 
-func ValidateSmokeReport(r Report) error {
-	if r.Schema != ReportSchema {
+func ValidateSmokeReport(r FixtureReport) error {
+	if r.Schema != FixtureReportSchema {
 		return fmt.Errorf("livecodebench report: schema = %q, want %q", r.Schema, ReportSchema)
 	}
 	if r.ResultClaimAllowed {
