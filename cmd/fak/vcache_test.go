@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
@@ -145,6 +146,71 @@ func TestRunVCacheStatusExplainsProviderOnlySnapshotContextGap(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "context MISSING (0 events)") {
 		t.Fatalf("text status did not explain missing context counters:\n%s", out.String())
+	}
+}
+
+func TestRunVCacheStatusIncludesRecentSessionSummary(t *testing.T) {
+	cfg := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "work", "fak")
+	if err := os.MkdirAll(workspace, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	ns := sessionaudit.ProjectNamespace(workspace)
+	writeSessionAuditJSONL(t, filepath.Join(cfg, "projects", ns, "heavy.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("opus", 200, 0, 900_000, 50_000, "claude-opus-4-8", ""),
+	})
+	writeSessionAuditJSONL(t, filepath.Join(cfg, "projects", ns, "fable.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("fable", 300, 0, 20_000, 1_000, "claude-fable-5", ""),
+	})
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+	})
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--json", "--sessions", "--session-days", "-1", "--session-max", "2"}); code != 0 {
+		t.Fatalf("status --sessions --json exit=%d stderr=%s", code, errb.String())
+	}
+	var rep vcacheStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.RecentSessions == nil {
+		t.Fatalf("recent session summary missing:\n%s", out.String())
+	}
+	summary := rep.RecentSessions
+	if summary.Scope.NamespaceFilter != ns || summary.Scope.Audited != 2 || summary.Totals.TotalContextTokens != 971_000 {
+		t.Fatalf("recent session summary = %+v", summary)
+	}
+	tiers := map[string]sessionaudit.CompactTier{}
+	for _, tier := range summary.Tiers {
+		tiers[tier.Tier] = tier
+	}
+	if tiers["fable"].OutputTokens != 300 || tiers["opus"].OutputTokens != 200 {
+		t.Fatalf("recent session tiers = %+v", summary.Tiers)
+	}
+	if len(summary.TopLongContext) == 0 || summary.TopLongContext[0].Session != "heavy" {
+		t.Fatalf("recent long-context rows = %+v", summary.TopLongContext)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"status", "--sessions", "--session-days", "-1", "--session-max", "2"}); code != 0 {
+		t.Fatalf("status --sessions exit=%d stderr=%s", code, errb.String())
+	}
+	text := out.String()
+	for _, want := range []string{"recent sessions:", "fable: output 300", "opus: output 200", "top long-context: heavy"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status --sessions missing %q:\n%s", want, text)
+		}
 	}
 }
 

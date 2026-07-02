@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
@@ -60,7 +62,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 
 func vcacheUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fak vcache status [--json]
+  fak vcache status [--json] [--sessions] [--session-days N] [--session-max N]
+                   [--session-ns-prefix PREFIX | --session-all]
   fak vcache prove [--json] [--anchor-tokens N] [--suffix-tokens N] [--requests N]
                    [--min-prefix-tokens N] [--read-mult F] [--write-mult F]
                    [--content public|secret|regulated]
@@ -118,19 +121,21 @@ managed-context lifecycle events (see internal/vcacheobserve.LifecycleEvent).
 }
 
 type vcacheStatusReport struct {
-	Status                 string                     `json:"status"`
-	Governor               string                     `json:"governor"`
-	Chains                 string                     `json:"chains"`
-	LiveProvider           string                     `json:"live_provider"`
-	Proof                  vcachegov.StarSavingsProof `json:"proof"`
-	RecallProof            vcachechain.RecallProof    `json:"recall_proof"`
-	CodexOpenAI            vcacheCodexOpenAIStatus    `json:"codex_openai"`
-	RecentObservation      *vcacheRecentObservation   `json:"recent_observation,omitempty"`
-	RecentObservationError string                     `json:"recent_observation_error,omitempty"`
-	M4Issue                string                     `json:"m4_issue"`
-	M5Issue                string                     `json:"m5_issue"`
-	Remaining              []vcacheRemainingIssue     `json:"remaining"`
-	CorrectnessLaw         string                     `json:"correctness_law"`
+	Status                 string                      `json:"status"`
+	Governor               string                      `json:"governor"`
+	Chains                 string                      `json:"chains"`
+	LiveProvider           string                      `json:"live_provider"`
+	Proof                  vcachegov.StarSavingsProof  `json:"proof"`
+	RecallProof            vcachechain.RecallProof     `json:"recall_proof"`
+	CodexOpenAI            vcacheCodexOpenAIStatus     `json:"codex_openai"`
+	RecentObservation      *vcacheRecentObservation    `json:"recent_observation,omitempty"`
+	RecentObservationError string                      `json:"recent_observation_error,omitempty"`
+	RecentSessions         *sessionaudit.CompactReport `json:"recent_sessions,omitempty"`
+	RecentSessionsError    string                      `json:"recent_sessions_error,omitempty"`
+	M4Issue                string                      `json:"m4_issue"`
+	M5Issue                string                      `json:"m5_issue"`
+	Remaining              []vcacheRemainingIssue      `json:"remaining"`
+	CorrectnessLaw         string                      `json:"correctness_law"`
 }
 
 type vcacheRemainingIssue struct {
@@ -176,11 +181,24 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("vcache status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit machine-readable status")
+	includeSessions := fs.Bool("sessions", false, "include compact recent Claude session summary scoped to this workspace")
+	sessionDays := fs.Float64("session-days", 7, "with --sessions, only include transcripts modified within N days")
+	sessionMax := fs.Int("session-max", 40, "with --sessions, maximum recent transcripts to summarize")
+	sessionNS := fs.String("session-ns-prefix", "", "with --sessions, namespace prefix to summarize (default: current workspace namespace)")
+	sessionAll := fs.Bool("session-all", false, "with --sessions, include all non-excluded namespaces instead of the current workspace namespace")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 
 	rep := defaultVCacheStatus()
+	if *includeSessions {
+		applyRecentSessionSummary(&rep, vcacheSessionSummaryOptions{
+			SinceDays:       *sessionDays,
+			Max:             *sessionMax,
+			NamespacePrefix: *sessionNS,
+			AllNamespaces:   *sessionAll,
+		})
+	}
 	if *asJSON {
 		return writeJSON(stdout, rep)
 	}
@@ -194,6 +212,11 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 			recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextStatus, recent.ContextEvents)
 	} else if rep.RecentObservationError != "" {
 		fmt.Fprintf(stdout, "recent snapshot: unreadable (%s)\n", rep.RecentObservationError)
+	}
+	if rep.RecentSessions != nil {
+		printVCacheSessionSummary(stdout, *rep.RecentSessions)
+	} else if rep.RecentSessionsError != "" {
+		fmt.Fprintf(stdout, "recent sessions: unreadable (%s)\n", rep.RecentSessionsError)
 	}
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
@@ -784,6 +807,90 @@ func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) 
 		return "WITNESSED", "snapshot includes fak_context_* counters from a guard/serve context event"
 	}
 	return "MISSING", "snapshot has provider-cache turns but no fak_context_* counters; it predates context instrumentation or no managed-context event fired"
+}
+
+type vcacheSessionSummaryOptions struct {
+	SinceDays       float64
+	Max             int
+	NamespacePrefix string
+	AllNamespaces   bool
+}
+
+func applyRecentSessionSummary(rep *vcacheStatusReport, opts vcacheSessionSummaryOptions) {
+	var since *float64
+	if opts.SinceDays >= 0 {
+		v := opts.SinceDays
+		since = &v
+	}
+	nsPrefix := strings.TrimSpace(opts.NamespacePrefix)
+	if opts.AllNamespaces {
+		nsPrefix = ""
+	} else if nsPrefix == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			rep.RecentSessionsError = fmt.Sprintf("current workspace namespace: %v", err)
+			return
+		}
+		nsPrefix = sessionaudit.ProjectNamespace(cwd)
+	}
+	discover := sessionaudit.DiscoverOptions{
+		SinceDays:       since,
+		NamespacePrefix: nsPrefix,
+	}
+	recs, err := sessionaudit.Discover(discover)
+	if err != nil {
+		rep.RecentSessionsError = err.Error()
+		return
+	}
+	totalDiscovered := len(recs)
+	if opts.Max > 0 && len(recs) > opts.Max {
+		recs = recs[:opts.Max]
+	}
+	sessions := make([]sessionaudit.Session, 0, len(recs))
+	for _, rec := range recs {
+		if rec.Kind == "subagent" {
+			continue
+		}
+		s := sessionaudit.Analyze(rec.Path)
+		s.Kind = rec.Kind
+		sessions = append(sessions, s)
+	}
+	agg := sessionaudit.AggregateSessions(sessions)
+	summary := sessionaudit.BuildCompactReport(sessions, agg, nsPrefix, since, false, opts.Max, totalDiscovered, nil, time.Now())
+	rep.RecentSessions = &summary
+}
+
+func printVCacheSessionSummary(w io.Writer, summary sessionaudit.CompactReport) {
+	fmt.Fprintf(w, "recent sessions: %d/%d sessions, scope %s, context %d tok, cache-read %.1f%%, I:O %.1f, cost $%.2f",
+		summary.Scope.Audited,
+		summary.Scope.Discovered,
+		summary.Scope.NamespaceFilter,
+		summary.Totals.TotalContextTokens,
+		100*summary.Totals.CacheReadShare,
+		summary.Totals.IORatio,
+		summary.Totals.EstimatedCostUSD)
+	if summary.Scope.Clipped {
+		fmt.Fprint(w, " (clipped)")
+	}
+	fmt.Fprintln(w)
+	for _, tier := range summary.Tiers {
+		if tier.Tier == "fable" || tier.Tier == "opus" {
+			fmt.Fprintf(w, "  %s: output %d (%.1f%%), cost $%.2f (%.1f%%)\n",
+				tier.Tier,
+				tier.OutputTokens,
+				100*tier.OutputShare,
+				tier.EstimatedCostUSD,
+				100*tier.CostShare)
+		}
+	}
+	if len(summary.TopLongContext) > 0 {
+		top := summary.TopLongContext[0]
+		fmt.Fprintf(w, "  top long-context: %s context %d tok, cache-read %.1f%%, model %s\n",
+			top.Session,
+			top.TotalContextTokens,
+			100*top.CacheReadShare,
+			top.TopModel)
+	}
 }
 
 func dominantVCacheGovernorDecision(families []vcacheobserve.Family) string {
