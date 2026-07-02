@@ -1849,7 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--markdown", action="store_true", help="emit the snapshot markdown body")
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
     ap.add_argument("--compare", default="", metavar="BASELINE.json",
-                    help="print the experience-frontier (+35% goal) and friction-debt delta vs a prior baseline JSON")
+                    help="print the experience-frontier (+35%% goal) and friction-debt delta vs a prior baseline JSON")
     args = ap.parse_args(argv)
 
     try:
