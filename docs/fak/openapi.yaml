@@ -801,8 +801,36 @@ paths:
         an actionability state (`noop`, `ready`, or `gated`). The surface is
         read-only: heartbeat and explicit-cache rows remain gated unless a caller
         has separate provider capability and byte-identical prefix evidence.
+        Optional query parameters carry that evidence and only change the plan's
+        readiness classification; they do not execute a provider call.
         Provider cache hits are still observed rebates, never correctness
         requirements.
+      parameters:
+        - name: heartbeat_transport
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Witness that the host can issue provider heartbeat refresh calls.
+        - name: explicit_cache_transport
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Witness that the provider exposes explicit cache create/delete controls.
+        - name: prefix_witness
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Witness that action candidates use a byte-identical observed prefix.
+        - name: deletion_capable
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Witness that explicit-cache entries can be deleted.
+        - name: transport_source
+          in: query
+          required: false
+          schema: { type: string }
+          description: Short label naming the source of the supplied transport witness.
       responses:
         '200':
           description: The current provider-cache action plan.

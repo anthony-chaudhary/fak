@@ -91,6 +91,8 @@ func vcacheUsage(w io.Writer) {
   fak vcache context-join [--transcript FILE]... [--telemetry FILE] --events FILE
                    [--json] [--before-millis N] [--after-millis N]
   fak vcache actions [--json] [--snapshot FILE|default|off] [--out FILE]
+                   [--heartbeat-transport] [--explicit-cache-transport]
+                   [--prefix-witness] [--deletion-capable] [--transport-source S]
   fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
                    [--snapshot-out FILE|default] [--score-out FILE] [--family NAME]
   fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]
@@ -142,7 +144,9 @@ actions renders the provider-cache action plan over a persisted observed-window
 snapshot. It maps each observed prefix family from the M5 Governor verdict to a
 concrete action row (ride_natural / heartbeat_pin / lazy_rebuild / evict_manifest /
 no_cache / explicit_cache) and labels rows noop, ready, or gated. This is a
-decision/API witness, not proof that a provider warm was spent.
+decision/API witness, not proof that a provider warm was spent. Transport flags are
+witness inputs only: a heartbeat/explicit-cache row becomes ready only when its
+required capability and byte-identical prefix evidence is supplied.
 
 `)
 }
@@ -336,6 +340,11 @@ func runVCacheActions(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable provider action plan")
 	snapshot := fs.String("snapshot", "default", "provider snapshot to read: FILE, default, or off")
 	out := fs.String("out", "", "write the JSON action plan to this file")
+	heartbeatTransport := fs.Bool("heartbeat-transport", false, "witness that the host can issue provider heartbeat refresh calls")
+	explicitCacheTransport := fs.Bool("explicit-cache-transport", false, "witness that the provider exposes explicit cache create/delete controls")
+	prefixWitness := fs.Bool("prefix-witness", false, "witness that action candidates use a byte-identical observed prefix")
+	deletionCapable := fs.Bool("deletion-capable", false, "witness that explicit-cache entries can be deleted")
+	transportSource := fs.String("transport-source", "", "short label for the transport witness source")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -351,7 +360,15 @@ func runVCacheActions(stdout, stderr io.Writer, argv []string) int {
 			turns = readTurns
 		}
 	}
-	plan := vcacheobserve.PlanProviderActions(turns, false)
+	plan := vcacheobserve.PlanProviderActionsWithOptions(turns, false, vcacheobserve.ProviderActionOptions{
+		Transport: vcacheobserve.ProviderTransportWitness{
+			HeartbeatTransport:     *heartbeatTransport,
+			ExplicitCacheTransport: *explicitCacheTransport,
+			ByteIdenticalPrefix:    *prefixWitness,
+			DeletionCapable:        *deletionCapable,
+			Source:                 strings.TrimSpace(*transportSource),
+		},
+	})
 	if strings.TrimSpace(*out) != "" {
 		if err := writeJSONFile(*out, plan); err != nil {
 			fmt.Fprintf(stderr, "fak vcache actions: write %q: %v\n", *out, err)
