@@ -45,20 +45,30 @@ const DefaultContextRel = "vcache-context-turns.jsonl"
 // "config dir, else .fak" convention guardDefaultAuditPath uses, so the snapshot lives
 // beside the decision journal and the cache-value ledger.
 func DefaultPath() string {
-	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
-		return filepath.Join(dir, "fak", DefaultRel)
-	}
-	return filepath.Join(".fak", DefaultRel)
+	return defaultSnapshotPath(DefaultRel)
 }
 
 // DefaultContextPath resolves the well-known context witness snapshot path. It follows
 // the same config-dir convention as DefaultPath, but uses a separate basename so the
 // provider-cache and context planes can be witnessed independently and composed later.
 func DefaultContextPath() string {
-	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
-		return filepath.Join(dir, "fak", DefaultContextRel)
+	return defaultSnapshotPath(DefaultContextRel)
+}
+
+func defaultSnapshotPath(rel string) string {
+	dir := strings.TrimSpace(userConfigDir())
+	if dir != "" {
+		return filepath.Join(dir, "fak", rel)
 	}
-	return filepath.Join(".fak", DefaultContextRel)
+	return filepath.Join(".fak", rel)
+}
+
+func userConfigDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 // ConfiguredPath resolves the automatic guard/serve snapshot target. It mirrors the
