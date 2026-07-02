@@ -32,6 +32,9 @@ func TestCountAttemptsAndLastLaunch(t *testing.T) {
 		{UnixSeconds: 200, Phase: "deferred"},
 		{UnixSeconds: 300, Phase: ""}, // a phase-less launcher row records a real spawn
 		{UnixSeconds: 400, Phase: "Considered"},
+		{UnixSeconds: 500, Phase: "queued"},
+		{UnixSeconds: 600, Phase: "status"},
+		{UnixSeconds: 700, Phase: "progress"},
 	}
 	if got := CountAttempts(history); got != 2 {
 		t.Errorf("CountAttempts = %d, want 2", got)
@@ -95,6 +98,14 @@ func TestRetryGateDefaultCap(t *testing.T) {
 	d := RetryGate(history, OutcomeRecoverable, 0)
 	if d.Blocked {
 		t.Fatalf("2 attempts under the default cap (%d) must not block: %q", DefaultMaxResumeAttempts, d.Reason)
+	}
+}
+
+func TestRetryGateIgnoresStatusOnlyLedgerRows(t *testing.T) {
+	history := []Attempt{{Phase: "queued"}, {Phase: "status"}, {Phase: "progress"}}
+	d := RetryGate(history, OutcomeUnknown, 8)
+	if d.Blocked {
+		t.Fatalf("status-only ledger rows must not burn the first launch: %q", d.Reason)
 	}
 }
 

@@ -99,7 +99,7 @@ type Attempt struct {
 // attempt, so counting it would burn a session's attempt budget on rows where nothing ran.
 func (a Attempt) IsLaunch() bool {
 	switch strings.ToLower(strings.TrimSpace(a.Phase)) {
-	case "deferred", "considered", "skipped":
+	case "deferred", "considered", "skipped", "gate_fail_open", "queued", "detected", "status", "tick", "snapshot", "progress":
 		return false
 	default:
 		return true
@@ -182,7 +182,7 @@ func RetryGate(history []Attempt, outcome Outcome, maxAttempts int) RetryDecisio
 	}
 	attempts := CountAttempts(history)
 	if attempts == 0 {
-		attempts = len(history)
+		return RetryDecision{Blocked: false, Reason: "first resume"}
 	}
 	if attempts >= maxAttempts {
 		return RetryDecision{Blocked: true, Reason: fmt.Sprintf("attempt cap reached (%d/%d)", attempts, maxAttempts)}
