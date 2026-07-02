@@ -31,11 +31,15 @@ def load():
     return mod
 
 
-def _assistant(msg_id, *, out, cread, ccreate, inp=0, tool=None, model="claude-opus-4-8"):
+def _assistant(msg_id, *, out, cread, ccreate, inp=0, tool=None, model="claude-opus-4-8",
+               tool_id=None, tool_input=None):
     """One assistant transcript record with a given message.id and usage."""
     content = []
     if tool:
-        content.append({"type": "tool_use", "name": tool, "input": {}})
+        blk = {"type": "tool_use", "name": tool, "input": tool_input or {}}
+        if tool_id:
+            blk["id"] = tool_id
+        content.append(blk)
     return {
         "type": "assistant",
         "timestamp": "2026-06-20T00:00:00.000Z",
@@ -51,6 +55,19 @@ def _assistant(msg_id, *, out, cread, ccreate, inp=0, tool=None, model="claude-o
             },
             "content": content,
         },
+    }
+
+
+def _user_result(tool_use_id, text, is_error=True):
+    """One user transcript record carrying a tool_result for a prior tool_use."""
+    return {
+        "type": "user",
+        "timestamp": "2026-06-20T00:00:01.000Z",
+        "message": {"content": [{
+            "type": "tool_result", "tool_use_id": tool_use_id,
+            "is_error": is_error,
+            "content": [{"type": "text", "text": text}],
+        }]},
     }
 
 
@@ -113,6 +130,66 @@ class DedupTest(unittest.TestCase):
         recs = [_assistant("msg-only", out=1_000, cread=0, ccreate=0)] * 3
         s = sa.analyze(_write_transcript(recs))
         self.assertAlmostEqual(s["cost_usd"], 1_000 * 75.0 / 1e6, places=9)
+
+
+class StreamingBlockLinesTest(unittest.TestCase):
+    """Newer transcripts stream ONE content block per line, all lines sharing the
+    billed turn's message.id. Usage must fold once per id (as before), but blocks
+    must be deduped by BLOCK identity — skipping dup lines wholesale undercounted
+    tool calls ~6x on real 2026-07 transcripts (39 counted vs 247 present)."""
+
+    def _turn_lines(self, mid, blocks, *, out=100):
+        rows = []
+        for blk in blocks:
+            r = _assistant(mid, out=out, cread=1_000, ccreate=100)
+            r["message"]["content"] = [blk]
+            rows.append(r)
+        return rows
+
+    def test_blocks_across_dup_lines_all_counted_usage_once(self) -> None:
+        sa = load()
+        recs = self._turn_lines("msg-S", [
+            {"type": "thinking", "thinking": "hmm"},
+            {"type": "text", "text": "doing it"},
+            {"type": "tool_use", "id": "tA", "name": "Bash", "input": {"command": "ls"}},
+            {"type": "tool_use", "id": "tB", "name": "Edit", "input": {"file_path": "x.go"}},
+            # a re-serialized repeat of an already-seen block must NOT recount
+            {"type": "tool_use", "id": "tA", "name": "Bash", "input": {"command": "ls"}},
+        ])
+        s = sa.analyze(_write_transcript(recs))
+        self.assertEqual(s["assistant_turns"], 1, "one billed turn")
+        self.assertEqual(s["tokens"]["output"], 100, "usage folded once")
+        self.assertEqual(s["n_tool_use"], 2, "blocks deduped by id, not by line")
+        self.assertEqual(s["tools"], {"Bash": 1, "Edit": 1})
+        self.assertEqual(s["n_thinking"], 1)
+        self.assertEqual(s["n_text"], 1)
+
+    def test_error_attribution_works_for_late_line_tool_use(self) -> None:
+        sa = load()
+        recs = self._turn_lines("msg-S", [
+            {"type": "thinking", "thinking": "hmm"},
+            {"type": "tool_use", "id": "tA", "name": "Bash",
+             "input": {"command": "git fetch"}},
+        ]) + [_user_result("tA", "Exit code 143 Command timed out after 2m 0s")]
+        s = sa.analyze(_write_transcript(recs))
+        self.assertEqual(s["behavior"]["tool_errors"], {"Bash": 1},
+                         "the tool_use arriving on a dup line must still map")
+        self.assertEqual(s["behavior"]["timeout_kills"], 1)
+
+    def test_trend_scan_counts_late_line_tool_use(self) -> None:
+        sa = load()
+        recs = self._turn_lines("msg-S", [
+            {"type": "thinking", "thinking": "hmm"},
+            {"type": "tool_use", "id": "tA", "name": "Bash",
+             "input": {"command": "sleep 10"}},
+        ])
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(d, "C--work-fak", "sess.jsonl", recs)
+            buckets, _ = sa.trend_scan([d], "", "day", False)
+        B = buckets["2026-06-20"]
+        self.assertEqual(B["assist_turns"], 1)
+        self.assertEqual(dict(B["tools"]), {"Bash": 1})
+        self.assertEqual(B["beh"]["sleep_polls"], 1)
 
 
 class WebActivityReportingTest(unittest.TestCase):
@@ -309,6 +386,151 @@ class BillingBucketTest(unittest.TestCase):
         self.assertIn("<synthetic>", s["per_model"])
         agg = sa.aggregate([s])
         self.assertEqual(sa.model_cost("<synthetic>", agg["per_model"]["<synthetic>"]), 0.0)
+
+
+class BehavioralLensTest(unittest.TestCase):
+    """The stuck/churn detectors from #2365 (+ file-mutation churn, the
+    edit/rewrite-loop signal no other layer catches). Every detector reads only
+    what the transcript carries; the token lens is untouched."""
+
+    def _one(self, recs):
+        sa = load()
+        s = sa.analyze(_write_transcript(recs))
+        self.assertNotIn("error", s)
+        return sa, s
+
+    def test_per_tool_errors_attributed_by_tool_use_id(self) -> None:
+        sa, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+            _user_result("t1", "Exit code 1\nboom"),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t2"),
+            _user_result("t2", "clean output", is_error=False),
+            _assistant("m3", out=10, cread=0, ccreate=0, tool="Grep", tool_id="t3"),
+            _user_result("t3", "Invalid regex"),
+        ])
+        self.assertEqual(s["behavior"]["tool_errors"], {"Bash": 1, "Grep": 1})
+        agg = sa.aggregate([s])
+        pt = agg["behavior"]["per_tool"]
+        self.assertEqual(pt["Bash"], {"calls": 2, "errors": 1, "error_rate": 0.5})
+        self.assertEqual(pt["Grep"]["error_rate"], 1.0)
+
+    def test_timeout_kills_shell_only(self) -> None:
+        _, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+            _user_result("t1", "Command timed out after 2m 0.0s"),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="PowerShell", tool_id="t2"),
+            _user_result("t2", "git fetch\nExit code: 143"),
+            _assistant("m3", out=10, cread=0, ccreate=0, tool="WebFetch", tool_id="t3"),
+            _user_result("t3", "Request timed out"),   # non-shell: not a harness kill
+        ])
+        self.assertEqual(s["behavior"]["timeout_kills"], 2)
+
+    def test_sleep_poll_prefix_foreground_only(self) -> None:
+        _, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1",
+                       tool_input={"command": "sleep 30 && curl localhost:8080"}),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="PowerShell", tool_id="t2",
+                       tool_input={"command": "Start-Sleep -Seconds 5; Get-Item x"}),
+            _assistant("m3", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t3",
+                       tool_input={"command": "echo sleep"}),
+            _assistant("m4", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t4",
+                       tool_input={"command": "sleep 60", "run_in_background": True}),
+        ])
+        self.assertEqual(s["behavior"]["sleep_polls"], 2,
+                         "prefix-anchored, foreground shell calls only")
+
+    def test_edit_write_churn_signatures(self) -> None:
+        sa, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Edit", tool_id="t1"),
+            _user_result("t1", "File has not been read yet. Read it first before writing to it."),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="Edit", tool_id="t2"),
+            _user_result("t2", "File has not been read yet."),
+            _assistant("m3", out=10, cread=0, ccreate=0, tool="Write", tool_id="t3"),
+            _user_result("t3", "File has been modified since read, either by the user or by a linter."),
+        ])
+        self.assertEqual(s["behavior"]["edit_churn"], {"not_read": 2, "stale_read": 1})
+        agg = sa.aggregate([s])
+        self.assertEqual(agg["behavior"]["wasted_mutation_calls"], 3)
+
+    def test_repeat_failure_signatures(self) -> None:
+        recs = []
+        for i in range(3):
+            recs += [_assistant(f"m{i}", out=10, cread=0, ccreate=0,
+                                tool="Bash", tool_id=f"t{i}"),
+                     _user_result(f"t{i}", "Exit code 1")]
+        recs += [_assistant("mx", out=10, cread=0, ccreate=0, tool="Bash", tool_id="tx"),
+                 _user_result("tx", "Exit code 2")]
+        _, s = self._one(recs)
+        b = s["behavior"]
+        self.assertEqual(b["max_repeat_failure"], 3)
+        self.assertEqual(b["repeat_failures"],
+                         [{"tool": "Bash", "sig": "Exit code 1", "count": 3}])
+
+    def test_two_identical_failures_stay_below_threshold(self) -> None:
+        _, s = self._one([
+            _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1"),
+            _user_result("t1", "Exit code 1"),
+            _assistant("m2", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t2"),
+            _user_result("t2", "Exit code 1"),
+        ])
+        self.assertEqual(s["behavior"]["repeat_failures"], [])
+        self.assertEqual(s["behavior"]["max_repeat_failure"], 2)
+
+    def test_file_churn_same_file_mutations(self) -> None:
+        recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
+                           tool_id=f"t{i}", tool_input={"file_path": "C:/x/hot.go"})
+                for i in range(5)]
+        recs.append(_assistant("m9", out=10, cread=0, ccreate=0, tool="Edit",
+                               tool_id="t9", tool_input={"file_path": "C:/x/cold.go"}))
+        _, s = self._one(recs)
+        b = s["behavior"]
+        self.assertEqual(b["max_file_churn"], 5)
+        self.assertEqual(b["file_churn"], [{"file": "C:/x/hot.go", "count": 5}])
+
+    def test_duplicated_assistant_lines_do_not_double_detectors(self) -> None:
+        # The same billed turn re-serialized 3x: one sleep-poll, one file write.
+        recs = [_assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1",
+                           tool_input={"command": "sleep 9"})] * 3
+        _, s = self._one(recs)
+        self.assertEqual(s["behavior"]["sleep_polls"], 1)
+
+    def test_report_md_behavioral_section(self) -> None:
+        recs = []
+        for i in range(3):
+            recs += [_assistant(f"m{i}", out=10, cread=0, ccreate=0,
+                                tool="Bash", tool_id=f"t{i}",
+                                tool_input={"command": "sleep 5"}),
+                     _user_result(f"t{i}", "Command timed out after 2m 0.0s")]
+        sa, s = self._one(recs)
+        md = sa.report_md([s], sa.aggregate([s]))
+        self.assertIn("## Behavioral lens — stuck/churn detectors", md)
+        self.assertIn("| Bash | 3 | 3 | 100.0% |", md)
+        self.assertIn("Timeout kills", md)
+        self.assertIn("**Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** 3", md)
+        self.assertIn("repeated identical failure", md)
+        self.assertIn("Command timed out after 2m 0.0s", md)
+
+    def test_aggregate_tolerates_pre_lens_sessions(self) -> None:
+        sa, s = self._one([_assistant("m1", out=10, cread=0, ccreate=0, tool="Bash")])
+        del s["behavior"]   # a session replayed from pre-lens JSON
+        agg = sa.aggregate([s])
+        self.assertEqual(agg["behavior"]["timeout_kills"], 0)
+        self.assertEqual(agg["behavior"]["per_tool"]["Bash"]["errors"], 0)
+
+    def test_trend_scan_folds_behavior_per_bucket(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(d, "C--work-fak", "sess.jsonl", [
+                _assistant("m1", out=10, cread=0, ccreate=0, tool="Bash", tool_id="t1",
+                           tool_input={"command": "sleep 30"}),
+                _user_result("t1", "Command timed out after 2m 0.0s"),
+            ])
+            buckets, n = sa.trend_scan([d], "", "day", False)
+        self.assertEqual(n, 1)
+        B = buckets["2026-06-20"]
+        self.assertEqual(dict(B["tool_errors"]), {"Bash": 1})
+        self.assertEqual(B["beh"]["timeout_kills"], 1)
+        self.assertEqual(B["beh"]["sleep_polls"], 1)
 
 
 if __name__ == "__main__":

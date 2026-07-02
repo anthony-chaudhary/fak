@@ -25,6 +25,12 @@ Usage:
 All numbers from token usage are EXACT. Cost uses the PRICING table below (an ASSUMPTION,
 clearly flagged) — edit it to match current rates; token counts are the ground truth.
 
+Besides the token/cost lens, every subcommand also runs the BEHAVIORAL lens (#2365):
+per-tool call/error counts and error rate, shell timeout kills (exit 143 / "timed
+out"), foreground sleep-polls, Edit/Write read-discipline churn, repeated identical
+failure signatures, and per-file mutation churn — the stuck/churn half a token-only
+audit can't see.
+
 Cost is split by BILLING BUCKET (provider): claude-* is the Anthropic invoice; a gemini-*
 / gpt-* / local model is a different invoice. The auditor never sums cost across buckets
 and never prices a non-Claude model at Claude rates — an unpriced model is reported with
@@ -32,6 +38,7 @@ exact tokens but no fabricated cost. <synthetic> (harness-injected) is non-bille
 """
 import sys
 import os
+import re
 import json
 import glob
 import argparse
@@ -94,6 +101,105 @@ READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS", "NotebookRead", "WebFetch", "We
                    "ReadMcpResourceTool", "ListMcpResourcesTool", "ReadMcpResourceDirTool"}
 # Bash/Edit/Write/NotebookEdit/TaskCreate/TaskUpdate/TaskStop/Workflow/etc. are
 # side-effecting or spawn.
+
+# --- behavioral lens (#2365): stuck / churn detectors -------------------------
+# All detectors read ONLY what the transcript already carries (tool_use inputs +
+# errored tool_results); none of them re-run anything or read the process table.
+SHELL_TOOLS = {"Bash", "PowerShell"}
+# A shell result that was killed by the harness deadline: SIGTERM exit 143 or the
+# harness "timed out" phrasing. \W{0,3} absorbs ':'/': ' variants between
+# "code"/"status" and the number.
+TIMEOUT_KILL_RE = re.compile(r"exit (?:code|status)\W{0,3}143\b|timed out",
+                             re.IGNORECASE)
+# A foreground shell call whose command *starts* with a sleep is a poll — the
+# turn is blocked doing nothing (background sleeps are fine, they don't block).
+SLEEP_POLL_RE = re.compile(r"^\s*(?:sleep|start-sleep)\b", re.IGNORECASE)
+# Edit/Write churn: mutation calls wasted on read-before-write discipline.
+EDIT_CHURN_SIGNATURES = {
+    "not_read":   "File has not been read yet",
+    "stale_read": "has been modified since read",
+}
+MUTATION_TOOLS = {"Edit", "Write", "NotebookEdit"}
+# The same failure signature repeated this often in one session is a stuck loop;
+# the same file mutated this often is a rewrite/flip-flop loop.
+REPEAT_FAILURE_MIN = 3
+FILE_CHURN_MIN = 5
+
+def _txt_str(content, cap=4000):
+    """Flatten a content field (str or list of blocks) to text, capped at `cap`."""
+    if isinstance(content, str):
+        return content[:cap]
+    if isinstance(content, list):
+        parts, n = [], 0
+        for b in content:
+            if n >= cap:
+                break
+            if isinstance(b, dict):
+                s = _txt_str(b.get("content", b.get("text", "")), cap - n)
+            elif isinstance(b, str):
+                s = b[:cap - n]
+            else:
+                continue
+            parts.append(s)
+            n += len(s)
+        return "".join(parts)
+    return ""
+
+class BehaviorLens:
+    """Per-transcript stuck/churn detectors (#2365). Fed one tool_use /
+    tool_result at a time (post de-dup); `summary()` emits one plain dict:
+    per-tool error counts, timeout kills, foreground sleep-polls, Edit/Write
+    read-discipline churn, repeated identical failure signatures, and per-file
+    mutation churn (the edit/rewrite-loop signal nothing else catches)."""
+
+    def __init__(self):
+        self.errors = collections.Counter()        # tool -> errored results
+        self.timeout_kills = 0
+        self.sleep_polls = 0
+        self.edit_churn = collections.Counter()    # not_read / stale_read
+        self.failure_sigs = collections.Counter()  # (tool, signature) -> n
+        self.file_writes = collections.Counter()   # file_path -> mutation calls
+
+    def see_tool_use(self, name, tool_input):
+        ti = tool_input if isinstance(tool_input, dict) else {}
+        if name in SHELL_TOOLS and not ti.get("run_in_background") \
+                and SLEEP_POLL_RE.match(ti.get("command") or ""):
+            self.sleep_polls += 1
+        if name in MUTATION_TOOLS:
+            path = ti.get("file_path") or ti.get("notebook_path")
+            if path:
+                self.file_writes[path] += 1
+
+    def see_tool_result(self, tool, is_error, text):
+        if not is_error:
+            return
+        self.errors[tool] += 1
+        if tool in SHELL_TOOLS and TIMEOUT_KILL_RE.search(text):
+            self.timeout_kills += 1
+        for key, sig in EDIT_CHURN_SIGNATURES.items():
+            if sig in text:
+                self.edit_churn[key] += 1
+        self.failure_sigs[(tool, " ".join(text.split())[:160])] += 1
+
+    def summary(self):
+        repeats = sorted(({"tool": t, "sig": sig, "count": n}
+                          for (t, sig), n in self.failure_sigs.items()
+                          if n >= REPEAT_FAILURE_MIN),
+                         key=lambda r: -r["count"])
+        hot_files = sorted(({"file": f, "count": n}
+                            for f, n in self.file_writes.items()
+                            if n >= FILE_CHURN_MIN),
+                           key=lambda r: -r["count"])
+        return {
+            "tool_errors": dict(self.errors),
+            "timeout_kills": self.timeout_kills,
+            "sleep_polls": self.sleep_polls,
+            "edit_churn": dict(self.edit_churn),
+            "repeat_failures": repeats[:10],
+            "max_repeat_failure": max(self.failure_sigs.values(), default=0),
+            "file_churn": hot_files[:10],
+            "max_file_churn": max(self.file_writes.values(), default=0),
+        }
 
 def price_for(model):
     """Rate card for a model, or None when we hold no card for its billing bucket.
@@ -220,6 +326,13 @@ def analyze(path):
     # disagree on usage among its duplicate lines. De-dup on it; only id-less
     # lines (defensive — none seen in practice) are counted individually.
     seen_msg_ids = set()
+    # Content blocks are deduped by BLOCK identity, not line identity: newer
+    # transcripts stream ONE block per line under a shared message.id (skipping
+    # dup lines wholesale undercounted tool calls ~6x there), while older ones
+    # repeat the FULL content array on every duplicate line.
+    seen_blocks = set()
+    lens = BehaviorLens()
+    tooluse_names = {}   # tool_use id -> tool name, to attribute tool_results
 
     try:
         with open(path, encoding="utf-8") as f:
@@ -245,47 +358,72 @@ def analyze(path):
         if t == "assistant":
             msg = r.get("message", {}) or {}
             mid = msg.get("id")
+            new_turn = True
             if mid is not None:
                 if mid in seen_msg_ids:
                     dup_assistant_lines += 1
-                    continue          # already folded this billed turn
-                seen_msg_ids.add(mid)
-            assistant_turns += 1
-            models[msg.get("model", "?")] += 1
-            u = msg.get("usage", {}) or {}
-            inp = u.get("input_tokens", 0) or 0
-            out = u.get("output_tokens", 0) or 0
-            cr  = u.get("cache_read_input_tokens", 0) or 0
-            cc  = u.get("cache_creation_input_tokens", 0) or 0
-            stu = u.get("server_tool_use", {}) or {}
-            tok["input"] += inp
-            tok["output"] += out
-            tok["cache_read"] += cr
-            tok["cache_create"] += cc
-            tok["web_search"] += stu.get("web_search_requests", 0) or 0
-            tok["web_fetch"]  += stu.get("web_fetch_requests", 0) or 0
-            tok["iterations"] += len(u.get("iterations", []) or [])
-            cost += cost_usd(msg.get("model"), inp, cc, cr, out)
-            pm = per_model[msg.get("model", "?")]
-            pm["turns"] += 1
-            pm["input"] += inp
-            pm["output"] += out
-            pm["cache_read"] += cr
-            pm["cache_create"] += cc
+                    new_turn = False   # usage already folded; blocks may be new
+                else:
+                    seen_msg_ids.add(mid)
+            if new_turn:
+                assistant_turns += 1
+                models[msg.get("model", "?")] += 1
+                u = msg.get("usage", {}) or {}
+                inp = u.get("input_tokens", 0) or 0
+                out = u.get("output_tokens", 0) or 0
+                cr  = u.get("cache_read_input_tokens", 0) or 0
+                cc  = u.get("cache_creation_input_tokens", 0) or 0
+                stu = u.get("server_tool_use", {}) or {}
+                tok["input"] += inp
+                tok["output"] += out
+                tok["cache_read"] += cr
+                tok["cache_create"] += cc
+                tok["web_search"] += stu.get("web_search_requests", 0) or 0
+                tok["web_fetch"]  += stu.get("web_fetch_requests", 0) or 0
+                tok["iterations"] += len(u.get("iterations", []) or [])
+                cost += cost_usd(msg.get("model"), inp, cc, cr, out)
+                pm = per_model[msg.get("model", "?")]
+                pm["turns"] += 1
+                pm["input"] += inp
+                pm["output"] += out
+                pm["cache_read"] += cr
+                pm["cache_create"] += cc
+            dedup_blocks = mid is not None
             for b in (msg.get("content") or []):
                 if not isinstance(b, dict):
                     continue
                 bt = b.get("type")
                 if bt == "tool_use":
+                    key = b.get("id") or (mid, "tool_use", b.get("name"),
+                                          json.dumps(b.get("input", {}),
+                                                     sort_keys=True, default=str))
+                    if dedup_blocks:
+                        if key in seen_blocks:
+                            continue
+                        seen_blocks.add(key)
                     n_tool_use += 1
-                    tools[b.get("name", "?")] += 1
+                    name = b.get("name", "?")
+                    tools[name] += 1
                     tool_input_chars += _txt_len(b.get("input", {}))
-                elif bt == "thinking":
-                    n_thinking += 1
-                elif bt == "text":
-                    n_text += 1
+                    if b.get("id"):
+                        tooluse_names[b["id"]] = name
+                    lens.see_tool_use(name, b.get("input"))
+                elif bt in ("thinking", "text"):
+                    body = b.get("thinking") if bt == "thinking" else b.get("text")
+                    key = (mid, bt, hash(body if isinstance(body, str) else str(body)))
+                    if dedup_blocks:
+                        if key in seen_blocks:
+                            continue
+                        seen_blocks.add(key)
+                    if bt == "thinking":
+                        n_thinking += 1
+                    else:
+                        n_text += 1
             if r.get("interruptedMessageId") or msg.get("stop_reason") == "interrupted":
-                interrupted += 1
+                key = (mid, "interrupted")
+                if not dedup_blocks or key not in seen_blocks:
+                    seen_blocks.add(key)
+                    interrupted += 1
         elif t == "user":
             msg = r.get("message", {}) or {}
             content = msg.get("content")
@@ -294,6 +432,10 @@ def analyze(path):
                     if isinstance(b, dict) and b.get("type") == "tool_result":
                         n_tool_result += 1
                         tool_result_chars += _txt_len(b.get("content", ""))
+                        lens.see_tool_result(
+                            tooluse_names.get(b.get("tool_use_id"), "?"),
+                            bool(b.get("is_error")),
+                            _txt_str(b.get("content", "")))
             elif _looks_like_typed_prompt(content) and not r.get("isMeta"):
                 prompts.append((ts, content.strip()[:400]))
 
@@ -325,6 +467,7 @@ def analyze(path):
         "tokens": tok, "total_input_tokens": total_in,
         "io_ratio": io_ratio, "cache_hit_frac": cache_hit,
         "cost_usd": cost, "ts_min": ts_min, "ts_max": ts_max, "wall_s": wall,
+        "behavior": lens.summary(),
     }
 
 def _pct(xs, p):
@@ -377,8 +520,39 @@ def aggregate(sessions):
     ios   = [s["io_ratio"] for s in S if s["io_ratio"]]
     chf   = [s["cache_hit_frac"] for s in S if s["cache_hit_frac"] is not None]
     rof   = [s["read_only_frac"] for s in S if s["read_only_frac"] is not None]
+    # behavioral rollup (#2365) — tolerate sessions replayed from pre-lens JSON
+    beh_errors = collections.Counter()
+    beh_churn = collections.Counter()
+    beh_timeouts = beh_sleeps = 0
+    repeat_rows, filechurn_rows = [], []
+    for s in S:
+        b = s.get("behavior") or {}
+        beh_errors.update(b.get("tool_errors", {}))
+        beh_churn.update(b.get("edit_churn", {}))
+        beh_timeouts += b.get("timeout_kills", 0)
+        beh_sleeps += b.get("sleep_polls", 0)
+        ns = os.path.basename(os.path.dirname(s["path"]))
+        for r in (b.get("repeat_failures") or [])[:1]:
+            repeat_rows.append({"session": s["session"], "ns": ns, **r})
+        for r in (b.get("file_churn") or [])[:1]:
+            filechurn_rows.append({"session": s["session"], "ns": ns, **r})
+    per_tool_beh = {t: {"calls": tot_tools.get(t, 0),
+                        "errors": beh_errors.get(t, 0),
+                        "error_rate": (beh_errors.get(t, 0) / tot_tools[t])
+                                      if tot_tools.get(t) else None}
+                    for t in set(tot_tools) | set(beh_errors)}
+    behavior = {
+        "per_tool": per_tool_beh,
+        "timeout_kills": beh_timeouts,
+        "sleep_polls": beh_sleeps,
+        "edit_churn": dict(beh_churn),
+        "wasted_mutation_calls": sum(beh_churn.values()),
+        "repeat_failure_sessions": sorted(repeat_rows, key=lambda r: -r["count"])[:10],
+        "file_churn_sessions": sorted(filechurn_rows, key=lambda r: -r["count"])[:10],
+    }
     return {
         "n_sessions": len(S), "totals": dict(tot), "total_cost_usd": tot_cost,
+        "behavior": behavior,
         "tool_mix": dict(tot_tools.most_common()),
         "per_namespace": {k: dict(v) for k, v in ns_roll.items()},
         "per_namespace_cost": dict(ns_cost),
@@ -555,6 +729,55 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
         L.append(f"| {name} | {fmt_int(n)} | {'✓' if name in READ_ONLY_TOOLS else ''} |")
     L.append("")
 
+    # Behavioral lens (#2365) — the stuck/churn half the token lens can't see.
+    beh = agg.get("behavior") or {}
+    if beh:
+        L.append("## Behavioral lens — stuck/churn detectors\n")
+        pt = beh.get("per_tool", {})
+        with_calls = sorted((t for t in pt if pt[t]["calls"]),
+                            key=lambda t: -pt[t]["calls"])
+        show = with_calls[:12] + [t for t in pt
+                                  if pt[t]["errors"] and t not in with_calls[:12]]
+        L.append("| Tool | Calls | Errors | Error rate |")
+        L.append("|---|---:|---:|---:|")
+        for t in show:
+            v = pt[t]
+            L.append(f"| {t} | {fmt_int(v['calls'])} | {fmt_int(v['errors'])} | "
+                     f"{fmt_pct(v['error_rate'])} |")
+        churn = beh.get("edit_churn", {})
+        L.append("")
+        L.append(f"- **Timeout kills (shell result matched exit-143 / \"timed out\"):** "
+                 f"{fmt_int(beh.get('timeout_kills', 0))}")
+        L.append(f"- **Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** "
+                 f"{fmt_int(beh.get('sleep_polls', 0))}")
+        L.append(f"- **Edit/Write churn (wasted mutation calls):** "
+                 f"{fmt_int(beh.get('wasted_mutation_calls', 0))}  "
+                 f"(not-read {fmt_int(churn.get('not_read', 0))} · "
+                 f"stale-read {fmt_int(churn.get('stale_read', 0))})")
+        rep = beh.get("repeat_failure_sessions") or []
+        L.append(f"- **Sessions with a repeated identical failure "
+                 f"(≥{REPEAT_FAILURE_MIN}× same signature):** {len(rep)}"
+                 + (" — worst below" if rep else ""))
+        if rep:
+            L.append("")
+            L.append("| Session | NS | Tool | × | Failure signature |")
+            L.append("|---|---|---|---:|---|")
+            for r in rep:
+                sig = r["sig"][:80].replace("|", "\\|")
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                         f"{r['count']} | {sig} |")
+        fc = beh.get("file_churn_sessions") or []
+        L.append(f"- **Sessions with file churn (≥{FILE_CHURN_MIN} mutations of "
+                 f"one file):** {len(fc)}" + (" — worst below" if fc else ""))
+        if fc:
+            L.append("")
+            L.append("| Session | NS | × | File |")
+            L.append("|---|---|---:|---|")
+            for r in fc:
+                fp = r["file"].replace("|", "\\|")
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | {fp} |")
+        L.append("")
+
     L.append("## Top 15 sessions by output tokens\n")
     L.append("| Session | NS | Turns | Tool calls | Output tok | I:O | Cache-hit | Est.$ |")
     L.append("|---|---|---:|---:|---:|---:|---:|---:|")
@@ -665,7 +888,12 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
     buckets = collections.defaultdict(lambda: {
         "files": 0, "assist_turns": 0,
         "tok": collections.Counter(), "tools": collections.Counter(),
-        "models": collections.Counter(), "cost": 0.0})
+        "models": collections.Counter(), "cost": 0.0,
+        "tool_errors": collections.Counter(), "beh": collections.Counter()})
+    # Errored tool_results are the only user lines the behavioral lens needs;
+    # gating on the serialized is_error:true keeps the huge SUCCESSFUL
+    # tool_result lines (browser snapshots, big reads) unparsed as before.
+    err_markers = ('"is_error": true', '"is_error":true')
     n = 0
     for f in files:
         n += 1
@@ -676,6 +904,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
             continue
         # find this file's bucket from its first timestamped line
         rows_assist = []
+        rows_err = []
         with fh:
             for line in fh:
                 if '"timestamp"' in line and first_ts is None:
@@ -692,34 +921,77 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                         rows_assist.append(r)
                     if first_ts is None and r.get("timestamp"):
                         first_ts = r.get("timestamp")
+                elif any(m in line for m in err_markers):
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    if r.get("type") == "user":
+                        rows_err.append(r)
         b = _iso_bucket(first_ts or "", bucket)
         if b is None:
             continue
         B = buckets[b]
         B["files"] += 1
         seen_msg_ids = set()   # de-dup billed turns per file (see analyze())
+        seen_blocks = set()    # de-dup tool_use by BLOCK identity (see analyze())
+        lens = BehaviorLens()
+        tooluse_names = {}
         for r in rows_assist:
             msg = r.get("message", {}) or {}
             mid = msg.get("id")
+            new_turn = True
             if mid is not None:
                 if mid in seen_msg_ids:
-                    continue
-                seen_msg_ids.add(mid)
-            u = msg.get("usage", {}) or {}
-            B["assist_turns"] += 1
-            B["models"][msg.get("model", "?")] += 1
-            inp = u.get("input_tokens", 0) or 0
-            out = u.get("output_tokens", 0) or 0
-            cr = u.get("cache_read_input_tokens", 0) or 0
-            cc = u.get("cache_creation_input_tokens", 0) or 0
-            B["tok"]["input"] += inp
-            B["tok"]["output"] += out
-            B["tok"]["cache_read"] += cr
-            B["tok"]["cache_create"] += cc
-            B["cost"] += cost_usd(msg.get("model"), inp, cc, cr, out)
+                    new_turn = False
+                else:
+                    seen_msg_ids.add(mid)
+            if new_turn:
+                u = msg.get("usage", {}) or {}
+                B["assist_turns"] += 1
+                B["models"][msg.get("model", "?")] += 1
+                inp = u.get("input_tokens", 0) or 0
+                out = u.get("output_tokens", 0) or 0
+                cr = u.get("cache_read_input_tokens", 0) or 0
+                cc = u.get("cache_creation_input_tokens", 0) or 0
+                B["tok"]["input"] += inp
+                B["tok"]["output"] += out
+                B["tok"]["cache_read"] += cr
+                B["tok"]["cache_create"] += cc
+                B["cost"] += cost_usd(msg.get("model"), inp, cc, cr, out)
             for blk in (msg.get("content") or []):
                 if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                    B["tools"][blk.get("name", "?")] += 1
+                    key = blk.get("id") or (mid, blk.get("name"),
+                                            json.dumps(blk.get("input", {}),
+                                                       sort_keys=True, default=str))
+                    if mid is not None:
+                        if key in seen_blocks:
+                            continue
+                        seen_blocks.add(key)
+                    name = blk.get("name", "?")
+                    B["tools"][name] += 1
+                    if blk.get("id"):
+                        tooluse_names[blk["id"]] = name
+                    lens.see_tool_use(name, blk.get("input"))
+        for r in rows_err:
+            content = (r.get("message", {}) or {}).get("content")
+            if not isinstance(content, list):
+                continue
+            for blk in content:
+                if isinstance(blk, dict) and blk.get("type") == "tool_result" \
+                        and blk.get("is_error"):
+                    lens.see_tool_result(
+                        tooluse_names.get(blk.get("tool_use_id"), "?"),
+                        True, _txt_str(blk.get("content", "")))
+        s = lens.summary()
+        B["tool_errors"].update(s["tool_errors"])
+        B["beh"]["timeout_kills"] += s["timeout_kills"]
+        B["beh"]["sleep_polls"] += s["sleep_polls"]
+        B["beh"]["edit_churn"] += sum(s["edit_churn"].values())
+        if s["max_repeat_failure"] >= REPEAT_FAILURE_MIN:
+            B["beh"]["repeat_failure_files"] += 1
+        if s["max_file_churn"] >= FILE_CHURN_MIN:
+            B["beh"]["file_churn_files"] += 1
     return buckets, n
 
 def cmd_trend(a):
@@ -729,7 +1001,8 @@ def cmd_trend(a):
     buckets, n = trend_scan(roots, nsp, a.bucket, a.include_subagents, excl)
     print(f"# Trend — {n} transcripts, bucket={a.bucket}, ns_prefix={nsp or '(all)'}\n")
     print(f"{'bucket':10} {'files':>6} {'turns':>7} {'out_tok':>12} {'cacheRead':>14} "
-          f"{'cacheHit%':>9} {'I:O':>7} {'cost$':>10}  top_model / top_tool")
+          f"{'cacheHit%':>9} {'I:O':>7} {'cost$':>10} {'err%':>5} {'t/o':>4} "
+          f"{'slp':>4} {'chrn':>5}  top_model / top_tool")
     rows = []
     for b in sorted(buckets):
         B = buckets[b]
@@ -741,13 +1014,24 @@ def cmd_trend(a):
         tt = B["tools"].most_common(1)
         tmn = (tm[0][0].replace("claude-", "")[:14]) if tm else "—"
         ttn = (tt[0][0].replace("mcp__playwright__", "pw:")[:18]) if tt else "—"
+        n_calls = sum(B["tools"].values())
+        n_errs = sum(B["tool_errors"].values())
+        errp = n_errs / n_calls * 100 if n_calls else 0
+        beh = B["beh"]
         print(f"{b:10} {B['files']:>6} {B['assist_turns']:>7} {t['output']:>12,} "
-              f"{t['cache_read']:>14,} {chf:>8.1f}% {io:>7.0f} {B['cost']:>10,.0f}  {tmn} / {ttn}")
+              f"{t['cache_read']:>14,} {chf:>8.1f}% {io:>7.0f} {B['cost']:>10,.0f} "
+              f"{errp:>4.0f}% {beh['timeout_kills']:>4} {beh['sleep_polls']:>4} "
+              f"{beh['edit_churn']:>5}  {tmn} / {ttn}")
         rows.append({"bucket": b, "files": B["files"], "turns": B["assist_turns"],
                      "tok": dict(t), "io_ratio": round(io, 1), "cache_hit_pct": round(chf, 1),
                      "cost_usd": round(B["cost"], 2),
                      "top_models": B["models"].most_common(5),
-                     "top_tools": B["tools"].most_common(12)})
+                     "top_tools": B["tools"].most_common(12),
+                     "behavior": {"tool_errors": dict(B["tool_errors"].most_common()),
+                                  "tool_error_pct": round(errp, 1),
+                                  **{k: beh[k] for k in
+                                     ("timeout_kills", "sleep_polls", "edit_churn",
+                                      "repeat_failure_files", "file_churn_files")}}})
     if a.json:
         json.dump(rows, open(a.json, "w", encoding="utf-8"), indent=2)
         print(f"\nwrote {a.json}", file=sys.stderr)
@@ -759,6 +1043,15 @@ def cmd_deep(a):
           f"output_tok={fmt_int(s['tokens']['output'])} io={s['io_ratio'] and round(s['io_ratio'],1)} "
           f"cache_hit={s['cache_hit_frac'] and round(s['cache_hit_frac'],3)} cost=${s['cost_usd']:.2f}")
     print(f"tools={s['tools']}")
+    b = s["behavior"]
+    print(f"behavior: tool_errors={sum(b['tool_errors'].values())} {b['tool_errors']} "
+          f"timeout_kills={b['timeout_kills']} sleep_polls={b['sleep_polls']} "
+          f"edit_churn={b['edit_churn']} max_repeat_failure={b['max_repeat_failure']} "
+          f"max_file_churn={b['max_file_churn']}")
+    for r in b["repeat_failures"][:5]:
+        print(f"  repeat ×{r['count']} [{r['tool']}] {r['sig'][:120]}")
+    for r in b["file_churn"][:5]:
+        print(f"  churn  ×{r['count']} {r['file']}")
     print("\n## User asks (the trajectory), in order:")
     for i, (ts, txt) in enumerate(s["prompts"]):
         one = " ".join(txt.split())
