@@ -183,9 +183,31 @@ type OwnerAttributionBucket struct {
 	Period                        string  `json:"period"`
 	ProviderPromptCacheTokenEquiv float64 `json:"provider_prompt_cache_token_equiv"`
 	FakAuthoredTokenEquiv         float64 `json:"fak_authored_token_equiv"`
-	FakKVPrefixReusedTokens       uint64  `json:"fak_kv_prefix_reused_tokens"`
-	FakCompactionShedTokens       uint64  `json:"fak_compaction_shed_tokens"`
-	FakVDSOAvoidedCalls           uint64  `json:"fak_vdso_avoided_calls"`
+	// FakSharePct is fak's share of the period's total cache-value
+	// token-equivalents, in percent — the "what % of the cache value is fak's?"
+	// headline, pre-divided so no reader has to derive it from the two columns.
+	// It is present only when the period's total is positive (see
+	// FakShareOfTotalPct), so an empty or upside-down period can never render
+	// as a 0% or 100% claim. The share covers ROWS RECORDED IN THE LEDGERS —
+	// it says nothing about traffic neither track observed.
+	FakSharePct             *float64 `json:"fak_share_pct,omitempty"`
+	FakKVPrefixReusedTokens uint64   `json:"fak_kv_prefix_reused_tokens"`
+	FakCompactionShedTokens uint64   `json:"fak_compaction_shed_tokens"`
+	FakVDSOAvoidedCalls     uint64   `json:"fak_vdso_avoided_calls"`
+}
+
+// FakShareOfTotalPct is fak's share of this period's total cache-value
+// token-equivalents, in percent. ok is false when the total is zero or negative
+// (nothing recorded, or a provider write premium that outweighed every saving) —
+// a period with no positive total has no meaningful share, and reporting 0%
+// there would read as "fak contributed nothing to a real total" when there is
+// no real total to speak of.
+func (b OwnerAttributionBucket) FakShareOfTotalPct() (float64, bool) {
+	total := b.ProviderPromptCacheTokenEquiv + b.FakAuthoredTokenEquiv
+	if total <= 0 {
+		return 0, false
+	}
+	return 100 * b.FakAuthoredTokenEquiv / total, true
 }
 
 // NewSavingsRows converts one live session observation into the durable Track-2 row shape.
@@ -586,7 +608,11 @@ func foldOwnerAttribution(track1 []Bucket, track2 []SavingsBucket) []OwnerAttrib
 	keys := sortedPeriodKeys(byPeriod)
 	out := make([]OwnerAttributionBucket, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, *byPeriod[k])
+		b := *byPeriod[k]
+		if pct, ok := b.FakShareOfTotalPct(); ok {
+			b.FakSharePct = &pct
+		}
+		out = append(out, b)
 	}
 	return out
 }
@@ -642,11 +668,16 @@ func RenderTwoTrack(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "  no owner-attribution rows yet\n")
 		return sb.String()
 	}
-	fmt.Fprintf(&sb, "  %-9s  %13s  %10s  %10s  %11s  %s\n",
-		"week", "provider_teq", "fak_teq", "kv_tok", "compact_tok", "vdso_calls")
+	fmt.Fprintf(&sb, "  fak_share = fak_teq / (provider_teq + fak_teq), over rows RECORDED in the two ledgers; \"-\" when the period total is not positive\n")
+	fmt.Fprintf(&sb, "  %-9s  %13s  %10s  %10s  %10s  %11s  %s\n",
+		"week", "provider_teq", "fak_teq", "fak_share", "kv_tok", "compact_tok", "vdso_calls")
 	for _, b := range r.OwnerAttribution {
-		fmt.Fprintf(&sb, "  %-9s  %13.0f  %10.0f  %10d  %11d  %d\n",
-			b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv,
+		share := "-"
+		if pct, ok := b.FakShareOfTotalPct(); ok {
+			share = fmt.Sprintf("%.4f%%", pct)
+		}
+		fmt.Fprintf(&sb, "  %-9s  %13.0f  %10.0f  %10s  %10d  %11d  %d\n",
+			b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv, share,
 			b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 	}
 	return sb.String()

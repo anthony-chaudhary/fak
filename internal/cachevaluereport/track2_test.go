@@ -199,10 +199,65 @@ func TestFoldTwoTrackOwnerAttributionSeparatesProviderAndFakTokens(t *testing.T)
 		t.Fatalf("fak-authored token-equiv = %.1f, want 1100", got.FakAuthoredTokenEquiv)
 	}
 	out := RenderTwoTrack(rep)
-	for _, want := range []string{"Owner attribution", "provider_teq", "fak_teq", "kv_tok", "compact_tok", "900", "1100"} {
+	for _, want := range []string{"Owner attribution", "provider_teq", "fak_teq", "fak_share", "kv_tok", "compact_tok", "900", "1100"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestFoldTwoTrackOwnerAttributionFakSharePct pins the pre-divided headline: the
+// bucket carries fak's share of the period total so "what % of the cache value is
+// fak's?" is answered by the report, not left as a division for the reader — and
+// the share is refused (nil / "-") when the period total is not positive, so an
+// upside-down period can never masquerade as a measured 0%.
+func TestFoldTwoTrackOwnerAttributionFakSharePct(t *testing.T) {
+	track1 := []cachevalueledger.Row{
+		{Date: "2026-06-22", SessionType: "run", Turns: 10, PromptTokens: 1000, ReusedTokens: 800},
+	}
+	track2 := []SavingsRow{
+		{
+			Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+			CacheReadTokens: 1000, SavedTokenEquiv: 900, NetSavedTokenEquiv: 900,
+		},
+		{
+			Date: "2026-06-22", Provider: "fak", Mechanism: "compaction_shed",
+			CompactionShedTokens: 300, SavedTokenEquiv: 300, NetSavedTokenEquiv: 300,
+		},
+	}
+	rep := FoldTwoTrack(track1, track2, twoTrackNow)
+	if len(rep.OwnerAttribution) != 1 {
+		t.Fatalf("want one owner-attribution bucket, got %d", len(rep.OwnerAttribution))
+	}
+	got := rep.OwnerAttribution[0]
+	pct, ok := got.FakShareOfTotalPct()
+	if !ok || !approxTrack2(pct, 55) { // fak 1100 of total 2000
+		t.Fatalf("fak share = %.4f ok=%v, want 55%% of the period total", pct, ok)
+	}
+	if got.FakSharePct == nil || !approxTrack2(*got.FakSharePct, 55) {
+		t.Fatalf("folded bucket must carry the share for the JSON surface: %+v", got.FakSharePct)
+	}
+	if out := RenderTwoTrack(rep); !strings.Contains(out, "55.0000%") {
+		t.Fatalf("render missing the fak share:\n%s", out)
+	}
+
+	// A period whose only row is a provider write premium (negative net) has no
+	// positive total: the share must be refused, not reported as a number.
+	neg := FoldTwoTrack(nil, []SavingsRow{{
+		Date: "2026-06-22", Provider: "anthropic", Mechanism: "provider_prompt_cache",
+		CacheCreationTokens: 1000, SavedTokenEquiv: -250, NetSavedTokenEquiv: -250,
+	}}, twoTrackNow)
+	if len(neg.OwnerAttribution) != 1 {
+		t.Fatalf("want one owner-attribution bucket, got %d", len(neg.OwnerAttribution))
+	}
+	if _, ok := neg.OwnerAttribution[0].FakShareOfTotalPct(); ok {
+		t.Fatal("share must be undefined when the period total is not positive")
+	}
+	if neg.OwnerAttribution[0].FakSharePct != nil {
+		t.Fatal("folded bucket must not carry a share when the total is not positive")
+	}
+	if out := RenderTwoTrack(neg); !strings.Contains(out, "-") {
+		t.Fatalf("render must show \"-\" for an undefined share:\n%s", out)
 	}
 }
 

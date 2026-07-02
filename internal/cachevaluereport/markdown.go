@@ -129,6 +129,9 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 		fmt.Fprintf(&sb, "| provider prompt-cache token-equiv | %.0f | OBSERVED (provider-relayed) |\n", last.ProviderPromptCacheTokenEquiv)
 		fmt.Fprintf(&sb, "| fak-authored token-equiv | %.0f (kv %d, compaction %d, vDSO calls %d) | WITNESSED (fak-authored) |\n",
 			last.FakAuthoredTokenEquiv, last.FakKVPrefixReusedTokens, last.FakCompactionShedTokens, last.FakVDSOAvoidedCalls)
+		if pct, ok := last.FakShareOfTotalPct(); ok {
+			fmt.Fprintf(&sb, "| fak share of cache value | %.4f%% | derived: WITNESSED fak / (OBSERVED provider + WITNESSED fak) token-equiv, recorded rows only |\n", pct)
+		}
 	}
 	return sb.String()
 }
