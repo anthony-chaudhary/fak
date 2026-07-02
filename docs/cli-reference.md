@@ -449,7 +449,10 @@ as a local, off-path policy engine, while provider calibration/warming/recall re
 open in #716-#718 and the Codex/OpenAI cached-token probe is proven by #727. Add
 `--sessions` to attach the compact current-workspace session summary (`fak
 session-audit summary --here`): recent Fable/Opus output mix, total context,
-cache-read share, and top long-context sessions. `prove` runs
+cache-read share, and top long-context sessions. With `--sessions`, the JSON also
+includes `recent_session_actions`, the advisory action ledger from that same
+summary; `--session-action-gate high|medium|none` selects the embedded gate
+threshold without changing the `vcache status` exit code. `prove` runs
 the deterministic star-anchor savings arithmetic without a provider or model; the
 default Codex-like workload (4096-token anchor, 7 sibling requests, 10-token suffixes,
 0.1 read / 1.25 write multipliers) proves 21,094.4 token-equivalents saved, 73.4%,

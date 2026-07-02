@@ -325,6 +325,18 @@ func TestRunVCacheStatusIncludesRecentSessionSummary(t *testing.T) {
 	if len(summary.TopLongContext) == 0 || summary.TopLongContext[0].Session != "heavy" {
 		t.Fatalf("recent long-context rows = %+v", summary.TopLongContext)
 	}
+	if rep.RecentSessionActions == nil {
+		t.Fatalf("recent session actions missing:\n%s", out.String())
+	}
+	actions := rep.RecentSessionActions
+	if actions.Schema != sessionaudit.CompactActionPlanSchema ||
+		actions.Counts.Total != 2 ||
+		actions.Counts.High != 2 ||
+		actions.Gate.Threshold != "high" ||
+		actions.Gate.Verdict != "refuse" ||
+		actions.Gate.Refused != 2 {
+		t.Fatalf("recent session actions = %+v", actions)
+	}
 
 	out.Reset()
 	errb.Reset()
@@ -332,10 +344,27 @@ func TestRunVCacheStatusIncludesRecentSessionSummary(t *testing.T) {
 		t.Fatalf("status --sessions exit=%d stderr=%s", code, errb.String())
 	}
 	text := out.String()
-	for _, want := range []string{"recent sessions:", "fable: output 300", "opus: output 200", "top long-context: heavy"} {
+	for _, want := range []string{
+		"recent sessions:",
+		"fable: output 300",
+		"opus: output 200",
+		"top long-context: heavy",
+		"recent session actions: total=2 high=2 medium=0 gate=refuse threshold=high refused=2",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status --sessions missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestRunVCacheStatusRejectsInvalidSessionActionGate(t *testing.T) {
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--sessions", "--session-action-gate", "urgent"}); code != 2 {
+		t.Fatalf("status invalid gate exit=%d, want 2; stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "invalid --session-action-gate") {
+		t.Fatalf("missing invalid gate error:\n%s", errb.String())
 	}
 }
 

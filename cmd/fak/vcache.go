@@ -77,6 +77,7 @@ func vcacheUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak vcache status [--json] [--sessions] [--session-days N] [--session-max N]
                    [--session-ns-prefix PREFIX | --session-all]
+                   [--session-action-gate high|medium|none]
   fak vcache prove [--json] [--anchor-tokens N] [--suffix-tokens N] [--requests N]
                    [--min-prefix-tokens N] [--read-mult F] [--write-mult F]
                    [--content public|secret|regulated]
@@ -161,24 +162,25 @@ provider executor supplies an independent execution witness.
 }
 
 type vcacheStatusReport struct {
-	Status                 string                      `json:"status"`
-	Governor               string                      `json:"governor"`
-	Chains                 string                      `json:"chains"`
-	LiveProvider           string                      `json:"live_provider"`
-	Proof                  vcachegov.StarSavingsProof  `json:"proof"`
-	RecallProof            vcachechain.RecallProof     `json:"recall_proof"`
-	CodexOpenAI            vcacheCodexOpenAIStatus     `json:"codex_openai"`
-	ContextAPI             vcacheContextAPIStatus      `json:"context_api"`
-	ProviderCalibration    vcacheProviderCalStatus     `json:"provider_calibration"`
-	ProviderActions        vcacheProviderActionStatus  `json:"provider_actions"`
-	RecentObservation      *vcacheRecentObservation    `json:"recent_observation,omitempty"`
-	RecentObservationError string                      `json:"recent_observation_error,omitempty"`
-	RecentSessions         *sessionaudit.CompactReport `json:"recent_sessions,omitempty"`
-	RecentSessionsError    string                      `json:"recent_sessions_error,omitempty"`
-	M4Issue                string                      `json:"m4_issue"`
-	M5Issue                string                      `json:"m5_issue"`
-	Remaining              []vcacheRemainingIssue      `json:"remaining"`
-	CorrectnessLaw         string                      `json:"correctness_law"`
+	Status                 string                          `json:"status"`
+	Governor               string                          `json:"governor"`
+	Chains                 string                          `json:"chains"`
+	LiveProvider           string                          `json:"live_provider"`
+	Proof                  vcachegov.StarSavingsProof      `json:"proof"`
+	RecallProof            vcachechain.RecallProof         `json:"recall_proof"`
+	CodexOpenAI            vcacheCodexOpenAIStatus         `json:"codex_openai"`
+	ContextAPI             vcacheContextAPIStatus          `json:"context_api"`
+	ProviderCalibration    vcacheProviderCalStatus         `json:"provider_calibration"`
+	ProviderActions        vcacheProviderActionStatus      `json:"provider_actions"`
+	RecentObservation      *vcacheRecentObservation        `json:"recent_observation,omitempty"`
+	RecentObservationError string                          `json:"recent_observation_error,omitempty"`
+	RecentSessions         *sessionaudit.CompactReport     `json:"recent_sessions,omitempty"`
+	RecentSessionActions   *sessionaudit.CompactActionPlan `json:"recent_session_actions,omitempty"`
+	RecentSessionsError    string                          `json:"recent_sessions_error,omitempty"`
+	M4Issue                string                          `json:"m4_issue"`
+	M5Issue                string                          `json:"m5_issue"`
+	Remaining              []vcacheRemainingIssue          `json:"remaining"`
+	CorrectnessLaw         string                          `json:"correctness_law"`
 }
 
 type vcacheRemainingIssue struct {
@@ -268,8 +270,13 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	sessionMax := fs.Int("session-max", 40, "with --sessions, maximum recent transcripts to summarize")
 	sessionNS := fs.String("session-ns-prefix", "", "with --sessions, namespace prefix to summarize (default: current workspace namespace)")
 	sessionAll := fs.Bool("session-all", false, "with --sessions, include all non-excluded namespaces instead of the current workspace namespace")
+	sessionActionGate := fs.String("session-action-gate", "high", "with --sessions, stamp recent_session_actions gate threshold: high, medium, or none")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	if _, ok := sessionaudit.CompactActionSeverityRank(*sessionActionGate); !ok {
+		fmt.Fprintf(stderr, "fak vcache status: invalid --session-action-gate %q (want high, medium, or none)\n", *sessionActionGate)
+		return 2
 	}
 
 	rep := defaultVCacheStatus()
@@ -279,6 +286,7 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 			Max:             *sessionMax,
 			NamespacePrefix: *sessionNS,
 			AllNamespaces:   *sessionAll,
+			ActionGate:      *sessionActionGate,
 		})
 	}
 	if *asJSON {
@@ -305,6 +313,9 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	if rep.RecentSessions != nil {
 		printVCacheSessionSummary(stdout, *rep.RecentSessions)
+		if rep.RecentSessionActions != nil {
+			printVCacheSessionActions(stdout, *rep.RecentSessionActions)
+		}
 	} else if rep.RecentSessionsError != "" {
 		fmt.Fprintf(stdout, "recent sessions: unreadable (%s)\n", rep.RecentSessionsError)
 	}

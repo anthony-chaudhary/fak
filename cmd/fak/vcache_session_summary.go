@@ -16,6 +16,7 @@ type vcacheSessionSummaryOptions struct {
 	Max             int
 	NamespacePrefix string
 	AllNamespaces   bool
+	ActionGate      string
 }
 
 func applyRecentSessionSummary(rep *vcacheStatusReport, opts vcacheSessionSummaryOptions) {
@@ -60,6 +61,11 @@ func applyRecentSessionSummary(rep *vcacheStatusReport, opts vcacheSessionSummar
 	agg := sessionaudit.AggregateSessions(sessions)
 	summary := sessionaudit.BuildCompactReport(sessions, agg, nsPrefix, since, false, opts.Max, totalDiscovered, nil, time.Now())
 	rep.RecentSessions = &summary
+	plan := sessionaudit.BuildCompactActionPlan(summary)
+	if gated, ok := sessionaudit.ApplyCompactActionGate(plan, opts.ActionGate); ok {
+		plan = gated
+	}
+	rep.RecentSessionActions = &plan
 }
 
 func printVCacheSessionSummary(w io.Writer, summary sessionaudit.CompactReport) {
@@ -117,4 +123,18 @@ func dominantVCacheGovernorDecision(families []vcacheobserve.Family) string {
 		}
 	}
 	return best
+}
+
+func printVCacheSessionActions(w io.Writer, plan sessionaudit.CompactActionPlan) {
+	fmt.Fprintf(w, "recent session actions: total=%d high=%d medium=%d",
+		plan.Counts.Total,
+		plan.Counts.High,
+		plan.Counts.Medium)
+	if plan.Gate.Verdict != "" {
+		fmt.Fprintf(w, " gate=%s threshold=%s refused=%d",
+			plan.Gate.Verdict,
+			plan.Gate.Threshold,
+			plan.Gate.Refused)
+	}
+	fmt.Fprintln(w)
 }
