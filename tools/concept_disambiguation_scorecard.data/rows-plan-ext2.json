@@ -534,7 +534,8 @@
         "vCache"
       ],
       "aliases": [
-        "planprovideractions"
+        "planprovideractions",
+        "planprovideractionswithoptions"
       ],
       "grounding": "provideractionplan",
       "grounding_kind": "symbol",

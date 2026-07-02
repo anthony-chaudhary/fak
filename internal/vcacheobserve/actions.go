@@ -35,9 +35,10 @@ type ProviderActionPlan struct {
 // heartbeat/explicit-cache actions ready after a caller supplies the missing
 // transport witness.
 type ProviderActionTransport struct {
-	Mode   string `json:"mode"`
-	Ready  bool   `json:"ready"`
-	Reason string `json:"reason"`
+	Mode    string                    `json:"mode"`
+	Ready   bool                      `json:"ready"`
+	Witness *ProviderTransportWitness `json:"witness,omitempty"`
+	Reason  string                    `json:"reason"`
 }
 
 // ProviderActionCounts summarizes rows by actionability.
@@ -54,6 +55,8 @@ type ProviderAction struct {
 	Decision            vcachegov.GovernorDecision `json:"decision"`
 	Action              string                     `json:"action"`
 	State               ProviderActionState        `json:"state"`
+	Requires            []string                   `json:"requires,omitempty"`
+	Witnessed           []string                   `json:"witnessed,omitempty"`
 	Reason              string                     `json:"reason"`
 	Turns               int                        `json:"turns"`
 	ArrivalRatePerSec   float64                    `json:"arrival_rate_per_sec"`
@@ -62,10 +65,49 @@ type ProviderAction struct {
 	SavedTokenEquiv     float64                    `json:"saved_token_equiv"`
 }
 
+// ProviderActionOptions carries external evidence that can upgrade a spendful
+// provider-cache action from gated to ready. The planner remains side-effect free:
+// a ready row means the required witness is present, not that fak spent a provider call.
+type ProviderActionOptions struct {
+	Transport ProviderTransportWitness `json:"transport,omitempty"`
+}
+
+// ProviderTransportWitness is the evidence boundary for provider-cache transport.
+// ByteIdenticalPrefix proves the bytes to be warmed match the prefix observed in
+// telemetry. HeartbeatTransport proves the host can issue a harmless refresh call.
+// ExplicitCacheTransport and DeletionCapable prove a provider surface exists for
+// regulated explicit-cache entries with deletion.
+type ProviderTransportWitness struct {
+	HeartbeatTransport     bool   `json:"heartbeat_transport,omitempty"`
+	ExplicitCacheTransport bool   `json:"explicit_cache_transport,omitempty"`
+	ByteIdenticalPrefix    bool   `json:"byte_identical_prefix,omitempty"`
+	DeletionCapable        bool   `json:"deletion_capable,omitempty"`
+	Source                 string `json:"source,omitempty"`
+}
+
+func (w ProviderTransportWitness) any() bool {
+	return w.HeartbeatTransport || w.ExplicitCacheTransport || w.ByteIdenticalPrefix || w.DeletionCapable || w.Source != ""
+}
+
+func (w ProviderTransportWitness) heartbeatReady() bool {
+	return w.HeartbeatTransport && w.ByteIdenticalPrefix
+}
+
+func (w ProviderTransportWitness) explicitReady() bool {
+	return w.ExplicitCacheTransport && w.ByteIdenticalPrefix && w.DeletionCapable
+}
+
 // PlanProviderActions folds the same observed turn window as Observe into
 // concrete provider-cache action candidates. It is pure and side-effect free:
 // the output is a witnessable action plan, not an executor.
 func PlanProviderActions(turns []Turn, windowCapped bool) ProviderActionPlan {
+	return PlanProviderActionsWithOptions(turns, windowCapped, ProviderActionOptions{})
+}
+
+// PlanProviderActionsWithOptions is PlanProviderActions plus an optional external
+// transport witness. This is the bridge a live host uses to prove the missing
+// heartbeat/explicit-cache prerequisites before treating a spendful row as ready.
+func PlanProviderActionsWithOptions(turns []Turn, windowCapped bool, opt ProviderActionOptions) ProviderActionPlan {
 	turns = providerActionTurns(turns)
 	rep := Observe(turns, DefaultMultipliers())
 	plan := ProviderActionPlan{
@@ -81,8 +123,9 @@ func PlanProviderActions(turns []Turn, windowCapped bool) ProviderActionPlan {
 		},
 		CorrectnessLaw: "full uncached prompt remains the correctness path; provider cache hits are rebates, never required",
 	}
+	applyProviderTransportWitness(&plan, opt.Transport)
 	for _, fam := range rep.Families {
-		action := providerActionFromFamily(fam)
+		action := providerActionFromFamily(fam, opt.Transport)
 		plan.Actions = append(plan.Actions, action)
 		switch action.State {
 		case ActionReady:
@@ -97,6 +140,21 @@ func PlanProviderActions(turns []Turn, windowCapped bool) ProviderActionPlan {
 		plan.Transport.Reason = "no provider-cache families observed in the rolling window"
 	}
 	return plan
+}
+
+func applyProviderTransportWitness(plan *ProviderActionPlan, w ProviderTransportWitness) {
+	if !w.any() {
+		return
+	}
+	plan.Transport.Mode = "witnessed_transport"
+	witness := w
+	plan.Transport.Witness = &witness
+	if w.heartbeatReady() || w.explicitReady() {
+		plan.Transport.Ready = true
+		plan.Transport.Reason = "provider transport witness supplied; spendful rows become ready only when their required capability and byte-identical prefix evidence is present"
+		return
+	}
+	plan.Transport.Reason = "partial provider transport witness supplied, but no spendful action class has all required evidence"
 }
 
 func providerActionTurns(turns []Turn) []Turn {
@@ -137,7 +195,7 @@ func TurnHasProviderTelemetry(turn Turn) bool {
 	}
 }
 
-func providerActionFromFamily(fam Family) ProviderAction {
+func providerActionFromFamily(fam Family, w ProviderTransportWitness) ProviderAction {
 	row := ProviderAction{
 		Family:              fam.Key,
 		Decision:            fam.GovernorDecision,
@@ -154,8 +212,15 @@ func providerActionFromFamily(fam Family) ProviderAction {
 		row.Reason = "natural traffic is already refreshing the provider prefix inside the TTL; spend no dedicated warm"
 	case vcachegov.DecisionHeartbeatPin:
 		row.Action = "heartbeat_pin"
-		row.State = ActionGated
-		row.Reason = "pin candidate needs active provider warm transport plus byte-identical prefix fingerprint before spending"
+		row.Requires = []string{"heartbeat_transport", "byte_identical_prefix"}
+		row.Witnessed = witnessedProviderTransport(row.Requires, w)
+		if w.heartbeatReady() {
+			row.State = ActionReady
+			row.Reason = "heartbeat transport and byte-identical prefix witness supplied; ready to refresh without changing correctness path"
+		} else {
+			row.State = ActionGated
+			row.Reason = "pin candidate needs active provider warm transport plus byte-identical prefix fingerprint before spending"
+		}
 	case vcachegov.DecisionLazyRebuild:
 		row.Action = "lazy_rebuild"
 		row.State = ActionNoop
@@ -170,12 +235,47 @@ func providerActionFromFamily(fam Family) ProviderAction {
 		row.Reason = "route the prefix uncached because the content is not warmable"
 	case vcachegov.DecisionExplicitCache:
 		row.Action = "explicit_cache"
-		row.State = ActionGated
-		row.Reason = "regulated prefix needs a deletion-capable explicit-cache provider surface"
+		row.Requires = []string{"explicit_cache_transport", "byte_identical_prefix", "deletion_capable"}
+		row.Witnessed = witnessedProviderTransport(row.Requires, w)
+		if w.explicitReady() {
+			row.State = ActionReady
+			row.Reason = "explicit-cache transport, deletion capability, and byte-identical prefix witness supplied"
+		} else {
+			row.State = ActionGated
+			row.Reason = "regulated prefix needs a deletion-capable explicit-cache provider surface"
+		}
 	default:
 		row.Action = "unknown"
 		row.State = ActionGated
 		row.Reason = "unknown governor decision"
 	}
 	return row
+}
+
+func witnessedProviderTransport(required []string, w ProviderTransportWitness) []string {
+	if len(required) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(required))
+	for _, req := range required {
+		switch req {
+		case "heartbeat_transport":
+			if w.HeartbeatTransport {
+				out = append(out, req)
+			}
+		case "explicit_cache_transport":
+			if w.ExplicitCacheTransport {
+				out = append(out, req)
+			}
+		case "byte_identical_prefix":
+			if w.ByteIdenticalPrefix {
+				out = append(out, req)
+			}
+		case "deletion_capable":
+			if w.DeletionCapable {
+				out = append(out, req)
+			}
+		}
+	}
+	return out
 }

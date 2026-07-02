@@ -359,6 +359,39 @@ func TestRunVCacheActionsReadsSnapshot(t *testing.T) {
 	}
 }
 
+func TestRunVCacheActionsMarksHeartbeatReadyWithTransportWitness(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"bursty","unix_millis":1,"input_tokens":40000,"cache_creation_input_tokens":40000}` + "\n" +
+		`{"family":"bursty","unix_millis":700001,"input_tokens":50,"cache_read_input_tokens":40000,"cache_creation_input_tokens":500}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{
+		"actions", "--json", "--snapshot", snap,
+		"--heartbeat-transport", "--prefix-witness", "--transport-source", "test",
+	}); code != 0 {
+		t.Fatalf("actions witnessed transport exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var plan vcacheobserve.ProviderActionPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if plan.Transport.Mode != "witnessed_transport" || !plan.Transport.Ready || plan.Transport.Witness == nil {
+		t.Fatalf("transport = %+v, want witnessed ready transport", plan.Transport)
+	}
+	if plan.Counts.Ready != 1 || len(plan.Actions) != 1 {
+		t.Fatalf("action plan counts = %+v actions=%+v, want one ready row", plan.Counts, plan.Actions)
+	}
+	row := plan.Actions[0]
+	if row.Action != "heartbeat_pin" || row.State != vcacheobserve.ActionReady {
+		t.Fatalf("action row = %+v, want ready heartbeat pin", row)
+	}
+	if len(row.Requires) != 2 || len(row.Witnessed) != 2 {
+		t.Fatalf("action witness lists = requires %v witnessed %v, want both prerequisites", row.Requires, row.Witnessed)
+	}
+}
+
 func TestRunVCacheActionsContextOnlySnapshotDoesNotInventProviderRows(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "context.jsonl")
 	if err := os.WriteFile(snap, []byte(`{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900}`+"\n"), 0o600); err != nil {

@@ -44,6 +44,37 @@ func TestPlanProviderActionsGatesHeartbeatPinsUntilTransportExists(t *testing.T)
 	if plan.Counts.Gated != 1 || plan.Counts.Noop != 0 || plan.Counts.Ready != 0 {
 		t.Fatalf("counts = %+v, want one gated row", plan.Counts)
 	}
+	if got := row.Requires; len(got) != 2 || got[0] != "heartbeat_transport" || got[1] != "byte_identical_prefix" {
+		t.Fatalf("heartbeat row requires = %v, want transport + prefix witness", got)
+	}
+}
+
+func TestPlanProviderActionsHeartbeatReadyWithTransportWitness(t *testing.T) {
+	const sec = int64(1000)
+	turns := []Turn{
+		{Family: "bursty", UnixMillis: 0, InputTokens: 100, CacheCreation: 40000},
+		{Family: "bursty", UnixMillis: 700 * sec, InputTokens: 50, CacheRead: 40000},
+	}
+	plan := PlanProviderActionsWithOptions(turns, false, ProviderActionOptions{
+		Transport: ProviderTransportWitness{
+			HeartbeatTransport:  true,
+			ByteIdenticalPrefix: true,
+			Source:              "test",
+		},
+	})
+	if !plan.Transport.Ready || plan.Transport.Mode != "witnessed_transport" || plan.Transport.Witness == nil {
+		t.Fatalf("transport = %+v, want witnessed ready transport", plan.Transport)
+	}
+	if plan.Counts.Ready != 1 || plan.Counts.Gated != 0 || plan.Counts.Noop != 0 {
+		t.Fatalf("counts = %+v, want one ready row", plan.Counts)
+	}
+	row := plan.Actions[0]
+	if row.Action != "heartbeat_pin" || row.State != ActionReady {
+		t.Fatalf("row = %+v, want ready heartbeat pin", row)
+	}
+	if got := row.Witnessed; len(got) != 2 || got[0] != "heartbeat_transport" || got[1] != "byte_identical_prefix" {
+		t.Fatalf("heartbeat row witnessed = %v, want both prerequisites", got)
+	}
 }
 
 func TestPlanProviderActionsEmptyWindowIsExplicit(t *testing.T) {

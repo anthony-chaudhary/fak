@@ -55,6 +55,34 @@ func TestHandleFakVCacheActionsReportsObservedFamilies(t *testing.T) {
 	}
 }
 
+func TestHandleFakVCacheActionsAcceptsTransportWitness(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeVCacheTurn("bursty", 1, 40000, 0, 40000)
+	m.observeVCacheTurn("bursty", 700001, 50, 40000, 500)
+	s := &Server{metrics: m}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/fak/vcache/actions?heartbeat_transport=1&prefix_witness=1&transport_source=test", nil)
+	s.handleFakVCacheActions(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var plan vcacheobserve.ProviderActionPlan
+	if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("decode: %v\n%s", err, rec.Body.String())
+	}
+	if plan.Transport.Mode != "witnessed_transport" || !plan.Transport.Ready || plan.Transport.Witness == nil {
+		t.Fatalf("transport = %+v, want witnessed ready", plan.Transport)
+	}
+	if plan.Counts.Ready != 1 || len(plan.Actions) != 1 {
+		t.Fatalf("plan = %+v, want one ready action", plan)
+	}
+	row := plan.Actions[0]
+	if row.Action != "heartbeat_pin" || row.State != vcacheobserve.ActionReady {
+		t.Fatalf("row = %+v, want ready heartbeat pin", row)
+	}
+}
+
 func TestHandleFakVCacheActionsRejectsNonGet(t *testing.T) {
 	rec := httptest.NewRecorder()
 	(&Server{}).handleFakVCacheActions(rec, httptest.NewRequest(http.MethodPost, "/v1/fak/vcache/actions", nil))

@@ -397,6 +397,29 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-witness-proof-providertransportwitness",
+      "canonical": "ProviderTransportWitness (provider-cache action evidence)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "vcacheobserve.ProviderTransportWitness is the evidence struct a caller supplies to `PlanProviderActionsWithOptions`, carrying provider-cache transport capability, byte-identical prefix, deletion capability, and source labels that can upgrade spendful vCache action rows from gated to ready.",
+      "distinction": "It is the witness CARRIER for provider-cache transport prerequisites, not the ProviderActionPlan it annotates, not a world-state witness on the cache coherence bus, and not proof that the provider cache action already ran.",
+      "distinct_from": [
+        "ProviderActionPlan (vCache provider-action planner)",
+        "world-state-witness",
+        "provider-cache transport capability fields"
+      ],
+      "aliases": [
+        "applyprovidertransportwitness",
+        "witnessedprovidertransport"
+      ],
+      "grounding": "providertransportwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }
