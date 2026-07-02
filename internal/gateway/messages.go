@@ -816,6 +816,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// in-kernel, never ride raw bytes upstream.
 	if s.anthropicPassthroughFor(req.Model) {
 		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey), agent.WithUpstreamBeta(upstreamBeta))
+		ctx = withDecodedCtxViewSuppressed(ctx)
 	}
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, opts...)
 	if err != nil {

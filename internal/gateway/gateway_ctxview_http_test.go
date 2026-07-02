@@ -115,6 +115,8 @@ func TestCtxViewHTTPOffForwardsFullHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
+	const traceID = "ctxview-openai-witness"
+	srv.SetDefaultTraceID(traceID)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -183,6 +185,8 @@ func TestCtxViewHTTPOnPlansHistoryOnTheWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
+	const traceID = "ctxview-openai-witness"
+	srv.SetDefaultTraceID(traceID)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -215,6 +219,25 @@ func TestCtxViewHTTPOnPlansHistoryOnTheWire(t *testing.T) {
 		if strings.Contains(m.Content, "weather sunny 22C") {
 			t.Error("ON: the off-topic span should have been elided from the planned view that reached the wire")
 		}
+	}
+
+	ctxValue := srv.CtxValueReportFor(traceID)
+	if ctxValue.Turns.ContextEvents != 1 || ctxValue.Turns.TurnsSinceContextEvent != 0 {
+		t.Fatalf("ON: ctxvalue turns = %+v, want one current decoded ctx-view event", ctxValue.Turns)
+	}
+	turns, _ := srv.VCacheTurnsSnapshot()
+	if len(turns) == 0 {
+		t.Fatal("ON: vcache snapshot must include the served OpenAI turn with decoded ctx-view evidence")
+	}
+	got := turns[0]
+	if got.ContextEvents != 1 || got.ContextDroppedTurns != 1 || got.ContextShedTokens <= 0 {
+		t.Fatalf("ON: decoded ctx-view evidence = events:%d shed:%d dropped:%d, want 1/>0/1",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+	score := srv.vcacheScoreReport()
+	if !score.Planes.ContextWitnessed.Available || score.AgenticActivation.ContextEvents != 1 {
+		t.Fatalf("ON: live vcache score context plane = %+v activation=%+v, want witnessed decoded ctx-view event",
+			score.Planes.ContextWitnessed, score.AgenticActivation)
 	}
 }
 

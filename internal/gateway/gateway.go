@@ -749,6 +749,14 @@ type Server struct {
 	sessionPlannerMu sync.Mutex
 	sessionPlanners  map[string]*agent.SessionPlanner
 
+	// ctxViewPending records decoded-message ctxplan rewrites that fired before the
+	// provider usage is known. logInferenceTurn consumes one pending event for the same
+	// trace so ctxvalue can count the served turn as a context event without threading a
+	// new return value through every complete() caller. Anthropic raw passthrough uses an
+	// explicit contextEvent bit and does not consume this map.
+	ctxViewPendingMu sync.Mutex
+	ctxViewPending   map[string]int
+
 	// resetHealth holds ONE rolling compaction-health record per session trace id, fed the
 	// provider's OBSERVED cache counters on every compacted turn so the per-session resetScore
 	// shadow surface (#792, reset_shadow.go) can recommend cut-vs-reset without re-deriving the
@@ -1448,6 +1456,77 @@ func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages [
 	return planned
 }
 
+func (s *Server) observeDecodedCtxViewRewrite(trace string, full, planned []agent.Message) {
+	if s == nil || len(planned) >= len(full) {
+		return
+	}
+	fullTokens := estimateMessageContentTokens(full)
+	plannedTokens := estimateMessageContentTokens(planned)
+	shed := 0
+	if fullTokens > plannedTokens {
+		shed = fullTokens - plannedTokens
+	}
+	s.metrics.observeCtxViewRewrite(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    len(full) - len(planned),
+		ShedTokens: shed,
+	})
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return
+	}
+	s.ctxViewPendingMu.Lock()
+	if s.ctxViewPending == nil {
+		s.ctxViewPending = map[string]int{}
+	}
+	s.ctxViewPending[trace]++
+	s.ctxViewPendingMu.Unlock()
+}
+
+func (s *Server) consumeDecodedCtxViewEvent(trace string) bool {
+	if s == nil {
+		return false
+	}
+	trace = strings.TrimSpace(trace)
+	if trace == "" {
+		return false
+	}
+	s.ctxViewPendingMu.Lock()
+	defer s.ctxViewPendingMu.Unlock()
+	n := s.ctxViewPending[trace]
+	if n <= 0 {
+		return false
+	}
+	if n == 1 {
+		delete(s.ctxViewPending, trace)
+	} else {
+		s.ctxViewPending[trace] = n - 1
+	}
+	return true
+}
+
+func estimateMessageContentTokens(messages []agent.Message) int {
+	total := 0
+	for _, m := range messages {
+		if m.Content == "" {
+			continue
+		}
+		total += (len(m.Content) + 3) / 4
+	}
+	return total
+}
+
+type suppressDecodedCtxViewKey struct{}
+
+func withDecodedCtxViewSuppressed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressDecodedCtxViewKey{}, true)
+}
+
+func decodedCtxViewSuppressed(ctx context.Context) bool {
+	v, _ := ctx.Value(suppressDecodedCtxViewKey{}).(bool)
+	return v
+}
+
 // maybeElideKVResidency drives the model-side PLANNED-ELISION residency bridge (issue #579, the
 // kvmmu-planned-eviction half) when the context planner shrank the turn history. It is the
 // capacity-plan twin of evictInKernelPoison's KVSpanEvictor (which enforces a trust quarantine):
@@ -1588,6 +1667,9 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// the persistent per-session planner so the rewrite is O(c·N), not O(N²), across turns.
 	fullHistory := messages
 	messages = s.maybePlanMessages(ctx, trace, messages)
+	if !decodedCtxViewSuppressed(ctx) {
+		s.observeDecodedCtxViewRewrite(trace, fullHistory, messages)
+	}
 	// Shrink the kernel-owned KV residency to match the planned O(1) view (issue #579, the
 	// kvmmu-planned-eviction half): when planning ELIDED older history (the view is a strict
 	// trailing window of the full transcript), drive the model-side residency bridge so the
