@@ -54,6 +54,19 @@ type Turn struct {
 type RequestMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	Repeat  int    `json:"repeat,omitempty"`
+}
+
+func (m RequestMessage) ExpandedContent() string {
+	if m.Repeat <= 1 {
+		return m.Content
+	}
+	var b strings.Builder
+	b.Grow(len(m.Content) * m.Repeat)
+	for i := 0; i < m.Repeat; i++ {
+		b.WriteString(m.Content)
+	}
+	return b.String()
 }
 
 // Call is one proposed tool call in a turn, with the verdict the floor must reach.
@@ -149,7 +162,10 @@ func ParseFixture(raw []byte) (*Fixture, error) {
 			default:
 				return nil, fmt.Errorf("guardtrace: turn %d message %d has unknown role %q (want system|user|assistant)", ti, mi, m.Role)
 			}
-			if strings.TrimSpace(m.Content) == "" {
+			if m.Repeat < 0 {
+				return nil, fmt.Errorf("guardtrace: turn %d message %d has negative repeat %d", ti, mi, m.Repeat)
+			}
+			if strings.TrimSpace(m.ExpandedContent()) == "" {
 				return nil, fmt.Errorf("guardtrace: turn %d message %d has empty content", ti, mi)
 			}
 		}

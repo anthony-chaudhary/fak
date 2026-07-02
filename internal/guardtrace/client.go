@@ -97,7 +97,7 @@ func anthropicRequestMessages(t Turn) (string, []map[string]any) {
 	messages := make([]map[string]any, 0, len(t.Messages))
 	for _, m := range t.Messages {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
-		content := m.Content
+		content := m.ExpandedContent()
 		if role == "system" {
 			if system == "" {
 				system = content
@@ -128,7 +128,7 @@ func openAIRequestMessages(t Turn) []map[string]any {
 	for _, m := range t.Messages {
 		messages = append(messages, map[string]any{
 			"role":    strings.ToLower(strings.TrimSpace(m.Role)),
-			"content": m.Content,
+			"content": m.ExpandedContent(),
 		})
 	}
 	return messages

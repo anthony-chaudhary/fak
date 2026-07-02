@@ -22,8 +22,10 @@ func TestParseFixtureValidation(t *testing.T) {
 		{"unknown class", `{"turns":[{"calls":[{"tool":"Bash","class":"maybe"}]}]}`, true},
 		{"unknown message role", `{"turns":[{"messages":[{"role":"tool","content":"x"}],"calls":[{"tool":"Read","class":"allow"}]}]}`, true},
 		{"empty message content", `{"turns":[{"messages":[{"role":"user","content":" "}],"calls":[{"tool":"Read","class":"allow"}]}]}`, true},
+		{"negative repeat", `{"turns":[{"messages":[{"role":"user","content":"x","repeat":-1}],"calls":[{"tool":"Read","class":"allow"}]}]}`, true},
 		{"valid allow", `{"turns":[{"calls":[{"tool":"Read","class":"allow"}]}]}`, false},
 		{"valid messages", `{"turns":[{"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"}],"calls":[{"tool":"Read","class":"allow"}]}]}`, false},
+		{"valid repeated message", `{"turns":[{"messages":[{"role":"user","content":"u","repeat":3}],"calls":[{"tool":"Read","class":"allow"}]}]}`, false},
 		{"valid deny", `{"turns":[{"calls":[{"tool":"Bash","class":"DENY","reason":"POLICY_BLOCK"}]}]}`, false},
 	}
 	for _, tt := range tests {
@@ -232,6 +234,30 @@ func TestBuildInboundRequestUsesFixtureMessages(t *testing.T) {
 	if len(anthropic.Messages) != 3 || anthropic.Messages[0].Role != "user" ||
 		anthropic.Messages[1].Role != "assistant" || anthropic.Messages[2].Content != "latest task" {
 		t.Fatalf("anthropic messages = %+v, want fixture non-system history", anthropic.Messages)
+	}
+}
+
+func TestBuildInboundRequestExpandsRepeatedMessages(t *testing.T) {
+	turn := Turn{
+		Messages: []RequestMessage{
+			{Role: "system", Content: "system "},
+			{Role: "user", Content: "task ", Repeat: 3},
+		},
+		Calls: []Call{{Tool: "Read"}},
+	}
+
+	body, err := BuildInboundRequest("openai", "test-model", turn)
+	if err != nil {
+		t.Fatalf("BuildInboundRequest(openai): %v", err)
+	}
+	var req struct {
+		Messages []RequestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(req.Messages) != 2 || req.Messages[1].Content != "task task task " {
+		t.Fatalf("messages = %+v, want repeated content expanded", req.Messages)
 	}
 }
 
