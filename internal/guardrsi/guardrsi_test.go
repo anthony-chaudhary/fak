@@ -13,15 +13,34 @@ import (
 func TestCleanJournalScores100(t *testing.T) {
 	p := writeJournal(t, []map[string]any{
 		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
-		{"verdict": "DENY", "kind": "DENY", "reason": "OUT_OF_TREE_WRITE"},
-		{"verdict": "QUARANTINE", "kind": "QUARANTINE", "reason": "TAINTED_RESULT"},
+		{"verdict": "DENY", "kind": "DENY", "reason": "OUT_OF_TREE_WRITE", "witness": map[string]any{"policy": "workspace"}},
+		{"verdict": "QUARANTINE", "kind": "QUARANTINE", "reason": "TAINTED_RESULT", "witness": map[string]any{"screen": "prompt-injection"}},
 	})
 	fold := FoldRows([]string{p})
-	if fold.TotalRows != 3 || fold.BlankReasonOnDeny != 0 || fold.UnknownVerdict != 0 {
+	if fold.TotalRows != 3 || fold.BlankReasonOnDeny != 0 || fold.UnknownVerdict != 0 || fold.WitnesslessBlock != 0 {
 		t.Fatalf("fold = %+v", fold)
 	}
 	if got := VerdictQuality(fold); got != 100 {
 		t.Fatalf("quality = %v, want 100", got)
+	}
+}
+
+func TestWitnesslessBlockLowersQuality(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE"},
+		{"verdict": "DENY", "kind": "DENY", "reason": "OUT_OF_TREE_WRITE", "witness": map[string]any{"policy": "workspace"}},
+		{"verdict": "QUARANTINE", "kind": "QUARANTINE", "reason": "TAINTED_RESULT"},
+	})
+	fold := FoldRows([]string{p})
+	if fold.WitnesslessBlock != 1 || fold.BlankReasonOnDeny != 0 || fold.UnknownVerdict != 0 {
+		t.Fatalf("fold = %+v, want one witnessless block only", fold)
+	}
+	if got, want := VerdictQuality(fold), 83.333; got != want {
+		t.Fatalf("quality = %v, want %v", got, want)
+	}
+	worst := WorstBucket(fold)
+	if worst.Bucket != "witnessless_block" || worst.Count != 1 || !strings.Contains(worst.Lever, "#1958") {
+		t.Fatalf("worst = %+v, want witnessless #1958 bucket", worst)
 	}
 }
 
@@ -101,7 +120,7 @@ func TestScorecardPayloadShapeAndGrade(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "tools", "scorecard_baseline.json"), []byte(`{"guard_rsi":1}`))
 	mustWrite(t, filepath.Join(root, ".claude", "skills", "guard-rsi-score", "SKILL.md"), []byte("skill"))
 	mustWrite(t, filepath.Join(root, "docs", "fak", "guard-verdict-rsi-loop.md"), []byte("doc"))
-	mustWrite(t, filepath.Join(root, ".dispatch-runs", "guard-audit", "one.jsonl"), []byte(`{"verdict":"DENY","reason":"POLICY_BLOCK"}`+"\n"))
+	mustWrite(t, filepath.Join(root, ".dispatch-runs", "guard-audit", "one.jsonl"), []byte(`{"verdict":"DENY","reason":"POLICY_BLOCK","witness":{"policy":"fixture"}}`+"\n"))
 
 	payload := BuildScorecard(root)
 	if payload.Schema != ScorecardSchema || payload.Corpus["guard_rsi_debt"] != 0 {

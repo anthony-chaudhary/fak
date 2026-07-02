@@ -33,6 +33,7 @@ type Fold struct {
 	ByReason          map[string]int `json:"by_reason"`
 	UnknownVerdict    int            `json:"unknown_verdict"`
 	BlankReasonOnDeny int            `json:"blank_reason_on_deny"`
+	WitnesslessBlock  int            `json:"witnessless_block"`
 }
 
 type Bucket struct {
@@ -162,6 +163,9 @@ func FoldRows(paths []string) Fold {
 					fold.BlankReasonOnDeny++
 				} else {
 					fold.ByReason[reason]++
+					if !hasWitness(row["witness"]) {
+						fold.WitnesslessBlock++
+					}
 				}
 			}
 		}
@@ -173,7 +177,7 @@ func VerdictQuality(f Fold) float64 {
 	if f.TotalRows <= 0 {
 		return 0
 	}
-	penalty := float64(f.BlankReasonOnDeny+f.UnknownVerdict) / float64(f.TotalRows)
+	penalty := (float64(f.BlankReasonOnDeny+f.UnknownVerdict) + 0.5*float64(f.WitnesslessBlock)) / float64(f.TotalRows)
 	return mathx.Round3(math.Max(0, 1-penalty) * 100)
 }
 
@@ -190,6 +194,13 @@ func WorstBucket(f Fold) Bucket {
 			Bucket: "unknown_verdict",
 			Count:  f.UnknownVerdict,
 			Lever:  "constrain verdicts to the closed set; an UNCLASSIFIED verdict is a bug to declare, not journal",
+		}
+	}
+	if f.WitnesslessBlock > 0 {
+		return Bucket{
+			Bucket: "witnessless_block",
+			Count:  f.WitnesslessBlock,
+			Lever:  "attach a witness to every DENY/QUARANTINE with a closed-vocabulary reason, so #1958-style forensic gaps are visible",
 		}
 	}
 	if len(f.ByReason) > 0 {
@@ -223,6 +234,7 @@ func RunIteration(root, auditPath string, witness map[string]any) Iteration {
 	repaired := fold
 	repaired.UnknownVerdict = 0
 	repaired.BlankReasonOnDeny = 0
+	repaired.WitnesslessBlock = 0
 	next := VerdictQuality(repaired)
 	delta := mathx.Round3(next - base)
 	haveWitness := false
@@ -290,8 +302,8 @@ func RenderIteration(it Iteration) string {
 		fmt.Sprintf("  rows %d  verdict-quality %.3g -> %.3g (delta %.3g)  kept=%v", it.Fold.TotalRows, it.BaselineQuality, it.ReplayedQuality, it.MeasuredDelta, it.Kept),
 		fmt.Sprintf("  by_verdict: %s", mapString(it.Fold.ByVerdict)),
 	}
-	if it.Fold.BlankReasonOnDeny > 0 || it.Fold.UnknownVerdict > 0 {
-		lines = append(lines, fmt.Sprintf("  honesty holes: blank_reason_on_deny=%d unknown_verdict=%d", it.Fold.BlankReasonOnDeny, it.Fold.UnknownVerdict))
+	if it.Fold.BlankReasonOnDeny > 0 || it.Fold.UnknownVerdict > 0 || it.Fold.WitnesslessBlock > 0 {
+		lines = append(lines, fmt.Sprintf("  honesty holes: blank_reason_on_deny=%d unknown_verdict=%d witnessless_block=%d", it.Fold.BlankReasonOnDeny, it.Fold.UnknownVerdict, it.Fold.WitnesslessBlock))
 	}
 	lines = append(lines,
 		fmt.Sprintf("  candidate: [%s] %s", it.Candidate.Bucket, it.Candidate.Lever),
@@ -550,6 +562,23 @@ func asString(v any) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func hasWitness(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(x) != ""
+	case map[string]any:
+		return len(x) > 0
+	case []any:
+		return len(x) > 0
+	case bool:
+		return x
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", x)) != ""
+	}
 }
 
 func topCount(m map[string]int) (string, int) {
