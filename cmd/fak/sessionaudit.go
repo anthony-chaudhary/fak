@@ -95,6 +95,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak session-audit discover: %v\n", err)
 		return 1
 	}
+	total := len(recs)
 	if *max > 0 && len(recs) > *max {
 		recs = recs[:*max]
 	}
@@ -105,7 +106,11 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "%d sessions\n", len(recs))
+	if *max > 0 && total > *max {
+		fmt.Fprintf(stdout, "%d sessions (showing first %d of %d; use --ns-prefix to target a namespace before --max)\n", len(recs), len(recs), total)
+	} else {
+		fmt.Fprintf(stdout, "%d sessions\n", len(recs))
+	}
 	for _, r := range recs {
 		mt := time.Unix(0, int64(r.MTime*1e9)).Format("2006-01-02T15:04:05")
 		fmt.Fprintf(stdout, "  %s  %6dKB  %s/%s", mt, r.Size/1024, r.NS, filepath.Base(r.Path))
@@ -134,10 +139,14 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak session-audit audit: discover: %v\n", err)
 		return 1
 	}
+	totalDiscovered := len(recs)
 	if *max > 0 && len(recs) > *max {
 		recs = recs[:*max]
 	}
 	fmt.Fprintf(stderr, "analyzing %d transcripts ...\n", len(recs))
+	if *max > 0 && totalDiscovered > *max {
+		fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix to target a namespace before --max\n", len(recs), totalDiscovered)
+	}
 	sessions := make([]sessionaudit.Session, 0, len(recs))
 	for _, rec := range recs {
 		s := sessionaudit.Analyze(rec.Path)
@@ -175,7 +184,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	reportSince := opts.SinceDays
 	reportNS := opts.NamespacePrefix
-	md := sessionaudit.ReportMarkdown(top, agg, reportNS, reportSince, *includeSubagents, *max, excluded, time.Now())
+	md := sessionaudit.ReportMarkdown(top, agg, reportNS, reportSince, *includeSubagents, *max, totalDiscovered, excluded, time.Now())
 	payload := sessionaudit.AuditPayload{
 		Aggregate:         agg,
 		ExcludedSubagents: excluded,

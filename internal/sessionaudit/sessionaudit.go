@@ -416,7 +416,7 @@ func SummarizeTranscripts(records []Transcript) Summary {
 	return SummarizeAnalyses(sessions)
 }
 
-func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int, excludedSubagents *Summary, generated time.Time) string {
+func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int, discoveredCount int, excludedSubagents *Summary, generated time.Time) string {
 	var b strings.Builder
 	ok := validSessions(sessions)
 	fmt.Fprintln(&b, "# Session-Transcript Audit - active scope")
@@ -424,6 +424,9 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	fmt.Fprintf(&b, "**Generated:** %s  \n", generated.Format("2006-01-02T15:04:05"))
 	fmt.Fprintf(&b, "**Top-level sessions audited:** %d  .  **Tool:** `fak session-audit` (re-runnable)  \n", agg.NSessions)
 	fmt.Fprintf(&b, "**Scope:** %s\n", scopeLine(ok, nsPrefix, sinceDays, includeSubagents, maxSessions))
+	if note := maxClipNote(maxSessions, discoveredCount); note != "" {
+		fmt.Fprintln(&b, note)
+	}
 	if note := subagentNote(excludedSubagents); note != "" {
 		fmt.Fprintln(&b, note)
 	}
@@ -894,9 +897,17 @@ func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeS
 	}
 	cap := ""
 	if maxSessions > 0 {
-		cap = fmt.Sprintf("; max top-level sessions: %d", maxSessions)
+		cap = fmt.Sprintf("; max transcripts before analysis: %d", maxSessions)
 	}
 	return fmt.Sprintf("%d namespaces folded (%s); namespace filter: %s; time window: %s; %s%s", len(names), nsDesc, nsFilter, window, kinds, cap)
+}
+
+func maxClipNote(maxSessions, discoveredCount int) string {
+	if maxSessions <= 0 || discoveredCount <= maxSessions {
+		return ""
+	}
+	return fmt.Sprintf("NOTE: `--max %d` clipped this audit to the newest %d of %d discovered transcripts; use `--ns-prefix <namespace>` or raise `--max` before treating missing namespaces or model usage as absent.",
+		maxSessions, maxSessions, discoveredCount)
 }
 
 func namespaceName(path string) string {

@@ -162,7 +162,7 @@ func TestWebActivityRendering(t *testing.T) {
 	if client.ReadOnlyFrac == nil || *client.ReadOnlyFrac != 1.0 {
 		t.Fatalf("read-only frac = %v, want 1.0", client.ReadOnlyFrac)
 	}
-	md := ReportMarkdown([]Session{client}, AggregateSessions([]Session{client}), "", nil, false, 0, nil, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))
+	md := ReportMarkdown([]Session{client}, AggregateSessions([]Session{client}), "", nil, false, 0, 1, nil, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))
 	if !strings.Contains(md, "WebFetch 1") {
 		t.Fatalf("client WebFetch hidden from report:\n%s", md)
 	}
@@ -170,7 +170,7 @@ func TestWebActivityRendering(t *testing.T) {
 	server := Analyze(writeTranscript(t, []map[string]any{
 		assistantRecord("msg-2", 100, 1_000, 100, withServerWeb(3, 2)),
 	}))
-	md = ReportMarkdown([]Session{server}, AggregateSessions([]Session{server}), "", nil, false, 0, nil, time.Now())
+	md = ReportMarkdown([]Session{server}, AggregateSessions([]Session{server}), "", nil, false, 0, 1, nil, time.Now())
 	if !strings.Contains(md, "search 3 / fetch 2") {
 		t.Fatalf("server web counts hidden:\n%s", md)
 	}
@@ -240,7 +240,7 @@ func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 	sub := Analyze(subPath)
 	sum := SummarizeAnalyses([]Session{sub})
 	agg := AggregateSessions([]Session{top})
-	md := ReportMarkdown([]Session{top}, agg, "C--work-fak", nil, false, 0, &sum, time.Now())
+	md := ReportMarkdown([]Session{top}, agg, "C--work-fak", nil, false, 0, 1, &sum, time.Now())
 	for _, want := range []string{
 		"# Session-Transcript Audit - active scope",
 		"1 namespaces folded (C--work-fak)",
@@ -319,7 +319,7 @@ func TestProviderBucketAndCostBehavior(t *testing.T) {
 	if ModelCost("<synthetic>", agg.PerModel["<synthetic>"]) != 0 {
 		t.Fatal("synthetic should cost 0")
 	}
-	md := ReportMarkdown([]Session{s}, agg, "", nil, false, 0, nil, time.Now())
+	md := ReportMarkdown([]Session{s}, agg, "", nil, false, 0, 1, nil, time.Now())
 	for _, want := range []string{"Cost by billing bucket", "Google (Gemini)", "- (no card)", "Other billing buckets present"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("report missing %q:\n%s", want, md)

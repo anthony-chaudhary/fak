@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSessionAuditDiscoverAuditAndDeep(t *testing.T) {
@@ -87,6 +88,47 @@ func TestSessionAuditWarnsWhenSubagentsExcluded(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "NOTE: +1 subagent transcripts uncounted") {
 		t.Fatalf("subagent warning missing:\n%s", stdout.String())
+	}
+}
+
+func TestSessionAuditWarnsWhenMaxClipsBeforeNamespaceAudit(t *testing.T) {
+	root := t.TempDir()
+	older := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "fable.jsonl"), []map[string]any{
+		sessionAuditAssistant("fable", 100, ""),
+	})
+	newer := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-job", "synthetic.jsonl"), []map[string]any{
+		sessionAuditAssistant("synthetic", 10, ""),
+	})
+	now := time.Now()
+	if err := os.Chtimes(older, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"discover", "--root", root, "--all", "--max", "1"})
+	if rc != 0 {
+		t.Fatalf("discover rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "showing first 1 of 2") ||
+		!strings.Contains(stdout.String(), "use --ns-prefix") ||
+		strings.Contains(stdout.String(), "C--work-fak/fable.jsonl") {
+		t.Fatalf("discover cap warning did not explain hidden namespace:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"audit", "--root", root, "--all", "--max", "1"})
+	if rc != 0 {
+		t.Fatalf("audit rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: --max clipped discovery to first 1 of 2") {
+		t.Fatalf("audit stderr cap warning missing:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "NOTE: `--max 1` clipped this audit to the newest 1 of 2 discovered transcripts") {
+		t.Fatalf("audit markdown cap warning missing:\n%s", stdout.String())
 	}
 }
 
