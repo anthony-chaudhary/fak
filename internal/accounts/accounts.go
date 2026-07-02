@@ -573,6 +573,13 @@ func nameTokens(name string) []string {
 		switch t {
 		case "", "seat", "claude":
 		default:
+			// Restored/recreated account dirs sometimes carry an operational suffix glued
+			// to the identity token (gem8NEW-netra, day26NEW-netra). That suffix is not
+			// an account claim; keep the identity-bearing base so a valid restore does
+			// not look like a name lie, while gem8NEW logged into day26 still fails.
+			if strings.HasSuffix(t, "new") && len(t) > len("new") {
+				t = strings.TrimSuffix(t, "new")
+			}
 			out = append(out, t)
 		}
 	}

@@ -216,7 +216,7 @@ func rotationStatusFor(h Home, pol RotationPolicy) RotationStatus {
 		return RotationTombstoned
 	case LoginDisabled:
 		return RotationDisabled
-	case LoginMissingDir, LoginNeedsLogin:
+	case LoginMissingDir, LoginNeedsLogin, LoginIdentityMismatch:
 		return RotationUnservable
 	default:
 		return RotationUnservable

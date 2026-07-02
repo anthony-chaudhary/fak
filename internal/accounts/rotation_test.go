@@ -44,9 +44,9 @@ func excludedSeat(res RotationResult, name string) (RotationSeat, bool) {
 func TestRotationPlanDedupAndExclusions(t *testing.T) {
 	reg := Registry{Homes: []Home{
 		active("alice", "u-alice", "alice@x.test"),
-		// Same account bucket as alice (shares u-alice) under a different, non-matching name:
+		// Same account bucket as alice (shares u-alice) under another truthful name:
 		// must collapse to a duplicate, not present a second rotatable account.
-		func() Home { h := active("zdup", "u-alice", "alice@x.test"); return h }(),
+		func() Home { h := active("alice-dup", "u-alice", "alice@x.test"); return h }(),
 		active("bob", "u-bob", "bob@x.test"),
 		// Reserved: held out of routine rotation (default policy avoid_reserved=true).
 		func() Home { h := active("carol", "u-carol", "carol@x.test"); h.Reserved = true; return h }(),
@@ -72,18 +72,18 @@ func TestRotationPlanDedupAndExclusions(t *testing.T) {
 	if got := poolNames(res); len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
 		t.Fatalf("pool = %v, want [alice bob] (distinct eligible buckets, sorted)", got)
 	}
-	// The canonical for the alice bucket is "alice"; "zdup" collapses onto it.
+	// The canonical for the alice bucket is "alice"; "alice-dup" collapses onto it.
 	for _, s := range res.Pool {
 		if s.Name == "alice" && s.Account != "uuid:u-alice" {
 			t.Fatalf("alice pool seat account = %q, want uuid:u-alice", s.Account)
 		}
 	}
-	if r := excludedReason(res, "zdup"); r != RotationDuplicate {
-		t.Fatalf("zdup excluded reason = %q, want duplicate", r)
+	if r := excludedReason(res, "alice-dup"); r != RotationDuplicate {
+		t.Fatalf("alice-dup excluded reason = %q, want duplicate", r)
 	}
 	for _, s := range res.Excluded {
-		if s.Name == "zdup" && s.Canonical != "alice" {
-			t.Fatalf("zdup canonical = %q, want alice", s.Canonical)
+		if s.Name == "alice-dup" && s.Canonical != "alice" {
+			t.Fatalf("alice-dup canonical = %q, want alice", s.Canonical)
 		}
 	}
 	if r := excludedReason(res, "carol"); r != RotationReserved {
@@ -127,15 +127,15 @@ func TestNextInRotationRoundRobinSkipsCurrentBucket(t *testing.T) {
 		active("bob", "u-bob", "bob@x.test"),
 		active("frank", "u-frank", "frank@x.test"),
 		// A duplicate of alice's bucket — rotating "after" it must still skip the alice bucket.
-		func() Home { h := active("zdup", "u-alice", "alice@x.test"); return h }(),
+		func() Home { h := active("alice-dup", "u-alice", "alice@x.test"); return h }(),
 	}}
 
 	cases := []struct{ after, want string }{
 		{"alice", "bob"},
 		{"bob", "frank"},
-		{"frank", "alice"}, // wrap
-		{"", "alice"},      // fresh start -> first in rotation
-		{"zdup", "bob"},    // a duplicate resolves to alice's bucket -> next is bob
+		{"frank", "alice"},   // wrap
+		{"", "alice"},        // fresh start -> first in rotation
+		{"alice-dup", "bob"}, // a duplicate resolves to alice's bucket -> next is bob
 		{"unknown", "alice"},
 	}
 	for _, c := range cases {

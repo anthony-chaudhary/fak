@@ -16,6 +16,8 @@ func TestLoginStatusPrimaryStates(t *testing.T) {
 		{"disabled", disabled, LoginDisabled},
 		{"missing dir", Home{Name: "missing", Dir: "/missing", Identity: Identity{Exists: false}}, LoginMissingDir},
 		{"needs login", Home{Name: "needs-login", Dir: "/needs", Identity: Identity{Exists: true, HasCreds: false}}, LoginNeedsLogin},
+		{"wrong identity", Home{Name: "gem8", Dir: "/gem8", Identity: Identity{Exists: true, HasCreds: true, Email: "day26@example.test"}}, LoginIdentityMismatch},
+		{"restored suffix", Home{Name: "gem8NEW-netra", Dir: "/gem8new", Identity: Identity{Exists: true, HasCreds: true, Email: "gem8@example.test"}}, LoginReady},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,7 +43,7 @@ func TestLoginReportWarningsAndSummary(t *testing.T) {
 		Roles: map[string]string{RoleActive: "alice", RoleAnchor: "alice"},
 		Homes: []Home{
 			active("alice", "u-alice", "alice@example.test"),
-			active("zdup", "u-alice", "alice@example.test"),
+			active("alice-dup", "u-alice", "alice@example.test"),
 			{Name: "gem8", Dir: "/home/gem8", Identity: Identity{Exists: true, HasCreds: true, AccountUUID: "u-gem8", Email: "gem8@example.test", TokenFP: "abc123"}},
 			{Name: "day24", Dir: "/home/day24", Identity: Identity{Exists: true, HasCreds: true, AccountUUID: "u-day24", Email: "day24@example.test", TokenFP: "abc123"}},
 			noIdentity,
@@ -67,8 +69,8 @@ func TestLoginReportWarningsAndSummary(t *testing.T) {
 	for _, obs := range report.Seats {
 		byName[obs.Name] = obs
 	}
-	if !hasLoginWarning(byName["zdup"], LoginWarningDuplicateBucket) {
-		t.Fatalf("duplicate bucket warning missing: %+v", byName["zdup"])
+	if !hasLoginWarning(byName["alice-dup"], LoginWarningDuplicateBucket) {
+		t.Fatalf("duplicate bucket warning missing: %+v", byName["alice-dup"])
 	}
 	if !hasLoginWarning(byName["gem8"], LoginWarningTokenTwin) ||
 		!hasLoginWarning(byName["day24"], LoginWarningTokenTwin) {
@@ -82,6 +84,23 @@ func TestLoginReportWarningsAndSummary(t *testing.T) {
 	}
 	if byName["disabled"].CanServe {
 		t.Fatalf("disabled seat must not be can_serve: %+v", byName["disabled"])
+	}
+}
+
+func TestLoginReportBlocksIdentityMismatch(t *testing.T) {
+	reg := Registry{Homes: []Home{
+		{Name: "gem8", Dir: "/home/gem8", Identity: Identity{Exists: true, HasCreds: true, Email: "day26@example.test"}},
+	}}
+	report := reg.LoginReport()
+	if report.Summary.ByStatus[string(LoginIdentityMismatch)] != 1 || report.Summary.CanServe != 0 {
+		t.Fatalf("identity mismatch should be unservable: summary=%+v", report.Summary)
+	}
+	obs := report.Seats[0]
+	if obs.Status != LoginIdentityMismatch || obs.CanServe {
+		t.Fatalf("identity mismatch obs = %+v", obs)
+	}
+	if !hasLoginWarning(obs, LoginWarningNameLie) {
+		t.Fatalf("identity mismatch should retain name warning: %+v", obs)
 	}
 }
 

@@ -238,6 +238,8 @@ func TestNameLie(t *testing.T) {
 		{"alex-agent-seat", "alex.agent@example.test", false},                 // all name tokens present in email
 		{"day24-seat", "gem5@example.test", true},                             // different person
 		{"default", "gem8@example.test", false},                               // role name, never a lie
+		{"gem8NEW-netra", "gem8@example.test", false},                         // restore suffix is operational, not identity
+		{"gem8NEW-netra", "day26@example.test", true},                         // still catches a restored dir logged into another account
 		{"whatever", "", false},                                               // no identity -> never a lie
 	}
 	for _, c := range cases {
@@ -359,8 +361,8 @@ func TestSaveRegistryRoundTrips(t *testing.T) {
 // gem8 is the serveable anchor (Serve's fall-forward target), throttled is
 // active-but-logged-out, q is tombstoned.
 func serveFixture() Registry {
-	live := Identity{Email: "x@y", Exists: true, HasCreds: true}
-	noCreds := Identity{Email: "x@y", Exists: true, HasCreds: false}
+	live := Identity{Email: "gem8@example.test", Exists: true, HasCreds: true}
+	noCreds := Identity{Email: "throttled@example.test", Exists: true, HasCreds: false}
 	return Registry{
 		Roles: map[string]string{RoleAnchor: "gem8-seat"},
 		Homes: []Home{

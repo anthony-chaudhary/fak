@@ -20,6 +20,10 @@ const (
 	LoginDisabled   LoginStatus = "disabled"
 	LoginMissingDir LoginStatus = "missing_dir"
 	LoginNeedsLogin LoginStatus = "needs_login"
+	// LoginIdentityMismatch means the config home has credentials, but the disk-derived
+	// login identity does not match the named seat. Treat it like a login wall for launch
+	// purposes: serving would burn the wrong account's quota.
+	LoginIdentityMismatch LoginStatus = "identity_mismatch"
 )
 
 // LoginWarning is an auxiliary condition that does not necessarily stop a
@@ -89,6 +93,8 @@ func (h Home) LoginStatus() LoginStatus {
 		return LoginMissingDir
 	case !h.Identity.HasCreds:
 		return LoginNeedsLogin
+	case h.NameLie():
+		return LoginIdentityMismatch
 	default:
 		return LoginReady
 	}
@@ -189,6 +195,12 @@ func LoginReasonAction(status LoginStatus, h Home) (string, string) {
 		return "config directory is missing", "restore the directory or tombstone/rehome the seat"
 	case LoginNeedsLogin:
 		return "config directory exists but has no live credentials", "run /login for this CLAUDE_CONFIG_DIR or rehome the seat"
+	case LoginIdentityMismatch:
+		action := "log out and re-login this CLAUDE_CONFIG_DIR with the browser profile that belongs to this seat"
+		if h.ChromeProfile != "" {
+			action = "log out and re-login this CLAUDE_CONFIG_DIR with Chrome " + h.ChromeProfile
+		}
+		return "config directory has credentials for a different account than its seat name", action
 	default:
 		return "", ""
 	}
