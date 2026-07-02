@@ -155,126 +155,175 @@ func materializeGPTOSSTensors(cfg Config, man map[string]tensorMeta, raw *[]byte
 	return nil
 }
 
+// materializeFusedExpertTensor is the shared driver for splitting one fused
+// per-layer expert tensor into per-expert components: it resolves the first
+// present alias among names, validates the fused tensor against wantShape via
+// check (requireF32Shape for data-copy splits, requireMoESplitShape for
+// zero-copy manifest splits), invokes perExpert for each of the E experts, and
+// removes the fused source from the manifest. An absent source is a no-op.
+func materializeFusedExpertTensor(man map[string]tensorMeta, E int, wantShape []int, check func(string, tensorMeta, []int) error, perExpert func(name string, meta tensorMeta, e int) error, names ...string) error {
+	name, meta, ok := firstTensor(man, names...)
+	if !ok {
+		return nil
+	}
+	if err := check(name, meta, wantShape); err != nil {
+		return err
+	}
+	for e := 0; e < E; e++ {
+		if err := perExpert(name, meta, e); err != nil {
+			return err
+		}
+	}
+	delete(man, name)
+	return nil
+}
+
+// metaF32Reader returns an accessor for flat f32 element k of a manifest tensor.
+func metaF32Reader(raw *[]byte, meta tensorMeta) func(int) float32 {
+	return func(k int) float32 { return readF32At(*raw, meta, k) }
+}
+
+// gptossGateUpExpert de-interleaves expert e's gate and up projections (each
+// [I, H] row-major) out of a fused GPT-OSS gate_up tensor laid out [E, H, 2I]
+// with gate/up interleaved on the last axis. at reads flat element k of the
+// fused tensor.
+func gptossGateUpExpert(e, I, H int, at func(int) float32) (gate, up []float32) {
+	gate = make([]float32, I*H)
+	up = make([]float32, I*H)
+	for i := 0; i < I; i++ {
+		for h := 0; h < H; h++ {
+			src := ((e*H+h)*2*I + 2*i)
+			gate[i*H+h] = at(src)
+			up[i*H+h] = at(src + 1)
+		}
+	}
+	return gate, up
+}
+
+// gptossGateUpBiasExpert de-interleaves expert e's gate and up bias vectors
+// (each [I]) out of a fused GPT-OSS gate_up bias tensor laid out [E, 2I].
+func gptossGateUpBiasExpert(e, I int, at func(int) float32) (gate, up []float32) {
+	gate = make([]float32, I)
+	up = make([]float32, I)
+	for i := 0; i < I; i++ {
+		src := e*2*I + 2*i
+		gate[i] = at(src)
+		up[i] = at(src + 1)
+	}
+	return gate, up
+}
+
+// gptossDownExpert transposes expert e's down projection ([H, I] row-major)
+// out of a fused GPT-OSS down tensor laid out [E, I, H]. at reads flat element
+// k of the fused tensor.
+func gptossDownExpert(e, I, H int, at func(int) float32) []float32 {
+	down := make([]float32, H*I)
+	for h := 0; h < H; h++ {
+		for i := 0; i < I; i++ {
+			down[h*I+i] = at((e*I+i)*H + h)
+		}
+	}
+	return down
+}
+
+// gptossGateUpDest returns expert e's gate/up destination tensor names with
+// suffix kind ("weight" or "bias") and errors if either already exists in man;
+// what names the components in the conflict message.
+func gptossGateUpDest(man map[string]tensorMeta, name string, layer, e int, kind, what string) (gateName, upName string, err error) {
+	gateName = expertName(layer, e, "gate_proj."+kind)
+	upName = expertName(layer, e, "up_proj."+kind)
+	if anyTensorPresent(man, gateName, upName) {
+		return "", "", fmt.Errorf("model: cannot materialize %s: expert %d %s already exists", name, e, what)
+	}
+	return gateName, upName, nil
+}
+
+// gptossDownDest returns expert e's down destination tensor name with suffix
+// kind and errors if it already exists in man.
+func gptossDownDest(man map[string]tensorMeta, name string, layer, e int, kind, what string) (string, error) {
+	downName := expertName(layer, e, "down_proj."+kind)
+	if _, exists := man[downName]; exists {
+		return "", fmt.Errorf("model: cannot materialize %s: expert %d %s already exists", name, e, what)
+	}
+	return downName, nil
+}
+
+// materializeGPTOSSGateUpPair splits one fused GPT-OSS gate/up tensor (weight
+// or bias flavor) into per-expert gate/up components appended to the manifest.
+func materializeGPTOSSGateUpPair(man map[string]tensorMeta, raw *[]byte, layer, E int, wantShape, partShape []int, kind, what string, extract func(meta tensorMeta, e int) (gate, up []float32), names ...string) error {
+	return materializeFusedExpertTensor(man, E, wantShape, requireF32Shape,
+		func(name string, meta tensorMeta, e int) error {
+			gateName, upName, err := gptossGateUpDest(man, name, layer, e, kind, what)
+			if err != nil {
+				return err
+			}
+			gate, up := extract(meta, e)
+			appendF32Tensor(man, raw, gateName, partShape, gate)
+			appendF32Tensor(man, raw, upName, partShape, up)
+			return nil
+		}, names...)
+}
+
+// materializeGPTOSSDownSingle splits one fused GPT-OSS down tensor (weight or
+// bias flavor) into per-expert down components appended to the manifest.
+func materializeGPTOSSDownSingle(man map[string]tensorMeta, raw *[]byte, layer, E int, wantShape, partShape []int, kind, what string, extract func(meta tensorMeta, e int) []float32, names ...string) error {
+	return materializeFusedExpertTensor(man, E, wantShape, requireF32Shape,
+		func(name string, meta tensorMeta, e int) error {
+			downName, err := gptossDownDest(man, name, layer, e, kind, what)
+			if err != nil {
+				return err
+			}
+			appendF32Tensor(man, raw, downName, partShape, extract(meta, e))
+			return nil
+		}, names...)
+}
+
 func materializeGPTOSSExpertGateUp(cfg Config, layer int, man map[string]tensorMeta, raw *[]byte) error {
-	name, meta, ok := firstTensor(man,
+	E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
+	return materializeGPTOSSGateUpPair(man, raw, layer, E, []int{E, H, 2 * I}, []int{I, H}, "weight", "gate/up component",
+		func(meta tensorMeta, e int) (gate, up []float32) {
+			return gptossGateUpExpert(e, I, H, metaF32Reader(raw, meta))
+		},
 		layerName(layer, "mlp.experts.gate_up_proj"),
 		layerName(layer, "mlp.experts.gate_up_proj.weight"),
 	)
-	if !ok {
-		return nil
-	}
-	E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
-	if err := requireF32Shape(name, meta, []int{E, H, 2 * I}); err != nil {
-		return err
-	}
-	for e := 0; e < E; e++ {
-		gateName := expertName(layer, e, "gate_proj.weight")
-		upName := expertName(layer, e, "up_proj.weight")
-		if anyTensorPresent(man, gateName, upName) {
-			return fmt.Errorf("model: cannot materialize %s: expert %d gate/up component already exists", name, e)
-		}
-		gate := make([]float32, I*H)
-		up := make([]float32, I*H)
-		for i := 0; i < I; i++ {
-			for h := 0; h < H; h++ {
-				src := ((e*H+h)*2*I + 2*i)
-				gate[i*H+h] = readF32At(*raw, meta, src)
-				up[i*H+h] = readF32At(*raw, meta, src+1)
-			}
-		}
-		appendF32Tensor(man, raw, gateName, []int{I, H}, gate)
-		appendF32Tensor(man, raw, upName, []int{I, H}, up)
-	}
-	delete(man, name)
-	return nil
 }
 
 func materializeGPTOSSExpertDown(cfg Config, layer int, man map[string]tensorMeta, raw *[]byte) error {
-	name, meta, ok := firstTensor(man,
+	E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
+	return materializeGPTOSSDownSingle(man, raw, layer, E, []int{E, I, H}, []int{H, I}, "weight", "down component",
+		func(meta tensorMeta, e int) []float32 {
+			return gptossDownExpert(e, I, H, metaF32Reader(raw, meta))
+		},
 		layerName(layer, "mlp.experts.down_proj"),
 		layerName(layer, "mlp.experts.down_proj.weight"),
 	)
-	if !ok {
-		return nil
-	}
-	E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
-	if err := requireF32Shape(name, meta, []int{E, I, H}); err != nil {
-		return err
-	}
-	for e := 0; e < E; e++ {
-		downName := expertName(layer, e, "down_proj.weight")
-		if _, exists := man[downName]; exists {
-			return fmt.Errorf("model: cannot materialize %s: expert %d down component already exists", name, e)
-		}
-		down := make([]float32, H*I)
-		for h := 0; h < H; h++ {
-			for i := 0; i < I; i++ {
-				down[h*I+i] = readF32At(*raw, meta, (e*I+i)*H+h)
-			}
-		}
-		appendF32Tensor(man, raw, downName, []int{H, I}, down)
-	}
-	delete(man, name)
-	return nil
 }
 
 func materializeGPTOSSExpertGateUpBias(cfg Config, layer int, man map[string]tensorMeta, raw *[]byte) error {
-	name, meta, ok := firstTensor(man,
+	E, I := cfg.NumExperts, cfg.IntermediateSize
+	return materializeGPTOSSGateUpPair(man, raw, layer, E, []int{E, 2 * I}, []int{I}, "bias", "gate/up bias",
+		func(meta tensorMeta, e int) (gate, up []float32) {
+			return gptossGateUpBiasExpert(e, I, metaF32Reader(raw, meta))
+		},
 		layerName(layer, "mlp.experts.gate_up_proj_bias"),
 		layerName(layer, "mlp.experts.gate_up_proj.bias"),
 	)
-	if !ok {
-		return nil
-	}
-	E, I := cfg.NumExperts, cfg.IntermediateSize
-	if err := requireF32Shape(name, meta, []int{E, 2 * I}); err != nil {
-		return err
-	}
-	for e := 0; e < E; e++ {
-		gateName := expertName(layer, e, "gate_proj.bias")
-		upName := expertName(layer, e, "up_proj.bias")
-		if anyTensorPresent(man, gateName, upName) {
-			return fmt.Errorf("model: cannot materialize %s: expert %d gate/up bias already exists", name, e)
-		}
-		gate := make([]float32, I)
-		up := make([]float32, I)
-		for i := 0; i < I; i++ {
-			src := e*2*I + 2*i
-			gate[i] = readF32At(*raw, meta, src)
-			up[i] = readF32At(*raw, meta, src+1)
-		}
-		appendF32Tensor(man, raw, gateName, []int{I}, gate)
-		appendF32Tensor(man, raw, upName, []int{I}, up)
-	}
-	delete(man, name)
-	return nil
 }
 
 func materializeGPTOSSExpertDownBias(cfg Config, layer int, man map[string]tensorMeta, raw *[]byte) error {
-	name, meta, ok := firstTensor(man,
+	E, H := cfg.NumExperts, cfg.HiddenSize
+	return materializeGPTOSSDownSingle(man, raw, layer, E, []int{E, H}, []int{H}, "bias", "down bias",
+		func(meta tensorMeta, e int) []float32 {
+			down := make([]float32, H)
+			for h := 0; h < H; h++ {
+				down[h] = readF32At(*raw, meta, e*H+h)
+			}
+			return down
+		},
 		layerName(layer, "mlp.experts.down_proj_bias"),
 		layerName(layer, "mlp.experts.down_proj.bias"),
 	)
-	if !ok {
-		return nil
-	}
-	E, H := cfg.NumExperts, cfg.HiddenSize
-	if err := requireF32Shape(name, meta, []int{E, H}); err != nil {
-		return err
-	}
-	for e := 0; e < E; e++ {
-		downName := expertName(layer, e, "down_proj.bias")
-		if _, exists := man[downName]; exists {
-			return fmt.Errorf("model: cannot materialize %s: expert %d down bias already exists", name, e)
-		}
-		down := make([]float32, H)
-		for h := 0; h < H; h++ {
-			down[h] = readF32At(*raw, meta, e*H+h)
-		}
-		appendF32Tensor(man, raw, downName, []int{H}, down)
-	}
-	delete(man, name)
-	return nil
 }
 
 func materializeContiguousQKVBias(cfg Config, dstPrefix, srcName string, man map[string]tensorMeta, raw *[]byte) error {

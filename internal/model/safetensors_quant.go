@@ -483,15 +483,7 @@ func quantizeGPTOSSSourceMoETensor(name string, layer int, suffix string, shape 
 			if anyQ8Present(m, gateName, upName) {
 				return true, fmt.Errorf("safetensors: cannot materialize %s: expert %d gate/up component already exists", name, e)
 			}
-			gate := make([]float32, I*H)
-			up := make([]float32, I*H)
-			for i := 0; i < I; i++ {
-				for h := 0; h < H; h++ {
-					src := ((e*H+h)*2*I + 2*i)
-					gate[i*H+h] = data[src]
-					up[i*H+h] = data[src+1]
-				}
-			}
+			gate, up := gptossGateUpExpert(e, I, H, func(k int) float32 { return data[k] })
 			m.q8w[gateName] = quantizeQ8(gate, I, H)
 			m.q8w[upName] = quantizeQ8(up, I, H)
 		}
