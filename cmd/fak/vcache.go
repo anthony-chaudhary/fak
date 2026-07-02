@@ -799,7 +799,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			if err != nil {
 				fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
 			} else if ok {
-				providerTurns := vcacheProviderTelemetryTurns(turns)
+				providerTurns := vcacheobserve.ProviderTelemetryTurns(turns)
 				if len(providerTurns) > 0 {
 					observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
 					in.TelemetryRows = vcacheobserve.Rows(providerTurns)
@@ -1139,7 +1139,7 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path, contextPath str
 		applyRecentVCacheContextOnlyObservation(rep, contextPath)
 		return
 	}
-	providerTurns := vcacheProviderTelemetryTurns(turns)
+	providerTurns := vcacheobserve.ProviderTelemetryTurns(turns)
 	obs := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
 	recent := vcacheRecentObservation{
 		Source:              "snapshot",
@@ -1260,27 +1260,6 @@ func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) 
 		return "WITNESSED", "snapshot includes fak_context_* counters from a guard/serve context event"
 	}
 	return "MISSING", "snapshot has provider-cache turns but no fak_context_* counters; it predates context instrumentation or no managed-context event fired"
-}
-
-func vcacheProviderTelemetryTurns(turns []vcacheobserve.Turn) []vcacheobserve.Turn {
-	if len(turns) == 0 {
-		return nil
-	}
-	out := make([]vcacheobserve.Turn, 0, len(turns))
-	for _, turn := range turns {
-		if vcacheTurnHasProviderTelemetry(turn) {
-			out = append(out, turn)
-		}
-	}
-	return out
-}
-
-func vcacheTurnHasProviderTelemetry(turn vcacheobserve.Turn) bool {
-	return turn.InputTokens > 0 ||
-		turn.CacheRead > 0 ||
-		turn.CacheCreation > 0 ||
-		turn.Ephemeral1h > 0 ||
-		turn.Ephemeral5m > 0
 }
 
 type vcacheSessionSummaryOptions struct {
