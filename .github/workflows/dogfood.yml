@@ -15,6 +15,12 @@
 #   * EVIDENCE — `report.json` and the vCache score artifact are uploaded as build
 #                artifacts and the human report is written to the run's step summary,
 #                so the dogfood evidence is published, not just produced locally.
+#   * BRIDGE   — on the daily scheduled run (and manual dispatch), the report's
+#                scorecard ACTION findings are filed as stable, deduplicated tracker
+#                issues via `fak dogfood-issues --live`. This is the anti-stumble
+#                rung: friction the packet witnesses must reach the tracker as part
+#                of the loop, not wait for a human or an outside agent to trip over
+#                it. Dedup by marker key means reruns update in place, never spam.
 #
 # The runner resolves a `fak` binary from `tools/.bin/fak` (the same path
 # `resolve_fak_bin` probes), so the job BUILDS one there first — the green gate then
@@ -38,6 +44,11 @@ jobs:
   recent-feature-dogfood:
     name: recent-feature dogfood gate + evidence
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # issues:write is used ONLY by the schedule/dispatch-gated bridge step below;
+      # push/PR runs never touch the tracker.
+      issues: write
     env:
       GOTOOLCHAIN: auto
     defaults:
@@ -70,6 +81,18 @@ jobs:
           python tools/recent_feature_dogfood.py \
             --out-dir .fak/recent-feature-dogfood/ci \
             --json | tee dogfood-report.json
+
+      # The BRIDGE: file the fresh report's ACTION findings as deduped tracker
+      # issues. Gated to the daily schedule + manual dispatch so PR/push runs stay
+      # read-only; the marker-key dedup makes reruns update in place. (When the
+      # CLI grows an issues-sync.json receipt beside the report, the evidence
+      # artifact below already globs the out-dir, so the receipt ships with it.)
+      - name: bridge dogfood ACTION findings to tracker issues (schedule/dispatch only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./tools/.bin/fak dogfood-issues --live .fak/recent-feature-dogfood/ci/report.json
 
       # Publish the evidence: the report and the vCache score artifact the packet wrote.
       - name: upload dogfood evidence
