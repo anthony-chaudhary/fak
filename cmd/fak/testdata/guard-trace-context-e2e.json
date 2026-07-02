@@ -1,0 +1,44 @@
+{
+  "slice_id": "guard-trace-context-e2e",
+  "_provenance": "A compact no-key guard replay fixture for the context-plane vcache witness. The request messages include a repeated off-topic assistant span that expands into a long client history; `fak guard --replay-trace ... --replay-wire openai` posts it through the real gateway ctx-view path. Set FAK_VCACHE_SNAPSHOT to an explicit artifact path before replaying so the generated fak_context_* counters do not overwrite the user's live default snapshot.",
+  "turns": [
+    {
+      "note": "Long request history: the current task is auth/refund, while the repeated weather assistant span is off-topic and should be elided by ctx-view under the replay/front-door 8000-token budget.",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a coding agent under fak guard. Keep the current task grounded in the auth-token and refund-policy context."
+        },
+        {
+          "role": "user",
+          "content": "Rotate the auth token and then check the refund policy."
+        },
+        {
+          "role": "assistant",
+          "content": "weather sunny unrelated padding ",
+          "repeat": 1800
+        },
+        {
+          "role": "user",
+          "content": "What is the auth token rotation procedure and the refund window?"
+        }
+      ],
+      "usage": {
+        "input_tokens": 240,
+        "output_tokens": 12,
+        "cache_read_input_tokens": 1800,
+        "cache_creation_input_tokens": 0
+      },
+      "calls": [
+        {
+          "id": "call_read_policy",
+          "tool": "Read",
+          "args": {
+            "file_path": "README.md"
+          },
+          "class": "allow"
+        }
+      ]
+    }
+  ]
+}

@@ -28,6 +28,9 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"gated OFF by default; off-path",
 		"M4 recall cost-gate proof: refuted",
 		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
+		"context witness replay: set FAK_VCACHE_SNAPSHOT=.fak/vcache-context-replay.jsonl",
+		"fak guard --replay-trace cmd/fak/testdata/guard-trace-context-e2e.json --replay-wire openai",
+		"fak vcache score --json",
 		"codex-like star proof: PROVEN",
 		"codex/openai verifier: ready",
 		"codex/openai live telemetry: proven (Codex CLI replay artifact)",
@@ -60,7 +63,11 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 		rep.ContextAPI.HTTP != "GET /v1/fak/ctxvalue" ||
 		rep.ContextAPI.MCPTool != "fak_context_value" ||
 		!rep.ContextAPI.AdviceOnly ||
-		!strings.Contains(rep.ContextAPI.ScoreIntegration, "after a guard/serve context event fires") {
+		!strings.Contains(rep.ContextAPI.ScoreIntegration, "after a guard/serve context event fires") ||
+		rep.ContextAPI.NoKeyReplayFixture != "cmd/fak/testdata/guard-trace-context-e2e.json" ||
+		rep.ContextAPI.NoKeyReplaySnapshot != ".fak/vcache-context-replay.jsonl" ||
+		!strings.Contains(rep.ContextAPI.NoKeyReplayCommand, "guard --replay-trace") ||
+		rep.ContextAPI.NoKeyScoreCommand != "fak vcache score --json" {
 		t.Fatalf("context_api status missing live API contract: %+v", rep.ContextAPI)
 	}
 	if rep.CodexOpenAI.CachedSampleProof.Status != vcachegov.ProofProven ||

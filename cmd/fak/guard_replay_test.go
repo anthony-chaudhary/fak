@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +22,7 @@ import (
 // test asserts on. The module root is the repo root, so the relative path resolves from
 // cmd/fak.
 const guardTraceFixturePath = "../../internal/gateway/testdata/guard-trace-e2e.json"
+const guardContextTraceFixturePath = "testdata/guard-trace-context-e2e.json"
 
 // TestGuardReplayShippedFloorDeniesEveryFixtureDanger is the anti-drift witness: the REAL
 // shipped guard floor (guardDefaultPolicyJSON, the one --replay-trace installs by default)
@@ -118,38 +118,11 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 func TestGuardReplayWritesExplicitContextSnapshot(t *testing.T) {
 	t.Cleanup(journal.ResetActiveForTest)
 	dir := t.TempDir()
-	fixturePath := filepath.Join(dir, "ctxview-replay.json")
 	snapPath := filepath.Join(dir, "vcache-turns.jsonl")
 	t.Setenv(vcachesnapshot.EnvPath, snapPath)
 
-	f := guardtrace.Fixture{
-		SliceID: "ctxview-replay",
-		Turns: []guardtrace.Turn{{
-			Messages: []guardtrace.RequestMessage{
-				{Role: "system", Content: "You are a coding agent under fak guard."},
-				{Role: "user", Content: "rotate the auth token and then check the refund policy"},
-				{Role: "assistant", Content: strings.Repeat("weather sunny unrelated padding ", 5000)},
-				{Role: "user", Content: "what is the auth token rotation and refund window"},
-			},
-			Usage: guardtrace.Usage{InputTokens: 240, OutputTokens: 12, CacheReadInputTokens: 1800},
-			Calls: []guardtrace.Call{{
-				ID:    "call_read_policy",
-				Tool:  "Read",
-				Args:  json.RawMessage(`{"file_path":"README.md"}`),
-				Class: "allow",
-			}},
-		}},
-	}
-	raw, err := json.Marshal(f)
-	if err != nil {
-		t.Fatalf("marshal fixture: %v", err)
-	}
-	if err := os.WriteFile(fixturePath, raw, 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-
 	var sb strings.Builder
-	if code := runGuardReplay(fixturePath, "openai", "", &sb); code != 0 {
+	if code := runGuardReplay(guardContextTraceFixturePath, "openai", "", &sb); code != 0 {
 		t.Fatalf("runGuardReplay exit = %d, want 0\n%s", code, sb.String())
 	}
 	if !strings.Contains(sb.String(), "wrote vcache snapshot") {

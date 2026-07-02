@@ -191,13 +191,17 @@ type vcacheCodexOpenAIStatus struct {
 }
 
 type vcacheContextAPIStatus struct {
-	Verifier         string   `json:"verifier"`
-	HTTP             string   `json:"http"`
-	MCPTool          string   `json:"mcp_tool"`
-	AdviceOnly       bool     `json:"advice_only"`
-	Provenance       []string `json:"provenance"`
-	ScoreIntegration string   `json:"score_integration"`
-	Reason           string   `json:"reason"`
+	Verifier            string   `json:"verifier"`
+	HTTP                string   `json:"http"`
+	MCPTool             string   `json:"mcp_tool"`
+	AdviceOnly          bool     `json:"advice_only"`
+	Provenance          []string `json:"provenance"`
+	ScoreIntegration    string   `json:"score_integration"`
+	NoKeyReplayFixture  string   `json:"no_key_replay_fixture"`
+	NoKeyReplaySnapshot string   `json:"no_key_replay_snapshot"`
+	NoKeyReplayCommand  string   `json:"no_key_replay_command"`
+	NoKeyScoreCommand   string   `json:"no_key_score_command"`
+	Reason              string   `json:"reason"`
 }
 
 func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
@@ -248,6 +252,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "context API: %s (%s; MCP %s; advice_only=%v)\n",
 		rep.ContextAPI.Verifier, rep.ContextAPI.HTTP, rep.ContextAPI.MCPTool, rep.ContextAPI.AdviceOnly)
+	fmt.Fprintf(stdout, "context witness replay: set FAK_VCACHE_SNAPSHOT=%s then run `%s`; score with `%s`\n",
+		rep.ContextAPI.NoKeyReplaySnapshot, rep.ContextAPI.NoKeyReplayCommand, rep.ContextAPI.NoKeyScoreCommand)
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
@@ -1062,14 +1068,20 @@ func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
 }
 
 func defaultVCacheContextAPIStatus() vcacheContextAPIStatus {
+	const fixture = "cmd/fak/testdata/guard-trace-context-e2e.json"
+	const snapshot = ".fak/vcache-context-replay.jsonl"
 	return vcacheContextAPIStatus{
-		Verifier:         "ready",
-		HTTP:             "GET /v1/fak/ctxvalue",
-		MCPTool:          "fak_context_value",
-		AdviceOnly:       true,
-		Provenance:       []string{"OBSERVED tokens", "WITNESSED turns/context_events", "FORECAST turns_to_event", "DECISION step_advice"},
-		ScoreIntegration: "context events feed /v1/fak/vcache/score and persisted vcache snapshots only after a guard/serve context event fires",
-		Reason:           "managed-context value API is wired for running guard/serve sessions; it sizes next steps but does not itself prove a context-saving event",
+		Verifier:            "ready",
+		HTTP:                "GET /v1/fak/ctxvalue",
+		MCPTool:             "fak_context_value",
+		AdviceOnly:          true,
+		Provenance:          []string{"OBSERVED tokens", "WITNESSED turns/context_events", "FORECAST turns_to_event", "DECISION step_advice"},
+		ScoreIntegration:    "context events feed /v1/fak/vcache/score and persisted vcache snapshots only after a guard/serve context event fires",
+		NoKeyReplayFixture:  fixture,
+		NoKeyReplaySnapshot: snapshot,
+		NoKeyReplayCommand:  "fak guard --replay-trace " + fixture + " --replay-wire openai",
+		NoKeyScoreCommand:   "fak vcache score --json",
+		Reason:              "managed-context value API is wired for running guard/serve sessions; it sizes next steps but does not itself prove a context-saving event",
 	}
 }
 
