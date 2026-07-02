@@ -158,20 +158,41 @@ func applyProviderTransportWitness(plan *ProviderActionPlan, w ProviderTransport
 }
 
 func providerActionTurns(turns []Turn) []Turn {
+	return ProviderTelemetryTurns(turns)
+}
+
+// ProviderTelemetryTurns keeps turns with real provider-cache token counters and
+// drops context-only witness rows before provider-cache economics are folded.
+func ProviderTelemetryTurns(turns []Turn) []Turn {
 	if len(turns) == 0 {
 		return nil
 	}
 	out := make([]Turn, 0, len(turns))
-	for _, turn := range turns {
-		if turn.InputTokens > 0 ||
-			turn.CacheRead > 0 ||
-			turn.CacheCreation > 0 ||
-			turn.Ephemeral1h > 0 ||
-			turn.Ephemeral5m > 0 {
-			out = append(out, turn)
+	for i := range turns {
+		if TurnHasProviderTelemetry(turns[i]) {
+			out = append(out, turns[i])
 		}
 	}
 	return out
+}
+
+// TurnHasProviderTelemetry reports whether a turn has provider-cache counters,
+// as distinct from context-plane-only witness counters.
+func TurnHasProviderTelemetry(turn Turn) bool {
+	switch {
+	case turn.InputTokens > 0:
+		return true
+	case turn.CacheRead > 0:
+		return true
+	case turn.CacheCreation > 0:
+		return true
+	case turn.Ephemeral1h > 0:
+		return true
+	case turn.Ephemeral5m > 0:
+		return true
+	default:
+		return false
+	}
 }
 
 func providerActionFromFamily(fam Family, w ProviderTransportWitness) ProviderAction {

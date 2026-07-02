@@ -278,7 +278,11 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 				continue
 			}
 			ns := entry.Name()
-			if excludedNamespace(ns) || (opts.NamespacePrefix != "" && !strings.HasPrefix(ns, opts.NamespacePrefix)) {
+			if opts.NamespacePrefix != "" {
+				if !strings.HasPrefix(ns, opts.NamespacePrefix) {
+					continue
+				}
+			} else if excludedNamespace(ns) {
 				continue
 			}
 			nsdir := filepath.Join(root, ns)
@@ -1132,22 +1136,22 @@ func compactOpusCostPressure(tiers []CompactTier) (CompactRecommendation, bool) 
 		return CompactRecommendation{}, false
 	}
 	if hasFable && fable.OutputShare >= opus.OutputShare {
-		return CompactRecommendation{
-			Kind:     "opus_cost_pressure",
-			Severity: "high",
-			Action:   "keep Fable as the default route and require an explicit Opus justification for cost-heavy long-context work",
-			Reason:   "Fable produced at least as much output as Opus, but Opus carried most estimated cost",
-			Evidence: fmt.Sprintf("opus_cost_share=%.1f%% fable_output_share=%.1f%% opus_output_share=%.1f%%",
+		return compactRecommendation(
+			"opus_cost_pressure",
+			"high",
+			"keep Fable as the default route and require an explicit Opus justification for cost-heavy long-context work",
+			"Fable produced at least as much output as Opus, but Opus carried most estimated cost",
+			fmt.Sprintf("opus_cost_share=%.1f%% fable_output_share=%.1f%% opus_output_share=%.1f%%",
 				100*opus.CostShare, 100*fable.OutputShare, 100*opus.OutputShare),
-		}, true
+		), true
 	}
-	return CompactRecommendation{
-		Kind:     "opus_cost_pressure",
-		Severity: "medium",
-		Action:   "audit the top Opus-heavy sessions before launching more Opus turns",
-		Reason:   "Opus carried most estimated cost in the audited window",
-		Evidence: fmt.Sprintf("opus_cost_share=%.1f%% opus_output_share=%.1f%%", 100*opus.CostShare, 100*opus.OutputShare),
-	}, true
+	return compactRecommendation(
+		"opus_cost_pressure",
+		"medium",
+		"audit the top Opus-heavy sessions before launching more Opus turns",
+		"Opus carried most estimated cost in the audited window",
+		fmt.Sprintf("opus_cost_share=%.1f%% opus_output_share=%.1f%%", 100*opus.CostShare, 100*opus.OutputShare),
+	), true
 }
 
 func compactLongContextPressure(rows []CompactLongContext) (CompactRecommendation, bool) {
@@ -1170,6 +1174,16 @@ func compactLongContextPressure(rows []CompactLongContext) (CompactRecommendatio
 		Evidence: fmt.Sprintf("session=%s context_tokens=%d io_ratio=%.1f model=%s",
 			top.Session, top.TotalContextTokens, top.IORatio, top.TopModel),
 	}, true
+}
+
+func compactRecommendation(kind, severity, action, reason, evidence string) CompactRecommendation {
+	return CompactRecommendation{
+		Kind:     kind,
+		Severity: severity,
+		Action:   action,
+		Reason:   reason,
+		Evidence: evidence,
+	}
 }
 
 func compactTierByName(tiers []CompactTier, name string) (CompactTier, bool) {

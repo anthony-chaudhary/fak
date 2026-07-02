@@ -521,6 +521,28 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x2-plan-provideractionplan",
+      "canonical": "ProviderActionPlan (vCache provider-action planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "internal/vcacheobserve.ProviderActionPlan is the read-only plan that folds observed provider-cache families into concrete action rows for the gateway API and `fak vcache actions` CLI.",
+      "distinction": "It is a provider-cache ACTION PLAN derived from observed vCache turns, NOT a ctxplan placement plan and NOT proof that a spendful provider warm was executed.",
+      "distinct_from": [
+        "PlanPlacement",
+        "vCache"
+      ],
+      "aliases": [
+        "planprovideractions",
+        "planprovideractionswithoptions"
+      ],
+      "grounding": "provideractionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

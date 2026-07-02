@@ -104,10 +104,12 @@ func vcacheProofExit(s vcachegov.ProofStatus) int {
 }
 
 func formatBreakEven(n int) string {
-	if n == int(^uint(0)>>1) {
+	switch n {
+	case int(^uint(0) >> 1):
 		return "never"
+	default:
+		return fmt.Sprintf("%d", n)
 	}
-	return fmt.Sprintf("%d", n)
 }
 
 func formatObservedPositive(n int) string {

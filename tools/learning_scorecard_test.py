@@ -229,6 +229,11 @@ def test_detect_latency_bench_is_net_true_after_cost() -> None:
 
 # --- shipped-surface coverage ---------------------------------------------
 
+def test_added_paths_cutoff_is_utc_explicit() -> None:
+    assert lsc._since_after_stamp_utc(date(2026, 6, 29)) == "--since=2026-06-30T00:00:00Z"
+    assert lsc._before_stamp_end_utc(date(2026, 6, 29)) == "--before=2026-06-29T23:59:59Z"
+
+
 def test_added_on_or_after_stamp_excludes_same_day_stamp() -> None:
     original = lsc._git_first_added_date
     try:

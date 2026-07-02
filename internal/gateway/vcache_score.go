@@ -90,20 +90,7 @@ func applyVCacheProviderWindowForScore(in *vcachescore.Input, turns []vcacheobse
 }
 
 func vcacheScoreProviderTurns(turns []vcacheobserve.Turn) []vcacheobserve.Turn {
-	if len(turns) == 0 {
-		return nil
-	}
-	out := make([]vcacheobserve.Turn, 0, len(turns))
-	for _, turn := range turns {
-		if turn.InputTokens > 0 ||
-			turn.CacheRead > 0 ||
-			turn.CacheCreation > 0 ||
-			turn.Ephemeral1h > 0 ||
-			turn.Ephemeral5m > 0 {
-			out = append(out, turn)
-		}
-	}
-	return out
+	return vcacheobserve.ProviderTelemetryTurns(turns)
 }
 
 func (s *Server) vcacheTurnsSnapshotForScore() []vcacheobserve.Turn {

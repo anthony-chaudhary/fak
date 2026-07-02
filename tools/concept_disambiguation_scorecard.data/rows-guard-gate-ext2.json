@@ -527,6 +527,22 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x2-guard-gate-runguardreplay",
+      "canonical": "runGuardReplay (guard trace replay entry point)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The cmd/fak runGuardReplay function behind `fak guard --replay-trace`: it replays a recorded guard trace fixture through the real gateway/guard path and can emit the context-plane vCache witness snapshot.",
+      "distinction": "It is the HERMETIC TRACE-REPLAY entry point for recorded guard fixtures, NOT cmdGuard (the live guarded-session launcher) and NOT guardrsi (the journal-fold measurement layer).",
+      "distinct_from": ["cmdGuard (fak guard entry point)", "guardrsi (guard-verdict-RSI fold)", "guard (fak guard kernel)"],
+      "aliases": [],
+      "grounding": "runguardreplay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

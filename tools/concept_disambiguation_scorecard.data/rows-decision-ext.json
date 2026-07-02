@@ -113,6 +113,29 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-decision-vcachegovernoractions",
+      "canonical": "DecisionRideNatural / DecisionHeartbeatPin / DecisionLazyRebuild (vCache governor actions)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The vcachegov governor decision labels that choose the provider-cache action posture for a prefix: ride_natural for enough organic reuse, heartbeat_pin for cheap pinning, and lazy_rebuild for rebuilding only when demand returns.",
+      "distinction": "These are PROVIDER-CACHE governor decisions, not the kernel tool-call Decision trace and not the witness adjudication Decision.",
+      "distinct_from": [
+        "Decision (kernel)",
+        "Decision (witness)"
+      ],
+      "aliases": [
+        "decisionheartbeatpin",
+        "decisionlazyrebuild",
+        "providervcachedecisions"
+      ],
+      "grounding": "decisionridenatural",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

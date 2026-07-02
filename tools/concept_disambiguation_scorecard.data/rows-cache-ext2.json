@@ -100,6 +100,28 @@
       "gaps": []
     },
     {
+      "id": "x2-cache-cachereadshare",
+      "canonical": "CacheReadShare (session cache-read ratio)",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "sessionaudit.CacheReadShare is the ratio of cache-read tokens to total context tokens in a session or tier summary, rendered by `fak sessionaudit` and `fak vcache score` as the percentage of observed context served from provider cache.",
+      "distinction": "It is a derived SHARE/RATIO for reporting session reuse, not cache_read the raw provider token count, not ProviderCacheReadTokens the gateway counter, and not CacheReadMultiplier the price coefficient.",
+      "distinct_from": [
+        "cache_read",
+        "provider-cache read/savings metrics",
+        "CacheReadMultiplier (price coeff)"
+      ],
+      "aliases": [
+        "cache_read_share"
+      ],
+      "grounding": "cachereadshare",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
       "id": "x2-cache-lmcachemlcache",
       "canonical": "LMCache/MLCache (external KV-cache study refs)",
       "family": "cache",
@@ -356,6 +378,51 @@
       ],
       "aliases": [],
       "grounding": "placeanthropiccachebreakpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-vcachepolicyactions",
+      "canonical": "no_cache / explicit_cache (vCache provider policy actions)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "DecisionNoCache and DecisionExplicitCache are vcachegov provider-cache policy decisions: no_cache refuses warming secret prefixes, while explicit_cache requires a regulated explicit-cache path instead of ambient warming.",
+      "distinction": "They are provider-cache POLICY ACTIONS in the vCache governor, not a generic cache miss and not the provider cache_control marker itself.",
+      "distinct_from": [
+        "Provider cache",
+        "cache_control"
+      ],
+      "aliases": [
+        "explicitcache",
+        "providervcachedecisions"
+      ],
+      "grounding": "nocache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x2-cache-providertransportcapability",
+      "canonical": "provider-cache transport capability fields",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "ExplicitCacheTransport and HeartbeatTransport are ProviderTransportWitness booleans proving that the host has a provider-cache transport surface for regulated explicit-cache entries or harmless heartbeat refreshes before a vCache action row can move from gated to ready.",
+      "distinction": "They are CAPABILITY/WITNESS bits for provider-cache transport, not the no_cache / explicit_cache policy decision, not raw provider-cache telemetry, and not proof that a warm or explicit-cache write already executed.",
+      "distinct_from": [
+        "no_cache / explicit_cache (vCache provider policy actions)",
+        "provider-cache read/savings metrics",
+        "ProviderTransportWitness"
+      ],
+      "aliases": [
+        "explicitcachetransport",
+        "heartbeattransport"
+      ],
+      "grounding": "explicitcachetransport",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

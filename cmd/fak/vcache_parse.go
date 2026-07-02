@@ -196,9 +196,11 @@ func anchorInputsToRanked(rows []vcacheAnchorInput) []vcachecal.RankedVBlock {
 }
 
 func firstAnchorString(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		switch {
+		case trimmed != "":
+			return trimmed
 		}
 	}
 	return ""
