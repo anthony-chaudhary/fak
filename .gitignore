@@ -382,6 +382,12 @@ experiments/fleet/*.log
 # bench records live under experiments/.
 /report.json
 /baseline.json
+/fanout.csv
+/fanout.json
+/fleet-sweep.csv
+/fleet-sweep.json
+/topo.csv
+/topo.json
 
 # fak loop runtime ledger (internal/loopmgr): the append-only hash-chained loop-event
 # JSONL the dispatcher/scheduler producers write to (default .fak/loops.jsonl, overridable
@@ -389,6 +395,7 @@ experiments/fleet/*.log
 # collide across sessions and replay stale fires. The schema lives in code; the rows are
 # regenerable scratch.
 /.fak/
+**/.fak/
 
 # default outputs of the remaining demo subcommands (cmd/fak/main.go), all regenerable
 # scratch dropped at the module root by a no-arg run — same class as the report/agent/
@@ -431,6 +438,14 @@ gpucheck_wsl
 /.added*.txt
 /.del_*.txt
 /.dryrun_*.txt
+# live open-issue list dumps from an ad-hoc triage session (same regenerable
+# `gh issue list` output class as the .fak_issues_now dumps above) — tree-walking
+# gates (refaudit) prune gitignored paths, so these can never redden them.
+/.open_issues_tmp.txt
+/.tmp_open_issues.json
+/tools/_registry_*/
+/tools/_scorecard_verify_scratch/
+**/fak/witness-cache/
 
 # Regenerable turn-tax + kvmmu witness reports. WRITTEN BY TESTS, not curated:
 # internal/turnbench/stochastic_test.go writes experiments/turn-tax/turntax-{stochastic,
