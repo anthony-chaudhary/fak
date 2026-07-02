@@ -41,9 +41,19 @@ type Fixture struct {
 // Turn is one upstream model response: the tool calls it proposes plus the token usage
 // the provider would report for that turn.
 type Turn struct {
-	Note  string `json:"note,omitempty"`
-	Usage Usage  `json:"usage"`
-	Calls []Call `json:"calls"`
+	Note string `json:"note,omitempty"`
+	// Messages, when present, is the client history the replay posts into the gateway for
+	// this turn. Older fixtures omit it and get the compact default request; context
+	// fixtures use it to drive ctx-view over the same HTTP path as guard/serve.
+	Messages []RequestMessage `json:"messages,omitempty"`
+	Usage    Usage            `json:"usage"`
+	Calls    []Call           `json:"calls"`
+}
+
+// RequestMessage is one client-side history span posted into the gateway during replay.
+type RequestMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // Call is one proposed tool call in a turn, with the verdict the floor must reach.
@@ -132,6 +142,16 @@ func ParseFixture(raw []byte) (*Fixture, error) {
 	for ti, t := range f.Turns {
 		if len(t.Calls) == 0 {
 			return nil, fmt.Errorf("guardtrace: turn %d has no calls", ti)
+		}
+		for mi, m := range t.Messages {
+			switch strings.ToLower(strings.TrimSpace(m.Role)) {
+			case "system", "user", "assistant":
+			default:
+				return nil, fmt.Errorf("guardtrace: turn %d message %d has unknown role %q (want system|user|assistant)", ti, mi, m.Role)
+			}
+			if strings.TrimSpace(m.Content) == "" {
+				return nil, fmt.Errorf("guardtrace: turn %d message %d has empty content", ti, mi)
+			}
 		}
 		for ci, c := range t.Calls {
 			if c.Tool == "" {

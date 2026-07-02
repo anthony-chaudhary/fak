@@ -20,7 +20,10 @@ func TestParseFixtureValidation(t *testing.T) {
 		{"turn with no calls", `{"turns":[{"calls":[]}]}`, true},
 		{"call with no tool", `{"turns":[{"calls":[{"class":"allow"}]}]}`, true},
 		{"unknown class", `{"turns":[{"calls":[{"tool":"Bash","class":"maybe"}]}]}`, true},
+		{"unknown message role", `{"turns":[{"messages":[{"role":"tool","content":"x"}],"calls":[{"tool":"Read","class":"allow"}]}]}`, true},
+		{"empty message content", `{"turns":[{"messages":[{"role":"user","content":" "}],"calls":[{"tool":"Read","class":"allow"}]}]}`, true},
 		{"valid allow", `{"turns":[{"calls":[{"tool":"Read","class":"allow"}]}]}`, false},
+		{"valid messages", `{"turns":[{"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"}],"calls":[{"tool":"Read","class":"allow"}]}]}`, false},
 		{"valid deny", `{"turns":[{"calls":[{"tool":"Bash","class":"DENY","reason":"POLICY_BLOCK"}]}]}`, false},
 	}
 	for _, tt := range tests {
@@ -184,6 +187,51 @@ func TestBuildInboundRequest(t *testing.T) {
 		if !ok || len(tools) != 2 {
 			t.Errorf("%s: want 2 advertised tools, got %v", provider, req["tools"])
 		}
+	}
+}
+
+func TestBuildInboundRequestUsesFixtureMessages(t *testing.T) {
+	turn := Turn{
+		Messages: []RequestMessage{
+			{Role: "system", Content: "system prompt"},
+			{Role: "user", Content: "first task"},
+			{Role: "assistant", Content: "older assistant context"},
+			{Role: "user", Content: "latest task"},
+		},
+		Calls: []Call{{Tool: "Read"}},
+	}
+
+	body, err := BuildInboundRequest("openai", "test-model", turn)
+	if err != nil {
+		t.Fatalf("BuildInboundRequest(openai): %v", err)
+	}
+	var openAI struct {
+		Messages []RequestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &openAI); err != nil {
+		t.Fatalf("decode openai request: %v", err)
+	}
+	if !reflect.DeepEqual(openAI.Messages, turn.Messages) {
+		t.Fatalf("openai messages = %+v, want fixture messages %+v", openAI.Messages, turn.Messages)
+	}
+
+	body, err = BuildInboundRequest("anthropic", "test-model", turn)
+	if err != nil {
+		t.Fatalf("BuildInboundRequest(anthropic): %v", err)
+	}
+	var anthropic struct {
+		System   string           `json:"system"`
+		Messages []RequestMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &anthropic); err != nil {
+		t.Fatalf("decode anthropic request: %v", err)
+	}
+	if anthropic.System != "system prompt" {
+		t.Fatalf("anthropic system = %q, want fixture system prompt", anthropic.System)
+	}
+	if len(anthropic.Messages) != 3 || anthropic.Messages[0].Role != "user" ||
+		anthropic.Messages[1].Role != "assistant" || anthropic.Messages[2].Content != "latest task" {
+		t.Fatalf("anthropic messages = %+v, want fixture non-system history", anthropic.Messages)
 	}
 }
 

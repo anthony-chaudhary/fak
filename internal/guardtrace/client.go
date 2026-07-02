@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // InboundRoute is the gateway HTTP route a wire posts its turns to.
@@ -19,11 +20,11 @@ func InboundRoute(provider string) string {
 }
 
 // BuildInboundRequest renders the per-turn request the CLIENT sends INTO the gateway, in
-// the wire shape the route expects. The body is minimal but well-formed: a system turn,
-// one user turn, and the tool declarations for every tool the upcoming response will
-// call (so the request passes the gateway's well-formedness floor and the tools are
-// advertised). The gateway forwards this to the fake upstream, whose scripted response
-// for this turn supplies the tool calls + usage.
+// the wire shape the route expects. Fixtures can provide a full client-side history in
+// Turn.Messages; older fixtures get a minimal but well-formed default request with a
+// system turn, one user turn, and the tool declarations for every tool the upcoming
+// response will call. The gateway forwards this to the fake upstream, whose scripted
+// response for this turn supplies the tool calls + usage.
 func BuildInboundRequest(provider, model string, t Turn) ([]byte, error) {
 	switch provider {
 	case "anthropic":
@@ -54,14 +55,13 @@ func buildAnthropicInbound(model string, t Turn) ([]byte, error) {
 			"input_schema": map[string]any{"type": "object"},
 		})
 	}
+	system, messages := anthropicRequestMessages(t)
 	req := map[string]any{
 		"model":      model,
 		"max_tokens": 1024,
-		"system":     "You are a coding agent under fak guard.",
-		"messages": []map[string]any{
-			{"role": "user", "content": "proceed with the next step"},
-		},
-		"tools": tools,
+		"system":     system,
+		"messages":   messages,
+		"tools":      tools,
 	}
 	return json.Marshal(req)
 }
@@ -79,14 +79,59 @@ func buildOpenAIInbound(model string, t Turn) ([]byte, error) {
 		})
 	}
 	req := map[string]any{
-		"model": model,
-		"messages": []map[string]any{
-			{"role": "system", "content": "You are a coding agent under fak guard."},
-			{"role": "user", "content": "proceed with the next step"},
-		},
-		"tools": tools,
+		"model":    model,
+		"messages": openAIRequestMessages(t),
+		"tools":    tools,
 	}
 	return json.Marshal(req)
+}
+
+func anthropicRequestMessages(t Turn) (string, []map[string]any) {
+	const defaultSystem = "You are a coding agent under fak guard."
+	if len(t.Messages) == 0 {
+		return defaultSystem, []map[string]any{
+			{"role": "user", "content": "proceed with the next step"},
+		}
+	}
+	system := ""
+	messages := make([]map[string]any, 0, len(t.Messages))
+	for _, m := range t.Messages {
+		role := strings.ToLower(strings.TrimSpace(m.Role))
+		content := m.Content
+		if role == "system" {
+			if system == "" {
+				system = content
+			} else {
+				system += "\n\n" + content
+			}
+			continue
+		}
+		messages = append(messages, map[string]any{"role": role, "content": content})
+	}
+	if system == "" {
+		system = defaultSystem
+	}
+	if len(messages) == 0 {
+		messages = append(messages, map[string]any{"role": "user", "content": "proceed with the next step"})
+	}
+	return system, messages
+}
+
+func openAIRequestMessages(t Turn) []map[string]any {
+	if len(t.Messages) == 0 {
+		return []map[string]any{
+			{"role": "system", "content": "You are a coding agent under fak guard."},
+			{"role": "user", "content": "proceed with the next step"},
+		}
+	}
+	messages := make([]map[string]any, 0, len(t.Messages))
+	for _, m := range t.Messages {
+		messages = append(messages, map[string]any{
+			"role":    strings.ToLower(strings.TrimSpace(m.Role)),
+			"content": m.Content,
+		})
+	}
+	return messages
 }
 
 // PostTurn posts one turn's inbound request to the gateway at gatewayURL and returns the
