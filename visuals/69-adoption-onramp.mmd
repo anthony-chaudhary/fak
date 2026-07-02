@@ -1,0 +1,23 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  r0["Rung 0 - wrap what you already run<br/>fak guard -- claude<br/>gain: embedded default-deny floor, exit summary of every verdict,<br/>429 absorption - on your existing subscription"]
+  r1["Rung 1 - own the floor<br/>fak policy --dump then edit, fak policy --check<br/>gain: the allow-list is a reviewed JSON file in YOUR git,<br/>checkable offline with no model and no key"]
+  r2["Rung 2 - turn on the record<br/>FAK_AUDIT_JOURNAL=audit.jsonl, --log FILE, GET /metrics<br/>gain: a hash-chained decision trail an auditor re-verifies,<br/>plus Prometheus counters per verdict"]
+  r3["Rung 3 - front your own stack<br/>fak serve --base-url (production checklist) or serve --stdio (MCP)<br/>or --gguf (local model in-kernel)<br/>gain: the same floor for every client of your endpoint"]
+  r4["Rung 4 - fleet and referee<br/>many sessions over one boundary<br/>gain: per-trace metrics across agents, and claim verification<br/>from artifacts instead of worker self-reports"]
+
+  r0 -->|"cost to climb: edit one JSON file"| r1
+  r1 -->|"cost: set one env var"| r2
+  r2 -->|"cost: run the same binary as a server"| r3
+  r3 -->|"cost: point more sessions at it"| r4
+
+  note["Each rung adds a witness, not a rewrite.<br/>Stop at any rung: the binary and the policy<br/>keep the same shape underneath you."]
+  r4 -.-> note
+
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class r0 pass;
+  class r1,r2,r3,r4 kernel;
+  class note note;

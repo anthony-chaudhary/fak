@@ -1,0 +1,37 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph AGENTS["Your agent - unchanged"]
+    direction TB
+    claude["Claude Code<br/>subscription OAuth by default"]
+    codex["Codex / OpenCode<br/>OpenAI-compatible wire"]
+    sdk["Your own app<br/>Anthropic / OpenAI SDK or MCP client"]
+  end
+
+  subgraph FAK["fak - one static Go binary, the seam you own"]
+    boundary["Tool calls adjudicated: allow / deny / repair / quarantine<br/>Tool results admitted before the model reads them<br/>Every decision counted; hash-chained journal opt-in<br/>Provider 429s and retries absorbed"]
+  end
+
+  subgraph UPSTREAM["The model - also unchanged"]
+    direction TB
+    anthropic["Anthropic API<br/>your subscription or API key"]
+    openaiC["Any OpenAI-compatible server<br/>vLLM, SGLang, Ollama, llama-server, cloud"]
+    gguf["Local GGUF in-kernel<br/>--gguf: no key, no network"]
+  end
+
+  claude -->|"ANTHROPIC_BASE_URL<br/>injected into the child only"| boundary
+  codex -->|"OPENAI_BASE_URL"| boundary
+  sdk -->|"base_url = the gateway"| boundary
+  boundary --> anthropic
+  boundary --> openaiC
+  boundary --> gguf
+
+  note["Adoption is re-pointing a base URL.<br/>The agent and the model stay what they were;<br/>the seam between them becomes reviewable, executable policy."]
+  FAK -.-> note
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class claude,codex,sdk,anthropic,openaiC,gguf untrusted;
+  class boundary kernel;
+  class note note;

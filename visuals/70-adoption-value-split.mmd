@@ -1,0 +1,42 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  turn["One served turn crosses the boundary.<br/>Who authored each slice of its value?"]
+
+  subgraph FAKOWN["fak-authored - WITNESSED on any seat, including proxy"]
+    direction TB
+    floor["Capability-floor refusals<br/>rm -rf denied, git push gated, self-modify blocked"]
+    quar["Result quarantine<br/>hostile tool output held out of context"]
+    audit["Legibility<br/>per-turn verdict line, /metrics,<br/>hash-chained audit journal"]
+    resil["Operational absorption<br/>provider 429s / retries eaten;<br/>deny-all false stops auto-resumed"]
+    shed["Compaction shed<br/>the fak= token slice of the debug line"]
+  end
+
+  subgraph PROV["provider-authored - OBSERVED, honestly relayed"]
+    direction TB
+    pcache["Prompt-cache read rebates<br/>the prov= token slice of the debug line"]
+    speed["Serving speed and model quality"]
+  end
+
+  subgraph LOCAL["fak-authored only in-kernel (--gguf / local model)"]
+    direction TB
+    kv["KV prefix as a kernel object<br/>cross-agent prefix reuse"]
+    evict["Poison eviction<br/>quarantined bytes never enter the KV cache"]
+  end
+
+  turn --> FAKOWN
+  turn --> PROV
+  turn --> LOCAL
+
+  note["On a proxy or subscription seat, faster belongs to the provider column -<br/>fak relays it, marked OBSERVED, and does not claim it.<br/>Adopt for the left column; the right column arrives only when<br/>the model lives inside the kernel."]
+  PROV -.-> note
+
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class turn note;
+  class floor,quar,audit,resil,shed pass;
+  class pcache,speed gate;
+  class kv,evict kernel;
+  class note note;

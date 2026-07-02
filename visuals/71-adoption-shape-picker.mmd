@@ -1,0 +1,39 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  start["What do you already run?"]
+
+  q1{"An agent CLI you launch yourself?<br/>claude / codex / opencode"}
+  q2{"A model endpoint that many<br/>clients already hit?"}
+  q3{"An agent that executes its own tools<br/>and should ask for a verdict first?"}
+  q4{"No model in the loop -<br/>you just want the floor checked?"}
+
+  guard["fak guard -- your-agent<br/>in-process gateway on a private loopback port;<br/>base URL injected into the child only; zero config"]
+  serve["fak serve --base-url ...<br/>the bare-serve production path:<br/>policy file + auth-key env + /healthz + /metrics"]
+  mcp["fak serve --stdio<br/>manual MCP server: the agent asks the kernel<br/>about a call before running it itself"]
+  ci["fak policy --check / fak preflight<br/>no model, no key, no listener -<br/>author and gate the floor in CI"]
+  ggufN["Air-gapped or privacy-bound?<br/>add --gguf: a local model in-kernel,<br/>no key, no network after the first pull"]
+
+  start --> q1
+  q1 -->|"yes"| guard
+  q1 -->|"no"| q2
+  q2 -->|"yes"| serve
+  q2 -->|"no"| q3
+  q3 -->|"yes"| mcp
+  q3 -->|"no"| q4
+  q4 -->|"yes"| ci
+  guard -.-> ggufN
+  serve -.-> ggufN
+
+  note["One binary, four shapes: you add flags, not components.<br/>Pick by what you already run,<br/>not by what you are willing to rewrite."]
+  ci -.-> note
+
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class start note;
+  class q1,q2,q3,q4 gate;
+  class guard pass;
+  class serve,mcp,ci,ggufN kernel;
+  class note note;

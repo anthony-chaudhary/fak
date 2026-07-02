@@ -1,0 +1,36 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  claim["When is the performance win real?"]
+
+  g1{"Two or more things share one prompt?<br/>many turns in a row, or agents side by side"}
+  g2{"A shared prefix worth reusing?<br/>a few hundred words or more"}
+  base{"What are you replacing?"}
+
+  zero["Roughly zero benefit.<br/>A single agent on a single short turn<br/>is a slight LOSS - adopt for trust, not speed"]
+  naive["A naive re-send-everything loop:<br/>up to ~60x, growing with turns and agents"]
+  tuned["A tuned warm-cache / prefix-sharing stack:<br/>~1.5-4x, growing with prompt size and agent count"]
+  writes["Write-heavy fleet caution: around a 1% shared-state<br/>write rate, cross-agent sharing can flip NEGATIVE<br/>on defaults - read-heavy fleets only"]
+
+  claim --> g1
+  g1 -->|"no"| zero
+  g1 -->|"yes"| g2
+  g2 -->|"no"| zero
+  g2 -->|"yes"| base
+  base -->|"naive baseline"| naive
+  base -->|"tuned baseline"| tuned
+  naive -.-> writes
+  tuned -.-> writes
+
+  note["The trust value - floor, quarantine, audit - is not gated<br/>by any of this. It holds at one agent, one turn."]
+  zero -.-> note
+
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class claim note;
+  class g1,g2,base gate;
+  class naive,tuned pass;
+  class zero,writes deny;
+  class note note;
