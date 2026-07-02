@@ -13,6 +13,18 @@ description: "How well the launched-session dogfooding loop is wired and how hon
 
 The law: a launched session must not narrate a WITNESSED success over an OBSERVED Stop-hook error. The model may report what the hook DID (synced / nothing-staged / errored) but may not assert the run was clean when the harness reported a hook error in the same turn.
 
+The card now scores a third axis, the **chain**: friction found by the
+recent-feature dogfood packet must reach the tracker as deduped issues *as part
+of the loop* — a human or outside agent should never stumble into friction the
+packet already witnessed. Two rungs: the packet ran recently on this host
+(`make dogfood-recent`, also daily in CI), and the newest report's ACTION
+findings carry a bridge receipt (`fak dogfood-issues --live`, or
+`--fetch-existing` to verify they are already tracked — both write
+`issues-sync.json` beside the report). A host that has never run the packet is
+honestly unscored on this axis (soft rungs, excluded from the composite); once
+evidence exists, both rungs are hard debt that the `improve-loops`/`tend` super
+loops surface worst-first.
+
 ## Wiring — is the loop set up to run honestly?
 
 | ok | criterion |
@@ -35,8 +47,11 @@ The law: a launched session must not narrate a WITNESSED success over an OBSERVE
 ## Run it
 
 ```bash
-go run ./cmd/fak dogfood-score      # score this host's launched-session transcripts
+go run ./cmd/fak dogfood-score      # score this host's launched-session transcripts + the chain
 go test ./internal/dogfoodscore/... # prove the conflation scan reds and a clean tree greens
+make dogfood-recent                 # produce a fresh packet report (chain rung 1)
+go run ./cmd/fak dogfood-issues     # dry-run the report->issues bridge (no arg = newest report)
+go run ./cmd/fak dogfood-issues --live  # file/update deduped issues + write the bridge receipt (chain rung 2)
 ```
 
 ## Read next

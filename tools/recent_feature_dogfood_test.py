@@ -143,6 +143,19 @@ def test_run_suite_fails_when_required_probe_fails() -> None:
     assert "go-test-promptmmu" in report["reason"]
 
 
+def test_global_tick_command_targets_the_global_ledger() -> None:
+    mod = load()
+    report = {"verdict": "OK", "finding": "recent_features_dogfooded"}
+    cmd = mod.global_tick_command(ROOT, report)
+    assert "loop" in cmd and "append" in cmd
+    assert str(ROOT / ".fak" / "loops.jsonl") in cmd
+    # Plain loop id (no /manual|/cron variant) so loopfleet folds every trigger
+    # into the ONE `loopmgr:recent-feature-dogfood` row the improve-loops super
+    # loop walks.
+    assert cmd[cmd.index("--loop") + 1] == "recent-feature-dogfood"
+    assert "recent-feature-dogfood: OK (recent_features_dogfooded)" in cmd
+
+
 def _run_all() -> int:
     tests = sorted((n, f) for n, f in globals().items() if n.startswith("test_") and callable(f))
     failed = 0

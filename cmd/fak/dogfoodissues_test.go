@@ -169,6 +169,108 @@ func TestDogfoodIssuesLiveOverrideAllowsStaleReportWithoutGithub(t *testing.T) {
 	}
 }
 
+// With no report argument, the bridge resolves the newest report under the
+// workspace's .fak/recent-feature-dogfood/ — nobody has to hand-locate an
+// evidence stamp to run the chain.
+func TestDogfoodIssuesDefaultsToNewestReport(t *testing.T) {
+	ws := t.TempDir()
+	older := filepath.Join(ws, ".fak", "recent-feature-dogfood", "20260629T000000Z")
+	newer := filepath.Join(ws, ".fak", "recent-feature-dogfood", "20260630T000000Z")
+	for _, dir := range []string{older, newer} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeDogfoodIssuesReportIn(t, older, 30*time.Minute)
+	want := writeDogfoodIssuesReportIn(t, newer, 5*time.Minute)
+
+	var out, errb bytes.Buffer
+	code := runDogfoodIssues(&out, &errb, []string{"--workspace", ws, "--json"})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
+	}
+	var got struct {
+		Report string `json:"report"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	wantAbs, err := filepath.Abs(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Report != wantAbs {
+		t.Fatalf("report = %q, want newest stamp %q", got.Report, wantAbs)
+	}
+}
+
+// A workspace with no packet evidence refuses with the producing command, so the
+// stumble ends in a one-line remedy instead of a path hunt.
+func TestDogfoodIssuesNoEvidenceNamesTheProducingCommand(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runDogfoodIssues(&out, &errb, []string{"--workspace", t.TempDir(), "--json"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "make dogfood-recent") {
+		t.Fatalf("stderr must name the producing command:\n%s", errb.String())
+	}
+}
+
+// A --live run leaves the bridge receipt beside the report — the witness the
+// dogfood-score chain axis reads. (The unscoped fixture plans nothing, so no gh
+// is touched; the receipt still witnesses that the bridge ran on this report.)
+func TestDogfoodIssuesLiveWritesBridgeReceipt(t *testing.T) {
+	dir := t.TempDir()
+	report := writeDogfoodIssuesReportIn(t, dir, 5*time.Minute)
+	existing := filepath.Join(dir, "existing.json")
+	if err := os.WriteFile(existing, []byte(`[]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runDogfoodIssues(&out, &errb, []string{"--live", "--existing-json", existing, "--json", report})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errb.String())
+	}
+	var got struct {
+		Receipt string `json:"receipt"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out.String())
+	}
+	if got.Receipt == "" {
+		t.Fatalf("live result must carry the receipt path:\n%s", out.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "issues-sync.json"))
+	if err != nil {
+		t.Fatalf("receipt must sit beside the report: %v", err)
+	}
+	var rec struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("receipt json: %v\n%s", err, raw)
+	}
+	if rec.Mode != "live" {
+		t.Fatalf("receipt mode = %q, want live", rec.Mode)
+	}
+}
+
+// A pure dry-run consults nothing and must leave NO receipt — unverified must
+// not masquerade as verified.
+func TestDogfoodIssuesDryRunLeavesNoReceipt(t *testing.T) {
+	dir := t.TempDir()
+	report := writeDogfoodIssuesReportIn(t, dir, 5*time.Minute)
+	var out, errb bytes.Buffer
+	if code := runDogfoodIssues(&out, &errb, []string{"--json", report}); code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "issues-sync.json")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run must not write a receipt (stat err = %v)", err)
+	}
+}
+
 func writeDogfoodIssuesReport(t *testing.T, age time.Duration) string {
 	t.Helper()
 	return writeDogfoodIssuesReportIn(t, t.TempDir(), age)

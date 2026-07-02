@@ -130,6 +130,9 @@ type Result struct {
 	Skipped         []SkippedRow     `json:"skipped,omitempty"`
 	Refused         bool             `json:"refused,omitempty"`
 	Error           string           `json:"error,omitempty"`
+	// Receipt is the path of the bridge receipt written beside the report on a
+	// tracker-consulting run (--live / --fetch-existing); "" otherwise.
+	Receipt string `json:"receipt,omitempty"`
 }
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
@@ -911,6 +914,9 @@ func Render(r Result) string {
 	}
 	if len(r.Planned) == 0 {
 		lines = append(lines, "  no dispatchable scorecard ACTION items found")
+		if r.Receipt != "" {
+			lines = append(lines, "  receipt: "+r.Receipt)
+		}
 		return strings.Join(lines, "\n")
 	}
 	for _, row := range r.Planned {
@@ -923,6 +929,9 @@ func Render(r Result) string {
 	}
 	if r.Mode == "dry-run" {
 		lines = append(lines, "  dry-run: pass --live to create/update issues with gh")
+	}
+	if r.Receipt != "" {
+		lines = append(lines, "  receipt: "+r.Receipt)
 	}
 	return strings.Join(lines, "\n")
 }

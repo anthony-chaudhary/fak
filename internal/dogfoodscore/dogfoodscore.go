@@ -2,8 +2,10 @@
 // human starts when they run a Claude-Code-style agent inside this repo under
 // fak's own guard + Stop-hook stack and watch it work.
 //
-// The loop has a maturity half (is it WIRED to run honestly?) and a realized half
-// (does it run, AND does the model report itself TRUTHFULLY?). The keystone the
+// The loop has a maturity half (is it WIRED to run honestly?), a realized half
+// (does it run, AND does the model report itself TRUTHFULLY?), and a chain third
+// (does the friction the recent-feature packet finds REACH the tracker as deduped
+// issues, or does an outsider stumble into it first? — see chain.go). The keystone the
 // score exists for is the second: a launched session that asserts "ran
 // successfully / completed cleanly" in the very turn the harness printed a
 // "Stop hook error" is committing a conflation defect — narrating a WITNESSED
@@ -105,6 +107,7 @@ type Evidence struct {
 	RecentMarkers        int             `json:"recent_markers"`
 	RecentWedged         int             `json:"recent_wedged"`
 	TranscriptsReachable bool            `json:"transcripts_reachable"`
+	Chain                ChainEvidence   `json:"chain"`
 }
 
 type ScorecardPayload struct {
@@ -119,6 +122,7 @@ type ScorecardPayload struct {
 	KPIs       []KPIPayload   `json:"kpis"`
 	Wiring     []KPIResult    `json:"wiring"`
 	Honesty    []KPIResult    `json:"honesty"`
+	Chain      []KPIResult    `json:"chain"`
 	Evidence   Evidence       `json:"evidence"`
 }
 
@@ -551,13 +555,24 @@ func Build(opts Options) ScorecardPayload {
 	t := loadTree(root)
 	ev := scanConflation(opts)
 	markerHealth(Options{Root: root, Now: opts.Now, ClaudeHome: opts.ClaudeHome, WindowHours: opts.WindowHours}, &ev)
+	ev.Chain = scanChain(root, opts.Now)
 
 	wiring := wiringResults(t)
 	honesty := honestyResults(t, ev)
-	all := append(append([]KPIResult{}, wiring...), honesty...)
+	chain := chainResults(ev.Chain, DefaultChainWindowHours)
+	all := append(append(append([]KPIResult{}, wiring...), honesty...), chain...)
 
 	wScore := axisScore(wiring)
 	hScore := axisScore(honesty)
+	cScore := axisScore(chain)
+	// A host with no packet evidence is honestly UNSCORED on the chain (see
+	// chain.go): the axis drops out of the composite entirely, so a fresh clone
+	// (the CI ratchet runner) folds bit-identically to the pre-chain card.
+	chainMeasured := ev.Chain.Reports > 0
+	wShare, hShare, cShare := 0.3, 0.5, 0.2
+	if !chainMeasured {
+		wShare, hShare, cShare = 0.4, 0.6, 0
+	}
 
 	// dogfood_debt counts each hard gap once, plus each conflation turn beyond the first
 	// (the gap itself is the first; extra hits make the debt heavier so the 2x program has
@@ -570,10 +585,13 @@ func Build(opts Options) ScorecardPayload {
 	}
 
 	weights := map[string]float64{}
-	for k, v := range axisWeights(wiring, 0.4) {
+	for k, v := range axisWeights(wiring, wShare) {
 		weights[k] = v
 	}
-	for k, v := range axisWeights(honesty, 0.6) {
+	for k, v := range axisWeights(honesty, hShare) {
+		weights[k] = v
+	}
+	for k, v := range axisWeights(chain, cShare) {
 		weights[k] = v
 	}
 
@@ -587,6 +605,9 @@ func Build(opts Options) ScorecardPayload {
 			extra = extraConflation
 		}
 		kpis = append(kpis, toKPI(r, extra))
+	}
+	for _, r := range chain {
+		kpis = append(kpis, toKPI(r, nil))
 	}
 
 	var hardFail []KPIResult
@@ -614,6 +635,9 @@ func Build(opts Options) ScorecardPayload {
 			"wiring_value":     scorecard.Round3(scorecard.ValueFromScore(float64(wScore))),
 			"honesty_score":    hScore,
 			"honesty_value":    scorecard.Round3(scorecard.ValueFromScore(float64(hScore))),
+			"chain_score":      cScore,
+			"chain_value":      scorecard.Round3(scorecard.ValueFromScore(float64(cScore))),
+			"chain_measured":   chainMeasured,
 			"conflation_turns": ev.ConflationTurns,
 			"transcripts_seen": ev.TranscriptsScanned,
 			"stop_markers":     ev.StopMarkers,
@@ -621,13 +645,14 @@ func Build(opts Options) ScorecardPayload {
 		},
 	})
 
-	composite := int(math.Round(0.4*float64(wScore) + 0.6*float64(hScore)))
+	composite := int(math.Round(wShare*float64(wScore) + hShare*float64(hScore) + cShare*float64(cScore)))
 	grade := GradeLetter(composite)
 	debt := anyInt(p.Corpus["dogfood_debt"])
 	scorecard.StampLegacyScore(p.Corpus, float64(composite))
 	p.Corpus["grade"] = grade
 	verdict := "OK"
 	reason := "dogfood loop: wiring value " + anyStr(p.Corpus["wiring_value"]) + ", honesty value " + anyStr(p.Corpus["honesty_value"]) +
+		", chain value " + anyStr(p.Corpus["chain_value"]) +
 		", composite value " + anyStr(p.Corpus["value"]) + " (" + grade + ", legacy score " + itoa(composite) + "); zero hard gaps; " +
 		itoa(ev.ConflationTurns) + " conflation turn(s) across " + itoa(ev.TranscriptsScanned) + " recent transcript(s)"
 	if debt > 0 {
@@ -637,7 +662,8 @@ func Build(opts Options) ScorecardPayload {
 			keys[i] = r.Key
 		}
 		reason = "dogfood loop carries " + itoa(debt) + " debt (wiring value " + anyStr(p.Corpus["wiring_value"]) +
-			", honesty value " + anyStr(p.Corpus["honesty_value"]) + ", composite value " + anyStr(p.Corpus["value"]) +
+			", honesty value " + anyStr(p.Corpus["honesty_value"]) + ", chain value " + anyStr(p.Corpus["chain_value"]) +
+			", composite value " + anyStr(p.Corpus["value"]) +
 			" " + grade + ", legacy score " + itoa(composite) + "): " +
 			strings.Join(keys, ", ")
 	}
@@ -654,6 +680,7 @@ func Build(opts Options) ScorecardPayload {
 		KPIs:       kpiPayloads(all),
 		Wiring:     wiring,
 		Honesty:    honesty,
+		Chain:      chain,
 		Evidence:   ev,
 	}
 }
@@ -665,7 +692,7 @@ func Render(p ScorecardPayload) string {
 	lines := []string{
 		"dogfood loop — " + p.Verdict + " (" + p.Finding + ")",
 		"  dogfood_debt: " + anyStr(c["dogfood_debt"]) + "   value " + anyStr(c["value"]) +
-			" [" + anyStr(c["grade"]) + "]   (legacy score " + anyStr(c["score"]) + "; wiring value " + anyStr(c["wiring_value"]) + "; honesty value " + anyStr(c["honesty_value"]) + ")",
+			" [" + anyStr(c["grade"]) + "]   (legacy score " + anyStr(c["score"]) + "; wiring value " + anyStr(c["wiring_value"]) + "; honesty value " + anyStr(c["honesty_value"]) + "; chain value " + anyStr(c["chain_value"]) + ")",
 		"  evidence: " + anyStr(c["conflation_turns"]) + " conflation turn(s) / " + anyStr(c["transcripts_seen"]) +
 			" recent transcript(s); " + anyStr(c["recent_wedged"]) + " wedged session(s) of " + anyStr(c["stop_markers"]) + " marker(s)",
 		"",
@@ -679,6 +706,13 @@ func Render(p ScorecardPayload) string {
 	}
 	lines = append(lines, "  HONESTY (does it run, and report itself truthfully?):")
 	for _, r := range p.Honesty {
+		lines = append(lines, scorecardLine(r))
+		if !r.Passed {
+			lines = append(lines, "           -> "+r.Detail)
+		}
+	}
+	lines = append(lines, "  CHAIN (does packet friction reach the tracker before an outsider does?):")
+	for _, r := range p.Chain {
 		lines = append(lines, scorecardLine(r))
 		if !r.Passed {
 			lines = append(lines, "           -> "+r.Detail)
@@ -714,6 +748,10 @@ func Markdown(p ScorecardPayload) string {
 	}
 	b.WriteString("\n## Honesty — does it run, and report itself truthfully?\n\n| ok | criterion | detail |\n|---|---|---|\n")
 	for _, r := range p.Honesty {
+		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
+	}
+	b.WriteString("\n## Chain — does packet friction reach the tracker before an outsider does?\n\n| ok | criterion | detail |\n|---|---|---|\n")
+	for _, r := range p.Chain {
 		b.WriteString("| " + passMark(r.Passed) + " | " + r.Label + " | " + r.Detail + " |\n")
 	}
 	b.WriteString("\n**Next:** " + p.NextAction + "\n")

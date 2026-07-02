@@ -562,6 +562,40 @@ def render(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def global_tick_command(root: Path, report: dict[str, Any]) -> list[str]:
+    """The `fak loop append` invocation that ticks the GLOBAL loop ledger
+    (.fak/loops.jsonl) for this packet run. Pure so the test can pin it. The
+    loop id is plain ``recent-feature-dogfood`` (no /manual|/cron variant) so
+    loopfleet folds every trigger into ONE row — the row the improve-loops
+    super loop walks (kind ``loopmgr:recent-feature-dogfood``)."""
+    return fak_cmd(root) + [
+        "loop", "append",
+        "--ledger", str(root / ".fak" / "loops.jsonl"),
+        "--loop", "recent-feature-dogfood",
+        "--kind", "fire",
+        "--source", "recent_feature_dogfood",
+        "--summary", f"recent-feature-dogfood: {report['verdict']} ({report['finding']})",
+    ]
+
+
+def append_global_loop_tick(root: Path, report: dict[str, Any]) -> bool:
+    """Best-effort global-ledger tick so every packet run is visible to
+    `fak loop status` / loopfleet / `fak superloop walk` — the outsider-path
+    loop must be a first-class loop, not an untracked script run. Never fails
+    the packet: the evidence dir stays the primary artifact."""
+    try:
+        proc = subprocess.run(
+            global_tick_command(root, report),
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Dogfood recently-added fak features locally.")
     ap.add_argument("--workspace", default="", help="repo root (default: auto)")
@@ -581,6 +615,12 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         include_go_tests=not args.no_go_tests,
     )
+    if not append_global_loop_tick(root, report):
+        print(
+            "recent-feature-dogfood: warning: global loop-ledger tick failed "
+            "(the run is still recorded under the evidence dir)",
+            file=sys.stderr,
+        )
     if args.json:
         print(json.dumps(report, indent=2))
     else:

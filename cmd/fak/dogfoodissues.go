@@ -1,11 +1,16 @@
 package main
 
 // fak dogfood-issues — the backlog bridge from the recent-feature dogfood
-// scorecard to stable, deduplicated GitHub issues. It reads a dogfood report.json,
-// folds out the scorecard ACTION items, and creates or updates exactly one stable
-// issue per item (dedup by an HTML-comment marker key). Safe by default: a dry-run
-// that prints what it WOULD do and never touches the network; --live is the
-// explicit opt-in that fetches existing issues and shells out to `gh`.
+// scorecard to stable, deduplicated GitHub issues. It reads a dogfood report.json
+// (default: the newest report under .fak/recent-feature-dogfood/, so nobody has to
+// hand-locate an evidence stamp), folds out the scorecard ACTION items, and creates
+// or updates exactly one stable issue per item (dedup by an HTML-comment marker
+// key). Safe by default: a dry-run that prints what it WOULD do and never touches
+// the network; --live is the explicit opt-in that fetches existing issues and
+// shells out to `gh`. Tracker-consulting runs (--live / --fetch-existing) leave an
+// issues-sync.json receipt beside the report — the witness the dogfood-score chain
+// axis reads, which is what keeps this bridge on the super loop's walk instead of
+// depending on someone remembering to run it.
 
 import (
 	"encoding/json"
@@ -27,6 +32,7 @@ func cmdDogfoodIssues(argv []string) { os.Exit(runDogfoodIssues(os.Stdout, os.St
 func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dogfood-issues", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	workspace := fs.String("workspace", "", "workspace root for the default newest-report lookup (default: repo root)")
 	repo := fs.String("repo", "", "owner/repo for gh; default is current repo")
 	limit := fs.Int("limit", 300, "existing issue scan limit for live/fetch modes")
 	existingJSON := fs.String("existing-json", "", "fixture/list of existing gh issues for dry-run tests")
@@ -44,12 +50,27 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "dogfood-issues: --max-report-age must be non-negative")
 		return 2
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "fak dogfood-issues: give exactly one path to a recent-feature dogfood report.json")
+	if fs.NArg() > 1 {
+		fmt.Fprintln(stderr, "fak dogfood-issues: give at most one path to a recent-feature dogfood report.json (default: the newest report under .fak/recent-feature-dogfood/)")
 		return 2
 	}
 
-	reportPath, err := filepath.Abs(fs.Arg(0))
+	selected := ""
+	if fs.NArg() == 1 {
+		selected = fs.Arg(0)
+	} else {
+		root := *workspace
+		if root == "" {
+			root = repoRoot()
+		}
+		newest, err := dogfoodissues.NewestReport(root)
+		if err != nil {
+			fmt.Fprintf(stderr, "dogfood-issues: %v\n", err)
+			return 2
+		}
+		selected = newest
+	}
+	reportPath, err := filepath.Abs(selected)
 	if err != nil {
 		fmt.Fprintf(stderr, "dogfood-issues: %v\n", err)
 		return 2
@@ -130,6 +151,24 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *live && len(plan) > 0 {
 		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)
+	}
+
+	// A tracker-consulting run leaves the bridge receipt beside the report — the
+	// chain witness dogfood-score reads. Failing to persist it is exit-affecting:
+	// a filed-but-unwitnessed bridge would leave the chain axis red and the next
+	// run safely updates the same deduped issues.
+	if *live || *fetchExisting {
+		receiptMode := dogfoodissues.ReceiptModeLive
+		if !*live {
+			receiptMode = dogfoodissues.ReceiptModeFetchExisting
+		}
+		rec := dogfoodissues.BuildReceipt(result, receiptMode, time.Now())
+		receiptPath, err := dogfoodissues.WriteReceipt(filepath.Dir(reportPath), rec)
+		if err != nil {
+			fmt.Fprintf(stderr, "dogfood-issues: write bridge receipt: %v\n", err)
+			return 1
+		}
+		result.Receipt = receiptPath
 	}
 
 	if *asJSON {

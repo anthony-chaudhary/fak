@@ -147,7 +147,8 @@ var registry = []Super{
 		Floor: 0,
 		Members: []Member{
 			{Kind: KindScorecard, Ref: "loopindex", Why: "the agentic-coding loop-index: orient->plan->act->verify->ship->learn stages not yet witnessed at floor"},
-			{Kind: KindScorecard, Ref: "dogfood", Why: "dogfood-loop debt: are we running our own loops?"},
+			{Kind: KindScorecard, Ref: "dogfood", Why: "dogfood-loop debt: are we running our own loops, and does packet friction reach the tracker before an outsider does?", Enter: "go run ./cmd/fak dogfood-score"},
+			{Kind: KindLoop, Ref: "loopmgr:recent-feature-dogfood", Why: "the recent-feature packet loop that probes fak like an outsider — dark means friction is found by outsiders, not by the loop", Enter: "make dogfood-recent && go run ./cmd/fak dogfood-issues --live"},
 			{Kind: KindLoop, Ref: "dispatch", Why: "the issue-resolve dispatch loop — dark means throughput stalled"},
 			{Kind: KindLoop, Ref: "cadence", Why: "the regular-cadence report loop — dark means the pacing pulse stopped"},
 			{Kind: KindLoop, Ref: "dojo", Why: "the dojo gym loop — dark means calibration stopped"},
