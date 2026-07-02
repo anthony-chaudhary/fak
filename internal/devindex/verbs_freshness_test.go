@@ -266,6 +266,94 @@ func TestCheckFreshnessGreen(t *testing.T) {
 	}
 }
 
+// TestOrphanNotes exercises the tree->index converse of DeadDocLinks: a dated note
+// under docs/notes/ that INDEX.md never mentions is an orphan; a listed one, a
+// non-dated note, and a README are not. It also proves the check reads INDEX.md's raw
+// bytes (a note reached via prose, not a markdown link, still counts as listed) so the
+// Go view and the Python reciprocal gate agree on the orphan set.
+func TestOrphanNotes(t *testing.T) {
+	root := t.TempDir()
+	// INDEX.md mentions the listed note as a link and the prose note as a bare basename.
+	indexMd := "# INDEX\n" +
+		"- [Listed](docs/notes/2026-01-02-listed.md) — reachable via a link.\n" +
+		"- The 2026-01-03-prose.md note is referenced only in prose.\n"
+	mustWrite(t, root, "INDEX.md", indexMd)
+	mustMkdir(t, root, "docs", "notes")
+	notes := filepath.Join(root, "docs", "notes")
+	mustWrite(t, notes, "2026-01-02-listed.md", "# listed\n")   // dated + listed -> not orphan
+	mustWrite(t, notes, "2026-01-03-prose.md", "# prose\n")     // dated + prose ref -> not orphan
+	mustWrite(t, notes, "2026-01-01-orphan.md", "# orphan\n")   // dated + unlisted -> ORPHAN
+	mustWrite(t, notes, "PLAN-orphan.md", "# plan\n")           // PLAN- + unlisted -> ORPHAN
+	mustWrite(t, notes, "README.md", "# readme\n")              // README -> never a dated note
+	mustWrite(t, notes, "helper.md", "# helper\n")              // undated -> not a dated note
+
+	c := &Catalog{Root: root}
+	got := c.OrphanNotes()
+	want := []string{"docs/notes/2026-01-01-orphan.md", "docs/notes/PLAN-orphan.md"}
+	if len(got) != len(want) {
+		t.Fatalf("OrphanNotes = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("OrphanNotes[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
+	}
+
+	// The finding also surfaces through the folded CheckFreshness view, tagged.
+	orphanFindings := 0
+	for _, d := range c.CheckFreshness() {
+		if d.Kind == DriftOrphanNote {
+			orphanFindings++
+			if d.Subject == "" || d.Reason == "" {
+				t.Errorf("orphan-note finding missing subject/reason: %+v", d)
+			}
+		}
+	}
+	if orphanFindings != len(want) {
+		t.Errorf("CheckFreshness carried %d orphan-note findings, want %d", orphanFindings, len(want))
+	}
+}
+
+// TestOrphanNotesNoIndex: a tree with no INDEX.md yields no orphan findings (there is
+// no curated map to reconcile against — absence of a claim, not a drift).
+func TestOrphanNotesNoIndex(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, root, "docs", "notes")
+	mustWrite(t, filepath.Join(root, "docs", "notes"), "2026-01-01-x.md", "# x\n")
+	c := &Catalog{Root: root}
+	if got := c.OrphanNotes(); got != nil {
+		t.Errorf("no INDEX.md should yield nil orphans, got %v", got)
+	}
+}
+
+// TestUndeclaredLeavesHonorsLanesSection: a leaf named only in the flat [lanes]
+// concurrency arrays (no [lanes.trees] glob of its own) is DECLARED, not drift — the
+// same rule internal/hooks.readLaneTaxonomy applies. Only a Go package with a lane in
+// NEITHER table is an undeclared-leaf finding. This pins the fix that brought the
+// declared-set into exact parity with the authoritative gate (a [lanes]-only leaf was
+// previously flagged as undeclared).
+func TestUndeclaredLeavesHonorsLanesSection(t *testing.T) {
+	root := t.TempDir()
+	dosToml := "[lanes]\n" +
+		"concurrent = [\"declaredname\", \"gateway\"]\n" +
+		"keyword = [\n  \"multiline\",\n]\n" +
+		"[lanes.trees]\n" +
+		"gateway = [\"internal/gateway/**\"]\n"
+	mustWrite(t, root, "dos.toml", dosToml)
+	for _, leaf := range []string{"gateway", "declaredname", "multiline", "trulyorphan"} {
+		mustMkdir(t, root, "internal", leaf)
+		mustWrite(t, filepath.Join(root, "internal", leaf), leaf+".go", "package "+leaf+"\n")
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := c.UndeclaredLeaves()
+	if len(got) != 1 || got[0] != "trulyorphan" {
+		t.Errorf("UndeclaredLeaves = %v, want [trulyorphan] (declaredname/multiline are named in [lanes])", got)
+	}
+}
+
 func TestUndeclaredVerbsNoMainGo(t *testing.T) {
 	// A root with no cmd/fak/main.go yields no verb findings (missing source, not drift).
 	root := t.TempDir()

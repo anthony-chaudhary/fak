@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/devindex"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
 // writeIndexRepo lays down a minimal dos.toml + CLAIMS.md so the index CLI is
@@ -120,5 +124,117 @@ func TestIndexGenerationJSON(t *testing.T) {
 		!strings.Contains(strings.Join(generations[0].IssueBodySignals, " "), "milestone") ||
 		!strings.Contains(generations[0].InvalidatingAssumption, "stream label") {
 		t.Fatalf("generation row missing evidence/body contract: %+v", generations[0])
+	}
+}
+
+// writeFreshnessCLIRepo lays down a tree with a known dead INDEX.md link and a
+// known orphaned dated note so `fak index freshness` is tested against fixed bytes.
+func writeFreshnessCLIRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeFile := func(rel, body string) {
+		fp := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("dos.toml", "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n")
+	writeFile("INDEX.md", "# INDEX\n- [Gone](docs/gone.md) — dead local link.\n")
+	writeFile("docs/notes/2026-05-05-lonely.md", "# lonely note, unlisted\n")
+	return root
+}
+
+func TestIndexFreshness(t *testing.T) {
+	root := writeFreshnessCLIRepo(t)
+
+	// Table mode names both the dead-doc-link and the orphan-note drift.
+	var out, errb bytes.Buffer
+	if rc := runIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex freshness rc=%d, stderr=%s", rc, errb.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "dead-doc-link") || !strings.Contains(got, "docs/gone.md") {
+		t.Errorf("freshness table missing dead-doc-link finding, got:\n%s", got)
+	}
+	if !strings.Contains(got, "orphan-note") || !strings.Contains(got, "2026-05-05-lonely.md") {
+		t.Errorf("freshness table missing orphan-note finding, got:\n%s", got)
+	}
+
+	// JSON mode round-trips the typed findings.
+	out.Reset()
+	errb.Reset()
+	if rc := runIndex(&out, &errb, []string{"freshness", "--json", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex freshness --json rc=%d, stderr=%s", rc, errb.String())
+	}
+	var drift []struct {
+		Kind    string `json:"kind"`
+		Subject string `json:"subject"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &drift); err != nil {
+		t.Fatalf("freshness --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	kinds := map[string]bool{}
+	for _, d := range drift {
+		kinds[d.Kind] = true
+	}
+	if !kinds["dead-doc-link"] || !kinds["orphan-note"] {
+		t.Errorf("freshness --json kinds = %v, want dead-doc-link + orphan-note", kinds)
+	}
+}
+
+// TestIndexFreshnessClean: a tree whose index agrees with the sources prints the
+// reassuring no-drift line and still exits 0 (a query, not a gate).
+func TestIndexFreshnessClean(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "INDEX.md"), []byte("# INDEX\n- [R](README.md) — resolves.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runIndex(&out, &errb, []string{"freshness", "--root", root}); rc != 0 {
+		t.Fatalf("runIndex freshness rc=%d, stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "no drift") {
+		t.Errorf("clean tree freshness should report no drift, got: %q", out.String())
+	}
+}
+
+// TestIndexFreshnessUndeclaredLeafParity dogfoods the freshness detector against the
+// AUTHORITATIVE lane-audit gate on the LIVE tree: internal/devindex.UndeclaredLeaves
+// (the tier-1 reimplementation behind `fak index freshness`) must return the SAME leaf
+// set as internal/hooks.UndeclaredLeaves. They diverged once — devindex counted only
+// [lanes.trees] keys as declared and ignored the flat [lanes] name list, so a lane
+// declared in [lanes] with no explicit tree glob was falsely flagged — and this pins
+// the two together against future drift.
+func TestIndexFreshnessUndeclaredLeafParity(t *testing.T) {
+	root := devindex.FindRoot(".")
+	if _, err := os.Stat(filepath.Join(root, "dos.toml")); err != nil {
+		t.Skipf("no repo root (%v); skipping live parity dogfood", err)
+	}
+	cat, err := devindex.Load(root)
+	if err != nil {
+		t.Fatalf("devindex.Load: %v", err)
+	}
+	gaps, err := hooks.UndeclaredLeaves(root)
+	if err != nil {
+		t.Fatalf("hooks.UndeclaredLeaves: %v", err)
+	}
+	want := make([]string, 0, len(gaps))
+	for _, g := range gaps {
+		want = append(want, strings.ToLower(g.Leaf))
+	}
+	sort.Strings(want)
+	got := cat.UndeclaredLeaves()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("undeclared-leaf parity broken:\n devindex=%v\n hooks   =%v\n(did devindex's declared-set fall behind dos.toml's [lanes]?)", got, want)
 	}
 }

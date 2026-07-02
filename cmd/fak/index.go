@@ -11,6 +11,9 @@ package main
 //	fak index work [<query>]   the selection surface: named issue views + the default's gh query
 //	fak index generation [<query>]
 //	                         the generation taxonomy: labels, milestones, evidence rules
+//	fak index freshness        the self-index drift report: undeclared leaves, dead doc
+//	                         links, unknown verbs, and orphaned dated notes — is the
+//	                         index still honest against the tree?
 //
 // It is a thin shell over internal/devindex, which reads the facts live from the
 // files that already own them (dos.toml's [lanes.trees], the curated INDEX.md, the
@@ -93,6 +96,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexGeneration(stdout, stderr, cat, args, *asJSON, *limit)
 	case "work", "views", "view":
 		return indexWork(stdout, stderr, cat, args, *asJSON, *limit)
+	case "freshness", "fresh":
+		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
 	default:
 		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
@@ -275,6 +280,25 @@ func indexWork(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 	return flushTab(tw, stderr, "fak index work")
 }
 
+// indexFreshness answers `fak index freshness` from internal/devindex.CheckFreshness:
+// every way the self-index disagrees with its live sources — an undeclared leaf, a dead
+// INDEX.md doc link, a main.go verb missing from the catalog, or a dated docs/notes/ note
+// INDEX.md never lists. It is a READ-ONLY query (always exit 0), not a gate: it surfaces
+// the drift an agent should fix, in one place, for humans (a kind/subject/reason table)
+// and LLMs (--json / MCP). A clean tree prints a single reassuring line. The build-redding
+// gate over the same findings lives in *_test.go, out of this shell's lane.
+func indexFreshness(stdout, stderr io.Writer, cat *devindex.Catalog, asJSON bool, limit int) int {
+	drift := cat.CheckFreshness()
+	if limit > 0 && len(drift) > limit {
+		drift = drift[:limit]
+	}
+	return indexRenderHits(stdout, stderr, drift, asJSON, "fak index freshness",
+		"index fresh: no drift — the catalog agrees with the tree",
+		func(tw *tabwriter.Writer, d devindex.Drift) {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", d.Kind, d.Subject, d.Reason)
+		})
+}
+
 func writeIndexUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
@@ -284,6 +308,7 @@ func writeIndexUsage(w io.Writer) {
   fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
   fak index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
   fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
+  fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
   flags: --json  --limit N  --root DIR
 `)
 }

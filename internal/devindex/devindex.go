@@ -87,6 +87,13 @@ type Catalog struct {
 	prefixes map[string]string
 	exact    map[string]string
 	tiers    map[string]int
+	// declared is the full set of lane names dos.toml declares, lowercased — the
+	// names in the flat [lanes] concurrency-class arrays AND the [lanes.trees] keys.
+	// It mirrors internal/hooks.readLaneTaxonomy's `declared` exactly, so the
+	// undeclared-leaf freshness detector agrees with the authoritative lane-audit gate.
+	// Counting only [lanes.trees] keys (as this once did) falsely flags a leaf that is
+	// declared in [lanes] but carries no explicit tree glob of its own.
+	declared map[string]bool
 }
 
 // FindRoot walks up from start looking for the dos.toml that marks the repo root,
@@ -118,7 +125,7 @@ func FindRoot(start string) string {
 // taxonomy is the load-bearing half. Load only errors when dos.toml is unreadable,
 // because without it there is no taxonomy to serve.
 func Load(root string) (*Catalog, error) {
-	c := &Catalog{Root: root, prefixes: map[string]string{}, exact: map[string]string{}, tiers: map[string]int{}}
+	c := &Catalog{Root: root, prefixes: map[string]string{}, exact: map[string]string{}, tiers: map[string]int{}, declared: map[string]bool{}}
 	b, err := os.ReadFile(filepath.Join(root, "dos.toml"))
 	if err != nil {
 		return nil, err
@@ -164,6 +171,22 @@ func (c *Catalog) parseLanes(text string) {
 			section = strings.Trim(t, "[]")
 			continue
 		}
+		if section == "lanes" {
+			// The [lanes] table is a set of concurrency-class arrays whose VALUES are
+			// lane names (`concurrent = ["agent", "gateway", ...]`), often spanning many
+			// lines. Every quoted token on a line is a declared lane name — the SAME rule
+			// internal/hooks.readLaneTaxonomy applies — so a leaf declared here but with
+			// no explicit [lanes.trees] glob still counts as declared. Strip an inline
+			// comment first so a quoted word in a trailing note is not read as a lane.
+			body := t
+			if h := strings.IndexByte(body, '#'); h >= 0 {
+				body = body[:h]
+			}
+			for _, m := range laneTokenRE.FindAllStringSubmatch(body, -1) {
+				c.declared[strings.ToLower(m[1])] = true
+			}
+			continue
+		}
 		if section != "lanes.trees" {
 			continue
 		}
@@ -175,6 +198,7 @@ func (c *Catalog) parseLanes(text string) {
 		if name == "" {
 			continue
 		}
+		c.declared[name] = true // the [lanes.trees] key is itself a declared lane
 		rhs := t[eq+1:]
 		arrayPart, desc := rhs, ""
 		if h := strings.IndexByte(rhs, '#'); h >= 0 {

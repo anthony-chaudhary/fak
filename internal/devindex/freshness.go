@@ -11,13 +11,19 @@ package devindex
 //     on disk (an external http(s) link is not checked here — no network in tier 1);
 //   - an UnknownVerb: a `case "<verb>":` in cmd/fak/main.go with no matching entry in
 //     the C3 verb manifest (#1290) — the "a verb in main.go with no manifest entry"
-//     drift the issue names explicitly.
+//     drift the issue names explicitly;
+//   - an OrphanNote: a dated note under docs/notes/ that INDEX.md never mentions —
+//     the tree->index converse of a dead doc link (INDEX.md's own contract is "if a
+//     doc exists, it is reachable from here"). This is the ORPHAN half of the Python
+//     reciprocal sync gate (tools/check_index_sync.py) brought into the pure Go view,
+//     so the whole self-index drift surface is answerable from one queryable place.
 //
 // This file is the DETECTION half (in lane). REDDING THE BUILD on a finding is a CI /
 // *_test.go concern that lives outside internal/devindex — out of lane, reported as
 // not-yet. A named gap is a finding; a silent gap is the failure this gate kills.
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,6 +42,8 @@ const (
 	DriftDeadDocLink DriftKind = "dead-doc-link"
 	// DriftUnknownVerb: a main.go switch case with no C3 verb-manifest entry.
 	DriftUnknownVerb DriftKind = "unknown-verb"
+	// DriftOrphanNote: a dated docs/notes/ note not listed in INDEX.md.
+	DriftOrphanNote DriftKind = "orphan-note"
 )
 
 // Drift is one freshness finding: the kind, the offending token (a leaf name, a doc
@@ -80,6 +88,13 @@ func (c *Catalog) CheckFreshness() []Drift {
 			Reason:  `cmd/fak/main.go case "` + verb + `" has no C3 verb-manifest entry`,
 		})
 	}
+	for _, note := range c.OrphanNotes() {
+		out = append(out, Drift{
+			Kind:    DriftOrphanNote,
+			Subject: note,
+			Reason:  note + " is a dated note under docs/notes/ but is not listed in INDEX.md",
+		})
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Kind != out[j].Kind {
 			return out[i].Kind < out[j].Kind
@@ -90,14 +105,14 @@ func (c *Catalog) CheckFreshness() []Drift {
 }
 
 // UndeclaredLeaves returns the names of internal/<X> directories that hold at least
-// one .go file but have no declared [lanes.trees] lane. It mirrors
+// one .go file but have no declared dos.toml lane. It mirrors
 // internal/hooks.UndeclaredLeaves, recomputed from this catalog's already-parsed lane
-// set so the tier-1 package need not import the hooks gate. Sorted, deduped.
+// set (c.declared — every name in [lanes] AND every [lanes.trees] key, the SAME set
+// the authoritative gate builds) so the tier-1 package need not import the hooks gate
+// yet reaches the identical verdict (pinned by a live parity test). A leaf declared in
+// [lanes] with no explicit tree is declared, NOT drift; counting only [lanes.trees]
+// keys would falsely flag it. Sorted, deduped.
 func (c *Catalog) UndeclaredLeaves() []string {
-	declared := map[string]bool{}
-	for _, l := range c.Leaves {
-		declared[l.Name] = true
-	}
 	dir := filepath.Join(c.Root, "internal")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -109,7 +124,7 @@ func (c *Catalog) UndeclaredLeaves() []string {
 			continue
 		}
 		name := strings.ToLower(e.Name())
-		if declared[name] {
+		if c.declared[name] {
 			continue
 		}
 		if !dirHasGoFiles(filepath.Join(dir, e.Name())) {
@@ -162,6 +177,65 @@ func (c *Catalog) DeadDocLinks() []Doc {
 		}
 	}
 	return dead
+}
+
+// datedNoteRE matches the ISO date a working note carries in its filename, e.g.
+// docs/notes/CONCEPT-…-2026-06-30.md. It mirrors the stamp check in the Python
+// reciprocal sync gate (tools/check_index_sync.py) so the two agree on what a
+// "dated note" is.
+var datedNoteRE = regexp.MustCompile(`20\d\d-\d\d-\d\d`)
+
+// isDatedNote reports whether a docs/notes basename is a dated working note that
+// INDEX.md is expected to list: a `.md` file (not a README) whose name carries a
+// YYYY-MM-DD stamp or starts with the `PLAN-` prefix. Same predicate as the Python
+// gate's _is_dated_note, so a note the pre-commit hook flags and one this view
+// flags are the same set.
+func isDatedNote(base string) bool {
+	if base == "README.md" || !strings.HasSuffix(base, ".md") {
+		return false
+	}
+	return datedNoteRE.MatchString(base) || strings.HasPrefix(base, "PLAN-")
+}
+
+// OrphanNotes returns the repo-relative paths of dated notes under docs/notes/
+// whose basename INDEX.md never mentions — the tree->index converse of
+// DeadDocLinks. INDEX.md's own contract is "if a doc exists, it is reachable from
+// here", so an unlisted dated note breaks it. The check is a raw-basename substring
+// test against INDEX.md's bytes (a note may be reached via prose, not only a link),
+// matching tools/check_index_sync.py exactly so the Go view and the Python gate can
+// never disagree on an orphan. A missing INDEX.md yields nothing (no map to
+// reconcile against). Sorted, deduped; reads only the tree under c.Root — no git,
+// no network (tier 1).
+func (c *Catalog) OrphanNotes() []string {
+	idx, err := os.ReadFile(filepath.Join(c.Root, "INDEX.md"))
+	if err != nil {
+		return nil
+	}
+	text := string(idx)
+	notesDir := filepath.Join(c.Root, "docs", "notes")
+	var out []string
+	_ = filepath.WalkDir(notesDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // an unreadable subtree contributes no finding, not an error
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !isDatedNote(d.Name()) {
+			return nil
+		}
+		if strings.Contains(text, d.Name()) {
+			return nil // referenced somewhere in INDEX.md — reachable, not an orphan
+		}
+		rel, relErr := filepath.Rel(c.Root, path)
+		if relErr != nil {
+			rel = path
+		}
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 // mainCaseRE captures the quoted verb tokens of a `case "a", "b":` line in a Go
