@@ -86,15 +86,13 @@ func (m *gatewayMetrics) vcacheTurnsSnapshot() ([]vcacheobserve.Turn, bool) {
 		return nil, false
 	}
 	m.vcacheMu.Lock()
-	if len(m.vcacheTurns) == 0 {
-		capped := m.vcacheTurnsDropped
-		m.vcacheMu.Unlock()
-		return nil, capped
-	}
 	out := make([]vcacheobserve.Turn, len(m.vcacheTurns))
 	copy(out, m.vcacheTurns)
 	capped := m.vcacheTurnsDropped
 	m.vcacheMu.Unlock()
+	if len(out) == 0 {
+		return m.contextOnlyVCacheTurn(), capped
+	}
 	m.attachVCacheContextEvidence(out)
 	return out, capped
 }
@@ -103,18 +101,40 @@ func (m *gatewayMetrics) attachVCacheContextEvidence(turns []vcacheobserve.Turn)
 	if m == nil || len(turns) == 0 {
 		return
 	}
-	compact := m.compactionSnapshotData()
-	fired := compact.attempts["fired"]
-	events := fired
-	if events == 0 && compact.shed > 0 {
-		events = 1
-	}
-	if events == 0 && compact.shed == 0 && compact.dropped == 0 {
+	events, shed, dropped, ok := vcacheContextEvidenceFromCompaction(m.compactionSnapshotData())
+	if !ok {
 		return
 	}
-	turns[0].ContextEvents = uint64ToInt64(events)
-	turns[0].ContextShedTokens = uint64ToInt64(compact.shed)
-	turns[0].ContextDroppedTurns = uint64ToInt64(compact.dropped)
+	turns[0].ContextEvents = events
+	turns[0].ContextShedTokens = shed
+	turns[0].ContextDroppedTurns = dropped
+}
+
+func (m *gatewayMetrics) contextOnlyVCacheTurn() []vcacheobserve.Turn {
+	if m == nil {
+		return nil
+	}
+	events, shed, dropped, ok := vcacheContextEvidenceFromCompaction(m.compactionSnapshotData())
+	if !ok {
+		return nil
+	}
+	return []vcacheobserve.Turn{{
+		Family:              "context",
+		ContextEvents:       events,
+		ContextShedTokens:   shed,
+		ContextDroppedTurns: dropped,
+	}}
+}
+
+func vcacheContextEvidenceFromCompaction(compact compactionSnapshot) (events, shed, dropped int64, ok bool) {
+	fired := compact.attempts["fired"]
+	if fired == 0 && compact.shed > 0 {
+		fired = 1
+	}
+	if fired == 0 && compact.shed == 0 && compact.dropped == 0 {
+		return 0, 0, 0, false
+	}
+	return uint64ToInt64(fired), uint64ToInt64(compact.shed), uint64ToInt64(compact.dropped), true
 }
 
 func attachVCacheContextEconomics(turns []vcacheobserve.Turn, compactHistoryBudget int) {

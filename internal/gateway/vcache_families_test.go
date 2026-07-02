@@ -57,6 +57,34 @@ func TestVCacheTurnsSnapshotCarriesContextEvidence(t *testing.T) {
 	}
 }
 
+func TestVCacheTurnsSnapshotCarriesContextOnlyEvidence(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCompaction(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    4,
+		ShedTokens: 1500,
+	}, false)
+
+	turns, capped := m.vcacheTurnsSnapshot()
+	if capped {
+		t.Fatal("context-only evidence must not mark the provider-cache window capped")
+	}
+	if len(turns) != 1 {
+		t.Fatalf("snapshot retained %d turns, want one context-only witness row", len(turns))
+	}
+	got := turns[0]
+	if got.Family != "context" {
+		t.Fatalf("context-only family = %q, want context", got.Family)
+	}
+	if got.InputTokens != 0 || got.CacheRead != 0 || got.CacheCreation != 0 {
+		t.Fatalf("context-only row must not invent provider telemetry: %+v", got)
+	}
+	if got.ContextEvents != 1 || got.ContextShedTokens != 1500 || got.ContextDroppedTurns != 4 {
+		t.Fatalf("context evidence = events:%d shed:%d dropped:%d, want 1/1500/4",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+}
+
 func TestServerVCacheTurnsSnapshotCarriesContextEconomics(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
 	m.observeVCacheTurn("trace-A", 1, 100, 900, 0)
@@ -78,6 +106,33 @@ func TestServerVCacheTurnsSnapshotCarriesContextEconomics(t *testing.T) {
 	}
 	if got.ContextBaselineTokens != 2000 || got.ContextCostTokens != 1200 {
 		t.Fatalf("context economics = baseline:%d cost:%d, want 2000/1200",
+			got.ContextBaselineTokens, got.ContextCostTokens)
+	}
+}
+
+func TestServerVCacheTurnsSnapshotCarriesContextOnlyEconomics(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCompaction(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    2,
+		ShedTokens: 900,
+	}, false)
+	s := &Server{metrics: m, compactHistoryBudget: 1100}
+
+	turns, _ := s.VCacheTurnsSnapshot()
+	if len(turns) != 1 {
+		t.Fatalf("snapshot retained %d turns, want one context-only witness row", len(turns))
+	}
+	got := turns[0]
+	if got.InputTokens != 0 || got.CacheRead != 0 || got.CacheCreation != 0 {
+		t.Fatalf("context-only server row must not invent provider telemetry: %+v", got)
+	}
+	if got.ContextEvents != 1 || got.ContextShedTokens != 900 || got.ContextDroppedTurns != 2 {
+		t.Fatalf("context evidence = events:%d shed:%d dropped:%d, want 1/900/2",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+	if got.ContextBaselineTokens != 2000 || got.ContextCostTokens != 1100 {
+		t.Fatalf("context economics = baseline:%d cost:%d, want 2000/1100",
 			got.ContextBaselineTokens, got.ContextCostTokens)
 	}
 }
