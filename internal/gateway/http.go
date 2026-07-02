@@ -83,6 +83,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/fak/events", s.handleFakEvents},
 		{"/v1/fak/vcache/score", s.handleFakVCacheScore},
 		{"/v1/fak/vcache/actions", s.handleFakVCacheActions},
+		{"/v1/fak/session-audit/actions", s.handleFakSessionAuditActions},
 		// /v1/fak/ctxvalue is the managed-context arm of the value API: the per-session
 		// multi-level (tokens / turns / session) long-session context report plus the
 		// closed step-advice verdict. GET; ?trace=<id> narrows to one session.
