@@ -274,6 +274,26 @@ fails closed to not-reclaimable). Each row carries the `evidence` comparison
 that decided it. Reclaiming still goes through the fenced `acquire` — this view
 only tells an agent which refusals are worth contesting.
 
+### Region admission: `fak loop region` + the loop drive's region hold
+
+The lease fabric above answers *"who holds what"*; **region admission**
+([`docs/region-admission.md`](region-admission.md), `internal/regionadmit`)
+answers the question every surface should ask before mutating a tree: *"may
+THIS actor act on THIS (lane, tree) right now?"* — tree geometry plus the
+`dos.toml` lane semantics (a named lane serializes; an exclusive lane runs
+alone), refusing `COLLISION_RISK` with the conflicting lease named.
+
+```bash
+fak loop region --lane gateway --actor session:$ME     # decision only: exit 0 admit / 3 refuse
+fak loop region --tree 'internal/gateway/**' --json    # {"admit":false,"reason":"COLLISION_RISK","rung":"tree_overlap","conflict":{...}}
+```
+
+The dispatch tick's lane-lease acquire runs this same decision, and a GOAL.md
+loop that declares `lane:`/`region:` (or `fak loop drive --lane/--tree`) both
+checks it and **holds** a fenced region lease for the whole drive — so loops,
+dispatch workers, and manual sessions that consult the fabric are mutually
+visible instead of racing one tree blind.
+
 ### Gardening stale work + the watchdog cadence
 
 `fak garden` is the one composed, read-only fold over the repo's self-maintenance passes.
