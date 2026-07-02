@@ -32,6 +32,34 @@ func Itoa(n uint64) string {
 	return string(b[i:])
 }
 
+// ItoaInt renders a signed integer in base 10 without going through the fmt
+// reflection path. It is the hoist of the byte-identical hand-rolled signed
+// int->string helpers in internal/compute (cuda), internal/trajectory, and
+// internal/trajhook. The n == math.MinInt edge keeps the original helpers'
+// behavior verbatim (the magnitude loop sees a still-negative n and renders
+// only the sign), so the hoist stays bit-for-bit behavior-preserving.
+func ItoaInt(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}
+
 // EnvPositiveInt reads key from the environment and parses it as a base-10
 // integer, returning def unless the value parses cleanly AND is strictly
 // positive. It is the hoist of the identical envPositiveInt helpers in
