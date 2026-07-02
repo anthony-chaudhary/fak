@@ -278,7 +278,11 @@ func Discover(opts DiscoverOptions) ([]Transcript, error) {
 				continue
 			}
 			ns := entry.Name()
-			if excludedNamespace(ns) || (opts.NamespacePrefix != "" && !strings.HasPrefix(ns, opts.NamespacePrefix)) {
+			if opts.NamespacePrefix != "" {
+				if !strings.HasPrefix(ns, opts.NamespacePrefix) {
+					continue
+				}
+			} else if excludedNamespace(ns) {
 				continue
 			}
 			nsdir := filepath.Join(root, ns)

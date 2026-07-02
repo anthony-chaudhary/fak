@@ -342,6 +342,13 @@ func TestDefaultDiscoversAllNonExcludedNamespaces(t *testing.T) {
 	if len(narrowed) != 1 || narrowed[0].NS != "C--work-fak" {
 		t.Fatalf("narrowed = %+v", narrowed)
 	}
+	explicitExcluded, err := Discover(DiscoverOptions{Roots: []string{root}, NamespacePrefix: "AppData-Local-Temp-fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(explicitExcluded) != 1 || explicitExcluded[0].NS != "AppData-Local-Temp-fixture" {
+		t.Fatalf("explicit excluded namespace = %+v, want scoped temp namespace", explicitExcluded)
+	}
 }
 
 func TestProjectNamespaceMatchesClaudeProjectsKey(t *testing.T) {
