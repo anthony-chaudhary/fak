@@ -32,6 +32,7 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"gated OFF by default; off-path",
 		"M4 recall cost-gate proof: refuted",
 		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
+		"provider calibration: ready (CLI fak vcache calibrate; output vcachecal.Calibration JSON; consumer fak vcache observe --calibration)",
 		"provider actions API: ready (GET /v1/fak/vcache/actions; CLI fak vcache actions; transport=decision_only)",
 		"context witness replay: run `fak vcache context-witness`",
 		"vcache-context-turns.jsonl",
@@ -76,6 +77,14 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 		rep.ContextAPI.DefaultSnapshot != vcachesnapshot.DefaultContextPath() ||
 		rep.ContextAPI.NoKeyScoreCommand != "fak vcache score --json" {
 		t.Fatalf("context_api status missing live API contract: %+v", rep.ContextAPI)
+	}
+	if rep.ProviderCalibration.Verifier != "ready" ||
+		rep.ProviderCalibration.CLI != "fak vcache calibrate" ||
+		rep.ProviderCalibration.Output != "vcachecal.Calibration JSON" ||
+		rep.ProviderCalibration.Consumer != "fak vcache observe --calibration" ||
+		!strings.Contains(rep.ProviderCalibration.LiveProbe, "no spendful probe transport") ||
+		!strings.Contains(rep.ProviderCalibration.Reason, "TTL") {
+		t.Fatalf("provider_calibration status missing fitted calibration contract: %+v", rep.ProviderCalibration)
 	}
 	if rep.ProviderActions.Verifier != "ready" ||
 		rep.ProviderActions.HTTP != "GET /v1/fak/vcache/actions" ||
