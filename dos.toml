@@ -81,6 +81,10 @@ concurrent = [
   "operatorbrief",
   "harnessprofile",
   "toolproc",
+  "laneadmit",
+  "regionadmit",
+  "dispatchauto",
+  "toolprocgate",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -190,6 +194,10 @@ concurrent = [
   # pairwise-disjoint per the header invariant.
   "superloop",
   "toolproc",
+  "laneadmit",
+  "regionadmit",
+  "dispatchauto",
+  "toolprocgate",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -274,6 +282,10 @@ autopick = [
   "devexmeter",
   "superloop", # internal/superloop leaf (the operator-intent meta-loop), see [lanes].concurrent note
   "toolproc",
+  "laneadmit",
+  "regionadmit",
+  "dispatchauto",
+  "toolprocgate",
   # new-leaf:lane
 ]
 
@@ -440,6 +452,10 @@ livecodebench = ["internal/livecodebench/**"]
 devexmeter = ["internal/devexmeter/**"]
 superloop = ["internal/superloop/**"] # operator-intent meta-loop (cmd/fak/superloop.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 toolproc = ["internal/toolproc/**"]
+laneadmit = ["internal/laneadmit/**"]
+regionadmit = ["internal/regionadmit/**"]
+dispatchauto = ["internal/dispatchauto/**"]
+toolprocgate = ["internal/toolprocgate/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
