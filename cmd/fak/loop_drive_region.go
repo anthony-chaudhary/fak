@@ -22,7 +22,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -35,6 +37,10 @@ import (
 // Renewed every turn; sized so one long agent turn cannot silently expire the
 // lease mid-drive, while a crashed drive's ghost stays bounded (garden reaps).
 const loopDriveRegionTTLS int64 = 3600
+
+// loopDriveHoldSeq disambiguates holds created inside one process — the pid
+// alone cannot (see the holder comment in newLoopDriveRegionHold).
+var loopDriveHoldSeq uint64
 
 // loopDriveRegionRefusal is a structured region refusal: Reason is from the
 // closed vocabulary (COLLISION_RISK, or a leaseref fence token such as
@@ -82,10 +88,17 @@ func newLoopDriveRegionHold(opt loopDriveOptions, spec loopdrive.Spec) *loopDriv
 		tax = regionadmit.Taxonomy{}
 	}
 	return &loopDriveRegionHold{
-		store:  leaseref.NewInDir(""),
-		tax:    tax,
-		id:     "loop-" + cleanDispatchLeaseToken(spec.Loop),
-		holder: "loop:" + spec.Loop + "@" + dispatchLeaseHolder(),
+		store: leaseref.NewInDir(""),
+		tax:   tax,
+		id:    "loop-" + cleanDispatchLeaseToken(spec.Loop),
+		// The holder must be PROCESS-unique: dispatchLeaseHolder alone can be
+		// pinned fleet-wide (FAK_LEASE_OWNER / CLAUDE_CODE_SESSION_ID), and a
+		// same-holder AcquireFenced silently RENEWs — two concurrent drives of
+		// one loop would then both believe they hold the region. The pid
+		// suffix makes the second drive refuse (LEASE_HELD); the tradeoff is
+		// that a crash-restarted drive waits out its predecessor's TTL. The
+		// per-process sequence keeps two holds unique even inside one process.
+		holder: fmt.Sprintf("loop:%s@%s#%d-%d", spec.Loop, dispatchLeaseHolder(), os.Getpid(), atomic.AddUint64(&loopDriveHoldSeq, 1)),
 		lane:   lane,
 		tree:   tree,
 		ttl:    ttl,
@@ -96,24 +109,35 @@ func newLoopDriveRegionHold(opt loopDriveOptions, spec loopdrive.Spec) *loopDriv
 // decides admission against the live lease set and acquires the fenced lease;
 // later calls renew it. A structured refusal means the drive must honest-stop;
 // an error is an infra failure the caller warns about and fails open on.
+//
+// Renew outcomes are split by what they witness: STALE_LEASE means a peer
+// holds the region NOW (terminal — honest-stop); NO_LEASE means the lease
+// lapsed with no taker (e.g. one turn outran the TTL) — that is not a peer
+// conflict, so the hold falls through to a fresh admission + reacquire, and a
+// peer who took the region meanwhile refuses THERE. LEASE_CONTENDED is a lost
+// CAS against a racing reaper — transient by contract, retried once.
 func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, error) {
 	if h == nil {
 		return nil, nil
 	}
 	ctx := context.Background()
 	if h.held {
-		_, verdict, err := h.store.Renew(ctx, h.id, h.holder, h.ttl, now)
+		verdict, err := h.renewOnce(ctx, now)
 		if err != nil {
-			return nil, fmt.Errorf("renew region lease %s: %w", h.id, err)
+			return nil, err
 		}
-		if !verdict.OK {
+		switch {
+		case verdict.OK:
+			return nil, nil
+		case string(verdict.Reason) == leaseref.ReasonNoLease:
+			h.held = false // lapsed, untaken: fall through to reacquire
+		default:
 			h.held = false
 			return &loopDriveRegionRefusal{
 				Reason: string(verdict.Reason),
 				Detail: fmt.Sprintf("region lease %s lost mid-drive: %s", h.id, verdict.Detail),
 			}, nil
 		}
-		return nil, nil
 	}
 	live, _, err := h.store.Live(ctx, now)
 	if err != nil {
@@ -134,9 +158,9 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		Holder:     h.holder,
 		TTLSeconds: h.ttl,
 	}
-	_, verdict, err := h.store.AcquireFenced(ctx, rec, now)
+	verdict, err := h.acquireOnce(ctx, rec, now)
 	if err != nil {
-		return nil, fmt.Errorf("acquire region lease %s: %w", h.id, err)
+		return nil, err
 	}
 	if !verdict.OK {
 		return &loopDriveRegionRefusal{
@@ -146,6 +170,37 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 	}
 	h.held = true
 	return nil, nil
+}
+
+// renewOnce renews the held lease, retrying a single LEASE_CONTENDED (a lost
+// CAS is transient — "re-read and retry" is the fence's own contract).
+func (h *loopDriveRegionHold) renewOnce(ctx context.Context, now time.Time) (leaseref.FenceVerdict, error) {
+	_, verdict, err := h.store.Renew(ctx, h.id, h.holder, h.ttl, now)
+	if err != nil {
+		return leaseref.FenceVerdict{}, fmt.Errorf("renew region lease %s: %w", h.id, err)
+	}
+	if !verdict.OK && string(verdict.Reason) == leaseref.ReasonLeaseContended {
+		_, verdict, err = h.store.Renew(ctx, h.id, h.holder, h.ttl, now)
+		if err != nil {
+			return leaseref.FenceVerdict{}, fmt.Errorf("renew region lease %s: %w", h.id, err)
+		}
+	}
+	return verdict, nil
+}
+
+// acquireOnce acquires the lease with the same single LEASE_CONTENDED retry.
+func (h *loopDriveRegionHold) acquireOnce(ctx context.Context, rec leaseref.Record, now time.Time) (leaseref.FenceVerdict, error) {
+	_, verdict, err := h.store.AcquireFenced(ctx, rec, now)
+	if err != nil {
+		return leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
+	}
+	if !verdict.OK && string(verdict.Reason) == leaseref.ReasonLeaseContended {
+		_, verdict, err = h.store.AcquireFenced(ctx, rec, now)
+		if err != nil {
+			return leaseref.FenceVerdict{}, fmt.Errorf("acquire region lease %s: %w", h.id, err)
+		}
+	}
+	return verdict, nil
 }
 
 // release drops the held lease. Nil-safe and idempotent; an unheld or already

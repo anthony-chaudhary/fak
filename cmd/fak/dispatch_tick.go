@@ -594,7 +594,8 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int) ma
 	// worker on this lane, still running) must refuse here exactly as it always
 	// has — with a pinned FAK_LEASE_OWNER the fence would otherwise read the new
 	// tick as the SAME holder and silently renew, double-spawning the lane.
-	dec := regionadmit.Decide(regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}, regionLeases(live), tax)
+	req := regionadmit.Request{Actor: holder, Lane: lane, Tree: tree}
+	dec := regionadmit.Decide(req, regionLeases(live), tax)
 	if !dec.Admit {
 		return map[string]any{
 			"acquired": false,
@@ -607,7 +608,15 @@ func acquireDispatchLaneLease(root, id, lane string, tree []string, ttlS int) ma
 			"tree":     tree,
 		}
 	}
-	rec := leaseref.Record{ID: id, TreeGlobs: tree, Holder: holder, TTLSeconds: int64(ttlS)}
+	// Record the tree the decision was MADE on: with an empty requested tree
+	// and a named lane, Decide admits on the lane's canonical taxonomy tree —
+	// writing the raw (empty) tree instead would publish an unknown-blast-radius
+	// lease that conservatively blocks every peer after a permissive admit.
+	recTree := regionadmit.ResolveTree(req, tax)
+	if len(recTree) == 0 {
+		recTree = tree
+	}
+	rec := leaseref.Record{ID: id, TreeGlobs: recTree, Holder: holder, TTLSeconds: int64(ttlS)}
 	written, verdict, err := store.AcquireFenced(context.Background(), rec, now)
 	if err != nil {
 		return map[string]any{"acquired": false, "refused": false, "id": id, "holder": holder, "fail_open": true, "error": err.Error(), "tree": tree}

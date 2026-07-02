@@ -278,6 +278,87 @@ func TestLoopRegionVerb(t *testing.T) {
 	}
 }
 
+// TestLoopDriveRegionHoldRefusesDoppelganger is the pinned-identity witness:
+// with a fleet-pinned FAK_LEASE_OWNER (standard in resume-wave ops) two
+// concurrent drives of the SAME loop must not both hold the region — the
+// process-unique holder makes the second one refuse at the fence instead of
+// silently sharing the first one's lease.
+func TestLoopDriveRegionHoldRefusesDoppelganger(t *testing.T) {
+	initRegionTestRepo(t)
+	t.Setenv("FAK_LEASE_OWNER", "pinned-fleet-owner")
+
+	spec := loopdrive.Spec{Loop: "region-loop", Lane: "gateway"}
+	now := time.Now()
+
+	first := newLoopDriveRegionHold(loopDriveOptions{}, spec)
+	if refuse, err := first.ensure(now); err != nil || refuse != nil {
+		t.Fatalf("first drive must hold: refuse=%+v err=%v", refuse, err)
+	}
+	defer first.release()
+
+	second := newLoopDriveRegionHold(loopDriveOptions{}, spec)
+	refuse, err := second.ensure(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refuse == nil {
+		t.Fatal("a concurrent drive of the same loop under a pinned owner must refuse, not share the lease")
+	}
+	if refuse.Reason != leaseref.ReasonLeaseHeld {
+		t.Fatalf("refusal reason = %q, want %q", refuse.Reason, leaseref.ReasonLeaseHeld)
+	}
+	// And the doppelganger's renew path must not hijack the region either:
+	// its ensure never held, so the first drive's later renew still succeeds.
+	if refuse, err := first.ensure(now.Add(time.Minute)); err != nil || refuse != nil {
+		t.Fatalf("the true holder's renew must survive the doppelganger: refuse=%+v err=%v", refuse, err)
+	}
+}
+
+// TestLoopDriveRegionHoldReacquiresAfterLapse: a lease that expired with no
+// taker (one turn outran the TTL) is not a peer conflict — the next ensure
+// reacquires instead of honest-stopping a contention-free drive.
+func TestLoopDriveRegionHoldReacquiresAfterLapse(t *testing.T) {
+	initRegionTestRepo(t)
+
+	spec := loopdrive.Spec{Loop: "region-loop", Lane: "gateway"}
+	now := time.Now()
+	hold := newLoopDriveRegionHold(loopDriveOptions{}, spec)
+	if refuse, err := hold.ensure(now); err != nil || refuse != nil {
+		t.Fatalf("acquire: refuse=%+v err=%v", refuse, err)
+	}
+	defer hold.release()
+
+	// Two TTLs later the lease has lapsed untaken; ensure must self-heal.
+	later := now.Add(time.Duration(2*loopDriveRegionTTLS) * time.Second)
+	if refuse, err := hold.ensure(later); err != nil || refuse != nil {
+		t.Fatalf("lapsed-untaken lease must reacquire, got refuse=%+v err=%v", refuse, err)
+	}
+	if !hold.held {
+		t.Fatal("hold must be re-held after the lapse")
+	}
+
+	// But when a PEER takes over the lapsed lease (fenced expired-takeover,
+	// generation bump), the drive's next renew must refuse — that region is
+	// genuinely someone else's now.
+	takeover := later.Add(time.Duration(2*loopDriveRegionTTLS) * time.Second)
+	_, verdict, err := hold.store.AcquireFenced(context.Background(), leaseref.Record{
+		ID: hold.id, Holder: "peer-holder", TreeGlobs: []string{"internal/gateway/**"}, TTLSeconds: 600,
+	}, takeover)
+	if err != nil || !verdict.OK {
+		t.Fatalf("peer takeover of the lapsed lease: verdict=%+v err=%v", verdict, err)
+	}
+	refuse, err := hold.ensure(takeover.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refuse == nil {
+		t.Fatal("a peer holding the lease must refuse the drive's renew")
+	}
+	if refuse.Reason != leaseref.ReasonStaleLease {
+		t.Fatalf("refusal reason = %q, want %q", refuse.Reason, leaseref.ReasonStaleLease)
+	}
+}
+
 // TestDispatchAcquireHonorsLaneTaxonomy proves the dispatch side of the shared
 // seam: the tick's lane-lease acquire now refuses on the SAME decision — here
 // an exclusive-lane live lease (a release cut) blocks a disjoint-tree lane,
@@ -305,5 +386,27 @@ func TestDispatchAcquireHonorsLaneTaxonomy(t *testing.T) {
 	lease = acquireDispatchLaneLease(dir, "resolve-gateway", "gateway", []string{"internal/gateway/**"}, 600)
 	if refused, _ := lease["refused"].(bool); !refused {
 		t.Fatalf("a loop-held region must refuse a dispatch spawn on the same tree, got %+v", lease)
+	}
+}
+
+// TestDispatchAcquireRecordsDecidedTree pins decide/record consistency: an
+// empty requested tree with a named lane is admitted on the lane's canonical
+// taxonomy tree, so the WRITTEN lease must carry that same tree — never an
+// empty unknown-blast-radius record after a permissive admit.
+func TestDispatchAcquireRecordsDecidedTree(t *testing.T) {
+	dir := initRegionTestRepo(t)
+	lease := acquireDispatchLaneLease(dir, "resolve-docs", "docs", nil, 600)
+	if acquired, _ := lease["acquired"].(bool); !acquired {
+		t.Fatalf("free lane with empty tree must acquire on the lane's canonical tree, got %+v", lease)
+	}
+	live, _, err := leaseref.NewInDir(dir).Live(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("live = %+v", live)
+	}
+	if got := live[0].TreeGlobs; len(got) != 2 || got[0] != "docs/**" || got[1] != "README.md" {
+		t.Fatalf("recorded tree = %v, want the docs lane's canonical tree", got)
 	}
 }
