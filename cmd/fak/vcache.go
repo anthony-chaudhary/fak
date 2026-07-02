@@ -44,6 +44,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheObserve(stdout, stderr, argv[1:])
 	case "context-join":
 		return runVCacheContextJoin(stdout, stderr, argv[1:])
+	case "codex-session-extract":
+		return runVCacheCodexSessionExtract(stdout, stderr, argv[1:])
 	case "score", "bench":
 		return runVCacheScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -70,6 +72,8 @@ func vcacheUsage(w io.Writer) {
                    [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
   fak vcache context-join [--transcript FILE]... [--telemetry FILE] --events FILE
                    [--json] [--before-millis N] [--after-millis N]
+  fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
+                   [--snapshot-out FILE|default] [--score-out FILE] [--family NAME]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
