@@ -90,10 +90,16 @@ func ResolveTree(req Request, tax Taxonomy) []string {
 	return nil
 }
 
-// LaneOf reports the lane whose canonical taxonomy tree exactly matches tree
-// (order-insensitive), or "" when no lane owns exactly that tree. This is how
-// a lease that recorded only its tree gets its lane semantics back without a
-// schema change to the lease record.
+// LaneOf reports the lane that owns tree: first by exact, order-insensitive
+// tree-set match, then — because a surface may lease a NARROWED region inside
+// its lane (a GOAL.md region:, a dispatch --lease-tree) — by containment: the
+// single most-specific lane whose canonical tree contains every glob of tree.
+// Without the containment rung a narrowed lease silently loses its lane
+// semantics (same-lane serialization, exclusive-lane blocking) and only
+// geometry protects it. A tree spanning multiple lanes, or contained only by
+// a catch-all glob (empty literal prefix, e.g. "**/*"), owns no lane. This is
+// how a lease that recorded only its tree gets its lane semantics back
+// without a schema change to the lease record.
 func LaneOf(tree []string, tax Taxonomy) string {
 	key := treeKey(tree)
 	if key == "" {
@@ -110,6 +116,66 @@ func LaneOf(tree []string, tax Taxonomy) string {
 		if treeKey(tax.Trees[lane]) == key {
 			return lane
 		}
+	}
+	// Containment rung: the tightest containing lane wins (longest container
+	// prefix); the sorted walk makes an exact-specificity tie deterministic.
+	best, bestSpec := "", -1
+	for _, lane := range lanes {
+		if spec, ok := treeContainmentSpec(tree, tax.Trees[lane]); ok && spec > bestSpec {
+			best, bestSpec = lane, spec
+		}
+	}
+	return best
+}
+
+// treeContainmentSpec reports whether every glob of tree sits under a
+// non-catch-all glob of laneTree, and how tight the containment is (the
+// shortest container prefix used — higher = more specific). Containment uses
+// the same literal-prefix geometry as the overlap check: a glob's prefix is
+// its leading path up to the first meta character.
+func treeContainmentSpec(tree, laneTree []string) (int, bool) {
+	globs := cleanGlobs(tree)
+	containers := cleanGlobs(laneTree)
+	if len(globs) == 0 || len(containers) == 0 {
+		return 0, false
+	}
+	spec := int(^uint(0) >> 1)
+	for _, g := range globs {
+		p := globPrefix(g)
+		best := -1
+		for _, c := range containers {
+			cp := globPrefix(c)
+			if cp == "" {
+				// A catch-all container ("**/*") contains everything and
+				// therefore claims nothing — otherwise every lease would
+				// classify onto the exclusive global lane and block the world.
+				continue
+			}
+			if (p == cp || strings.HasPrefix(p, cp+"/")) && len(cp) > best {
+				best = len(cp)
+			}
+		}
+		if best < 0 {
+			return 0, false
+		}
+		if best < spec {
+			spec = best
+		}
+	}
+	return spec, true
+}
+
+// globPrefix is the literal leading path of a glob: the part before the first
+// meta character (* ? [), trimmed back to the last complete path segment. A
+// meta-free glob is its own prefix (a literal file path).
+func globPrefix(g string) string {
+	i := strings.IndexAny(g, "*?[")
+	if i < 0 {
+		return strings.TrimSuffix(g, "/")
+	}
+	p := g[:i]
+	if j := strings.LastIndexByte(p, '/'); j >= 0 {
+		return p[:j]
 	}
 	return ""
 }
@@ -214,11 +280,12 @@ func LoadTaxonomy(root string) (Taxonomy, error) {
 		buf.Reset()
 	}
 	for _, line := range strings.Split(string(raw), "\n") {
-		trimmed := strings.TrimSpace(stripTomlComment(line))
+		stripped, d := tomlScanLine(line)
+		trimmed := strings.TrimSpace(stripped)
 		if depth > 0 {
 			buf.WriteString(trimmed)
 			buf.WriteString("\n")
-			depth += strings.Count(trimmed, "[") - strings.Count(trimmed, "]")
+			depth += d
 			if depth <= 0 {
 				flush()
 				depth = 0
@@ -228,7 +295,7 @@ func LoadTaxonomy(root string) (Taxonomy, error) {
 		if trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && !strings.Contains(trimmed, "=") {
 			section = strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")
 			continue
 		}
@@ -240,7 +307,7 @@ func LoadTaxonomy(root string) (Taxonomy, error) {
 		v = strings.TrimSpace(v)
 		buf.WriteString(v)
 		buf.WriteString("\n")
-		depth = strings.Count(v, "[") - strings.Count(v, "]")
+		_, depth = tomlScanLine(v)
 		if depth <= 0 {
 			flush()
 			depth = 0
@@ -250,40 +317,69 @@ func LoadTaxonomy(root string) (Taxonomy, error) {
 	return tax, nil
 }
 
-// stripTomlComment removes a `#` comment that starts outside a quoted string.
-func stripTomlComment(line string) string {
-	inString := false
+// tomlScanLine strips a `#` comment (quote- and escape-aware) and reports the
+// bracket depth delta of the remaining text, counting `[`/`]` only OUTSIDE
+// double-quoted strings — a bracket inside a glob value like "docs/x[!a]/**"
+// or inside `[reasons]` prose is content, not structure, and counting it
+// would silently desync the reader and swallow every later lane. Single-quoted
+// TOML strings are not used by the [lanes] tables this reader targets.
+func tomlScanLine(line string) (stripped string, depth int) {
+	inString, escaped := false, false
 	for i := 0; i < len(line); i++ {
-		switch line[i] {
+		ch := line[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch ch {
+		case '\\':
+			if inString {
+				escaped = true
+			}
 		case '"':
 			inString = !inString
 		case '#':
 			if !inString {
-				return line[:i]
+				return line[:i], depth
+			}
+		case '[':
+			if !inString {
+				depth++
+			}
+		case ']':
+			if !inString {
+				depth--
 			}
 		}
 	}
-	return line
+	return line, depth
 }
 
-// quotedStrings extracts every "..." token from raw, in order.
+// quotedStrings extracts every "..." token from raw, in order, honoring
+// backslash escapes so an escaped quote inside a value cannot desync the scan.
 func quotedStrings(raw string) []string {
 	var out []string
-	for {
-		start := strings.IndexByte(raw, '"')
-		if start < 0 {
-			return out
+	var cur strings.Builder
+	inString, escaped := false, false
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		switch {
+		case escaped:
+			cur.WriteByte(ch)
+			escaped = false
+		case ch == '\\' && inString:
+			escaped = true
+		case ch == '"':
+			if inString && cur.Len() > 0 {
+				out = append(out, cur.String())
+			}
+			cur.Reset()
+			inString = !inString
+		case inString:
+			cur.WriteByte(ch)
 		}
-		raw = raw[start+1:]
-		end := strings.IndexByte(raw, '"')
-		if end < 0 {
-			return out
-		}
-		if v := raw[:end]; v != "" {
-			out = append(out, v)
-		}
-		raw = raw[end+1:]
 	}
+	return out
 }
 
 func cleanGlobs(tree []string) []string {

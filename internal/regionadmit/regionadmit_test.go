@@ -140,11 +140,71 @@ func TestLaneOfMatchesTreeSetOrderInsensitive(t *testing.T) {
 	if lane := LaneOf([]string{"README.md", "docs/**"}, tax); lane != "docs" {
 		t.Fatalf("LaneOf = %q, want docs", lane)
 	}
-	if lane := LaneOf([]string{"docs/**"}, tax); lane != "" {
-		t.Fatalf("a partial tree must not claim the lane, got %q", lane)
-	}
 	if lane := LaneOf(nil, tax); lane != "" {
 		t.Fatalf("an empty tree owns no lane, got %q", lane)
+	}
+}
+
+func TestLaneOfClassifiesNarrowedTreesByContainment(t *testing.T) {
+	tax := testTaxonomy()
+	// A lease narrowed INSIDE its lane keeps its lane semantics.
+	if lane := LaneOf([]string{"internal/gateway/http/**"}, tax); lane != "gateway" {
+		t.Fatalf("narrowed subtree LaneOf = %q, want gateway", lane)
+	}
+	// A subset of a lane's multi-glob tree is still that lane's.
+	if lane := LaneOf([]string{"docs/**"}, tax); lane != "docs" {
+		t.Fatalf("subset tree LaneOf = %q, want docs", lane)
+	}
+	// A literal file inside a lane tree.
+	if lane := LaneOf([]string{"internal/abi/types.go"}, tax); lane != "abi" {
+		t.Fatalf("literal file LaneOf = %q, want abi", lane)
+	}
+	// A tree BROADER than any lane claims nothing.
+	if lane := LaneOf([]string{"internal/**"}, tax); lane != "" {
+		t.Fatalf("broader-than-lane tree must own no lane, got %q", lane)
+	}
+	// A tree spanning two lanes claims nothing (geometry still protects it).
+	if lane := LaneOf([]string{"internal/gateway/**", "docs/**"}, tax); lane != "" {
+		t.Fatalf("multi-lane tree must own no lane, got %q", lane)
+	}
+	// A catch-all container never claims by containment: with only the global
+	// lane containing this path, it stays lane-less rather than exclusive.
+	only := Taxonomy{Exclusive: map[string]bool{"global": true}, Trees: map[string][]string{"global": {"**/*"}}}
+	if lane := LaneOf([]string{"anything/at/all.go"}, only); lane != "" {
+		t.Fatalf("catch-all containment must not classify, got %q", lane)
+	}
+}
+
+func TestDecideSerializesNarrowedSameLaneRegions(t *testing.T) {
+	// The witnessed bypass: two disjoint sub-regions of ONE named lane must
+	// serialize — the live lease's lane is recovered by containment even
+	// though its tree is not the lane's canonical tree.
+	dec := Decide(
+		Request{Actor: "loop:b", Lane: "gateway", Tree: []string{"internal/gateway/relay/**"}},
+		[]Lease{{ID: "loop-a", Holder: "loop:a", Tree: []string{"internal/gateway/http/**"}}},
+		testTaxonomy(),
+	)
+	if dec.Admit {
+		t.Fatal("two narrowed regions of the same named lane must serialize")
+	}
+	if dec.Rung != RungSameLane {
+		t.Fatalf("rung = %q, want %q", dec.Rung, RungSameLane)
+	}
+}
+
+func TestDecideExclusiveSubsetLeaseBlocksEverything(t *testing.T) {
+	// The witnessed bypass: a lease on a SUBSET of an exclusive lane's tree
+	// must still block every new region.
+	dec := Decide(
+		Request{Actor: "loop:x", Lane: "cmd"},
+		[]Lease{{ID: "abi-edit", Holder: "op", Tree: []string{"internal/abi/types.go"}}},
+		testTaxonomy(),
+	)
+	if dec.Admit {
+		t.Fatal("a lease inside an exclusive lane's tree must block every new region")
+	}
+	if dec.Rung != RungExclusiveLive {
+		t.Fatalf("rung = %q, want %q", dec.Rung, RungExclusiveLive)
 	}
 }
 
@@ -193,6 +253,46 @@ summary = "not a lane tree"
 	}
 	if _, err := LoadTaxonomy(dir); err == nil {
 		t.Fatal("a missing dos.toml must surface an error, not a silent empty taxonomy")
+	}
+}
+
+func TestLoadTaxonomyBracketsInsideStringsAreContent(t *testing.T) {
+	// The witnessed desync: a char-class glob ("x[!a]/**") or bracketed prose
+	// in a quoted value must not change the reader's bracket depth — before
+	// the quote-aware scan, one such value silently swallowed every later
+	// lane, degrading lane semantics with no error surfaced.
+	dir := t.TempDir()
+	toml := `[lanes]
+concurrent = [
+  "weird",
+  "gateway",
+]
+exclusive = ["abi"]
+
+[lanes.trees]
+weird = ["docs/x[!a/**"]
+gateway = ["internal/gateway/**"]
+abi = ["internal/abi/**"]
+cmd = ["cmd/**"] # prose with [brackets] and an escaped quote \" inside a comment
+`
+	if err := os.WriteFile(filepath.Join(dir, "dos.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tax, err := LoadTaxonomy(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tax.Trees["weird"]; len(got) != 1 || got[0] != "docs/x[!a/**" {
+		t.Fatalf("char-class glob tree = %v", got)
+	}
+	if got := tax.Trees["gateway"]; len(got) != 1 || got[0] != "internal/gateway/**" {
+		t.Fatalf("gateway tree lost after a bracketed value: %v", got)
+	}
+	if got := tax.Trees["cmd"]; len(got) != 1 || got[0] != "cmd/**" {
+		t.Fatalf("cmd tree lost after a bracketed comment: %v", got)
+	}
+	if !tax.Exclusive["abi"] {
+		t.Fatalf("exclusive set lost after a bracketed value: %v", tax.Exclusive)
 	}
 }
 
