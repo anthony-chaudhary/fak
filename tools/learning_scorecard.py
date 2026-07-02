@@ -424,16 +424,26 @@ def _rel(path: str) -> str:
     return path.strip().replace("\\", "/").lstrip("./")
 
 
+def _since_after_stamp_utc(stamp_date: date) -> str:
+    # The stamp is day-granular. Use a UTC midnight so Windows/Pacific and
+    # Linux/UTC runners derive the same post-stamp surface set.
+    since = (stamp_date + timedelta(days=1)).isoformat()
+    return f"--since={since}T00:00:00Z"
+
+
+def _before_stamp_end_utc(stamp_date: date) -> str:
+    return f"--before={stamp_date.isoformat()}T23:59:59Z"
+
+
 def _git_added_paths_since_stamp(root: Path, stamp: str) -> list[str]:
     stamp_date = _parse_date(stamp)
     if stamp_date is None:
         return []
     # The generated stamp is day-granular, not a timestamp. Same-day additions
     # are still inside that stamp's freshness window, so only count later dates.
-    since = (stamp_date + timedelta(days=1)).isoformat()
     out = _git_line([
         "log", "--diff-filter=A", "--name-only", "--format=",
-        f"--since={since}T00:00:00",
+        _since_after_stamp_utc(stamp_date),
         "--",
         "internal", "cmd/fak", "cmd",
     ], root)
@@ -527,7 +537,7 @@ def _git_added_fak_verbs_since_stamp(root: Path, stamp: str) -> list[str]:
     if stamp_date is None:
         return []
     baseline = _git_line([
-        "rev-list", "-1", f"--before={stamp_date.isoformat()}T23:59:59",
+        "rev-list", "-1", _before_stamp_end_utc(stamp_date),
         "HEAD", "--", "cmd/fak/main.go",
     ], root)
     if not baseline:

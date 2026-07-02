@@ -361,6 +361,27 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x2-cache-vcachepolicyactions",
+      "canonical": "no_cache / explicit_cache (vCache provider policy actions)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "DecisionNoCache and DecisionExplicitCache are vcachegov provider-cache policy decisions: no_cache refuses warming secret prefixes, while explicit_cache requires a regulated explicit-cache path instead of ambient warming.",
+      "distinction": "They are provider-cache POLICY ACTIONS in the vCache governor, not a generic cache miss and not the provider cache_control marker itself.",
+      "distinct_from": [
+        "Provider cache",
+        "cache_control"
+      ],
+      "aliases": [
+        "explicitcache"
+      ],
+      "grounding": "nocache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }
