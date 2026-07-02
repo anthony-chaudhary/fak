@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; guided tutorial surfaced (Pick-your-path + docs map). -->
+<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; examples generalized to the hardware/harness sweep (HARDWARE-MATRIX + supported/); guided tutorial surfaced (Pick-your-path + docs map). -->
 
 **fak in one line:** fak is a fused agent kernel. One Go binary sits in front of an agent's
 tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
@@ -34,8 +34,10 @@ ledger is [CLAIMS.md](CLAIMS.md):
   the shared prompt prefix — the system prompt + tools, the *KV cache* of the work so far —
   across agents instead of re-paying for it. Reuse climbs to **6.95×** across the model
   ladder (~60× versus a naive re-send loop; the tuned figure is the honest bar).
-- **In-kernel GPU decode hits ~120 tok/s** on an RTX 4070 (SmolLM2-135M, f32 weights, gated
-  `FAK_CUDA_GRAPH=1`) — inside llama.cpp's Q8_0 band of 120 ± 15 tok/s.
+- **One kernel, four hardware platforms.** The same correctness gates run on Apple Metal,
+  AMD Vulkan, and NVIDIA CUDA (Ada + Ampere) across macOS, Windows, WSL2, and Linux; on
+  CUDA, in-kernel decode reaches ~120 tok/s on a single RTX 4070 — inside llama.cpp's Q8_0
+  band of 120 ± 15 tok/s. The sweep, per box: [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md).
 - **The provider cache discount survives a long session.** `fak` sheds old turns while
   keeping the prompt-cache prefix byte-identical, so the rebate holds.
 - **The guard tax is ~362 ns per call** — the allow/deny decision runs in-process
@@ -76,16 +78,18 @@ fak benchmarks list --offline   # -> the zero-asset benchmark set
 
 `fak routebench` replays a built-in 8-case corpus through a routing policy versus a
 single-model baseline and prints `routed is ~20% cheaper, ~10% less total compute, quality
-tied` — a deterministic offline lens, and the fastest way to see the kernel do something real.
+tied` — a deterministic offline lens.
 
 ## Run the model in the kernel
 
 The kernel can *be* the model host too. `fak guard --gguf qwen2.5:7b -- claude` loads a
 local GGUF model in-process — no API key, no network, your data never leaves the box — and
 the kernel owns the KV cache, so the same reuse and quarantine
-machinery applies to a local model as to a proxied one. On the gated reusable-CUDA-graph
-path, fak's f32 in-kernel decode reaches parity with a quantized llama.cpp baseline
-([head-to-head results](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)).
+machinery applies to a local model as to a proxied one. The path is not one lucky box: it
+is profiled on Apple Metal and AMD Vulkan as well as CUDA — where f32 in-kernel decode
+reaches parity with a quantized llama.cpp
+([head-to-head](docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md)) — with models from
+SmolLM2-135M to Qwen3.6-27B running end-to-end.
 
 The honest fence: a small local model is a quality ramp, not a frontier coder — use
 `--gguf` for offline or privacy-bound work, and the proxy path for the best reasoning.
@@ -127,8 +131,10 @@ watch: [four wins, by example — a 29-second silent MP4](visuals/worked-example
   endpoint and point the client at it: [GETTING-STARTED.md](GETTING-STARTED.md) ·
   [docs/fak/api-reference.md](docs/fak/api-reference.md).
 
-The kernel surface table and benchmark list moved to the
-[overflow page](docs/README-legacy.md#what-the-kernel-does). Every claim in
+Witnessed live in front of Claude Code (a measured 5-run A/B ablation), opencode, and
+Codex; 41 of 47 surveyed harnesses and frameworks repoint with one base URL — the
+catalogue: [docs/supported/README.md](docs/supported/README.md). Surface table + benchmark
+list: [overflow page](docs/README-legacy.md#what-the-kernel-does). Every claim in
 [CLAIMS.md](CLAIMS.md) carries exactly one tag — `[SHIPPED]`, `[SIMULATED]`, or `[STUB]` —
 and the lint gate enforces that honesty ledger.
 
@@ -137,10 +143,9 @@ and the lint gate enforces that honesty ledger.
 Most agent security tries to recognize bad text. Recognizers help; they are not the floor.
 So `fak` moves the load-bearing decision to the **capability floor**: a dangerous tool
 outside the allow-list cannot be called, no matter what the model was told. Two independent
-gates carry it — a call-side gate (a denied call never reaches the tool runner) and a
-result-side gate (poisoned or secret-bearing output is quarantined before it enters
-context). The floor is a deployable JSON manifest you copy, trim, and watch bite, no model
-in the loop:
+gates carry it: call-side (a denied call never reaches the tool runner) and result-side
+(poisoned or secret-bearing output is quarantined before it enters context). The floor is a
+deployable JSON manifest you copy, trim, and watch bite, no model in the loop:
 
 ```bash
 fak preflight --tool refund_payment --args "{}"     # -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
@@ -199,6 +204,8 @@ catalogue, vCache, model routing, the moved front-page detail, and the three-axe
 | Capability floor (policy) | [POLICY.md](POLICY.md) · [examples/README.md](examples/README.md) |
 | CLI verbs | [docs/cli-reference.md](docs/cli-reference.md) |
 | Security model | [docs/fak/security.md](docs/fak/security.md) |
+| Hardware sweep (4 platforms) | [docs/HARDWARE-MATRIX.md](docs/HARDWARE-MATRIX.md) |
+| Supported models / engines / harnesses | [docs/supported/README.md](docs/supported/README.md) |
 | Benchmark authority | [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) |
 | Charts, diagrams, videos | [BENCHMARK-GALLERY.md](BENCHMARK-GALLERY.md) · [visuals/](visuals/) |
 | Honesty ledger | [CLAIMS.md](CLAIMS.md) |
