@@ -468,8 +468,6 @@ var grandfathered = []string{
 	"tools/session_audit.py",
 	"tools/session_checkpoint_test.py",
 	"tools/session_checkpoint.py",
-	"tools/shared_task_contract_test.py",
-	"tools/shared_task_contract.py",
 	"tools/skill_context_test.py",
 	"tools/skill_context.py",
 	"tools/skill_frontmatter_lint_test.py",

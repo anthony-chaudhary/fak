@@ -5,14 +5,23 @@ cover an initial task, title edits, open-decision edits, tenant-scoped notes wit
 external body refs, accepted/conflict patch results, disaggregated artifact refs,
 body-ref updates, and materialized journals.
 
-Prerequisites: Python 3 from the repo root; no network, API key, model, or GPU is
-needed. The validation run completes in seconds and is deterministic: it reads the
-fixture files and returns the same verdict on every run.
+```text
++---------------+     +---------------------------+     +---------------------------+
+| fixture files | --> | internal/sharedtask       | --> | task record sequence,     |
++---------------+     | contract validator        |     | revision chain, journal,  |
+                      | (sequence witness)        |     | artifact refs validate    |
+                      +---------------------------+     | (exit 0)                  |
+                                                        +---------------------------+
+```
+
+Prerequisites: the Go toolchain from the repo root; no network, API key, model, or
+GPU is needed. The validation run completes in seconds and is deterministic: it
+reads the fixture files and returns the same verdict on every run.
 
 Run:
 
 ```bash
-python tools/shared_task_contract.py validate-sequence examples/shared-task-record
+go test ./internal/sharedtask -run TestContractSequenceFixtureValidates -v
 ```
 
 ## What You See

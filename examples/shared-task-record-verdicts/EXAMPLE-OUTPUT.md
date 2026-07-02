@@ -3,25 +3,25 @@
 Command:
 
 ```bash
-python tools/shared_task_contract.py validate-dir examples/shared-task-record-verdicts
+go test ./internal/sharedtask -run TestContractVerdictsFixtureValidates -v
 ```
 
 Output on this checkout:
 
 ```text
-examples\shared-task-record-verdicts: OK (fak.shared-patch-result.v1=5)
+=== RUN   TestContractVerdictsFixtureValidates
+--- PASS: TestContractVerdictsFixtureValidates (0.00s)
+PASS
+ok  	github.com/anthony-chaudhary/fak/internal/sharedtask	0.148s
 ```
 
-Command:
-
-```bash
-python tools/shared_task_contract.py validate-verdicts examples/shared-task-record-verdicts
-```
-
-Output on this checkout:
+The test envelope-validates every fixture file in this directory and then checks
+the non-acceptance shape (needs_approval, denied, and quarantined verdicts all
+present, each carrying a reason, none advancing the task revision), pinning the
+exact per-schema count:
 
 ```text
-examples\shared-task-record-verdicts: OK collaboration verdicts (fak.shared-patch-result.v1=5)
+fak.shared-patch-result.v1=5
 ```
 
 Exit code: `0`.

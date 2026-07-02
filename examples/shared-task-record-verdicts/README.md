@@ -3,14 +3,22 @@
 These fixtures cover the non-acceptance collaboration verdicts a UI or protocol
 adapter must render without advancing the task revision.
 
-Prerequisites: Python 3 from the repo root; no network, API key, model, or GPU is
-needed. The validation run completes in seconds and is deterministic: it reads the
-fixture files and returns the same verdict on every run.
+```text
++---------------+     +---------------------------+     +--------------------------+
+| fixture files | --> | internal/sharedtask       | --> | non-acceptance verdict   |
++---------------+     | contract validator        |     | rendered; task revision  |
+                      | (verdicts witness)        |     | does not advance (exit 0)|
+                      +---------------------------+     +--------------------------+
+```
+
+Prerequisites: the Go toolchain from the repo root; no network, API key, model, or
+GPU is needed. The validation run completes in seconds and is deterministic: it
+reads the fixture files and returns the same verdict on every run.
 
 Run:
 
 ```bash
-python tools/shared_task_contract.py validate-verdicts examples/shared-task-record-verdicts
+go test ./internal/sharedtask -run TestContractVerdictsFixtureValidates -v
 ```
 
 ## What You See

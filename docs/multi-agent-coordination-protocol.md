@@ -46,7 +46,7 @@ The protocol has three layers, each a shipped package:
 | Layer | What it carries | Package | Try it |
 |---|---|---|---|
 | **§3 Message passing** | one addressed value, now, A→B | [`internal/a2achan`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/a2achan.go) | `go run ./cmd/a2ademo` |
-| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask) | `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
+| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask) | `go test ./internal/sharedtask -run TestContractSequenceFixtureValidates` |
 | **§5 Coordination primitives** | broadcast / scatter / gather / barrier over a wave | [`internal/comm`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go), [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) | `go test ./internal/comm` |
 
 ---
@@ -211,7 +211,8 @@ reader's scope, so a tenant-scoped reader never sees a fleet-scoped body.
   arithmetic (see the cache docs for the measured reuse).
 
 **Witness:** `internal/sharedtask/sharedtask_test.go`, `internal/sharedtask/live_test.go`;
-the executable contract validator `tools/shared_task_contract.py` over
+the executable contract validator `internal/sharedtask/contract.go`
+(`go test ./internal/sharedtask -run TestContract`) over
 `examples/shared-task-record`.
 
 ---
@@ -267,7 +268,7 @@ artifact and a runnable witness, not to prose.
 | Acceptance item | Shipped artifact | Witness |
 |---|---|---|
 | **Message passing between agents** | `internal/a2achan` — `Send`/`Recv`/`TryRecv`, `Publish`/`Subscribe`, three locales, the capability floor | `go test -race ./internal/a2achan`; `go run ./cmd/a2ademo` |
-| **Shared KV/cache space** | `internal/sharedtask` shared record + scoped/taint-tracked refs + journal; cross-agent prefix-cache reuse | `go test ./internal/sharedtask`; `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
+| **Shared KV/cache space** | `internal/sharedtask` shared record + scoped/taint-tracked refs + journal; cross-agent prefix-cache reuse | `go test ./internal/sharedtask` (incl. `TestContractSequenceFixtureValidates` over `examples/shared-task-record`) |
 | **Coordination primitives** | `internal/comm` Group collectives (broadcast/scatter/gather/barrier/split/spawn) + `internal/agenttopo` declared topology DAG | `go test ./internal/comm ./internal/agenttopo` |
 | **RFC/spec document** | **this document** | renders + link-clean; binds the three pillars under the §2 invariant |
 

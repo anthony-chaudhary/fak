@@ -10,7 +10,8 @@ It is the rung where humans and agents can co-edit a task board or plan without
 turning edits into unstructured chat.
 
 The runtime reference is `internal/sharedtask`; the executable fixture validator
-is `tools/shared_task_contract.py`.
+is `internal/sharedtask/contract.go` (run it with
+`go test ./internal/sharedtask -run TestContract`).
 
 ## Envelopes
 
@@ -172,10 +173,13 @@ Materialized journal:
 ## Validate
 
 ```bash
-python tools/shared_task_contract.py validate-doc docs/shared-task-record-contract.md
-python tools/shared_task_contract.py validate-sequence examples/shared-task-record
-python tools/shared_task_contract.py validate-verdicts examples/shared-task-record-verdicts
+go test ./internal/sharedtask -run TestContract -v
 ```
+
+This runs the doc-example, sequence-fixture, and verdict-fixture witnesses
+(`TestContractDocExamplesValidate`, `TestContractSequenceFixtureValidates`,
+`TestContractVerdictsFixtureValidates`), each pinning the exact per-schema
+fixture counts.
 
 ## Honest Scope
 
