@@ -23,6 +23,13 @@ import (
 func realRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// GIT_OPTIONAL_LOCKS=0: the read probes (rev-parse, symbolic-ref, status,
+	// diff) must never take git's OPTIONAL locks — a plain `git status` otherwise
+	// opportunistically refreshes the index under .git/index.lock and, on a busy
+	// shared tree, collides with a concurrent writer (the documented burst-time
+	// stall class). Mandatory write locks (add/commit) are unaffected; contention
+	// on those is ridden out by runRidingLockContention instead.
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	if dir != "" {
 		cmd.Dir = dir
 	}

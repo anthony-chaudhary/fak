@@ -302,10 +302,17 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// dirty file. The post-commit assertion (step 7) remains the authority — a peer who raced
 	// between this add and the commit is caught there.
 	addArgs := append([]string{"add", "--all", "--"}, paths...)
-	if out, code, aerr := run(ctx, opts.Dir, addArgs...); aerr != nil {
+	if out, code, aerr := runRidingLockContention(ctx, run, opts.Dir, addArgs...); aerr != nil {
 		return res, fmt.Errorf("safecommit: git not executable: %w", aerr)
 	} else if code != 0 {
-		res.Reason = ReasonHookRefused
+		// A peer's raw git holding index.lock (or a ref lock) is TRANSIENT
+		// contention, not a hook refusal — after the in-place retries are spent it
+		// surfaces as the retryable LOCK_BUSY, never the halt-class HOOK_REFUSED.
+		if isGitLockContention(out) {
+			res.Reason = ReasonLockBusy
+		} else {
+			res.Reason = ReasonHookRefused
+		}
 		res.Detail = trimDetail(out)
 		return res, nil
 	}
@@ -322,10 +329,16 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 	commitArgs = append(commitArgs, "-F", msgPath, "--")
 	commitArgs = append(commitArgs, paths...)
-	if out, code, cerr := run(ctx, opts.Dir, commitArgs...); cerr != nil {
+	if out, code, cerr := runRidingLockContention(ctx, run, opts.Dir, commitArgs...); cerr != nil {
 		return res, fmt.Errorf("safecommit: git not executable: %w", cerr)
 	} else if code != 0 {
-		res.Reason = ReasonHookRefused
+		// Same transient-vs-permanent split as the add step: a lost ref/index lock
+		// race is LOCK_BUSY (retry), only a genuine hook refusal is HOOK_REFUSED.
+		if isGitLockContention(out) {
+			res.Reason = ReasonLockBusy
+		} else {
+			res.Reason = ReasonHookRefused
+		}
 		res.Detail = trimDetail(out)
 		return res, nil
 	}
