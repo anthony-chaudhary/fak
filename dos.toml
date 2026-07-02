@@ -760,6 +760,22 @@ summary  = "the command waits for a human (an editor, an interactive prompt, a d
 fix      = "re-run the non-interactive equivalent the finding pre-fills: git commit -s -m \"...\" (never bare), git add -- <paths> (never -i/-p), GIT_SEQUENCE_EDITOR=: for a scripted rebase, gh auth login --with-token, the harness Edit/Write tools instead of vi/vim/nano. Floor: cmd/repoguard (PreToolUse hook); soften with FAK_REPO_GUARD=warn or off."
 see_also = ["internal/repoguard/interactive.go", "cmd/repoguard/main.go", ".claude/settings.json", "AGENTS.md"]
 
+# Long foreground sleep timers (#2366): a foreground `sleep 1500` / `Start-Sleep
+# -Seconds 300` (bare, chained, or inside a poll loop) holds an agent turn open
+# doing nothing when background waits (Monitor, run_in_background, ScheduleWakeup)
+# exist for exactly this -- one audited session burned ~75 minutes of held-open
+# turns polling a remote bench. The same PreToolUse floor (cmd/repoguard) surfaces
+# the curated forms; ADVISORY-ONLY (refusal = false): even in enforce mode the
+# hook prints the structured pointer and ALLOWS -- a legitimate long wait stays
+# possible. Unresolvable durations (`sleep $T`) and backgrounded timers
+# (`sleep 300 &`) pass untouched; the guard never guesses.
+[reasons.FOREGROUND_SLEEP]
+category = "OPERATOR_GATE"
+refusal  = false
+summary  = "a single foreground sleep timer at or over 120s in a Bash/PowerShell tool call -- it holds the turn open doing nothing while background-wait primitives exist for exactly this"
+fix      = "wait in the background instead: Bash run_in_background with an until-loop, the Monitor tool, or ScheduleWakeup. Floor: cmd/repoguard (PreToolUse hook, advisory even under enforce); soften with FAK_REPO_GUARD=warn or off."
+see_also = ["internal/repoguard/sleepwait.go", "cmd/repoguard/main.go", ".claude/settings.json"]
+
 # L3 cross-tenant prefix-share gate (#57): the two typed REFUSE reasons the read-path
 # admission gate (internal/gateway/l3share.go -> AdmitL3SharedPage) cites when it refuses
 # a cross-tenant L3 page. fak rides the control/admission path in FRONT of the external L3
