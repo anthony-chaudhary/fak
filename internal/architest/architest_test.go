@@ -218,6 +218,7 @@ var tier = map[string]int{
 	"fakrpc":           1, // disaggregated agent-RPC contract (#930): the pure Request envelope + the FAKRES nonce/sha frame (encode/decode/verify) a resident worker (cmd/fakrpcd) and pluggable text-only bridges build on. stdlib-only, imports nothing internal, off the hot path â€” the same frame tools/dgx_witness_run.sh emits.
 	"resume":           1, // deterministic resume-cache decision (#745/#774 family): prices RESUME_FULL/CUT/RESET against the projected cold/warm prompt-cache posture at the resume boundary and recommends a cut-by-default re-entry; pure Plan(Input) Report, stdlib-only, imports nothing internal, off the hot path. The computable answer to "resume a 250k session â€” what happens to the cache".
 	"vcacheobserve":    2,
+	"vcacheextract":    2, // Codex session token-telemetry sanitizer: reads a Codex/`codex exec --json` JSONL and keeps ONLY token counters (drops all prompt/tool/response content), bridging them into the observed-window snapshot + score. Pure decision layer: imports vcacheobserve(2)+vcachesnapshot(2)+vcachescore(2)+stdlib, off the hot path.
 	"vcachesnapshot":   2, // vCache observed-cache-window snapshot bridge (#827d882f): folds vcacheobserve's realized traffic into the read-side snapshot the score consumes; imports vcacheobserve(2)+stdlib only, off the hot path.
 	"cadencereport":    3, // the consolidated regular-cadence report: a read-only fold-over-folds that distills the scorecard control pane (scores), git (work-done), and release-status (releases) into one schema/ok/verdict/finding envelope + a durable JSONL trend ledger. Composer (like gardenbundle): shells to the Python folds + git off the hot path, imports nothing internal.
 	"epicprogress":     1, // the provenance-honest gh epic child-completion resolver (#1438): a track-label -> body-checklist -> honest-errored-row priority chain behind an injectable Runner, returning EpicCounts{Closed,Total,Source,Err} that NEVER fabricates a 0%. Extracted from milestonereport so issue-triage/plan-audit/dogfoodissues can reuse it; stdlib-only, imports nothing internal, off the hot path.
@@ -292,6 +293,7 @@ var tier = map[string]int{
 	"toolproc": 2,
 	"laneadmit": 1,
 	"regionadmit": 2,
+	"dispatchauto": 1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
