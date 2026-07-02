@@ -501,6 +501,27 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
+    },
+    {
+      "id": "x-context-ctx-observectxviewrewrite",
+      "canonical": "observeCtxViewRewrite (ctx-view metric witness)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "gateway.observeCtxViewRewrite is the metrics helper that records a successful ctxplan planned-view rewrite as ctx-view events, dropped turns, and shed resident-token estimates without incrementing compact-history counters.",
+      "distinction": "It is the OBSERVABILITY witness for a ctx-view rewrite, not the CtxViewBudget knob that enables planning and not the compact-history CompactionFired counter.",
+      "distinct_from": [
+        "CtxViewBudget (gateway knob)",
+        "CompactionFired (gateway metric)"
+      ],
+      "aliases": [
+        "observedecodedctxviewrewrite"
+      ],
+      "grounding": "observectxviewrewrite",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "ctxview",
+      "verdict": "defined",
+      "gaps": []
     }
   ]
 }

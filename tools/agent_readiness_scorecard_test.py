@@ -16,6 +16,8 @@ or `python -m pytest tools/agent_readiness_scorecard_test.py -q`.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -681,6 +683,17 @@ def test_render_compare_reports_35pct_frontier_goal() -> None:
     cur_small = ar.build_payload(workspace=".", kpis=_clean_kpis(), facts=small)
     out_small = ar.render_compare(base, cur_small)
     assert "not yet +35%" in out_small, out_small
+
+
+def test_cli_help_renders_compare_percent_literal() -> None:
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            ar.main(["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    out = buf.getvalue()
+    assert "+35% goal" in out, out
 
 
 def test_is_substantive_recipe_requires_real_content() -> None:
