@@ -27,7 +27,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
-	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -1060,8 +1059,7 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	// session's data — otherwise the snapshot is silent and the related vcache items look
 	// like they only have a synthetic forecast to score.
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
-		snapPath := vcachesnapshot.DefaultPath()
-		if err := vcachesnapshot.Write(snapPath, turns); err == nil && !quiet {
+		if snapPath, ok, err := writeConfiguredVCacheSnapshot(turns); err == nil && ok && !quiet {
 			fmt.Fprint(os.Stderr, formatVCacheSnapshotPointer(len(turns), snapPath))
 		}
 	}

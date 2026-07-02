@@ -421,7 +421,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write machine-readable scorecard JSON to this file")
 	telemetry := fs.String("telemetry", "", "optional provider telemetry JSONL file ('-' for stdin)")
 	anchorsFile := fs.String("anchors-file", "", "optional ranked anchor workload JSONL/JSON/CSV file ('-' for stdin)")
-	snapshotDefault := strings.TrimSpace(os.Getenv("FAK_VCACHE_SNAPSHOT"))
+	snapshotDefault := strings.TrimSpace(os.Getenv(vcachesnapshot.EnvPath))
 	snapshot := fs.String("snapshot", snapshotDefault, "OBSERVED-by-default source: per-turn provider-cache window a finished `fak guard`/`fak serve` session persisted (default: $FAK_VCACHE_SNAPSHOT, then the well-known path under your config dir). When no --telemetry/--anchors-file is given and this snapshot has turns, the score reports the REALIZED cache multiplier from real traffic instead of the synthetic-Zipf FORECAST. Pass 'off' to force the planned forecast; an absent/empty snapshot falls open to the forecast (clearly labeled).")
 	indexOut := fs.String("index-out", "", "write selected hot-anchor index JSON to this file")
 	anchor := fs.Float64("anchor-tokens", def.Star.AnchorTokens, "cacheable anchor size in input tokens")
@@ -845,7 +845,7 @@ func defaultVCacheStatus() vcacheStatusReport {
 }
 
 func statusVCacheSnapshotPath() string {
-	path := strings.TrimSpace(os.Getenv("FAK_VCACHE_SNAPSHOT"))
+	path := strings.TrimSpace(os.Getenv(vcachesnapshot.EnvPath))
 	if path == "" {
 		return vcachesnapshot.DefaultPath()
 	}

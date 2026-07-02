@@ -26,7 +26,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
-	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 type repeatedStringFlag []string
@@ -321,7 +320,7 @@ func persistCacheValueObservations(srv *gateway.Server, kind, name, provider str
 	}
 	appendObservedCacheSavings(kind, provider, name, srv.AdjudicationSummary())
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
-		_ = vcachesnapshot.Write(vcachesnapshot.DefaultPath(), turns)
+		_, _, _ = writeConfiguredVCacheSnapshot(turns)
 	}
 }
 
