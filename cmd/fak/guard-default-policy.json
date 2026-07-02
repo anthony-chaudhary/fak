@@ -27,6 +27,7 @@
     "Monitor",
     "ScheduleWakeup",
     "SendMessage",
+    "StructuredOutput",
     "TaskCreate",
     "TaskGet",
     "TaskList",
