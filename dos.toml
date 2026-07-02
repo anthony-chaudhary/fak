@@ -27,6 +27,12 @@ development_branch = "main"
 release_branch = "main"
 release_source = "main"
 public_front_door = "main"
+# Shadow-cutover pilot lever (#1703, docs/branch-regime-shadow-cutover.md): the
+# branch a NAMED pilot worker may treat as its development branch, opt-in per
+# process via FLEET_BRANCH_PILOT=1. Inert for everyone else -- development_branch
+# above stays the single accepted everyday branch until a recorded `proceed`
+# cutover decision; the pilot value may never equal release_branch.
+pilot_development_branch = "dev"
 
 # Lane taxonomy -- a concurrent lane may run iff its file-tree is disjoint from
 # every live lease; an exclusive lane runs alone. fak's architecture is a STAR of

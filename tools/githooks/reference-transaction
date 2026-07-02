@@ -16,6 +16,9 @@
 #   off    do nothing
 # Escape hatch:  FLEET_ALLOW_BRANCH=1 <git cmd>   always allows (e.g. release tooling).
 # Allowlisted branch name: [branch_roles].development_branch from dos.toml.
+# Pilot cohort (#1703): FLEET_BRANCH_PILOT=1 additionally allowlists
+# [branch_roles].pilot_development_branch, so a named shadow-cutover pilot
+# worker can create the pilot branch while everyone else stays refused.
 # Release tooling uses FLEET_ALLOW_BRANCH=1 when it must create or repair another role branch.
 #
 # git calls this hook once per phase ("prepared", "committed", "aborted") with the
@@ -119,9 +122,15 @@ branch_role_value() {
 development_branch=$(branch_role_value development_branch "$dos_file")
 [ -n "$development_branch" ] || development_branch=main
 
+pilot_branch=""
+if [ "${FLEET_BRANCH_PILOT:-0}" = "1" ]; then
+	pilot_branch=$(branch_role_value pilot_development_branch "$dos_file")
+fi
+
 violations=""
 for name in $created; do
 	[ "$name" = "$development_branch" ] && continue
+	[ -n "$pilot_branch" ] && [ "$name" = "$pilot_branch" ] && continue
 	violations="$violations $name"
 done
 

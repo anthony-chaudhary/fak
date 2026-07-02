@@ -13,12 +13,31 @@ import (
 
 const defaultBranch = "main"
 
+// PilotEnv is the per-process opt-in for the shadow-cutover pilot cohort
+// (#1703, docs/branch-regime-shadow-cutover.md): when it is set to "1" AND
+// dos.toml declares pilot_development_branch, Load resolves DevelopmentBranch
+// to the pilot branch for THIS process only. The shared dos.toml keeps
+// development_branch authoritative for every other worker, so a named cohort
+// can rehearse the dev regime without split-brain — the default never moves,
+// only an explicitly opted-in process flips.
+const PilotEnv = "FLEET_BRANCH_PILOT"
+
+// PilotOptedIn reports whether this process opted into the pilot cohort.
+func PilotOptedIn() bool { return os.Getenv(PilotEnv) == "1" }
+
 // Roles names the long-lived branch roles used during the dev/main migration.
 type Roles struct {
 	DevelopmentBranch string
 	ReleaseBranch     string
 	ReleaseSource     string
 	PublicFrontDoor   string
+	// PilotDevelopmentBranch is the branch a pilot-cohort worker may treat as
+	// its development branch during the #1703 shadow cutover ("" = no pilot
+	// declared). It never applies unless the process opts in via PilotEnv.
+	PilotDevelopmentBranch string
+	// PilotActive reports that THIS process resolved DevelopmentBranch from
+	// the pilot declaration (PilotEnv opt-in plus a declared pilot branch).
+	PilotActive bool
 }
 
 // Defaults is the current no-cutover branch regime.
@@ -77,7 +96,27 @@ func LoadFile(path string) (Roles, error) {
 		return Defaults(), err
 	}
 	roles, _, err := parse(b)
-	return roles, err
+	if err != nil {
+		return roles, err
+	}
+	return applyPilot(roles)
+}
+
+// applyPilot resolves the per-process pilot opt-in. An opt-in with no declared
+// pilot branch is an error, not a silent fallback: callers that gate on err
+// fall back to the shared development branch, so a mislaunched pilot worker
+// either surfaces the misconfiguration or keeps status-quo behavior.
+func applyPilot(roles Roles) (Roles, error) {
+	if !PilotOptedIn() {
+		return roles, nil
+	}
+	pilot := strings.TrimSpace(roles.PilotDevelopmentBranch)
+	if pilot == "" {
+		return roles, fmt.Errorf("branchrole: %s=1 but dos.toml [branch_roles] declares no pilot_development_branch", PilotEnv)
+	}
+	roles.DevelopmentBranch = pilot
+	roles.PilotActive = true
+	return roles, nil
 }
 
 func parse(b []byte) (Roles, bool, error) {
@@ -132,17 +171,22 @@ func parse(b []byte) (Roles, bool, error) {
 			roles.ReleaseSource = value
 		case "public_front_door":
 			roles.PublicFrontDoor = value
+		case "pilot_development_branch":
+			roles.PilotDevelopmentBranch = value
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return roles, found, err
+	}
+	if roles.PilotDevelopmentBranch != "" && roles.PilotDevelopmentBranch == roles.ReleaseBranch {
+		return roles, found, fmt.Errorf("branchrole: pilot_development_branch %q may not name the release branch", roles.PilotDevelopmentBranch)
 	}
 	return roles, found, nil
 }
 
 func isKnownRoleKey(key string) bool {
 	switch key {
-	case "development_branch", "release_branch", "release_source", "public_front_door":
+	case "development_branch", "release_branch", "release_source", "public_front_door", "pilot_development_branch":
 		return true
 	default:
 		return false
