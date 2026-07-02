@@ -389,14 +389,20 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // retryBackoffWait performs the pre-attempt backoff shared by every upstream retry loop
 // (Complete, streamConnect, StreamAnthropicRaw) on a retry iteration (attempt > 0). It computes
-// the next wait — honoring a named Retry-After, else the jittered exponential schedule, clamped
-// to the remaining time budget when budgetOn — surfaces it via RetryNotify BEFORE the otherwise-
-// invisible sleep (so the operator's `retry` line and counter fire with the exact wait slept),
-// then sleeps it out cancellably under ctx. It returns stop=true when the time budget is spent
-// (the caller breaks the loop and surfaces the last error) and a non-nil err when ctx was
-// cancelled during the wait (the caller returns it). The wait is computed ONCE and shared with
-// the hook, so the reported wait carries the same jitter and honored Retry-After as the sleep.
-func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus int, lastRetryAfter string, deadline time.Time, budgetOn bool) (stop bool, err error) {
+// the next wait — honoring a named Retry-After, else the classified cap wait (lastCapWait, the
+// delta-seconds toward a session/weekly/usage-cap reset from classifyLimit429; "" on the
+// transient path), else the jittered exponential schedule, clamped to the remaining time budget
+// when budgetOn — surfaces it via RetryNotify BEFORE the otherwise-invisible sleep (so the
+// operator's `retry` line and counter fire with the exact wait slept), then sleeps it out
+// cancellably under ctx. An upstream-supplied Retry-After outranks the derived cap wait: the
+// provider's own instruction is always the better signal. It returns stop=true when the time
+// budget is spent (the caller breaks the loop and surfaces the last error) and a non-nil err
+// when ctx was cancelled during the wait (the caller returns it). The wait is computed ONCE and
+// shared with the hook, so the reported wait carries the same jitter and honored value as the sleep.
+func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus int, lastRetryAfter, lastCapWait string, deadline time.Time, budgetOn bool) (stop bool, err error) {
+	if lastRetryAfter == "" {
+		lastRetryAfter = lastCapWait
+	}
 	var wait time.Duration
 	if budgetOn {
 		wait = retryWaitWithin(attempt, lastRetryAfter, deadline, time.Now())

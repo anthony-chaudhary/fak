@@ -98,6 +98,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	var lastStatusErr *UpstreamStatusError
 	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
 	lastRetryAfter := "" // the triggering response's Retry-After, honored as the next wait
+	lastCapWait := ""    // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -105,7 +106,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			// buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry` line fires
 			// for the streaming passthrough too), then wait — honoring a named Retry-After, else
 			// the jittered exponential schedule; a spent budget stops. See retryBackoffWait.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, deadline, budgetOn)
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, deadline, budgetOn)
 			if err != nil {
 				return err
 			}
@@ -139,7 +140,8 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			lastErr = derr
 			lastStatus = 0
 			lastRetryAfter = ""
-			continue // lastStatusErr left intact
+			lastCapWait = "" // a glitch is not a cap: never stretch its retry to a cap probe
+			continue         // lastStatusErr left intact
 		}
 		if r.StatusCode == http.StatusOK {
 			resp = r
@@ -150,10 +152,15 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		if retryableStatus(r.StatusCode) {
 			ra := r.Header.Get("Retry-After")
 			se := &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
+			// Classify a 429 LIVE (#1362): see Complete — a session/weekly/usage cap waits
+			// toward its named reset; a plain throttle keeps today's wait decision.
+			cls, capWait := classifyLimit429(r.StatusCode, raw, r.Header, time.Now())
+			se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
 			lastErr = se
 			lastStatusErr = se
 			lastStatus = r.StatusCode
 			lastRetryAfter = ra
+			lastCapWait = capWait
 			continue
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry

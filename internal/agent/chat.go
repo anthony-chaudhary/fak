@@ -1020,6 +1020,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	var lastStatusErr *UpstreamStatusError
 	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
 	lastRetryAfter := "" // the triggering response's Retry-After header, honored as the next wait
+	lastCapWait := ""    // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
 	// re-read it fresh and retry. triedAuthRefresh caps that at a single extra attempt so a
@@ -1030,7 +1031,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
 			// budget is the bound a spent budget stops the loop (surface the last error) and a
 			// cancelled context returns promptly. See retryBackoffWait for the shared step.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, deadline, budgetOn)
+			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, deadline, budgetOn)
 			if err != nil {
 				return nil, err
 			}
@@ -1054,6 +1055,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			lastErr = err
 			lastStatus = 0      // a transient transport error has no HTTP status
 			lastRetryAfter = "" // ...and no Retry-After to honor — fall back to backoff
+			lastCapWait = ""    // a glitch is not a cap: never stretch its retry to a cap probe
 			continue            // lastStatusErr is left intact: a glitch can't shadow a real status
 		}
 		raw, _ := io.ReadAll(resp.Body)
@@ -1062,10 +1064,18 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if retryableStatus(resp.StatusCode) {
 				ra := resp.Header.Get("Retry-After")
 				se := &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: ra}
+				// Classify a 429 LIVE against the closed rate-limit vocabulary (#1362): the
+				// error we may finally surface names the kind the recovery acted on, and a
+				// session/weekly/usage cap waits toward its named reset instead of hammering
+				// the transient schedule. A non-429 (or a plain throttle) leaves the wait
+				// decision byte-for-byte unchanged.
+				cls, capWait := classifyLimit429(resp.StatusCode, raw, resp.Header, time.Now())
+				se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
 				lastErr = se
 				lastStatusErr = se
 				lastStatus = resp.StatusCode
 				lastRetryAfter = ra // a 429/503/529 may NAME when to retry — honor it as the next wait
+				lastCapWait = capWait
 				continue
 			}
 			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
