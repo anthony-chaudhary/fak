@@ -5,9 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,14 +19,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
-	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
-	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
-	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -81,105 +75,126 @@ func configureServeToolEngines() {
 	agent.RegisterReadEngine("")
 }
 
+// serveFlags holds the parsed `fak serve` flag values, one field per flag in
+// definition order, so the boot stages consume them without threading four dozen
+// locals through every call.
+type serveFlags struct {
+	addr                        *string
+	stdio                       *bool
+	provider                    *string
+	baseURL                     *string
+	replicaBaseURLs             repeatedStringFlag
+	model                       *string
+	apiKeyEnv                   *string
+	engineCacheEngine           *string
+	engineCacheBaseURL          *string
+	engineCacheAdminKeyEnv      *string
+	engineCacheIdleTimeout      *time.Duration
+	engineCacheRequireExactSpan *bool
+	engineID                    *string
+	backendName                 *string
+	cudaGraph                   *bool
+	policyPath                  *string
+	policyCheck                 *bool
+	vdso                        *bool
+	invalidation                *string
+	requireKeyEnv               *string
+	routeManifest               *string
+	ggufPath                    *string
+	tokPath                     *string
+	ctxViewBudget               *int
+	compactHistoryBudget        *int
+	compactAnchorHead           *bool
+	elideResultBytes            *int
+	sessionID                   *string
+	sessionStatePath            *string
+	contextBudgetTokens         *int
+	resetOnBudget               *bool
+	cpuOffloadExperts           *bool
+	metal                       *bool
+	expertParallel              *int
+	tensorParallel              *int
+	budgetWebhook               *string
+	budgetWarnFraction          *float64
+	notifyNative                *bool
+	notifyWebhook               *string
+	notifySlack                 *string
+	debugStats                  *bool
+	dojoMode                    *bool
+	native                      *bool
+	nativeMaxTurns              *int
+	vdsoProxyFill               *bool
+	metricsSnapshot             *time.Duration
+}
+
+// newServeFlagSet defines the full `fak serve` flag surface and returns the set
+// plus the struct the boot stages read the parsed values through.
+func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	sf := &serveFlags{}
+	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
+	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
+	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
+	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
+	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1.")
+	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
+	sf.apiKeyEnv = fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
+	sf.engineCacheEngine = fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
+	sf.engineCacheBaseURL = fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
+	sf.engineCacheAdminKeyEnv = fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
+	sf.engineCacheIdleTimeout = fs.Duration("engine-cache-idle-timeout", 0, "SGLang /flush_cache idle timeout, e.g. 30s (0 fails fast)")
+	sf.engineCacheRequireExactSpan = fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
+	sf.engineID = fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to: inkernel, mock, vllm, sglang, llm-d, dynamo, or another registered driver (default: the fused in-kernel model)")
+	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
+	sf.cudaGraph = fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
+	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	sf.policyCheck = fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
+	sf.vdso = fs.Bool("vdso", true, "enable the vDSO dedup fast path")
+	sf.invalidation = fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
+	sf.requireKeyEnv = fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
+	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
+	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
+	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
+	sf.ctxViewBudget = fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
+	sf.compactHistoryBudget = fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
+	sf.compactAnchorHead = fs.Bool("compact-anchor-head", false, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the default first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything. OPT-IN: re-anchoring bursts the recent breakpoint's cached suffix once, so it only fires when the burst repays (CacheBurstPaysBack, #1408) — without a wired session-turn horizon it only fires zero-penalty bursts.")
+	sf.elideResultBytes = fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
+	sf.sessionID = fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
+	sf.sessionStatePath = fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
+	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
+	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
+	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
+	sf.metal = fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
+	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
+	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
+	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
+	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
+	sf.notifyNative = fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
+	sf.notifyWebhook = fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
+	sf.notifySlack = fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
+	sf.debugStats = fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
+	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
+	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316): drive fak's OWN agent loop (agent.RunArm) for a non-streaming /v1/messages turn instead of the single-shot proxy turn — fak owns dispatch, the in-kernel syscall boundary is the sole tool path, and the per-turn session gate + per-call routing + operator steer bus run on the served loop. The loop is seeded with the request's last user message and drives the kernel-owned tool catalog to a final answer; the per-turn ArmMetrics ride back on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged). A streaming request falls through to the proxy path.")
+	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
+	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
+	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, docs/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
+	return fs, sf
+}
+
 func cmdServe(argv []string) {
 	// t0 anchors the boot timeline exposed as fak_gateway_time_to_ready_seconds; it
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
 	t0 := time.Now()
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
-	stdio := fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
-	provider := fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
-	baseURL := fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
-	var replicaBaseURLs repeatedStringFlag
-	fs.Var(&replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1.")
-	model := fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
-	apiKeyEnv := fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
-	engineCacheEngine := fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
-	engineCacheBaseURL := fs.String("engine-cache-base-url", "", "serving-engine control/base URL for cache reset (default: --base-url when --engine-cache-engine is set)")
-	engineCacheAdminKeyEnv := fs.String("engine-cache-admin-key-env", "", "env var holding the serving-engine admin API key for cache reset")
-	engineCacheIdleTimeout := fs.Duration("engine-cache-idle-timeout", 0, "SGLang /flush_cache idle timeout, e.g. 30s (0 fails fast)")
-	engineCacheRequireExactSpan := fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
-	engineID := fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to: inkernel, mock, vllm, sglang, llm-d, dynamo, or another registered driver (default: the fused in-kernel model)")
-	backendName := fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
-	cudaGraph := fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
-	policyPath := fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
-	policyCheck := fs.Bool("policy-check", false, "validate --policy and exit without binding a listener")
-	vdso := fs.Bool("vdso", true, "enable the vDSO dedup fast path")
-	invalidation := fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
-	requireKeyEnv := fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
-	routeManifest := fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
-	ggufPath := fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
-	tokPath := fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
-	ctxViewBudget := fs.Int("ctx-view-budget", 8000, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
-	compactHistoryBudget := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
-	compactAnchorHead := fs.Bool("compact-anchor-head", false, "re-anchor --compact-history-budget's protected prefix on the stable system/tools head instead of the default first-breakpoint anchor, fixing the anchor-starved trap (#1407) where real Claude Code traffic's recent cache_control breakpoint protects almost the whole conversation so the budget can never shed anything. OPT-IN: re-anchoring bursts the recent breakpoint's cached suffix once, so it only fires when the burst repays (CacheBurstPaysBack, #1408) — without a wired session-turn horizon it only fires zero-penalty bursts.")
-	elideResultBytes := fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes, "ON by default at gateway.DefaultElideResultBytes (the reviewed gateway.DocumentedElideResultBytes threshold): shrink oversized tool_result bodies outside the active working set to a bounded head+tail form once they exceed this byte threshold. 0 disables.")
-	sessionID := fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
-	sessionStatePath := fs.String("session-state", "", "COLD-RESUME the per-session DRIVE state across a process restart (#629): a fleet-snapshot file this `fak serve` RESTORES at boot — re-attaching every session at the budget/priority/run-state/pace it held, not its defaults (a STOPPED session reloads STOPPED with its reason, never silently RUNNING) — and REWRITES on a clean shutdown. Empty (default) = off, byte-for-byte today's path. Distinct from the live Paused→Running resume the /v1/fak/session control verbs already do.")
-	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
-	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
-	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
-	metal := fs.Bool("metal", false, "with --gguf (no --base-url), require the Apple-Silicon Metal GPU forward — GPU prefill + GPU-resident Q8 decode (#67, ~0.99x of llama.cpp-Metal on dense Qwen2.5-7B Q8). Apple-Silicon+cgo builds auto-select Metal when a usable device is present; this flag/FAK_METAL=1 makes absence fail loud instead of falling back to CPU. Mutually exclusive with --backend (Metal is the CPU-session seam, not a compute HAL device). Dense Qwen-class Q8 GGUFs only — a MoE/hybrid model (GLM-5.2, GDN) self-declines to CPU decode.")
-	expertParallel := fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move the expert GEMM off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
-	tensorParallel := fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
-	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
-	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
-	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
-	notifyWebhook := fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
-	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
-	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
-	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
-	native := fs.Bool("native", false, "NATIVE HARNESS (#1316): drive fak's OWN agent loop (agent.RunArm) for a non-streaming /v1/messages turn instead of the single-shot proxy turn — fak owns dispatch, the in-kernel syscall boundary is the sole tool path, and the per-turn session gate + per-call routing + operator steer bus run on the served loop. The loop is seeded with the request's last user message and drives the kernel-owned tool catalog to a final answer; the per-turn ArmMetrics ride back on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged). A streaming request falls through to the proxy path.")
-	nativeMaxTurns := fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
-	vdsoProxyFill := fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
-	metricsSnapshot := fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, docs/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
+	fs, sf := newServeFlagSet()
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
 
-	// Expand a leading ~ in the model/tokenizer paths: PowerShell and most quoting
-	// pass ~ through literally and Go never expands it, so `--gguf ~/...` (as the
-	// docs and the --tokenizer help itself show) would otherwise fail to open.
-	*ggufPath = pathutil.ExpandTilde(*ggufPath)
-	*tokPath = pathutil.ExpandTilde(*tokPath)
-
-	// A friendly alias (`--gguf smollm2`) resolves through the model registry to its
-	// target ref (an hf:// URI or a local path) before anything else, so the run-by-name
-	// surface (`fak pull` / `fak ls`) reaches `fak serve` too. A bare hf:// URI or an
-	// existing path passes through unchanged.
-	if *ggufPath != "" {
-		if resolved, expanded := modelreg.Resolve(*ggufPath); expanded {
-			fmt.Fprintf(os.Stderr, "fak serve: --gguf %s → %s\n", *ggufPath, resolved)
-			*ggufPath = resolved
-		}
-	}
-
-	// An hf:// --gguf resolves to a locally cached file before the loader sees it,
-	// so `fak serve --gguf hf://owner/repo/model.gguf` works without a manual
-	// `fak model load` first (issue #294). Download progress goes to stderr.
-	if hfhub.IsURI(*ggufPath) {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		resolved, err := hfhub.FetchURI(ctx, *ggufPath, os.Stderr)
-		stop()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: --gguf %v\n", err)
-			os.Exit(1)
-		}
-		*ggufPath = resolved
-	}
+	resolveServeModelSources(sf)
 
 	// --policy-check: validate the manifest and exit, binding no listener.
-	if *policyCheck {
-		if *policyPath == "" {
-			fmt.Fprintln(os.Stderr, "fak serve: --policy-check requires --policy FILE")
-			os.Exit(2)
-		}
-		rt, err := policy.LoadRuntime(*policyPath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("OK  %s  (manifest valid; every deny cites a closed-vocabulary reason)\n\n%s", *policyPath, policy.SummaryRuntime(rt))
+	if *sf.policyCheck {
+		runServePolicyCheck(*sf.policyPath)
 		return
 	}
 
@@ -187,297 +202,70 @@ func cmdServe(argv []string) {
 	// than silently falling back to a more permissive default. Time it as the first
 	// startup phase.
 	tPolicy := time.Now()
-	applyPolicy(*policyPath)
-	startupPhases := []gateway.StartupPhase{
+	applyPolicy(*sf.policyPath)
+	rt := &serveRuntime{t0: t0, startupPhases: []gateway.StartupPhase{
 		{Name: "flag-parse", Dur: parseDur},
 		{Name: "policy-load", Dur: time.Since(tPolicy)},
-	}
+	}}
 	configureServeToolEngines()
 
-	// Resolve the optional in-kernel chat decode backend BEFORE eager model loading, so
-	// a known device can refuse an oversize GGUF from its header instead of OOMing during
-	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
-	chatBackend, err := resolveServeChatBackend(*backendName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if chatBackend != nil {
-		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", chatBackend.Name())
-	}
-	// Resolve the Apple-Silicon Metal GPU forward BEFORE eager loading. On an
-	// Apple-Silicon+cgo binary with a usable device it is the default runtime path; an
-	// explicit --metal/FAK_METAL=1 keeps the old fail-loud posture when Metal is unavailable.
-	// Metal is the CPU-session seam, so it conflicts with a device --backend.
-	useMetal, err := resolveServeMetal(*metal, os.Getenv("FAK_METAL") != "", *backendName)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	if useMetal {
-		fmt.Println("fak: in-kernel chat decode → Apple-Silicon Metal GPU (prefill + resident Q8 decode)")
-	}
-	// Multi-GPU rank counts (#971). The EP arithmetic is host-proven bit-exact at ranks=1
-	// (the no-op default), but a ranks>1 reduction is only a real multi-GPU serve when it
-	// runs over a non-cpu-ref device collective. Fail loud on N>1 rather than silently reduce
-	// through the single-box LocalCollective and mislabel it "multi-GPU".
-	if *expertParallel < 1 || *tensorParallel < 1 {
-		fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel must be >= 1")
-		os.Exit(2)
-	}
-	// Resolve this process's place in a SHARDED expert-parallel serve (FAK_EP_RANK / FAK_EP_COORD_ADDR).
-	// When ep.sharded, N separate processes each load only their band and reduce across a DistComm
-	// process group (the host multi-process topology, #971) — so it takes the DistComm path below,
-	// NOT the single-process device-collective gate. When not sharded, ep is inert and the serve is
-	// byte-identical to today.
-	ep, err := resolveEPRankConfig(*expertParallel)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
-		os.Exit(2)
-	}
-	if *expertParallel > 1 && ep.sharded && *tensorParallel > 1 {
-		fmt.Fprintln(os.Stderr, "fak serve: sharded --expert-parallel (FAK_EP_COORD_ADDR) does not combine with --tensor-parallel>1 yet (#971)")
-		os.Exit(2)
-	}
-	if (*expertParallel > 1 || *tensorParallel > 1) && !ep.sharded {
-		if *expertParallel > 1 && *tensorParallel > 1 && *expertParallel != *tensorParallel {
-			fmt.Fprintln(os.Stderr, "fak serve: --expert-parallel and --tensor-parallel currently must match when both are >1; the single-process NCCL backend has one communicator world and no subgroup split yet (#971)")
-			os.Exit(2)
-		}
-		collectiveRanks := *expertParallel
-		if *tensorParallel > collectiveRanks {
-			collectiveRanks = *tensorParallel
-		}
-		if init, ok := chatBackend.(compute.CollectiveInitializer); ok {
-			if err := init.InitCollective(collectiveRanks); err != nil {
-				fmt.Fprintf(os.Stderr, "fak serve: initialize %d-rank device collective: %v\n", collectiveRanks, err)
-				os.Exit(2)
-			}
-		}
-		deviceCollective := chatBackend != nil && chatBackend.Caps().Collective
-		if !deviceCollective {
-			fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel/--tensor-parallel N>1 requires a multi-device collective backend: no compute backend advertises Caps().Collective after initialization. Build with the device NCCL CollectiveBackend rung (CUDA: -tags cuda,nccl via FAK_CUDA_NCCL=1) and run on a box with enough visible GPUs (#971).\n")
-			os.Exit(2)
-		}
-	}
-	// --cuda-graph flips the (init-time, FAK_CUDA_GRAPH-gated) graph-replay decode path on
-	// from a parsed flag. graphEnabled is consulted per token at GraphBegin, so this post-init
-	// flip cleanly activates the fully-wired HAL capture/replay path. No-op on a non-cuda build.
-	if *cudaGraph {
-		compute.EnableCUDAGraph()
-		// Size the fixed device-KV prealloc to the served context so a real prompt never grows
-		// the cache mid-capture (a cudaMalloc during capture is illegal — #932). Off-budget (0)
-		// leaves the decode-bench default (1024). The prealloc is real VRAM (3 buffers × KV-heads
-		// × head-dim × positions × 4B/layer), so an operator who wants a large graph context must
-		// budget VRAM for it (or pair with the Q4_K weight lever to free room).
-		compute.SetCUDAGraphKVCapacity(*contextBudgetTokens)
-		fmt.Printf("fak: CUDA-graph decode replay enabled (#483), KV graph capacity=%d positions — witness tok/s before relying on it\n", max(*contextBudgetTokens, 1024))
-	}
+	// Boot stages (serve_stages.go). The order is load-bearing: compute before the
+	// weight load, the session plane before the gateway, the observer seams resolved
+	// before the gateway exists but installed only after it does.
+	rt.resolveCompute(sf)
+	defer rt.closeEPGroup()
+	rt.loadModel(sf)
+	rt.resolveSessionPlane(sf)
+	rt.resolveObservers(sf)
+	rt.buildGateway(sf)
+	rt.wireGateway(sf)
+	rt.run(sf)
+}
 
-	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
-	// (potentially multi-second) load is measured as part of time-to-ready and its
-	// phase breakdown is on /metrics, rather than a lazy cost paid on first request.
-	//
-	// Two load paths, selected by the FAK_Q4K env (mirroring cmd/fakchat and
-	// cmd/q4kdiag): the default lean-Q8 round-trip, or the direct-resident-Q4_K path
-	// (QWEN36-NATIVE-PERF-PLAN P1/P2) that holds eligible Q4_K matmul tensors raw and
-	// engages the NEON SDOT int8 decode GEMV — ~10× faster load and the Qwen3.6-27B
-	// decode lever. The Q8 path stays byte-identical when the env is unset.
-	//
-	// The loaded *model.Model is ALSO kept for the gateway chat planner: with a tokenizer
-	// (explicit --tokenizer or the GGUF's embedded one) and no --base-url,
-	// /v1/chat/completions and /v1/messages serve it directly.
-	//
-	// For a SHARDED EP rank, size this process's expert band from the GGUF header BEFORE the load so
-	// it admits only [Lo,Hi) into the resident store (the #971 residency). nil = the full model, as
-	// today. numExperts is a cheap header read (no tensor bytes).
-	var expertShard *ggufload.ExpertShard
-	if ep.sharded {
-		numExperts, err := ggufNumExperts(*ggufPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: read GGUF expert count for the expert-parallel shard: %v\n", err)
-			os.Exit(2)
-		}
-		shard, err := expertShardForConfig(ep, numExperts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
-			os.Exit(2)
-		}
-		expertShard = shard
-		fmt.Printf("fak: expert-parallel rank %d/%d loads experts [%d,%d) of %d resident (sharded serve, #971)\n", ep.rank, ep.ranks, shard.Lo, shard.Hi, numExperts)
-	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, chatBackend, *cpuOffloadExperts, *contextBudgetTokens, expertShard)
-	if loadPhase.Name != "" {
-		startupPhases = append(startupPhases, loadPhase)
-	}
-	// A sharded EP rank now joins the DistComm process group and wires the rank-local forward: each
-	// rank computes only its band and reduces its single [H] partial across the group. The group is
-	// formed AFTER the load (a load failure must not block peers) and BEFORE binding the listener.
-	// The rank-local forward path is entered ONLY here — an ordinary serve leaves the model on the
-	// single-process all-band path, byte-identical to today.
-	if ep.sharded && inKernelModel != nil {
-		group, err := dialEPGroup(ep)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak serve: form the %d-rank expert-parallel group: %v\n", ep.ranks, err)
-			os.Exit(2)
-		}
-		defer group.Close()
-		inKernelModel.SetExpertParallelRanks(ep.ranks)
-		inKernelModel.SetExpertParallelRank(ep.rank)
-		// Opt-in upgrade: on a backend that implements the multi-process NCCL process group
-		// (compute.ProcessGroupBackend, -tags cuda,nccl on a real device), form it now and
-		// reduce through the device-NCCL tensor rung instead of the host DistComm reduce. Any
-		// other build (no cuda/nccl tag, or a backend without the seam) falls through unchanged
-		// to today's NewDistCommCollective(group) — zero behavior change on every existing path.
-		devColl, devErr := joinDevicePGIfSupported(chatBackend, group, ep)
-		if devErr != nil {
-			fmt.Printf("fak: expert-parallel rank %d/%d: device-NCCL process group unavailable (%v) — falling back to host DistComm reduce\n", ep.rank, ep.ranks, devErr)
-		}
-		if devColl != nil {
-			inKernelModel.SetExpertParallelCollective(devColl)
-			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (device-NCCL tensor reduce, #971 follow-on)\n", ep.rank, ep.ranks)
-		} else {
-			inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
-			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", ep.rank, ep.ranks)
-		}
-	}
-	// Per-GPU residency pre-check for an expert-parallel serve: refuse an --expert-parallel N whose
-	// per-card shard (replicated weights + the largest expert band) exceeds a GPU, BEFORE binding the
-	// listener and letting rank r OOM uploading its band. Fail-open on cpu-ref / a non-probing backend
-	// (the load above already gated host/aggregate fit); this adds only the per-rank VRAM check the
-	// rank-count + Caps().Collective gate above does not make (#971).
-	if err := refuseEPPlanIfUnfit(inKernelModel, chatBackend, *expertParallel, *contextBudgetTokens); err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: --expert-parallel %d does not fit resident across the GPUs: %v\n", *expertParallel, err)
-		os.Exit(2)
-	}
-
-	inKernelTok, tokLoaded := resolveServeTokenizer(*tokPath, *ggufPath)
-	if tokLoaded {
-		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
-	}
-
-	apiKey := ""
-	if *apiKeyEnv != "" {
-		apiKey = os.Getenv(*apiKeyEnv)
-	}
-	engineCacheAdminKey, ok := resolveRequiredKey(*engineCacheAdminKeyEnv, os.Getenv)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "fak serve: --engine-cache-admin-key-env %s is set but unset/empty — refusing to send cache-reset requests with NO admin auth (set the secret or omit the flag)\n", *engineCacheAdminKeyEnv)
-		os.Exit(2)
-	}
-	if *engineCacheIdleTimeout < 0 {
-		fmt.Fprintln(os.Stderr, "fak serve: --engine-cache-idle-timeout must be non-negative")
-		os.Exit(2)
-	}
-	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "fak serve: --require-key-env %s is set but unset/empty — refusing to start a network-facing gateway with NO authentication (set the secret or omit the flag)\n", *requireKeyEnv)
-		os.Exit(2)
-	}
-	if *contextBudgetTokens < 0 {
-		fmt.Fprintln(os.Stderr, "fak serve: --context-budget-tokens must be non-negative")
-		os.Exit(2)
-	}
-	if *resetOnBudget && *contextBudgetTokens <= 0 {
-		fmt.Fprintln(os.Stderr, "fak serve: --reset-on-budget requires --context-budget-tokens N")
-		os.Exit(2)
-	}
-	// COLD resume (#629): re-attach the persisted drive state of every session BEFORE the
-	// per-boot default-budget seed, so a restart resumes each session at the budget/
-	// priority/run-state/pace it held — not its defaults — while an explicit
-	// --context-budget-tokens on THIS boot still re-seeds the default trace. A STOPPED
-	// session reloads STOPPED with its reason (session.Table.Restore), never silently
-	// resurrected as RUNNING. A missing file is a clean first boot; a present-but-corrupt
-	// file fails loud (a tampered drive record is worse than none).
-	if err := restoreServeSessions(serveSessions, *sessionStatePath); err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
-	}
-	if err := configureServeSessionDurability(serveSessions, "", os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
-	}
-
-	defaultTraceID := strings.TrimSpace(*sessionID)
-	if *contextBudgetTokens > 0 {
-		if defaultTraceID == "" {
-			defaultTraceID = "default"
-		}
-		serveSessions.SetBudget(defaultTraceID, session.Budget{
-			TurnsLeft:         session.Unbounded,
-			TokensLeft:        session.Unbounded,
-			ContextTokensLeft: *contextBudgetTokens,
-		})
-	}
-	if err := registerServeSessionDurability(context.Background(), defaultTraceID); err != nil {
-		fmt.Fprintln(os.Stderr, "fak serve:", err)
-		os.Exit(1)
-	}
-	// Wire the optional operator webhook (#743) and the tiered stop-reason push notifier
-	// (#761). The #743 budget webhook stays byte-identical when it is the only thing set:
-	// combineBudgetObservers returns the lone observer unchanged, so WatchBudget is called
-	// once exactly as before. The notifier (native default-on; webhook/Slack opt-in) adds a
-	// SECOND budget fan-out plus the run-state TRANSITION observer that covers
-	// PAUSED/DRAINING/STOPPED — the rest of the closed stop-reason vocabulary the budget seam
-	// alone never sees. newNotifier returns nil when no sink is configured, leaving the
-	// transition seam its byte-identical no-op default.
-	notifier := newNotifier(*notifyNative, os.Stderr, *notifyWebhook, *notifySlack)
-	var transObs session.TransitionObserver
-	if notifier != nil {
-		transObs = notifier.transitionObserver()
-	}
-	var budgetObs session.BudgetObserver
-	if obs := budgetWebhookObserver(*budgetWebhook); obs != nil {
-		budgetObs = obs
-	}
-	if notifier != nil {
-		budgetObs = combineBudgetObservers(budgetObs, notifier.budgetObserver())
-	}
-	// The two table observer seams (transObs/budgetObs) are resolved here but INSTALLED below,
-	// after srv exists: the #1095 slot-freed attach needs srv, and the scheduler's Attach owns the
-	// table's single WatchTransitions/WatchBudget slots — so the install must be a single decision
-	// (scheduler-takeover vs direct) that also has srv in hand. See the attach call after gateway.New.
-
+// buildGateway loads the optional model-routing policy, constructs the gateway
+// server from the resolved planes, and arms the admission controller for a pure
+// in-kernel serve.
+func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than
 	// silently default-routing every call to the kernel default (a mis-routed model is a
 	// security boundary). gateway.New also re-validates the loaded manifest.
 	var routeMan *modelroute.Manifest
-	if *routeManifest != "" {
-		loaded, err := modelroute.LoadManifest(*routeManifest)
+	if *sf.routeManifest != "" {
+		loaded, err := modelroute.LoadManifest(*sf.routeManifest)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve: --route-manifest:", err)
 			os.Exit(1)
 		}
 		routeMan = &loaded
-		fmt.Printf("fak: model-routing policy loaded from %s\n", *routeManifest)
+		fmt.Printf("fak: model-routing policy loaded from %s\n", *sf.routeManifest)
 	}
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:                    *engineID,
-		Model:                       *model,
-		BaseURL:                     *baseURL,
-		ReplicaBaseURLs:             replicaBaseURLs.Values(),
-		Provider:                    *provider,
-		APIKey:                      apiKey,
-		EngineCacheEngine:           *engineCacheEngine,
-		EngineCacheBaseURL:          *engineCacheBaseURL,
-		EngineCacheAdminKey:         engineCacheAdminKey,
-		EngineCacheIdleTimeout:      *engineCacheIdleTimeout,
-		EngineCacheRequireExactSpan: *engineCacheRequireExactSpan,
-		InKernelModel:               inKernelModel,
-		Tokenizer:                   inKernelTok,
-		InKernelQ4K:                 inKernelQ4K,
-		Backend:                     chatBackend,
-		CPUOffloadExperts:           *cpuOffloadExperts,
-		Metal:                       useMetal,
-		ExpertParallelRanks:         *expertParallel,
-		RequireKey:                  requireKey,
-		VDSO:                        *vdso,
-		Invalidation:                *invalidation,
+		EngineID:                    *sf.engineID,
+		Model:                       *sf.model,
+		BaseURL:                     *sf.baseURL,
+		ReplicaBaseURLs:             sf.replicaBaseURLs.Values(),
+		Provider:                    *sf.provider,
+		APIKey:                      rt.apiKey,
+		EngineCacheEngine:           *sf.engineCacheEngine,
+		EngineCacheBaseURL:          *sf.engineCacheBaseURL,
+		EngineCacheAdminKey:         rt.engineCacheAdminKey,
+		EngineCacheIdleTimeout:      *sf.engineCacheIdleTimeout,
+		EngineCacheRequireExactSpan: *sf.engineCacheRequireExactSpan,
+		InKernelModel:               rt.inKernelModel,
+		Tokenizer:                   rt.inKernelTok,
+		InKernelQ4K:                 rt.inKernelQ4K,
+		Backend:                     rt.chatBackend,
+		CPUOffloadExperts:           *sf.cpuOffloadExperts,
+		Metal:                       rt.useMetal,
+		ExpertParallelRanks:         *sf.expertParallel,
+		RequireKey:                  rt.requireKey,
+		VDSO:                        *sf.vdso,
+		Invalidation:                *sf.invalidation,
 		Version:                     appversion.Current(),
-		ReloadPolicy:                policyReloader(*policyPath),
+		ReloadPolicy:                policyReloader(*sf.policyPath),
 		ResetTrace:                  resetTrace,
 		ObserveTrace:                observeTrace,
 		ObserveSession:              observeSession,
@@ -486,15 +274,15 @@ func cmdServe(argv []string) {
 		ListSessions:                listSessions,
 		DecideSession:               decideSession,
 		DebitSession:                debitSession,
-		ResetOnBudget:               resetOnBudgetHook(*resetOnBudget, *contextBudgetTokens),
-		DefaultTraceID:              defaultTraceID,
-		StartTime:                   t0,
-		StartupPhases:               startupPhases,
-		CtxViewBudget:               *ctxViewBudget,
-		CompactHistoryBudget:        *compactHistoryBudget,
-		CompactAnchorHead:           *compactAnchorHead,
-		ElideResultBytes:            *elideResultBytes,
-		DebugStatsf:                 debugStatsSink(*debugStats),
+		ResetOnBudget:               resetOnBudgetHook(*sf.resetOnBudget, *sf.contextBudgetTokens),
+		DefaultTraceID:              rt.defaultTraceID,
+		StartTime:                   rt.t0,
+		StartupPhases:               rt.startupPhases,
+		CtxViewBudget:               *sf.ctxViewBudget,
+		CompactHistoryBudget:        *sf.compactHistoryBudget,
+		CompactAnchorHead:           *sf.compactAnchorHead,
+		ElideResultBytes:            *sf.elideResultBytes,
+		DebugStatsf:                 debugStatsSink(*sf.debugStats),
 		// Inbound twin of #555: prune tool DEFINITIONS the installed floor can never admit
 		// from the Anthropic passthrough's tools[], cache-prefix-preserving. The predicate
 		// reads adjudicator.Default (the floor serve installs via applyPolicy) under its lock,
@@ -509,134 +297,16 @@ func cmdServe(argv []string) {
 		RouteManifest: routeMan,
 		// Native-harness keystone (#1316): drive agent.RunArm for a non-streaming
 		// /v1/messages turn. Off by default — the proxy path is byte-for-byte unchanged.
-		Native:         *native,
-		NativeMaxTurns: *nativeMaxTurns,
-		VDSOProxyFill:  *vdsoProxyFill,
+		Native:         *sf.native,
+		NativeMaxTurns: *sf.nativeMaxTurns,
+		VDSOProxyFill:  *sf.vdsoProxyFill,
 	})
 	must(err)
-	srv.SetModelLoadProfile(loadProfile)
-	if inKernelModel != nil && inKernelTok != nil && strings.TrimSpace(*baseURL) == "" && len(replicaBaseURLs.Values()) == 0 {
+	srv.SetModelLoadProfile(rt.loadProfile)
+	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
 		srv.SetAdmissionController(gateway.NewAdmissionController(gateway.DefaultAdmissionPolicy()))
 	}
-
-	// Slot-freed -> KV-free serve-path attach (#1095): with FAK_INKERNEL_KVMMU on, a
-	// session.Scheduler is attached over the live serve table and the gateway's KV-reclaim edge
-	// becomes its slot-freed observer, so a real drain/stop routes to srv.ReclaimKVOnSlotFreed at
-	// the next boundary — the FIRST non-test caller of wireSlotFreedKVReclaim + SetKVResidencyReclaimer.
-	// The scheduler's Attach OWNS the table's single WatchTransitions/WatchBudget slots, so it takes
-	// the resolved observers as pass-throughs (composing, never clobbering the notifier). When it
-	// takes over (flag on), the direct Watch* installs are skipped; flag-off they run exactly as
-	// before, so the served path is byte-identical until an operator opts in. The residency-backed
-	// reclaimer it installs is nil today (servePathResidencyReclaimer) — the edge is reachable but
-	// inert until the planner surfaces a trace-keyed residency to evict (#1074 / #987).
-	if !attachServeSlotFreedReclaim(serveSessions, srv, *budgetWarnFraction, budgetObs, transObs) {
-		if transObs != nil {
-			serveSessions.WatchTransitions(transObs)
-		}
-		if budgetObs != nil {
-			serveSessions.WatchBudget(*budgetWarnFraction, budgetObs)
-		}
-	}
-
-	// Install the #1073 post-decode KV pressure-relief sweep (#1094): the LIVE, non-test caller
-	// of SetKVPressureRelief. The sweeper closure wraps the genuine engine capacity executor over
-	// the live device backend; the gateway gates the edge on FAK_INKERNEL_KVMMU AND on a non-nil
-	// provider, so installing it unconditionally is safe — with no provider the edge stays inert
-	// (a no-op, byte-identical to today). The PROVIDER (the resident-span enumerator over
-	// kvmmu.Segment{From,Len,KV}) is nil here because no durable cross-turn resident-span ledger
-	// exists yet — the in-kernel planner builds a kvmmu.Context ephemerally per eviction and keeps
-	// only a radixkv prefix-reuse tree, not enumerable per-span candidates. Building that
-	// enumerator is the fenced follow-on #1074 / #987; when it lands, serve.go passes it here
-	// instead of nil and the sweep fires on real residency with no other change. KV is nil for the
-	// same reason (a nil-provider sweep never calls it). See wireKVPressureRelief's honest fence.
-	wireKVPressureRelief(srv, chatBackend, nil, nil)
-
-	// Stream every drive-state revision on /v1/fak/session/changes (#630). Wired
-	// AFTER gateway.New so srv exists: each Rev bump of the process-local table
-	// (a control verb, a debit, a continuation) is projected to the wire DTO and
-	// pushed onto the gateway's bounded revision ring, where an operator drains it
-	// by cursor — the live "what is every session doing right now" tail. The sink is
-	// a cheap ring append and never re-enters the table (see session.RevisionObserver).
-	serveSessions.WatchRevisions(func(s session.State) {
-		srv.PublishSessionRevision(toGatewaySessionState(s))
-	})
-
-	// Graceful drain on ANY terminating signal, not just Ctrl-C (#1359): SIGHUP is "the
-	// terminal was closed" and SIGTERM is "an orchestrator asked us to stop" — both must
-	// route through the same ctx-cancel → ListenAndServe-returns → dumpServeSessions flush
-	// as SIGINT, or the most common "I closed the window" case (SIGHUP) silently loses the
-	// live drive-state that had not been dumped on a prior clean exit. A SIGKILL (kill -9)
-	// is uncatchable and still loses the un-journaled tail — that residue is the write-ahead
-	// journal's job (#1363), not this signal handler's.
-	ctx, stop := signal.NotifyContext(context.Background(), terminatingSignals()...)
-	defer stop()
-
-	// Hot-reload the routing policy (#842): when a manifest is installed, follow the
-	// file and atomically swap the live policy on a validated edit — no restart. A
-	// malformed edit is rejected and the last-good policy is kept (the fail-loud
-	// startup contract extended to reload). The watcher reads the SAME atomic Live
-	// the gateway classifies through, so a swap is visible on the hot path; it is
-	// bound to ctx, so it stops with the server. Reloads/rejections are logged so an
-	// operator can confirm the swap landed.
-	if live := srv.RouteLive(); live != nil {
-		watcher := modelroute.NewWatcher(*routeManifest, live, 0, func(ev modelroute.ReloadEvent) {
-			if ev.Err != nil {
-				fmt.Fprintf(os.Stderr, "fak: route-manifest reload REJECTED: %v\n", ev.Err)
-				return
-			}
-			if ev.Reloaded {
-				fmt.Fprintf(os.Stderr, "fak: model-routing policy hot-reloaded from %s (reload #%d)\n", *routeManifest, ev.Reloads)
-			}
-		})
-		go func() { _ = watcher.Run(ctx) }()
-
-		// If --dojo is enabled, log the start of a live dojo episode.
-		if *dojoMode {
-			if err := logDojoEpisodeStart("serve"); err != nil {
-				fmt.Fprintf(os.Stderr, "fak: --dojo episode logging failed: %v (continuing without dojo)\n", err)
-			}
-		}
-	}
-
-	// #1610 (child B of epic #1601): the optional periodic gateway-usage snapshot runs
-	// for the lifetime of ctx, appending an interim "periodic" counter row every
-	// --metrics-snapshot tick so a crash before a clean exit still leaves a trail. Off
-	// (0 duration, the default) is a byte-for-byte no-op; the exit-time "exit" row below
-	// is always written regardless of this flag.
-	stopMetricsSnapshot := startGatewayUsageSnapshotLoop(ctx, srv, *metricsSnapshot, "serve")
-	defer stopMetricsSnapshot()
-
-	if *stdio {
-		// MCP over stdio: stdout carries the protocol; the log package writes to
-		// stderr, so diagnostics never corrupt the frames.
-		if err := srv.ServeStdio(ctx, os.Stdin, os.Stdout); err != nil && !errors.Is(err, context.Canceled) {
-			must(err)
-		}
-		// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-		persistCacheValueObservations(srv, "serve", "stdio", *provider)
-		if *dojoMode {
-			_ = persistLiveDojoEpisode("serve", srv)
-		}
-		// Append the full served-turn counter-family snapshot (#1610).
-		persistGatewayUsageObservation(srv, "serve", "stdio")
-		dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
-		return
-	}
-	if *addr == "" {
-		fmt.Fprintln(os.Stderr, "fak serve: --addr is required (or pass --stdio)")
-		os.Exit(2)
-	}
-	if err := srv.ListenAndServe(ctx, *addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		must(err)
-	}
-	// Append the cache-value observation + the observed vcache window (#1072/#1075/#1090).
-	persistCacheValueObservations(srv, "serve", "http", *provider)
-	if *dojoMode {
-		_ = persistLiveDojoEpisode("serve", srv)
-	}
-	// Append the full served-turn counter-family snapshot (#1610).
-	persistGatewayUsageObservation(srv, "serve", "http")
-	dumpServeSessions(serveSessions, *sessionStatePath) // #629: persist drive state for the next cold resume
+	rt.srv = srv
 }
 
 // persistCacheValueObservations writes the post-session cache-value ledger row (tagged
