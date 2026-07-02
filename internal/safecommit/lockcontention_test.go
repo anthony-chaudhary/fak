@@ -169,6 +169,45 @@ func TestHookRefusal_notRetriedStillHookRefused(t *testing.T) {
 	}
 }
 
+// Slow re-runs (a hook-heavy `git commit` retried on a ref-lock race) are
+// bounded by wall-clock, not just attempt count: once lockContentionBudget is
+// spent the loop stops riding — protecting the 10s window queued fak peers
+// poll against — and the caller still classifies the failure LOCK_BUSY.
+func TestLockContention_timeBudgetStopsRiding(t *testing.T) {
+	waits := swallowContentionSleep(t)
+	prevNow := contentionNow
+	now := time.Unix(1_750_000_000, 0)
+	contentionNow = func() time.Time { return now }
+	t.Cleanup(func() { contentionNow = prevNow })
+
+	g := &fakeGit{reply: onTrunkBase()}
+	commits := 0
+	run := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		if len(args) > 0 && args[0] == "commit" {
+			commits++
+			// Each re-run models a slow hook suite: the clock advances past the
+			// whole budget before the retry decision is made.
+			now = now.Add(lockContentionBudget + time.Second)
+			return "error: cannot lock ref 'refs/heads/main': Unable to create 'C:/work/fak/.git/refs/heads/main.lock': File exists.", 128, nil
+		}
+		return g.run(ctx, dir, args...)
+	}
+
+	res, err := CommitWith(context.Background(), run, okLock(nil), baseOpts())
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if res.Reason != ReasonLockBusy {
+		t.Fatalf("Reason = %q, want %q", res.Reason, ReasonLockBusy)
+	}
+	if commits != 1 {
+		t.Fatalf("commit attempts = %d, want 1 (time budget spent after the first slow re-run)", commits)
+	}
+	if len(*waits) != 0 {
+		t.Fatalf("no backoff should fire once the budget is spent, got %v", *waits)
+	}
+}
+
 // The backoff schedule is positive, grows with the attempt, and is jittered
 // into (0, base] so queued writers do not re-collide in lockstep.
 func TestLockContentionWait_boundedAndPositive(t *testing.T) {

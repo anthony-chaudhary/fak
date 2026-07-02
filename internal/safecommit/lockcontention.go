@@ -63,6 +63,20 @@ func isGitLockContention(out string) bool {
 // waiting fak peer already tolerates.
 const lockContentionAttempts = 4
 
+// lockContentionBudget caps the TOTAL wall-clock one riding loop may consume —
+// sleeps AND re-runs. The attempt cap alone under-counts the real cost of a
+// `git commit` retry: a "cannot lock ref" failure happens AFTER the pre-commit
+// hooks already ran, so every retry re-pays the whole hook suite inside the fak
+// advisory lock, and four hook-heavy attempts could otherwise eat most of the
+// 10s window (DefaultLockTimeout) that queued fak peers are polling against.
+// Once the budget is spent the loop stops retrying and the caller surfaces
+// LOCK_BUSY — the peers' window stays protected no matter how slow the hooks.
+const lockContentionBudget = 3 * time.Second
+
+// contentionNow is time.Now, injectable so tests exercise the time cap without
+// real waits.
+var contentionNow = time.Now
+
 // contentionSleep is time.Sleep, injectable so tests exercise the retry loop
 // without real waits.
 var contentionSleep = time.Sleep
@@ -80,13 +94,15 @@ func lockContentionWait(attempt int) time.Duration {
 }
 
 // runRidingLockContention runs one mutating git op, re-running it up to
-// lockContentionAttempts times while each failure is lock contention. It returns
-// the FINAL (out, code, err): a success, the first non-contention failure (a
-// hook refusal is never retried), or the last contention failure once the
-// attempts are spent — the caller classifies that as LOCK_BUSY. A cancelled ctx
-// stops the loop between attempts; the in-flight git run already honors ctx via
-// the Runner itself.
+// lockContentionAttempts times — and within lockContentionBudget of total
+// wall-clock — while each failure is lock contention. It returns the FINAL
+// (out, code, err): a success, the first non-contention failure (a hook refusal
+// is never retried), or the last contention failure once either bound is spent —
+// the caller classifies that as LOCK_BUSY. A cancelled ctx stops the loop
+// between attempts; the in-flight git run already honors ctx via the Runner
+// itself.
 func runRidingLockContention(ctx context.Context, run Runner, dir string, args ...string) (string, int, error) {
+	start := contentionNow()
 	var out string
 	var code int
 	var err error
@@ -96,6 +112,11 @@ func runRidingLockContention(ctx context.Context, run Runner, dir string, args .
 			return out, code, err
 		}
 		if attempt >= lockContentionAttempts || ctx.Err() != nil {
+			return out, code, err
+		}
+		if contentionNow().Sub(start) >= lockContentionBudget {
+			// Time budget spent: the re-runs themselves (hooks included) consumed
+			// the window; stop riding so queued fak peers still reach the lock.
 			return out, code, err
 		}
 		contentionSleep(lockContentionWait(attempt))
