@@ -149,6 +149,58 @@ func throttleIsActive(info map[string]any) bool {
 	return true
 }
 
+// weeklyThrottleIsActive mirrors fleet_accounts._weekly_throttle_is_active: a carried
+// throttle holds through a fresh OK probe only while its WEEKLY window is still open —
+// no weekly text means no weekly cap, a weekly reset provably in the past means the cap
+// expired, and anything else (unparseable/future) defers to the throttle's own liveness.
+func weeklyThrottleIsActive(info map[string]any) bool {
+	if info == nil {
+		return false
+	}
+	weekly := asString(info["weekly"])
+	if weekly == "" {
+		return false
+	}
+	if state := resetIsFuture(weekly, time.Now().UTC()); state != nil && !*state {
+		return false
+	}
+	return throttleIsActive(info)
+}
+
+// applyThrottleStatus stamps the carried-throttle block onto st, mirroring
+// fleet_accounts._apply_throttle_status. Python stamps reset/weekly straight from
+// thr.get(...): absent -> None (null), present (even "") -> the value; mirror that
+// presence, not emptiness.
+func applyThrottleStatus(st RuntimeStatus, thr map[string]any) RuntimeStatus {
+	resetVal, hasReset := thr["reset"]
+	weeklyVal, hasWeekly := thr["weekly"]
+	reset := asString(resetVal)
+	weekly := asString(weeklyVal)
+	reason := "usage limit"
+	if reset != "" {
+		reason = "usage limit; resets " + reset
+	}
+	if weekly != "" {
+		reason += "; weekly " + weekly
+	}
+	st.Available, st.Blocked = false, true
+	st.BlockKind, st.hasBlockKind = "usage", true
+	st.BlockReason = reason
+	st.Reset, st.hasReset = reset, hasReset
+	st.Weekly, st.hasWeekly = weekly, hasWeekly
+	st.Throttled = true
+	return st
+}
+
+// shouldConsultProbeLedger mirrors fleet_accounts._should_consult_probe_ledger for the
+// passed-registry case (the only shape the Go fold has: Annotate always receives a
+// loaded Registry): consult the ledger exactly when FLEET_REG_DIR names the registry
+// dir the prober writes under, so the Go reader and the Python writer agree on the dir
+// and callers without a prober keep the pure passive fold.
+func shouldConsultProbeLedger() bool {
+	return strings.TrimSpace(os.Getenv("FLEET_REG_DIR")) != ""
+}
+
 func resetText(info map[string]any) string {
 	if info == nil {
 		return ""
@@ -192,10 +244,12 @@ type RuntimeStatus struct {
 }
 
 // computeRuntimeStatus folds the passive registry signals (sessions/throttle) into one
-// account's availability. This is the hot-path passive fold; the active probe-ledger
-// override (account_probe.py's probe_ledger.jsonl) is intentionally NOT consulted here —
-// it depends on a separate prober and is the documented follow-on. Synthetic _probe
-// session rows already present in sessions.json ARE honored (the watchdog-folded path).
+// account's availability. Synthetic _probe session rows already present in sessions.json
+// are honored first (the watchdog-folded path); absent those, a fresh active-probe
+// verdict from the probe LEDGER (account_probe writes probe_ledger.jsonl, never
+// sessions.json) overrides a carried block — consulted exactly when FLEET_REG_DIR names
+// the prober's registry dir (see shouldConsultProbeLedger), so callers without a prober
+// keep the pure passive fold.
 func computeRuntimeStatus(account string, reg Registry) RuntimeStatus {
 	throttleMap := normalizeThrottle(reg.Throttle)
 	authMap := reg.Auth
@@ -316,27 +370,49 @@ func computeRuntimeStatus(account string, reg Registry) RuntimeStatus {
 		return st
 	}
 
-	if thr, ok := throttleMap[account]; ok && throttleIsActive(thr) {
-		resetVal, hasReset := thr["reset"]
-		weeklyVal, hasWeekly := thr["weekly"]
-		reset := asString(resetVal)
-		weekly := asString(weeklyVal)
-		reason := "usage limit"
-		if reset != "" {
-			reason = "usage limit; resets " + reset
+	// No synthetic _probe session row -> consult the active-probe LEDGER directly.
+	// account_probe writes its verdict only there, so a fresh manual/watchdog probe
+	// would otherwise be invisible here and the carried throttle below would win
+	// (probe says OK, roster still "resets 11pm"). A ledger verdict within
+	// ProbeLedgerFreshMin is the same authoritative fresh probe. Mirrors
+	// fleet_accounts.runtime_status's probe-ledger rung.
+	thr, hasThr := throttleMap[account]
+	if shouldConsultProbeLedger() {
+		if led := FreshProbeFromLedger(account, "", time.Now().UTC(), 0); led != nil {
+			if led.Available {
+				// A fresh OK must not reopen a seat whose WEEKLY cap is still
+				// active: the weekly window outlives any single probe. (Python also
+				// clears this hold when the throttle's stamped identity provably
+				// differs from the seat's current identity; this port assumes the
+				// identity matches — the fail-closed reading — leaving the
+				// identity-match refinement as the named follow-on.)
+				if hasThr && weeklyThrottleIsActive(thr) {
+					return applyThrottleStatus(st, thr)
+				}
+				st.StatusSource = "probe-ledger"
+				return st
+			}
+			kind := led.BlockKind
+			if kind == "" {
+				kind = "auth"
+			}
+			reason := led.BlockReason
+			if reason == "" {
+				reason = "blocked"
+			}
+			st.Available, st.Blocked = false, true
+			st.BlockKind, st.hasBlockKind = kind, true
+			st.BlockReason = reason
+			st.Reset, st.hasReset = led.Reset, true
+			st.Weekly, st.hasWeekly = led.Weekly, true
+			st.Throttled = kind == "usage"
+			st.StatusSource = "probe-ledger"
+			return st
 		}
-		if weekly != "" {
-			reason += "; weekly " + weekly
-		}
-		st.Available, st.Blocked = false, true
-		st.BlockKind, st.hasBlockKind = "usage", true
-		st.BlockReason = reason
-		// Python stamps reset/weekly straight from thr.get(...): absent -> None (null),
-		// present (even "") -> the value. Mirror that presence, not emptiness.
-		st.Reset, st.hasReset = reset, hasReset
-		st.Weekly, st.hasWeekly = weekly, hasWeekly
-		st.Throttled = true
-		return st
+	}
+
+	if hasThr && throttleIsActive(thr) {
+		return applyThrottleStatus(st, thr)
 	}
 
 	if authCurrent {

@@ -54,8 +54,9 @@ type FreshProbe struct {
 // current limit.
 //
 // freshMin <= 0 uses ProbeLedgerFreshMin(). now is injected for determinism (pass
-// time.Now().UTC() in production). Wiring this fold INTO computeRuntimeStatus is a
-// deliberate follow-on (see status.go's passive-fold note); this ports the primitive.
+// time.Now().UTC() in production). computeRuntimeStatus consults this fold when
+// FLEET_REG_DIR names the prober's registry dir (see shouldConsultProbeLedger), so the
+// whole roster surface — available/rotation/resolve — self-heals off a fresh probe.
 func FreshProbeFromLedger(account, regDir string, now time.Time, freshMin float64) *FreshProbe {
 	if freshMin <= 0 {
 		freshMin = ProbeLedgerFreshMin()
