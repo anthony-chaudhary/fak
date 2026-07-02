@@ -14,6 +14,7 @@ import (
 )
 
 func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
 	var out, errb bytes.Buffer
 	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
 		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
@@ -41,6 +42,7 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 
 func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("FAK_VCACHE_SNAPSHOT", filepath.Join(t.TempDir(), "missing.jsonl"))
 	var out, errb bytes.Buffer
 	if code := runVCache(&out, &errb, []string{"status", "--json"}); code != 0 {
 		t.Fatalf("status --json exit=%d stderr=%s", code, errb.String())
@@ -65,6 +67,44 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 	if rep.CodexOpenAI.NoCacheRefutation.Status != vcachegov.ProofRefuted ||
 		rep.CodexOpenAI.NoCacheRefutation.SavedTokenEquiv != 0 {
 		t.Fatalf("no-cache proof = %+v, want zero-cache refutation", rep.CodexOpenAI.NoCacheRefutation)
+	}
+}
+
+func TestRunVCacheStatusReadsRecentSnapshot(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920,"fak_context_events":1,"fak_context_shed_tokens":200}` + "\n" +
+		`{"family":"head","unix_millis":2,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_VCACHE_SNAPSHOT", snap)
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--json"}); code != 0 {
+		t.Fatalf("status --json exit=%d stderr=%s", code, errb.String())
+	}
+	var rep vcacheStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.RecentObservation == nil {
+		t.Fatalf("status did not attach recent observation:\n%s", out.String())
+	}
+	recent := rep.RecentObservation
+	if recent.Turns != 2 || recent.ProviderStatus != string(vcachegov.ProofProven) || recent.CacheReadTokens != 3840 {
+		t.Fatalf("recent observation = %+v, want two proven cached turns", recent)
+	}
+	if recent.FalseWarmRate != 0 || recent.GovernorDecision == "" || recent.ContextEvents != 1 || recent.ContextShedTokens != 200 {
+		t.Fatalf("recent observation missed prediction/governor/context evidence: %+v", recent)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
+		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "recent snapshot: 2 turns, provider PROVEN") {
+		t.Fatalf("text status did not report recent snapshot:\n%s", out.String())
 	}
 }
 

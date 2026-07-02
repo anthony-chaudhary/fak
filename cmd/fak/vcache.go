@@ -118,23 +118,45 @@ managed-context lifecycle events (see internal/vcacheobserve.LifecycleEvent).
 }
 
 type vcacheStatusReport struct {
-	Status         string                     `json:"status"`
-	Governor       string                     `json:"governor"`
-	Chains         string                     `json:"chains"`
-	LiveProvider   string                     `json:"live_provider"`
-	Proof          vcachegov.StarSavingsProof `json:"proof"`
-	RecallProof    vcachechain.RecallProof    `json:"recall_proof"`
-	CodexOpenAI    vcacheCodexOpenAIStatus    `json:"codex_openai"`
-	M4Issue        string                     `json:"m4_issue"`
-	M5Issue        string                     `json:"m5_issue"`
-	Remaining      []vcacheRemainingIssue     `json:"remaining"`
-	CorrectnessLaw string                     `json:"correctness_law"`
+	Status                 string                     `json:"status"`
+	Governor               string                     `json:"governor"`
+	Chains                 string                     `json:"chains"`
+	LiveProvider           string                     `json:"live_provider"`
+	Proof                  vcachegov.StarSavingsProof `json:"proof"`
+	RecallProof            vcachechain.RecallProof    `json:"recall_proof"`
+	CodexOpenAI            vcacheCodexOpenAIStatus    `json:"codex_openai"`
+	RecentObservation      *vcacheRecentObservation   `json:"recent_observation,omitempty"`
+	RecentObservationError string                     `json:"recent_observation_error,omitempty"`
+	M4Issue                string                     `json:"m4_issue"`
+	M5Issue                string                     `json:"m5_issue"`
+	Remaining              []vcacheRemainingIssue     `json:"remaining"`
+	CorrectnessLaw         string                     `json:"correctness_law"`
 }
 
 type vcacheRemainingIssue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	URL    string `json:"url"`
+}
+
+type vcacheRecentObservation struct {
+	Source                string  `json:"source"`
+	Path                  string  `json:"path,omitempty"`
+	Turns                 int     `json:"turns"`
+	ProviderStatus        string  `json:"provider_status"`
+	CacheReadTokens       float64 `json:"cache_read_tokens"`
+	CacheCreationTokens   float64 `json:"cache_creation_tokens"`
+	HitRate               float64 `json:"hit_rate"`
+	Multiplier            float64 `json:"multiplier"`
+	SavedTokenEquiv       float64 `json:"saved_token_equiv"`
+	FalseWarmRate         float64 `json:"false_warm_rate"`
+	FalseColdRate         float64 `json:"false_cold_rate"`
+	GovernorDecision      string  `json:"governor_decision,omitempty"`
+	ContextEvents         int64   `json:"context_events,omitempty"`
+	ContextShedTokens     int64   `json:"context_shed_tokens,omitempty"`
+	ContextDroppedTurns   int64   `json:"context_dropped_turns,omitempty"`
+	ContextBaselineTokens int64   `json:"context_baseline_tokens,omitempty"`
+	ContextCostTokens     int64   `json:"context_cost_tokens,omitempty"`
 }
 
 type vcacheCodexOpenAIStatus struct {
@@ -164,6 +186,13 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "vCache M5 governor: %s\n", rep.Governor)
 	fmt.Fprintf(stdout, "vCache M4 chains & recall: %s\n", rep.Chains)
 	fmt.Fprintf(stdout, "live provider loop: %s\n", rep.LiveProvider)
+	if rep.RecentObservation != nil {
+		recent := rep.RecentObservation
+		fmt.Fprintf(stdout, "recent snapshot: %d turns, provider %s %.2fx, false-warm %.2f%%, governor %s, context events %d\n",
+			recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextEvents)
+	} else if rep.RecentObservationError != "" {
+		fmt.Fprintf(stdout, "recent snapshot: unreadable (%s)\n", rep.RecentObservationError)
+	}
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
@@ -664,7 +693,7 @@ func int64ToInt(n int64) int {
 }
 
 func defaultVCacheStatus() vcacheStatusReport {
-	return vcacheStatusReport{
+	rep := vcacheStatusReport{
 		Status:       "M5 governor decision witness live; warm/pin/evict actions still gated; full vCache provider loop not yet live",
 		Governor:     "decision witness live (/metrics + /debug/vars journal); pin/lazy/evict actions not registered",
 		Chains:       "implemented (prefix DAG, topological replay, cost-gated rebuild); gated OFF by default; off-path",
@@ -694,6 +723,72 @@ func defaultVCacheStatus() vcacheStatusReport {
 		},
 		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
 	}
+	applyRecentVCacheObservation(&rep, statusVCacheSnapshotPath())
+	return rep
+}
+
+func statusVCacheSnapshotPath() string {
+	path := strings.TrimSpace(os.Getenv("FAK_VCACHE_SNAPSHOT"))
+	if path == "" {
+		return vcachesnapshot.DefaultPath()
+	}
+	return path
+}
+
+func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.EqualFold(path, "off") {
+		return
+	}
+	turns, ok, err := vcachesnapshot.Read(path)
+	if err != nil {
+		rep.RecentObservationError = fmt.Sprintf("%s: %v", path, err)
+		return
+	}
+	if !ok {
+		return
+	}
+	obs := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
+	recent := vcacheRecentObservation{
+		Source:              "snapshot",
+		Path:                path,
+		Turns:               obs.Turns,
+		ProviderStatus:      string(obs.Aggregate.Status),
+		CacheReadTokens:     obs.Aggregate.CacheReadTokens,
+		CacheCreationTokens: obs.Aggregate.CacheCreationTokens,
+		HitRate:             obs.HitRate,
+		Multiplier:          obs.Multiplier,
+		SavedTokenEquiv:     obs.Aggregate.SavedTokenEquiv,
+		FalseWarmRate:       obs.Prediction.FalseWarmRate(),
+		FalseColdRate:       obs.Prediction.FalseColdRate(),
+		GovernorDecision:    dominantVCacheGovernorDecision(obs.Families),
+	}
+	for _, turn := range turns {
+		recent.ContextEvents += turn.ContextEvents
+		recent.ContextShedTokens += turn.ContextShedTokens
+		recent.ContextDroppedTurns += turn.ContextDroppedTurns
+		recent.ContextBaselineTokens += turn.ContextBaselineTokens
+		recent.ContextCostTokens += turn.ContextCostTokens
+	}
+	rep.RecentObservation = &recent
+	rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot observed %d turns at %.2fx provider multiplier with %.2f%% false-warm; active warm/pin/evict actions remain gated",
+		recent.Turns, recent.Multiplier, 100*recent.FalseWarmRate)
+}
+
+func dominantVCacheGovernorDecision(families []vcacheobserve.Family) string {
+	if len(families) == 0 {
+		return ""
+	}
+	counts := make(map[string]int, len(families))
+	best := ""
+	for _, family := range families {
+		decision := string(family.GovernorDecision)
+		counts[decision]++
+		if best == "" || counts[decision] > counts[best] || counts[decision] == counts[best] && decision < best {
+			best = decision
+		}
+	}
+	return best
 }
 
 func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
