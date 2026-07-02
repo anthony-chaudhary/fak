@@ -908,8 +908,26 @@ func maxClipNote(maxSessions, discoveredCount int) string {
 	if maxSessions <= 0 || discoveredCount <= maxSessions {
 		return ""
 	}
-	return fmt.Sprintf("NOTE: `--max %d` clipped this audit to the newest %d of %d discovered transcripts; use `--ns-prefix <namespace>` or raise `--max` before treating missing namespaces or model usage as absent.",
+	return fmt.Sprintf("NOTE: `--max %d` clipped this audit to the newest %d of %d discovered transcripts; use `--ns-prefix <namespace>`, `--here`, or raise `--max` before treating missing namespaces or model usage as absent.",
 		maxSessions, maxSessions, discoveredCount)
+}
+
+// ProjectNamespace returns the Claude Code projects/<namespace> key for a
+// workspace path. Claude derives it by replacing every non-alphanumeric rune in
+// the cleaned path with '-': C:\work\fak becomes C--work-fak.
+func ProjectNamespace(workspace string) string {
+	clean := filepath.Clean(workspace)
+	var b strings.Builder
+	b.Grow(len(clean))
+	for _, r := range clean {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
 }
 
 func namespaceName(path string) string {

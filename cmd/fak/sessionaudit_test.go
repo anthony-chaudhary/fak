@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 )
 
 func TestSessionAuditDiscoverAuditAndDeep(t *testing.T) {
@@ -129,6 +131,61 @@ func TestSessionAuditWarnsWhenMaxClipsBeforeNamespaceAudit(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "NOTE: `--max 1` clipped this audit to the newest 1 of 2 discovered transcripts") {
 		t.Fatalf("audit markdown cap warning missing:\n%s", stdout.String())
+	}
+}
+
+func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "work", "fak")
+	if err := os.MkdirAll(workspace, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	hereNS := sessionaudit.ProjectNamespace(workspace)
+	herePath := writeSessionAuditJSONL(t, filepath.Join(root, hereNS, "fable.jsonl"), []map[string]any{
+		sessionAuditAssistant("fable", 100, ""),
+	})
+	otherPath := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-job", "synthetic.jsonl"), []map[string]any{
+		sessionAuditAssistant("synthetic", 10, ""),
+	})
+	now := time.Now()
+	if err := os.Chtimes(herePath, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(otherPath, now, now); err != nil {
+		t.Fatal(err)
+	}
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"discover", "--root", root, "--here", "--max", "1"})
+	if rc != 0 {
+		t.Fatalf("discover --here rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), hereNS+"/fable.jsonl") ||
+		strings.Contains(stdout.String(), "C--work-job/synthetic.jsonl") ||
+		strings.Contains(stdout.String(), "showing first 1 of 2") {
+		t.Fatalf("--here did not scope before --max:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"audit", "--root", root, "--here", "--max", "1"})
+	if rc != 0 {
+		t.Fatalf("audit --here rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "namespace filter: "+hereNS) ||
+		!strings.Contains(stdout.String(), "| fable |") ||
+		strings.Contains(stdout.String(), "C--work-job") {
+		t.Fatalf("audit --here did not report the current workspace scope:\n%s", stdout.String())
 	}
 }
 

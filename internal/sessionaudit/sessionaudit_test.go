@@ -289,6 +289,21 @@ func TestDefaultDiscoversAllNonExcludedNamespaces(t *testing.T) {
 	}
 }
 
+func TestProjectNamespaceMatchesClaudeProjectsKey(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{`C:\work\fak`, "C--work-fak"},
+		{`C:\work\fak repo`, "C--work-fak-repo"},
+		{`/home/u/p`, "-home-u-p"},
+	} {
+		if got := ProjectNamespace(tc.path); got != tc.want {
+			t.Fatalf("ProjectNamespace(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 func TestScopeHeaderSubagentWarningAndModelMix(t *testing.T) {
 	root := t.TempDir()
 	topPath := writeTranscriptIn(t, root, "C--work-fak", "session-a.jsonl", []map[string]any{

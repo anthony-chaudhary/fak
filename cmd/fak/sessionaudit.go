@@ -37,8 +37,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 }
 
 func sessionAuditUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--ns-prefix PREFIX] [--all] [--include-subagents] [--max N]")
-	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--ns-prefix PREFIX] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
+	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N]")
+	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 }
 
@@ -50,20 +50,21 @@ func (r *rootFlags) Set(v string) error {
 	return nil
 }
 
-func sessionAuditCommonFlags(name string, stderr io.Writer) (*flag.FlagSet, *rootFlags, *float64, *string, *bool, *bool, *int) {
+func sessionAuditCommonFlags(name string, stderr io.Writer) (*flag.FlagSet, *rootFlags, *float64, *string, *bool, *bool, *bool, *int) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	roots := rootFlags{}
 	sinceDays := fs.Float64("since-days", -1, "only include transcripts modified within N days")
 	nsPrefix := fs.String("ns-prefix", sessionaudit.NamespaceIncludePrefix, "namespace prefix filter")
+	here := fs.Bool("here", false, "use the current working directory's Claude projects namespace as --ns-prefix")
 	allNS := fs.Bool("all", false, "include all non-excluded namespaces")
 	includeSubagents := fs.Bool("include-subagents", false, "include subagent/workflow transcripts")
 	max := fs.Int("max", 0, "maximum transcripts to read or render")
 	fs.Var(&roots, "root", "transcript projects root (repeatable)")
-	return fs, &roots, sinceDays, nsPrefix, allNS, includeSubagents, max
+	return fs, &roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max
 }
 
-func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, allNS bool, includeSubagents bool) sessionaudit.DiscoverOptions {
+func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, here bool, allNS bool, includeSubagents bool) sessionaudit.DiscoverOptions {
 	var since *float64
 	if sinceDays >= 0 {
 		v := sinceDays
@@ -71,6 +72,10 @@ func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, allNS 
 	}
 	if allNS {
 		nsPrefix = ""
+	} else if here && nsPrefix == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			nsPrefix = sessionaudit.ProjectNamespace(cwd)
+		}
 	}
 	return sessionaudit.DiscoverOptions{
 		Roots:            []string(roots),
@@ -81,7 +86,7 @@ func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, allNS 
 }
 
 func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit discover", stderr)
+	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit discover", stderr)
 	asJSON := fs.Bool("json", false, "emit discovered transcript records as JSON")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -90,7 +95,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	recs, err := sessionaudit.Discover(discoverOptions(*roots, *sinceDays, *nsPrefix, *allNS, *includeSubagents))
+	recs, err := sessionaudit.Discover(discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents))
 	if err != nil {
 		fmt.Fprintf(stderr, "fak session-audit discover: %v\n", err)
 		return 1
@@ -107,7 +112,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	if *max > 0 && total > *max {
-		fmt.Fprintf(stdout, "%d sessions (showing first %d of %d; use --ns-prefix to target a namespace before --max)\n", len(recs), len(recs), total)
+		fmt.Fprintf(stdout, "%d sessions (showing first %d of %d; use --ns-prefix or --here to target a namespace before --max)\n", len(recs), len(recs), total)
 	} else {
 		fmt.Fprintf(stdout, "%d sessions\n", len(recs))
 	}
@@ -123,7 +128,7 @@ func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
-	fs, roots, sinceDays, nsPrefix, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit audit", stderr)
+	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit audit", stderr)
 	jsonOut := fs.String("json", "", "write JSON payload to OUT")
 	mdOut := fs.String("md", "", "write markdown report to OUT")
 	if err := fs.Parse(argv); err != nil {
@@ -133,7 +138,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 		fs.Usage()
 		return 2
 	}
-	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *allNS, *includeSubagents)
+	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
 	recs, err := sessionaudit.Discover(opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak session-audit audit: discover: %v\n", err)
@@ -145,7 +150,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stderr, "analyzing %d transcripts ...\n", len(recs))
 	if *max > 0 && totalDiscovered > *max {
-		fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix to target a namespace before --max\n", len(recs), totalDiscovered)
+		fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix or --here to target a namespace before --max\n", len(recs), totalDiscovered)
 	}
 	sessions := make([]sessionaudit.Session, 0, len(recs))
 	for _, rec := range recs {
