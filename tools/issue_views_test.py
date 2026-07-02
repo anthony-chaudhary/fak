@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +55,13 @@ GENERATION_VIEW_BINDINGS = {
     "generation-second-next": ("gen/second-next", 'milestone:"Generation G2 - Second Next Gen"'),
     "generation-future": ("gen/future", 'milestone:"Generation G3 - Future"'),
 }
+
+GO_ISSUE_CREATE_ARGV_RE = re.compile(
+    r"(?s)(?:\w+\s*:=\s*|=\s*)\[\]string\{\s*\"issue\"\s*,\s*\"create\"\s*,"
+)
+PY_ISSUE_CREATE_ARGV_RE = re.compile(
+    r"(?s)(?:\w+\s*=\s*)\[\s*(?:\"gh\"\s*,\s*)?[\"']issue[\"']\s*,\s*[\"']create[\"']\s*,"
+)
 
 # Closure binding: this map plus test_issue_create_producers_are_contract_or_triage_gated
 # below satisfy #1461's ask in full -- every gh-issue-create-capable producer in the
@@ -221,8 +229,10 @@ class ShippedConfig(unittest.TestCase):
                     continue
                 text = path.read_text(encoding="utf-8", errors="replace")
                 creates = False
-                if path.suffix in {".py", ".go"}:
-                    creates = '"issue", "create"' in text or "'issue', 'create'" in text
+                if path.suffix == ".go":
+                    creates = bool(GO_ISSUE_CREATE_ARGV_RE.search(text))
+                elif path.suffix == ".py":
+                    creates = bool(PY_ISSUE_CREATE_ARGV_RE.search(text))
                 else:
                     creates = "gh issue create" in text
                 if creates:
