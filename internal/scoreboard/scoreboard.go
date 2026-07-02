@@ -21,18 +21,15 @@
 package scoreboard
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 const slackAPI = "https://slack.com/api/"
@@ -54,11 +51,15 @@ var (
 	productChannelEnvs = []string{"FAK_PRODUCT_CHANNEL"}
 )
 
-// Client is a minimal Slack Web API client scoped to posting scoreboard updates.
+// Client posts scoreboard updates to Slack. The wire protocol (post/auth, 429
+// handling, typed errors) lives in internal/slackwire — the ONE Slack transport;
+// this type keeps what is scoreboard-specific: token resolution and the
+// change-gating that keeps #scoreboard signal instead of heartbeat.
 type Client struct {
 	token    string
-	http     *http.Client
-	apiBase  string // override for tests
+	http     *http.Client // optional injected client, passed through to the wire
+	apiBase  string       // override for tests, passed through to the wire
+	wire     *slackwire.Client
 	lastMu   sync.RWMutex
 	lastPost map[string]Update // keyed by title
 }
@@ -85,13 +86,17 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 	}
 	c := &Client{
 		token:    token,
-		http:     &http.Client{Timeout: 40 * time.Second},
 		apiBase:  slackAPI,
 		lastPost: make(map[string]Update),
 	}
 	for _, o := range opts {
 		o(c)
 	}
+	wopts := []slackwire.Option{slackwire.WithAPIBase(c.apiBase)}
+	if c.http != nil {
+		wopts = append(wopts, slackwire.WithHTTPClient(c.http))
+	}
+	c.wire = slackwire.New(token, wopts...)
 	return c, nil
 }
 
@@ -162,15 +167,6 @@ func (c *Client) recordLast(up Update) {
 	c.lastPost[up.Title] = up
 }
 
-// postMessageResp carries the chat.postMessage outcome (Slack returns ok=false in
-// the body even on HTTP 200).
-type postMessageResp struct {
-	OK      bool   `json:"ok"`
-	TS      string `json:"ts"`
-	Channel string `json:"channel"`
-	Error   string `json:"error"`
-}
-
 // Post sends text to a channel and returns the posted message ts. blocks, when
 // non-empty, attaches a Block Kit payload (used for the formatted scorecard card);
 // text is the notification fallback Slack shows in the sidebar/badge.
@@ -188,37 +184,14 @@ func (c *Client) PostWithUpdate(ctx context.Context, channel string, up Update, 
 		return "", nil // skip: no change from last post for this title
 	}
 
-	body := map[string]any{"channel": channel, "text": text}
-	if len(blocks) > 0 {
-		body["blocks"] = blocks
-	}
-	raw, err := json.Marshal(body)
+	ts, err := c.wire.PostMessage(ctx, channel, text, blocks, "")
 	if err != nil {
 		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBase+"chat.postMessage", bytes.NewReader(raw))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	data, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	var r postMessageResp
-	if err := json.Unmarshal(data, &r); err != nil {
-		return "", fmt.Errorf("chat.postMessage: decode: %w (body=%.200s)", err, string(data))
-	}
-	if !r.OK {
-		return "", fmt.Errorf("chat.postMessage: %s", r.Error)
 	}
 	if up.Title != "" {
 		c.recordLast(up)
 	}
-	return r.TS, nil
+	return ts, nil
 }
 
 // AuthInfo is the identity a bot token resolves to — the subset of auth.test a
@@ -232,48 +205,22 @@ type AuthInfo struct {
 	BotID  string // B... bot id (set when the token is a bot token)
 }
 
-// authTestResp carries the auth.test outcome (Slack returns ok=false in the body).
-type authTestResp struct {
-	OK     bool   `json:"ok"`
-	Error  string `json:"error"`
-	URL    string `json:"url"`
-	Team   string `json:"team"`
-	User   string `json:"user"`
-	TeamID string `json:"team_id"`
-	UserID string `json:"user_id"`
-	BotID  string `json:"bot_id"`
-}
-
 // AuthTest calls auth.test to verify the token is valid and report the identity it
 // resolves to. It is the "does this token actually work" probe behind `fak slack check
 // --auth`: a wrong, revoked, or workspace-mismatched bot token is the most common Slack
 // failure, and it surfaces here as a concrete error (e.g. "invalid_auth") instead of a
 // downstream chat.postMessage rejection with no context.
 func (c *Client) AuthTest(ctx context.Context) (*AuthInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBase+"auth.test", nil)
+	info, err := c.wire.AuthTest(ctx)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	data, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	var r authTestResp
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("auth.test: decode: %w (body=%.200s)", err, string(data))
-	}
-	if !r.OK {
-		return nil, fmt.Errorf("auth.test: %s", r.Error)
 	}
 	return &AuthInfo{
-		URL:    r.URL,
-		Team:   r.Team,
-		User:   r.User,
-		TeamID: r.TeamID,
-		UserID: r.UserID,
-		BotID:  r.BotID,
+		URL:    info.URL,
+		Team:   info.Team,
+		User:   info.User,
+		TeamID: info.TeamID,
+		UserID: info.UserID,
+		BotID:  info.BotID,
 	}, nil
 }
