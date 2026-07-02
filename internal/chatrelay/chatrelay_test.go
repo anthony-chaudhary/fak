@@ -3,11 +3,14 @@ package chatrelay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 // fakeHub is one httptest server that plays BOTH the Slack Web API (conversations.history,
@@ -250,6 +253,26 @@ func TestPrimeSkipsBacklog(t *testing.T) {
 	}
 	if n2 != 1 {
 		t.Fatalf("handled = %d, want 1 (only the post-Prime message)", n2)
+	}
+}
+
+func TestHTTPSlackUsesSharedSlackwireErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"ok": false, "error": "channel_not_found"})
+	}))
+	defer srv.Close()
+
+	slack := &HTTPSlack{Token: "xoxb-test", APIBase: srv.URL + "/", HTTP: srv.Client()}
+	_, err := slack.History(context.Background(), "C_MISSING", "", 1)
+	if err == nil {
+		t.Fatal("History returned nil error, want Slack API error")
+	}
+	var apiErr *slackwire.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("History error = %T %v, want *slackwire.APIError", err, err)
+	}
+	if apiErr.Method != "conversations.history" || apiErr.Code != "channel_not_found" {
+		t.Fatalf("API error fields = %+v", apiErr)
 	}
 }
 

@@ -30,11 +30,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/slackwire"
 )
 
 // Message is one Slack channel message, the subset of conversations.history this relay
@@ -246,32 +247,30 @@ func tsAfter(a, b string) bool {
 // HTTPSlack is the live SlackClient over the Slack Web API. Token is a bot token with the
 // conversations.history (channels:history / groups:history) and chat:write scopes. APIBase
 // defaults to https://slack.com/api/ and is overridable for tests.
+//
+// It is a thin adapter over internal/slackwire — the ONE Slack transport (#2261): the
+// HTTP exchange, ok:false envelope decode, and 429/Retry-After handling live there; this
+// type keeps only the relay-shaped surface (its Message mapping and threadTS-in-Post).
+// The hand-rolled conversations.history/chat.postMessage HTTP that used to live here was
+// the second parallel Slack client the epic retired.
 type HTTPSlack struct {
 	Token   string
 	APIBase string
 	HTTP    *http.Client
 }
 
-const slackAPIDefault = "https://slack.com/api/"
-
-func (s *HTTPSlack) base() string {
+// wire builds the slackwire client for one call. Construction is cheap (the injected —
+// or default — http.Client carries the connection pool, not this struct), and building
+// per call keeps HTTPSlack a plain value type with no lazy-init state to guard.
+func (s *HTTPSlack) wire() *slackwire.Client {
+	opts := make([]slackwire.Option, 0, 2)
 	if s.APIBase != "" {
-		return s.APIBase
+		opts = append(opts, slackwire.WithAPIBase(s.APIBase))
 	}
-	return slackAPIDefault
-}
-
-func (s *HTTPSlack) httpClient() *http.Client {
 	if s.HTTP != nil {
-		return s.HTTP
+		opts = append(opts, slackwire.WithHTTPClient(s.HTTP))
 	}
-	return &http.Client{Timeout: 40 * time.Second}
-}
-
-type historyResp struct {
-	OK       bool      `json:"ok"`
-	Error    string    `json:"error"`
-	Messages []Message `json:"messages"`
+	return slackwire.New(s.Token, opts...)
 }
 
 // UnmarshalJSON maps Slack's snake_case message fields onto Message.
@@ -296,71 +295,23 @@ func (m *Message) UnmarshalJSON(b []byte) error {
 // History calls conversations.history. oldestTS is passed as the `oldest` bound; the relay
 // still re-filters by ts so the inclusive/exclusive nuance never double-answers a message.
 func (s *HTTPSlack) History(ctx context.Context, channel, oldestTS string, limit int) ([]Message, error) {
-	q := url.Values{}
-	q.Set("channel", channel)
-	if oldestTS != "" {
-		q.Set("oldest", oldestTS)
-	}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base()+"conversations.history?"+q.Encode(), nil)
+	wire, err := s.wire().History(ctx, channel, oldestTS, limit)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+s.Token)
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, err
+	msgs := make([]Message, len(wire))
+	for i, m := range wire {
+		msgs[i] = Message{
+			Type: m.Type, Subtype: m.Subtype, TS: m.TS,
+			ThreadTS: m.ThreadTS, User: m.User, BotID: m.BotID, Text: m.Text,
+		}
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var r historyResp
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("conversations.history: decode: %w (body=%.200s)", err, string(data))
-	}
-	if !r.OK {
-		return nil, fmt.Errorf("conversations.history: %s", r.Error)
-	}
-	return r.Messages, nil
-}
-
-type postResp struct {
-	OK    bool   `json:"ok"`
-	TS    string `json:"ts"`
-	Error string `json:"error"`
+	return msgs, nil
 }
 
 // Post calls chat.postMessage, threading the reply under threadTS when set.
 func (s *HTTPSlack) Post(ctx context.Context, channel, threadTS, text string) (string, error) {
-	body := map[string]any{"channel": channel, "text": text}
-	if threadTS != "" {
-		body["thread_ts"] = threadTS
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base()+"chat.postMessage", bytes.NewReader(raw))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.Token)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var r postResp
-	if err := json.Unmarshal(data, &r); err != nil {
-		return "", fmt.Errorf("chat.postMessage: decode: %w (body=%.200s)", err, string(data))
-	}
-	if !r.OK {
-		return "", fmt.Errorf("chat.postMessage: %s", r.Error)
-	}
-	return r.TS, nil
+	return s.wire().PostMessage(ctx, channel, text, nil, threadTS)
 }
 
 // HTTPModel calls a served OpenAI-compatible /v1/chat/completions. Endpoint is the serve
