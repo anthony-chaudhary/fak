@@ -193,6 +193,7 @@ var tier = map[string]int{
 	"promptmmu":        1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
 	"loopmgr":          1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing â€” those stay in the producers.
 	"leaseref":         1, // cross-machine lease VISIBILITY substrate (#825): persists a lease record under refs/fak/locks/<id> so lease state rides ordinary git fetch/push between clones. Distribution, NOT atomic acquisition. Shells to git off the hot path through one Runner seam; imports only dormancy(1) for the lease's LastActiveAt clock (#1179).
+	"laneadmit":        1, // pure lane/tree admission fold for dispatch/loop/manual surfaces: lane taxonomy + live leases -> COLLISION_RISK verdict; imports dispatchorder(1)+stdlib, off the hot path.
 	"guard":            1, // agent-spawn containment seam (#824): the Linux Landlock read-only-.git/hooks hook-floor for the child `fak guard` spawns, via a re-exec trampoline. Pure spec/resolution core + raw-syscall linux impl + no-op twin; opt-in, off by default, fails open; imports only stdlib (syscall/unsafe on linux), nothing internal.
 	"codexmcphealth":   2, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
 	"pythongate":       2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
@@ -228,6 +229,7 @@ var tier = map[string]int{
 	"milestonepost":    3, // outbound Slack publisher for the milestone report (twin of cachevaluepost): folds a milestonereport.Report into one #milestones channel card. Forced to tier 3 by its milestonereport(3) import; also imports scoreboard(1)+slackenv(1)+slackmeta(1), off the hot path.
 	"milestonedoc":     3, // the freshness-checked milestone status doc (#1441): renders the maturity CLIMB (covmatrix grid -> M0-M7 ladder via milestonereport.InterpretMaturity) into a committed docs/milestones/STATUS.md block with the --write-doc/--check-doc seam (twin of supportmaturityscore's matrix block). Forced to tier 3 by its milestonereport(3) import; also imports covmatrix(1)+supportmaturity(2), off the hot path.
 	"dispatchorder":    1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
+	"dispatchauto":     1, // pure dispatch wave auto-sizing fold: live ceilings + node roster + context budget -> target/refill/placement; stdlib-only, off the hot path.
 	"dispatchtick":     1, // pure issue-resolution dispatch tick contract: backend argv, guard wrap, wave/account sidecars; stdlib-only, off the hot path.
 	"dispatchsweep":    1, // pure queue-drain loop core for `fak dispatch sweep`: find next issue -> spawn one worker -> repeat, until a tick refuses or the best-effort agent ceiling is hit; tick+settle are injected and the cmd/fak shell runs the Go tick evaluator. stdlib-only, imports nothing internal, off the hot path.
 	"issuesmallness":   1, // pure issue-template smallness lint: one deliverable + one witness classifier and dry-run report fold; stdlib-only, off the hot path.
@@ -295,6 +297,10 @@ var tier = map[string]int{
 	"toolproc":         2,
 	"regionadmit":      2,
 	"toolprocgate":     4, // post-kill tool-result quarantine rung; declared once its leaf landed on the trunk (see the stale-row rule above)
+
+	"operatortouches":       1, // R1 babysitting counter (#2270): pure fold over loopmgr's loop-event ledger measuring human touches per witnessed shipped unit; imports only loopmgr (tier 1), off the hot path.
+	"popularizationtickets": 1, // embedded popularization-ticket curriculum (tickets.json) + pure fold/render over it; stdlib-only, off the hot path.
+	"qwen36nodereports":     2, // qwen36 node-report harvester: reads/unzips node artifacts and folds a versioned report; tool-shaped mechanism leaf, shells out off the hot path, imports nothing internal.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
