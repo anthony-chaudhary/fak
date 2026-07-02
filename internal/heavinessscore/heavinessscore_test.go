@@ -34,6 +34,22 @@ func TestParseVerbs_OnlyTheDispatchBlock(t *testing.T) {
 	}
 }
 
+func TestParsePublicVerbs_UsesAuthoredSurface(t *testing.T) {
+	usage := "usage:\n" +
+		"  fak run       --trace FILE\n" +
+		"  fak commit    --path P\n" +
+		"      fak not-a-row appears in prose and is not a surface row\n"
+	docs := "```\n" +
+		"fak maturity  [next] [--json]\n" +
+		"fak run       --trace FILE\n" +
+		"```\n"
+	got := ParsePublicVerbs(usage, docs)
+	want := []string{"commit", "maturity", "run"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("ParsePublicVerbs = %v, want %v", got, want)
+	}
+}
+
 func TestIsMetaVerb(t *testing.T) {
 	for _, v := range []string{"conflation-scorecard", "dojo-rsi", "loop-score", "scorecard"} {
 		if !isMetaVerb(v) {

@@ -61,10 +61,12 @@ const CleanFloor = 0
 
 // The operator-surface source files this card reads. The strings these render ARE the data.
 const (
-	mainGoRel  = "cmd/fak/main.go"  // the top-level dispatch table (the verb surface)
-	guardGoRel = "cmd/fak/guard.go" // the front-door verb's flag set
-	dosTomlRel = "dos.toml"         // the structured refusal vocabulary
-	docMapRel  = "llms.txt"         // the doc map an operator orients from
+	mainGoRel  = "cmd/fak/main.go"       // the top-level dispatch table (appeal/fallback)
+	usageGoRel = "cmd/fak/usage.go"      // the authored public help wall
+	cliDocRel  = "docs/cli-reference.md" // the public CLI catalog
+	guardGoRel = "cmd/fak/guard.go"      // the front-door verb's flag set
+	dosTomlRel = "dos.toml"              // the structured refusal vocabulary
+	docMapRel  = "llms.txt"              // the doc map an operator orients from
 )
 
 // Soft lines + ceilings for the magnitude KPIs. The soft line is the comfortable operator-surface
@@ -106,7 +108,7 @@ var requiredDocMapSurfaces = []requiredDocMapSurface{
 // Surface is the parsed operator-facing surface every KPI reads. Holding it as plain data is what
 // lets the KPIs be pure functions tested against fixtures with no tree.
 type Surface struct {
-	Verbs          []string // distinct top-level dispatch verbs (sorted)
+	Verbs          []string // distinct public top-level verbs (sorted)
 	MetaVerbs      []string // the subset that are meta-scorecards / RSI verbs (sorted)
 	FrontDoorFlags int      // flags defined on the front-door verb (`fak guard`)
 	RefusalReasons int      // [reasons.*] blocks declared in dos.toml
@@ -124,6 +126,8 @@ var (
 	reReasonsBlock = regexp.MustCompile(`(?m)^\[reasons\.[A-Z0-9_]+\]`)
 	// reMarkdownLink matches a markdown link target `](...)` -- the shape of a real doc-map entry.
 	reMarkdownLink = regexp.MustCompile(`\]\([^)]*\)`)
+	// rePublicVerbLine matches the authored public CLI surface in usage.go and docs/cli-reference.md.
+	rePublicVerbLine = regexp.MustCompile(`(?m)^ {0,2}fak\s+([a-z][a-z0-9-]*)\b`)
 )
 
 // dispatchSwitchHeader anchors the top-level verb switch in cmd/fak/main.go. Bounding the verb
@@ -174,14 +178,38 @@ func ParseVerbs(mainGo string) []string {
 	return out
 }
 
+// ParsePublicVerbs returns the distinct public top-level verbs authored in the help wall and CLI
+// reference. Hidden subprocess arms in the dispatch switch are executable implementation details,
+// not operator-facing surface; if the authored surface is unavailable, ParseSurface falls back to
+// the dispatch parser above so the card remains measurable in tiny fixtures.
+func ParsePublicVerbs(texts ...string) []string {
+	seen := map[string]bool{}
+	for _, text := range texts {
+		for _, m := range rePublicVerbLine.FindAllStringSubmatch(text, -1) {
+			seen[m[1]] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for v := range seen {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ParseSurface reads the four operator-surface source files under root into a Surface.
 func ParseSurface(root string) Surface {
 	mainGo := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(mainGoRel)))
+	usageGo := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(usageGoRel)))
+	cliDoc := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(cliDocRel)))
 	guardGo := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(guardGoRel)))
 	dosToml := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(dosTomlRel)))
 	docMap := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(docMapRel)))
 
-	verbs := ParseVerbs(mainGo)
+	verbs := ParsePublicVerbs(usageGo, cliDoc)
+	if len(verbs) == 0 {
+		verbs = ParseVerbs(mainGo)
+	}
 	var meta []string
 	for _, v := range verbs {
 		if isMetaVerb(v) {
@@ -200,7 +228,7 @@ func ParseSurface(root string) Surface {
 	}
 }
 
-// metaShare is the fraction of the dispatch table that is meta-tooling.
+// metaShare is the fraction of the public verb surface that is meta-tooling.
 func (s Surface) metaShare() float64 {
 	if len(s.Verbs) == 0 {
 		return 0
