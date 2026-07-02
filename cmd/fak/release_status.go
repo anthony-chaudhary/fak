@@ -393,10 +393,7 @@ func releaseStatusCutPlan(root string, opts releaseStatusOptions) map[string]any
 }
 
 func releaseStatusRunPythonJSON(root string, timeout time.Duration, script string, args ...string) (map[string]any, int, error) {
-	python := strings.TrimSpace(os.Getenv("FAK_PYTHON"))
-	if python == "" {
-		python = "python"
-	}
+	python := releasePython()
 	scriptPath := filepath.Join(root, "tools", script)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

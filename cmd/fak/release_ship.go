@@ -642,10 +642,7 @@ func releaseShipWorktreeDir(root string, opts releaseShipOptions) (string, error
 }
 
 func releaseShipPython() string {
-	if p := strings.TrimSpace(os.Getenv("FAK_PYTHON")); p != "" {
-		return p
-	}
-	return "python"
+	return releasePython()
 }
 
 func releaseShipScript(root, script string) string {

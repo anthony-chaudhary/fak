@@ -135,7 +135,7 @@ release-staleness-check:
 # publish, and roll back a release at agentic speed? Re-derived from git + the tracked
 # tree + live release signals; folds into the scorecard control pane. Pure-stdlib.
 release-readiness:
-	@python3 tools/release_readiness_scorecard.py
+	@go run ./cmd/fak release readiness
 
 # garden: the default-on gardening bundle — ONE read-only fold over the repo's
 # self-maintenance passes (the scorecard control pane + fresh status), so "run the

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -70,6 +71,59 @@ func TestReleaseDispatchesKnownHelper(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotArgs, []string{"--version", "1.2.3", "--json"}) {
 		t.Fatalf("args = %#v", gotArgs)
+	}
+}
+
+func TestReleaseDispatchesReadinessAliases(t *testing.T) {
+	old := releaseRunScript
+	defer func() { releaseRunScript = old }()
+
+	for _, subcommand := range []string{"readiness", "release-readiness", "scorecard", "release-scorecard"} {
+		t.Run(subcommand, func(t *testing.T) {
+			var gotScript string
+			var gotArgs []string
+			releaseRunScript = func(root, script string, args []string, stdout, stderr io.Writer) int {
+				gotScript = script
+				gotArgs = append([]string(nil), args...)
+				return 0
+			}
+
+			rc := runRelease(io.Discard, io.Discard, []string{subcommand, "--json"})
+			if rc != 0 {
+				t.Fatalf("exit = %d, want 0", rc)
+			}
+			if gotScript != "release_readiness_scorecard.py" {
+				t.Fatalf("script = %q, want release_readiness_scorecard.py", gotScript)
+			}
+			if !reflect.DeepEqual(gotArgs, []string{"--json"}) {
+				t.Fatalf("args = %#v", gotArgs)
+			}
+		})
+	}
+}
+
+func TestReleasePythonSelection(t *testing.T) {
+	old := releaseLookPath
+	defer func() { releaseLookPath = old }()
+
+	t.Setenv("FAK_PYTHON", "")
+	releaseLookPath = func(name string) (string, error) {
+		switch name {
+		case "python":
+			return "", errors.New("missing")
+		case "python3":
+			return "/usr/bin/python3", nil
+		default:
+			return "", errors.New("unexpected")
+		}
+	}
+	if got := releasePython(); got != "python3" {
+		t.Fatalf("releasePython() = %q, want python3 fallback", got)
+	}
+
+	t.Setenv("FAK_PYTHON", "custom-python")
+	if got := releasePython(); got != "custom-python" {
+		t.Fatalf("releasePython() with FAK_PYTHON = %q, want custom-python", got)
 	}
 }
 
@@ -156,6 +210,7 @@ func TestReleaseUsageSurfacesCanonicalPath(t *testing.T) {
 		"release-artifacts verification",
 		"ship --execute",
 		"staleness",
+		"readiness",
 		"stable|stable-context",
 	} {
 		if !strings.Contains(text, want) {

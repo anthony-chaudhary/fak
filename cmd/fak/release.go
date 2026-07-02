@@ -18,21 +18,24 @@ type releaseScriptRunner func(root, script string, args []string, stdout, stderr
 var releaseRunScript releaseScriptRunner = runReleaseScript
 var releaseRunShip = runReleaseShip
 var releaseRunStatus = runReleaseStatus
+var releaseLookPath = exec.LookPath
 
 var releaseScripts = map[string]string{
-	"plan":           "release_status.py",
-	"decide":         "release_decide.py",
-	"cut":            "release_cut.py",
-	"tag":            "release_tag.py",
-	"publish":        "release_publish.py",
-	"lock":           "release_lock.py",
-	"dry-run":        "release_dry_run.py",
-	"dryrun":         "release_dry_run.py",
-	"manifest":       "release_manifest.py",
-	"readiness":      "release_readiness_scorecard.py",
-	"scorecard":      "release_readiness_scorecard.py",
-	"stable":         "stable_release_promote.py",
-	"stable-context": "stable_release_context.py",
+	"plan":              "release_status.py",
+	"decide":            "release_decide.py",
+	"cut":               "release_cut.py",
+	"tag":               "release_tag.py",
+	"publish":           "release_publish.py",
+	"lock":              "release_lock.py",
+	"dry-run":           "release_dry_run.py",
+	"dryrun":            "release_dry_run.py",
+	"manifest":          "release_manifest.py",
+	"readiness":         "release_readiness_scorecard.py",
+	"release-readiness": "release_readiness_scorecard.py",
+	"scorecard":         "release_readiness_scorecard.py",
+	"release-scorecard": "release_readiness_scorecard.py",
+	"stable":            "stable_release_promote.py",
+	"stable-context":    "stable_release_context.py",
 }
 
 func cmdRelease(argv []string) { os.Exit(runRelease(os.Stdout, os.Stderr, argv)) }
@@ -50,7 +53,7 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 	rest := argv
 	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
 		key := strings.ToLower(strings.TrimSpace(argv[0]))
-		if key == "staleness" {
+		if key == "staleness" || key == "release-staleness" {
 			return runReleaseStaleness(stdout, stderr, argv[1:])
 		}
 		if key == "status" {
@@ -100,10 +103,7 @@ func hasReleaseArg(args []string, want string) bool {
 }
 
 func runReleaseScript(root, script string, args []string, stdout, stderr io.Writer) int {
-	python := strings.TrimSpace(os.Getenv("FAK_PYTHON"))
-	if python == "" {
-		python = "python"
-	}
+	python := releasePython()
 	scriptPath := filepath.Join(root, "tools", script)
 	if _, err := os.Stat(scriptPath); err != nil {
 		fmt.Fprintf(stderr, "fak release: %s is unavailable: %v\n", scriptPath, err)
@@ -124,6 +124,18 @@ func runReleaseScript(root, script string, args []string, stdout, stderr io.Writ
 	return 0
 }
 
+func releasePython() string {
+	if python := strings.TrimSpace(os.Getenv("FAK_PYTHON")); python != "" {
+		return python
+	}
+	for _, name := range []string{"python", "python3"} {
+		if _, err := releaseLookPath(name); err == nil {
+			return name
+		}
+	}
+	return "python"
+}
+
 func releaseUsage(w io.Writer) {
 	fmt.Fprint(w, `fak release - front door for the release helpers
 
@@ -131,7 +143,7 @@ usage:
   fak release [status flags...]
   fak release ship [--execute] [--json] [ship flags...]
   fak release prplan [--json] [--base <ref>] [--head <ref>] [--check]
-  fak release status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness [helper flags...]
+  fak release status|staleness|release-staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|release-readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
 
 examples:
@@ -140,6 +152,7 @@ examples:
   fak release prplan --base origin/main --head main
   fak release prplan --check
   fak release staleness --json
+  fak release readiness --json
   fak release decide --json --require-ci-green
   fak release cut --json
   fak release cut --execute --json --require-ci-green
@@ -155,9 +168,10 @@ Helper order underneath:
   detached worktree at origin/main -> release_decide -> release_lock -> release_cut
   -> push main -> release_tag -> release_publish -> release-artifacts verification
 
-The status, staleness, and prplan subcommands are native Go folds. The deeper
-release helpers live in tools/release_*.py / tools/stable_release_*.py and
-remain the release contract while their implementation is migrated.
+The status, staleness, and prplan subcommands are native Go folds; readiness is
+routed through the same Go front door to the scorecard helper. The deeper release
+helpers live in tools/release_*.py / tools/stable_release_*.py and remain the
+release contract while their implementation is migrated.
 prplan folds the promotion range (release branch .. release source) into PR
 units grouped by the (fak <leaf>) ship-stamp — the "PRs managed in advance"
 artifact a dev->main promotion opens as its human-legible PR body(ies);
