@@ -1202,7 +1202,7 @@ func addPositiveIntToUint64(total uint64, value int) uint64 {
 }
 
 func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
-	s.logInferenceTurnWithContextEvent(traceID, wire, stream, usage, finishReason, dur, compacted, compacted)
+	s.logInferenceTurnWithContextEvent(traceID, wire, stream, usage, finishReason, dur, compacted, compacted || s.consumeDecodedCtxViewEvent(traceID))
 }
 
 func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool) {
