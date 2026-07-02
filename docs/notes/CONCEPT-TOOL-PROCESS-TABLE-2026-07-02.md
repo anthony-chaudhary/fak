@@ -23,8 +23,12 @@ events, and `fak guard` now installs the PreToolUse/PostToolUse/SessionEnd
 hooks for Claude children by default (observe mode, fail-open,
 `--toolproc-hooks off` to disable) — a default guarded session carries a
 live `fak toolproc ps` table with zero setup, and SessionEnd (never Stop,
-which fires every turn) marks the orphan boundary. Seams 3, 5, and 6 remain
-**labeled next steps**. The spine is
+which fires every turn) marks the orphan boundary. Seam 6 is **wired**:
+`Supervisor.BindPID` binds a spawned call to the OS process tree it
+launched, and a kill/reap tick terminates the bound tree through
+`procguard.KillPID` (`NewOSSupervisor`) in the same act that cancels and
+revokes — reap advice has OS teeth once the embedder binds the pid. Seams
+3 and 5 remain **labeled next steps**. The spine is
 offline-provable: `fak toolproc sample` folds a deterministic built-in
 journal, no key, no model, no GPU.
 
@@ -176,10 +180,14 @@ and advice stream. None of this is wired yet.
    belong in the capability manifest, per tool — the runtime envelope granted
    at admission alongside the capability itself. "You may run this tool" and
    "you may run it for this long, reporting at this cadence" are one grant.
-6. **procguard bridge**. `reap` advice has teeth only if the tool process is
-   bound to its OS process tree (job objects / process groups) at spawn.
-   `internal/procguard` already knows how to classify and reap at the OS
-   level; the missing piece is the tool-call ↔ process-tree binding.
+6. **procguard bridge** — **wired**. `Supervisor.BindPID(callID, pid)` is
+   the tool-call ↔ process-tree binding (self-pid refused; retired on exit,
+   prune, or kill), and `NewOSSupervisor` arms `procguard.KillPID` (taskkill
+   /T /F on Windows, SIGKILL on POSIX) as the tick's OS lever — invoked once
+   per kill/reap, outside the lock, its verdict recorded on the TickAction
+   (`reaped`/`reap_detail`; a failed reap never claims success). What remains
+   is embedder adoption: the spawn plumbing that knows the pid (the seam-1
+   wire adapter, the hook adapter) calls BindPID.
 
 ## Honesty fences
 
