@@ -135,7 +135,7 @@ func commandOutwardFacing(cmd string) bool {
 		orderedWords(words, "gh", "pr", "comment"), orderedWords(words, "gh", "pr", "merge"),
 		orderedWords(words, "gh", "release", "create"), orderedWords(words, "gh", "release", "upload"):
 		return true
-	case curlWrites(words), httpieWrites(words), ghAPIWrites(words):
+	case curlWrites(cmd), httpieWrites(words), ghAPIWrites(words):
 		return true
 	default:
 		return false
@@ -187,19 +187,10 @@ func toolIrreversible(tool string) bool {
 		strings.Contains(lower, "unlink") || strings.Contains(lower, "rmdir")
 }
 
-func curlWrites(words []string) bool {
-	if !containsWord(words, "curl") {
-		return false
-	}
-	for i, w := range words {
-		if (w == "x" || w == "request" || w == "request-target") && i+1 < len(words) && httpWriteVerb(words[i+1]) {
-			return true
-		}
-		if w == "d" || w == "data" || w == "data-raw" || w == "data-binary" || w == "form" {
-			return true
-		}
-	}
-	return false
+var curlWriteFlagRE = regexp.MustCompile(`(?i)(^|[;&|()]|[[:space:]])curl(\.exe)?\b.*([[:space:]]-[Xx][[:space:]]*(POST|PUT|PATCH|DELETE)\b|[[:space:]]--request(=|[[:space:]]+)(POST|PUT|PATCH|DELETE)\b|[[:space:]](-d|--data|--data-raw|--data-binary|--form)(=|[[:space:]]|$))`)
+
+func curlWrites(cmd string) bool {
+	return curlWriteFlagRE.MatchString(cmd)
 }
 
 func httpieWrites(words []string) bool {
@@ -391,6 +382,15 @@ func argsWithoutConfirmation(args map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func hasConfirmationArg(args map[string]any) bool {
+	for k := range args {
+		if isConfirmationKey(k) {
+			return true
+		}
+	}
+	return false
 }
 
 func confirmationToken(args map[string]any) string {

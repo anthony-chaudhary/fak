@@ -57,16 +57,17 @@ func TestMatchGlobDotfileBoundary(t *testing.T) {
 		path string
 		want string
 	}{
-		{"os.environ", ""},                            // dotted name, not a dotfile
-		{"config.env", ""},                            // suffixed word, not a dotfile
-		{".env", ".env"},                              // the dotfile itself, start of string
-		{"src/.env", ".env"},                          // path segment
-		{"--env-file=.env", ".env"},                   // '=' boundary
-		{"'.env'", ".env"},                            // quote boundary
-		{"~/.aws/credentials", ".aws/"},               // '/' boundary
-		{"backup id_rsa now", "id_rsa"},               // non-dot glob: substring as before
-		{"david_rsa", "id_rsa"},                       // non-dot glob keeps its (coarse) substring reach
-		{"x internal/abi/kernel.go", "internal/abi/"}, // non-dot glob unchanged
+		{"os.environ", ""},                                 // dotted name, not a dotfile
+		{"config.env", ""},                                 // suffixed word, not a dotfile
+		{".env", ".env"},                                   // the dotfile itself, start of string
+		{"src/.env", ".env"},                               // path segment
+		{"--env-file=.env", ".env"},                        // '=' boundary
+		{"'.env'", ".env"},                                 // quote boundary
+		{"~/.aws/credentials", ".aws/"},                    // '/' boundary
+		{"backup id_rsa now", "id_rsa"},                    // non-dot glob: substring as before
+		{"david_rsa", "id_rsa"},                            // non-dot glob keeps its (coarse) substring reach
+		{"x internal/abi/kernel.go", "internal/abi/"},      // non-dot glob unchanged
+		{"shutil.rmtree('internal/abi')", "internal/abi/"}, // tree glob catches exact dir too
 	}
 	for _, tc := range cases {
 		if got := matchGlob(tc.path, globs); got != tc.want {

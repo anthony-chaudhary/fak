@@ -87,6 +87,7 @@ const (
 	rungArgPredicate              // per-tool arg-value predicates
 	rungEgress                    // tool call reaches a blocked network destination (cloud-metadata SSRF)
 	rungLintWrite                 // whole-file write of unparseable code
+	rungReversibility             // preview-confirm for irreversible / outward-facing dispatch
 	rungTransform                 // redact a secret-shaped arg before dispatch
 	rungAllow                     // affirmative allow + AllowPrefix (terminal)
 	rungDefaultDeny               // fail-closed default deny (terminal)

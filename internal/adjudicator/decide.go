@@ -86,6 +86,16 @@ type Policy struct {
 	// violations) already returned before defaultDeny, so they still fail closed. An
 	// empty/nil Complain set is byte-identical to HEAD (no tool is in complain mode).
 	Complain map[string]bool
+	// AdvisoryReasons is the operator-declared per-reason advisory (warn) posture —
+	// the false-positive escape hatch for the HEURISTIC rungs. A monitor refusal
+	// citing a reason in this set is downgraded to an admit-and-log Allow carrying
+	// the would-deny record in Meta (posture=advisory, would_deny, the bounded
+	// claim), so the decision journal keeps every would-deny. CLAMPED to
+	// AdvisoryEligible (SELF_MODIFY, MALFORMED, DEFAULT_DENY) by New/SetPolicy —
+	// the genuine-danger reasons (POLICY_BLOCK, SECRET_EXFIL, EGRESS_BLOCK) can
+	// never be blanket-softened; use ArgPredicate.Advisory for one FP-prone rule.
+	// Empty/nil keeps every rung enforcing (byte-identical to HEAD). See advisory.go.
+	AdvisoryReasons map[abi.ReasonCode]bool
 	// SecretPosture selects what the on-discovery secret rung (internal/secretgate,
 	// #884/#885) does when a tool RESULT bears a credential: quarantine (the zero
 	// value = today's behavior), fail_closed (deny), or admit_and_log (admit a
@@ -156,6 +166,12 @@ type ArgPredicate struct {
 	Re     *regexp.Regexp // ArgDenyRegex: precompiled RE2 (nil for other kinds)
 	N      int            // ArgMaxBytes: byte cap
 	Reason abi.ReasonCode // refusal code cited on violation (manifest default: POLICY_BLOCK)
+	// Advisory puts THIS rule on logged trial (manifest arg_rules[].advisory): a
+	// violation no longer denies — it is noted (bounded, never the arg value) and
+	// carried on the eventual verdict's Meta as advisory_violations, so an operator
+	// can soften ONE false-positive-prone rule without uncoupling the rest of the
+	// floor. The rule-granular dual of Policy.AdvisoryReasons.
+	Advisory bool
 }
 
 // Adjudicator is the reference monitor. Construct with New; the default instance
@@ -182,13 +198,15 @@ type Adjudicator struct {
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
-	p.Profile = sanitizeProfile(p.Profile) // floor invariant: a profile may narrow only
+	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
+	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
 	return &Adjudicator{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)}
 }
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
 func (a *Adjudicator) SetPolicy(p Policy) {
-	p.Profile = sanitizeProfile(p.Profile) // floor invariant: a profile may narrow only
+	p.Profile = sanitizeProfile(p.Profile)                         // floor invariant: a profile may narrow only
+	p.AdvisoryReasons = sanitizeAdvisoryReasons(p.AdvisoryReasons) // floor invariant: only heuristic reasons soften
 	a.mu.Lock()
 	a.policy = p
 	a.argByTool = indexArgPredicates(p.ArgPredicates)
@@ -302,9 +320,11 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	argPreds := a.argByTool[strings.ToLower(c.Tool)] // predicates targeting THIS tool (case-insensitive)
 	a.mu.RUnlock()
 
-	// Explicit provable refusal.
+	// Explicit provable refusal. Routed through soften like every monitor deny:
+	// a name-level deny only downgrades when the operator declared its CITED
+	// reason advisory (never POLICY_BLOCK / SECRET_EXFIL — those are clamped).
 	if r, ok := p.Deny[c.Tool]; ok {
-		return abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "monitor"}
+		return p.soften(abi.Verdict{Kind: abi.VerdictDeny, Reason: r, By: "monitor"}, nil)
 	}
 
 	// Decode args once for the structural checks.
@@ -325,12 +345,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// glob, never the whole policy (deny channel is not a policy oracle).
 	if pr.runs(cl, rungSelfModify) && writeShaped(c.Tool) {
 		if g := matchGlob(targetPath(args), p.SelfModifyGlobs); g != "" {
-			return abi.Verdict{
+			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
-			}
+			}, nil)
 		}
 	}
 
@@ -345,12 +365,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// disclosure: the witness names only the offending glob.
 	if pr.runs(cl, rungCmdSelfModify) {
 		if g := commandSelfModify(args, p.SelfModifyGlobs); g != "" {
-			return abi.Verdict{
+			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
-			}
+			}, nil)
 		}
 	}
 
@@ -367,12 +387,12 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// is not exec/command-shaped anyway).
 	if pr.runs(cl, rungSynthTool) {
 		if g := synthToolSelfModify(args, &a.authored, p.SelfModifyGlobs); g != "" {
-			return abi.Verdict{
+			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonSelfModify,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: g},
-			}
+			}, nil)
 		}
 		// Record agent-authored scripts (the ledger half) so the NEXT exec is
 		// recognized as a synth-tool. Placed AFTER the self-modify deny rung, so a
@@ -385,9 +405,16 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// refusal even for an otherwise allow-listed tool — denied here, never passed
 	// to detection. Bounded disclosure: the witness names only the offending
 	// tool.arg + the bound it broke, never the whole policy nor the arg value.
+	// advisoryNotes accumulates the bounded records of violated ADVISORY arg rules
+	// (ArgPredicate.Advisory): noted, never denied, attached to whatever verdict
+	// this call ultimately resolves to — if it is an admit. A later hard deny
+	// stands on its own (the deny already names its offense).
+	var advisoryNotes []string
 	if pr.runs(cl, rungArgPredicate) && len(argPreds) > 0 {
-		if v, denied := evalArgPredicates(argPreds, c.Tool, args); denied {
-			return v
+		v, denied, notes := evalArgPredicates(argPreds, c.Tool, args)
+		advisoryNotes = notes
+		if denied {
+			return p.soften(v, advisoryNotes)
 		}
 	}
 
@@ -426,37 +453,81 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// finding, never the file content.
 	if pr.runs(cl, rungLintWrite) && p.LintWrites && wholeFileWrite(c.Tool) {
 		if w := lintWriteMalformed(targetPath(args), args); w != "" {
-			return abi.Verdict{
+			return p.soften(abi.Verdict{
 				Kind:    abi.VerdictDeny,
 				Reason:  abi.ReasonMalformed,
 				By:      "monitor",
 				Payload: abi.WitnessPayload{Claim: w},
+			}, advisoryNotes)
+		}
+	}
+
+	redactedArgs, redacted := map[string]any(nil), false
+	if pr.runs(cl, rungTransform) && len(p.RedactFields) > 0 && args != nil {
+		redactedArgs, redacted = redact(args, p.RedactFields)
+	}
+
+	// REVERSIBILITY (#2156): before any path that would otherwise dispatch the
+	// call (redact-transform, affirmative allow, or admit-and-log default allow),
+	// hold irreversible/outward-facing calls behind a deterministic preview token.
+	// Hard refusals above still win first, and a normally denied call is not handed
+	// a preview token it cannot use.
+	confirmedWithToken := false
+	if pr.runs(cl, rungReversibility) && (redacted || wouldAdmit(p, c.Tool)) {
+		env, ok := ReversibilityConfirmed(c.Tool, args)
+		if !ok {
+			return reversibilityGateVerdict(env)
+		}
+		confirmedWithToken = env.Class != ReversibilityReversible && hasConfirmationArg(args)
+		if confirmedWithToken {
+			args = argsWithoutConfirmation(args)
+			if redacted {
+				redactedArgs, redacted = redact(args, p.RedactFields)
 			}
 		}
 	}
 
-	// TRANSFORM: redact a secret-shaped arg field before dispatch.
-	if pr.runs(cl, rungTransform) && len(p.RedactFields) > 0 && args != nil {
-		if newArgs, changed := redact(args, p.RedactFields); changed {
-			if ref, ok := putJSON(ctx, newArgs); ok {
-				return abi.Verdict{Kind: abi.VerdictTransform, By: "monitor",
-					Payload: abi.TransformPayload{NewArgs: ref}}
+	// TRANSFORM: redact a secret-shaped arg field before dispatch. An advisory
+	// arg-rule note rides the transform's Meta so the logged trial is not lost
+	// when the call is repaired-and-dispatched rather than plainly allowed.
+	if redacted {
+		if ref, ok := putJSON(ctx, redactedArgs); ok {
+			v := abi.Verdict{Kind: abi.VerdictTransform, By: "monitor",
+				Payload: abi.TransformPayload{NewArgs: ref}}
+			if len(advisoryNotes) > 0 {
+				v.Meta = map[string]string{"advisory_violations": strings.Join(advisoryNotes, "; ")}
 			}
+			return v
 		}
 	}
 
 	// Affirmative allow.
 	if p.Allow[c.Tool] {
-		return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor"}
+		if confirmedWithToken {
+			if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+				return v
+			}
+		}
+		return allowWithNotes("monitor", advisoryNotes)
 	}
 	for _, pre := range p.AllowPrefix {
 		if strings.HasPrefix(c.Tool, pre) {
-			return abi.Verdict{Kind: abi.VerdictAllow, By: "monitor"}
+			if confirmedWithToken {
+				if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+					return v
+				}
+			}
+			return allowWithNotes("monitor", advisoryNotes)
 		}
 	}
 
 	// Nothing affirmatively allowed it — fail-closed default deny.
-	return defaultDeny(p, c.Tool)
+	if confirmedWithToken && (p.admitAndLog(c.Tool) || p.AdvisoryReasons[abi.ReasonDefaultDeny]) {
+		if v, ok := stripConfirmationTransform(ctx, args, advisoryNotes); ok {
+			return v
+		}
+	}
+	return defaultDeny(p, c.Tool, advisoryNotes)
 }
 
 // complainFor reports whether a tool is in the per-tool complain set (#670). A nil
@@ -471,6 +542,18 @@ func (p *Policy) complainFor(tool string) bool {
 // self-modify, arg violations) return before defaultDeny, so neither path can admit one.
 func (p *Policy) admitAndLog(tool string) bool {
 	return (p.Posture == PostureAdmitAndLog && lowRiskReadShaped(tool)) || p.complainFor(tool)
+}
+
+func wouldAdmit(p Policy, tool string) bool {
+	if p.Allow[tool] || p.admitAndLog(tool) || p.AdvisoryReasons[abi.ReasonDefaultDeny] {
+		return true
+	}
+	for _, pre := range p.AllowPrefix {
+		if strings.HasPrefix(tool, pre) {
+			return true
+		}
+	}
+	return false
 }
 
 // NeverAdmits (on the live Adjudicator) is the locked read of the installed floor's
@@ -511,8 +594,10 @@ func (p Policy) NeverAdmits(tool string) bool {
 	if len(p.Allow) == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
 		return false
 	}
-	if _, denied := p.Deny[tool]; denied {
-		return true
+	if r, denied := p.Deny[tool]; denied {
+		// A name-deny whose cited reason is advisory can still be admitted (the
+		// soften downgrade), so its tool-def must not be pruned.
+		return !p.AdvisoryReasons[r]
 	}
 	if p.Allow[tool] {
 		return false
@@ -525,25 +610,72 @@ func (p Policy) NeverAdmits(tool string) bool {
 	if strings.EqualFold(tool, "WebFetch") && len(p.ResearchEgressAllowHosts) > 0 {
 		return false
 	}
-	return !p.admitAndLog(tool)
+	// Advisory DEFAULT_DENY admits any name (with the would-deny record), so
+	// nothing is never-admitted under it.
+	return !p.admitAndLog(tool) && !p.AdvisoryReasons[abi.ReasonDefaultDeny]
 }
 
-func defaultDeny(p Policy, tool string) abi.Verdict {
+func defaultDeny(p Policy, tool string, advisoryNotes []string) abi.Verdict {
 	if p.admitAndLog(tool) {
 		// Admit-and-log record (#671): the default-deny rung is the refusal being
 		// suppressed, so the record carries would_deny = its reason name via
 		// abi.ReasonName — the forensic field the promotion ledger (#672) folds. Both
 		// the complain-set and the global read-shaped path carry it identically.
+		meta := map[string]string{
+			"posture":    "admit_and_log",
+			"would_deny": abi.ReasonName(abi.ReasonDefaultDeny),
+		}
+		if len(advisoryNotes) > 0 {
+			meta["advisory_violations"] = strings.Join(advisoryNotes, "; ")
+		}
 		return abi.Verdict{
 			Kind: abi.VerdictAllow,
 			By:   "monitor",
-			Meta: map[string]string{
-				"posture":    "admit_and_log",
-				"would_deny": abi.ReasonName(abi.ReasonDefaultDeny),
-			},
+			Meta: meta,
 		}
 	}
-	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "monitor"}
+	// Advisory DEFAULT_DENY (Policy.AdvisoryReasons) admits ANY tool with the
+	// would-deny record — the strictly-wider dev dual of admit_and_log, carrying
+	// posture=advisory so the promotion ledger's admit_and_log fold is untouched.
+	return p.soften(abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "monitor"}, advisoryNotes)
+}
+
+func reversibilityGateVerdict(env ReversibilityEnvelope) abi.Verdict {
+	claim, err := json.Marshal(env)
+	if err != nil {
+		claim = []byte(`{"class":"` + string(env.Class) + `"}`)
+	}
+	meta := map[string]string{
+		"reversibility_class": string(env.Class),
+		"preview":             env.Preview,
+		"confirm_token":       env.ConfirmToken,
+	}
+	if env.DryRunHint != "" {
+		meta["dry_run_hint"] = env.DryRunHint
+	}
+	return abi.Verdict{
+		Kind:    abi.VerdictRequireWitness,
+		By:      "monitor/reversibility",
+		Payload: abi.WitnessPayload{Claim: string(claim)},
+		Meta:    meta,
+	}
+}
+
+func stripConfirmationTransform(ctx context.Context, args map[string]any, advisoryNotes []string) (abi.Verdict, bool) {
+	ref, ok := putJSON(ctx, args)
+	if !ok {
+		return abi.Verdict{}, false
+	}
+	v := abi.Verdict{
+		Kind:    abi.VerdictTransform,
+		By:      "monitor",
+		Payload: abi.TransformPayload{NewArgs: ref},
+		Meta:    map[string]string{"reversibility_confirmed": "true"},
+	}
+	if len(advisoryNotes) > 0 {
+		v.Meta["advisory_violations"] = strings.Join(advisoryNotes, "; ")
+	}
+	return v, true
 }
 
 func researchEgressVerdict(tool string, args map[string]any, allowHosts []string) (abi.Verdict, bool) {
@@ -691,6 +823,9 @@ func matchGlob(path string, globs []string) string {
 			if strings.Contains(path, g) {
 				return g
 			}
+			if strings.HasSuffix(g, "/") && treeDirFragmentIn(path, strings.TrimSuffix(g, "/")) {
+				return g
+			}
 			continue
 		}
 		if dotfileFragmentIn(path, g) {
@@ -711,6 +846,30 @@ func dotfileFragmentIn(path, g string) bool {
 		}
 		at := from + i
 		if at == 0 || !wordByte(path[at-1]) {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+// treeDirFragmentIn reports whether a slash-bearing guarded-tree fragment occurs
+// as the tree itself, not only as a parent prefix ending in '/'. This preserves
+// the "internal/abi/" glob for descendants while also catching destructive calls
+// that name the directory exactly, such as rmtree("internal/abi").
+func treeDirFragmentIn(path, g string) bool {
+	if g == "" || !strings.Contains(g, "/") {
+		return false
+	}
+	for from := 0; ; {
+		i := strings.Index(path[from:], g)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		end := at + len(g)
+		leftOK := at == 0 || !wordByte(path[at-1])
+		rightOK := end == len(path) || !wordByte(path[end])
+		if leftOK && rightOK {
 			return true
 		}
 		from = at + 1
@@ -765,7 +924,14 @@ var interpreterEvalFlags = []interpreterEvalSpec{
 // args, returning the first violation's Deny verdict (and true) or a zero verdict
 // (and false) if all pass. It is pure and allocation-light: it only iterates the
 // (typically tiny) predicate slice and reads scalar arg values.
-func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (abi.Verdict, bool) {
+func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (abi.Verdict, bool, []string) {
+	var notes []string
+	// note records a violated ADVISORY rule instead of denying: the same bounded
+	// string the hard deny would have carried as its witness claim, accumulated so
+	// the eventual admit's Meta shows exactly which trial rules the call broke.
+	note := func(pr *ArgPredicate, detail string) {
+		notes = append(notes, pr.Tool+"."+pr.Arg+" "+detail)
+	}
 	for i := range preds {
 		pr := &preds[i]
 		if !strings.EqualFold(pr.Tool, tool) {
@@ -776,7 +942,11 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 		case ArgAllowGlob:
 			// Positive requirement: a missing OR out-of-bounds value fails closed.
 			if !present || !pathUnderGlob(pr.Glob, val) {
-				return argDeny(pr, "allow_glob "+pr.Glob), true
+				if pr.Advisory {
+					note(pr, "allow_glob "+pr.Glob)
+					continue
+				}
+				return argDeny(pr, "allow_glob "+pr.Glob), true, notes
 			}
 		case ArgDenyRegex:
 			// The RCE download-pipe rule (#1465) is decided STRUCTURALLY, not by the raw
@@ -790,18 +960,30 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// rules stay literal.
 			if isRCEPipeArgRule(pr) {
 				if present && commandHasRemotePipeToInterpreter(val) {
-					return argDeny(pr, "rce_pipe download|interpreter"), true
+					if pr.Advisory {
+						note(pr, "rce_pipe download|interpreter")
+						continue
+					}
+					return argDeny(pr, "rce_pipe download|interpreter"), true, notes
 				}
 			} else if present && pr.Re != nil && pr.Re.MatchString(val) {
-				return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true
+				if pr.Advisory {
+					note(pr, "deny_regex /"+pr.Re.String()+"/")
+					continue
+				}
+				return argDeny(pr, "deny_regex /"+pr.Re.String()+"/"), true, notes
 			}
 		case ArgMaxBytes:
 			if present && len(val) > pr.N {
-				return argDeny(pr, "max_bytes "+strconv.Itoa(pr.N)), true
+				if pr.Advisory {
+					note(pr, "max_bytes "+strconv.Itoa(pr.N))
+					continue
+				}
+				return argDeny(pr, "max_bytes "+strconv.Itoa(pr.N)), true, notes
 			}
 		}
 	}
-	return abi.Verdict{}, false
+	return abi.Verdict{}, false, notes
 }
 
 // argDeny builds the bounded-disclosure Deny for a violated arg predicate. The

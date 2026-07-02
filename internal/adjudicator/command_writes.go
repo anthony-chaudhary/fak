@@ -174,17 +174,31 @@ func commandWrites(cmd string) bool {
 	// NO `>` redirect — `python3 -c "open('internal/abi/x.go','w').write(...)"` would
 	// otherwise launder a self-edit past every rung above (#172 Hole 1 residual, the
 	// `perl -i`/`ruby -i` gap one interpreter further out — python/node/ruby are the ones
-	// most likely on a coding agent's PATH). The program string is opaque to this floor, so
-	// — matching the opaque nature of inline code — an inline interpreter program is
-	// treated as write-shaped.
+	// most likely on a coding agent's PATH). The program string is opaque to this floor.
 	// Matching is by TOKEN (interpreterEvalMatch), so the idiomatic `ruby -e'…'` (no space),
 	// `node --eval=…`, and intervening-flag (`ruby -rjson -e …`) spellings are all caught,
 	// not just a `<interp> <flag> ` prefix. commandSelfModify's target extractor treats
 	// the opaque inline-program segment as the write target; a read-shaped interpreter call
 	// WITHOUT an eval flag (`python score.py`,
 	// `node app.js`) names no flag token and is not matched.
+	//
+	// The eval flag alone is NOT enough — it says "runs an inline program", not "writes a
+	// file". SELF_MODIFY is a WRITE floor, so an inline program that only READS (introspection,
+	// `os.environ`, `open(p).read()`, `.count('id_rsa')`, `os.path.exists('~/.ssh/id_ed25519')`)
+	// must NOT be routed to the whole-segment write-target extractor — where it would match any
+	// guarded glob it merely NAMES by substring and deny a harmless read as a self-edit (witnessed
+	// live 2026-07-02: read-only `python -c` naming `~/.ssh/id_ed25519` / counting `id_rsa` in a
+	// log both denied SELF_MODIFY; the earlier dotfile-boundary fix reached only dot-globs like
+	// `.env`, not the non-dot credential globs). Gate the interpreter rung on inlineEvalWriteIntent:
+	// a program is write-shaped only when it shows an actual file-MUTATION signal (a write/append/
+	// exclusive open, a `.write`/writeFile/File.write, a delete/rename/mkdir/truncate/chmod, or a
+	// subprocess that could do any of those). A read that then EXFILTRATES a secret is the domain of
+	// the secret/egress rungs, not this one. Direction of safety: the write-intent set is broad —
+	// every realistic file write in python/node/ruby carries one of its tokens — so a genuine inline
+	// self-edit keeps its deny; a redirect (`os.system('… > .env')`) inside the program is caught
+	// independently by the `>` scanner regardless of this gate.
 	for _, ev := range interpreterEvalFlags {
-		if interpreterEvalMatch(lc, ev) {
+		if interpreterEvalMatch(lc, ev) && inlineEvalWriteIntent(lc) {
 			return true
 		}
 	}
@@ -427,7 +441,12 @@ func segmentWriteTargets(segment string) []string {
 		}
 	}
 	for _, ev := range interpreterEvalFlags {
-		if interpreterEvalMatch(lc, ev) {
+		// Only a write-INTENT inline program contributes its whole opaque segment as a
+		// write target (mirrors the commandWrites gate): a read-only one-liner that merely
+		// NAMES a guarded path writes nothing, so it must not be handed to matchGlob as a
+		// target. Without this, a read segment's guarded name matches by substring even when
+		// commandWrites was made true by a DIFFERENT segment's real write verb.
+		if interpreterEvalMatch(lc, ev) && inlineEvalWriteIntent(lc) {
 			add(segment)
 			break
 		}
@@ -831,6 +850,52 @@ func isShellSep(b byte) bool {
 	switch b {
 	case ';', '|', '&', '(', '\n':
 		return true
+	}
+	return false
+}
+
+// inlineWriteIntentTokens are the lowercased substrings whose presence in an interpreter
+// inline-program string proves it MUTATES the filesystem (as opposed to only reading). The
+// set is deliberately BROAD on the write side — missing a write is fail-OPEN (a laundered
+// self-edit), while a spurious hit only ever matters when the program ALSO names a guarded
+// glob, and even then errs toward the safe (deny) direction. Every realistic file write in
+// the three inline interpreters this floor covers (python/node/ruby) carries one of these:
+//   - "write": .write / writeFile(Sync) / write_text / write_bytes / File.write / IO.write /
+//     os.write / createWriteStream — the single most common write signal;
+//   - a file opened for WRITE/APPEND/EXCLUSIVE/UPDATE: the comma-prefixed mode strings below
+//     (`open(p, 'w')`, `'a'`, `'x'`, `'w+'`, `'wb'`, …), including the truncate-on-open case
+//     that carries no `.write` call. Comma-prefixed so a bare `print('a')` is not a write;
+//   - a delete / rename / make / truncate / perms mutation verb;
+//   - a subprocess that could do any of the above (`os.system`, `subprocess`, `popen`,
+//     `child_process`, `spawn`), which the `>` redirect scanner also backstops.
+//
+// The residual (a maximally-obfuscated inline writer that avoids every token here) is the
+// same class the perl/php/lua interpreters are for interpreterEvalFlags — named, not yet
+// closed — and the direct-write and shell-redirect floors still catch its common forms.
+var inlineWriteIntentTokens = []string{
+	"write",
+	"truncate", "unlink", "rmtree", "rmdir", "mkdir", "makedirs", "appendfile",
+	".remove(", "os.remove", ".rename(", "os.rename", ".replace(", "shutil",
+	"symlink", "chmod", "chown",
+	"system(", "popen(", "subprocess", "os.exec", "execsync", "child_process", "spawn(", ".spawn", "execfile", "fileutils",
+	// file opened for write/append/exclusive/update — comma-prefixed mode strings, both
+	// quotings and with/without a space after the comma (`open(p,'w')`, `open(p, "a+")`).
+	",'w", ", 'w", ",\"w", ", \"w",
+	",'a", ", 'a", ",\"a", ", \"a",
+	",'x", ", 'x", ",\"x", ", \"x",
+	",'r+", ", 'r+", ",\"r+", ", \"r+",
+}
+
+// inlineEvalWriteIntent reports whether an interpreter inline-program command (already known
+// to carry an interp+eval-flag) shows any sign of MUTATING the filesystem. A false result
+// means the program only reads, so — the SELF_MODIFY floor being a write floor — its opaque
+// segment must not be treated as a write target even when it names a guarded path. See
+// inlineWriteIntentTokens for the safety direction and the residual.
+func inlineEvalWriteIntent(lc string) bool {
+	for _, t := range inlineWriteIntentTokens {
+		if strings.Contains(lc, t) {
+			return true
+		}
 	}
 	return false
 }
