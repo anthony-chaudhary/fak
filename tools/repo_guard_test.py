@@ -210,5 +210,128 @@ class HookTests(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, ""))
 
 
+class SleepTests(unittest.TestCase):
+    """Foreground-sleep detector (#2366): long blocking sleeps are flagged; short,
+    shell-backgrounded, harness-backgrounded, and argument-position ones are not."""
+
+    def setUp(self):
+        self.mod = load()
+
+    def _s(self, tool, ti):
+        return self.mod.sleep_findings(tool, ti)
+
+    def test_long_bash_sleep_flagged(self):
+        v = self._s("Bash", {"command": "sleep 300"})
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0]["reason"], "FOREGROUND_SLEEP")
+        self.assertEqual(v[0]["seconds"], 300)
+
+    def test_sleep_in_loop_and_chain_flagged(self):
+        self.assertTrue(self._s("Bash", {"command": "for i in $(seq 1 16); do sleep 300; probe; done"}))
+        self.assertTrue(self._s("Bash", {"command": "sleep 1500; echo TIMER_DONE_POLL"}))
+        self.assertTrue(self._s("Bash", {"command": "sudo sleep 300 && echo up"}))  # && is not background
+
+    def test_units_and_threshold_boundary(self):
+        self.assertTrue(self._s("Bash", {"command": "sleep 5m"}))    # 300s
+        self.assertTrue(self._s("Bash", {"command": "sleep 2m"}))    # exactly 120s -> flagged (>=)
+        self.assertEqual(self._s("Bash", {"command": "sleep 119"}), [])  # below threshold
+        self.assertEqual(self._s("Bash", {"command": "sleep 1m"}), [])   # 60s
+
+    def test_short_sleep_ok(self):
+        self.assertEqual(self._s("Bash", {"command": "sleep 5"}), [])
+        self.assertEqual(self._s("Bash", {"command": "sleep 30 && go test ./..."}), [])
+
+    def test_sleep_as_argument_not_flagged(self):
+        # `sleep` is an operand of echo/grep here, not a command in its own right.
+        self.assertEqual(self._s("Bash", {"command": "echo sleep 300"}), [])
+        self.assertEqual(self._s("Bash", {"command": "grep sleep 300 file.log"}), [])
+
+    def test_shell_backgrounded_not_flagged(self):
+        self.assertEqual(self._s("Bash", {"command": "sleep 300 &"}), [])
+        self.assertEqual(self._s("Bash", {"command": "sleep 300 & echo started"}), [])
+
+    def test_harness_backgrounded_not_flagged(self):
+        self.assertEqual(self._s("Bash", {"command": "sleep 300", "run_in_background": True}), [])
+
+    def test_powershell_variants(self):
+        self.assertTrue(self._s("PowerShell", {"command": "Start-Sleep -Seconds 300"}))
+        self.assertTrue(self._s("PowerShell", {"command": "Start-Sleep 300"}))
+        self.assertTrue(self._s("PowerShell", {"command": "Start-Sleep -s 240"}))
+        self.assertEqual(self._s("PowerShell", {"command": "Start-Sleep -Milliseconds 5000"}), [])  # 5s
+        self.assertEqual(self._s("PowerShell", {"command": "Start-Sleep 5"}), [])
+
+    def test_non_shell_tool_ignored(self):
+        self.assertEqual(self._s("Write", {"file_path": "sleep 300"}), [])
+        self.assertEqual(self._s("Read", {"command": "sleep 300"}), [])
+
+    def test_threshold_env_override(self):
+        import os
+        old = os.environ.get("FAK_SLEEP_THRESHOLD_S")
+        os.environ["FAK_SLEEP_THRESHOLD_S"] = "600"
+        try:
+            self.assertEqual(self._s("Bash", {"command": "sleep 300"}), [])   # now below the raised bar
+            self.assertTrue(self._s("Bash", {"command": "sleep 700"}))
+        finally:
+            if old is None:
+                os.environ.pop("FAK_SLEEP_THRESHOLD_S", None)
+            else:
+                os.environ["FAK_SLEEP_THRESHOLD_S"] = old
+
+
+class SleepHookTests(unittest.TestCase):
+    def setUp(self):
+        self.mod = load()
+
+    def _run(self, payload, env=None):
+        import os
+        keys = ("FAK_REPO_GUARD", "FAK_SLEEP_THRESHOLD_S")
+        old = {k: os.environ.get(k) for k in keys}
+        for k in keys:
+            os.environ.pop(k, None)
+        if env:
+            os.environ.update(env)
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = self.mod.run_hook(json.dumps(payload))
+            return rc, buf.getvalue()
+        finally:
+            for k, val in old.items():
+                if val is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = val
+
+    def test_hook_denies_long_foreground_sleep(self):
+        rc, out = self._run({"tool_name": "Bash", "cwd": WS, "tool_input": {"command": "sleep 1500; echo done"}})
+        self.assertEqual(rc, 0)
+        hso = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("FOREGROUND_SLEEP", hso["permissionDecisionReason"])
+        self.assertIn("run_in_background", hso["permissionDecisionReason"])
+
+    def test_hook_denies_powershell_sleep(self):
+        rc, out = self._run({"tool_name": "PowerShell", "cwd": WS, "tool_input": {"command": "Start-Sleep -Seconds 300"}})
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_hook_allows_short_sleep(self):
+        rc, out = self._run({"tool_name": "Bash", "cwd": WS, "tool_input": {"command": "sleep 5"}})
+        self.assertEqual((rc, out.strip()), (0, ""))
+
+    def test_warn_mode_allows_sleep(self):
+        rc, out = self._run(
+            {"tool_name": "Bash", "cwd": WS, "tool_input": {"command": "sleep 1500"}},
+            env={"FAK_REPO_GUARD": "warn"},
+        )
+        self.assertEqual((rc, out.strip()), (0, ""))  # no deny JSON on stdout
+
+    def test_off_mode_disables_sleep(self):
+        rc, out = self._run(
+            {"tool_name": "Bash", "cwd": WS, "tool_input": {"command": "sleep 1500"}},
+            env={"FAK_REPO_GUARD": "off"},
+        )
+        self.assertEqual((rc, out.strip()), (0, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

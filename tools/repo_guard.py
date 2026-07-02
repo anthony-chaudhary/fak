@@ -26,6 +26,14 @@ every destructive/write target against the workspace root and flags the ones tha
 land outside it (and outside an allow-listed scratch root like the OS temp dir or
 ``~/.cache``). It is the named floor of ``dos.toml [reasons.OUT_OF_TREE_WRITE]``.
 
+Second check (behavioral, #2366): the hook also refuses a FOREGROUND ``sleep`` /
+``Start-Sleep`` at or above ``SLEEP_THRESHOLD_S`` (120s) in a Bash/PowerShell tool
+call -- bare, in a ``for``/``;`` chain, or behind a benign prefix -- because it holds
+the whole turn open doing nothing when Monitor / ``run_in_background`` / ScheduleWakeup
+exist for exactly that. Short sleeps, shell-backgrounded (``&``) sleeps, and
+harness-backgrounded (``run_in_background``) calls pass untouched. It rides the same
+``FAK_REPO_GUARD`` mode knob (enforce -> deny, warn -> advisory, off -> skip).
+
 Two surfaces, both backed by the same pure core:
   * ``--check "<cmd>"`` / ``--selftest`` / ``--json``  -- a control-pane / CI lens.
   * ``--hook``  -- a Claude Code **PreToolUse** hook: reads the tool call as JSON on
@@ -43,12 +51,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import PurePosixPath
 
 SCHEMA = "fak-repo-guard/1"
 REASON = "OUT_OF_TREE_WRITE"
+# The behavioral (not filesystem) reason this guard also carries: a FOREGROUND sleep
+# long enough to hold a whole turn open doing nothing, when Monitor / run_in_background /
+# ScheduleWakeup exist for exactly that (issue #2366). It rides the SAME FAK_REPO_GUARD
+# mode knob as OUT_OF_TREE_WRITE (enforce -> deny, warn -> advisory, off -> skip).
+REASON_SLEEP = "FOREGROUND_SLEEP"
 
 # Verbs whose path operands are DELETE targets (every non-flag operand).
 DELETE_VERBS = frozenset({"rm", "rmdir", "unlink", "shred", "trash", "trash-put"})
@@ -72,6 +86,41 @@ NULL_DEVICES = frozenset({
     "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom",
     "/dev/stdout", "/dev/stderr", "/dev/tty",
 })
+
+# --------------------------------------------------------------------------- #
+# Foreground-sleep detection (#2366): a `sleep`/`Start-Sleep` at or above this
+# many seconds, running in the FOREGROUND, holds the turn open doing nothing.
+# --------------------------------------------------------------------------- #
+# Threshold in seconds. Short waits (< this) pass untouched — a legitimate settle
+# or debounce is cheap; the wasted-turn tax only bites on the long ones the audit
+# caught (240–1500s foreground timers). Overridable via FAK_SLEEP_THRESHOLD_S.
+SLEEP_THRESHOLD_S = 120
+_SLEEP_UNIT_S = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+# A bash `sleep <dur>` in COMMAND position: at the start of a simple command —
+# after string start, a separator (; & | newline paren brace), or a loop keyword
+# (do/then/else) and the benign command prefixes (sudo/time/nice/…). This anchoring
+# is what keeps `echo sleep 300` (sleep as an ARGUMENT) from tripping the guard.
+_BASH_SLEEP_RE = re.compile(
+    r"""
+    (?:^|[;&|\n(){}]|&&|\|\|)                                    # start of a simple command
+    [ \t]*
+    (?:(?:do|then|else|sudo|time|nice|command|exec|nohup|builtin|env)\b
+       (?:[ \t]+-[^\s]+)*[ \t]+)*                                # loop keywords / benign prefixes (+ flags)
+    sleep[ \t]+
+    (?P<num>\d+(?:\.\d+)?)(?P<unit>[smhd]?)
+    (?![\w.])
+    """,
+    re.VERBOSE,
+)
+# A PowerShell `Start-Sleep` in command position; its args run to the next
+# separator so a following command is never swallowed. Duration parsed downstream.
+_PS_SLEEP_RE = re.compile(
+    r"(?:^|[;&|\n(){}]|&&|\|\|)[ \t]*start-sleep\b(?P<args>[^;&|\n]*)",
+    re.IGNORECASE,
+)
+# A simple command is backgrounded (non-blocking) when a lone `&` — not `&&` —
+# immediately follows it; such a sleep does NOT hold the turn open.
+_BACKGROUND_RE = re.compile(r"[ \t]*&(?!&)")
 
 
 # --------------------------------------------------------------------------- #
@@ -363,6 +412,110 @@ def _violation(op: str, raw: str, resolved: str, why: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Foreground-sleep findings (#2366) -- pure, no filesystem
+# --------------------------------------------------------------------------- #
+def sleep_threshold_s() -> int:
+    """The foreground-sleep threshold in seconds; FAK_SLEEP_THRESHOLD_S overrides
+    the default so an operator can tighten/loosen without a code change. A bad value
+    falls back to the default (a guard knob must never fail closed on a typo)."""
+    raw = (os.environ.get("FAK_SLEEP_THRESHOLD_S") or "").strip()
+    if raw:
+        try:
+            v = int(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return SLEEP_THRESHOLD_S
+
+
+def _dur_seconds(num: str, unit: str) -> float | None:
+    try:
+        return float(num) * _SLEEP_UNIT_S[unit]
+    except (ValueError, KeyError):
+        return None
+
+
+def _backgrounded(rest: str) -> bool:
+    """True iff the text right after a sleep command starts with a lone `&` (the
+    shell background operator), so the sleep does not block the turn. `&&` (and-then)
+    is NOT backgrounding."""
+    return _BACKGROUND_RE.match(rest) is not None
+
+
+def _ps_sleep_seconds(args: str) -> float | None:
+    """Seconds a `Start-Sleep` waits: -Seconds/-s N, -Milliseconds/-ms N (÷1000), or
+    a bare positional number (PowerShell's default -Seconds). None when unparseable."""
+    toks = args.split()
+    for i, tok in enumerate(toks):
+        t = tok.lower()
+        nxt = toks[i + 1] if i + 1 < len(toks) else None
+        if t in ("-milliseconds", "-ms") and nxt:
+            try:
+                return float(nxt) / 1000.0
+            except ValueError:
+                return None
+        if t in ("-seconds", "-s") and nxt:
+            try:
+                return float(nxt)
+            except ValueError:
+                return None
+    for tok in toks:  # positional (default is -Seconds)
+        if re.fullmatch(r"\d+(?:\.\d+)?", tok):
+            return float(tok)
+    return None
+
+
+def sleep_findings(tool_name: str, tool_input: dict, *, threshold_s: int | None = None) -> list[dict]:
+    """Return FOREGROUND_SLEEP findings for a Bash/PowerShell tool call whose command
+    blocks the turn on a foreground sleep at/above the threshold. Pure and content-blind
+    to paths — it reads only the command text (heredoc bodies stripped) and the harness
+    `run_in_background` flag. Empty when the call is backgrounded at the harness level,
+    every sleep is short, or every sleep is shell-backgrounded (`&`)."""
+    if tool_name not in ("Bash", "PowerShell"):
+        return []
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    if ti.get("run_in_background"):
+        return []  # the whole call already runs in the background — it never holds the turn
+    cmd = str(ti.get("command") or "")
+    if not cmd:
+        return []
+    thr = threshold_s if threshold_s is not None else sleep_threshold_s()
+    text = _strip_heredoc_bodies(cmd)
+    out: list[dict] = []
+    for m in _BASH_SLEEP_RE.finditer(text):
+        if _backgrounded(text[m.end():]):
+            continue
+        secs = _dur_seconds(m.group("num"), m.group("unit"))
+        if secs is not None and secs >= thr:
+            out.append(_sleep_finding("sleep", secs, m.group(0)))
+    for m in _PS_SLEEP_RE.finditer(text):
+        if _backgrounded(text[m.end():]):
+            continue
+        secs = _ps_sleep_seconds(m.group("args"))
+        if secs is not None and secs >= thr:
+            out.append(_sleep_finding("Start-Sleep", secs, "Start-Sleep " + m.group("args")))
+    return out
+
+
+def _sleep_finding(op: str, seconds: float, matched: str) -> dict:
+    return {"reason": REASON_SLEEP, "op": op, "seconds": seconds,
+            "target": " ".join(matched.split())[:80]}
+
+
+def render_sleep_reason(findings: list[dict]) -> str:
+    where = "; ".join(f"{f['op']} {f['seconds']:g}s" for f in findings[:4])
+    thr = sleep_threshold_s()
+    return (
+        f"{REASON_SLEEP}: a foreground wait of >= {thr}s holds this turn open doing nothing "
+        f"({where}). Replace the blocking sleep with a background wait -- Monitor (stream events "
+        "as they happen), a run_in_background command with an `until`-loop (one completion "
+        "notification), or ScheduleWakeup (resume later). If a blocking wait is genuinely "
+        "required, re-run with FAK_REPO_GUARD=warn (advisory) or off."
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Context (workspace root + scratch allow-list) -- minimal, no spawns
 # --------------------------------------------------------------------------- #
 def find_repo_root(start: str) -> str:
@@ -495,12 +648,18 @@ def run_hook(stdin_text: str) -> int:
         violations = evaluate(
             tool_name, tool_input, workspace_root=workspace_root, safe_roots=safe_roots
         )
+        naps = sleep_findings(tool_name, tool_input)
     except Exception as exc:  # noqa: BLE001 -- fail-open is deliberate here
         print(f"repo_guard: internal error, allowing ({exc})", file=sys.stderr)
         return 0
-    if not violations:
+    if not violations and not naps:
         return 0
-    reason = render_reason(violations)
+    reason = "  ".join(
+        p for p in (
+            render_reason(violations) if violations else "",
+            render_sleep_reason(naps) if naps else "",
+        ) if p
+    )
     if mode == "warn":
         print(f"repo_guard (advisory): {reason}", file=sys.stderr)
         return 0
@@ -567,6 +726,26 @@ def _selftest() -> int:
         ("Bash", {"command": "go test ./... > /dev/null"}),
         ("Bash", {"command": "echo done >> /dev/stderr"}),
     ]
+    # Foreground-sleep (#2366): a long blocking sleep DENYs; short / backgrounded
+    # / harness-backgrounded ones ALLOW. Threshold is the default 120s.
+    sleep_deny = [
+        ("Bash", {"command": "sleep 300"}),
+        ("Bash", {"command": "sleep 1500; echo TIMER_DONE_POLL"}),
+        ("Bash", {"command": "for i in $(seq 1 16); do sleep 300; probe; done"}),
+        ("Bash", {"command": "sleep 5m"}),
+        ("Bash", {"command": "sudo sleep 300 && echo up"}),
+        ("PowerShell", {"command": "Start-Sleep -Seconds 300"}),
+        ("PowerShell", {"command": "Start-Sleep 240"}),
+    ]
+    sleep_allow = [
+        ("Bash", {"command": "sleep 5"}),
+        ("Bash", {"command": "sleep 30 && go test ./..."}),
+        ("Bash", {"command": "echo sleep 300"}),                 # sleep is an ARGUMENT, not a command
+        ("Bash", {"command": "sleep 300", "run_in_background": True}),  # backgrounded at the harness level
+        ("Bash", {"command": "sleep 300 &"}),                    # shell-backgrounded, never blocks
+        ("PowerShell", {"command": "Start-Sleep -Milliseconds 5000"}),
+        ("PowerShell", {"command": "Start-Sleep 5"}),
+    ]
     fails = 0
     for tool, ti in deny:
         v = evaluate(tool, ti, workspace_root=WS, safe_roots=SAFE)
@@ -578,8 +757,18 @@ def _selftest() -> int:
         if v:
             print(f"  FAIL (expected ALLOW, got {v}): {tool} {ti}")
             fails += 1
-    total = len(deny) + len(allow)
-    print(f"repo_guard selftest: {total - fails}/{total} passed ({len(deny)} deny, {len(allow)} allow)")
+    for tool, ti in sleep_deny:
+        if not sleep_findings(tool, ti):
+            print(f"  FAIL (expected SLEEP deny, got allow): {tool} {ti}")
+            fails += 1
+    for tool, ti in sleep_allow:
+        s = sleep_findings(tool, ti)
+        if s:
+            print(f"  FAIL (expected SLEEP allow, got {s}): {tool} {ti}")
+            fails += 1
+    total = len(deny) + len(allow) + len(sleep_deny) + len(sleep_allow)
+    print(f"repo_guard selftest: {total - fails}/{total} passed "
+          f"({len(deny)} deny, {len(allow)} allow, {len(sleep_deny)} sleep-deny, {len(sleep_allow)} sleep-allow)")
     return 1 if fails else 0
 
 
@@ -601,15 +790,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         safe_roots = default_safe_roots() + private_companion_roots(ws)
         violations = classify_command(args.check, workspace_root=ws, safe_roots=safe_roots)
-        payload = {"schema": SCHEMA, "ok": not violations, "workspace": ws, "violations": violations}
+        naps = sleep_findings("Bash", {"command": args.check})
+        ok = not violations and not naps
+        payload = {"schema": SCHEMA, "ok": ok, "workspace": ws,
+                   "violations": violations, "sleeps": naps}
         if args.json:
             print(json.dumps(payload, indent=2))
+        elif ok:
+            print(f"ALLOW  no out-of-tree write or long foreground sleep in: {args.check}")
         else:
             if violations:
                 print(f"DENY  {render_reason(violations)}")
-            else:
-                print(f"ALLOW  no out-of-tree write in: {args.check}")
-        return 1 if violations else 0
+            if naps:
+                print(f"DENY  {render_sleep_reason(naps)}")
+        return 0 if ok else 1
 
     ap.print_help()
     return 0
