@@ -6,11 +6,15 @@ date: 2026-07-02
 
 # The tool process table
 
-Status: concept note **plus a shipped decision spine**. `internal/toolproc` (the
-pure fold) and `fak toolproc` (the CLI) land with this note; every enforcement
-seam below is a **labeled next step** — nothing kills, cancels, or quarantines
-anything today. The spine is offline-provable: `fak toolproc sample` folds a
-deterministic built-in journal, no key, no model, no GPU.
+Status: concept note **plus a shipped decision spine and the first shipped
+enforcement rung**. `internal/toolproc` (the pure fold) and `fak toolproc` (the
+CLI) landed with this note. Seam 2 below is now **wired**:
+`internal/toolprocgate` registers a rank-2 `abi.ResultAdmitter` (defconfig-
+enabled, inert until a kill) that quarantines any completion whose call the
+kernel revoked — witnessed through the real `kernel.AdmitResult` fold. Seams 1
+and 3–6 remain **labeled next steps** — nothing yet kills a live process or
+cancels an upstream request. The spine is offline-provable: `fak toolproc
+sample` folds a deterministic built-in journal, no key, no model, no GPU.
 
 ## The problem: the syscall got a lifetime
 
@@ -127,10 +131,14 @@ and advice stream. None of this is wired yet.
    (cancel the upstream request, refuse the next poll, annotate the turn) —
    makes the table live. The decision journal (`FAK_AUDIT_JOURNAL`) gains
    lifecycle rows, not just admission rows.
-2. **Result-admission rung** (`abi.ResultAdmitter`). A completion whose call
-   the table shows as `KILLED` is `TOOL_RESULT_AFTER_KILL`: quarantine the
-   payload (`VerdictQuarantine{PageOut}`), never admit it as live. This closes
-   failure class 4 with machinery the kernel already has.
+2. **Result-admission rung** (`abi.ResultAdmitter`) — **SHIPPED** as
+   `internal/toolprocgate`: a rank-2 admitter (in front of the content screens)
+   quarantines a completion whose call id is in the in-process revocation
+   table (`toolprocgate.Kill`), citing `TOOL_RESULT_AFTER_KILL`, payload
+   stubbed in place and the original bytes dropped (a post-kill payload has no
+   legitimate re-entry path). Registered-but-inert by default: with an empty
+   table it Defers on every result. Closes failure class 4 in-process; the
+   cross-process kill feed rides on seam 1.
 3. **MCP wire** (`fak serve --stdio` / `/mcp`). MCP has native
    progress-notification and cancellation semantics; a brokered MCP tool call
    maps 1:1 onto the event vocabulary (progress → `pulse`, cancellation →

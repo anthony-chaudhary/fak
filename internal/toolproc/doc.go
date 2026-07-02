@@ -32,12 +32,15 @@
 // (1040–1043, above abi.ReasonCoreMax) exactly like egressfloor's EGRESS_BLOCK;
 // the consumer registers the names, so this leaf stays init-free and pure.
 //
-// WHAT THIS LEAF IS NOT (yet). It is the decision spine only — deterministic,
+// WHAT THIS LEAF IS NOT. It is the decision spine only — deterministic,
 // offline-provable (`fak toolproc sample`), same-input ⇒ byte-identical-output.
 // It does not itself kill processes, cancel MCP requests, or quarantine
-// payloads; the enforcement wiring (gateway/guard supervisor emitting spawn and
-// pulse events from the live wire and acting on the advice, a ResultAdmitter
-// rung refusing post-kill payloads) is the labeled next step, kept honest by
+// payloads. The first enforcement rung is SHIPPED as its own leaf:
+// internal/toolprocgate registers the rank-2 ResultAdmitter that quarantines a
+// completion whose call was revoked (the TOOL_RESULT_AFTER_KILL verdict, seam 2
+// of the concept note). The remaining wiring (gateway/guard supervisor emitting
+// spawn and pulse events from the live wire and acting on kill/probe/reap
+// advice — seams 1 and 3–6) is the labeled next step, kept honest by
 // docs/notes/CONCEPT-TOOL-PROCESS-TABLE-2026-07-02.md.
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only

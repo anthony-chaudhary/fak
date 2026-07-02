@@ -133,4 +133,5 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/a2achan"
 	_ "github.com/anthony-chaudhary/fak/internal/headroom"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
+	_ "github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
