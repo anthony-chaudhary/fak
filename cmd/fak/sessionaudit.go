@@ -150,7 +150,11 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stderr, "analyzing %d transcripts ...\n", len(recs))
 	if *max > 0 && totalDiscovered > *max {
-		fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix or --here to target a namespace before --max\n", len(recs), totalDiscovered)
+		if opts.NamespacePrefix != "" {
+			fmt.Fprintf(stderr, "warning: --max clipped scoped discovery to first %d of %d transcripts; raise --max before treating older sessions inside this scope as absent\n", len(recs), totalDiscovered)
+		} else {
+			fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix or --here to target a namespace before --max\n", len(recs), totalDiscovered)
+		}
 	}
 	sessions := make([]sessionaudit.Session, 0, len(recs))
 	for _, rec := range recs {

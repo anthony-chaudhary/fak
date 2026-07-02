@@ -132,6 +132,9 @@ func TestSessionAuditWarnsWhenMaxClipsBeforeNamespaceAudit(t *testing.T) {
 	if !strings.Contains(stdout.String(), "NOTE: `--max 1` clipped this audit to the newest 1 of 2 discovered transcripts") {
 		t.Fatalf("audit markdown cap warning missing:\n%s", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "scoped audit") {
+		t.Fatalf("unscoped audit should not use scoped cap wording:\n%s", stdout.String())
+	}
 }
 
 func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
@@ -144,11 +147,17 @@ func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
 	herePath := writeSessionAuditJSONL(t, filepath.Join(root, hereNS, "fable.jsonl"), []map[string]any{
 		sessionAuditAssistant("fable", 100, ""),
 	})
+	olderHerePath := writeSessionAuditJSONL(t, filepath.Join(root, hereNS, "opus.jsonl"), []map[string]any{
+		sessionAuditAssistant("opus", 200, ""),
+	})
 	otherPath := writeSessionAuditJSONL(t, filepath.Join(root, "C--work-job", "synthetic.jsonl"), []map[string]any{
 		sessionAuditAssistant("synthetic", 10, ""),
 	})
 	now := time.Now()
 	if err := os.Chtimes(herePath, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(olderHerePath, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(otherPath, now, now); err != nil {
@@ -172,7 +181,7 @@ func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), hereNS+"/fable.jsonl") ||
 		strings.Contains(stdout.String(), "C--work-job/synthetic.jsonl") ||
-		strings.Contains(stdout.String(), "showing first 1 of 2") {
+		!strings.Contains(stdout.String(), "showing first 1 of 2") {
 		t.Fatalf("--here did not scope before --max:\n%s", stdout.String())
 	}
 
@@ -184,8 +193,13 @@ func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "namespace filter: "+hereNS) ||
 		!strings.Contains(stdout.String(), "| fable |") ||
+		!strings.Contains(stdout.String(), "clipped this scoped audit to the newest 1 of 2 discovered transcripts") ||
 		strings.Contains(stdout.String(), "C--work-job") {
 		t.Fatalf("audit --here did not report the current workspace scope:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: --max clipped scoped discovery to first 1 of 2 transcripts") ||
+		strings.Contains(stderr.String(), "use --ns-prefix or --here") {
+		t.Fatalf("audit --here cap warning should be scoped:\n%s", stderr.String())
 	}
 }
 

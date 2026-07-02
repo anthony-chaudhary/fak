@@ -424,7 +424,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	fmt.Fprintf(&b, "**Generated:** %s  \n", generated.Format("2006-01-02T15:04:05"))
 	fmt.Fprintf(&b, "**Top-level sessions audited:** %d  .  **Tool:** `fak session-audit` (re-runnable)  \n", agg.NSessions)
 	fmt.Fprintf(&b, "**Scope:** %s\n", scopeLine(ok, nsPrefix, sinceDays, includeSubagents, maxSessions))
-	if note := maxClipNote(maxSessions, discoveredCount); note != "" {
+	if note := maxClipNote(maxSessions, discoveredCount, nsPrefix != ""); note != "" {
 		fmt.Fprintln(&b, note)
 	}
 	if note := subagentNote(excludedSubagents); note != "" {
@@ -904,9 +904,13 @@ func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeS
 	return fmt.Sprintf("%d namespaces folded (%s); namespace filter: %s; time window: %s; %s%s", len(names), nsDesc, nsFilter, window, kinds, cap)
 }
 
-func maxClipNote(maxSessions, discoveredCount int) string {
+func maxClipNote(maxSessions, discoveredCount int, scoped bool) string {
 	if maxSessions <= 0 || discoveredCount <= maxSessions {
 		return ""
+	}
+	if scoped {
+		return fmt.Sprintf("NOTE: `--max %d` clipped this scoped audit to the newest %d of %d discovered transcripts; raise `--max` before treating older sessions, model usage, or long-context rows inside this scope as absent.",
+			maxSessions, maxSessions, discoveredCount)
 	}
 	return fmt.Sprintf("NOTE: `--max %d` clipped this audit to the newest %d of %d discovered transcripts; use `--ns-prefix <namespace>`, `--here`, or raise `--max` before treating missing namespaces or model usage as absent.",
 		maxSessions, maxSessions, discoveredCount)
