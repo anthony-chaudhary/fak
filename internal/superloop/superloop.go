@@ -70,11 +70,15 @@ const (
 
 // Member is one constituent a super loop walks. Ref names the surface (scorecard
 // key / loop id / garden name / super-loop name); Why is the one-line reason it
-// belongs under this intent.
+// belongs under this intent. Enter, when set, is the CONCRETE command or skill an
+// operator runs to retire this member's debt (e.g. "/slop-score",
+// "python tools/learning_scorecard.py --json") — it makes the worklist action
+// directly enterable instead of the generic "its skill" pointer.
 type Member struct {
-	Kind MemberKind `json:"kind"`
-	Ref  string     `json:"ref"`
-	Why  string     `json:"why"`
+	Kind  MemberKind `json:"kind"`
+	Ref   string     `json:"ref"`
+	Why   string     `json:"why"`
+	Enter string     `json:"enter,omitempty"`
 }
 
 // Super is a named operator-intent super loop: an intent bound to an ordered member
@@ -101,17 +105,39 @@ var registry = []Super{
 	{
 		Name:  "improve-quality",
 		Title: "improve code & content quality",
-		About: "walk the quality-bearing scorecards + the gardening loop, then enter the worst-first member to retire its debt",
+		About: "descend the seven-surface sweep, walk the remaining quality scorecards + the gardening loop, then enter the worst-first member to retire its debt",
 		Floor: 0,
 		Members: []Member{
-			{Kind: KindScorecard, Ref: "slop", Why: "code-slop debt is the heaviest quality drag; retire it worst-first"},
-			{Kind: KindScorecard, Ref: "code", Why: "code-quality debt: the core correctness/clarity signal"},
-			{Kind: KindScorecard, Ref: "disambiguation", Why: "concept-disambiguation debt: ambiguous concepts confuse agents and readers"},
-			{Kind: KindScorecard, Ref: "conflation", Why: "conflation debt: metrics that report an upstream value without an OBSERVED qualifier"},
+			// The seven quality SURFACES live in their own nested intent (below) so an
+			// operator can sweep exactly them; improve-quality DESCENDS it, which keeps
+			// each surface's debt counted exactly once at the tend root.
+			{Kind: KindSuperloop, Ref: "sweep-surfaces", Why: "the seven quality surfaces (code, doc-appeal, agent-readiness, code-slop, concept-disambiguation, learning, tooling-quality), swept worst-first"},
+			{Kind: KindScorecard, Ref: "conflation", Why: "conflation debt: metrics that report an upstream value without an OBSERVED qualifier", Enter: "/conflation-score"},
 			{Kind: KindScorecard, Ref: "intent_literal", Why: "intent-literal debt: code that drifts from the operator's literal intent"},
 			{Kind: KindScorecard, Ref: "ui_quality", Why: "UI/UX-quality debt over the terminal render surface"},
-			{Kind: KindScorecard, Ref: "claim_repro", Why: "claim-repro debt: claims a reader cannot reproduce"},
+			{Kind: KindScorecard, Ref: "claim_repro", Why: "claim-repro debt: claims a reader cannot reproduce", Enter: "/claim-repro-score"},
 			{Kind: KindGarden, Ref: "garden", Why: "the gardening bundle tends the rest (scorecard ratchet, fresh-status, stale work)"},
+		},
+	},
+	{
+		// sweep-surfaces is the seven-surface sweep, one intent that walks exactly the
+		// seven quality SURFACES worst-first. Every member carries an Enter hint (the
+		// owning skill, or the scorecard script where no skill exists yet), so the
+		// worklist's action column is directly runnable. It is NESTED under
+		// improve-quality (which descends it), so the root tend fold counts each
+		// surface's debt exactly once — the once-only test pins that.
+		Name:  "sweep-surfaces",
+		Title: "sweep the seven quality surfaces worst-first",
+		About: "walk the seven surface scorecards (code, doc-appeal, agent-readiness, code-slop, concept-disambiguation, learning, tooling-quality), then enter the worst-first surface's reduce loop",
+		Floor: 0,
+		Members: []Member{
+			{Kind: KindScorecard, Ref: "code", Why: "code-quality debt: the core correctness/clarity signal", Enter: "/quality-score"},
+			{Kind: KindScorecard, Ref: "appeal", Why: "doc-appeal debt: docs that read machine-written repel human readers", Enter: "/appeal-score"},
+			{Kind: KindScorecard, Ref: "agent", Why: "agent-readiness friction debt: how hard an agent must fight the repo to get work done", Enter: "/agent-readiness"},
+			{Kind: KindScorecard, Ref: "slop", Why: "code-slop debt is the heaviest quality drag; retire it worst-first", Enter: "/slop-score"},
+			{Kind: KindScorecard, Ref: "disambiguation", Why: "concept-disambiguation debt: ambiguous concepts confuse agents and readers", Enter: "/disambiguation-score"},
+			{Kind: KindScorecard, Ref: "learning", Why: "learning debt: lessons the fleet keeps re-paying instead of encoding", Enter: "python tools/learning_scorecard.py --json"},
+			{Kind: KindScorecard, Ref: "tooling_quality", Why: "tooling-quality (py) debt: Python tooling not yet ported to the Go-first hygiene path", Enter: "python tools/tooling_quality_scorecard.py --json"},
 		},
 	},
 	{
@@ -145,10 +171,12 @@ var registry = []Super{
 		// intent (the shell walks sub-super-loops inline and folds each sub-report via
 		// [SubwalkStatus]), so one command answers "across every operator intent, what
 		// is worst right now?". The no-drift test pins that every other registered
-		// intent is a member here, so a new intent cannot silently escape the root.
+		// intent is REACHABLE from here over KindSuperloop edges (directly a member,
+		// or nested like sweep-surfaces under improve-quality), so a new intent cannot
+		// silently escape the root — while a nested intent is still counted only once.
 		Name:  "tend",
 		Title: "tend every operator intent — the super loop of super loops",
-		About: "walk every other registered super loop as a member, descend each one, and enter the worst-first intent",
+		About: "walk every registered super loop (directly or by descent), and enter the worst-first intent",
 		Floor: 0,
 		Members: []Member{
 			{Kind: KindSuperloop, Ref: "improve-quality", Why: "quality debt is the broadest drag on everything the fleet ships"},
@@ -504,6 +532,9 @@ func actionFor(st MemberStatus) string {
 	case KindScorecard:
 		if !st.Measured {
 			return fmt.Sprintf("run `fak scorecard` / the %s scorecard to measure it", st.Member.Ref)
+		}
+		if e := strings.TrimSpace(st.Member.Enter); e != "" {
+			return fmt.Sprintf("enter `%s` to retire %s debt", e, st.Member.Ref)
 		}
 		return fmt.Sprintf("enter the %s scorecard's reduce loop (its skill) to retire debt", st.Member.Ref)
 	case KindLoop:

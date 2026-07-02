@@ -69,21 +69,42 @@ fak superloop walk improve-quality
    its floor **and** every member was measured **and** none is dark. An unread or dark
    member can never let the intent read as done.
 
-A real walk on this repo:
+A real walk on this repo — the seven-surface sweep. Every action is directly
+runnable (each member carries an **enter hint**: the owning skill, or the scorecard
+script where no skill exists yet), and the two clean surfaces (doc-appeal,
+agent-readiness at debt 0) are correctly absent from the worklist:
+
+```
+superloop walk: sweep-surfaces — ACTION (superloop_debt)
+  aggregate debt 998 (floor 0)  members 7  walked 7  unmeasured 0  dark 0
+
+  worst-first — enter these in order:
+  #  MEMBER                     DEBT  ACTION
+  1  scorecard slop             746   enter `/slop-score` to retire slop debt
+  2  scorecard disambiguation   153   enter `/disambiguation-score` to retire disambiguation debt
+  3  scorecard tooling_quality  68    enter `python tools/tooling_quality_scorecard.py --json` to retire tooling_quality debt
+  4  scorecard code             28    enter `/quality-score` to retire code debt
+  5  scorecard learning         3     enter `python tools/learning_scorecard.py --json` to retire learning debt
+
+  → worst-first: scorecard "slop" — enter `/slop-score` to retire slop debt
+```
+
+And one altitude up, `improve-quality` DESCENDS the sweep inline — the sub-walk's
+folded debt arrives as one measured row, so nothing is counted twice:
 
 ```
 superloop walk: improve-quality — ACTION (superloop_debt)
-  aggregate debt 657 (floor 0)  members 8  walked 7  unmeasured 0  dark 0
+  aggregate debt 1009 (floor 0)  members 6  walked 5  unmeasured 0  dark 0
 
   worst-first — enter these in order:
   #  MEMBER                    DEBT  ACTION
-  1  scorecard slop            600   enter the slop scorecard's reduce loop (its skill)
-  2  scorecard disambiguation  30    enter the disambiguation scorecard's reduce loop
-  3  scorecard code            24    enter the code scorecard's reduce loop
-  4  scorecard ui_quality      3     enter the ui_quality scorecard's reduce loop
+  1  superloop sweep-surfaces  998   descend: `fak superloop walk sweep-surfaces`
+  2  scorecard intent_literal  7     enter the intent_literal scorecard's reduce loop (its skill)
+  3  scorecard ui_quality      3     enter the ui_quality scorecard's reduce loop (its skill)
+  4  scorecard claim_repro     1     enter `/claim-repro-score` to retire claim_repro debt
   5  garden garden             →     run `fak garden` then `fak garden tick`
 
-  → worst-first: scorecard "slop" — enter the slop scorecard's reduce loop (its skill)
+  → worst-first: superloop "sweep-surfaces" — descend: `fak superloop walk sweep-surfaces`
 ```
 
 ## How a super loop relates to what already exists
@@ -101,15 +122,27 @@ oracle.
 
 Super loops are **data** (`internal/superloop`). Each binds an operator intent to an
 ordered member set; every scorecard member references a real control-pane card key
-(a no-drift test enforces it). The seed set:
+(a no-drift test enforces it), and a member may carry an **enter hint** — the
+concrete skill or command that retires its debt — so the worklist action column is
+runnable as printed. The registered set:
 
-- **`improve-quality`** — the quality-bearing scorecards (slop, code, disambiguation,
-  conflation, intent-literal, ui-quality, claim-repro) + the gardening bundle.
+- **`sweep-surfaces`** — the seven quality surfaces, swept worst-first: **code**
+  (`/quality-score`), **doc-appeal** (`/appeal-score`), **agent-readiness**
+  (`/agent-readiness`), **code-slop** (`/slop-score`), **concept-disambiguation**
+  (`/disambiguation-score`), **learning** (`tools/learning_scorecard.py`), and
+  **tooling-quality** (`tools/tooling_quality_scorecard.py`).
+- **`improve-quality`** — descends `sweep-surfaces`, then the remaining
+  quality-bearing scorecards (conflation, intent-literal, ui-quality, claim-repro)
+  + the gardening bundle. Nesting the sweep (instead of duplicating its members)
+  keeps each surface's debt counted exactly **once** at the root — a once-only test
+  pins that no scorecard key is walked by two intents.
 - **`improve-loops`** — the loop-index scorecard + the dogfood scorecard + the live
   loop ledgers (dispatch, cadence, dojo) + the gardening bundle.
 - **`manage-benchmarks`** — the benchmark-DX scorecard + the `nightrun` collection
   loop + a descend pointer into `fak bench-loop status`, the benchmark-specific
   control surface.
+- **`tend`** — the root: every other registered intent, reachable directly as a
+  member or by descent (a no-escape test pins the reachability).
 
 For benchmark work, use the generic intent to orient across loop health and debt:
 

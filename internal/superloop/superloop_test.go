@@ -1,6 +1,7 @@
 package superloop
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
@@ -364,27 +365,39 @@ func TestSuperloopMembersResolveAcyclic(t *testing.T) {
 }
 
 // TestTendWalksEveryOtherSuperloop pins the ROOT intent: every other registered
-// intent must be a KindSuperloop member of "tend", so a new intent cannot silently
-// escape the root walk.
+// intent must be REACHABLE from "tend" over KindSuperloop edges — directly a member,
+// or nested below another intent (sweep-surfaces under improve-quality) — so a new
+// intent cannot silently escape the root walk, while a nested intent stays counted
+// once instead of being forced into a debt-double-counting direct membership.
 func TestTendWalksEveryOtherSuperloop(t *testing.T) {
 	tend, ok := Lookup("tend")
 	if !ok {
 		t.Fatal("root intent \"tend\" not registered")
 	}
-	members := map[string]bool{}
 	for _, m := range tend.Members {
 		if m.Kind != KindSuperloop {
 			t.Errorf("tend member %q must be a sub-super-loop, got kind %q", m.Ref, m.Kind)
-			continue
 		}
-		members[m.Ref] = true
 	}
-	for _, s := range Registry() {
-		if s.Name == "tend" {
-			continue
+	reachable := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		if reachable[name] {
+			return
 		}
-		if !members[s.Name] {
-			t.Errorf("tend must walk registered intent %q (add it as a KindSuperloop member or deliberately exclude it here)", s.Name)
+		reachable[name] = true
+		if s, ok := Lookup(name); ok {
+			for _, m := range s.Members {
+				if m.Kind == KindSuperloop {
+					visit(m.Ref)
+				}
+			}
+		}
+	}
+	visit("tend")
+	for _, s := range Registry() {
+		if !reachable[s.Name] {
+			t.Errorf("tend must reach registered intent %q over KindSuperloop edges (add it as a member of tend or nest it under one)", s.Name)
 		}
 	}
 
@@ -405,6 +418,119 @@ func TestTendWalksEveryOtherSuperloop(t *testing.T) {
 	}
 	if len(rep.Worklist) != 2 || rep.Worklist[0].Member.Ref != tend.Members[0].Ref {
 		t.Errorf("worst-first: want the debt-5 sub ranked first and the clean sub dropped, got %+v", rep.Worklist)
+	}
+}
+
+// TestSweepSurfacesSevenSurfaces pins the seven-surface sweep intent: exactly the
+// seven named quality surfaces, every one a scorecard member carrying a concrete
+// Enter hint (the worklist action must be directly runnable), and the intent is
+// NESTED — improve-quality descends it, and improve-quality holds no direct
+// scorecard member duplicating a swept surface (that would double-count its debt).
+func TestSweepSurfacesSevenSurfaces(t *testing.T) {
+	sweep, ok := Lookup("sweep-surfaces")
+	if !ok {
+		t.Fatal("sweep-surfaces not registered")
+	}
+	want := []string{"code", "appeal", "agent", "slop", "disambiguation", "learning", "tooling_quality"}
+	if len(sweep.Members) != len(want) {
+		t.Fatalf("sweep-surfaces must walk exactly %d surfaces, got %d", len(want), len(sweep.Members))
+	}
+	got := map[string]Member{}
+	for _, m := range sweep.Members {
+		if m.Kind != KindScorecard {
+			t.Errorf("sweep-surfaces member %q must be a scorecard, got %q", m.Ref, m.Kind)
+		}
+		if strings.TrimSpace(m.Enter) == "" {
+			t.Errorf("surface %q has no Enter hint — the sweep worklist must be directly runnable", m.Ref)
+		}
+		got[m.Ref] = m
+	}
+	for _, ref := range want {
+		if _, ok := got[ref]; !ok {
+			t.Errorf("sweep-surfaces is missing surface %q", ref)
+		}
+	}
+
+	iq, ok := Lookup("improve-quality")
+	if !ok {
+		t.Fatal("improve-quality not registered")
+	}
+	descends := false
+	for _, m := range iq.Members {
+		if m.Kind == KindSuperloop && m.Ref == "sweep-surfaces" {
+			descends = true
+		}
+		if m.Kind == KindScorecard {
+			if _, dup := got[m.Ref]; dup {
+				t.Errorf("improve-quality holds scorecard %q directly AND via sweep-surfaces — its debt would fold twice", m.Ref)
+			}
+		}
+	}
+	if !descends {
+		t.Error("improve-quality must descend sweep-surfaces as a KindSuperloop member")
+	}
+}
+
+// TestRootFoldCountsEachScorecardOnce is the once-only fold witness: across every
+// intent reachable from the root "tend", no scorecard key may be walked by two
+// different intents — a duplicated key would fold its debt twice into the root
+// aggregate and distort the worst-first ranking.
+func TestRootFoldCountsEachScorecardOnce(t *testing.T) {
+	seenIn := map[string]string{}
+	visited := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		if visited[name] {
+			return
+		}
+		visited[name] = true
+		s, ok := Lookup(name)
+		if !ok {
+			return
+		}
+		for _, m := range s.Members {
+			switch m.Kind {
+			case KindSuperloop:
+				visit(m.Ref)
+			case KindScorecard:
+				if prior, dup := seenIn[m.Ref]; dup {
+					t.Errorf("scorecard %q is walked by both %q and %q — the root fold would count its debt twice", m.Ref, prior, name)
+					continue
+				}
+				seenIn[m.Ref] = name
+			}
+		}
+	}
+	visit("tend")
+}
+
+// TestWalkActionUsesEnterHint pins the useful-action rung: a measured, debt-bearing
+// scorecard member with an Enter hint gets that concrete command in its worklist
+// action; an unmeasured one still gets the measure-it action (you cannot retire what
+// you have not read).
+func TestWalkActionUsesEnterHint(t *testing.T) {
+	s := Super{Name: "t", Title: "t", Floor: 0, Members: []Member{
+		{Kind: KindScorecard, Ref: "slop", Enter: "/slop-score"},
+		{Kind: KindScorecard, Ref: "appeal", Enter: "/appeal-score"},
+	}}
+	rep := Walk(s, []MemberStatus{
+		{Member: s.Members[0], Measured: true, Debt: 5},
+		{Member: s.Members[1], Measured: false},
+	})
+	var slopAction, appealAction string
+	for _, it := range rep.Worklist {
+		switch it.Member.Ref {
+		case "slop":
+			slopAction = it.Action
+		case "appeal":
+			appealAction = it.Action
+		}
+	}
+	if !strings.Contains(slopAction, "/slop-score") {
+		t.Errorf("measured member's action must carry its Enter hint, got %q", slopAction)
+	}
+	if strings.Contains(appealAction, "/appeal-score") || !strings.Contains(appealAction, "measure") {
+		t.Errorf("unmeasured member must keep the measure action, got %q", appealAction)
 	}
 }
 
