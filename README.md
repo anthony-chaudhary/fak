@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/ci.yml) [![release artifacts](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml/badge.svg?branch=main)](https://github.com/anthony-chaudhary/fak/actions/workflows/release-artifacts.yml)
 
-<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced. -->
+<!-- readme-verified: 2026-07-01 vs VERSION 0.36.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme. 2026-07-01: front page halved; overflow: docs/README-legacy.md. Same day: hero video + gallery/video links re-surfaced; guided tutorial surfaced (Pick-your-path + docs map). -->
 
 **fak in one line:** fak is a fused agent kernel. One Go binary sits in front of an agent's
 tool calls. It checks each call. It reuses the stable work in long sessions. The same agent
@@ -20,6 +20,7 @@ at itself for you.
 ## Pick your path
 
 [Run your agent through it now](#get-started-with-fak-guard) ·
+[follow the guided tutorial — 15 min, no key, no GPU](docs/fak/tutorial.md) ·
 [run the Colab quickstart](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) ·
 [run a model in the kernel](#run-the-model-in-the-kernel) ·
 [the performance story](#the-performance-value-proposition) · [a hard security floor](#for-security-teams).
@@ -189,7 +190,8 @@ catalogue, vCache, model routing, the moved front-page detail, and the three-axe
 
 | If you want... | Read |
 |---|---|
-| First real run | [GETTING-STARTED.md](GETTING-STARTED.md) |
+| Guided first session (15 min, real output at every step) | [docs/fak/tutorial.md](docs/fak/tutorial.md) |
+| Install + the four usage tiers | [GETTING-STARTED.md](GETTING-STARTED.md) |
 | Claude Code / guard path | [docs/integrations/claude.md](docs/integrations/claude.md) |
 | Always-on gateway (`fak node`) | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
 | Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |

@@ -5,6 +5,11 @@ This page gets you from a clean checkout to a running kernel, and to serving a m
 behind it, with copy-pasteable commands that were run on a clean build before being
 written down.
 
+> **Never run `fak` before?** Take the [guided first session](docs/fak/tutorial.md)
+> instead (~15 min): every command with its real captured output, offline for the first
+> two parts, no key and no GPU. This page is the install reference and the tier map;
+> the tutorial is the hand-held walkthrough.
+
 `fak` is **one Go binary**: a single static artifact with zero external dependencies (no
 Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole governed-serving
 surface: the gateway, the policy gate, the result quarantine, and the audit/metrics
