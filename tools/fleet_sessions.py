@@ -1028,7 +1028,22 @@ def decide(rows, throttle, availability=None):
                 # the owner won't help, so this waits for a seat to free up, not a human.
                 r["action"] = "DEFER_NO_USAGE"
         elif r["disp"] == "INFRA_AUTH":
-            r["action"] = "BLOCKED_AUTH"            # INFRA: needs human re-login; resume won't help
+            # A "Not logged in" tail usually means the SEAT needs a human /login --
+            # resume can't fix that, so it blocks. But when the owner seat reads
+            # ADMISSIBLE in the freshness-stamped snapshot (#619 positive evidence),
+            # the seat itself contradicts the banner: the failure is session-local --
+            # a frozen banner tail from before a re-login, or a guard-gateway child
+            # whose recorded auth wiring died with its parent (2026-07-02: cbdc1e5d
+            # answered every in-place resume with the banner while its owner probed
+            # pong; the same transcript re-homed onto another seat resumed cleanly).
+            # Route those through the in-place ladder: retry on the proven owner
+            # (covers the frozen-tail-after-relogin case), escalate to another seat
+            # after RESUME_ESCALATE_AFTER in-place attempts (covers the dead-binding
+            # case). A seat WITHOUT positive evidence keeps the human-re-login block.
+            if _owner_available(availability, r["account"]):
+                _resume_inplace_or_escalate(r, availability, assigned, inplace_counts)
+            else:
+                r["action"] = "BLOCKED_AUTH"        # INFRA: needs human re-login; resume won't help
         elif r["disp"] == "STOPPED_APIERR":
             # INFRA: transient API error -> retry (#1353: any autonomy; server interrupted it).
             # Repeated in-place retries that don't stick escalate to another seat.

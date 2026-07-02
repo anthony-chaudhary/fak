@@ -655,6 +655,75 @@ class ResumeEscalationTest(unittest.TestCase):
         fleet_sessions.decide(rows, {}, self._two_seat_avail())
         self.assertFalse(rows[0]["rehomed"])
 
+
+class AuthAnomalyEscalationTest(unittest.TestCase):
+    """An INFRA_AUTH tail whose OWNER seat reads admissible (#619 positive evidence)
+    is session-local, not a seat logout: a frozen banner from before a re-login, or a
+    guard-gateway child whose recorded auth wiring died with its parent (cbdc1e5d,
+    2026-07-02 -- every in-place resume answered the banner while the owner probed
+    pong; the same transcript re-homed onto another seat resumed cleanly). Those rows
+    take the in-place ladder and escalate to another seat; a seat WITHOUT positive
+    evidence keeps the human-re-login BLOCKED_AUTH."""
+
+    def setUp(self):
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def _seed_ledger(self, sid, *, inplace=0):
+        import json as _json
+        with open(os.path.join(self._tmp, "resume_ledger.jsonl"), "w", encoding="utf-8") as fh:
+            for _ in range(inplace):
+                fh.write(_json.dumps({"session": sid, "phase": "launched", "rehomed": False}) + "\n")
+
+    def _two_seat_avail(self):
+        return [_avail(".claude-owner-acct", available=True, live=2),
+                _avail(".claude-other-acct", available=True, live=0)]
+
+    def test_auth_banner_on_proven_owner_resumes_in_place_first(self) -> None:
+        # fresh anomaly (no prior in-place attempts) -> retry on the proven owner:
+        # covers the frozen-banner-after-relogin case, where in place works.
+        rows = [_row(".claude-owner-acct", "INFRA_AUTH")]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+
+    def test_auth_banner_repeat_failures_escalate_to_another_seat(self) -> None:
+        # the banner survived RESUME_ESCALATE_AFTER in-place attempts -> the session's
+        # auth wiring is dead on this seat; re-home onto the other proven seat.
+        sid = "abba1111-2222-3333-4444-555555555555"
+        self._seed_ledger(sid, inplace=2)
+        rows = [_row(".claude-owner-acct", "INFRA_AUTH", session=sid)]
+        fleet_sessions.decide(rows, {}, self._two_seat_avail())
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-other-acct")
+        self.assertIn("Copy-Item", r["resume_cmd"])
+
+    def test_auth_banner_on_unproven_owner_still_blocks(self) -> None:
+        # owner seat absent from the snapshot -> the banner stands: human /login.
+        rows = [_row(".claude-auth-acct", "INFRA_AUTH")]
+        fleet_sessions.decide(rows, {}, [_avail(".claude-good-acct", available=True)])
+        self.assertEqual(rows[0]["action"], "BLOCKED_AUTH")
+        self.assertFalse(rows[0]["rehomed"])
+
+    def test_auth_banner_on_carried_owner_verdict_still_blocks(self) -> None:
+        # #619 launch boundary: a carried 'available' is not positive evidence the
+        # seat can serve -- the auth block stands until a fresh probe proves it.
+        rows = [_row(".claude-owner-acct", "INFRA_AUTH")]
+        carried = _avail(".claude-owner-acct", available=True, verdict_source="carried")
+        fleet_sessions.decide(rows, {}, [carried])
+        self.assertEqual(rows[0]["action"], "BLOCKED_AUTH")
+        self.assertFalse(rows[0]["rehomed"])
+
+
 class TaskSigClassifyTest(unittest.TestCase):
     """task_sig must come from the real first instruction, ignoring harness wrappers
     and the fixed resume prompt a re-home injects."""
