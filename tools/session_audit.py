@@ -120,10 +120,19 @@ EDIT_CHURN_SIGNATURES = {
     "stale_read": "has been modified since read",
 }
 MUTATION_TOOLS = {"Edit", "Write", "NotebookEdit"}
-# The same failure signature repeated this often in one session is a stuck loop;
-# the same file mutated this often is a rewrite/flip-flop loop.
+# The same failure repeated this often in one session is a stuck loop. Verbatim
+# repeats key on (tool, args, error) — a true retry loop; the error-mass view
+# keys on (tool, error text) alone — a recurring failure CLASS whose args may
+# vary (e.g. rotating through wedged bridge sessions). Conflating the two
+# false-alarmed on five distinct commands sharing one timeout string.
 REPEAT_FAILURE_MIN = 3
+# A file mutated this often is only a rewrite/flip-flop loop when the edits
+# revisit the same regions or undo each other; distinct-region build-out
+# (verb-per-edit-triple, helper extraction) is healthy iteration.
 FILE_CHURN_MIN = 5
+# A gap this long with ZERO transcript records is a harness/API stall — the
+# kind of dead time the sleep-poll counter can't see.
+STALL_GAP_S = 300
 
 def _txt_str(content, cap=4000):
     """Flatten a content field (str or list of blocks) to text, capped at `cap`."""
@@ -145,20 +154,28 @@ def _txt_str(content, cap=4000):
         return "".join(parts)
     return ""
 
+def _norm_head(s, cap=200):
+    """whitespace-collapsed head of a string, for region/signature identity."""
+    return " ".join((s or "").split())[:cap]
+
 class BehaviorLens:
     """Per-transcript stuck/churn detectors (#2365). Fed one tool_use /
     tool_result at a time (post de-dup); `summary()` emits one plain dict:
     per-tool error counts, timeout kills, foreground sleep-polls, Edit/Write
-    read-discipline churn, repeated identical failure signatures, and per-file
-    mutation churn (the edit/rewrite-loop signal nothing else catches)."""
+    read-discipline churn, verbatim repeat failures (same tool+args+error, a
+    true retry loop) vs failure-class mass (same tool+error, args vary), and
+    per-file mutation churn discriminated into rewrite-loop vs distinct-region
+    build-out via edit-region identity + revert pairs."""
 
     def __init__(self):
         self.errors = collections.Counter()        # tool -> errored results
         self.timeout_kills = 0
         self.sleep_polls = 0
         self.edit_churn = collections.Counter()    # not_read / stale_read
-        self.failure_sigs = collections.Counter()  # (tool, signature) -> n
+        self.verbatim_sigs = collections.Counter() # (tool, args_key, sig) -> n
+        self.mass_sigs = collections.Counter()     # (tool, sig) -> n
         self.file_writes = collections.Counter()   # file_path -> mutation calls
+        self.file_regions = collections.defaultdict(list)  # path -> [(old_h, new_h)]
 
     def see_tool_use(self, name, tool_input):
         ti = tool_input if isinstance(tool_input, dict) else {}
@@ -169,8 +186,15 @@ class BehaviorLens:
             path = ti.get("file_path") or ti.get("notebook_path")
             if path:
                 self.file_writes[path] += 1
+                # Region identity: Edit carries old/new strings; a Write is a
+                # whole-file rewrite (one region), so N Writes of one file still
+                # read as revisiting the same region.
+                old_h = hash(_norm_head(ti.get("old_string", "")))
+                new_h = hash(_norm_head(ti.get("new_string",
+                                               ti.get("content", ""))))
+                self.file_regions[path].append((old_h, new_h))
 
-    def see_tool_result(self, tool, is_error, text):
+    def see_tool_result(self, tool, is_error, text, args_key=None):
         if not is_error:
             return
         self.errors[tool] += 1
@@ -179,25 +203,49 @@ class BehaviorLens:
         for key, sig in EDIT_CHURN_SIGNATURES.items():
             if sig in text:
                 self.edit_churn[key] += 1
-        self.failure_sigs[(tool, " ".join(text.split())[:160])] += 1
+        sig = _norm_head(text, 160)
+        self.verbatim_sigs[(tool, args_key, sig)] += 1
+        self.mass_sigs[(tool, sig)] += 1
+
+    def _churn_rows(self):
+        rows = []
+        for f, n in self.file_writes.items():
+            if n < FILE_CHURN_MIN:
+                continue
+            regions = self.file_regions.get(f, [])
+            distinct = len({o for o, _ in regions}) or 1
+            seen_old = set()
+            reverts = 0
+            for old_h, new_h in regions:
+                if new_h in seen_old and new_h != old_h:
+                    reverts += 1          # this edit restores an earlier state
+                seen_old.add(old_h)
+            # Rewrite loop = edits undo each other or keep revisiting the same
+            # few regions; distinct-region build-out is filtered out here.
+            if reverts >= 1 or distinct * 2 <= n:
+                rows.append({"file": f, "count": n,
+                             "distinct_regions": distinct, "reverts": reverts})
+        return sorted(rows, key=lambda r: -r["count"])
 
     def summary(self):
         repeats = sorted(({"tool": t, "sig": sig, "count": n}
-                          for (t, sig), n in self.failure_sigs.items()
+                          for (t, _a, sig), n in self.verbatim_sigs.items()
                           if n >= REPEAT_FAILURE_MIN),
                          key=lambda r: -r["count"])
-        hot_files = sorted(({"file": f, "count": n}
-                            for f, n in self.file_writes.items()
-                            if n >= FILE_CHURN_MIN),
-                           key=lambda r: -r["count"])
+        mass = sorted(({"tool": t, "sig": sig, "count": n}
+                       for (t, sig), n in self.mass_sigs.items()
+                       if n >= REPEAT_FAILURE_MIN),
+                      key=lambda r: -r["count"])
         return {
             "tool_errors": dict(self.errors),
             "timeout_kills": self.timeout_kills,
             "sleep_polls": self.sleep_polls,
             "edit_churn": dict(self.edit_churn),
             "repeat_failures": repeats[:10],
-            "max_repeat_failure": max(self.failure_sigs.values(), default=0),
-            "file_churn": hot_files[:10],
+            "max_repeat_failure": max(self.verbatim_sigs.values(), default=0),
+            "failure_mass": mass[:10],
+            "max_failure_mass": max(self.mass_sigs.values(), default=0),
+            "file_churn": self._churn_rows()[:10],
             "max_file_churn": max(self.file_writes.values(), default=0),
         }
 
@@ -333,6 +381,10 @@ def analyze(path):
     seen_blocks = set()
     lens = BehaviorLens()
     tooluse_names = {}   # tool_use id -> tool name, to attribute tool_results
+    tooluse_args = {}    # tool_use id -> args digest, for verbatim-retry keying
+    prev_dt = None
+    stall_gaps = 0
+    max_gap_s = 0.0
 
     try:
         with open(path, encoding="utf-8") as f:
@@ -354,6 +406,18 @@ def analyze(path):
         if ts:
             ts_min = ts if ts_min is None or ts < ts_min else ts_min
             ts_max = ts if ts_max is None or ts > ts_max else ts_max
+            try:
+                dt = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                dt = None
+            if dt is not None:
+                if prev_dt is not None:
+                    gap = (dt - prev_dt).total_seconds()
+                    if gap > max_gap_s:
+                        max_gap_s = gap
+                    if gap >= STALL_GAP_S:
+                        stall_gaps += 1   # zero-record dead time (harness stall)
+                prev_dt = dt
 
         if t == "assistant":
             msg = r.get("message", {}) or {}
@@ -407,6 +471,8 @@ def analyze(path):
                     tool_input_chars += _txt_len(b.get("input", {}))
                     if b.get("id"):
                         tooluse_names[b["id"]] = name
+                        tooluse_args[b["id"]] = hash(json.dumps(
+                            b.get("input", {}), sort_keys=True, default=str))
                     lens.see_tool_use(name, b.get("input"))
                 elif bt in ("thinking", "text"):
                     body = b.get("thinking") if bt == "thinking" else b.get("text")
@@ -435,7 +501,8 @@ def analyze(path):
                         lens.see_tool_result(
                             tooluse_names.get(b.get("tool_use_id"), "?"),
                             bool(b.get("is_error")),
-                            _txt_str(b.get("content", "")))
+                            _txt_str(b.get("content", "")),
+                            args_key=tooluse_args.get(b.get("tool_use_id")))
             elif _looks_like_typed_prompt(content) and not r.get("isMeta"):
                 prompts.append((ts, content.strip()[:400]))
 
@@ -452,6 +519,9 @@ def analyze(path):
         except Exception:
             pass
     ro = sum(v for k, v in tools.items() if k in READ_ONLY_TOOLS)
+    behavior = lens.summary()
+    behavior["stall_gaps"] = stall_gaps
+    behavior["max_gap_s"] = round(max_gap_s, 1)
     return {
         "path": path, "session": os.path.splitext(os.path.basename(path))[0],
         "n_records": sum(rec_types.values()), "rec_types": dict(rec_types),
@@ -467,7 +537,7 @@ def analyze(path):
         "tokens": tok, "total_input_tokens": total_in,
         "io_ratio": io_ratio, "cache_hit_frac": cache_hit,
         "cost_usd": cost, "ts_min": ts_min, "ts_max": ts_max, "wall_s": wall,
-        "behavior": lens.summary(),
+        "behavior": behavior,
     }
 
 def _pct(xs, p):
@@ -524,16 +594,23 @@ def aggregate(sessions):
     beh_errors = collections.Counter()
     beh_churn = collections.Counter()
     beh_timeouts = beh_sleeps = 0
-    repeat_rows, filechurn_rows = [], []
+    stall_sessions = 0
+    max_gap_s = 0.0
+    repeat_rows, filechurn_rows, mass_rows = [], [], []
     for s in S:
         b = s.get("behavior") or {}
         beh_errors.update(b.get("tool_errors", {}))
         beh_churn.update(b.get("edit_churn", {}))
         beh_timeouts += b.get("timeout_kills", 0)
         beh_sleeps += b.get("sleep_polls", 0)
+        if b.get("stall_gaps", 0):
+            stall_sessions += 1
+        max_gap_s = max(max_gap_s, b.get("max_gap_s", 0) or 0)
         ns = os.path.basename(os.path.dirname(s["path"]))
         for r in (b.get("repeat_failures") or [])[:1]:
             repeat_rows.append({"session": s["session"], "ns": ns, **r})
+        for r in (b.get("failure_mass") or [])[:1]:
+            mass_rows.append({"session": s["session"], "ns": ns, **r})
         for r in (b.get("file_churn") or [])[:1]:
             filechurn_rows.append({"session": s["session"], "ns": ns, **r})
     per_tool_beh = {t: {"calls": tot_tools.get(t, 0),
@@ -547,7 +624,10 @@ def aggregate(sessions):
         "sleep_polls": beh_sleeps,
         "edit_churn": dict(beh_churn),
         "wasted_mutation_calls": sum(beh_churn.values()),
+        "stall_sessions": stall_sessions,
+        "max_gap_s": round(max_gap_s, 1),
         "repeat_failure_sessions": sorted(repeat_rows, key=lambda r: -r["count"])[:10],
+        "failure_mass_sessions": sorted(mass_rows, key=lambda r: -r["count"])[:10],
         "file_churn_sessions": sorted(filechurn_rows, key=lambda r: -r["count"])[:10],
     }
     return {
@@ -754,9 +834,13 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                  f"{fmt_int(beh.get('wasted_mutation_calls', 0))}  "
                  f"(not-read {fmt_int(churn.get('not_read', 0))} · "
                  f"stale-read {fmt_int(churn.get('stale_read', 0))})")
+        L.append(f"- **Sessions with a ≥{STALL_GAP_S//60}-min zero-record stall "
+                 f"(harness/API dead time):** {fmt_int(beh.get('stall_sessions', 0))}"
+                 + (f"  (longest gap {beh.get('max_gap_s', 0)/60:.0f} min)"
+                    if beh.get("stall_sessions") else ""))
         rep = beh.get("repeat_failure_sessions") or []
-        L.append(f"- **Sessions with a repeated identical failure "
-                 f"(≥{REPEAT_FAILURE_MIN}× same signature):** {len(rep)}"
+        L.append(f"- **Sessions with a VERBATIM retry loop "
+                 f"(≥{REPEAT_FAILURE_MIN}× same tool+args+error):** {len(rep)}"
                  + (" — worst below" if rep else ""))
         if rep:
             L.append("")
@@ -766,16 +850,30 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                 sig = r["sig"][:80].replace("|", "\\|")
                 L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
                          f"{r['count']} | {sig} |")
+        mass = beh.get("failure_mass_sessions") or []
+        L.append(f"- **Sessions with a recurring failure CLASS "
+                 f"(≥{REPEAT_FAILURE_MIN}× same tool+error, args vary):** {len(mass)}"
+                 + (" — worst below" if mass else ""))
+        if mass:
+            L.append("")
+            L.append("| Session | NS | Tool | × | Failure class |")
+            L.append("|---|---|---|---:|---|")
+            for r in mass:
+                sig = r["sig"][:80].replace("|", "\\|")
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                         f"{r['count']} | {sig} |")
         fc = beh.get("file_churn_sessions") or []
-        L.append(f"- **Sessions with file churn (≥{FILE_CHURN_MIN} mutations of "
-                 f"one file):** {len(fc)}" + (" — worst below" if fc else ""))
+        L.append(f"- **Sessions with a REWRITE loop (≥{FILE_CHURN_MIN} mutations "
+                 f"of one file, same-region or reverting):** {len(fc)}"
+                 + (" — worst below" if fc else ""))
         if fc:
             L.append("")
-            L.append("| Session | NS | × | File |")
-            L.append("|---|---|---:|---|")
+            L.append("| Session | NS | × | Regions | Reverts | File |")
+            L.append("|---|---|---:|---:|---:|---|")
             for r in fc:
                 fp = r["file"].replace("|", "\\|")
-                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | {fp} |")
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | "
+                         f"{r.get('distinct_regions', '—')} | {r.get('reverts', '—')} | {fp} |")
         L.append("")
 
     L.append("## Top 15 sessions by output tokens\n")
@@ -937,6 +1035,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
         seen_blocks = set()    # de-dup tool_use by BLOCK identity (see analyze())
         lens = BehaviorLens()
         tooluse_names = {}
+        tooluse_args = {}
         for r in rows_assist:
             msg = r.get("message", {}) or {}
             mid = msg.get("id")
@@ -972,6 +1071,8 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                     B["tools"][name] += 1
                     if blk.get("id"):
                         tooluse_names[blk["id"]] = name
+                        tooluse_args[blk["id"]] = hash(json.dumps(
+                            blk.get("input", {}), sort_keys=True, default=str))
                     lens.see_tool_use(name, blk.get("input"))
         for r in rows_err:
             content = (r.get("message", {}) or {}).get("content")
@@ -982,7 +1083,8 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                         and blk.get("is_error"):
                     lens.see_tool_result(
                         tooluse_names.get(blk.get("tool_use_id"), "?"),
-                        True, _txt_str(blk.get("content", "")))
+                        True, _txt_str(blk.get("content", "")),
+                        args_key=tooluse_args.get(blk.get("tool_use_id")))
         s = lens.summary()
         B["tool_errors"].update(s["tool_errors"])
         B["beh"]["timeout_kills"] += s["timeout_kills"]
@@ -990,7 +1092,9 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
         B["beh"]["edit_churn"] += sum(s["edit_churn"].values())
         if s["max_repeat_failure"] >= REPEAT_FAILURE_MIN:
             B["beh"]["repeat_failure_files"] += 1
-        if s["max_file_churn"] >= FILE_CHURN_MIN:
+        if s["failure_mass"]:
+            B["beh"]["failure_mass_files"] += 1
+        if s["file_churn"]:   # flagged rewrite-loops only, not raw edit counts
             B["beh"]["file_churn_files"] += 1
     return buckets, n
 

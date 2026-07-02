@@ -485,7 +485,67 @@ class BehavioralLensTest(unittest.TestCase):
         _, s = self._one(recs)
         b = s["behavior"]
         self.assertEqual(b["max_file_churn"], 5)
-        self.assertEqual(b["file_churn"], [{"file": "C:/x/hot.go", "count": 5}])
+        self.assertEqual(b["file_churn"], [{
+            "file": "C:/x/hot.go",
+            "count": 5,
+            "distinct_regions": 1,
+            "reverts": 0,
+        }])
+
+    def test_file_churn_distinct_region_buildout_not_flagged(self) -> None:
+        # 6 edits, 6 DISTINCT regions, zero reverts — helper-extraction /
+        # verb-per-triple build-out must NOT read as a rewrite loop (the exact
+        # false alarm the 2026-07-02 forensic pass refuted on 5 real sessions).
+        recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
+                           tool_id=f"t{i}",
+                           tool_input={"file_path": "C:/x/grow.go",
+                                       "old_string": f"region-{i}-before",
+                                       "new_string": f"region-{i}-after"})
+                for i in range(6)]
+        _, s = self._one(recs)
+        b = s["behavior"]
+        self.assertEqual(b["max_file_churn"], 6, "raw count still reported")
+        self.assertEqual(b["file_churn"], [], "distinct-region build-out is not churn")
+
+    def test_file_churn_revert_pair_flagged(self) -> None:
+        # Distinct regions overall, but one edit RESTORES an earlier pre-state
+        # (its new_string == an earlier edit's old_string) — an undo marks a loop.
+        edits = [("A", "B"), ("C", "D"), ("E", "F"), ("B", "A"), ("G", "H")]
+        recs = [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Edit",
+                           tool_id=f"t{i}",
+                           tool_input={"file_path": "C:/x/flip.go",
+                                       "old_string": old, "new_string": new})
+                for i, (old, new) in enumerate(edits)]
+        _, s = self._one(recs)
+        rows = s["behavior"]["file_churn"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reverts"], 1, "B->A restores edit 0's pre-state")
+
+    def test_verbatim_vs_failure_mass_split(self) -> None:
+        # 3 DIFFERENT commands sharing one error text: a failure CLASS, not a
+        # verbatim retry loop (the bea7d4b9/77ec8b67 false-alarm shape).
+        recs = []
+        for i in range(3):
+            recs += [_assistant(f"m{i}", out=10, cread=0, ccreate=0, tool="Bash",
+                                tool_id=f"t{i}",
+                                tool_input={"command": f"git cmd-{i}"}),
+                     _user_result(f"t{i}", "Exit code 143 Command timed out after 2m 0s")]
+        _, s = self._one(recs)
+        b = s["behavior"]
+        self.assertEqual(b["repeat_failures"], [], "args differ -> not verbatim")
+        self.assertEqual(b["max_repeat_failure"], 1)
+        self.assertEqual(b["failure_mass"],
+                         [{"tool": "Bash",
+                           "sig": "Exit code 143 Command timed out after 2m 0s",
+                           "count": 3}])
+
+    def test_stall_gap_detection(self) -> None:
+        r1 = _assistant("m1", out=10, cread=0, ccreate=0)
+        r2 = _assistant("m2", out=10, cread=0, ccreate=0)
+        r2["timestamp"] = "2026-06-20T00:10:00.000Z"   # 10 min after r1
+        _, s = self._one([r1, r2])
+        self.assertEqual(s["behavior"]["stall_gaps"], 1)
+        self.assertEqual(s["behavior"]["max_gap_s"], 600.0)
 
     def test_duplicated_assistant_lines_do_not_double_detectors(self) -> None:
         # The same billed turn re-serialized 3x: one sleep-poll, one file write.
@@ -507,7 +567,9 @@ class BehavioralLensTest(unittest.TestCase):
         self.assertIn("| Bash | 3 | 3 | 100.0% |", md)
         self.assertIn("Timeout kills", md)
         self.assertIn("**Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** 3", md)
-        self.assertIn("repeated identical failure", md)
+        self.assertIn("VERBATIM retry loop", md)
+        self.assertIn("recurring failure CLASS", md)
+        self.assertIn("zero-record stall", md)
         self.assertIn("Command timed out after 2m 0.0s", md)
 
     def test_aggregate_tolerates_pre_lens_sessions(self) -> None:
