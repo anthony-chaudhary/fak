@@ -202,6 +202,15 @@ binary/tooling is unavailable, and say so in the handoff.
   (`rg --files | rg <pat>`) or anchor **and** bound: `find /c/work/fak -xdev -maxdepth 8 …`,
   `timeout`-wrapped. Backstop: `tools/runaway_process_reaper.ps1` reaps stragglers; audit
   anytime with `tools/runaway_process_scan.ps1`.
+- **On this Windows host, run git (and anything you can't afford to hang) through the
+  PowerShell tool, not the Bash tool.** MSYS Bash stalls intermittently: `git diff`,
+  `git log`, `git status`, even `git remote -v` sit until the 120s tool timeout and die
+  with exit 143 — `--no-pager` / `-c core.pager=cat` do not save them (a 2026-07-01
+  trajectory audit counted 11 such kills across five sessions in two days). The same
+  commands via PowerShell return promptly and fail *fast* (exit 128) when a peer holds
+  `index.lock`, which is recoverable; a silent two-minute hang is not. Relatedly, never
+  foreground-`sleep` to poll for slow work — the harness blocks `sleep N; <cmd>` chains;
+  run the wait as a background task or monitor and let it notify you.
 - **Writes that resolve *outside* the repo are refused (`OUT_OF_TREE_WRITE`).** The
   `repo-guard` PreToolUse hook (`tools/repo_guard.py`, on by default on a fleet host) denies
   a Bash/Write/Edit op whose target escapes the workspace — a `../sibling` path or an absolute
