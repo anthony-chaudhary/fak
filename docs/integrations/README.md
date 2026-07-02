@@ -67,6 +67,8 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Hermes Agent** (NousResearch self-hosted agent, OpenAI wire) | [`hermes.md`](hermes.md) |
 | **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
 | **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
+| **Roo Code** (VS Code — OpenAI-Compatible provider *or* MCP) | [`roo-code.md`](roo-code.md) |
+| **Windsurf** (Cascade agent — OpenAI-compatible proxy) | [`windsurf.md`](windsurf.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
 
 **All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
@@ -75,6 +77,10 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
 env → build/start → `/healthz` → `ANTHROPIC_BASE_URL` wiring — plus the manual Claude
 Code MCP-server setup and the CI-embed shape, none of which need the dogfood launcher.
+
+**Running a support desk?** The [customer-support playbook](customer-support-playbook.md)
+is the vertical adoption guide — threat model, rollout plan, and runbook for the read-only
+customer-support policy template.
 
 Don't see your exact tool below? Read on — if it lets you set a base URL (almost all
 do), it already works. The [compatibility matrix](compatibility-matrix.md) is the full

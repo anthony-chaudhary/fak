@@ -179,6 +179,25 @@ _Generated from the per-module proof files (**94 PROVEN · 2 OPEN · 1 REFUTED �
 |  | ↳ | Release is idempotent (a second Release, and a Release on a nil *Lease, are no-ops that do not panic), AND a lease hel | `TestReleaseIdempotent`, `TestReleaseOnProcessExit` | ✅ PROVEN |
 <!-- LEDGER-END -->
 
+## Companion fixtures & packets
+
+Adjacent artifacts in this directory that ride the ledger's discipline but are not
+numbered obligations:
+
+- **[sound-restore.md](sound-restore.md)** — D-regime **fixture** (not a soundness
+  theorem): restore consults the persisted, non-forgeable keep-bit and does not re-fire an
+  already-witnessed effect, where an ACRFence-style semantic-rollback control re-executes.
+  Verdict **DEMONSTRATED** (2026-06-25); its honesty note states exactly what is *not*
+  claimed.
+- **[ctxsafety-provenance-lane.md](ctxsafety-provenance-lane.md)** — the C8 render
+  contract for context-safety visuals (#1225 numbering, not the crypto C-regime):
+  `WITNESSED` / `OBSERVED` / `MODELED` provenance as a visible, non-blended channel, with
+  the paired honesty test in `internal/cachewitness`.
+- **[safety-case-iec-61508-iso-26262.md](safety-case-iec-61508-iso-26262.md)** — the
+  compliance packet mapping already-proven determinism/provenance obligations (N7, I1,
+  D1, C1, C2) onto IEC 61508 / ISO 26262 / ISO-IEC TR 5469 requirements. Partner-gated;
+  aggregates existing witnesses, no new code.
+
 ## DOS binding — the proof section is itself witnessed
 
 The math above proves the *modules*. "I wrote these proofs and ran their witnesses" is
