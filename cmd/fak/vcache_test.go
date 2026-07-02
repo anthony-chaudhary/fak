@@ -157,6 +157,46 @@ func TestRunVCacheStatusExplainsProviderOnlySnapshotContextGap(t *testing.T) {
 	}
 }
 
+func TestRunVCacheStatusReadsContextOnlySnapshot(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900,"fak_context_dropped_turns":2,"fak_context_baseline_tokens":2000,"fak_context_cost_tokens":1100}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_VCACHE_SNAPSHOT", snap)
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--json"}); code != 0 {
+		t.Fatalf("status --json exit=%d stderr=%s", code, errb.String())
+	}
+	var rep vcacheStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.RecentObservation == nil {
+		t.Fatalf("status did not attach recent observation:\n%s", out.String())
+	}
+	recent := rep.RecentObservation
+	if recent.ProviderStatus != "MISSING" || recent.CacheReadTokens != 0 || recent.CacheCreationTokens != 0 {
+		t.Fatalf("context-only snapshot invented provider telemetry: %+v", recent)
+	}
+	if recent.ContextStatus != "WITNESSED" || recent.ContextEvents != 1 || recent.ContextShedTokens != 900 {
+		t.Fatalf("context-only status = %+v, want witnessed context counters", recent)
+	}
+	if !strings.Contains(rep.LiveProvider, "no provider-cache telemetry") {
+		t.Fatalf("live_provider did not explain context-only snapshot: %q", rep.LiveProvider)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
+		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "recent snapshot: 1 turns, provider MISSING, context WITNESSED (1 events)") {
+		t.Fatalf("text status did not report context-only snapshot:\n%s", out.String())
+	}
+}
+
 func TestRunVCacheStatusIncludesRecentSessionSummary(t *testing.T) {
 	cfg := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "work", "fak")
@@ -740,6 +780,40 @@ func TestRunVCacheScoreSnapshotCarriesContextEvidence(t *testing.T) {
 	}
 	if rep.DefaultUsefulness.Facets.AgenticActivation == 0 {
 		t.Fatalf("default-usefulness missed context activation: %+v", rep.DefaultUsefulness)
+	}
+}
+
+func TestRunVCacheScoreContextOnlySnapshotDoesNotInventProviderTelemetry(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900,"fak_context_dropped_turns":2,"fak_context_baseline_tokens":2000,"fak_context_cost_tokens":1100}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--snapshot", snap}); code != 0 && code != 1 {
+		t.Fatalf("score --snapshot exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.ActiveSource != "planned" || rep.Observed != nil || rep.TurnsObserved != 0 {
+		t.Fatalf("context-only snapshot must not become provider telemetry: source=%q observed=%+v turns=%d",
+			rep.ActiveSource, rep.Observed, rep.TurnsObserved)
+	}
+	if rep.Planes.ProviderObserved.Available {
+		t.Fatalf("context-only snapshot invented provider plane: %+v", rep.Planes.ProviderObserved)
+	}
+	if !rep.Planes.ContextWitnessed.Available || rep.Planes.ContextWitnessed.Provenance != "WITNESSED" {
+		t.Fatalf("context plane = %+v, want WITNESSED evidence from context-only snapshot", rep.Planes.ContextWitnessed)
+	}
+	if rep.Planes.ContextWitnessed.SavedTokenEquiv != 900 ||
+		rep.Planes.ContextWitnessed.BaselineTokenEquiv != 2000 ||
+		rep.Planes.ContextWitnessed.CostTokenEquiv != 1100 {
+		t.Fatalf("context economics=%+v, want 900 saved / 2000 baseline / 1100 cost", rep.Planes.ContextWitnessed)
+	}
+	if !rep.AgenticActivation.Active || rep.AgenticActivation.ContextEvents != 1 || rep.AgenticActivation.Total != 1 {
+		t.Fatalf("agentic activation = %+v, want one context-only event", rep.AgenticActivation)
 	}
 }
 

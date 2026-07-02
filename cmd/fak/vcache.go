@@ -219,8 +219,13 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "live provider loop: %s\n", rep.LiveProvider)
 	if rep.RecentObservation != nil {
 		recent := rep.RecentObservation
-		fmt.Fprintf(stdout, "recent snapshot: %d turns, provider %s %.2fx, false-warm %.2f%%, governor %s, context %s (%d events)\n",
-			recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextStatus, recent.ContextEvents)
+		if recent.ProviderStatus == "MISSING" {
+			fmt.Fprintf(stdout, "recent snapshot: %d turns, provider MISSING, context %s (%d events)\n",
+				recent.Turns, recent.ContextStatus, recent.ContextEvents)
+		} else {
+			fmt.Fprintf(stdout, "recent snapshot: %d turns, provider %s %.2fx, false-warm %.2f%%, governor %s, context %s (%d events)\n",
+				recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextStatus, recent.ContextEvents)
+		}
 	} else if rep.RecentObservationError != "" {
 		fmt.Fprintf(stdout, "recent snapshot: unreadable (%s)\n", rep.RecentObservationError)
 	}
@@ -570,12 +575,15 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
 		} else if ok {
-			observed := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
-			in.TelemetryRows = vcacheobserve.Rows(turns)
-			in.Ranked = vcacheobserve.RankedWorkload(turns)
-			in.Prediction = observed.Prediction
-			in.AnchorSource = vcachescore.AnchorSourceMeasured
-			in.TurnsObserved = len(turns)
+			providerTurns := vcacheProviderTelemetryTurns(turns)
+			if len(providerTurns) > 0 {
+				observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
+				in.TelemetryRows = vcacheobserve.Rows(providerTurns)
+				in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
+				in.Prediction = observed.Prediction
+				in.AnchorSource = vcachescore.AnchorSourceMeasured
+				in.TurnsObserved = len(providerTurns)
+			}
 			applyVCacheSnapshotContext(&in, turns)
 		}
 	}
@@ -787,12 +795,13 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 	if !ok {
 		return
 	}
-	obs := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
+	providerTurns := vcacheProviderTelemetryTurns(turns)
+	obs := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
 	recent := vcacheRecentObservation{
 		Source:              "snapshot",
 		Path:                path,
-		Turns:               obs.Turns,
-		ProviderStatus:      string(obs.Aggregate.Status),
+		Turns:               len(turns),
+		ProviderStatus:      "MISSING",
 		CacheReadTokens:     obs.Aggregate.CacheReadTokens,
 		CacheCreationTokens: obs.Aggregate.CacheCreationTokens,
 		HitRate:             obs.HitRate,
@@ -800,7 +809,10 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 		SavedTokenEquiv:     obs.Aggregate.SavedTokenEquiv,
 		FalseWarmRate:       obs.Prediction.FalseWarmRate(),
 		FalseColdRate:       obs.Prediction.FalseColdRate(),
-		GovernorDecision:    dominantVCacheGovernorDecision(obs.Families),
+	}
+	if len(providerTurns) > 0 {
+		recent.ProviderStatus = string(obs.Aggregate.Status)
+		recent.GovernorDecision = dominantVCacheGovernorDecision(obs.Families)
 	}
 	for _, turn := range turns {
 		recent.ContextEvents += turn.ContextEvents
@@ -811,8 +823,13 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 	}
 	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
 	rep.RecentObservation = &recent
-	rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot observed %d turns at %.2fx provider multiplier with %.2f%% false-warm; active warm/pin/evict actions remain gated",
-		recent.Turns, recent.Multiplier, 100*recent.FalseWarmRate)
+	if len(providerTurns) > 0 {
+		rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot observed %d provider turn(s) at %.2fx multiplier with %.2f%% false-warm; active warm/pin/evict actions remain gated",
+			len(providerTurns), recent.Multiplier, 100*recent.FalseWarmRate)
+	} else {
+		rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot has no provider-cache telemetry; context status %s with %d event(s); active warm/pin/evict actions remain gated",
+			recent.ContextStatus, recent.ContextEvents)
+	}
 }
 
 func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) {
@@ -821,6 +838,27 @@ func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) 
 		return "WITNESSED", "snapshot includes fak_context_* counters from a guard/serve context event"
 	}
 	return "MISSING", "snapshot has provider-cache turns but no fak_context_* counters; it predates context instrumentation or no managed-context event fired"
+}
+
+func vcacheProviderTelemetryTurns(turns []vcacheobserve.Turn) []vcacheobserve.Turn {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]vcacheobserve.Turn, 0, len(turns))
+	for _, turn := range turns {
+		if vcacheTurnHasProviderTelemetry(turn) {
+			out = append(out, turn)
+		}
+	}
+	return out
+}
+
+func vcacheTurnHasProviderTelemetry(turn vcacheobserve.Turn) bool {
+	return turn.InputTokens > 0 ||
+		turn.CacheRead > 0 ||
+		turn.CacheCreation > 0 ||
+		turn.Ephemeral1h > 0 ||
+		turn.Ephemeral5m > 0
 }
 
 type vcacheSessionSummaryOptions struct {
