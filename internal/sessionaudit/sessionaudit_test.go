@@ -238,6 +238,36 @@ func TestReportMarkdownHighlightsLongContextSessions(t *testing.T) {
 	}
 }
 
+func TestBuildCompactReportSummarizesModelMixAndLongContext(t *testing.T) {
+	root := t.TempDir()
+	heavy := Analyze(writeTranscriptIn(t, root, "C--work-fak", "heavyctx.jsonl", []map[string]any{
+		assistantRecord("heavy-1", 100, 900_000, 50_000),
+		assistantRecord("heavy-2", 100, 100_000, 50_000),
+	}))
+	fable := Analyze(writeTranscriptIn(t, root, "C--work-fak", "fablectx.jsonl", []map[string]any{
+		assistantRecord("fable-1", 300, 20_000, 1_000, withModel("claude-fable-5")),
+	}))
+	agg := AggregateSessions([]Session{heavy, fable})
+	rep := BuildCompactReport([]Session{heavy, fable}, agg, "C--work-fak", nil, false, 2, 3, nil, time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC))
+	if rep.Schema != "fak.session_audit.summary.v1" || !rep.Scope.Scoped || !rep.Scope.Clipped {
+		t.Fatalf("compact scope = %+v schema=%q", rep.Scope, rep.Schema)
+	}
+	if rep.Totals.TotalContextTokens != 1_121_000 || rep.Totals.OutputTokens != 500 {
+		t.Fatalf("compact totals = %+v", rep.Totals)
+	}
+	tiers := map[string]CompactTier{}
+	for _, tier := range rep.Tiers {
+		tiers[tier.Tier] = tier
+	}
+	if tiers["fable"].OutputTokens != 300 || tiers["opus"].OutputTokens != 200 {
+		t.Fatalf("compact tiers = %+v", rep.Tiers)
+	}
+	if len(rep.TopLongContext) == 0 || rep.TopLongContext[0].Session != "heavyctx" ||
+		rep.TopLongContext[0].TotalContextTokens != 1_100_000 {
+		t.Fatalf("compact long-context rows = %+v", rep.TopLongContext)
+	}
+}
+
 func TestReadOnlyClassification(t *testing.T) {
 	for _, name := range []string{"Monitor", "TaskGet", "TaskList", "TaskOutput", "ReadMcpResourceTool"} {
 		if !ReadOnlyTools[name] {

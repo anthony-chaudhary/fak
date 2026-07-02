@@ -179,6 +179,61 @@ type AuditPayload struct {
 	SubagentTranscript int       `json:"subagent_transcripts,omitempty"`
 }
 
+type CompactReport struct {
+	Schema            string               `json:"schema"`
+	Generated         string               `json:"generated"`
+	Scope             CompactScope         `json:"scope"`
+	Totals            CompactTotals        `json:"totals"`
+	Tiers             []CompactTier        `json:"tiers"`
+	TopLongContext    []CompactLongContext `json:"top_long_context,omitempty"`
+	ExcludedSubagents *Summary             `json:"excluded_subagents,omitempty"`
+}
+
+type CompactScope struct {
+	NamespaceFilter  string   `json:"namespace_filter"`
+	Namespaces       []string `json:"namespaces"`
+	SinceDays        *float64 `json:"since_days,omitempty"`
+	IncludeSubagents bool     `json:"include_subagents"`
+	Max              int      `json:"max,omitempty"`
+	Discovered       int      `json:"discovered"`
+	Audited          int64    `json:"audited"`
+	Clipped          bool     `json:"clipped"`
+	Scoped           bool     `json:"scoped"`
+}
+
+type CompactTotals struct {
+	OutputTokens       int64   `json:"output_tokens"`
+	FreshInputTokens   int64   `json:"fresh_input_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CacheCreateTokens  int64   `json:"cache_create_tokens"`
+	TotalContextTokens int64   `json:"total_context_tokens"`
+	CacheReadShare     float64 `json:"cache_read_share"`
+	IORatio            float64 `json:"io_ratio"`
+	EstimatedCostUSD   float64 `json:"estimated_cost_usd"`
+}
+
+type CompactTier struct {
+	Tier             string  `json:"tier"`
+	OutputTokens     int64   `json:"output_tokens"`
+	OutputShare      float64 `json:"output_share"`
+	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
+	CostShare        float64 `json:"cost_share"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	Turns            int64   `json:"turns"`
+}
+
+type CompactLongContext struct {
+	Session            string  `json:"session"`
+	Namespace          string  `json:"namespace"`
+	TotalContextTokens int64   `json:"total_context_tokens"`
+	FreshInputTokens   int64   `json:"fresh_input_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CacheReadShare     float64 `json:"cache_read_share"`
+	OutputTokens       int64   `json:"output_tokens"`
+	IORatio            float64 `json:"io_ratio"`
+	TopModel           string  `json:"top_model"`
+}
+
 func DefaultRoots() []string {
 	base := os.Getenv("CLAUDE_CONFIG_DIR")
 	if base == "" {
@@ -414,6 +469,45 @@ func SummarizeTranscripts(records []Transcript) Summary {
 		sessions = append(sessions, Analyze(r.Path))
 	}
 	return SummarizeAnalyses(sessions)
+}
+
+func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int, discoveredCount int, excludedSubagents *Summary, generated time.Time) CompactReport {
+	ok := validSessions(sessions)
+	totalContext := agg.Totals.Input + agg.Totals.CacheRead + agg.Totals.CacheCreate
+	names := sessionNamespaces(ok)
+	nsFilter := nsPrefix
+	if nsFilter == "" {
+		nsFilter = "all non-excluded namespaces"
+	}
+	rep := CompactReport{
+		Schema:    "fak.session_audit.summary.v1",
+		Generated: generated.Format(time.RFC3339),
+		Scope: CompactScope{
+			NamespaceFilter:  nsFilter,
+			Namespaces:       names,
+			SinceDays:        sinceDays,
+			IncludeSubagents: includeSubagents,
+			Max:              maxSessions,
+			Discovered:       discoveredCount,
+			Audited:          agg.NSessions,
+			Clipped:          maxSessions > 0 && discoveredCount > maxSessions,
+			Scoped:           nsPrefix != "",
+		},
+		Totals: CompactTotals{
+			OutputTokens:       agg.Totals.Output,
+			FreshInputTokens:   agg.Totals.Input,
+			CacheReadTokens:    agg.Totals.CacheRead,
+			CacheCreateTokens:  agg.Totals.CacheCreate,
+			TotalContextTokens: totalContext,
+			CacheReadShare:     floatRatioValue(float64(agg.Totals.CacheRead), float64(totalContext)),
+			IORatio:            floatRatioValue(float64(totalContext), float64(agg.Totals.Output)),
+			EstimatedCostUSD:   agg.TotalCostUSD,
+		},
+		Tiers:             compactTiers(agg),
+		TopLongContext:    compactLongContext(ok, 10),
+		ExcludedSubagents: excludedSubagents,
+	}
+	return rep
 }
 
 func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int, discoveredCount int, excludedSubagents *Summary, generated time.Time) string {
@@ -870,15 +964,7 @@ func validSessions(sessions []Session) []Session {
 }
 
 func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int) string {
-	set := map[string]bool{}
-	for _, s := range sessions {
-		set[namespaceName(s.Path)] = true
-	}
-	names := make([]string, 0, len(set))
-	for ns := range set {
-		names = append(names, ns)
-	}
-	sort.Strings(names)
+	names := sessionNamespaces(sessions)
 	nsDesc := "none"
 	if len(names) > 8 {
 		nsDesc = strings.Join(names[:8], ", ") + fmt.Sprintf(", ... (+%d more)", len(names)-8)
@@ -902,6 +988,19 @@ func scopeLine(sessions []Session, nsPrefix string, sinceDays *float64, includeS
 		cap = fmt.Sprintf("; max transcripts before analysis: %d", maxSessions)
 	}
 	return fmt.Sprintf("%d namespaces folded (%s); namespace filter: %s; time window: %s; %s%s", len(names), nsDesc, nsFilter, window, kinds, cap)
+}
+
+func sessionNamespaces(sessions []Session) []string {
+	set := map[string]bool{}
+	for _, s := range sessions {
+		set[namespaceName(s.Path)] = true
+	}
+	names := make([]string, 0, len(set))
+	for ns := range set {
+		names = append(names, ns)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func maxClipNote(maxSessions, discoveredCount int, scoped bool) string {
@@ -936,6 +1035,68 @@ func ProjectNamespace(workspace string) string {
 
 func namespaceName(path string) string {
 	return filepath.Base(filepath.Dir(path))
+}
+
+func compactTiers(agg Aggregate) []CompactTier {
+	totalOutput := int64(0)
+	totalCost := 0.0
+	for _, c := range agg.PerTier {
+		totalOutput += c.Output
+	}
+	for model, c := range agg.PerModel {
+		totalCost += ModelCost(model, c)
+	}
+	out := make([]CompactTier, 0, len(agg.PerTier))
+	for _, tier := range sortedModelCounts(agg.PerTier) {
+		c := agg.PerTier[tier]
+		tierCost := 0.0
+		for model, mc := range agg.PerModel {
+			if ModelTier(model) == tier {
+				tierCost += ModelCost(model, mc)
+			}
+		}
+		out = append(out, CompactTier{
+			Tier:             tier,
+			OutputTokens:     c.Output,
+			OutputShare:      floatRatioValue(float64(c.Output), float64(totalOutput)),
+			EstimatedCostUSD: tierCost,
+			CostShare:        floatRatioValue(tierCost, totalCost),
+			CacheReadTokens:  c.CacheRead,
+			Turns:            c.Turns,
+		})
+	}
+	return out
+}
+
+func compactLongContext(sessions []Session, limit int) []CompactLongContext {
+	rows := longContextSessionRows(sessions)
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	out := make([]CompactLongContext, 0, len(rows))
+	for _, row := range rows {
+		s := row.Session
+		cacheReadShare := 0.0
+		if row.CacheReadFrac != nil {
+			cacheReadShare = *row.CacheReadFrac
+		}
+		ioRatio := 0.0
+		if s.IORatio != nil {
+			ioRatio = *s.IORatio
+		}
+		out = append(out, CompactLongContext{
+			Session:            s.Session,
+			Namespace:          namespaceName(s.Path),
+			TotalContextTokens: row.TotalContext,
+			FreshInputTokens:   s.Tokens.Input,
+			CacheReadTokens:    s.Tokens.CacheRead,
+			CacheReadShare:     cacheReadShare,
+			OutputTokens:       s.Tokens.Output,
+			IORatio:            ioRatio,
+			TopModel:           topSessionModel(s),
+		})
+	}
+	return out
 }
 
 func subagentNote(summary *Summary) string {
@@ -1339,6 +1500,13 @@ func floatRatio(n, d float64) *float64 {
 	}
 	v := n / d
 	return &v
+}
+
+func floatRatioValue(n, d float64) float64 {
+	if d == 0 {
+		return 0
+	}
+	return n / d
 }
 
 func fmtPct(v *float64) string {
