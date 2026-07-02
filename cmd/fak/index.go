@@ -9,6 +9,8 @@ package main
 //	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
 //	fak index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
 //	fak index work [<query>]   the selection surface: named issue views + the default's gh query
+//	fak index refs <pkg>.<Symbol>
+//	                         direct + transitive dependents of a Go symbol before editing
 //	fak index generation [<query>]
 //	                         the generation taxonomy: labels, milestones, evidence rules
 //	fak index freshness        the self-index drift report: undeclared leaves, dead doc
@@ -96,6 +98,8 @@ func runIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexGeneration(stdout, stderr, cat, args, *asJSON, *limit)
 	case "work", "views", "view":
 		return indexWork(stdout, stderr, cat, args, *asJSON, *limit)
+	case "refs", "ref":
+		return indexRefs(stdout, stderr, rootDir, args, *asJSON, *limit)
 	case "freshness", "fresh":
 		return indexFreshness(stdout, stderr, cat, *asJSON, *limit)
 	default:
@@ -312,6 +316,7 @@ func writeIndexUsage(w io.Writer) {
   fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
   fak index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
   fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
+  fak index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
   fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
   flags: --json  --limit N  --root DIR
 `)

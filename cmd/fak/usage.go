@@ -287,13 +287,15 @@ const usageCoreText = `usage:
                  strategies, and capability cards are available. The answer is a
                  lightweight FeatureCard set with guarded request shapes; --detail faults
                  only the selected schema, doc snippet, or memory explain plan.)
-  fak index     lane <path>... | leaf [<query>] | docs <query>   [--json] [--limit N] [--root DIR]
+  fak index     lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym>   [--json] [--limit N] [--root DIR]
                 (the QUERYABLE SELF-INDEX: query fak's own dev facts instead of
                  re-surveying prose. 'lane' resolves which lane/leaf owns a path
                  (+ the (fak <leaf>) commit stamp it implies); 'leaf' searches the
                  dos.toml lane taxonomy by name/tree/description; 'docs' ranks the
-                 curated INDEX.md doc map by relevance. A VIEW over dos.toml + INDEX.md,
-                 never a competing source of truth. --json for tooling/MCP)
+                 curated INDEX.md doc map by relevance; 'refs' lists direct +
+                 transitive dependents of a Go symbol before editing. A VIEW over
+                 dos.toml + INDEX.md + go list, never a competing source of truth.
+                 Alias: fak devindex refs. --json for tooling/MCP)
   fak orient    --paths GLOB[,GLOB...] [--paths GLOB] [--json] [--root DIR]
                 (TASK-SCOPED ORIENTATION: for the files you are about to touch, print
                  the owning lane/tree, architest tier, owning go test target, expected

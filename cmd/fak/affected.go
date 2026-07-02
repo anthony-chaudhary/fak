@@ -538,6 +538,7 @@ func gitOut(root string, args ...string) (string, error) {
 // the import lists build the dependency edges.
 type goPkg struct {
 	ImportPath string
+	Name       string
 	Dir        string
 	Module     *struct{ Path, Dir string }
 

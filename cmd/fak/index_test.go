@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,6 +128,48 @@ func TestIndexGenerationJSON(t *testing.T) {
 	}
 }
 
+func TestIndexRefsBlastRadiusCLI(t *testing.T) {
+	root := t.TempDir()
+	writeFile := func(rel, body string) {
+		t.Helper()
+		fp := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fp, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/fak\n\ngo 1.26\n")
+	writeFile("dos.toml", "[lanes.trees]\ndevindex = [\"internal/devindex/**\", \"cmd/fak/**\"]\n")
+	writeFile("internal/core/core.go", "package core\n\ntype Widget struct{}\n")
+	writeFile("internal/direct/direct.go", "package direct\n\nimport \"example.com/fak/internal/core\"\n\nvar _ = core.Widget{}\n")
+	writeFile("internal/testonly/doc.go", "package testonly\n")
+	writeFile("internal/testonly/testonly_test.go", "package testonly\n\nimport \"testing\"\nimport \"example.com/fak/internal/core\"\n\nfunc TestWidget(t *testing.T) { _ = core.Widget{} }\n")
+	writeFile("internal/far/far.go", "package far\n\nimport _ \"example.com/fak/internal/direct\"\n")
+	writeFile("cmd/app/main.go", "package main\n\nfunc main() {}\n")
+	writeFile("cmd/app/main_test.go", "package main_test\n\nimport _ \"example.com/fak/internal/far\"\n")
+	writeFile("internal/unrelated/unrelated.go", "package unrelated\n")
+
+	var out, errb bytes.Buffer
+	if rc := runIndex(&out, &errb, []string{"refs", "--json", "--root", root, "example.com/fak/internal/core.Widget"}); rc != 0 {
+		t.Fatalf("runIndex refs rc=%d, stderr=%s", rc, errb.String())
+	}
+	var got devindex.BlastRadiusResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("refs --json is not valid JSON: %v\n%s", err, out.String())
+	}
+	want := []devindex.BlastRadiusPackage{
+		{ImportPath: "example.com/fak/internal/direct", Distance: 1, Direct: true},
+		{ImportPath: "example.com/fak/internal/testonly", Distance: 1, Direct: true},
+		{ImportPath: "example.com/fak/internal/far", Distance: 2},
+		{ImportPath: "example.com/fak/cmd/app", Distance: 3},
+	}
+	if strings.Join(blastRows(got.Packages), "\n") != strings.Join(blastRows(want), "\n") {
+		t.Fatalf("refs packages = %+v, want %+v", got.Packages, want)
+	}
+}
+
 // writeFreshnessCLIRepo lays down a tree with a known dead INDEX.md link and a
 // known orphaned dated note so `fak index freshness` is tested against fixed bytes.
 func writeFreshnessCLIRepo(t *testing.T) string {
@@ -145,6 +188,14 @@ func writeFreshnessCLIRepo(t *testing.T) string {
 	writeFile("INDEX.md", "# INDEX\n- [Gone](docs/gone.md) — dead local link.\n")
 	writeFile("docs/notes/2026-05-05-lonely.md", "# lonely note, unlisted\n")
 	return root
+}
+
+func blastRows(rows []devindex.BlastRadiusPackage) []string {
+	out := make([]string, len(rows))
+	for i, row := range rows {
+		out[i] = fmt.Sprintf("%s|%d|%t", row.ImportPath, row.Distance, row.Direct)
+	}
+	return out
 }
 
 func TestIndexFreshness(t *testing.T) {

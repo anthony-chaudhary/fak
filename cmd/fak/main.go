@@ -229,7 +229,7 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "feature":
 		cmdFeature(os.Args[2:])
-	case "index":
+	case "index", "devindex":
 		cmdIndex(os.Args[2:])
 	case "orient":
 		cmdOrient(os.Args[2:])
