@@ -192,6 +192,7 @@ catalogue, vCache, model routing, the moved front-page detail, and the three-axe
 |---|---|
 | Guided first session (15 min, real output at every step) | [docs/fak/tutorial.md](docs/fak/tutorial.md) |
 | Install + the four usage tiers | [GETTING-STARTED.md](GETTING-STARTED.md) |
+| Absolute-beginner start · the ordered concept path | [START-HERE.md](START-HERE.md) · [LEARNING-PATH.md](LEARNING-PATH.md) |
 | Claude Code / guard path | [docs/integrations/claude.md](docs/integrations/claude.md) |
 | Always-on gateway (`fak node`) | [docs/fak/node-setup.md](docs/fak/node-setup.md) |
 | Long sessions / cache | [docs/explainers/long-sessions-keep-the-cache-hit.md](docs/explainers/long-sessions-keep-the-cache-hit.md) |
