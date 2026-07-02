@@ -84,13 +84,18 @@ git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'   # see peers' leases
 fak loop region --lane gateway --actor session:$ME     # may I?
 fak leaseref acquire --id session-$ME-gateway --tree 'internal/gateway/**' --ttl 3600
 # ... work ... (renew with `fak leaseref renew` if it runs long)
+fak leaseref release --id session-$ME-gateway --holder $ME   # done: hand the region back NOW
 ```
 
 Once held, the manual lease is not advisory decoration: the dispatch tick and
 every lane/region-declaring loop drive will **refuse** to enter that region
-until it clears. When the work is done, the TTL bounds the record and
-`fak leaseref reap` (or the garden tick) removes it once expired; a CLI
-release twin of `acquire` is a named follow-on.
+until it clears. When the work is done, `fak leaseref release` — the release
+twin of `acquire` — hands the region back immediately (holder-checked and
+CAS-deleted: a live lease held by a different holder refuses `STALE_LEASE`, an
+already-absent one is an idempotent OK, and an expired record is releasable by
+anyone as a single-id reap; `--force` is the operator override). A holder that
+never releases is still bounded: the TTL lapses the record and
+`fak leaseref reap` (or the garden tick) removes it.
 
 ## Operational consequences worth knowing
 
@@ -99,8 +104,8 @@ release twin of `acquire` is a named follow-on.
   refuses *every* new region — that is the dos "runs alone" contract, now
   enforced at dispatch and loop-drive admission. The flip side: a leaked
   600-second release-tree lease blocks all spawns until it expires or
-  `fak leaseref reap` / the garden tick clears it. Keep exclusive work's TTLs
-  short and reap promptly.
+  `fak leaseref reap` / the garden tick clears it. Release at completion
+  (`fak leaseref release`), keep exclusive work's TTLs short, and reap promptly.
 - **A narrowed lease keeps its lane.** A lease on a sub-region
   (`region: internal/gateway/http/**`, or dispatch `--lease-tree`) is
   classified back to its lane by containment, so same-lane serialization and

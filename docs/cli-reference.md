@@ -242,6 +242,7 @@ fak leaseref list           # every record under refs/fak/locks/*, marked LIVE /
 fak leaseref liveness --session $ME   # classify each LIVE lease self|peer-live|peer-dead|peer-unknown by session heartbeat (#2164)
 fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing
 fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
+fak leaseref release --id L --holder $ME   # the release twin of acquire: hand the lease back NOW instead of waiting out the TTL (holder-checked; exit 3 on a refusal)
 ```
 
 `audit` is the read-only counterpart of `reap`: it classifies every lease live-vs-expired and
