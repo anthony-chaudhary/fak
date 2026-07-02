@@ -42,10 +42,28 @@ var gitLockContentionNeedles = []string{
 	"another git process", // the advice trailer git appends to the index.lock fatal
 }
 
+// gitLockPermanentMarkers force a failure OUT of the contention class even when
+// a needle also matched. "cannot lock ref" covers more than the transient race:
+// a CORRUPT ref fails as "error: cannot lock ref 'refs/heads/main': unable to
+// resolve reference 'refs/heads/main': reference broken" — a permanent
+// condition no retry clears, which must keep the halt-class HOOK_REFUSED so an
+// operator investigates instead of a fleet retrying forever.
+var gitLockPermanentMarkers = []string{
+	"unable to resolve reference", // the ref itself is unreadable, not merely locked
+	"reference broken",            // git's corrupt-ref suffix
+}
+
 // isGitLockContention reports whether raw git output describes a lost
 // repository-lock race — the transient failure class a short retry fixes.
+// Permanent markers win over the needles: a corrupt-ref failure is never
+// contention, even though it carries "cannot lock ref".
 func isGitLockContention(out string) bool {
 	low := strings.ToLower(out)
+	for _, marker := range gitLockPermanentMarkers {
+		if strings.Contains(low, marker) {
+			return false
+		}
+	}
 	for _, needle := range gitLockContentionNeedles {
 		if strings.Contains(low, needle) {
 			return true

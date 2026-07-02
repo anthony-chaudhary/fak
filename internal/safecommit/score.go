@@ -41,7 +41,7 @@ func resultScore(res Result) (int, []string) {
 	case ReasonNothingStaged:
 		return 88, []string{"no pathspec changes to commit"}
 	case ReasonLockBusy, ReasonWindowFull:
-		return 82, []string{"retryable writer-admission refusal"}
+		return 82, []string{"retryable commit-lane contention (fak lock/window, or a peer's raw-git lock)"}
 	case ReasonPushRejected:
 		if res.Verified {
 			return 80, []string{"verified local commit; push rejected"}

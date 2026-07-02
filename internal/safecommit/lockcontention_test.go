@@ -38,6 +38,9 @@ func TestIsGitLockContention(t *testing.T) {
 		{"hook refusal", "FILE_ADMISSION: docs/tmp-scratch.md is a one-off operational artifact", false},
 		{"vet failure", "internal/foo/bar.go:10: undefined: baz", false},
 		{"empty", "", false},
+		// "cannot lock ref" also fires on PERMANENT ref corruption — the marker
+		// must win so a broken ref halts (HOOK_REFUSED) instead of retrying.
+		{"corrupt ref", "error: cannot lock ref 'refs/heads/main': unable to resolve reference 'refs/heads/main': reference broken", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
