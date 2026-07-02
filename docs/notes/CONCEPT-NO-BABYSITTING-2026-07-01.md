@@ -242,6 +242,16 @@ of shipped work. You cannot retire what you cannot count.
 
 ## The rungs (new here, not duplicating #1860 / #2198 / the loop note)
 
+Filed 2026-07-02 as epic
+[#2269](https://github.com/anthony-chaudhary/fak/issues/2269): R1 #2270 ·
+R2 #2271 · R3 #2272 · R4 #2273 (doubly parented in #1146, whose
+"launched ≠ took" gap it closes) · R5 #2274 · R6 #2275, plus two gap leaves —
+#2276 (`loop_budget_burn_without_evidence` emission) and #2277 (`fak loop
+recover` pid-liveness probe). The duplicate sweep that preceded filing found
+the adjacent homes, and the epic references rather than duplicates them:
+agent-OS mechanics #748, witnessed two-heartbeat liveness #750, crash/resume
+visibility #1146, fleet-status consolidation #2038/#2040.
+
 - **R1 — The babysitting counter.** Emit the four KPIs from the ledgers named
   above; classify each operator touch by watch. Cheapest rung; everything else
   is graded against it. (The dispatch and resume ledgers already record most
@@ -303,17 +313,19 @@ of shipped work. You cannot retire what you cannot count.
   is the counter: if better models alone drive `touches_per_witnessed_unit`
   to zero without W1–W5 structure, the doctrine is wrong — and the counter
   would show it.
-- No GitHub issues are filed from this note: the same bottleneck map records
-  a live issue-taxonomy regression caused by unlabeled epic bursts, so filing
-  the R1–R6 spine without priority/kind/area/owner would worsen the exact debt
-  it documents. Filing them *with* labels is the named next step, not a
-  casualty of it.
+- The spine was filed 2026-07-02 as epic #2269 + children #2270–#2277 with
+  kind/area/priority labels attached at creation — the same bottleneck map
+  records a live taxonomy regression caused by unlabeled epic bursts, and
+  this filing adds no rows to that debt. A duplicate sweep of the open
+  tracker preceded it; R4 is doubly parented in #1146 rather than re-filed
+  as a sibling.
 
 ## Next checkable step
 
-Build **R1** (the counter) first — like #2198-R1, it is the cheapest rung and
-the doctrine's own witness; R4 (the recovery drain witness) is the live fire
-to point it at, since the fleet is CRITICAL there today. Check: the four KPIs
+Build **R1** (#2270, the counter) first — like #2198-R1, it is the cheapest
+rung and the doctrine's own witness; R4 (#2273, filed P0) is the live fire to
+point it at, since the fleet is CRITICAL there today. Check:
+`gh issue view 2270` / `gh issue view 2273`; then the four KPIs
 appear in an operator-readable report with a dated baseline, and the
 2026-07-01 bottleneck map's 18 stuck workers become the first measured
 `silent_hours` / `mttr_sessions` datapoints.
