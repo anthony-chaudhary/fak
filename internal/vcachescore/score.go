@@ -818,6 +818,12 @@ func actionsAndRisks(rep Report, maxFalseWarm float64) ([]string, []string) {
 	if rep.ActiveSource == "planned" {
 		actions = append(actions, "collect provider telemetry with fak vcache prove-telemetry, then re-score on observed cache_read counters")
 	}
+	if !rep.Planes.KernelWitnessed.Available {
+		actions = append(actions, "capture a fak-owned KV witness: run guard/serve long enough to append the cache-value ledger, or pass --kernel-ledger/--kernel-kv-* evidence")
+	}
+	if !rep.Planes.ContextWitnessed.Available {
+		actions = append(actions, "capture a context-plane witness: run guard/serve until compact-history or ctx-view fires, or pass --context-shed-tokens with resident-token cost")
+	}
 	if rep.Planned.Status != vcachegov.ProofProven {
 		risks = append(risks, rep.Planned.Reason)
 		actions = append(actions, "raise sibling reuse, anchor length, or read discount before spending dedicated vCache engineering")

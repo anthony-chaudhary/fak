@@ -136,6 +136,20 @@ func TestProviderTelemetryDoesNotCountAsAgenticActivation(t *testing.T) {
 	}
 }
 
+func TestMissingFakPlanesAreNamedInActions(t *testing.T) {
+	in := DefaultInput()
+	in.TelemetryRows = []vcachegov.TelemetryRow{
+		{InputTokens: 86, CacheReadInputTokens: 1920},
+	}
+	rep := Score(in)
+	if !contains(rep.Actions, "capture a fak-owned KV witness") {
+		t.Fatalf("actions=%v, want missing kernel witness guidance", rep.Actions)
+	}
+	if !contains(rep.Actions, "capture a context-plane witness") {
+		t.Fatalf("actions=%v, want missing context witness guidance", rep.Actions)
+	}
+}
+
 func TestSuppliedAgenticActivationIsScoredSeparately(t *testing.T) {
 	in := DefaultInput()
 	in.TelemetryRows = []vcachegov.TelemetryRow{
