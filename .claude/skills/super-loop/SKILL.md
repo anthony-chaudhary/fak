@@ -43,16 +43,30 @@ failure — two runs, ~52 turns, 0 commits).
   lands on the trunk (`dos commit-audit`, `dos verify`) — ground truth the launcher
   cannot fake.
 - **The cap is the no-DoS guarantee.** Every spawn passes `dispatch_preflight.py`
-  (`SPAWN_OK`), which refuses if the host guard is dirty, no account is free, or the
-  live worker population is at the cap. A `REFUSE_*` is the safety floor doing its
-  job — surface it, do not route around it.
+  (`SPAWN_OK`) — `issue_dispatch.py` re-checks it per spawn, and
+  `launch_goal_detached.ps1` (the spawn point the single AND multi-account wave
+  paths share) refuses on any non-`SPAWN_OK` verdict. A `REFUSE_*` is the safety
+  floor doing its job — surface it, do not route around it (`-SkipPreflight` is an
+  operator-only override; never pass it in a wave). One honest caveat: a just-spawned
+  `/goal` worker is stdin-fed and carries no scannable process marker, so the
+  per-spawn re-check sees a sibling only once it holds a lane lease — size the wave
+  from the plan; do not re-run it to "top up" while workers are still starting.
+- **Own the seat.** The launcher strips `ANTHROPIC_*` and the session-identity vars
+  before spawning, so a wave launched from inside a `fak guard`ed session cannot
+  bleed onto the parent's loopback gateway/seat (the whole-wave same-instant crash;
+  child-stderr tell: "claude.ai connectors are disabled because ANTHROPIC_API_KEY …
+  is set").
 
 ## Step 0 — Orient: is it safe to spawn, and what is the fuel?
 
 ```bash
 python tools/dispatch_preflight.py --json     # SPAWN_OK  or  REFUSE_{INSPECT,HOST,NO_SEAT,AT_CAP,NO_ACCOUNT}
-python tools/dispatch_status.py --md | head -40   # workers live vs cap, account availability, backend health
+python tools/dispatch_status.py --fast        # quick pure-local card: workers live vs cap, account availability
 ```
+
+(`--md` is not a display flag — `--md <path>` WRITES the committed markdown status
+doc; the human-readable card is the default stdout output, `--fast` skips the two
+gh-backed folds for a quick look.)
 
 If preflight is not `SPAWN_OK`, STOP and report the verdict — the recover step is
 the one named in the AGENTS.md guard table (fix the host / re-login / wait for a
@@ -131,7 +145,7 @@ loop; check back on a cadence with the existing status tools (this skill launche
 it does not re-implement monitoring):
 
 ```bash
-python tools/dispatch_status.py --md            # live workers, throughput, closure-honesty
+python tools/dispatch_status.py                 # full fold: live workers, throughput, closure-honesty
 ```
 
 When a worker claims a leaf done, the truth is git, not the log tail:
@@ -179,7 +193,8 @@ super-loop commit.
 - **Host not `SPAWN_OK`.** Fix the preflight refusal first; a wave on a dirty host or
   a throttled account just fails N ways instead of one.
 - **One issue, one worker.** Use `/dos-dispatch` (or launch a single
-  `launch_goal_detached.ps1`); a wave is overhead for a single leaf.
+  `launch_goal_detached.ps1` — dry-run it first with `-PlanOnly`, the single-spawn
+  twin of the wave's default plan mode); a wave is overhead for a single leaf.
 - **Self-source churn.** Do not fan out engineering workers that will free-edit
   `cmd/**` / `internal/**` in one shared checkout — that is the build-poisoning
   collision the tree-disjoint `--wave` path exists to prevent.
