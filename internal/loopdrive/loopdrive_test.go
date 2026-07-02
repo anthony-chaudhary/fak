@@ -45,6 +45,51 @@ Ship the GOAL.md loop spec.
 	}
 }
 
+func TestParseRenderRoundTripWithLaneAndRegion(t *testing.T) {
+	src := []byte(`---
+loop: nightly
+witness: commit-audit
+lane: gateway
+region: internal/gateway/**, docs/gateway.md # region admission scope
+budget: { max_iters: 3 }
+---
+# Objective
+Keep the gateway green.
+
+# Plan
+- [ ] One step
+
+# Scratch / last-refusal
+`)
+	spec, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Lane != "gateway" {
+		t.Fatalf("lane = %q", spec.Lane)
+	}
+	if !reflect.DeepEqual(spec.Region, []string{"internal/gateway/**", "docs/gateway.md"}) {
+		t.Fatalf("region = %v", spec.Region)
+	}
+	again, err := Parse(spec.Render())
+	if err != nil {
+		t.Fatalf("parse rendered spec: %v\n%s", err, spec.Render())
+	}
+	if !reflect.DeepEqual(again, spec) {
+		t.Fatalf("render round-trip drifted\n got: %+v\nwant: %+v", again, spec)
+	}
+}
+
+func TestParseWithoutLaneOrRegionStaysZero(t *testing.T) {
+	spec, err := Parse(Template("plain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Lane != "" || spec.Region != nil {
+		t.Fatalf("an undeclared lane/region must stay zero (uncoordinated drive unchanged), got lane=%q region=%v", spec.Lane, spec.Region)
+	}
+}
+
 func TestTemplateIsParseable(t *testing.T) {
 	spec, err := Parse(Template("nightly/dispatch"))
 	if err != nil {

@@ -16,6 +16,14 @@ type Spec struct {
 	Objective string
 	Plan      []PlanItem
 	Scratch   string
+	// Lane optionally names the dos.toml lane this loop's writes stay inside;
+	// Region optionally names explicit region globs. Either arms the driver's
+	// region admission (internal/regionadmit): the drive refuses to start over
+	// a live overlapping lease (COLLISION_RISK) and holds a fenced lease for
+	// the region while it runs. Both empty = the historical uncoordinated
+	// drive, byte-for-byte unchanged.
+	Lane   string
+	Region []string
 }
 
 // Budget carries the bounded loop budget from frontmatter.
@@ -30,11 +38,14 @@ type PlanItem struct {
 	Text    string
 }
 
-// Parse reads the minimal GOAL.md format:
+// Parse reads the minimal GOAL.md format (lane/region are optional and arm
+// the driver's region admission):
 //
 //	---
 //	loop: id
 //	witness: commit-audit
+//	lane: gateway
+//	region: internal/gateway/**, docs/gateway.md
 //	budget: { max_iters: 20 }
 //	---
 //	# Objective
@@ -69,6 +80,12 @@ func Parse(data []byte) (Spec, error) {
 func (s Spec) Render() []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\nloop: %s\nwitness: %s\n", s.Loop, s.Witness)
+	if strings.TrimSpace(s.Lane) != "" {
+		fmt.Fprintf(&b, "lane: %s\n", strings.TrimSpace(s.Lane))
+	}
+	if len(s.Region) > 0 {
+		fmt.Fprintf(&b, "region: %s\n", strings.Join(s.Region, ", "))
+	}
 	if s.Budget.MaxIters > 0 || s.Budget.MaxTokens > 0 {
 		var parts []string
 		if s.Budget.MaxIters > 0 {
@@ -220,6 +237,10 @@ func parseFrontmatter(text string) (Spec, error) {
 			spec.Loop = value
 		case "witness":
 			spec.Witness = value
+		case "lane":
+			spec.Lane = value
+		case "region":
+			spec.Region = parseRegion(value)
 		case "budget":
 			b, err := parseBudget(value)
 			if err != nil {
@@ -229,6 +250,19 @@ func parseFrontmatter(text string) (Spec, error) {
 		}
 	}
 	return spec, nil
+}
+
+// parseRegion splits a frontmatter region value into its glob list:
+// comma-separated, whitespace-trimmed, empties dropped.
+func parseRegion(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func parseBudget(value string) (Budget, error) {
