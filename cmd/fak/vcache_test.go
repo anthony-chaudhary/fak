@@ -97,14 +97,54 @@ func TestRunVCacheStatusReadsRecentSnapshot(t *testing.T) {
 	if recent.FalseWarmRate != 0 || recent.GovernorDecision == "" || recent.ContextEvents != 1 || recent.ContextShedTokens != 200 {
 		t.Fatalf("recent observation missed prediction/governor/context evidence: %+v", recent)
 	}
+	if recent.ContextStatus != "WITNESSED" || !strings.Contains(recent.ContextReason, "fak_context_* counters") {
+		t.Fatalf("recent context status = %q (%q), want WITNESSED with reason", recent.ContextStatus, recent.ContextReason)
+	}
 
 	out.Reset()
 	errb.Reset()
 	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
 		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "recent snapshot: 2 turns, provider PROVEN") {
+	if !strings.Contains(out.String(), "recent snapshot: 2 turns, provider PROVEN") ||
+		!strings.Contains(out.String(), "context WITNESSED (1 events)") {
 		t.Fatalf("text status did not report recent snapshot:\n%s", out.String())
+	}
+}
+
+func TestRunVCacheStatusExplainsProviderOnlySnapshotContextGap(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n" +
+		`{"family":"head","unix_millis":2,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAK_VCACHE_SNAPSHOT", snap)
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"status", "--json"}); code != 0 {
+		t.Fatalf("status --json exit=%d stderr=%s", code, errb.String())
+	}
+	var rep vcacheStatusReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.RecentObservation == nil {
+		t.Fatalf("status did not attach recent observation:\n%s", out.String())
+	}
+	recent := rep.RecentObservation
+	if recent.ProviderStatus != string(vcachegov.ProofProven) || recent.ContextStatus != "MISSING" ||
+		!strings.Contains(recent.ContextReason, "no fak_context_* counters") {
+		t.Fatalf("provider-only context status = %+v, want provider proven with MISSING context reason", recent)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"status"}); code != 0 {
+		t.Fatalf("status exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "context MISSING (0 events)") {
+		t.Fatalf("text status did not explain missing context counters:\n%s", out.String())
 	}
 }
 

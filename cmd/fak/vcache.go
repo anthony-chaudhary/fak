@@ -152,6 +152,8 @@ type vcacheRecentObservation struct {
 	FalseWarmRate         float64 `json:"false_warm_rate"`
 	FalseColdRate         float64 `json:"false_cold_rate"`
 	GovernorDecision      string  `json:"governor_decision,omitempty"`
+	ContextStatus         string  `json:"context_status"`
+	ContextReason         string  `json:"context_reason,omitempty"`
 	ContextEvents         int64   `json:"context_events,omitempty"`
 	ContextShedTokens     int64   `json:"context_shed_tokens,omitempty"`
 	ContextDroppedTurns   int64   `json:"context_dropped_turns,omitempty"`
@@ -188,8 +190,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "live provider loop: %s\n", rep.LiveProvider)
 	if rep.RecentObservation != nil {
 		recent := rep.RecentObservation
-		fmt.Fprintf(stdout, "recent snapshot: %d turns, provider %s %.2fx, false-warm %.2f%%, governor %s, context events %d\n",
-			recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextEvents)
+		fmt.Fprintf(stdout, "recent snapshot: %d turns, provider %s %.2fx, false-warm %.2f%%, governor %s, context %s (%d events)\n",
+			recent.Turns, recent.ProviderStatus, recent.Multiplier, 100*recent.FalseWarmRate, recent.GovernorDecision, recent.ContextStatus, recent.ContextEvents)
 	} else if rep.RecentObservationError != "" {
 		fmt.Fprintf(stdout, "recent snapshot: unreadable (%s)\n", rep.RecentObservationError)
 	}
@@ -770,9 +772,18 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path string) {
 		recent.ContextBaselineTokens += turn.ContextBaselineTokens
 		recent.ContextCostTokens += turn.ContextCostTokens
 	}
+	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
 	rep.RecentObservation = &recent
 	rep.LiveProvider = fmt.Sprintf("passive provider-cache window wired; recent snapshot observed %d turns at %.2fx provider multiplier with %.2f%% false-warm; active warm/pin/evict actions remain gated",
 		recent.Turns, recent.Multiplier, 100*recent.FalseWarmRate)
+}
+
+func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) {
+	if recent.ContextEvents > 0 || recent.ContextShedTokens > 0 || recent.ContextDroppedTurns > 0 ||
+		recent.ContextBaselineTokens > 0 || recent.ContextCostTokens > 0 {
+		return "WITNESSED", "snapshot includes fak_context_* counters from a guard/serve context event"
+	}
+	return "MISSING", "snapshot has provider-cache turns but no fak_context_* counters; it predates context instrumentation or no managed-context event fired"
 }
 
 func dominantVCacheGovernorDecision(families []vcacheobserve.Family) string {
