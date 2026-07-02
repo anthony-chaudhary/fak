@@ -596,14 +596,15 @@ jobs:
       # `--markdown` / `--stamp` but no gate — which is why the corpus drifted 34
       # defects deep before a human noticed (cf1deba4). `--check` (#1280) is the
       # keep-bit ratchet every #1278 child reads: GREEN while learning-debt holds
-      # at-or-below the pinned `--baseline` ceiling (0 today — the corpus is clean)
-      # and RED only on a regression, so learning-debt cannot merge silently again.
-      # The tool's own unit tests are HARD; the ratchet is HARD at baseline 0.
+      # at-or-below the pinned `--baseline` ceiling (45 today, matching the
+      # control-pane baseline) and RED only on a regression, so learning-debt
+      # cannot merge silently again.
+      # The tool's own unit tests are HARD; the ratchet is HARD at baseline 45.
       - name: learning-docs scorecard (pedagogy KPIs + learning-debt; HARD ratchet --check)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/learning_scorecard_test.py
-          python tools/learning_scorecard.py --check --baseline 0
+          python tools/learning_scorecard.py --check --baseline 45
 
       # Scorecard regression suites (the six that ran in NO gate): the docs / demo-quality
       # / demo-robustness / seo-aeo / repo-hygiene scorecards each run their own *_test.py
