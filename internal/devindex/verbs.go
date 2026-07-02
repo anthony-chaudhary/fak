@@ -35,6 +35,11 @@ type Verb struct {
 	Aliases  []string `json:"aliases,omitempty"`
 	Lane     string   `json:"lane,omitempty"`
 	Doc      string   `json:"doc,omitempty"`
+	// Tier is the epic-#2228 CLI concept tier (frontdoor|dev|hidden), stamped
+	// from the verbTiers table (tiers.go) — never authored per manifest entry,
+	// so the classification keeps its one home. Empty only for a curated entry
+	// whose verb is not (yet) dispatched.
+	Tier VerbTier `json:"tier,omitempty"`
 }
 
 // Spellings returns the verb's canonical name plus every alias — the full set of
@@ -244,6 +249,9 @@ func (c *Catalog) Verbs() []Verb {
 	if len(tokens) == 0 {
 		out := make([]Verb, len(verbManifest))
 		copy(out, verbManifest)
+		for i := range out {
+			out[i].Tier = tierFor(out[i].Name)
+		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
 	}
@@ -261,6 +269,7 @@ func (c *Catalog) Verbs() []Verb {
 				continue // a curated verb reached via one of its alias spellings
 			}
 			seen[v.Name] = true
+			v.Tier = tierFor(v.Name)
 			out = append(out, v)
 			continue
 		}
@@ -268,7 +277,7 @@ func (c *Catalog) Verbs() []Verb {
 			continue
 		}
 		seen[tok] = true
-		out = append(out, Verb{Name: tok, Synopsis: "not yet cataloged — `fak " + tok + " -h` for usage"})
+		out = append(out, Verb{Name: tok, Synopsis: "not yet cataloged — `fak " + tok + " -h` for usage", Tier: tierFor(tok)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -293,6 +302,13 @@ func (c *Catalog) liveDispatchTokens() []string {
 // The freshness gate uses this to ask "does main.go's case <tok> have a manifest
 // entry?" without re-deriving the alias set at the call site.
 func (c *Catalog) VerbByName(name string) (Verb, bool) {
+	return manifestVerbByName(name)
+}
+
+// manifestVerbByName is the package-level manifest lookup behind VerbByName,
+// factored out so TierOf (tiers.go) can canonicalize an alias spelling without a
+// Catalog — the tier answer must not require a readable repo.
+func manifestVerbByName(name string) (Verb, bool) {
 	n := strings.ToLower(strings.TrimSpace(name))
 	if n == "" {
 		return Verb{}, false
