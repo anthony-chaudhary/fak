@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
@@ -60,6 +61,16 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 	}
 }
 
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	seen := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			seen = true
+		}
+	})
+	return seen
+}
+
 func vcacheUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
   fak vcache status [--json] [--sessions] [--session-days N] [--session-max N]
@@ -81,6 +92,7 @@ func vcacheUsage(w io.Writer) {
                    [--anchor-tokens N --suffix-tokens N --requests N]
                    [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
                    [--zipf-s F --anchors N --anchors-file FILE --target-coverage F]
+                   [--kernel-ledger FILE|default|off]
                    [--kernel-kv-events N --context-events N]
                    [--kernel-kv-prompt-tokens N --kernel-kv-reused-tokens N]
                    [--context-shed-tokens N --context-resident-tokens N]
@@ -443,8 +455,17 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	recallUnit := fs.Int64("recall-unit-tokens", def.Recall.UnitTokens, "M4 recall proof unit tokens (U)")
 	recallSiblings := fs.Int("recall-siblings", def.Recall.Siblings, "M4 recall proof sibling count (S)")
 	recallReadMult := fs.Float64("recall-read-mult", def.Recall.ReadMult, "M4 recall cached-read token multiplier")
+	kernelLedgerDefault := strings.TrimSpace(os.Getenv("FAK_VCACHE_KERNEL_LEDGER"))
+	if kernelLedgerDefault == "" {
+		kernelLedgerDefault = cachevalueledger.DefaultLedgerRel
+	}
+	kernelLedger := fs.String("kernel-ledger", kernelLedgerDefault, "durable cache-value ledger for fak-owned KV witness (default docs/nightrun/cache-value.jsonl; off disables)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	kernelLedgerSet := flagWasSet(fs, "kernel-ledger")
+	if !kernelLedgerSet && (strings.TrimSpace(*telemetry) != "" || strings.TrimSpace(*anchorsFile) != "" || flagWasSet(fs, "snapshot")) {
+		*kernelLedger = "off"
 	}
 	if strings.TrimSpace(*telemetry) == "-" && strings.TrimSpace(*anchorsFile) == "-" {
 		fmt.Fprintln(stderr, "fak vcache score: --telemetry - and --anchors-file - cannot both read stdin")
@@ -504,6 +525,9 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			CostTokenEquiv:     *kernelKVPromptTokens - reused,
 			Reason:             "fak-owned KV witness supplied by CLI",
 		}
+	}
+	if !in.KernelKV.Available {
+		applyVCacheKernelLedger(&in, *kernelLedger)
 	}
 	if *contextShedTokens < 0 || *contextResidentTokens < 0 {
 		fmt.Fprintln(stderr, "fak vcache score: --context-shed-tokens and --context-resident-tokens must be non-negative")
@@ -685,6 +709,44 @@ func planeLabel(p vcachescore.PlaneValueReport) string {
 	return p.Provenance
 }
 
+func applyVCacheKernelLedger(in *vcachescore.Input, path string) {
+	if in == nil {
+		return
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || strings.EqualFold(path, "off") {
+		return
+	}
+	if strings.EqualFold(path, "default") {
+		path = cachevalueledger.DefaultLedgerRel
+	}
+	res, err := cachevalueledger.ScoreLedger(path)
+	if err != nil || !res.HasEnoughData() || res.GatePromptTokens == 0 || res.GateReusedTokens == 0 {
+		return
+	}
+	cost := res.GatePromptTokens - res.GateReusedTokens
+	if res.GateReusedTokens > res.GatePromptTokens {
+		cost = 0
+	}
+	in.KernelKV = vcachescore.PlaneEvidenceInput{
+		Available:          true,
+		Provenance:         "WITNESSED",
+		BaselineTokenEquiv: float64(res.GatePromptTokens),
+		SavedTokenEquiv:    float64(res.GateReusedTokens),
+		CostTokenEquiv:     float64(cost),
+		Reason: fmt.Sprintf(
+			"durable cache-value ledger %s witnessed %d multi-turn session(s), %d turn(s), and %.3f realized KV-prefix reuse",
+			path,
+			res.MultiTurnSessions,
+			res.MultiTurnTurns,
+			res.RealizedReuseRatio,
+		),
+	}
+	if in.AgenticActivation.KernelKVEvents == 0 {
+		in.AgenticActivation.KernelKVEvents = uint64ToIntVCache(res.MultiTurnTurns)
+	}
+}
+
 func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Turn) {
 	var events, shed, dropped, baseline, cost int64
 	for _, t := range turns {
@@ -732,6 +794,14 @@ func nonNegInt64(n int64) int64 {
 
 func int64ToInt(n int64) int {
 	maxInt := int64(int(^uint(0) >> 1))
+	if n > maxInt {
+		return int(maxInt)
+	}
+	return int(n)
+}
+
+func uint64ToIntVCache(n uint64) int {
+	maxInt := uint64(int(^uint(0) >> 1))
 	if n > maxInt {
 		return int(maxInt)
 	}

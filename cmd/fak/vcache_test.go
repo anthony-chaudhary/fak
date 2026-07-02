@@ -669,6 +669,40 @@ func TestRunVCacheScoreContextSavedOnlyDoesNotInferBaseline(t *testing.T) {
 	}
 }
 
+func TestRunVCacheScoreKernelLedgerSuppliesWitness(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "cache-value.jsonl")
+	body := `{"schema":"fak-cache-value-ledger/1","date":"2026-07-01","session_type":"guard","context":"fixture","unix_millis":1,"turns":5,"prompt_tokens":1000,"reused_tokens":800,"frozen_turns":4,"partial_turns":1,"cold_turns":0,"reuse_ratio":0.8}` + "\n" +
+		`{"schema":"fak-cache-value-ledger/1","date":"2026-07-01","session_type":"guard","context":"fixture","unix_millis":2,"turns":5,"prompt_tokens":1000,"reused_tokens":900,"frozen_turns":5,"partial_turns":0,"cold_turns":0,"reuse_ratio":0.9}` + "\n"
+	if err := os.WriteFile(ledger, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runVCache(&out, &errb, []string{
+		"score", "--json", "--snapshot", "off", "--kernel-ledger", ledger,
+	})
+	if code != 0 {
+		t.Fatalf("score kernel ledger exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.ActiveSource != "planned" || rep.Planes.ProviderObserved.Available {
+		t.Fatalf("kernel ledger must not invent provider telemetry: source=%q provider=%+v", rep.ActiveSource, rep.Planes.ProviderObserved)
+	}
+	kernel := rep.Planes.KernelWitnessed
+	if !kernel.Available || kernel.Provenance != "WITNESSED" {
+		t.Fatalf("kernel plane=%+v, want WITNESSED cache-value ledger evidence", kernel)
+	}
+	if kernel.BaselineTokenEquiv != 2000 || kernel.SavedTokenEquiv != 1700 || kernel.CostTokenEquiv != 300 {
+		t.Fatalf("kernel economics=%+v, want 1700 saved / 2000 baseline / 300 cost", kernel)
+	}
+	if !rep.AgenticActivation.Active || rep.AgenticActivation.KernelKVEvents != 10 || rep.AgenticActivation.Total != 10 {
+		t.Fatalf("agentic activation=%+v, want ten kernel-ledger events", rep.AgenticActivation)
+	}
+}
+
 func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
 	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
 	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
