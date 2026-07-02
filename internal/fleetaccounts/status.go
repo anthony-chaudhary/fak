@@ -476,6 +476,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 			st := computeRuntimeStatus(r.Account, reg)
 			applyStatus(r, st)
 			applyLoginGate(r)
+			applyCredExpiryGate(r, time.Now().UTC())
 		} else {
 			r.Available = boolp(false)
 			r.Blocked = boolp(false)

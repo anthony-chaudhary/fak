@@ -117,6 +117,13 @@ func RenderList(rows []Account, home, policyPath string, policyExists bool,
 				product(r), r.Tag, r.Account, tierStr(r), derefStr(r.Model), derefStr(r.BlockReason))
 		}
 	}
+	if dropped := DroppedSeats(rows); len(dropped) > 0 {
+		fmt.Fprintf(&b, "\nNEEDS RE-LOGIN (seat dropped from the offerable pool): %d\n", len(dropped))
+		for _, d := range dropped {
+			fmt.Fprintf(&b, "  %-16s %-28s %s\n", d.Tag, d.Account, d.Reason)
+			fmt.Fprintf(&b, "  %-16s re-login: %s\n", "", d.NextAction)
+		}
+	}
 	if len(buckets["duplicate"]) > 0 {
 		fmt.Fprintf(&b, "\nDUPLICATE IDENTITY (same Anthropic account as a canonical dir -- not offered): %d\n",
 			len(buckets["duplicate"]))

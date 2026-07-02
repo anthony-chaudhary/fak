@@ -42,6 +42,10 @@ type WaveResult struct {
 	Reason                string           `json:"reason"`
 	Lanes                 []WaveLane       `json:"lanes"`
 	BlockedTargetAccounts []BlockedAccount `json:"blocked_target_accounts"`
+	// DroppedSeats lists seats out of the pool pending an interactive re-login
+	// (#2075): the reason a fan-out is smaller than the roster suggests, surfaced
+	// so the shrink is never silent.
+	DroppedSeats []DroppedSeat `json:"dropped_seats,omitempty"`
 }
 
 // AllocateWave allocates up to Count distinct available account pools for a
@@ -144,6 +148,22 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 		reason = fmt.Sprintf("granted %d distinct pools", granted)
 	}
 
+	// A pool shrunk by a stale credential must never shrink silently (#2075):
+	// name the seats waiting on a re-login so the operator sees why the fan-out
+	// is smaller than the roster suggests.
+	var dropped []DroppedSeat
+	if wantedProduct == "" || wantedProduct == "claude" {
+		dropped = DroppedSeats(rows)
+	}
+	if len(dropped) > 0 {
+		tags := make([]string, 0, len(dropped))
+		for _, d := range dropped {
+			tags = append(tags, d.Tag)
+		}
+		reason += fmt.Sprintf("; %d seat(s) dropped pending re-login: %s",
+			len(dropped), strings.Join(tags, ", "))
+	}
+
 	if lanes == nil {
 		lanes = []WaveLane{}
 	}
@@ -159,6 +179,7 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 		Reason:                reason,
 		Lanes:                 lanes,
 		BlockedTargetAccounts: blocked,
+		DroppedSeats:          dropped,
 	}
 }
 
