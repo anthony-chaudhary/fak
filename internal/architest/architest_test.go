@@ -290,11 +290,8 @@ var tier = map[string]int{
 	"vllmcompile":      1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":   1,
 	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
-	"toolproc": 2,
-	"laneadmit": 1,
-	"regionadmit": 2,
-	"dispatchauto": 1,
-	"toolprocgate": 4,
+	"toolproc":         2,
+	"regionadmit":      2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
