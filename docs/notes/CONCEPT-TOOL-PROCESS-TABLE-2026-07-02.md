@@ -17,7 +17,10 @@ and reap advice CANCELS the in-flight work via the lever registered at Spawn
 and arms the revocation table — the full pipeline (spawn → deadline/orphan →
 cancel → post-kill quarantine) is witnessed end-to-end in-process. What
 remains of seam 1 is the wire adapter (the gateway/guard observation
-plumbing), and seams 3–6 remain **labeled next steps**. The spine is
+plumbing). Seam 4 is **shipped in CLI form**: `fak toolproc hook
+(pre|post|stop)` turns any hook-capable harness's firings into journal
+events, giving a hooked session a live `fak toolproc ps` table with no proxy
+in the path. Seams 3, 5, and 6 remain **labeled next steps**. The spine is
 offline-provable: `fak toolproc sample` folds a deterministic built-in
 journal, no key, no model, no GPU.
 
@@ -155,10 +158,16 @@ and advice stream. None of this is wired yet.
    maps 1:1 onto the event vocabulary (progress → `pulse`, cancellation →
    `kill`). fak, fronting the wire, can enforce a deadline the MCP client
    never has to know about.
-4. **Harness hooks** (Claude Code). `fak guard` already installs PreCompact
-   and Stop hooks; a PreToolUse/PostToolUse pair emitting
-   `spawn`/`pulse`/`exit` extends the same install path to harnesses where
-   fak is a hook, not a proxy.
+4. **Harness hooks** (Claude Code). **SHIPPED** in CLI form: `fak toolproc
+   hook (pre|post|stop)` reads the hook stdin envelope and appends one
+   journal event (pre → `spawn` with the granted envelope, post → `exit`,
+   stop → `session_end`; identity = `tool_use_id` with respawn generations
+   for repeated identical calls; fail-open — observation never wedges the
+   harness). The journal is the same one `fak toolproc ps --events` folds,
+   so a hooked session has a live table today: a call that never posts stays
+   RUNNING, and session end flags survivors `TOOL_ORPHANED`. **Remaining**:
+   `fak guard` auto-installing the three hook lines (it already installs
+   PreCompact and Stop), and a pulse source for streamed output.
 5. **Policy envelope** (`internal/policy`). Deadline and heartbeat cadence
    belong in the capability manifest, per tool — the runtime envelope granted
    at admission alongside the capability itself. "You may run this tool" and

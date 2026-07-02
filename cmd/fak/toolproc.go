@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,14 +33,84 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocPS(stdout, stderr, argv[1:])
 	case "sample":
 		return runToolprocSample(stdout, stderr, argv[1:])
+	case "hook":
+		return runToolprocHook(os.Stdin, stderr, argv[1:])
 	case "-h", "--help", "help":
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | sample)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | sample | hook)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
+}
+
+// runToolprocHook is the seam-4 adapter: one PreToolUse / PostToolUse / Stop
+// hook firing in, one journal line out. FAIL-OPEN BY DESIGN: observation must
+// never wedge the harness, so every failure is a stderr note and exit 0 — the
+// same doctrine as the repo-guard hook. The journal it feeds is the same one
+// `fak toolproc ps --events` folds.
+func runToolprocHook(stdin io.Reader, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, "fak toolproc hook: kind required (pre | post | stop)")
+		return 0 // fail-open: a misconfigured hook must not block the harness
+	}
+	kind := argv[0]
+	fs := flag.NewFlagSet("toolproc hook", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	journalPath := fs.String("journal", filepath.Join(".fak", "toolproc", "journal.jsonl"), "journal JSONL to append to")
+	deadlineMS := fs.Int64("deadline-ms", 0, "runtime deadline granted to a spawned call (0 = unbounded)")
+	heartbeatMS := fs.Int64("heartbeat-ms", 0, "liveness cadence expected of a spawned call (0 = none)")
+	if err := fs.Parse(argv[1:]); err != nil {
+		return 0
+	}
+	if err := toolprocHookOnce(stdin, kind, *journalPath, toolproc.HookEnvelope{
+		DeadlineMS: *deadlineMS, HeartbeatEveryMS: *heartbeatMS,
+	}, time.Now().UnixMilli()); err != nil {
+		fmt.Fprintf(stderr, "fak toolproc hook: %v (fail-open, not blocking the harness)\n", err)
+	}
+	return 0
+}
+
+func toolprocHookOnce(stdin io.Reader, kind, journalPath string, env toolproc.HookEnvelope, nowMS int64) error {
+	raw, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
+	if err != nil {
+		return err
+	}
+	var payload toolproc.HookPayload
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return fmt.Errorf("parse hook payload: %w", err)
+		}
+	}
+	var existing []toolproc.Event
+	if f, err := os.Open(journalPath); err == nil {
+		existing, err = toolproc.ParseEvents(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("existing journal unreadable: %w", err)
+		}
+	}
+	ev, emit, err := toolproc.HookEvent(kind, payload, env, nowMS, existing)
+	if err != nil || !emit {
+		return err
+	}
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(journalPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(journalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return err
 }
 
 func runToolprocPS(stdout, stderr io.Writer, argv []string) int {
@@ -174,6 +245,8 @@ func toolprocUsage(w io.Writer) {
   fak toolproc ps --events FILE|- [--now-unix-ms N] [--default-deadline-ms N]
                   [--stall-mult F] [--json]
   fak toolproc sample [--json | --journal]
+  fak toolproc hook (pre | post | stop) [--journal FILE]
+                    [--deadline-ms N] [--heartbeat-ms N]
 
 The adjudicator disposes a tool call at admission; the result floor disposes its
 payload at re-entry. Between the two, a long-running call (a background shell, a
@@ -190,6 +263,15 @@ ps exits 0 when nothing needs attention, 3 when any finding advises action
 (gate-able), 1 on an IO/parse refusal, 2 on usage. sample folds a deterministic
 built-in journal exercising every verdict class and always exits 0 (a demo, not
 a gate); --journal prints the raw JSONL instead.
+
+hook is the harness adapter (seam 4): wire it as a Claude Code (or compatible)
+PreToolUse / PostToolUse / Stop hook and each firing appends one journal event
+(pre -> spawn, post -> exit, stop -> session_end; identity = tool_use_id, with
+respawn generations for repeated identical calls). The journal it feeds is the
+same one ps folds, so "fak toolproc ps --events .fak/toolproc/journal.jsonl"
+is the live table for a hooked session: a call that never posts stays visible
+as RUNNING, and the stop hook's session_end flags survivors TOOL_ORPHANED.
+hook always exits 0 (fail-open: observation must never wedge the harness).
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,
