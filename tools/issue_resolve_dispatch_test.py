@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -832,7 +833,7 @@ class BuildWorkerCommandTest(unittest.TestCase):
 
     def test_windows_fak_bin_env_keeps_backslashes(self) -> None:
         mod = load()
-        with unittest.mock.patch.object(mod.os, "name", "nt"):
+        with mock.patch.object(mod.os, "name", "nt"):
             self.assertEqual(
                 mod.split_command_env(r"C:\work\fak\fak.exe"),
                 [r"C:\work\fak\fak.exe"])
