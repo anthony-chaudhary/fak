@@ -67,6 +67,8 @@ tools/_walltime.*
 # root, or a *tmp working dir). Private-by-default so they can never be `git add`-ed; the
 # FILE_ADMISSION gate is the commit-time backstop for anything that slips past these globs.
 *scratchpad*
+# ...but a tracked note ABOUT the scratchpad concept is legitimate, not a leak.
+!docs/notes/*SCRATCHPAD*
 **/rmverifytmp/
 **/*verifytmp/
 
