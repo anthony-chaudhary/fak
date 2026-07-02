@@ -59,6 +59,9 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		if key == "ship" || key == "auto" {
 			return releaseRunShip(stdout, stderr, argv[1:])
 		}
+		if key == "prplan" {
+			return runReleasePRPlan(stdout, stderr, argv[1:])
+		}
 		if _, ok := releaseScripts[key]; !ok {
 			fmt.Fprintf(stderr, "fak release: unknown subcommand %q\n", argv[0])
 			releaseUsage(stderr)
@@ -127,12 +130,15 @@ func releaseUsage(w io.Writer) {
 usage:
   fak release [status flags...]
   fak release ship [--execute] [--json] [ship flags...]
+  fak release prplan [--json] [--base <ref>] [--head <ref>] [--check]
   fak release status|staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
 
 examples:
   fak release --json
   fak release ship --execute --json
+  fak release prplan --base origin/main --head main
+  fak release prplan --check
   fak release staleness --json
   fak release decide --json --require-ci-green
   fak release cut --json
@@ -149,9 +155,13 @@ Helper order underneath:
   detached worktree at origin/main -> release_decide -> release_lock -> release_cut
   -> push main -> release_tag -> release_publish -> release-artifacts verification
 
-The status and staleness subcommands are native Go folds. The deeper release
-helpers live in tools/release_*.py / tools/stable_release_*.py and remain the
-release contract while their implementation is migrated.
+The status, staleness, and prplan subcommands are native Go folds. The deeper
+release helpers live in tools/release_*.py / tools/stable_release_*.py and
+remain the release contract while their implementation is migrated.
+prplan folds the promotion range (release branch .. release source) into PR
+units grouped by the (fak <leaf>) ship-stamp — the "PRs managed in advance"
+artifact a dev->main promotion opens as its human-legible PR body(ies);
+--check gates on unstamped commits in the range.
 The ship subcommand is the default hot-tree path: it leaves this checkout's
 unrelated modified/untracked files alone by cutting in a transient detached
 worktree, while sharing the same single-writer release lock.
