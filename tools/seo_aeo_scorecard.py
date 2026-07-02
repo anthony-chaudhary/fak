@@ -189,10 +189,11 @@ _QUESTION_RE = re.compile(
 # so it is blind to a self-repo link that rots when a file moves — yet that link
 # is in-repo and resolvable offline. The captured group is the repo-relative path;
 # the URL is terminated on the first delimiter so it never swallows trailing HTML
-# attribute junk (`...mp4">full-resolution`) from a <video>/<a> tag.
+# attribute junk (`...mp4">full-resolution`) from a <video>/<a> tag, nor the
+# `](...)` tail of a markdown link whose TEXT is the URL itself.
 SELF_REPO_RE = re.compile(
     r"https?://(?:github\.com|raw\.githubusercontent\.com)/anthony-chaudhary/fak/"
-    r"(?:(?:blob|tree|raw)/)?(?:main|master|HEAD)/([^)\s\"'<>`#?]+)")
+    r"(?:(?:blob|tree|raw)/)?(?:main|master|HEAD)/([^)\]\s\"'<>`#?]+)")
 
 # Image-alt regexes (the alt_text KPI). A markdown image and a raw <img> tag both
 # owe non-empty alt text (image-search SEO + the caption a screen reader / answer
