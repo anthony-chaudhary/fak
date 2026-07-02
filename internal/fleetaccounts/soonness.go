@@ -73,6 +73,15 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// ResetInstant parses one of Claude's reset strings ("7:10pm (America/Los_Angeles)",
+// "Dec 31, 1pm") into the concrete instant it refers to, anchored on now — the exported
+// face of resetTime for callers that need the moment itself (e.g. the resume resolver's
+// WAIT_RESET countdown), not a soonness score. ok is false for an empty or unparseable
+// string; the instant may be in the past (an expired reset) — callers compare against now.
+func ResetInstant(reset string, now time.Time) (time.Time, bool) {
+	return resetTime(reset, now)
+}
+
 // ResetSoonness scores how SOON a still-future reset string will free an account up, on a
 // [0,1) scale where SOONER is HIGHER: a reset at (or just after) now scores near 1, a reset
 // resetSoonWindow or further out scores near 0. ok is false when the string is empty,
