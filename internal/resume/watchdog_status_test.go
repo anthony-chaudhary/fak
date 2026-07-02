@@ -106,6 +106,72 @@ func TestFoldWatchdogStatusLaunchWithoutProgressIsNotRecovered(t *testing.T) {
 	}
 }
 
+func TestFoldWatchdogStatusLegacyPhaseLessLaunchAndSettledRows(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:           "LIVE",
+		NowUnix:        2_000,
+		SilentSeconds:  10_000,
+		MonotonicTicks: 3,
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 1_000, Session: "sid-legacy"},
+			{UnixSeconds: 1_050, Session: "sid-settled", Phase: "settled"},
+		},
+	})
+
+	if len(got.MTTRSessions) != 1 {
+		t.Fatalf("mttr rows = %+v, want only the legacy launch row", got.MTTRSessions)
+	}
+	row := got.MTTRSessions[0]
+	if row.Session != "sid-legacy" || row.Status != WatchdogMTTRLaunchedUnproven || row.ResumedAt != 1_000 {
+		t.Fatalf("legacy launch row = %+v, want launched_unproven at 1000", row)
+	}
+}
+
+func TestFoldWatchdogStatusCurrentPlanReopensRecoveredSession(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:    "LIVE",
+		NowUnix: 3_000,
+		Plan:    []WatchdogPlanRow{{Session: "sid-reopened", Account: ".claude-a"}},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 1_000, Session: "sid-reopened", Phase: "queued", Mode: "LIVE"},
+			{UnixSeconds: 1_100, Session: "sid-reopened", Phase: "launched", Mode: "LIVE"},
+			{UnixSeconds: 1_200, Session: "sid-reopened", Phase: "progress", Mode: "LIVE", NewTurns: 1},
+		},
+	})
+
+	row := watchdogTestRow(got.MTTRSessions, "sid-reopened")
+	if row.Status != WatchdogMTTRQueued || row.DetectedAt != 3_000 {
+		t.Fatalf("reopened row = %+v, want current plan to reopen as queued at now", row)
+	}
+}
+
+func TestFoldWatchdogStatusCurrentPlanBoundsDepthAndRows(t *testing.T) {
+	got := FoldWatchdogStatus(WatchdogStatusInput{
+		Mode:    "LIVE",
+		NowUnix: 10_000,
+		Plan: []WatchdogPlanRow{
+			{Session: "sid-current-1", Account: ".claude-a"},
+			{Session: "sid-current-2", Account: ".claude-a"},
+		},
+		Events: []WatchdogStatusEvent{
+			{UnixSeconds: 1_000, Phase: "status", Mode: "LIVE", AutoResumeDepth: 61},
+			{UnixSeconds: 1_100, Session: "sid-stale", Phase: "queued", Mode: "LIVE"},
+			{UnixSeconds: 1_200, Session: "sid-stale", Phase: "launched", Mode: "LIVE"},
+			{UnixSeconds: 2_000, Session: "sid-current-1", Phase: "queued", Mode: "LIVE"},
+		},
+	})
+
+	if got.AutoResumeDepth != 2 {
+		t.Fatalf("auto resume depth = %d, want current plan depth 2", got.AutoResumeDepth)
+	}
+	if watchdogTestRow(got.MTTRSessions, "sid-stale").Session != "" {
+		t.Fatalf("stale row leaked into current plan report: %+v", got.MTTRSessions)
+	}
+	if len(got.MTTRSessions) != 2 {
+		t.Fatalf("mttr rows = %+v, want only two current plan rows", got.MTTRSessions)
+	}
+}
+
 func watchdogTestRow(rows []WatchdogMTTRRow, session string) WatchdogMTTRRow {
 	for _, row := range rows {
 		if row.Session == session {

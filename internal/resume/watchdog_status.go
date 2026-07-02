@@ -85,6 +85,7 @@ type watchdogSessionFold struct {
 	detectedAt int64
 	launches   []int64
 	progresses []watchdogProgress
+	closed     bool
 }
 
 type watchdogProgress struct {
@@ -107,22 +108,18 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	bySession := map[string]*watchdogSessionFold{}
 	depthSamples := make([]watchdogDepthSample, 0)
 	currentDepth := len(in.Plan)
-
+	planSessions := map[string]bool{}
 	for _, row := range in.Plan {
-		if row.Session == "" {
-			continue
-		}
-		f := watchdogFoldFor(bySession, row.Session)
-		f.session = row.Session
-		if f.detectedAt == 0 && now > 0 {
-			f.detectedAt = now
+		if row.Session != "" {
+			planSessions[row.Session] = true
 		}
 	}
+	hasCurrentPlan := in.Plan != nil
 
 	events := append([]WatchdogStatusEvent(nil), in.Events...)
 	sort.SliceStable(events, func(i, j int) bool { return events[i].UnixSeconds < events[j].UnixSeconds })
 	for _, e := range events {
-		phase := strings.ToLower(strings.TrimSpace(e.Phase))
+		phase := normalizeWatchdogPhase(e.Phase)
 		at := firstNonZero(e.UnixSeconds, e.DetectedUnix, e.ResumedUnix, e.ProgressWitnessUnix)
 		if phase == "status" || phase == "tick" || phase == "snapshot" {
 			depthSamples = append(depthSamples, watchdogDepthSample{at: at, mode: normalizeWatchdogMode(firstNonEmpty(e.Mode, mode)), depth: e.AutoResumeDepth})
@@ -131,38 +128,44 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 		if e.Session == "" {
 			continue
 		}
-		f := watchdogFoldFor(bySession, e.Session)
-		f.session = e.Session
 		if e.DetectedUnix > 0 {
-			setEarliest(&f.detectedAt, e.DetectedUnix)
+			f := watchdogFoldFor(bySession, e.Session)
+			f.beginCycle(e.DetectedUnix)
 		}
 		switch phase {
 		case "queued", "detected", "auto_resume":
-			setEarliest(&f.detectedAt, e.UnixSeconds)
+			watchdogFoldFor(bySession, e.Session).beginCycle(e.UnixSeconds)
 		case "launched", "resumed":
-			if e.ResumedUnix > 0 {
-				f.launches = append(f.launches, e.ResumedUnix)
-			} else if e.UnixSeconds > 0 {
-				f.launches = append(f.launches, e.UnixSeconds)
-			}
+			watchdogFoldFor(bySession, e.Session).recordLaunch(firstNonZero(e.ResumedUnix, e.UnixSeconds))
+		case "settled", "operator_settled", "consolidated":
+			watchdogFoldFor(bySession, e.Session).close()
 		}
 		if e.ProgressWitnessUnix > 0 {
-			f.progresses = append(f.progresses, watchdogProgress{at: e.ProgressWitnessUnix, evidence: "progress_witnessed_at"})
+			watchdogFoldFor(bySession, e.Session).recordProgress(e.ProgressWitnessUnix, "progress_witnessed_at")
 		}
 		if e.NewTurns > 0 && e.UnixSeconds > 0 {
-			f.progresses = append(f.progresses, watchdogProgress{at: e.UnixSeconds, evidence: fmt.Sprintf("new_turns:%d", e.NewTurns)})
+			watchdogFoldFor(bySession, e.Session).recordProgress(e.UnixSeconds, fmt.Sprintf("new_turns:%d", e.NewTurns))
 		}
 		if phase == "progress" && e.NewTurns <= 0 && e.UnixSeconds > 0 {
-			f.progresses = append(f.progresses, watchdogProgress{at: e.UnixSeconds, evidence: "progress_row"})
+			watchdogFoldFor(bySession, e.Session).recordProgress(e.UnixSeconds, "progress_row")
 		}
 		if strings.TrimSpace(e.CommitSHA) != "" && e.UnixSeconds > 0 {
-			f.progresses = append(f.progresses, watchdogProgress{at: e.UnixSeconds, evidence: "commit:" + strings.TrimSpace(e.CommitSHA)})
+			watchdogFoldFor(bySession, e.Session).recordProgress(e.UnixSeconds, "commit:"+strings.TrimSpace(e.CommitSHA))
 		}
 		if e.LedgerProgress && e.UnixSeconds > 0 {
-			f.progresses = append(f.progresses, watchdogProgress{at: e.UnixSeconds, evidence: "ledger_progress"})
+			watchdogFoldFor(bySession, e.Session).recordProgress(e.UnixSeconds, "ledger_progress")
 		}
 	}
-	if len(in.Plan) > 0 && now > 0 {
+	for _, row := range in.Plan {
+		if row.Session == "" {
+			continue
+		}
+		f := watchdogFoldFor(bySession, row.Session)
+		if f.closed || f.detectedAt == 0 || f.recovered() {
+			f.beginCycle(now)
+		}
+	}
+	if hasCurrentPlan && now > 0 {
 		depthSamples = append(depthSamples, watchdogDepthSample{at: now, mode: mode, depth: len(in.Plan)})
 		currentDepth = len(in.Plan)
 	}
@@ -170,6 +173,12 @@ func FoldWatchdogStatus(in WatchdogStatusInput) WatchdogDrainStatus {
 	rows := make([]WatchdogMTTRRow, 0, len(bySession))
 	var maxSilent int64
 	for _, f := range bySession {
+		if f.closed {
+			continue
+		}
+		if hasCurrentPlan && !planSessions[f.session] {
+			continue
+		}
 		row := foldWatchdogMTTRRow(*f, mode, now)
 		if row.SilentSeconds > maxSilent {
 			maxSilent = row.SilentSeconds
@@ -222,11 +231,58 @@ func watchdogFoldFor(m map[string]*watchdogSessionFold, session string) *watchdo
 	return f
 }
 
+func (f *watchdogSessionFold) beginCycle(at int64) {
+	if at <= 0 {
+		at = f.detectedAt
+	}
+	f.detectedAt = at
+	f.launches = nil
+	f.progresses = nil
+	f.closed = false
+}
+
+func (f *watchdogSessionFold) recordLaunch(at int64) {
+	if at <= 0 {
+		return
+	}
+	if f.recovered() {
+		f.beginCycle(at)
+	}
+	if f.detectedAt == 0 {
+		f.detectedAt = at
+	}
+	f.launches = append(f.launches, at)
+	f.closed = false
+}
+
+func (f *watchdogSessionFold) recordProgress(at int64, evidence string) {
+	if at <= 0 {
+		return
+	}
+	if f.detectedAt == 0 {
+		f.detectedAt = at
+	}
+	f.progresses = append(f.progresses, watchdogProgress{at: at, evidence: evidence})
+	f.closed = false
+}
+
+func (f *watchdogSessionFold) close() {
+	f.detectedAt = 0
+	f.launches = nil
+	f.progresses = nil
+	f.closed = true
+}
+
+func (f watchdogSessionFold) recovered() bool {
+	progressAt, _ := firstProgressAfterLaunch(f.detectedAt, f.launches, f.progresses)
+	return resumeAtForProgress(f.detectedAt, f.launches, progressAt) > 0 && progressAt > 0
+}
+
 func foldWatchdogMTTRRow(f watchdogSessionFold, mode string, now int64) WatchdogMTTRRow {
 	sort.Slice(f.launches, func(i, j int) bool { return f.launches[i] < f.launches[j] })
 	sort.Slice(f.progresses, func(i, j int) bool { return f.progresses[i].at < f.progresses[j].at })
-	progressAt, evidence := firstProgressAfterLaunch(f.launches, f.progresses)
-	resumedAt := resumeAtForProgress(f.launches, progressAt)
+	progressAt, evidence := firstProgressAfterLaunch(f.detectedAt, f.launches, f.progresses)
+	resumedAt := resumeAtForProgress(f.detectedAt, f.launches, progressAt)
 	status := WatchdogMTTRQueued
 	if resumedAt > 0 {
 		status = WatchdogMTTRLaunchedUnproven
@@ -250,13 +306,13 @@ func foldWatchdogMTTRRow(f watchdogSessionFold, mode string, now int64) Watchdog
 	}
 }
 
-func firstProgressAfterLaunch(launches []int64, progresses []watchdogProgress) (int64, string) {
+func firstProgressAfterLaunch(detectedAt int64, launches []int64, progresses []watchdogProgress) (int64, string) {
 	if len(launches) == 0 {
 		return 0, ""
 	}
 	for _, p := range progresses {
 		for _, l := range launches {
-			if p.at > l {
+			if launchInCycle(detectedAt, l) && p.at > l {
 				return p.at, p.evidence
 			}
 		}
@@ -264,23 +320,29 @@ func firstProgressAfterLaunch(launches []int64, progresses []watchdogProgress) (
 	return 0, ""
 }
 
-func resumeAtForProgress(launches []int64, progressAt int64) int64 {
+func resumeAtForProgress(detectedAt int64, launches []int64, progressAt int64) int64 {
 	if len(launches) == 0 {
 		return 0
 	}
 	if progressAt <= 0 {
-		return launches[len(launches)-1]
+		for i := len(launches) - 1; i >= 0; i-- {
+			if launchInCycle(detectedAt, launches[i]) {
+				return launches[i]
+			}
+		}
+		return 0
 	}
 	resumedAt := int64(0)
 	for _, l := range launches {
-		if l <= progressAt {
+		if launchInCycle(detectedAt, l) && l <= progressAt {
 			resumedAt = l
 		}
 	}
-	if resumedAt == 0 {
-		return launches[len(launches)-1]
-	}
 	return resumedAt
+}
+
+func launchInCycle(detectedAt, launchAt int64) bool {
+	return launchAt > 0 && (detectedAt <= 0 || launchAt >= detectedAt)
 }
 
 func monotonicGrowthTicks(samples []watchdogDepthSample, ticks int) int {
@@ -303,6 +365,14 @@ func normalizeWatchdogMode(mode string) string {
 		return "UNKNOWN"
 	}
 	return mode
+}
+
+func normalizeWatchdogPhase(phase string) string {
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	if phase == "" {
+		return "launched"
+	}
+	return phase
 }
 
 func watchdogMTTRRank(s WatchdogMTTRStatus) int {

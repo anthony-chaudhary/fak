@@ -143,3 +143,80 @@ func TestDiagnoseDeterministicAndTotal(t *testing.T) {
 		t.Errorf("empty diagnosis = %+v, want clean/zero", empty)
 	}
 }
+
+// uturn is a user-side main-chain record (a typed prompt or a tool result) — the model
+// owes a reply after it.
+var uturn = Event{Kind: EventUserTurn}
+
+// TestDiagnoseInterruptedMidTurn is the invisible-death regression (the 392f-class crash):
+// a transcript whose tail is an unanswered user turn — no refusal record, no error, just
+// silence — used to read as a clean end and vanish from every readout. Past the idle floor
+// it must be diagnosed interrupted (unresumed), while staying OFF the rate-limit restart
+// flag (scan's NeedsRestart contract is unchanged).
+func TestDiagnoseInterruptedMidTurn(t *testing.T) {
+	events := []Event{mturn(120000), uturn, book}
+	d := Diagnose(events, scanIn()) // 2h idle — far past the floor
+
+	if d.Crash != CrashInterrupted {
+		t.Fatalf("crash = %q, want interrupted", d.Crash)
+	}
+	if !d.Unresumed {
+		t.Error("Unresumed = false, want true (nothing answered the user turn)")
+	}
+	if d.NeedsRestart {
+		t.Error("NeedsRestart = true, want false (interrupted is not the rate-limit restart class)")
+	}
+	if d.ResidentTokens != 120000 {
+		t.Errorf("resident = %d, want 120000 (sized from the last real turn)", d.ResidentTokens)
+	}
+}
+
+// TestDiagnoseInterruptedFirstPrompt: a session killed before its FIRST assistant reply
+// (no real turn at all) is still an interrupted death, not a clean end.
+func TestDiagnoseInterruptedFirstPrompt(t *testing.T) {
+	d := Diagnose([]Event{uturn, book}, scanIn())
+	if d.Crash != CrashInterrupted {
+		t.Fatalf("crash = %q, want interrupted (unanswered first prompt)", d.Crash)
+	}
+}
+
+// TestDiagnoseInterruptedIdleFloor: below the idle floor — or with idle unknown — the same
+// tail may be a LIVE session still thinking, so the conservative verdict is a clean end
+// (never invite a duplicate resume onto a live session).
+func TestDiagnoseInterruptedIdleFloor(t *testing.T) {
+	events := []Event{mturn(120000), uturn}
+	for _, idle := range []int64{0, InterruptedIdleFloorSeconds - 1, -1} {
+		d := Diagnose(events, Input{IdleSeconds: idle, TTL: TTL5m})
+		if d.Crash != CrashNone {
+			t.Errorf("idle=%d: crash = %q, want none (below the interrupted floor)", idle, d.Crash)
+		}
+	}
+	d := Diagnose(events, Input{IdleSeconds: InterruptedIdleFloorSeconds, TTL: TTL5m})
+	if d.Crash != CrashInterrupted {
+		t.Errorf("idle=floor: crash = %q, want interrupted", d.Crash)
+	}
+}
+
+// TestDiagnoseTailErrorBeatsUserTurn: when the tail carries BOTH an unanswered user turn
+// and an error record, the error is the terminal failure regardless of their order — the
+// richer verdict (with its limit reason and reset semantics) must win.
+func TestDiagnoseTailErrorBeatsUserTurn(t *testing.T) {
+	for name, events := range map[string][]Event{
+		"error after user turn":  {mturn(50000), uturn, rl(LimitSession)},
+		"error before user turn": {mturn(50000), rl(LimitSession), uturn},
+	} {
+		d := Diagnose(events, scanIn())
+		if d.Crash != CrashRateLimit || d.LimitReason != LimitSession {
+			t.Errorf("%s: crash = (%q,%q), want (rate_limit,session_limit)", name, d.Crash, d.LimitReason)
+		}
+	}
+}
+
+// TestDiagnoseAnsweredUserTurnIsClean: a user turn FOLLOWED by a real model turn was
+// answered — the ordinary conversational rhythm, not an interruption.
+func TestDiagnoseAnsweredUserTurnIsClean(t *testing.T) {
+	d := Diagnose([]Event{uturn, mturn(50000), book}, scanIn())
+	if d.Crash != CrashNone {
+		t.Errorf("crash = %q, want none (the user turn was answered)", d.Crash)
+	}
+}

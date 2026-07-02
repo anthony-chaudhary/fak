@@ -124,3 +124,94 @@ func TestResolvePinBlockedNoHealthyTarget(t *testing.T) {
 		t.Fatalf("pin dir = %q, want owner (best effort)", got.PinConfigDir)
 	}
 }
+
+// TestResolveWaitsForImminentOwnerReset: a blocked owner whose reset is minutes away is
+// worth waiting for — the verdict is WAIT_RESET pinned to the owner with a machine-checkable
+// countdown, and NO transcript copy lands on the healthy sibling (the silent-re-home this
+// verdict exists to prevent).
+func TestResolveWaitsForImminentOwnerReset(t *testing.T) {
+	home := t.TempDir()
+	sid := "s-wait"
+	writeTranscript(t, home, ".claude-owner", testProject, sid, time.Now(), 10)
+	healthyCfg := filepath.Join(home, ".claude-healthy")
+	now := int64(1_700_000_000)
+
+	got := Resolve(ResolveInput{
+		SID: sid, Home: home, CWD: testCWD, NowUnix: now,
+		OwnerStatus:  &OwnerStatus{Available: false, BlockKind: "usage", BlockReason: "usage limit; resets 7:10pm", ResetUnix: now + 180},
+		Availability: []Target{{Account: ".claude-healthy", Available: true, ConfigDir: healthyCfg}},
+		RehomeFn:     RehomeTranscript,
+	})
+	if got.Action != "WAIT_RESET" {
+		t.Fatalf("action = %q, want WAIT_RESET", got.Action)
+	}
+	if got.PinAccount != ".claude-owner" {
+		t.Errorf("pin account = %q, want the owner (the seat worth waiting for)", got.PinAccount)
+	}
+	if got.WaitSeconds != 180 || got.ResetUnix != now+180 {
+		t.Errorf("wait/reset = %d/%d, want 180/%d", got.WaitSeconds, got.ResetUnix, now+180)
+	}
+	if _, err := os.Stat(filepath.Join(healthyCfg, "projects", testProject, sid+".jsonl")); err == nil {
+		t.Error("WAIT_RESET must not copy the transcript onto the sibling")
+	}
+}
+
+// TestResolveWaitHorizon: the wait verdict is bounded — a reset beyond the horizon (or an
+// already-expired one, or none at all) re-homes exactly as before, and NoWait forces the
+// copy even when the reset is imminent.
+func TestResolveWaitHorizon(t *testing.T) {
+	now := int64(1_700_000_000)
+	cases := []struct {
+		name   string
+		reset  int64
+		noWait bool
+		want   string
+	}{
+		{"imminent reset waits", now + WaitResetHorizonSeconds, false, "WAIT_RESET"},
+		{"distant reset rehomes", now + WaitResetHorizonSeconds + 1, false, "REHOME"},
+		{"expired reset rehomes", now - 30, false, "REHOME"},
+		{"unknown reset rehomes", 0, false, "REHOME"},
+		{"no-wait forces rehome", now + 60, true, "REHOME"},
+	}
+	for _, tc := range cases {
+		home := t.TempDir()
+		sid := "s-horizon"
+		writeTranscript(t, home, ".claude-owner", testProject, sid, time.Now(), 10)
+		got := Resolve(ResolveInput{
+			SID: sid, Home: home, CWD: testCWD, NowUnix: now, NoWait: tc.noWait,
+			OwnerStatus:  &OwnerStatus{Available: false, BlockKind: "usage", BlockReason: "usage limit", ResetUnix: tc.reset},
+			Availability: []Target{{Account: ".claude-healthy", Available: true, ConfigDir: filepath.Join(home, ".claude-healthy")}},
+			RehomeFn:     RehomeTranscript,
+		})
+		if got.Action != tc.want {
+			t.Errorf("%s: action = %q, want %q", tc.name, got.Action, tc.want)
+		}
+	}
+}
+
+// TestResolveProbeResetFeedsWait: when the owner's carried throttle is re-probed and the
+// probe confirms the block WITH a fresher reset window, the wait verdict uses the probe's
+// instant, not the carried one.
+func TestResolveProbeResetFeedsWait(t *testing.T) {
+	home := t.TempDir()
+	sid := "s-probe-wait"
+	writeTranscript(t, home, ".claude-owner", testProject, sid, time.Now(), 10)
+	now := int64(1_700_000_000)
+
+	got := Resolve(ResolveInput{
+		SID: sid, Home: home, CWD: testCWD, ProbeOwner: true, NowUnix: now,
+		OwnerStatus: &OwnerStatus{Available: false, BlockKind: "usage", StatusSource: "registry",
+			BlockReason: "usage limit; resets 3pm", ResetUnix: now + WaitResetHorizonSeconds + 600},
+		ProbeFn: func(account, _ string) *ProbeResult {
+			return &ProbeResult{Available: false, BlockReason: "usage limit; resets 7:10pm", ResetUnix: now + 120}
+		},
+		Availability: []Target{{Account: ".claude-healthy", Available: true, ConfigDir: filepath.Join(home, ".claude-healthy")}},
+		RehomeFn:     RehomeTranscript,
+	})
+	if got.Action != "WAIT_RESET" {
+		t.Fatalf("action = %q, want WAIT_RESET (probe's fresher reset is imminent)", got.Action)
+	}
+	if got.ResetUnix != now+120 {
+		t.Errorf("reset_unix = %d, want the probe's %d", got.ResetUnix, now+120)
+	}
+}

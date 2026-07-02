@@ -1,6 +1,7 @@
 package rehome
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,7 +19,18 @@ type OwnerStatus struct {
 	BlockReason  string
 	BlockKind    string
 	StatusSource string
+	// ResetUnix is the instant the owner's block is expected to lift (parsed from the
+	// provider's "resets 7:10pm"-style string), 0 when unknown. It powers the WAIT_RESET
+	// verdict: an owner whose reset is minutes away is worth waiting for, not re-homing off.
+	ResetUnix int64
 }
+
+// WaitResetHorizonSeconds is how imminent a blocked owner's reset must be for Resolve to
+// say WAIT_RESET instead of REHOME. A re-home is not free — it copies the transcript onto
+// another (often already-loaded) seat and leaves a duplicate copy that every later owner
+// lookup must disambiguate — so when the owner frees up within this horizon, waiting is
+// strictly cheaper. Beyond it, waiting would idle the session longer than the copy costs.
+const WaitResetHorizonSeconds int64 = 15 * 60
 
 // ResolveInput carries the facts and injected dependencies for a resume resolution.
 // Availability / OwnerStatus / the *Fn callbacks are injectable so the decision is
@@ -34,6 +46,13 @@ type ResolveInput struct {
 	// live-probes the owner before re-homing when its block is a carried usage
 	// throttle, and enables the duplicate-owner reselection + target probe loop.
 	ProbeOwner bool
+	// NoWait disables the WAIT_RESET verdict: a blocked owner is re-homed off immediately
+	// even when its reset is imminent (the pre-wait behavior, for callers that must land
+	// a resume NOW on whatever seat is healthy).
+	NoWait bool
+	// NowUnix anchors the reset-imminence comparison; 0 means the wall clock (callers in
+	// tests inject a fixed instant so the verdict is deterministic).
+	NowUnix int64
 
 	// OwnerStatus, when non-nil, is the owner's availability (skips OwnerStatusFn and,
 	// mirroring the Python `owner_status is None` guard, disables duplicate reselect).
@@ -62,6 +81,9 @@ type ReselectMove struct {
 type OwnerProbe struct {
 	Available   bool   `json:"available"`
 	BlockReason string `json:"block_reason,omitempty"`
+	// ResetUnix is the probe-reported instant the block lifts (0 unknown) — fresher than
+	// any carried reset, so the WAIT_RESET verdict prefers it.
+	ResetUnix int64 `json:"reset_unix,omitempty"`
 }
 
 // CapRelief records that the burst-spread cap was relaxed for a single resume.
@@ -78,7 +100,7 @@ type TargetProbe struct {
 }
 
 // Decision is the resume resolution record, mirroring the dict resume_resolver.resolve
-// returns. Action is one of NOT_FOUND | PIN | REHOME | PIN_BLOCKED.
+// returns. Action is one of NOT_FOUND | PIN | REHOME | PIN_BLOCKED | WAIT_RESET.
 type Decision struct {
 	OK               bool          `json:"ok"`
 	Action           string        `json:"action"`
@@ -103,7 +125,12 @@ type Decision struct {
 	CapRelief        *CapRelief    `json:"cap_relief,omitempty"`
 	TargetProbes     []TargetProbe `json:"target_probes,omitempty"`
 	DestProjectSlugs []string      `json:"dest_project_slugs,omitempty"`
-	Reason           string        `json:"reason"`
+	// ResetUnix / WaitSeconds carry the WAIT_RESET verdict's machine-checkable wait: the
+	// instant the owner's block lifts and how many seconds away that is from the decision's
+	// anchor. Zero on every other action.
+	ResetUnix   int64  `json:"reset_unix,omitempty"`
+	WaitSeconds int64  `json:"wait_seconds,omitempty"`
+	Reason      string `json:"reason"`
 }
 
 // carriedThrottleBlock reports whether the owner is blocked by a usage throttle CARRIED
@@ -186,7 +213,7 @@ func Resolve(in ResolveInput) Decision {
 	if in.ProbeOwner && !ownerAvailable && carriedThrottleBlock(status) && in.ProbeFn != nil {
 		probed := in.ProbeFn(owner.Account, owner.ConfigDir)
 		if probed != nil {
-			rec.OwnerProbe = &OwnerProbe{Available: probed.Available, BlockReason: probed.BlockReason}
+			rec.OwnerProbe = &OwnerProbe{Available: probed.Available, BlockReason: probed.BlockReason, ResetUnix: probed.ResetUnix}
 			ownerAvailable = probed.Available
 			if probed.BlockReason != "" {
 				blockReason = probed.BlockReason
@@ -222,6 +249,32 @@ func Resolve(in ResolveInput) Decision {
 		rec.PinConfigDir = owner.ConfigDir
 		rec.Reason = reason
 		return rec
+	}
+
+	// Owner blocked with an imminent, machine-known reset -> the cheapest healthy seat is
+	// the owner itself, a few minutes from now. Say so (WAIT_RESET) instead of silently
+	// copying the transcript onto another seat: the wait is bounded and visible, the copy
+	// leaves a duplicate every later owner lookup must disambiguate.
+	if !in.NoWait {
+		resetUnix := status.ResetUnix
+		if rec.OwnerProbe != nil && rec.OwnerProbe.ResetUnix > 0 {
+			resetUnix = rec.OwnerProbe.ResetUnix // the live probe's window is fresher than the carried one
+		}
+		now := in.NowUnix
+		if now == 0 {
+			now = time.Now().Unix()
+		}
+		if wait := resetUnix - now; resetUnix > 0 && wait >= 0 && wait <= WaitResetHorizonSeconds {
+			rec.Action = "WAIT_RESET"
+			rec.PinAccount = owner.Account
+			rec.PinConfigDir = owner.ConfigDir
+			rec.ResetUnix = resetUnix
+			rec.WaitSeconds = wait
+			rec.Reason = fmt.Sprintf(
+				"owner blocked (%s) but frees up in ~%s -- wait for the owner instead of re-homing (resolve -wait does the waiting; -no-wait forces the copy)",
+				blockReason, compactWait(wait))
+			return rec
+		}
 	}
 
 	// Owner blocked/throttled -> re-home its full transcript onto a healthy worker.
@@ -339,6 +392,19 @@ func Resolve(in ResolveInput) Decision {
 	rec.SourceConfigDir = owner.ConfigDir
 	rec.Reason = "owner blocked (" + blockReason + ") -- " + verb + " transcript onto " + tgtTag + confirmNote + " and pin there"
 	return rec
+}
+
+// compactWait renders a wait in the roundest unit an operator thinks in ("45s", "3m",
+// "1h05m") — the WAIT_RESET reason must read as a countdown, not an integer.
+func compactWait(s int64) string {
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm", (s+59)/60)
+	default:
+		return fmt.Sprintf("%dh%02dm", s/3600, (s%3600)/60)
+	}
 }
 
 func targetConfigDir(t Target, home string) string {

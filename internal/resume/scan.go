@@ -44,8 +44,15 @@ const (
 	// EventOtherError is a synthetic api-error turn that is NOT a rate limit (an overloaded
 	// server, a transport failure). It marks an unclean end, but not the one this verb restarts.
 	EventOtherError EventKind = "other_error"
-	// EventOther is any record the classifier ignores — user turns, tool results, system and
-	// bookkeeping lines. Present so the shell can stream every record through without filtering.
+	// EventUserTurn is a user-side record on the MAIN chain — a typed prompt or a tool
+	// result. Either one means the model owes the session a reply: a transcript whose tail
+	// is a user turn with no assistant turn and no error after it did not end cleanly, it
+	// was killed mid-turn (process death, machine sleep, an account wall that struck before
+	// the refusal record could be written). Sidechain user records must NOT be mapped here —
+	// a subagent's interleaved tail would falsely mark the main chain as owed a reply.
+	EventUserTurn EventKind = "user_turn"
+	// EventOther is any record the classifier ignores — system and bookkeeping lines.
+	// Present so the shell can stream every record through without filtering.
 	EventOther EventKind = "other"
 )
 
@@ -92,7 +99,23 @@ const (
 	// CrashOther: the session ended on a non-rate error with no real turn after it — an unclean
 	// end, but not a rate-limit one (restart remediation differs), so it is reported, not flagged.
 	CrashOther CrashKind = "other_error"
+	// CrashInterrupted: the transcript's tail is a user turn (a typed prompt or a tool result)
+	// with no assistant reply and no error record after it — the session was killed mid-turn
+	// BEFORE the provider could write any refusal. This is the invisible death: with no error
+	// record the tail used to read as "ended cleanly" and the session silently vanished from
+	// every readout, which an operator experiences as "my session died as a random error and
+	// no tool will even name it". Only diagnosed once the session has been idle past
+	// InterruptedIdleFloorSeconds, so a live session mid-inference is never declared dead.
+	CrashInterrupted CrashKind = "interrupted"
 )
+
+// InterruptedIdleFloorSeconds is how long a transcript ending on an unanswered user turn
+// must have been idle before Diagnose will call it interrupted. Between a prompt landing
+// and the first assistant record the transcript of a LIVE session looks identical to a
+// dead one; five minutes is comfortably past any healthy first-token wait while keeping
+// the death visible on the next readout. Below the floor (or with idle unknown, -1) the
+// conservative verdict is CrashNone — never invite a duplicate resume onto a live session.
+const InterruptedIdleFloorSeconds int64 = 300
 
 // Diagnosis is the deterministic verdict for one dormant session: how it ended and, when it
 // crashed on a rate limit and never resumed, the managed-cache restart Plan that makes the
@@ -137,6 +160,11 @@ func Diagnose(events []Event, in Input) Diagnosis {
 		resident = in.ResidentTokens // an explicit operator pin wins over the derived size
 	}
 	crash, reason := classifyTail(events)
+	if crash == CrashInterrupted && in.IdleSeconds < InterruptedIdleFloorSeconds {
+		// An unanswered user turn younger than the floor (or with unknown idle) may be a
+		// live session still thinking — the conservative verdict is a clean end for now.
+		crash, reason = CrashNone, ""
+	}
 
 	in.ResidentTokens = resident
 	return Diagnosis{
@@ -167,9 +195,11 @@ func residentFromEvents(events []Event) (resident, realTurns int) {
 // classifyTail decides how the transcript ended. It finds the last real model turn, then
 // looks at the tail AFTER it: the error closest to the end (scanning backward) is the
 // terminal failure. A rate-limit error there means the session crashed on a limit and never
-// resumed; a non-rate error there is an unclean-but-not-rate end; no error there (the last
-// meaningful event is a real turn, or any earlier rate limit was followed by a real turn)
-// means a clean enough end that needs no managed restart.
+// resumed; a non-rate error there is an unclean-but-not-rate end; no error but an unanswered
+// user turn there means the session was killed mid-turn (CrashInterrupted — Diagnose demotes
+// it back to clean until the idle floor proves the silence is death, not thinking); a bare
+// tail (the last meaningful event is a real turn, or any earlier rate limit was followed by
+// a real turn) means a clean enough end that needs no managed restart.
 func classifyTail(events []Event) (CrashKind, string) {
 	lastReal := -1
 	for i, e := range events {
@@ -177,13 +207,19 @@ func classifyTail(events []Event) (CrashKind, string) {
 			lastReal = i
 		}
 	}
+	interrupted := false
 	for i := len(events) - 1; i > lastReal; i-- {
 		switch events[i].Kind {
 		case EventRateLimitError:
 			return CrashRateLimit, events[i].LimitReason
 		case EventOtherError:
 			return CrashOther, ""
+		case EventUserTurn:
+			interrupted = true // keep scanning: an error deeper in the tail still wins
 		}
+	}
+	if interrupted {
+		return CrashInterrupted, ""
 	}
 	return CrashNone, ""
 }

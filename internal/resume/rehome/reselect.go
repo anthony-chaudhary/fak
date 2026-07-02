@@ -10,6 +10,9 @@ type ProbeResult struct {
 	BlockReason  string
 	BlockKind    string
 	StatusSource string
+	// ResetUnix is the probe-reported instant a blocked account frees up (0 unknown);
+	// it feeds Resolve's WAIT_RESET verdict.
+	ResetUnix int64
 }
 
 // ProbeFunc live-probes one account (by basename + config dir) and returns its fresh

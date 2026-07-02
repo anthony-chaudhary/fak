@@ -154,11 +154,11 @@ func TestResetElapsedTable(t *testing.T) {
 		{LimitSession, SessionLimitResetSeconds, true},
 		{LimitWeekly, WeeklyLimitResetSeconds - 1, false},
 		{LimitWeekly, WeeklyLimitResetSeconds, true},
-		{LimitUsage, 60, false},                       // usage takes the session floor
+		{LimitUsage, 60, false}, // usage takes the session floor
 		{LimitUsage, SessionLimitResetSeconds + 1, true},
-		{LimitRate, 0, true},                          // a burst has no wall-clock reset
-		{"", 0, true},                                 // not a limit crash
-		{LimitSession, -1, false},                     // unknown idle never proves elapsed
+		{LimitRate, 0, true},      // a burst has no wall-clock reset
+		{"", 0, true},             // not a limit crash
+		{LimitSession, -1, false}, // unknown idle never proves elapsed
 	}
 	for _, c := range cases {
 		if got := resetElapsed(c.limit, c.idle); got != c.want {
