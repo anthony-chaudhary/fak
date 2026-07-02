@@ -167,7 +167,14 @@ def _last_json(text: str) -> dict[str, Any]:
 
 
 def host_check(root: Path, *, max_threads: int | None = None) -> dict[str, Any]:
-    """proc_resource_guard.py CLEAN ⇒ safe. Any flagged runaway/orphan ⇒ unsafe."""
+    """proc_resource_guard.py CLEAN ⇒ safe. Only an ACTIONABLE (non-protected)
+    runaway/orphan ⇒ unsafe. A protected process breaching a threshold (e.g. the
+    operator's own terminal, whose thread count scales with open panes) is
+    surfaced as advisory, never a refusal: the guard's own ``ok`` verdict already
+    excludes it as non-actionable, and its reaper refuses the kill — so refusing
+    the spawn on it wedges every dispatch behind a recovery step ("reap") that is
+    impossible by design (#2227). Mirrors the Go fold's
+    ``ActionableFlaggedCount`` semantics (cmd/fak/dispatch_tick_preflight.go)."""
     guard = root / "tools" / "proc_resource_guard.py"
     if not guard.exists():
         return {"safe": False, "error": f"guard not found: {guard}", "flagged": 0}
@@ -178,9 +185,13 @@ def host_check(root: Path, *, max_threads: int | None = None) -> dict[str, Any]:
     if doc.get("_error") and not doc.get("schema"):
         return {"safe": False, "error": doc["_error"], "flagged": 0}
     flagged = doc.get("flagged") or []
-    return {"safe": bool(doc.get("ok")) and not flagged,
-            "flagged": len(flagged),
-            "flagged_names": [str(r.get("name")) for r in flagged][:8]}
+    actionable = [r for r in flagged if not r.get("protected")]
+    protected = [r for r in flagged if r.get("protected")]
+    return {"safe": bool(doc.get("ok")) and not actionable,
+            "flagged": len(actionable),
+            "flagged_names": [str(r.get("name")) for r in actionable][:8],
+            "protected_flagged": len(protected),
+            "protected_names": [str(r.get("name")) for r in protected][:8]}
 
 
 def _codex_ambient_account() -> dict[str, Any]:

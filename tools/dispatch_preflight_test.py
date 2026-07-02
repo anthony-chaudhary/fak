@@ -107,6 +107,56 @@ class IntTest(unittest.TestCase):
         self.assertEqual(mod._int("nope", 0), 0)
 
 
+class HostCheckProtectedTest(unittest.TestCase):
+    """host_check must refuse only on ACTIONABLE (non-protected) flags (#2227).
+
+    A protected process (e.g. the operator's terminal) breaching a threshold is
+    report-only: the guard's ``ok`` stays true and its reaper refuses the kill,
+    so the spawn gate hardening it into REFUSE_HOST wedged every dispatch behind
+    an impossible recovery. These are hermetic: ``run_json`` is stubbed."""
+
+    def _host(self, mod, guard_doc):
+        mod.run_json = lambda cmd, root, timeout=90, ok_codes=None: guard_doc
+        return mod.host_check(ROOT)
+
+    def test_protected_breach_is_advisory_not_a_refusal(self) -> None:
+        mod = load()
+        host = self._host(mod, {
+            "schema": "fleet-proc-resource-guard/1", "ok": True,
+            "flagged": [{"pid": 1, "name": "WindowsTerminal",
+                         "reasons": ["threads 2768 > 2000"],
+                         "protected": True, "action": "report"}]})
+        self.assertTrue(host["safe"])
+        self.assertEqual(host["flagged"], 0)
+        self.assertEqual(host["flagged_names"], [])
+        self.assertEqual(host["protected_flagged"], 1)
+        self.assertEqual(host["protected_names"], ["WindowsTerminal"])
+
+    def test_actionable_runaway_still_refuses(self) -> None:
+        mod = load()
+        host = self._host(mod, {
+            "schema": "fleet-proc-resource-guard/1", "ok": False,
+            "flagged": [{"pid": 2, "name": "llama-cli",
+                         "reasons": ["threads 129427 > 2000"],
+                         "protected": False, "action": "report"}]})
+        self.assertFalse(host["safe"])
+        self.assertEqual(host["flagged"], 1)
+        self.assertEqual(host["flagged_names"], ["llama-cli"])
+        self.assertEqual(host["protected_flagged"], 0)
+
+    def test_mixed_flags_refuse_and_name_only_the_actionable(self) -> None:
+        mod = load()
+        host = self._host(mod, {
+            "schema": "fleet-proc-resource-guard/1", "ok": False,
+            "flagged": [
+                {"pid": 1, "name": "WindowsTerminal", "protected": True},
+                {"pid": 2, "name": "llama-cli", "protected": False}]})
+        self.assertFalse(host["safe"])
+        self.assertEqual(host["flagged"], 1)
+        self.assertEqual(host["flagged_names"], ["llama-cli"])
+        self.assertEqual(host["protected_names"], ["WindowsTerminal"])
+
+
 class EvaluateVerdictTest(unittest.TestCase):
     def test_spawn_ok_when_host_clean_account_free_under_cap(self) -> None:
         mod = load()
