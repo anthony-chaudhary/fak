@@ -79,13 +79,17 @@ func runGuardReplay(fixturePath, wire, policyPath string, out io.Writer) int {
 	defer upstream.Close()
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:     "inkernel",
-		Model:        model,
-		Provider:     provider,
-		BaseURL:      replayUpstreamBase(provider, upstream.URL),
-		VDSO:         true,
-		Invalidation: "global",
-		Version:      appversion.Current(),
+		EngineID:             "inkernel",
+		Model:                model,
+		Provider:             provider,
+		BaseURL:              replayUpstreamBase(provider, upstream.URL),
+		VDSO:                 true,
+		Invalidation:         "global",
+		Version:              appversion.Current(),
+		CtxViewBudget:        8000,
+		CompactHistoryBudget: gateway.DefaultCompactHistoryBudget,
+		ElideResultBytes:     gateway.DefaultElideResultBytes,
+		ToolFloorDenies:      adjudicator.Default.NeverAdmits,
 		// Mute the structured per-request log stream so the human report stands alone (the
 		// live `fak guard` keeps it off by default too); the durable journal + the report
 		// carry the record.
@@ -144,6 +148,16 @@ func runGuardReplay(fixturePath, wire, policyPath string, out io.Writer) int {
 			continue
 		}
 		failures += renderReplayTurn(out, ti, turn, adjs)
+	}
+
+	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
+		if snapPath, ok, werr := writeExplicitVCacheSnapshot(turns); werr != nil {
+			fmt.Fprintf(out, "fak guard --replay-trace: vcache snapshot write failed: %v\n", werr)
+			failures++
+		} else if ok {
+			fmt.Fprintf(out, "fak guard --replay-trace: wrote vcache snapshot - %d turn(s) to %s; replay with `FAK_VCACHE_SNAPSHOT=%s fak vcache score --json`.\n\n",
+				len(turns), snapPath, snapPath)
+		}
 	}
 
 	// --- The exit summary — the SAME roll-up the live `fak guard` prints on exit. ---

@@ -59,3 +59,35 @@ func TestWriteConfiguredVCacheSnapshotEmptySkips(t *testing.T) {
 		t.Fatalf("writeConfiguredVCacheSnapshot(empty) = path %q ok %v, want skipped", got, ok)
 	}
 }
+
+func TestWriteExplicitVCacheSnapshotRequiresEnvPath(t *testing.T) {
+	t.Setenv(vcachesnapshot.EnvPath, "")
+
+	got, ok, err := writeExplicitVCacheSnapshot([]vcacheobserve.Turn{{
+		Family:    "provider",
+		CacheRead: 55,
+	}})
+	if err != nil {
+		t.Fatalf("writeExplicitVCacheSnapshot(no env) error = %v", err)
+	}
+	if ok || got != "" {
+		t.Fatalf("writeExplicitVCacheSnapshot(no env) = path %q ok %v, want skipped", got, ok)
+	}
+}
+
+func TestWriteExplicitVCacheSnapshotUsesEnvPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replay-vcache-turns.jsonl")
+	t.Setenv(vcachesnapshot.EnvPath, path)
+
+	got, ok, err := writeExplicitVCacheSnapshot([]vcacheobserve.Turn{{
+		Family:            "context",
+		ContextEvents:     1,
+		ContextShedTokens: 700,
+	}})
+	if err != nil {
+		t.Fatalf("writeExplicitVCacheSnapshot() error = %v", err)
+	}
+	if !ok || got != path {
+		t.Fatalf("writeExplicitVCacheSnapshot() = path %q ok %v, want %q true", got, ok, path)
+	}
+}

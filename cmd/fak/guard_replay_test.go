@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +14,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardtrace"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/vcachescore"
+	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
 // guardTraceFixturePath is the shared end-to-end fixture, authored in the gateway package's
@@ -106,6 +112,73 @@ func TestGuardReplayRunsCleanOnBothWires(t *testing.T) {
 				t.Errorf("%s replay leaked full write content into the report:\n%s", wire, out)
 			}
 		})
+	}
+}
+
+func TestGuardReplayWritesExplicitContextSnapshot(t *testing.T) {
+	t.Cleanup(journal.ResetActiveForTest)
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "ctxview-replay.json")
+	snapPath := filepath.Join(dir, "vcache-turns.jsonl")
+	t.Setenv(vcachesnapshot.EnvPath, snapPath)
+
+	f := guardtrace.Fixture{
+		SliceID: "ctxview-replay",
+		Turns: []guardtrace.Turn{{
+			Messages: []guardtrace.RequestMessage{
+				{Role: "system", Content: "You are a coding agent under fak guard."},
+				{Role: "user", Content: "rotate the auth token and then check the refund policy"},
+				{Role: "assistant", Content: strings.Repeat("weather sunny unrelated padding ", 5000)},
+				{Role: "user", Content: "what is the auth token rotation and refund window"},
+			},
+			Usage: guardtrace.Usage{InputTokens: 240, OutputTokens: 12, CacheReadInputTokens: 1800},
+			Calls: []guardtrace.Call{{
+				ID:    "call_read_policy",
+				Tool:  "Read",
+				Args:  json.RawMessage(`{"file_path":"README.md"}`),
+				Class: "allow",
+			}},
+		}},
+	}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(fixturePath, raw, 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	var sb strings.Builder
+	if code := runGuardReplay(fixturePath, "openai", "", &sb); code != 0 {
+		t.Fatalf("runGuardReplay exit = %d, want 0\n%s", code, sb.String())
+	}
+	if !strings.Contains(sb.String(), "wrote vcache snapshot") {
+		t.Fatalf("replay output did not point at the explicit vcache snapshot:\n%s", sb.String())
+	}
+
+	turns, ok, err := vcachesnapshot.Read(snapPath)
+	if err != nil {
+		t.Fatalf("read replay snapshot: %v", err)
+	}
+	if !ok || len(turns) == 0 {
+		t.Fatalf("replay snapshot missing turns: ok=%v turns=%+v", ok, turns)
+	}
+	if turns[0].ContextEvents != 1 || turns[0].ContextDroppedTurns != 1 || turns[0].ContextShedTokens <= 0 {
+		t.Fatalf("replay context evidence = events:%d dropped:%d shed:%d, want 1/1/>0",
+			turns[0].ContextEvents, turns[0].ContextDroppedTurns, turns[0].ContextShedTokens)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json"}); code != 0 && code != 1 {
+		t.Fatalf("vcache score exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("vcache score emitted invalid json: %v\n%s", err, out.String())
+	}
+	if !rep.Planes.ContextWitnessed.Available || rep.AgenticActivation.ContextEvents != 1 {
+		t.Fatalf("score context plane=%+v activation=%+v, want replay snapshot context witness",
+			rep.Planes.ContextWitnessed, rep.AgenticActivation)
 	}
 }
 
