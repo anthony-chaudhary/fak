@@ -57,8 +57,15 @@ func ScanForDownloadURLs(repoRoot string, allow map[string]bool) ([]Offense, err
 			return err
 		}
 		if d.IsDir() {
-			// Skip VCS, vendored, dependency, and local scratch trees.
-			if name := d.Name(); name == ".git" || name == ".dos" || name == ".fak" || name == "vendor" || name == "node_modules" {
+			// Skip VCS, vendored, dependency, and local scratch trees. Dot- and
+			// underscore-prefixed dirs mirror the Go toolchain's own corpus rule
+			// (`go build ./...` never descends them), so a checkout copy under a
+			// scratch dir like .tmp/ cannot red the gate with phantom findings.
+			name := d.Name()
+			if path != repoRoot && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
+				return filepath.SkipDir
+			}
+			if name == "vendor" || name == "node_modules" {
 				return filepath.SkipDir
 			}
 			if path != repoRoot {
