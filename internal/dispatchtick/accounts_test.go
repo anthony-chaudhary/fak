@@ -1,6 +1,7 @@
 package dispatchtick
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -178,6 +179,57 @@ func TestSeatPoolCountsFreeLeasedBlockedAndSkipsDuplicate(t *testing.T) {
 	for _, seat := range got.Seats {
 		if seat.Tag == "copy" {
 			t.Fatalf("duplicate identity seat was included: %+v", seat)
+		}
+	}
+}
+
+// TestAccountWirePreservesFleetAccountsFields locks the JSON field names that
+// fak dispatch tick/wave consumed from tools/fleet_accounts.py route|seats|wave
+// output. The Go structs carry them as tags, so a rename compiles cleanly while
+// silently breaking every consumer written against the Python wire shape.
+func TestAccountWirePreservesFleetAccountsFields(t *testing.T) {
+	rows := accountRowsFixture()
+	leases := []SeatLease{{Worker: "resolve-1", Tag: "gem7", Dir: "C:/Users/u/.claude-gem7"}}
+	raw, err := json.Marshal(BuildSeatPool(rows, leases, "claude"))
+	if err != nil {
+		t.Fatalf("marshal seat pool: %v", err)
+	}
+	seatWire := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &seatWire); err != nil {
+		t.Fatalf("unmarshal seat pool: %v", err)
+	}
+	for _, key := range []string{"total_seats", "free_seats", "leased_seats", "depleted", "seats"} {
+		if _, ok := seatWire[key]; !ok {
+			t.Fatalf("seat pool wire payload lost %q: %s", key, raw)
+		}
+	}
+	var seats []map[string]any
+	if err := json.Unmarshal(seatWire["seats"], &seats); err != nil {
+		t.Fatalf("unmarshal seat rows: %v", err)
+	}
+	if len(seats) == 0 {
+		t.Fatalf("seat pool wire payload has no seats: %s", raw)
+	}
+	for _, key := range []string{"tag", "model", "state"} {
+		if _, ok := seats[0][key]; !ok {
+			t.Fatalf("seat row wire payload lost %q: %s", key, raw)
+		}
+	}
+
+	wave := AllocateWave(AccountWaveInput{Rows: rows, Count: 2, Product: "claude", WorkKind: "engineering"})
+	waveWire := wave.Map()
+	for _, key := range []string{"wave_id", "shortfall", "granted", "lanes", "blocked_target_accounts"} {
+		if _, ok := waveWire[key]; !ok {
+			t.Fatalf("wave wire payload lost %q: %+v", key, waveWire)
+		}
+	}
+	if len(wave.Lanes) == 0 {
+		t.Fatalf("wave allocated no lanes: %+v", wave)
+	}
+	laneWire := wave.Lanes[0].Map()
+	for _, key := range []string{"tag", "config_dir", "selected_tier", "model", "wave_id"} {
+		if _, ok := laneWire[key]; !ok {
+			t.Fatalf("wave lane wire payload lost %q: %+v", key, laneWire)
 		}
 	}
 }
