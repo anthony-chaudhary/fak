@@ -422,10 +422,13 @@ func main() {
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
-		usage()
+		cmdHelp(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "fak: unknown verb %q\n", os.Args[1])
-		usage()
+		if s := suggestVerb(os.Args[1]); s != "" {
+			fmt.Fprintf(os.Stderr, "  did you mean 'fak %s'?\n", s)
+		}
+		fmt.Fprintln(os.Stderr, "  'fak help' shows the overview; 'fak help --all' lists every verb.")
 		recordUsage(verb, argv, 2, start)
 		os.Exit(2)
 	}

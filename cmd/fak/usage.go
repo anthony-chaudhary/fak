@@ -1,28 +1,44 @@
 // usage.go holds the `fak` top-level help text, extracted from main.go so the
 // verb-dispatch monolith stays under the steerability god-file line (#984).
-// Pure code motion: usage() is unchanged.
+//
+// The full per-verb text (the "wall") lives here as three raw-string constants
+// (core verbs / ops verbs / scorecards + aliases). It is no longer what `fak`
+// or `fak --help` prints — that is the compact curated overview in help.go —
+// but it remains the single authored copy of every verb's deep documentation:
+// `fak help <verb>` carves its block out of these constants, and
+// `fak help --full` prints the whole wall unchanged.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 )
 
-// usage prints the full `fak` help banner. The verb list is long enough to be a
-// god-function on its own, so the body is split into three contiguous raw-string
-// sections (core verbs / ops verbs / scorecards + aliases) printed back-to-back —
-// the output is byte-identical to the single block it replaced.
+// usage prints the error-path help: the compact overview, to stderr. Bare `fak`
+// reaches this; requested help (`fak help`, `-h`) prints the same overview to
+// stdout via cmdHelp.
 func usage() {
-	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
-	usageCoreVerbs()
-	usageOpsVerbs()
-	usageScorecardVerbs()
+	usageCompact(os.Stderr)
 }
 
-func usageCoreVerbs() {
-	fmt.Fprint(os.Stderr, `usage:
+// usageWall prints the original full help wall — every verb's synopsis and
+// paragraph. Reached via `fak help --full`; output is byte-identical to what
+// `fak --help` printed before the compact overview existed.
+func usageWall(w io.Writer) {
+	fmt.Fprintf(w, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
+	fmt.Fprint(w, usageWallText())
+}
+
+// usageWallText returns the wall as one string, for printing (usageWall) and
+// for the per-verb carver (verbWallSections in help.go).
+func usageWallText() string {
+	return usageCoreText + usageOpsText + usageScorecardText
+}
+
+const usageCoreText = `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
@@ -176,6 +192,11 @@ func usageCoreVerbs() {
                  malformed args, duplicate read, poison  -  vs fak's 1-shot. Replays a
                  class-labeled trace through the real kernel, prices the turns it
                  deletes per lever, and keeps the safety floor on its own axis)
+  fak hooklat   [STREAM...] [--budget-p99-ms 250] [--since 2h] [--json]
+                (GUARD-HOOK LATENCY ROLLUP: fold the DOS hook-observation streams'
+                 per-firing latency_ms into p50/p90/p99 per verb, judge the tail
+                 against the declared budget; a breach names GATE_LATENCY_REGRESSION
+                 and exits 1, a thin sample abstains  -  #1993)
   fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
                 [--max-turns N] [--out agent-report.json] [--policy FILE]   (LIVE turn-count A/B)
@@ -278,11 +299,9 @@ func usageCoreVerbs() {
                  the owning lane/tree, architest tier, owning go test target, expected
                  (fak <leaf>) stamp, and any live refs/fak/locks lease that overlaps
                  the tree. This is the one-command orientation path before editing.)
-`)
-}
+`
 
-func usageOpsVerbs() {
-	fmt.Fprint(os.Stderr, `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
+const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
   fak recover   <REASON> [--dry-run|--execute] [--json]
@@ -448,11 +467,9 @@ func usageOpsVerbs() {
                  fak_session_reset / fak_context_change) over stdin/stdout)
   fak serve-wiring [--md|--check]
                 (audit fak serve flag -> gateway.Config -> runtime-read wiring)
-`)
-}
+`
 
-func usageScorecardVerbs() {
-	fmt.Fprint(os.Stderr, `  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
+const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR --size N --vec a,b,c |
                 worker --coord ADDR --rank R --size N --vec a,b,c   [--op allreduce|allgather]
                 (MULTI-NODE COMPUTE: run a real cross-node collective over fak's DistComm
                  process group (host float32). Launch 'coordinator' on one box and 'worker'
@@ -680,5 +697,4 @@ func usageScorecardVerbs() {
 
 every tool call crosses one in-process syscall boundary: vDSO -> adjudicate ->
 pre-flight/grammar -> dispatch -> context-MMU admit.
-`)
-}
+`
