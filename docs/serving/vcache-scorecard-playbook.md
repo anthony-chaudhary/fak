@@ -67,7 +67,7 @@ proofs, the index, and the action/risk lists) and `--out FILE` to persist it.
 | `planes.kernel_witnessed` | Pure-fak KV-prefix reuse evidence, supplied by `--kernel-kv-prompt-tokens` / `--kernel-kv-reused-tokens` or the gateway cache observer. |
 | `planes.context_witnessed` | O(1) context/query value, including gateway compaction shed-token evidence. Shed-only evidence is visible but needs a resident/baseline denominator for net-value credit. |
 | `planes.external_engine_observed` | SGLang/vLLM/llama prefix-cache hit-rate evidence. Hit rate alone improves coverage, not token-value credit. |
-| `agentic_activation` | Counts fak-authored mechanisms that fired. Provider cache counters alone do not increment it. |
+| `agentic_activation` | Counts fak-authored mechanisms and decision witnesses that fired. Provider cache counters alone do not increment it; provider-vcache decisions are governor/action-plan rows, not proof that a provider warm was spent. |
 | `default_usefulness` | A separate conservative score over realized value, activation, cold-path correctness, granularity, coverage, drift resistance, and actionability. |
 | `concentration` | The Zipf `s` of the workload's anchor reuse. `defeated=true` means the workload is too flat for anchor caching to help -- the honest "do not bother" case. |
 | `hot-anchor index` | The plan: how many top anchors to index and the coverage they buy. This is the artifact the agent persists (`--index-out FILE`). |

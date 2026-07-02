@@ -881,6 +881,9 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	if rep.Prediction.Total != 2 || rep.Prediction.TrueWarm != 1 || rep.Prediction.FalseCold != 1 {
 		t.Fatalf("snapshot prediction = %+v, want total=2 true_warm=1 false_cold=1", rep.Prediction)
 	}
+	if rep.AgenticActivation.ProviderVCacheDecisions != 1 || rep.AgenticActivation.Total != 1 {
+		t.Fatalf("snapshot provider decisions = %+v, want one fak-authored provider action-plan decision", rep.AgenticActivation)
+	}
 
 	// --snapshot off forces the planned FORECAST even when a snapshot exists.
 	var out2, errb2 bytes.Buffer

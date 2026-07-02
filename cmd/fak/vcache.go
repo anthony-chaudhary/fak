@@ -644,7 +644,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 	contextEvents := fs.Int("context-events", 0, "fak-authored O(1) context/query cache events that fired")
 	contextShedTokens := fs.Float64("context-shed-tokens", 0, "O(1) context witness: prompt tokens removed from the live request body")
 	contextResidentTokens := fs.Float64("context-resident-tokens", 0, "O(1) context witness: resident prompt tokens kept after compaction/planning")
-	providerVCacheDecisions := fs.Int("provider-vcache-decisions", 0, "fak-authored provider-vcache warm/pin/evict decisions that fired")
+	providerVCacheDecisions := fs.Int("provider-vcache-decisions", 0, "fak-authored provider-vcache action-plan decisions witnessed")
 	externalEngineEvents := fs.Int("external-engine-events", 0, "fak-authored SGLang/vLLM/llama cache adapter events that fired")
 	externalEngineHitRate := fs.Float64("external-engine-hit-rate", 0, "observed SGLang/vLLM/llama prefix-cache hit rate, 0..1")
 	recallPrefix := fs.Int64("recall-prefix-tokens", def.Recall.PrefixTokens, "M4 recall proof prefix tokens (P)")
@@ -807,6 +807,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 					in.Prediction = observed.Prediction
 					in.AnchorSource = vcachescore.AnchorSourceMeasured
 					in.TurnsObserved = len(providerTurns)
+					applyVCacheProviderActionDecisions(&in, providerTurns)
 				}
 				contextFromProviderSnapshot = applyVCacheSnapshotContext(&in, turns, "persisted guard/serve context snapshot")
 			}
@@ -999,6 +1000,20 @@ func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Tur
 	in.Context = ev
 	if in.AgenticActivation.ContextEvents == 0 {
 		in.AgenticActivation.ContextEvents = int64ToInt(nonNegInt64(events))
+	}
+	return true
+}
+
+func applyVCacheProviderActionDecisions(in *vcachescore.Input, turns []vcacheobserve.Turn) bool {
+	if in == nil {
+		return false
+	}
+	plan := vcacheobserve.PlanProviderActions(turns, false)
+	if len(plan.Actions) == 0 {
+		return false
+	}
+	if in.AgenticActivation.ProviderVCacheDecisions == 0 {
+		in.AgenticActivation.ProviderVCacheDecisions = len(plan.Actions)
 	}
 	return true
 }

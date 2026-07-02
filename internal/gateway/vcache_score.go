@@ -25,10 +25,12 @@ func (s *Server) handleFakVCacheScore(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) vcacheScoreReport() vcachescore.Report {
 	in := vcachescore.DefaultInput()
+	turns := s.vcacheTurnsSnapshotForScore()
 	var sum AdjudicationSummary
 	if s != nil {
 		sum = s.AdjudicationSummary()
-		if sum.InputTokens > 0 || sum.CachedPromptTokens > 0 || sum.CacheCreationTokens > 0 {
+		if !applyVCacheProviderWindowForScore(&in, turns) &&
+			(sum.InputTokens > 0 || sum.CachedPromptTokens > 0 || sum.CacheCreationTokens > 0) {
 			in.TelemetryRows = []vcachegov.TelemetryRow{{
 				InputTokens:              float64(sum.InputTokens),
 				CacheReadInputTokens:     float64(sum.CachedPromptTokens),
@@ -36,7 +38,7 @@ func (s *Server) vcacheScoreReport() vcachescore.Report {
 			}}
 		}
 	}
-	if ctxEvidence, events, ok := contextPlaneEvidenceFromTurns(s.vcacheTurnsSnapshotForScore()); ok {
+	if ctxEvidence, events, ok := contextPlaneEvidenceFromTurns(turns); ok {
 		in.Context = ctxEvidence
 		if in.AgenticActivation.ContextEvents == 0 {
 			in.AgenticActivation.ContextEvents = events
@@ -64,6 +66,44 @@ func (s *Server) vcacheScoreReport() vcachescore.Report {
 		in.ExternalEngine = ext
 	}
 	return vcachescore.Score(in)
+}
+
+func applyVCacheProviderWindowForScore(in *vcachescore.Input, turns []vcacheobserve.Turn) bool {
+	if in == nil {
+		return false
+	}
+	providerTurns := vcacheScoreProviderTurns(turns)
+	if len(providerTurns) == 0 {
+		return false
+	}
+	observed := vcacheobserve.Observe(providerTurns, vcacheobserve.DefaultMultipliers())
+	in.TelemetryRows = vcacheobserve.Rows(providerTurns)
+	in.Ranked = vcacheobserve.RankedWorkload(providerTurns)
+	in.Prediction = observed.Prediction
+	in.AnchorSource = vcachescore.AnchorSourceMeasured
+	in.TurnsObserved = len(providerTurns)
+	plan := vcacheobserve.PlanProviderActions(providerTurns, false)
+	if in.AgenticActivation.ProviderVCacheDecisions == 0 {
+		in.AgenticActivation.ProviderVCacheDecisions = len(plan.Actions)
+	}
+	return true
+}
+
+func vcacheScoreProviderTurns(turns []vcacheobserve.Turn) []vcacheobserve.Turn {
+	if len(turns) == 0 {
+		return nil
+	}
+	out := make([]vcacheobserve.Turn, 0, len(turns))
+	for _, turn := range turns {
+		if turn.InputTokens > 0 ||
+			turn.CacheRead > 0 ||
+			turn.CacheCreation > 0 ||
+			turn.Ephemeral1h > 0 ||
+			turn.Ephemeral5m > 0 {
+			out = append(out, turn)
+		}
+	}
+	return out
 }
 
 func (s *Server) vcacheTurnsSnapshotForScore() []vcacheobserve.Turn {

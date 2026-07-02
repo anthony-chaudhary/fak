@@ -22,6 +22,7 @@ import (
 // stubGateway records the last control request and serves canned drive state.
 type stubGateway struct {
 	lastMethod, lastPath, lastVerb string
+	lastRawQuery                   string
 	lastBody                       gateway.SessionControlRequest
 	verbs                          []string
 	bodies                         []gateway.SessionControlRequest
@@ -29,12 +30,14 @@ type stubGateway struct {
 	curPace                        gateway.SessionPace
 	curRev                         uint64
 	conflictID                     string // an id whose control POST returns 409
+	ctxValue                       gateway.CtxValueSnapshot
 }
 
 func (g *stubGateway) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/fak/sessions", func(w http.ResponseWriter, r *http.Request) {
 		g.lastMethod, g.lastPath = r.Method, r.URL.Path
+		g.lastRawQuery = r.URL.RawQuery
 		writeTestJSON(w, 200, gateway.SessionListResponse{
 			Count: 2,
 			Sessions: []gateway.SessionState{
@@ -45,8 +48,14 @@ func (g *stubGateway) handler() http.Handler {
 			},
 		})
 	})
+	mux.HandleFunc("/v1/fak/ctxvalue", func(w http.ResponseWriter, r *http.Request) {
+		g.lastMethod, g.lastPath = r.Method, r.URL.Path
+		g.lastRawQuery = r.URL.RawQuery
+		writeTestJSON(w, 200, g.ctxValue)
+	})
 	mux.HandleFunc("/v1/fak/session/", func(w http.ResponseWriter, r *http.Request) {
 		g.lastMethod, g.lastPath = r.Method, r.URL.Path
+		g.lastRawQuery = r.URL.RawQuery
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/fak/session/")
 		parts := strings.Split(rest, "/")
 		id := parts[0]
@@ -186,6 +195,65 @@ func TestSessionCLIContextBudget(t *testing.T) {
 	}
 	if !strings.Contains(out, "context=150000") {
 		t.Fatalf("context budget output missing axis: %q", out)
+	}
+}
+
+func TestSessionCLIContextValue(t *testing.T) {
+	g := &stubGateway{ctxValue: gateway.CtxValueSnapshot{
+		Schema:       "fak-ctxvalue-report/1",
+		BudgetTokens: 8000,
+		Sessions: []gateway.CtxValueReport{{
+			Schema:  "fak-ctxvalue-report/1",
+			TraceID: "sess-context",
+			Tokens: gateway.CtxValueTokens{
+				ResidentTokens:     6500,
+				PeakResidentTokens: 7000,
+				BudgetTokens:       8000,
+				Headroom:           &gateway.CtxValueHeadroom{Tokens: 1500, Pct: 18.75},
+				GrowthPerTurn:      300,
+				Provenance:         "OBSERVED",
+			},
+			Turns: gateway.CtxValueTurns{
+				TurnsObserved:          9,
+				ContextEvents:          1,
+				TurnsSinceContextEvent: 5,
+				Provenance:             "WITNESSED",
+			},
+			Session: gateway.CtxValueSession{
+				Phase:      "crowding",
+				Provenance: "WITNESSED",
+			},
+			StepAdvice: gateway.CtxStepAdvice{
+				StepClass:  gateway.StepClassCheckpoint,
+				Basis:      "token_headroom",
+				Reason:     "resident 6.5K of 8K budget",
+				Provenance: "DECISION",
+			},
+		}},
+	}}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runSessionAt(t, ts.URL, "context", "sess-context")
+	if code != 0 {
+		t.Fatalf("context exit = %d (%s)", code, errb)
+	}
+	if g.lastMethod != http.MethodGet || g.lastPath != "/v1/fak/ctxvalue" || g.lastRawQuery != "trace=sess-context" {
+		t.Fatalf("context hit %s %s?%s, want GET /v1/fak/ctxvalue?trace=sess-context",
+			g.lastMethod, g.lastPath, g.lastRawQuery)
+	}
+	for _, want := range []string{"sess-context context", "step=checkpoint", "basis=token_headroom", "phase=crowding", "resident=6500", "headroom=1500(18.8%)", "events=1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("context output missing %q:\n%s", want, out)
+		}
+	}
+
+	out, errb, code = runSessionAt(t, ts.URL, "context", "sess-context", "--json")
+	if code != 0 {
+		t.Fatalf("context json exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, `"schema": "fak-ctxvalue-report/1"`) || !strings.Contains(out, `"step_class": "checkpoint"`) {
+		t.Fatalf("context json missing ctxvalue report:\n%s", out)
 	}
 }
 

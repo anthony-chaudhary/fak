@@ -57,8 +57,9 @@ type PlaneEvidenceInput struct {
 	Reason             string  `json:"reason,omitempty"`
 }
 
-// AgenticActivationInput counts fak-authored cache activation events. Provider
-// cache counters are observed economics, not fak-authored activation.
+// AgenticActivationInput counts fak-authored cache activation events and decision
+// witnesses. Provider cache counters are observed economics, not fak-authored
+// activation.
 type AgenticActivationInput struct {
 	KernelKVEvents          int `json:"kernel_kv_events,omitempty"`
 	ContextEvents           int `json:"context_events,omitempty"`

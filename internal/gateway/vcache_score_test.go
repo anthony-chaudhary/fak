@@ -73,6 +73,39 @@ func TestHandleFakVCacheScoreSeparatesProviderAndKernelEvidence(t *testing.T) {
 	}
 }
 
+func TestHandleFakVCacheScoreCountsLiveProviderActionPlan(t *testing.T) {
+	restore := swapCacheObserver(cacheobs.New())
+	defer restore()
+
+	m := newGatewayMetrics(time.Now())
+	m.observeVCacheTurn("head", 1, 40000, 0, 40000)
+	m.observeVCacheTurn("head", 2, 50, 40000, 500)
+	s := &Server{metrics: m}
+
+	rec := httptest.NewRecorder()
+	s.handleFakVCacheScore(rec, httptest.NewRequest(http.MethodGet, "/v1/fak/vcache/score", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("decode: %v\n%s", err, rec.Body.String())
+	}
+	if rep.ActiveSource != "telemetry" || rep.AnchorSource != vcachescore.AnchorSourceMeasured || rep.TurnsObserved != 2 {
+		t.Fatalf("source/anchors/turns=%q/%q/%d, want live observed provider window",
+			rep.ActiveSource, rep.AnchorSource, rep.TurnsObserved)
+	}
+	if !rep.Planes.ProviderObserved.Available || rep.Planes.KernelWitnessed.Available || rep.Planes.ContextWitnessed.Available {
+		t.Fatalf("planes=%+v, want provider observed only", rep.Planes)
+	}
+	if rep.AgenticActivation.ProviderVCacheDecisions != 1 || rep.AgenticActivation.Total != 1 {
+		t.Fatalf("activation=%+v, want one fak-authored provider action-plan decision", rep.AgenticActivation)
+	}
+	if rep.DefaultUsefulness.Facets.AgenticActivation != 20 {
+		t.Fatalf("default-usefulness activation facet=%d, want provider action-plan credit", rep.DefaultUsefulness.Facets.AgenticActivation)
+	}
+}
+
 func TestHandleFakVCacheScoreReportsExternalEngineHitRate(t *testing.T) {
 	restore := swapCacheObserver(cacheobs.New())
 	defer restore()
