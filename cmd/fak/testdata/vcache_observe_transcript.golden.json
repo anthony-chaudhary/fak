@@ -61,11 +61,11 @@
   "concentration": {
     "ZipfS": 0,
     "Measured": false,
-    "Defeated": true,
+    "Defeated": false,
     "TopNCoverage": {
       "1": 1
     },
-    "Recommendation": "workload is flat (s\u003c=1): vCache will not help — manufacture skew (canonicalize/aggregate) or abstain"
+    "Recommendation": "single positive anchor covers 100% of measured weight; vCache can exploit it, but collect more anchors before trusting a Zipf slope"
   },
   "prediction": {
     "Total": 3,
@@ -90,8 +90,8 @@
     "loss_ratio": 404.3,
     "correctness_depends_on": false
   },
-  "grade_measured": "F",
-  "score_measured": 30,
+  "grade_measured": "D",
+  "score_measured": 45,
   "grade_synthetic": "C",
   "score_synthetic": 70,
   "owner_slices": [
@@ -140,11 +140,11 @@
       "package": "internal/vcachecal",
       "milestone": "M1 (#716) §5.2",
       "question": "is reuse CONCENTRATED enough for cross-family warming to help?",
-      "value": "measured Zipf s=0.00 over 1 families (defeated=true)",
+      "value": "measured Zipf s=0.00 over 1 families (defeated=false)",
       "provenance": "DECISION",
-      "verdict": "DEFEATED",
+      "verdict": "EXPLOITABLE",
       "witness": "fak vcache score --anchors-file \u003cmeasured-anchors\u003e",
-      "detail": "workload is flat (s\u003c=1): vCache will not help — manufacture skew (canonicalize/aggregate) or abstain"
+      "detail": "single positive anchor covers 100% of measured weight; vCache can exploit it, but collect more anchors before trusting a Zipf slope"
     },
     {
       "name": "M1 warmth belief",
@@ -195,7 +195,7 @@
       "package": "internal/vcachescore",
       "milestone": "agent-dev 2x gate",
       "question": "what grade does the run earn — measured vs synthetic?",
-      "value": "MEASURED F (30/100) vs SYNTHETIC C (70/100)",
+      "value": "MEASURED D (45/100) vs SYNTHETIC C (70/100)",
       "provenance": "DECISION",
       "verdict": "CONTEXT-DEPENDENT",
       "witness": "fak vcache score --telemetry \u003ct\u003e --anchors-file \u003ca\u003e",

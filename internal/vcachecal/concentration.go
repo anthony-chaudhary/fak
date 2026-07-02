@@ -42,8 +42,10 @@ type Concentration struct {
 // sorted descending by Weight) via least-squares on log(weight) vs log(rank): a Zipf law
 // has weight(rank) ∝ 1/rank^s, so log(weight) = C − s·log(rank) and s = −slope. It then
 // computes the top-N coverage curve and flags a flat workload (s ≤ 1) as structurally
-// defeated — the §5.2 gate. Fewer than two positive weights cannot fit s; the result is
-// conservatively defeated (Measured = false, s = 0).
+// defeated — the §5.2 gate. A single positive anchor cannot fit a Zipf slope, but it is
+// still maximally concentrated: top-1 covers 100%, so vCache can exploit it while the
+// report stays honest that the Zipf exponent itself is not measured. Zero positive
+// weights remain conservatively defeated.
 func FitConcentration(ranked []RankedVBlock) Concentration {
 	c := Concentration{TopNCoverage: map[int]float64{}}
 	if len(ranked) == 0 {
@@ -84,6 +86,15 @@ func FitConcentration(ranked []RankedVBlock) Concentration {
 			cum += v.Weight()
 			c.TopNCoverage[i+1] = cum / total
 		}
+	}
+	if n == 1 && total > 0 {
+		c.Recommendation = "single positive anchor covers 100% of measured weight; vCache can exploit it, but collect more anchors before trusting a Zipf slope"
+		return c
+	}
+	if n == 0 {
+		c.Defeated = true
+		c.Recommendation = "no positive workload weight measured — measure concentration before trusting vCache"
+		return c
 	}
 	if c.ZipfS <= 1.0 {
 		c.Defeated = true

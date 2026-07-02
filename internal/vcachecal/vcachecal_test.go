@@ -2,6 +2,7 @@ package vcachecal
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -321,6 +322,22 @@ func TestFitConcentrationFlatWorkloadDefeated(t *testing.T) {
 	c := FitConcentration(zipfWeights(1.0, 1000))
 	if cov := c.TopNCoverage[7]; math.Abs(cov-0.346) > 0.01 {
 		t.Errorf("top-7 coverage at s=1.0 = %.3f, want ~0.346 (the §5.2 flat headline)", cov)
+	}
+}
+
+func TestFitConcentrationSingleAnchorIsConcentrated(t *testing.T) {
+	c := FitConcentration([]RankedVBlock{{Key: "only", Frequency: 5, Size: 4096, ReuseDensity: 3}})
+	if c.Measured {
+		t.Fatal("single anchor cannot measure a Zipf slope")
+	}
+	if c.Defeated {
+		t.Fatalf("single positive anchor should be exploitable, not flat-defeated: %+v", c)
+	}
+	if cov := c.TopNCoverage[1]; cov != 1 {
+		t.Fatalf("top-1 coverage=%g, want 1", cov)
+	}
+	if !strings.Contains(c.Recommendation, "single positive anchor") {
+		t.Fatalf("recommendation=%q, want single-anchor caveat", c.Recommendation)
 	}
 }
 

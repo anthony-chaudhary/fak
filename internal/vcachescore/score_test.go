@@ -62,6 +62,24 @@ func TestTelemetryOverridesActiveMultiplier(t *testing.T) {
 	}
 }
 
+func TestObservedSingleAnchorTelemetryCanPassTwoX(t *testing.T) {
+	in := DefaultInput()
+	in.TelemetryRows = []vcachegov.TelemetryRow{
+		{InputTokens: 86, CacheReadInputTokens: 1920},
+	}
+	in.Ranked = []vcachecal.RankedVBlock{{Key: "head", Frequency: 1, Size: 2006, ReuseDensity: 1920}}
+	in.AnchorSource = AnchorSourceMeasured
+	in.TurnsObserved = 1
+
+	rep := Score(in)
+	if !rep.TwoXBetter || rep.Status != "2x_ready" {
+		t.Fatalf("single observed hot anchor status=%s twoX=%v concentration=%+v", rep.Status, rep.TwoXBetter, rep.Concentration)
+	}
+	if rep.Concentration.Defeated || rep.Index.Defeated || rep.Index.AnchorCount != 1 {
+		t.Fatalf("single observed hot anchor index/concentration = %+v / %+v", rep.Index, rep.Concentration)
+	}
+}
+
 func TestEconomicsBlockReportsHitReadRebateCostFromTelemetry(t *testing.T) {
 	// No telemetry: the observed economics block is absent (a hit/read/rebate
 	// value must always have a provider witness behind it).
