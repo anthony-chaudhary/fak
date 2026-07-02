@@ -503,8 +503,10 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 		if err != nil {
 			fmt.Fprintf(stderr, "fak vcache score: snapshot %s: %v (falling open to the planned forecast)\n", snapPath, err)
 		} else if ok {
+			observed := vcacheobserve.Observe(turns, vcacheobserve.DefaultMultipliers())
 			in.TelemetryRows = vcacheobserve.Rows(turns)
 			in.Ranked = vcacheobserve.RankedWorkload(turns)
+			in.Prediction = observed.Prediction
 			in.AnchorSource = vcachescore.AnchorSourceMeasured
 			in.TurnsObserved = len(turns)
 			applyVCacheSnapshotContext(&in, turns)

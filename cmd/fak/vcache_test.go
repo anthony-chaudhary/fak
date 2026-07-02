@@ -535,6 +535,9 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	if rep.Index.TotalAnchors != 1 {
 		t.Fatalf("snapshot index total anchors=%d, want measured one-family workload", rep.Index.TotalAnchors)
 	}
+	if rep.Prediction.Total != 2 || rep.Prediction.TrueWarm != 1 || rep.Prediction.FalseCold != 1 {
+		t.Fatalf("snapshot prediction = %+v, want total=2 true_warm=1 false_cold=1", rep.Prediction)
+	}
 
 	// --snapshot off forces the planned FORECAST even when a snapshot exists.
 	var out2, errb2 bytes.Buffer
