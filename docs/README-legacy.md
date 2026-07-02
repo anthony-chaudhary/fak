@@ -1,10 +1,13 @@
 # fak — front-page overflow (moved off README.md)
 
 These sections used to live on the front page. They were moved here on
-2026-06-28 to keep `README.md` focused on what the lowest-common-denominator
-reader needs first — performance and cost, the no-key demo, and the one-command
-wrap. Nothing here is deprecated; it is narrower-audience or deep-dive material
-that earns a link from the front page rather than a place on it.
+2026-06-28 (and a second batch on 2026-07-01, when the front page was halved)
+to keep `README.md` focused on what the lowest-common-denominator reader needs
+first — performance and cost, the no-key demo, and the one-command wrap.
+Nothing here is deprecated; it is narrower-audience or deep-dive material that
+earns a link from the front page rather than a place on it. The pre-restructure
+front page is archived at
+[README-2026-06-25-before-fresh-start.md](archive/README-2026-06-25-before-fresh-start.md).
 
 Each claim still carries the same authority it did on the front page — every
 number traces to [BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md), and every
@@ -131,6 +134,145 @@ The crossing point is one kernel present at the most scales, depths, and substra
 targets, carrying the same invariants through all of them — the way Linux runs on
 the phone in your pocket and the rack training the model on it. See [the
 cross-platform spine](explainers/cross-platform-spine.md).
+
+## What the kernel does
+
+The at-a-glance surface table (moved off the front page 2026-07-01):
+
+| Surface | What it gives you | Status |
+|---|---|---|
+| `fak guard` | Drop-in guard around an existing CLI agent | shipped |
+| `fak node` | Install/connect an always-on `fak serve` gateway as a system service | shipped |
+| `fak console` | Native operator/client panes for issues, live sessions, guard artifacts | shipped |
+| `fak serve` | OpenAI, Anthropic, fak-native HTTP, plus MCP over HTTP/stdio | shipped |
+| Capability floor | JSON allow/deny manifest with closed refusal reasons | shipped |
+| Result quarantine | Secret, poison, oversize, and pollution results held out of context | shipped |
+| Audit/metrics | JSON logs, optional hash-chained journal, Prometheus, `/debug/vars` | shipped |
+| Session control | Budgets, reset directives, cooperative MCP reset, live session state | shipped |
+| Model routing | Per-aspect routing, ensembles, routebench, gateway seam | shipped spine |
+| In-kernel model | Pure-Go reference model, kernel-owned KV cache, GPU/backend witnesses | correctness/reference path |
+| Cross-platform spine | One kernel across the deployment substrate (IoT → edge → laptop → hyperscaler) | shipped |
+
+Every claim in [CLAIMS.md](../CLAIMS.md) carries exactly one tag: `[SHIPPED]`,
+`[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
+
+## Benchmarks, in one page
+
+The rule is simple: every number traces to
+[BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md). The ones worth remembering:
+
+- 50-turn × 5-agent Qwen2.5-1.5B authority row: 4.1× vs a tuned warm-cache stack (prefix
+  reuse climbs to 6.95× across the model ladder). Larger figures are fenced as vs-naive.
+- GPU decode on the gated reusable-CUDA-graph path (`FAK_CUDA_GRAPH=1`): ~120 tok/s on an
+  RTX 4070 (SmolLM2-135M, f32), inside llama.cpp's Q8_0 band of 120 ± 15 tok/s. Framing:
+  [LLAMACPP-HEADTOHEAD-RESULTS.md](benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md).
+- Native in-kernel continuous batching: 1.54× req/s at 8-way batch (synthetic CPU witness)
+  vs the legacy per-request lifecycle.
+- WebVoyager geometry model: 8-worker fleet prefill is 1.10× less work than tuned per-agent
+  KV (9.7× less than the naive re-prefill floor). Modeled prefill-token work, not wall-clock.
+- Pure-kernel decide latency: 362 ns per allow decision; the read-path floor is ~0.55 ns/op,
+  flat from 1 to 1000 registered drivers.
+
+Use vLLM or SGLang for raw token serving. Put `fak` on the agent boundary for reuse, routing,
+audit, and the capability floor.
+
+## The front-page diagrams
+
+How `fak guard -- claude` sits in the loop:
+
+```mermaid
+flowchart LR
+  you["<b>fak guard -- claude</b><br/>one command"]
+  subgraph one["one binary, on loopback"]
+    direction TB
+    agent["your agent<br/>Claude Code · Codex · opencode"]
+    kernel{{"fak kernel<br/>allow · deny · repair · quarantine<br/>shed old turns · keep cache prefix"}}
+    agent -- "proposed tool call" --> kernel
+    kernel -- "verdict" --> agent
+  end
+  you --> agent
+  kernel -- "real credential + cache_control passed through" --> up["Anthropic / OpenAI API<br/>or a local --gguf model"]
+  up -- "tokens" --> kernel
+```
+
+In-kernel f32 GPU decode versus a quantized llama.cpp (both land at ~120 tok/s; fak's
+119–120 sits inside llama.cpp's Q8_0 band of 120 ± 15):
+
+```mermaid
+xychart-beta
+  title "GPU decode tok/s, batch-1, higher is better (RTX 4070, SmolLM2-135M)"
+  x-axis ["llama.cpp Q8_0 (120 +/- 15)", "fak in-kernel f32 (FAK_CUDA_GRAPH=1)"]
+  y-axis "tok/s" 0 --> 140
+  bar [120, 120]
+```
+
+The shared prompt prefix, computed once and reused across a fleet:
+
+```mermaid
+flowchart TD
+  p["Shared prompt prefix<br/>system + tools + instructions<br/><b>computed once</b>"]
+  p -. "reused (copy-on-write)" .-> a1(["agent 1"])
+  p -. reused .-> a2(["agent 2"])
+  p -. reused .-> a3(["agent 3"])
+  a1 --> w["<b>~4.1x less work</b> than a tuned<br/>warm-cache stack (50 turns x 5 agents)"]
+  a2 --> w
+  a3 --> w
+```
+
+Shedding old turns while keeping the provider cache prefix byte-identical:
+
+```mermaid
+flowchart LR
+  subgraph s1["a sprawling 100k-token session"]
+    direction LR
+    h["prefix (cached)"] --> m["old middle turns"] --> t["recent turns"]
+  end
+  subgraph s2["what fak sends upstream"]
+    direction LR
+    h2["prefix<br/><b>byte-identical</b><br/>cache hit preserved"] --> t2["recent turns"]
+  end
+  s1 -->|"fak guard (on by default)"| s2
+```
+
+## `fak serve` in front of any compatible client
+
+The gateway recipe that used to sit on the front page. Put `fak serve` in front of a model
+endpoint and point the client at it:
+
+```bash
+fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+  --policy examples/dev-agent-policy.json
+```
+
+OpenAI traffic goes to `http://127.0.0.1:8080/v1`, Anthropic Messages to the bare host.
+Harden with `--require-key-env FAK_TOKEN` and scrape `/metrics`. For MCP hosts,
+`fak serve --stdio --policy examples/dev-agent-policy.json` exposes five kernel tools
+(`fak_adjudicate` / `fak_syscall` / `fak_admit` / `fak_context_change` plus a session
+reset). See [GETTING-STARTED.md](../GETTING-STARTED.md),
+[fak/api-reference.md](fak/api-reference.md), and [../examples/mcp](../examples/mcp).
+
+The kernel also reports live prefill vs decode tok/s on `/metrics`, so a slow first request
+gets an answer instead of a shrug. The operating board that keeps the multi-agent reuse,
+O(1) context/query, provider-cache, and KV-deletion work on the product path:
+[CACHE-FRONTIER-OPERATING-PLAN.md](CACHE-FRONTIER-OPERATING-PLAN.md).
+
+## Build, test, and ship (the front-page detail)
+
+The badges on the front page mirror the local loop: `go build ./cmd/fak`, `make test-fast`,
+`make ci`. On native Windows, `go build` and `go vet` work normally, but native `go test`
+can be blocked by OS Application Control on freshly compiled test binaries — use
+`./test.ps1` under WSL for the full suite on that host.
+
+Run the cheapest witness that covers your change first: `make test-fast` for code,
+`python tools/readme_freshness_audit.py --json` for the front page, or the relevant
+`--dry-run`/`--check` command. Then use `make ci` as the green bar before delivery.
+
+Shipping is continuous but path-scoped. Preview the exact subject and files with
+`fak commit --preview -m "<subject>" --path <p>`, commit only those paths, and push after
+the gate is green. Each pushed commit should be a self-building snapshot; do not rely on a
+later commit in the same push to repair a broken intermediate. No side branch, no
+`git add -A`, no force-push.
 
 ---
 
