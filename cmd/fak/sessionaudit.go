@@ -91,7 +91,7 @@ func discoverOptions(roots rootFlags, sinceDays float64, nsPrefix string, here b
 func runSessionAuditDiscover(stdout, stderr io.Writer, argv []string) int {
 	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit discover", stderr)
 	asJSON := fs.Bool("json", false, "emit discovered transcript records as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -134,7 +134,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit audit", stderr)
 	jsonOut := fs.String("json", "", "write JSON payload to OUT")
 	mdOut := fs.String("md", "", "write markdown report to OUT")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -237,7 +237,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
 	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit summary", stderr)
 	asJSON := fs.Bool("json", false, "emit compact summary as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -338,13 +338,19 @@ func renderSessionAuditSummary(w io.Writer, rep sessionaudit.CompactReport) {
 				row.Namespace, row.Session, row.TotalContextTokens, 100*row.CacheReadShare, row.OutputTokens, row.IORatio, row.TopModel)
 		}
 	}
+	if len(rep.Recommendations) > 0 {
+		fmt.Fprintln(w, "recommendations:")
+		for _, rec := range rep.Recommendations {
+			fmt.Fprintf(w, "- %s [%s]: %s (%s)\n", rec.Kind, rec.Severity, rec.Action, rec.Evidence)
+		}
+	}
 }
 
 func runSessionAuditDeep(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("session-audit deep", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit analysis JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 1 {

@@ -180,13 +180,14 @@ type AuditPayload struct {
 }
 
 type CompactReport struct {
-	Schema            string               `json:"schema"`
-	Generated         string               `json:"generated"`
-	Scope             CompactScope         `json:"scope"`
-	Totals            CompactTotals        `json:"totals"`
-	Tiers             []CompactTier        `json:"tiers"`
-	TopLongContext    []CompactLongContext `json:"top_long_context,omitempty"`
-	ExcludedSubagents *Summary             `json:"excluded_subagents,omitempty"`
+	Schema            string                  `json:"schema"`
+	Generated         string                  `json:"generated"`
+	Scope             CompactScope            `json:"scope"`
+	Totals            CompactTotals           `json:"totals"`
+	Tiers             []CompactTier           `json:"tiers"`
+	TopLongContext    []CompactLongContext    `json:"top_long_context,omitempty"`
+	Recommendations   []CompactRecommendation `json:"recommendations,omitempty"`
+	ExcludedSubagents *Summary                `json:"excluded_subagents,omitempty"`
 }
 
 type CompactScope struct {
@@ -232,6 +233,14 @@ type CompactLongContext struct {
 	OutputTokens       int64   `json:"output_tokens"`
 	IORatio            float64 `json:"io_ratio"`
 	TopModel           string  `json:"top_model"`
+}
+
+type CompactRecommendation struct {
+	Kind     string `json:"kind"`
+	Severity string `json:"severity"`
+	Action   string `json:"action"`
+	Reason   string `json:"reason"`
+	Evidence string `json:"evidence"`
 }
 
 func DefaultRoots() []string {
@@ -507,6 +516,7 @@ func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinc
 		TopLongContext:    compactLongContext(ok, 10),
 		ExcludedSubagents: excludedSubagents,
 	}
+	rep.Recommendations = compactRecommendations(rep)
 	return rep
 }
 
@@ -1097,6 +1107,78 @@ func compactLongContext(sessions []Session, limit int) []CompactLongContext {
 		})
 	}
 	return out
+}
+
+const (
+	longContextPressureTokens  = int64(20_000_000)
+	longContextPressureIORatio = 200.0
+)
+
+func compactRecommendations(rep CompactReport) []CompactRecommendation {
+	var out []CompactRecommendation
+	if rec, ok := compactOpusCostPressure(rep.Tiers); ok {
+		out = append(out, rec)
+	}
+	if rec, ok := compactLongContextPressure(rep.TopLongContext); ok {
+		out = append(out, rec)
+	}
+	return out
+}
+
+func compactOpusCostPressure(tiers []CompactTier) (CompactRecommendation, bool) {
+	opus, hasOpus := compactTierByName(tiers, "opus")
+	fable, hasFable := compactTierByName(tiers, "fable")
+	if !hasOpus || opus.EstimatedCostUSD <= 0 || opus.CostShare < 0.5 {
+		return CompactRecommendation{}, false
+	}
+	if hasFable && fable.OutputShare >= opus.OutputShare {
+		return CompactRecommendation{
+			Kind:     "opus_cost_pressure",
+			Severity: "high",
+			Action:   "keep Fable as the default route and require an explicit Opus justification for cost-heavy long-context work",
+			Reason:   "Fable produced at least as much output as Opus, but Opus carried most estimated cost",
+			Evidence: fmt.Sprintf("opus_cost_share=%.1f%% fable_output_share=%.1f%% opus_output_share=%.1f%%",
+				100*opus.CostShare, 100*fable.OutputShare, 100*opus.OutputShare),
+		}, true
+	}
+	return CompactRecommendation{
+		Kind:     "opus_cost_pressure",
+		Severity: "medium",
+		Action:   "audit the top Opus-heavy sessions before launching more Opus turns",
+		Reason:   "Opus carried most estimated cost in the audited window",
+		Evidence: fmt.Sprintf("opus_cost_share=%.1f%% opus_output_share=%.1f%%", 100*opus.CostShare, 100*opus.OutputShare),
+	}, true
+}
+
+func compactLongContextPressure(rows []CompactLongContext) (CompactRecommendation, bool) {
+	if len(rows) == 0 {
+		return CompactRecommendation{}, false
+	}
+	top := rows[0]
+	if top.TotalContextTokens < longContextPressureTokens && top.IORatio < longContextPressureIORatio {
+		return CompactRecommendation{}, false
+	}
+	severity := "medium"
+	if top.TotalContextTokens >= longContextPressureTokens || top.IORatio >= 2*longContextPressureIORatio {
+		severity = "high"
+	}
+	return CompactRecommendation{
+		Kind:     "long_context_pressure",
+		Severity: severity,
+		Action:   "checkpoint or reset the top long-context session before adding more high-cost turns; use ctxvalue/vcache context witnesses to prove shed-token value",
+		Reason:   "the largest recent session is dominated by repeated context ingestion",
+		Evidence: fmt.Sprintf("session=%s context_tokens=%d io_ratio=%.1f model=%s",
+			top.Session, top.TotalContextTokens, top.IORatio, top.TopModel),
+	}, true
+}
+
+func compactTierByName(tiers []CompactTier, name string) (CompactTier, bool) {
+	for _, tier := range tiers {
+		if tier.Tier == name {
+			return tier, true
+		}
+	}
+	return CompactTier{}, false
 }
 
 func subagentNote(summary *Summary) string {

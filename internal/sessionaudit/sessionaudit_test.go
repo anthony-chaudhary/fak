@@ -268,6 +268,31 @@ func TestBuildCompactReportSummarizesModelMixAndLongContext(t *testing.T) {
 	}
 }
 
+func TestBuildCompactReportRecommendsForOpusCostAndLongContextPressure(t *testing.T) {
+	root := t.TempDir()
+	opus := Analyze(writeTranscriptIn(t, root, "C--work-fak", "opusctx.jsonl", []map[string]any{
+		assistantRecord("opus-1", 1_000, 30_000_000, 0, withModel("claude-opus-4-8")),
+	}))
+	fable := Analyze(writeTranscriptIn(t, root, "C--work-fak", "fablectx.jsonl", []map[string]any{
+		assistantRecord("fable-1", 5_000, 1_000, 0, withModel("claude-fable-5")),
+	}))
+	rep := BuildCompactReport([]Session{opus, fable}, AggregateSessions([]Session{opus, fable}), "C--work-fak", nil, false, 0, 2, nil, time.Now())
+	byKind := map[string]CompactRecommendation{}
+	for _, rec := range rep.Recommendations {
+		byKind[rec.Kind] = rec
+	}
+	if byKind["opus_cost_pressure"].Severity != "high" ||
+		!strings.Contains(byKind["opus_cost_pressure"].Evidence, "opus_cost_share=") ||
+		!strings.Contains(byKind["opus_cost_pressure"].Action, "Fable") {
+		t.Fatalf("opus cost recommendation = %+v", byKind["opus_cost_pressure"])
+	}
+	if byKind["long_context_pressure"].Severity != "high" ||
+		!strings.Contains(byKind["long_context_pressure"].Evidence, "opusctx") ||
+		!strings.Contains(byKind["long_context_pressure"].Action, "ctxvalue/vcache") {
+		t.Fatalf("long-context recommendation = %+v", byKind["long_context_pressure"])
+	}
+}
+
 func TestReadOnlyClassification(t *testing.T) {
 	for _, name := range []string{"Monitor", "TaskGet", "TaskList", "TaskOutput", "ReadMcpResourceTool"} {
 		if !ReadOnlyTools[name] {

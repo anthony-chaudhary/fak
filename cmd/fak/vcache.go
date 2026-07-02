@@ -1358,6 +1358,14 @@ func printVCacheSessionSummary(w io.Writer, summary sessionaudit.CompactReport) 
 			100*top.CacheReadShare,
 			top.TopModel)
 	}
+	for _, rec := range summary.Recommendations {
+		fmt.Fprintf(w, "  recommendation: %s [%s] %s (%s)\n",
+			rec.Kind,
+			rec.Severity,
+			rec.Action,
+			rec.Evidence,
+		)
+	}
 }
 
 func dominantVCacheGovernorDecision(families []vcacheobserve.Family) string {
