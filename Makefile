@@ -232,7 +232,11 @@ index-sync:
 # (.gitattributes pins only *.sh/*.golden to LF), so scripts/ci.ps1 deliberately omits this
 # and relies on the WSL `make ci` / CI for the canonical LF check. Fix with `gofmt -w .`.
 gofmt-check:
-	@unformatted="$$(gofmt -l .)"; \
+	@files="$$(git ls-files -co --exclude-standard '*.go')"; \
+	unformatted=""; \
+	if [ -n "$$files" ]; then \
+		unformatted="$$(printf '%s\n' "$$files" | xargs gofmt -l)"; \
+	fi; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt: not formatted (run 'gofmt -w .' from the repo root):"; \
 		echo "$$unformatted"; exit 1; \
