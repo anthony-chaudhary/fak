@@ -203,7 +203,45 @@ func TestSessionAuditHereScopesToCurrentWorkspaceNamespace(t *testing.T) {
 	}
 }
 
+func TestSessionAuditSummaryJSON(t *testing.T) {
+	root := t.TempDir()
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "heavy.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("opus", 200, 0, 900_000, 50_000, "claude-opus-4-8", ""),
+	})
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-fak", "fable.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("fable", 300, 0, 20_000, 1_000, "claude-fable-5", ""),
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := runSessionAudit(&stdout, &stderr, []string{"summary", "--root", root, "--all", "--json"})
+	if rc != 0 {
+		t.Fatalf("summary --json rc=%d stderr=%s", rc, stderr.String())
+	}
+	var rep sessionaudit.CompactReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("bad summary json: %v\n%s", err, stdout.String())
+	}
+	if rep.Schema != "fak.session_audit.summary.v1" || rep.Totals.TotalContextTokens != 971_000 {
+		t.Fatalf("summary report = %+v", rep)
+	}
+	tiers := map[string]sessionaudit.CompactTier{}
+	for _, tier := range rep.Tiers {
+		tiers[tier.Tier] = tier
+	}
+	if tiers["fable"].OutputTokens != 300 || tiers["opus"].OutputTokens != 200 {
+		t.Fatalf("summary tiers = %+v", rep.Tiers)
+	}
+	if len(rep.TopLongContext) == 0 || rep.TopLongContext[0].Session != "heavy" ||
+		rep.TopLongContext[0].TotalContextTokens != 950_000 {
+		t.Fatalf("summary long-context rows = %+v", rep.TopLongContext)
+	}
+}
+
 func sessionAuditAssistant(id string, out int64, tool string) map[string]any {
+	return sessionAuditAssistantDetailed(id, out, 10, 20, 5, "claude-sonnet-4-5", tool)
+}
+
+func sessionAuditAssistantDetailed(id string, out, input, cacheRead, cacheCreate int64, model, tool string) map[string]any {
 	content := []any{}
 	if tool != "" {
 		content = append(content, map[string]any{"type": "tool_use", "name": tool, "input": map[string]any{}})
@@ -213,12 +251,12 @@ func sessionAuditAssistant(id string, out int64, tool string) map[string]any {
 		"timestamp": "2026-06-20T00:00:00.000Z",
 		"message": map[string]any{
 			"id":    id,
-			"model": "claude-sonnet-4-5",
+			"model": model,
 			"usage": map[string]any{
-				"input_tokens":                10,
+				"input_tokens":                input,
 				"output_tokens":               out,
-				"cache_read_input_tokens":     20,
-				"cache_creation_input_tokens": 5,
+				"cache_read_input_tokens":     cacheRead,
+				"cache_creation_input_tokens": cacheCreate,
 			},
 			"content": content,
 		},

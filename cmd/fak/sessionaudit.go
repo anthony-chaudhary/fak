@@ -24,6 +24,8 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 		return runSessionAuditDiscover(stdout, stderr, argv[1:])
 	case "audit":
 		return runSessionAuditAudit(stdout, stderr, argv[1:])
+	case "summary":
+		return runSessionAuditSummary(stdout, stderr, argv[1:])
 	case "deep":
 		return runSessionAuditDeep(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -39,6 +41,7 @@ func runSessionAudit(stdout, stderr io.Writer, argv []string) int {
 func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N]")
 	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
+	fmt.Fprintln(w, "       fak session-audit summary  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 }
 
@@ -150,11 +153,7 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stderr, "analyzing %d transcripts ...\n", len(recs))
 	if *max > 0 && totalDiscovered > *max {
-		if opts.NamespacePrefix != "" {
-			fmt.Fprintf(stderr, "warning: --max clipped scoped discovery to first %d of %d transcripts; raise --max before treating older sessions inside this scope as absent\n", len(recs), totalDiscovered)
-		} else {
-			fmt.Fprintf(stderr, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix or --here to target a namespace before --max\n", len(recs), totalDiscovered)
-		}
+		writeSessionAuditMaxWarning(stderr, len(recs), totalDiscovered, opts.NamespacePrefix != "")
 	}
 	sessions := make([]sessionaudit.Session, 0, len(recs))
 	for _, rec := range recs {
@@ -233,6 +232,112 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprint(stdout, md)
 	return 0
+}
+
+func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
+	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit summary", stderr)
+	asJSON := fs.Bool("json", false, "emit compact summary as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
+	opts := discoverOptions(*roots, *sinceDays, *nsPrefix, *here, *allNS, *includeSubagents)
+	recs, err := sessionaudit.Discover(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session-audit summary: discover: %v\n", err)
+		return 1
+	}
+	totalDiscovered := len(recs)
+	if *max > 0 && len(recs) > *max {
+		recs = recs[:*max]
+	}
+	if *max > 0 && totalDiscovered > *max {
+		writeSessionAuditMaxWarning(stderr, len(recs), totalDiscovered, opts.NamespacePrefix != "")
+	}
+	sessions := make([]sessionaudit.Session, 0, len(recs))
+	for _, rec := range recs {
+		s := sessionaudit.Analyze(rec.Path)
+		s.Kind = rec.Kind
+		sessions = append(sessions, s)
+	}
+	var included []sessionaudit.Session
+	for _, s := range sessions {
+		if *includeSubagents || s.Kind != "subagent" {
+			included = append(included, s)
+		}
+	}
+	agg := sessionaudit.AggregateSessions(included)
+	var excluded *sessionaudit.Summary
+	if !*includeSubagents {
+		allOpts := opts
+		allOpts.IncludeSubagents = true
+		allRecs, err := sessionaudit.Discover(allOpts)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak session-audit summary: subagent scan: %v\n", err)
+			return 1
+		}
+		var subRecs []sessionaudit.Transcript
+		for _, rec := range allRecs {
+			if rec.Kind == "subagent" {
+				subRecs = append(subRecs, rec)
+			}
+		}
+		if len(subRecs) > 0 {
+			sum := sessionaudit.SummarizeTranscripts(subRecs)
+			excluded = &sum
+		}
+	}
+	rep := sessionaudit.BuildCompactReport(included, agg, opts.NamespacePrefix, opts.SinceDays, *includeSubagents, *max, totalDiscovered, excluded, time.Now())
+	if *asJSON {
+		return writeJSON(stdout, rep)
+	}
+	renderSessionAuditSummary(stdout, rep)
+	return 0
+}
+
+func writeSessionAuditMaxWarning(w io.Writer, shown, total int, scoped bool) {
+	if scoped {
+		fmt.Fprintf(w, "warning: --max clipped scoped discovery to first %d of %d transcripts; raise --max before treating older sessions inside this scope as absent\n", shown, total)
+		return
+	}
+	fmt.Fprintf(w, "warning: --max clipped discovery to first %d of %d transcripts; use --ns-prefix or --here to target a namespace before --max\n", shown, total)
+}
+
+func renderSessionAuditSummary(w io.Writer, rep sessionaudit.CompactReport) {
+	fmt.Fprintf(w, "session-audit summary: %d/%d sessions", rep.Scope.Audited, rep.Scope.Discovered)
+	if rep.Scope.NamespaceFilter != "" {
+		fmt.Fprintf(w, " scope=%s", rep.Scope.NamespaceFilter)
+	}
+	if rep.Scope.Clipped {
+		fmt.Fprint(w, " clipped=true")
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "tokens: output=%d fresh_input=%d cache_read=%d cache_create=%d total_context=%d cache_read_share=%.1f%% io=%.1f cost=$%.2f\n",
+		rep.Totals.OutputTokens,
+		rep.Totals.FreshInputTokens,
+		rep.Totals.CacheReadTokens,
+		rep.Totals.CacheCreateTokens,
+		rep.Totals.TotalContextTokens,
+		100*rep.Totals.CacheReadShare,
+		rep.Totals.IORatio,
+		rep.Totals.EstimatedCostUSD)
+	if len(rep.Tiers) > 0 {
+		fmt.Fprintln(w, "model tiers:")
+		for _, tier := range rep.Tiers {
+			fmt.Fprintf(w, "- %s: output=%d share=%.1f%% cost=$%.2f cost_share=%.1f%% cache_read=%d turns=%d\n",
+				tier.Tier, tier.OutputTokens, 100*tier.OutputShare, tier.EstimatedCostUSD, 100*tier.CostShare, tier.CacheReadTokens, tier.Turns)
+		}
+	}
+	if len(rep.TopLongContext) > 0 {
+		fmt.Fprintln(w, "top long-context sessions:")
+		for _, row := range rep.TopLongContext {
+			fmt.Fprintf(w, "- %s %s: context=%d cache_read=%.1f%% output=%d io=%.1f model=%s\n",
+				row.Namespace, row.Session, row.TotalContextTokens, 100*row.CacheReadShare, row.OutputTokens, row.IORatio, row.TopModel)
+		}
+	}
 }
 
 func runSessionAuditDeep(stdout, stderr io.Writer, argv []string) int {
