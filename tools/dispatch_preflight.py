@@ -36,8 +36,13 @@ ALL of which must pass:
                      magic number. (host_safe above stays the HARD stop on a true
                      runaway; host_cap is the soft gradient that bites first.) and
                      live = max(kernel's `dos loop` alive, an OS process scan for
-                     live `dos-dispatch-loop` claudes) — the MAX so neither a
-                     stale lease nor an unleased orphan can hide capacity
+                     live `dos-dispatch-loop` claudes plus the pid-file witnesses
+                     — the issue resolver's `.dispatch-runs` sidecars and the
+                     detached /goal launcher's `.goal-runs` breadcrumbs (#2226:
+                     a stdin-fed worker carries NO cmdline marker, so only its
+                     breadcrumb makes it visible before it leases a lane)) — the
+                     MAX so neither a stale lease nor an unleased orphan can hide
+                     capacity
 
 The bound is the whole DoS proof: with the gate in front of every spawn, the
 live worker population is provably ≤ cap, so the per-session hook pressure is
@@ -102,6 +107,12 @@ WORKER_CMD_MARKER = "dos-dispatch-loop"
 ISSUE_RESOLVE_CMD_MARKER = "resolve GitHub issue #"
 WORKER_CMD_MARKERS = (WORKER_CMD_MARKER, ISSUE_RESOLVE_CMD_MARKER)
 RUNS_DIRNAME = ".dispatch-runs"
+# tools/launch_goal_detached.ps1 drops one pid breadcrumb per detached /goal worker
+# (`<pointer-tag>-<yyyyMMdd>-<HHmmss>.pid`, next to the worker's logs) under the
+# workspace's goal-run dir. That breadcrumb is the ONLY launch-time witness for a
+# stdin-fed worker, whose command line carries no scannable marker (#2226).
+GOAL_RUNS_DIRNAME = ".goal-runs"
+_GOAL_PID_RE = re.compile(r".+-\d{8}-\d{6}\.pid$")
 _RESOLVE_PID_RE = re.compile(r"resolve-\d+-\d{8}-\d{6}\.pid$")
 _SIDECAR_CREATE_BEFORE_WINDOW_SECONDS = 5 * 60
 _SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
@@ -864,13 +875,77 @@ def _sidecar_backend(pid_file: Path) -> str | None:
         return None
 
 
+def live_goal_worker_pids(
+    goal_runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Callable[[int], dict[str, Any]] | None = None,
+    product: str | None = None,
+) -> set[int]:
+    """Live detached /goal workers from the launcher's `.goal-runs/*.pid` breadcrumbs.
+
+    A detached /goal worker (tools/launch_goal_detached.ps1) is fed its goal via
+    STDIN — ``claude -p`` with no prompt argument — so its command line carries NO
+    scannable marker and the cmdline scan is blind to it until it takes a lane
+    lease (#2226). The launcher's pid breadcrumb closes that start-up window: the
+    breadcrumb counts while its pid is a live agent-backend process (never a bare
+    shell) whose create time sits inside the breadcrumb's spawn window — the same
+    pid-reuse guard the resolve sidecars use. A dead pid is simply IGNORED, so a
+    stale breadcrumb never inflates the live count and wedges spawning (the
+    launcher also sweeps dead breadcrumbs before each spawn, but this scan must
+    not depend on that hygiene having run).
+
+    Goal workers write no ``.backend`` sidecar; when ``product`` is given they
+    are attributed to a pool by their live process IMAGE
+    (``_image_matches_product``), like the generic cmdline-marked workers.
+    """
+    if not goal_runs_dir.is_dir():
+        return set()
+    probe_fn = probe or _process_probe
+    pids: set[int] = set()
+    for pid_file in goal_runs_dir.glob("*.pid"):
+        if not _GOAL_PID_RE.match(pid_file.name):
+            continue
+        pid = _read_resolve_pid_sidecar(pid_file)
+        if pid is None:
+            continue
+        if alive is not None and pid not in alive:
+            continue
+        try:
+            breadcrumb_mtime = pid_file.stat().st_mtime
+        except OSError:
+            continue
+        rec = probe_fn(pid)
+        if not rec.get("alive"):
+            continue  # worker exited: stale breadcrumb, never counted
+        # The goal went in via stdin, so there is usually no cmdline marker to
+        # lean on; the backend-image + spawn-window pair is the whole
+        # recycled-pid guard. A marker match still counts (belt and braces);
+        # anything else must be a real agent image created around the
+        # breadcrumb's write time — a recycled shell or later claude never is.
+        if not _is_worker_cmdline(_probe_cmdline_text(rec)):
+            if not _probe_image_is_worker_backend(rec):
+                continue
+            if not _within_sidecar_spawn_window(rec.get("create_time"),
+                                                breadcrumb_mtime):
+                continue
+        if product is not None and not _image_matches_product(
+                str(rec.get("name") or ""), product):
+            continue
+        pids.add(pid)
+    return pids
+
+
 def proc_worker_count(root: Path | None = None, *, product: str | None = None) -> int:
     """Count live worker processes that consume the dispatch cap.
 
     This combines the generic DOS-loop command-line marker with the issue
-    resolver's pid sidecars. Use the union of pids so a worker visible through both
-    witnesses is counted once; if psutil is absent, each witness is still best
-    effort and may be conservatively low rather than fabricating capacity.
+    resolver's pid sidecars and the detached /goal launcher's pid breadcrumbs
+    (#2226: a stdin-fed /goal worker has no cmdline marker, so its breadcrumb is
+    the only witness between spawn and its first lane lease). Use the union of
+    pids so a worker visible through several witnesses is counted once; if psutil
+    is absent, each witness is still best effort and may be conservatively low
+    rather than fabricating capacity.
 
     When ``product`` is given, only workers in that account pool count — a claude
     worker no longer pins the opencode lane's cap and vice versa, so the two lanes
@@ -888,12 +963,14 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     root = root or repo_root()
     if product is not None:
         pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
+        pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME, product=product))
         pids.update(_cmdline_worker_pids(product=product))
         if product == "codex":
             pids.update(ambient_codex_pids())
         return len(pids)
     pids = set(_cmdline_worker_pids())
     pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))
+    pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME))
     return len(pids)
 
 

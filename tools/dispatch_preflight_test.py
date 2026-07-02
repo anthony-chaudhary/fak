@@ -543,6 +543,7 @@ class WorkerCountTest(unittest.TestCase):
         # authorized an over-subscribing spawn. It must now be counted via its image.
         mod = load()
         mod.live_resolve_worker_pids = lambda *a, **k: set()
+        mod.live_goal_worker_pids = lambda *a, **k: set()
         mod._cmdline_worker_pids = (
             lambda product=None: {4242} if product == "claude" else set())
         self.assertEqual(mod.proc_worker_count(Path("/nonexistent"), product="claude"), 1)
@@ -653,6 +654,7 @@ class WorkerCountTest(unittest.TestCase):
         mod = load()
         mod._cmdline_worker_pids = lambda: {101, 103}
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
         self.assertEqual(mod.proc_worker_count(ROOT), 3)
 
     def test_proc_worker_count_scopes_to_product_pool(self) -> None:
@@ -668,6 +670,7 @@ class WorkerCountTest(unittest.TestCase):
         # dos-loop worker {999} belongs to the claude pool, none to opencode.
         mod._cmdline_worker_pids = (
             lambda product=None: {999} if product in (None, "claude") else set())
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
         seen = {}
 
         def fake_pids(runs_dir, **kw):
@@ -702,6 +705,7 @@ class WorkerCountTest(unittest.TestCase):
     def test_proc_worker_count_codex_includes_ambient_codex_processes(self) -> None:
         mod = load()
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101}
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
         mod.ambient_codex_pids = lambda: {201, 202}
         self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 3)
 
@@ -775,6 +779,147 @@ class WorkerCountTest(unittest.TestCase):
                 mod.live_resolve_worker_pids(runs, product="opencode", probe=probe), {702})
             self.assertEqual(
                 mod.live_resolve_worker_pids(runs, probe=probe), {701, 702})
+
+
+class GoalBreadcrumbTest(unittest.TestCase):
+    """#2226: a detached /goal worker is fed its goal via STDIN (`claude -p` with
+    no prompt argument), so the cmdline scan is blind to it until it leases a
+    lane. The launcher's `.goal-runs/<tag>-<stamp>.pid` breadcrumb must occupy a
+    cap slot from the instant of launch — and a dead-pid breadcrumb must NEVER
+    inflate the count and wedge spawning."""
+
+    NOW = 1_000_000.0
+
+    def _crumb(self, runs: Path, pid,
+               name: str = "resolve-tickets-witnessed-20260702-090000.pid") -> Path:
+        crumb = runs / name
+        crumb.write_text(f"{pid}\n", encoding="utf-8")
+        os.utime(crumb, (self.NOW, self.NOW))
+        return crumb
+
+    def _live_claude_probe(self):
+        # The stdin-fed shape this issue is about: a live claude image whose
+        # command line carries NO worker marker (the goal went in via stdin).
+        def probe(pid):
+            return {"alive": True, "create_time": self.NOW - 1.0,
+                    "name": "claude.exe",
+                    "cmdline": "claude -p --permission-mode bypassPermissions"}
+        return probe
+
+    def test_live_breadcrumb_counts_from_the_instant_of_launch(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, 4711)
+            self.assertEqual(
+                mod.live_goal_worker_pids(runs, probe=self._live_claude_probe()),
+                {4711})
+
+    def test_dead_pid_breadcrumb_is_ignored(self) -> None:
+        # Stale-breadcrumb hygiene: the worker exited, its breadcrumb remains —
+        # it must contribute NOTHING to the live count.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, 4712)
+            self.assertEqual(
+                mod.live_goal_worker_pids(runs, probe=lambda pid: {"alive": False}),
+                set())
+
+    def test_recycled_pid_created_after_breadcrumb_is_rejected(self) -> None:
+        # Windows pid reuse: a LATER claude session recycled the dead worker's
+        # pid. Alive + right image is not enough — the create time sits outside
+        # the breadcrumb's spawn window, so it must not consume a cap slot.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, 4713)
+            def probe(pid):
+                return {"alive": True, "create_time": self.NOW + 60 * 60,
+                        "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(mod.live_goal_worker_pids(runs, probe=probe), set())
+
+    def test_recycled_shell_pid_in_window_is_rejected(self) -> None:
+        # A bare shell that recycled the pid inside the spawn window is NOT a
+        # worker — same guard as the resolve sidecars.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, 4714)
+            def probe(pid):
+                return {"alive": True, "create_time": self.NOW - 30,
+                        "name": "cmd.exe", "cmdline": ""}
+            self.assertEqual(mod.live_goal_worker_pids(runs, probe=probe), set())
+
+    def test_breadcrumb_scopes_by_live_process_image(self) -> None:
+        # Goal workers write no `.backend` sidecar; the live process image is the
+        # pool signal, so a claude /goal worker pins the claude cap, not opencode's.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, 4715)
+            probe = self._live_claude_probe()
+            self.assertEqual(
+                mod.live_goal_worker_pids(runs, product="claude", probe=probe), {4715})
+            self.assertEqual(
+                mod.live_goal_worker_pids(runs, product="opencode", probe=probe), set())
+
+    def test_malformed_and_foreign_pid_files_are_ignored(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._crumb(runs, "not-a-pid")                    # unparseable pid
+            self._crumb(runs, 4716, name="random.pid")        # no <tag>-<stamp> shape
+            self.assertEqual(
+                mod.live_goal_worker_pids(runs, probe=self._live_claude_probe()),
+                set())
+
+    def test_proc_worker_count_folds_goal_breadcrumbs(self) -> None:
+        # Union semantics: a worker visible through several witnesses counts once,
+        # and the goal breadcrumbs add to the existing cmdline/sidecar rungs.
+        mod = load()
+        mod._cmdline_worker_pids = lambda: {101}
+        mod.live_resolve_worker_pids = lambda runs_dir, **kw: {102}
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: {101, 103}
+        self.assertEqual(mod.proc_worker_count(ROOT), 3)
+
+    def test_evaluate_counts_goal_breadcrumb_toward_cap(self) -> None:
+        # End to end (the issue's done-condition rung): one live stdin-fed /goal
+        # worker — no lane lease, no cmdline marker, ONLY its breadcrumb — and the
+        # preflight already sees live=1 and refuses at cap=1.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / mod.GOAL_RUNS_DIRNAME).mkdir()
+            self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4717)
+            real_count = mod.proc_worker_count
+            patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
+            mod.proc_worker_count = real_count
+            mod._cmdline_worker_pids = lambda product=None: set()
+            mod._process_probe = self._live_claude_probe()
+            p = mod.evaluate(root, max_workers=1, work_kind="engineering",
+                             product="claude")
+            self.assertEqual(p["live"], 1)
+            self.assertEqual(p["os_worker_procs"], 1)
+            self.assertEqual(p["verdict"], mod.REFUSE_AT_CAP)
+
+    def test_stale_breadcrumb_never_wedges_spawning(self) -> None:
+        # Same wiring, but the breadcrumb's pid is DEAD: live stays 0 and the
+        # gate stays SPAWN_OK — a stale entry can never pin the cap.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / mod.GOAL_RUNS_DIRNAME).mkdir()
+            self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4718)
+            real_count = mod.proc_worker_count
+            patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
+            mod.proc_worker_count = real_count
+            mod._cmdline_worker_pids = lambda product=None: set()
+            mod._process_probe = lambda pid: {"alive": False}
+            p = mod.evaluate(root, max_workers=1, work_kind="engineering",
+                             product="claude")
+            self.assertEqual(p["live"], 0)
+            self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
 
 def _seat_row(tag, *, uuid="", available=True, product="claude", role="", dir_=None):

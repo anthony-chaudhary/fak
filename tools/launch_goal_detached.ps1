@@ -50,6 +50,11 @@
   - bypassPermissions is required for an unattended worker (it edits files, runs git).
   - This does NOT modify the tree or commit; it only starts a process. Stop it with
     `Stop-Process -Id <pid>` (the PID is printed and written to the .pid file).
+  - The .pid file is ALSO the spawn gate's witness (#2226): dispatch_preflight.py
+    counts live pid breadcrumbs under <Workspace>\.goal-runs, so a stdin-fed worker
+    (whose command line carries no scannable marker) occupies a cap slot from
+    launch, not from its first lane lease. Dead-pid breadcrumbs are ignored by the
+    scan and swept by this launcher before each spawn.
   - -PlanOnly resolves the account and runs the preflight but spawns NOTHING — the
     witnessable dry-run for a single dispatch, mirroring the wave launcher's default.
 #>
@@ -57,7 +62,11 @@
 param(
   [string]$PointerFile = ".claude/goal-prompts/resolve-tickets-witnessed.md",
   [string]$Workspace   = "C:\work\fleet",
-  [string]$LogDir      = "C:\work\fleet\.goal-runs",
+  # Where the worker's logs + pid breadcrumb land. Empty derives <Workspace>\.goal-runs
+  # — the SAME dir dispatch_preflight.py scans for live /goal pid breadcrumbs (#2226).
+  # Point it elsewhere only if you accept that the spawn gate then cannot see these
+  # workers until they lease a lane.
+  [string]$LogDir      = '',
   # Work kind drives the tier: engineering (default) -> tier1, gardening -> tier2.
   # Leave empty to fall back to -Tier. See fleet_accounts.GARDENING/ENGINEERING_WORK_KINDS.
   [ValidateSet('engineering','eng','dev','feature','implementation',
@@ -108,6 +117,24 @@ function Resolve-FakExe {
 }
 
 Set-Location $Workspace
+if (-not $LogDir) { $LogDir = Join-Path $Workspace '.goal-runs' }
+
+# --- Breadcrumb hygiene (#2226): sweep dead-pid breadcrumbs before the gate runs ------
+# dispatch_preflight.py folds live `<LogDir>\*.pid` breadcrumbs into its worker count —
+# that is how a stdin-fed /goal worker (no cmdline marker until it leases a lane)
+# occupies a cap slot from the instant it spawns. The scan already IGNORES a dead pid,
+# so a stale breadcrumb can never wedge spawning; this sweep just stops corpses
+# accumulating across waves. Only the .pid marker is removed — logs stay for forensics.
+if (Test-Path $LogDir) {
+  Get-ChildItem -Path $LogDir -Filter '*.pid' -File -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      $crumbPid = 0
+      $raw = Get-Content -Raw $_.FullName -ErrorAction SilentlyContinue
+      if ($raw -and [int]::TryParse($raw.Trim(), [ref]$crumbPid) -and $crumbPid -gt 0 -and
+          (Get-Process -Id $crumbPid -ErrorAction SilentlyContinue)) { return }
+      Remove-Item $_.FullName -ErrorAction SilentlyContinue
+    }
+}
 
 if (-not (Test-Path $PointerFile)) { throw "pointer file not found: $PointerFile" }
 $body = Get-Content -Raw $PointerFile
@@ -250,6 +277,10 @@ $p = Start-Process -FilePath $claude `
   -WindowStyle Hidden `
   -PassThru
 
+# The pid breadcrumb doubles as the spawn gate's live-count witness (#2226): a
+# stdin-fed worker carries no cmdline marker, so dispatch_preflight.py counts this
+# file — while its pid is a live claude-image process — from the instant it exists,
+# closing the spawn-to-lease blind window the per-host worker cap had.
 $p.Id | Out-File -FilePath $pidF -Encoding ascii
 
 [pscustomobject]@{
