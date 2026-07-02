@@ -24,6 +24,50 @@ const (
 	HostCapFloor         = 1
 )
 
+// HostBudgets are the per-worker charge constants the host-capacity gradient
+// folds (#1337). The Host* consts above are the built-in conservative guesses;
+// DefaultHostBudgets overlays the FAK_HOST_* env knobs so a shared or measured
+// box recalibrates the gradient without a rebuild -- the same overrides the
+// Python preflight honors, closing the drift where FAK_HOST_THREADS_PER_CORE
+// raised the Python threads budget while this Go mirror stayed pinned at 400.
+// The zero value means "built-in defaults", so a caller that sets nothing gets
+// the old behavior and the pure fold stays hermetically testable.
+type HostBudgets struct {
+	CoresPerWorker   int `json:"cores_per_worker"`
+	RAMMBPerWorker   int `json:"ram_mb_per_worker"`
+	ThreadsPerCore   int `json:"threads_per_core"`
+	ThreadsPerWorker int `json:"threads_per_worker"`
+}
+
+// DefaultHostBudgets resolves the per-worker budgets with the FAK_HOST_* env
+// overrides applied (FAK_HOST_CORES_PER_WORKER, FAK_HOST_RAM_MB_PER_WORKER,
+// FAK_HOST_THREADS_PER_CORE, FAK_HOST_THREADS_PER_WORKER). The impure shell
+// passes this into PreflightInput; the pure fold itself never reads env.
+func DefaultHostBudgets() HostBudgets {
+	return HostBudgets{
+		CoresPerWorker:   envPosInt("FAK_HOST_CORES_PER_WORKER", HostCoresPerWorker),
+		RAMMBPerWorker:   envPosInt("FAK_HOST_RAM_MB_PER_WORKER", HostRAMMBPerWorker),
+		ThreadsPerCore:   envPosInt("FAK_HOST_THREADS_PER_CORE", HostThreadsPerCore),
+		ThreadsPerWorker: envPosInt("FAK_HOST_THREADS_PER_WORKER", HostThreadsPerWorker),
+	}
+}
+
+func (b HostBudgets) normalized() HostBudgets {
+	if b.CoresPerWorker <= 0 {
+		b.CoresPerWorker = HostCoresPerWorker
+	}
+	if b.RAMMBPerWorker <= 0 {
+		b.RAMMBPerWorker = HostRAMMBPerWorker
+	}
+	if b.ThreadsPerCore <= 0 {
+		b.ThreadsPerCore = HostThreadsPerCore
+	}
+	if b.ThreadsPerWorker <= 0 {
+		b.ThreadsPerWorker = HostThreadsPerWorker
+	}
+	return b
+}
+
 type HostResources struct {
 	Cores        *int `json:"cores"`
 	FreeRAMMB    *int `json:"free_ram_mb"`
@@ -76,13 +120,17 @@ type SeatCheck struct {
 }
 
 type PreflightInput struct {
-	Workspace     string
-	MaxWorkers    int
-	Host          HostCheck
-	Account       AccountCheck
-	Kernel        KernelCheck
-	Seat          SeatCheck
-	Resources     HostResources
+	Workspace  string
+	MaxWorkers int
+	Host       HostCheck
+	Account    AccountCheck
+	Kernel     KernelCheck
+	Seat       SeatCheck
+	Resources  HostResources
+	// Budgets are the per-worker host charges the capacity gradient folds; the
+	// zero value means the built-in Host* consts. The shell passes
+	// DefaultHostBudgets() so the FAK_HOST_* env knobs reach the fold.
+	Budgets       HostBudgets
 	OSWorkerProcs int
 }
 
@@ -118,6 +166,14 @@ type CapTerms struct {
 func IntPtr(n int) *int { return &n }
 
 func HostCapacity(res HostResources) HostCapacityInfo {
+	return HostCapacityWith(res, HostBudgets{})
+}
+
+// HostCapacityWith folds the host resources against explicit per-worker budgets
+// (zero fields fall back to the built-in consts). HostCapacity is the
+// built-in-budget shorthand; the shell reaches this via PreflightInput.Budgets.
+func HostCapacityWith(res HostResources, budgets HostBudgets) HostCapacityInfo {
+	b := budgets.normalized()
 	info := HostCapacityInfo{
 		Cores:        res.Cores,
 		FreeRAMMB:    res.FreeRAMMB,
@@ -125,17 +181,17 @@ func HostCapacity(res HostResources) HostCapacityInfo {
 		Components:   map[string]int{},
 	}
 	if res.Cores != nil && *res.Cores > 0 {
-		info.Components["cores"] = *res.Cores / HostCoresPerWorker
+		info.Components["cores"] = *res.Cores / b.CoresPerWorker
 	}
 	if res.FreeRAMMB != nil && *res.FreeRAMMB >= 0 {
-		info.Components["ram"] = *res.FreeRAMMB / HostRAMMBPerWorker
+		info.Components["ram"] = *res.FreeRAMMB / b.RAMMBPerWorker
 	}
 	if res.TotalThreads != nil && *res.TotalThreads >= 0 && res.Cores != nil && *res.Cores > 0 {
-		freeThreads := *res.Cores*HostThreadsPerCore - *res.TotalThreads
+		freeThreads := *res.Cores*b.ThreadsPerCore - *res.TotalThreads
 		if freeThreads < 0 {
 			freeThreads = 0
 		}
-		info.Components["threads"] = freeThreads / HostThreadsPerWorker
+		info.Components["threads"] = freeThreads / b.ThreadsPerWorker
 	}
 	if len(info.Components) == 0 {
 		return info
@@ -155,7 +211,7 @@ func HostCapacity(res HostResources) HostCapacityInfo {
 }
 
 func EvaluatePreflight(in PreflightInput) PreflightResult {
-	hostCapInfo := HostCapacity(in.Resources)
+	hostCapInfo := HostCapacityWith(in.Resources, in.Budgets)
 	capacity := in.MaxWorkers
 	if in.Kernel.Target != nil && *in.Kernel.Target > 0 {
 		capacity = minInt(capacity, *in.Kernel.Target)

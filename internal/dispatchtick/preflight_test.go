@@ -28,6 +28,66 @@ func TestHostCapacityRoomyBoxBoundByCores(t *testing.T) {
 	}
 }
 
+func TestDefaultMaxWorkersFallbackPinned(t *testing.T) {
+	// Pin the raised ceiling (4->8) so a silent revert is caught; the adaptive
+	// gates (host_cap, seats, dos target) can only pull the effective cap DOWN.
+	if FallbackMaxWorkers != 8 {
+		t.Fatalf("FallbackMaxWorkers = %d, want 8", FallbackMaxWorkers)
+	}
+}
+
+func TestEnvPosInt(t *testing.T) {
+	if got := envPosInt("FAK_TEST_UNSET_KNOB", 8); got != 8 {
+		t.Fatalf("unset = %d, want fallback 8", got)
+	}
+	t.Setenv("FAK_TEST_KNOB", "12")
+	if got := envPosInt("FAK_TEST_KNOB", 8); got != 12 {
+		t.Fatalf("set = %d, want 12", got)
+	}
+	for _, garbage := range []string{"", "  ", "zero", "-3", "0", "4.5"} {
+		t.Setenv("FAK_TEST_KNOB", garbage)
+		if got := envPosInt("FAK_TEST_KNOB", 8); got != 8 {
+			t.Fatalf("garbage %q = %d, want fallback 8", garbage, got)
+		}
+	}
+}
+
+func TestDefaultHostBudgetsHonorsEnvOverrides(t *testing.T) {
+	for _, name := range []string{"FAK_HOST_CORES_PER_WORKER", "FAK_HOST_RAM_MB_PER_WORKER",
+		"FAK_HOST_THREADS_PER_CORE", "FAK_HOST_THREADS_PER_WORKER"} {
+		t.Setenv(name, "")
+	}
+	b := DefaultHostBudgets()
+	want := HostBudgets{CoresPerWorker: 2, RAMMBPerWorker: 1500, ThreadsPerCore: 400, ThreadsPerWorker: 200}
+	if b != want {
+		t.Fatalf("defaults = %+v, want %+v", b, want)
+	}
+	t.Setenv("FAK_HOST_CORES_PER_WORKER", "1")
+	t.Setenv("FAK_HOST_RAM_MB_PER_WORKER", "1000")
+	t.Setenv("FAK_HOST_THREADS_PER_CORE", "1000")
+	t.Setenv("FAK_HOST_THREADS_PER_WORKER", "100")
+	b = DefaultHostBudgets()
+	want = HostBudgets{CoresPerWorker: 1, RAMMBPerWorker: 1000, ThreadsPerCore: 1000, ThreadsPerWorker: 100}
+	if b != want {
+		t.Fatalf("overridden = %+v, want %+v", b, want)
+	}
+}
+
+func TestHostCapacityWithRaisedThreadBudgetUnbindsThreads(t *testing.T) {
+	// The live parity fix: FAK_HOST_THREADS_PER_CORE=1000 (set on the agent host)
+	// must reach the Go fold. With the built-in 400/core budget this box reads
+	// thread-bound at the floor; with the operator's 1000/core it is core-bound.
+	res := HostResources{Cores: IntPtr(8), FreeRAMMB: IntPtr(64000), TotalThreads: IntPtr(3000)}
+	before := HostCapacityWith(res, HostBudgets{})
+	if before.HostCap == nil || *before.HostCap != 1 || before.Binding != "threads" {
+		t.Fatalf("built-in budgets: cap/binding = %v/%q, want 1/threads", before.HostCap, before.Binding)
+	}
+	after := HostCapacityWith(res, HostBudgets{ThreadsPerCore: 1000})
+	if after.HostCap == nil || *after.HostCap != 4 || after.Binding != "cores" {
+		t.Fatalf("raised thread budget: cap/binding = %v/%q, want 4/cores", after.HostCap, after.Binding)
+	}
+}
+
 func TestHostCapacityThreadSaturationFloors(t *testing.T) {
 	info := HostCapacity(HostResources{Cores: IntPtr(8), FreeRAMMB: IntPtr(64000), TotalThreads: IntPtr(200000)})
 	if info.HostCap == nil || *info.HostCap != 1 {

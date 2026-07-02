@@ -9,7 +9,9 @@ package dispatchtick
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -19,21 +21,43 @@ const (
 	WaveSidecarSuffix    = ".wave"
 	AccountSidecarSuffix = ".account"
 	BaseSHASidecarSuffix = ".basesha"
-	// DefaultMaxWorkers is the operator's *aspirational* outer ceiling on live
-	// dispatch workers, not the safety bound. The real DoS proof is the preflight's
-	// adaptive cap = min(this, host_cap, seats): host_cap (#1337) auto-throttles to
-	// the box's current cores/RAM/thread headroom, and the seat pool (#1336) hard-
-	// bounds at one worker per routable account so a spawn can never double-book a
-	// rate limit. Doubled 2->4 once those two gates landed: the static 2 sat below
-	// both and was the artificial bottleneck; raising it lets the adaptive gates --
-	// which can only LOWER the effective cap -- govern, so concurrency rises to what
-	// the box and the account pool can actually carry and no further.
-	DefaultMaxWorkers      = 4
+	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
+	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
+	FallbackMaxWorkers     = 8
 	DefaultCooldownMinutes = 120
 	DefaultWorkerTimeoutS  = 1800
 	DefaultSpawnProbeS     = 5.0
 	LeaseTTLMarginS        = 600
 )
+
+// DefaultMaxWorkers is the operator's *aspirational* outer ceiling on live
+// dispatch workers, not the safety bound. The real DoS proof is the preflight's
+// adaptive cap = min(this, host_cap, seats): host_cap (#1337) auto-throttles to
+// the box's current cores/RAM/thread headroom, and the seat pool (#1336) hard-
+// bounds at one worker per routable account so a spawn can never double-book a
+// rate limit. Raised 4->8 after the 2->4 doubling proved the pattern: the static
+// ceiling's only job is to sit ABOVE the adaptive gates -- which can only LOWER
+// the effective cap -- so concurrency rises to what the box and the account pool
+// can actually carry and no further (the 2026-07-01 headroom audit witnessed
+// host_cap 16 with the static caps binding first). Resolved once at startup from
+// FAK_MAX_WORKERS so the fleet-wide ceiling is an env knob shared with the
+// Python launchers, not a rebuild.
+var DefaultMaxWorkers = envPosInt("FAK_MAX_WORKERS", FallbackMaxWorkers)
+
+// envPosInt returns the positive-int value of the named env var, or fallback on
+// unset/garbage -- the same tolerant contract as dispatch_preflight._env_pos_int,
+// so the Go and Python halves of the dispatch stack read one knob one way.
+func envPosInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
 
 var validBackends = map[string]bool{
 	"claude":   true,
