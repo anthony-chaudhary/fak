@@ -25,11 +25,20 @@ type ReviewRequest struct {
 }
 
 type ReviewResult struct {
-	Model      string        `json:"model,omitempty"`
-	Verdict    ReviewVerdict `json:"verdict"`
-	Reason     string        `json:"reason,omitempty"`
-	DiffSHA256 string        `json:"diff_sha256,omitempty"`
-	ScoutCalls int           `json:"scout_calls,omitempty"`
+	Model          string         `json:"model,omitempty"`
+	Verdict        ReviewVerdict  `json:"verdict"`
+	Reason         string         `json:"reason,omitempty"`
+	DiffSHA256     string         `json:"diff_sha256,omitempty"`
+	ScoutCalls     int            `json:"scout_calls,omitempty"`
+	RequiredModels int            `json:"required_models,omitempty"`
+	Members        []ReviewMember `json:"members,omitempty"`
+}
+
+type ReviewMember struct {
+	Model   string        `json:"model,omitempty"`
+	Verdict ReviewVerdict `json:"verdict"`
+	Reason  string        `json:"reason,omitempty"`
+	Error   string        `json:"error,omitempty"`
 }
 
 func ReviewDiffWithScout(ctx context.Context, scout Classifier, req ReviewRequest) (ReviewResult, error) {
@@ -95,6 +104,77 @@ func ReviewResultFromScoutLabel(req ReviewRequest, label ScoutLabel) (ReviewResu
 func DiffSHA256(diff string) string {
 	sum := sha256.Sum256([]byte(diff))
 	return hex.EncodeToString(sum[:])
+}
+
+func FoldReviewQuorum(req ReviewRequest, members []ReviewMember, minUsable int) ReviewResult {
+	out := ReviewResult{
+		Model:          strings.TrimSpace(req.Model),
+		DiffSHA256:     DiffSHA256(req.Diff),
+		RequiredModels: minUsable,
+		Members:        append([]ReviewMember(nil), members...),
+	}
+	if len(members) == 0 {
+		out.Verdict = ReviewUnavailable
+		out.Reason = "no review models configured"
+		return out
+	}
+	if minUsable <= 0 {
+		minUsable = 1
+		out.RequiredModels = minUsable
+	}
+
+	var usable, calls int
+	var refutes, unavailable []string
+	for _, m := range members {
+		calls++
+		name := strings.TrimSpace(m.Model)
+		if name == "" {
+			name = "model"
+		}
+		switch m.Verdict {
+		case ReviewPass:
+			usable++
+		case ReviewRefute:
+			usable++
+			refutes = append(refutes, memberSummary(name, m.Reason))
+		default:
+			unavailable = append(unavailable, memberSummary(name, firstNonEmptyReview(m.Error, m.Reason, "unavailable")))
+		}
+	}
+	out.ScoutCalls = calls
+	if len(refutes) > 0 {
+		out.Verdict = ReviewRefute
+		out.Reason = "review quorum refuted: " + strings.Join(refutes, "; ")
+		return out
+	}
+	if usable < minUsable {
+		out.Verdict = ReviewRefute
+		out.Reason = fmt.Sprintf("review quorum not met: %d/%d usable verdicts, need %d", usable, len(members), minUsable)
+		if len(unavailable) > 0 {
+			out.Reason += " (" + strings.Join(unavailable, "; ") + ")"
+		}
+		return out
+	}
+	out.Verdict = ReviewPass
+	out.Reason = fmt.Sprintf("review quorum passed: %d/%d usable verdicts", usable, len(members))
+	return out
+}
+
+func memberSummary(model, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return model
+	}
+	return model + ": " + reason
+}
+
+func firstNonEmptyReview(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func firstLabel(labels map[string]string, keys ...string) string {

@@ -31,6 +31,8 @@ func runCommitCommand(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "status":
 		return runCommitStatus(stdout, stderr, argv[1:])
+	case "poison-audit":
+		return runCommitPoisonAudit(stdout, stderr, argv[1:])
 	case "submit":
 		return runCommitSubmit(stdout, stderr, argv[1:])
 	case "drain":
@@ -72,13 +74,18 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
-	reviewModel := fs.String("review-model", envOrDefault("FAK_REVIEW_MODEL", ""), "optional scout model id that must pass/refute this diff before commit; reviewer errors fail open and are recorded")
+	reviewModel := fs.String("review-model", envOrDefault("FAK_REVIEW_MODEL", ""), "optional scout model id, or comma-separated model ids, that must pass/refute this diff before commit; a multi-model quorum blocks on any refute")
+	reviewMinModels := fs.Int("review-min-models", envIntOrDefault("FAK_REVIEW_MIN_MODELS", 0), "minimum usable review verdicts required when --review-model names multiple models (default: 2, or 1 for a single model)")
 	reviewObjective := fs.String("review-objective", envOrDefault("FAK_REVIEW_OBJECTIVE", ""), "objective given to --review-model (default: FAK_GOAL_OBJECTIVE, then first commit-message line)")
 	reviewEndpoint := fs.String("review-endpoint", envOrDefault("FAK_REVIEW_ENDPOINT", "http://127.0.0.1:8080/v1"), "OpenAI-compatible base URL for --review-model")
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *reviewMinModels < 0 {
+		fmt.Fprintln(stderr, "fak commit: --review-min-models must be non-negative")
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
@@ -110,7 +117,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	if derived, ok := deriveCommitMessageStamp(message, paths, root); ok {
 		message = derived
 	}
-	review := commitReviewOptions(*reviewModel, firstNonEmpty(*reviewObjective, os.Getenv("FAK_GOAL_OBJECTIVE"), firstCommitLine(message)), *reviewEndpoint, *reviewAPIKeyEnv)
+	review := commitReviewOptions(*reviewModel, firstNonEmpty(*reviewObjective, os.Getenv("FAK_GOAL_OBJECTIVE"), firstCommitLine(message)), *reviewEndpoint, *reviewAPIKeyEnv, *reviewMinModels)
 
 	// --require-issue pre-lints the message before touching git: a real commit on the shared trunk
 	// cannot be amended (a sibling may push it first), so a missing bindable `#N` is caught here as a

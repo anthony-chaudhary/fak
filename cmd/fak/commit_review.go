@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -13,37 +14,79 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
-func commitReviewOptions(model, objective, endpoint, apiKeyEnv string) *safecommit.ReviewOptions {
-	model = strings.TrimSpace(model)
-	if model == "" {
+func commitReviewOptions(model, objective, endpoint, apiKeyEnv string, minModels int) *safecommit.ReviewOptions {
+	return reviewOptionsForPrompt(model, objective, endpoint, apiKeyEnv, minModels, commitReviewSystemPrompt, commitReviewPrompt)
+}
+
+type reviewPromptBuilder func(objective, diff string) string
+
+func reviewOptionsForPrompt(model, objective, endpoint, apiKeyEnv string, minModels int, systemPrompt string, prompt reviewPromptBuilder) *safecommit.ReviewOptions {
+	models := commitReviewModels(model)
+	if len(models) == 0 {
 		return nil
 	}
 	apiKey := ""
 	if apiKeyEnv = strings.TrimSpace(apiKeyEnv); apiKeyEnv != "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnv))
 	}
-	client := agent.NewHTTPPlanner(endpoint, model, apiKey)
-	client.MaxTokens = 256
-	client.Temperature = 0
 	temp := 0.0
-	classifier := modelroute.ClassifierFunc(func(ctx context.Context, s modelroute.Subject) (modelroute.ScoutLabel, error) {
-		comp, err := client.Complete(ctx, []agent.Message{
-			{Role: agent.RoleSystem, Content: commitReviewSystemPrompt},
-			{Role: agent.RoleUser, Content: commitReviewPrompt(s.Labels["objective"], s.Labels["diff"])},
-		}, nil, agent.WithMaxTokens(256), agent.WithTemperature(&temp))
-		if err != nil {
-			return modelroute.ScoutLabel{}, err
-		}
-		if comp == nil {
-			return modelroute.ScoutLabel{}, fmt.Errorf("review model returned nil completion")
-		}
-		return parseCommitReviewScoutLabel(comp.Message.Content)
-	})
+	type boundReviewer struct {
+		model      string
+		classifier modelroute.Classifier
+	}
+	reviewers := make([]boundReviewer, 0, len(models))
+	for _, m := range models {
+		m := m
+		client := agent.NewHTTPPlanner(endpoint, m, apiKey)
+		client.MaxTokens = 256
+		client.Temperature = 0
+		reviewers = append(reviewers, boundReviewer{
+			model: m,
+			classifier: modelroute.ClassifierFunc(func(ctx context.Context, s modelroute.Subject) (modelroute.ScoutLabel, error) {
+				comp, err := client.Complete(ctx, []agent.Message{
+					{Role: agent.RoleSystem, Content: systemPrompt},
+					{Role: agent.RoleUser, Content: prompt(s.Labels["objective"], s.Labels["diff"])},
+				}, nil, agent.WithMaxTokens(256), agent.WithTemperature(&temp))
+				if err != nil {
+					return modelroute.ScoutLabel{}, err
+				}
+				if comp == nil {
+					return modelroute.ScoutLabel{}, fmt.Errorf("review model returned nil completion")
+				}
+				return parseCommitReviewScoutLabel(comp.Message.Content)
+			}),
+		})
+	}
+	minModels = defaultReviewMinModels(len(reviewers), minModels)
 	return &safecommit.ReviewOptions{
-		Model:     model,
+		Model:     strings.Join(models, ","),
 		Objective: objective,
 		Reviewer: func(ctx context.Context, req modelroute.ReviewRequest) (modelroute.ReviewResult, error) {
-			return modelroute.ReviewDiffWithScout(ctx, classifier, req)
+			if len(reviewers) == 1 {
+				req.Model = reviewers[0].model
+				return modelroute.ReviewDiffWithScout(ctx, reviewers[0].classifier, req)
+			}
+			members := make([]modelroute.ReviewMember, 0, len(reviewers))
+			for _, r := range reviewers {
+				memberReq := req
+				memberReq.Model = r.model
+				res, err := modelroute.ReviewDiffWithScout(ctx, r.classifier, memberReq)
+				if err != nil {
+					members = append(members, modelroute.ReviewMember{
+						Model:   r.model,
+						Verdict: modelroute.ReviewUnavailable,
+						Error:   err.Error(),
+					})
+					continue
+				}
+				members = append(members, modelroute.ReviewMember{
+					Model:   r.model,
+					Verdict: res.Verdict,
+					Reason:  res.Reason,
+				})
+			}
+			req.Model = strings.Join(models, ",")
+			return modelroute.FoldReviewQuorum(req, members, minModels), nil
 		},
 	}
 }
@@ -52,6 +95,45 @@ const commitReviewSystemPrompt = "You are a cheap scout code reviewer. Decide wh
 
 func commitReviewPrompt(objective, diff string) string {
 	return "Objective:\n" + strings.TrimSpace(objective) + "\n\nDiff:\n```diff\n" + diff + "\n```\n\nReturn only JSON with verdict pass or refute and a short reason."
+}
+
+func commitReviewModels(raw string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' }) {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
+}
+
+func defaultReviewMinModels(modelCount, requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if modelCount > 1 {
+		if modelCount < 2 {
+			return modelCount
+		}
+		return 2
+	}
+	return 1
+}
+
+func envIntOrDefault(name string, def int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func parseCommitReviewScoutLabel(text string) (modelroute.ScoutLabel, error) {

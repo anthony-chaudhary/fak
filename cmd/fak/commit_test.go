@@ -470,6 +470,42 @@ func TestRunCommit_reviewModelWiresSafecommitReview(t *testing.T) {
 	}
 }
 
+func TestRunCommit_reviewModelCSVWiresQuorum(t *testing.T) {
+	var got safecommit.Options
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		got = o
+		return safecommit.Result{Committed: true, Verified: true, Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--path", "a.go",
+		"-m", "feat(loop): add review quorum (#1185) (fak cmd)",
+		"--review-model", "cheap-scout,frontier-scout,cheap-scout",
+		"--review-min-models", "2",
+	})
+	if code != 0 {
+		t.Fatalf("want 0, got %d stderr=%q", code, errb.String())
+	}
+	if got.Review == nil {
+		t.Fatal("--review-model did not wire safecommit Review")
+	}
+	if got.Review.Model != "cheap-scout,frontier-scout" {
+		t.Fatalf("review model list = %q", got.Review.Model)
+	}
+}
+
+func TestRunCommit_reviewMinModelsRejectsNegative(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{
+		"--path", "a.go",
+		"-m", "feat(loop): add review quorum (#1185) (fak cmd)",
+		"--review-min-models", "-1",
+	})
+	if code != 2 {
+		t.Fatalf("negative --review-min-models should be usage, got %d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+}
+
 func TestRunCommit_coreLockMaintenanceWitnessWiresSafecommit(t *testing.T) {
 	var got safecommit.Options
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {

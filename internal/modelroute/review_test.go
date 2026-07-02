@@ -62,3 +62,48 @@ func TestReviewDiffWithScoutRejectsInvalidVerdict(t *testing.T) {
 		t.Fatal("invalid review verdict should fail loud")
 	}
 }
+
+func TestFoldReviewQuorumRefuteWinsOverPass(t *testing.T) {
+	res := FoldReviewQuorum(ReviewRequest{Model: "cheap,frontier", Diff: "diff"}, []ReviewMember{
+		{Model: "cheap", Verdict: ReviewPass, Reason: "looks fine"},
+		{Model: "frontier", Verdict: ReviewRefute, Reason: "guard bypass"},
+	}, 2)
+	if res.Verdict != ReviewRefute {
+		t.Fatalf("verdict = %q, want refute", res.Verdict)
+	}
+	if !strings.Contains(res.Reason, "frontier") || !strings.Contains(res.Reason, "guard bypass") {
+		t.Fatalf("reason should carry the refuting model and reason, got %q", res.Reason)
+	}
+	if res.ScoutCalls != 2 || len(res.Members) != 2 {
+		t.Fatalf("quorum evidence lost calls/members: %+v", res)
+	}
+}
+
+func TestFoldReviewQuorumRequiresUsableModels(t *testing.T) {
+	res := FoldReviewQuorum(ReviewRequest{Model: "cheap,frontier", Diff: "diff"}, []ReviewMember{
+		{Model: "cheap", Verdict: ReviewPass, Reason: "looks fine"},
+		{Model: "frontier", Verdict: ReviewUnavailable, Error: "timeout"},
+	}, 2)
+	if res.Verdict != ReviewRefute {
+		t.Fatalf("verdict = %q, want refute when quorum is not met", res.Verdict)
+	}
+	if !strings.Contains(res.Reason, "1/2 usable") || !strings.Contains(res.Reason, "timeout") {
+		t.Fatalf("reason should explain missing quorum, got %q", res.Reason)
+	}
+	if res.ScoutCalls != 2 {
+		t.Fatalf("ScoutCalls = %d, want all attempted reviewers counted", res.ScoutCalls)
+	}
+}
+
+func TestFoldReviewQuorumPassesWhenQuorumMet(t *testing.T) {
+	res := FoldReviewQuorum(ReviewRequest{Model: "cheap,frontier", Diff: "diff"}, []ReviewMember{
+		{Model: "cheap", Verdict: ReviewPass, Reason: "ok"},
+		{Model: "frontier", Verdict: ReviewPass, Reason: "ok"},
+	}, 2)
+	if res.Verdict != ReviewPass {
+		t.Fatalf("verdict = %q, want pass", res.Verdict)
+	}
+	if res.RequiredModels != 2 {
+		t.Fatalf("RequiredModels = %d, want 2", res.RequiredModels)
+	}
+}
