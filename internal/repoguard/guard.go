@@ -720,7 +720,13 @@ func evaluate(toolName string, toolInput map[string]any, workspaceRoot string, s
 	case "Bash":
 		command := stringField(toolInput, "command")
 		violations := classifyCommand(command, workspaceRoot, safeRoots)
-		return append(violations, classifyInteractive(command)...)
+		violations = append(violations, classifyInteractive(command)...)
+		return append(violations, classifySleepWait(command)...)
+	case "PowerShell":
+		// The PowerShell tool gets ONLY the advisory sleep rung: the
+		// out-of-tree and interactive classifiers parse POSIX shell syntax
+		// and would misread PowerShell forms.
+		return classifySleepWait(stringField(toolInput, "command"))
 	case "Write", "Edit", "MultiEdit", "NotebookEdit":
 		fp := stringField(toolInput, "file_path")
 		if fp == "" {
@@ -747,11 +753,14 @@ func stringField(m map[string]any, key string) string {
 }
 
 func renderReason(violations []Violation) string {
-	var outOfTree, interactive []Violation
+	var outOfTree, interactive, sleeps []Violation
 	for _, v := range violations {
-		if v.Reason == ReasonInteractiveHang {
+		switch v.Reason {
+		case ReasonInteractiveHang:
 			interactive = append(interactive, v)
-		} else {
+		case ReasonForegroundSleep:
+			sleeps = append(sleeps, v)
+		default:
 			outOfTree = append(outOfTree, v)
 		}
 	}
@@ -761,6 +770,9 @@ func renderReason(violations []Violation) string {
 	}
 	if len(interactive) > 0 {
 		blocks = append(blocks, renderInteractiveReason(interactive))
+	}
+	if len(sleeps) > 0 {
+		blocks = append(blocks, renderSleepReason(sleeps))
 	}
 	return strings.Join(blocks, " | ")
 }

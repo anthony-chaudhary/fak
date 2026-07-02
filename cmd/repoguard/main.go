@@ -102,11 +102,28 @@ func runHook(stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(violations) == 0 {
 		return 0
 	}
-	reason := repoguard.RenderReason(violations)
 	if mode == "warn" {
-		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", reason)
+		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", repoguard.RenderReason(violations))
 		return 0
 	}
+	// Advisory-class findings (FOREGROUND_SLEEP, #2366) are warn-first even
+	// under enforce: print the structured pointer at the background-wait
+	// alternatives, allow the call, and deny only on refusal-class violations.
+	var denying, advisory []repoguard.Violation
+	for _, v := range violations {
+		if repoguard.IsAdvisoryReason(v.Reason) {
+			advisory = append(advisory, v)
+		} else {
+			denying = append(denying, v)
+		}
+	}
+	if len(advisory) > 0 {
+		fmt.Fprintf(stderr, "repo_guard (advisory): %s\n", repoguard.RenderReason(advisory))
+	}
+	if len(denying) == 0 {
+		return 0
+	}
+	reason := repoguard.RenderReason(denying)
 	// enforce: deny via the PreToolUse decision protocol. SetEscapeHTML(false) so the
 	// reason reads `->` like the Python original, not the HTML-escaped `>`.
 	enc := json.NewEncoder(stdout)
@@ -127,8 +144,17 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 	safeRoots := repoguard.SafeRootsForWorkspace(ws)
 	violations := repoguard.ClassifyCommand(command, ws, safeRoots)
 	violations = append(violations, repoguard.ClassifyInteractive(command)...)
+	violations = append(violations, repoguard.ClassifySleepWait(command)...)
 	if violations == nil {
 		violations = []repoguard.Violation{} // marshal as [] (matches the Python --json shape), never null
+	}
+	// Advisory-class findings ride along in the JSON but never fail the check:
+	// ok and the exit code track refusal-class violations only (#2366).
+	denying := 0
+	for _, v := range violations {
+		if !repoguard.IsAdvisoryReason(v.Reason) {
+			denying++
+		}
 	}
 	if asJSON {
 		payload := struct {
@@ -136,17 +162,19 @@ func runCheck(command, workspace string, asJSON bool, stdout io.Writer) int {
 			OK         bool                  `json:"ok"`
 			Workspace  string                `json:"workspace"`
 			Violations []repoguard.Violation `json:"violations"`
-		}{repoguard.Schema, len(violations) == 0, ws, violations}
+		}{repoguard.Schema, denying == 0, ws, violations}
 		enc := json.NewEncoder(stdout)
 		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(payload)
-	} else if len(violations) > 0 {
+	} else if denying > 0 {
 		fmt.Fprintf(stdout, "DENY  %s\n", repoguard.RenderReason(violations))
+	} else if len(violations) > 0 {
+		fmt.Fprintf(stdout, "WARN  %s\n", repoguard.RenderReason(violations))
 	} else {
 		fmt.Fprintf(stdout, "ALLOW  no out-of-tree write or would-hang interactive form in: %s\n", command)
 	}
-	if len(violations) > 0 {
+	if denying > 0 {
 		return 1
 	}
 	return 0
