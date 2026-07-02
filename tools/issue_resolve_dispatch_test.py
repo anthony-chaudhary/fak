@@ -748,6 +748,36 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(seen["spawn_probe_s"], 5.0)
         self.assertEqual(seen["account"]["tag"], "worker-a")
 
+    def test_live_reports_spawn_failed_when_worker_exits_noisily_immediately(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "tools", "numbers": [1402], "by_lane_count": {}})
+
+        def fake_spawn(*_args, **_kwargs):
+            return {
+                "pid": 303,
+                "log": "resolve-1402.log",
+                "issue": 1402,
+                "lane": "tools",
+                "backend": "claude",
+                "early_exit": {
+                    "checked": True,
+                    "alive": False,
+                    "wait_s": 5.0,
+                    "returncode": 1,
+                    "log_bytes": 120,
+                    "silent": False,
+                    "tail": "rate limited",
+                },
+            }
+
+        mod.spawn_issue_worker = fake_spawn
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True, spawn_probe_s=5.0)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SPAWN_FAILED")
+        self.assertIn("with code 1", p["reason"])
+
 
 class BuildWorkerCommandTest(unittest.TestCase):
     def test_claude_command_shape(self) -> None:
@@ -794,6 +824,13 @@ class BuildWorkerCommandTest(unittest.TestCase):
         mod = load()
         with self.assertRaises(ValueError):
             mod.build_worker_command("gpt", "x", None)
+
+    def test_windows_fak_bin_env_keeps_backslashes(self) -> None:
+        mod = load()
+        with unittest.mock.patch.object(mod.os, "name", "nt"):
+            self.assertEqual(
+                mod.split_command_env(r"C:\work\fak\fak.exe"),
+                [r"C:\work\fak\fak.exe"])
 
 
 class WinCreationFlagsTest(unittest.TestCase):

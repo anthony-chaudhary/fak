@@ -1324,8 +1324,13 @@ def default_loop_ledger(root: Path) -> Path:
 def fak_loop_cmd(root: Path) -> list[str]:
     configured = os.environ.get("FAK_BIN")
     if configured:
-        return shlex.split(configured)
+        return split_command_env(configured)
     return ["go", "run", "./cmd/fak"]
+
+
+def split_command_env(value: str) -> list[str]:
+    """Split a command-valued env var without eating Windows path separators."""
+    return shlex.split(value, posix=(os.name != "nt"))
 
 
 # --- Fenced lane-lease gate (residual of #1310) ------------------------------
@@ -1357,7 +1362,7 @@ def _fak_bin(root: Path) -> list[str] | None:
     FAK_BIN the gate fails open (the same-host log scan still applies)."""
     configured = os.environ.get("FAK_BIN")
     if configured:
-        return shlex.split(configured)
+        return split_command_env(configured)
     exe = shutil.which("fak")
     return [exe] if exe else None
 
@@ -2184,7 +2189,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         }
     model = acct.get("model") if backend == "opencode" else None
     preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
-    payload["command"] = build_worker_command(backend, preview_prompt, model)
+    preview_env = dispatch_worker.child_env(chosen_lane, backend, root)
+    preview_command, preview_guarded = dispatch_worker.guarded_launch_command(
+        build_worker_command(backend, preview_prompt, model),
+        chosen_lane, backend, root, preview_env)
+    payload["command"] = preview_command
+    payload["guarded"] = preview_guarded
 
     if not live:
         payload.update({"ok": True, "action": "would_spawn", "verdict": "WOULD_SPAWN",
@@ -2222,7 +2232,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     else:
         env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
-    command = build_worker_command(backend, rec["prompt"], model)
+    command, guarded = dispatch_worker.guarded_launch_command(
+        build_worker_command(backend, rec["prompt"], model),
+        chosen_lane, backend, root, env)
+    if guarded:
+        dispatch_worker.guard_env_augment(env)
+    payload["command"] = command
+    payload["guarded"] = guarded
     # Per-worker commit-sha tracking (#1324 proposal #2): stamp repo HEAD now, before
     # the worker can commit, so a later tick re-audits the commit THIS worker lands
     # (base..HEAD citing #target). Fail-open: a git error -> no base, and the witness
@@ -2232,7 +2248,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
                                  account=acct, base_sha=base_sha, spawn_probe_s=spawn_probe_s)
     early = spawned.get("early_exit") or {}
-    if early.get("checked") and not early.get("alive") and early.get("silent"):
+    if early.get("checked") and not early.get("alive"):
         # The spawn died immediately, so the lane lease we just took now guards a
         # worker that never ran. There is no early-release verb yet (`fak leaseref`
         # exposes only acquire/reap, not a delete-one-live-lease), so the lane is
@@ -2247,7 +2263,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                         "spawned": spawned,
                         "reason": (f"{backend} worker pid {spawned['pid']} for "
                                    f"#{target} exited within {early.get('wait_s')}s "
-                                   "and produced an empty log")})
+                                   f"with code {early.get('returncode')}"
+                                   + (" and produced an empty log" if early.get("silent") else ""))})
         _record(runs_dir, payload)
         return finish(payload)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
