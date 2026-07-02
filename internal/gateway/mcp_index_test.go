@@ -85,7 +85,7 @@ func TestMCPIndexToolsMirrorDevIndex(t *testing.T) {
 		tool := raw.(map[string]any)
 		names[tool["name"].(string)] = true
 	}
-	for _, want := range []string{"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs", "fak_index_work"} {
+	for _, want := range []string{"fak_index_lane", "fak_index_leaves", "fak_index_docs", "fak_index_claims", "fak_index_verbs", "fak_index_work", "fak_index_freshness"} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s", want)
 		}
@@ -147,6 +147,44 @@ func TestMCPIndexToolsMirrorDevIndex(t *testing.T) {
 	}
 	if work.Views[0].Slug != "ready-leaves" || work.Views[0].Query == "" {
 		t.Fatalf("fak_index_work first view = %+v, want ready-leaves with a gh query", work.Views[0])
+	}
+
+	// The synthetic repo is internally consistent (declared leaf, resolving doc links,
+	// no undeclared internal package), so the freshness surface reports zero drift.
+	fresh := callMCPTool[IndexFreshnessResponse](t, srv, "fak_index_freshness", map[string]any{
+		"root": root,
+	})
+	if len(fresh.Drift) != 0 {
+		t.Fatalf("fak_index_freshness on a consistent repo = %+v, want no drift", fresh.Drift)
+	}
+}
+
+// TestMCPIndexFreshnessSurfacesDrift proves the freshness surface reports real drift
+// through MCP: a dead INDEX.md doc link and an orphaned dated note both come back tagged.
+func TestMCPIndexFreshnessSurfacesDrift(t *testing.T) {
+	srv := newTestServer(t)
+	root := t.TempDir()
+	for path, body := range map[string]string{
+		"dos.toml":                        "[lanes.trees]\ngateway = [\"internal/gateway/**\"]\n",
+		"INDEX.md":                        "# INDEX\n- [Gone](docs/vanished.md) - dead local link.\n",
+		"docs/notes/2026-05-05-lonely.md": "# lonely, unlisted\n",
+		"internal/gateway/gateway.go":     "package gateway\n",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh := callMCPTool[IndexFreshnessResponse](t, srv, "fak_index_freshness", map[string]any{"root": root})
+	kinds := map[string]bool{}
+	for _, d := range fresh.Drift {
+		kinds[string(d.Kind)] = true
+	}
+	if !kinds["dead-doc-link"] || !kinds["orphan-note"] {
+		t.Fatalf("fak_index_freshness drift kinds = %v, want dead-doc-link + orphan-note", kinds)
 	}
 }
 

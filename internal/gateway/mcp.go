@@ -387,6 +387,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[IndexSearchRequest](p.Arguments, "fak_index_work", func(req IndexSearchRequest) (any, error) {
 			return s.indexWork(req)
 		})
+	case "fak_index_freshness":
+		return mcpDecodeCall[IndexFreshnessRequest](p.Arguments, "fak_index_freshness", func(req IndexFreshnessRequest) (any, error) {
+			return s.indexFreshness(req)
+		})
 	case "fak_feature_query":
 		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
 			return s.featureQuery(req)
@@ -394,6 +398,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	case "fak_capabilities":
 		return mcpDecodeCall[CapabilitiesRequest](p.Arguments, "fak_capabilities", func(req CapabilitiesRequest) (any, error) {
 			return s.capabilities(req)
+		})
+	case "fak_context_value":
+		return mcpDecodeCall[ContextValueRequest](p.Arguments, "fak_context_value", func(req ContextValueRequest) (any, error) {
+			return s.CtxValueReportFor(s.traceFor(req.TraceID)), nil
 		})
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
@@ -671,6 +679,11 @@ func toolDescriptors() []map[string]any {
 			"inputSchema": indexSearchInputSchema,
 		},
 		{
+			"name":        "fak_index_freshness",
+			"description": "Report every way the dev self-index disagrees with the tree: undeclared leaves, dead INDEX.md doc links, CLI verbs missing from the catalog, orphaned dated notes, and dead llms.txt links. Read-only; an empty result means the index is fresh. Mirrors `fak index freshness` for MCP clients.",
+			"inputSchema": indexFreshnessInputSchema,
+		},
+		{
 			"name":        "fak_feature_query",
 			"description": "Query fak's unified self-feature catalog: dev facts, live MCP tools, memory drivers, and capability cards. Returns lightweight FeatureCards with guarded request shapes; pass detail to fault only one selected schema, doc snippet, or memory explain plan.",
 			"inputSchema": featureQueryInputSchema,
@@ -679,6 +692,16 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_capabilities",
 			"description": "The task-scoped toolbelt: memory drivers (memq recall/render/clean/compact/dream), the fak index * self-index verbs, and the kernel shared-path verbs (fak_changes, dos_arbitrate), ranked by an optional intent, each with the exact call to make (a memory-driver card carries a ready fak_memory_run call). Narrower and memory-forward compared to fak_feature_query.",
 			"inputSchema": capabilitiesInputSchema,
+		},
+		{
+			"name":        "fak_context_value",
+			"description": "Query the managed-context value report for a session BEFORE sizing your next step in a long session. Returns three levels — tokens (resident window, budget headroom, growth per reply; OBSERVED), turns (turns observed, context events, estimated turns to the next compaction; WITNESSED/FORECAST), session (lifecycle phase, cumulative volumes) — plus a closed step_advice verdict: any (wide headroom, a large step fits) | bounded (take a single-concern step) | checkpoint (land in-flight state before the window turns over) | rebuild (the window was just rewritten; re-anchor from durable state first) | unknown (the window edge is not visible; the reason says why). Advice-only; nothing enforces it. Pass {trace_id?}; omitted uses the gateway default trace (your own session under fak guard).",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured (your own session under fak guard)"}
+  }
+}`),
 		},
 	}
 }

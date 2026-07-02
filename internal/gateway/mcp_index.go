@@ -205,6 +205,41 @@ func (s *Server) indexWork(req IndexSearchRequest) (IndexWorkResponse, error) {
 	}, nil
 }
 
+// IndexFreshnessRequest is the MCP argument shape for fak_index_freshness. It mirrors
+// `fak index freshness`: no query — just an optional repo root and a result cap.
+type IndexFreshnessRequest struct {
+	Root  string `json:"root,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+var indexFreshnessInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "root": {"type": "string", "description": "optional repo root; omitted means search upward for dos.toml from the server working directory"},
+    "limit": {"type": "integer", "description": "maximum finding count; 0 or omitted means no cap"}
+  }
+}`)
+
+// IndexFreshnessResponse is the MCP result for fak_index_freshness: every way the dev
+// self-index disagrees with its live sources — an undeclared leaf, a dead INDEX.md doc
+// link, a CLI verb missing from the catalog, an orphaned dated note, or a dead llms.txt
+// link. An empty Drift means the catalog agrees with the tree (the index is fresh).
+type IndexFreshnessResponse struct {
+	Root  string           `json:"root"`
+	Drift []devindex.Drift `json:"drift"`
+}
+
+func (s *Server) indexFreshness(req IndexFreshnessRequest) (IndexFreshnessResponse, error) {
+	if err := validateIndexLimit(req.Limit); err != nil {
+		return IndexFreshnessResponse{}, err
+	}
+	cat, err := loadDevIndex(req.Root)
+	if err != nil {
+		return IndexFreshnessResponse{}, err
+	}
+	return IndexFreshnessResponse{Root: cat.Root, Drift: capResults(cat.CheckFreshness(), req.Limit)}, nil
+}
+
 // FeatureQueryRequest is the MCP argument shape for fak_feature_query. It mirrors
 // `fak feature query`: a non-empty intent, optional dev/live/all plane, optional
 // result limit, and optional detail fault for one selected card.
