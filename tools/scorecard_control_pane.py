@@ -288,7 +288,11 @@ SCORECARDS: list[dict[str, str]] = [
     # GPU-less box. persona_fit is orthogonal to the wired persona_readiness
     # (matrix-integrity debt vs entry-path-gate debt — no persona double-count).
     {"key": "observability", "debt": "observability_debt", "script": "observability_scorecard.py", "label": "observability"},
-    {"key": "learning", "debt": "learning_debt", "script": "learning_scorecard.py", "label": "learning"},
+    # learning_scorecard scans the broad teaching-doc corpus and its link graph.
+    # On Windows-mounted WSL checkouts it can exceed the generic 120s live-smoke
+    # budget while still producing a valid deterministic payload, so give this
+    # one broad-corpus card an explicit bounded allowance.
+    {"key": "learning", "debt": "learning_debt", "script": "learning_scorecard.py", "timeout": "240", "label": "learning"},
     {"key": "rsi_maturity", "debt": "rsi_debt", "script": "rsi_maturity_scorecard.py", "label": "rsi-maturity"},
     {"key": "tooling_quality", "debt": "py_debt", "script": "tooling_quality_scorecard.py", "label": "tooling-quality"},
     {"key": "bench_dx", "debt": "bench_dx_debt", "script": "bench_dx_scorecard.py", "label": "bench-dx"},
@@ -785,7 +789,8 @@ def collect(root: Path, *, python: str = "", timeout: int = 120) -> list[dict[st
     python = python or sys.executable
     metrics: list[dict[str, Any]] = []
     for card in SCORECARDS:
-        payload, error = run_scorecard(root, card, python=python, timeout=timeout)
+        card_timeout = int(card.get("timeout", timeout)) if isinstance(card, dict) else timeout
+        payload, error = run_scorecard(root, card, python=python, timeout=card_timeout)
         metrics.append(metric_from_payload(card, payload, error))
     return metrics
 
