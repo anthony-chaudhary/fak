@@ -1011,23 +1011,20 @@ func nonNegInt64(n int64) int64 {
 }
 
 func resolveVCacheProviderSnapshotPath(path string) (string, bool) {
-	path = strings.TrimSpace(path)
-	if strings.EqualFold(path, "off") {
-		return "", false
-	}
-	if path == "" || strings.EqualFold(path, "default") {
-		return vcachesnapshot.DefaultPath(), true
-	}
-	return path, true
+	return resolveVCacheSnapshotPath(path, vcachesnapshot.DefaultPath())
 }
 
 func resolveVCacheContextSnapshotPath(path string) (string, bool) {
+	return resolveVCacheSnapshotPath(path, vcachesnapshot.DefaultContextPath())
+}
+
+func resolveVCacheSnapshotPath(path, defaultPath string) (string, bool) {
 	path = strings.TrimSpace(path)
 	if strings.EqualFold(path, "off") {
 		return "", false
 	}
 	if path == "" || strings.EqualFold(path, "default") {
-		return vcachesnapshot.DefaultContextPath(), true
+		return defaultPath, true
 	}
 	return path, true
 }
@@ -1146,13 +1143,7 @@ func applyRecentVCacheObservation(rep *vcacheStatusReport, path, contextPath str
 		recent.ProviderStatus = string(obs.Aggregate.Status)
 		recent.GovernorDecision = dominantVCacheGovernorDecision(obs.Families)
 	}
-	for _, turn := range turns {
-		recent.ContextEvents += turn.ContextEvents
-		recent.ContextShedTokens += turn.ContextShedTokens
-		recent.ContextDroppedTurns += turn.ContextDroppedTurns
-		recent.ContextBaselineTokens += turn.ContextBaselineTokens
-		recent.ContextCostTokens += turn.ContextCostTokens
-	}
+	accumulateRecentVCacheContext(&recent, turns)
 	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
 	if recent.ContextStatus == "MISSING" {
 		applyRecentVCacheContextSnapshot(&recent, contextPath)
@@ -1191,13 +1182,7 @@ func applyRecentVCacheContextOnlyObservation(rep *vcacheStatusReport, contextPat
 		ProviderStatus: "MISSING",
 		ContextPath:    contextPath,
 	}
-	for _, turn := range turns {
-		recent.ContextEvents += turn.ContextEvents
-		recent.ContextShedTokens += turn.ContextShedTokens
-		recent.ContextDroppedTurns += turn.ContextDroppedTurns
-		recent.ContextBaselineTokens += turn.ContextBaselineTokens
-		recent.ContextCostTokens += turn.ContextCostTokens
-	}
+	accumulateRecentVCacheContext(&recent, turns)
 	recent.ContextStatus, recent.ContextReason = recentVCacheContextStatus(recent)
 	if recent.ContextStatus != "WITNESSED" {
 		return
@@ -1225,13 +1210,7 @@ func applyRecentVCacheContextSnapshot(recent *vcacheRecentObservation, contextPa
 		return false
 	}
 	var ctx vcacheRecentObservation
-	for _, turn := range turns {
-		ctx.ContextEvents += turn.ContextEvents
-		ctx.ContextShedTokens += turn.ContextShedTokens
-		ctx.ContextDroppedTurns += turn.ContextDroppedTurns
-		ctx.ContextBaselineTokens += turn.ContextBaselineTokens
-		ctx.ContextCostTokens += turn.ContextCostTokens
-	}
+	accumulateRecentVCacheContext(&ctx, turns)
 	status, _ := recentVCacheContextStatus(ctx)
 	if status != "WITNESSED" {
 		return false
@@ -1245,6 +1224,19 @@ func applyRecentVCacheContextSnapshot(recent *vcacheRecentObservation, contextPa
 	recent.ContextStatus = "WITNESSED"
 	recent.ContextReason = "separate context snapshot includes fak_context_* counters from a guard/serve context event"
 	return true
+}
+
+func accumulateRecentVCacheContext(recent *vcacheRecentObservation, turns []vcacheobserve.Turn) {
+	if recent == nil {
+		return
+	}
+	for _, turn := range turns {
+		recent.ContextEvents += turn.ContextEvents
+		recent.ContextShedTokens += turn.ContextShedTokens
+		recent.ContextDroppedTurns += turn.ContextDroppedTurns
+		recent.ContextBaselineTokens += turn.ContextBaselineTokens
+		recent.ContextCostTokens += turn.ContextCostTokens
+	}
 }
 
 func recentVCacheContextStatus(recent vcacheRecentObservation) (string, string) {
@@ -1476,10 +1468,12 @@ func vcacheProofExit(s vcachegov.ProofStatus) int {
 }
 
 func formatBreakEven(n int) string {
-	if n == int(^uint(0)>>1) {
+	switch n {
+	case int(^uint(0) >> 1):
 		return "never"
+	default:
+		return fmt.Sprintf("%d", n)
 	}
-	return fmt.Sprintf("%d", n)
 }
 
 func formatObservedPositive(n int) string {
