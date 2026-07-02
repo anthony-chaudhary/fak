@@ -39,11 +39,16 @@ import (
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
 //	                                   default): cache/vCache ON + the kernel as the permission system
-//	                                   (--dangerously-skip-permissions). Claude launches default to Fable
-//	                                   (--model fable); --model '' uses the seat's own saved default.
+//	                                   (--dangerously-skip-permissions). Claude launches default to Fable 5
+//	                                   (--model fable) with one startup fallback to Opus 4.8;
+//	                                   --model '' uses the seat's own saved default.
 //	                                   --guard=false / --skip-permissions=false opt out
 //	fak accounts list                  table of every seat: name, lifecycle, LOGIN status, TRUE identity, creds, rehome, flags
 //	fak accounts status [--json]       observable login report: closed status, can_serve, warnings, next action
+//	fak accounts doctor [--json] [--write] fold every seat into ONE closed recovery action (none|relogin|
+//	                                   wait_reset|top_up|prune|enable_or_remove|dedupe) with the exact command;
+//	                                   --write applies the deterministic repairs (tombstone+rehome a seat whose
+//	                                   config dir vanished). Exit 1 while actions remain, 0 when clean
 //	fak accounts rotation [--json]     the FULL witnessed rotation decision: the pool in launch order
 //	                                   (with headroom tiers) AND every excluded seat with the reason it
 //	                                   is out (duplicate/reserved/disabled/tombstoned/unservable), plus
@@ -60,7 +65,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|list|status|doctor|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -79,7 +84,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	pin := fs.Bool("pin", false, "(resolve) PIN to the exact seat (strict); default rehomes to a live seat")
 	dryRun := fs.Bool("dry-run", false, "(pull) print what would be pulled without copying; (launch) print the launch plan without starting the agent")
 	gateDir := fs.String("dir", "", "(gate-write) target config dir to gate a stdin setup-token write against")
-	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout")
+	write := fs.Bool("write", false, "(discover) MERGE the disk scan into the registry and write it back (preserving authored policy), instead of emitting to stdout; (doctor) APPLY the auto-fixable repairs instead of only reporting them")
 	dosView := fs.String("dos-view", firstNonEmpty(os.Getenv("FAK_DOS_ROSTER"), defaultDosView(defHome)), "(sync/check) path to the generated dos roster view (~/.claude/accounts.yaml)")
 	jobView := fs.String("job-view", os.Getenv("FAK_JOB_ROSTER"), "(sync/check) path to the generated job roster view; empty skips the job view")
 	addName := fs.String("name", "", "(add) roster name for the new account")
@@ -97,7 +102,8 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	launchUltracode := fs.Bool("ultracode", true, "(launch) run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) by default, via --settings '{\"ultracode\":true}'; --ultracode=false launches without it. Claude-only; ignored for other agents")
-	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Fable ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
+	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Fable 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
+	launchFallbackModel := fs.String("fallback-model", defaultLaunchFallbackModel, "(launch) Claude model retried once if the default Fable 5 startup fails with a model-unavailable error; empty disables. Default: Opus 4.8 ("+defaultLaunchFallbackModel+"). Ignored when --model is explicit")
 	rotateFlag := fs.Bool("rotate", false, "(launch) launch the NEXT account in the rotation instead of the active/named seat — the round-robin off a walled account")
 	afterSeat := fs.String("after", "", "(next/launch) rotate to the account bucket AFTER this seat (default: the named seat, else the active seat)")
 	noHeadroom := fs.Bool("no-headroom", false, "(next/launch --rotate) ignore the live runtime headroom signal and rotate stable-by-name; by default rotation prefers the account with room and sorts walled/capped accounts last")
@@ -146,6 +152,12 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 
 	case "status":
 		return accountsStatus(stdout, stderr, *registryPath, *homeDir, *asJSON)
+
+	case "doctor":
+		// The recover/clean fold: one closed action per seat (with the exact command),
+		// and --write applies the deterministic repairs through the same audited path
+		// as `remove`. See accounts_doctor.go.
+		return accountsDoctor(stdout, stderr, *registryPath, *dosView, *jobView, *asJSON, *write)
 
 	case "resolve":
 		return accountsResolve(stdout, stderr, positional, *registryPath, *homeDir, *pin, *asEnv)
@@ -265,19 +277,21 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			seat = strings.TrimSpace(rest[0])
 		}
 		return runAccountsLaunch(stdout, stderr, launchParams{
-			name:         seat,
-			command:      *launchCommand,
-			rotate:       *rotateFlag,
-			after:        strings.TrimSpace(*afterSeat),
-			useHeadroom:  !*noHeadroom,
-			useGuard:     *launchGuard,
-			skipPerms:    *launchSkipPerms,
-			ultracode:    *launchUltracode,
-			model:        strings.TrimSpace(*launchModel),
-			dryRun:       *dryRun,
-			passthrough:  fs.Args(),
-			registryPath: *registryPath,
-			homeDir:      *homeDir,
+			name:          seat,
+			command:       *launchCommand,
+			rotate:        *rotateFlag,
+			after:         strings.TrimSpace(*afterSeat),
+			useHeadroom:   !*noHeadroom,
+			useGuard:      *launchGuard,
+			skipPerms:     *launchSkipPerms,
+			ultracode:     *launchUltracode,
+			model:         strings.TrimSpace(*launchModel),
+			modelExplicit: flagSet(fs, "model"),
+			fallbackModel: strings.TrimSpace(*launchFallbackModel),
+			dryRun:        *dryRun,
+			passthrough:   fs.Args(),
+			registryPath:  *registryPath,
+			homeDir:       *homeDir,
 		})
 
 	case "sync":

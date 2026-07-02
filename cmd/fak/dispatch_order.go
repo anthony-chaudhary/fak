@@ -46,6 +46,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
+	case "auto":
+		return runDispatchAuto(stdout, stderr, argv[1:])
 	case "order":
 		return runDispatchOrder(stdout, stderr, argv[1:])
 	case "price":
@@ -84,7 +86,7 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		dispatchUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
+		fmt.Fprintf(stderr, "fak dispatch: unknown subcommand %q (want auto, order, price, route, tick, wave, sweep, progress, audit, scorecard, issue-smallness-lint, commit-links, unwitnessed-claim, close-batch, skip-ledger, attempt-budget, or timeout-ledger)\n", argv[0])
 		dispatchUsage(stderr)
 		return 2
 	}
@@ -245,6 +247,7 @@ func dispAge(now, recency int64) string {
 func dispatchUsage(w io.Writer) {
 	fmt.Fprint(w, `fak dispatch — deterministic dispatch helpers
 
+  fak dispatch auto  [--workspace DIR] [--backend claude|opencode|codex] [--required-workers N] [--context-tokens N] [--live] [--json]
   fak dispatch order [--in FILE] [--cooldown-min N] [--now UNIX] [--prefer-oldest] [--json]
   fak dispatch price [--workspace DIR] [--in FILE] [--json]
   fak dispatch route [--workspace DIR] [--json]
@@ -262,6 +265,15 @@ func dispatchUsage(w io.Writer) {
   fak dispatch skip-ledger [--in FILE] [--workspace DIR] [--cooldown-min N] [--now UNIX] [--json]
   fak dispatch attempt-budget [--in FILE] [--budget N] [--now UNIX] [--json]
   fak dispatch timeout-ledger [--in FILE] [--workspace DIR] [--now UNIX] [--json]
+
+auto is the self-sizing front door to the multi-account wave: it folds the live ceilings (the
+preflight's effective cap, the switcher's distinct fresh account pools, the router's ready
+work, an optional throughput target) into a steady-state worker Target, computes the Refill
+(Target minus live workers), and with --live drives the priced "dispatch wave" with that
+count. The operator types NO count; run it on a cadence and the population converges to
+Target and tops itself back up as workers exit. The decision is pure
+(internal/dispatchauto.PlanAuto) and the plan names its binding ceiling, so "why only N?" is
+always answerable. --context-tokens slices a fleet context budget evenly per worker.
 
 order answers "of these candidate work units, which should a worker take FIRST, and which are
 stale duplicates?" It collapses units that share a target (the same "key") to the single most

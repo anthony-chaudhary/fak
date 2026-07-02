@@ -121,9 +121,10 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       its LIVE/EXPIRED status; --json emits the raw records.
 
   fak leaseref reap [--dir DIR]
-      Delete the expired (reapable) records — BOTH expired lock leases and expired
-      guard-session descriptors under refs/fak/locks/*. A crashed holder's lapsed
-      lease (or a crashed node's lapsed session) is bounded, not a permanent ghost.
+      Delete the expired (reapable) records — expired lock leases, expired
+      guard-session descriptors, and lapsed intent claims (see 'fak intent') under
+      refs/fak/locks/*. A crashed holder's lapsed lease (or a crashed node's lapsed
+      session) is bounded, not a permanent ghost.
       The delete is an ordinary ref delete that converges across clones the same way
       acquisition does.
 
@@ -266,10 +267,11 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 	now := time.Now()
 	rc := 0
 
-	// Reap BOTH ref kinds under refs/fak/locks/*: expired lock leases and expired session
-	// descriptors. Each sweep is independent and best-effort — a failure on one kind is
-	// reported but never suppresses the other. Store.Reap / ReapSessions delete only their
-	// own kind (the namespace split), so a session is never mistaken for a lock lease.
+	// Reap ALL THREE ref kinds under refs/fak/locks/*: expired lock leases, expired session
+	// descriptors, and lapsed intent claims (#2155). Each sweep is independent and
+	// best-effort — a failure on one kind is reported but never suppresses the others.
+	// Store.Reap / ReapSessions / ReapIntents delete only their own kind (the namespace
+	// split), so one kind is never mistaken for another.
 	leases, lerr := store.Reap(ctx, now)
 	if lerr != nil {
 		fmt.Fprintf(stderr, "fak leaseref reap: leases: %v\n", lerr)
@@ -280,7 +282,12 @@ func runLeaserefReap(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref reap: sessions: %v\n", serr)
 		rc = 1
 	}
-	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s)\n", len(leases), len(sessions))
+	intents, ierr := store.ReapIntents(ctx, now)
+	if ierr != nil {
+		fmt.Fprintf(stderr, "fak leaseref reap: intents: %v\n", ierr)
+		rc = 1
+	}
+	fmt.Fprintf(stdout, "reaped %d expired lease(s), %d expired session(s), %d lapsed intent(s)\n", len(leases), len(sessions), len(intents))
 	return rc
 }
 

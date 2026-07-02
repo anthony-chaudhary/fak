@@ -127,7 +127,7 @@ func TestResumeWatchdogBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 		return denyLaunchBrokerGrant(a, "unit-test-deny")
 	}
 	spawned := false
-	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string) (int, error) {
+	rwSpawnResumeLaunch = func(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
 		spawned = true
 		return 12345, nil
 	}
@@ -219,6 +219,32 @@ func TestResumeWatchdogStatusJSONLaunchedNoProgressRed(t *testing.T) {
 	}
 }
 
+func TestRwLoadWatchdogStatusEventsNormalizesLegacyRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "resume_ledger.jsonl")
+	body := strings.Join([]string{
+		`{"ts":"2026-07-01T00:00:00Z","session":"sid-legacy"}`,
+		`{"ts":"2026-07-01T00:01:00Z","session":"sid-settled","action":"consolidate-operator-excluded","manual_override":true}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := resume.FoldWatchdogStatus(resume.WatchdogStatusInput{
+		Mode:    "LIVE",
+		NowUnix: 2_000,
+		Events:  rwLoadWatchdogStatusEvents(path),
+	})
+	if len(rep.MTTRSessions) != 1 {
+		t.Fatalf("mttr rows = %+v, want only the phase-less legacy launch", rep.MTTRSessions)
+	}
+	row := rep.MTTRSessions[0]
+	if row.Session != "sid-legacy" || row.Status != resume.WatchdogMTTRLaunchedUnproven {
+		t.Fatalf("row = %+v, want sid-legacy launched_unproven", row)
+	}
+}
+
 func TestResumeWatchdogTickRecordsDrainSamplesWithoutBurningAttempts(t *testing.T) {
 	reg := t.TempDir()
 	logDir := t.TempDir()
@@ -248,6 +274,68 @@ func TestResumeWatchdogTickRecordsDrainSamplesWithoutBurningAttempts(t *testing.
 	hist := rwLoadHistory(filepath.Join(reg, "resume_ledger.jsonl"))
 	if got := resume.CountAttempts(hist["sid-queued"]); got != 0 {
 		t.Fatalf("status/queued rows burned %d attempts, want 0", got)
+	}
+}
+
+func TestRwLoadPlanAcceptsUTF8BOM(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "resume_plan.json")
+	body := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"plan":[{"session":"sid-bom","account":".claude-a"}]}`)...)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := rwLoadPlan(path)
+	if len(rows) != 1 || rows[0].Session != "sid-bom" {
+		t.Fatalf("rows = %+v, want BOM-tolerant decode", rows)
+	}
+}
+
+func TestResumeWatchdogTickRecordsTranscriptProgressWitness(t *testing.T) {
+	reg := t.TempDir()
+	logDir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	sid := "sid-progress"
+	project := "C--work-fak"
+	cfg := filepath.Join(home, ".claude-a")
+	projDir := filepath.Join(cfg, "projects", project)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := strings.Join([]string{
+		`{"type":"assistant","timestamp":"2026-07-01T00:00:10Z","message":{"role":"assistant","model":"claude-test","content":"done","usage":{"input_tokens":10}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(projDir, sid+".jsonl"), []byte(transcript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"plan":[{"session":"` + sid + `","account":".claude-a","project":"` + project + `","config_dir":` +
+		string(mustJSON(cfg)) + `}]}`
+	if err := os.WriteFile(filepath.Join(reg, "resume_plan.json"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := `{"ts":"2026-07-01T00:00:00Z","session":"` + sid + `","phase":"launched"}` + "\n"
+	if err := os.WriteFile(filepath.Join(reg, "resume_ledger.jsonl"), []byte(ledger), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runResumeWatchdog(&out, &errb, []string{
+		"--no-refresh", "--reg-dir", reg, "--log-dir", logDir, "--spacing-sec", "0",
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s stdout: %s)", code, errb.String(), out.String())
+	}
+	raw, err := os.ReadFile(rwWatchdogStatusLedger(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"phase":"progress"`) || !strings.Contains(body, `"new_turns":1`) ||
+		!strings.Contains(body, `"progress_witness_source":"transcript_real_turn_after_resume"`) {
+		t.Fatalf("status ledger missing transcript progress witness:\n%s", body)
 	}
 }
 

@@ -40,6 +40,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 	"github.com/anthony-chaudhary/fak/internal/slackmeta"
+	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 )
 
 // scoreboardTokenKey is the shared workspace bot token every non-scoreboard surface falls
@@ -147,13 +148,14 @@ func cmdSlack(argv []string) {
 	if len(argv) == 0 {
 		os.Exit(runSlackCheck(os.Stdout, os.Stderr, nil))
 	}
-	dispatchSubcommands("slack", "check | health | beat | walk | refresh | send", argv,
+	dispatchSubcommands("slack", "check | health | beat | walk | refresh | send | outbox", argv,
 		subcommand{"check", runSlackCheck},
 		subcommand{"health", runSlackHealth},
 		subcommand{"beat", runSlackBeat},
 		subcommand{"walk", runSlackWalk},
 		subcommand{"refresh", runSlackRefresh},
 		subcommand{"send", runSlackSend},
+		subcommand{"outbox", runSlackOutbox},
 	)
 }
 
@@ -328,6 +330,7 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 	text := fs.String("text", "", "message text (REQUIRED); pass - to read the message from stdin")
 	token := fs.String("token", "", "bot token (default: $FAK_SCOREBOARD_TOKEN, then .env.slack.local)")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
+	durable := fs.Bool("durable", false, "enqueue through the durable outbox: the message survives crashes/429s/token drift and is delivered by this call's drain or a later one")
 	dryRun := fs.Bool("dry-run", false, "print what would be sent and exit without posting")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -364,8 +367,45 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "  channel : %s\n", *channel)
 		fmt.Fprintf(stdout, "  token   : %s  [%s]\n", redactToken(tok), tokSource)
 		fmt.Fprintf(stdout, "  text    : %s\n", msg)
+		if *durable {
+			fmt.Fprintf(stdout, "  durable : would enqueue into %s then drain\n", resolveOutboxDir())
+		}
 		if tok == "" {
 			fmt.Fprintln(stderr, "  (token is UNSET — set --token or "+scoreboardTokenKey+" before a live send)")
+		}
+		return 0
+	}
+
+	if *durable {
+		// Durability first: the row is on disk before any network is attempted, so a
+		// crash, 429, or missing token delays the message instead of losing it. The
+		// in-process drain is best-effort — a failure leaves the row for the next
+		// drain (another --durable send, `fak slack outbox drain`, or the watchdog).
+		ob, err := openOutbox()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak slack send: outbox: %v\n", err)
+			return 1
+		}
+		nonce, err := ob.Enqueue(slackoutbox.Row{Channel: *channel, Text: msg, Source: "slack-send"})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak slack send: enqueue: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "fak slack send: enqueued durably (nonce=%s)\n", nonce)
+		wire, werr := outboxWire(tok, *apiBase)
+		if werr != nil {
+			fmt.Fprintf(stdout, "  delivery deferred: %v — run `fak slack outbox drain` once configured\n", werr)
+			return 0
+		}
+		rep, derr := ob.Drain(ctx(), wire, slackoutbox.DrainOpts{Root: "."})
+		switch {
+		case derr == slackoutbox.ErrDrainBusy:
+			fmt.Fprintln(stdout, "  delivery deferred: another drainer holds the lock")
+		case derr != nil:
+			fmt.Fprintf(stdout, "  delivery deferred: %v\n", derr)
+		default:
+			fmt.Fprintf(stdout, "  drained: posted %d  refused %d  failed %d  remaining %d\n",
+				rep.Posted, rep.Refused, rep.Failed, rep.Remaining)
 		}
 		return 0
 	}

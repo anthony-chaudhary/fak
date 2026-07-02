@@ -66,11 +66,13 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeWatchdog(stdout, stderr, argv[1:])
 	case "resolve":
 		return runResumeResolve(stdout, stderr, argv[1:])
+	case "why":
+		return runResumeWhy(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, or resolve)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, resolve, or why)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -491,12 +493,12 @@ func isNonLaunchPhase(phase string) bool {
 }
 
 // defaultResumeLedger is the durable launch ledger every launcher appends to, under the
-// fleet registry dir (FLEET_REG_DIR, default tools/_registry) — the same path
-// fleet_resume_watchdog.py and launch_admission.py use.
+// fleet registry dir (FLEET_REG_DIR, default host Fleet registry when present, else
+// tools/_registry) — the same path the registered watchdog uses.
 func defaultResumeLedger() string {
 	reg := strings.TrimSpace(os.Getenv("FLEET_REG_DIR"))
 	if reg == "" {
-		reg = filepath.Join("tools", "_registry")
+		reg = defaultFleetRegistryDir()
 	}
 	return filepath.Join(reg, "resume_ledger.jsonl")
 }
@@ -1014,7 +1016,9 @@ func resumeUsage(w io.Writer) {
                       [--no-refresh]
 
   fak resume resolve <session-id> [--home DIR] [--cwd DIR] [--dry-run]
-                     [--no-probe] [--json]
+                     [--no-probe] [--wait] [--no-wait] [--json]
+
+  fak resume why <session-id> [--home DIR] [--ledger FILE] [--max-attempts N] [--json]
 
 plan answers "I am resuming a long session — what happens to the prompt cache, and what
 should I do?" It projects the cache posture (cold if idle exceeds the TTL, warm if not),
@@ -1041,8 +1045,19 @@ premise held. The deterministic, observable answer to "is the cache-value call e
 resolve decides which account "claude --resume <sid>" should pin to: it locates the
 owner (host-last, newest-mtime) across ~/.claude*, and — when the owner is throttled —
 re-homes the transcript onto the least-loaded healthy Claude worker and pins there
-(PIN / REHOME / PIN_BLOCKED). stdout is the CLAUDE_CONFIG_DIR to set; --dry-run decides
-without copying. The Go port of tools/resume_resolver.py.
+(PIN / REHOME / PIN_BLOCKED). When the owner's reset is imminent (<= 15 min) the verdict
+is WAIT_RESET instead — waiting for the owner beats copying the transcript onto another
+loaded seat — and --wait turns that into behavior: sleep out the reset (narrated as a
+countdown on stderr), re-resolve, and print the pin dir, so one command self-heals the
+account wall. --no-wait forces the immediate re-home. stdout is the CLAUDE_CONFIG_DIR to
+set; --dry-run decides without copying. The Go port of tools/resume_resolver.py.
+
+why is the single-session narrative over the same folds: locate the session across every
+~/.claude* account (no --store to know), read how it died from the transcript's own
+records — including the mid-turn death that writes NO error record and used to vanish
+from every readout — fold the resume journey from the ledger, read the owner account's
+block/reset state, dry-run the resolve decision, and print the story with the one
+command to run. The answer to "my session just died as a random error — what happened?".
 
 scan walks a whole transcript store and finds the sessions that crashed on a rate limit
 and never resumed — the ones that need a managed restart — then prints each one's cache
@@ -1093,5 +1108,11 @@ example (find the rate-limited crashes in a project and plan each managed restar
 
 example (read where every crashed/resumed session stands and what still needs action):
   fak resume status --store ~/.claude/projects/<project>
+
+example (one dead session — the full story and the exact command to bring it back):
+  fak resume why <session-id>
+
+example (resume one session, self-healing an imminent owner reset by waiting it out):
+  CLAUDE_CONFIG_DIR="$(fak resume resolve -wait <sid>)" claude --resume <sid>
 `)
 }

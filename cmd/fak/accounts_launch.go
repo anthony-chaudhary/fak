@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -32,6 +34,8 @@ import (
 // replacing a hand-rolled `CLAUDE_CONFIG_DIR=… claude` line with one that defaults to the
 // guarded, cache-on, kernel-adjudicated path.
 
+const launchModelFallbackMaxDuration = 30 * time.Second
+
 // launchOpts captures the launch knobs after the seat is resolved.
 type launchOpts struct {
 	command         string   // agent command to start (default "claude")
@@ -49,12 +53,18 @@ type launchOpts struct {
 // only emits it for Claude, since --settings is Claude-specific.
 const ultracodeSettingsArg = `{"ultracode":true}`
 
-// defaultLaunchModel is the model an account-switched Claude launch pins by default. The switcher
-// passes it explicitly via --model so every seat a launch lands on starts on the same model
-// regardless of that seat's OWN saved default. `--model ""` opts out and lets the seat's saved
-// default stand. Like ultracode it is emitted for Claude only: --model is a Claude-specific flag
-// and the id names a Claude model, meaningless to other agents.
+// defaultLaunchModel is the Fable 5 model alias an account-switched Claude launch pins by
+// default. The switcher passes it explicitly via --model so every seat a launch lands on
+// starts on the same model regardless of that seat's OWN saved default. `--model ""` opts
+// out and lets the seat's saved default stand. Like ultracode it is emitted for Claude only:
+// --model is a Claude-specific flag and the id names a Claude model, meaningless to other
+// agents.
 const defaultLaunchModel = "fable"
+
+// defaultLaunchFallbackModel is the one-shot startup fallback when the default Fable 5
+// launch is refused before a session starts because the model is unavailable. It deliberately
+// lands on the explicit Opus 4.8 id; ultracode is preserved by reusing the same launchOpts.
+const defaultLaunchFallbackModel = "claude-opus-4-8"
 
 // launchSkipPermsFlag returns the agent-specific flag that hands permission authority to
 // fak's capability floor — i.e. suppresses the agent's OWN per-call approval prompts, because
@@ -133,22 +143,33 @@ type launchParams struct {
 	// rotate launches the NEXT account in the rotation instead of the active/named seat —
 	// the round-robin that lets an operator hop off a walled account onto a fresh bucket.
 	// after is the anchor it rotates OFF of (empty => the named seat, else the active seat).
-	rotate       bool
-	after        string
-	useHeadroom  bool   // default true — order the rotation by the live runtime headroom signal
-	useGuard     bool   // default true
-	skipPerms    bool   // default true
-	ultracode    bool   // default true — put Claude in ultracode (workflow) mode via --settings
-	model        string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
-	dryRun       bool   // print the plan, do not exec
-	passthrough  []string
-	registryPath string
-	homeDir      string
+	rotate        bool
+	after         string
+	useHeadroom   bool   // default true — order the rotation by the live runtime headroom signal
+	useGuard      bool   // default true
+	skipPerms     bool   // default true
+	ultracode     bool   // default true — put Claude in ultracode (workflow) mode via --settings
+	model         string // default Fable — the model a switched Claude launch pins via --model ("" => seat default)
+	modelExplicit bool
+	fallbackModel string // default Opus 4.8 — retried once when the default Fable startup is unavailable
+	dryRun        bool   // print the plan, do not exec
+	passthrough   []string
+	registryPath  string
+	homeDir       string
+}
+
+// launchRunResult is the exec seam result. Stderr carries a bounded tail only, so the
+// fallback classifier can inspect startup failures without retaining a whole agent session.
+type launchRunResult struct {
+	Code     int
+	Stderr   string
+	Duration time.Duration
 }
 
 // accountsLaunchRun is the exec seam: it spawns the resolved argv with the seat's
-// CLAUDE_CONFIG_DIR in the environment and returns the child's exit code. A test overrides
-// it to capture the plan without spawning a real agent. Production uses execLaunchChild.
+// CLAUDE_CONFIG_DIR in the environment and returns the child's exit code plus a stderr tail.
+// A test overrides it to capture the plan without spawning a real agent. Production uses
+// execLaunchChild.
 var accountsLaunchRun = execLaunchChild
 
 // accountsLaunchStamp/accountsLaunchHeadRev are freshness seams. A stale launcher is a
@@ -246,6 +267,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		passthrough:     p.passthrough,
 	})
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+home.Dir)
+	grant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), argv, envMap(env), home.Dir))
 
 	guardWord := "off (--guard=false; launching the agent directly, no kernel/cache hop)"
 	if p.useGuard {
@@ -260,7 +282,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		}
 	}
 	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
-	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = %s\n", home.Dir)
+	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>\n")
 	if id.Email != "" {
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
 	}
@@ -283,19 +305,121 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 			modelWord = fmt.Sprintf("n/a (%s is not Claude; --model not applied)", command)
 		}
 	}
+	if fb, ok := defaultModelFallback(command, p); ok {
+		modelWord += fmt.Sprintf(" (fallback %s on model-unavailable startup)", fb)
+	}
 	fmt.Fprintf(stderr, "  guard             = %s\n", guardWord)
 	fmt.Fprintf(stderr, "  permissions       = %s\n", permWord)
 	fmt.Fprintf(stderr, "  ultracode         = %s\n", ultracodeWord)
 	fmt.Fprintf(stderr, "  model             = %s\n", modelWord)
-	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(argv, " "))
+	fmt.Fprintf(stderr, "  command           = %s\n", strings.Join(grant.SanitizedArgv, " "))
+	fmt.Fprintf(stderr, "  agent_run         = %s policy_digest=%s broker=%s\n",
+		grant.Metadata.AgentRunID, grant.Metadata.PolicyDigest, grant.Reason)
+
+	if !grant.Allow {
+		fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied launch: %s\n", grant.Reason)
+		return 1
+	}
+	launchArgv := grant.Argv
+	launchEnv := envSliceFromMap(grant.Env)
 
 	if p.dryRun {
 		fmt.Fprintln(stderr, "  (dry-run — not launching)")
 		// Also echo the launch command to stdout so it is scriptable (eval/wrappers).
-		fmt.Fprintln(stdout, strings.Join(argv, " "))
+		fmt.Fprintln(stdout, strings.Join(launchArgv, " "))
 		return 0
 	}
-	return accountsLaunchRun(stdout, stderr, argv, env)
+	res := accountsLaunchRun(stdout, stderr, launchArgv, launchEnv)
+	if fallback, ok := defaultModelFallback(command, p); ok && shouldRetryLaunchWithFallback(res, p.model) {
+		fmt.Fprintf(stderr, "fak accounts launch: primary model %q was unavailable at startup; retrying once with fallback model %q.\n",
+			p.model, fallback)
+		fallbackArgv := buildLaunchArgv(fakBin, launchOpts{
+			command:         command,
+			useGuard:        p.useGuard,
+			skipPermissions: p.skipPerms,
+			ultracode:       p.ultracode,
+			model:           fallback,
+			passthrough:     p.passthrough,
+		})
+		fallbackGrant := launchSpawnBroker(newLaunchBrokerAttempt("accounts_launch", guardAgentBaseName(command), fallbackArgv, envMap(env), home.Dir))
+		fmt.Fprintf(stderr, "  fallback command  = %s\n", strings.Join(fallbackGrant.SanitizedArgv, " "))
+		fmt.Fprintf(stderr, "  fallback agent_run = %s policy_digest=%s broker=%s\n",
+			fallbackGrant.Metadata.AgentRunID, fallbackGrant.Metadata.PolicyDigest, fallbackGrant.Reason)
+		if !fallbackGrant.Allow {
+			fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied fallback launch: %s\n", fallbackGrant.Reason)
+			return 1
+		}
+		res = accountsLaunchRun(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env))
+	}
+	return res.Code
+}
+
+func defaultModelFallback(command string, p launchParams) (string, bool) {
+	switch guardAgentBaseName(command) {
+	case "claude", "claude-code":
+	default:
+		return "", false
+	}
+	primary := strings.TrimSpace(p.model)
+	fallback := strings.TrimSpace(p.fallbackModel)
+	if primary == "" || fallback == "" || strings.EqualFold(primary, fallback) {
+		return "", false
+	}
+	if p.modelExplicit || !strings.EqualFold(primary, defaultLaunchModel) {
+		return "", false
+	}
+	if passthroughOverridesClaudeModel(p.passthrough) {
+		return "", false
+	}
+	return fallback, true
+}
+
+func passthroughOverridesClaudeModel(args []string) bool {
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) {
+			return true
+		}
+		if strings.HasPrefix(a, "--model=") {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRetryLaunchWithFallback(res launchRunResult, primary string) bool {
+	if res.Code == 0 {
+		return false
+	}
+	if res.Duration > launchModelFallbackMaxDuration {
+		return false
+	}
+	return launchModelUnavailable(res.Stderr, primary)
+}
+
+func launchModelUnavailable(stderr, primary string) bool {
+	text := strings.ToLower(stderr)
+	if !strings.Contains(text, "model") {
+		return false
+	}
+	primary = strings.ToLower(strings.TrimSpace(primary))
+	if primary != "" && !strings.Contains(text, primary) && !strings.Contains(text, "fable") {
+		return false
+	}
+	for _, sig := range []string{
+		"not available",
+		"unavailable",
+		"not found",
+		"does not exist",
+		"unknown model",
+		"invalid model",
+		"unsupported model",
+		"model_not_found",
+	} {
+		if strings.Contains(text, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 func warnIfAccountsLaunchStaleBinary(stderr io.Writer, fakBin string, useGuard bool) {
@@ -362,21 +486,50 @@ func activeLaunchSeatName(reg accounts.Registry) (string, bool) {
 // execLaunchChild spawns argv[0] with argv[1:] under env, wiring the child to the real
 // terminal (an interactive agent owns stdin/stdout/stderr), and returns its exit code.
 // A non-exec error (binary not found, etc.) is surfaced and mapped to 1.
-func execLaunchChild(_, stderr io.Writer, argv, env []string) int {
+func execLaunchChild(_, stderr io.Writer, argv, env []string) launchRunResult {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "fak accounts launch: empty command")
-		return 2
+		return launchRunResult{Code: 2}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	var errTail cappedBuffer
+	errTail.max = 64 << 10
+	cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errTail)
+	start := time.Now()
 	if err := cmd.Run(); err != nil {
+		dur := time.Since(start)
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return ee.ExitCode()
+			return launchRunResult{Code: ee.ExitCode(), Stderr: errTail.String(), Duration: dur}
 		}
 		fmt.Fprintf(stderr, "fak accounts launch: %v\n", err)
-		return 1
+		return launchRunResult{Code: 1, Stderr: errTail.String(), Duration: dur}
 	}
-	return 0
+	return launchRunResult{Code: 0, Stderr: errTail.String(), Duration: time.Since(start)}
+}
+
+type cappedBuffer struct {
+	bytes.Buffer
+	max int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if b.max <= 0 {
+		return n, nil
+	}
+	if len(p) >= b.max {
+		b.Buffer.Reset()
+		_, _ = b.Buffer.Write(p[len(p)-b.max:])
+		return n, nil
+	}
+	_, _ = b.Buffer.Write(p)
+	if b.Buffer.Len() > b.max {
+		data := append([]byte(nil), b.Buffer.Bytes()[b.Buffer.Len()-b.max:]...)
+		b.Buffer.Reset()
+		_, _ = b.Buffer.Write(data)
+	}
+	return n, nil
 }

@@ -2,14 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -18,9 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/term"
-
-	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -29,12 +22,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
-	"github.com/anthony-chaudhary/fak/internal/journal"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
-	"github.com/anthony-chaudhary/fak/internal/secretload"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
@@ -126,6 +117,7 @@ func cmdGuard(argv []string) {
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
+	bannerFlag := fs.String("banner", guardBannerAuto, "how much of the startup report to print before handing the terminal to the agent: auto|full|compact|off. AUTO (default): the compact 3-line banner for an attended interactive launch (the full report is a wall of text the agent's full-screen UI paints over seconds later), and the FULL report for headless/piped/scripted launches (a captured log wants the detail; byte-for-byte the pre-flag output). The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars). --quiet still silences everything.")
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended as a durable row to docs/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
@@ -156,7 +148,8 @@ func cmdGuard(argv []string) {
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session, then persist a scored vcache live row at shutdown when provider-cache telemetry exists.")
-	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Mutually exclusive with --base-url / --remote-serve.")
+	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Alone, the local model IS the upstream (mutually exclusive with --remote-serve); with --alongside or an explicit --base-url it serves ALONGSIDE the API upstream instead (see --alongside).")
+	alongside := fs.Bool("alongside", false, "with --gguf: serve the small local model ALONGSIDE the API upstream instead of REPLACING it (the dual planner). The wrapped agent's normal turns proxy to the provider exactly as a plain `fak guard` session (same OAuth/passthrough, same prompt-cache preservation), while any request addressed to the --gguf model's alias — or the literal model id \"local\" — decodes in-kernel on your box with no upstream call and no tokens billed (e.g. point a cheap subagent tier at it). Implied by --gguf + an explicit --base-url.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, or a llama.cpp server) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
@@ -164,7 +157,6 @@ func cmdGuard(argv []string) {
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
-	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
@@ -300,6 +292,16 @@ func cmdGuard(argv []string) {
 		*debugStats, *quiet, guardSetFlags["debug-stats"],
 		cmdGuardStdinInteractive(), guardChildInteractive(command))
 
+	// Startup-banner verbosity: resolve --banner now, fail-loud on a bad value before
+	// any gateway binds. AUTO compacts only the attended interactive launch — the same
+	// attended-vs-headless split as the debug-stats auto-suppress above — so headless/
+	// piped launches keep the full startup report byte-for-byte. See guard_banner.go.
+	bannerMode, bannerErr := guardBannerModeDecision(*bannerFlag, *quiet, cmdGuardStdinInteractive(), guardChildInteractive(command))
+	if bannerErr != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: %v\n", bannerErr)
+		os.Exit(2)
+	}
+
 	// Observability sink for the gateway's structured per-request + per-verdict logs
 	// (event=gateway_http_request / event=gateway_operation, each carrying the trace_id).
 	// Default OFF (a no-op) so the wrapped agent's terminal stays clean; --log FILE (or
@@ -314,19 +316,31 @@ func cmdGuard(argv []string) {
 	//    embedded guard floor. With NO floor the kernel default-denies every tool and
 	//    the wrapped agent can do nothing — so guard ALWAYS loads one, fail-loud.
 	var (
-		rt          policy.Runtime
-		err         error
-		floorSource string
+		rt           policy.Runtime
+		err          error
+		floorSource  string
+		policyBytes  []byte
+		policyDigest string
 	)
 	tPolicy := time.Now()
 	if *policyPath != "" {
-		rt, err = policy.LoadRuntime(*policyPath)
+		policyBytes, err = os.ReadFile(*policyPath)
+		if err == nil {
+			rt, err = policy.ParseRuntime(policyBytes)
+			if err != nil {
+				err = fmt.Errorf("policy %s: %w", *policyPath, err)
+			}
+		} else {
+			err = fmt.Errorf("policy: %w", err)
+		}
 		floorSource = *policyPath
 	} else {
+		policyBytes = guardDefaultPolicyJSON
 		rt, err = policy.ParseRuntime(guardDefaultPolicyJSON)
 		floorSource = "built-in guard floor (--dump-policy to see it)"
 	}
 	must(err)
+	policyDigest = guardPolicyDigest(policyBytes)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	policyDur := time.Since(tPolicy)
@@ -361,14 +375,19 @@ func cmdGuard(argv []string) {
 		os.Exit(2)
 	}
 
-	// --gguf turns the in-process gateway into a LOCAL in-kernel model server (fak runs the
-	// model itself), so it is mutually exclusive with the upstream-proxy flags — the local
-	// model IS the upstream. Decide + validate up front, before binding or pulling weights.
-	localModel, localConflict := guardLocalModelDecision(*ggufPath, *baseURL, remoteBase)
+	// --gguf turns the in-process gateway into a LOCAL in-kernel model server (fak runs
+	// the model itself). Alone, the local model IS the upstream; with --alongside (or an
+	// explicit --base-url) it serves ALONGSIDE the API upstream instead — the gateway's
+	// dual planner routes requests addressed to the local model id in-kernel and proxies
+	// everything else. Decide + validate up front, before binding or pulling weights.
+	localModel, localAlongside, localConflict := guardLocalModelDecision(*ggufPath, *baseURL, remoteBase, *alongside)
 	if localConflict != "" {
 		fmt.Fprintln(os.Stderr, "fak guard:", localConflict)
 		os.Exit(2)
 	}
+	// The alias the operator typed (before resolution rewrites *ggufPath to a file path)
+	// is the model id a client asks for to reach the local side in alongside mode.
+	localAlias := strings.TrimSpace(*ggufPath)
 
 	// --local: auto-detect a running local OpenAI-compatible server (Ollama/LM Studio/
 	// llama.cpp) and wire the upstream to it. This is a PROXY path (the server is external),
@@ -423,14 +442,17 @@ func cmdGuard(argv []string) {
 
 	// 3. Resolve the upstream wire + credential posture. Two worlds:
 	//
-	//    LOCAL (--gguf): fak runs the model itself in-kernel, so there is NO upstream API,
-	//    no API key, and no OAuth. Resolve ONLY the wire (anthropic for claude, openai for
-	//    codex/…) — that still selects which base-URL env var points the child at the
-	//    gateway and labels the banner — and leave the credential posture empty.
+	//    LOCAL-ONLY (--gguf, no --alongside): fak runs the model itself in-kernel, so
+	//    there is NO upstream API, no API key, and no OAuth. Resolve ONLY the wire
+	//    (anthropic for claude, openai for codex/…) — that still selects which base-URL
+	//    env var points the child at the gateway and labels the banner — and leave the
+	//    credential posture empty.
 	//
 	//    PROXY (default): resolveGuardUpstream picks the provider, base URL, API key, and
 	//    the Claude subscription-OAuth default. --remote-serve, when set, pins provider=openai
-	//    + base=the box inside the resolver.
+	//    + base=the box inside the resolver. ALONGSIDE (--gguf --alongside / --gguf
+	//    --base-url) takes THIS world too — the API upstream keeps its full credential
+	//    posture unchanged, and the loaded local model rides beside it (dual planner).
 	var (
 		up                   string
 		providerAutodetected bool
@@ -452,7 +474,7 @@ func cmdGuard(argv []string) {
 		apiKeyFunc func() string
 	)
 	tUpstream := time.Now()
-	if localModel {
+	if localModel && !localAlongside {
 		up, providerAutodetected = resolveGuardProvider(*provider, command[0])
 	} else {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
@@ -522,24 +544,6 @@ func cmdGuard(argv []string) {
 		}
 	}
 	upstreamResolveDur = time.Since(tUpstream)
-
-	// Managed-cache posture (epic #1844 C6): decide from the JUST-resolved upstream whether
-	// this session actively manages the provider prompt-cache (the stable-prefix 1h TTL
-	// upgrade). AUTO keys on provable API-key billing — the OAuth branch above rewrote
-	// apiKey to the subscription token but stamped oauthSource, so the pair distinguishes
-	// the two credentials. Fail loud on an unknown mode before any gateway binds.
-	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
-		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
-		// PURE local branch (no upstream at all) turns the cache posture off.
-		localModel:  localModel,
-		provider:    up,
-		apiKey:      apiKey,
-		oauthSource: oauthSource,
-	})
-	if mcErr != nil {
-		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
-		os.Exit(2)
-	}
 
 	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
 	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
@@ -670,6 +674,9 @@ func cmdGuard(argv []string) {
 			fmt.Fprintf(os.Stderr, "fak guard: %q has no usable tokenizer; pass --tokenizer or use a GGUF with an embedded tokenizer\n", *ggufPath)
 			os.Exit(1)
 		}
+		if localAlongside && !*quiet {
+			fmt.Fprintf(os.Stderr, "fak guard: ALONGSIDE mode — model id %q (or \"local\") decodes in-kernel on this box; every other model id proxies to the API upstream as usual\n", localAlias)
+		}
 	}
 
 	// 4. Bind the listener up front so the real port is known BEFORE we wire the child,
@@ -739,11 +746,15 @@ func cmdGuard(argv []string) {
 		APIKeyFunc: apiKeyFunc,
 		// LOCAL in-kernel model (--gguf): a loaded model + tokenizer with an EMPTY BaseURL
 		// makes the gateway serve BOTH /v1/messages (claude) and /v1/chat/completions (codex)
-		// from fak's own engine — no upstream call. nil/false in the proxy path, so the
-		// default `fak guard -- claude` upstream behavior is unchanged.
+		// from fak's own engine — no upstream call. With --alongside (BaseURL ALSO set) the
+		// gateway instead builds its dual planner: requests addressed to LocalModelID (the
+		// --gguf alias as typed, or the literal "local") decode in-kernel and everything
+		// else proxies upstream unchanged. nil/false in the proxy path, so the default
+		// `fak guard -- claude` upstream behavior is unchanged.
 		InKernelModel:         inKernelModel,
 		Tokenizer:             inKernelTok,
 		InKernelQ4K:           inKernelQ4K,
+		LocalModelID:          localAlias,
 		Backend:               chatBackend,
 		PinUpstreamCredential: pinUpstream,
 		RequireKey:            requireKey,
@@ -775,11 +786,6 @@ func cmdGuard(argv []string) {
 		CompactHistoryBudget: *compactHistoryBudget,
 		CompactAnchorHead:    *compactAnchorHead,
 		ElideResultBytes:     *elideResultBytes,
-		// Managed-cache posture (--managed-cache, epic #1844 C6): when active, the gateway
-		// upgrades the stable-prefix cache_control breakpoint to the 1h TTL tier on the
-		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from
-		// the session's billing posture; witnessed on /metrics per turn.
-		CacheTTL1H: mcache.active,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
 		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),
@@ -987,9 +993,14 @@ func cmdGuard(argv []string) {
 		os.Exit(1)
 	}
 
-	if !*quiet {
+	// Render the FULL startup report to a buffer — always, even under --quiet or the
+	// compact banner — and register it on the gateway, so the session serves it back
+	// on demand for its whole life (`fak info --startup` / startup_report on
+	// /debug/vars). What reaches the terminal RIGHT NOW is bannerMode's call below.
+	var startupReport strings.Builder
+	{
 		if providerAutodetected {
-			fmt.Fprintf(os.Stderr, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
+			fmt.Fprintf(&startupReport, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
 		}
 		injectNames := injected[0][0]
 		for _, kv := range injected[1:] {
@@ -999,549 +1010,66 @@ func cmdGuard(argv []string) {
 		if localModel {
 			localLabel = filepath.Base(*ggufPath)
 		}
-		printGuardBanner(os.Stderr, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
+		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, refusalCarryForward, remoteBase != "", localModel, localLabel, command)
 		if preCompactInstall.Applied {
-			fmt.Fprintf(os.Stderr, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
+			fmt.Fprintf(&startupReport, "fak guard: Claude PreCompact hook: %s (settings %s)\n", preCompactInstall.Mode, preCompactInstall.SettingsPath)
 		}
 		if stopHookInstall.Applied {
-			fmt.Fprintf(os.Stderr, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
+			fmt.Fprintf(&startupReport, "fak guard: Claude Stop hook (deny-all auto-continue): %s — graduated nudge→warn(%d)→final(%d)→give-up(>%d consecutive); a floor-refused-everything turn is reported as end_turn and this resumes the agent past it with escalating guidance, the give-up logged (--deny-all-continue off to disable)\n", stopHookInstall.Mode, stopHookInstall.WarnAt, stopHookInstall.FinalAt, stopHookInstall.Max)
 		}
 		if len(guardTaskHandoffEnv(handoffCfg)) > 0 {
 			live := "validate-only"
 			if handoffCfg.Live {
 				live = "live-issue-sync"
 			}
-			fmt.Fprintf(os.Stderr, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", handoffCfg.Mode, live, handoffCfg.File, guardTaskHandoffFileEnv)
+			fmt.Fprintf(&startupReport, "fak guard: task handoff Stop gate: %s (%s) — clean stops require %s; child sees $%s\n", handoffCfg.Mode, live, handoffCfg.File, guardTaskHandoffFileEnv)
 		}
-		printGuardCodexNote(os.Stderr, codexInstall)
-		printGuardMCPNote(os.Stderr, mcpInstall)
-		printGuardCapabilitiesNote(os.Stderr, mcpInstall)
+		printGuardCodexNote(&startupReport, codexInstall)
+		printGuardMCPNote(&startupReport, mcpInstall)
+		printGuardCapabilitiesNote(&startupReport, mcpInstall)
 		switch {
 		case debugStatsStderr:
-			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
+			fmt.Fprintln(&startupReport, "  debug      : observable layer ON — one cache/token-value line per turn to stderr (request_tokens/cache_read/cache_creation/cache_hit/cache_rebate_tokens/compact/health); --debug-stats=false or --quiet to silence")
 		case *debugStats && !*quiet:
-			fmt.Fprintln(os.Stderr, "  debug      : observable layer ON — the per-turn cache/token-value economy is kept OUT of the agent's full-screen UI to avoid corrupting it; read it live in the `fak info` pane and in the exit summary. Pass --debug-stats to also stream it here, --debug-stats=false to disable")
+			fmt.Fprintln(&startupReport, "  debug      : observable layer ON — the per-turn cache/token-value economy is kept OUT of the agent's full-screen UI to avoid corrupting it; read it live in the `fak info` pane and in the exit summary. Pass --debug-stats to also stream it here, --debug-stats=false to disable")
 		}
 		// A LOCAL in-kernel model has no upstream credential to report; the proxy-path auth
 		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
 		if !localModel {
 			switch {
 			case pinUpstream:
-				fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
-			case up == "anthropic" && apiKey != "":
-				fmt.Fprintf(os.Stderr, "fak guard: upstream auth — API key (from --api-key-env %s; API billing)\n", *apiKeyEnv)
+				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", oauthSource)
 			case up == "anthropic":
-				fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
+				fmt.Fprintln(&startupReport, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 			}
-			// The session's prompt-cache posture, made explicit at boot: whether fak actively
-			// manages the outbound cache_control (1h TTL upgrade) or stays passive and why.
-			fmt.Fprintln(os.Stderr, mcache.bannerLine())
 		}
 		if contextBudgetLimit > 0 {
-			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, contextBudgetLimit)
+			fmt.Fprintf(&startupReport, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, contextBudgetLimit)
 			if *resetOnBudget {
-				fmt.Fprintln(os.Stderr, "fak guard: session reset — transparent carryover enabled")
+				fmt.Fprintln(&startupReport, "fak guard: session reset — transparent carryover enabled")
 			}
 			if *restartOnBudget {
-				fmt.Fprintln(os.Stderr, "fak guard: session restart — child relaunch on budget exhaustion enabled")
+				fmt.Fprintln(&startupReport, "fak guard: session restart — child relaunch on budget exhaustion enabled")
 			}
 		}
 		if maxDurationLimit > 0 {
-			fmt.Fprintf(os.Stderr, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDurationLimit.String())
+			fmt.Fprintf(&startupReport, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDurationLimit.String())
 		}
+	}
+
+	srv.SetStartupReport(startupReport.String())
+	switch bannerMode {
+	case guardBannerFull:
+		fmt.Fprint(os.Stderr, startupReport.String())
+	case guardBannerCompact:
+		printGuardCompactBanner(os.Stderr, guardBannerVersion(), guardShortBuildID(), gwURL, command, refusalCarryForward)
 	}
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
+	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)
 	if restarter.Enabled() {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, spawnMeta, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
-}
-
-const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
-
-// logDojoEpisodeStart records the start of a live dojo episode when --dojo is
-// enabled. Shutdown writes a second completed row if the gateway observed a
-// provider-cache turn window.
-func logDojoEpisodeStart(mode string) error {
-	return logDojoEpisodeFile(mode, nil)
-}
-
-// findRepoRoot walks up from start to the nearest dir containing .git; falls back to start.
-func findRepoRoot(start string) string {
-	cur := filepath.Clean(start)
-	for {
-		if _, err := os.Stat(filepath.Join(cur, ".git")); err == nil {
-			return cur
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return start
-		}
-		cur = parent
-	}
-}
-
-type guardOAuthEnvSource struct {
-	key string
-	env string
-}
-
-func (s guardOAuthEnvSource) Name() string { return "$" + s.env }
-
-func (s guardOAuthEnvSource) Lookup(key string) (string, bool) {
-	if key != s.key || s.env == "" {
-		return "", false
-	}
-	v := strings.TrimSpace(os.Getenv(s.env))
-	return v, v != ""
-}
-
-type guardOAuthCredentialsSource struct {
-	key  string
-	path string
-	now  func() time.Time
-	warn io.Writer
-}
-
-func (s guardOAuthCredentialsSource) Name() string { return s.path }
-
-func (s guardOAuthCredentialsSource) Lookup(key string) (string, bool) {
-	if key != s.key {
-		return "", false
-	}
-	now := time.Now
-	if s.now != nil {
-		now = s.now
-	}
-	// Claude Code refreshes this file ~hourly by rewriting it, so a read can race the
-	// rewrite and catch a torn/empty/partial body that fails to parse. The window closes
-	// in microseconds, so when the file EXISTS but the current read does not yield a token,
-	// retry a few times over a few ms before giving up — that keeps a transient torn read
-	// from being reported as "no active login" and falling through to the sibling
-	// .oauth-token (a DIFFERENT, possibly-stale setup token). A genuinely-absent file (the
-	// first os.Stat error) still misses immediately.
-	const tornReadRetries = 3
-	for attempt := 0; ; attempt++ {
-		v, ok, transient := s.readOnce(now)
-		if ok || !transient || attempt >= tornReadRetries {
-			return v, ok
-		}
-		time.Sleep(15 * time.Millisecond)
-	}
-}
-
-// readOnce performs a single resolve of the credentials file. It returns the token and
-// ok=true on success; on failure, transient reports whether the failure looks like a
-// torn/racing read of an EXISTING file (worth a brief retry) versus a definitive miss —
-// an absent file, or a present-but-expired token (which must NOT be sent: an expired
-// bearer 401s, so it is treated as absent so a fresher source or the per-request 401
-// refresh can take over).
-func (s guardOAuthCredentialsSource) readOnce(now func() time.Time) (tok string, ok bool, transient bool) {
-	b, err := os.ReadFile(s.path)
-	if err != nil {
-		// A missing file is a definitive miss; any other read error (a momentary
-		// permission/lock blip during the rewrite) is worth a short retry.
-		return "", false, !os.IsNotExist(err)
-	}
-	var doc struct {
-		ClaudeAIOauth struct {
-			AccessToken string `json:"accessToken"`
-			ExpiresAt   int64  `json:"expiresAt"`
-		} `json:"claudeAiOauth"`
-	}
-	if json.Unmarshal(b, &doc) != nil {
-		// File exists but does not parse — a torn read mid-rewrite. Retry.
-		return "", false, true
-	}
-	v := strings.TrimSpace(doc.ClaudeAIOauth.AccessToken)
-	if v == "" {
-		// Parsed but no token (truncated-but-valid JSON, or a transitional empty write).
-		return "", false, true
-	}
-	// An expired access token is a KNOWN-BAD bearer (the upstream 401s on it). Treat it as
-	// absent rather than send it: a higher-priority source already lost, so falling through
-	// lets the long-lived .oauth-token setup token answer, and the per-request 401 refresh
-	// (agent.HTTPPlanner) re-reads the file once Claude Code rewrites the rotated token in.
-	if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < now().UnixMilli() {
-		if s.warn != nil {
-			fmt.Fprintf(s.warn, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", s.path)
-		}
-		return "", false, false
-	}
-	return v, true, false
-}
-
-// credExpiresAt reads the .credentials.json accessToken's expiresAt WITHOUT collapsing an
-// expired token to "absent" (unlike readOnce, which the Lookup contract requires to do): the
-// #1183 StaleCred rehydrate rung (accounts.CredFreshness / CredCheck) needs the raw freshness
-// fact — is the token live right now — not the "safe to send" verdict. ok is false when the
-// file is missing/unparseable/carries no token (nothing to judge); a token with expiresAt<=0
-// (no expiry recorded) is treated as always-fresh, matching Claude Code's own convention of
-// omitting expiresAt for a token that does not rotate.
-func credExpiresAt(path string) (expiresAt time.Time, ok bool) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return time.Time{}, false
-	}
-	var doc struct {
-		ClaudeAIOauth struct {
-			AccessToken string `json:"accessToken"`
-			ExpiresAt   int64  `json:"expiresAt"`
-		} `json:"claudeAiOauth"`
-	}
-	if json.Unmarshal(b, &doc) != nil {
-		return time.Time{}, false
-	}
-	if strings.TrimSpace(doc.ClaudeAIOauth.AccessToken) == "" {
-		return time.Time{}, false
-	}
-	if doc.ClaudeAIOauth.ExpiresAt <= 0 {
-		return time.Time{}, true // no expiry recorded: treat as never-expiring
-	}
-	return time.UnixMilli(doc.ClaudeAIOauth.ExpiresAt), true
-}
-
-type guardOAuthFileSource struct {
-	key  string
-	path string
-}
-
-func (s guardOAuthFileSource) Name() string { return s.path }
-
-func (s guardOAuthFileSource) Lookup(key string) (string, bool) {
-	if key != s.key {
-		return "", false
-	}
-	b, err := os.ReadFile(s.path)
-	if err != nil {
-		return "", false
-	}
-	v := strings.TrimSpace(string(b))
-	return v, v != ""
-}
-
-func guardAnthropicOAuthLoader(tokenEnv, cfgDir string, now func() time.Time, warn io.Writer) (*secretload.Loader, []string) {
-	tried := make([]string, 0, 3)
-	sources := make([]secretload.SecretSource, 0, 3)
-
-	if tokenEnv != "" {
-		tried = append(tried, "$"+tokenEnv)
-		sources = append(sources, guardOAuthEnvSource{key: guardAnthropicOAuthSecretKey, env: tokenEnv})
-	}
-
-	credPath := filepath.Join(cfgDir, ".credentials.json")
-	tried = append(tried, credPath)
-	sources = append(sources, guardOAuthCredentialsSource{
-		key:  guardAnthropicOAuthSecretKey,
-		path: credPath,
-		now:  now,
-		warn: warn,
-	})
-
-	setupPath := filepath.Join(cfgDir, ".oauth-token")
-	tried = append(tried, setupPath)
-	sources = append(sources, guardOAuthFileSource{key: guardAnthropicOAuthSecretKey, path: setupPath})
-
-	l := secretload.New(sources...)
-	l.Require(guardAnthropicOAuthSecretKey, "Claude Pro/Max subscription OAuth token", nil)
-	return l, tried
-}
-
-// resolveAnthropicOAuthToken finds a Claude Pro/Max SUBSCRIPTION OAuth token to
-// authenticate the upstream with, in priority order:
-//  1. the named env var (default CLAUDE_CODE_OAUTH_TOKEN) — the explicit
-//     headless/automation override;
-//  2. <claude-config>/.credentials.json -> claudeAiOauth.accessToken — the active
-//     Claude Code login token. This mirrors the credential direct Claude Code is
-//     using right now, which matters because a stale or org-disallowed setup token
-//     can exist beside a working interactive login;
-//  3. <claude-config>/.oauth-token — a long-lived setup-token file. This remains
-//     the fallback for headless homes with no interactive login, and callers that
-//     want to force a specific setup token can still put it in tokenEnv.
-//
-// <claude-config> is $CLAUDE_CONFIG_DIR (first entry if it is a list) when set,
-// else ~/.claude. Returns the token and a human source label, or an error that
-// names every place it looked so the operator can fix the setup.
-func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err error) {
-	// Boot-time/diagnostic callers want the expired-token WARNING on stderr (it fires at most
-	// once per resolve here). The hot per-request refresh path must pass io.Discard via
-	// resolveAnthropicOAuthTokenWarn so a genuinely-expired credential does not reprint the
-	// multi-line warning every turn and bury the agent's output.
-	return resolveAnthropicOAuthTokenWarn(tokenEnv, os.Stderr)
-}
-
-// resolveAnthropicOAuthTokenWarn is resolveAnthropicOAuthToken with the expired-token warning
-// sink made explicit. The credential file's expiry warning (guardOAuthCredentialsSource.warn)
-// is invaluable ONCE at startup but becomes stderr spam when re-emitted on the per-request
-// rotation re-read (apiKeyFunc in cmdGuard), so that path passes io.Discard while the boot
-// path passes os.Stderr. Routing is unchanged — same loader, same source precedence.
-func resolveAnthropicOAuthTokenWarn(tokenEnv string, warn io.Writer) (token, source string, err error) {
-	loader, tried := guardAnthropicOAuthLoader(tokenEnv, guardClaudeConfigDir(), time.Now, warn)
-	if v, src, ok := loader.LookupSource(guardAnthropicOAuthSecretKey); ok {
-		return v, src, nil
-	}
-
-	return "", "", fmt.Errorf("no Claude subscription OAuth token found (looked in: %s). Log into Claude Code (`claude`), or create a long-lived one with `claude setup-token` and export it as %s", strings.Join(tried, ", "), tokenEnv)
-}
-
-// guardSubscriptionLoginPresent reports whether a Claude subscription login EXISTS on disk,
-// independent of whether its token is readable RIGHT NOW. Claude Code rewrites
-// <claude-config>/.credentials.json roughly hourly and the OAuth access token it holds is
-// short-lived, so a single boot-time read can legitimately catch the file mid-rotation (or
-// holding a just-expired token) and miss — even though a live login is there and the token
-// will rotate back in within seconds. resolveAnthropicOAuthToken correctly returns "absent"
-// in that window (a torn/expired read must NOT be sent as a bearer), but the guard's
-// pin-vs-passthrough boot decision must NOT read that transient miss as "no subscription":
-// demoting to passthrough strips the placeholder that keeps the wrapped agent out of its own
-// /login, so the agent hangs on a login prompt for a session that would have recovered on the
-// first per-request token re-resolve (the 'stuck on login sometimes' race). This is the cheap
-// disk witness that separates "a login is present, the token is just briefly unreadable" (pin
-// on intent; the per-request APIKeyFunc recovers the fresh token) from "no subscription at
-// all" (genuinely fall back to passthrough). The named env override (CLAUDE_CODE_OAUTH_TOKEN)
-// counts as present when set. Existence only — it never reads or validates the token.
-func guardSubscriptionLoginPresent(tokenEnv string) bool {
-	if tokenEnv != "" && strings.TrimSpace(os.Getenv(tokenEnv)) != "" {
-		return true
-	}
-	cfgDir := guardClaudeConfigDir()
-	if accounts.DeriveIdentity(cfgDir).HasCreds {
-		return true
-	}
-	if fi, err := os.Stat(filepath.Join(cfgDir, ".oauth-token")); err == nil && !fi.IsDir() {
-		return true
-	}
-	return false
-}
-
-// cmdGuardStdinInteractive reports whether the guard process's stdin is a real interactive
-// terminal where a user could complete an OAuth /login. The headless no-token fail-loud gate
-// uses this so an attended user is never blocked, while an automated/headless run — where a
-// blocked login is unrecoverable — fails loud with guidance instead of hanging.
-//
-// It uses term.IsTerminal, NOT the stdlib os.ModeCharDevice test: on Windows a redirected
-// stdin (`NUL` / `< /dev/null`) reports AS a character device, so a FileMode check treats the
-// exact headless-automation case as interactive and the gate never fires (caught by field
-// test, not the unit test). term.IsTerminal calls GetConsoleMode on Windows / isatty on Unix,
-// which distinguishes a console from a redirected handle.
-func cmdGuardStdinInteractive() bool {
-	return guardFdIsTerminal(int(os.Stdin.Fd()))
-}
-
-// guardFdIsTerminal is the seam over term.IsTerminal, named so the gate can be reasoned about
-// (and the real os.Stdin fd swapped in tests) without depending on the test's own stdin.
-func guardFdIsTerminal(fd int) bool {
-	return term.IsTerminal(fd)
-}
-
-// guardDebugStatsToSharedStderr decides whether the per-turn `fak-turn …` economy line
-// streams to the SHARED terminal stderr. The line is invaluable on a headless / piped /
-// scripted run, but on an ATTENDED interactive launch the wrapped agent (Claude Code)
-// paints a full-screen alternate-screen TUI over THIS same terminal — so a per-turn stderr
-// write lands on top of the agent's UI and corrupts the session view. There the economy
-// belongs in the `fak info` split pane (the dedicated fak section), the exit summary, and
-// /metrics, not bleeding into the agent pane.
-//
-// Precedence, highest first: --debug-stats=false / --quiet silence everything (false). An
-// EXPLICIT --debug-stats (userSet) is a knowing opt-in and always streams here (true).
-// Otherwise an attended interactive child sharing this terminal auto-suppresses the
-// shared-stderr stream (false — the pane + exit summary still carry it); a headless / piped
-// launch keeps it (true — there is no full-screen UI to corrupt and a captured log helps).
-func guardDebugStatsToSharedStderr(debugStats, quiet, userSet, stdinInteractive, childInteractive bool) bool {
-	if !debugStats || quiet {
-		return false
-	}
-	if userSet {
-		return true
-	}
-	return !(stdinInteractive && childInteractive)
-}
-
-// guardClaudeConfigDir resolves the directory that holds Claude Code's per-account
-// credentials: $CLAUDE_CONFIG_DIR (first path if it is an OS-list) when set, else
-// ~/.claude. A home that cannot be resolved degrades to the literal ".claude".
-func guardClaudeConfigDir() string {
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); v != "" {
-		if i := strings.IndexByte(v, os.PathListSeparator); i >= 0 {
-			v = v[:i]
-		}
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ".claude"
-	}
-	return filepath.Join(home, ".claude")
-}
-
-// printGuardBanner explains exactly what is now in front of the agent: where the
-// gateway is, what it proxies to, which floor is loaded, the single env var injected
-// into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
-// audit journal, and the structured log stream. It goes to stderr so it never pollutes a
-// `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, version, buildStamp, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, refusalCarryForward []guardRefusalCarry, remoteServe, local bool, localLabel string, command []string) {
-	fmt.Fprintf(w, "fak guard %s — kernel-adjudicated: %s\n", version, strings.Join(command, " "))
-	// The embedded build stamp, not the version, is the reliable "is THIS guard binary current?"
-	// signal: the version reads the tree's VERSION file, so a stale binary still looks current
-	// (the screenshot confusion). A +uncommitted marker means the running guard was built from a
-	// dirty tree. See guardBannerBuildStamp.
-	fmt.Fprintf(w, "  build      : %s\n", buildStamp)
-	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
-	switch {
-	case local:
-		// The model runs IN-KERNEL on this box; there is no upstream API call at all. Say so
-		// plainly — it is the headline of `fak guard --gguf`: a local model + your harness.
-		fmt.Fprintf(w, "  upstream   : in-kernel %s   (LOCAL — fak runs the model itself; no API key, no network) via the %s wire\n", localLabel, provider)
-	case remoteServe:
-		// Tell the operator the dev turn's INFERENCE is on the lab box they chose, not a
-		// public API — the whole point of --remote-serve.
-		fmt.Fprintf(w, "  upstream   : %s   (remote fak serve on a lab box, %s wire)\n", baseURL, provider)
-	default:
-		fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
-	}
-	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
-	fmt.Fprintf(w, "  wired via  : %s=%s   (child only — your shell is untouched)\n", injectVar, injectVal)
-	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
-	// loopback); the audit journal is ON by default (auditLabel says where), the log
-	// stream survives the session only if asked for.
-	fmt.Fprintf(w, "  metrics    : %s/metrics  ·  %s/debug/vars  ·  %s/v1/fak/events\n", gwURL, gwURL, gwURL)
-	// Point operators at the cache-value metric family by name — it lives on /metrics
-	// above, but nothing told them to scrape for it (#1077, epic #1072). These are the
-	// numbers that answer "what did fak's owned KV cache actually save this session?".
-	fmt.Fprintf(w, "  cache value: scrape %s/metrics for the fak_vcache_* family (saved_token_equiv, hit_rate, multiplier, proven)\n", gwURL)
-	fmt.Fprintf(w, "  audit log  : %s\n", auditLabel)
-	fmt.Fprint(w, formatGuardRefusalCarryForward(refusalCarryForward))
-	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
-	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
-}
-
-// guardLogSink builds the gateway's structured-log destination from the --log value.
-// "" (default) mutes it (a no-op) to keep the wrapped agent's terminal clean; "-" or
-// "stderr" streams it to stderr; any other value appends to that file. It returns the
-// log function, an optional closer (the opened file), and a human label for the banner.
-// A file that cannot be opened is fatal — an operator who asked for a log and silently
-// got none is worse than a loud failure.
-func guardLogSink(logPath string, stderr io.Writer) (logf func(string, ...any), closer io.Closer, label string) {
-	switch strings.TrimSpace(logPath) {
-	case "":
-		return func(string, ...any) {}, nil, "off (--log FILE or --log - to enable)"
-	case "-", "stderr":
-		lg := log.New(stderr, "fak-gateway ", log.LstdFlags|log.Lmsgprefix)
-		return lg.Printf, nil, "stderr"
-	default:
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		must(err)
-		lg := log.New(f, "", log.LstdFlags)
-		return lg.Printf, f, logPath
-	}
-}
-
-// guardAuditPlan is the PURE decision behind guard's default-on audit journal: it
-// returns the path to enable (""=> do not enable) and whether the off was an
-// explicit opt-out, given the flags and whether a journal is already active at
-// boot (FAK_AUDIT_JOURNAL). Kept side-effect-free so the precedence — boot env
-// wins, then --no-audit / --audit off, then --audit PATH, then the repo-local
-// default — is unit-tested without touching the process-global journal.
-func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath string, optedOut bool) {
-	if bootActive {
-		return "", false // FAK_AUDIT_JOURNAL already registered an emitter; nothing to enable
-	}
-	if noAudit || strings.EqualFold(strings.TrimSpace(auditPath), "off") {
-		return "", true
-	}
-	p := strings.TrimSpace(auditPath)
-	if p == "" {
-		p = guardDefaultAuditPath()
-	}
-	return p, false
-}
-
-// guardDefaultAuditPath is where fak guard writes its durable decision journal
-// when the operator names none: .dispatch-runs/guard-audit/interactive-<pid>-<hash>.jsonl.
-// That is the same repo-local discovery root guardrsi folds, so an attended
-// `fak guard -- claude` refusal has a per-session witness row beside fleet runs.
-func guardDefaultAuditPath() string {
-	root := findRepoRoot(".")
-	return filepath.Join(guardAuditDir(root),
-		fmt.Sprintf("interactive-%d-%s.jsonl", os.Getpid(), guardAuditPathHash(root)))
-}
-
-func guardAuditDir(root string) string {
-	return filepath.Join(root, ".dispatch-runs", "guard-audit")
-}
-
-func guardAuditPathHash(root string) string {
-	abs, err := filepath.Abs(root)
-	if err == nil {
-		root = abs
-	}
-	sum := sha256.Sum256([]byte(filepath.Clean(root)))
-	return hex.EncodeToString(sum[:])[:12]
-}
-
-// guardReadableAuditPath is the reader-side default used by diagnostics and the
-// guard TUI. A separate process cannot know another guard session's PID-derived
-// writer path, so readers prefer the newest repo-local journal when the operator
-// did not name FAK_AUDIT_JOURNAL.
-func guardReadableAuditPath() string {
-	if p := strings.TrimSpace(os.Getenv("FAK_AUDIT_JOURNAL")); p != "" {
-		return p
-	}
-	if p := latestGuardAuditJournalPath(); p != "" {
-		return p
-	}
-	return guardDefaultAuditPath()
-}
-
-func latestGuardAuditJournalPath() string {
-	dir := guardAuditDir(findRepoRoot("."))
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	var bestPath, bestName string
-	var bestMod time.Time
-	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl") {
-			continue
-		}
-		info, err := ent.Info()
-		if err != nil {
-			continue
-		}
-		mod := info.ModTime()
-		if bestPath == "" || mod.After(bestMod) || (mod.Equal(bestMod) && ent.Name() > bestName) {
-			bestName = ent.Name()
-			bestMod = mod
-			bestPath = filepath.Join(dir, ent.Name())
-		}
-	}
-	return bestPath
-}
-
-// guardEnableAudit turns the durable, hash-chained decision journal ON for the
-// session per guardAuditPlan and returns a human label for the banner plus the
-// active journal (nil when disabled). A failure to open a REQUESTED path is fatal
-// (must) — an operator who asked for an audit trail and silently got none is worse
-// than a loud failure, mirroring guardLogSink's file-sink contract.
-func guardEnableAudit(auditPath string, noAudit bool) (label string, active *journal.Journal) {
-	// A boot-time FAK_AUDIT_JOURNAL already registered an emitter we cannot
-	// unregister; respect it (and note --no-audit cannot turn it off).
-	if j := journal.Active(); j != nil {
-		if p := j.Path(); p != "" {
-			return p + "  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
-		}
-		return "active  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
-	}
-	path, optedOut := guardAuditPlan(auditPath, noAudit, false)
-	if path == "" {
-		if optedOut {
-			return "off  (default-on; disabled by --no-audit / --audit off)", nil
-		}
-		return "off", nil
-	}
-	j, err := journal.Enable(path)
-	must(err)
-	return path + "  (durable, hash-chained — verify with: fak audit verify <path>)", j
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, spawnMeta, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler)
 }

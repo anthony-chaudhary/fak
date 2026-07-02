@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
 // The embedded guard floor must be a valid, closed-vocabulary manifest, and must do
@@ -418,6 +420,110 @@ func TestBuildGuardChildIncludesRestartEnv(t *testing.T) {
 			t.Fatalf("child env missing %q in:\n%s", want, env)
 		}
 	}
+}
+
+func TestGuardSpawnBrokerDeniedBeforeLauncher(t *testing.T) {
+	broker := toolprocgate.NewSpawnBroker()
+	called := false
+	launcher := func(toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+		called = true
+		return exec.Command("unused"), nil
+	}
+	meta := guardChildSpawnMetadata{
+		AgentRunID: "agent-run-1",
+		ToolCallID: "guard-child:agent-run-1",
+		Backend:    "anthropic",
+		Envelope:   toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}},
+	}
+	grant, child, err := launchGuardChildWithBroker([]string{"agent"}, [][2]string{{"OPENAI_BASE_URL", "http://gw/v1"}}, false, meta, broker, launcher)
+	if err == nil {
+		t.Fatalf("launchGuardChildWithBroker allowed an unmanaged spawn: grant=%+v child=%v", grant, child)
+	}
+	if called {
+		t.Fatal("denied spawn must not call the launcher")
+	}
+	audits := broker.Audits()
+	if len(audits) != 1 || audits[0].Verdict != toolprocgate.SpawnVerdictDeny || audits[0].Reason != "MISSING_POLICY_DIGEST" {
+		t.Fatalf("deny audit = %+v, want one MISSING_POLICY_DIGEST denial", audits)
+	}
+}
+
+func TestGuardSpawnBrokerAllowedPropagatesMetadata(t *testing.T) {
+	t.Setenv(toolprocgate.EnvAgentRunID, "stale-parent-env")
+	broker := toolprocgate.NewSpawnBroker()
+	var got toolprocgate.SpawnGrant
+	launcher := func(grant toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+		got = grant
+		return exec.Command("unused"), nil
+	}
+	meta := guardChildSpawnMetadata{
+		AgentRunID:   " agent-run-1 ",
+		ParentRunID:  " parent-run-1 ",
+		ToolCallID:   " tool-call-1 ",
+		PolicyDigest: " sha256:policy ",
+		Backend:      " openai ",
+		Envelope: toolprocgate.CapabilityEnvelope{
+			Capabilities:     []abi.Capability{toolprocgate.CapAgentRunSpawn},
+			DeadlineMS:       90_000,
+			HeartbeatEveryMS: 5_000,
+		},
+	}
+	grant, child, err := launchGuardChildWithBroker(
+		[]string{"  fake-agent  ", "--mode", "ok"},
+		[][2]string{{"OPENAI_BASE_URL", "http://gw/v1"}},
+		false,
+		meta,
+		broker,
+		launcher,
+		[2]string{"FAK_SESSION_ID", "agent-run-1"},
+	)
+	if err != nil {
+		t.Fatalf("launchGuardChildWithBroker: %v", err)
+	}
+	if child == nil || grant.GrantID == "" || got.GrantID != grant.GrantID {
+		t.Fatalf("launcher did not receive the allowed grant: grant=%+v got=%+v child=%v", grant, got, child)
+	}
+	if strings.Join(got.Argv, " ") != "fake-agent --mode ok" {
+		t.Fatalf("launcher argv = %q, want sanitized command", strings.Join(got.Argv, " "))
+	}
+	if got.CWD == "" || got.CWD != filepath.Clean(got.CWD) {
+		t.Fatalf("launcher cwd = %q, want clean non-empty cwd", got.CWD)
+	}
+	if got.AgentRunID != "agent-run-1" || got.ParentRunID != "parent-run-1" ||
+		got.ToolCallID != "tool-call-1" || got.PolicyDigest != "sha256:policy" || got.Backend != "openai" {
+		t.Fatalf("launcher metadata = %+v, want normalized AgentRun fields", got)
+	}
+	wantEnv := map[string]string{
+		toolprocgate.EnvAgentRunID:   "agent-run-1",
+		toolprocgate.EnvParentRunID:  "parent-run-1",
+		toolprocgate.EnvToolCallID:   "tool-call-1",
+		toolprocgate.EnvPolicyDigest: "sha256:policy",
+		toolprocgate.EnvSpawnBackend: "openai",
+		toolprocgate.EnvSpawnGrantID: grant.GrantID,
+		"OPENAI_BASE_URL":            "http://gw/v1",
+		"FAK_SESSION_ID":             "agent-run-1",
+	}
+	for k, want := range wantEnv {
+		if seen := guardGrantEnvValue(got.Env, k); seen != want {
+			t.Fatalf("grant env %s = %q, want %q; env=%+v", k, seen, want, got.Env)
+		}
+	}
+	if got.Envelope.DeadlineMS != 90_000 || got.Envelope.HeartbeatEveryMS != 5_000 {
+		t.Fatalf("grant envelope = %+v, want runtime deadline/heartbeat", got.Envelope)
+	}
+	audits := broker.Audits()
+	if len(audits) != 1 || audits[0].Verdict != toolprocgate.SpawnVerdictAllow || audits[0].GrantID != grant.GrantID {
+		t.Fatalf("allow audit = %+v, want one allow audit for grant", audits)
+	}
+}
+
+func guardGrantEnvValue(env []toolprocgate.EnvVar, name string) string {
+	for _, kv := range env {
+		if kv.Name == name {
+			return kv.Value
+		}
+	}
+	return ""
 }
 
 func TestGuardRestartLimitStatusIsManagedContextVisible(t *testing.T) {
@@ -1752,33 +1858,38 @@ func TestGuardEmptyNamedKeyIsError(t *testing.T) {
 }
 
 // guardLocalModelDecision is the gate that lets `fak guard --gguf <model> -- claude` run a
-// small model in-kernel as the local upstream. It must (a) request local mode iff --gguf is
-// non-empty and (b) reject the two upstream-proxy flags that would otherwise silently win,
-// since a local in-kernel model IS the upstream.
+// small model in-kernel — alone as the local upstream, or ALONGSIDE an explicit --base-url
+// API upstream (the dual-planner mode). It must (a) request local mode iff --gguf is
+// non-empty, (b) turn --gguf + --base-url into alongside=true rather than a refusal, and
+// (c) still reject --gguf + --remote-serve, where two boxes could each decode the local id.
 func TestGuardLocalModelDecision(t *testing.T) {
 	cases := []struct {
-		name         string
-		gguf         string
-		baseURL      string
-		remoteServe  string
-		wantLocal    bool
-		wantConflict bool // we assert presence, and which flag is named
-		nameInMsg    string
+		name          string
+		gguf          string
+		baseURL       string
+		remoteServe   string
+		wantLocal     bool
+		wantAlongside bool
+		wantConflict  bool // we assert presence, and which flag is named
+		nameInMsg     string
 	}{
-		{name: "no gguf is the default proxy path", gguf: "", baseURL: "", remoteServe: "", wantLocal: false, wantConflict: false},
-		{name: "no gguf ignores upstream flags", gguf: "", baseURL: "http://x/v1", remoteServe: "box:8080", wantLocal: false, wantConflict: false},
-		{name: "gguf alone requests local mode", gguf: "qwen2.5:7b", baseURL: "", remoteServe: "", wantLocal: true, wantConflict: false},
-		{name: "gguf path alone requests local mode", gguf: "/models/x.gguf", baseURL: "", remoteServe: "", wantLocal: true, wantConflict: false},
-		{name: "whitespace-only gguf is not local", gguf: "   ", baseURL: "", remoteServe: "", wantLocal: false, wantConflict: false},
-		{name: "gguf + base-url conflicts", gguf: "smollm2", baseURL: "http://localhost:11434/v1", remoteServe: "", wantLocal: true, wantConflict: true, nameInMsg: "--base-url"},
-		{name: "gguf + remote-serve conflicts", gguf: "smollm2", baseURL: "", remoteServe: "http://box:8080", wantLocal: true, wantConflict: true, nameInMsg: "--remote-serve"},
-		{name: "remote-serve wins the conflict message when both set", gguf: "smollm2", baseURL: "http://x/v1", remoteServe: "http://box:8080", wantLocal: true, wantConflict: true, nameInMsg: "--remote-serve"},
+		{name: "no gguf is the default proxy path", gguf: "", baseURL: "", remoteServe: "", wantLocal: false, wantAlongside: false, wantConflict: false},
+		{name: "no gguf ignores upstream flags", gguf: "", baseURL: "http://x/v1", remoteServe: "box:8080", wantLocal: false, wantAlongside: false, wantConflict: false},
+		{name: "gguf alone requests local mode", gguf: "qwen2.5:7b", baseURL: "", remoteServe: "", wantLocal: true, wantAlongside: false, wantConflict: false},
+		{name: "gguf path alone requests local mode", gguf: "/models/x.gguf", baseURL: "", remoteServe: "", wantLocal: true, wantAlongside: false, wantConflict: false},
+		{name: "whitespace-only gguf is not local", gguf: "   ", baseURL: "", remoteServe: "", wantLocal: false, wantAlongside: false, wantConflict: false},
+		{name: "gguf + base-url is the ALONGSIDE (dual) mode", gguf: "smollm2", baseURL: "http://localhost:11434/v1", remoteServe: "", wantLocal: true, wantAlongside: true, wantConflict: false},
+		{name: "gguf + remote-serve conflicts", gguf: "smollm2", baseURL: "", remoteServe: "http://box:8080", wantLocal: true, wantAlongside: false, wantConflict: true, nameInMsg: "--remote-serve"},
+		{name: "remote-serve conflict wins over alongside when both set", gguf: "smollm2", baseURL: "http://x/v1", remoteServe: "http://box:8080", wantLocal: true, wantAlongside: false, wantConflict: true, nameInMsg: "--remote-serve"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			local, conflict := guardLocalModelDecision(tc.gguf, tc.baseURL, tc.remoteServe)
+			local, alongside, conflict := guardLocalModelDecision(tc.gguf, tc.baseURL, tc.remoteServe, false)
 			if local != tc.wantLocal {
 				t.Errorf("local=%v, want %v", local, tc.wantLocal)
+			}
+			if alongside != tc.wantAlongside {
+				t.Errorf("alongside=%v, want %v", alongside, tc.wantAlongside)
 			}
 			if tc.wantConflict {
 				if conflict == "" {

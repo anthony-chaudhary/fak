@@ -95,24 +95,38 @@ func guardDefaultBaseURL(provider string) string {
 }
 
 // guardLocalModelDecision decides whether `fak guard` should run a LOCAL in-kernel model
-// (fak loading the weights into its own engine) and validates that the local-model flag
-// does not collide with an upstream-proxy flag. ggufRef is the raw --gguf value (a
-// non-empty value requests local mode); baseURL is --base-url; remoteServe is the
-// normalized --remote-serve base. It returns local=true when local mode is requested, and
-// a non-empty conflict message (local still true) when the operator ALSO named an upstream —
-// the two are mutually exclusive because a local in-kernel model IS the upstream. Pure (no
-// I/O, no exit) so the precedence is unit-tested without standing a model up.
-func guardLocalModelDecision(ggufRef, baseURL, remoteServe string) (local bool, conflict string) {
+// (fak loading the weights into its own engine) and how that composes with an
+// upstream-proxy flag. ggufRef is the raw --gguf value (a non-empty value requests local
+// mode); baseURL is --base-url; remoteServe is the normalized --remote-serve base;
+// alongsideFlag is --alongside.
+//
+//   - --gguf alone: local=true, alongside=false — the local model IS the upstream
+//     (the historical mode, unchanged).
+//   - --gguf + --base-url, or --gguf + --alongside (the provider's DEFAULT base URL,
+//     e.g. the plain Claude subscription upstream): local=true, alongside=true — the
+//     ALONGSIDE (dual) mode: the gateway serves the small local model for its own model
+//     id (or the literal "local") AND proxies every other request to the API upstream
+//     (internal/gateway's dual planner). --gguf + an explicit --base-url used to be
+//     refused; naming both now MEANS alongside, not a conflict.
+//   - --gguf + --remote-serve: still a conflict — a remote `fak serve` already hosts a
+//     model, so which box should decode the local id is ambiguous; pass only one.
+//   - --alongside without --gguf: a conflict — there is no local model to run alongside.
+//
+// Pure (no I/O, no exit) so the precedence is unit-tested without standing a model up.
+func guardLocalModelDecision(ggufRef, baseURL, remoteServe string, alongsideFlag bool) (local, alongside bool, conflict string) {
 	if strings.TrimSpace(ggufRef) == "" {
-		return false, ""
+		if alongsideFlag {
+			return false, false, "--alongside requires --gguf <model> — it serves the in-kernel local model alongside the API upstream"
+		}
+		return false, false, ""
 	}
 	if strings.TrimSpace(remoteServe) != "" {
-		return true, "--gguf (local in-kernel model) and --remote-serve are mutually exclusive — the local model IS the upstream; pass only one"
+		return true, false, "--gguf (local in-kernel model) and --remote-serve are mutually exclusive — pass --gguf with --base-url/--alongside for a local model ALONGSIDE an API upstream, or --remote-serve alone"
 	}
-	if strings.TrimSpace(baseURL) != "" {
-		return true, "--gguf (local in-kernel model) and --base-url are mutually exclusive — the local model IS the upstream; pass only one"
+	if alongsideFlag || strings.TrimSpace(baseURL) != "" {
+		return true, true, ""
 	}
-	return true, ""
+	return true, false, ""
 }
 
 // normalizeRemoteServe turns a --remote-serve operand (HOST or HOST:PORT, with or

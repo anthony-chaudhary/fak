@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -223,6 +224,91 @@ func TestAblateUnknownFeatureUsageError(t *testing.T) {
 	if !strings.Contains(errb, "unknown runtime feature") {
 		t.Fatalf("stderr missing the fail-loud reason:\n%s", errb)
 	}
+}
+
+func TestAblateFromSessionUsesCapturedUsage(t *testing.T) {
+	path := writeAblateSessionFixture(t, `{
+  "slice_id": "cmd-session",
+  "turns": [{
+    "usage": {"input_tokens": 120, "output_tokens": 30, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 10},
+    "calls": [{"tool": "calculate", "args": {"a": 1, "b": 2}, "class": "allow"}]
+  }]
+}`)
+	var out, errb bytes.Buffer
+	code := runAblate(&out, &errb, []string{"--from-session", path, "--sweep", "vdso", "--json"})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	var rep struct {
+		Provenance struct {
+			EngineModel string `json:"engine_model"`
+			SliceID     string `json:"slice_id"`
+		} `json:"provenance"`
+		Runs []struct {
+			ArmID string `json:"arm_id"`
+			Arm   struct {
+				InTokens                    int64 `json:"input_tokens"`
+				OutTokens                   int64 `json:"output_tokens"`
+				ProviderCacheReadTokens     int64 `json:"provider_cache_read_tokens"`
+				ProviderCacheCreationTokens int64 `json:"provider_cache_creation_tokens"`
+			} `json:"arm"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if rep.Provenance.EngineModel != "session-cassette" || rep.Provenance.SliceID != "session:cmd-session" {
+		t.Fatalf("provenance = %+v, want session cassette bound to session:cmd-session", rep.Provenance)
+	}
+	var off *struct {
+		ArmID string `json:"arm_id"`
+		Arm   struct {
+			InTokens                    int64 `json:"input_tokens"`
+			OutTokens                   int64 `json:"output_tokens"`
+			ProviderCacheReadTokens     int64 `json:"provider_cache_read_tokens"`
+			ProviderCacheCreationTokens int64 `json:"provider_cache_creation_tokens"`
+		} `json:"arm"`
+	}
+	for i := range rep.Runs {
+		if rep.Runs[i].ArmID == "all-off" {
+			off = &rep.Runs[i]
+			break
+		}
+	}
+	if off == nil {
+		t.Fatalf("missing all-off arm in %+v", rep.Runs)
+	}
+	if off.Arm.InTokens != 120 || off.Arm.OutTokens != 30 ||
+		off.Arm.ProviderCacheReadTokens != 40 || off.Arm.ProviderCacheCreationTokens != 10 {
+		t.Fatalf("all-off session usage = %+v, want captured 120/30/40/10", off.Arm)
+	}
+}
+
+func TestAblateFromSessionRejectsEnvGatedSweep(t *testing.T) {
+	path := writeAblateSessionFixture(t, `{
+  "slice_id": "cmd-session",
+  "turns": [{
+    "usage": {"input_tokens": 10, "output_tokens": 2},
+    "calls": [{"tool": "calculate", "args": {"a": 1, "b": 2}, "class": "allow"}]
+  }]
+}`)
+	var out, errb bytes.Buffer
+	code := runAblate(&out, &errb, []string{"--from-session", path, "--sweep", "normgate", "--json"})
+	if code != 2 {
+		t.Fatalf("exit=%d, want usage refusal; stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "--from-session currently supports in-process sweeps only") {
+		t.Fatalf("stderr missing from-session/env-gated refusal:\n%s", errb.String())
+	}
+}
+
+func writeAblateSessionFixture(t *testing.T, body string) string {
+	t.Helper()
+	path := t.TempDir() + "/session.json"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
 }
 
 // fakeAblateArmRunner runs each arm IN-PROCESS (no spawn), reconstructing the trace exactly

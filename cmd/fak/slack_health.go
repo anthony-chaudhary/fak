@@ -42,6 +42,12 @@ const (
 	verdictAuthFail   healthVerdict = "AUTH_FAIL"  // token resolved but auth.test rejected it (rotated/revoked bot)
 	verdictStale      healthVerdict = "STALE"      // ready + auth OK but no recent post could be witnessed past the budget
 	verdictDeferred   healthVerdict = "DEFERRED"   // an OPTIONAL surface with no channel yet — expected, NOT an alarm (no #channel exists)
+
+	// The outbox rung's verdicts (#2262) — new states, not overloaded old ones: the
+	// durable outbox has no cadence to be STALE against, but a dead-lettered row or a
+	// backlog no drain is moving is exactly the delivery loss it exists to make loud.
+	verdictDeadRows      healthVerdict = "DEAD_ROWS" // rows exhausted their retry budget — operator must retry or re-author
+	verdictOutboxStalled healthVerdict = "STALLED"   // pending rows older than the stall budget (or spool unreadable)
 )
 
 // surfaceFreshnessBudget maps a surface to the staleness budget implied by the cadence of
@@ -107,6 +113,7 @@ func runSlackHealth(stdout, stderr io.Writer, argv []string) int {
 	reports := buildSurfaceReports()
 	runAuthChecks(reports, *apiBase)
 	health := foldSlackHealth(reports, *apiBase, time.Now())
+	health = append(health, outboxHealthRung(time.Now()))
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
@@ -242,7 +249,7 @@ func healthExit(health []healthReport) int {
 // renderHealthReports prints the human table, worst-verdict-first within a stable order so
 // the surfaces that need attention sit at the top.
 func renderHealthReports(w io.Writer, health []healthReport) {
-	var ok, incomplete, authFail, stale, deferred int
+	var ok, incomplete, authFail, stale, deferred, alarms int
 	for _, h := range health {
 		switch h.Verdict {
 		case verdictOK:
@@ -255,10 +262,12 @@ func renderHealthReports(w io.Writer, health []healthReport) {
 			stale++
 		case verdictDeferred:
 			deferred++
+		case verdictDeadRows, verdictOutboxStalled:
+			alarms++
 		}
 	}
-	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d DEFERRED=%d\n\n",
-		len(health), ok, stale, authFail, incomplete, deferred)
+	fmt.Fprintf(w, "fak slack health — %d surfaces; OK=%d STALE=%d AUTH_FAIL=%d INCOMPLETE=%d DEFERRED=%d OUTBOX_ALARMS=%d\n\n",
+		len(health), ok, stale, authFail, incomplete, deferred, alarms)
 
 	ordered := make([]healthReport, len(health))
 	copy(ordered, health)
@@ -281,13 +290,15 @@ func verdictRank(v healthVerdict) int {
 	switch v {
 	case verdictAuthFail:
 		return 0
-	case verdictStale:
-		return 1
-	case verdictIncomplete:
+	case verdictDeadRows:
+		return 1 // messages already lost-unless-retried — as loud as a dead token
+	case verdictStale, verdictOutboxStalled:
 		return 2
-	case verdictOK:
+	case verdictIncomplete:
 		return 3
-	default: // DEFERRED — expected, sorts last (below OK)
+	case verdictOK:
 		return 4
+	default: // DEFERRED — expected, sorts last (below OK)
+		return 5
 	}
 }

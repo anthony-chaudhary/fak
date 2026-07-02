@@ -7,9 +7,11 @@ import (
 )
 
 // applyGuardSessionBudgetEnvelope seeds a guard session's managed-context envelope at
-// launch (#1573). It mutates only the existing session table axes: Budget, Pace, and
-// TimeBudget. Spend/throughput remain parsed inspectable contract fields until a live
-// runtime consumer enforces them.
+// launch (#1573). It mutates only the existing session table axes: Budget (including
+// the spend ceiling, which SessionBudget projects onto Budget.SpendMicroCentsLeft —
+// live-enforced by DebitUsage once the host spend meter prices turns, see
+// session_spend.go), Pace, and TimeBudget. Throughput remains a parsed inspectable
+// contract field until a live runtime consumer enforces it.
 func applyGuardSessionBudgetEnvelope(tbl *session.Table, traceID string, env session.BudgetEnvelope, hasEnvelope bool, contextOverride *int, effectiveContext int, wallLimit time.Duration, now time.Time) {
 	if tbl == nil || traceID == "" {
 		return

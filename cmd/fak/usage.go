@@ -522,7 +522,16 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
   fak dogfood-score [--json] [--markdown] [--compare FILE] [--window-hours N]
                 (scores the launched-session dogfooding loop: is it WIRED to run honestly,
                  and does the model report itself truthfully  -  the keystone defect is a turn
-                 that claims success over an OBSERVED Stop-hook error, read from real transcripts)
+                 that claims success over an OBSERVED Stop-hook error, read from real transcripts;
+                 also grades the CHAIN axis: packet freshness + report-to-issues bridging)
+  fak dogfood-issues [REPORT.json] [--live|--fetch-existing] [--json] [--label L]
+                (bridges a recent-feature dogfood report's ACTION findings into stable,
+                 deduplicated GitHub issues so friction is filed by the loop, not stumbled
+                 into by an outsider. No REPORT path = the newest report under
+                 .fak/recent-feature-dogfood/. Dry-run by default; --live files/updates via
+                 gh and --fetch-existing verifies against the tracker -- both leave an
+                 issues-sync.json receipt beside the report, which dogfood-score's chain
+                 axis and the improve-loops super loop read)
   fak token-defaults-scorecard [--json] [--markdown] [--compare FILE]
                 (native token-saving-defaults control-pane payload)
   fak skill-effectiveness-scorecard [--json] [--markdown]
@@ -591,7 +600,8 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
   fak slack     check [--auth] [--json] | health [--json] | beat [--dry-run] |
                 walk [--json] | refresh [--surface LIST] [--live] [--continue-on-error]
                 [--news-title T --news-file FILE] [--json] |
-                send --channel ID --text MSG [--token T] [--dry-run]
+                send --channel ID --text MSG [--token T] [--durable] [--dry-run] |
+                outbox [status [--json] | drain [--dry-run] | retry (--nonce N | --all) | dead [--json]]
                 (DEBUG + USE the whole Slack surface from one place. 'check' reports, for
                  every surface (scoreboard/blockers/bench/dispatch/dojo/marketing/
                  news/node-usage/product/steering/chatrelay), the bot token + channel it would
@@ -602,7 +612,10 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  locally refreshable feeds by default and posts only with --live; the news
                  surface requires --news-title plus --news-file because it needs an editorial
                  digest. 'send' posts an ad-hoc message to ANY channel (token defaults to
-                 FAK_SCOREBOARD_TOKEN), --text - reads the body from stdin, --dry-run previews)
+                 FAK_SCOREBOARD_TOKEN), --text - reads the body from stdin, --dry-run previews,
+                 --durable spools through the outbox so the message survives crashes/429s.
+                 'outbox' operates the durable spool (#2262): status/dead report, drain runs one
+                 serialized delivery pass, retry re-arms dead rows; health carries its rungs)
   fak cadence   [--json] [--check] [--append-history] [--window N] [--ledger FILE]
                 (the CONSOLIDATED regular-cadence report: folds the four dimensions
                  an operator tracks  -  SCORES (scorecard control pane), MATURITY

@@ -118,6 +118,11 @@ type guardInfoVars struct {
 	// live session state. It is rendered from /debug/vars only; `fak info` never reads
 	// hidden transcript text to infer what the model might be assuming.
 	Assumptions []gateway.SessionAssumption `json:"assumptions,omitempty"`
+	// StartupReport is the full startup report the guard recorded at boot — the banner +
+	// hook/auth notes an attended launch keeps compact (`fak guard --banner=auto`). The
+	// --startup flag prints it verbatim; empty means the gateway recorded none (a fak
+	// serve gateway, or a guard build predating the report wiring).
+	StartupReport string `json:"startup_report"`
 }
 
 // guardInfoSession is the wire shape of one /debug/vars sessions row
@@ -248,6 +253,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
+	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -275,6 +281,22 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		base: base,
 		key:  strings.TrimSpace(os.Getenv(strings.TrimSpace(*keyEnv))),
 		hc:   &http.Client{Timeout: 10 * time.Second},
+	}
+
+	// --startup is a one-shot read, not a watch: fetch the recorded report, print it
+	// verbatim, done. A gateway that answers but recorded no report (fak serve, an older
+	// guard build) gets an actionable note instead of a silent empty page.
+	if *startup {
+		v, ok := fetchGuardInfoVars(c, stderr)
+		if !ok {
+			return 1
+		}
+		if strings.TrimSpace(v.StartupReport) == "" {
+			fmt.Fprintf(stderr, "fak info: the gateway at %s recorded no startup report (a fak serve gateway, or a fak guard built before the report was wired) — relaunch the guard with --banner=full to stream it at boot\n", c.base)
+			return 1
+		}
+		fmt.Fprint(stdout, v.StartupReport)
+		return 0
 	}
 
 	if *asJSON {

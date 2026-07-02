@@ -182,7 +182,7 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	gotErr := errb.String()
 	for _, want := range []string{
 		`seat "gem8-seat"`,
-		"CLAUDE_CONFIG_DIR = " + seat,
+		"CLAUDE_CONFIG_DIR = <account-dir>",
 		"login             = ready (can_serve=true)",
 		"guard             = on",
 		"model             = " + defaultLaunchModel,
@@ -199,6 +199,9 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	if !strings.Contains(gotOut, "guard -- claude --dangerously-skip-permissions") {
 		t.Fatalf("dry-run stdout command = %q", gotOut)
 	}
+	if strings.Contains(gotErr, seat) {
+		t.Fatalf("dry-run stderr leaked raw account dir %q:\n%s", seat, gotErr)
+	}
 }
 
 // TestRunAccountsLaunchModelOptOut pins the opt-out: `--model ""` launches with the seat's own
@@ -209,9 +212,9 @@ func TestRunAccountsLaunchModelOptOut(t *testing.T) {
 
 	var gotArgv []string
 	orig := accountsLaunchRun
-	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		gotArgv = argv
-		return 0
+		return launchRunResult{Code: 0}
 	}
 	t.Cleanup(func() { accountsLaunchRun = orig })
 
@@ -234,9 +237,9 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 
 	var gotArgv, gotEnv []string
 	orig := accountsLaunchRun
-	accountsLaunchRun = func(_, _ io.Writer, argv, env []string) int {
+	accountsLaunchRun = func(_, _ io.Writer, argv, env []string) launchRunResult {
 		gotArgv, gotEnv = argv, env
-		return 7
+		return launchRunResult{Code: 7}
 	}
 	t.Cleanup(func() { accountsLaunchRun = orig })
 
@@ -266,6 +269,173 @@ func TestRunAccountsLaunchExecSeam(t *testing.T) {
 	}
 }
 
+func TestAccountsLaunchBrokerDenyDoesNotStartWorker(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-env-secret")
+
+	oldBroker := launchSpawnBroker
+	oldRun := accountsLaunchRun
+	var attempt launchBrokerAttempt
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		attempt = a
+		return denyLaunchBrokerGrant(a, "unit-test-deny")
+	}
+	called := false
+	accountsLaunchRun = func(_, _ io.Writer, _ []string, _ []string) launchRunResult {
+		called = true
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		accountsLaunchRun = oldRun
+	})
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 1 {
+		t.Fatalf("broker-denied launch rc=%d, want 1; stderr=%s", rc, errb.String())
+	}
+	if called {
+		t.Fatal("accounts launch runner was called after broker denial")
+	}
+	if attempt.Surface != "accounts_launch" || attempt.Metadata.AgentRunID == "" ||
+		!strings.HasPrefix(attempt.Metadata.PolicyDigest, "policy-sha256:") {
+		t.Fatalf("broker attempt = %+v, want accounts launch AgentRun/PolicyDigest metadata", attempt)
+	}
+	for _, leak := range []string{"sk-env-secret", attempt.Env["CLAUDE_CONFIG_DIR"]} {
+		if leak != "" && strings.Contains(errb.String(), leak) {
+			t.Fatalf("broker-denied stderr leaked %q:\n%s", leak, errb.String())
+		}
+	}
+	if !strings.Contains(errb.String(), "spawn broker denied launch: unit-test-deny") {
+		t.Fatalf("stderr missing broker denial:\n%s", errb.String())
+	}
+}
+
+func TestAccountsLaunchBrokerAllowCarriesMetadata(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	oldBroker := launchSpawnBroker
+	oldRun := accountsLaunchRun
+	var attempt launchBrokerAttempt
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		attempt = a
+		return allowLaunchBrokerGrant(a, "unit-test-allow")
+	}
+	accountsLaunchRun = func(_, _ io.Writer, _ []string, _ []string) launchRunResult {
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		accountsLaunchRun = oldRun
+	})
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("broker-allowed launch rc=%d; stderr=%s", rc, errb.String())
+	}
+	if attempt.Metadata.AgentRunID == "" || attempt.Metadata.PolicyDigest == "" {
+		t.Fatalf("broker attempt metadata = %+v, want AgentRun/PolicyDigest", attempt.Metadata)
+	}
+	for _, want := range []string{"agent_run", attempt.Metadata.AgentRunID, attempt.Metadata.PolicyDigest, "broker=unit-test-allow"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("allowed stderr missing %q:\n%s", want, errb.String())
+		}
+	}
+	if strings.Contains(errb.String(), attempt.Env["CLAUDE_CONFIG_DIR"]) {
+		t.Fatalf("allowed stderr leaked raw account dir:\n%s", errb.String())
+	}
+}
+
+func TestRunAccountsLaunchFallsBackToOpus48WhenDefaultFableUnavailable(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	var calls [][]string
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
+		calls = append(calls, append([]string(nil), argv...))
+		if len(calls) == 1 {
+			return launchRunResult{Code: 1, Stderr: `error: model "fable" is not available for this account`}
+		}
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "gem8-seat", "--registry", regPath, "--home", home})
+	if rc != 0 {
+		t.Fatalf("launch fallback rc=%d stderr=%s", rc, errb.String())
+	}
+	if len(calls) != 2 {
+		t.Fatalf("launch attempts = %d, want primary + fallback; calls=%#v", len(calls), calls)
+	}
+	first, second := strings.Join(calls[0], " "), strings.Join(calls[1], " ")
+	if !strings.Contains(first, "--model "+defaultLaunchModel) {
+		t.Fatalf("primary launch did not use default Fable model: %q", first)
+	}
+	for _, want := range []string{"--model " + defaultLaunchFallbackModel, "--settings " + ultracodeSettingsArg} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("fallback launch missing %q:\n%s", want, second)
+		}
+	}
+	for _, want := range []string{"retrying once", defaultLaunchFallbackModel, "fallback command"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("fallback stderr missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
+func TestRunAccountsLaunchDoesNotFallbackWhenModelExplicit(t *testing.T) {
+	home := t.TempDir()
+	regPath, _ := launchRegistry(t, home)
+
+	var calls int
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, _ []string, _ []string) launchRunResult {
+		calls++
+		return launchRunResult{Code: 1, Stderr: `error: model "fable" is not available for this account`}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{
+		"launch", "--name", "gem8-seat", "--model", defaultLaunchModel,
+		"--registry", regPath, "--home", home,
+	})
+	if rc != 1 {
+		t.Fatalf("explicit-model launch rc=%d, want primary failure; stderr=%s", rc, errb.String())
+	}
+	if calls != 1 {
+		t.Fatalf("explicit --model should not auto-fallback; attempts=%d", calls)
+	}
+	if strings.Contains(errb.String(), "retrying once") {
+		t.Fatalf("explicit --model emitted fallback retry:\n%s", errb.String())
+	}
+}
+
+func TestLaunchModelUnavailableClassifier(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{`error: model "fable" is not available for this account`, true},
+		{`invalid model: fable`, true},
+		{`model_not_found: fable`, true},
+		{`network unavailable while contacting provider`, false},
+		{`model claude-opus-4-8 is not available`, false},
+		{`permission denied`, false},
+	}
+	for _, tc := range cases {
+		if got := launchModelUnavailable(tc.stderr, defaultLaunchModel); got != tc.want {
+			t.Errorf("launchModelUnavailable(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
+	}
+}
+
 func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
 	home := t.TempDir()
 	regPath, _ := launchRegistry(t, home)
@@ -282,12 +452,12 @@ func TestRunAccountsLaunchWarnsOnStaleBinary(t *testing.T) {
 	})
 
 	launched := false
-	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		launched = true
 		if len(argv) < 3 || argv[1] != "guard" {
 			t.Fatalf("stale warning should not disable the default guard launch: %#v", argv)
 		}
-		return 0
+		return launchRunResult{Code: 0}
 	}
 	accountsLaunchStamp = func() binstamp.Stamp {
 		return binstamp.Stamp{Revision: oldRev, HasVCS: true}
@@ -322,9 +492,9 @@ func TestRunAccountsLaunchDirectNoGuard(t *testing.T) {
 
 	var gotArgv []string
 	orig := accountsLaunchRun
-	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+	accountsLaunchRun = func(_, _ io.Writer, argv, _ []string) launchRunResult {
 		gotArgv = argv
-		return 0
+		return launchRunResult{Code: 0}
 	}
 	t.Cleanup(func() { accountsLaunchRun = orig })
 

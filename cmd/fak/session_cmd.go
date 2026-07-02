@@ -80,6 +80,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "reset-diff" {
 		return runSessionResetDiff(os.Stdin, stdout, stderr, args)
 	}
+	if verb == "envelope" && (len(args) == 0 || strings.HasPrefix(args[0], "-")) {
+		return runSessionEnvelope(stdout, stderr, args)
+	}
 
 	// Positional arity per verb: the fixed leading args (an id, maybe a value) come
 	// before any flags, so `fak session status sess-1 --json` parses cleanly.

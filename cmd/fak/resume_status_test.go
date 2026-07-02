@@ -76,8 +76,9 @@ func TestResumeStatusWired(t *testing.T) {
 		t.Errorf("status table missing the fixture sessions:\n%s", got)
 	}
 	// The crashed pending session is idle years past any reset window, so the runbook says
-	// run and emits the exact resolve+resume command.
-	if !strings.Contains(got, "run now") || !strings.Contains(got, "fak resume resolve crashed0") {
+	// run and emits the exact resolve+resume command (self-healing -wait form: resolve
+	// sleeps out an imminent owner reset on its own).
+	if !strings.Contains(got, "run now") || !strings.Contains(got, "fak resume resolve -wait crashed0") {
 		t.Errorf("runbook should list the fire command for the crashed session:\n%s", got)
 	}
 }
@@ -135,7 +136,7 @@ func TestResumeStatusJSON(t *testing.T) {
 			if s.NextAction != resume.ActRun || !s.Fire {
 				t.Errorf("crashed0 next = %q fire=%v, want run/true", s.NextAction, s.Fire)
 			}
-			if !strings.Contains(s.Command, "fak resume resolve crashed0") {
+			if !strings.Contains(s.Command, "fak resume resolve -wait crashed0") {
 				t.Errorf("crashed0 command = %q, want the resolve+resume recipe", s.Command)
 			}
 		case "tookabc1":
@@ -164,5 +165,95 @@ func TestResumeStatusUsageErrors(t *testing.T) {
 	}
 	if _, _, code := runResumeStatusAt("--store", filepath.Join(t.TempDir(), "nope")); code != 1 {
 		t.Errorf("missing store dir: exit = %d, want 1", code)
+	}
+}
+
+// statusInterruptedFixture is the invisible-death shape (the 392f-class crash): a real
+// model turn, then a user prompt that never got a reply — no refusal record, no error,
+// the process just died. Years idle, so the interrupted floor has long passed.
+const statusInterruptedFixture = `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2020-01-01T00:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"working"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":230000,"cache_creation_input_tokens":16000,"output_tokens":500}}}
+{"type":"user","timestamp":"2020-01-01T00:01:00Z","message":{"role":"user","content":"go on"}}
+{"type":"last-prompt","lastPrompt":"go on"}
+`
+
+// statusMetaTailFixture ends on an isMeta user line AFTER a clean model turn — meta lines
+// get no reply, so this is a clean end, not an interruption.
+const statusMetaTailFixture = `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2020-01-01T00:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":90000,"cache_creation_input_tokens":0,"output_tokens":300}}}
+{"type":"user","timestamp":"2020-01-01T00:00:10Z","isMeta":true,"message":{"role":"user","content":"Caveat: local commands"}}
+`
+
+// statusSidechainTailFixture ends on a SIDECHAIN user record after a clean main-chain
+// turn — a subagent's record must not mark the main chain as owed a reply.
+const statusSidechainTailFixture = `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2020-01-01T00:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":90000,"cache_creation_input_tokens":0,"output_tokens":300}}}
+{"type":"user","timestamp":"2020-01-01T00:00:10Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}
+`
+
+// TestResumeStatusSurfacesInterrupted is the visibility regression for the mid-turn death:
+// a session killed between a user turn and the reply used to read "ended cleanly" and
+// silently VANISH from the default status report — the operator saw a random error and no
+// tool would even name the session. It must now appear, classified interrupted; the meta-
+// and sidechain-tailed clean sessions must stay out of the default report.
+func TestResumeStatusSurfacesInterrupted(t *testing.T) {
+	store := t.TempDir()
+	for name, body := range map[string]string{
+		"deadmid1.jsonl": statusInterruptedFixture,
+		"metatail.jsonl": statusMetaTailFixture,
+		"sidetail.jsonl": statusSidechainTailFixture,
+	} {
+		if err := os.WriteFile(filepath.Join(store, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+
+	out, errb, code := runResumeStatusAt("--store", store, "--ledger", ledger)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if !strings.Contains(out, "deadmid1") || !strings.Contains(out, "interrupted") {
+		t.Errorf("mid-turn death missing from the default report:\n%s", out)
+	}
+	if strings.Contains(out, "metatail") || strings.Contains(out, "sidetail") {
+		t.Errorf("meta/sidechain-tailed clean sessions must not be reported as crashed:\n%s", out)
+	}
+}
+
+// TestResumeStatusInterruptedRowJSON pins the interrupted row's fold: crashed with no
+// limit reason (nothing to wait out), unresumed, and — with the host admitting — the
+// runbook verdict is run with the self-healing command attached.
+func TestResumeStatusInterruptedRowJSON(t *testing.T) {
+	store := t.TempDir()
+	if err := os.WriteFile(filepath.Join(store, "deadmid1.jsonl"), []byte(statusInterruptedFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+
+	out, errb, code := runResumeStatusAt("--store", store, "--ledger", ledger, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var rep struct {
+		HostAdmitted bool        `json:"host_admitted"`
+		Sessions     []statusRow `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out)
+	}
+	if len(rep.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(rep.Sessions))
+	}
+	row := rep.Sessions[0]
+	if row.Crash != resume.CrashInterrupted || row.LimitReason != "" {
+		t.Errorf("crash = (%q,%q), want (interrupted, no limit reason)", row.Crash, row.LimitReason)
+	}
+	if rep.HostAdmitted {
+		if row.NextAction != resume.ActRun || !strings.Contains(row.Command, "resolve -wait deadmid1") {
+			t.Errorf("admitted host: next = %q cmd = %q, want run with the -wait resolve command", row.NextAction, row.Command)
+		}
+	} else if row.NextAction != resume.ActHoldAdmission {
+		t.Errorf("refused host: next = %q, want hold_admission", row.NextAction)
 	}
 }

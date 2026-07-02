@@ -7,9 +7,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ablate"
 	"github.com/anthony-chaudhary/fak/internal/bench"
+	enginepkg "github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guardtrace"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
@@ -41,25 +44,46 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	suite := fs.String("suite", "tau2-smoke", "trace suite under testdata/tau2")
 	tracePath := fs.String("trace", "", "explicit trace path (overrides --suite)")
+	fromSession := fs.String("from-session", "", "captured fak guard replay fixture to replay as a session-backed cassette")
 	sweep := fs.String("sweep", "vdso", "comma list of runtime features to sweep (known: "+strings.Join(ablate.KnownFeatures, ",")+")")
 	baseline := fs.String("baseline", "all-off", "arm id used as the delta reference in the table")
 	out := fs.String("out", "", "write the AblationReport JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the AblationReport JSON to stdout (no table)")
-	engine := fs.String("engine", "mock", "engine id (the offline mock by default)")
+	engineIDFlag := fs.String("engine", "mock", "engine id (the offline mock by default)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 
 	features := splitCommaList(*sweep)
 
-	path := *tracePath
-	if path == "" {
-		path = resolveSuite(traceDir(), *suite)
-	}
-	t, err := bench.LoadTrace(path)
-	if err != nil {
-		fmt.Fprintln(stderr, "fak ablate:", err)
-		return 1
+	engineID := *engineIDFlag
+	engineModel := *engineIDFlag + "-offline"
+	var t *bench.Trace
+	if *fromSession != "" {
+		if *tracePath != "" {
+			fmt.Fprintln(stderr, "fak ablate: --from-session and --trace are mutually exclusive")
+			return 2
+		}
+		sessionTrace, cas, sessionEngineID, err := guardtrace.LoadSessionTrace(*fromSession)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak ablate:", err)
+			return 1
+		}
+		abi.RegisterEngine(sessionEngineID, enginepkg.NewCassetteEngine(cas))
+		t = sessionTrace
+		engineID = sessionEngineID
+		engineModel = "session-cassette"
+	} else {
+		path := *tracePath
+		if path == "" {
+			path = resolveSuite(traceDir(), *suite)
+		}
+		var err error
+		t, err = bench.LoadTrace(path)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak ablate:", err)
+			return 1
+		}
 	}
 
 	// BuildSweep validates the sweep spec (an unknown token fails loud → usage exit 2) and
@@ -67,6 +91,10 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 	configs, err := ablate.BuildSweep(features)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak ablate:", err)
+		return 2
+	}
+	if *fromSession != "" && anyEnvGated(features) {
+		fmt.Fprintln(stderr, "fak ablate: --from-session currently supports in-process sweeps only; use --sweep vdso or a bench trace for env-gated sweeps")
 		return 2
 	}
 
@@ -81,7 +109,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak ablate: resolve fak binary for arm re-exec:", err)
 			return 1
 		}
-		rep, dropped, err := ablate.SweepViaSubprocess(ctx(), bin, t, *engine, *engine+"-offline", configs, *baseline, ablateArmRunner)
+		rep, dropped, err := ablate.SweepViaSubprocess(ctx(), bin, t, engineID, engineModel, configs, *baseline, ablateArmRunner)
 		if err != nil {
 			fmt.Fprintln(stderr, "fak ablate:", err)
 			return 1
@@ -93,7 +121,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 		return emitAblation(stdout, stderr, rep, *out, *asJSON)
 	}
 
-	rep, err := ablate.Sweep(ctx(), t, *engine, *engine+"-offline", configs, *baseline)
+	rep, err := ablate.Sweep(ctx(), t, engineID, engineModel, configs, *baseline)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak ablate:", err)
 		return 1

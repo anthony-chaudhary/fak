@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -23,7 +24,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -194,6 +197,11 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, remoteServeBase,
 			noTokenAnywhere = os.Getenv("ANTHROPIC_API_KEY") == ""
 		}
 	}
+	// Arm the served-session spend meter for this upstream: the guard boot is the
+	// one point where the wrapped provider identity is known, and the session
+	// table's spend axis (Budget.SpendMicroCentsLeft) only debits priced turns —
+	// see session_spend.go. Unpriced pairs stay dollar-blind (no debit), honestly.
+	armServedSpendPricing(up, agentName)
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
@@ -335,6 +343,15 @@ func guardRunHeadlessRehydrate(stdinInteractive, pinUpstream bool, credPath stri
 	gate := rehydrate.NewGate(accounts.NewRehydrateCredRung(check))
 	adm := gate.Admit(context.Background(), dormancy.Cold)
 	if adm.Admitted {
+		return guardHeadlessRehydrateVerdict{Ran: true, CredPath: credPath}
+	}
+	// #2260: the ≤30s window above rides out a rotation ALREADY in progress; an expired
+	// credential on a headless host needs a HUMAN-paced re-login (minutes-to-hours). Park
+	// on a few-minute poll — bounded (FAK_GUARD_PARK_BUDGET, default 24h; 0 restores the
+	// immediate refusal), observable (one park line + one outcome line on stderr) — before
+	// failing loud, so the fleet self-heals the moment `claude` runs once anywhere on the
+	// host instead of every queued spawn dying inside half a minute. See guard_park.go.
+	if park := guardParkForRelogin(credPath, guardParkBudget(), guardParkPoll(), nil, nil, os.Stderr); park.Recovered {
 		return guardHeadlessRehydrateVerdict{Ran: true, CredPath: credPath}
 	}
 	return guardHeadlessRehydrateVerdict{Ran: true, Refused: true, Detail: adm.Detail, CredPath: credPath}
@@ -508,25 +525,65 @@ func guardLoginStatusNote(us guardUpstream) string {
 		us.claudeConfigDir, us.loginStatus, us.canServe)
 }
 
+type guardChildSpawnMetadata struct {
+	AgentRunID   string
+	ParentRunID  string
+	ToolCallID   string
+	PolicyDigest string
+	Backend      string
+	Envelope     toolprocgate.CapabilityEnvelope
+}
+
+type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
+
+func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, command []string) guardChildSpawnMetadata {
+	agentRunID = strings.TrimSpace(agentRunID)
+	if agentRunID == "" {
+		agentRunID = "guard"
+	}
+	env := toolprocgate.CapabilityEnvelope{
+		Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn},
+	}
+	if len(command) > 0 && rt.ToolRuntime != nil {
+		if r, ok := rt.ToolRuntime.EnvelopeFor(guardAgentBaseName(command[0])); ok {
+			env.DeadlineMS = r.DeadlineMS
+			env.HeartbeatEveryMS = r.HeartbeatEveryMS
+		}
+	}
+	return guardChildSpawnMetadata{
+		AgentRunID:   agentRunID,
+		ToolCallID:   "guard-child:" + agentRunID,
+		PolicyDigest: strings.TrimSpace(policyDigest),
+		Backend:      strings.TrimSpace(backend),
+		Envelope:     env,
+	}
+}
+
 // buildGuardChild constructs the wrapped-agent command with ONLY the gateway URL injected
 // into its environment (never the parent shell). In pinned subscription mode it also hands
 // the client a placeholder ANTHROPIC_API_KEY (when it has none) so it talks x-api-key to the
 // gateway, which ignores the placeholder and authenticates upstream with the held token.
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
+	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
+	child := exec.Command(command[0], command[1:]...)
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	child.Env = env
+	return child
+}
+
+func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) ([]string, []string) {
 	// Landlock hook-floor (opt-in, Linux): rewrite the agent argv so the child is launched
 	// through the fak re-exec trampoline, which applies the read-only-.git/hooks ruleset to
 	// itself before exec'ing the agent. Off by default, no-op on non-Linux or when the hook
 	// dirs cannot be resolved — the original command is used unchanged.
 	command = maybeLandlockCommand(command)
-	child := exec.Command(command[0], command[1:]...)
-	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.Env = os.Environ()
+	env := os.Environ()
 	for _, kv := range injected {
-		child.Env = append(child.Env, kv[0]+"="+kv[1])
+		env = append(env, kv[0]+"="+kv[1])
 	}
 	for _, kv := range extraEnv {
 		if strings.TrimSpace(kv[0]) != "" {
-			child.Env = append(child.Env, kv[0]+"="+kv[1])
+			env = append(env, kv[0]+"="+kv[1])
 		}
 	}
 	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
@@ -535,9 +592,65 @@ func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, e
 	// the client may forward its own subscription bearer — also ignored in pinned mode —
 	// so either way the held token is what reaches Anthropic.
 	if pinUpstream && os.Getenv("ANTHROPIC_API_KEY") == "" {
-		child.Env = append(child.Env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
+		env = append(env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
 	}
-	return child
+	return command, env
+}
+
+func guardChildSpawnAttempt(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, extraEnv ...[2]string) (toolprocgate.SpawnAttempt, error) {
+	command, envStrings := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
+	env, err := toolprocgate.EnvFromStrings(envStrings)
+	if err != nil {
+		return toolprocgate.SpawnAttempt{}, err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return toolprocgate.SpawnAttempt{}, err
+	}
+	return toolprocgate.SpawnAttempt{
+		AgentRunID:   meta.AgentRunID,
+		ParentRunID:  meta.ParentRunID,
+		ToolCallID:   meta.ToolCallID,
+		PolicyDigest: meta.PolicyDigest,
+		Argv:         command,
+		Env:          env,
+		CWD:          cwd,
+		Backend:      meta.Backend,
+		Envelope:     meta.Envelope,
+	}, nil
+}
+
+func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
+	if broker == nil {
+		broker = toolprocgate.NewSpawnBroker()
+	}
+	attempt, err := guardChildSpawnAttempt(command, injected, pinUpstream, meta, extraEnv...)
+	if err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
+	grant, err := broker.Admit(attempt)
+	if err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
+	if launcher == nil {
+		launcher = guardExecLauncher
+	}
+	child, err := launcher(grant)
+	if err != nil {
+		return toolprocgate.SpawnGrant{}, nil, err
+	}
+	return grant, child, nil
+}
+
+func guardExecLauncher(grant toolprocgate.SpawnGrant) (*exec.Cmd, error) {
+	if len(grant.Argv) == 0 {
+		return nil, fmt.Errorf("empty brokered argv")
+	}
+	child := exec.Command(grant.Argv[0], grant.Argv[1:]...)
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	child.Env = toolprocgate.EnvStrings(grant.Env)
+	child.Dir = grant.CWD
+	return child, nil
 }
 
 // maybeLandlockCommand rewrites the agent argv to run through the fak Landlock trampoline
@@ -758,9 +871,14 @@ func guardRestartLimitStatus(limit int, ev guardBudgetRestartEvent) string {
 // command with a resume flag appended — so a crash caused by auth expiry self-heals within this
 // guarded session instead of always needing a manual re-run. credPath is empty when guard is not
 // pinning the Claude subscription upstream, which makes the check an unconditional no-op there.
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+	spawnBroker := toolprocgate.NewSpawnBroker()
 	for {
-		child := buildGuardChild(command, injected, pinUpstream)
+		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil)
+		if err != nil {
+			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
 		runErr := child.Run()
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
 			command = next
@@ -771,12 +889,17 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	}
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler) {
+	spawnBroker := toolprocgate.NewSpawnBroker()
 	var extraEnv [][2]string
 	restarts := 0
 	for {
-		child := buildGuardChild(command, injected, pinUpstream, extraEnv...)
+		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
+		if err != nil {
+			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
 		if err := child.Start(); err != nil {
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
@@ -890,8 +1013,12 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 	}
 	cancel()
 	serr := <-serveErr
+	// The session's wall-clock window, when the resource sampler tracked one — the
+	// honest scope for the hook-latency exit line below (0 = no anchor, fold all-time).
+	var sessionWindow time.Duration
 	if sampler != nil {
 		snap := sampler.Stop()
+		sessionWindow = snap.Elapsed
 		appendHarnessResources("guard", provider, agentName, snap)
 		if !quiet {
 			fmt.Fprintln(os.Stderr, "fak guard: "+snap.Report())
@@ -911,6 +1038,10 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		fmt.Fprint(os.Stderr, formatAuditSummary(sum, kc))
 		fmt.Fprint(os.Stderr, formatAmplification(kc, sum))
 		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+		// The guard-hook wall-clock tax (#1993): what the pre+post adjudication hooks
+		// cost per tool call this session. Best-effort — a hook-less session prints
+		// nothing rather than a vacuous zero row.
+		fmt.Fprint(os.Stderr, guardHookLatencySummaryLine(sessionWindow, time.Now()))
 	}
 	// Append cache-value observation to ledger (epic #1072, issue #1075).
 	stats := cacheobs.Default.Snapshot()

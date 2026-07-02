@@ -463,6 +463,16 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		return finish(payload), nil
 	}
 
+	dryRunGrant := launchSpawnBroker(newLaunchBrokerAttempt("dispatch_tick", opts.Backend, launchPreview, nil, root))
+	payload["spawn_broker"] = launchBrokerGrantMap(dryRunGrant)
+	if !dryRunGrant.Allow {
+		payload["ok"] = false
+		payload["action"] = "broker_denied"
+		payload["verdict"] = "SPAWN_BROKER_DENIED"
+		payload["reason"] = "spawn broker denied dispatch worker launch: " + dryRunGrant.Reason
+		return finish(payload), nil
+	}
+
 	if !opts.Live {
 		payload["ok"] = true
 		payload["action"] = "would_spawn"
@@ -550,7 +560,24 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		}
 	}
 	baseSHA := currentGitSHA(root)
-	spawned, err := spawnDispatchIssueWorker(launchCommand, env, root, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
+	grant := launchSpawnBroker(newLaunchBrokerAttempt("dispatch_tick", opts.Backend, launchCommand, env, root))
+	payload["spawn_broker"] = launchBrokerGrantMap(grant)
+	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
+		bundle["spawn_broker"] = launchBrokerMetadataMap(grant.Metadata)
+	}
+	if !grant.Allow {
+		payload["ok"] = false
+		payload["action"] = "broker_denied"
+		payload["verdict"] = "SPAWN_BROKER_DENIED"
+		payload["reason"] = "spawn broker denied dispatch worker launch: " + grant.Reason
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
+	launchCommand = grant.Argv
+	env = grant.Env
+	spawnCWD := firstString(grant.CWD, root)
+
+	spawned, err := dispatchIssueWorkerSpawner(launchCommand, env, spawnCWD, runsDir, target, pick.Lane, opts.Backend, leaseID, pick.Tree, account, opts.Membership, baseSHA, opts.SpawnProbeS)
 	if err != nil {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"
@@ -769,6 +796,8 @@ func augmentGuardEnvDefaults() {
 		}
 	}
 }
+
+var dispatchIssueWorkerSpawner = spawnDispatchIssueWorker
 
 func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
 	if len(command) == 0 {

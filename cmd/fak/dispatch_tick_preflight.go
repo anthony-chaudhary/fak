@@ -36,6 +36,7 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 		Kernel:        dispatchPreflightKernel(root),
 		Seat:          dispatchPreflightSeat(root, stderr, product),
 		Resources:     dispatchProbeHostResources(),
+		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchProbeWorkerCount(root, product),
 	}
 	return dispatchtick.EvaluatePreflight(in).Map(), nil

@@ -117,8 +117,13 @@ func TestAccountsLaunchRotate(t *testing.T) {
 	if !strings.Contains(got, `rotating off "alice-seat" -> "bob-seat"`) {
 		t.Fatalf("missing rotation note:\n%s", got)
 	}
-	if !strings.Contains(got, `seat "bob-seat"`) || !strings.Contains(got, "CLAUDE_CONFIG_DIR = "+bDir) {
-		t.Fatalf("rotated launch plan should target bob-seat:\n%s", got)
+	if !strings.Contains(got, `seat "bob-seat"`) ||
+		!strings.Contains(got, "identity          = bob@example.test") ||
+		!strings.Contains(got, "CLAUDE_CONFIG_DIR = <account-dir>") {
+		t.Fatalf("rotated launch plan should target bob-seat without exposing its account dir:\n%s", got)
+	}
+	if strings.Contains(got, bDir) {
+		t.Fatalf("rotated launch plan exposed the raw account dir %q:\n%s", bDir, got)
 	}
 	if !strings.Contains(got, "login             = ready (can_serve=true)") {
 		t.Fatalf("rotated launch plan missing login readiness:\n%s", got)

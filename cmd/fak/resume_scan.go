@@ -141,10 +141,12 @@ func scanTranscriptToEvents(r io.Reader) (events []resume.Event, model string, l
 		CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	}
 	type rec struct {
-		Type       string `json:"type"`
-		Timestamp  string `json:"timestamp"`
-		IsAPIError bool   `json:"isApiErrorMessage"`
-		Message    *struct {
+		Type        string `json:"type"`
+		Timestamp   string `json:"timestamp"`
+		IsAPIError  bool   `json:"isApiErrorMessage"`
+		IsSidechain bool   `json:"isSidechain"`
+		IsMeta      bool   `json:"isMeta"`
+		Message     *struct {
 			Role    string          `json:"role"`
 			Model   string          `json:"model"`
 			Content json.RawMessage `json:"content"`
@@ -179,6 +181,14 @@ func scanTranscriptToEvents(r io.Reader) (events []resume.Event, model string, l
 			} else {
 				events = append(events, resume.Event{Kind: resume.EventOtherError})
 			}
+			continue
+		}
+		// A main-chain user record (a typed prompt or a tool result) leaves the model owing a
+		// reply — an unanswered one at the tail is a mid-turn death (CrashInterrupted), the
+		// crash class that writes NO error record. Same guard as the status shell: meta lines
+		// get no reply and sidechain records belong to a subagent, so neither counts.
+		if m.Role == "user" && !jr.IsSidechain && !jr.IsMeta {
+			events = append(events, resume.Event{Kind: resume.EventUserTurn})
 			continue
 		}
 		// A real model turn: a non-synthetic assistant message carrying prompt usage. Its
@@ -244,19 +254,22 @@ func classifyLimit(text string) (string, bool) {
 // which session, why it died, how big its resident context is, the projected cache posture, and
 // the managed-cache restart strategy that avoids a cold full re-prefill.
 func renderScan(w io.Writer, store string, rows []scanRow, all bool) {
-	var crashed, otherErr, clean int
+	var crashed, otherErr, interrupted, clean int
 	for _, r := range rows {
 		switch {
 		case r.Diagnosis.NeedsRestart:
 			crashed++
 		case r.Diagnosis.Crash == resume.CrashOther:
 			otherErr++
+		case r.Diagnosis.Crash == resume.CrashInterrupted:
+			interrupted++
 		default:
 			clean++
 		}
 	}
 	fmt.Fprintf(w, "scanned %d session(s) in %s\n", len(rows), store)
-	fmt.Fprintf(w, "  %d crashed on a rate limit and never resumed   %d other unclean end   %d clean\n\n", crashed, otherErr, clean)
+	fmt.Fprintf(w, "  %d crashed on a rate limit and never resumed   %d died mid-turn   %d other unclean end   %d clean\n\n",
+		crashed, interrupted, otherErr, clean)
 
 	show := make([]scanRow, 0, len(rows))
 	for _, r := range rows {

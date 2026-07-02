@@ -39,16 +39,16 @@ func TestRenderGuardInfoVisualBlockResourcesAndAgents(t *testing.T) {
 
 	for _, want := range []string{
 		"── resources ", "── agents ", // the new section rules
-		" mem    ",                          // resources gutter label
-		"41MB heap", "68MB sys", "24 gor",   // live resource axes
-		"gc 12",                             //
-		" rate   ", "12.3 tok/s out",        // generation rate
-		"ttft 1.20s", "oldest req 3s",       // latency + hung-request tell
-		" agent  ",                          // agents gutter label
-		"main-trace · root",                 // the root session (trace id capped at 10)
-		"running", "1m35s",                  // run state + live wall-clock
-		"380k tok left", "7 turns left",     // remaining budget axes
-		"sub-trace · sub g1",                // the sub-agent lineage row
+		" mem    ",                        // resources gutter label
+		"41MB heap", "68MB sys", "24 gor", // live resource axes
+		"gc 12",                      //
+		" rate   ", "12.3 tok/s out", // generation rate
+		"ttft 1.20s", "oldest req 3s", // latency + hung-request tell
+		" agent  ",          // agents gutter label
+		"main-trace · root", // the root session (trace id capped at 10)
+		"running", "1m35s",  // run state + live wall-clock
+		"380k tok left", "7 turns left", // remaining budget axes
+		"sub-trace · sub g1", // the sub-agent lineage row
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("visual block missing %q:\n%s", want, block)

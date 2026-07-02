@@ -152,8 +152,11 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		// exercises the REAL time.Now/time.Sleep path (guardRunHeadlessRehydrate always builds
 		// its check with nil/nil), so shrink the window via its documented env-var override —
 		// otherwise this subtest would burn the full 30s ceiling waiting for a rotation that
-		// never comes.
+		// never comes. FAK_GUARD_PARK_BUDGET=0 keeps the #2260 park out of this subtest (it
+		// would otherwise wait for a re-login that never comes); the park's own wiring is
+		// witnessed by the park subtests below.
 		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "0")
 		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
 
 		v := guardRunHeadlessRehydrate(false /* headless */, true /* pinUpstream */, credPath)
@@ -165,6 +168,45 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 		}
 		if v.Detail == "" {
 			t.Fatal("a STALE_CRED refusal must carry a re-auth-routing detail, not a bare refusal")
+		}
+	})
+
+	t.Run("park_exhaustion_still_refuses_stale_cred", func(t *testing.T) {
+		// The #2260 park wiring, give-up half: an expired credential that never rotates
+		// parks for the (shrunk) budget and then still refuses STALE_CRED — the park delays
+		// the refusal, it never converts a genuine staleness into a silent pass.
+		dir := t.TempDir()
+		credPath := filepath.Join(dir, ".credentials.json")
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "80ms")
+		t.Setenv("FAK_GUARD_PARK_POLL", "1s") // clamped to min 1s; one poll spends the 80ms budget
+		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
+
+		v := guardRunHeadlessRehydrate(false, true, credPath)
+		if !v.Ran || !v.Refused {
+			t.Fatalf("park exhaustion must still refuse: got %+v", v)
+		}
+	})
+
+	t.Run("park_recovers_when_relogin_lands", func(t *testing.T) {
+		// The #2260 park wiring, recovery half (the fleet's actual self-heal): the launch
+		// finds an expired credential, parks, a re-login rewrites the file mid-park, and the
+		// launch PROCEEDS instead of dying — the pre-#2260 behavior was a refusal inside the
+		// 30s rehydrate ceiling no matter what landed minutes later.
+		dir := t.TempDir()
+		credPath := filepath.Join(dir, ".credentials.json")
+		t.Setenv("FAK_AUTH_REFRESH_WINDOW", "50ms")
+		t.Setenv("FAK_GUARD_PARK_BUDGET", "30s") // ample; recovery ends the park well before this
+		t.Setenv("FAK_GUARD_PARK_POLL", "1s")    // min-clamped poll keeps the test ~1s, not minutes
+		writeCred(t, credPath, "sk-ant-oat01-dead", time.Now().Add(-time.Hour).UnixMilli())
+		go func() {
+			time.Sleep(200 * time.Millisecond) // the human runs `claude` once, mid-park
+			writeCred(t, credPath, "sk-ant-oat01-fresh", time.Now().Add(time.Hour).UnixMilli())
+		}()
+
+		v := guardRunHeadlessRehydrate(false, true, credPath)
+		if !v.Ran || v.Refused {
+			t.Fatalf("a re-login landing mid-park must let the launch proceed: got %+v", v)
 		}
 	})
 

@@ -84,62 +84,11 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 		f.Close()
 
 		hist := history[sid]
-		idle := idleSince(now, tr.lastUnix)
-		d := resume.Diagnose(tr.events, resume.Input{IdleSeconds: idle, TTL: resume.TTL5m})
-		if d.Crash == resume.CrashNone && len(hist) == 0 && !*all {
+		row := foldStatusRow(sid, tr, hist, admit, *maxAttempts, now)
+		if row.Crash == resume.CrashNone && len(hist) == 0 && !*all {
 			continue // neither crashed nor part of any resume journey
 		}
-
-		outcome := resume.ClassifyOutcome(classifyTerminalSignal(tr.terminalText, tr.terminalFound))
-		attempts := resume.CountAttempts(hist)
-		newTurns := resume.NewTurnsAfter(tr.turnTimes, resume.LastLaunchUnix(hist))
-		settled := false
-		for _, a := range hist {
-			if a.ManualOverride || strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.Action)), "consolidate") {
-				settled = true
-			}
-		}
-		gate := resume.RetryGate(hist, outcome, *maxAttempts)
-		state := resume.FoldResumeState(resume.ResumeFacts{
-			Attempts:        attempts,
-			MaxAttempts:     *maxAttempts,
-			OperatorSettled: settled,
-			NewTurns:        newTurns,
-			Outcome:         outcome,
-		})
-		next := resume.FoldNextAction(resume.NextInput{
-			State:               state,
-			Outcome:             outcome,
-			Retry:               gate,
-			LimitReason:         d.LimitReason,
-			IdleSeconds:         idle,
-			Admitted:            admit.Admit,
-			AdmitReason:         admit.Reason,
-			AdmitRetryAfterUnix: admit.RetryAfterUnix,
-		})
-		cmd := ""
-		if next.Fire {
-			cmd = resumeRunCommand(sid)
-		}
-		rows = append(rows, statusRow{
-			SessionID:        sid,
-			Crash:            d.Crash,
-			LimitReason:      d.LimitReason,
-			Goal:             tr.goal,
-			Attempts:         attempts,
-			NewTurns:         newTurns,
-			Outcome:          outcome,
-			State:            state,
-			RetryBlocked:     gate.Blocked,
-			RetryReason:      gate.Reason,
-			IdleSeconds:      idle,
-			LastActivityUnix: tr.lastUnix,
-			NextAction:       next.Action,
-			NextReason:       next.Reason,
-			Fire:             next.Fire,
-			Command:          cmd,
-			RetryAfterUnix:   next.RetryAfterUnix,
-		})
+		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
 		fmt.Fprintf(stderr, "fak resume status: no reportable sessions in %q (try --all)\n", *store)
@@ -159,9 +108,9 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
-			"schema":       "fak.resume-status.v1",
-			"store":        *store,
-			"ledger_path":  *ledger,
+			"schema":        "fak.resume-status.v1",
+			"store":         *store,
+			"ledger_path":   *ledger,
 			"host_admitted": admit.Admit,
 			"admit_reason":  admit.Reason,
 			"sessions":      rows,
@@ -169,6 +118,67 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderResumeStatus(stdout, *store, rows, admit)
 	return 0
+}
+
+// foldStatusRow runs the whole per-session fold chain — crash diagnosis, terminal-turn
+// outcome, retry gate, resume-journey state, and the next-action runbook verdict — over
+// one transcript's facts plus its ledger history. It is the ONE place a session's status
+// row is computed, shared by the store-wide `resume status` table and the single-session
+// `resume why` narrative so the two can never tell different stories.
+func foldStatusRow(sid string, tr statusTranscript, hist []resume.Attempt, admit resume.SourceDecision, maxAttempts int, now int64) statusRow {
+	idle := idleSince(now, tr.lastUnix)
+	d := resume.Diagnose(tr.events, resume.Input{IdleSeconds: idle, TTL: resume.TTL5m})
+
+	outcome := resume.ClassifyOutcome(classifyTerminalSignal(tr.terminalText, tr.terminalFound))
+	attempts := resume.CountAttempts(hist)
+	newTurns := resume.NewTurnsAfter(tr.turnTimes, resume.LastLaunchUnix(hist))
+	settled := false
+	for _, a := range hist {
+		if a.ManualOverride || strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.Action)), "consolidate") {
+			settled = true
+		}
+	}
+	gate := resume.RetryGate(hist, outcome, maxAttempts)
+	state := resume.FoldResumeState(resume.ResumeFacts{
+		Attempts:        attempts,
+		MaxAttempts:     maxAttempts,
+		OperatorSettled: settled,
+		NewTurns:        newTurns,
+		Outcome:         outcome,
+	})
+	next := resume.FoldNextAction(resume.NextInput{
+		State:               state,
+		Outcome:             outcome,
+		Retry:               gate,
+		LimitReason:         d.LimitReason,
+		IdleSeconds:         idle,
+		Admitted:            admit.Admit,
+		AdmitReason:         admit.Reason,
+		AdmitRetryAfterUnix: admit.RetryAfterUnix,
+	})
+	cmd := ""
+	if next.Fire {
+		cmd = resumeRunCommand(sid)
+	}
+	return statusRow{
+		SessionID:        sid,
+		Crash:            d.Crash,
+		LimitReason:      d.LimitReason,
+		Goal:             tr.goal,
+		Attempts:         attempts,
+		NewTurns:         newTurns,
+		Outcome:          outcome,
+		State:            state,
+		RetryBlocked:     gate.Blocked,
+		RetryReason:      gate.Reason,
+		IdleSeconds:      idle,
+		LastActivityUnix: tr.lastUnix,
+		NextAction:       next.Action,
+		NextReason:       next.Reason,
+		Fire:             next.Fire,
+		Command:          cmd,
+		RetryAfterUnix:   next.RetryAfterUnix,
+	}
 }
 
 // foldHostAdmission computes the host's launch-admission verdict once for the whole batch:
@@ -193,11 +203,12 @@ func foldHostAdmission(ledgerPath string) resume.SourceDecision {
 }
 
 // resumeRunCommand is the exact, copy-pasteable command that resumes one session: pin (and,
-// if the owner is throttled, re-home) via `fak resume resolve` — which prints the
-// CLAUDE_CONFIG_DIR to use — then `claude --resume`. The agent adds only genuine one-offs
-// (a --cwd for a session born in another dir, or -p for a headless single turn).
+// if the owner is throttled, wait out an imminent reset or re-home) via
+// `fak resume resolve -wait` — which prints the CLAUDE_CONFIG_DIR to use, sleeping out a
+// minutes-away owner reset on its own — then `claude --resume`. The agent adds only genuine
+// one-offs (a --cwd for a session born in another dir, or -p for a headless single turn).
 func resumeRunCommand(sid string) string {
-	return fmt.Sprintf(`CLAUDE_CONFIG_DIR="$(fak resume resolve %s)" claude --resume %s`, sid, sid)
+	return fmt.Sprintf(`CLAUDE_CONFIG_DIR="$(fak resume resolve -wait %s)" claude --resume %s`, sid, sid)
 }
 
 // actionRank orders the runbook fire-first: run, then the deferrals (wait_reset,
@@ -326,10 +337,12 @@ func scanTranscriptForStatus(r io.Reader) statusTranscript {
 		CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	}
 	type rec struct {
-		Type       string `json:"type"`
-		Timestamp  string `json:"timestamp"`
-		IsAPIError bool   `json:"isApiErrorMessage"`
-		Message    *struct {
+		Type        string `json:"type"`
+		Timestamp   string `json:"timestamp"`
+		IsAPIError  bool   `json:"isApiErrorMessage"`
+		IsSidechain bool   `json:"isSidechain"`
+		IsMeta      bool   `json:"isMeta"`
+		Message     *struct {
 			Role    string          `json:"role"`
 			Model   string          `json:"model"`
 			Content json.RawMessage `json:"content"`
@@ -374,6 +387,14 @@ func scanTranscriptForStatus(r io.Reader) statusTranscript {
 		}
 		if m == nil {
 			continue
+		}
+		// A main-chain user record (a typed prompt or a tool result) means the model owes a
+		// reply: if nothing follows it, the session died mid-turn (CrashInterrupted) rather
+		// than "ended cleanly" — the death that used to vanish from this readout entirely.
+		// Meta lines get no reply and sidechain records belong to a subagent, so neither may
+		// mark the main chain as owed one.
+		if m.Role == "user" && !jr.IsAPIError && !jr.IsSidechain && !jr.IsMeta {
+			out.events = append(out.events, resume.Event{Kind: resume.EventUserTurn})
 		}
 		if jr.IsAPIError {
 			if reason, ok := classifyLimit(transcriptText(m.Content)); ok {

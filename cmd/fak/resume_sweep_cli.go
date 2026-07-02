@@ -59,7 +59,7 @@ func runResumeSweep(stdout, stderr io.Writer, argv []string) int {
 	bucket := fs.String("bucket", "", "filter to one bucket (e.g. LIMIT_RESET_PASSED)")
 	includeResumed := fs.Bool("include-resumed", false, "don't exclude sessions the ledger shows were already resumed in-window (default: exclude them so an active pass isn't re-flagged)")
 	homeFlag := fs.String("home", "", "user home holding the .claude* account dirs (default: discovered)")
-	regDir := fs.String("reg-dir", "", "registry dir holding resume_ledger.jsonl (default: $FLEET_REG_DIR, else <repo>/tools/_registry)")
+	regDir := fs.String("reg-dir", "", "registry dir holding resume_ledger.jsonl (default: $FLEET_REG_DIR, else host Fleet registry when present, else <repo>/tools/_registry)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -172,13 +172,32 @@ func runResumeSweep(stdout, stderr io.Writer, argv []string) int {
 }
 
 // resolveSweepRegDir honors FLEET_REG_DIR exactly as the fleet tools do, defaulting to
-// <repo>/tools/_registry — the dir the launchers write the resume ledger into.
+// the host Fleet registry when present, else <repo>/tools/_registry.
 func resolveSweepRegDir(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
 	}
 	if v := strings.TrimSpace(os.Getenv("FLEET_REG_DIR")); v != "" {
 		return v
+	}
+	return defaultFleetRegistryDir()
+}
+
+func defaultFleetRegistryDir() string {
+	if v := strings.TrimSpace(os.Getenv("FLEET_STATE_DIR")); v != "" {
+		return filepath.Join(v, "registry")
+	}
+	if v := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); v != "" {
+		candidate := filepath.Join(v, "Fleet", "registry")
+		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+			return candidate
+		}
+	}
+	if runtime.GOOS == "windows" {
+		candidate := filepath.Join(os.TempDir(), "Fleet", "registry")
+		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+			return candidate
+		}
 	}
 	cwd, _ := os.Getwd()
 	return filepath.Join(findRepoRoot(cwd), "tools", "_registry")

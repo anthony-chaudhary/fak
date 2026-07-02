@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
 func cmdToolproc(argv []string) { os.Exit(runToolproc(os.Stdout, os.Stderr, argv)) }
@@ -32,6 +33,8 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 	switch argv[0] {
 	case "ps":
 		return runToolprocPS(stdout, stderr, argv[1:])
+	case "leaks":
+		return runToolprocLeaks(stdout, stderr, argv[1:])
 	case "sample":
 		return runToolprocSample(stdout, stderr, argv[1:])
 	case "hook":
@@ -40,7 +43,7 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | sample | hook)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | sample | hook)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -233,6 +236,41 @@ func runToolprocSample(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func runToolprocLeaks(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("toolproc leaks", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	eventsPath := fs.String("events", "", "JSONL journal of leak-prevention events (required; '-' reads stdin)")
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak toolproc leaks: --events FILE is required ('-' reads stdin)")
+		return 2
+	}
+	var in io.Reader = os.Stdin
+	if *eventsPath != "-" {
+		f, err := os.Open(*eventsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak toolproc leaks: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
+	}
+	events, err := toolprocgate.ParseLeakEvents(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak toolproc leaks: %v\n", err)
+		return 1
+	}
+	report := toolprocgate.LeakReportFromEvents(events)
+	if *asJSON {
+		return encodeJSONOrFail(stdout, stderr, report, "fak toolproc leaks")
+	}
+	toolprocgate.RenderLeakReport(stdout, report)
+	return 0
+}
+
 func encodeToolprocEventLine(stdout, stderr io.Writer, ev toolproc.Event) int {
 	b, err := json.Marshal(ev)
 	if err != nil {
@@ -275,6 +313,7 @@ func toolprocUsage(w io.Writer) {
 
   fak toolproc ps --events FILE|- [--now-unix-ms N] [--default-deadline-ms N]
                   [--stall-mult F] [--json]
+  fak toolproc leaks --events FILE|- [--json]
   fak toolproc sample [--json | --journal]
   fak toolproc hook (pre | post | stop) [--journal FILE]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
@@ -314,6 +353,13 @@ launch post announcing a background id spawns a second proc "bg:<id>" (tool
 pulses it (Via = the poll call), and a poll reporting completion exits it — so
 a healthy polled job reads LIVE, a silent one STALLED, instead of both hiding
 behind the launch call's instant exit.
+
+leaks folds the leak-prevention journal rows emitted by enforcement adapters
+into an operator report: counts by channel/reason/descendant state plus bounded
+identity rows carrying agent_run_id, parent_run_id, tool_call_id, trace_id,
+policy digest, backend, reason token, source channel, and a byte-free reference.
+It is an observability surface only; raw payload, secret, env, and canary values
+are not part of the accepted row schema.
 
 This is the decision spine only (pure fold, offline-provable). The enforcement
 wiring - the gateway/guard supervisor emitting spawn/pulse from the live wire,

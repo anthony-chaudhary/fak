@@ -71,11 +71,11 @@ func guardInfoPanels() []guardInfoPanel {
 // (0 or negative = unknown, treated as roomy) and returns the final rows, identity
 // row first. The fit sequence is deterministic:
 //
-//	1. every non-silent panel at full, with section rules — the roomy layout;
-//	2. drop the rules (the old "compact" look);
-//	3. degrade panels full→mini one at a time in degrade order (highest first);
-//	4. hide panels one at a time in the same order;
-//	5. a pane too short even for that (height 1-2) gets the single compact status line.
+//  1. every non-silent panel at full, with section rules — the roomy layout;
+//  2. drop the rules (the old "compact" look);
+//  3. degrade panels full→mini one at a time in degrade order (highest first);
+//  4. hide panels one at a time in the same order;
+//  5. a pane too short even for that (height 1-2) gets the single compact status line.
 func composeGuardInfoPanels(ctx guardInfoPanelCtx, panels []guardInfoPanel, height int) []string {
 	if height > 0 && height <= 2 {
 		return []string{guardInfoVisualTinyRow(ctx.v)}

@@ -31,6 +31,7 @@ package main
 // tools/slack_post parity note in the goal issue.
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -68,7 +69,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	spacingSec := fs.Float64("spacing-sec", rwEnvFloat("FAK_LAUNCH_SPACING_SEC", 8), "seconds between spawns in one tick, so a burst does not trip the per-source 529 wall (0 = all at once; env FAK_LAUNCH_SPACING_SEC)")
 	probeMode := fs.String("probe", rwEnvStr("FAK_PROBE", "auto"), "registry refresh probe mode: auto|blocked|stale|all|none (auto = blocked on --live, none on dry-run; env FAK_PROBE)")
 	probeMinIntervalMin := fs.Int("probe-min-interval-min", rwEnvInt("FAK_PROBE_MIN_INTERVAL_MIN", 20), "min minutes between active probes of one account (env FAK_PROBE_MIN_INTERVAL_MIN)")
-	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_plan.json / resume_ledger.jsonl / sessions.json (default: $FLEET_REG_DIR, else <repo>/tools/_registry)")
+	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_plan.json / resume_ledger.jsonl / sessions.json (default: $FLEET_REG_DIR, else host Fleet registry when present, else <repo>/tools/_registry)")
 	logDirFlag := fs.String("log-dir", "", "watchdog log dir (default: $FAK_WATCHDOG_LOG_DIR, else <repo>/tools/_watchdog)")
 	noRefresh := fs.Bool("no-refresh", false, "skip the fleet_sessions.py registry refresh and act on the existing plan file (offline/test)")
 	statusOnly := fs.Bool("status", false, "print the read-only drain status from resume_plan.json + resume_ledger.jsonl, then exit")
@@ -153,6 +154,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	history := rwLoadHistory(ledgerPath)
 
 	launched := 0
+	progressRecorded := map[string]bool{}
 	for _, p := range plan {
 		if launched >= *maxPerTick {
 			note("  per-tick cap reached (%d)", *maxPerTick)
@@ -162,9 +164,10 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 		// Outcome-aware once-gate input: how did the LAST attempt actually end, per the
 		// transcript's own terminal turn (ground truth, never the launcher's ledger row)?
 		hist := history[p.Session]
-		outcome := resume.OutcomeUnknown
+		progress := rwReadResumeProgress(home, p.Session, hist)
+		outcome := progress.Outcome
 		if len(hist) > 0 {
-			outcome = resume.ClassifyOutcome(rwTerminalSignal(rwTerminalText(rwNewestTranscript(home, p.Session))))
+			rwRecordResumeProgress(statusLedgerPath, tickMode, p.Session, progress, hist, statusEvents, progressRecorded)
 		}
 		d := resume.DecideWatchdogRow(p, guards, hist, outcome)
 		if d.Action != resume.WatchdogLaunch {
@@ -258,6 +261,87 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 // The pre-gate screens (self-resume guard, worker-account policy) and the probe-mode
 // resolution live in the pure leaf: resume.DecideWatchdogRow / ResolveWatchdogProbeMode.
 
+type rwResumeProgress struct {
+	Outcome      resume.Outcome
+	NewTurns     int
+	ProgressUnix int64
+}
+
+// rwReadResumeProgress reads the newest transcript copy for a session and returns the
+// transcript-grounded facts that prove whether a prior resume took: the terminal outcome
+// and the first real model turn after the last launch. No transcript means unknown, which
+// preserves the conservative burn-once gate but emits no recovery witness.
+func rwReadResumeProgress(home, sid string, hist []resume.Attempt) rwResumeProgress {
+	out := rwResumeProgress{Outcome: resume.OutcomeUnknown}
+	path := rwNewestTranscript(home, sid)
+	if path == "" {
+		return out
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return out
+	}
+	tr := scanTranscriptForStatus(f)
+	f.Close()
+	out.Outcome = resume.ClassifyOutcome(rwTerminalSignal(tr.terminalText))
+	lastLaunch := resume.LastLaunchUnix(hist)
+	for _, ts := range tr.turnTimes {
+		if ts > lastLaunch {
+			out.NewTurns++
+			if out.ProgressUnix == 0 {
+				out.ProgressUnix = ts
+			}
+		}
+	}
+	return out
+}
+
+func rwRecordResumeProgress(ledgerPath, mode, sid string, progress rwResumeProgress, hist []resume.Attempt, events []resume.WatchdogStatusEvent, recorded map[string]bool) {
+	lastLaunch := resume.LastLaunchUnix(hist)
+	if sid == "" || lastLaunch <= 0 || progress.NewTurns <= 0 || progress.ProgressUnix <= lastLaunch {
+		return
+	}
+	if recorded[sid] || rwHasProgressWitness(events, sid, lastLaunch) {
+		return
+	}
+	rwAppendLedger(ledgerPath, map[string]any{
+		"ts":                      time.Unix(progress.ProgressUnix, 0).UTC().Format("2006-01-02T15:04:05Z"),
+		"session":                 sid,
+		"phase":                   "progress",
+		"mode":                    mode,
+		"new_turns":               progress.NewTurns,
+		"progress_witnessed_at":   time.Unix(progress.ProgressUnix, 0).UTC().Format("2006-01-02T15:04:05Z"),
+		"progress_witness_source": "transcript_real_turn_after_resume",
+	})
+	recorded[sid] = true
+}
+
+func rwHasProgressWitness(events []resume.WatchdogStatusEvent, sid string, afterUnix int64) bool {
+	for _, e := range events {
+		if e.Session != sid {
+			continue
+		}
+		at := rwFirstNonZeroInt64(e.ProgressWitnessUnix, e.UnixSeconds)
+		if at <= afterUnix {
+			continue
+		}
+		if e.NewTurns > 0 || e.ProgressWitnessUnix > 0 || e.LedgerProgress || strings.TrimSpace(e.CommitSHA) != "" ||
+			strings.EqualFold(strings.TrimSpace(e.Phase), "progress") {
+			return true
+		}
+	}
+	return false
+}
+
+func rwFirstNonZeroInt64(vals ...int64) int64 {
+	for _, v := range vals {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
 // rwTerminalSignal classifies a transcript's terminal-turn text into the closed
 // TerminalSignal facts resume.ClassifyOutcome folds. One deliberate widening over the
 // Python watchdog's ad-hoc "overloaded/529" check: the transient family is
@@ -312,6 +396,7 @@ func rwLoadPlan(path string) []resume.WatchdogPlanRow {
 	if err != nil {
 		return nil
 	}
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 	var doc struct {
 		Plan []resume.WatchdogPlanRow `json:"plan"`
 	}
@@ -373,6 +458,8 @@ func rwLoadWatchdogStatusEvents(path string) []resume.WatchdogStatusEvent {
 			TS                  string `json:"ts"`
 			Session             string `json:"session"`
 			Phase               string `json:"phase"`
+			Action              string `json:"action"`
+			ManualOverride      bool   `json:"manual_override"`
 			Mode                string `json:"mode"`
 			AutoResumeDepth     int    `json:"auto_resume_depth"`
 			NewTurns            int    `json:"new_turns"`
@@ -393,10 +480,14 @@ func rwLoadWatchdogStatusEvents(path string) []resume.WatchdogStatusEvent {
 		if commit == "" {
 			commit = strings.TrimSpace(rec.Commit)
 		}
+		phase := rec.Phase
+		if rec.ManualOverride || strings.HasPrefix(strings.ToLower(strings.TrimSpace(rec.Action)), "consolidate") {
+			phase = "settled"
+		}
 		out = append(out, resume.WatchdogStatusEvent{
 			UnixSeconds:         parseTranscriptUnix(rec.TS),
 			Session:             rec.Session,
-			Phase:               rec.Phase,
+			Phase:               phase,
 			Mode:                rec.Mode,
 			AutoResumeDepth:     rec.AutoResumeDepth,
 			NewTurns:            rec.NewTurns,

@@ -536,10 +536,10 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 		t.Fatalf("startup cap = %#v, want cap=3 live=0", capFact)
 	}
 	terms := mapAt(capFact, "cap_terms")
-	if dispatchMapInt(terms, "configured_cap") != 4 || dispatchMapInt(terms, "lease_cap") != 3 ||
+	if dispatchMapInt(terms, "configured_cap") != dispatchtick.DefaultMaxWorkers || dispatchMapInt(terms, "lease_cap") != 3 ||
 		dispatchMapInt(terms, "host_cap") != 32 || dispatchMapInt(terms, "seat_cap") != 3 ||
 		dispatchMapInt(terms, "effective_cap") != 3 || dispatchMapString(terms, "limiting") != "lease" {
-		t.Fatalf("startup cap terms = %#v, want configured=4 lease=3 host=32 seat=3 effective=3 limiting=lease", terms)
+		t.Fatalf("startup cap terms = %#v, want configured=%d lease=3 host=32 seat=3 effective=3 limiting=lease", terms, dispatchtick.DefaultMaxWorkers)
 	}
 	preflight := mapAt(got, "preflight")
 	if dispatchMapString(mapAt(preflight, "cap_terms"), "limiting") != "lease" {
@@ -559,6 +559,90 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 	dirty := mapAt(bundle, "dirty_tree")
 	if dirty["available"] != true || dirty["clean"] != false || dispatchMapInt(dirty, "dirty_total") == 0 {
 		t.Fatalf("startup dirty tree = %#v, want available dirty tree fact", dirty)
+	}
+	broker := mapAt(got, "spawn_broker")
+	if broker["allow"] != true || dispatchMapString(broker, "agent_run_id") == "" ||
+		!strings.HasPrefix(dispatchMapString(broker, "policy_digest"), "policy-sha256:") {
+		t.Fatalf("spawn broker metadata = %#v, want allowed AgentRun/PolicyDigest metadata", broker)
+	}
+	if b, _ := json.Marshal(broker); strings.Contains(string(b), root) || strings.Contains(string(b), "acct-preflight") {
+		t.Fatalf("spawn broker metadata leaked raw workspace/account detail: %s", b)
+	}
+}
+
+func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
+	withDispatchJSONHelper(t, dispatchHappyHelper(t))
+	root := t.TempDir()
+
+	oldBroker := launchSpawnBroker
+	oldSpawner := dispatchIssueWorkerSpawner
+	var brokerCalls int
+	spawned := false
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
+		brokerCalls++
+		if a.Surface != "dispatch_tick" || a.Metadata.AgentRunID == "" || a.Metadata.PolicyDigest == "" {
+			t.Fatalf("broker attempt = %+v, want dispatch_tick with AgentRun/PolicyDigest metadata", a)
+		}
+		return denyLaunchBrokerGrant(a, "unit-test-deny")
+	}
+	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA string, probeS float64) (dispatchSpawnResult, error) {
+		spawned = true
+		return dispatchSpawnResult{PID: 999, Issue: issue, Lane: lane, Backend: backend}, nil
+	}
+	t.Cleanup(func() {
+		launchSpawnBroker = oldBroker
+		dispatchIssueWorkerSpawner = oldSpawner
+	})
+
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	if code != 1 {
+		t.Fatalf("exit = %d, want broker denial refusal (stderr: %s)\n%s", code, errb, out)
+	}
+	if spawned {
+		t.Fatal("dispatch worker spawner was called after broker denial")
+	}
+	if brokerCalls == 0 {
+		t.Fatal("spawn broker was not consulted")
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad json: %v\n%s", err, out)
+	}
+	if got["action"] != "broker_denied" || got["verdict"] != "SPAWN_BROKER_DENIED" || got["ok"] != false {
+		t.Fatalf("dispatch broker denial = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
+	}
+	broker := mapAt(got, "spawn_broker")
+	if broker["allow"] != false || dispatchMapString(broker, "reason") != "unit-test-deny" {
+		t.Fatalf("spawn broker payload = %#v, want denied unit-test reason", broker)
+	}
+}
+
+func TestLaunchBrokerMetadataRedactsRawSecrets(t *testing.T) {
+	attempt := newLaunchBrokerAttempt("accounts_launch", "claude",
+		[]string{"claude", "--api-key", "sk-raw-argv", "--base-url=https://oauth-token@example.test/v1?api_key=sk-query"},
+		map[string]string{
+			"ANTHROPIC_API_KEY": "sk-env-secret",
+			"BEARER_TOKEN":      "bearer-secret",
+			"PATH":              "set",
+		},
+		`C:\Users\USER\.claude-secret`,
+	)
+	grant := allowLaunchBrokerGrant(attempt, "allowed")
+	blob, err := json.Marshal(launchBrokerGrantMap(grant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(blob)
+	for _, leak := range []string{"sk-raw-argv", "oauth-token", "sk-query", "sk-env-secret", "bearer-secret", `.claude-secret`} {
+		if strings.Contains(text, leak) {
+			t.Fatalf("broker metadata leaked %q: %s", leak, text)
+		}
+	}
+	joinedArgv := strings.Join(grant.SanitizedArgv, " ")
+	for _, leak := range []string{"sk-raw-argv", "oauth-token", "sk-query"} {
+		if strings.Contains(joinedArgv, leak) {
+			t.Fatalf("sanitized argv leaked %q: %#v", leak, grant.SanitizedArgv)
+		}
 	}
 }
 

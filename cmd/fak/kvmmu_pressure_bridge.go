@@ -152,9 +152,12 @@ func kvPressureSpillPath() string { return os.TempDir() }
 // probedTierProfilesForHost builds the tier ladder cachemeta plans candidates against from the box
 // THIS process can prove it has: HBM sized from backend's device-memory probe (dropped entirely
 // when the backend cannot report one, e.g. cpu-ref — the no-GPU-box fix #1468 calls out), DRAM
-// sized from the host's real physical memory, and disk sized from the scratch filesystem's real
-// free space. Each capacity reading is independently fail-open (cachemeta.ProbedTierProfiles keeps
-// the representative default for a tier whose probe reads non-positive/absent).
+// sized from the host's real physical memory, disk sized from the scratch filesystem's real
+// free space, and the far tiers (NUMA-far / CXL) entering the ladder only when the NUMA-topology
+// probe confirmed them (#1470 — before that probe existed they were unconditionally out). Each
+// capacity reading is independently fail-open (cachemeta.ProbedTierProfiles keeps the
+// representative default for an always-present tier whose probe reads non-positive/absent, and
+// keeps an unconfirmed far tier out of the ladder).
 func probedTierProfilesForHost(backend compute.Backend, residentBytes int64) map[cachemeta.ResidencyTier]cachemeta.TierProfile {
 	probe := cachemeta.CapacityProbe{}
 	if hbmTotal, _, ok := compute.DeviceMemoryInfo(backend); ok && hbmTotal > 0 {
@@ -167,12 +170,20 @@ func probedTierProfilesForHost(backend compute.Backend, residentBytes int64) map
 	if diskTotal, _, ok := compute.DiskInfo(kvPressureSpillPath()); ok && diskTotal > 0 {
 		probe.DiskBytes = diskTotal
 	}
+	if farTotal, _, ok := compute.NUMAFarMemoryInfo(); ok && farTotal > 0 {
+		probe.NUMAFarPresent = true
+		probe.NUMAFarBytes = farTotal
+	}
+	if cxlTotal, _, ok := compute.CXLMemoryInfo(); ok && cxlTotal > 0 {
+		probe.CXLPresent = true
+		probe.CXLBytes = cxlTotal
+	}
 	return cachemeta.ProbedTierProfiles(probe)
 }
 
 // liveTierPressure assembles the per-tier fullness the planner's coldest-colder-with-room walk
-// reads, from the same already-shipped live probes the engine's PlanPlacementForDeviceHostAndDisk
-// wire folds (capacity_pressure.go / capacity_dram.go / capacity_disk.go) — reused here rather than
+// reads, from the same already-shipped live probes the engine's PlanPlacementForLocalLadder
+// wire folds (capacity_pressure.go / capacity_dram.go / capacity_disk.go / capacity_far.go) — reused here rather than
 // reinvented, since RunCapacityPressureSweep independently re-derives HBM pressure from Backend for
 // its own high-water gate. A probe that reports known=false leaves that tier absent from the
 // returned TierPressure, which cachemeta.TierPressure.HasRoom treats as "has room" (unknown != full)
@@ -187,6 +198,16 @@ func liveTierPressure(backend compute.Backend, residentBytes int64) cachemeta.Ti
 	}
 	if p, _, known := engine.DiskPressure(kvPressureSpillPath()); known {
 		pressure[cachemeta.TierDisk] = p
+	}
+	// The far tiers (#1470) finish the per-tier ladder. residentBytes 0: fak keeps no
+	// far-resident counter, and the topology probe always reports free when it reports
+	// at all, so the resident-bytes fallback never engages; an unconfirmed tier stays
+	// absent (unknown != full — the same fail-open contract as the three above).
+	if p, _, known := engine.NUMAFarPressure(0); known {
+		pressure[cachemeta.TierNUMAFar] = p
+	}
+	if p, _, known := engine.CXLPressure(0); known {
+		pressure[cachemeta.TierCXL] = p
 	}
 	return pressure
 }
