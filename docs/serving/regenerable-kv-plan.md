@@ -22,7 +22,7 @@ Regenerable KV treats the KV cache not as durable memory but as a rebuildable bu
 > persistence-across-rollout, fleet-shared-corpus, and backfill-scheduler layers that
 > turn those primitives into a rolling cache migration are **unbuilt (GAP)**. Every mark
 > below carries a `file:line` anchor checked against the working tree on 2026-06-23;
-> line numbers drift, so re-anchor with [§9](#9-how-to-re-verify).
+> line numbers drift, so re-anchor with [§10](#10-how-to-re-verify).
 >
 > **No benchmark number is asserted.** The regen-vs-keep cost is the same A/B "turn-tax"
 > the bench harnesses already measure (`internal/swebench/cost.go:17`,
@@ -64,7 +64,7 @@ Regenerable KV treats the KV cache not as durable memory but as a rebuildable bu
 6. **What lands now is the principle plus the primitives it stands on.** The deterministic
    text→KV regen path is live; a content-addressed, poison-re-screened tool-result store
    that survives process death is shipped (per-session); `SourceDigest` names the regen
-   input. The migration apparatus on top is sequenced in [§7](#7-the-child-map--sequencing),
+   input. The migration apparatus on top is sequenced in [§8](#8-the-child-map--sequencing),
    not claimed here.
 
 ## 2. The reframe — KV is a build artifact, text is the source
@@ -156,7 +156,7 @@ rollout untouched, so the new model's cache can be rebuilt from it:
   model's spans. It is speculative — without a fleet model of which sessions will actually
   return, eager backfill can prefill abandoned work and lose to lazy. The honest default is
   lazy-on-miss with eager backfill gated on a return-probability predictor (an open question,
-  [§8](#8-non-goals--honest-fence)).
+  [§9](#9-non-goals--honest-fence)).
 
 The interaction with the exact-ModelID barrier is the subtle part, and it is a *complement*,
 not a violation. Text-regen never serves model A's KV bytes to model B; it re-derives B's own

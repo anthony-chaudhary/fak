@@ -16,7 +16,7 @@ description: "The measured results of running a small local model behind fak gua
 > witnessed separately via `fak guard --replay-trace` (8 adjudicated verdicts, 3 dangerous
 > calls denied, hash-chained journal). The honest gaps surfaced by the run — which client
 > wires route through fak, and why a no-tool-call chat turn records zero verdicts — are
-> stated plainly in [Findings](#findings-what-the-real-run-taught-us). To reproduce, see
+> stated plainly in [Findings](#findings--what-the-real-run-taught-us). To reproduce, see
 > [`LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md`](LOCAL-MODEL-CODING-WITNESS-RUNBOOK.md).
 
 ---

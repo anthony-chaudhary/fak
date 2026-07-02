@@ -121,7 +121,7 @@ The division of labor is the point:
 pure (`fak route`, witnessed by `go test`). The **live multi-backend dispatch** that runs
 each member on its bound backend and folds the results is the tracked `[STUB]` in
 [`CLAIMS.md`](../../CLAIMS.md) — see the wiring contract in
-[model routing](../model-routing.md#the-wiring-contract-load-bearing--read-before-wiring-dispatch).
+[model routing](../model-routing.md#the-wiring-contract-load-bearing).
 Authoring the routing policy and previewing the decision works today; binding each routed
 model id to a LiteLLM-backed account and executing the ensemble is the model-routing
 roadmap.

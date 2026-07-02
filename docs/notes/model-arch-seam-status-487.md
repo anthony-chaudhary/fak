@@ -63,7 +63,7 @@ but lack an on-disk numeric oracle today.
   on-disk code at HEAD**, which is the stronger evidence anyway.
 - **Sibling-issue numbering correction.** The epic body lists `S0..S8 = #17..#26` and `ST = #26`.
   Those are **stale internal-tracker numbers** — they do not map to live GitHub issues. The real
-  GitHub owners (verified via `gh issue view`) are in the [issue map](#sibling-issue-map) below. There
+  GitHub owners (verified via `gh issue view`) are in the [issue map](#sibling-issue-map-verified-via-gh-issue-view) below. There
   is **no dedicated live GitHub issue for S2/S3/S4/S5/S6/S8**; those stages landed folded into the
   #490 SEAM-0 work or under the family-specific epics (#447 qwen35, #414/#413 GLM-DSA).
 - **Every citation is real.** Where a stage cannot be fully ground-truthed from disk (a numeric oracle

@@ -98,7 +98,7 @@ The `type` is derived from the HTTP status class so a client can branch on it:
 | everything else (400, 404, 405, …) | `invalid_request_error` |
 
 > Note: `/mcp` is the exception — a protocol fault there returns a JSON-RPC 2.0 error
-> object, not this envelope (see [MCP-over-HTTP](#mcp-over-http--mcp)).
+> object, not this envelope (see [MCP-over-HTTP](#mcp-over-http-mcp)).
 
 ### A refusal is not an error
 
@@ -130,7 +130,7 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | GET | [`/v1/fak/session/{id}`](#v1faksession--live-session-control) | fak-native | Observe a session's live drive state |
 | POST | [`/v1/fak/session/{id}/{verb}`](#v1faksession--live-session-control) | fak-native | Control a session (run/budget/pace/priority) |
 | GET | [`/v1/fak/sessions`](#v1faksession--live-session-control) | fak-native | Snapshot every live session's drive state |
-| POST | [`/mcp`](#mcp-over-http--mcp) | MCP | JSON-RPC 2.0 over a single POST |
+| POST | [`/mcp`](#mcp-over-http-mcp) | MCP | JSON-RPC 2.0 over a single POST |
 | GET | [`/healthz`](#get-healthz) | ops | Liveness (auth-exempt) |
 | GET | [`/metrics`](#get-metrics) | ops | Prometheus metrics |
 | GET | [`/debug/vars`](#get-debugvars) | ops | JSON diagnostics snapshot |
