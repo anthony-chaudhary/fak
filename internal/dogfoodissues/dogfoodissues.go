@@ -29,6 +29,14 @@ const DefaultGhTimeout = 30 * time.Second
 // unless the operator explicitly overrides it.
 const DefaultMaxReportAge = 24 * time.Hour
 
+// DefaultMilestone is the intake/default roadmap bucket for machine-created
+// dogfood issues. It matches docs/generation.md's current-generation milestone.
+const DefaultMilestone = "Generation G0 - Now / Immediate"
+
+// DefaultProjectSignalLabel keeps the missing-project fact visible without
+// requiring this issue bridge to own GitHub Projects API plumbing.
+const DefaultProjectSignalLabel = "needs-project"
+
 // ReportFreshness records the timestamp/age of the selected dogfood report.
 type ReportFreshness struct {
 	Timestamp     string `json:"timestamp"`
@@ -84,6 +92,7 @@ type PlanRow struct {
 	Number       *int                 `json:"number"`
 	State        string               `json:"state"`
 	Title        string               `json:"title"`
+	Milestone    string               `json:"milestone,omitempty"`
 	Body         string               `json:"-"`
 	Score        string               `json:"score"`
 	Grade        string               `json:"grade"`
@@ -137,20 +146,27 @@ type Result struct {
 
 // Issue is the subset of a `gh issue list --json ...` row this tool reads.
 type Issue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	State  string `json:"state"`
-	URL    string `json:"url"`
+	Number    int             `json:"number"`
+	Title     string          `json:"title"`
+	Body      string          `json:"body"`
+	State     string          `json:"state"`
+	URL       string          `json:"url"`
+	Milestone *IssueMilestone `json:"milestone"`
+}
+
+// IssueMilestone is the subset of a GitHub milestone read through gh JSON.
+type IssueMilestone struct {
+	Title string `json:"title"`
 }
 
 // BuildOptions carries the producer context needed to turn scorecard ACTION
 // rows into dispatchable issues. The legacy BuildPlan path is left unreviewed
 // for tests and older callers; effectful callers should use BuildPlanWithOptions.
 type BuildOptions struct {
-	Live          bool
-	DedupeChecked bool
-	DedupeCap     int
+	Live             bool
+	DedupeChecked    bool
+	DedupeCap        int
+	DefaultMilestone string
 }
 
 func toInt(v any, def int) int {
@@ -618,7 +634,7 @@ func BuildPlanWithOptions(items []ActionItem, existing []Issue, opt BuildOptions
 			})
 			continue
 		}
-		row := planRow(item)
+		row := planRowWithOptions(item, opt)
 		row.Review = review
 		if found, ok := byKey[item.Key]; ok {
 			row.Action = "update"
@@ -632,10 +648,19 @@ func BuildPlanWithOptions(items []ActionItem, existing []Issue, opt BuildOptions
 }
 
 func planRow(item ActionItem) PlanRow {
+	return planRowWithOptions(item, BuildOptions{})
+}
+
+func planRowWithOptions(item ActionItem, opt BuildOptions) PlanRow {
+	milestone := strings.TrimSpace(opt.DefaultMilestone)
+	if milestone == "" {
+		milestone = DefaultMilestone
+	}
 	return PlanRow{
 		Action:       "create",
 		Key:          item.Key,
 		Title:        item.Title,
+		Milestone:    milestone,
 		Body:         IssueBody(item),
 		Score:        item.Score,
 		Grade:        item.Grade,
@@ -644,7 +669,7 @@ func planRow(item ActionItem) PlanRow {
 		NextAction:   item.NextAction,
 		Lane:         item.Lane,
 		Paths:        append([]string(nil), item.Paths...),
-		Labels:       append([]string(nil), item.Labels...),
+		Labels:       mergeDogfoodIssueLabels(item.Labels, []string{DefaultProjectSignalLabel}),
 	}
 }
 
@@ -684,7 +709,7 @@ func defaultRunner(args []string) (string, string, bool) {
 // create vs update. repo "" uses the current repo.
 func FetchExistingIssues(repo string, limit int) ([]Issue, error) {
 	args := []string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit),
-		"--json", "number,title,body,state,url"}
+		"--json", "number,title,body,state,url,milestone"}
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
@@ -742,6 +767,9 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 			for _, label := range mergeDogfoodIssueLabels(row.Labels, labels) {
 				args = append(args, "--label", label)
 			}
+		}
+		if strings.TrimSpace(row.Milestone) != "" {
+			args = append(args, "--milestone", strings.TrimSpace(row.Milestone))
 		}
 		if repo != "" {
 			args = append(args, "--repo", repo)
@@ -828,7 +856,11 @@ func CreatedIssue(stdout string) (number int, url string, ok bool) {
 }
 
 func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, stderr string, ok bool) {
-	args := []string{"issue", "view", strconv.Itoa(number), "--json", "number,title,body,state,url"}
+	fields := "number,title,body,state,url"
+	if strings.TrimSpace(row.Milestone) != "" {
+		fields += ",milestone"
+	}
+	args := []string{"issue", "view", strconv.Itoa(number), "--json", fields}
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
@@ -845,6 +877,15 @@ func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, s
 	}
 	if got := MarkerKey(issue.Body); got != row.Key {
 		return issue.URL, fmt.Sprintf("verify issue #%d: marker key %q != planned key %q", number, got, row.Key), false
+	}
+	if want := strings.TrimSpace(row.Milestone); want != "" {
+		if issue.Milestone == nil || strings.TrimSpace(issue.Milestone.Title) != want {
+			got := ""
+			if issue.Milestone != nil {
+				got = issue.Milestone.Title
+			}
+			return issue.URL, fmt.Sprintf("verify issue #%d: milestone %q != planned milestone %q", number, got, want), false
+		}
 	}
 	return issue.URL, "", true
 }

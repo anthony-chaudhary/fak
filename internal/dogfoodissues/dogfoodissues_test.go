@@ -160,19 +160,34 @@ func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
 	if row.Action != "update" || row.Number == nil || *row.Number != 44 {
 		t.Fatalf("row = %+v, want update #44", row)
 	}
+	if row.Milestone != DefaultMilestone {
+		t.Fatalf("milestone = %q, want %q", row.Milestone, DefaultMilestone)
+	}
 	if !row.Review.OK || row.Review.Dispatchability != "dispatchable" || row.Review.Score.Total != 100 {
 		t.Fatalf("review = %+v, want dispatchable full score", row.Review)
 	}
 	if row.Lane != "guardrsi" || len(row.Paths) != 1 || row.Paths[0] != "internal/guardrsi/**" {
 		t.Fatalf("route = lane %q paths %+v", row.Lane, row.Paths)
 	}
-	if len(row.Labels) != 1 || row.Labels[0] != "guardrsi" {
-		t.Fatalf("labels = %+v, want guardrsi", row.Labels)
+	if strings.Join(row.Labels, ",") != "guardrsi,needs-project" {
+		t.Fatalf("labels = %+v, want guardrsi+needs-project", row.Labels)
 	}
 	for _, want := range []string{"Working spine", "Priority context", "Work unit", "Expected steps", "Trigger", "Batch policy", "In scope", "Acceptance gate", "Path hints"} {
 		if !strings.Contains(row.Body, want) {
 			t.Fatalf("body missing %q\n---\n%s", want, row.Body)
 		}
+	}
+}
+
+func TestReviewedPlanAcceptsExplicitInboxMilestone(t *testing.T) {
+	plan, skipped := BuildPlanWithOptions([]ActionItem{scopedGuardActionItem()}, nil, BuildOptions{
+		DefaultMilestone: "Inbox",
+	})
+	if len(skipped) != 0 || len(plan) != 1 {
+		t.Fatalf("plan=%+v skipped=%+v, want one dispatchable row", plan, skipped)
+	}
+	if plan[0].Milestone != "Inbox" {
+		t.Fatalf("milestone = %q, want explicit inbox", plan[0].Milestone)
 	}
 }
 
@@ -336,9 +351,12 @@ func TestSyncUsesPlanLabelsAndGlobalLabels(t *testing.T) {
 			labels = append(labels, calls[0][i+1])
 		}
 	}
-	want := []string{"guardrsi", "backlog"}
+	want := []string{"guardrsi", "needs-project", "backlog"}
 	if strings.Join(labels, ",") != strings.Join(want, ",") {
 		t.Fatalf("labels = %+v, want %+v; args=%+v", labels, want, calls[0])
+	}
+	if got := dogfoodArgAfter(calls[0], "--milestone"); got != DefaultMilestone {
+		t.Fatalf("create milestone = %q, want %q; args=%+v", got, DefaultMilestone, calls[0])
 	}
 }
 
@@ -383,11 +401,17 @@ func TestSyncUsesInjectedRunnerWithoutGh(t *testing.T) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "issue edit 7") {
 			sawEdit = true
+			if got := dogfoodArgAfter(args, "--milestone"); got != DefaultMilestone {
+				t.Errorf("edit milestone = %q, want %q; args=%+v", got, DefaultMilestone, args)
+			}
 		}
 		if strings.Contains(joined, "issue create") {
 			sawCreate = true
 			if strings.Contains(joined, "--label backlog") {
 				sawLabel = true
+			}
+			if got := dogfoodArgAfter(args, "--milestone"); got != DefaultMilestone {
+				t.Errorf("create milestone = %q, want %q; args=%+v", got, DefaultMilestone, args)
 			}
 		}
 		if !strings.Contains(joined, "--repo owner/repo") {
@@ -477,6 +501,25 @@ func TestSyncRejectsCreatedIssueWhenMarkerVerificationFails(t *testing.T) {
 	}
 }
 
+func TestSyncRejectsCreatedIssueWhenMilestoneVerificationFails(t *testing.T) {
+	item := scopedGuardActionItem()
+	rows := SyncWithOptions([]PlanRow{planRow(item)}, "", nil, func(args []string) (string, string, bool) {
+		if len(args) >= 2 && args[0] == "issue" && args[1] == "view" {
+			return dogfoodIssueViewJSONWithMilestone(78, IssueBody(item), ""), "", true
+		}
+		return "https://github.com/owner/repo/issues/78", "", true
+	}, SyncOptions{Timeout: time.Second})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].OK || rows[0].Verified {
+		t.Fatalf("milestone-null create should not be OK: %+v", rows[0])
+	}
+	if !strings.Contains(rows[0].Stderr, "milestone") {
+		t.Fatalf("verification failure should explain milestone mismatch: %+v", rows[0])
+	}
+}
+
 func TestSyncBoundsHungRunner(t *testing.T) {
 	item := scopedGuardActionItem()
 	start := time.Now()
@@ -501,12 +544,21 @@ func dogfoodArgAfter(args []string, flag string) string {
 }
 
 func dogfoodIssueViewJSON(number int, body string) string {
+	return dogfoodIssueViewJSONWithMilestone(number, body, DefaultMilestone)
+}
+
+func dogfoodIssueViewJSONWithMilestone(number int, body, milestone string) string {
+	var ms *IssueMilestone
+	if strings.TrimSpace(milestone) != "" {
+		ms = &IssueMilestone{Title: milestone}
+	}
 	b, _ := json.Marshal(Issue{
-		Number: number,
-		Title:  "dogfood issue",
-		Body:   body,
-		State:  "OPEN",
-		URL:    "https://github.com/owner/repo/issues/" + strconv.Itoa(number),
+		Number:    number,
+		Title:     "dogfood issue",
+		Body:      body,
+		State:     "OPEN",
+		URL:       "https://github.com/owner/repo/issues/" + strconv.Itoa(number),
+		Milestone: ms,
 	})
 	return string(b)
 }

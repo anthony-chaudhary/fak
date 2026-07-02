@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
@@ -39,6 +40,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
 	live := fs.Bool("live", false, "create/update GitHub issues with gh")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
+	milestone := fs.String("milestone", dogfoodissues.DefaultMilestone, "milestone title to assign to created/updated issues")
 	maxReportAge := fs.Duration("max-report-age", dogfoodissues.DefaultMaxReportAge, "stale report threshold before --live is refused (default 24h)")
 	allowStaleReport := fs.Bool("allow-stale-report", false, "allow --live even when the selected report is older than --max-report-age")
 	var labels stringList
@@ -136,9 +138,10 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	plan, skipped := dogfoodissues.BuildPlanWithOptions(items, existing, dogfoodissues.BuildOptions{
-		Live:          *live,
-		DedupeChecked: *live || *fetchExisting || *existingJSON != "",
-		DedupeCap:     issueSyncScanLimit(*limit),
+		Live:             *live,
+		DedupeChecked:    *live || *fetchExisting || *existingJSON != "",
+		DedupeCap:        issueSyncScanLimit(*limit),
+		DefaultMilestone: strings.TrimSpace(*milestone),
 	})
 	result := dogfoodissues.Result{
 		Schema:          dogfoodissues.Schema,
