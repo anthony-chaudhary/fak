@@ -460,6 +460,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	renderBuckets(&b, agg)
 	renderModels(&b, agg)
 	renderNamespaces(&b, agg)
+	renderOpusHeavySessions(&b, ok)
 	renderDistributions(&b, agg.Distributions)
 	renderToolMix(&b, agg.ToolMix)
 	renderTopSessions(&b, ok)
@@ -1029,6 +1030,111 @@ func renderNamespaces(b *strings.Builder, agg Aggregate) {
 			ns, v.Sessions, fmtInt(v.Output), fmtPctPtr(agg.PerNamespaceOpusShare[ns]), fmtInt(v.CacheRead), fmtInt(v.ToolUse), agg.PerNamespaceTopModel[ns], fmtFloat(agg.PerNamespaceCost[ns], 2))
 	}
 	fmt.Fprintln(b)
+}
+
+type opusSessionRow struct {
+	Session   Session
+	OpusOut   int64
+	OpusCost  float64
+	OpusShare *float64
+	TopModel  string
+	TotalCost float64
+	TotalOut  int64
+}
+
+func renderOpusHeavySessions(b *strings.Builder, sessions []Session) {
+	rows := opusHeavySessionRows(sessions)
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "## Opus-heavy sessions")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Session | NS | Opus output tok | Opus share | Opus est.$ | Total output tok | Total est.$ | Top model |")
+	fmt.Fprintln(b, "|---|---|---:|---:|---:|---:|---:|---|")
+	if len(rows) > 10 {
+		rows = rows[:10]
+	}
+	for _, row := range rows {
+		sid := row.Session.Session
+		if len(sid) > 8 {
+			sid = sid[:8]
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | $%s | %s | $%s | %s |\n",
+			sid,
+			namespaceName(row.Session.Path),
+			fmtInt(row.OpusOut),
+			fmtPctPtr(row.OpusShare),
+			fmtFloat(row.OpusCost, 2),
+			fmtInt(row.TotalOut),
+			fmtFloat(row.TotalCost, 2),
+			row.TopModel)
+	}
+	fmt.Fprintln(b)
+}
+
+func opusHeavySessionRows(sessions []Session) []opusSessionRow {
+	rows := make([]opusSessionRow, 0, len(sessions))
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue
+		}
+		opusOut, opusCost := sessionTierOutputCost(s, "opus")
+		if opusOut == 0 {
+			continue
+		}
+		var share *float64
+		if s.Tokens.Output > 0 {
+			v := float64(opusOut) / float64(s.Tokens.Output)
+			share = &v
+		}
+		rows = append(rows, opusSessionRow{
+			Session:   s,
+			OpusOut:   opusOut,
+			OpusCost:  opusCost,
+			OpusShare: share,
+			TopModel:  topSessionModel(s),
+			TotalCost: s.CostUSD,
+			TotalOut:  s.Tokens.Output,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].OpusOut == rows[j].OpusOut {
+			if rows[i].OpusCost == rows[j].OpusCost {
+				return rows[i].Session.Path < rows[j].Session.Path
+			}
+			return rows[i].OpusCost > rows[j].OpusCost
+		}
+		return rows[i].OpusOut > rows[j].OpusOut
+	})
+	return rows
+}
+
+func sessionTierOutputCost(s Session, tier string) (int64, float64) {
+	var output int64
+	var cost float64
+	for model, counts := range s.PerModel {
+		if ModelTier(model) != tier {
+			continue
+		}
+		output += counts.Output
+		cost += ModelCost(model, counts)
+	}
+	return output, cost
+}
+
+func topSessionModel(s Session) string {
+	top := ""
+	var topOut int64
+	for model, counts := range s.PerModel {
+		if counts.Output > topOut || (counts.Output == topOut && (top == "" || model < top)) {
+			top = model
+			topOut = counts.Output
+		}
+	}
+	if top == "" {
+		return "?"
+	}
+	return top
 }
 
 func renderDistributions(b *strings.Builder, d Distributions) {

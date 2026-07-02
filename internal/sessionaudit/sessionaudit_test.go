@@ -176,6 +176,39 @@ func TestWebActivityRendering(t *testing.T) {
 	}
 }
 
+func TestReportMarkdownHighlightsOpusHeavySessions(t *testing.T) {
+	root := t.TempDir()
+	opusHeavy := Analyze(writeTranscriptIn(t, root, "C--work-fak", "opus-heavy.jsonl", []map[string]any{
+		assistantRecord("opus-1", 900, 10_000, 1_000),
+		assistantRecord("fable-1", 100, 10_000, 1_000, withModel("claude-fable-5")),
+	}))
+	mixed := Analyze(writeTranscriptIn(t, root, "C--work-fak", "mixed.jsonl", []map[string]any{
+		assistantRecord("opus-2", 300, 10_000, 1_000),
+		assistantRecord("fable-2", 700, 10_000, 1_000, withModel("claude-fable-5")),
+	}))
+	fableOnly := Analyze(writeTranscriptIn(t, root, "C--work-fak", "fable-only.jsonl", []map[string]any{
+		assistantRecord("fable-3", 1200, 10_000, 1_000, withModel("claude-fable-5")),
+	}))
+
+	md := ReportMarkdown([]Session{mixed, fableOnly, opusHeavy}, AggregateSessions([]Session{mixed, fableOnly, opusHeavy}), "C--work-fak", nil, false, 0, 3, nil, time.Now())
+	if !strings.Contains(md, "## Opus-heavy sessions") {
+		t.Fatalf("report missed Opus-heavy section:\n%s", md)
+	}
+	section := md[strings.Index(md, "## Opus-heavy sessions"):]
+	if end := strings.Index(section, "\n## Distributions"); end >= 0 {
+		section = section[:end]
+	}
+	if !strings.Contains(section, "| opus-hea | C--work-fak | 900 | 90.0% | $0.10 | 1,000 | $0.11 | claude-opus-4-8 |") {
+		t.Fatalf("report missed sorted Opus-heavy row:\n%s", md)
+	}
+	if !strings.Contains(section, "| mixed | C--work-fak | 300 | 30.0% | $0.06 | 1,000 | $0.07 | claude-fable-5 |") {
+		t.Fatalf("report missed mixed Opus row:\n%s", md)
+	}
+	if strings.Contains(section, "fable-on | C--work-fak |") {
+		t.Fatalf("fable-only session should not appear in Opus-heavy section:\n%s", md)
+	}
+}
+
 func TestReadOnlyClassification(t *testing.T) {
 	for _, name := range []string{"Monitor", "TaskGet", "TaskList", "TaskOutput", "ReadMcpResourceTool"} {
 		if !ReadOnlyTools[name] {
