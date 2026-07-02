@@ -461,6 +461,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	renderModels(&b, agg)
 	renderNamespaces(&b, agg)
 	renderOpusHeavySessions(&b, ok)
+	renderLongContextSessions(&b, ok)
 	renderDistributions(&b, agg.Distributions)
 	renderToolMix(&b, agg.ToolMix)
 	renderTopSessions(&b, ok)
@@ -1135,6 +1136,77 @@ func topSessionModel(s Session) string {
 		return "?"
 	}
 	return top
+}
+
+type longContextSessionRow struct {
+	Session       Session
+	TotalContext  int64
+	CacheReadFrac *float64
+}
+
+func renderLongContextSessions(b *strings.Builder, sessions []Session) {
+	rows := longContextSessionRows(sessions)
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "## Long-context sessions")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Session | NS | Total context tok | Fresh input tok | Cache-read tok | Cache-read share | Output tok | I:O | Top model |")
+	fmt.Fprintln(b, "|---|---|---:|---:|---:|---:|---:|---:|---|")
+	if len(rows) > 10 {
+		rows = rows[:10]
+	}
+	for _, row := range rows {
+		s := row.Session
+		sid := s.Session
+		if len(sid) > 8 {
+			sid = sid[:8]
+		}
+		ioCell := "-"
+		if s.IORatio != nil {
+			ioCell = fmt.Sprintf("%.1f", *s.IORatio)
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			sid,
+			namespaceName(s.Path),
+			fmtInt(row.TotalContext),
+			fmtInt(s.Tokens.Input),
+			fmtInt(s.Tokens.CacheRead),
+			fmtPctPtr(row.CacheReadFrac),
+			fmtInt(s.Tokens.Output),
+			ioCell,
+			topSessionModel(s))
+	}
+	fmt.Fprintln(b)
+}
+
+func longContextSessionRows(sessions []Session) []longContextSessionRow {
+	rows := make([]longContextSessionRow, 0, len(sessions))
+	for _, s := range sessions {
+		if s.Error != "" {
+			continue
+		}
+		total := totalContextTokens(s)
+		if total == 0 {
+			continue
+		}
+		rows = append(rows, longContextSessionRow{
+			Session:       s,
+			TotalContext:  total,
+			CacheReadFrac: ratio(s.Tokens.CacheRead, total),
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].TotalContext == rows[j].TotalContext {
+			return rows[i].Session.Path < rows[j].Session.Path
+		}
+		return rows[i].TotalContext > rows[j].TotalContext
+	})
+	return rows
+}
+
+func totalContextTokens(s Session) int64 {
+	return s.Tokens.Input + s.Tokens.CacheRead + s.Tokens.CacheCreate
 }
 
 func renderDistributions(b *strings.Builder, d Distributions) {

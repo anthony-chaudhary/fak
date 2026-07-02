@@ -195,7 +195,7 @@ func TestReportMarkdownHighlightsOpusHeavySessions(t *testing.T) {
 		t.Fatalf("report missed Opus-heavy section:\n%s", md)
 	}
 	section := md[strings.Index(md, "## Opus-heavy sessions"):]
-	if end := strings.Index(section, "\n## Distributions"); end >= 0 {
+	if end := strings.Index(section, "\n## Long-context sessions"); end >= 0 {
 		section = section[:end]
 	}
 	if !strings.Contains(section, "| opus-hea | C--work-fak | 900 | 90.0% | $0.10 | 1,000 | $0.11 | claude-opus-4-8 |") {
@@ -206,6 +206,35 @@ func TestReportMarkdownHighlightsOpusHeavySessions(t *testing.T) {
 	}
 	if strings.Contains(section, "fable-on | C--work-fak |") {
 		t.Fatalf("fable-only session should not appear in Opus-heavy section:\n%s", md)
+	}
+}
+
+func TestReportMarkdownHighlightsLongContextSessions(t *testing.T) {
+	root := t.TempDir()
+	heavy := Analyze(writeTranscriptIn(t, root, "C--work-fak", "heavyctx.jsonl", []map[string]any{
+		assistantRecord("heavy-1", 100, 900_000, 50_000),
+		assistantRecord("heavy-2", 100, 100_000, 50_000),
+	}))
+	light := Analyze(writeTranscriptIn(t, root, "C--work-fak", "lightctx.jsonl", []map[string]any{
+		assistantRecord("light-1", 100, 1_000, 100, withModel("claude-fable-5")),
+	}))
+
+	md := ReportMarkdown([]Session{light, heavy}, AggregateSessions([]Session{light, heavy}), "C--work-fak", nil, false, 0, 2, nil, time.Now())
+	if !strings.Contains(md, "## Long-context sessions") {
+		t.Fatalf("report missed long-context section:\n%s", md)
+	}
+	section := md[strings.Index(md, "## Long-context sessions"):]
+	if end := strings.Index(section, "\n## Distributions"); end >= 0 {
+		section = section[:end]
+	}
+	if !strings.Contains(section, "| heavyctx | C--work-fak | 1,100,000 | 0 | 1,000,000 | 90.9% | 200 | 5500.0 | claude-opus-4-8 |") {
+		t.Fatalf("report missed long-context heavy row:\n%s", md)
+	}
+	if !strings.Contains(section, "| lightctx | C--work-fak | 1,100 | 0 | 1,000 | 90.9% | 100 | 11.0 | claude-fable-5 |") {
+		t.Fatalf("report missed long-context light row:\n%s", md)
+	}
+	if strings.Index(section, "1,100,000") > strings.Index(section, "1,100 |") {
+		t.Fatalf("long-context section is not sorted by total context descending:\n%s", section)
 	}
 }
 
