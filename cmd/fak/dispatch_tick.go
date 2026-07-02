@@ -217,6 +217,21 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		reg = dispatchRefreshRegistry(root, stderr)
 	}
 
+	// Commit-time diff-witness binding (#1324 proposal #2), ported from the Python
+	// dispatcher: grade each finished (dead-pid) worker's slot through `dos
+	// commit-audit` and record the verdict in a .witness sidecar, so a bare `exit 0`
+	// never silently counts as productive. Live ticks only (the audit + the sidecar
+	// write are the side effects, and a dry run must stay byte-identical); fail-open.
+	// The re-blockable guard refusals it surfaces (self_modify / policy_block) feed
+	// the pick's hold set below (#1396).
+	witnessedSlots := map[string]any{"skipped": true}
+	heldNoCommit := map[int]bool{}
+	if opts.Live {
+		var witnessRecords []dispatchtick.WitnessRecord
+		witnessedSlots, witnessRecords = witnessExitedWorkers(root, runsDir, true)
+		heldNoCommit = dispatchtick.HeldNoCommitIssues(witnessRecords)
+	}
+
 	pre, err := dispatchPreflight(root, stderr, opts.MaxWorkers, opts.WorkKind, dispatchtick.ProductForBackend(opts.Backend))
 	if err != nil {
 		return nil, err
@@ -250,6 +265,14 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		skip[n] = true
 	}
 	for n := range cooled {
+		skip[n] = true
+	}
+	// The pick-held-invariant rung (#1396): an issue whose last finished worker was
+	// STRUCTURALLY guard-blocked (self_modify / policy_block) re-blocks identically
+	// on re-dispatch, so hold it this tick instead of re-storming the same
+	// un-landable drain. An auth wall is deliberately NOT held here — it re-probes
+	// after the time cooldown window.
+	for n := range heldNoCommit {
 		skip[n] = true
 	}
 	target, hasTarget := dispatchtick.PickTargetIssue(pick.Numbers, skip)
@@ -294,6 +317,15 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 	if hasTarget {
 		payload["target_issue"] = target
+	}
+	// Surface the slot witness only on a live tick where the sweep ran, and the
+	// structurally-held issues only when something is actually held, so the common
+	// dry-run / nothing-held payloads stay byte-identical to before (#1396).
+	if opts.Live {
+		payload["witnessed_slots"] = witnessedSlots
+	}
+	if len(heldNoCommit) > 0 {
+		payload["held_no_commit"] = sortedSet(heldNoCommit)
 	}
 
 	finish := func(p map[string]any) map[string]any {
@@ -367,7 +399,11 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 		payload["ok"] = false
 		payload["action"] = "no_issue"
 		payload["verdict"] = "NO_ISSUE"
-		payload["reason"] = fmt.Sprintf("every open issue on lane %q is live or cooling", pick.Lane)
+		reason := fmt.Sprintf("every open issue on lane %q is live or cooling", pick.Lane)
+		if len(heldNoCommit) > 0 {
+			reason = fmt.Sprintf("every open issue on lane %q is live, cooling, or held after a structural guard refusal (held: %v)", pick.Lane, sortedSet(heldNoCommit))
+		}
+		payload["reason"] = reason
 		return finish(payload), nil
 	}
 
