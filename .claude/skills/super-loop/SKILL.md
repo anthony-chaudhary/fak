@@ -1,6 +1,6 @@
 ---
 name: super-loop
-description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per DISTINCT rate-limit account, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account-distinctness before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", or "start the overnight fleet".
+description: The durable front door to a "super loop" — launching HEADLESS work sessions in BULK, one detached `/goal` worker per DISTINCT rate-limit account, each resolving a top-ranked ready leaf and closing it by witnessed ancestry. Wraps the proven launchers (`tools/issue_dispatch.py --wave`, `tools/launch_wave_detached.ps1`) with the discipline the raw scripts assume: PLAN by default, price the fan-out for tree-collisions AND account-distinctness before a single worker spawns, re-check the no-DoS preflight cap per spawn, and never confuse a launch with a ship. Regime-aware, not a fixed script: it reads the host first and adapts — RECLAIM stale workers/residue before growing, RAMP a cold host canary-first (promote on witnessed commits), and run 12h+ MARATHONS as a cadence of waves with budget and stop signals. Use when the operator says "launch a wave", "run a super loop", "spin up N workers on the top issues", "fan out headless sessions", "drain the backlog in parallel", "start the overnight fleet", "clean up the old workers first", "ramp up slowly", or "keep it running for 12 hours".
 allowed-tools: Read, Bash, Write
 metadata:
   opencode: claude-only   # the commit-by-explicit-path, honesty-boundary, and collision discipline are load-bearing and not portable per-skill
@@ -68,14 +68,64 @@ python tools/dispatch_status.py --fast        # quick pure-local card: workers l
 doc; the human-readable card is the default stdout output, `--fast` skips the two
 gh-backed folds for a quick look.)
 
-If preflight is not `SPAWN_OK`, STOP and report the verdict — the recover step is
-the one named in the AGENTS.md guard table (fix the host / re-login / wait for a
-seat), not a wider fan-out.
+**Pick the regime from what you observed — never hard-code "launch a wave":**
+
+| Observation (preflight verdict + status card) | Regime | Where |
+|---|---|---|
+| `SPAWN_OK`, workers already live and shipping | FULL wave at the remaining headroom | Steps 1–3 |
+| `SPAWN_OK` but cold: `live=0`, first wave of the day, or the fuel/launcher just changed | CANARY — 1 worker, promote on evidence | Step 1.5 |
+| `REFUSE_HOST`, or the card shows silent workers / orphan leases / dead-PID residue | RECLAIM first, then re-orient | Step 0.5 |
+| `REFUSE_AT_CAP` and the live workers are real (leases held, commits landing) | Not a launch turn — watch, don't spawn | Step 4 |
+| `REFUSE_NO_SEAT` / `REFUSE_NO_ACCOUNT` / card says `WEEKLY_CAPPED` | WAIT-FOR-RESET — the seat comes back on a window, not on retry | Step 5 signals |
+| Operator asked for an overnight / 12h+ run | MARATHON — a cadence of waves, not a bigger wave | Step 5 |
+
+A `REFUSE_*` still means what it always meant: recover per the AGENTS.md guard
+table, never route around it. The regimes are the *named* recover/launch paths —
+none of them is an override.
 
 The **fuel** is the `/goal` pointer each headless worker reads
 (`.claude/goal-prompts/resolve-top-issue-witnessed.md`) — a self-contained spec:
 *take a lane, resolve the top ready leaf, ship it witnessed, close by ancestry,
 stop.* Keep it < 4000 chars (the `/goal` cap the launcher enforces).
+
+## Step 0.5 — Reclaim: clean up old workers before growing
+
+An `AT_CAP` / `REFUSE_HOST` on a quiet box usually means *residue*, not load:
+dead workers still holding inflight markers, silent spinners, orphaned helper
+sprawl. Reclaim in three rungs, cheapest first — and re-run Step 0 after, because
+**a reclaim is not admission**: the freed capacity has to be witnessed by the
+preflight gate, not assumed.
+
+**Rung 1 — free, no kills (safe to run any time):**
+
+```bash
+python tools/issue_dispatch.py --no-refresh     # ANY dry-run tick self-heals inflight markers (dead PID / unreadable / >12h TTL)
+python tools/stale_work_watchdog.py --live      # GC >7d gitignored ephemera ONLY (.dos/markers|streams|stop-failures, tools/_watchdog); never touches git state
+```
+
+**Rung 2 — read the evidence (still no kills):**
+
+```bash
+python tools/proc_resource_guard.py --json      # the exact runaway/orphan report REFUSE_HOST is built on
+python tools/dispatch_status.py                 # silent-worker (stub log + dead PID) and orphan process/lease folds
+```
+```powershell
+Get-ScheduledTaskInfo FleetRunawayReaper        # a standing reaper may already be on it — don't double-reap
+```
+
+**Rung 3 — kill, operator-gated (the same approval bar as `-Launch`):**
+
+```powershell
+Stop-Process -Id <pid>    # only a worker the card proves is dead-weight: silent (stub log) or spinning with zero witnessed commits
+```
+```bash
+python tools/proc_resource_guard.py --enact --reap-orphans   # kill FLAGGED runaways/orphans only; protected processes are never killed
+```
+
+Never `--enact` from automation or without reading the rung-2 report first, and
+never kill a worker that is mid-witnessed-progress — a held lease plus a recent
+commit is a live worker, not residue. Killing whatever looks big to route around
+`REFUSE_HOST` is the same sin as `-SkipPreflight`.
 
 ## Step 1 — Rank the queue (the "top N" fuel, live — never a frozen list)
 
@@ -91,6 +141,27 @@ python tools/issue_triage.py --markdown --out docs/_audits/issue-triage-$(date +
 
 Read the top N (default N = `--max-workers`) rows. These are the leaves the wave
 will pick from; each worker selects the top-ranked leaf on the lane it leases.
+
+## Step 1.5 — Size the wave: ramp rungs (the next tick IS the ramp)
+
+Nothing in the stack sleeps between spawns — there is no stagger flag anywhere.
+The ramp primitive is running the launcher *again*, smaller first. Pick the rung
+from evidence, not appetite; `<N>` below is what Steps 2–3 get:
+
+| Rung | When | How |
+|---|---|---|
+| **CANARY** (1) | cold host, first wave of the day, fuel/launcher just changed, or right after a reclaim | single-tick `issue_dispatch.py --live` (no `--wave`) spawns exactly one; or one `launch_goal_detached.ps1` after `-PlanOnly` |
+| **STEP** (2–3) | the canary shipped and headroom is confirmed | `--wave --max-workers 3`; re-run Step 0 + Step 2 before the next rung |
+| **FULL** (headroom) | the previous rung landed witnessed commits and the card is healthy | `--wave --max-workers <preflight headroom>` |
+
+Promote on WITNESS, not on time: a canary is promoted when it holds a lane lease
+and its first commit passes `dos commit-audit` — not because twenty minutes
+passed. Between rungs re-run the preflight: the adaptive host cap rises as load
+clears, so each successive plan is honest. A rung that shows stub logs or
+throttle folds means drop BACK a rung, not push through. And the Step-0 caveat
+still binds — never "top up" while workers are still starting (a just-spawned
+worker is invisible to the scan until it holds a lease); a new rung begins only
+after the last rung's workers hold leases/markers or have exited.
 
 ## Step 2 — Price the fan-out (dry-run) — collisions AND account-distinctness
 
@@ -161,6 +232,38 @@ worker that produced a witnessed commit and left its lane clean is a complete ru
 one that is spinning without net-witnessed gain should be stopped, not left burning
 the account.
 
+## Step 5 — Marathon: runs longer than one wave (12h+ / overnight)
+
+A worker is one-leaf-then-stop by fuel design, so a long run is a **cadence of
+waves**, never a long-lived worker or one bigger burst. Two honest shapes:
+
+- **Standing cron (preferred unattended).** The `FleetIssueDispatch` scheduled
+  task already re-ticks the dispatcher; the status card's watchdog fold says
+  whether it is installed and firing. If it is live, an "overnight run" means
+  leave it on and fix what the card says blocks it — do NOT also hand-launch
+  waves beside it (double-dispatch on the same seats and lanes).
+- **Attended cadence (wave-sized ticks).** Repeat orient → rung-1 reclaim →
+  price → wave every 60–90 minutes. Every tick starts at Step 0: a preflight
+  verdict from the previous tick is stale evidence, and the queue re-ranks live.
+
+Budget and stop signals — read them each tick, they are the marathon's honesty:
+
+- **`WEEKLY_CAPPED` / seat cooling** — that account is out for the window, and
+  waiting IS the correct move; `fak resume status --store <projects-dir>` names
+  the earliest fire-eligible session and the exact resume command. Downshift to
+  `--work-kind gardening` (tier 2) only if t2 seats are genuinely free.
+- **Throughput flat** — the card's 1h/3h/6h/12h/24h trailing windows are the
+  witness: launches rising while ships stay flat across two consecutive windows
+  means STOP and investigate (silent workers, stub rate), not wave again.
+- **Backlog drained** — `ready-leaves` empty means the marathon is DONE; report
+  it as done, don't idle-tick.
+- **12h markers** — inflight markers auto-expire at 12h; a marker that old is
+  residue for rung-1 reclaim, not evidence of a 12-hour worker.
+
+The end-of-marathon report is per-tick launches, witnessed SHIPS (`dos
+commit-audit` / closure-honesty), what was reclaimed, and which stop signal ended
+the run. Hours elapsed is not a result.
+
 ## Committing (this skill's own writes)
 
 This skill authors/updates the **fuel** and (optionally) an audit note — not the
@@ -190,8 +293,9 @@ super-loop commit.
 
 ## When NOT to use
 
-- **Host not `SPAWN_OK`.** Fix the preflight refusal first; a wave on a dirty host or
-  a throttled account just fails N ways instead of one.
+- **Host not `SPAWN_OK`.** Fix the preflight refusal first (the Step-0.5 reclaim
+  rungs are the named path); a wave on a dirty host or a throttled account just
+  fails N ways instead of one.
 - **One issue, one worker.** Use `/dos-dispatch` (or launch a single
   `launch_goal_detached.ps1` — dry-run it first with `-PlanOnly`, the single-spawn
   twin of the wave's default plan mode); a wave is overhead for a single leaf.
@@ -216,3 +320,12 @@ super-loop commit.
   closure-honesty and `dos commit-audit`; a launch count is not a ship count.
 - ❌ Committing a frozen "top 30" list — the queue re-ranks daily; rank it live in
   Step 1 each run.
+- ❌ A full-size wave onto a cold or just-reclaimed host — canary first, and promote
+  on witnessed commits, never on elapsed time.
+- ❌ `--enact` / `Stop-Process` from automation, or without reading the rung-2
+  report — a reclaim kill carries the same operator bar as `-Launch`, and killing
+  whatever looks big to clear `REFUSE_HOST` is `-SkipPreflight` by other means.
+- ❌ Running "12 hours" as one bigger burst, or hand-launching waves while the
+  `FleetIssueDispatch` cron is live — double-dispatch on the same seats and lanes.
+- ❌ Re-waving into flat throughput — launches rising while ships stay flat is a
+  stop signal to investigate, not a sizing problem to push through.
