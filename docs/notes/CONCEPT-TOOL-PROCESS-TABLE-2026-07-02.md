@@ -6,15 +6,20 @@ date: 2026-07-02
 
 # The tool process table
 
-Status: concept note **plus a shipped decision spine and the first shipped
-enforcement rung**. `internal/toolproc` (the pure fold) and `fak toolproc` (the
-CLI) landed with this note. Seam 2 below is now **wired**:
-`internal/toolprocgate` registers a rank-2 `abi.ResultAdmitter` (defconfig-
-enabled, inert until a kill) that quarantines any completion whose call the
-kernel revoked — witnessed through the real `kernel.AdmitResult` fold. Seams 1
-and 3–6 remain **labeled next steps** — nothing yet kills a live process or
-cancels an upstream request. The spine is offline-provable: `fak toolproc
-sample` folds a deterministic built-in journal, no key, no model, no GPU.
+Status: concept note **plus shipped mechanism at three depths**.
+`internal/toolproc` (the pure fold) and `fak toolproc` (the CLI) landed with
+this note. Seam 2 is **wired**: `internal/toolprocgate` registers a rank-2
+`abi.ResultAdmitter` (defconfig-enabled, inert until a kill) that quarantines
+any completion whose call the kernel revoked — witnessed through the real
+`kernel.AdmitResult` fold. Seam 1's **engine is shipped**:
+`toolprocgate.Supervisor` runs the live journal and Tick loop, and its kill
+and reap advice CANCELS the in-flight work via the lever registered at Spawn
+and arms the revocation table — the full pipeline (spawn → deadline/orphan →
+cancel → post-kill quarantine) is witnessed end-to-end in-process. What
+remains of seam 1 is the wire adapter (the gateway/guard observation
+plumbing), and seams 3–6 remain **labeled next steps**. The spine is
+offline-provable: `fak toolproc sample` folds a deterministic built-in
+journal, no key, no model, no GPU.
 
 ## The problem: the syscall got a lifetime
 
@@ -123,14 +128,20 @@ supervisor tick, a CI gate, and a forensic replay all read the same truth.
 Each seam below already exists; toolproc gives it a shared clock, vocabulary,
 and advice stream. None of this is wired yet.
 
-1. **Gateway supervisor** (`internal/gateway`). The proxy already sees every
-   proposed `tool_use` and every inbound `tool_result`. Emitting `spawn` when
-   an adjudicated call is dispatched, `pulse` when a poll references the job
-   (`BashOutput`'s shell id argument is the correlation key), and `exit` when
-   its terminal result crosses — then folding on a tick and acting on advice
-   (cancel the upstream request, refuse the next poll, annotate the turn) —
-   makes the table live. The decision journal (`FAK_AUDIT_JOURNAL`) gains
-   lifecycle rows, not just admission rows.
+1. **Gateway supervisor** (`internal/gateway`). **ENGINE SHIPPED** as
+   `toolprocgate.Supervisor`: the live journal + Tick loop that folds the same
+   pure `toolproc.Fold` and acts — kill/reap advice cancels the in-flight
+   work via the cancel lever registered at Spawn, enters the call into the
+   revocation table (arming the Gate against its late completion), and
+   records the kill in the journal; probe stays advisory. Clock-free,
+   goroutine-free, witnessed end-to-end in-process (spawn → deadline → cancel
+   → post-kill quarantine through `kernel.AdmitResult`). **Remaining**: the
+   wire adapter — the proxy already sees every proposed `tool_use` and
+   inbound `tool_result`; it needs to map dispatch onto `Spawn` (registering
+   the upstream request's cancel), polls onto `Pulse` (`BashOutput`'s shell
+   id is the correlation key), terminal results onto `Exit`, and tick on its
+   cadence. The decision journal (`FAK_AUDIT_JOURNAL`) then gains lifecycle
+   rows, not just admission rows.
 2. **Result-admission rung** (`abi.ResultAdmitter`) — **SHIPPED** as
    `internal/toolprocgate`: a rank-2 admitter (in front of the content screens)
    quarantines a completion whose call id is in the in-process revocation

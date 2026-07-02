@@ -20,10 +20,21 @@
 //
 // REGISTERED-BUT-INERT BY DEFAULT. With an empty revocation table the gate
 // Defers on every result, so the defconfig ships it enabled at zero behavior
-// change. Teeth engage the moment a supervisor calls Kill — the gateway/guard
-// tick acting on a toolproc `kill` advice (seam 1, next step), or any
-// in-process caller. Cross-process revocation (a CLI killing a call inside a
-// running gateway) rides on seam 1's supervisor, not this leaf.
+// change. Teeth engage the moment something calls Kill.
+//
+// THE SUPERVISOR (seam 1's engine, supervisor.go). NewSupervisor gives an
+// embedder — the gateway proxy, `fak guard`, the agent loop, the MCP server —
+// the live side of the table: report Spawn (with the in-flight work's cancel
+// lever) / Pulse / Exit / SessionEnd as they cross the wire, call Tick on
+// your cadence. Tick folds the same pure toolproc.Fold the CLI uses, then
+// ACTS: kill/reap advice cancels the in-flight work once, enters the call
+// into the revocation table (arming the Gate against its late completion),
+// and appends the kill to the journal; probe stays advisory. Clock-free and
+// goroutine-free — the embedder owns the cadence, tests own the clock. What
+// remains for the wire adapters (gateway/guard/MCP) is only observation
+// plumbing: map their dispatch/stream/poll events onto these entry points.
+// Cross-process revocation (a CLI killing a call inside a running gateway)
+// rides on that adapter, not this leaf.
 //
 // Tier: integrator (4) — see internal/architest. This package may import only
 // packages whose tier is <= 4 (it imports abi tier 0 and toolproc tier 2); an
