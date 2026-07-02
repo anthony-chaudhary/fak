@@ -144,7 +144,7 @@ func TestBenignRaces(t *testing.T) {
 	events := []Event{
 		{Kind: EvSpawn, CallID: "c1", Tool: "x", AtMS: 1_000},
 		{Kind: EvExit, CallID: "c1", AtMS: 2_000, Status: "ok"},
-		{Kind: EvPulse, CallID: "c1", AtMS: 2_500}, // chunk in flight when exit landed
+		{Kind: EvPulse, CallID: "c1", AtMS: 2_500},                    // chunk in flight when exit landed
 		{Kind: EvKill, CallID: "c1", AtMS: 3_000, Reason: "OPERATOR"}, // killer lost the race
 	}
 	tab, err := Fold(events, 10_000, Config{})

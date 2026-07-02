@@ -45,7 +45,7 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 func runToolprocPS(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("toolproc ps", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	eventsPath := fs.String("events", "", "JSONL journal of tool-process events (required)")
+	eventsPath := fs.String("events", "", "JSONL journal of tool-process events (required; '-' reads stdin)")
 	nowMS := fs.Int64("now-unix-ms", 0, "fold instant (default: wall clock; pin it for deterministic fixtures)")
 	defaultDeadlineMS := fs.Int64("default-deadline-ms", 0, "deadline for procs whose spawn declared none (0 = unbounded)")
 	stallMult := fs.Float64("stall-mult", toolproc.DefaultStallMultiplier, "declared-cadence multiplier before a silent proc is STALLED")
@@ -54,16 +54,20 @@ func runToolprocPS(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak toolproc ps: --events FILE is required")
+		fmt.Fprintln(stderr, "fak toolproc ps: --events FILE is required ('-' reads stdin)")
 		return 2
 	}
-	f, err := os.Open(*eventsPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak toolproc ps: %v\n", err)
-		return 1
+	var in io.Reader = os.Stdin
+	if *eventsPath != "-" {
+		f, err := os.Open(*eventsPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak toolproc ps: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		in = f
 	}
-	defer f.Close()
-	events, err := toolproc.ParseEvents(f)
+	events, err := toolproc.ParseEvents(in)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak toolproc ps: %v\n", err)
 		return 1
@@ -97,7 +101,7 @@ func runToolprocSample(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("toolproc sample", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the folded table as JSON")
-	journal := fs.Bool("journal", false, "print the raw sample journal (pipe it back into `fak toolproc ps --events -`... write it to a file)")
+	journal := fs.Bool("journal", false, "print the raw sample journal JSONL (pipe it into `fak toolproc ps --events -`)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -167,7 +171,7 @@ func renderToolprocTable(w io.Writer, tab toolproc.Table) {
 func toolprocUsage(w io.Writer) {
 	fmt.Fprint(w, `fak toolproc - the kernel's process table for tool calls (long-running tool lifecycle)
 
-  fak toolproc ps --events FILE [--now-unix-ms N] [--default-deadline-ms N]
+  fak toolproc ps --events FILE|- [--now-unix-ms N] [--default-deadline-ms N]
                   [--stall-mult F] [--json]
   fak toolproc sample [--json | --journal]
 
