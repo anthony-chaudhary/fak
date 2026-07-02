@@ -62,11 +62,11 @@ func TestSyncPushThenFetchExactArgv(t *testing.T) {
 
 func TestSyncSingleDirection(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		push, fetch    bool
-		wantVerb       string
-		wantPushed     bool
-		wantFetched    bool
+		name        string
+		push, fetch bool
+		wantVerb    string
+		wantPushed  bool
+		wantFetched bool
 	}{
 		{"push-only", true, false, "push", true, false},
 		{"fetch-only", false, true, "fetch", false, true},

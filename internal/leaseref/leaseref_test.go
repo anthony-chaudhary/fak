@@ -42,8 +42,15 @@ func (f *fakeGit) run(ctx context.Context, dir string, args ...string) (string, 
 	case "update-ref":
 		if args[1] == "-d" {
 			ref := args[2]
-			if _, ok := f.refs[ref]; !ok {
+			cur, ok := f.refs[ref]
+			if !ok {
 				return "", 1, nil // delete of a missing ref exits non-zero (real git behavior)
+			}
+			// CAS form `update-ref -d <ref> <old>`: honor the old-value guarded delete the
+			// fenced release (casDelete) relies on — a ref that advanced since <old> was
+			// read survives the delete (exit non-zero). The 2-arg blind form is unchanged.
+			if len(args) >= 4 && cur != args[3] {
+				return "", 1, nil
 			}
 			delete(f.refs, ref)
 			return "", 0, nil

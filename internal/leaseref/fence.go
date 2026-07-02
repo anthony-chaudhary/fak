@@ -293,13 +293,21 @@ func (s *Store) currentOID(ctx context.Context, ref string) (string, bool, error
 }
 
 // casWrite writes rec as a blob and points ref at it under an update-ref OLD-VALUE
+// compare-and-swap — see casWriteJSON, which carries the whole mechanism; this wrapper
+// keeps the lock-lease call sites typed.
+func (s *Store) casWrite(ctx context.Context, ref string, rec Record, oldOID string, hadRef bool) (bool, error) {
+	return s.casWriteJSON(ctx, ref, rec, oldOID, hadRef)
+}
+
+// casWriteJSON marshals v to a blob and points ref at it under an update-ref OLD-VALUE
 // compare-and-swap, so a concurrent same-host writer that advanced ref since oldOID was read
 // loses the race (update-ref exits non-zero) instead of clobbering the token. For a CREATE
 // (hadRef == false) it uses git's zero-OID "must not exist" sentinel, sized to the repo's
 // object format, so even the first acquire fails closed if a peer created the ref first.
 // Returns written == false on a CAS loss (a value, not an error); a real git failure errors.
-func (s *Store) casWrite(ctx context.Context, ref string, rec Record, oldOID string, hadRef bool) (bool, error) {
-	blob, err := json.Marshal(rec)
+// Shared by the fenced lock-lease writes (casWrite) and the intent-lease claim (#2155).
+func (s *Store) casWriteJSON(ctx context.Context, ref string, v any, oldOID string, hadRef bool) (bool, error) {
+	blob, err := json.Marshal(v)
 	if err != nil {
 		return false, fmt.Errorf("leaseref: marshal record: %w", err)
 	}

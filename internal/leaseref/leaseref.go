@@ -57,10 +57,11 @@ import (
 // refPrefix is the dedicated ref namespace every fak side ref lives under. Unlike
 // notes (confined to refs/notes/*), an ordinary ref can be named directly, so the
 // on-disk ref is EXACTLY refs/fak/locks/<id> — the namespace the issue asked for and
-// the one git fetch/push converges across clones. TWO ref kinds share this prefix: a
-// lock lease at refs/fak/locks/<id> (this file) and a live guard-session descriptor at
-// refs/fak/locks/session-<id> (session.go); the readers on each side filter by the
-// session- basename marker so the two views stay distinct.
+// the one git fetch/push converges across clones. THREE ref kinds share this prefix: a
+// lock lease at refs/fak/locks/<id> (this file), a live guard-session descriptor at
+// refs/fak/locks/session-<id> (session.go), and a work-target intent lease at
+// refs/fak/locks/intent-<key> (intent.go, #2155); the readers on each side filter by
+// the basename marker so the views stay distinct.
 const refPrefix = "refs/fak/locks/"
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It is
@@ -303,6 +304,9 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 		}
 		if isSessionRef(ref) {
 			continue // session descriptors (refs/fak/locks/session-*) are a DISTINCT kind, not lock leases
+		}
+		if isIntentRef(ref) {
+			continue // intent leases (refs/fak/locks/intent-*) are work-target claims, not tree leases (#2155)
 		}
 		rec, rerr := s.readRef(ctx, ref)
 		if rerr != nil {
