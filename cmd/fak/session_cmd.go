@@ -410,6 +410,9 @@ func formatSessionState(st gateway.SessionState) string {
 	if st.Reason != "" {
 		line += " reason=" + st.Reason
 	}
+	if seg := formatSessionTime(st.Time); seg != "" {
+		line += " " + seg
+	}
 	if st.ContinuationID != "" {
 		line += " continuation=" + st.ContinuationID
 	}
@@ -420,6 +423,28 @@ func formatSessionState(st gateway.SessionState) string {
 		line += fmt.Sprintf(" gen=%d", st.Generation)
 	}
 	return line
+}
+
+// formatSessionTime renders the wall-clock budget segment of a session line: the twin of
+// the budget(...) token segment, showing where a `--max-duration` / managed-context wall
+// axis stands. It returns "" for a zero (never-configured, never-started) time budget so
+// the common no-time-budget session line is byte-identical to before this axis existed.
+// A bounded envelope shows elapsed + remaining + limit (plus an EXCEEDED marker once the
+// wall clock is spent); an unbounded-but-ticking session shows only elapsed, honoring
+// "--max-duration 0 … still tracked for session status".
+func formatSessionTime(t gateway.SessionTime) string {
+	if t.IsZero() {
+		return ""
+	}
+	dur := func(sec int64) string { return (time.Duration(sec) * time.Second).String() }
+	if !t.Bounded {
+		return "time(elapsed=" + dur(t.ElapsedSeconds) + ")"
+	}
+	seg := fmt.Sprintf("time(elapsed=%s remaining=%s limit=%s", dur(t.ElapsedSeconds), dur(t.RemainingSeconds), dur(t.LimitSeconds))
+	if t.Exceeded {
+		seg += " EXCEEDED"
+	}
+	return seg + ")"
 }
 
 // budgetAxis renders an unbounded (negative) budget axis as a stable token rather

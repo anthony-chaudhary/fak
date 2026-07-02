@@ -1116,7 +1116,30 @@ func toGatewaySessionState(s session.State) gateway.SessionState {
 		},
 		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
 		Assumptions:      toGatewaySessionAssumptions(s.Assumptions),
+		Time:             toGatewaySessionTime(s.Time, now),
 		Rev:              s.Rev,
+	}
+}
+
+// toGatewaySessionTime projects a session's wall-clock TimeBudget into the read-only wire
+// form `fak session status` renders — the field that finally makes `--max-duration`
+// legible (it was armed and enforced, but never observable). It surfaces the budget
+// whenever a wall-clock envelope is configured OR the clock has ticked at all, so an
+// UNBOUNDED-but-running guard session ("--max-duration 0 … still tracked for session
+// status") still reports its elapsed time. A never-started, unconfigured TimeBudget
+// projects to the zero SessionTime, which omitzero drops from the wire entirely.
+func toGatewaySessionTime(tb session.TimeBudget, now time.Time) gateway.SessionTime {
+	q := tb.Query(now)
+	elapsed := tb.Elapsed(now)
+	if !q.Bounded && elapsed <= 0 {
+		return gateway.SessionTime{}
+	}
+	return gateway.SessionTime{
+		Bounded:          q.Bounded,
+		Exceeded:         q.Exceeded,
+		ElapsedSeconds:   int64(elapsed / time.Second),
+		RemainingSeconds: int64(q.Remaining / time.Second),
+		LimitSeconds:     int64(q.Limit / time.Second),
 	}
 }
 

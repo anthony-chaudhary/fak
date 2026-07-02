@@ -437,8 +437,35 @@ type SessionState struct {
 	CacheAffinity    SessionCacheAffinity    `json:"cache_affinity,omitempty,omitzero"`
 	ResetTransaction SessionResetTransaction `json:"reset_transaction,omitempty,omitzero"`
 	Assumptions      []SessionAssumption     `json:"assumptions,omitempty"`
-	Rev              uint64                  `json:"rev"`
+	// Time is the session's WALL-CLOCK budget projection (issue #1584): elapsed,
+	// remaining, limit, and whether the envelope is exceeded. It is the observability
+	// twin of Budget's token axes — the field that makes `--max-duration` (and the
+	// managed-context wall axis) legible in `fak session status`, which the flag's own
+	// help promises but a bare Budget/Pace projection could never deliver. Advisory /
+	// read-only: nothing gates on it, and the zero value (no wall-clock envelope, never
+	// started) marshals away via omitzero so a session with no time budget keeps the
+	// pre-#1584 wire shape byte-for-byte.
+	Time SessionTime `json:"time,omitempty,omitzero"`
+	Rev  uint64      `json:"rev"`
 }
+
+// SessionTime is the gateway wire projection of internal/session.TimeBudget's read-only
+// Query verdict: the wall-clock allotment an operator sees in `fak session status`.
+// Durations are carried as whole seconds (a wall-clock budget is minutes-to-hours scale,
+// so seconds is both lossless-enough and legible in the raw `--json` form). Bounded is
+// false when no envelope is configured, in which case Remaining/Limit are 0 and only
+// Elapsed (if the clock ever started) is meaningful.
+type SessionTime struct {
+	Bounded          bool  `json:"bounded,omitempty"`
+	Exceeded         bool  `json:"exceeded,omitempty"`
+	ElapsedSeconds   int64 `json:"elapsed_seconds,omitempty"`
+	RemainingSeconds int64 `json:"remaining_seconds,omitempty"`
+	LimitSeconds     int64 `json:"limit_seconds,omitempty"`
+}
+
+// IsZero reports whether no wall-clock budget is attached (nothing configured and no
+// time ticked), for json omitzero — so a pre-#1584 session's wire form is unchanged.
+func (t SessionTime) IsZero() bool { return t == SessionTime{} }
 
 // SessionAssumption is the gateway's wire-neutral projection of an active
 // session assumption. The host owns how rows are minted; gateway only carries
