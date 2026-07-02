@@ -840,6 +840,70 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/session-audit/actions:
+    get:
+      tags: [fak-native]
+      summary: Read the recent-session action ledger
+      description: |
+        Returns the `fak.session_audit.actions.v1` action ledger over recent
+        Claude/Codex session transcripts. It lowers the compact session-audit
+        recommendations into advisory rows such as keeping Fable as the default
+        route under Opus cost pressure or checkpointing/resetting the top
+        long-context session. The endpoint is read-only: no model route,
+        transcript, or session is changed by this report.
+      parameters:
+        - name: since_days
+          in: query
+          required: false
+          schema: { type: number, default: 7 }
+          description: Only include transcripts modified within this many days; `days` is accepted as an alias.
+        - name: max
+          in: query
+          required: false
+          schema: { type: integer, default: 40, minimum: 0 }
+          description: Maximum transcripts to audit before building the compact report.
+        - name: gate
+          in: query
+          required: false
+          schema: { type: string, enum: [high, medium, none], default: high }
+          description: Severity threshold for the advisory gate; `fail_on` and `action_gate` are accepted as aliases.
+        - name: ns_prefix
+          in: query
+          required: false
+          schema: { type: string }
+          description: Session namespace prefix; omitted defaults to the current workspace namespace unless `all` is true.
+        - name: all
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Include every namespace instead of defaulting to the current workspace namespace.
+        - name: include_subagents
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Include subagent/workflow transcripts in the audited window.
+        - name: root
+          in: query
+          required: false
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+          description: Transcript projects root; repeatable.
+      responses:
+        '200':
+          description: The current recent-session action ledger.
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500':
+          description: Transcript discovery failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /v1/fak/ctxvalue:
     get:
       tags: [fak-native]

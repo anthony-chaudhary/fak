@@ -485,7 +485,9 @@ machine-readable shape behind that `vcache status --sessions` block. `fak
 session-audit actions --here --since-days 7 --max 40 --json` lowers its Fable/Opus
 and long-context recommendations into a stable advisory action ledger with witness
 commands; add `--fail-on high` to make that ledger a guard gate that exits 1 when
-recent cost/context pressure should block more high-cost turns. Both are scoped by
+recent cost/context pressure should block more high-cost turns. `GET
+/v1/fak/session-audit/actions` serves the same read-only action ledger for
+gateway/control clients. Both are scoped by
 the current workspace's Claude transcript namespace by default, label clipped
 `--max` windows, and keep exact token counts separate from assumed-cost estimates.
 
