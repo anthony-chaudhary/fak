@@ -128,6 +128,7 @@ type gatewayMetrics struct {
 	compactAnchorStarved uint64            // WITNESSED: under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation so the lever structurally cannot fire (#1407). A subset of bailReasons[under_budget]; the signal that idle is NOT a benign short session.
 	uncachedTrimResults  uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
 	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
+	ttlUpgrades          map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
 
 	// toolPruneMu guards the INBOUND tool-definition prune accumulators (the twin of
 	// the compaction family above, for the tools[] axis). maybeCompactInboundTools drops
@@ -330,6 +331,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		inflightReq:           map[uint64]inflightEntry{},
 		compactAttempts:       map[string]uint64{},
 		compactBailReasons:    map[string]uint64{},
+		ttlUpgrades:           map[string]uint64{},
 		reqMemoryObserved:     map[string]uint64{},
 		reqMemoryPlan:         map[requestMemoryMetricKey]*requestMemoryMetricStats{},
 		reqMemoryTokens:       map[requestMemoryTokenKey]*requestMemoryTokenStats{},
@@ -523,6 +525,29 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 			m.compactAnchorStarved++
 		}
 	}
+}
+
+// observeCacheTTLUpgrade records one managed-cache 1h TTL upgrade attempt on the outbound
+// Anthropic wire, bucketed by the closed agent.TTLUpgradeReason* outcome ("" — an actual
+// upgrade — counts as "upgraded"). WITNESSED: fak authored the splice, and the upgrader
+// re-proves the body redecodes before returning changed bytes. Called only while the lever
+// (--managed-cache / Config.CacheTTL1H) is on, so the family doubles as the lever's
+// default-state witness: absent rows mean OFF, a zero "upgraded" row with nonzero reason
+// rows means ON-but-ineligible.
+func (m *gatewayMetrics) observeCacheTTLUpgrade(reason string) {
+	if m == nil {
+		return
+	}
+	outcome := reason
+	if outcome == "" {
+		outcome = "upgraded"
+	}
+	m.compactMu.Lock()
+	if m.ttlUpgrades == nil {
+		m.ttlUpgrades = map[string]uint64{}
+	}
+	m.ttlUpgrades[outcome]++
+	m.compactMu.Unlock()
 }
 
 // observeUncachedTrim records oversized-result elision as a fak-authored uncached-token saving.
@@ -1957,6 +1982,7 @@ type compactionSnapshot struct {
 	anchorStarved       uint64
 	uncachedTrimResults uint64
 	uncachedTrimShed    uint64
+	ttlUpgrades         map[string]uint64
 }
 
 type requestMemoryAggregateSnapshot struct {
@@ -2049,9 +2075,14 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 	for k, v := range m.compactBailReasons {
 		bailReasons[k] = v
 	}
+	ttlUpgrades := map[string]uint64{}
+	for k, v := range m.ttlUpgrades {
+		ttlUpgrades[k] = v
+	}
 	return compactionSnapshot{
 		attempts:            attempts,
 		bailReasons:         bailReasons,
+		ttlUpgrades:         ttlUpgrades,
 		dropped:             m.compactDropped,
 		shed:                m.compactShed,
 		cacheReads:          m.compactCacheReads,
@@ -2544,6 +2575,25 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
 	writeCounter(b, "fak_gateway_uncached_trim_results_total", "WITNESSED (fak authored): oversized old tool_result bodies shrunk in the uncached post-breakpoint region. The transform keeps the protected cache prefix byte-identical and leaves recent/cache_control-bearing results intact.", int64(snap.uncachedTrimResults))
 	writeCounter(b, "fak_gateway_uncached_trim_shed_tokens_total", "WITNESSED (fak authored): estimated tokens removed by uncached-tail oversized-result trim, also folded into fak_gateway_compaction_shed_tokens_total for the owner=\"fak\" cache-savings attribution.", int64(snap.uncachedTrimShed))
+
+	// The managed-cache 1h TTL upgrade family (--managed-cache, epic #1844 C6). WITNESSED:
+	// fak spliced ttl:"1h" into an existing stable-head cache_control (or bailed for the
+	// named reason). Whether the provider then HONORS the longer TTL across an idle gap is
+	// OBSERVED on the cache_read counters, never claimed here. The "upgraded" row is emitted
+	// even at 0 so an active lever with zero eligible heads is visible, not silent.
+	writeHelpType(b, "fak_gateway_cache_ttl_upgrade_total",
+		"WITNESSED (fak authored): managed-cache 1h TTL upgrade attempts on the outbound Anthropic wire, by outcome: upgraded (ttl:\"1h\" spliced into the stable system/tools-head cache_control) or the bail reason (no_stable_breakpoint|already_1h|ttl_already_set|volatile_head|non_json|splice_failed|redecode_failed). Rows exist only while --managed-cache is ACTIVE. splice_failed/redecode_failed are fak bugs and must stay 0. The provider honoring the 1h tier across an idle gap is OBSERVED via cache_read, not claimed by this counter.", "counter")
+	fmt.Fprintf(b, "fak_gateway_cache_ttl_upgrade_total{outcome=%q} %d\n", "upgraded", snap.ttlUpgrades["upgraded"])
+	ttlReasons := make([]string, 0, len(snap.ttlUpgrades))
+	for r := range snap.ttlUpgrades {
+		if r != "upgraded" {
+			ttlReasons = append(ttlReasons, r)
+		}
+	}
+	sort.Strings(ttlReasons)
+	for _, r := range ttlReasons {
+		fmt.Fprintf(b, "fak_gateway_cache_ttl_upgrade_total{outcome=%q} %d\n", promQuote(r), snap.ttlUpgrades[r])
+	}
 
 	// The INBOUND tool-floor prune family (the tools[] twin of the compaction shed above).
 	// WITNESSED: how many unreachable tool DEFINITIONS fak dropped from the advertised surface,

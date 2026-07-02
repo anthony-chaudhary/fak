@@ -163,6 +163,7 @@ func cmdGuard(argv []string) {
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
+	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
@@ -521,6 +522,24 @@ func cmdGuard(argv []string) {
 	}
 	upstreamResolveDur = time.Since(tUpstream)
 
+	// Managed-cache posture (epic #1844 C6): decide from the JUST-resolved upstream whether
+	// this session actively manages the provider prompt-cache (the stable-prefix 1h TTL
+	// upgrade). AUTO keys on provable API-key billing — the OAuth branch above rewrote
+	// apiKey to the subscription token but stamped oauthSource, so the pair distinguishes
+	// the two credentials. Fail loud on an unknown mode before any gateway binds.
+	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
+		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
+		// PURE local branch (no upstream at all) turns the cache posture off.
+		localModel:  localModel && !localAlongside,
+		provider:    up,
+		apiKey:      apiKey,
+		oauthSource: oauthSource,
+	})
+	if mcErr != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", mcErr)
+		os.Exit(2)
+	}
+
 	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
 	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
 	// Code gets an actionable next step instead of a raw exec error after the gateway
@@ -755,6 +774,11 @@ func cmdGuard(argv []string) {
 		CompactHistoryBudget: *compactHistoryBudget,
 		CompactAnchorHead:    *compactAnchorHead,
 		ElideResultBytes:     *elideResultBytes,
+		// Managed-cache posture (--managed-cache, epic #1844 C6): when active, the gateway
+		// upgrades the stable-prefix cache_control breakpoint to the 1h TTL tier on the
+		// outbound Anthropic wire (maybeUpgradeAnthropicCacheTTL1H). Resolved above from
+		// the session's billing posture; witnessed on /metrics per turn.
+		CacheTTL1H: mcache.active,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
 		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),
@@ -987,9 +1011,14 @@ func cmdGuard(argv []string) {
 			switch {
 			case pinUpstream:
 				fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
+			case up == "anthropic" && apiKey != "":
+				fmt.Fprintf(os.Stderr, "fak guard: upstream auth — API key (from --api-key-env %s; API billing)\n", *apiKeyEnv)
 			case up == "anthropic":
 				fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 			}
+			// The session's prompt-cache posture, made explicit at boot: whether fak actively
+			// manages the outbound cache_control (1h TTL upgrade) or stays passive and why.
+			fmt.Fprintln(os.Stderr, mcache.bannerLine())
 		}
 		if contextBudgetLimit > 0 {
 			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, contextBudgetLimit)

@@ -198,9 +198,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// history (auto-compaction), never fak. The observation is folded after the served turn, once
 	// the provider's cache counters are known.
 	inboundPrefixDigest := inboundProtectedPrefixDigest(req.Raw)
-	// TTL ablation (#1850): when explicitly enabled, extend an existing stable-head
-	// cache_control breakpoint to Anthropic's 1h tier before any body shrinker touches
-	// req.Raw. This is gate-only until the live read/write economics are attributed.
+	// Managed-cache 1h TTL upgrade (#1850 / epic #1844 C6): when the lever is on
+	// (fak guard --managed-cache, auto-on for API-key-billed sessions; or the
+	// FAK_ABLATE_TTL_1H ablation arm), extend an existing stable-head cache_control
+	// breakpoint to Anthropic's 1h tier before any body shrinker touches req.Raw, so a
+	// long session idling past the 5m window re-enters on a cache read. Every attempt is
+	// witnessed on /metrics (fak_gateway_cache_ttl_upgrade_total).
 	s.maybeUpgradeAnthropicCacheTTL1H(req)
 	// ctxplan planned VIEW on the Anthropic passthrough (#927 — the deferred #555 req.Raw
 	// transform): when --ctx-view-budget is set, plan req.Messages into an O(1) resident
@@ -504,6 +507,9 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 		return false
 	}
 	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
+	// WITNESSED per attempt while the lever is on (--managed-cache / FAK_ABLATE_TTL_1H), so
+	// an active-but-never-eligible session is visible on /metrics instead of silent.
+	s.metrics.observeCacheTTLUpgrade(outcome.Reason)
 	if outcome.Reason != agent.TTLUpgradeReasonNone {
 		return false
 	}
