@@ -1393,7 +1393,9 @@ func (s *Server) VCacheTurnsSnapshot() ([]vcacheobserve.Turn, bool) {
 	if s == nil {
 		return nil, false
 	}
-	return s.metrics.vcacheTurnsSnapshot()
+	turns, capped := s.metrics.vcacheTurnsSnapshot()
+	attachVCacheContextEconomics(turns, s.compactHistoryBudget)
+	return turns, capped
 }
 
 // SetModelLoadProfile records the boot-time weight-load breakdown the host captured

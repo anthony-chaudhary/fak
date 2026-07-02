@@ -57,6 +57,31 @@ func TestVCacheTurnsSnapshotCarriesContextEvidence(t *testing.T) {
 	}
 }
 
+func TestServerVCacheTurnsSnapshotCarriesContextEconomics(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeVCacheTurn("trace-A", 1, 100, 900, 0)
+	m.observeCompaction(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    3,
+		ShedTokens: 800,
+	}, false)
+	s := &Server{metrics: m, compactHistoryBudget: 1200}
+
+	turns, _ := s.VCacheTurnsSnapshot()
+	if len(turns) != 1 {
+		t.Fatalf("snapshot retained %d turns, want 1", len(turns))
+	}
+	got := turns[0]
+	if got.ContextEvents != 1 || got.ContextShedTokens != 800 || got.ContextDroppedTurns != 3 {
+		t.Fatalf("context evidence = events:%d shed:%d dropped:%d, want 1/800/3",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+	if got.ContextBaselineTokens != 2000 || got.ContextCostTokens != 1200 {
+		t.Fatalf("context economics = baseline:%d cost:%d, want 2000/1200",
+			got.ContextBaselineTokens, got.ContextCostTokens)
+	}
+}
+
 // TestVCacheFamiliesReconcilesWithObserve proves the live per-family block the gateway
 // exposes over its rolling window is byte-identical to what `fak vcache observe` computes
 // offline on the same traffic — the #935 acceptance ("reconciling with `fak vcache

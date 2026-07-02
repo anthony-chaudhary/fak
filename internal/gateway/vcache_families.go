@@ -117,12 +117,57 @@ func (m *gatewayMetrics) attachVCacheContextEvidence(turns []vcacheobserve.Turn)
 	turns[0].ContextDroppedTurns = uint64ToInt64(compact.dropped)
 }
 
+func attachVCacheContextEconomics(turns []vcacheobserve.Turn, compactHistoryBudget int) {
+	if len(turns) == 0 || compactHistoryBudget <= 0 {
+		return
+	}
+	for i := range turns {
+		events := turns[i].ContextEvents
+		shed := turns[i].ContextShedTokens
+		if events <= 0 || shed <= 0 {
+			continue
+		}
+		if turns[i].ContextBaselineTokens > 0 || turns[i].ContextCostTokens > 0 {
+			return
+		}
+		cost := saturatingInt64Mul(int64(compactHistoryBudget), events)
+		turns[i].ContextCostTokens = cost
+		turns[i].ContextBaselineTokens = saturatingInt64Add(cost, shed)
+		return
+	}
+}
+
 func uint64ToInt64(n uint64) int64 {
 	const maxInt64 = uint64(^uint64(0) >> 1)
 	if n > maxInt64 {
 		return int64(maxInt64)
 	}
 	return int64(n)
+}
+
+func saturatingInt64Mul(a, b int64) int64 {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if a > maxInt64/b {
+		return maxInt64
+	}
+	return a * b
+}
+
+func saturatingInt64Add(a, b int64) int64 {
+	if a < 0 {
+		a = 0
+	}
+	if b < 0 {
+		b = 0
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if a > maxInt64-b {
+		return maxInt64
+	}
+	return a + b
 }
 
 func clampNonNeg(n int) int {
