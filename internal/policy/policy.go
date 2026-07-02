@@ -68,6 +68,19 @@ type Manifest struct {
 	Deny            map[string]string `json:"deny,omitempty"`
 	SelfModifyGlobs []string          `json:"self_modify_globs,omitempty"`
 	RedactFields    []string          `json:"redact_fields,omitempty"`
+	// AdvisoryReasons is the per-reason advisory (warn) posture — the operator's
+	// false-positive escape hatch for the HEURISTIC rungs. A monitor refusal citing
+	// a listed reason is admitted with the full would-deny record in its verdict
+	// Meta (posture=advisory, would_deny, the bounded claim), journaled like every
+	// verdict. Only the heuristic reasons are accepted (adjudicator.AdvisoryEligible:
+	// SELF_MODIFY, MALFORMED, DEFAULT_DENY); naming a genuine-danger reason
+	// (POLICY_BLOCK, SECRET_EXFIL, EGRESS_BLOCK) fails loud at load — soften one
+	// FP-prone rule with arg_rules[].advisory instead. The FAK_ADVISORY_REASONS env
+	// var (comma-separated reasons, or "dev" for all three) UNIONS into this set at
+	// load — the one-line dev-session override that needs no manifest edit; it is
+	// read in the fak process that enforces the floor, so a guarded child agent
+	// cannot flip it. Maps to adjudicator.Policy.AdvisoryReasons.
+	AdvisoryReasons []string `json:"advisory_reasons,omitempty"`
 	// SecretPosture (issue #885) selects what the on-discovery secret rung does when
 	// a tool result bears a credential: "quarantine" (default, omitted), "fail_closed",
 	// or "admit_and_log". An unknown token is refused at load. Maps to
@@ -114,6 +127,12 @@ type Manifest struct {
 	// supervisor resolve per-spawn envelopes via Runtime.ToolRuntime. Like
 	// RateLimit, manifest/runtime-only, NOT an adjudicator.Policy field.
 	ToolRuntime []ToolRuntimeRule `json:"tool_runtime,omitempty"`
+	// InheritedCapabilities declares the capability subset a brokered child
+	// launch may inherit from its parent. Absent means default-deny: no ambient
+	// env, secret value, cwd, writable/persistence scope, or egress reference is
+	// passed. Like ToolRuntime, this is manifest/runtime-only; launch adapters
+	// resolve it through Runtime.InheritedCapabilities before exec.
+	InheritedCapabilities []InheritedRule `json:"inherited_capabilities,omitempty"`
 }
 
 // EgressRule is the manifest's network-egress block.
@@ -154,6 +173,11 @@ type ArgRule struct {
 	DenyRegex string `json:"deny_regex,omitempty"`
 	MaxBytes  int    `json:"max_bytes,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	// Advisory puts THIS rule on logged trial: a violation is noted on the
+	// admitted verdict's Meta (advisory_violations) instead of denying — the
+	// rule-granular false-positive softener, so one noisy rule can warn while
+	// the rest of the floor stays enforcing. Maps to ArgPredicate.Advisory.
+	Advisory bool `json:"advisory,omitempty"`
 }
 
 // RateLimitRule is the declarative throughput/cost cap (Epic 8, issue #699): the
@@ -192,6 +216,9 @@ type Runtime struct {
 	// the tool-process table); nil when the manifest declares none
 	// (EnvelopeFor then resolves nothing and the fold defaults apply).
 	ToolRuntime *ToolRuntimeTable
+	// InheritedCapabilities is the compiled child-launch inheritance table; nil
+	// when the manifest declares none, so Resolve returns an empty envelope.
+	InheritedCapabilities *InheritedTable
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -332,6 +359,11 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	}
 	p.ArgPredicates = argPreds
 	p.LintWrites = m.LintWrites
+	adv, err := compileAdvisoryReasons(m.AdvisoryReasons)
+	if err != nil {
+		return Runtime{}, err
+	}
+	p.AdvisoryReasons = adv
 	secretPosture, ok := adjudicator.ParseSecretPosture(m.SecretPosture)
 	if !ok {
 		return Runtime{}, fmt.Errorf("unknown secret_posture %q; valid: quarantine, fail_closed, admit_and_log", m.SecretPosture)
@@ -366,14 +398,19 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	ic, err := compileInheritedCapabilities(m.InheritedCapabilities)
+	if err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
-		Adjudicator:    p,
-		Sources:        sources,
-		SafeSinks:      safe,
-		AuthorizeRules: auth,
-		RateLimit:      rl,
-		Isolation:      iso,
-		ToolRuntime:    tr,
+		Adjudicator:           p,
+		Sources:               sources,
+		SafeSinks:             safe,
+		AuthorizeRules:        auth,
+		RateLimit:             rl,
+		Isolation:             iso,
+		ToolRuntime:           tr,
+		InheritedCapabilities: ic,
 	}, nil
 }
 
@@ -414,6 +451,13 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 	if p.Posture == adjudicator.PostureAdmitAndLog {
 		m.Posture = postureAdmitAndLog
 	}
+	if len(p.AdvisoryReasons) > 0 {
+		m.AdvisoryReasons = make([]string, 0, len(p.AdvisoryReasons))
+		for r := range p.AdvisoryReasons {
+			m.AdvisoryReasons = append(m.AdvisoryReasons, abi.ReasonName(r))
+		}
+		sort.Strings(m.AdvisoryReasons) // deterministic dump (map iteration is unordered)
+	}
 	if len(p.Allow) > 0 {
 		m.Allow = make([]string, 0, len(p.Allow))
 		for t := range p.Allow {
@@ -436,7 +480,7 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 	if len(p.ArgPredicates) > 0 {
 		m.ArgRules = make([]ArgRule, 0, len(p.ArgPredicates))
 		for _, pred := range p.ArgPredicates {
-			r := ArgRule{Tool: pred.Tool, Arg: pred.Arg, Reason: abi.ReasonName(pred.Reason)}
+			r := ArgRule{Tool: pred.Tool, Arg: pred.Arg, Reason: abi.ReasonName(pred.Reason), Advisory: pred.Advisory}
 			switch pred.Kind {
 			case adjudicator.ArgAllowGlob:
 				r.AllowGlob = pred.Glob
@@ -479,6 +523,14 @@ func (m Manifest) JSON() []byte {
 func Summary(p adjudicator.Policy) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "posture            : %s\n", postureName(p.Posture))
+	if len(p.AdvisoryReasons) > 0 {
+		names := make([]string, 0, len(p.AdvisoryReasons))
+		for r := range p.AdvisoryReasons {
+			names = append(names, abi.ReasonName(r))
+		}
+		sort.Strings(names)
+		fmt.Fprintf(&b, "advisory reasons   : %s (would-deny admits, journaled)\n", strings.Join(names, ", "))
+	}
 	allowN := len(p.Allow)
 	fmt.Fprintf(&b, "allow (exact)      : %d tool(s)\n", allowN)
 	fmt.Fprintf(&b, "allow (prefix)     : %s\n", joinOrNone(p.AllowPrefix))
@@ -556,6 +608,15 @@ func SummaryRuntime(rt Runtime) string {
 		}
 	} else {
 		fmt.Fprintf(&b, "tool runtime       : (none — fold defaults apply)\n")
+	}
+	if rows := rt.InheritedCapabilities.Rules(); len(rows) > 0 {
+		fmt.Fprintf(&b, "inherited launch   : %d envelope(s)\n", len(rows))
+		for _, r := range rows {
+			fmt.Fprintf(&b, "                     %s -> env=%d secret_refs=%d cwd=%t writable=%d persistence=%d egress=%d\n",
+				r.Tool, len(r.Env), len(r.SecretRefs), r.CWD != "", len(r.WritablePaths), len(r.PersistencePaths), len(r.EgressRefs))
+		}
+	} else {
+		fmt.Fprintf(&b, "inherited launch   : (none — child inherits nothing)\n")
 	}
 	return b.String()
 }
@@ -686,6 +747,67 @@ func compileSecretPatterns(pats []string) ([]*regexp.Regexp, error) {
 	return out, nil
 }
 
+// AdvisoryEnv is the dev-session override: reasons named here UNION into the
+// manifest's advisory_reasons at every policy load (boot AND --policy
+// hot-reload). Comma/space-separated closed-vocabulary reason names, case-
+// insensitive, plus the alias "dev" = every advisory-eligible reason
+// (SELF_MODIFY, MALFORMED, DEFAULT_DENY). It is read by the fak PROCESS that
+// enforces the floor — the operator's shell — so a guarded child agent cannot
+// flip it for the session that judges it. A token that is unknown, or names a
+// reason that is not advisory-eligible, fails the load LOUDLY (same discipline
+// as a manifest typo): a dev who believes they softened the floor must never
+// silently still be enforcing, and vice versa.
+const AdvisoryEnv = "FAK_ADVISORY_REASONS"
+
+// compileAdvisoryReasons resolves the manifest advisory_reasons list unioned
+// with the AdvisoryEnv overlay into the adjudicator's clamped reason set.
+func compileAdvisoryReasons(names []string) (map[abi.ReasonCode]bool, error) {
+	set := map[abi.ReasonCode]bool{}
+	add := func(name, src string) error {
+		tok := strings.ToUpper(strings.TrimSpace(name))
+		if tok == "" {
+			return fmt.Errorf("%s: empty advisory reason", src)
+		}
+		code, ok := abi.ReasonByName(tok)
+		if !ok {
+			return fmt.Errorf("%s: unknown advisory reason %q; advisory-eligible reasons: %s",
+				src, name, strings.Join(adjudicator.AdvisoryEligibleNames(), ", "))
+		}
+		if !adjudicator.AdvisoryEligible(code) {
+			return fmt.Errorf("%s: reason %s cannot be advisory — it guards the genuine-danger floor; "+
+				"advisory-eligible reasons: %s (to soften ONE false-positive-prone rule, set arg_rules[].advisory)",
+				src, tok, strings.Join(adjudicator.AdvisoryEligibleNames(), ", "))
+		}
+		set[code] = true
+		return nil
+	}
+	for i, n := range names {
+		if err := add(n, fmt.Sprintf("advisory_reasons[%d]", i)); err != nil {
+			return nil, err
+		}
+	}
+	if env := strings.TrimSpace(os.Getenv(AdvisoryEnv)); env != "" {
+		toks := strings.FieldsFunc(env, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\t' })
+		for _, t := range toks {
+			if strings.EqualFold(strings.TrimSpace(t), "dev") {
+				for _, n := range adjudicator.AdvisoryEligibleNames() {
+					if err := add(n, AdvisoryEnv); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
+			if err := add(t, AdvisoryEnv); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	return set, nil
+}
+
 func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 	if len(rules) == 0 {
 		return nil, nil
@@ -720,7 +842,7 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 			}
 			reason = code
 		}
-		pred := adjudicator.ArgPredicate{Tool: r.Tool, Arg: r.Arg, Reason: reason}
+		pred := adjudicator.ArgPredicate{Tool: r.Tool, Arg: r.Arg, Reason: reason, Advisory: r.Advisory}
 		switch {
 		case r.AllowGlob != "":
 			pred.Kind = adjudicator.ArgAllowGlob
@@ -743,6 +865,9 @@ func compileArgRules(rules []ArgRule) ([]adjudicator.ArgPredicate, error) {
 
 func describeArgPredicate(p adjudicator.ArgPredicate) string {
 	reason := abi.ReasonName(p.Reason)
+	if p.Advisory {
+		reason += " (advisory)"
+	}
 	switch p.Kind {
 	case adjudicator.ArgAllowGlob:
 		return fmt.Sprintf("%s.%s allow_glob %s -> %s", p.Tool, p.Arg, p.Glob, reason)
