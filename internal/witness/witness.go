@@ -52,6 +52,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -118,6 +119,12 @@ type Resolver struct {
 	run     Runner
 	execRun CommandRunner
 	dir     string
+
+	// The content-addressed verdict cache (#2152, cache.go): cacheDir is resolved
+	// once per Resolver from `git rev-parse --git-common-dir` ("" = cache disabled
+	// for this Resolver).
+	cacheOnce sync.Once
+	cacheDir  string
 }
 
 // New is the real-git resolver, registered as "dos_verify".
@@ -138,11 +145,33 @@ func NewWithRunners(git Runner, exec CommandRunner, dir string) *Resolver {
 // Resolve corroborates the claim against independent evidence and returns the
 // outcome. Parse-failures and a missing git both yield Abstain (never a false
 // Confirm, never a crash).
+//
+// A claim whose verdict is a pure function of immutable git objects (ancestor /
+// notests / symptom / grep — see cache.go, #2152) is memoized content-addressed:
+// the key pins the anchors' resolved SHAs, so a re-verification of an unchanged
+// ref is a file read, and a moved ref misses and recomputes. Everything else
+// re-resolves every call.
 func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) abi.WitnessOutcome {
 	kind, arg, ok := splitClaim(claim)
 	if !ok {
 		return abi.WitnessAbstain
 	}
+	key, cacheable := r.cacheKey(ctx, kind, arg)
+	if cacheable {
+		if out, hit := r.cacheGet(ctx, key); hit {
+			return out
+		}
+	}
+	out := r.resolveUncached(ctx, c, kind, arg)
+	if cacheable {
+		r.cachePut(ctx, key, claim, out)
+	}
+	return out
+}
+
+// resolveUncached runs the actual evidence rung for a parsed claim — the switch
+// Resolve wraps with the verdict cache.
+func (r *Resolver) resolveUncached(ctx context.Context, c *abi.ToolCall, kind, arg string) abi.WitnessOutcome {
 	switch kind {
 	case "ancestor":
 		// exit 0 => arg is an ancestor of HEAD (shipped); 1 => not; other => abstain.
