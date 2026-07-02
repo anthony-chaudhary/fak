@@ -85,7 +85,7 @@ These are the **only explicitly permitted tools**. Everything else resolves to `
 ]
 ```
 
-These admit the broad read-only family without naming every tool — the [`read_`](../../internal/adjudicator/defaults.go) family, [`get_`](../../internal/adjudicator/defaults.go), and the search/lookup/list families.
+These admit the broad read-only family without naming every tool — the [`read_`](../../internal/adjudicator/decide.go) family, [`get_`](../../internal/adjudicator/decide.go), and the search/lookup/list families.
 
 ### Deny-list
 
@@ -330,4 +330,4 @@ See the [`agentdojo-redteam`](../../examples/agentdojo-redteam/README.md) benchm
 - [`wire-quarantine-demo/README.md`](../../examples/wire-quarantine-demo/README.md) — result-side quarantine witness.
 - [`agentdojo-redteam/README.md`](../../examples/agentdojo-redteam/README.md) — IFC TRUST_VIOLATION benchmark.
 - [`docs/glossary.md`](../../docs/glossary.md) — IFC sink-gate definition.
-- [`FAQ.md`](../../FAQ.md) — "What is the difference between fail_closed and admit_and_log posture?"
+- [`FAQ.md`](../FAQ.md) — "What is the difference between fail_closed and admit_and_log posture?"

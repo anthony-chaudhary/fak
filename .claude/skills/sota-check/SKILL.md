@@ -20,7 +20,7 @@ prove against an oracle, and record what you read.**
 
 The single source of truth is `internal/sotamatrix` (a flat in-binary literal, same discipline
 as `internal/benchcatalog`). The human front door is
-[`docs/sota/README.md`](../../docs/sota/README.md). Three surfaces read the matrix: the
+[`docs/sota/README.md`](../../../docs/sota/README.md). Three surfaces read the matrix: the
 `fak sota` command (lookup), the `PRIOR_ART` advisory gate (commit-time nudge), and
 `tools/sota_coverage_scorecard.py` (keeps the matrix complete against the tree).
 

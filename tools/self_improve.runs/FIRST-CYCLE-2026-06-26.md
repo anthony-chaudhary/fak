@@ -1,6 +1,6 @@
 # dos-self-improve — first end-to-end cycle on fak (#388)
 
-Date: 2026-06-26. Harness: [`tools/self_improve.py`](../self_improve.py). Base SHA
+Date: 2026-06-26. Harness: [`tools/self_improve.py`](https://github.com/anthony-chaudhary/fak/blob/c588c993e221c11ddba60df10fb5a3132ec8eb2a/tools/self_improve.py) (since ported off Python; link pinned to the run's base SHA). Base SHA
 (pinned): `c588c993e221c11ddba60df10fb5a3132ec8eb2a` (`main` at run time).
 
 This is the first time the recursive-self-improvement loop ran end-to-end on fak:

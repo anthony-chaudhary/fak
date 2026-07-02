@@ -1,6 +1,6 @@
 # GLM-5.2 Fak-Kernel Cache Value — On a Solved Ticket
 
-> **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md)**,
+> **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)**,
 > the single source of truth for all committed performance claims.
 
 > **⚠️ RESULT STATUS:** **PENDING — Results not yet collected.** This document describes the result packet shape and what will be measured once the live run executes on datacenter compute. The observation seam (`fak swebench cache-witness`) is shipped and tested; the live GLM-5.2 cache-value number is the box residual.
@@ -168,7 +168,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 | Live in-kernel aggregate `kv_prefix.reused_tokens` > 0 | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server GPU-server box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
-When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
+When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
 
 **Conflation contract:** every number above carries its trust class; no number sums or
 derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean

@@ -1,5 +1,7 @@
 # fak — the **F**used **A**gent **K**ernel
 
+> **Archived snapshot (2026-06-25).** This is the root `README.md` as it stood before the fresh-start rewrite. Links are pinned to commit `13825245d0cd` so they resolve from this location; none of them track current state.
+
 <!-- readme-verified: 2026-06-24 vs VERSION 0.32.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · turn-tax hero front and center; breadth stills in BENCHMARK-GALLERY.md -->
 <!-- appeal-verified: 2026-06-24 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) → appeal-debt 0 · 2026-06-24 re-measure caught 2 residual (1 overlong 36-word sentence in flip-1, 1 81-word wall at the flip-1 lead) — sentence split, wall broken into first/second, em-dash budget held (8→7); every claim, number, and link identical · prior 2026-06-23: front door rebuilt from 54/F (lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed) -->
 
@@ -11,9 +13,9 @@
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
      repo-relative .mp4, so the embed is a compact looping .gif that links to the full mp4. -->
-[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the modeled 9.7x prefill-elimination floor, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
+[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the modeled 9.7x prefill-elimination floor, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](https://raw.githubusercontent.com/anthony-chaudhary/fak/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/visuals/hero-video.gif)](https://raw.githubusercontent.com/anthony-chaudhary/fak/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/visuals/hero-video.mp4)
 
-<sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
+<sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](https://raw.githubusercontent.com/anthony-chaudhary/fak/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/visuals/hero-video.mp4)</sub>
 
 ## Try it now — three live demos, nothing to install
 
@@ -44,7 +46,7 @@ From the security seat, that kernel is a permission gate the agent can't talk it
 way past. From the performance seat, it does the shared work once instead of every
 turn. The unexpected part: those are the *same gate*. Owning that boundary is what
 lets `fak` do things no production agent stack does today.
-→ [One binary is the whole surface](docs/explainers/one-binary-one-surface.md)
+→ [One binary is the whole surface](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/one-binary-one-surface.md)
 
 `fak` is not a faster model server, and doesn't try to be. SOTA engines (vLLM,
 SGLang, llama.cpp) win raw throughput and prefix-cache reuse; that's their job.
@@ -72,7 +74,7 @@ floor — a deterministic geometry model, not a wall-clock measurement (run it
 yourself: `fak webbench describe`). Against a tuned warm-cache SOTA stack on the
 live model-reuse race, the measured win is a conservative **4.1×**.
 
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / modeled 9.7x / measured 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
+[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / modeled 9.7x / measured 4.1x](https://raw.githubusercontent.com/anthony-chaudhary/fak/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/visuals/60-hero-turntax-curves.png)](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/BENCHMARK-GALLERY.md#60--turn-tax-curves)
 
 The breadth is the point too, but it belongs in the gallery rather than on the
 front page. A capability matrix (`fak` spans the whole boundary; serving stacks
@@ -83,8 +85,8 @@ Each one is generated from a single source-of-truth data file, so it is honest b
 construction. A `[NAIVE]` number stays fenced, competitor cells never carry a
 fabricated figure, and the single-stream throughput `fak` *doesn't* target is shown
 rather than hidden.
-→ [The full benchmark gallery](BENCHMARK-GALLERY.md) ·
-[every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md) ⭐
+→ [The full benchmark gallery](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/BENCHMARK-GALLERY.md) ·
+[every number, traced to its commit + artifact](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/BENCHMARK-AUTHORITY.md) ⭐
 
 ---
 
@@ -109,7 +111,7 @@ Refusing an irreversible action doesn't depend on *catching* the attack; it
 depends on the lever never having been wired up. For thirty years, "more security"
 meant more checks to recognize bad things, a game attackers win. The flip is to
 stop recognizing and start *not building the lever*.
-→ [Policy in the kernel](docs/explainers/policy-in-the-kernel.md)
+→ [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/policy-in-the-kernel.md)
 
 **2. The cache becomes addressable, past what any shipped engine offers.** As a
 model reads, it builds a scratchpad of the work-so-far (the *KV cache*) so it
@@ -130,7 +132,7 @@ the reference at `max|Δ| = 0` (not one number differs).
 engine, which is what makes this possible. The cache stops being only a *speed*
 structure and becomes one that policy can address. Evict a span the moment a verdict says
 so, regardless of memory pressure. Then *prove* it's gone.
-→ [Addressable KV cache](docs/explainers/addressable-kv-cache.md)
+→ [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/addressable-kv-cache.md)
 
 ---
 
@@ -160,7 +162,7 @@ read-heavy fleets.
 `cmd/fak` paths below live inside it). Or run it in a hosted notebook with a free
 T4 GPU and nothing to install:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
-(see [`notebooks/`](notebooks/README.md)).
+(see [`notebooks/`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/notebooks/README.md)).
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak && cd fak
@@ -170,7 +172,7 @@ go run ./cmd/fak agent --offline
 ```
 
 `refund_payment` returns `DENY (POLICY_BLOCK)` — refused by the policy floor. The
-verdict cites one code from a [closed refusal vocabulary](POLICY.md#the-closed-refusal-vocabulary)
+verdict cites one code from a [closed refusal vocabulary](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/POLICY.md#the-closed-refusal-vocabulary)
 (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, …) instead of free text.
 `search_kb` returns `ALLOW`. Then `agent --offline` runs *the same task*
 twice, once with tools wired directly and once behind `fak`, and prints the
@@ -193,7 +195,7 @@ task completed (booked)              YES        YES
 
 Both finish the task. But with `fak` the booby-trapped instruction never reaches
 the model and the dangerous action never runs. Full walkthrough:
-[`docs/repro-packet.md`](docs/repro-packet.md).
+[`docs/repro-packet.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/repro-packet.md).
 
 ---
 
@@ -213,7 +215,7 @@ pays, everyone after reads for free, so *more agents can mean less total work*.
 Two fences keep this honest. The reuse win is self-host only: an app that just
 *calls* a frontier API gets the safety floor but not the savings. And the
 frontier-scale "agent city" numbers are design targets rather than measurements.
-→ [The full cost model and personas](docs/concepts-and-story.md)
+→ [The full cost model and personas](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/concepts-and-story.md)
 
 Modeled from the real WebVoyager task set (643 tasks) with a deterministic
 geometry model — `fak webbench describe` derives turn counts from each task's
@@ -230,16 +232,16 @@ The turn-tax is worker-independent: every agent pays it, every turn,
 regardless of fleet size. SOTA agents like Alumnium (98.5% WebVoyager success)
 reach the same capability through `fak` at ~9× less prefill cost than the naive
 floor (modeled), or ~1.1× less than a tuned per-agent-KV stack.
-→ [Frontier WebBench baselines](docs/webbench-baselines.md)
+→ [Frontier WebBench baselines](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/webbench-baselines.md)
 
 And it's not one lucky box. The same pure-Go kernel runs across **4 distinct
 hardware platforms** with its bit-exact gates intact: Apple M3 Pro/Metal, AMD
 Ryzen + RX 7600/Vulkan, Intel + RTX 4070/CUDA Ada, and an 8-GPU server/CUDA
 Ampere. That spans 2 CPU ISAs, 4 GPU backends, and 4 operating systems, and the
 deterministic results reproduce byte-for-byte on every one.
-→ [The hardware matrix](docs/HARDWARE-MATRIX.md)
+→ [The hardware matrix](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/HARDWARE-MATRIX.md)
 
-[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8-GPU server / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
+[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8-GPU server / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](https://raw.githubusercontent.com/anthony-chaudhary/fak/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/visuals/56-hardware-coverage-matrix.svg)](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/HARDWARE-MATRIX.md#the-coverage-matrix)
 
 ---
 
@@ -270,7 +272,7 @@ The weak model is the case that matters: without `fak` it fell for the trap and
 booked nothing; with `fak` it ignored the trap and booked the flight. The two
 gemini rows are five live trials per arm (`flash` ×2, `flash-lite` ×3); across
 those five the injection reached the unprotected baseline 5/5 and `fak` walled it
-off 5/5 — per-trial detail in [`LIVE-RESULTS.md`](docs/benchmarks/LIVE-RESULTS.md).
+off 5/5 — per-trial detail in [`LIVE-RESULTS.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/benchmarks/LIVE-RESULTS.md).
 
 ---
 
@@ -307,8 +309,8 @@ the model you already run.
   model's job;
   the kernel gives you frontier-grade *safety* at ~$0 on a small local model today.
 
-→ [Guided tutorial](docs/fak/tutorial.md) (zero to first adjudicated call, real output
-at every step) · [Getting started](GETTING-STARTED.md)
+→ [Guided tutorial](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/fak/tutorial.md) (zero to first adjudicated call, real output
+at every step) · [Getting started](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/GETTING-STARTED.md)
 
 ---
 
@@ -350,14 +352,14 @@ with no agent-side changes.
 The honest fence: `fak` is not the fast token engine, and its own in-binary model
 is a correctness reference rather than a production server. The contrast is about
 operational surface rather than tokens per second.
-→ [One binary is the whole surface](docs/explainers/one-binary-one-surface.md)
+→ [One binary is the whole surface](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/one-binary-one-surface.md)
 
 ---
 
 ## What's real, what's not (we keep score)
 
 `fak` is built to survive a skeptic reading the code. Every capability in
-[`fak/CLAIMS.md`](CLAIMS.md) carries one tag (`[SHIPPED]`/`[SIMULATED]`/`[STUB]`),
+[`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/CLAIMS.md) carries one tag (`[SHIPPED]`/`[SIMULATED]`/`[STUB]`),
 each backed by a named witness — a test, a benchmark, or a file read-back. The
 short version:
 
@@ -377,7 +379,7 @@ gate where the tool call is the checkpoint.
 
 One static binary: no clone, no Go toolchain, no Python or CUDA, and no
 dependency tree to manage (there is no `go.sum`). Full guide:
-[Getting started](GETTING-STARTED.md).
+[Getting started](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/GETTING-STARTED.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
@@ -385,9 +387,9 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 
 Or grab a [prebuilt archive](https://github.com/anthony-chaudhary/fak/releases/latest)
 for `linux_amd64`, `darwin_amd64`, `darwin_arm64`, or `windows_amd64`. You can also
-run it [in a container](GETTING-STARTED.md). Then — assuming a model server is already
+run it [in a container](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/GETTING-STARTED.md). Then — assuming a model server is already
 listening at `--base-url` (here it's Ollama's default port, so start it first with
-`ollama serve`; see [Getting started](GETTING-STARTED.md) to wire up the upstream):
+`ollama serve`; see [Getting started](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/GETTING-STARTED.md) to wire up the upstream):
 
 ```bash
 fak policy --dump > floor.json   # a starter allow-list you can edit + review
@@ -398,7 +400,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 > Install with Go (needs [Go 1.26+](https://go.dev/dl/)): the module is the
 > repo root, so `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` drops
 > `fak` onto your `$(go env GOBIN)` (`$GOPATH/bin`). Or from a clone:
-> `go build -o fak ./cmd/fak`. Full install matrix: [`INSTALL.md`](INSTALL.md).
+> `go build -o fak ./cmd/fak`. Full install matrix: [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/INSTALL.md).
 
 ---
 
@@ -406,24 +408,24 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 
 | If you want… | Read |
 |---|---|
-| The two flips, from first principles | [Policy in the kernel](docs/explainers/policy-in-the-kernel.md) · [Addressable KV cache](docs/explainers/addressable-kv-cache.md) |
-| Why engineering is becoming loop-building, and where fak sits | [Engineering is building loops](docs/explainers/engineering-is-building-loops.md) |
-| Why one Go binary beats a serving stack (operational surface, laptop → fleet) | [One binary is the whole surface](docs/explainers/one-binary-one-surface.md) |
-| The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](docs/serving/dual-track-serving-plan.md) |
-| Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
-| Every machine fak runs on (the hardware matrix — 4 platforms, 2 CPU ISAs, 4 GPU backends, 4 OSes) | [`docs/HARDWARE-MATRIX.md`](docs/HARDWARE-MATRIX.md) |
-| Web agent benchmark results (real WebVoyager: 8.8-9.7× vs naive floor, modeled geometry) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
-| The parable, personas, and when-the-win-kicks-in tables | [`docs/concepts-and-story.md`](docs/concepts-and-story.md) |
-| What "tuned SOTA" means (the 10 optimizations fak sits on top of) | [`docs/explainers/sota-optimizations.md`](docs/explainers/sota-optimizations.md) |
-| Shipped capabilities (runnable artifacts, claim tags) | [`fak/CLAIMS.md`](CLAIMS.md), [`fak/STATUS.md`](STATUS.md) |
-| Policy / permissions | [`fak/POLICY.md`](POLICY.md) |
-| Architecture (the registry seams, the frozen ABI) | [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
-| Build your optimization on fak (researchers/teams: plug in → prove correct → prove faster → ship) | [`fak/EXTENDING.md`](EXTENDING.md) |
-| First run, step by step (guided session, real output at every step) | [`docs/fak/tutorial.md`](docs/fak/tutorial.md) ⭐ |
-| Learn every concept in order (a prerequisite-based course — join at your level, walk to mastery) | [`LEARNING-PATH.md`](LEARNING-PATH.md) ⭐ |
-| Quick answers (what is fak, how it differs from a firewall / guardrails / vLLM, the threat model) | [`docs/FAQ.md`](docs/FAQ.md) |
-| A machine-readable map (for LLMs & answer engines) | [`llms.txt`](llms.txt) |
-| New here? | [`START-HERE.md`](START-HERE.md) · [Simple demo](cmd/simpledemo/README.md) |
+| The two flips, from first principles | [Policy in the kernel](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/policy-in-the-kernel.md) · [Addressable KV cache](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/addressable-kv-cache.md) |
+| Why engineering is becoming loop-building, and where fak sits | [Engineering is building loops](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/engineering-is-building-loops.md) |
+| Why one Go binary beats a serving stack (operational surface, laptop → fleet) | [One binary is the whole surface](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/one-binary-one-surface.md) |
+| The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/serving/dual-track-serving-plan.md) |
+| Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/BENCHMARK-AUTHORITY.md) ⭐ |
+| Every machine fak runs on (the hardware matrix — 4 platforms, 2 CPU ISAs, 4 GPU backends, 4 OSes) | [`docs/HARDWARE-MATRIX.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/HARDWARE-MATRIX.md) |
+| Web agent benchmark results (real WebVoyager: 8.8-9.7× vs naive floor, modeled geometry) | [`docs/webbench-baselines.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/webbench-baselines.md) |
+| The parable, personas, and when-the-win-kicks-in tables | [`docs/concepts-and-story.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/concepts-and-story.md) |
+| What "tuned SOTA" means (the 10 optimizations fak sits on top of) | [`docs/explainers/sota-optimizations.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/explainers/sota-optimizations.md) |
+| Shipped capabilities (runnable artifacts, claim tags) | [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/CLAIMS.md), [`fak/STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/STATUS.md) |
+| Policy / permissions | [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/POLICY.md) |
+| Architecture (the registry seams, the frozen ABI) | [`fak/ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/ARCHITECTURE.md) |
+| Build your optimization on fak (researchers/teams: plug in → prove correct → prove faster → ship) | [`fak/EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/EXTENDING.md) |
+| First run, step by step (guided session, real output at every step) | [`docs/fak/tutorial.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/fak/tutorial.md) ⭐ |
+| Learn every concept in order (a prerequisite-based course — join at your level, walk to mastery) | [`LEARNING-PATH.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/LEARNING-PATH.md) ⭐ |
+| Quick answers (what is fak, how it differs from a firewall / guardrails / vLLM, the threat model) | [`docs/FAQ.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/docs/FAQ.md) |
+| A machine-readable map (for LLMs & answer engines) | [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/llms.txt) |
+| New here? | [`START-HERE.md`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/START-HERE.md) · [Simple demo](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/cmd/simpledemo/README.md) |
 
 ---
 
@@ -434,10 +436,10 @@ It is edited directly here, never regenerated from a private mirror. A
 separate private repo holds only the operator-specific material that must never be
 published (machine names, IPs, lab hosts, internal paths).
 
-Cite this work: machine-readable metadata is in [`CITATION.cff`](CITATION.cff)
+Cite this work: machine-readable metadata is in [`CITATION.cff`](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/CITATION.cff)
 (GitHub renders a "Cite this repository" button from it).
 
-License: [Apache-2.0](LICENSE).
+License: [Apache-2.0](https://github.com/anthony-chaudhary/fak/blob/13825245d0cd9fe7a1142d8af0733adc34a0fdf4/LICENSE).
 
 <sub>Topics: Fused Agent Kernel · fak agent kernel · fak serve · fak-certified ·
 agent kernel · agent tool firewall · AI agent security · prompt injection defense ·
