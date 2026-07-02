@@ -27,6 +27,7 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"vCache M4 chains & recall: implemented",
 		"gated OFF by default; off-path",
 		"M4 recall cost-gate proof: refuted",
+		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
 		"codex-like star proof: PROVEN",
 		"codex/openai verifier: ready",
 		"codex/openai live telemetry: proven (Codex CLI replay artifact)",
@@ -54,6 +55,13 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 	}
 	if rep.CodexOpenAI.Verifier != "ready" || rep.CodexOpenAI.Issue == "" {
 		t.Fatalf("codex_openai status missing verifier/issue: %+v", rep.CodexOpenAI)
+	}
+	if rep.ContextAPI.Verifier != "ready" ||
+		rep.ContextAPI.HTTP != "GET /v1/fak/ctxvalue" ||
+		rep.ContextAPI.MCPTool != "fak_context_value" ||
+		!rep.ContextAPI.AdviceOnly ||
+		!strings.Contains(rep.ContextAPI.ScoreIntegration, "after a guard/serve context event fires") {
+		t.Fatalf("context_api status missing live API contract: %+v", rep.ContextAPI)
 	}
 	if rep.CodexOpenAI.CachedSampleProof.Status != vcachegov.ProofProven ||
 		rep.CodexOpenAI.CachedSampleProof.SavedTokenEquiv != 1728 {

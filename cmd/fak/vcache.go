@@ -128,6 +128,7 @@ type vcacheStatusReport struct {
 	Proof                  vcachegov.StarSavingsProof  `json:"proof"`
 	RecallProof            vcachechain.RecallProof     `json:"recall_proof"`
 	CodexOpenAI            vcacheCodexOpenAIStatus     `json:"codex_openai"`
+	ContextAPI             vcacheContextAPIStatus      `json:"context_api"`
 	RecentObservation      *vcacheRecentObservation    `json:"recent_observation,omitempty"`
 	RecentObservationError string                      `json:"recent_observation_error,omitempty"`
 	RecentSessions         *sessionaudit.CompactReport `json:"recent_sessions,omitempty"`
@@ -177,6 +178,16 @@ type vcacheCodexOpenAIStatus struct {
 	NoCacheRefutation   vcachegov.TelemetrySavingsProof `json:"no_cache_refutation"`
 }
 
+type vcacheContextAPIStatus struct {
+	Verifier         string   `json:"verifier"`
+	HTTP             string   `json:"http"`
+	MCPTool          string   `json:"mcp_tool"`
+	AdviceOnly       bool     `json:"advice_only"`
+	Provenance       []string `json:"provenance"`
+	ScoreIntegration string   `json:"score_integration"`
+	Reason           string   `json:"reason"`
+}
+
 func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("vcache status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -218,6 +229,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	} else if rep.RecentSessionsError != "" {
 		fmt.Fprintf(stdout, "recent sessions: unreadable (%s)\n", rep.RecentSessionsError)
 	}
+	fmt.Fprintf(stdout, "context API: %s (%s; MCP %s; advice_only=%v)\n",
+		rep.ContextAPI.Verifier, rep.ContextAPI.HTTP, rep.ContextAPI.MCPTool, rep.ContextAPI.AdviceOnly)
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
@@ -739,6 +752,7 @@ func defaultVCacheStatus() vcacheStatusReport {
 			Siblings:     1,
 		}),
 		CodexOpenAI: defaultCodexOpenAIStatus(),
+		ContextAPI:  defaultVCacheContextAPIStatus(),
 		M4Issue:     "https://github.com/anthony-chaudhary/fak/issues/719",
 		M5Issue:     "https://github.com/anthony-chaudhary/fak/issues/720",
 		Remaining: []vcacheRemainingIssue{
@@ -936,6 +950,18 @@ func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
 			Rows:     []vcachegov.TelemetryRow{openAITelemetryRow(2006, 0)},
 			ReadMult: 0.1,
 		}),
+	}
+}
+
+func defaultVCacheContextAPIStatus() vcacheContextAPIStatus {
+	return vcacheContextAPIStatus{
+		Verifier:         "ready",
+		HTTP:             "GET /v1/fak/ctxvalue",
+		MCPTool:          "fak_context_value",
+		AdviceOnly:       true,
+		Provenance:       []string{"OBSERVED tokens", "WITNESSED turns/context_events", "FORECAST turns_to_event", "DECISION step_advice"},
+		ScoreIntegration: "context events feed /v1/fak/vcache/score and persisted vcache snapshots only after a guard/serve context event fires",
+		Reason:           "managed-context value API is wired for running guard/serve sessions; it sizes next steps but does not itself prove a context-saving event",
 	}
 }
 
