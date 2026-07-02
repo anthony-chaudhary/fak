@@ -1,0 +1,2442 @@
+{
+  "rows": [
+    {
+      "id": "x-goal25b-plan-appendserveggufdeviceplan",
+      "canonical": "appendServeGGUFDevicePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "appendServeGGUFDevicePlan (cmd/fak/serve.go) extends a compute.MemoryPlan with the GGUF weight-source's device placement for `fak serve`, under the context and fit budgets.",
+      "distinction": "A serve-time MEMORY-plan extender, not a fleet RunPlan or context-layout Plan.",
+      "distinct_from": [
+        "x-goal25b-plan-estimateexpertparallelloadmemoryplan",
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "appendServeGGUFDevicePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-estimateexpertparallelloadmemoryplan",
+      "canonical": "EstimateExpertParallelLoadMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "WeightSource.EstimateExpertParallelLoadMemoryPlan (internal/ggufload/estimate.go) computes the compute.MemoryPlan for loading expert-parallel weights across a rank count.",
+      "distinction": "A weight-load memory ESTIMATE, not the serve-time device-plan extension that consumes it.",
+      "distinct_from": [
+        "x-goal25b-plan-appendserveggufdeviceplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateExpertParallelLoadMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-cmddebugcontextplanpreview",
+      "canonical": "cmdDebugContextPlanPreview",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmdDebugContextPlanPreview (cmd/fak/debug_ctxplan.go) is the `fak debug` CLI entry that renders a ctxplan context-plan preview.",
+      "distinction": "The CLI wrapper over ctxplan previewing, not the planner or preview engine itself.",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "cmdDebugContextPlanPreview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-cmdplanaudit",
+      "canonical": "cmdPlanAudit",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "cmdPlanAudit (cmd/fak/plan_audit.go) is the `fak plan-audit` CLI entry, exiting with runPlanAudit's status over the plan corpus.",
+      "distinction": "The plan-AUDIT command, not a plan document or planner.",
+      "distinct_from": [
+        "x-goal25b-plan-totalplans",
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "cmdPlanAudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-totalplans",
+      "canonical": "total_plans",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "total_plans (internal/planaudit) is the plan-audit counter of how many plan documents the audit walked.",
+      "distinction": "An audit COUNT over plan documents, not a plan itself.",
+      "distinct_from": [
+        "x-goal25b-plan-cmdplanaudit"
+      ],
+      "aliases": [],
+      "grounding": "total_plans",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-contextplanning",
+      "canonical": "context_planning",
+      "family": "plan",
+      "kind": "config",
+      "definition": "context_planning (internal/vcacheobserve/contextjoin.go CausePlanning) is the attribution-cause token tagging cache activity attributed to fak's context planning rather than provider cache behavior.",
+      "distinction": "An ATTRIBUTION label for observed cache activity, not the planning mechanism.",
+      "distinct_from": [
+        "plan-planner",
+        "x-goal25b-plan-planningattributed"
+      ],
+      "aliases": [],
+      "grounding": "context_planning",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-planningattributed",
+      "canonical": "PlanningAttributed",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "PlanningAttributed (internal/vcacheobserve/contextjoin.go) counts turns whose cache activity was attributed to context planning.",
+      "distinction": "The COUNTER for the context_planning attribution cause, not the cause token.",
+      "distinct_from": [
+        "x-goal25b-plan-contextplanning"
+      ],
+      "aliases": [],
+      "grounding": "PlanningAttributed",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-decodeissuecontractcandidates",
+      "canonical": "decodeIssueContractCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "decodeIssueContractCandidates (cmd/fak/issue_contract.go) decodes issue-contract Candidate JSON, accepting an array or wrapped forms.",
+      "distinction": "A DECODER into issue-contract Candidates, not a candidate type or scorer.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "decodeIssueContractCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-parsecandidates",
+      "canonical": "parseCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "parseCandidates (cmd/fak/dispatch_order.go) parses dispatch-order Candidate JSON for the dispatch ordering pass.",
+      "distinction": "The dispatch-order candidate DECODER; decodeIssueContractCandidates is its issue-contract sibling.",
+      "distinct_from": [
+        "x-goal25b-plan-decodeissuecontractcandidates",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "parseCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-readcandidates",
+      "canonical": "ReadCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ReadCandidates (internal/ideascout) reads scouted idea Candidates from a JSON path.",
+      "distinction": "The ideascout candidate READER; ScoreCandidate grades what it reads.",
+      "distinct_from": [
+        "x-goal25b-plan-scorecandidate",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "ReadCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-scorecandidate",
+      "canonical": "ScoreCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "ScoreCandidate (internal/ideascout) scores a scouted Candidate against a Topic and Config, returning the score and its reasons.",
+      "distinction": "The ideascout candidate GRADER, not the reader or the candidate type.",
+      "distinct_from": [
+        "x-goal25b-plan-readcandidates",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "ScoreCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-fromplan",
+      "canonical": "fromPlan (--from-plan)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "fromPlan (cmd/fak/issue_cohort.go) is the --from-plan flag: the issue-plan JSON file a cohort run reads its candidates from.",
+      "distinction": "A CLI INPUT flag pointing at a plan file, not a plan type.",
+      "distinct_from": [
+        "x-goal25b-plan-planpath"
+      ],
+      "aliases": [],
+      "grounding": "fromPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-planpath",
+      "canonical": "planPath",
+      "family": "plan",
+      "kind": "config",
+      "definition": "planPath (cmd/fak/fleet.go) is the --plan flag variable holding the run-plan JSON path in fleet commands.",
+      "distinction": "A flag variable holding a plan PATH, not the RunPlan document it names.",
+      "distinct_from": [
+        "x-goal25-plan-runplan"
+      ],
+      "aliases": [],
+      "grounding": "planPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-plannerfor",
+      "canonical": "plannerFor",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "plannerFor (internal/bench/fanrun.go) picks the agent.Planner for a bench arm - shared or per-agent.",
+      "distinction": "A bench-side planner SELECTOR, not a planner implementation.",
+      "distinct_from": [
+        "x-goal25-plan-dualplanner",
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "plannerFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-planplacementfordevicehostanddisk",
+      "canonical": "PlanPlacementForDeviceHostAndDisk",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "PlanPlacementForDeviceHostAndDisk (internal/engine/capacity_disk.go) plans KV placement across device HBM, host DRAM, and disk for a cachemeta.PlacementRequest.",
+      "distinction": "A KV PLACEMENT planner across memory tiers, not a context or fleet plan.",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "PlanPlacementForDeviceHostAndDisk",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-resumeplan",
+      "canonical": "resume_plan",
+      "family": "plan",
+      "kind": "concept",
+      "definition": "resume_plan is the tools/_registry/resume_plan.json artifact: the AUTO_RESUME rows the resume watchdog consumes.",
+      "distinction": "A fleet-registry ARTIFACT of resume rows; WatchdogPlanRow is one row of it as parsed.",
+      "distinct_from": [
+        "x-goal25b-plan-watchdogplanrow"
+      ],
+      "aliases": [],
+      "grounding": "resume_plan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-watchdogplanrow",
+      "canonical": "WatchdogPlanRow",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "WatchdogPlanRow (internal/resume/watchdog.go) is one AUTO_RESUME entry of resume_plan.json as the watchdog parses it, with ResumeTarget/RehomeSource accessors.",
+      "distinction": "One PARSED row of the resume_plan artifact, not the whole registry file.",
+      "distinct_from": [
+        "x-goal25b-plan-resumeplan"
+      ],
+      "aliases": [],
+      "grounding": "WatchdogPlanRow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-rotationplanwithheadroom",
+      "canonical": "RotationPlanWithHeadroom",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Registry.RotationPlanWithHeadroom (internal/accounts/rotation.go) computes the account-rotation plan honoring per-account rotation headroom.",
+      "distinction": "An ACCOUNT-rotation plan, not a fleet RunPlan mapping issues to workers.",
+      "distinct_from": [
+        "x-goal25-plan-runplan"
+      ],
+      "aliases": [],
+      "grounding": "RotationPlanWithHeadroom",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-plan-unwraphttpplanner",
+      "canonical": "unwrapHTTPPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "unwrapHTTPPlanner (internal/gateway/messages.go) unwraps an agent.Planner to its underlying HTTPPlanner when one is present.",
+      "distinction": "A planner UNWRAPPER for the HTTP layer, not a planner implementation.",
+      "distinct_from": [
+        "x-goal25-plan-dualplanner"
+      ],
+      "aliases": [],
+      "grounding": "unwrapHTTPPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-cachekey",
+      "canonical": "cacheKey",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "cacheKey (internal/witness/cache.go) computes the witness Resolver's memo key for a (kind, arg) verification lookup.",
+      "distinction": "A memo key inside the WITNESS resolver's cache - not a KV-cache or provider prompt-cache key.",
+      "distinct_from": [
+        "kv-cache",
+        "x-goal25b-cache-witnesscache"
+      ],
+      "aliases": [],
+      "grounding": "cacheKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-witnesscache",
+      "canonical": "witness cache",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "witness cache is the doc-level name for the witness Resolver's memoized verification results (internal/witness/cache.go).",
+      "distinction": "A memo of verification RESULTS, not a token cache: nothing model-facing is stored.",
+      "distinct_from": [
+        "kv-cache",
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "witnesscache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-compactioncachereadtokens",
+      "canonical": "CompactionCacheReadTokens",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "CompactionCacheReadTokens (internal/gateway/metrics.go) is the OBSERVED provider cache-read token count attributed to compaction turns.",
+      "distinction": "An OBSERVED provider number attributed to compaction, not a fak-side savings claim.",
+      "distinct_from": [
+        "cachemeta",
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "CompactionCacheReadTokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-defaultcachepricing",
+      "canonical": "DefaultCachePricing",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "DefaultCachePricing (internal/gateway/cache_pricing.go) resolves a provider/context pair to its cache read/write pricing multipliers, reporting the source.",
+      "distinction": "The pricing LOOKUP for cache economics; CacheTTL1h is one tier it prices.",
+      "distinct_from": [
+        "x-goal25-cache-cachettl1h"
+      ],
+      "aliases": [],
+      "grounding": "DefaultCachePricing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-kvevictionscopewholeprefixcache",
+      "canonical": "KVEvictionScopeWholePrefixCache",
+      "family": "cache",
+      "kind": "config",
+      "definition": "KVEvictionScopeWholePrefixCache (internal/cachemeta/external_invalidation.go) is the KVEvictionScope value meaning the engine flushed the whole prefix cache rather than an exact span.",
+      "distinction": "One closed SCOPE value of KVEvictionScope, not the scope type itself.",
+      "distinct_from": [
+        "x-goal25b-evict-kvevictionscope",
+        "cachemeta"
+      ],
+      "aliases": [],
+      "grounding": "KVEvictionScopeWholePrefixCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-providercachecreationtokens",
+      "canonical": "ProviderCacheCreationTokens",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "ProviderCacheCreationTokens (internal/metrics, internal/bench) is the prompt-prefix cache WRITE axis: tokens the upstream billed to create cache entries.",
+      "distinction": "The cache-WRITE billing axis; CachedInputTokens is the read side.",
+      "distinct_from": [
+        "x-goal25-cache-cachedinputtokens"
+      ],
+      "aliases": [],
+      "grounding": "ProviderCacheCreationTokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-reasoncachedremoveworktreepresent",
+      "canonical": "ReasonCachedRemoveWorktreePresent",
+      "family": "cache",
+      "kind": "config",
+      "definition": "ReasonCachedRemoveWorktreePresent (internal/safecommit/cachedremove.go) is the refusal token CACHED_REMOVE_WORKTREE_PRESENT: a staged deletion while the file still exists in the worktree.",
+      "distinction": "A safecommit refusal about the git INDEX ('cached' in git's sense), not a model or provider cache.",
+      "distinct_from": [
+        "kv-cache",
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "ReasonCachedRemoveWorktreePresent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-runcachevaluefeed",
+      "canonical": "runCachevalueFeed",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "runCachevalueFeed (cmd/fak/cachevalue.go) is the CLI runner emitting the cache-value savings feed rows.",
+      "distinction": "The FEED emitter over cache-value accounting, not the accounting itself.",
+      "distinct_from": [
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "runCachevalueFeed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-vcacheextract",
+      "canonical": "vcacheextract",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "Package vcacheextract (internal/vcacheextract) sanitizes Codex session JSONL token telemetry for vCache accounting.",
+      "distinction": "The Codex telemetry SANITIZER feeding vCache, not the vCache accounting layer.",
+      "distinct_from": [
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "vcacheextract",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-vcachegovernordecisionorder",
+      "canonical": "vcacheGovernorDecisionOrder",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "vcacheGovernorDecisionOrder (internal/gateway/vcache_families.go) is the fixed render order of governor decisions on the vCache metrics surface.",
+      "distinction": "A fixed RENDER order for governor decisions, not the governor journal.",
+      "distinct_from": [
+        "x-goal25-cache-vcachegovernor"
+      ],
+      "aliases": [],
+      "grounding": "vcacheGovernorDecisionOrder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-cache-vcachewindowhascacheactivity",
+      "canonical": "vcacheWindowHasCacheActivity",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "vcacheWindowHasCacheActivity (internal/gateway/vcache_families.go) is the predicate: does an observed turn window contain any cache read/write activity at all.",
+      "distinction": "A window-level activity PREDICATE, not a savings number.",
+      "distinct_from": [
+        "vcache"
+      ],
+      "aliases": [],
+      "grounding": "vcacheWindowHasCacheActivity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-computegatedscore",
+      "canonical": "compute_gated_score",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "compute_gated_score is the reference SWE-bench scoring rule (correctness-gated speedup) that internal/frontierswe/score.go's GatedScore ports to Go.",
+      "distinction": "A correctness-GATED scoring formula, not an admission or commit gate.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "compute_gated_score",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-finishguardchildandreport",
+      "canonical": "finishGuardChildAndReport",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "finishGuardChildAndReport (cmd/fak/guard_child.go) folds a guarded child's exit state, gateway shutdown, and audit summary into the final guard report.",
+      "distinction": "The guarded-child TEARDOWN/report step, not a gate decision.",
+      "distinct_from": [
+        "guard-kernel",
+        "x-goal25b-guard-gate-guardchild"
+      ],
+      "aliases": [],
+      "grounding": "finishGuardChildAndReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardchild",
+      "canonical": "guard_child",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guard_child.go (cmd/fak) resolves the guarded child's upstream wire/credential posture and runs the child process under the guard.",
+      "distinction": "The child-RUNNING half of fak guard, not the guard front-door command itself.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guard_child",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-formatguardrefusalcarryforward",
+      "canonical": "formatGuardRefusalCarryForward",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "formatGuardRefusalCarryForward (cmd/fak/guard_carryforward.go) formats the carried-forward guard refusals for the startup banner.",
+      "distinction": "The banner FORMATTER over carried refusals; guardRefusalCarry is one carried record.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardrefusalcarry"
+      ],
+      "aliases": [],
+      "grounding": "formatGuardRefusalCarryForward",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardrefusalcarry",
+      "canonical": "guardRefusalCarry",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardRefusalCarry (cmd/fak/guard.go) is one carried-forward refusal record surfaced in the guard banner at next start.",
+      "distinction": "One carried refusal RECORD, not the formatter that renders the set.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-formatguardrefusalcarryforward"
+      ],
+      "aliases": [],
+      "grounding": "guardRefusalCarry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-gateable",
+      "canonical": "gateable",
+      "family": "guard-gate",
+      "kind": "doc-term",
+      "definition": "gateable is the recurring doc adjective for a number CI can gate on - measured, first-class, and exiting non-zero on regression (hooklat, releasestale).",
+      "distinction": "An ADJECTIVE about numbers fit for gating, not a gate mechanism.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "gateable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-gatelatencyregression",
+      "canonical": "GateLatencyRegression",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "GateLatencyRegression (internal/turntaxmeter/hooklat.go) is the closed token GATE_LATENCY_REGRESSION for a hook-latency regression verdict.",
+      "distinction": "A latency-regression VERDICT token, not the hook gate that emits it.",
+      "distinct_from": [
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "GateLatencyRegression",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardfdisterminal",
+      "canonical": "guardFdIsTerminal",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardFdIsTerminal (cmd/fak/guard.go) reports whether a guard file descriptor is a terminal, selecting banner formatting.",
+      "distinction": "A tty PROBE for banner output, not a guard decision.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardFdIsTerminal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardfindreasonroot",
+      "canonical": "guardFindReasonRoot",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardFindReasonRoot (cmd/fak/guard_carryforward.go) locates the root directory holding guard refusal-reason artifacts.",
+      "distinction": "A PATH resolver for refusal artifacts, not a refusal reason.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardrefusalcarry"
+      ],
+      "aliases": [],
+      "grounding": "guardFindReasonRoot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardinfovars",
+      "canonical": "guardInfoVars",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoVars (cmd/fak/info.go) is the /debug/vars snapshot `fak info` fetches from a live guard gateway.",
+      "distinction": "A fetched DEBUG snapshot for the info panel, not guard state itself.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoVars",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardprecompact",
+      "canonical": "guard_precompact",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guard_precompact.go (cmd/fak) installs the PreCompact hook wiring when fak guard wraps a Claude command.",
+      "distinction": "The PreCompact hook INSTALLER, one of the guard's per-harness install shapes (beside the Codex and MCP installs).",
+      "distinct_from": [
+        "x-goal25-guard-gate-guardiscodex",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guard_precompact",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardprecompactisclaudecommand",
+      "canonical": "guardPreCompactIsClaudeCommand",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardPreCompactIsClaudeCommand (cmd/fak/guard_precompact.go) detects whether the guarded command is a Claude CLI invocation, so the PreCompact hook install applies.",
+      "distinction": "The Claude-detection twin of guardIsCodex, scoped to the PreCompact install.",
+      "distinct_from": [
+        "x-goal25-guard-gate-guardiscodex"
+      ],
+      "aliases": [],
+      "grounding": "guardPreCompactIsClaudeCommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardprofilehasrepoint",
+      "canonical": "guardProfileHasRepoint",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardProfileHasRepoint (cmd/fak/guard_repoint.go) checks the harness profile for a repoint mechanism applicable to the guarded command.",
+      "distinction": "A capability PROBE on the harness profile, not the repoint action.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardProfileHasRepoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-guardreadableauditpath",
+      "canonical": "guardReadableAuditPath",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardReadableAuditPath (cmd/fak/guard.go) returns the audit-log path fak guard prints, when it is readable.",
+      "distinction": "An audit-path RESOLVER for the banner, not the audit log itself.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "guardReadableAuditPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-printguardcodexnote",
+      "canonical": "printGuardCodexNote",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "printGuardCodexNote (cmd/fak/guard_codex.go) prints the Codex install note in the guard banner.",
+      "distinction": "The Codex-note PRINTER; printGuardMCPNote is its MCP sibling.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-printguardmcpnote"
+      ],
+      "aliases": [],
+      "grounding": "printGuardCodexNote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-printguardmcpnote",
+      "canonical": "printGuardMCPNote",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "printGuardMCPNote (cmd/fak/guard_mcp.go) prints the MCP self-query install note in the guard banner.",
+      "distinction": "The MCP-note PRINTER; printGuardCodexNote is its Codex sibling.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-printguardcodexnote"
+      ],
+      "aliases": [],
+      "grounding": "printGuardMCPNote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-resolveguardupstream",
+      "canonical": "resolveGuardUpstream",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "resolveGuardUpstream (cmd/fak/guard_child.go) resolves the guarded child's upstream: provider, base URL, and credential posture (API key vs OAuth).",
+      "distinction": "The upstream RESOLUTION step inside guard startup, not a gate verdict.",
+      "distinct_from": [
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "resolveGuardUpstream",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-guard-gate-writeguardinfoframe",
+      "canonical": "writeGuardInfoFrame",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "writeGuardInfoFrame (cmd/fak/info_visual.go) writes one refreshed frame of the guard info panel.",
+      "distinction": "A panel RENDER step for fak info, not guard state.",
+      "distinct_from": [
+        "x-goal25b-guard-gate-guardinfovars"
+      ],
+      "aliases": [],
+      "grounding": "writeGuardInfoFrame",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-classifycontexthealth",
+      "canonical": "ClassifyContextHealth",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ClassifyContextHealth (internal/scorecardpane/contexthealth.go) folds ContextHealthSignals into a ContextHealthSeverity.",
+      "distinction": "The severity FOLD; ContextHealthSeverity is the closed output type.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-contexthealthseverity"
+      ],
+      "aliases": [],
+      "grounding": "ClassifyContextHealth",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contexthealth",
+      "canonical": "context health",
+      "family": "context-ctx",
+      "kind": "concept",
+      "definition": "context health (internal/scorecardpane/contexthealth.go, issue #1579) is the user-facing severity fold over managed-context signals - one word for how well the managed context program is doing.",
+      "distinction": "A user-facing HEALTH readout over managed context, not the context-MMU mechanism.",
+      "distinct_from": [
+        "context-mmu",
+        "x-goal25b-context-ctx-managedcontext"
+      ],
+      "aliases": [],
+      "grounding": "contexthealth",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contexthealthseverity",
+      "canonical": "ContextHealthSeverity",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextHealthSeverity (internal/scorecardpane/contexthealth.go) is the closed severity type context health folds to, with a validity check.",
+      "distinction": "The closed severity TYPE, not the classifier that produces it.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-classifycontexthealth"
+      ],
+      "aliases": [],
+      "grounding": "ContextHealthSeverity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contexthealthsignalsfromslorows",
+      "canonical": "ContextHealthSignalsFromSLORows",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextHealthSignalsFromSLORows (internal/scorecardpane/contexthealth.go) builds ContextHealthSignals from managed-context SLO rows.",
+      "distinction": "The signals BUILDER from SLO rows; ClassifyContextHealth grades what it builds.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-classifycontexthealth"
+      ],
+      "aliases": [],
+      "grounding": "ContextHealthSignalsFromSLORows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-compactionanchorstarved",
+      "canonical": "CompactionAnchorStarved",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionAnchorStarved (internal/gateway/metrics.go) counts under-budget compaction bails whose protected prefix already exceeded the budget - nothing sheddable remained.",
+      "distinction": "One specific BAIL reason counter; CompactionBailed is the total bail count.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-compactionbailed"
+      ],
+      "aliases": [],
+      "grounding": "CompactionAnchorStarved",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-compactionbailed",
+      "canonical": "CompactionBailed",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionBailed (internal/gateway/metrics.go) counts compaction attempts that bailed, with a witnessed per-reason breakdown.",
+      "distinction": "The total bail COUNTER; CompactionAnchorStarved is one reason within it.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-compactionanchorstarved"
+      ],
+      "aliases": [],
+      "grounding": "CompactionBailed",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-compactiondroppedturns",
+      "canonical": "CompactionDroppedTurns",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionDroppedTurns (internal/gateway/metrics.go) counts conversation turns dropped by gateway compaction.",
+      "distinction": "A dropped-TURN counter, not a token count like CompactionCacheReadTokens.",
+      "distinct_from": [
+        "x-goal25b-cache-compactioncachereadtokens"
+      ],
+      "aliases": [],
+      "grounding": "CompactionDroppedTurns",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-compactionoff",
+      "canonical": "CompactionOff",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "CompactionOff (internal/gateway/metrics.go) counts compaction attempts recorded with the off outcome - turns where compaction was disabled.",
+      "distinction": "The disabled-outcome COUNTER, one cell of the compaction attempt breakdown.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-compactionbailed"
+      ],
+      "aliases": [],
+      "grounding": "CompactionOff",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-compactionshed",
+      "canonical": "compaction_shed",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "compaction_shed (internal/cachevaluereport/track2.go) is the cache-value mechanism label for savings created by fak's compaction shedding turns (owner=fak).",
+      "distinction": "An ATTRIBUTION label in the savings report, not a metrics counter.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-compactiondroppedturns"
+      ],
+      "aliases": [],
+      "grounding": "compaction_shed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contextbounded",
+      "canonical": "contextBounded",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Budget.contextBounded (internal/session/session.go) reports whether the session budget still has context tokens left.",
+      "distinction": "A budget PREDICATE about remaining context, not a cap-applying transform like withContextCap.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-withcontextcap"
+      ],
+      "aliases": [],
+      "grounding": "contextBounded",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-withcontextcap",
+      "canonical": "withContextCap",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Budget.withContextCap (internal/session/session.go) clamps a session budget to its context cap.",
+      "distinction": "The cap-APPLYING transform; contextBounded only tests the remainder.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-contextbounded"
+      ],
+      "aliases": [],
+      "grounding": "withContextCap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contextnudge",
+      "canonical": "ContextNudge",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Table.ContextNudge (internal/session/ctxspike.go) returns the context-spike nudge string the turn loop splices into a run when a spike is detected.",
+      "distinction": "A spike-triggered NUDGE message, not a compaction or budget mechanism.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "ContextNudge",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-contextqueryauditrecord",
+      "canonical": "ContextQueryAuditRecord",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ContextQueryAuditRecord (internal/gateway/context_query_audit.go) is one audit record of a missing-context MCP query and the clarification plan it produced.",
+      "distinction": "An AUDIT record of context queries, not the missing_context reason token.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-missingcontext"
+      ],
+      "aliases": [],
+      "grounding": "ContextQueryAuditRecord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-ctxvalue",
+      "canonical": "ctxvalue",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ctxvalue (internal/gateway/ctxvalue.go, schema fak-ctxvalue-report/1) is the gateway's context-value report surface.",
+      "distinction": "A VALUE report over context, not the context-MMU or planner.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "ctxvalue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-issueagentcontextincomplete",
+      "canonical": "ISSUE_AGENT_CONTEXT_INCOMPLETE",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "ISSUE_AGENT_CONTEXT_INCOMPLETE (internal/issuecontract ReasonAgentIncomplete) is the closed refusal token for an issue whose agent-context section is incomplete.",
+      "distinction": "An issue-CONTRACT refusal token, not a session-context condition.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-missingcontext"
+      ],
+      "aliases": [],
+      "grounding": "ISSUE_AGENT_CONTEXT_INCOMPLETE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-managedcontext",
+      "canonical": "managed context",
+      "family": "context-ctx",
+      "kind": "concept",
+      "definition": "managed context is fak's gateway-owned context program - the SLO-reported alternative to client-managed context (internal/productscorecard ManagedContextSLOReport).",
+      "distinction": "The PROGRAM of gateway-owned context; context health is its user-facing severity readout.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-contexthealth",
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "managedContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-managedcontextsloreport",
+      "canonical": "ManagedContextSLOReport",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "ManagedContextSLOReport (internal/productscorecard) folds managed-context SLO rows into the product-scorecard report map.",
+      "distinction": "The SLO report FOLD for managed context, not the program itself.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-managedcontext"
+      ],
+      "aliases": [],
+      "grounding": "ManagedContextSLOReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-maxcontexttokens",
+      "canonical": "MaxContextTokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "SessionShape.MaxContextTokens (internal/turnbench/longcontext.go) is a bench session shape's context-window token cap.",
+      "distinction": "A BENCH shape parameter, not the live session budget's context cap.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-withcontextcap"
+      ],
+      "aliases": [],
+      "grounding": "MaxContextTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-missingcontext",
+      "canonical": "missing_context",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "missing_context (internal/selfquery/clarification.go ClarificationMissingContext) is the closed clarification reason: the agent lacks context it needs.",
+      "distinction": "A clarification REASON token; MissingContextClarifications builds the question plan for it.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-missingcontextclarifications"
+      ],
+      "aliases": [],
+      "grounding": "missing_context",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-missingcontextclarifications",
+      "canonical": "MissingContextClarifications",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "MissingContextClarifications (internal/selfquery/clarification.go) builds the ClarificationPlan for a set of missing context keys.",
+      "distinction": "The plan BUILDER for the missing_context reason, not the reason token.",
+      "distinct_from": [
+        "x-goal25b-context-ctx-missingcontext"
+      ],
+      "aliases": [],
+      "grounding": "MissingContextClarifications",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-runctx",
+      "canonical": "runCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "runCtx (internal/bgloop, internal/fleetpane) is the derived cancellable context.Context a background run executes under - Go cancellation plumbing.",
+      "distinction": "A Go context.Context VARIABLE, not fak's managed context or context-MMU.",
+      "distinct_from": [
+        "context-mmu"
+      ],
+      "aliases": [],
+      "grounding": "runCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-context-ctx-stalerecall",
+      "canonical": "STALE_RECALL",
+      "family": "context-ctx",
+      "kind": "config",
+      "definition": "STALE_RECALL (internal/recall/rehydrate.go) is the closed withhold token for a recalled fact whose concrete artifacts no longer verify on a Cold+ wake.",
+      "distinction": "The WITHHOLD token the recall gate emits; recall is the mechanism it protects.",
+      "distinct_from": [
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "STALE_RECALL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-doswitnessverbs",
+      "canonical": "dos_witness_verbs",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "dos_witness_verbs.go (internal/hooks) is fak's bounded mirror of the DOS commit-audit claim classifier's code-effect verb set.",
+      "distinction": "A VERB vocabulary mirror for commit-claim grading, not a witness mechanism.",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "dos_witness_verbs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-evidencetrustepoch",
+      "canonical": "EvidenceTrustEpoch",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "EvidenceTrustEpoch (internal/recall) is the recall trust axis: the integrity epoch a page was admitted under must still be current.",
+      "distinction": "The EPOCH axis of recall evidence; EvidenceWitness is the external-witness axis.",
+      "distinct_from": [
+        "x-goal25b-witness-proof-evidencewitness"
+      ],
+      "aliases": [],
+      "grounding": "EvidenceTrustEpoch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-evidencewitness",
+      "canonical": "EvidenceWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "EvidenceWitness (internal/recall) is the recall trust axis: the external trust witness a page was admitted under must still verify.",
+      "distinction": "The WITNESS axis of recall evidence; EvidenceTrustEpoch is the integrity-clock axis.",
+      "distinct_from": [
+        "x-goal25b-witness-proof-evidencetrustepoch"
+      ],
+      "aliases": [],
+      "grounding": "EvidenceWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-originwitness",
+      "canonical": "origin_witness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "origin_witness (internal/taskmgr, /fak/tasks filter) is the evidence axis naming WHICH witness vouched for a task's origin claim.",
+      "distinction": "Names the vouching witness on a task record; PathWitness/ShapeWitness are witness kinds it may name.",
+      "distinct_from": [
+        "x-goal25-witness-proof-pathwitness"
+      ],
+      "aliases": [],
+      "grounding": "origin_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-reasonreviewrefuted",
+      "canonical": "ReasonReviewRefuted",
+      "family": "witness-proof",
+      "kind": "config",
+      "definition": "ReasonReviewRefuted (internal/safecommit) is the refusal token REVIEW_REFUTED: an opt-in scout review refuted the diff before commit.",
+      "distinction": "A commit REFUSAL token from review evidence, not a witness kind.",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "ReasonReviewRefuted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-unwitnessedclaim",
+      "canonical": "unwitnessedclaim",
+      "family": "witness-proof",
+      "kind": "subsystem",
+      "definition": "Package unwitnessedclaim (internal/unwitnessedclaim) buckets issue-close claims that carry no witness, for `fak unwitnessed-claim`.",
+      "distinction": "The BUCKETER of witness-less claims, not a claim or witness type.",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "unwitnessedclaim",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-witnessednumbers",
+      "canonical": "witnessed_numbers",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "witnessed_numbers (`fak dispatch progress --json`) is the JSON key listing issue numbers whose close was witnessed by commit links.",
+      "distinction": "A WITNESSED-set key in dispatch progress, not a witness mechanism.",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "witnessed_numbers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-witnessjson",
+      "canonical": "witnessJSON (--witness-json)",
+      "family": "witness-proof",
+      "kind": "config",
+      "definition": "witnessJSON (cmd/fak/dispatch_commit_links.go) is the --witness-json flag: a path of commit-linked issue witness facts to bucket close-gate failures from.",
+      "distinction": "A CLI INPUT of witness facts, not a witness kind.",
+      "distinct_from": [
+        "x-goal25b-witness-proof-witnessednumbers"
+      ],
+      "aliases": [],
+      "grounding": "witnessJSON",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-witnesstestgo",
+      "canonical": "witness_test.go",
+      "family": "witness-proof",
+      "kind": "doc-term",
+      "definition": "witness_test.go is the doc-referenced test-file name anchoring witness-behavior claims in docs/claims - a pointer to where witness behavior is proven.",
+      "distinction": "A DOC pointer to the proving test file, not a production witness symbol.",
+      "distinct_from": [
+        "witness-resolver"
+      ],
+      "aliases": [],
+      "grounding": "witnesstestgo",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-witness-proof-witnesswindow",
+      "canonical": "WitnessWindow",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "WitnessWindow (internal/cachewitness/cachewitness.go) is the bounded record window a cache-usage witness folds over.",
+      "distinction": "The fold WINDOW for cache-witness records; CacheBit is the one-bit verdict from it.",
+      "distinct_from": [
+        "x-goal25-cache-cachebit"
+      ],
+      "aliases": [],
+      "grounding": "WitnessWindow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-fleetsessionsignals",
+      "canonical": "fleet_session_signals",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "fleet_session_signals is the auth-block taxonomy shared by runtime status readers - tools/fleet_session_signals.py, ported as internal/resume/signals.",
+      "distinction": "The fleet-level signal TAXONOMY; package sessionsignals is its per-session Go classifier core.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessionsignals"
+      ],
+      "aliases": [],
+      "grounding": "fleet_session_signals",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-registerservesessiondurability",
+      "canonical": "registerServeSessionDurability",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "registerServeSessionDurability (cmd/fak/session_durable.go) registers a serve session with the durability re-publisher so its descriptor stays published.",
+      "distinction": "The REGISTRATION entry into sessionDurability, not the re-publisher itself.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondurability"
+      ],
+      "aliases": [],
+      "grounding": "registerServeSessionDurability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-runsessionresetdiff",
+      "canonical": "runSessionResetDiff",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "runSessionResetDiff (cmd/fak/session_reset_diff.go) is the `fak session reset-diff` runner: diffs a session envelope across a reset.",
+      "distinction": "A reset DIFF tool over session envelopes, not session state.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "runSessionResetDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-sessionassumption",
+      "canonical": "SessionAssumption",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SessionAssumption (internal/gateway/gateway.go) is one assumed-context fact the gateway exposes per session via /debug assumptions.",
+      "distinction": "An exposed ASSUMPTION record, not a session descriptor or budget.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondescriptor",
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "SessionAssumption",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-sessionspend",
+      "canonical": "session_spend",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "session_spend.go (cmd/fak) is the host spend meter: prices a session's turns from billed usage; unpriced pairs stay dollar-blind (no debit).",
+      "distinction": "The DOLLAR meter over a session, not its token or time budget.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessionlimit",
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "session_spend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-sessiontime",
+      "canonical": "SessionTime",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "SessionTime (internal/gateway/gateway.go) is the per-session clock snapshot exposed in gateway session state, with an IsZero test.",
+      "distinction": "A CLOCK snapshot on session state, not the session lease or budget.",
+      "distinct_from": [
+        "session"
+      ],
+      "aliases": [],
+      "grounding": "SessionTime",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-session-runtime-stoppedsessions",
+      "canonical": "stopped_sessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "stopped_sessions is the stopped-session classify/decide core: internal/resume/stopped, the Go port of tools/stopped_sessions.py.",
+      "distinction": "The classifier of STOPPED sessions for resume, not live session state.",
+      "distinct_from": [
+        "session",
+        "x-goal25-session-runtime-sessionsignals"
+      ],
+      "aliases": [],
+      "grounding": "stopped_sessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-defaultgatewaybaseurl",
+      "canonical": "DefaultGatewayBaseURL",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "DefaultGatewayBaseURL (internal/frontierswe/env_adapter.go) is the default OpenAI-compatible fak gateway base URL (http://127.0.0.1:8080/v1) the SWE-bench env adapter wires the shim to.",
+      "distinction": "The DEFAULT constant; GatewayBaseURL is the config field it backs.",
+      "distinct_from": [
+        "x-goal25b-gateway-engine-gatewaybaseurl"
+      ],
+      "aliases": [],
+      "grounding": "DefaultGatewayBaseURL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-gatewaybaseurl",
+      "canonical": "GatewayBaseURL",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "GatewayBaseURL (frontierswe EnvAdapterConfig; cmd/fak swebench_fleet gatewayBaseURL) carries the fak gateway base URL a run should point its client at.",
+      "distinction": "The CONFIGURED gateway address, not the gateway server itself.",
+      "distinct_from": [
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "GatewayBaseURL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-gatewaybase",
+      "canonical": "gatewayBase",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "gatewayBase (internal/frontierswe/env_adapter.go) is the resolved gateway base URL variable threaded through env-adapter boundary validation and job YAML.",
+      "distinction": "The RESOLVED local variable; GatewayBaseURL is the config field it comes from.",
+      "distinct_from": [
+        "x-goal25b-gateway-engine-gatewaybaseurl"
+      ],
+      "aliases": [],
+      "grounding": "gatewayBase",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-engineeringworkkinds",
+      "canonical": "engineeringWorkKinds",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "engineeringWorkKinds (internal/fleetaccounts/route.go) is the set of work kinds routed to engineering seats.",
+      "distinction": "A fleet ROUTING set named 'engineering', unrelated to the inference engine.",
+      "distinct_from": [
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "engineeringWorkKinds",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-gatewayusageledger",
+      "canonical": "gatewayusageledger",
+      "family": "gateway-engine",
+      "kind": "subsystem",
+      "definition": "Package gatewayusageledger (internal/gatewayusageledger) persists per-turn gateway usage rows that the audit-usage fold reads.",
+      "distinction": "The USAGE ledger behind the gateway, not the gateway server.",
+      "distinct_from": [
+        "gateway"
+      ],
+      "aliases": [],
+      "grounding": "gatewayusageledger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-matchkernelglob",
+      "canonical": "matchKernelGlob",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "matchKernelGlob (internal/hooks/gate_priorart.go, cmd/fak/sota.go) matches a path against a kernel-surface glob for the prior-art gate and `fak sota`.",
+      "distinction": "A GLOB matcher over kernel-surface paths, not the kernel itself.",
+      "distinct_from": [
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "matchKernelGlob",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-modkernel32",
+      "canonical": "modkernel32",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "modkernel32 (internal/dispatchaudit, internal/harnessres) is the lazily loaded kernel32.dll handle Windows sampling code calls procs through.",
+      "distinction": "A WINDOWS DLL binding (kernel32.dll), not fak's kernel concept.",
+      "distinct_from": [
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "modkernel32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-vllmengine",
+      "canonical": "VLLMEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "VLLMEngine (internal/engine/vllm.go) is the vLLM-backed engine adapter, declaring its capability set.",
+      "distinction": "One concrete engine ADAPTER; engine is the general abstraction.",
+      "distinct_from": [
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "VLLMEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-gateway-engine-vllmengineid",
+      "canonical": "VLLMEngineID",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "VLLMEngineID (internal/engine/vllm.go) is the closed engine id 'vllm' naming the vLLM adapter.",
+      "distinction": "The ID constant for VLLMEngine, not the adapter.",
+      "distinct_from": [
+        "x-goal25b-gateway-engine-vllmengine"
+      ],
+      "aliases": [],
+      "grounding": "VLLMEngineID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-materializefusedexperttensor",
+      "canonical": "materializeFusedExpertTensor",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "materializeFusedExpertTensor (internal/model/materialize.go) materializes a fused MoE expert tensor from per-expert entries in the safetensors manifest.",
+      "distinction": "TENSOR materialization for MoE weights, not context/prompt rendering.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "materializeFusedExpertTensor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderable",
+      "canonical": "renderable",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "renderable is the doc adjective for context that can be rendered into prompt text - ctxplan prices a span by tokenizing its renderable text.",
+      "distinction": "An ADJECTIVE about render-capable context, not a render function.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "renderable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-rendercontextstatusline",
+      "canonical": "RenderContextStatusLine",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderContextStatusLine (internal/scorecardpane/contextstatus.go) renders the one-line context status shown by fak info.",
+      "distinction": "A STATUS-line renderer, not the context program it summarizes.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderContextStatusLine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-rendercorelockwarnings",
+      "canonical": "renderCoreLockWarnings",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderCoreLockWarnings (cmd/fak/corelockwarn.go) renders core-lock warnings for commit preview and hygiene output.",
+      "distinction": "A WARNING renderer for core-lock findings, not the safecommit lock check.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "renderCoreLockWarnings",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderdigest",
+      "canonical": "RenderDigest",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderDigest (internal/memoryread) renders the agent-memory digest `fak memory-read` prints, bounded by max bytes.",
+      "distinction": "The MEMORY digest renderer, not a context or plan renderer.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderfiles",
+      "canonical": "renderFiles",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderFiles (internal/uiquality) is the fixed list of render-surface files the uiquality scorecard audits.",
+      "distinction": "An AUDIT file list about render surfaces, not a renderer.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "renderFiles",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderknownunknownassumedcontext",
+      "canonical": "RenderKnownUnknownAssumedContext",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderKnownUnknownAssumedContext (internal/contextq/context_render.go) renders the known/unknown/assumed context split for debug output.",
+      "distinction": "A DEBUG renderer of the context split, not the context query result.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderKnownUnknownAssumedContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderline",
+      "canonical": "RenderLine",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderLine (internal/fleettrend) renders the one-line fleet trend readout from trend rows.",
+      "distinction": "A one-line TREND renderer, not a context renderer.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderLine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderorder",
+      "canonical": "renderOrder",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "renderOrder (internal/workflowaudit) is the fixed order ref classes are rendered in by the workflow audit.",
+      "distinction": "An ORDERING constant for audit rendering, not a renderer.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "renderOrder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderrawfakcontractmarkdown",
+      "canonical": "RenderRawFakContractMarkdown",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderRawFakContractMarkdown (internal/frontierswe/smoke_contract.go) renders the raw fak smoke contract as markdown.",
+      "distinction": "A CONTRACT markdown renderer, not a context renderer.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderRawFakContractMarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-render-materialize-renderrecovery",
+      "canonical": "RenderRecovery",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "RenderRecovery (internal/guardrsi/recovery.go) renders a guardrsi RecoveryReport for the CLI.",
+      "distinction": "A RECOVERY-report renderer, not the recovery logic.",
+      "distinct_from": [
+        "renderplan-context"
+      ],
+      "aliases": [],
+      "grounding": "RenderRecovery",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-areapolicy",
+      "canonical": "AreaPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "AreaPolicy (internal/ctxplan/layout.go) is the per-area layout policy of a context plan, with defaults applied by areaWithDefault.",
+      "distinction": "A ctxplan LAYOUT policy per area, not the loaded fleet Policy.",
+      "distinct_from": [
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "AreaPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-defaultassumptionpolicy",
+      "canonical": "DefaultAssumptionPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "DefaultAssumptionPolicy (internal/ctxplan/assumption.go) returns the default AssumptionPolicy governing what a plan may assume.",
+      "distinction": "The DEFAULT for assumption policy, not a loaded policy file.",
+      "distinct_from": [
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "DefaultAssumptionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-defaultlooppolicy",
+      "canonical": "defaultLoopPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "defaultLoopPolicy (cmd/fak/loop.go) returns the default policy name a `fak loop` run uses when none is given.",
+      "distinction": "The loop-run policy DEFAULT, not the policy manifest.",
+      "distinct_from": [
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "defaultLoopPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-defaultresumesourcepolicy",
+      "canonical": "defaultResumeSourcePolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "defaultResumeSourcePolicy (cmd/fak/resume.go) returns the default resume source-policy selection when none is configured.",
+      "distinction": "The resume-source policy DEFAULT; LoadSourcePolicy reads the configured one.",
+      "distinct_from": [
+        "x-goal25b-policy-capability-loadsourcepolicy"
+      ],
+      "aliases": [],
+      "grounding": "defaultResumeSourcePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-loadpolicy",
+      "canonical": "LoadPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "LoadPolicy (internal/fleetaccounts/paths.go) loads the fleet-accounts Policy from its Paths.",
+      "distinction": "The fleet-accounts policy LOADER; LoadSourcePolicy is the resume-side loader.",
+      "distinct_from": [
+        "x-goal25b-policy-capability-loadsourcepolicy",
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "LoadPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-loadsourcepolicy",
+      "canonical": "LoadSourcePolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "LoadSourcePolicy (internal/resume/source_governor.go) loads resume SourcePolicies from a path.",
+      "distinction": "The resume-source policy LOADER; LoadPolicy is the fleet-accounts loader.",
+      "distinct_from": [
+        "x-goal25b-policy-capability-loadpolicy"
+      ],
+      "aliases": [],
+      "grounding": "LoadSourcePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-preflights",
+      "canonical": "preflights",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "preflights (internal/qwen36nodereports; dispatch docs) are the pre-dispatch check reports a run loads or performs before committing to work.",
+      "distinction": "PRE-run checks, not a policy document or capability floor.",
+      "distinct_from": [
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "preflights",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-policy-capability-walkpolicy",
+      "canonical": "WalkPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "WalkPolicy (internal/gardenbundle/walk.go) is the policy governing which items a garden walk admits.",
+      "distinction": "The garden-walk ADMISSION policy; WalkPlan is the folded result.",
+      "distinct_from": [
+        "x-goal25-plan-walkplan",
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "WalkPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-climbratchetdebt",
+      "canonical": "climb_ratchet_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "climb_ratchet_debt (internal/milestonereport/ratchet.go RatchetDebtKey) is the milestone ratchet's debt key on the control pane.",
+      "distinction": "The RATCHET debt key, one debt-keyed number among the scorecard debts.",
+      "distinct_from": [
+        "agent-readiness-scorecard"
+      ],
+      "aliases": [],
+      "grounding": "climb_ratchet_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-demorobustnessscorecard",
+      "canonical": "demo_robustness_scorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "tools/demo_robustness_scorecard.py is the demo-robustness scorecard registered on the control pane under robustness_debt.",
+      "distinction": "The demo-ROBUSTNESS scorecard, a sibling of the readiness scorecards.",
+      "distinct_from": [
+        "agent-readiness-scorecard"
+      ],
+      "aliases": [],
+      "grounding": "demo_robustness_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-emitscorecard",
+      "canonical": "emitScorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "emitScorecard (cmd/fak) is the shared helper rendering a scorecard payload - human, JSON, markdown, or compare - under a debt key.",
+      "distinction": "The shared EMITTER for scorecard verbs, not a scorecard.",
+      "distinct_from": [
+        "x-goal25b-score-debt-scorecardcmdsetup"
+      ],
+      "aliases": [],
+      "grounding": "emitScorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-scorecardcmdsetup",
+      "canonical": "scorecardCmdSetup",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "scorecardCmdSetup (cmd/fak/skill_effectiveness.go) is the shared argument/setup scaffold (flags, compare, markdown) scorecard verbs run through.",
+      "distinction": "The shared SETUP scaffold; emitScorecard is the shared output half.",
+      "distinct_from": [
+        "x-goal25b-score-debt-emitscorecard"
+      ],
+      "aliases": [],
+      "grounding": "scorecardCmdSetup",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-tokendefaultsdebt",
+      "canonical": "token_defaults_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "token_defaults_debt is the debt key of the token-defaults scorecard on the control pane (cmd/fak token-defaults-scorecard).",
+      "distinction": "The token-DEFAULTS debt key, one control-pane debt number.",
+      "distinct_from": [
+        "x-goal25b-score-debt-climbratchetdebt"
+      ],
+      "aliases": [],
+      "grounding": "token_defaults_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-toolingqualityscorecard",
+      "canonical": "tooling_quality_scorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "tools/tooling_quality_scorecard.py is the Python-tooling quality scorecard on the control pane (py_debt) - the meter for Python not yet ported to the Go-first hygiene path.",
+      "distinction": "The PYTHON-tooling quality meter, a sibling of the other control-pane scorecards.",
+      "distinct_from": [
+        "x-goal25b-score-debt-demorobustnessscorecard"
+      ],
+      "aliases": [],
+      "grounding": "tooling_quality_scorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-score-debt-uiqualitydebt",
+      "canonical": "ui_quality_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "ui_quality_debt (internal/uiquality DebtKey) is the debt key of the uiquality scorecard over fak's render surfaces.",
+      "distinction": "The UI-quality debt key, one control-pane debt number.",
+      "distinct_from": [
+        "x-goal25b-score-debt-climbratchetdebt"
+      ],
+      "aliases": [],
+      "grounding": "ui_quality_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-coveragepct",
+      "canonical": "CoveragePct",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "CoveragePct (internal/commitsubject/coverage.go) is the coverage-percentage field of the commit-subject coverage payload.",
+      "distinction": "A PERCENT readout of coverage; minCoverage is the floor it is graded against.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-mincoverage",
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "CoveragePct",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-mincoverage",
+      "canonical": "minCoverage",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "minCoverage (internal/commitsubject, internal/toolcoverage) is the optional minimum-coverage floor the coverage payload builders grade against.",
+      "distinction": "The coverage FLOOR parameter, not the measured percentage.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-coveragepct"
+      ],
+      "aliases": [],
+      "grounding": "minCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-qwen36parity",
+      "canonical": "qwen36parity",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "Package qwen36parity (internal/qwen36parity) loads and grades qwen3.6 parity witness reports against a required ratio.",
+      "distinction": "A model-PARITY grader, not a test-coverage meter.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "qwen36parity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-routercoverage",
+      "canonical": "RouterCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "RouterCoverage (internal/dispatchtick/router.go) reports how much of the issue backlog the dispatch router actually fetched against its limit.",
+      "distinction": "DISPATCH-router backlog coverage, not code or tool coverage.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "RouterCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-sotacoverage",
+      "canonical": "sotacoverage",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "Package sotacoverage (internal/sotacoverage) drives the sota-coverage scorecard (sota_debt) over the prior-art matrix.",
+      "distinction": "PRIOR-ART matrix coverage, not code coverage.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "sotacoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-support-maturity-toolcoverage",
+      "canonical": "toolcoverage",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "Package toolcoverage (internal/toolcoverage) audits which load-bearing tools modules have sibling tests.",
+      "distinction": "TOOLS-test coverage, not dispatch or prior-art coverage.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-routercoverage",
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "toolcoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-evict-canevict",
+      "canonical": "CanEvict",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "CanEvict (internal/model/kvcache.go, internal/kvmmu) reports whether the KV cache is in a state where eviction may proceed.",
+      "distinction": "The eviction PRECONDITION check, not the eviction action.",
+      "distinct_from": [
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "CanEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-evict-kvevictionscope",
+      "canonical": "KVEvictionScope",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "KVEvictionScope (internal/cachemeta/external_invalidation.go) is the closed scope type of an external KV eviction - exact span versus whole prefix cache.",
+      "distinction": "The SCOPE type of an eviction attestation, not the eviction check or action.",
+      "distinct_from": [
+        "x-goal25b-evict-canevict",
+        "evict-kvcache"
+      ],
+      "aliases": [],
+      "grounding": "KVEvictionScope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-attention-kflashattention",
+      "canonical": "k_flash_attention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "k_flash_attention (internal/compute/cuda.go) is the CUDA flash-attention decode kernel - tiled over the KV window with a running max/sum so no full score buffer materializes.",
+      "distinction": "The CUDA decode KERNEL for attention, not an attention observer or metric.",
+      "distinct_from": [
+        "attn-observer"
+      ],
+      "aliases": [],
+      "grounding": "k_flash_attention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-attention-linearattndims",
+      "canonical": "linearAttnDims",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Config.linearAttnDims (internal/model/qwen35.go) returns the linear-attention head/dim geometry for hybrid models.",
+      "distinction": "GEOMETRY for linear attention layers, not the attention kernel.",
+      "distinct_from": [
+        "x-goal25b-attention-kflashattention"
+      ],
+      "aliases": [],
+      "grounding": "linearAttnDims",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-layout-previewlayout",
+      "canonical": "PreviewLayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "PreviewLayout (internal/ctxplan/preview.go) renders a Preview of spans under a Layout, forecast, budget, and cost model.",
+      "distinction": "The PREVIEW over a ctxplan Layout; ProbeLayout probes the per-area spans.",
+      "distinct_from": [
+        "x-goal25b-layout-probelayout",
+        "layout-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "PreviewLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-goal25b-layout-probelayout",
+      "canonical": "ProbeLayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Index.ProbeLayout (internal/ctxplan/layout.go) probes the per-area spans a Layout would produce for a forecast.",
+      "distinction": "The span PROBE for a layout; PreviewLayout renders the full preview.",
+      "distinct_from": [
+        "x-goal25b-layout-previewlayout",
+        "layout-ctxplan"
+      ],
+      "aliases": [],
+      "grounding": "ProbeLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
