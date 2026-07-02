@@ -18,9 +18,15 @@ import (
 func isPolicyManifest(b []byte) bool {
 	var probe struct {
 		Version string `json:"version"`
+		Schema  string `json:"schema"`
 	}
 	if err := json.Unmarshal(b, &probe); err != nil {
 		return true // not parseable as JSON-with-version: let ParseRuntime report it
+	}
+	if probe.Schema != "" {
+		// A top-level "schema" key is a different family's self-tag (e.g.
+		// fak.resume-source-policy.v1) — policy manifests tag with "version".
+		return false
 	}
 	return probe.Version == "" || strings.HasPrefix(probe.Version, "fak-policy/")
 }
