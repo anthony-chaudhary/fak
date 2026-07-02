@@ -143,6 +143,7 @@ fak ablate    --sweep vdso                             # N-arm self-ablation: on
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
 fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
+fak relay     resume (--baton FILE|- | FILE) [--json]   # inspect a fak.relay.baton.v1 leg handoff OFFLINE: exactly what a successor leg would receive (pointer-only, no reload re-verification); --json emits the canonical byte-stable wire form
 fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
 fak task      handoff --file HANDOFF.json [--json] [--live] [--repo owner/repo]  # verified completion handoff: require StateDone + VerifiedDone + current state, then plan/sync 1-2 follow-up issues
 fak test      [fast|full|race|<pkg>] [-n] [-- go test args]   # host-aware test runner; Windows routes go test through WSL/test.ps1
