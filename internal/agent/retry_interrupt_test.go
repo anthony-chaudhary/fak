@@ -26,6 +26,13 @@ func TestComplete_ClientCancelDuringCapWait_CarriesClassification(t *testing.T) 
 	}))
 	t.Cleanup(srv.Close)
 
+	// #2258 added a client-survivable per-wait ceiling (default 90s): an honored wait this
+	// long is now REFUSED up front — RetryNotify never fires and the classification surfaces
+	// as a RetryCeilingError instead of a sleep. This test pins the OTHER regime, where
+	// in-handler absorption is configured (ceiling disabled) and the sleep is reachable: a
+	// client cancel mid-wait must still carry the classified truth (#2257).
+	t.Setenv("FAK_INHANDLER_WAIT_CEILING", "0")
+
 	p := NewHTTPPlanner(srv.URL, "m", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

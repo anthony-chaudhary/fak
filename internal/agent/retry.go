@@ -151,10 +151,12 @@ func retryBounds(now time.Time) (maxAttempts int, deadline time.Time, budgetOn b
 // call. It defaults to defaultRetryBudget (4h) so a long rate-limit/overload window is
 // ridden out instead of dropping the turn; FAK_PLANNER_RETRY_BUDGET overrides it (any Go
 // duration, e.g. "30m", "4h"), clamped to [0, maxRetryBudget]. A value of 0 disables the
-// time bound, restoring pure attempt-count behavior. The caller's context is still the
-// real bound: on the synchronous serve path the http.Server WriteTimeout
-// (FAK_HTTP_WRITE_TIMEOUT_S) caps the in-handler wait far below this — there the durable
-// session park (#1363) is what extends the wait across a process boundary.
+// time bound, restoring pure attempt-count behavior. On the proxy path the full window is
+// deliberately NOT reachable in-handler: any single wait past the client-survivable
+// ceiling (inHandlerWaitCeiling, #2258) stops the loop and relays the truthful 429/5xx +
+// Retry-After downstream instead of sleeping past the wrapped client's own request
+// timeout — riding out a longer window is the supervisor's job (`fak guard` park, #2256),
+// not an in-handler sleep's. The caller's context is still the real bound under both.
 func plannerRetryBudget() time.Duration {
 	if v := os.Getenv("FAK_PLANNER_RETRY_BUDGET"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
@@ -228,7 +230,10 @@ const maxBackoff = 30 * time.Second
 // the remaining-budget clamp in retryWaitWithin, so a genuine multi-minute window can be
 // honored in one sleep without a fat-fingered or hostile header running away — the total
 // can never exceed the budget regardless. Beyond this per-wait cap we wait the cap, then
-// re-read a fresh Retry-After on the next try.
+// re-read a fresh Retry-After on the next try. Note the tighter client-facing bound in
+// retryBackoffWait: a wait past inHandlerWaitCeiling (default 90s, #2258) is not slept at
+// all — the classified status is surfaced downstream instead, because a sleep the CLIENT
+// cannot survive helps no one.
 const maxHonoredRetryAfter = time.Hour
 
 // retryWait returns how long to sleep before `attempt`. A server-directed Retry-After
@@ -420,6 +425,22 @@ func (p *HTTPPlanner) retryBackoffWait(ctx context.Context, attempt, lastStatus 
 		}
 	} else {
 		wait = retryWait(attempt, lastRetryAfter)
+	}
+	// Never sleep past the client (#2258): a wait beyond the client-survivable ceiling is
+	// structurally uncompletable on the proxy path (the wrapped client's own request
+	// timeout fires first, burning futile retries against a wall the gateway can name).
+	// Stop retrying and surface the classified upstream truth downstream — with the real
+	// Retry-After, or the classified cap-reset delta when the header was absent (both in
+	// RFC 7231 delta-seconds/date form; lastRetryAfter already carries the merge). Only a
+	// wait with a REAL classified status behind it takes this path: the transient backoff
+	// schedule (≤30s) never exceeds the default 90s ceiling, so absorb behavior under the
+	// ceiling is byte-for-byte unchanged, and FAK_INHANDLER_WAIT_CEILING=0 disables it.
+	if ceiling := inHandlerWaitCeiling(); ceiling > 0 && wait > ceiling && lastStatusErr != nil {
+		se := *lastStatusErr
+		if se.RetryAfter == "" {
+			se.RetryAfter = lastRetryAfter
+		}
+		return false, &RetryCeilingError{Cause: &se, Wait: wait, Ceiling: ceiling}
 	}
 	if p.RetryNotify != nil {
 		p.RetryNotify(attempt, lastStatus, wait)
