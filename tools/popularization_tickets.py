@@ -209,7 +209,7 @@ TICKETS = [
     T("C", "examples(demo): 60-second \"deny an irreversible call\" runnable proof (no key, no GPU)",
       ["capgate", "binary"],
       "`examples/deny-in-60s/`: a self-contained script + README that, with only the fak binary and "
-      "no API key or GPU, proposes an irreversible tool call, shows the kernel DENY verdict, and "
+      "no provider credential or GPU, proposes an irreversible tool call, shows the kernel DENY verdict, and "
       "shows the same call ALLOWed under a permissive policy — proving the floor is structural. Uses "
       "the offline adjudication path.",
       "The fastest possible 'I saw it work' moment. A reader who runs one command and watches a "
@@ -653,24 +653,113 @@ TICKETS = [
 ]
 
 
+def _likely_files(t):
+    """Derive the concrete path(s) a worker will touch from the deliverable text.
+
+    The contract gate reads backtick code-spans out of the `## Likely files`
+    section, so every path is rendered inside backticks.
+    """
+    import re
+    # Any path-looking backtick span already in the deliverable is authoritative.
+    spans = re.findall(r"`([^`]+)`", t["deliverable"])
+    paths = [s for s in spans if ("/" in s or s.endswith(".py") or s.endswith(".md"))
+             and " " not in s.strip()]
+    if not paths:
+        # Fall back to the lane -> a representative path.
+        lane = t["lane"]
+        if lane.startswith("examples-"):
+            paths = [f"`examples/{lane[len('examples-'):]}/`"]
+        elif lane.startswith("cmd-"):
+            paths = [f"`cmd/fak/{lane.split('-')[-1]}.go`"]
+        elif lane.startswith("tools-"):
+            paths = [f"`tools/{lane[len('tools-'):].replace('-', '_')}.py`"]
+        else:
+            paths = ["`docs/`"]
+    # de-dup, keep order, always add INDEX.md for doc lanes
+    seen, out = set(), []
+    for p in paths:
+        pb = p if p.startswith("`") else f"`{p}`"
+        if pb not in seen:
+            seen.add(pb)
+            out.append(pb)
+    if any("docs/" in p for p in out) and "`INDEX.md`" not in out:
+        out.append("`INDEX.md`")
+    return ", ".join(out)
+
+
 def render_body(t, epic_ref):
     dim_name = DIMS[t["dim"]]
     concepts = ", ".join(CONCEPTS[c] for c in t["concepts"])
+    files = _likely_files(t)
+    lane = t["lane"]
     return f"""**Dimension {t['dim']} — {dim_name}** · part of the concept-popularization epic ({epic_ref}).
 
 **Concepts served:** {concepts}
 
-## Deliverable
+## Parent context
+Concept-popularization epic — `{epic_ref}`. This is one of 50 self-contained tickets under the `popularization` label making the fak/DOS concepts broadly known and attractive.
+
+## Current state
+The concept exists in the code/docs but its human-facing popularization artifact for this dimension does not: {t['deliverable'].split(':')[0].strip()} is not yet present as a standalone, shareable unit. Today a reader has no single artifact for this angle.
+
+## Why now
+The AEO/SEO surface (machine-facing discovery) is maintained, but the human-facing half — the artifacts that make a person want and remember the concept — is the current gap. This dimension has no dedicated owner-artifact yet.
+
+## Working spine
 {t['deliverable']}
+
+## In scope
+The single deliverable named above, plus its wiring (index link / front-matter / cross-links) so it is reachable and honest.
+
+## Out of scope
+Any other popularization ticket's deliverable; kernel/engineering changes; market-adoption claims; any benchmark not already run; renaming or restructuring existing docs beyond what this artifact needs.
 
 ## Why it popularizes the concept
 {t['why']}
 
-## Acceptance
+## Done condition
 {t['acceptance']}
 
-## Lane / ship discipline
-- Suggested lane: `{t['lane']}` (disjoint from other popularization tickets — one worker can own it end to end).
+## Witness
+The acceptance artifact exists and is checkable: the named file/command is present and correct; `python tools/seo_aeo_scorecard.py` does not regress for any new `docs/*.md`; the ship commit passes `dos commit-audit`.
+
+## Acceptance gate
+{t['acceptance']}
+
+## Work unit
+One doc/example/tool artifact a single worker owns end to end in one sitting; no dependency on another popularization ticket landing first.
+
+## Expected steps
+3
+
+## Assumptions
+- The five core concepts and honest-scope fences in the epic doc are authoritative.
+- Witnessed numbers only (the tuned ~4.1×, not the naive 60×); simulated is labeled simulated.
+
+## Confusion risks
+- Do not overclaim market adoption or a novelty the 0/29 prior-art audit refutes.
+- Keep this lane disjoint from sibling popularization tickets — touch only the files below.
+
+## Coordination
+- One worker per lane; lane `{lane}` is disjoint from the other 49 tickets.
+- Verify lane disjointness via `dos_arbitrate` before writing if the trunk is busy.
+
+## Trigger
+Filed as part of the 2026-07-02 concept-popularization epic; dispatched via the account-switching headless resolver.
+
+## Batch policy
+One issue per popularization dimension-slot; deduped by title; update the existing issue rather than re-filing. Capped at the 50-ticket epic set.
+
+## Likely files
+{files}
+
+## Lane
+`{lane}` (disjoint from other popularization tickets — one worker can own it end to end).
+
+## Closure binding
+Closed by the ship commit that creates the accepted artifact, stamped `(fak <leaf>)` and referencing this issue number; the commit's `dos commit-audit` verdict is the binding witness.
+
+## Ship discipline
 - Trunk only; commit by explicit path; Conventional-Commits subject + a `(fak <leaf>)` stamp.
 - New `docs/*.md` need SEO front-matter (`title:`/`description:`) and an `INDEX.md` line.
 - Honest-scope fence: no market-adoption claim, no unrun benchmark, no novelty the 0/29 prior-art audit refutes; quote witnessed numbers, label simulated as simulated.
