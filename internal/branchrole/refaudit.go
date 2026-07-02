@@ -192,6 +192,7 @@ func ClassifyHardcodedRef(path, line string) string {
 		p == "cmd/fak/treedoctor.go" ||
 		p == "internal/corelockaudit/corelockaudit.go" ||
 		p == "internal/gitgate/gitgate.go" ||
+		p == "internal/safecommit/lockcontention.go" ||
 		p == "internal/releasestatus/releasestatus.go" ||
 		p == "internal/treedoctor/treedoctor.go" ||
 		p == "internal/workerenvelope/workerenvelope.go" ||
@@ -234,7 +235,10 @@ func ClassifyHardcodedRef(path, line string) string {
 
 func skipRefAuditDir(rel string) bool {
 	switch rel {
-	case ".git", ".idea", ".vscode", ".claude", "node_modules", "vendor":
+	// ".tmp" is the root session-scratch dir (fs dumps, pin-check checkout
+	// copies). It is gitignored, but keep the static skip too so the gate stays
+	// green when ignore-awareness is unavailable (git missing / not a repo).
+	case ".git", ".idea", ".vscode", ".claude", ".tmp", "node_modules", "vendor":
 		return true
 	default:
 		return strings.HasPrefix(rel, "docs/vendor/")
