@@ -237,6 +237,47 @@ func TestSessionAuditSummaryJSON(t *testing.T) {
 	}
 }
 
+func TestSessionAuditAliasDefaultsToHereSummary(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "work", "fak")
+	if err := os.MkdirAll(workspace, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	hereNS := sessionaudit.ProjectNamespace(workspace)
+	writeSessionAuditJSONL(t, filepath.Join(root, hereNS, "heavy.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("opus", 200, 0, 900_000, 50_000, "claude-opus-4-8", ""),
+	})
+	writeSessionAuditJSONL(t, filepath.Join(root, "C--work-other", "other.jsonl"), []map[string]any{
+		sessionAuditAssistantDetailed("other", 300, 0, 20_000, 1_000, "claude-fable-5", ""),
+	})
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := runSession(&stdout, &stderr, []string{"audit", "--root", root, "--days", "7", "--json"})
+	if rc != 0 {
+		t.Fatalf("session audit alias rc=%d stderr=%s", rc, stderr.String())
+	}
+	var rep sessionaudit.CompactReport
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatalf("bad alias summary json: %v\n%s", err, stdout.String())
+	}
+	if rep.Scope.NamespaceFilter != hereNS || rep.Scope.Discovered != 1 || rep.Scope.Audited != 1 {
+		t.Fatalf("alias summary scope = %+v, want here-scoped single transcript", rep.Scope)
+	}
+	if rep.Totals.OutputTokens != 200 || rep.Totals.TotalContextTokens != 950_000 {
+		t.Fatalf("alias summary totals = %+v, want only current-workspace transcript", rep.Totals)
+	}
+}
+
 func sessionAuditAssistant(id string, out int64, tool string) map[string]any {
 	return sessionAuditAssistantDetailed(id, out, 10, 20, 5, "claude-sonnet-4-5", tool)
 }

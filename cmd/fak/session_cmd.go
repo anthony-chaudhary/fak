@@ -17,6 +17,7 @@ package main
 //	fak session envelope <id> <spec>       # parse/apply one managed-context budget envelope (#1573)
 //	fak session context <id>                # read the managed-context value report
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
+//	fak session audit [summary|discover|audit|deep] ...  # offline transcript audit alias
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
 // All write verbs accept --if-rev N: the optimistic-concurrency guard, so a stale
@@ -80,6 +81,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	// below (which assumes every verb talks to a sessionClient).
 	if verb == "reset-diff" {
 		return runSessionResetDiff(os.Stdin, stdout, stderr, args)
+	}
+	if verb == "audit" {
+		return runSessionAuditAlias(stdout, stderr, args)
 	}
 	if verb == "envelope" && (len(args) == 0 || strings.HasPrefix(args[0], "-")) {
 		return runSessionEnvelope(stdout, stderr, args)
@@ -168,6 +172,50 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		})
 	}
 	return 2 // unreachable: arity gate already rejected unknown verbs
+}
+
+func runSessionAuditAlias(stdout, stderr io.Writer, argv []string) int {
+	args := normalizeSessionAuditAliasArgs(argv)
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		args = append([]string{"summary"}, args...)
+	}
+	switch args[0] {
+	case "discover", "audit", "summary":
+		if !sessionAuditArgsHaveScope(args[1:]) {
+			args = append([]string{args[0], "--here"}, args[1:]...)
+		}
+	case "deep", "-h", "--help", "help":
+	default:
+		fmt.Fprintf(stderr, "fak session audit: unknown subcommand %q\n", args[0])
+		fmt.Fprintln(stderr, "usage: fak session audit [summary|discover|audit|deep] [session-audit flags]")
+		return 2
+	}
+	return runSessionAudit(stdout, stderr, args)
+}
+
+func normalizeSessionAuditAliasArgs(argv []string) []string {
+	out := make([]string, len(argv))
+	copy(out, argv)
+	for i, arg := range out {
+		switch {
+		case arg == "--days":
+			out[i] = "--since-days"
+		case strings.HasPrefix(arg, "--days="):
+			out[i] = "--since-days=" + strings.TrimPrefix(arg, "--days=")
+		}
+	}
+	return out
+}
+
+func sessionAuditArgsHaveScope(args []string) bool {
+	for _, arg := range args {
+		if arg == "--here" || arg == "--all" ||
+			strings.HasPrefix(arg, "--here=") || strings.HasPrefix(arg, "--all=") ||
+			arg == "--ns-prefix" || strings.HasPrefix(arg, "--ns-prefix=") {
+			return true
+		}
+	}
+	return false
 }
 
 type sessionEnvelopeReport struct {
@@ -657,6 +705,8 @@ func sessionUsage(w io.Writer) {
                                                spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
   fak session context  <id>                   read the managed-context value report
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
+  fak session audit [summary|discover|audit|deep] [--days N] [--json]
+                                               offline recent transcript audit; defaults to summary --here
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
                                                (survived/summarized/expired/must-requery)
