@@ -786,7 +786,8 @@ var interpreterSuffix = []string{".py", ".sh", ".bash", ".ps1", ".rb", ".pl", ".
 // chokepoint as regOffList. Each entry is a deliberate, reviewed decision, not a
 // silent pass.
 var interpreterExecAllow = map[string]string{
-	"witness": "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
+	"witness":   "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
+	"procguard": "host process-guard telemetry/reaper — execs the OS process tools (ps/taskkill/PowerShell CIM one-liners) through the shared runTool helper as a host-observation seam; not an adjudication dependency of the tool-call decide path",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
