@@ -160,11 +160,12 @@ fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass o
 fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
 fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verbosity witness over a text; exit 1 when it loops/runs away
 fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
+fak index     lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym> [--json] [--limit N]   # query the devindex self-index for lane ownership, leaf search, docs, and Go refs; alias: fak devindex
 fak codelint  PATH...                                  # lint agent-written code (Go/JSON in-process, Python/CUDA via toolchain); exit 1 on a hard parse/compile error
 fak policy    --dump | --check FILE                        # author/validate the deployable capability floor
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
-fak vcache    status | prove | prove-telemetry | score   # virtual provider-cache status plus planned/observed token-savings proof/refutation and scorecard
+fak vcache    status | prove | prove-telemetry | actions | apply-actions | score   # virtual provider-cache status, planned/applied action ledgers, and token-savings proof/refutation scorecard
 fak cachevalue report|review|feed [--since DATE] [--json] [--append-ledger FILE] [--markdown-out FILE] # cache-effectiveness P&L plus generated cache-frontier review artifacts
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak cadence   [--json] [--check] [--append-history] [--window N]   # consolidated regular-cadence report: folds scores + maturity + work-done + releases into one control-pane envelope, including the top public `fak maturity route` seed; --append-history writes the durable ledger with standing_score + difficulty fields (docs/cadence/history.jsonl)
@@ -465,6 +466,15 @@ at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` prov
 reports the verifier as ready, includes a cached-token sample proof and zero-cache
 refutation, and keeps the raw OpenAI API probe as an optional no-credential skip path.
 These are cost proofs only: correctness never depends on a provider cache hit.
+
+`fak vcache actions --json` renders the provider-cache action plan for the current
+observed-window snapshot, mapping each prefix family to `ride_natural`,
+`heartbeat_pin`, `lazy_rebuild`, `evict_manifest`, `no_cache`, or `explicit_cache`.
+Spendful rows are `gated` until transport witnesses are supplied. `fak vcache
+apply-actions --manifest FILE` applies only local, no-provider-call effects to a
+fak-owned manifest: `evict_manifest` removes a warm row, `no_cache` marks a family
+uncached, and heartbeat/explicit-cache rows remain pending unless a later provider
+executor supplies an independent execution witness.
 
 `fak session-audit summary --here --since-days 7 --max 40 --json` emits the compact
 machine-readable shape behind that `vcache status --sessions` block. It is scoped by

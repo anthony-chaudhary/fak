@@ -46,6 +46,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheContextJoin(stdout, stderr, argv[1:])
 	case "actions":
 		return runVCacheActions(stdout, stderr, argv[1:])
+	case "apply-actions":
+		return runVCacheApplyActions(stdout, stderr, argv[1:])
 	case "codex-session-extract":
 		return runVCacheCodexSessionExtract(stdout, stderr, argv[1:])
 	case "context-witness":
@@ -91,6 +93,10 @@ func vcacheUsage(w io.Writer) {
   fak vcache context-join [--transcript FILE]... [--telemetry FILE] --events FILE
                    [--json] [--before-millis N] [--after-millis N]
   fak vcache actions [--json] [--snapshot FILE|default|off] [--out FILE]
+                   [--heartbeat-transport] [--explicit-cache-transport]
+                   [--prefix-witness] [--deletion-capable] [--transport-source S]
+  fak vcache apply-actions --manifest FILE [--plan FILE|--snapshot FILE|default|off]
+                   [--manifest-out FILE] [--out FILE] [--json] [--dry-run]
                    [--heartbeat-transport] [--explicit-cache-transport]
                    [--prefix-witness] [--deletion-capable] [--transport-source S]
   fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
@@ -147,6 +153,10 @@ no_cache / explicit_cache) and labels rows noop, ready, or gated. This is a
 decision/API witness, not proof that a provider warm was spent. Transport flags are
 witness inputs only: a heartbeat/explicit-cache row becomes ready only when its
 required capability and byte-identical prefix evidence is supplied.
+apply-actions applies only the local no-provider-call effects of that plan to a
+fak-owned warm manifest: evict_manifest removes a row, no_cache marks a family
+uncached, and spendful heartbeat/explicit-cache rows stay pending unless a later
+provider executor supplies an independent execution witness.
 
 `)
 }
@@ -239,13 +249,15 @@ type vcacheProviderCalStatus struct {
 }
 
 type vcacheProviderActionStatus struct {
-	Verifier  string `json:"verifier"`
-	HTTP      string `json:"http"`
-	CLI       string `json:"cli"`
-	Schema    string `json:"schema"`
-	ReadOnly  bool   `json:"read_only"`
-	Transport string `json:"transport"`
-	Reason    string `json:"reason"`
+	Verifier            string `json:"verifier"`
+	HTTP                string `json:"http"`
+	CLI                 string `json:"cli"`
+	ApplyCLI            string `json:"apply_cli"`
+	Schema              string `json:"schema"`
+	LocalManifestSchema string `json:"local_manifest_schema"`
+	ReadOnly            bool   `json:"read_only"`
+	Transport           string `json:"transport"`
+	Reason              string `json:"reason"`
 }
 
 func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
@@ -301,8 +313,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 		rep.ContextAPI.Verifier, rep.ContextAPI.HTTP, rep.ContextAPI.MCPTool, rep.ContextAPI.AdviceOnly)
 	fmt.Fprintf(stdout, "provider calibration: %s (CLI %s; output %s; consumer %s)\n",
 		rep.ProviderCalibration.Verifier, rep.ProviderCalibration.CLI, rep.ProviderCalibration.Output, rep.ProviderCalibration.Consumer)
-	fmt.Fprintf(stdout, "provider actions API: %s (%s; CLI %s; transport=%s)\n",
-		rep.ProviderActions.Verifier, rep.ProviderActions.HTTP, rep.ProviderActions.CLI, rep.ProviderActions.Transport)
+	fmt.Fprintf(stdout, "provider actions API: %s (%s; CLI %s; local apply %s; transport=%s)\n",
+		rep.ProviderActions.Verifier, rep.ProviderActions.HTTP, rep.ProviderActions.CLI, rep.ProviderActions.ApplyCLI, rep.ProviderActions.Transport)
 	fmt.Fprintf(stdout, "context witness replay: run `%s` (writes %s); score with `%s`\n",
 		rep.ContextAPI.NoKeyWitnessCommand, rep.ContextAPI.DefaultSnapshot, rep.ContextAPI.NoKeyScoreCommand)
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
@@ -382,6 +394,71 @@ func runVCacheActions(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func runVCacheApplyActions(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache apply-actions", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable apply report")
+	manifestPath := fs.String("manifest", "", "local provider-action manifest to update (required; created when absent)")
+	manifestOut := fs.String("manifest-out", "", "write updated manifest to this file (default: --manifest)")
+	planPath := fs.String("plan", "", "read a provider action plan JSON file instead of planning from --snapshot")
+	snapshot := fs.String("snapshot", "default", "provider snapshot to read when --plan is empty: FILE, default, or off")
+	out := fs.String("out", "", "write the JSON apply report to this file")
+	dryRun := fs.Bool("dry-run", false, "compute the report without writing the updated manifest")
+	heartbeatTransport := fs.Bool("heartbeat-transport", false, "witness that the host can issue provider heartbeat refresh calls")
+	explicitCacheTransport := fs.Bool("explicit-cache-transport", false, "witness that the provider exposes explicit cache create/delete controls")
+	prefixWitness := fs.Bool("prefix-witness", false, "witness that action candidates use a byte-identical observed prefix")
+	deletionCapable := fs.Bool("deletion-capable", false, "witness that explicit-cache entries can be deleted")
+	transportSource := fs.String("transport-source", "", "short label for the transport witness source")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	if strings.TrimSpace(*manifestPath) == "" {
+		fmt.Fprintln(stderr, "fak vcache apply-actions: --manifest is required")
+		return 2
+	}
+
+	manifest, err := readVCacheLocalProviderManifest(*manifestPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak vcache apply-actions: read manifest %q: %v\n", *manifestPath, err)
+		return 1
+	}
+	plan, err := loadVCacheApplyActionPlan(*planPath, *snapshot, vcacheobserve.ProviderActionOptions{
+		Transport: vcacheobserve.ProviderTransportWitness{
+			HeartbeatTransport:     *heartbeatTransport,
+			ExplicitCacheTransport: *explicitCacheTransport,
+			ByteIdenticalPrefix:    *prefixWitness,
+			DeletionCapable:        *deletionCapable,
+			Source:                 strings.TrimSpace(*transportSource),
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak vcache apply-actions: %v\n", err)
+		return 1
+	}
+	updated, report := vcacheobserve.ApplyProviderActionPlan(manifest, plan)
+	report.DryRun = *dryRun
+	if strings.TrimSpace(*manifestOut) == "" {
+		*manifestOut = *manifestPath
+	}
+	if !*dryRun {
+		if err := writeJSONFile(*manifestOut, updated); err != nil {
+			fmt.Fprintf(stderr, "fak vcache apply-actions: write manifest %q: %v\n", *manifestOut, err)
+			return 1
+		}
+	}
+	if strings.TrimSpace(*out) != "" {
+		if err := writeJSONFile(*out, report); err != nil {
+			fmt.Fprintf(stderr, "fak vcache apply-actions: write report %q: %v\n", *out, err)
+			return 1
+		}
+	}
+	if *asJSON {
+		return writeJSON(stdout, report)
+	}
+	renderVCacheApplyActions(stdout, report)
+	return 0
+}
+
 func renderVCacheActions(w io.Writer, plan vcacheobserve.ProviderActionPlan) {
 	fmt.Fprintf(w, "vCache provider actions: %d turn(s), %d family(ies); noop=%d ready=%d gated=%d\n",
 		plan.Turns,
@@ -407,6 +484,78 @@ func renderVCacheActions(w io.Writer, plan vcacheobserve.ProviderActionPlan) {
 			row.Reason,
 		)
 	}
+}
+
+func renderVCacheApplyActions(w io.Writer, report vcacheobserve.ProviderActionApplyReport) {
+	fmt.Fprintf(w, "vCache apply-actions: processed=%d applied=%d no-effect=%d pending=%d refused=%d; manifest families %d -> %d\n",
+		report.Counts.Processed,
+		report.Counts.Applied,
+		report.Counts.NoEffect,
+		report.Counts.Pending,
+		report.Counts.Refused,
+		report.BeforeFamilies,
+		report.AfterFamilies,
+	)
+	if report.DryRun {
+		fmt.Fprintln(w, "dry-run: manifest not written")
+	}
+	if len(report.Rows) == 0 {
+		fmt.Fprintln(w, "actions: none")
+		return
+	}
+	fmt.Fprintln(w, "actions:")
+	for _, row := range report.Rows {
+		fmt.Fprintf(w, "- %s: %s [%s] -> %s, reason=%s\n",
+			row.Family,
+			row.Action,
+			row.State,
+			row.Outcome,
+			row.Reason,
+		)
+	}
+}
+
+func readVCacheLocalProviderManifest(path string) (vcacheobserve.LocalProviderManifest, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return vcacheobserve.NormalizeLocalProviderManifest(vcacheobserve.LocalProviderManifest{}), nil
+		}
+		return vcacheobserve.LocalProviderManifest{}, err
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return vcacheobserve.NormalizeLocalProviderManifest(vcacheobserve.LocalProviderManifest{}), nil
+	}
+	var manifest vcacheobserve.LocalProviderManifest
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		return vcacheobserve.LocalProviderManifest{}, err
+	}
+	return vcacheobserve.NormalizeLocalProviderManifest(manifest), nil
+}
+
+func loadVCacheApplyActionPlan(planPath, snapshotPath string, opt vcacheobserve.ProviderActionOptions) (vcacheobserve.ProviderActionPlan, error) {
+	if strings.TrimSpace(planPath) != "" {
+		b, err := os.ReadFile(planPath)
+		if err != nil {
+			return vcacheobserve.ProviderActionPlan{}, fmt.Errorf("read plan %q: %w", planPath, err)
+		}
+		var plan vcacheobserve.ProviderActionPlan
+		if err := json.Unmarshal(b, &plan); err != nil {
+			return vcacheobserve.ProviderActionPlan{}, fmt.Errorf("decode plan %q: %w", planPath, err)
+		}
+		return plan, nil
+	}
+	var turns []vcacheobserve.Turn
+	if path, readSnapshot := resolveVCacheProviderSnapshotPath(snapshotPath); readSnapshot {
+		readTurns, ok, err := vcachesnapshot.Read(path)
+		if err != nil {
+			return vcacheobserve.ProviderActionPlan{}, fmt.Errorf("read snapshot %q: %w", path, err)
+		}
+		if ok {
+			turns = readTurns
+		}
+	}
+	return vcacheobserve.PlanProviderActionsWithOptions(turns, false, opt), nil
 }
 
 func runVCacheProve(stdout, stderr io.Writer, argv []string) int {
@@ -1133,13 +1282,15 @@ func defaultVCacheStatus() vcacheStatusReport {
 			Reason:    "fits provider TTL, minimum prefix, and cached-read multiplier from replayed probe samples instead of hard-coded hypotheses",
 		},
 		ProviderActions: vcacheProviderActionStatus{
-			Verifier:  "ready",
-			HTTP:      "GET /v1/fak/vcache/actions",
-			CLI:       "fak vcache actions",
-			Schema:    vcacheobserve.ProviderActionSchema,
-			ReadOnly:  true,
-			Transport: "decision_only",
-			Reason:    "maps observed provider-cache families to noop/ready/gated action rows; heartbeat/explicit-cache rows remain gated until prefix and provider-capability evidence exists",
+			Verifier:            "ready",
+			HTTP:                "GET /v1/fak/vcache/actions",
+			CLI:                 "fak vcache actions",
+			ApplyCLI:            "fak vcache apply-actions --manifest FILE",
+			Schema:              vcacheobserve.ProviderActionSchema,
+			LocalManifestSchema: vcacheobserve.LocalProviderManifestSchema,
+			ReadOnly:            true,
+			Transport:           "decision_only",
+			Reason:              "maps observed provider-cache families to noop/ready/gated action rows; apply-actions executes local evict/no_cache manifest edits while heartbeat/explicit-cache rows remain gated or pending until prefix and provider-capability evidence exists",
 		},
 		M4Issue: "https://github.com/anthony-chaudhary/fak/issues/719",
 		M5Issue: "https://github.com/anthony-chaudhary/fak/issues/720",

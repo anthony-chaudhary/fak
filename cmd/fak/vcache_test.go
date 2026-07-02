@@ -33,7 +33,7 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"M4 recall cost-gate proof: refuted",
 		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
 		"provider calibration: ready (CLI fak vcache calibrate; output vcachecal.Calibration JSON; consumer fak vcache observe --calibration)",
-		"provider actions API: ready (GET /v1/fak/vcache/actions; CLI fak vcache actions; transport=decision_only)",
+		"provider actions API: ready (GET /v1/fak/vcache/actions; CLI fak vcache actions; local apply fak vcache apply-actions --manifest FILE; transport=decision_only)",
 		"context witness replay: run `fak vcache context-witness`",
 		"vcache-context-turns.jsonl",
 		"fak vcache score --json",
@@ -89,9 +89,12 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 	if rep.ProviderActions.Verifier != "ready" ||
 		rep.ProviderActions.HTTP != "GET /v1/fak/vcache/actions" ||
 		rep.ProviderActions.CLI != "fak vcache actions" ||
+		rep.ProviderActions.ApplyCLI != "fak vcache apply-actions --manifest FILE" ||
 		rep.ProviderActions.Schema != vcacheobserve.ProviderActionSchema ||
+		rep.ProviderActions.LocalManifestSchema != vcacheobserve.LocalProviderManifestSchema ||
 		!rep.ProviderActions.ReadOnly ||
 		rep.ProviderActions.Transport != "decision_only" ||
+		!strings.Contains(rep.ProviderActions.Reason, "evict/no_cache") ||
 		!strings.Contains(rep.ProviderActions.Reason, "heartbeat/explicit-cache") {
 		t.Fatalf("provider_actions status missing live action API contract: %+v", rep.ProviderActions)
 	}
