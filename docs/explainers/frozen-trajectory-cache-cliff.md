@@ -33,8 +33,8 @@ cache has no answer to any of them.
 you will know why the headline number is an artifact of one workload shape, the three
 scaling laws that bend it to zero, and why this is the case for an addressable, coherence-
 checked cache rather than a frozen prefix. Every number here comes from
-[`tools/cache_curve.py`](../../tools/cache_curve.py) (deterministic, stdlib-only) and the
-real transcripts on this machine via [`tools/session_audit.py`](../../tools/session_audit.py).*
+[`tools/cache_curve.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py) (deterministic, stdlib-only) and the
+real transcripts on this machine via [`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py).*
 
 This is the demand-side companion to two existing notes. The mechanics of prefix reuse are
 in [`kv-cache-agentic-context.md`](kv-cache-agentic-context.md); the supply-side answer —
@@ -178,7 +178,7 @@ belongs to axes 1 and 2 (which genuinely bend one agent's hit to zero); fan-out'
 watch is the 0% cross-agent reuse rate and the linearly-growing waste. Recovering it requires
 leaving the default: stagger launches within the TTL, or prefill the prefix once and clone it
 bit-identically into every agent — exactly
-[pay-the-prefix-once](../../visuals/65-pay-the-prefix-once.svg).
+[pay-the-prefix-once](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/65-pay-the-prefix-once.svg).
 
 ## The compound collapse
 
@@ -240,9 +240,9 @@ Map each cliff axis to what is already shipped versus the open build:
 
 | Cliff axis | The frozen cache's failure | fak's answer | Status |
 |---|---|---|---|
-| Flexibility (edit / compact / RSI) | head-mutation invalidates the suffix | suffix-only regen on the live per-turn path (re-prefill only the divergent suffix), plus addressable, bit-exact span eviction (the KV-MMU, `max|Δ|=0`) so an edit removes exactly the touched span — [FAK 404/406](../../LEARNING-PATH.md), [addressable-kv-cache](addressable-kv-cache.md) | **shipped** (per-session, CPU path) |
-| Per-turn tool density | the 20-block / 4-breakpoint budget overruns | RadixAttention prefix tree keyed on token-ids (model-agnostic), on by default — [FAK 405](../../LEARNING-PATH.md) | **shipped** |
-| Cross-agent fan-out | concurrency wall → 0% cross-agent reuse; prefix paid N× | prefill the shared prefix once and clone it bit-identically into every agent (`max|Δ|=0`) — [pay-the-prefix-once](../../visuals/65-pay-the-prefix-once.svg) | **shipped** (this is the fan-out demo's "shared" path) |
+| Flexibility (edit / compact / RSI) | head-mutation invalidates the suffix | suffix-only regen on the live per-turn path (re-prefill only the divergent suffix), plus addressable, bit-exact span eviction (the KV-MMU, `max|Δ|=0`) so an edit removes exactly the touched span — [FAK 404/406](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md), [addressable-kv-cache](addressable-kv-cache.md) | **shipped** (per-session, CPU path) |
+| Per-turn tool density | the 20-block / 4-breakpoint budget overruns | RadixAttention prefix tree keyed on token-ids (model-agnostic), on by default — [FAK 405](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) | **shipped** |
+| Cross-agent fan-out | concurrency wall → 0% cross-agent reuse; prefix paid N× | prefill the shared prefix once and clone it bit-identically into every agent (`max|Δ|=0`) — [pay-the-prefix-once](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/65-pay-the-prefix-once.svg) | **shipped** (this is the fan-out demo's "shared" path) |
 | Durable across rollout / fleet | every binding-axis bump cold-starts the whole fleet | text-as-source regenerable cache; backfill replaces the synchronized cold start | **plan** ([regenerable-KV R1–R8](../serving/regenerable-kv-plan.md)) |
 
 Three of the four axes already have a shipped supply-side answer; the unbuilt part is the
@@ -254,7 +254,7 @@ transfers intact: never serve one regime's KV bytes to another — re-derive.
 The near-term step this demonstrator points at is its own: **turn the model into a meter.**
 `cache_curve.py` *predicts* the survival factors and now exposes `validate` for measured
 fan-out/flex anchors; the offline prefix-divergence analysis from
-[FAK 401](../../LEARNING-PATH.md) / [kv-cache-agentic-context](kv-cache-agentic-context.md)
+[FAK 401](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) / [kv-cache-agentic-context](kv-cache-agentic-context.md)
 is the richer path that *measures* the flexibility factor directly on a real transcript
 (longest-common-prefix reuse per turn), while `session_audit.py` already reads the provider
 `cache_read` / `cache_creation` split. Feeding those measurements into the explicit validation
@@ -331,5 +331,5 @@ mechanics and the input:output ratio that makes the cache matter) ·
 [`SCALING-LAWS-OF-AGENTS-2026-06-19.md`](../notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md) (the
 supply-side: deleting the reread under legality checks) ·
 [`AGENTIC-CACHING-SOTA-2026-06-19.md`](../notes/AGENTIC-CACHING-SOTA-2026-06-19.md) (the
-SOTA cache-layer parity map) · [`pay-the-prefix-once`](../../visuals/65-pay-the-prefix-once.svg)
+SOTA cache-layer parity map) · [`pay-the-prefix-once`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/65-pay-the-prefix-once.svg)
 (the multi-agent clone-once picture).

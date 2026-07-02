@@ -32,7 +32,7 @@ A **`trajectory.Turn`** is one analysis-shaped record of an agent action: the tr
 it belongs to, its order within the trace, the human-meaningful query that drove it,
 the tool and the kernel's verdict, the result taint, the digest identities, the
 per-turn token/byte cost, and — optionally — a deterministic `simhash` embedding of
-the query. It is deliberately *different* from a [decision-journal](../../internal/journal/journal.go)
+the query. It is deliberately *different* from a [decision-journal](https://github.com/anthony-chaudhary/fak/blob/main/internal/journal/journal.go)
 row: the journal is the tamper-evident audit ledger (a verdict over a digest); a
 `Turn` is the analysis surface (the query text, the cost, the cache shape, the
 embedding). One proves what the kernel decided; the other lets you find the bad

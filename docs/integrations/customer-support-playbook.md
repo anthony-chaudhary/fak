@@ -249,6 +249,6 @@ Add a `rate_limit` block to your policy:
 ## Cross-references
 
 - [General adopter playbook](adopter-playbook.md) — the full three-shape integration guide (front a model, MCP server, CI embed).
-- [Policy schema](../../POLICY.md) — the `fak-policy/v1` manifest documentation.
+- [Policy schema](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the `fak-policy/v1` manifest documentation.
 - [Claude Code integration](claude.md) — full Claude-specific guide (denial table, cloud providers, observability).
 - [Security and threat model](../fak/security.md) — the two-gate containment architecture and the general threat model.

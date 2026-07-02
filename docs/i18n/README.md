@@ -33,8 +33,8 @@ by a native technical writer. If you spot a mistranslation, an awkward phrasing,
 stale link, please open an issue or PR — corrections are welcome and credited.
 
 Every technical claim in a localized page must match the English source of truth
-([`README.md`](../../README.md), [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md),
-[`CLAIMS.md`](../../CLAIMS.md)). Localization changes the *language*, never the *claim* —
+([`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md), [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md),
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)). Localization changes the *language*, never the *claim* —
 the same net-true-value discipline applies, so a localized page quotes the tuned baseline
 (~4.1×), never the naive headline, exactly as the English docs do.
 
@@ -43,7 +43,7 @@ the same net-true-value discipline applies, so a localized page quotes the tuned
 1. Create `docs/i18n/<code>/README.md` using a two-letter (or `zh-Hant`-style) code.
 2. Translate the **structure** of an existing entry-point page — do not invent new claims;
    mirror the English source and keep all commands, flags, and code blocks in English.
-3. Add a row to the table above and a line in [`INDEX.md`](../../INDEX.md).
+3. Add a row to the table above and a line in [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md).
 4. Keep it compact: entry point + hand-off, not a doc-set fork.
 
 The broader go-to-market rationale (why these markets, the full lever set, what is shipped

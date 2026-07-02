@@ -8,7 +8,7 @@ description: "Page d'entrée en français pour fak : un binaire Go qui vérifie 
 > Ceci est une **page d'entrée localisée (entry point)**, pas une traduction complète de
 > la documentation. La documentation canonique est en anglais — cette page vous donne
 > l'essentiel, la preuve en 60 secondes et le chemin d'installation, puis vous renvoie
-> vers la [documentation anglaise](../../../README.md).
+> vers la [documentation anglaise](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
 > **Avertissement :** cette traduction est générée automatiquement et attend une relecture
 > native — les corrections par issue/PR sont bienvenues.
 >
@@ -49,7 +49,7 @@ fak guard -- claude    # enveloppe votre agent existant en une seule commande
   warm-cache optimisée (~60× par rapport à une boucle naïve de re-envoi ; le chiffre
   honnête est 4,1×). Le routage per-aspect envoie en plus les parties bon marché vers des
   modèles moins chers. Chaque chiffre est tracé dans
-  [BENCHMARK-AUTHORITY](../../../BENCHMARK-AUTHORITY.md).
+  [BENCHMARK-AUTHORITY](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 - **Apache-2.0, zéro friction d'achat.** fak est libre, open source et auto-hébergé — pas
   de contrat fournisseur, pas de carte bancaire, pas de compte. `git clone` et
   `go install`, c'est tout le chemin.
@@ -88,13 +88,13 @@ compatible OpenAI.
 
 ## Où aller ensuite
 
-- [README (la vue d'ensemble complète)](../../../README.md)
-- [START-HERE — un modèle local en 10 minutes](../../../START-HERE.md)
-- [Getting Started — installer le binaire](../../../GETTING-STARTED.md)
+- [README (la vue d'ensemble complète)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
+- [START-HERE — un modèle local en 10 minutes](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
+- [Getting Started — installer le binaire](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)
 - [Integrations — brancher votre agent](../../integrations/README.md)
 - [Data residency & compliance — pour le RGPD](../../explainers/data-residency-and-compliance.md)
 - [EU AI Act article 12 — conformité du journal d'audit](../../standards/eu-ai-act-article-12-conformance.md)
-- [BENCHMARK-AUTHORITY — la source de chaque chiffre](../../../BENCHMARK-AUTHORITY.md)
-- [CLAIMS — ce qui est shipped/simulé/stub](../../../CLAIMS.md)
+- [BENCHMARK-AUTHORITY — la source de chaque chiffre](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
+- [CLAIMS — ce qui est shipped/simulé/stub](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)
 
-Licence : [Apache-2.0](../../../LICENSE).
+Licence : [Apache-2.0](https://github.com/anthony-chaudhary/fak/blob/main/LICENSE).

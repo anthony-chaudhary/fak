@@ -15,7 +15,7 @@ discipline that answers it well, in two places:
   calibrate` loop: a `Prediction` (the theory a lever declares for a metric, before
   billed reality is consulted) is scored against a measured `Outcome` lifted from the
   provider's own usage records, yielding a `Verdict` from a closed set.
-- [`internal/resume`](../../internal/resume/backtest.go) `Backtest` — the resume-cache
+- [`internal/resume`](https://github.com/anthony-chaudhary/fak/blob/main/internal/resume/backtest.go) `Backtest` — the resume-cache
   projection back-tested against the provider's own per-turn `cache_read` /
   `cache_creation` records: the projection is the model, the usage records are the
   ground truth, and the report is the residual (an `Accuracy`, plus the *directional*
@@ -95,7 +95,7 @@ The band is the *eval-fn* made data: a residual within `calibrated_max` of the c
 is calibrated; a corpus thinner than `min_sample` is too thin to score and is
 reported `INSUFFICIENT` rather than rounded up. The default `calibrated_max` of `0.10`
 (within 10% of the claim) is the dojo's conservative
-[`DefaultCalibBand`](../../internal/dojo/dojo.go).
+[`DefaultCalibBand`](https://github.com/anthony-chaudhary/fak/blob/main/internal/dojo/dojo.go).
 
 ### Verdict — the closed, validatable output
 
@@ -113,7 +113,7 @@ token cannot be produced, and a validator decides membership without a live serv
 The normalized residual is the relative error `|realized − claimed| / |claimed|`,
 capped so a claim near zero that reality refutes cannot dominate with an unbounded
 ratio; a claim of "nothing" is scored by the absolute residual instead (the exact
-[`calibErr`](../../internal/dojo/dojo.go) the reference implementation uses). The
+[`calibErr`](https://github.com/anthony-chaudhary/fak/blob/main/internal/dojo/dojo.go) the reference implementation uses). The
 [machine-checkable schema](prediction-calibration.json) publishes this verdict set as
 a closed JSON Schema `enum` (Draft 2020-12), so any orchestrator validates a verdict
 with an off-the-shelf validator, **no fak engine present**.
@@ -127,7 +127,7 @@ higher-is-better metric (the default — a hit rate, an accuracy, a saving), `re
 promised, so it scores `OVER_CLAIM`. For a `lower_is_better` metric (a
 `false_warm_rate`, a latency), the polarity flips: `realized` **above** the claim is
 the worse side. This is the exact
-[`worseThanClaim`](../../internal/dojo/dojo.go) rule the reference implementation
+[`worseThanClaim`](https://github.com/anthony-chaudhary/fak/blob/main/internal/dojo/dojo.go) rule the reference implementation
 applies, surfaced here as a named contract so the conservative bias — *over-claiming
 is the direction that must never hide* — is part of the vocabulary, not an
 implementation detail. An `intentional_floor` claim is scored on its breach (the worse
@@ -143,12 +143,12 @@ bound to a witness:
 1. **The verdict vocabulary is closed and validatable.** The four verdicts above are
    the whole set; an out-of-set token is `UNCLASSIFIED` and refused, never coerced to
    a pass — the same fail-closed posture
-   [`dos check-reason`](../../AGENTS.md) keeps for a refusal token. Membership is
+   [`dos check-reason`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) keeps for a refusal token. Membership is
    decided by a finite switch, not a lookup against a live service. The
    [`prediction-calibration.json`](prediction-calibration.json) schema publishes the
    `enum` so the claim is machine-checkable, not asserted; the reference
    implementation's verdict constants
-   ([`internal/dojo/dojo.go`](../../internal/dojo/dojo.go)) are the same closed set,
+   ([`internal/dojo/dojo.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/dojo/dojo.go)) are the same closed set,
    offline-witnessed by `go test ./internal/dojo/`.
 2. **An over-claim is surfaced, never hidden; the conservative-bias direction is
    explicit.** `OVER_CLAIM` is a first-class verdict with its own decision arm, and
@@ -175,9 +175,9 @@ cannot conclusively score the claim is **reported `INSUFFICIENT`, never rounded 
 `CALIBRATED`**. Two cases collapse to it — `measured: false` (no ground truth existed,
 the dojo's `UNMEASURED`) and a `sample` below `min_sample` (the corpus is too thin to
 trust a central tendency, the discipline
-[`internal/resume`](../../internal/resume/backtest.go) keeps by *excluding* an
+[`internal/resume`](https://github.com/anthony-chaudhary/fak/blob/main/internal/resume/backtest.go) keeps by *excluding* an
 ambiguous partial re-serve from its accuracy denominator rather than scoring it on a
-guess, and [`internal/dojocal`](../../internal/dojocal/dojocal.go) keeps with a
+guess, and [`internal/dojocal`](https://github.com/anthony-chaudhary/fak/blob/main/internal/dojocal/dojocal.go) keeps with a
 `DefaultMinSample` floor before a recalibration is trusted). The
 [warm-hit bimodal note](../notes/DOJO-WARM-HIT-BIMODAL-963-2026-06-26.md) is the
 canonical reason this rule matters: a claim recalibrated `0.17 → 0.0` to the

@@ -171,7 +171,7 @@ options, smallest-first — recorded as decisions, **not** built here (building 
 no consumer would just add another latent surface):
 
 > **UPDATE 2026-06-24 — #1 is now BUILT and WIRED.** The first option below shipped as
-> [`tools/claims_salience_register.py`](../../tools/claims_salience_register.py): it routes
+> [`tools/claims_salience_register.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/claims_salience_register.py): it routes
 > every `CLAIMS.md` claim through `dos.salience.partition` (`[SHIPPED]`→LIVE,
 > `[SIMULATED]`/`[STUB]`→host-declared PARKED), asserts the no-loss invariant + cross-checks
 > the live/parked counts against the ledger, and surfaces the recoverable register at

@@ -10,8 +10,8 @@ front page is archived at
 [README-2026-06-25-before-fresh-start.md](archive/README-2026-06-25-before-fresh-start.md).
 
 Each claim still carries the same authority it did on the front page — every
-number traces to [BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md), and every
-tagged claim to [CLAIMS.md](../CLAIMS.md).
+number traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and every
+tagged claim to [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ---
 
@@ -44,22 +44,22 @@ Each row is a starter policy floor: a reviewable allow-list you copy, trim, and 
 `fak preflight` against to watch the floor bite. Point your agent at one with
 `fak guard --policy examples/<file>` (or `fak serve --policy …` for a gateway). The
 full catalogue, with a witness command per floor, is in
-[examples/README.md](../examples/README.md).
+[examples/README.md](https://github.com/anthony-chaudhary/fak/blob/main/examples/README.md).
 
 | Domain | Starter floor | The dangerous action it denies |
 |---|---|---|
-| Coding agent | [`presets/coding-agent-safe.json`](../examples/presets/coding-agent-safe.json) | force-push, `git add -A`, out-of-tree writes, destructive shell |
-| Coding agent (push feature branches) | [`protected-push-floor-policy.json`](../examples/protected-push-floor-policy.json) | a `git_push` whose ref is `main`/`release/*`, by argument value |
-| PR-review bot | [`code-review-bot-policy.json`](../examples/code-review-bot-policy.json) | `merge_pull_request`, `git_push`, `workflow_dispatch` |
-| Customer support | [`customer-support-readonly-policy.json`](../examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
-| Open-web research | [`research-agent-policy.json`](../examples/research-agent-policy.json) | `send_email`, shell, upload, arbitrary note path |
-| Browsing / scraping | [`browser-web-agent-policy.json`](../examples/browser-web-agent-policy.json) | `submit_form`, `execute_script`, a `file:`/`javascript:` URL |
-| Email / calendar | [`email-calendar-assistant-policy.json`](../examples/email-calendar-assistant-policy.json) | `send_email`, `forward_email`, `invite_external_guest` |
-| Infra / DevOps review | [`devops-dryrun-policy.json`](../examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
-| Flight booking | [`flight-booking-agent-policy.json`](../examples/flight-booking-agent-policy.json) | `refund_payment`, `export_pnr`, a `$10k+` fare |
-| Trading / brokerage | [`finance-trading-agent-policy.json`](../examples/finance-trading-agent-policy.json) | `withdraw_funds`, a six-figure order, a `short` side |
-| Clinical / PHI | [`healthcare-phi-policy.json`](../examples/healthcare-phi-policy.json) | `export_patient_data`, `email_phi`, record delete |
-| BI / SQL analyst | [`sql-analyst-policy.json`](../examples/sql-analyst-policy.json) | a `DROP`/`INSERT` inside an allowed read-query tool |
+| Coding agent | [`presets/coding-agent-safe.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/presets/coding-agent-safe.json) | force-push, `git add -A`, out-of-tree writes, destructive shell |
+| Coding agent (push feature branches) | [`protected-push-floor-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/protected-push-floor-policy.json) | a `git_push` whose ref is `main`/`release/*`, by argument value |
+| PR-review bot | [`code-review-bot-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/code-review-bot-policy.json) | `merge_pull_request`, `git_push`, `workflow_dispatch` |
+| Customer support | [`customer-support-readonly-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/customer-support-readonly-policy.json) | `refund_payment`, direct account or email action |
+| Open-web research | [`research-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/research-agent-policy.json) | `send_email`, shell, upload, arbitrary note path |
+| Browsing / scraping | [`browser-web-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/browser-web-agent-policy.json) | `submit_form`, `execute_script`, a `file:`/`javascript:` URL |
+| Email / calendar | [`email-calendar-assistant-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/email-calendar-assistant-policy.json) | `send_email`, `forward_email`, `invite_external_guest` |
+| Infra / DevOps review | [`devops-dryrun-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/devops-dryrun-policy.json) | `terraform_apply`, exec, delete, production deploy |
+| Flight booking | [`flight-booking-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/flight-booking-agent-policy.json) | `refund_payment`, `export_pnr`, a `$10k+` fare |
+| Trading / brokerage | [`finance-trading-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/finance-trading-agent-policy.json) | `withdraw_funds`, a six-figure order, a `short` side |
+| Clinical / PHI | [`healthcare-phi-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/healthcare-phi-policy.json) | `export_patient_data`, `email_phi`, record delete |
+| BI / SQL analyst | [`sql-analyst-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/sql-analyst-policy.json) | a `DROP`/`INSERT` inside an allowed read-query tool |
 
 Each denied action escalates to that floor's human safe sink instead of failing
 silently. Every refusal cites a closed reason code you can assert on, such as
@@ -89,7 +89,7 @@ accounting and control plane. The design contract, the full command set, and the
 causality fences are on the
 [vCache page](notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md); the Codex/OpenAI
 probe is written up in
-[the probe note](../experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
+[the probe note](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
 
 ## Model Routing And Router Fusion
 
@@ -153,13 +153,13 @@ The at-a-glance surface table (moved off the front page 2026-07-01):
 | In-kernel model | Pure-Go reference model, kernel-owned KV cache, GPU/backend witnesses | correctness/reference path |
 | Cross-platform spine | One kernel across the deployment substrate (IoT → edge → laptop → hyperscaler) | shipped |
 
-Every claim in [CLAIMS.md](../CLAIMS.md) carries exactly one tag: `[SHIPPED]`,
+Every claim in [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries exactly one tag: `[SHIPPED]`,
 `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
 
 ## Benchmarks, in one page
 
 The rule is simple: every number traces to
-[BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md). The ones worth remembering:
+[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). The ones worth remembering:
 
 - 50-turn × 5-agent Qwen2.5-1.5B authority row: 4.1× vs a tuned warm-cache stack (prefix
   reuse climbs to 6.95× across the model ladder). Larger figures are fenced as vs-naive.
@@ -249,8 +249,8 @@ OpenAI traffic goes to `http://127.0.0.1:8080/v1`, Anthropic Messages to the bar
 Harden with `--require-key-env FAK_TOKEN` and scrape `/metrics`. For MCP hosts,
 `fak serve --stdio --policy examples/dev-agent-policy.json` exposes five kernel tools
 (`fak_adjudicate` / `fak_syscall` / `fak_admit` / `fak_context_change` plus a session
-reset). See [GETTING-STARTED.md](../GETTING-STARTED.md),
-[fak/api-reference.md](fak/api-reference.md), and [../examples/mcp](../examples/mcp).
+reset). See [GETTING-STARTED.md](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md),
+[fak/api-reference.md](fak/api-reference.md), and [../examples/mcp](https://github.com/anthony-chaudhary/fak/tree/main/examples/mcp).
 
 The kernel also reports live prefill vs decode tok/s on `/metrics`, so a slow first request
 gets an answer instead of a shrug. The operating board that keeps the multi-agent reuse,
@@ -276,4 +276,4 @@ later commit in the same push to repair a broken intermediate. No side branch, n
 
 ---
 
-The current front page is [README.md](../README.md).
+The current front page is [README.md](https://github.com/anthony-chaudhary/fak/blob/main/README.md).

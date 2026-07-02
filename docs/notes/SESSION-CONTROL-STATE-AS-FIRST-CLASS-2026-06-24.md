@@ -82,7 +82,7 @@ asked for:
 `DRAINING` is the load-bearing nuance: a stop is requested at any instant but **taken at a
 turn boundary**, never mid-decode — so a stop never corrupts a half-emitted tool call or a
 mid-flight KV mutation. The session keeps the `STOPPED` reason as a value (a closed token, the
-same discipline as the [refusal vocabulary](../../POLICY.md)), so "why did it stop" is a
+same discipline as the [refusal vocabulary](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)), so "why did it stop" is a
 field, not an inference from an exit code. This mirrors how the kernel takes a poison
 quarantine on the `<|im_end|>` boundary in `EvictPoisoned`, never mid-token.
 
@@ -192,7 +192,7 @@ A cold resume already reloads the context (the ctxplan index next to the recall 
 session at the budget/priority/run-state it held, not a default. A `STOPPED` session reloads
 as `STOPPED` (with its reason) — it is not silently resurrected as `RUNNING`. This is the
 honesty rung: the persisted drive is a fact, re-checkable, the same way
-[`dos_recall`](../../README.md) re-verifies a memory against ground truth instead of trusting
+[`dos_recall`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) re-verifies a memory against ground truth instead of trusting
 the body.
 
 ## 6. What this is NOT (so it stays small)

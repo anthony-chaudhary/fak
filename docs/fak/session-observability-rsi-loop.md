@@ -91,7 +91,7 @@ python tools/session_audit.py audit # the cost side: tokens, tool mix, cache reu
 ## The scorecard
 
 `internal/sessionobs` grades the climb, following the repo's
-[scorecard doctrine](../../.claude/skills/scorecard/SKILL.md). It is a pure,
+[scorecard doctrine](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/scorecard/SKILL.md). It is a pure,
 deterministic function — `Score(corpus []Record, pipe Pipeline) Report` — with no
 clock and no RNG, so two callers with the same inputs score identically. The headline
 integer is `sessionobs_debt`: the count of HARD rungs not yet built.

@@ -6,8 +6,8 @@ description: "An aggregated executive snapshot of fak: the flagship wins, the li
 # fak executive roll-up — 2026-06-27
 
 _The aggregation of the most important items across fak's reports and concept docs:
-[PRODUCT-STATUS](PRODUCT-STATUS.md), [BENCHMARK-AUTHORITY](../BENCHMARK-AUTHORITY.md),
-the [AgentDojo red-team](../experiments/agent-live/agentdojo-fak-fullstack-20260627.md),
+[PRODUCT-STATUS](PRODUCT-STATUS.md), [BENCHMARK-AUTHORITY](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md),
+the [AgentDojo red-team](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/agentdojo-fak-fullstack-20260627.md),
 [dispatch-status](dispatch-status.md), the [GLM-5.2 cache-value packet](benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md),
 and the industry scorecard. Synthesized by a 7-agent aggregation+critic workflow; every
 number cross-checked against the tree and carries a provenance label._
@@ -143,4 +143,4 @@ with until it is. The live strategic goal (GLM-5.2 in fak's own kernel) is on-tr
 _Regenerate: this roll-up is synthesized from the linked source docs; each is independently
 regenerable by its own tool (`tools/product_scorecard.py`, `tools/dispatch_status.py`,
 `go run ./cmd/agentdojoredteam -json`). Numbers are bound to commits in
-[BENCHMARK-AUTHORITY.md](../BENCHMARK-AUTHORITY.md)._
+[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)._

@@ -22,7 +22,7 @@ cross-border AI API is the awkward shape here. fak is the opposite shape by cons
 
 fak's residency story is a direct consequence of four properties it already ships. None of
 these are new for this doc — they are the same properties described in the
-[README](../../README.md) and [llms.txt](../../llms.txt), read through a residency lens.
+[README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) and [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), read through a residency lens.
 
 1. **Self-host-first.** `fak` is one static Go binary with zero external dependencies. Put
    it in front of a **local** model (`fak guard --gguf …`, or `fak serve` fronting Ollama /

@@ -66,7 +66,7 @@ geometry — the artifact carries zero modeled fields** (a test gate enforces it
 
 Measured on a CPU-only box (no GPU, no model weights, no API key — a deterministic offline
 planner drives each sub-agent so the run is reproducible and needs nothing). Checked-in
-artifact [`experiments/fanout/fanrun.json`](../../experiments/fanout/fanrun.json):
+artifact [`experiments/fanout/fanrun.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/fanout/fanrun.json):
 
 | N (sub-agents) | tasks completed | tool errors | **wall-clock (serial)** | agents/s (serial) | **cross-agent vDSO hits** | **vdso_fills** | prefix tokens elided = (N−1)·P |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -170,11 +170,11 @@ spanning three orders of magnitude). The D-001 acceptance criteria
 ([#255](https://github.com/anthony-chaudhary/fak/issues/255)) name the **literal** scale
 points **N=100, N=500, N=1000** and ask for **coordination overhead vs a baseline** next to
 the cross-agent reuse uplift. The dedicated scale harness
-([`internal/bench/fanscale.go`](../../internal/bench/fanscale.go)) prices exactly those
+([`internal/bench/fanscale.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/bench/fanscale.go)) prices exactly those
 points against the **N=1 single-agent baseline** and is wired to a reproducible command
 path. Medians over 16 seeded trials (research-goal, P=2048, sub-turns=4, seed 1,
 `fak 0.34.0`, `go1.26.3`); checked-in artifact
-[`experiments/fanout/fanscale-d001.json`](../../experiments/fanout/fanscale-d001.json):
+[`experiments/fanout/fanscale-d001.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/fanout/fanscale-d001.json):
 
 | N (sub-agents) | calls | **coord overhead** (turns vs N=1) | coord overhead ÷ baseline | parallel_speedup | **cross_uplift** (measured) | prefix_tokens_saved = (N−1)·P | tax_clawed_back (modeled) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -226,9 +226,9 @@ the `DeferredRun` above. This subsection ships the half that **is** host-runnabl
 construction**, derived from each framework's *documented* multi-agent topology — not a
 measured wall-clock, and not a head-to-head throughput claim. It is the same honest
 discipline as the committed CrewAI manager-worker model
-([`examples/crewai-crew/`](../../examples/crewai-crew/README.md), 4.93×): **deterministic
+([`examples/crewai-crew/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/crewai-crew/README.md), 4.93×): **deterministic
 token arithmetic from a stated geometry**, governed by
-[`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md), and it sits inside the
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and it sits inside the
 already-declared `[SIMULATED]` reuse claim in `CLAIMS.md` (the win is **reuse-vs-reprefill
 over a stack that re-sends the shared prefix per coordination step — the common framework
 default — NOT** a win over a tuned shared-prefix engine).
@@ -418,7 +418,7 @@ recorded as a ceiling, never extrapolated. So columns A and B (where fanbench's 
 live) are kept apart from column C (where the engines win or tie) — exactly so no reader
 mistakes the reuse-vs-reprefill geometry for a vs-engine throughput win. Full provenance,
 the per-C llama.cpp sweep, and the host ceiling that gates a same-host fresh run are in
-[`../../experiments/fanout/peer-baselines.json`](../../experiments/fanout/peer-baselines.json).
+[`../../experiments/fanout/peer-baselines.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/fanout/peer-baselines.json).
 
 ---
 

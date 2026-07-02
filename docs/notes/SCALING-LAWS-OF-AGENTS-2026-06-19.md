@@ -13,8 +13,8 @@ Measured claims are separated from frontier hypotheses.
 
 Use with:
 
-- [README](../../README.md)
-- [Performance spectrum visual](../../visuals/41-performance-spectrum.svg)
+- [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
+- [Performance spectrum visual](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/41-performance-spectrum.svg)
 - Session value-stack deck — `SESSION-VALUE-STACK-DECK.md` (private companion — not published)
 - Fleet value projection — `FLEET-VALUE-PROJECTION.md` (private companion — not published)
 - Implications memo — `IMPLICATIONS-fak-agentic-os-2026-06-18.md` (private companion — not published; for the permission-floor framing it leans on, see [the capability floor](SECURITY-capability-floor-2026-06-18.md))
@@ -31,9 +31,9 @@ The better first-order law is:
 agent work ~= agents x turns x working-set size x reread rate x legality checks
 ```
 
-![Scaling laws of agents](../../visuals/42-agent-scaling-laws.svg)
+![Scaling laws of agents](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/42-agent-scaling-laws.svg)
 
-![Calculated frontier spectrum](../../visuals/44-agent-frontier-spectrum-data-chart.svg)
+![Calculated frontier spectrum](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/44-agent-frontier-spectrum-data-chart.svg)
 
 Where:
 

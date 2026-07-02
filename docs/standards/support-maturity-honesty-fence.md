@@ -41,7 +41,7 @@ candidate's own claim (the "non-forgeable keep-bit").
 Applied to the ladder: a cell advances to M4 (correct) only on a CI-runnable oracle
 (`covmatrix.OracleInCI`), to M5 (optimized) only on a committed bench a third party
 can re-run, to M6 (SOTA-parity) only on the baseline-letter discipline of
-[`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md). An author's own "this is M6"
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). An author's own "this is M6"
 is not a promotion event; it is a hypothesis awaiting a non-author witness. The author
 proposes the rung; the witness disposes of it.
 
@@ -94,18 +94,18 @@ count re-derives from the live grid each run.
 
 ## How this is encountered by default
 
-The fence is reachable today from [`INDEX.md`](../../INDEX.md), listed directly beside
+The fence is reachable today from [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md), listed directly beside
 its two sibling standards ([net-true-value](net-true-value.md) and
 [observer-effect](observer-effect.md)), and is pinned as epic #1243's honesty contract —
 Definition-of-Done item 8, "the honesty fence holds (no self-reported promotion;
 labels)." Two further placements are the named follow-on; this page does not yet claim
 them as present, because the fence forbids reporting an un-landed placement as attained:
 
-- **Agents** — a pointer in [`AGENTS.md`](../../AGENTS.md) beside the "every claim
+- **Agents** — a pointer in [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) beside the "every claim
   carries a tag" rule and the [net-true-value](net-true-value.md) /
   [observer-effect](observer-effect.md) lenses, so the support-side check sits where an
   agent already reads before reporting "this family is now optimized / at parity."
-- **Humans** — an [`llms.txt`](../../llms.txt) doc-map entry beside the two sibling
+- **Humans** — an [`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) doc-map entry beside the two sibling
   standards. Deferred because adding one forces a regen of the generated `llms-full.txt`
   companion (the `gen_llms_full.py --check` drift gate), a separate generated-file step
   taken off the shared trunk.

@@ -12,7 +12,7 @@ failure, so it is a first-class part of this module's test story.
 
 **The full `fak` suite passes under `-race` with zero data races**, and CI
 enforces it on every push and pull request (the `race detector · go test -race
-./...` job in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)). A
+./...` job in [`.github/workflows/ci.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/ci.yml)). A
 change that introduces a data race in any package — hot path or not — fails that
 required check.
 
@@ -42,7 +42,7 @@ test -race` cannot build an instrumented binary.
 
 ## Running it locally
 
-> **The one-command path:** [`tools/race_test.sh`](../../tools/race_test.sh)
+> **The one-command path:** [`tools/race_test.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/race_test.sh)
 > wraps the run with a **cgo preflight** — it proves a C compiler is present and
 > forces `CGO_ENABLED=1` *before* building, then delegates to `fak/test.sh` with
 > the CI-matching flags (`-race -count=1 -timeout=25m ./...`). If cgo is missing
@@ -64,7 +64,7 @@ needed — `CGO_ENABLED` defaults to `1` on these platforms.
 ### Windows via WSL (the canonical local path on the dev box)
 
 The repo's normal Go test runner already shells into WSL (see
-[`fak/test.sh`](../../test.sh)) because native Windows test execution is
+[`fak/test.sh`](https://github.com/anthony-chaudhary/fak/blob/main/test.sh)) because native Windows test execution is
 blocked by an Application Control policy. The same WSL distro provides the cgo
 toolchain the race detector needs:
 

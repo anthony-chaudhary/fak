@@ -19,7 +19,7 @@ evidence exists, not a benchmark row.
 
 LiveCodeBench accepts leaderboard submissions for the code-generation scenario
 through the upstream submissions flow. A fak row cannot be submitted or copied
-into [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) until all of these
+into [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) until all of these
 conditions are true:
 
 - the benchmark release is fixed with `--release_version` instead of
@@ -85,7 +85,7 @@ this packet can leave `BLOCKED_PRECREDENTIAL`:
 ## Authority Row Template - Fill Only After Evidence
 
 When, and only when, the missing evidence above exists, add one row to
-[`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md). The row must keep the
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). The row must keep the
 official LiveCodeBench score separate from fak-specific routing or safety
 evidence:
 

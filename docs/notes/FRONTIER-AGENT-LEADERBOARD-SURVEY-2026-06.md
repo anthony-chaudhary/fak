@@ -74,7 +74,7 @@ fronted model's, OBSERVED). The entry mechanic (Discord contact; EvalScope self-
 first move a *self-run* with both arms before any listing request.
 
 **Next step (named, not executed):** run-contract stub
-[`experiments/agent-live/bfcl-v4-raw-fak-contract-20260627.json`](../../experiments/agent-live/bfcl-v4-raw-fak-contract-20260627.json)
+[`experiments/agent-live/bfcl-v4-raw-fak-contract-20260627.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/bfcl-v4-raw-fak-contract-20260627.json)
 — `result_claim_allowed=false`, raw + fak arms, shared model / task-ids / budget. Executing it
 is a separate follow-on ticket.
 

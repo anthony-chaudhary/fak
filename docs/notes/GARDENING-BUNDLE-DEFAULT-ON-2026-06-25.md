@@ -88,7 +88,7 @@ The default-on contract has three properties, in priority order:
   only when (a) its change is mechanical and reversible (gofmt, index-sync,
   baseline re-pin), and (b) the result is witnessed by `dos commit-audit` before it
   is trusted — never on the skill's own say-so. This is the
-  [`dos-witness-claim`](../../.claude/skills/dos-witness-claim) discipline applied to
+  [`dos-witness-claim`](https://github.com/anthony-chaudhary/fak/tree/main/.claude/skills/dos-witness-claim) discipline applied to
   the fleet's own maintenance.
 
 - **One brake the operator already knows.** Reuse the governor. `FAK_GARDEN=off`

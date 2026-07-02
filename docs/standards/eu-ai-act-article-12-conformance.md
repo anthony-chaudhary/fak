@@ -131,7 +131,7 @@ The key: **fak ships the mechanism; you ship the retention schedule.** No built-
 
 ## See also
 
-- [`internal/journal/journal.go`](../../internal/journal/journal.go) — the implementation (append-only, hash-chained, per-row flush).
-- [`internal/journal/journal_test.go`](../../internal/journal/journal_test.go) — the tamper-detection witness (`TestVerifyDetectsTampering`).
+- [`internal/journal/journal.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/journal/journal.go) — the implementation (append-only, hash-chained, per-row flush).
+- [`internal/journal/journal_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/journal/journal_test.go) — the tamper-detection witness (`TestVerifyDetectsTampering`).
 - [`docs/proofs/journal.md`](../proofs/journal.md) — formal proof of the append-only hash-chain theorem.
 - [`docs/notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md`](../notes/MOBILE-EDGE-IOT-STRATEGY-2026-06-24.md) — edge/mobile/IoT strategy note (Tier 3 item 1).

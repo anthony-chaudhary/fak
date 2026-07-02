@@ -11,7 +11,7 @@ where a project gets *discovered*; this doc is the talk you could give and the
 essay series you could write once someone is curious enough to read 20 minutes.
 It reuses sourced material the repo already defends — it adds no new claims.
 
-**The one tagline, verbatim (consistent with [`README.md`](../../README.md) §"The
+**The one tagline, verbatim (consistent with [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) §"The
 one move" and [`docs/index.md`](../index.md); see
 [#372](https://github.com/anthony-chaudhary/fak/issues/372) for the tagline-drift
 this avoids):**
@@ -69,7 +69,7 @@ go run ./cmd/fak preflight …          --tool search_kb     --args "{}"   # →
 
 **Spoken:** "Same machine, two tools. One is refused *by structure* — not by a
 detector, not by a model in the loop. The other is allowed. That's the whole
-talk." Verified command ([`AGENTS.md`](../../AGENTS.md) "60-second proof");
+talk." Verified command ([`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) "60-second proof");
 `--explain` prints the 8-rung ladder ending `DENY DEFAULT_DENY <- winner`
 ([`docs/explainers/policy-in-the-kernel.md`](../explainers/policy-in-the-kernel.md) §"The adjudicator is a chain").
 
@@ -99,8 +99,8 @@ sidecar policy service, an LLM judge. Two weaknesses, both load-bearing:
 
 1. **The model can argue its way past a recognizer.** fak's own audit of its
    built-in detector measured it as **≈100% evadable** by a determined attacker.
-   (Sourced: [`README.md`](../../README.md); the detector is in
-   [`CLAIMS.md`](../../CLAIMS.md).)
+   (Sourced: [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md); the detector is in
+   [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).)
 2. **When the outside thing breaks, the call usually proceeds anyway** (fail-open),
    because failing closed would wedge the agent on every transient hiccup.
 
@@ -154,7 +154,7 @@ non-zero on any violation). Source:
 [`docs/explainers/addressable-kv-cache.md`](../explainers/addressable-kv-cache.md)
 §"The thing fak does that no shipped engine does", and the causal-invalidation
 witness `cmd/causalbench -selfcheck`
-([`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "Causal
+([`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "Causal
 invalidation-on-external-write", commit `0fc39aa`).
 
 > **On-slide fence (read it aloud):** "`max|Δ|=0` is proven on a *synthetic*
@@ -172,8 +172,8 @@ prefix sharing, ed25519 receipts — is established prior art. **The contributio
 is the *assembly***: one in-process gate where the tool call is the checkpoint,
 fused with an addressable cache, in one binary.
 
-Source: [`README.md`](../../README.md) ("A 29-claim prior-art audit scored 0/29
-novel"), [`CLAIMS.md`](../../CLAIMS.md). **Spoken payoff:** "We're not claiming
+Source: [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) ("A 29-claim prior-art audit scored 0/29
+novel"), [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). **Spoken payoff:** "We're not claiming
 we invented any of this. We're claiming we put it together in a shape nobody
 shipped, and we can prove the hard part to the last bit."
 
@@ -185,9 +185,9 @@ measured.
 | Claim | Number | Source | Fence (say it with the number) |
 |---|---|---|---|
 | WebVoyager per-turn prefill elimination | **8.8× (1 worker) → 9.7× (8 workers)** net (A/C) on the real 643-task set | [`docs/webbench-baselines.md`](../webbench-baselines.md) (modeled geometry) | vs the **naive** re-prefill loop, **modeled** (closed-form geometry, no wall-clock). It is prefill-*token* elimination, not a wall-clock speedup over a tuned stack. The win is the structural per-turn turn-tax (A/B = 8.8×, worker-independent); cross-worker reuse (B/C) is only 1.00×–1.10×. |
-| 50-turn × 5-agent reuse (README headline) | **4.1× vs tuned** warm-cache · 60.3× vs naive | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) row "README headline" (commit `2bbda6f`) | The 60.3× is vs naive; **lead 4.1×**. Arm A's ~19 h is **modeled** (validated within ~0.4%), not run live. Reuse is **self-host only**. |
-| RadixAttention reuse ladder | 4.58× → 6.95× live (135M → 1.5B); 7.50× token ceiling; **86.7%** hit rate | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "RadixAttention Model Ladder" (commit `92896a4`) | Hit rate is hardware-independent and inside SGLang's published 50–99% band; the comparison to SGLang is on **hit rate, not throughput**. |
-| In-process adjudication cost | ~2.4 µs in-process vs ~6.9 ms spawned `fak hook` ≈ **2,800×** boundary tax | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "Pure-kernel latency" (commit `bcad56e`) | A **subsystem regression sentinel**, not a fleet-speed headline. Nobody runs a per-call process spawn in production, so the ratio is not a "fak is faster" claim — it's *why fail-closed is affordable*. |
+| 50-turn × 5-agent reuse (README headline) | **4.1× vs tuned** warm-cache · 60.3× vs naive | [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) row "README headline" (commit `2bbda6f`) | The 60.3× is vs naive; **lead 4.1×**. Arm A's ~19 h is **modeled** (validated within ~0.4%), not run live. Reuse is **self-host only**. |
+| RadixAttention reuse ladder | 4.58× → 6.95× live (135M → 1.5B); 7.50× token ceiling; **86.7%** hit rate | [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "RadixAttention Model Ladder" (commit `92896a4`) | Hit rate is hardware-independent and inside SGLang's published 50–99% band; the comparison to SGLang is on **hit rate, not throughput**. |
+| In-process adjudication cost | ~2.4 µs in-process vs ~6.9 ms spawned `fak hook` ≈ **2,800×** boundary tax | [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "Pure-kernel latency" (commit `bcad56e`) | A **subsystem regression sentinel**, not a fleet-speed headline. Nobody runs a per-call process spawn in production, so the ratio is not a "fak is faster" claim — it's *why fail-closed is affordable*. |
 
 > **The four numbers to never let on a slide unqualified:** the naive 8.8×–9.7×
 > (always beside the tuned 4.1×), the ~60× / "agent city" projection (**DESIGN
@@ -228,7 +228,7 @@ live `deletioncert -selfcheck` frame if the room is warm.
 The writing reuses material the repo already defends. Each post's source explainer
 is linked so the author lifts sourced prose rather than re-deriving claims. No
 post cites a simulated number as measured; the honesty ledger
-([`CLAIMS.md`](../../CLAIMS.md)) is cited in every post.
+([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)) is cited in every post.
 
 **Through-line across the series:** the model is an untrusted program; every effect
 it wants is a syscall through a kernel it doesn't control; the same boundary carries
@@ -270,7 +270,7 @@ self-host only; in-binary model is a correctness reference, not a production
 server.
 
 ### Post 4 — "0/29 novel — and we lead with it" (the honesty ledger)
-**Maps to:** [`CLAIMS.md`](../../CLAIMS.md) + [`README.md`](../../README.md)
+**Maps to:** [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) + [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
 (0/29-novel posture) and [`docs/explainers/fleet-benchmarks.md`](../explainers/fleet-benchmarks.md).
 **Arc:** the contribution is the *assembly* (0/29 primitives novel) → every
 capability carries exactly one machine-checked tag (`[SHIPPED]` /
@@ -318,38 +318,38 @@ Every claim/number above traces to a committed source. No simulated number is
 cited as measured; no projection appears without its label.
 
 - **Tagline** ("Treat the model like an untrusted program, and the tool call like
-  a syscall"): [`README.md`](../../README.md) §"The one move";
+  a syscall"): [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) §"The one move";
   [`docs/index.md`](../index.md). Consistent with
   [`positioning-brief.md`](positioning-brief.md) (no contradicting tagline —
   [#372](https://github.com/anthony-chaudhary/fak/issues/372)).
 - **~100% evadable detector, two-gate floor, lever-never-wired-up:**
   [`docs/explainers/policy-in-the-kernel.md`](../explainers/policy-in-the-kernel.md);
-  [`README.md`](../../README.md); [`CLAIMS.md`](../../CLAIMS.md).
+  [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md); [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 - **`max|Δ|=0` mid-run eviction vs HF oracle:** synthetic-model witness;
   [`docs/explainers/addressable-kv-cache.md`](../explainers/addressable-kv-cache.md)
   §"The thing fak does that no shipped engine does"; reproduce `go run
   ./cmd/deletioncert -selfcheck`; causal witness
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) commit `0fc39aa`.
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) commit `0fc39aa`.
   Fences: self-signed v1 cert / self-reported `EvictedCount`; live path quarantines
   at byte layer; attention-state eviction = proven next rung.
-- **0/29-novel audit:** [`README.md`](../../README.md) ("A 29-claim prior-art
-  audit scored 0/29 novel"); [`CLAIMS.md`](../../CLAIMS.md).
+- **0/29-novel audit:** [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) ("A 29-claim prior-art
+  audit scored 0/29 novel"); [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 - **WebVoyager 8.8×–9.7× (643 tasks, vs naive re-prefill):**
   [`docs/webbench-baselines.md`](../webbench-baselines.md) "REAL MEASUREMENTS".
   Net prefill-token elimination (A/C); the structural per-turn turn-tax (A/B) is
   8.8× worker-independent; cross-worker reuse (B/C) is 1.00×–1.10×.
 - **50×5 reuse 4.1× vs tuned / 60.3× vs naive (arm A modeled):**
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) row "README headline"
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) row "README headline"
   (commit `2bbda6f`).
 - **RadixAttention 4.58×→6.95× / 7.50× token ceiling / 86.7% hit rate:**
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "RadixAttention Model
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "RadixAttention Model
   Ladder" (commit `92896a4`).
 - **In-process ~2.4 µs vs ~6.9 ms (~2,800×) boundary tax:**
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "Pure-kernel latency"
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) "Pure-kernel latency"
   (commit `bcad56e`); subsystem sentinel, not a fleet-speed headline.
 - **~13 MB static binary / zero deps / no `go.sum`:**
   [`docs/explainers/one-binary-one-surface.md`](../explainers/one-binary-one-surface.md);
-  [`go.mod`](../../go.mod).
+  [`go.mod`](https://github.com/anthony-chaudhary/fak/blob/main/go.mod).
 - **Fences carried verbatim from the kit:** reuse self-host-only / read-heavy /
   ~1%-write-flips-negative; in-binary model = correctness reference, not
   production server; not a faster token engine; ~60× / "agent city" = DESIGN

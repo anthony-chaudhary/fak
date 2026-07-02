@@ -227,6 +227,6 @@ rsi       keep-bit / breaker                   internal/shipgate/shipgate.go (Ev
 
 ## Reproduce / read next
 
-- The current numbers: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) (the single source of truth) and the five-demo tour in [`fleet-benchmarks`](../explainers/fleet-benchmarks.md).
+- The current numbers: [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) (the single source of truth) and the five-demo tour in [`fleet-benchmarks`](../explainers/fleet-benchmarks.md).
 - The ladder these layers come from: [`engineering-is-building-loops`](../explainers/engineering-is-building-loops.md).
 - The two siblings this note extends: [`CTXPLAN-PLANNING-COST-FLATTEN`](CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md) (planner work, not time) and [`TOKEN-STREAMING-TTFT`](TOKEN-STREAMING-TTFT-2026-06-25.md) (the streaming seam that unblocks TTFT/TPOT/ITL).

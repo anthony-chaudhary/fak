@@ -21,8 +21,8 @@ declare a prediction  ->  run the scenario  ->  measure billed reality  ->  scor
 The fifth rung — **act on the gap and prove the act helped** — is today a human reading the
 `next_action` string (`harvest the under-claimed saving`, `recalibrate the over-claiming
 lever`). This doc designs the loop that closes it autonomously: the dojo's `calib_err` metric
-joined to the non-forgeable keep-bit that [`internal/rsiloop`](../../internal/rsiloop) +
-[`internal/shipgate`](../../internal/shipgate) already provide, exactly the way
+joined to the non-forgeable keep-bit that [`internal/rsiloop`](https://github.com/anthony-chaudhary/fak/tree/main/internal/rsiloop) +
+[`internal/shipgate`](https://github.com/anthony-chaudhary/fak/tree/main/internal/shipgate) already provide, exactly the way
 [`fak guard-verdict-rsi`](guard-verdict-rsi-loop.md) closed the guard loop on our own journal.
 
 It is the **same machine** as the guard verdict loop, pointed at a different journal: the dojo

@@ -85,4 +85,4 @@ so the box needs a persistent/tmux control session.
 
 - [GPU-server private boundary](gpu-server-private-boundary.md) — the source of truth for *what is
   public vs private* and which gates enforce it.
-- [`AGENTS.md`](../AGENTS.md) — the agent entry point links here from the repo-layout map.
+- [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — the agent entry point links here from the repo-layout map.

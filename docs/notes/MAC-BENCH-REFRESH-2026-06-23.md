@@ -55,7 +55,7 @@ it is the least fak-flattering, so no reader is misled into thinking fak is clos
 fak still trails llama.cpp single-stream by design; the win is the cross-agent reuse layer on
 top, measured elsewhere.
 
-Artifact: [`experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json`](../../experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json)
+Artifact: [`experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json)
 (schema bumped to `fak-cpu-parity/2`, both thread arms embedded).
 
 ## 2. RadixAttention live — first clean uncontended 1.5B run on the M3 Pro
@@ -77,7 +77,7 @@ committed numbers exactly** — only the live wall-clocks are the new datum. The
 witness also passed (freed 8 tokens on a verdict, benign sibling kept). The live ratios sit in
 the 3.7–7.0× band the model-ladder thesis predicts.
 
-Artifact: [`experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json`](../../experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json).
+Artifact: [`experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json).
 
 ## Reproduce
 

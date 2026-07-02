@@ -1,7 +1,7 @@
 # Benchmarking Documentation Index
 
 > **Quick link:** The single source of truth for all benchmark numbers is
-> **[`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)**. Every claim
+> **[`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**. Every claim
 > traces back to a commit and artifact file. Start there for authoritative numbers.
 
 > **Want to run them yourself?** The
@@ -49,7 +49,7 @@ When we say "60× faster" or similar, the baseline matters:
 
 **Key fact:** Both SOTA engines and fak use KV cache. The performance difference vs
 SOTA is a few-fold. The 60× figure is only vs the naive stateless pattern.
-See [`visuals/45-sota-comparison-naive-vs-tuned-vs-kernel.svg`](../../visuals/45-sota-comparison-naive-vs-tuned-vs-kernel.svg)
+See [`visuals/45-sota-comparison-naive-vs-tuned-vs-kernel.svg`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/45-sota-comparison-naive-vs-tuned-vs-kernel.svg)
 for a visual comparison.
 
 ### Measured vs. Modeled
@@ -58,7 +58,7 @@ for a visual comparison.
 - **Modeled/Projected:** Extrapolations from measured rates, clearly labeled
 - **Frontier targets:** Design directions, not shipped claims
 
-All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
+All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
 ---
 
@@ -69,21 +69,21 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 **Result:** ~4.1× vs a tuned warm per-agent KV cache (the realistic SOTA) on a 50-turn × 5-agent session. (The ≈60× figure is only vs a *naive* re-prefill-every-turn loop — a worst-case floor no serving stack ships, not the SOTA comparison.)
 **Baseline:** Tuned warm per-agent KV cache (the SOTA); naive stateless shown only as the worst-case floor
 **Details:** `SESSION-VALUE-STACK-DECK.md` (private companion — see Authority below)
-**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Session value-add"
+**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) → "Session value-add"
 
 ### RadixAttention Cache Parity
 **What:** KV cache hit rate comparison with SGLang's RadixAttention
 **Result:** 86.7% hit rate on agents workload (inside SGLang's 50–99% band)
 **Baseline:** SGLang published results
 **Details:** `RADIXATTENTION-RESULTS.md` (private companion — see Authority below)
-**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "RadixAttention Results"
+**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) → "RadixAttention Results"
 
 ### Safety / Injection Resistance
 **What:** Prompt injection resistance on real models
 **Result:** 5/5 injections reached unprotected baseline; 0/5 reached fak
 **Baseline:** Unmediated tool calls
 **Details:** `LIVE-RESULTS.md` (private companion — see Authority below)
-**Authority:** See SECURITY section in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
+**Authority:** See SECURITY section in [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
 
 ---
 
@@ -232,7 +232,7 @@ M3 arm64). See `CROSS-PLATFORM-REPRO-20260619.md` (private companion).
 ## Governance Process
 
 ### DOS-Centric Verification
-**[`fak/BENCHMARK-GOVERNANCE.md`](../../BENCHMARK-GOVERNANCE.md)**
+**[`fak/BENCHMARK-GOVERNANCE.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md)**
 - How benchmark claims are created, verified, and published
 - The discipline that ensures traceability
 
@@ -247,11 +247,11 @@ M3 arm64). See `CROSS-PLATFORM-REPRO-20260619.md` (private companion).
 
 | Visual | Shows | Location |
 |---|---|---|
-| **41-performance-spectrum.svg** | Performance from parity to frontier | [`visuals/`](../../visuals/) |
-| **42-agent-scaling-laws.svg** | Scaling multipliers and saturation points | [`visuals/`](../../visuals/) |
-| **44-agent-frontier-spectrum-data-chart.svg** | Calculated frontier workload data | [`visuals/`](../../visuals/) |
-| **45-sota-comparison-naive-vs-tuned-vs-kernel.svg** | What "naive" means vs SOTA vs fak | [`visuals/`](../../visuals/) |
-| **46-two-gate-security-model.svg** | Security architecture comparison | [`visuals/`](../../visuals/) |
+| **41-performance-spectrum.svg** | Performance from parity to frontier | [`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) |
+| **42-agent-scaling-laws.svg** | Scaling multipliers and saturation points | [`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) |
+| **44-agent-frontier-spectrum-data-chart.svg** | Calculated frontier workload data | [`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) |
+| **45-sota-comparison-naive-vs-tuned-vs-kernel.svg** | What "naive" means vs SOTA vs fak | [`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) |
+| **46-two-gate-security-model.svg** | Security architecture comparison | [`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) |
 
 ---
 
@@ -272,7 +272,7 @@ go run ./cmd/radixbench \
   -out experiments/radixattention/radixbench-smollm2-135m-q8.json
 ```
 
-See [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Reproduce" section.
+See [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) → "Reproduce" section.
 
 ---
 

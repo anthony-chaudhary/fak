@@ -14,7 +14,7 @@ multiple strictly separate from fak's **inference** 5-10x (a different axis, cit
 never blended). The metric is defined in
 [`../explainers/ultracode-multi-agent-dogfood.md`](../explainers/ultracode-multi-agent-dogfood.md);
 the machine-readable witness is
-[`../../experiments/agent-live/ultracode-dogfood-witness-20260628.json`](../../experiments/agent-live/ultracode-dogfood-witness-20260628.json).
+[`../../experiments/agent-live/ultracode-dogfood-witness-20260628.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/ultracode-dogfood-witness-20260628.json).
 
 > **Honesty (`../proofs/00-METHOD.md`).** Assembled on a `windows/amd64` orchestrator with
 > **no Apple Silicon, no NVIDIA GPU, no 27B artifact**. Every speed/GPU/27B figure cited
@@ -31,8 +31,8 @@ lanes, each producing one reviewed artifact toward the parity goal:
 | Lane | Deliverable | Agent wall-time |
 |---|---|---:|
 | docs | [`benchmarks/QWEN36-PARITY-ROLLUP-2026-06-28.md`](../benchmarks/QWEN36-PARITY-ROLLUP-2026-06-28.md) — single-page parity rollup (proven vs `not yet`, with one-command Mac repros) | 165 s |
-| experiments | [`qwen36/token3-drift-investigation-2026-06-28.md`](../../experiments/qwen36/token3-drift-investigation-2026-06-28.md) — root-cause investigation of the token-3 correctness drift + a per-layer divergence-probe design | 290 s |
-| tools | [`qwen36_mac_parity_gate.sh`](../../tools/qwen36_mac_parity_gate.sh) — one-command Mac gate emitting a gradeable witness JSON | 647 s |
+| experiments | [`qwen36/token3-drift-investigation-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/token3-drift-investigation-2026-06-28.md) — root-cause investigation of the token-3 correctness drift + a per-layer divergence-probe design | 290 s |
+| tools | [`qwen36_mac_parity_gate.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/qwen36_mac_parity_gate.sh) — one-command Mac gate emitting a gradeable witness JSON | 647 s |
 | docs | [`explainers/ultracode-multi-agent-dogfood.md`](../explainers/ultracode-multi-agent-dogfood.md) — the ultracode-mode definition + the value metric | 150 s |
 
 **Wave 2 — independent verification (5 concurrent agents, window opened 15:35:04Z).** A
@@ -112,7 +112,7 @@ result.
 - **Gated residual:** the Mac M3 Pro `fakmetal` GPU-numerics + on-device tok/s witnesses
   need an Apple-Silicon host this orchestrator does not have. The one-command gate that
   produces a gradeable witness on that host is
-  [`../../tools/qwen36_mac_parity_gate.sh`](../../tools/qwen36_mac_parity_gate.sh).
+  [`../../tools/qwen36_mac_parity_gate.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/qwen36_mac_parity_gate.sh).
 
 Full reconciliation:
 [`benchmarks/QWEN36-PARITY-ROLLUP-2026-06-28.md`](../benchmarks/QWEN36-PARITY-ROLLUP-2026-06-28.md).

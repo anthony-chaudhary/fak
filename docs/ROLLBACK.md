@@ -172,6 +172,6 @@ onto a different build. Run `fak snapshot kinds` to list the primitives this bui
 
 ---
 
-See also: [`AGENTS.md`](../AGENTS.md) for the trunk + commit rules, the
+See also: [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for the trunk + commit rules, the
 [stability scorecard](STABILITY-SCORECARD.md) for what "stable" is measured against, and
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) for the full ship contract.
+[`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md) for the full ship contract.

@@ -7,7 +7,7 @@ description: "The normative standard for fak's domain-free trust grammar: the cl
 
 This is a **normative standard**. It fixes the grammar an agent fleet coordinates by — the
 nouns, the verbs, and the closed vocabularies — so a *second* implementation can be
-conformance-checked against it, the same role [`internal/abi`](../../internal/abi)'s golden
+conformance-checked against it, the same role [`internal/abi`](https://github.com/anthony-chaudhary/fak/tree/main/internal/abi)'s golden
 freeze plays for the ABI. The companion design note
 ([`CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md`](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md))
 explains *why* this grammar exists and catalogs the under-expressed concepts (`G1`–`G9`) that
@@ -25,7 +25,7 @@ The grammar carries one invariant at every scale:
 > not author is the only admissible truth; a claim is untrusted until witnessed; a refusal
 > carries a token from a closed, checkable set.
 
-A conforming host is a substrate (the reference is **DOS** — [`dos.toml`](../../dos.toml)
+A conforming host is a substrate (the reference is **DOS** — [`dos.toml`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml)
 plus the `dos_*` MCP verbs) that an agent fleet adopts by *configuration*, without forking
 the kernel. Every clause below is read off a verb that already ships.
 
@@ -36,7 +36,7 @@ admit a synonym that erases its invariant.
 
 | Noun | What it is | Reference home |
 |---|---|---|
-| `lane` | a named file-tree scope work is admitted against | [`dos.toml [lanes]`](../../dos.toml) |
+| `lane` | a named file-tree scope work is admitted against | [`dos.toml [lanes]`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml) |
 | `lease` | a live lock on a lane — `exclusive` or `shared` | `dos_arbitrate`, `dos.toml` lock-mode tree rule |
 | `reason token` | a closed-vocabulary refusal (`[reasons.*]`); out-of-set ⇒ `UNCLASSIFIED` | `dos.toml [reasons]`, `dos_check_reason` |
 | `witness` | the forgeability rung of a claim: `diff-witnessed` (non-forgeable) vs `subject-only` | `dos_commit_audit`, `internal/witness` |
@@ -105,8 +105,8 @@ non-conformant.
 ## G6 — the one-sided-screen + witnessed-loss polarity predicate (a checkable MUST)
 
 Any *additive* safety component — a screen, a proposer, a triage model bolted onto the floor
-(home: [`internal/wirescreen`](../../internal/wirescreen),
-[`internal/ctxmmu`](../../internal/ctxmmu)) — MUST declare and satisfy this predicate. It is
+(home: [`internal/wirescreen`](https://github.com/anthony-chaudhary/fak/tree/main/internal/wirescreen),
+[`internal/ctxmmu`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ctxmmu)) — MUST declare and satisfy this predicate. It is
 the polarity rule that lets fak add a lossy local model to the wire *without* widening the
 trust surface. Each clause is checkable, not aspirational:
 
@@ -114,7 +114,7 @@ trust surface. Each clause is checkable, not aspirational:
   toward MORE careful on the closed verdict lattice (`Allow` → `Quarantine`/`Deny`); it MUST
   NOT move any verdict toward more-permissive. **Check:** for every input, the component's
   output verdict rank ≥ the deterministic floor's verdict rank. This is the
-  [`internal/wirescreen`](../../internal/wirescreen) contract verbatim — *"a proposer may only
+  [`internal/wirescreen`](https://github.com/anthony-chaudhary/fak/tree/main/internal/wirescreen) contract verbatim — *"a proposer may only
   make the system MORE careful (quarantine, demote, redact), never weaker than a deterministic
   floor."*
 
@@ -164,11 +164,11 @@ Plus the recipe and polarity gates: every verb MUST satisfy the five MUST clause
   `claim-check`/`verify --ladder`) are tracked as `G1`–`G9` in the
   [design note](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) and are **not yet**.
 - **G6 is a predicate fak's additive screens already satisfy, not a new gate.** The
-  [`internal/wirescreen`](../../internal/wirescreen) proposer spine and `ctxmmu`'s
+  [`internal/wirescreen`](https://github.com/anthony-chaudhary/fak/tree/main/internal/wirescreen) proposer spine and `ctxmmu`'s
   quarantine + `PageIn` witness are the reference implementation; this page lifts their
   contract into a checkable MUST any additive component declares. It adds no rung and changes
   no fold.
-- Per [`AGENTS.md`](../../AGENTS.md), any future verb implementing this spec is **Go in a
+- Per [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md), any future verb implementing this spec is **Go in a
   leaf**, never a new `tools/*.py`. The grammar's home is DOS (domain-free trust logic);
   fak-tree policy/measurement lands as a `fak` subcommand.
 - This standard does **not** replace the token engine, the model, or the harness. It is the
@@ -179,6 +179,6 @@ Plus the recipe and polarity gates: every verb MUST satisfy the five MUST clause
 - [The agent-programming-grammar design note](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — the *why* and the `G1`–`G9` backlog this standard is the normative head of.
 - [Net-true-value](net-true-value.md) · [The observer-effect contract](observer-effect.md) · [The support-maturity honesty fence](support-maturity-honesty-fence.md) — the sibling prose standards in `docs/standards/`.
 - [The verification-ladder spec](verification-ladder-spec.md) (`G2`) · [the context-contract schema](context-contract-schema.md) (`G4`) · [the taint-check schema](taint-check-schema.md) (`G7`) · [the agent-routing schema](agent-routing-schema.md) (`G8`) · [the prediction-calibration contract](prediction-calibration.md) (`G5`) — the per-verb schemas that conform to this grammar.
-- [`dos.toml`](../../dos.toml) — the live lane taxonomy, reason vocabulary, and stamp grammar a conforming host declares.
+- [`dos.toml`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml) — the live lane taxonomy, reason vocabulary, and stamp grammar a conforming host declares.
 - [`docs/INNOVATIONS-INDEX.md`](../INNOVATIONS-INDEX.md) Part 4 — the durable catalog this standard heads.
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim.
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim.

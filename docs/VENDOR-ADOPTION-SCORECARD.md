@@ -9,7 +9,7 @@ description: "A dated strategic scorecard for how attractive fak is to Anthropic
 **Scope:** score how attractive `fak` is to multiple Anthropic and OpenAI teams, then name
 the smallest repo/product changes that can make adoption roughly 2x easier. This is a
 strategy artifact, not a shipped-claims ledger. For shipped scope, use
-[`CLAIMS.md`](../CLAIMS.md), [`docs/PRODUCT-STATUS.md`](PRODUCT-STATUS.md), and the
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), [`docs/PRODUCT-STATUS.md`](PRODUCT-STATUS.md), and the
 integration docs under [`docs/integrations/`](integrations/README.md).
 
 ## Headline
@@ -137,14 +137,14 @@ The target is **15 credible pilots** after the following work, a 2.1x expansion:
 **Progress as of 2026-06-25:** the repo now has the vendor proof packet
 ([Anthropic](vendor/anthropic-internal-pitch.md),
 [OpenAI](vendor/openai-internal-pitch.md)), the
-[OpenAI Agents SDK guardrail adapter example](../examples/openai-agents-guardrail/),
+[OpenAI Agents SDK guardrail adapter example](https://github.com/anthony-chaudhary/fak/tree/main/examples/openai-agents-guardrail),
 the [Claude Code managed rollout guide](vendor/claude-code-managed-rollout.md), and
 the [Agent Tool Governance Gateway profile](standards/agent-tool-governance-gateway.md)
 with [conformance fixtures](standards/fixtures/). That moves the artifact-backed
 pilot count from **7 to 15** (2.14x). The repo also records the live P1 proof:
-[Claude Code through `fak guard`](../experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json)
+[Claude Code through `fak guard`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json)
 and
-[Codex through the `fak` MCP server](../experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json)
+[Codex through the `fak` MCP server](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json)
 both show a denied dangerous call followed by useful allowed work. With those captures,
 the current adoption-path count is **17** (2.43x).
 

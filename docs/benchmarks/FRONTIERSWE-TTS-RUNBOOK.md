@@ -112,5 +112,5 @@ One task, one trial, both arms graded by the official grader, score-parity green
 
 - Task model, catalog, and scoring runtime: `internal/frontierswe` (C1–C5). The offline entry point `fak frontierswe describe [--tts]` and the reuse fold `fak frontierswe cache-witness` are in `cmd/fak/frontierswe.go`.
 - Scoring parity to the published oracle: [`FRONTIERSWE-SCORING-PARITY.md`](FRONTIERSWE-SCORING-PARITY.md), pinned by `internal/frontierswe/score_test.go`.
-- House benchmark discipline this runbook follows: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) and [`BENCHMARK-GOVERNANCE.md`](../../BENCHMARK-GOVERNANCE.md).
+- House benchmark discipline this runbook follows: [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) and [`BENCHMARK-GOVERNANCE.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md).
 - Written on a host with no FrontierSWE sandbox and no grader. Every measured cell is gated by design. The offline `describe`, `--tts`, and `cache-witness` steps run here. The TTS number does not.

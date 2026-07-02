@@ -60,7 +60,7 @@ commit / committed artifact.
 
 ### 2.1 amd64 — Zen5 16C/32T, SmolLM2-135M, Q8_0
 
-Canonical artifact: [`experiments/model-baseline/comparison.json`](../../experiments/model-baseline/comparison.json)
+Canonical artifact: [`experiments/model-baseline/comparison.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/model-baseline/comparison.json)
 (re-measured 2026-06-17 on an **idle** box, CPU ~10%), folded in
 [`docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md`](../benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md).
 

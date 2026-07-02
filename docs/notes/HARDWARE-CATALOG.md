@@ -103,10 +103,10 @@ Every machine must run:
 ## Related Documentation
 
 - **Hardware Matrix**: See [`docs/HARDWARE-MATRIX.md`](../HARDWARE-MATRIX.md) for detailed hardware coverage and benchmark results
-- **Benchmark Authority**: See [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) for single source of truth on benchmark claims
-- **Benchmark Governance**: See [`BENCHMARK-GOVERNANCE.md`](../../BENCHMARK-GOVERNANCE.md) for DOS-centric benchmark process
+- **Benchmark Authority**: See [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) for single source of truth on benchmark claims
+- **Benchmark Governance**: See [`BENCHMARK-GOVERNANCE.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md) for DOS-centric benchmark process
 - **Cross-Machine Infrastructure**: See [`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](../benchmark/CROSS-MACHINE-INFRASTRUCTURE.md) for multi-node benchmark design
 
 ## Machine Registry
 
-The live machine-readable catalog is maintained at [`experiments/benchmark/catalog.json`](../../experiments/benchmark/catalog.json) and managed via [`tools/bench_catalog.py`](../../tools/bench_catalog.py).
+The live machine-readable catalog is maintained at [`experiments/benchmark/catalog.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/benchmark/catalog.json) and managed via [`tools/bench_catalog.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/bench_catalog.py).

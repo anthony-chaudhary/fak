@@ -9,7 +9,7 @@ description: "Concept capture for #582: the mechanism behind the product scoreca
 > [#582](https://github.com/anthony-chaudhary/fak/issues/582)
 > (labels: documentation, enhancement, research). The issue's ask is
 > **concept capture, no code commitment** — extract the generic primitive
-> behind [`tools/product_scorecard.py`](../../tools/product_scorecard.py) /
+> behind [`tools/product_scorecard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/product_scorecard.py) /
 > [`docs/PRODUCT-STATUS.md`](../PRODUCT-STATUS.md), sketch a `dos`-grounded
 > variant, and decide where it should live. This note delivers all three.
 >
@@ -225,7 +225,7 @@ scoped this to capture, and the kernel surface is a different repository's tree.
 
 ## See also
 
-- [`tools/product_scorecard.py`](../../tools/product_scorecard.py) — the reference binding (the fak-specific shell).
+- [`tools/product_scorecard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/product_scorecard.py) — the reference binding (the fak-specific shell).
 - [`docs/PRODUCT-STATUS.md`](../PRODUCT-STATUS.md) — the rendered product-status page the ladder produces.
-- [`/scorecard`](../../.claude/skills) — the generic scoring doctrine every fak scorecard instantiates; the readiness ladder is the same machine pointed at "is this a durable product."
+- [`/scorecard`](https://github.com/anthony-chaudhary/fak/tree/main/.claude/skills) — the generic scoring doctrine every fak scorecard instantiates; the readiness ladder is the same machine pointed at "is this a durable product."
 - DOS kernel concepts this generalizes alongside: `dos_verify` (witnessed completion from git), `dos_refuse_reasons` / `dos_check_reason` (closed, verifiable refusal vocabulary), `dos_commit_audit` (a commit's claim vs its diff).

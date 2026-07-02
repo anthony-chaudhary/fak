@@ -24,13 +24,13 @@ date: 2026-06-25
 
 This page documents the already-shipped shape tracked by
 [#654](https://github.com/anthony-chaudhary/fak/issues/654). The code paths are
-`abi.Ref` / `abi.Resolver` in [`internal/abi/types.go`](../internal/abi/types.go),
-the default content-addressed backend in [`internal/blob/store.go`](../internal/blob/store.go),
-the optional tier router in [`internal/storedrv/storedrv.go`](../internal/storedrv/storedrv.go),
+`abi.Ref` / `abi.Resolver` in [`internal/abi/types.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go),
+the default content-addressed backend in [`internal/blob/store.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/blob/store.go),
+the optional tier router in [`internal/storedrv/storedrv.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/storedrv/storedrv.go),
 and the tier-2 shared-read cache plus coherence fences in
-[`internal/vdso/vdso.go`](../internal/vdso/vdso.go),
-[`internal/vdso/scope.go`](../internal/vdso/scope.go), and
-[`internal/vdso/revoke.go`](../internal/vdso/revoke.go).
+[`internal/vdso/vdso.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/vdso/vdso.go),
+[`internal/vdso/scope.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/vdso/scope.go), and
+[`internal/vdso/revoke.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/vdso/revoke.go).
 
 ## Why RMA is the right analogy
 

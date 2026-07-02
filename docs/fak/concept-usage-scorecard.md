@@ -15,7 +15,7 @@ The question: when an agent builds fak, how much does that development route thr
 
 Audience: release shepherds and agents deciding whether fak development is dogfooding its
 own witness discipline. Prereq: read the agent entry point in
-[`../../AGENTS.md`](../../AGENTS.md) and the net-true claim standard in
+[`../../AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and the net-true claim standard in
 [`../standards/net-true-value.md`](../standards/net-true-value.md). TL;DR: use this page to
 separate automatic commit discipline from evidence-backed witness behavior; after running the
 score, the next step is to improve the witness axis with real `dos verify` / `dos improve`

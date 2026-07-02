@@ -459,9 +459,9 @@ Aider sends `x-api-key:` (OpenAI SDK), which `fak` honors.
 
 - **Integration index**: [README.md](README.md) — universal recipe and which-agent routing
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md) — full field survey
-- **Policy schema**: [../../POLICY.md](../../POLICY.md) — authoring capability floors
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring capability floors
 - **Aider docs**: [https://aider.chat](https://aider.chat) — official Aider documentation
-- ** fak architecture**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md) — kernel internals
+- ** fak architecture**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — kernel internals
 
 ---
 

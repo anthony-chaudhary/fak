@@ -85,7 +85,7 @@ worker Prometheus endpoint and you want the smoke report to verify fak's `engine
 metrics normalization too.
 
 The route-manifest preset at
-[`examples/routing-presets/llm-d.json`](../../examples/routing-presets/llm-d.json)
+[`examples/routing-presets/llm-d.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/llm-d.json)
 uses `llm-d` as the default dispatch target while keeping common sensitivity labels on
 `inkernel`. Validate it with `fak route --check examples/routing-presets/llm-d.json`
 before using it with `--route-manifest`.

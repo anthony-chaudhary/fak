@@ -101,7 +101,7 @@ Claude.
 ## Watch fak from Grafana
 
 The repo ships a Prometheus + Grafana stack at
-[`tools/grafana/`](../../tools/grafana/README.md) that already scrapes a
+[`tools/grafana/`](https://github.com/anthony-chaudhary/fak/blob/main/tools/grafana/README.md) that already scrapes a
 `fak serve` gateway's `/metrics`. To point it at the Mac gateway, set the
 `fak_gateway` job target in `tools/grafana/prometheus.yml` to the tailnet host
 (e.g. `node-macos-a.local:8080`) instead of localhost, then:

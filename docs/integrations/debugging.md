@@ -198,5 +198,5 @@ jq '.calls[] | select(.arm=="fak")' agent-report.json
 
 - [Observability guide](../fak/observability.md) — the metrics / logs / `trace_id` reference.
 - [Integration index](README.md) — put fak in front of your agent.
-- [Policy / permissions](../../POLICY.md) — author and review the capability floor.
-- [MCP tools](../../examples/mcp/README.md) — the `fak_*` tools an MCP client calls directly.
+- [Policy / permissions](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — author and review the capability floor.
+- [MCP tools](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) — the `fak_*` tools an MCP client calls directly.

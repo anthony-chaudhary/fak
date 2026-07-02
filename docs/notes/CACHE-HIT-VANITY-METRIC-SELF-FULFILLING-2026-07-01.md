@@ -175,7 +175,7 @@ antidote is already structural.
   cross-agent reuse is a *forfeited* win, not a reason to serialize into one long
   session. Recover it by **paying the shared prefix once and cloning it
   bit-identically** into every agent (the shipped
-  [pay-the-prefix-once](../../visuals/65-pay-the-prefix-once.svg) path), or by
+  [pay-the-prefix-once](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/65-pay-the-prefix-once.svg) path), or by
   staggering launches within the cache TTL. Then judge the workflow by
   **confirmed findings / commits per dollar**, not by fleet hit rate.
 

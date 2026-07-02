@@ -99,7 +99,7 @@ char-device mode *is* interactive); the shipped binary did not. The bug was foun
 hand-building the binary and noticing the gate stay silent.
 
 **The symptom witness — [`28dd3b33`](https://github.com/anthony-chaudhary/fak/commit/28dd3b33)**
-([`cmd/fak/guard_login_e2e_test.go`](../../cmd/fak/guard_login_e2e_test.go)). It re-execs the
+([`cmd/fak/guard_login_e2e_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/guard_login_e2e_test.go)). It re-execs the
 real `fak guard -- claude` entry point headless with stdin driven from `os.DevNull` — the
 Windows char-device shape — and asserts exit-2-with-guidance within a hard 20s deadline (a
 hang = a timeout = a test failure). The `DevNull` stdin is load-bearing: it is the shape the
@@ -107,7 +107,7 @@ original `os.ModeCharDevice` gate mishandled, and it was verified standalone tha
 `term.IsTerminal(DevNull) == false` while `os.ModeCharDevice(DevNull) == true`. So this test
 **fails on the pre-fix check** (which read `ModeCharDevice` and called `NUL` interactive) and
 **passes on the fix** (which reads `term.IsTerminal`, the seam at
-[`cmd/fak/guard.go`](../../cmd/fak/guard.go) `guardFdIsTerminal`). A real witness, not a
+[`cmd/fak/guard.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/guard.go) `guardFdIsTerminal`). A real witness, not a
 tautology. The symptom's absence now lives in a CI-resident test instead of a transcript of
 someone eyeballing stderr once.
 
@@ -135,5 +135,5 @@ someone eyeballing stderr once.
 
 - [The verification-ladder spec](verification-ladder-spec.md) — the cost-ordered rung ladder this witness is a rung of (a `suite`-cost rung above the in-process diff-witness); same fail-closed, smallest-sufficient-rung discipline.
 - [Net-true-value](net-true-value.md) · [The observer-effect contract](observer-effect.md) · [The support-maturity honesty fence](support-maturity-honesty-fence.md) — the sibling honesty standards in `docs/standards/`: net-true-value grades a *gain*, observer-effect grades a *cost number*, this grades a *fix's symptom proof*.
-- [`cmd/fak/guard_login_e2e_test.go`](../../cmd/fak/guard_login_e2e_test.go) — the worked-example symptom witness (`28dd3b33`).
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim.
+- [`cmd/fak/guard_login_e2e_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/guard_login_e2e_test.go) — the worked-example symptom witness (`28dd3b33`).
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim.

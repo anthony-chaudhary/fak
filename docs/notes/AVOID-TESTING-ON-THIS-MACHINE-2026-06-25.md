@@ -9,7 +9,7 @@ Do **not** run the test suite or stand up a local `fak serve` directly on this W
 machine right now. Two reasons, one hard and one operational:
 
 1. **Native `go test` is already blocked here.** An OS Application-Control policy refuses
-   the freshly-compiled test binaries (see [`AGENTS.md`](../../AGENTS.md) "Windows" note).
+   the freshly-compiled test binaries (see [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) "Windows" note).
    The supported path is WSL: `./test.ps1` from the repo root. Trying to run `go test`
    natively just produces a confusing OS-level failure, not a real test result.
 

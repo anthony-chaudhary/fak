@@ -12,9 +12,9 @@ straight through — detection keys on *content*, and content can always be reph
 fak's information-flow control keys on **provenance** instead, which a paraphrase
 cannot launder: it stamps every value with a kernel-authored taint, propagates it, and
 refuses a tainted→sensitive-sink flow *before the call executes*. That spine is shipped
-and offline-witnessed in [`internal/ifc`](../../internal/ifc) ([`Ref.Taint`](../../internal/abi/types.go)
-source-stamped by [`internal/provenance`](../../internal/provenance), gated rank-30 at
-adjudication — [CLAIMS.md](../../CLAIMS.md)).
+and offline-witnessed in [`internal/ifc`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ifc) ([`Ref.Taint`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go)
+source-stamped by [`internal/provenance`](https://github.com/anthony-chaudhary/fak/tree/main/internal/provenance), gated rank-30 at
+adjudication — [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)).
 
 The grammar gap this page closes: that logic lives **inside fak's ABI**. There was no
 standalone check another agent runtime could call to ask the one question — *does this
@@ -27,7 +27,7 @@ vocabulary, and the closed deny reasons. It is `G7` of the
 [the support-maturity honesty fence](support-maturity-honesty-fence.md) (a maturity
 claim). The verb that walks this schema over a value is `dos taint-check`; its home is
 the installed DOS package, and it is **not yet** (see the [honest fences](#honest-fences)).
-fak's [`internal/ifc`](../../internal/ifc) is the reference implementation — the offline
+fak's [`internal/ifc`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ifc) is the reference implementation — the offline
 witness that the floor below is real, not a wish.
 
 The literature names this family — Biba integrity + least privilege + reference
@@ -53,8 +53,8 @@ Crossing {
 ```
 
 `value_taint` is the **kernel-authored** taint label — the closed
-[`abi.Ref.Taint`](../../internal/abi/types.go) lattice (`trusted` < `tainted` <
-`quarantined`). It is the *output* of [`internal/provenance`](../../internal/provenance),
+[`abi.Ref.Taint`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) lattice (`trusted` < `tainted` <
+`quarantined`). It is the *output* of [`internal/provenance`](https://github.com/anthony-chaudhary/fak/tree/main/internal/provenance),
 derived from the kernel-stamped result state and the host-registered tool source class
 **only**; it is never a caller's or model's self-tag (a poisoned read that tried to mint
 itself `trusted` is surfaced as `AttemptedSelfTrust` for forensics, not honored). The
@@ -68,8 +68,8 @@ sides — a clean span may be shared *and* may reach a sink; a tainted one may d
 without an explicit release.
 
 `sink_class` and `target_scope` are **closed** vocabularies that qualify the boundary —
-the [`ifc.SinkClass`](../../internal/ifc/ifc.go) sensitivity for a `sink` crossing, the
-[`abi.ShareScope`](../../internal/abi/types.go) reach for a `share` crossing. Exactly one
+the [`ifc.SinkClass`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ifc/ifc.go) sensitivity for a `sink` crossing, the
+[`abi.ShareScope`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) reach for a `share` crossing. Exactly one
 is required, by boundary; omitting it is a fail-closed reject, not a silent default.
 
 ### Decision — the reviewable Allow | Deny(reason)
@@ -92,13 +92,13 @@ the kernel gates' bounded disclosure), never the value's bytes.
 
 `DenyReason` is **closed and additive** — a new reason is a new named value plus a
 decision arm, never a free-text field. Every token folds to the kernel's
-[`TRUST_VIOLATION`](../../internal/abi/reasons.go) at the floor; this verb exposes the
+[`TRUST_VIOLATION`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/reasons.go) at the floor; this verb exposes the
 finer sub-vocabulary:
 
 | `reason` | when | kernel stick it lifts |
 |---|---|---|
-| `TAINTED_TO_SINK` | a dangerous (`tainted`/`quarantined`) value into a gated sensitive sink (`egress`/`exec`/`destructive`), no authorization | [`ifc.SinkGate`](../../internal/ifc/ifc.go) |
-| `TAINTED_SPAN_UNSHAREABLE` | a dangerous value shared to a scope wider than `agent` (`fleet`/`tenant`) | [`StampGate`](../../internal/ifc/ifc.go) down-clamp to `ScopeAgent` + [`ScopeCeilingGate`](../../internal/ifc/scope_ceiling.go) upward bound |
+| `TAINTED_TO_SINK` | a dangerous (`tainted`/`quarantined`) value into a gated sensitive sink (`egress`/`exec`/`destructive`), no authorization | [`ifc.SinkGate`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ifc/ifc.go) |
+| `TAINTED_SPAN_UNSHAREABLE` | a dangerous value shared to a scope wider than `agent` (`fleet`/`tenant`) | [`StampGate`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ifc/ifc.go) down-clamp to `ScopeAgent` + [`ScopeCeilingGate`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ifc/scope_ceiling.go) upward bound |
 | `UNKNOWN_TAINT` | `value_taint` not in the closed lattice — fail-closed (the kernel's "unknown ⇒ tainted") | `ifc.taintRank` default arm |
 | `UNCLASSIFIED_SINK` | `boundary == sink` but `sink_class` is missing/out-of-set — fail-closed | the closed `ifc.SinkClass` |
 | `UNKNOWN_BOUNDARY` | `boundary` not one of `sink`/`share` — fail-closed | — |
@@ -161,7 +161,7 @@ without fak's kernel:
 3. **It is fail-closed and evidence-bound.** Absence of an affirmative allow is a deny:
    an unknown taint, an unclassified sink, an unknown boundary, or an indeterminate
    share target each denies, never passes. And the `value_taint` is a *kernel-authored*
-   label — the output of [`internal/provenance`](../../internal/provenance), never the
+   label — the output of [`internal/provenance`](https://github.com/anthony-chaudhary/fak/tree/main/internal/provenance), never the
    model's self-report. A runtime that lets the model author the taint has voided the
    contract; the check assumes the label it is handed is the kernel's stamp.
 
@@ -179,7 +179,7 @@ fixtures under [`fixtures/`](fixtures/) are the on-disk witness:
   the kernel-stamped taint differs — the verdict turns on provenance, not on content.
 
 A reviewer reads the four files and the table binding them; no model and no fak engine
-are needed to confirm the check. fak's [`internal/ifc`](../../internal/ifc) classifies
+are needed to confirm the check. fak's [`internal/ifc`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ifc) classifies
 the same sources, gates the same sinks, and reaches the same verdicts — offline,
 witnessed by `go test ./internal/ifc`, which is the reference implementation's proof that
 the floor below is real.
@@ -214,7 +214,7 @@ the floor below is real.
   relieve. It has **no false negatives on the exfil channel** — the property a buyer
   underwrites.
 - **The runtime default relaxes EXEC; this schema's default is strict.** fak's running
-  [`DefaultGatedSinks`](../../internal/ifc/ifc.go) gates `egress` and `destructive` but
+  [`DefaultGatedSinks`](https://github.com/anthony-chaudhary/fak/blob/main/internal/ifc/ifc.go) gates `egress` and `destructive` but
   **not** `exec` — gating shell on the session-wide taint high-water mark denies normal
   Bash after any untrusted read, a workflow-breaking false positive on trusted dev work,
   for little marginal safety beyond the hard arg-rules that block dangerous shell
@@ -236,9 +236,9 @@ the floor below is real.
 ## Cross-references
 
 - [`taint-check-schema.json`](taint-check-schema.json) — the machine-checkable JSON Schema (Draft 2020-12) for this contract: validate a crossing with any off-the-shelf validator, no fak engine present.
-- [`internal/ifc`](../../internal/ifc) — fak's reference implementation of this floor: the source-stamp data plane, the sink-gate control plane, and the scope-ceiling share bound.
+- [`internal/ifc`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ifc) — fak's reference implementation of this floor: the source-stamp data plane, the sink-gate control plane, and the scope-ceiling share bound.
 - [The portable agent-routing schema](agent-routing-schema.md) — the `G8` sibling (a routing decision); same recipe, different verb.
 - [The agent-programming grammar](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — the epic this schema is `G7` of, and the recipe every lift keeps (closed vocabulary, evidence-bound, fail-closed, data-not-code, pays on both lenses).
 - [The out-of-band-injection-defense taxonomy](../notes/RESEARCH-out-of-band-injection-defense-taxonomy-triage-2026-06-26.md) — the literature this floor sits in (Biba / least-privilege / reference-monitor; CaMeL / FIDES / Progent).
 - [Net-true-value](net-true-value.md) · [The observer-effect contract](observer-effect.md) · [The support-maturity honesty fence](support-maturity-honesty-fence.md) — the sibling standards in `docs/standards/`.
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim (the IFC floor is line "Information-flow control: `Ref.Taint` is source-stamped and a tainted→sink flow is sink-gated").
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim (the IFC floor is line "Information-flow control: `Ref.Taint` is source-stamped and a tainted→sink flow is sink-gated").

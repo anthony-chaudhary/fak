@@ -15,7 +15,7 @@ The question: are fak's always-on background loops — the issue dispatchers, th
 
 Audience: operators and agents responsible for keeping background fak loops durable across
 restarts. Prereq: read [`../dispatch-loop.md`](../dispatch-loop.md) for the dispatch-loop
-contract and [`../../AGENTS.md`](../../AGENTS.md) for the shared-trunk recovery rules. TL;DR:
+contract and [`../../AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for the shared-trunk recovery rules. TL;DR:
 this scorecard tells you which loops are registered, observable, and routed through fak's own
 guard/witness path; after running it, fix the named loop gap before claiming loop health.
 

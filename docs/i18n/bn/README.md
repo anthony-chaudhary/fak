@@ -7,7 +7,7 @@ description: "fak-এর বাংলা প্রবেশ-পৃষ্ঠা: 
 
 > এটি একটি **স্থানীয়কৃত প্রবেশ-পৃষ্ঠা (entry point)** — পুরো ডকুমেন্টেশনের অনুবাদ নয়।
 > পূর্ণ ডকুমেন্টেশন ইংরেজিতে — এই পৃষ্ঠা fak-এর সারমর্ম, ৬০-সেকেন্ডের প্রমাণ আর install
-> পথ দিয়ে আপনাকে [ইংরেজি ডকস](../../../README.md)-এ পৌঁছে দেয়।
+> পথ দিয়ে আপনাকে [ইংরেজি ডকস](https://github.com/anthony-chaudhary/fak/blob/main/README.md)-এ পৌঁছে দেয়।
 > **দ্রষ্টব্য:** এই অনুবাদ যন্ত্রে তৈরি; native পর্যালোচনা বাকি — সংশোধনের জন্য
 > issue/PR খুলুন।
 >
@@ -76,12 +76,12 @@ llama.cpp / LM Studio বা যেকোনো OpenAI-compatible API-এর ম
 
 ## এরপর কোথায়
 
-- [README (পূর্ণ পরিদর্শন)](../../../README.md)
-- [START-HERE — ১০ মিনিটে local model](../../../START-HERE.md)
-- [Getting Started — binary install করুন](../../../GETTING-STARTED.md)
+- [README (পূর্ণ পরিদর্শন)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
+- [START-HERE — ১০ মিনিটে local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
+- [Getting Started — binary install করুন](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)
 - [Integrations — আপনার এজেন্ট যুক্ত করুন](../../integrations/README.md)
 - [ডেটা residency ও compliance — DPDP Act-এর জন্য](../../explainers/data-residency-and-compliance.md)
-- [BENCHMARK-AUTHORITY — প্রতিটি সংখ্যার উৎস](../../../BENCHMARK-AUTHORITY.md)
-- [CLAIMS — কোনটি shipped/simulated/stub](../../../CLAIMS.md)
+- [BENCHMARK-AUTHORITY — প্রতিটি সংখ্যার উৎস](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
+- [CLAIMS — কোনটি shipped/simulated/stub](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)
 
-License: [Apache-2.0](../../../LICENSE)।
+License: [Apache-2.0](https://github.com/anthony-chaudhary/fak/blob/main/LICENSE)।

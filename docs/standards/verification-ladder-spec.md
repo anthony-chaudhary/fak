@@ -18,10 +18,10 @@ restrictiveness lattice, cheapest rung first, fail-closed when nothing affirmati
 allows. And the doctrine's named-missing half is now built — the kernel ships a
 first-class `VerdictIndeterminate` and a lazy chain fold that makes it non-committable
 (a residual `Indeterminate` yields `Deny`, never `Allow`):
-[`internal/abi/types.go`](../../internal/abi/types.go) (`VerdictIndeterminate`, the
-closed kind), [`internal/abi/registry.go`](../../internal/abi/registry.go) (`FoldRank`
+[`internal/abi/types.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go) (`VerdictIndeterminate`, the
+closed kind), [`internal/abi/registry.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go) (`FoldRank`
 15, strictly between `Defer` and `Transform`), and
-[`internal/kernel/kernel.go`](../../internal/kernel/kernel.go) (the fold:
+[`internal/kernel/kernel.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/kernel/kernel.go) (the fold:
 `sawIndeterminate` → climb, else fail closed).
 
 The grammar gap this page closes: that ladder lives **inside fak's kernel**. There was
@@ -109,7 +109,7 @@ data — reviewable, diffable, produced with no model in the loop.
 
 `Verdict` is **closed and additive** — a new verdict is a new named value plus a fold
 arm, never a free-text field. It mirrors the kernel's closed `VerdictKind`
-([`internal/abi/types.go`](../../internal/abi/types.go)):
+([`internal/abi/types.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/types.go)):
 
 | `verdict` | meaning | committable? |
 |---|---|---|
@@ -122,14 +122,14 @@ arm, never a free-text field. It mirrors the kernel's closed `VerdictKind`
 fail-open allow (it never commits) and **not** a bare `defer` (a `defer` says "nothing
 here," an `indeterminate` says "climb, do not guess"). In the lattice it ranks above
 `defer` and below every conclusive kind (`FoldRank` 15, between `Defer` 10 and
-`Transform` 20 in [`internal/abi/registry.go`](../../internal/abi/registry.go)) — so a
+`Transform` 20 in [`internal/abi/registry.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go)) — so a
 conclusive `allow`/`deny` from any rung still wins outright, and the fold never gets
 stuck at `indeterminate` when something conclusive exists.
 
 `INDETERMINATE` is also a **`dos_check_reason`-validatable** refusal token: when a ladder
 exhausts with a residual indeterminate, its fail-closed deny carries `reason:
 "INDETERMINATE"`, declared in this workspace's
-[`dos.toml [reasons]`](../../dos.toml). It names "I could not decide cheaply; the
+[`dos.toml [reasons]`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml). It names "I could not decide cheaply; the
 costlier rung was unavailable, so fail closed — escalate, never silently allow."
 
 ### The cost and risk vocabularies
@@ -192,7 +192,7 @@ schema so a fail-open ladder is **rejected at the authoring boundary**, never ad
 
 These are the kernel's own guarantees, lifted into the data shape: the kernel's lazy fold
 holds an `Indeterminate` as non-committable and resolves a residual one to `Deny`
-([`internal/kernel/kernel.go`](../../internal/kernel/kernel.go)); the schema makes a
+([`internal/kernel/kernel.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/kernel/kernel.go)); the schema makes a
 host's *declared* ladder unable to opt out of that.
 
 ## The three contracts (the acceptance, made checkable)
@@ -213,7 +213,7 @@ without fak's kernel:
    any runtime authors and validates a ladder with an off-the-shelf validator, **no fak
    engine present**. And `INDETERMINATE` is `dos_check_reason`-validatable —
    `dos_check_reason INDETERMINATE` returns `known=true` (declared in
-   [`dos.toml [reasons]`](../../dos.toml)); an out-of-set token is `UNCLASSIFIED` and
+   [`dos.toml [reasons]`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml)); an out-of-set token is `UNCLASSIFIED` and
    refused conservatively. The five on-disk
    [negative fixtures](fixtures/verification-ladder-invalid/) — a fail-open tail, a
    missing escalate-on, an out-of-set verdict, a non-committable final verdict, and an
@@ -253,7 +253,7 @@ implementation's proof that the rungs below are real.
 |---|---|---|
 | `indeterminate` verdict (closed, non-committable) | `abi.VerdictIndeterminate` (`internal/abi/types.go`) + `FoldRank` 15 (`internal/abi/registry.go`) | [SHIPPED] |
 | Lazy fold: residual `indeterminate` → `Deny`, conclusive wins | `kernel.Fold` (`internal/kernel/kernel.go`) + `FoldExplain` mirror (`internal/kernel/explain.go`) | [SHIPPED] |
-| `INDETERMINATE` as a `dos_check_reason`-validatable refusal token | [`dos.toml [reasons.INDETERMINATE]`](../../dos.toml) | [SHIPPED] |
+| `INDETERMINATE` as a `dos_check_reason`-validatable refusal token | [`dos.toml [reasons.INDETERMINATE]`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml) | [SHIPPED] |
 | Cost-ordered chain, cheapest rung first, most-restrictive fold | `kernel.Fold` + the `FoldRank` lattice (`internal/abi/registry.go`) | [SHIPPED] |
 | Rung 0 (reuse / vDSO re-output) | `internal/kernel/kernel.go` (FastPath consulted before the fold) | [SHIPPED] |
 | Rung 1 (in-process structural: name / self-modify / arg-predicate / lint) | `internal/adjudicator/decide.go` (per-call short-circuit) | [SHIPPED] |
@@ -299,4 +299,4 @@ implementation's proof that the rungs below are real.
 - [The portable taint-check schema](taint-check-schema.md) · [the portable agent-routing schema](agent-routing-schema.md) · [the prediction-calibration contract](prediction-calibration.md) — the `G7`/`G8`/`G5` siblings; same recipe (closed vocabulary, evidence-bound, fail-closed, data-not-code), different verb.
 - [The agent-programming grammar](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — the epic this schema is `G2` of, and the recipe every lift keeps.
 - [Net-true-value](net-true-value.md) · [The observer-effect contract](observer-effect.md) · [The support-maturity honesty fence](support-maturity-honesty-fence.md) — the sibling standards in `docs/standards/`.
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim.
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim.

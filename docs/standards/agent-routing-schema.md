@@ -190,7 +190,7 @@ implementation's proof that the three contracts hold.
   offline-witnessed in `internal/modelroute`. The live multi-model **dispatch** — the
   layer that writes the chosen model to `abi.ToolCall.Engine`, runs each ensemble
   member as its own adjudicated call, and feeds the outputs into the fold — is
-  [STUB], tracked on the model-routing claim itself in [`CLAIMS.md`](../../CLAIMS.md).
+  [STUB], tracked on the model-routing claim itself in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
   This page is the *contract* that dispatch (and any external orchestrator) authors
   against, not a claim that dispatch runs.
 - **The `dos route` verb is not yet.** The portable verb that walks this schema over
@@ -218,4 +218,4 @@ implementation's proof that the three contracts hold.
 - [Routers & gateways](../integrations/routers.md) — why fak is a complement to a request-level router, the three topologies, and the residency floor that holds for every router.
 - [The agent-programming grammar](../notes/CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — the epic this schema is `G8` of, and the recipe every lift keeps (closed vocabulary, evidence-bound, fail-closed, data-not-code, pays on both lenses).
 - [Net-true-value](net-true-value.md) · [The observer-effect contract](observer-effect.md) · [The support-maturity honesty fence](support-maturity-honesty-fence.md) — the sibling standards in `docs/standards/`.
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim.
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim.

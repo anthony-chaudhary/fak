@@ -33,7 +33,7 @@ not just against this index:
 |---|---|
 | All public APIs documented | [`api-reference.md`](api-reference.md) (every `fak serve` endpoint) + [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0.3, 19 paths, sourced from `v0.30.0`) |
 | User guides for each feature | [`tutorial.md`](tutorial.md), [`policy-guide.md`](policy-guide.md), [`observability.md`](observability.md), [`security.md`](security.md), [`advanced-topics.md`](advanced-topics.md), [`deployment-guide.md`](deployment-guide.md), [`multi-language-examples.md`](multi-language-examples.md), [`agent-framework-integration.md`](agent-framework-integration.md) |
-| Architecture completeness | [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md), [`../../EXTENDING.md`](../../EXTENDING.md), [`agent-integration-architecture.md`](agent-integration-architecture.md) |
+| Architecture completeness | [`../../ARCHITECTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md), [`../../EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md), [`agent-integration-architecture.md`](agent-integration-architecture.md) |
 | Migration from v0.x guides | [`migration-guide.md`](migration-guide.md) (OpenAI / Anthropic / LangChain / AutoGen / llama.cpp → `fak`). `fak` is itself `v0.30.0`, so no `v0`→`v1` breaking transition exists yet to document |
 
 The dependency called out in #226 — #336 (policy hot-reload operator walkthrough) —

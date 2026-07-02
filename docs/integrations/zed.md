@@ -623,9 +623,9 @@ This overrides the global setting for that project only.
 
 - **Integration index**: [README.md](README.md) — universal recipe and which-agent routing
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md) — full field survey
-- **Policy schema**: [../../POLICY.md](../../POLICY.md) — authoring capability floors
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring capability floors
 - **Zed docs**: [https://zed.dev/docs](https://zed.dev/docs) — official Zed documentation
-- **fak architecture**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md) — kernel internals
+- **fak architecture**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — kernel internals
 
 ---
 

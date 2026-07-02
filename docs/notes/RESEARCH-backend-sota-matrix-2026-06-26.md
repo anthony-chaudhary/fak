@@ -106,7 +106,7 @@ The lineage the issue asks for (commit, machine, model, quant, backend, and whet
 is native fak / llama.cpp / vLLM / SGLang) is **already the discipline** of the two authority
 docs; this matrix does not duplicate it, it points at it:
 
-- **Numbers + commit + artifact:** [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
+- **Numbers + commit + artifact:** [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
   Quick-Reference — every row carries Number, Model, Baseline, Commit, Artifact, and the
   provenance-vs-reproducibility fence (private-lineage SHA vs the public artifact + reproduce
   command). The AWQ row is the one lineage entry the **Selection** above would fill.

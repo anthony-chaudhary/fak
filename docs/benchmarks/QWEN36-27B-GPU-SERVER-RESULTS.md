@@ -14,7 +14,7 @@ description: "fak serving and coding-agent surfaces on Qwen3.6-27B with an 8-GPU
 > raw SGLang across a concurrency sweep. The fak path here is **SGLang-serves +
 > fak-adjudicates** (`fak serve` gateway in front of SGLang) — *not* fak's native CUDA
 > engine, which cannot yet run a quantized / multi-GPU 27B. Every number traces to a
-> committed artifact under [`experiments/qwen36/gpu-server-r4-20260622/`](../../experiments/qwen36/gpu-server-r4-20260622/).
+> committed artifact under [`experiments/qwen36/gpu-server-r4-20260622/`](https://github.com/anthony-chaudhary/fak/tree/main/experiments/qwen36/gpu-server-r4-20260622).
 
 ## 1. Used in a coding agent (the headline)
 
@@ -27,7 +27,7 @@ All three fak surfaces **PASS** on the 27B, run on the GPU server
 | **gateway-openai** | ✅ PASS | single-stream decode **59.3 tok/s** (datacenter GPU; cf. 2.7 tok/s on a laptop AMD RX 7600) |
 | **mcp-http** | ✅ PASS | MCP gateway over the 27B |
 
-Artifact: [`surface-smoke.json`](../../experiments/qwen36/gpu-server-r4-20260622/surface-smoke.json).
+Artifact: [`surface-smoke.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/gpu-server-r4-20260622/surface-smoke.json).
 
 ## 2. Throughput under a multi-agent concurrency load (fak-gateway vs raw SGLang)
 
@@ -45,10 +45,10 @@ metric = `completion_tokens_per_sec`, 64 requests/concurrency, TP=8.
 | 128 | 1074.4 | 1103.2 | 0.97× |
 
 The 27B serves cleanly across the whole 1→128 concurrent load through both stacks.
-Artifacts: [`compare.json`](../../experiments/qwen36/gpu-server-r4-20260622/compare.json),
-[`fak-gateway.json`](../../experiments/qwen36/gpu-server-r4-20260622/fak-gateway.json),
-[`raw-sglang.json`](../../experiments/qwen36/gpu-server-r4-20260622/raw-sglang.json),
-[`COMPARE.md`](../../experiments/qwen36/gpu-server-r4-20260622/COMPARE.md).
+Artifacts: [`compare.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/gpu-server-r4-20260622/compare.json),
+[`fak-gateway.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/gpu-server-r4-20260622/fak-gateway.json),
+[`raw-sglang.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/gpu-server-r4-20260622/raw-sglang.json),
+[`COMPARE.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/gpu-server-r4-20260622/COMPARE.md).
 
 ## 3. Honest fence
 

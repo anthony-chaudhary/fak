@@ -14,7 +14,7 @@ across `AGENTS.md`, agent memory, and the kernel's tool surface, so a mid-tier a
 guesses and reaches for the wrong tool, or none. This map makes the right verb **one ask
 away** — query it from inside the loop with `fak loop-map`.
 
-> This is lever **#1153** of the 10x dev-experience epic ([#1148](../../)). Where
+> This is lever **#1153** of the 10x dev-experience epic ([#1148](https://github.com/anthony-chaudhary/fak/tree/main/.)). Where
 > `fak loop-index-scorecard` *measures* whether the loop is getting faster, this makes the
 > right verb cheap to *find* so every downstream lever gets used **by default**.
 

@@ -14,7 +14,7 @@ description: "Resolves the deferred architecture-fit question for D-006 (#243, T
 > leaf."* That tracker row is now **stale in one respect** — the read half already shipped
 > (`fak_read`, #795) — so the decision can be made on evidence, not speculation.
 > Written **2026-06-28** on a win32 dev box (native `go build`/`go vet` green; tests run
-> under WSL/CI per [AGENTS.md](../../AGENTS.md)).
+> under WSL/CI per [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md)).
 
 ---
 
@@ -49,24 +49,24 @@ which are *already underway on disk*:
    This is shipped and is the honest reading of *"each tool documented and
    safety-annotated"*:
    - per-tool read-only / idempotent / **destructive** annotations —
-     `metaFor` in [`internal/agent/tools.go`](../../internal/agent/tools.go) (`readOnlyHint`
+     `metaFor` in [`internal/agent/tools.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/tools.go) (`readOnlyHint`
      / `idempotentHint` / `destructive`), and the `read_only` hint on the MCP wire schema
-     ([`internal/gateway/mcp.go`](../../internal/gateway/mcp.go), `toolDescriptors`);
+     ([`internal/gateway/mcp.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/mcp.go), `toolDescriptors`);
    - capability-floor allow/deny + redaction, declared as policy manifests
-     ([`examples/dev-agent-policy.json`](../../examples/dev-agent-policy.json) and ~20
+     ([`examples/dev-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/dev-agent-policy.json) and ~20
      sibling presets) — the deployable form of a safety annotation;
    - tool-contract schemas + alias repair (`internal/grammar`, `internal/preflight`,
-     [`internal/toolsandbox`](../../internal/toolsandbox)).
+     [`internal/toolsandbox`](https://github.com/anthony-chaudhary/fak/tree/main/internal/toolsandbox)).
 
 2. **A small, confined set of kernel-routed built-ins** where routing *through* fak buys
    something the raw tool cannot give: the vDSO verified-fresh cache, path confinement, and
    in-line adjudication. `fak_read` is the shipped proof of concept (#795): the model calls
    `fak_read` instead of the harness's built-in Read, and the kernel serves a
    **verified-fresh cached** result with no disk I/O on a hit, or a working-tree-**confined**
-   `os.ReadFile` on a miss ([`internal/agent/readengine.go`](../../internal/agent/readengine.go),
+   `os.ReadFile` on a miss ([`internal/agent/readengine.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/readengine.go),
    wired in `Configure` and advertised in `toolDescriptors`). The built-in family is the
    `fak_*` set (`fak_read`, `fak_syscall`, `fak_adjudicate`, `fak_admit`, `fak_changes`,
-   `fak_revoke`, …) in [`internal/gateway/mcp.go`](../../internal/gateway/mcp.go).
+   `fak_revoke`, …) in [`internal/gateway/mcp.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/mcp.go).
 
 The corollary that scopes the rest of the acceptance: **fak ships a built-in only where the
 kernel adds value over the raw tool**, and it ships write/network built-ins only as
@@ -80,7 +80,7 @@ floor `internal/egressfloor`, plus result-side quarantine), not as raw request r
 
 | Acceptance item | On-disk state | Deciding evidence |
 |---|---|---|
-| File system **read** | 🟢 **Shipped** — confined, kernel-routed, cache-backed | `fak_read` MCP tool: [`internal/gateway/mcp.go`](../../internal/gateway/mcp.go) (`case "fak_read"`, `fakRead`, `toolDescriptors`), engine [`internal/agent/readengine.go`](../../internal/agent/readengine.go), registered in [`internal/agent/tools.go`](../../internal/agent/tools.go) `Configure` → `RegisterReadEngine`, test `internal/gateway/fak_read_test.go` (#795) |
+| File system **read** | 🟢 **Shipped** — confined, kernel-routed, cache-backed | `fak_read` MCP tool: [`internal/gateway/mcp.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/mcp.go) (`case "fak_read"`, `fakRead`, `toolDescriptors`), engine [`internal/agent/readengine.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/readengine.go), registered in [`internal/agent/tools.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/tools.go) `Configure` → `RegisterReadEngine`, test `internal/gateway/fak_read_test.go` (#795) |
 | File system **glob** | 🔴 Not shipped — **the named next leaf** | no `fak_glob` engine/descriptor exists (grep) |
 | File system **write** | 🔴 Not shipped — must be a destructive-gated path | no `fak_write` built-in; writes are *gated* today (adjudicator deny / self-modify floor), not *provided* |
 | **HTTP client** | 🔴 Not shipped as an agent-callable built-in | only a *gated* egress floor exists (`internal/egressfloor`); no `fak_http` request tool |
@@ -141,5 +141,5 @@ floor respectively.
 ## 7. See also
 
 - [`track-d-agent-framework-parity-tracking-304.md`](track-d-agent-framework-parity-tracking-304.md) — the Track D roll-up (epic #304) this note feeds back into.
-- [`internal/agent/readengine.go`](../../internal/agent/readengine.go) · [`internal/gateway/mcp.go`](../../internal/gateway/mcp.go) — the shipped `fak_read` built-in and the `fak_*` tool surface.
-- [`examples/dev-agent-policy.json`](../../examples/dev-agent-policy.json) · [`internal/toolsandbox`](../../internal/toolsandbox) — the safety-annotation / tool-contract layer.
+- [`internal/agent/readengine.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/readengine.go) · [`internal/gateway/mcp.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/mcp.go) — the shipped `fak_read` built-in and the `fak_*` tool surface.
+- [`examples/dev-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/dev-agent-policy.json) · [`internal/toolsandbox`](https://github.com/anthony-chaudhary/fak/tree/main/internal/toolsandbox) — the safety-annotation / tool-contract layer.

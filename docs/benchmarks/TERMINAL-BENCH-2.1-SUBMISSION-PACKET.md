@@ -122,7 +122,7 @@ baseline. This host has none of these, so the packet cannot be completed here.
 ## Authority row — fill only after evidence
 
 When — and only when — the official evidence above is checked in and hashed, add
-one row to [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md). The row must
+one row to [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). The row must
 keep the official Terminal-Bench pass rate **separate** from fak-specific
 evidence/cost/safety metrics, so a reader never mistakes a fak-side safety number
 for the leaderboard statistic:
@@ -155,4 +155,4 @@ output are checked in and hashed into the manifest above.
 - Gate (#898): the official-run contract pinned above is the machine-readable promotion gate.
 - Adapter (#899) / rehearsal (#900): the credentialed raw-vs-fak run that produces the still-missing compare artifact and gateway witness.
 - Recovery (#901): [`TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md`](TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md) — the closed-vocabulary classifier the compare artifact tallies by.
-- Promotion: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) — the single source of truth a row joins, only after the evidence gate clears.
+- Promotion: [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — the single source of truth a row joins, only after the evidence gate clears.

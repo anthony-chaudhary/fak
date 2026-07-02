@@ -54,9 +54,9 @@ durable parity floor.
 | Tokenizer byte-exact vs llama.cpp | `internal/tokenizer` oracle gate (#90) | byte-exact on the Qwen vocab + the 22-token ChatML smoke prompt | [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) |
 | GGUF tensor mapping (tiny + real) | `TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward`, `TestOptionalQwen35GGUFMapsEveryTensorName` | all 851 real-GGUF tensors map; hybrid knobs derived | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
 | Cached session == cacheless forward | `TestQwen35HybridSessionMatchesForwardAndPersistsState`, `TestQwen35HybridQuantTokenLoopPersistsState` | last-position logits match | [`FAK-NATIVE-QWEN35-RESULTS.md`](FAK-NATIVE-QWEN35-RESULTS.md) |
-| #71 Metal-hybrid-prefill CPU orchestration | `TestQwen35HybridViaMMMatchesCPUTemplate` (drives `prefillQwen35HybridViaMM`) | logits + KV cache + linear-attn cache match the proven CPU template within ~1e-6 Q8 float-order drift; green on `windows/amd64`, `CGO_ENABLED=0` — **re-built + re-run green 2026-06-29 at `cf8af435`** (#1242 build-hole closure: the prior dogfood's policy-blocked SKIP is now a real build, not a rounded pass) | [`experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md`](../../experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §2; [`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](../../experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json) |
-| q4_k GEMM/GEMV dispatch bit-identical | `TestQ4KGemmMatchesMatRows`, `TestQ4KGemmInt8MatchesMatRowsInt8`, `TestQ4KMatRowsMatchesF32` | batched GEMM bit-identical to per-token decode GEMV (f32 + int8-SDOT) — the q4_k majority adds **zero** drift | [`experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md`](../../experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md) §3; [`…decode-gemv-status…`](../../experiments/qwen36/metal-q4k-decode-gemv-status-2026-06-28.md) §3 |
-| #71 model-lane code LANDED on `main` | core `prefillQwen35HybridViaMM` (`c80d64fa`); Metal twin + gate + stub + `kv.go` dispatch (`5c065118`) | `dos commit-audit` `diff-witnessed` (`code_effect`) | [`…metal-hybrid-prefill-status…`](../../experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §1/§3 |
+| #71 Metal-hybrid-prefill CPU orchestration | `TestQwen35HybridViaMMMatchesCPUTemplate` (drives `prefillQwen35HybridViaMM`) | logits + KV cache + linear-attn cache match the proven CPU template within ~1e-6 Q8 float-order drift; green on `windows/amd64`, `CGO_ENABLED=0` — **re-built + re-run green 2026-06-29 at `cf8af435`** (#1242 build-hole closure: the prior dogfood's policy-blocked SKIP is now a real build, not a rounded pass) | [`experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §2; [`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json) |
+| q4_k GEMM/GEMV dispatch bit-identical | `TestQ4KGemmMatchesMatRows`, `TestQ4KGemmInt8MatchesMatRowsInt8`, `TestQ4KMatRowsMatchesF32` | batched GEMM bit-identical to per-token decode GEMV (f32 + int8-SDOT) — the q4_k majority adds **zero** drift | [`experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-q4k-device-gemm-status-2026-06-28.md) §3; [`…decode-gemv-status…`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-q4k-decode-gemv-status-2026-06-28.md) §3 |
+| #71 model-lane code LANDED on `main` | core `prefillQwen35HybridViaMM` (`c80d64fa`); Metal twin + gate + stub + `kv.go` dispatch (`5c065118`) | `dos commit-audit` `diff-witnessed` (`code_effect`) | [`…metal-hybrid-prefill-status…`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-hybrid-prefill-status-2026-06-28.md) §1/§3 |
 
 Build note for re-verifying any Go witness here: HEAD often doesn't build standalone (it
 references uncommitted peer fields, e.g. an in-flight `forward.go`/`normWeights`
@@ -80,7 +80,7 @@ re-measured here. The repro is the exact one command that re-confirms the gated 
 | 5 | **#70 q4_k device GEMM matmul-only split** | code shipped; whole-path warm prefill 7.3 tok/s @P=940 (~7× under 51.55) | M3 Pro, `-tags fakmetal`, no co-resident llama-server | `go test ./internal/model -tags fakmetal -run MetalQ4K -count=1`; then `FAK_QPROFILE=1` pp22/long-prompt prefill |
 | 6 | **#69 zero-copy residency + residency-win measure** | residency SHIPPED; `newBufferWithBytesNoCopy` upgrade + A/B win unmeasured | M3 Pro, `-tags fakmetal` (also needs a `(fak model)`-lane `FAK_METAL_REUPLOAD` baseline toggle first) | `go test ./internal/model -tags fakmetal -run MetalQ4K -count=1` after the toggle lands |
 | 7 | **#67 end-to-end decode tok/s → 7.29 bar** | clean decode **1.2** tok/s (ratio 0.16×, perf-gate FAIL is the expected fail-closed state) | M3 Pro, `-tags fakmetal`, no co-resident llama-server | `python tools/qwen36_perf_gate.py --metal --min-ratio 0.5` (exit 1 = recorded gap) |
-| 8 | **#65 GDN-recurrence on-device fraction** | REACHED — CPU-hybrid decision witnessed; pp22 `[metalprof-hybrid]` measured `total=6720.7 ms`, `gemm+roundtrip=6051.6 ms` (**90.0%**), `rest(recurrence/attn/norm)=669.1 ms` (**10.0%**, upper bound on recurrence), so the #92 GPU-scan trigger did not fire | M3 Pro, `-tags fakmetal`, captured on `node-macos-a` | Witness: [`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](../../experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json); decision: [`experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md`](../../experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md) |
+| 8 | **#65 GDN-recurrence on-device fraction** | REACHED — CPU-hybrid decision witnessed; pp22 `[metalprof-hybrid]` measured `total=6720.7 ms`, `gemm+roundtrip=6051.6 ms` (**90.0%**), `rest(recurrence/attn/norm)=669.1 ms` (**10.0%**, upper bound on recurrence), so the #92 GPU-scan trigger did not fire | M3 Pro, `-tags fakmetal`, captured on `node-macos-a` | Witness: [`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json); decision: [`experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-gdn-recurrence-decision-2026-06-28.md) |
 
 The single one-command Mac gate that drives the still-open rows 2–7 in sequence is being
 assembled at `tools/qwen36_mac_parity_gate.sh` (sibling agent, this campaign). Row 8 is
@@ -133,7 +133,7 @@ GDN recurrence / mRoPE / partial-RoPE**. Recorded as **THEOREM 3 (REFUTED)** in 
 ledger. Pinned artifacts:
 `experiments/qwen36/native-gguf-q8-multitoken-parity-20260619.json` (fak) and
 `experiments/qwen36/llamacpp-qwen36-multitoken-oracle-20260619.json` (oracle). Sources:
-[`experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](../../experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md)
+[`experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md)
 §1, [`QWEN36-PARITY-RESULTS.md`](QWEN36-PARITY-RESULTS.md) §"Token-3 drift RE-DIAGNOSED".
 
 Deeper root-cause investigation (which GDN/RoPE op compounds the error):
@@ -157,13 +157,13 @@ that wave. #1242 closes that hole with a **real build**:
 `windows/amd64` orchestrator at commit `cf8af435` (an ancestor of `origin/main`), both with
 the default build and `CGO_ENABLED=0`, and an independent multi-agent wave re-checked the
 witness (build re-run, `SKIP != PASS`, commit ancestry, oracle ids, secret-shape scrub). Witness:
-[`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](../../experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json).
+[`experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/qwen36-build-hole-closure-20260629T071148Z.json).
 This closes a §2-class (host-independent) item; it does **not** move §3 — the Apple-Silicon
 gate (`tools/qwen36_mac_parity_gate.sh` Arms 1–3 on a real M3 Pro) was **not** run here, so
 rows 1–7 of §3 honestly **stay `not yet`**, gated on the M3 Pro verify node + the 27B GGUF +
 llama.cpp b9707 that this orchestrator does not have. Row 8 is the later #65 decision witness,
 recorded separately in
-[`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](../../experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json).
+[`experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/metal-gdn-recurrence-m3pro-20260629.json).
 
 ---
 
@@ -180,7 +180,7 @@ must not be quoted on the same line as the M3 Pro single-stream kernel rows:
   Net (chunked) not supported, set to disabled` — so its absolute throughput is **not** an
   apples-to-apples GDN bar. Likewise **MLX is an invalid bar** for this arch (its hybrid
   cache silently recomputes the full context every turn) — never used here; see
-  [`…PARITY-AND-MEASUREMENT-STATUS…`](../../experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md) §2.
+  [`…PARITY-AND-MEASUREMENT-STATUS…`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md) §2.
 
 The single measured **bar** for the M3 Pro lane is **llama.cpp b9707 Metal (`-ngl 99`):
 prefill 51.55 tok/s, decode 7.29 tok/s, peak RSS ~24.5 GB**; CPU-only (`-ngl 0 -t 6`):

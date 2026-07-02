@@ -86,4 +86,4 @@ to a third-party router does not silently widen the data-egress surface.
 - [Clouds & hosted providers](../supported/clouds.md) — OpenRouter, Together, Groq, Fireworks, Bedrock, Vertex, Azure over the OpenAI-compatible wire.
 - [Compatibility matrix](compatibility-matrix.md) — OpenRouter, Together, Groq, Fireworks and 40 more, each with its wire and the exact repoint key.
 - [Interoperability stance](interoperability.md) — bring your own agent, model, and protocol.
-- [Claims ledger](../../CLAIMS.md) — shipped vs stub, claim by claim.
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — shipped vs stub, claim by claim.

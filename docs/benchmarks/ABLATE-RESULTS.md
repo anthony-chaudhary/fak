@@ -29,7 +29,7 @@ apples-to-apples by construction — every arm ran the same work.
 The minimal first experiment the epic names: a deterministic feature-sweep over
 one frozen `tau2` trace, committed as a reproducible artifact at zero cost.
 
-**Artifact:** [`experiments/ablate/tau2-smoke-vdso-ablation.json`](../../experiments/ablate/tau2-smoke-vdso-ablation.json)
+**Artifact:** [`experiments/ablate/tau2-smoke-vdso-ablation.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/ablate/tau2-smoke-vdso-ablation.json)
 **Reproduce:** `go run ./cmd/fak ablate --trace testdata/tau2/tau2-smoke.json --sweep vdso`
 
 | arm | features | calls | vdso_hits | engine_calls | denies | quar | tokens | Δ tokens |
@@ -58,7 +58,7 @@ clock measurements on the build host (Windows, go1.26.3 here). They are
 committed for completeness and fenced as illustrative, exactly the way the
 model-ladder wall-clocks are single-box while the deterministic token/hit-rate
 metrics reproduce exactly (see
-[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md) §"The model-ladder thesis").
+[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) §"The model-ladder thesis").
 
 ## Honesty fences (what this rung does NOT measure)
 
@@ -99,7 +99,7 @@ host run the suite under WSL (`./test.ps1`); `go build` / `go vet` are native.
 > **model-named** baseline (kernel-efficiency is *refused* unless the model is held
 > constant across arms), and a **decompose** into two numbers that are never blended.
 
-**Artifact:** [`experiments/ablate/cross-agent-pong-opus.json`](../../experiments/ablate/cross-agent-pong-opus.json)
+**Artifact:** [`experiments/ablate/cross-agent-pong-opus.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/ablate/cross-agent-pong-opus.json)
 **Reproduce (offline, from the embedded raw reps):** `python tools/cross_agent_ablate.py report --reps <reps.json>`
 **Re-measure (live, costs API tokens):** `python tools/cross_agent_ablate.py run --task pong --k 5 --fak ./fak.exe`
 

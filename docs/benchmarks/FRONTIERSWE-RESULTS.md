@@ -7,7 +7,7 @@ description: "The authority page for fak's FrontierSWE time-to-solution (TTS) cl
 
 FrontierSWE time-to-solution is fak's claim to reach the same task score in far less wall-clock. No number is recorded here yet.
 
-This is the single authority page for that claim. It follows the discipline of every number in [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md): one place, traced to a source commit and an artifact. It is created empty and gated on purpose, so the claim boundary is written down before a run exists. That keeps an ungoverned "10x faster" from leaking into the README or a Slack post ahead of the evidence.
+This is the single authority page for that claim. It follows the discipline of every number in [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md): one place, traced to a source commit and an artifact. It is created empty and gated on purpose, so the claim boundary is written down before a run exists. That keeps an ungoverned "10x faster" from leaking into the README or a Slack post ahead of the evidence.
 
 Child C15 ([#1721](https://github.com/anthony-chaudhary/fak/issues/1721)) of epic [#1706](https://github.com/anthony-chaudhary/fak/issues/1706).
 
@@ -78,7 +78,7 @@ Provenance labels on the filled row follow the house rule. fak's own KV-prefix r
 - Runbook, the raw-vs-fak recipe: [`FRONTIERSWE-TTS-RUNBOOK.md`](FRONTIERSWE-TTS-RUNBOOK.md)
 - Scoring parity to the published oracle: [`FRONTIERSWE-SCORING-PARITY.md`](FRONTIERSWE-SCORING-PARITY.md)
 - Scoring/TTS runtime: `internal/frontierswe`; offline CLI: `cmd/fak/frontierswe.go`
-- Authority index and row: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md), under "FrontierSWE time-to-solution (GATED)"
+- Authority index and row: [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), under "FrontierSWE time-to-solution (GATED)"
 
 ---
 

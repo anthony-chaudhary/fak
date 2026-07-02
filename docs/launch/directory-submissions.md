@@ -132,5 +132,5 @@ These add fak to the docs of tools fak fronts, reaching THEIR users (not just a 
 
 ---
 
-*Every description here is capability-first and traces to [`CLAIMS.md`](../../CLAIMS.md). No
+*Every description here is capability-first and traces to [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). No
 performance multipliers are claimed in any listing — keep it that way if you edit them.*

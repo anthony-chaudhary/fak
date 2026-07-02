@@ -14,13 +14,13 @@ result can reach the model by arguing past a classifier.
 
 This is the 60-second "harden any MCP server" path. The mechanism is shipped and
 verified; this page is the packaging. For the breadth of the MCP surface see
-[`README.md`](README.md) and [`../../examples/mcp/README.md`](../../examples/mcp/README.md).
+[`README.md`](README.md) and [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md).
 
 ## The two gates
 
 | Vector | What the server does | fak's structural answer | The tool your agent calls |
 |---|---|---|---|
-| **Poisoned RESULT** | returns bytes carrying a prompt-injection or a leaked secret | the **context-MMU** ([`../../internal/ctxmmu`](../../internal/ctxmmu)) holds the bytes out of context entirely and swaps in a stub pointer | `fak_admit` (screen a result you ran) or `fak_syscall` (run it through the kernel) |
+| **Poisoned RESULT** | returns bytes carrying a prompt-injection or a leaked secret | the **context-MMU** ([`../../internal/ctxmmu`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ctxmmu)) holds the bytes out of context entirely and swaps in a stub pointer | `fak_admit` (screen a result you ran) or `fak_syscall` (run it through the kernel) |
 | **Poisoned DESCRIPTION** | advertises a tool whose description is an injection | the **capability allow-list** — a tool that was never wired into the policy cannot be invoked no matter what its description says | `fak_adjudicate` (verdict before you run) |
 
 An attacker has to beat **two independent gates** rather than fool one classifier. The
@@ -33,7 +33,7 @@ Add `fak` as an MCP server alongside the one you want to harden. `fak serve --st
 speaks newline-delimited JSON-RPC over stdin/stdout (no listener, no auth surface) and
 exposes the `fak_*` tools above.
 
-**Claude Code** — copy [`../../examples/mcp/.mcp.json`](../../examples/mcp/.mcp.json) to
+**Claude Code** — copy [`../../examples/mcp/.mcp.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/.mcp.json) to
 your project root (it wires `fak serve --stdio`), or:
 
 ```bash
@@ -55,7 +55,7 @@ Then route the server you are hardening through the gates: `fak_adjudicate` a pr
 call before you run it, and `fak_admit` the result before it enters context (or do both
 at once with `fak_syscall`). The full input schemas are in `tools/list`; the result
 envelope is specified in [`../mcp-tool-result.md`](../mcp-tool-result.md). Adjust the
-policy to your own floor — see [`../../POLICY.md`](../../POLICY.md).
+policy to your own floor — see [`../../POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 
 ## Prove it: the poisoned-MCP A/B (no model, no key, no network)
 
@@ -91,7 +91,7 @@ control is allowed.
   description says).
 - This page is the **security / governance wedge**. The KV-reuse savings are self-host
   only and are deliberately not the pitch here — see
-  [`../../README.md`](../../README.md) for that axis.
+  [`../../README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for that axis.
 - fak does not today *transparently* proxy an arbitrary MCP server's wire; it provides
   the gate tools (`fak_adjudicate` / `fak_admit` / `fak_syscall`) the agent calls to put
   the kernel's two gates in front of every call and result. Add it alongside the server
@@ -99,9 +99,9 @@ control is allowed.
 
 ## Related
 
-- [`../../examples/mcp/README.md`](../../examples/mcp/README.md) — the one-paste MCP
+- [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) — the one-paste MCP
   setup (`.mcp.json` + the `fak_*` tools) this hardens.
-- [`../../examples/mcp-client/client.py`](../../examples/mcp-client/client.py) — a
+- [`../../examples/mcp-client/client.py`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp-client/client.py) — a
   dependency-free reference client that drives all six `fak_*` tools over stdio and HTTP.
-- [`../../README.md`](../../README.md) §"Security: the lock, not the screener" — the
+- [`../../README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) §"Security: the lock, not the screener" — the
   two-gate framing and the flight-booking A/B this mirrors.

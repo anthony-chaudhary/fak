@@ -17,8 +17,8 @@ itself introduces and compare against the alternative a competent operator would
 deploy — not the worst thing they could have done instead.
 
 This is not a new gate. It is the *name* for a discipline the repo already runs in pieces
-([`CLAIMS.md`](../../CLAIMS.md) tags, the baseline-letter convention in
-[`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md), the conflation and default-value
+([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) tags, the baseline-letter convention in
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), the conflation and default-value
 scorecards, the salience register). The table at the end binds each rubric question to the
 stick that mechanizes it, so this page is a lens over evidence, not prose on top of it.
 
@@ -67,10 +67,10 @@ encodes the honest answer:
 
 | Pattern | The tell | Ask | fak's honest frame |
 |---|---|---|---|
-| **Strawman baseline** | "5×" with no "vs what", or vs the naive floor | Against the *tuned* alternative? | baseline letters A=naive / B=tuned / C=fak ([`BENCHMARK-AUTHORITY`](../../BENCHMARK-AUTHORITY.md)) |
+| **Strawman baseline** | "5×" with no "vs what", or vs the naive floor | Against the *tuned* alternative? | baseline letters A=naive / B=tuned / C=fak ([`BENCHMARK-AUTHORITY`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) |
 | **Narrow scope sold as general** | one cache-favorable trace | Where does it vanish? | lossy/lossless + layer tags ([`awesome-token-efficiency`](../awesome-token-efficiency.md)) |
 | **Already in a tuned stack / already in ours** | a "new" trick the engines ship | Marginal over best practice? | the 10 already-shipped SOTA optimizations are the baseline ([`sota-optimizations`](../explainers/sota-optimizations.md)) |
-| **Modeled or cherry-picked** | a headline with no artifact | Measured? reproducible? | provenance labels + traceability ([`BENCHMARK-AUTHORITY`](../../BENCHMARK-AUTHORITY.md)) |
+| **Modeled or cherry-picked** | a headline with no artifact | Measured? reproducible? | provenance labels + traceability ([`BENCHMARK-AUTHORITY`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) |
 
 The lens cuts constructively too. A method that **survives** the rubric and isn't in fak
 doesn't get waved away — it lands in [`awesome-token-efficiency`](../awesome-token-efficiency.md)
@@ -83,10 +83,10 @@ we adopt real gains as readily as we decline noise. The daily intake from
 This standard would be decoration if fak's own claims didn't pass it. They are kept honest
 by machinery, not goodwill:
 
-- **Per-capability tags** — every `- [` line in [`CLAIMS.md`](../../CLAIMS.md) carries
+- **Per-capability tags** — every `- [` line in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries
   exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]`, lint-enforced by `make claims-lint`.
 - **Baseline letters + traceability** — every number in
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) pins a baseline letter and traces
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) pins a baseline letter and traces
   to a commit + artifact; any number quoted elsewhere must trace back here.
 - **Provenance, not blame** — the [conflation scorecard](../CONFLATION-SCORECARD.md) checks
   that every reported number labels WITNESSED vs OBSERVED, so a dashboard can't say "fak
@@ -122,10 +122,10 @@ What keeps this page honest is that most of it is already mechanized:
 
 The point of a standard is that nobody has to go looking for it.
 
-- **Agents** meet it in [`AGENTS.md`](../../AGENTS.md) next to the "every claim carries a
+- **Agents** meet it in [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) next to the "every claim carries a
   tag" rule — the lens an agent runs before reporting a win, and over the daily idea-scout
   intake before importing one.
-- **Humans** meet it in the doc map ([`llms.txt`](../../llms.txt), [`INDEX.md`](../../INDEX.md))
+- **Humans** meet it in the doc map ([`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md))
   beside the claims ledger and the benchmark authority, and it is the connective tissue
   under the [charter](../notes/CHARTER.md)'s principle #2 (industry-leading value) and #9
   (win-win-win).

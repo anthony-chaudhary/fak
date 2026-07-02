@@ -32,7 +32,7 @@ independently; this is the contract that binds them.
 | Guard-hop fitness harness — overhead + prompt-cache-preservation row with a `--check` honesty gate | [`tools/guard_hop_bench.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/guard_hop_bench.py), [`docs/benchmarks/GUARD-HOP-OVERHEAD-PENDING.md`](benchmarks/GUARD-HOP-OVERHEAD-PENDING.md) | **harness shipped**; overhead arm PROJECTED; **TTFB + cache arms PENDING (hardware-gated)** |
 | Loop-health metric — `closure_rate` / `regression_rate` | [`tools/issue_closure_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_closure_audit.py), [#382](https://github.com/anthony-chaudhary/fak/issues/382) | `closure_rate` **shipped**; `regression_rate` is an honest placeholder pending a live verdict-journal |
 | Loop-verdict telemetry — each keep/revert mirrored to the DOS audit journal | `cmd/rsiloop -dos-observe` (`dosobserve.go`, #588) | **shipped** (observe-only; never re-gates the keep-bit) |
-| The live signal source — per-request latency, in-flight, status mix, `cache_read_input_tokens` | `fak serve` `/v1/messages`; the **FAK Dogfood Slow Requests** dashboard; `fak guard`'s exit summary (`provider cache — N prompt tokens served from cache`) | **emitting** on the live fleet ([`DOGFOOD-CLAUDE.md`](../DOGFOOD-CLAUDE.md), [`docs/fak/always-on-dogfood-server.md`](fak/always-on-dogfood-server.md)) |
+| The live signal source — per-request latency, in-flight, status mix, `cache_read_input_tokens` | `fak serve` `/v1/messages`; the **FAK Dogfood Slow Requests** dashboard; `fak guard`'s exit summary (`provider cache — N prompt tokens served from cache`) | **emitting** on the live fleet ([`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md), [`docs/fak/always-on-dogfood-server.md`](fak/always-on-dogfood-server.md)) |
 
 The one thing **not** present is a *measured win kept by a live run*. That arm is
 hardware-gated — see [The honest gate](#the-honest-gate-what-is-not-done-here) at the
@@ -62,7 +62,7 @@ the author of the change.
 cache_read(direct)`, summed over the window.
 
 - Source field: the provider's `cache_read_input_tokens`, reported straight back to the
-  client on every `/v1/messages` response ([`DOGFOOD-CLAUDE.md`](../DOGFOOD-CLAUDE.md)).
+  client on every `/v1/messages` response ([`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md)).
 - **Goal: hold `cache_preservation` at 1.0.** A gateway change that perturbs the prompt
   prefix by even one byte collapses the provider prompt-cache; the rate falls below 1.0
   the instant a candidate breaks byte-for-byte `cache_control` forwarding. This is the
@@ -181,4 +181,4 @@ KEPT measured TTFB reduction into `BENCHMARK-AUTHORITY.md` — tombstoning the P
 - [`docs/rsi-loop.md`](rsi-loop.md) — the loop engine this payload plugs into.
 - [`docs/benchmarks/GUARD-HOP-OVERHEAD-PENDING.md`](benchmarks/GUARD-HOP-OVERHEAD-PENDING.md) — the fitness harness + its honesty gate.
 - [`docs/explainers/engineering-is-building-loops.md`](explainers/engineering-is-building-loops.md) — where the rsi rung sits in the loop ladder.
-- [`DOGFOOD-CLAUDE.md`](../DOGFOOD-CLAUDE.md) · [`docs/fak/always-on-dogfood-server.md`](fak/always-on-dogfood-server.md) — the live telemetry source.
+- [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) · [`docs/fak/always-on-dogfood-server.md`](fak/always-on-dogfood-server.md) — the live telemetry source.

@@ -9,7 +9,7 @@ This guide shows how to put `fak` in front of [OpenCode](https://opencode.ai/), 
 open-source terminal coding agent. Every tool call OpenCode proposes is adjudicated by the
 kernel before it runs: denied by structure, repaired, or quarantined.
 
-OpenCode reads the repo's [`AGENT.md`](../../AGENT.md) / [`AGENTS.md`](../../AGENTS.md) for
+OpenCode reads the repo's [`AGENT.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENT.md) / [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for
 project context; they point back here.
 
 ## Two integration paths
@@ -72,7 +72,7 @@ curl http://127.0.0.1:8080/healthz
 
 - **Integration index**: [README.md](README.md)
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md)
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - **Harden any MCP server**: [harden-any-mcp.md](harden-any-mcp.md)
 - **OpenCode docs**: [https://opencode.ai/docs](https://opencode.ai/docs)
 

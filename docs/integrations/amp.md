@@ -9,7 +9,7 @@ This guide shows how to put `fak` in front of [Amp](https://ampcode.com/), Sourc
 agentic coding tool. Every tool call Amp proposes is adjudicated by the kernel before it
 runs: denied by structure, repaired, or quarantined.
 
-Amp auto-loads [`AGENT.md`](../../AGENT.md) from the repo root for project context; it
+Amp auto-loads [`AGENT.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENT.md) from the repo root for project context; it
 points back here.
 
 ## Two integration paths
@@ -71,8 +71,8 @@ curl http://127.0.0.1:8080/healthz
 
 - **Integration index**: [README.md](README.md)
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md)
-- **Kernel internals**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md)
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
+- **Kernel internals**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md)
 - **Amp docs**: [https://ampcode.com/manual](https://ampcode.com/manual)
 
 ## License

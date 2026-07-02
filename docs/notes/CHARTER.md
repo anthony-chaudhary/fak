@@ -1,9 +1,9 @@
 # CHARTER — the ten principles fak is built to satisfy
 
 This is fak's constitution: the small set of commitments every surface is meant to
-advance. It is the *why* above the *what* — read [`README.md`](../../README.md) for what
-fak is, [`AGENTS.md`](../../AGENTS.md) for how to work in the repo, and
-[`CLAIMS.md`](../../CLAIMS.md) for what is actually shipped. This page names what all of
+advance. It is the *why* above the *what* — read [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for what
+fak is, [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for how to work in the repo, and
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) for what is actually shipped. This page names what all of
 that is *for*.
 
 The charter is a north star, not a new gate. It does not block a commit. Instead it
@@ -11,7 +11,7 @@ binds to the machinery the repo already runs: each principle points at a **surfa
 that embodies it** and a **deterministic scorecard that keeps it honest**, and where
 no measuring stick exists yet, the charter says so in plain `not yet` language rather
 than claiming alignment it can't witness. The repo already folds **18 scorecards**
-into one debt number through [`tools/scorecard_control_pane.py`](../../tools/scorecard_control_pane.py);
+into one debt number through [`tools/scorecard_control_pane.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/scorecard_control_pane.py);
 most of this charter is already measured there. The job of this document is to make
 the goal explicit, map it to that machinery, and grade the gap honestly.
 
@@ -47,8 +47,8 @@ A charter that only inspires is decoration. This one is wired to evidence:
   a session limit; they are marked `verify pending` and graded conservatively.
 - **`not yet`, not failure.** A principle with no dedicated measuring stick is capped
   below A and named as a gap to build, not scored as if the absence were success.
-  This is the same incomplete-state discipline [`AGENTS.md`](../../AGENTS.md) and
-  [`CLAIMS.md`](../../CLAIMS.md) already enforce.
+  This is the same incomplete-state discipline [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and
+  [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) already enforce.
 
 ## Alignment scorecard (2026-06-26)
 
@@ -148,7 +148,7 @@ new process — it *orders* the process that exists around a single set of goals
 - **Keeping it honest.** The scorecards keep the charter honest; `/score-2x` keeps the
   scorecards honest (debt down while a surface is dirty, the bar up when it saturates,
   so a frozen A is never mistaken for a finished job).
-- **Companions.** [`AGENTS.md`](../../AGENTS.md) is the agent's working contract,
-  [`CLAIMS.md`](../../CLAIMS.md) is the per-capability claim ledger, [`STATUS.md`](../../STATUS.md)
-  is the critical path, and [`INDEX.md`](../../INDEX.md) is the full map. This charter is the
+- **Companions.** [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) is the agent's working contract,
+  [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) is the per-capability claim ledger, [`STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md)
+  is the critical path, and [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) is the full map. This charter is the
   layer above all of them: the goals they exist to serve.

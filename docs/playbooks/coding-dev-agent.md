@@ -43,7 +43,7 @@ The kernel refuses any write-shaped call that targets a guarded glob with `SELF_
 
 ## The Floor in One Screen
 
-The [`dev-agent-policy.json`](../../examples/dev-agent-policy.json) template encodes the canonical coding agent floor in a single screen.
+The [`dev-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/dev-agent-policy.json) template encodes the canonical coding agent floor in a single screen.
 
 ### Allow-list (explicit)
 
@@ -153,7 +153,7 @@ The repo ships two scripts for Claude Code:
 - **macOS/Linux:** `scripts/dogfood-claude.sh`
 - **Windows:** `scripts/dogfood-claude.ps1`
 
-See [`DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) for full documentation.
+See [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) for full documentation.
 
 **Step 2 — Start a headless witness run**
 
@@ -349,7 +349,7 @@ The kernel returns only the offending glob (bounded disclosure), not the full pa
 
 ### Ship-stamp convention (DOS verify)
 
-Every commit that ships a change should carry a `(fak <leaf>)` trailer that binds it to a lane. See [`AGENTS.md`](../../AGENTS.md) for the full convention.
+Every commit that ships a change should carry a `(fak <leaf>)` trailer that binds it to a lane. See [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for the full convention.
 
 Example commit subject:
 
@@ -508,14 +508,14 @@ The audit trail records the full UNWITNESSED → witness → ALLOW flow.
 
 ## Cross-references
 
-- **Policy reference:** [`POLICY.md`](../../POLICY.md) — Policy manifest schema
-- **Template policy:** [`examples/dev-agent-policy.json`](../../examples/dev-agent-policy.json) — The floor starting point
+- **Policy reference:** [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — Policy manifest schema
+- **Template policy:** [`examples/dev-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/dev-agent-policy.json) — The floor starting point
 - **Cursor integration:** [`docs/integrations/cursor.md`](../../docs/integrations/cursor.md) — Cursor wiring guide
-- **Claude Code dogfood:** [`DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) — Dogfood launcher documentation
+- **Claude Code dogfood:** [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — Dogfood launcher documentation
 - **Ship-gate mechanism:** Issue #221 — OpenAI API Feature Parity (gateway ship-gate)
 - **Self-modify floor:** Issue #226 — Documentation Completeness (self-modify docs)
-- **DOS verify convention:** [`AGENTS.md`](../../AGENTS.md) — Ship-stamp convention and DOS integration
-- **Verifiable commits:** [`AGENTS.md`](../../AGENTS.md) — "Verifiable commits (DOS ship-stamp)" section
+- **DOS verify convention:** [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — Ship-stamp convention and DOS integration
+- **Verifiable commits:** [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) — "Verifiable commits (DOS ship-stamp)" section
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 # GLM-5.2 Fak-Kernel Cache Value — On a Solved Ticket
 
-> **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)**,
+> **📊 AUTHORITY:** This document's benchmark results are indexed in **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**,
 > the single source of truth for all committed performance claims.
 
 > **⚠️ RESULT STATUS:** **PENDING — Results not yet collected.** This document describes the result packet shape and what will be measured once the live run executes on datacenter compute. The observation seam (`fak swebench cache-witness`) is shipped and tested; the live GLM-5.2 cache-value number is the box residual.
@@ -10,7 +10,7 @@
 **DOS Verify:** the offline WITNESSED headline (the deterministic prefill-elimination floor) is bound to its commit and resolves under `dos verify`; the live WITNESSED cache value is reported `not yet` (host-gated on [#1012](https://github.com/anthony-chaudhary/fak/issues/1012)). See [DOS Binding](#dos-binding--provenance-of-every-number).
 **Epic:** [#1010](https://github.com/anthony-chaudhary/fak/issues/1010) — GLM-5.2 on the pure fak kernel
 **Child Issues:** [#1014](https://github.com/anthony-chaudhary/fak/issues/1014) — this result packet · [#1013](https://github.com/anthony-chaudhary/fak/issues/1013) — DOS binding + provenance of every number
-**Observation Seam:** [`internal/cachewitness/`](../../internal/cachewitness/) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
+**Observation Seam:** [`internal/cachewitness/`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachewitness) + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit-audit` → diff-witnessed)
 
 ## Summary
 
@@ -168,7 +168,7 @@ the commit that produced it — never to a worker's narration. An unproven step 
 | Live in-kernel aggregate `kv_prefix.reused_tokens` > 0 | WITNESSED (live) | a live GLM-5.2 fak-kernel serve on the 8-GPU datacenter server GPU-server box — child [#1012](https://github.com/anthony-chaudhary/fak/issues/1012), host-gated |
 | Live decode tok/s | OBSERVED | same live serve; expected ~0.03–0.17 under the #996/#971 expert-GEMM wall |
 
-When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
+When the live run lands (#1012), its results commit is bound the same way: `dos commit-audit <results-sha>` must grade **diff-witnessed** and `dos verify` resolves the headline, before any live number graduates into [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). Until then the live cache value stays `not yet` — the deterministic floor is the honest dos-bound headline available without the box.
 
 **Conflation contract:** every number above carries its trust class; no number sums or
 derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
@@ -179,7 +179,7 @@ derives across the WITNESSED/OBSERVED line; `fak conflation-scorecard` is clean
 - **Observation seam:** `internal/cachewitness/` + `fak swebench cache-witness` (commit `52dfea0d`, `dos commit_audit` → diff-witnessed)
 - **Provenance split:** WITNESSED (fak's own cache) vs OBSERVED (provider's cache), matching the conflation-scorecard line
 - **Metric definitions:** `internal/gateway/metrics.go` (`writeKVPrefixMetrics`)
-- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](../../BENCHMARK-TEMPLATE.md) standard
+- **Result packet format:** This document follows the [BENCHMARK-TEMPLATE.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-TEMPLATE.md) standard
 - **Gate / dependency:** Datacenter GPU access (8-GPU datacenter server sm_80 box) — the current residual
 
 ## Cross-References
@@ -205,6 +205,6 @@ When results are collected, this document will be updated with:
 - Actual commit hash of the results commit
 - Real numbers in the Results tables (no placeholders)
 - `dos_commit_audit <hash>` → **OK** verification
-- Entry in [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md) referencing this document
+- Entry in [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) referencing this document
 
 **Until then, this document serves as the result packet shape — what will be measured, how, and under what provenance discipline.**

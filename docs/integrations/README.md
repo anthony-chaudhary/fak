@@ -67,7 +67,7 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **Hermes Agent** (NousResearch self-hosted agent, OpenAI wire) | [`hermes.md`](hermes.md) |
 | **Cline** (VS Code — OpenAI-Compatible provider) | [`cline.md`](cline.md) |
 | **Continue** (VS Code — `config.yaml` `apiBase`) | [`continue.md`](continue.md) |
-| **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](../../examples/mcp/README.md) |
+| **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) |
 
 **All guides requested in #87 (Claude Code, VS Code, Continue, Aider, Cline, Zed, JetBrains) are now complete and available above.**
 
@@ -142,7 +142,7 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 
 **MCP clients** (the agent *asks* the kernel about a call, rather than being proxied):
 run `fak serve --stdio` as the server command. The one-paste setup and the five
-`fak_*` tools it exposes are in [`../../examples/mcp/README.md`](../../examples/mcp/README.md).
+`fak_*` tools it exposes are in [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md).
 
 **Need the exact key for *your* tool?** The [compatibility matrix](compatibility-matrix.md)
 lists 47 surveyed harnesses, frameworks, backends, and protocols — the wire each speaks,
@@ -214,7 +214,7 @@ curl -s http://127.0.0.1:8077/v1/fak/adjudicate \
 
 Same gate, two surfaces: transparently in front of the model (the proxy adds the `fak`
 block to every response) or asked directly (`/v1/fak/adjudicate`, verdict only — what the
-[MCP tools](../../examples/mcp/README.md) expose). Swap the mock for your real engine by
+[MCP tools](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) expose). Swap the mock for your real engine by
 adding `--base-url`; nothing else changes.
 
 **Don't take the snippets on faith — run them.** The same two checks (plus an allow-case)
@@ -226,14 +226,14 @@ key:
 python3 examples/wire-proof/verify.py   # -> PASS, exit 0
 ```
 
-→ [`examples/wire-proof/`](../../examples/wire-proof/README.md) (captured output included).
+→ [`examples/wire-proof/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/wire-proof/README.md) (captured output included).
 
 ---
 
 ## What you get once it's in front
 
 - **A reviewable allow-list** — which tools may run, as a JSON manifest in git, not a
-  code edit. Author and check it offline: [`../../POLICY.md`](../../POLICY.md).
+  code edit. Author and check it offline: [`../../POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 - **Result quarantine** — a poisoned or secret-shaped tool result is paged out before it
   reaches the model's context (injection containment by structure).
 - **An audit trail** — JSON access logs and an `X-Trace-Id` per call you can ship to a
@@ -244,7 +244,7 @@ python3 examples/wire-proof/verify.py   # -> PASS, exit 0
 The honest fence: `fak` is **not** the fast token engine, and its own in-binary model is
 a correctness reference, not a production server. It fronts your engine — the win is the
 governance surface, not tokens per second. Full scope, claim by claim:
-[`../../CLAIMS.md`](../../CLAIMS.md).
+[`../../CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ---
 
@@ -258,9 +258,9 @@ governance surface, not tokens per second. Full scope, claim by claim:
 - [Routers & gateways](routers.md) — OpenRouter, Portkey, LiteLLM Router, Unify, Martian: fak as a complement (govern + route per aspect) to request-level routers, with the honest categorical positioning.
 - [Interoperability stance](interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the capability floor) and the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Compatibility matrix](compatibility-matrix.md) — 47 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
-- [Getting started](../../GETTING-STARTED.md) — install the single static binary.
+- [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — install the single static binary.
 - [Guided tutorial](../fak/tutorial.md) — zero to first adjudicated tool call, real output at every step.
 - [Debugging a verdict](debugging.md) — why was my call denied/transformed? Reproduce it offline with `fak preflight --explain`, then trace it across the live gateway.
-- [Policy / permissions](../../POLICY.md) — author, dump, and review the capability floor.
+- [Policy / permissions](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — author, dump, and review the capability floor.
 - [FAQ](../FAQ.md) — what fak is, how it differs from a firewall / guardrails / vLLM, the threat model.
-- [llms.txt](../../llms.txt) — a machine-readable map for LLMs and answer engines.
+- [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — a machine-readable map for LLMs and answer engines.

@@ -618,7 +618,7 @@ This page was checked against the current OpenAI Codex manual on 2026-06-25:
 fak-side references:
 
 - [Integration index](README.md)
-- [MCP example](../../examples/mcp/README.md)
-- [Policy manifest guide](../../POLICY.md)
+- [MCP example](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md)
+- [Policy manifest guide](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - [Supported APIs and protocols](../supported/apis-and-protocols.md)
 - [Compatibility matrix](compatibility-matrix.md)

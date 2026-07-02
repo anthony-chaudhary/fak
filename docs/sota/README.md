@@ -38,7 +38,7 @@ The fix is to make the prior-art map a maintained datum that three surfaces read
 | **`tools/sota_coverage_scorecard.py`** | Cross-checks the matrix against the tree: every kernel file is covered by a row, every row's fak-path file exists, every row carries a primary link + oracle. Folds gaps into one `sota_debt` integer. | `tools/sota_coverage_scorecard.py` |
 
 The single source of truth is the flat literal in
-[`internal/sotamatrix/sotamatrix.go`](../../internal/sotamatrix/sotamatrix.go) — the same
+[`internal/sotamatrix/sotamatrix.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/sotamatrix/sotamatrix.go) — the same
 in-binary-registry discipline as `internal/benchcatalog`. The gate, the command, and the
 scorecard all read it; none keeps a rival copy. **Adding a kernel operation means adding one
 row there.**
@@ -83,5 +83,5 @@ table and `fak sota <slug>` for one operation's full detail (route note, oracle,
 **Borrow a kernel only after the witness for the current path exists.** The reference is
 inspiration and a correctness target — read it first, route deliberately, prove against the
 oracle, and record what you read. Throughput is a real program (the
-[kernel-optimization program](../../AGENTS.md) is never "done"), but it is pursued *on top of*
+[kernel-optimization program](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) is never "done"), but it is pursued *on top of*
 the known art, not in ignorance of it.

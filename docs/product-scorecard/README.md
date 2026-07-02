@@ -5,7 +5,7 @@ description: "Inward product-concept scorecard: each fak concept positioned on t
 
 # Product scorecard — durable, real, useful-today
 
-The sibling scorecards grade fak's internals (code, docs) and its competitive standing (industry). This one asks the question a *person* asks: **of the concepts fak ships, which can I actually pick up and use this afternoon — and which are still a named gap, a research seam, or an overclaim?** The source of truth is the concept catalog in [`CLAIMS.md`](../../CLAIMS.md); every number below is re-derived from `tools/product_scorecard.data/` by `tools/product_scorecard.py` and cross-checked against the real tree (the CLAIMS tag a concept carries, whether its first command resolves, whether its witness/entry paths exist). No verdict is hand-typed.
+The sibling scorecards grade fak's internals (code, docs) and its competitive standing (industry). This one asks the question a *person* asks: **of the concepts fak ships, which can I actually pick up and use this afternoon — and which are still a named gap, a research seam, or an overclaim?** The source of truth is the concept catalog in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md); every number below is re-derived from `tools/product_scorecard.data/` by `tools/product_scorecard.py` and cross-checked against the real tree (the CLAIMS tag a concept carries, whether its first command resolves, whether its witness/entry paths exist). No verdict is hand-typed.
 
 > Regenerate: `python tools/product_scorecard.py --markdown-dir docs/product-scorecard`.
 

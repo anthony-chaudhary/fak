@@ -9,7 +9,7 @@ This is the hands-on guide to the CLI tools you use while *working on* fak —
 debugging, profiling, and testing — plus the dev loop they sit inside. It is the
 practitioner companion to the navigational [Work map](WORK-MAP.md) (which routes a
 task to the right front door) and the verb-by-verb [CLI reference](cli-reference.md)
-(which lists every `fak` verb). Read [`AGENTS.md`](../AGENTS.md) first for the build
+(which lists every `fak` verb). Read [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) first for the build
 commands and the hard rules; this page is the "now I'm in the loop, what do I run?"
 layer. For the ranked improvement program behind this loop, see the
 [testing/linting infrastructure scorecard](TESTING-LINTING-INFRA-SCORECARD.md).
@@ -30,7 +30,7 @@ go build -o fak ./cmd/fak     # -> ./fak  (fak.exe on Windows); ~30-60s cold, in
 ```
 
 The 60-second, no-key/no-model/no-GPU proof is the canonical first run — see
-[`AGENTS.md`](../AGENTS.md) and the full [repro packet](repro-packet.md).
+[`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and the full [repro packet](repro-packet.md).
 
 ## The test runner
 
@@ -173,7 +173,7 @@ live `fak serve` if you wire `net/http/pprof` for an ops investigation.
 | `fak bench --suite <suite> --out report.json` | run a benchmark suite directly (`make bench` runs the `tau2-smoke` suite) |
 | `fak ablate` | the self-ablation sweep — turn one feature off and measure the delta, to prove a gain is net-true |
 
-Every perf number is held to the [net-true-value standard](../EXTENDING.md): measured
+Every perf number is held to the [net-true-value standard](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md): measured
 against the real (tuned, not naive) alternative, net of its own cost, scope stated,
 provenance-labeled, reproducible. A profile that isn't reproducible is `not yet`, not
 a result.
@@ -211,8 +211,8 @@ available; do not use `git add -A`. Work directly on `main`; the trunk guard ref
 an off-trunk commit (`OFF_TRUNK`). Default is to ship: once `make ci` is green,
 commit and push.
 
-Full contributor contract: [`CONTRIBUTING.md`](../CONTRIBUTING.md). How a *feature*
-attaches as a leaf behind a `Register*` seam: [`EXTENDING.md`](../EXTENDING.md). A
+Full contributor contract: [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md). How a *feature*
+attaches as a leaf behind a `Register*` seam: [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md). A
 broader catalog of verbs, runners, and demo scripts:
 [fak/related-items.md](fak/related-items.md).
 
@@ -225,7 +225,7 @@ So you never reach for a verb that isn't there:
 | Enhanced debugging | `fak debug` (context/session core-dump debugger) + `fak doctor` (answer-shape diagnostic) + [integrations/debugging.md](integrations/debugging.md) | shipped |
 | Built-in profiling | `fak profile` (host-aware wrapper over `go test -bench -cpuprofile -memprofile`) + Go pprof + `fak benchmarks` / `fak bench` / `fak ablate` | shipped |
 | Test runner | `fak test` (host-aware runner: routes `go test` to WSL on Windows), `fak test affected` (the affected-package agent loop), over `make test-fast` / `make test` / `make test-affected` / `make test-race` / `make ci`, `fak affected`, `./test.ps1` (WSL) | shipped |
-| Dev workflow guide | this page, plus [`AGENTS.md`](../AGENTS.md), [`CONTRIBUTING.md`](../CONTRIBUTING.md), [Work map](WORK-MAP.md) | shipped |
+| Dev workflow guide | this page, plus [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md), [`CONTRIBUTING.md`](https://github.com/anthony-chaudhary/fak/blob/main/CONTRIBUTING.md), [Work map](WORK-MAP.md) | shipped |
 
 `fak test` and `fak profile` encode the host knowledge this guide carries (routing
 `go test` to WSL on Windows automatically) over the same `make`/`go test` gates.

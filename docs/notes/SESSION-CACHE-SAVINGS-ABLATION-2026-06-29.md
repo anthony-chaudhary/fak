@@ -38,7 +38,7 @@ fak guard   (cache+floor)████▌                              4.15M   �
 
 ## Where the 25.5M actually comes from
 
-The number is computed in [`internal/gateway/cache_pricing.go`](../../internal/gateway/cache_pricing.go)
+The number is computed in [`internal/gateway/cache_pricing.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/cache_pricing.go)
 (via `vcachegov.ProveTelemetrySavings`) from three counters the upstream reports on
 every turn:
 
@@ -184,6 +184,6 @@ fak token-defaults-scorecard          # all six locked on; ctxview/elide effect 
 
 ## See also
 
-- [`internal/gateway/cache_pricing.go`](../../internal/gateway/cache_pricing.go) — the pricing model and its OBSERVED-vs-WITNESSED provenance.
-- [`internal/vcachegov/proof.go`](../../internal/vcachegov/proof.go) — `ProveTelemetrySavings`, the engine shared by the live summary and `fak vcache observe`.
+- [`internal/gateway/cache_pricing.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/cache_pricing.go) — the pricing model and its OBSERVED-vs-WITNESSED provenance.
+- [`internal/vcachegov/proof.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/vcachegov/proof.go) — `ProveTelemetrySavings`, the engine shared by the live summary and `fak vcache observe`.
 - [O(1)-context-window economics](../explainers/o1-context-window-economics.md) — the broader cost model this sits inside.

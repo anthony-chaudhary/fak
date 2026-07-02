@@ -26,7 +26,7 @@ owns the P/D + routing mechanics* so fak rides them instead of re-deriving them.
 vLLM, SGLang, and Dynamo already own the hard systems mechanics — paged KV, prefix-cache
 block hashing, prefill/decode disaggregation, KV-aware routing, and (Dynamo) SLA
 autoscaling. fak does **not** try to out-serve them and says so in
-[`llms.txt`](../../llms.txt) ("it is **not** a faster model server"). The orthogonal band
+[`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) ("it is **not** a faster model server"). The orthogonal band
 fak owns is **cache legality, provenance, policy, and agent-visible cache economics**:
 
 > A provider or ride-engine cache hit is a **performance fact, not an authorization fact**.
@@ -128,7 +128,7 @@ enforced in code, not convention:
 - The gateway exports the invariant live: `fak_gateway_provider_cache_local_trust 0`, derived
   from `ProviderCacheEvidence()` (cost/latency-only, never a trust verdict).
 
-[`internal/gateway/serving_event_source_test.go`](../../internal/gateway/serving_event_source_test.go)
+[`internal/gateway/serving_event_source_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/serving_event_source_test.go)
 (`TestServingEventSourcesAreTagged`) is the source-tag regression this readout adds: it builds
 one event per source through its real adapter, asserts the four land on four **distinct** planes,
 folds them through the unified `StreamMetrics` and asserts each stays its own row, then folds

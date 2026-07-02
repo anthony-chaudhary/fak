@@ -131,7 +131,7 @@ evidence, and points to the missing dogfood/product witnesses.
 
 ## See Also
 
-- [CLAIMS.md](../CLAIMS.md) for the shipped/stub honesty ledger.
+- [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) for the shipped/stub honesty ledger.
 - [Net-true value standard](standards/net-true-value.md) for the net-not-gross rule.
 - [GLM-5.2 fak-kernel cache value packet](benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md)
   for the benchmark packet shape.

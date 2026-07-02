@@ -132,7 +132,7 @@ does not creep as a provider registers more policy.
   actually pays is dominated by the network proxy hop and the engine, **not** by this fold —
   see the SGLang measurement in §4 (0.75× at peak, converging to a ~3% tax at saturation).
   The full per-call *decide* (`362 ns` allow, the "Pure-kernel decide latency" row in
-  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)) is the realistic per-call cost
+  [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)) is the realistic per-call cost
   fak adds before the engine runs; the `~0.55 ns` zero-alloc fold is the registry-read
   *component* of it that the issue names. None of these three numbers is the vLLM end-to-end
   tax — that stays `TBD` (§3) until a serving-node run lands an artifact.

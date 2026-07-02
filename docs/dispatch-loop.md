@@ -270,7 +270,7 @@ valid evidence, not pretending existing repo debt is already gone.
 
 The same packet runs on a clean checkout in CI (issue #798), so the recently-shipped
 CLI surfaces are proven to work on every push — not just locally. The
-[`dogfood`](../.github/workflows/dogfood.yml) workflow builds a real `fak` into
+[`dogfood`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/dogfood.yml) workflow builds a real `fak` into
 `tools/.bin/`, runs the packet into a fixed evidence dir, fails the build when a
 **required** probe fails, and uploads `report.json` + the vCache score artifact as build
 artifacts (with the human report written to the run's step summary). It runs on push to

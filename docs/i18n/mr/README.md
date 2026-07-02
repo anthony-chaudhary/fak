@@ -7,7 +7,7 @@ description: "fak चे मराठी प्रवेश-पान: प्र
 
 > हे एक **स्थानिकीकृत प्रवेश-पान (entry point)** आहे — संपूर्ण दस्तऐवजांचे भाषांतर नाही.
 > संपूर्ण दस्तऐवज इंग्रजीत आहेत — हे पान fak चा गाभा, 60-सेकंदांचा पुरावा आणि install
-> चा मार्ग देऊन तुम्हाला [इंग्रजी डॉक्स](../../../README.md)कडे पोहोचवते.
+> चा मार्ग देऊन तुम्हाला [इंग्रजी डॉक्स](https://github.com/anthony-chaudhary/fak/blob/main/README.md)कडे पोहोचवते.
 > **सूचना:** हे भाषांतर यंत्राने तयार केले असून native तपासणी बाकी आहे — दुरुस्तीसाठी
 > issue/PR उघडा.
 >
@@ -77,12 +77,12 @@ SGLang / llama.cpp / LM Studio किंवा कोणत्याही OpenA
 
 ## पुढे कुठे
 
-- [README (पूर्ण आढावा)](../../../README.md)
-- [START-HERE — 10 मिनिटांत local model](../../../START-HERE.md)
-- [Getting Started — binary install करा](../../../GETTING-STARTED.md)
+- [README (पूर्ण आढावा)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
+- [START-HERE — 10 मिनिटांत local model](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
+- [Getting Started — binary install करा](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)
 - [Integrations — तुमचा एजंट जोडा](../../integrations/README.md)
 - [डेटा residency आणि compliance — DPDP Act साठी](../../explainers/data-residency-and-compliance.md)
-- [BENCHMARK-AUTHORITY — प्रत्येक आकड्याचा स्रोत](../../../BENCHMARK-AUTHORITY.md)
-- [CLAIMS — काय shipped/simulated/stub आहे](../../../CLAIMS.md)
+- [BENCHMARK-AUTHORITY — प्रत्येक आकड्याचा स्रोत](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
+- [CLAIMS — काय shipped/simulated/stub आहे](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)
 
-License: [Apache-2.0](../../../LICENSE).
+License: [Apache-2.0](https://github.com/anthony-chaudhary/fak/blob/main/LICENSE).

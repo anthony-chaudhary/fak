@@ -17,9 +17,9 @@ it is **Voyager's acceptance gate**: the agent may *propose* a skill, but an *in
 verifier decides whether it is kept (2305.16291).
 
 fak already ships that verifier discipline — the hash-chained guard journal
-([`internal/abi`](../../internal/abi/events.go) `EvDecide`/`EvDeny`), the truth syscall
+([`internal/abi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/events.go) `EvDecide`/`EvDeny`), the truth syscall
 `dos verify`, and the guard-RSI worst-bucket routing
-([`internal/guardrsi`](../../internal/guardrsi/guardrsi.go) `WorstBucket`). What it does
+([`internal/guardrsi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/guardrsi/guardrsi.go) `WorstBucket`). What it does
 *not* yet have is a base context the agent can edit at all — so the gate has had nothing
 to gate. This page is the contract that closes that gap: the admission decision for a
 self-authored edit to the live base context, written domain-free so the
@@ -243,11 +243,11 @@ which is which:
 
 | Schema element | Reference stick | Status |
 |---|---|---|
-| The spine is byte-identical every turn (inv. 1) | [`cachemeta.SegStable`](../../internal/cachemeta) ("system prompt — byte-identical every turn") + [`promptmmu`](../../internal/promptmmu) byte-identity prefix floor (fail-safe identity on any drift) | [SHIPPED] |
-| An edit takes effect at the next prefix rebuild (inv. 2) | [`internal/sessionreset`](../../internal/sessionreset) `Contributor` registry (folds a drained transcript into a fresh seed; re-pins the spine) | [SHIPPED] |
-| The independent witness (Voyager acceptance gate) | `dos verify` (the truth syscall) + the hash-chained guard journal ([`internal/abi`](../../internal/abi/events.go) `EvDecide`/`EvDeny`) | [SHIPPED] |
-| Auto-demote of a worse-correlating rule | [`internal/guardrsi`](../../internal/guardrsi/guardrsi.go) `WorstBucket` (worst-bucket routing) | [SHIPPED] |
-| The segment vocabulary for a fak-owned base context | [`cachemeta.PromptSegment`](../../internal/cachemeta) `{Kind, Tokens, Content, Witness}` | [SHIPPED] |
+| The spine is byte-identical every turn (inv. 1) | [`cachemeta.SegStable`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachemeta) ("system prompt — byte-identical every turn") + [`promptmmu`](https://github.com/anthony-chaudhary/fak/tree/main/internal/promptmmu) byte-identity prefix floor (fail-safe identity on any drift) | [SHIPPED] |
+| An edit takes effect at the next prefix rebuild (inv. 2) | [`internal/sessionreset`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sessionreset) `Contributor` registry (folds a drained transcript into a fresh seed; re-pins the spine) | [SHIPPED] |
+| The independent witness (Voyager acceptance gate) | `dos verify` (the truth syscall) + the hash-chained guard journal ([`internal/abi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/events.go) `EvDecide`/`EvDeny`) | [SHIPPED] |
+| Auto-demote of a worse-correlating rule | [`internal/guardrsi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/guardrsi/guardrsi.go) `WorstBucket` (worst-bucket routing) | [SHIPPED] |
+| The segment vocabulary for a fak-owned base context | [`cachemeta.PromptSegment`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachemeta) `{Kind, Tokens, Content, Witness}` | [SHIPPED] |
 | `internal/syspromptmmu` base-context spine + segment model | Rung 1 (`#1259`, keystone) | **not yet** |
 | Segment-plan → `promptmmu` splice adapter (proves inv. 1 + 2 e2e) | Rung 2 (`#1260`) | **not yet** |
 | Residency policy (safety-critical always resident; spine never paged) | Rung 4 (`#1262`) | **not yet** |
@@ -291,5 +291,5 @@ which is which:
 - [The system-prompt MMU design note](../notes/SYSTEM-PROMPT-MMU-2026-06-29.md) — the epic (`#1258`) this is Rung 5 of: the fak-first base-context layout, the five load-bearing invariants, and the six rungs.
 - [The portable context-contract schema](context-contract-schema.md) — the materialized-view sibling (certifies a *view* is a witnessed fold); same recipe, a different decision.
 - [The portable taint-check schema](taint-check-schema.md) — the IFC sibling (gates a *value* into a sink); same recipe, a different decision.
-- [`internal/guardrsi`](../../internal/guardrsi/guardrsi.go) · [`internal/abi`](../../internal/abi/events.go) — the shipped guard-RSI worst-bucket routing and the hash-chained decision journal the auto-demote + witness arms rest on.
-- [`internal/promptmmu`](../../internal/promptmmu) · [`internal/sessionreset`](../../internal/sessionreset) · [`internal/cachemeta`](../../internal/cachemeta) — the shipped cache-stable splice floor, the rebuild re-pin, and the segment vocabulary.
+- [`internal/guardrsi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/guardrsi/guardrsi.go) · [`internal/abi`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/events.go) — the shipped guard-RSI worst-bucket routing and the hash-chained decision journal the auto-demote + witness arms rest on.
+- [`internal/promptmmu`](https://github.com/anthony-chaudhary/fak/tree/main/internal/promptmmu) · [`internal/sessionreset`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sessionreset) · [`internal/cachemeta`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachemeta) — the shipped cache-stable splice floor, the rebuild re-pin, and the segment vocabulary.

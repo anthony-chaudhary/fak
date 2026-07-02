@@ -44,7 +44,7 @@ at the question "how mature is this, really, and what is owed next?"
 ## 2. The lifecycle ladder
 
 Every declared fak capability is one `internal/<leaf>` lane in
-[`dos.toml`](../../dos.toml) `[lanes.trees]`. Each is placed on a closed,
+[`dos.toml`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml) `[lanes.trees]`. Each is placed on a closed,
 total-ordered ladder, best last:
 
 ```text
@@ -99,7 +99,7 @@ appears more mature than its evidence supports,"* not *"everything must be matur
 ## 4. The agentic-culture engine — every gap is the next work item
 
 For each capability, the **first unmet rung** is rendered as a concrete, checkable
-next work item that mirrors the [CLAUDE.md](../../CLAUDE.md) "not yet" idiom — the
+next work item that mirrors the [CLAUDE.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAUDE.md) "not yet" idiom — the
 gap, the missing witness, and the step that closes it:
 
 | Capability is at | The next work item | Closed when |
@@ -153,7 +153,7 @@ own next rung, a benchmark.)
 | **`internal/maturity`** | **where is each *capability* in its lifecycle, and what matures it next?** | **per-leaf lane** |
 
 `maturity` is the per-capability lifecycle view none of the others provide. It is a
-**Go leaf + a `fak` verb**, not a new `tools/*.py` — per [AGENTS.md](../../AGENTS.md)
+**Go leaf + a `fak` verb**, not a new `tools/*.py` — per [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md)
 ("a new verb is Go in a leaf"), and mirroring the `internal/conceptusage` idiom
 (`Build`/`Render`/`Markdown`/`Compare`, evidence re-derived from disk, deterministic
 `Options` seam). It is the **shipped fak-tree binding** of grammar G1 / the readiness
@@ -216,4 +216,4 @@ plan to make it *default* and *critical* — the long-horizon program:
 - [`docs/INNOVATIONS-INDEX.md`](../INNOVATIONS-INDEX.md) — the durable catalog; this is its lifecycle cross-cut.
 - [`CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md`](CONCEPT-AGENT-PROGRAMMING-GRAMMAR-2026-06-28.md) — grammar G1 (readiness ladder), which this ships as the fak-tree binding.
 - [`CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md`](CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md) — the readiness-ladder concept (#582) this lifecycle ladder instantiates.
-- [`tools/product_scorecard.py`](../../tools/product_scorecard.py) · [`internal/conceptusage`](../../internal/conceptusage) — the sibling scorecards it sits beside.
+- [`tools/product_scorecard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/product_scorecard.py) · [`internal/conceptusage`](https://github.com/anthony-chaudhary/fak/tree/main/internal/conceptusage) — the sibling scorecards it sits beside.

@@ -45,7 +45,7 @@ on every route except `/healthz`.
 | `GET /v1/fak/events` | `internal/gateway/http.go:43` | Structured event/journal stream with a `?since=` cursor — the per-turn adjudication record. |
 | `X-Trace-Id` | `internal/gateway/messages.go:141`, `metrics.go:877` | Correlation header, minted or honored per request — the join key across logs. |
 | JSON access logs | gateway serve path | One structured record per request, carrying the trace id. |
-| Policy manifests | `internal/policy`, [`POLICY.md`](../../POLICY.md) | `--policy FILE` JSON, validated against the **closed reason vocabulary**, with `--dump` ↔ `--check` round-trip. |
+| Policy manifests | `internal/policy`, [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) | `--policy FILE` JSON, validated against the **closed reason vocabulary**, with `--dump` ↔ `--check` round-trip. |
 
 Deployment, scaling, and HA guidance (sticky `trace_id` routing) already exists in
 [`deployment-guide.md`](deployment-guide.md) and [`advanced-topics.md`](advanced-topics.md).
@@ -121,4 +121,4 @@ issue and linked from [#576](https://github.com/anthony-chaudhary/fak/issues/576
 ## Related
 
 - [#216](https://github.com/anthony-chaudhary/fak/issues/216) · [#196](https://github.com/anthony-chaudhary/fak/issues/196) · [#328](https://github.com/anthony-chaudhary/fak/issues/328) — the foundational observability work this builds on.
-- [`observability.md`](observability.md) · [`security.md`](security.md) · [`deployment-guide.md`](deployment-guide.md) · [`advanced-topics.md`](advanced-topics.md) · [`POLICY.md`](../../POLICY.md).
+- [`observability.md`](observability.md) · [`security.md`](security.md) · [`deployment-guide.md`](deployment-guide.md) · [`advanced-topics.md`](advanced-topics.md) · [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).

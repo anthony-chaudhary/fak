@@ -138,7 +138,7 @@ that owns each boundary, rather than reimplement the protocol.
 | ACP (BeeAI) | agent ↔ agent | Needs an adapter | Pre-alpha, with an unsettled transport. fak would front it through the same registry once it stabilizes. |
 | ANP | agent ↔ agent (decentralized) | Needs an adapter | DID identity plus end-to-end encryption. A transparent middle-proxy is structurally impossible, so fak would terminate the channel, holding its own DID. |
 | AG-UI | agent ↔ frontend/UI | Different boundary | Standardizes the UI event stream, not the tool-call boundary fak gates. Orthogonal, not blocked. |
-| llms.txt | discovery / answer-engine context | Different boundary | A static Markdown file, not a runtime wire. fak [ships one](../../llms.txt); there is nothing live to sit on. |
+| llms.txt | discovery / answer-engine context | Different boundary | A static Markdown file, not a runtime wire. fak [ships one](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt); there is nothing live to sit on. |
 
 The agent-to-agent stance has its own design notes. They cover why fak projects onto A2A
 instead of shipping another A2A SDK, plus the implementation ladder. See

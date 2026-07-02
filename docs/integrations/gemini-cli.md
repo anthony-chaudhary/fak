@@ -9,7 +9,7 @@ This guide shows how to put `fak` in front of [Gemini CLI](https://github.com/go
 Google's open-source terminal agent. Every tool call is adjudicated by the kernel before it
 runs: denied by structure, repaired, or quarantined.
 
-Gemini CLI context for this repo lives in [`GEMINI.md`](../../GEMINI.md) (auto-loaded),
+Gemini CLI context for this repo lives in [`GEMINI.md`](https://github.com/anthony-chaudhary/fak/blob/main/GEMINI.md) (auto-loaded),
 which points back here.
 
 ## Two integration paths
@@ -74,7 +74,7 @@ curl http://127.0.0.1:8080/healthz
 
 - **Integration index**: [README.md](README.md)
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md)
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - **Harden any MCP server**: [harden-any-mcp.md](harden-any-mcp.md)
 - **Gemini CLI repo**: [https://github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
 

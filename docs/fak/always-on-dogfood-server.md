@@ -289,7 +289,7 @@ or the VPC), never the public internet.
 
 ## See also
 
-- [`DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) — the one-command dogfood launcher and the `/v1/messages` adjudication proxy
+- [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — the one-command dogfood launcher and the `/v1/messages` adjudication proxy
 - [`docs/fak/server-quickstart.md`](server-quickstart.md) — every way to start a `fak serve` gateway (auth, policy, in-kernel, cloud)
 - `cmd/fak/guard.go` — the `fak guard` front door (child-only base URL, subscription default, default-on hash-chained journal)
 - `tools/dogfood_coverage.py` — the coverage scorecard (run it to measure the 3x)

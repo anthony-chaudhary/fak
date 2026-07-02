@@ -7,8 +7,8 @@ description: "Evidence-backed security review of the governed vision/multimodal 
 
 > **Scope of this review.** The governed multimodal forward seam added for
 > [issue #399](https://github.com/anthony-chaudhary/fak/issues/399) —
-> [`internal/model/multimodal.go`](../../internal/model/multimodal.go) and its tests
-> [`internal/model/multimodal_test.go`](../../internal/model/multimodal_test.go).
+> [`internal/model/multimodal.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/multimodal.go) and its tests
+> [`internal/model/multimodal_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/multimodal_test.go).
 > This is the **"Security review of image handling pipeline"** that #399 lists itself
 > *Blocked By*, and the Phase 4 "Security review completed (image handling, DoS vectors)"
 > DoD item. It reviews the **admission/governance boundary**, not the semantic safety of
@@ -94,7 +94,7 @@ is made with eyes open:
 ## Disclosure
 
 A real vulnerability against this boundary should be reported privately per
-[`SECURITY.md`](../../SECURITY.md) (GitHub private advisory), not as a public issue.
+[`SECURITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) (GitHub private advisory), not as a public issue.
 
 ## Verdict
 

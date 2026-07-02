@@ -14,7 +14,7 @@ description: "fak's contribution is not any one primitive (0/29 novel) but one i
 ## The thesis
 
 fak leads with an unusual honesty: a 29-claim prior-art audit scored **0/29 novel**
-([`CLAIMS.md`](../../CLAIMS.md)). Every primitive — reference monitor, capability
+([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)). Every primitive — reference monitor, capability
 floor, content-addressed store, taint label, witness — is established. The
 contribution is the **assembly**: one in-process kernel where the tool call is a
 syscall, fused so the same boundary is safe *and* fast, carrying **one invariant at
@@ -30,7 +30,7 @@ The next contribution is to **lift that invariant out of fak's packages into a
 domain-free grammar** — a small set of nouns, verbs, and a closed vocabulary — that
 any agent fleet can adopt by configuration, without forking the kernel. That grammar
 already has a seed: **DOS**, the trust substrate fak dogfoods on its own repo
-([`dos.toml`](../../dos.toml), the `dos_*` MCP verbs, [`docs/dos-kernel-transfer-playbook.md`](../dos-kernel-transfer-playbook.md)).
+([`dos.toml`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml), the `dos_*` MCP verbs, [`docs/dos-kernel-transfer-playbook.md`](../dos-kernel-transfer-playbook.md)).
 This note maps what is already lifted, the shape that makes a lift correct, and the
 under-expressed concepts that should become the next verbs.
 
@@ -154,7 +154,7 @@ read off the verbs that already shipped:
 - The grammar's home is **DOS**, a substrate that ships in the installed `dos`
   package; some verbs may instead land as `fak` subcommands when they are fak-shaped
   (e.g. G9 `claim-check`). The boundary is: domain-free trust logic → DOS; fak-tree
-  policy/measurement → `fak`. Per [AGENTS.md](../../AGENTS.md), a new verb is Go in a
+  policy/measurement → `fak`. Per [AGENTS.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md), a new verb is Go in a
   leaf, never a new `tools/*.py`.
 - The grammar does **not** replace the token engine, the model, or the harness. It is
   the governance band — the same scope fak already owns.

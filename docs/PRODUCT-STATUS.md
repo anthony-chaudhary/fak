@@ -167,6 +167,6 @@ python tools/product_scorecard.py --json          # machine payload
 python tools/product_scorecard.py --markdown-dir docs/product-scorecard   # the generated scorecard
 ```
 
-- The honesty ledger this maps: [`CLAIMS.md`](../CLAIMS.md).
+- The honesty ledger this maps: [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 - The generated, per-concept scorecard: [`docs/product-scorecard/`](product-scorecard/README.md).
-- The proof-not-self-report status for the v0.2.x line: [`STATUS.md`](../STATUS.md).
+- The proof-not-self-report status for the v0.2.x line: [`STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md).

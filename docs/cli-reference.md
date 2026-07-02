@@ -29,13 +29,13 @@ If you drive a coding agent, fak fits in two ways:
   `/v1/chat/completions` wires are both adjudicated, and a dropped or repaired
   call comes back with an in-band `[fak]` note so the agent adapts instead of
   looping. Witnessed live on macOS + Windows with the real Claude Code CLI:
-  [`DOGFOOD-CLAUDE.md`](../DOGFOOD-CLAUDE.md) (one command — `scripts/dogfood-claude.sh`,
+  [`DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) (one command — `scripts/dogfood-claude.sh`,
   or `scripts/dogfood-claude.ps1` on Windows).
 - **As an MCP server** — `fak serve --stdio` exposes the kernel's verbs
   (`fak_adjudicate`, `fak_syscall`, `fak_admit`, …) as MCP tools, so your agent
   can ask the kernel for a verdict before it runs a tool, or screen a result it
   executed itself through the exfil floor. Copy-paste config + the tool catalog:
-  [`examples/mcp/`](../examples/mcp/) (drop [`examples/mcp/.mcp.json`](../examples/mcp/.mcp.json)
+  [`examples/mcp/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/mcp) (drop [`examples/mcp/.mcp.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/.mcp.json)
   in your project root for Claude Code).
 
 Both put the **same reviewable capability floor** (`--policy floor.json`) on every
@@ -82,10 +82,10 @@ knowing up front: `stream:true` SSE is **synthesized from the finished,
 already-adjudicated turn** — well-formed, but not true token-by-token streaming. (The
 client's `max_tokens`/`temperature`/`top_p`/`stop` are now forwarded per request, so
 long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
-[`GETTING-STARTED.md`](../GETTING-STARTED.md).
+[`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md).
 
 > **Status: shipped & benchmarked** (current release `v0.30.0` — single source of truth is
-> the root [`VERSION`](../VERSION) file). `go build`/`go vet`/`go test ./...` green across the
+> the root [`VERSION`](https://github.com/anthony-chaudhary/fak/blob/main/VERSION) file). `go build`/`go vet`/`go test ./...` green across the
 > internal packages, CI green, and the A/B benchmark gate passes. Confirmed not by self-report
 > but by the DOS truth syscall (`dos_verify`): the shipped line runs from **`v0.1.0`** (the
 > syscall skeleton, sha `c72ddf1`) through **`v0.2.0`** (model fusion + security substrate +
@@ -557,6 +557,6 @@ The following work was completed as the initial wave-0 build:
 2. `dos-plan-price PARTITION.md` → confirm collision-free; `dos-arbitrate` the leases.
 3. `dos-goal-fleet` the wave-1 packets; gate wave 2 on `dos-witness-claim`; fold; tag.
 
-See [PARTITION.md](../PARTITION.md) for the current partition manifest and wave plan.
+See [PARTITION.md](https://github.com/anthony-chaudhary/fak/blob/main/PARTITION.md) for the current partition manifest and wave plan.
 
 License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).

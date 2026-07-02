@@ -85,7 +85,7 @@ method compiles, every unsupported path is visible, and the conformance kit says
 which claims are still unfenced.
 
 The compiling minimum example is
-[`internal/compute/minimal_backend_example_test.go`](../../internal/compute/minimal_backend_example_test.go).
+[`internal/compute/minimal_backend_example_test.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/minimal_backend_example_test.go).
 It is intentionally small: `MatMul` and `Attention` are the hot ops the wrapper
 owns, `Caps()` advertises nothing, and every other method delegates to `cpu-ref`
 until a device implementation is ready. That is the shape a day-1 vendor backend

@@ -6,7 +6,7 @@ description: "Audit of the coherence between fak's cache/context machinery (cach
 # Two cache stacks, one wire (#1131)
 
 _Audit + the shipped spine for the fak<->harness cache-coherence question. Companion code:
-[`internal/compactcohere`](../../internal/compactcohere/compactcohere.go). Adjacent epics:
+[`internal/compactcohere`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compactcohere/compactcohere.go). Adjacent epics:
 cache-preserving compaction [#745](https://github.com/anthony-chaudhary/fak/issues/745),
 cut-vs-reset hybrid [#774](https://github.com/anthony-chaudhary/fak/issues/774), inbound
 prompt-MMU [#751](https://github.com/anthony-chaudhary/fak/issues/751), owned-KV value

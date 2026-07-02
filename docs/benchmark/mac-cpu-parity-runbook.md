@@ -1,7 +1,7 @@
 # Runbook — single-stream CPU Q8 parity: fak vs llama.cpp (Apple M3 Pro)
 
-Reproduces [`experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json`](../../experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json) —
-the canonical SOTA-parity baseline cited by [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
+Reproduces [`experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json) —
+the canonical SOTA-parity baseline cited by [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 It is the **honest fence**: fak trails llama.cpp on single-stream raw throughput by design.
 fak's value is the cross-agent **fleet-reuse** layer on top (4.1× vs a tuned warm-KV cache),
 measured separately — never cross-compare the two regimes.

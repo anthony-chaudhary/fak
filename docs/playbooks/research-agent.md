@@ -39,7 +39,7 @@ The research agent's distinctive risk is the **untrusted source surface**: every
 - `summarize_document` output (preserves taint from the input document)
 - Any downstream use of that content (citing, summarizing, or synthesizing)
 
-The [`research-agent-policy.json`](../../examples/research-agent-policy.json) encodes this explicitly:
+The [`research-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/research-agent-policy.json) encodes this explicitly:
 
 ```json
 "sources": {
@@ -55,7 +55,7 @@ This is **per-source** because the taint tracks origin, not just content: a loca
 
 ## The floor in one screen
 
-The [`research-agent-policy.json`](../../examples/research-agent-policy.json) template encodes the canonical research agent floor in a single screen.
+The [`research-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/research-agent-policy.json) template encodes the canonical research agent floor in a single screen.
 
 ### Allow-list
 
@@ -85,7 +85,7 @@ These are the **only explicitly permitted tools**. Everything else resolves to `
 ]
 ```
 
-These admit the broad read-only family without naming every tool — the [`read_`](../../internal/adjudicator/decide.go) family, [`get_`](../../internal/adjudicator/decide.go), and the search/lookup/list families.
+These admit the broad read-only family without naming every tool — the [`read_`](https://github.com/anthony-chaudhary/fak/blob/main/internal/adjudicator/decide.go) family, [`get_`](https://github.com/anthony-chaudhary/fak/blob/main/internal/adjudicator/decide.go), and the search/lookup/list families.
 
 ### Deny-list
 
@@ -149,7 +149,7 @@ Under `admit_and_log`, after explicit deny, self-modify, redaction, and arg-rule
 
 Your audit log still shows **exactly what the policy would have denied** — you can retroactively tighten the manifest without re-running the batch.
 
-See [`POLICY.md`](../../POLICY.md#the-manifest-schema-fak-policyv1) for the full `admit_and_log` contract.
+See [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md#the-manifest-schema-fak-policyv1) for the full `admit_and_log` contract.
 
 ### Where it stops
 
@@ -279,7 +279,7 @@ The kernel runs the result through the result-side stack:
 
 The agent's next turn receives a stub, not the injection text. The quarantine is **structural containment** — the bytes never reach the model's context, even if the model is fooled by other means.
 
-See the [`wire-quarantine-demo`](../../examples/wire-quarantine-demo/README.md) for a runnable witness of this path.
+See the [`wire-quarantine-demo`](https://github.com/anthony-chaudhary/fak/blob/main/examples/wire-quarantine-demo/README.md) for a runnable witness of this path.
 
 ### Incident (b): Untrusted taint flows to privileged sink → `TRUST_VIOLATION`
 
@@ -321,13 +321,13 @@ The kernel's IFC sink gate detects the flow:
 
 The exfil is blocked at call time, before the email is ever sent. The taint enforcement is **provenance-keyed non-interference** — data from an untrusted source cannot flow to a privileged sink, regardless of content or phrasing.
 
-See the [`agentdojo-redteam`](../../examples/agentdojo-redteam/README.md) benchmark for measured TRUST_VIOLATION coverage across paraphrased attacks.
+See the [`agentdojo-redteam`](https://github.com/anthony-chaudhary/fak/blob/main/examples/agentdojo-redteam/README.md) benchmark for measured TRUST_VIOLATION coverage across paraphrased attacks.
 
 ## Cross-references
 
-- [`POLICY.md`](../../POLICY.md) — the policy manifest schema and `admit_and_log` contract.
-- [`research-agent-policy.json`](../../examples/research-agent-policy.json) — the canonical template.
-- [`wire-quarantine-demo/README.md`](../../examples/wire-quarantine-demo/README.md) — result-side quarantine witness.
-- [`agentdojo-redteam/README.md`](../../examples/agentdojo-redteam/README.md) — IFC TRUST_VIOLATION benchmark.
+- [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the policy manifest schema and `admit_and_log` contract.
+- [`research-agent-policy.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/research-agent-policy.json) — the canonical template.
+- [`wire-quarantine-demo/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/wire-quarantine-demo/README.md) — result-side quarantine witness.
+- [`agentdojo-redteam/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/agentdojo-redteam/README.md) — IFC TRUST_VIOLATION benchmark.
 - [`docs/glossary.md`](../../docs/glossary.md) — IFC sink-gate definition.
 - [`FAQ.md`](../FAQ.md) — "What is the difference between fail_closed and admit_and_log posture?"

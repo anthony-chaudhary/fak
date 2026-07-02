@@ -104,5 +104,5 @@ mediated task differs from the official benchmark.**
 - Per-family contracts: `internal/terminalbench/contract.go`,
   `internal/browseraction/contract.go`, `internal/toolsandbox/contract.go`,
   `internal/swebench/deepswe_contract.go`.
-- The authoritative numbers (the *what*) live in [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md);
+- The authoritative numbers (the *what*) live in [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md);
   this map is the *which benchmark, which oracle, which caveat*.

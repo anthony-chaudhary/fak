@@ -10,7 +10,7 @@ agent. Every tool call Cascade proposes is adjudicated by the kernel before it r
 dangerous calls are denied by structure, malformed calls are repaired, and untrusted tool
 results are quarantined before they reach the model's context.
 
-Windsurf project context for this repo lives in [`.windsurfrules`](../../.windsurfrules)
+Windsurf project context for this repo lives in [`.windsurfrules`](https://github.com/anthony-chaudhary/fak/blob/main/.windsurfrules)
 (auto-loaded), which points back here.
 
 ## How it fits
@@ -78,8 +78,8 @@ Start a custom policy from the built-in default and validate it:
 
 - **Integration index**: [README.md](README.md) — the universal recipe + which-agent routing
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md) — authoring capability floors
-- **Kernel internals**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md)
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring capability floors
+- **Kernel internals**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md)
 - **Windsurf docs**: [https://docs.windsurf.com](https://docs.windsurf.com)
 
 ## License

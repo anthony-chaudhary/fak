@@ -20,7 +20,7 @@ Read with:
 - [`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](SCALING-LAWS-OF-AGENTS-2026-06-19.md) — the theory this note operationalizes.
 - [`docs/HARDWARE-MATRIX.md`](../HARDWARE-MATRIX.md) — the four profiled platforms.
 - [`docs/explainers/ultracode-multi-agent-dogfood.md`](../explainers/ultracode-multi-agent-dogfood.md) — the multi-agent *orchestration* mode and its metric.
-- [`examples/fleet-reuse-demo/`](../../examples/fleet-reuse-demo/) — the runnable, GPU-free reuse curve.
+- [`examples/fleet-reuse-demo/`](https://github.com/anthony-chaudhary/fak/tree/main/examples/fleet-reuse-demo) — the runnable, GPU-free reuse curve.
 - [`docs/nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md`](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md) — the honest frontier-MoE wall.
 
 ---
@@ -75,7 +75,7 @@ it does not batch); pure-CPU `llama.cpp` on the big-RAM host is **0.89 tok/s**,
 ~3.8× *faster* than fak's offload path
 ([GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md)). The fix is
 known — GLM-5.2's *dense* path is already pure-GPU witnessed (cosine 1.0 on the
-datacenter GPU, [CLAIMS.md](../../CLAIMS.md) Engine §); the DSA sparse-attention
+datacenter GPU, [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) Engine §); the DSA sparse-attention
 and DSA-KV are still host-side (#86/#413). Until the experts move off the host,
 **frontier-MoE-on-affordable-hardware is not a usable-agent story**, and this
 note does not pretend it is.
@@ -95,7 +95,7 @@ Everything in §2 is the tier where it *is* doable.
   endpoint.
 - **Single-stream reality (measured):** Qwen2.5-1.5B Q8 decode ~18 tok/s @ 8
   workers, Qwen2.5-7B Q8 ~3.75 tok/s @ 16 workers on a contended 32-core x86 box
-  ([WORKER-SCALING-DESKTOP-X86](../../experiments/session/WORKER-SCALING-DESKTOP-X86-20260624.md));
+  ([WORKER-SCALING-DESKTOP-X86](https://github.com/anthony-chaudhary/fak/blob/main/experiments/session/WORKER-SCALING-DESKTOP-X86-20260624.md));
   on an uncontended M3 Pro, 1.5B Q8 = 28.9 tok/s, 7B Q8 = 8.7 tok/s
   ([M3-LLAMACPP-RESULTS](../benchmarks/M3-LLAMACPP-RESULTS.md)). Slow for chat;
   fine for a batched overnight fleet.
@@ -106,7 +106,7 @@ Everything in §2 is the tier where it *is* doable.
   real agent sessions** end-to-end on a CPU-only box (no GPU, no weights, no key —
   a deterministic offline planner per sub-agent) in 364 ms serial wall, with
   3,069 real cross-agent dedup hits and exactly `(N−1)·P` prefix tokens elided
-  ([CLAIMS.md](../../CLAIMS.md) fan-out §). *Honest fence: `fanrun` is **serial by
+  ([CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) fan-out §). *Honest fence: `fanrun` is **serial by
   construction** and uses an offline planner; the live-model fan-out is open
   (#982).* It proves the coordination plane, not a decode rate.
 - **The safety rail that makes it overnight-safe:** the load-time **capacity
@@ -114,7 +114,7 @@ Everything in §2 is the tier where it *is* doable.
   a model that won't fit RAM headroom *before* allocation — the gate that exists
   precisely because the all-resident path once wedged a 1 TB host (#974,
   [GPU-SERVER-OVERNIGHT-PLAN](../nightrun/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md)).
-- **Showable today:** [`examples/fleet-reuse-demo`](../../examples/fleet-reuse-demo/)
+- **Showable today:** [`examples/fleet-reuse-demo`](https://github.com/anthony-chaudhary/fak/tree/main/examples/fleet-reuse-demo)
   runs the N-agent shared-prefix reuse curve **with no GPU and no model** (exact
   byte accounting, `--offline`), landing in the ~1.5–4× vs-tuned region at N=5.
 
@@ -133,11 +133,11 @@ Everything in §2 is the tier where it *is* doable.
   reuse plane riding on top, not throughput.)*
 - **Pure-kernel reach (measured):** SmolLM2-135M Q8 decodes at **127.8 tok/s**
   through the pure `k_q8_gemm` + `k_flash_attention` path on the datacenter GPU,
-  zero cuBLAS ([CLAIMS.md](../../CLAIMS.md) Engine §). On a single GCP L4, the
+  zero cuBLAS ([CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) Engine §). On a single GCP L4, the
   live in-kernel CUDA serve warm-decodes Qwen2.5-0.5B Q8 at **~466 tok/s**
   single-stream ([L4-INKERNEL-SERVE](L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md)).
 - **The fleet lever:** continuous batching is shipped on the in-kernel lifecycle
-  path (#401, [CLAIMS.md](../../CLAIMS.md) "What fak is NOT" — no longer
+  path (#401, [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) "What fak is NOT" — no longer
   SIMULATED). *Honest fence: production-grade multi-tenant **p99** scheduling is a
   separate honest no-claim; goodput-under-SLA is unmeasured ([cost.md](../industry-scorecard/cost.md)).*
 - **The fleet lever that needs few GPUs:** RadixAttention prefix sharing —
@@ -207,7 +207,7 @@ believe the agents:
   `refund_payment` / force-push / `git add -A` / out-of-tree write / destructive
   shell unless the policy admits it — an in-process check on the tool-call path,
   not a detector that can be talked past
-  ([`presets/coding-agent-safe.json`](../../examples/presets/coding-agent-safe.json)).
+  ([`presets/coding-agent-safe.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/presets/coding-agent-safe.json)).
 - **Disjoint-lease arbitration (`dos_arbitrate`).** Two agents are admitted
   concurrently only when their file trees are pairwise disjoint; overlap
   *serializes by refusal*, so a fleet on one shared trunk never clobbers itself
@@ -223,7 +223,7 @@ believe the agents:
   to its claim (`diff-witnessed` vs forgeable `subject-only`), so you wake up to
   *verified* work, not self-reported "done." The shipped issue-dispatch loop uses
   exactly this: ≤ `cap` detached workers, each ships a commit citing `#N`, closure
-  gated on the audit, not the worker's word ([CLAIMS.md](../../CLAIMS.md)
+  gated on the audit, not the worker's word ([CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)
   issue-dispatch §).
 - **Result quarantine.** A poisoned tool result is walled at first admit and
   cannot replay into the shared prefix every later agent reads.

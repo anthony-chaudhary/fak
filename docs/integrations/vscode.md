@@ -476,10 +476,10 @@ GitHub Copilot sends the API key from its configuration, which `fak` honors.
 
 - **Integration index**: [README.md](README.md) — universal recipe and which-agent routing
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md) — full field survey
-- **Policy schema**: [../../POLICY.md](../../POLICY.md) — authoring capability floors
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring capability floors
 - **GitHub Copilot docs**: [https://docs.github.com/copilot](https://docs.github.com/copilot) — official GitHub Copilot documentation
 - **VS Code docs**: [https://code.visualstudio.com](https://code.visualstudio.com) — VS Code documentation
-- **fak architecture**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md) — kernel internals
+- **fak architecture**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — kernel internals
 
 ---
 

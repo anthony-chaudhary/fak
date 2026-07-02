@@ -3,8 +3,8 @@
 This directory contains comprehensive documentation for the fleet benchmark infrastructure.
 
 > **📊 Authority:** All committed benchmark performance claims are centrally indexed in
-> **[fak/BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)** with full traceability
-> to commits and artifacts. See **[fak/BENCHMARK-GOVERNANCE.md](../../BENCHMARK-GOVERNANCE.md)**
+> **[fak/BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)** with full traceability
+> to commits and artifacts. See **[fak/BENCHMARK-GOVERNANCE.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md)**
 > for the DOS-centric process that creates, verifies, and publishes benchmark results.
 
 ## Quick Links

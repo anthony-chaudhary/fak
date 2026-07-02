@@ -7,7 +7,7 @@ description: "How to edit, build, validate, and ship fak CUDA kernels across loc
 
 This is the one place that describes the whole loop for working on fak's CUDA backend:
 edit a kernel, build it, prove it correct, and ship it without it silently rotting. If you
-are adding a *new* device backend from scratch, read [`EXTENDING.md`](../EXTENDING.md) first
+are adding a *new* device backend from scratch, read [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md) first
 for the registration seam; this guide is the CUDA-specific loop that rides on top of it.
 
 ## Why the loop is shaped this way
@@ -16,9 +16,9 @@ The CUDA backend is three files that have to agree on one flat C ABI:
 
 | File | Role |
 |---|---|
-| [`internal/compute/cuda_kernels.cu`](../internal/compute/cuda_kernels.cu) | the kernels (`__global__` + `extern "C" fcuda_*` entry points) |
-| [`internal/compute/cuda_backend.h`](../internal/compute/cuda_backend.h) | the flat C ABI — the typed seam (data, never trust) |
-| [`internal/compute/cuda.go`](../internal/compute/cuda.go) | the cgo binding that registers an *Approx* `cuda` backend |
+| [`internal/compute/cuda_kernels.cu`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_kernels.cu) | the kernels (`__global__` + `extern "C" fcuda_*` entry points) |
+| [`internal/compute/cuda_backend.h`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_backend.h) | the flat C ABI — the typed seam (data, never trust) |
+| [`internal/compute/cuda.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda.go) | the cgo binding that registers an *Approx* `cuda` backend |
 
 The default `go build ./cmd/fak` excludes all of this and stays one pure-Go binary; the CUDA
 path compiles only under `-tags cuda`. That keeps the shipped artifact clean, but it means
@@ -40,15 +40,15 @@ You only do this on a node that will actually build. On the win32 dev host you d
 any of it: `make cuda-check` runs without a toolchain.
 
 - **WSL, no sudo** (a laptop with an NVIDIA card and WSL2 GPU passthrough): run
-  [`internal/compute/setup_cuda_wsl.sh`](../internal/compute/setup_cuda_wsl.sh). It installs a
+  [`internal/compute/setup_cuda_wsl.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/setup_cuda_wsl.sh). It installs a
   complete user-space CUDA 12.6 toolkit (real `nvcc`, cuBLAS-dev, headers) via micromamba into
   `~/cudaenv`, then `source ~/cudaenv.env`. The version is pinned so two devs build against the
   same `nvcc`.
 - **Datacenter / GPU server / GCP Deep-Learning-VM**: `nvcc` is already on `PATH` and CUDA
-  lives at `/usr/local/cuda`. Nothing to install — [`build_cuda.sh`](../internal/compute/build_cuda.sh)
+  lives at `/usr/local/cuda`. Nothing to install — [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh)
   detects the system toolchain automatically.
 - **Native Windows** (a Windows box with the CUDA Toolkit + a signing cert): use
-  [`tools/build_cuda_windows.ps1`](../tools/build_cuda_windows.ps1), which ports the build off
+  [`tools/build_cuda_windows.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/build_cuda_windows.ps1), which ports the build off
    the WSL workaround and code-signs the binary (on Windows, WDAC blocks unsigned fork/exec).
 
 The GPU arch defaults to `sm_89`; override with `FAK_CUDA_ARCH=sm_80` for an older datacenter
@@ -64,13 +64,13 @@ in `cuda.go`. Then run the local gate **before** you push to a GPU node:
 make cuda-check                 # wraps: bash internal/compute/build_cuda.sh check
 ```
 
-This runs [`build_cuda.sh check`](../internal/compute/build_cuda.sh): first the pure-text
-[`tools/cuda_abi_parity.py`](../tools/cuda_abi_parity.py) cross-check that every `fcuda_*`
+This runs [`build_cuda.sh check`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh): first the pure-text
+[`tools/cuda_abi_parity.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cuda_abi_parity.py) cross-check that every `fcuda_*`
 prototype in the header is defined in the `.cu` and declared for every `C.fcuda_*` call in
 `cuda.go`, then a standalone `cuda_backend.h` parse with a strict host C compiler when one is
 available. It needs no nvcc, no GPU, and no cgo, so it catches both signature drift and
 `uint8_t`-class missing-header portability bugs locally instead of on a paid GPU VM. The
-no-toolchain Windows host keeps the Python mirror in [`scripts/ci.ps1`](../scripts/ci.ps1),
+no-toolchain Windows host keeps the Python mirror in [`scripts/ci.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/scripts/ci.ps1),
 and the same check is part of `make ci`.
 
 On a node that *has* a C compiler, add the cgo type-check (no CUDA toolkit needed — the header
@@ -82,7 +82,7 @@ is deliberately toolkit-free): `go vet -tags cuda ./internal/compute/`.
 make cuda-build                 # nvcc -> libfakcuda.a, then go build -tags cuda
 ```
 
-This delegates to [`build_cuda.sh`](../internal/compute/build_cuda.sh), which compiles the
+This delegates to [`build_cuda.sh`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/build_cuda.sh), which compiles the
 kernels into an in-tree `libfakcuda.a` and builds the `-tags cuda` variant against it. The
 same script works unchanged on WSL, a datacenter image, and a GCP DLVM.
 
@@ -108,12 +108,12 @@ Run **every** on-GPU witness with one verdict:
 make cuda-accept                # wraps: bash tools/cuda_acceptance.sh — one manifest, SKIP-is-not-PASS
 ```
 
-[`tools/cuda_acceptance.sh`](../tools/cuda_acceptance.sh) runs each acceptance witness
+[`tools/cuda_acceptance.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cuda_acceptance.sh) runs each acceptance witness
 (`run_479`/`run_482`/`run_483`/`run_484`/`run_485`/`run_486` and the GLM-DSA
 [`private GPU witness runner`](../private GPU witness runner)) and prints a per-family
 `PASS | SKIP | FAIL` manifest. A **SKIP is not a PASS**: on a host with no reachable GPU every
 family skips and the aggregator exits non-zero, so a CPU-only box can never read as green.
-Each individual witness — e.g. [`tools/run_484_acceptance_on_gpu.sh`](../tools/run_484_acceptance_on_gpu.sh)
+Each individual witness — e.g. [`tools/run_484_acceptance_on_gpu.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/run_484_acceptance_on_gpu.sh)
 for the fp16 HGEMM path — can still be run on its own.
 
 ## 5. Add a kernel
@@ -135,14 +135,14 @@ likely to forget (a missing prototype or a missing binding):
 
 ## CI — what's automatic and what isn't
 
-- [`.github/workflows/cuda-build.yml`](../.github/workflows/cuda-build.yml) runs
+- [`.github/workflows/cuda-build.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/cuda-build.yml) runs
   **automatically** on every CUDA-touching push/PR, on plain GitHub-hosted runners with **no
   GPU**: the ABI/header preflight, the pure-Go cgo-leak guard (the default build must stay
   pure-Go), `go vet -tags cuda` (no toolkit), and — in an `nvidia/cuda:12.6.2-devel` container
   — an `nvcc` compile of the kernels plus `go build -tags cuda` (which *links* against the
   image's cudart/cublas stub libs but never *runs*, so no device is needed). This buys "a peer
   can't break the kernels or the cgo seam unnoticed" for ~2 minutes on the rare CUDA PR.
-- [`.github/workflows/windows-cuda.yml`](../.github/workflows/windows-cuda.yml) is the
+- [`.github/workflows/windows-cuda.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/windows-cuda.yml) is the
   **manual** GPU lane: a self-hosted Windows+CUDA runner that runs the signed-binary Approx
   gate. It needs a real GPU and a signing cert, so it is `workflow_dispatch` only.
 
@@ -163,7 +163,7 @@ That GPU datapoint completes the recorded-then-measured loop and closes #926's l
 data; the floor is left at the conservative 0.995 (a measured-cosine-of-1.0 gate would be fragile to
 fp reduction-order drift, so — as on every sibling — the recorded floor sits below the measurement).
 
-The health of this whole loop is itself scored: [`tools/cuda_dev_scorecard.py`](../tools/cuda_dev_scorecard.py)
+The health of this whole loop is itself scored: [`tools/cuda_dev_scorecard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cuda_dev_scorecard.py)
 re-derives a **process-debt** number from the tree (is there a local gate? an automatic CI
 compile gate? a one-command witness? a documented loop?) so the dev process can't quietly
 regress. Snapshot: [`CUDA-DEV-SCORECARD.md`](CUDA-DEV-SCORECARD.md).

@@ -1,7 +1,7 @@
 # Self-Tax Trend — fak's own overhead and net effect, tracked over time
 
 > **What this is.** The living trend companion to the **self-tax** row in
-> [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md). It tracks fak's *own*
+> [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). It tracks fak's *own*
 > mediation overhead — and the cases where that mediation makes work **faster** —
 > as a dated series, net-true-labeled, every point tracing to a committed artifact
 > and a reproduce command like every other authority row.
@@ -95,12 +95,12 @@ performance (the `−` rows), each net of its own cost.
 2. Add one signed row above: first-committed date, surface, the number, its sign,
    its WITNESSED/OBSERVED/MODELED label, the artifact path, and the reproduce command.
 3. Bump the **Snapshot date**, and update the self-tax row in
-   [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) if the headline snapshot changed.
+   [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) if the headline snapshot changed.
 
 ## Verification
 
 - Every artifact path above is a tracked file; every number is the committed value already
-  carried in [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) (the read-path floor,
+  carried in [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) (the read-path floor,
   pure-kernel decide, vDSO ablation, cross-agent ablation rows) or pinned in the epic design
   note §9 (the improvement detector). This doc adds no new number — it folds existing
   witnessed numbers into the self-tax direction.

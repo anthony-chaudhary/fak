@@ -37,7 +37,7 @@ Two properties make this the dominant felt cost:
    That KPI is the kernel's own in-repo microbench (a warm Linux `Fold` decide).
    The cost a fleet host actually pays is **higher** — measured at the hook
    boundary on the Windows dev host with
-   [`tools/dos_hook_bench.py`](../tools/dos_hook_bench.py): `pretool` p50 ≈
+   [`tools/dos_hook_bench.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dos_hook_bench.py): `pretool` p50 ≈
    **300 ms** and `posttool` p50 ≈ **270 ms**, a **~0.57 s per-tool-call floor**,
    **synchronous** (it blocks the turn). Cold process startup dominates: the
    kernel's *internal* work is p50 **2.2 ms** (`.dos/metrics/observations.jsonl`),
@@ -125,7 +125,7 @@ The KPI proves the in-process boundary is **5,000–39,000× faster**. Two shape
 
 - A microbench like the existing `fak bench` KPI but at the **hook** boundary:
   median wall-clock of `pretool`+`posttool` per tool call, before vs after.
-  **Shipped:** [`tools/dos_hook_bench.py`](../tools/dos_hook_bench.py) —
+  **Shipped:** [`tools/dos_hook_bench.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dos_hook_bench.py) —
   `python tools/dos_hook_bench.py` reports `pretool`/`posttool` p10/p50/p90/max,
   the per-tool-call p50 floor, and the passthrough fraction from the observation
   log. It is read-only and SKIPs cleanly when `dos` is off PATH, so it is the

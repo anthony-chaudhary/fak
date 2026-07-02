@@ -7,7 +7,7 @@ description: "Paste-ready, fact-checked posts and scripts for getting fak organi
 
 Paste-ready assets for the channels where an AI-agent-security / self-hosted-LLM-infra
 project actually gets discovered organically. Every number in every asset traces to the
-honesty ledger ([`CLAIMS.md`](../../CLAIMS.md)); every CLI command was re-verified against
+honesty ledger ([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)); every CLI command was re-verified against
 the live binary. Nothing here is a substitute for the work being good — it's the
 distribution layer on top of work that already survives a skeptic reading the code.
 

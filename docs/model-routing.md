@@ -14,7 +14,7 @@ fak model routing is a way to route a single request at any aspect — the whole
 > **served gateway dispatch** path is [SHIPPED] for single-model picks and
 > ensembles through `--route-manifest`. Standalone `fak agent` route-manifest
 > entry points, scout-model live classification, and learned routing remain
-> follow-ons. See [`CLAIMS.md`](../CLAIMS.md).
+> follow-ons. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ## The one-paragraph version
 
@@ -306,10 +306,10 @@ in `internal/modelroute` guards every preset against rot.
 
 | Preset | Goal | Shape |
 |---|---|---|
-| [`cost-saver.json`](../examples/routing-presets/cost-saver.json) | spend less | interactive/short + read-shaped tool calls → small; only `min_complexity: high` → large; default → small |
-| [`guard-writes.json`](../examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
-| [`best-of-quality.json`](../examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
-| [`scout-then-route.json`](../examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
+| [`cost-saver.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/cost-saver.json) | spend less | interactive/short + read-shaped tool calls → small; only `min_complexity: high` → large; default → small |
+| [`guard-writes.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
+| [`best-of-quality.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
+| [`scout-then-route.json`](https://github.com/anthony-chaudhary/fak/blob/main/examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
 
 ```bash
 go run ./cmd/fak route --check examples/routing-presets/cost-saver.json

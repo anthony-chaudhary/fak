@@ -1,15 +1,15 @@
 # INNOVATIONS INDEX — fak's innovations, concepts, and learnings, in one map
 
 The durable, refreshable catalog of *what fak invented or assembled* — distinct from
-the doc map ([`llms.txt`](../llms.txt)), the repo map ([`INDEX.md`](../INDEX.md)), the
+the doc map ([`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)), the repo map ([`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md)), the
 naming disambiguators ([`docs/glossary.md`](glossary.md) / [`docs/fak/concept-glossary.md`](fak/concept-glossary.md)),
-and the per-capability claim ledger ([`CLAIMS.md`](../CLAIMS.md)). Those answer
+and the per-capability claim ledger ([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)). Those answer
 *where is the doc / file / name / claim*. This answers **what is the innovation, what
 general concept does it embody, where does it live, is it shipped, and has it been
 generalized for reuse.**
 
 > fak's own honesty leads here: a 29-claim prior-art audit scored **0/29 novel**
-> ([`CLAIMS.md`](../CLAIMS.md)). The contribution is the **assembly** — one fused,
+> ([`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)). The contribution is the **assembly** — one fused,
 > fail-closed, witness-gated kernel where the tool call is an in-process syscall —
 > and **one invariant carried at every scale**. Read this index with that frame: the
 > parts are old; the wiring and the invariant are the thing.
@@ -57,8 +57,8 @@ Companion decompositions: [`EXPLAINER-what-is-an-agent`](notes/EXPLAINER-what-is
 ## Part 2 — Innovation catalog by subsystem family
 
 Curated to the load-bearing innovations. The full leaf roster is in
-[`dos.toml`](../dos.toml) `[lanes.trees]`; per-claim status is in
-[`CLAIMS.md`](../CLAIMS.md). `Home` is the `internal/<pkg>` (or doc) it lives in.
+[`dos.toml`](https://github.com/anthony-chaudhary/fak/blob/main/dos.toml) `[lanes.trees]`; per-claim status is in
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). `Home` is the `internal/<pkg>` (or doc) it lives in.
 
 ### A. Safety / kernel / adjudication
 
@@ -201,10 +201,10 @@ The actioning epic groups the lifts as child issues.
 
 ## Part 5 — Honest ledger & authorities
 
-- [`CLAIMS.md`](../CLAIMS.md) — every capability with one machine-checked tag.
+- [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag.
 - [`claims-salience-register.md`](claims-salience-register.md) — LIVE (143) vs PARKED (17), no-loss.
-- [`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md) — every number, traced to commit + artifact.
-- [`STATUS.md`](../STATUS.md) — what's shipped and on the critical path.
+- [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — every number, traced to commit + artifact.
+- [`STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) — what's shipped and on the critical path.
 - [`docs/notes/CHARTER.md`](notes/CHARTER.md) — the ten principles + the alignment scorecard.
 
 ---
@@ -231,5 +231,5 @@ it:
    row here that is `[STUB]` there is a bug in this index, not a claim.
 
 Cadence: refresh on each major subsystem ship or at least per release. This page is
-the innovations counterpart to [`INDEX.md`](../INDEX.md) (repo map) and
-[`llms.txt`](../llms.txt) (doc map).
+the innovations counterpart to [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) (repo map) and
+[`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) (doc map).

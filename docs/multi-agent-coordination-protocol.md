@@ -45,9 +45,9 @@ The protocol has three layers, each a shipped package:
 
 | Layer | What it carries | Package | Try it |
 |---|---|---|---|
-| **§3 Message passing** | one addressed value, now, A→B | [`internal/a2achan`](../internal/a2achan/a2achan.go) | `go run ./cmd/a2ademo` |
-| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](../internal/sharedtask) | `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
-| **§5 Coordination primitives** | broadcast / scatter / gather / barrier over a wave | [`internal/comm`](../internal/comm/comm.go), [`internal/agenttopo`](../internal/agenttopo/agenttopo.go) | `go test ./internal/comm` |
+| **§3 Message passing** | one addressed value, now, A→B | [`internal/a2achan`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/a2achan.go) | `go run ./cmd/a2ademo` |
+| **§4 Shared state** | a named record / KV space many agents co-edit | [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask) | `python tools/shared_task_contract.py validate-sequence examples/shared-task-record` |
+| **§5 Coordination primitives** | broadcast / scatter / gather / barrier over a wave | [`internal/comm`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go), [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) | `go test ./internal/comm` |
 
 ---
 
@@ -218,7 +218,7 @@ the executable contract validator `tools/shared_task_contract.py` over
 
 ## 5. Coordination primitives — the wave collectives (`comm`, `agenttopo`)
 
-The synchronize-a-wave rung. A [`comm.Group`](../internal/comm/comm.go) is an **ordered
+The synchronize-a-wave rung. A [`comm.Group`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/comm.go) is an **ordered
 set of member agents**: `Rank` is a member's position in the *sorted* member set, so the
 same members always get the same ranks regardless of arrival order — rank is a
 deterministic function of the member identities, never of arrival order or a member's
@@ -241,7 +241,7 @@ return `StatusPending` handles completed via `Kernel.Reap`; no ABI edit is neede
 
 ### 5.2 Topology: declare vs search
 
-- **Declare** — [`internal/agenttopo`](../internal/agenttopo/agenttopo.go) declares a
+- **Declare** — [`internal/agenttopo`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/agenttopo.go) declares a
   *named, validated DAG* over a `comm.Group`: who may hand a result to whom, every edge
   checked against the group, cycles refused, declaration order preserved. (The
   `MPI_Graph_create` analogue.)
@@ -310,13 +310,13 @@ model/tool/context boundary; it is not the peer-agent channel.
 ## 8. References
 
 - **Message passing:** [`a2a-in-kernel-channel.md`](a2a-in-kernel-channel.md) ·
-  [`internal/a2achan/doc.go`](../internal/a2achan/doc.go)
+  [`internal/a2achan/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/a2achan/doc.go)
 - **Shared state:** [`shared-state-ladder.md`](shared-state-ladder.md) ·
   [`shared-task-record-contract.md`](shared-task-record-contract.md) ·
-  [`internal/sharedtask`](../internal/sharedtask)
+  [`internal/sharedtask`](https://github.com/anthony-chaudhary/fak/tree/main/internal/sharedtask)
 - **Coordination primitives:** [`comm-as-mpi-split.md`](comm-as-mpi-split.md) ·
-  [`internal/comm/doc.go`](../internal/comm/doc.go) ·
-  [`internal/agenttopo/doc.go`](../internal/agenttopo/doc.go)
+  [`internal/comm/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/comm/doc.go) ·
+  [`internal/agenttopo/doc.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agenttopo/doc.go)
 - **The fleet edge (out-of-kernel projection):**
   [`a2a-value-opportunities.md`](a2a-value-opportunities.md) ·
   [`agent-machine-link-protocol.md`](agent-machine-link-protocol.md)

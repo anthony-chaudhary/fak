@@ -117,7 +117,7 @@ fak guard --provider openai --api-key-env OPENAI_API_KEY -- hermes
 ### Recorded live witness
 
 The OpenAI-wire guard path has a live gateway-transited witness in
-[`experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json`](../../experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json).
+[`experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/agent-live/openai-wire-seat-guard-live-witness-2026-06-29.json).
 The run used `opencode` as the issue-approved OpenAI Chat Completions fallback because the
 `hermes` CLI was not installed on that Windows host. It records a real child result, `200`
 rows on `route=/v1/chat/completions` in the guard log, a direct placeholder-key `401`
@@ -134,7 +134,7 @@ fak guard --gguf qwen2.5-coder:7b -- hermes
 
 The GGUF downloads from Hugging Face on first run (cached in `~/.cache/fak-models/`), loads
 in-kernel, and Hermes Agent connects over the in-process gateway. Your data never leaves the
-box after the initial pull. See [`fak ls`](../../README.md) for the available aliases.
+box after the initial pull. See [`fak ls`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for the available aliases.
 
 ---
 
@@ -373,9 +373,9 @@ Expected on large local models — the agent prompt is large and the first turn 
 - **Integration index**: [README.md](README.md) — the universal recipe and which-agent routing
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md) — the full sourced field survey
 - **Aider guide**: [aider.md](aider.md) — the closest sibling (another OpenAI-wire CLI agent)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md) — authoring capability floors
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring capability floors
 - **Hermes Agent docs**: [https://hermes-agent.nousresearch.com/docs/](https://hermes-agent.nousresearch.com/docs/)
-- **fak architecture**: [../../ARCHITECTURE.md](../../ARCHITECTURE.md) — kernel internals
+- **fak architecture**: [../../ARCHITECTURE.md](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) — kernel internals
 
 ---
 

@@ -84,10 +84,10 @@ than dressed up.
 
 ## How this is encountered by default
 
-- **Agents** meet it in [`AGENTS.md`](../../AGENTS.md) beside the "every claim carries a
+- **Agents** meet it in [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) beside the "every claim carries a
   tag" rule and the [net-true-value](net-true-value.md) lens — the cost-side check an agent
   runs before reporting any "fak adds X%" or "fak saved Y" number.
-- **Humans** meet it in the doc map ([`llms.txt`](../../llms.txt), [`INDEX.md`](../../INDEX.md))
+- **Humans** meet it in the doc map ([`llms.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt), [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md))
   beside the net-true-value standard and the [self-tax plane note](../notes/self-tax-performance-assurance-tracking-1147.md).
 
 ## Honest fences

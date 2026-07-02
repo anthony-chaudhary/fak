@@ -41,11 +41,11 @@ small set of seams that each path independently needs:
 And there is exactly **one genuine, load-bearing tension** under all of it:
 
 > The bit-exact middle-span eviction moat needs fak to OWN pre-RoPE `Kraw` f32 rows in its
-> own address space ([`internal/model/kvcache.go:14`](../../internal/model/kvcache.go),
-> re-RoPE at [`:128`](../../internal/model/kvcache.go)). The *fastest* path to a throughput
+> own address space ([`internal/model/kvcache.go:14`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go),
+> re-RoPE at [`:128`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go)). The *fastest* path to a throughput
 > parity number is to RIDE vLLM/SGLang (Track A), which own the KV and expose only a coarse
 > whole-prefix reset (`SupportsExactSpan=false`,
-> [`internal/enginecache/enginecache.go:239`](../../internal/enginecache/enginecache.go)).
+> [`internal/enginecache/enginecache.go:239`](https://github.com/anthony-chaudhary/fak/blob/main/internal/enginecache/enginecache.go)).
 > So the move that buys throughput parity quickest is the move that degrades the trust moat
 > to a whole-prefix flush on that same span. `[CONFIRMED]` by verification.
 
@@ -67,11 +67,11 @@ metadata grammar above it — what is missing is the bytes, on both sides, ident
 ### 2a. `KVCache → bytes` span serializer — `[GAP]`, one artifact both tracks need
 
 Today a span has no portable byte form. `Evict` re-derives survivors from **owned** `Kraw`
-pre-RoPE rows ([`kvcache.go:128`](../../internal/model/kvcache.go)) and `Clone` splices
-in-process ([`kvcache.go:173`](../../internal/model/kvcache.go)). To move a span off-box you
+pre-RoPE rows ([`kvcache.go:128`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go)) and `Clone` splices
+in-process ([`kvcache.go:173`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go)). To move a span off-box you
 must serialize `K`/`Kraw`/`V`/`pos` for a `[from,len)` range into a self-describing blob,
 keyed by the materialization tuple (model / tokenizer / serializer / position-regime,
-[`internal/cachemeta/materialization.go:62`](../../internal/cachemeta/materialization.go))
+[`internal/cachemeta/materialization.go:62`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/materialization.go))
 so a deserialized span **fails closed under a wrong regime**.
 
 - Throughput unlock: this blob **is** the Track-B native P/D data-plane payload (#29,
@@ -83,13 +83,13 @@ so a deserialized span **fails closed under a wrong regime**.
 
 This is the universal gate. `cachemeta` names WHERE a span lives and HOW it shares zero-copy
 (`ShareKind` rdma/cxl_hdm/dmabuf/mmap,
-[`internal/cachemeta/hardware.go:50`](../../internal/cachemeta/hardware.go)) but emits no
+[`internal/cachemeta/hardware.go:50`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/hardware.go)) but emits no
 bytes — `BytesMoved` is a *reported counter*, no path copies KV
-([`internal/cachemeta/kvtransfer.go:54`](../../internal/cachemeta/kvtransfer.go)).
+([`internal/cachemeta/kvtransfer.go:54`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/kvtransfer.go)).
 `xenginekv`'s `AttachArena` takes a shared-memory/CUDA-IPC buffer
-([`arena.go:94`](../../internal/xenginekv/arena.go)) but the engine-specific transport that
+([`arena.go:94`](https://github.com/anthony-chaudhary/fak/blob/main/internal/xenginekv/arena.go)) but the engine-specific transport that
 maps a real KV region into the Arena is **explicitly the unbuilt remainder**
-([`arena.go:35`](../../internal/xenginekv/arena.go)). `[CONFIRMED]` by verification: the
+([`arena.go:35`](https://github.com/anthony-chaudhary/fak/blob/main/internal/xenginekv/arena.go)). `[CONFIRMED]` by verification: the
 arena is a Go `[]byte` in-process stand-in; nothing moves KV over a wire anywhere in-tree.
 
 - Throughput unlock: native prefill/decode disaggregation — the wire a P→D transfer rides.
@@ -108,18 +108,18 @@ arena is a Go `[]byte` in-process stand-in; nothing moves KV over a wire anywher
 
 ### 2c. The seams above the bytes are already shared and shipped — `[SHIPPED]` / `[SEAM-ONLY]`
 
-- The `abi.KVBackend` factory seam ([`internal/abi/registry.go:633`](../../internal/abi/registry.go))
+- The `abi.KVBackend` factory seam ([`internal/abi/registry.go:633`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go))
   is the per-session contract `kvmmu` enforces through with zero concrete-model dependency
-  ([`internal/kvmmu/kvmmu.go:131`](../../internal/kvmmu/kvmmu.go)) — a remote tier attaches
+  ([`internal/kvmmu/kvmmu.go:131`](https://github.com/anthony-chaudhary/fak/blob/main/internal/kvmmu/kvmmu.go)) — a remote tier attaches
   the *same way* the region/page-out backends do. `[SHIPPED]` (the seam), `[GAP]` (a remote
   impl).
 - The payload-free disaggregation grammar — `ExactSpanTargets`
-  ([`internal/cachemeta/external_invalidation.go:93`](../../internal/cachemeta/external_invalidation.go))
+  ([`internal/cachemeta/external_invalidation.go:93`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/external_invalidation.go))
   — names a precise remote eviction without ever touching the data path. `[SHIPPED]`.
 - The portable signed `DeletionCertificate`
-  ([`internal/deletioncert/deletioncert.go:133`](../../internal/deletioncert/deletioncert.go))
+  ([`internal/deletioncert/deletioncert.go:133`](https://github.com/anthony-chaudhary/fak/blob/main/internal/deletioncert/deletioncert.go))
   binds a bit-exact eviction to a hash-chained journal row. `[SHIPPED]`, self-signed only
-  until the external anchor is populated ([`:90`](../../internal/deletioncert/deletioncert.go)).
+  until the external anchor is populated ([`:90`](https://github.com/anthony-chaudhary/fak/blob/main/internal/deletioncert/deletioncert.go)).
 
 ---
 
@@ -132,14 +132,14 @@ GPU server access, the most expensive narrowly-single-track work) sequenced last
 
 | Step | What | Path | Size | Owning child(ren) | Anchors |
 |---|---|---|---|---|---|
-| **S1** | Extend the `EngineDriver` seam from one-shot `Complete` to admit/step/stream/cancel, **reviewed against the native-scheduler shape, not just the adapter shape**. Thread `ctx` into the decode loop + incremental detokenizer so tokens flush live. | **both** | L | #46, #47, #48 | `EngineDriver` is `Complete`+`Caps` only at [`registry.go:590`](../../internal/abi/registry.go); the sole impl one-shots `sess.Generate` with `ctx` never consulted in decode ([`internal/modelengine/modelengine.go:139`](../../internal/modelengine/modelengine.go)); doc names this the #1 risk ([`dual-track-serving-plan.md:90`](../serving/dual-track-serving-plan.md)) |
-| **S2** | Parity bench harness: drive identical Poisson load against fak AND a real vLLM/SGLang/TRT-LLM endpoint on the same hardware; emit TTFT/TPOT/goodput/queue-depth/KV-util. Net-new — `cmd/paritybench` measures capability/safety/cost A/B, a different axis. | **both** | L | #44, #43 | [`cmd/paritybench/main.go`](../../cmd/paritybench/main.go); [`dual-track-serving-plan.md:85`](../serving/dual-track-serving-plan.md) |
-| **S2½** | Wire the fleet router into the gateway hot path: N-upstream dispatch + residency index + membership/health, so throughput dispatch and trust admission attach at the same layer. | **both** | L | #45, #41, #42 | Static N-upstream dispatch is now wired through `ReplicaRouter` + `fak serve --replica-base-url` ([`replica_router.go`](../../internal/gateway/replica_router.go)); the remaining gap is the residency index + health/drain/failover layer, so placement is still round-robin rather than KV/load-aware. |
-| **S3** | `KVCache → bytes` span serializer keyed by the materialization tuple, fails closed under a wrong regime. | **both** | L | #29 | [`kvcache.go:128`](../../internal/model/kvcache.go), [`:173`](../../internal/model/kvcache.go); [`materialization.go:62`](../../internal/cachemeta/materialization.go) |
-| **S4** | `StageTransport` byte mover — **TCP path first** (no special hardware, exercisable before GPU server), RDMA/UCX as a backend swap behind the same seam. | **both** | XL | #29 (KV bytes), #85/#30 (PP stage handoff) | [`arena.go:35`](../../internal/xenginekv/arena.go); [`hardware.go:50`](../../internal/cachemeta/hardware.go); [`kvtransfer.go:54`](../../internal/cachemeta/kvtransfer.go) |
-| **S5** | Continuous-batching scheduler over `StepBatchActive` (admit/retire/rebuild-running-batch + admission/priority) **and** paged/block KV allocator that **proves the bit-exact `Evict` survives paging** (#33 gate). Sequenced together — the scheduler admits/preempts against the allocator. | **both** | XL | #36, #35, #34, #33 | [`batch_step.go:75`](../../internal/model/batch_step.go) (StepBatchActive, per-step GEMM), [`:135`](../../internal/model/batch_step.go) (GenerateBatch is STATIC fixed-B, no loop); [`kvcache.go:92`](../../internal/model/kvcache.go) (memmove-compacting Evict) |
-| **S6a** | **Trust branch, hardware-UNGATED.** Asyncify `KVBackend.Prefill` (add residency-transfer methods, keep the local dense path byte-identical) → referee sidecar return-digest verify + durability-gated admission → `L3RegionBackend` behind the frozen Resolver/KVBackend seam → durability-tiered promotion → per-span `DeletionCertificate` over the pool. In-process L3 stub before a real external L3 cache. | **trust** | L (on top of spine) | #638 (unblock), #53 (+#55-#58) | [`registry.go:633`](../../internal/abi/registry.go); [`kvmmu.go:131`](../../internal/kvmmu/kvmmu.go); [`external_invalidation.go:93`](../../internal/cachemeta/external_invalidation.go); [`deletioncert.go:133`](../../internal/deletioncert/deletioncert.go) |
-| **S6b** | **Throughput branch, hardware-GATED.** Real 2-GPU device `CollectiveBackend` (lift hardcoded `cudaSetDevice(0)`) → multi-process TP serving (`ForwardTP` per-rank) → network PP serve loop → native P/D split → **last**: GLM-5.2 MLA-aware TP + MoE expert-parallel (the decompositions `ForwardTP` fails closed on). | **throughput** | XL | #28, #30, #85, #274 | [`compute.go:350`](../../internal/compute/compute.go) (cpu-ref collectives); [`cuda_kernels.cu:52`](../../internal/compute/cuda_kernels.cu) (`cudaSetDevice(0)`); [`internal/model/tensor_parallel_forward.go:76`](../../internal/model/tensor_parallel_forward.go) (fails closed on MLA/DSA/MoE/quant/ParallelResidual/linear-attn) |
+| **S1** | Extend the `EngineDriver` seam from one-shot `Complete` to admit/step/stream/cancel, **reviewed against the native-scheduler shape, not just the adapter shape**. Thread `ctx` into the decode loop + incremental detokenizer so tokens flush live. | **both** | L | #46, #47, #48 | `EngineDriver` is `Complete`+`Caps` only at [`registry.go:590`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go); the sole impl one-shots `sess.Generate` with `ctx` never consulted in decode ([`internal/modelengine/modelengine.go:139`](https://github.com/anthony-chaudhary/fak/blob/main/internal/modelengine/modelengine.go)); doc names this the #1 risk ([`dual-track-serving-plan.md:90`](../serving/dual-track-serving-plan.md)) |
+| **S2** | Parity bench harness: drive identical Poisson load against fak AND a real vLLM/SGLang/TRT-LLM endpoint on the same hardware; emit TTFT/TPOT/goodput/queue-depth/KV-util. Net-new — `cmd/paritybench` measures capability/safety/cost A/B, a different axis. | **both** | L | #44, #43 | [`cmd/paritybench/main.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/paritybench/main.go); [`dual-track-serving-plan.md:85`](../serving/dual-track-serving-plan.md) |
+| **S2½** | Wire the fleet router into the gateway hot path: N-upstream dispatch + residency index + membership/health, so throughput dispatch and trust admission attach at the same layer. | **both** | L | #45, #41, #42 | Static N-upstream dispatch is now wired through `ReplicaRouter` + `fak serve --replica-base-url` ([`replica_router.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/replica_router.go)); the remaining gap is the residency index + health/drain/failover layer, so placement is still round-robin rather than KV/load-aware. |
+| **S3** | `KVCache → bytes` span serializer keyed by the materialization tuple, fails closed under a wrong regime. | **both** | L | #29 | [`kvcache.go:128`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go), [`:173`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go); [`materialization.go:62`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/materialization.go) |
+| **S4** | `StageTransport` byte mover — **TCP path first** (no special hardware, exercisable before GPU server), RDMA/UCX as a backend swap behind the same seam. | **both** | XL | #29 (KV bytes), #85/#30 (PP stage handoff) | [`arena.go:35`](https://github.com/anthony-chaudhary/fak/blob/main/internal/xenginekv/arena.go); [`hardware.go:50`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/hardware.go); [`kvtransfer.go:54`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/kvtransfer.go) |
+| **S5** | Continuous-batching scheduler over `StepBatchActive` (admit/retire/rebuild-running-batch + admission/priority) **and** paged/block KV allocator that **proves the bit-exact `Evict` survives paging** (#33 gate). Sequenced together — the scheduler admits/preempts against the allocator. | **both** | XL | #36, #35, #34, #33 | [`batch_step.go:75`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/batch_step.go) (StepBatchActive, per-step GEMM), [`:135`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/batch_step.go) (GenerateBatch is STATIC fixed-B, no loop); [`kvcache.go:92`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go) (memmove-compacting Evict) |
+| **S6a** | **Trust branch, hardware-UNGATED.** Asyncify `KVBackend.Prefill` (add residency-transfer methods, keep the local dense path byte-identical) → referee sidecar return-digest verify + durability-gated admission → `L3RegionBackend` behind the frozen Resolver/KVBackend seam → durability-tiered promotion → per-span `DeletionCertificate` over the pool. In-process L3 stub before a real external L3 cache. | **trust** | L (on top of spine) | #638 (unblock), #53 (+#55-#58) | [`registry.go:633`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go); [`kvmmu.go:131`](https://github.com/anthony-chaudhary/fak/blob/main/internal/kvmmu/kvmmu.go); [`external_invalidation.go:93`](https://github.com/anthony-chaudhary/fak/blob/main/internal/cachemeta/external_invalidation.go); [`deletioncert.go:133`](https://github.com/anthony-chaudhary/fak/blob/main/internal/deletioncert/deletioncert.go) |
+| **S6b** | **Throughput branch, hardware-GATED.** Real 2-GPU device `CollectiveBackend` (lift hardcoded `cudaSetDevice(0)`) → multi-process TP serving (`ForwardTP` per-rank) → network PP serve loop → native P/D split → **last**: GLM-5.2 MLA-aware TP + MoE expert-parallel (the decompositions `ForwardTP` fails closed on). | **throughput** | XL | #28, #30, #85, #274 | [`compute.go:350`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/compute.go) (cpu-ref collectives); [`cuda_kernels.cu:52`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_kernels.cu) (`cudaSetDevice(0)`); [`internal/model/tensor_parallel_forward.go:76`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/tensor_parallel_forward.go) (fails closed on MLA/DSA/MoE/quant/ParallelResidual/linear-attn) |
 
 S2½ may land opportunistically once S1 lands, but **S1–S5 are the shared-spine gate before
 any track-specific parity claim**. A native fak parity claim belongs after S6b only if S2 has
@@ -160,16 +160,16 @@ hardware justify it.
 
 - **No device communicator.** No real NCCL/RCCL device API anywhere (`git grep
   ncclAllReduce|ncclComm|nccl.h` → nothing); `cudaSetDevice(0)` is hardcoded and is the only
-  `cudaSetDevice` in `internal/` ([`cuda_kernels.cu:52`](../../internal/compute/cuda_kernels.cu)).
+  `cudaSetDevice` in `internal/` ([`cuda_kernels.cu:52`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/cuda_kernels.cu)).
   Every multi-GPU rung (S6b) is gated on building this AND on real multi-GPU hardware to test it.
   - *Correction the verification forced (claim `no-nccl`, PARTIAL):* "genuinely no
     world-size / device-mesh / per-rank binding — true greenfield" is **overstated**. The
     tree already has compiled per-rank collective *contracts*
-    ([`internal/compute/collective.go`](../../internal/compute/collective.go) cpu-ref
+    ([`internal/compute/collective.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/compute/collective.go) cpu-ref
     AllReduce/AllGather/ReduceScatter/AllToAll), rank-ordered TP sharding
-    ([`internal/model/tensor_parallel.go`](../../internal/model/tensor_parallel.go)
+    ([`internal/model/tensor_parallel.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/tensor_parallel.go)
     LocalCollective/TPPlan), a `DistComm` process-group
-    ([`internal/model/dist_collective.go`](../../internal/model/dist_collective.go), host-float32
+    ([`internal/model/dist_collective.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/dist_collective.go), host-float32
     cross-process, explicitly NOT NCCL/multi-GPU), and a `StageTransport` seam — all deliberate
     single-box CPU-ref implementations built as the swap point. What is **truly greenfield is
     the NCCL/RDMA *device backend* and the cross-process *wire transport* behind those seams**,
@@ -179,35 +179,35 @@ hardware justify it.
 
 - **No continuous-batching scheduler.** `StepBatch`/`StepBatchActive` are bit-exact per-step
   GEMM primitives; `GenerateBatch` is STATIC fixed-B with EOS re-feed
-  ([`batch_step.go:135`](../../internal/model/batch_step.go)). The scheduler the comment says
+  ([`batch_step.go:135`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/batch_step.go)). The scheduler the comment says
   "*would* call" the primitive does not exist.
   - *Correction (claim `spine-shared-enginedriver-stepbatch`, PARTIAL):* the framing that the
     admit/step/stream/cancel lifecycle is *already* shared spine is **aspirational**.
-    `EngineDriver` today is one-shot `Complete`+`Caps` ([`registry.go:590`](../../internal/abi/registry.go))
+    `EngineDriver` today is one-shot `Complete`+`Caps` ([`registry.go:590`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go))
     with no step/stream/cancel; the unified lifecycle is future work (#46), and the
     `Admit`/`Evict` symbols in `registry.go` are on *other* interfaces. The seam and the
     primitive exist and are reused by static batching; the *lifecycle* is what S1/S5 build.
 - **Production paged KV is still not the default live path.** The default session cache is still
   the flat `[]float32` + memmove-compacting `Evict`
-  ([`kvcache.go:11`,`:92`](../../internal/model/kvcache.go)). The #33 design/prototype gate is
+  ([`kvcache.go:11`,`:92`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go)). The #33 design/prototype gate is
   now proven by `paged_evict.go` + `TestPagedEvictBitIdenticalToContiguous`: exact-span Evict
   survives a block-paged layout when the blocks carry f32 `Kraw` and COW-split before re-RoPE.
   The remaining gap is #34: carrying that proof into the production allocator/serve path.
 - **Streaming is synthesized post-adjudication** — TTFT == whole-turn until S1.
 - **`KVBackend.Prefill` is synchronous-dense `[]float32`**
-  ([`registry.go:635`](../../internal/abi/registry.go), inherited from
-  [`internal/model/kv.go:386`](../../internal/model/kv.go)). A remote/async L3 backend cannot
+  ([`registry.go:635`](https://github.com/anthony-chaudhary/fak/blob/main/internal/abi/registry.go), inherited from
+  [`internal/model/kv.go:386`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kv.go)). A remote/async L3 backend cannot
   satisfy it as-is; S6a must add residency-transfer methods. `[CONFIRMED]`.
 - **The external L3 cache is out-of-tree** (a separate workspace), not imported or built, and
   the repo guard refuses out-of-workspace writes — so child-A's "prove against a real external
   store" cannot be demonstrated from this workspace alone; the in-process stub is the honest
   first proof.
 - **Recurrent/hybrid caches reject mid-span evict entirely** —
-  `RecurrentEvictUnsupportedError` ([`kvcache.go` Evict path](../../internal/model/kvcache.go),
+  `RecurrentEvictUnsupportedError` ([`kvcache.go` Evict path](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/kvcache.go),
   Gated-DeltaNet linear-attention). The quarantine + deletion-cert moat **structurally does not
   exist** for those families. The flagship (753B GLM-5.2, MoE+MLA+DSA+quant) is partly exactly
   the architecture the moat cannot cover and the throughput TP path fails closed on
-  ([`tensor_parallel_forward.go:76`](../../internal/model/tensor_parallel_forward.go)) — the two
+  ([`tensor_parallel_forward.go:76`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/tensor_parallel_forward.go)) — the two
   tracks value the same model for opposite reasons.
 
 **The parity-must-be-measured rule (#44):** a throughput-parity claim is **MEASURED only by the

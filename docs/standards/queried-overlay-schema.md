@@ -232,12 +232,12 @@ about which is which:
 
 | Schema element | Reference stick | Status |
 |---|---|---|
-| The query primitive (intent → ranked cards, fault under budget) | [`contextq.QueryCapabilities`](../../internal/contextq/contextq.go) (MCP-Zero active discovery) + the `CapabilityLedger` | [SHIPPED] |
-| The 0→∞ overlay index (harness items as queryable cards) | [`capindex.Catalog.Query(intent)`](../../internal/capindex/catalog.go) + [`capindex.CapCard`](../../internal/capindex/capindex.go) (cards at rest, body-on-demand via `Materialize`) | [SHIPPED] |
-| The canonical `CapRef` (the #1144 fold) | [`capindex.CapRef`](../../internal/capindex/capindex.go) `{Kind, Name, Version}` | [SHIPPED] (the `contextq` duplicate is the debt this folds) |
-| HIT-on-reinvocation (no re-fault on an identical digest) | [`contextq.SkillContextRecord`](../../internal/contextq/skillmemory.go) (procedural-memory view keyed by invocation digest) | [SHIPPED] |
-| The pager for an evictable overlay body | [`ctxmmu`](../../internal/ctxmmu) `PageOutBody` + CAS-pinned eviction | [SHIPPED] |
-| The cache-breakpoint vocabulary the overlay is appended after | [`cachemeta.PromptSegment`](../../internal/cachemeta) + `InjectBreakMarker` | [SHIPPED] |
+| The query primitive (intent → ranked cards, fault under budget) | [`contextq.QueryCapabilities`](https://github.com/anthony-chaudhary/fak/blob/main/internal/contextq/contextq.go) (MCP-Zero active discovery) + the `CapabilityLedger` | [SHIPPED] |
+| The 0→∞ overlay index (harness items as queryable cards) | [`capindex.Catalog.Query(intent)`](https://github.com/anthony-chaudhary/fak/blob/main/internal/capindex/catalog.go) + [`capindex.CapCard`](https://github.com/anthony-chaudhary/fak/blob/main/internal/capindex/capindex.go) (cards at rest, body-on-demand via `Materialize`) | [SHIPPED] |
+| The canonical `CapRef` (the #1144 fold) | [`capindex.CapRef`](https://github.com/anthony-chaudhary/fak/blob/main/internal/capindex/capindex.go) `{Kind, Name, Version}` | [SHIPPED] (the `contextq` duplicate is the debt this folds) |
+| HIT-on-reinvocation (no re-fault on an identical digest) | [`contextq.SkillContextRecord`](https://github.com/anthony-chaudhary/fak/blob/main/internal/contextq/skillmemory.go) (procedural-memory view keyed by invocation digest) | [SHIPPED] |
+| The pager for an evictable overlay body | [`ctxmmu`](https://github.com/anthony-chaudhary/fak/tree/main/internal/ctxmmu) `PageOutBody` + CAS-pinned eviction | [SHIPPED] |
+| The cache-breakpoint vocabulary the overlay is appended after | [`cachemeta.PromptSegment`](https://github.com/anthony-chaudhary/fak/tree/main/internal/cachemeta) + `InjectBreakMarker` | [SHIPPED] |
 | `internal/syspromptmmu` base-context overlay tier (where cards append) | Rung 1 (`#1259`, keystone) | **not yet** |
 | Segment-plan → `promptmmu` splice adapter (the breakpoint to append after) | Rung 2 (`#1260`) | **not yet** |
 | The live caller that drives `QueryCapabilities` from the turn on the request path | Rung 3 (`#1261`, this issue) | **not yet** (the substrate above is request-path-dead until this lands) |
@@ -276,4 +276,4 @@ about which is which:
 - [The system-prompt MMU design note](../notes/SYSTEM-PROMPT-MMU-2026-06-29.md) — the epic (`#1258`) this is Rung 3 of: the fak-first base-context layout, the five load-bearing invariants, and the six rungs.
 - [The witness-gated system-prompt-mutation schema](system-prompt-mutation-schema.md) — the Rung-5 sibling (gates an *edit* to the base); same recipe, a different decision.
 - [The portable context-contract schema](context-contract-schema.md) — the materialized-view sibling (certifies a *view* is a witnessed fold); same recipe, a different decision.
-- [`internal/contextq`](../../internal/contextq/contextq.go) · [`internal/capindex`](../../internal/capindex/capindex.go) — the shipped query primitive, the at-rest card index, and the canonical `CapRef` this contract drives and folds.
+- [`internal/contextq`](https://github.com/anthony-chaudhary/fak/blob/main/internal/contextq/contextq.go) · [`internal/capindex`](https://github.com/anthony-chaudhary/fak/blob/main/internal/capindex/capindex.go) — the shipped query primitive, the at-rest card index, and the canonical `CapRef` this contract drives and folds.

@@ -35,7 +35,7 @@ memory at a time.
 This is the same invariant the rest of the substrate carries (see the grammar
 note): *a state no participant can move by narrating around it.* A complaint is
 just friction lifted into a first-class, refusable, witnessed value — the same way
-[`CLAIMS.md`](../../CLAIMS.md) lifts a claim and `dos_refuse_reasons` lifts a
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) lifts a claim and `dos_refuse_reasons` lifts a
 refusal. "I worked around it" is a self-report that moves nothing; a filed,
 deduped, witnessed complaint is the thing a maintainer can actually fix.
 
@@ -91,7 +91,7 @@ it actionable instead of noise.
    once the complain surface settles, add the `case "complain"` dispatch + a
    `workflow`/`dev` complaint domain so the *same* deduping channel covers general
    agentic-dev friction (the classes above), and reference it from
-   [`AGENTS.md`](../../AGENTS.md) so it is discoverable by default.
+   [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) so it is discoverable by default.
 
 3. **Structured, verifiable refusal** — when the right move is to *decline green
    with a reason* rather than render an unearned OK. Channel: the DOS closed refusal

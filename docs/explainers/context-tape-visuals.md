@@ -29,13 +29,13 @@ grow unevenly, and you can see how little of it is new each step. That single im
 in one glance, why a multi-agent fleet stresses the KV cache and where fak's reuse win comes
 from.
 
-![How each agent's context assembles — a row per agent, tool results drawn to scale](../../visuals/66-context-tape-fleet.svg)
+![How each agent's context assembles — a row per agent, tool results drawn to scale](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/66-context-tape-fleet.svg)
 
 The trouble was that this picture lived **only** inside one running Go HTTP demo, drawn in
 browser JavaScript, fed by five synthetic scenarios. You could not point it at a real
 session, you could not emit it from another part of the system, and you could not drop it
 into a doc. This note is about the small tool that fixes all three —
-[`tools/context_tape.py`](../../tools/context_tape.py) — and the program it opens up:
+[`tools/context_tape.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/context_tape.py) — and the program it opens up:
 **more of this kind of visual, everywhere a human reads.**
 
 ## One renderer, many sources
@@ -73,7 +73,7 @@ python tools/context_tape.py render      tape.json             --html out.html
 ## Application 1 — live for any trajectory
 
 Point the `trajectory` adapter at a real Claude Code session transcript — the same `.jsonl`
-[`tools/session_audit.py`](../../tools/session_audit.py) reads — and it renders **that
+[`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) reads — and it renders **that
 session's** context tape. Each row is one billed turn; the bands are **exact provider token
 counts** from `message.usage`: the big faded band is the prefix the model **reused** from
 cache that turn (`cache_read`), the small coloured tip is the fresh input that turn
@@ -96,8 +96,8 @@ turn 8 │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒�
 The reused band dwarfing the fresh tip is the frozen-trajectory **OBSERVED provider-cache
 cost/latency rebate** — but now on *your* session, not a synthetic one. It is the
 per-turn, drawn-to-scale companion to the
-aggregate numbers in [`session_audit.py`](../../tools/session_audit.py) and the survival
-curves in [`cache_curve.py`](../../tools/cache_curve.py): the
+aggregate numbers in [`session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) and the survival
+curves in [`cache_curve.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/cache_curve.py): the
 [frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md) made visible turn by turn.
 
 ```sh
@@ -108,12 +108,12 @@ python tools/context_tape.py trajectory <that-session>.jsonl --svg my-session.sv
 ## Application 2 — RSI loops, and similar, modularly
 
 Because the renderer only knows about rows-of-segments, a producer that is **not** a context
-trace at all gets the same picture. The RSI loop ([`internal/rsiloop`](../../internal/rsiloop))
+trace at all gets the same picture. The RSI loop ([`internal/rsiloop`](https://github.com/anthony-chaudhary/fak/tree/main/internal/rsiloop))
 writes an append-only keep/revert journal; the `rsi` adapter renders it as a **verdict
 ladder** — one row per cycle, the bar the candidate metric over a shared baseline floor, the
 contested delta tinted by the verdict (keep / revert / escalate).
 
-![RSI keep-or-revert ladder — one row per cycle, the contested delta tinted by the verdict](../../visuals/67-rsi-verdict-ladder.svg)
+![RSI keep-or-revert ladder — one row per cycle, the contested delta tinted by the verdict](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/67-rsi-verdict-ladder.svg)
 
 ```text
 RSI LOOP — KEEP OR REVERT, CYCLE BY CYCLE   [non-forgeable keep-bit]
@@ -129,7 +129,7 @@ cycle 5: cache=20 │░░░░░░░░░░░░░░░░░░░�
 This is the "more modular" point made concrete: the loop did not learn to draw, and the
 renderer did not learn about RSI — they meet at the Tape schema. A loop run can emit a ladder
 SVG as a build artifact the way it already emits a `dos improve --observe` receipt
-(the [`Observer`](../../internal/rsiloop/rsiloop.go) seam), so a human reviewing a self-
+(the [`Observer`](https://github.com/anthony-chaudhary/fak/blob/main/internal/rsiloop/rsiloop.go) seam), so a human reviewing a self-
 improvement run sees the keeps and reverts at a glance instead of reading a JSONL. The next
 producer — a fleet's per-agent token budget, a benchmark's arm-by-arm cost, a policy's
 allow/deny mix — is one `Tape`-emitting function away, with no renderer change.
@@ -142,9 +142,9 @@ visual can live wherever a human reads — not only on a running demo:
 - **A README or GitHub page** embeds the SVG directly (`![](visuals/66-context-tape-fleet.svg)`).
 - **A Jekyll-served `docs/` page** uses the ASCII fence (renders identically everywhere, no
   mermaid plugin needed) or embeds the SVG image.
-- **The [learning path](../../LEARNING-PATH.md)** can illustrate the cache courses with a real
-  picture: [FAK 201](../../LEARNING-PATH.md) (what a KV cache is), [FAK 401](../../LEARNING-PATH.md)
-  (how agents stress it), and [FAK 402](../../LEARNING-PATH.md) (the A/B/C cost arms) are exactly
+- **The [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md)** can illustrate the cache courses with a real
+  picture: [FAK 201](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) (what a KV cache is), [FAK 401](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md)
+  (how agents stress it), and [FAK 402](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) (the A/B/C cost arms) are exactly
   the concepts the tape draws. A course lab becomes "render your own session and read the reused
   band," which is a far better checkpoint than a paragraph.
 
@@ -161,7 +161,7 @@ The tape is the first instance of a general principle worth pursuing across the 
 > visual language, with no custom rendering code.**
 
 The repo already has two visual families: the hand-authored mermaid deck in
-[`visuals/`](../../visuals/) (architecture diagrams, edited via `_meta.json`) and the
+[`visuals/`](https://github.com/anthony-chaudhary/fak/tree/main/visuals) (architecture diagrams, edited via `_meta.json`) and the
 generated charts from `tools/*_gen.py` and `cache_curve.py`. The context tape adds a third,
 more reusable kind: a **renderer keyed on a portable data model**, so the work of making a
 new visual is the work of describing the data, not drawing it. Concrete next steps that
@@ -172,7 +172,7 @@ follow this principle:
    the checked-in SVG render from one schema and can never drift.
 2. **Turn the trajectory tape into a meter.** The bands are already exact; folding a
    per-turn longest-common-prefix divergence (the flexibility survival factor from
-   [FAK 401](../../LEARNING-PATH.md)) onto each row would make the
+   [FAK 401](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md)) onto each row would make the
    [cache cliff](frozen-trajectory-cache-cliff.md) falsifiable on a live workload, exactly
    the meter that note asks for.
 3. **More producers.** A fleet budget tape, a benchmark cost-arm tape, a policy
@@ -187,7 +187,7 @@ follow this principle:
   the fresh band is the turn's dominant tool name — an attribution of an exact-size band, not
   a per-tool token re-measurement. The legend says `fresh input · <tool>` to keep that honest.
 - **The scenario is synthetic.** The `scenario` shapes are a faithful Python mirror of the Go
-  catalog in [`cmd/ctxdemo/scenario.go`](../../cmd/ctxdemo/scenario.go) (same seeded LCG). The
+  catalog in [`cmd/ctxdemo/scenario.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/ctxdemo/scenario.go) (same seeded LCG). The
   mirror is cross-checked byte-for-byte against `go run ./cmd/ctxdemo -print -json` (all five
   scenarios, results and tool names) and the parity is locked by a test; pass
   `--from-json <(go run ./cmd/ctxdemo -print -json)` to render from the authoritative numbers
@@ -216,5 +216,5 @@ python -m pytest tools/context_tape_test.py -q                 # parity + exact-
 **Related:** [`frozen-trajectory-cache-cliff.md`](frozen-trajectory-cache-cliff.md) (why the
 reused band is so big, and the scaling laws that shrink it) ·
 [`kv-cache-agentic-context.md`](kv-cache-agentic-context.md) (the prefix mechanics) ·
-[`tools/session_audit.py`](../../tools/session_audit.py) (the exact token accounting the
-trajectory tape reads) · [`cmd/ctxdemo`](../../cmd/ctxdemo) (the live, interactive sibling).
+[`tools/session_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/session_audit.py) (the exact token accounting the
+trajectory tape reads) · [`cmd/ctxdemo`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/ctxdemo) (the live, interactive sibling).

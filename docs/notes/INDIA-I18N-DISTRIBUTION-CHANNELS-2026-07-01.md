@@ -86,7 +86,7 @@ The per-market positioning line (concept-note lever 10) to reuse verbatim:
   docs/i18n/hi/।*
 
 Numbers discipline: quote the tuned ~4.1× figure, never the naive ~60× as headline —
-same rule as [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
+same rule as [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
 ## Machine-side complement (already tracked elsewhere)
 

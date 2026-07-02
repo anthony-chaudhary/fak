@@ -90,7 +90,7 @@ Deterministic: no key, no network, no GPU. The `-v` flag prints the witness bloc
 
 - [`docs/cache-value-rollup.md`](../cache-value-rollup.md) — the two-track (WITNESSED kernel
   reuse / OBSERVED provider-$) reader-facing layer this witness feeds.
-- [`CLAIMS.md`](../../CLAIMS.md) — the shipped/simulated honesty ledger (the M2 placement and
+- [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — the shipped/simulated honesty ledger (the M2 placement and
   compaction claims this note prices).
 - `internal/agent/anthropic_cachebp.go` — the offensive placement itself; its correctness is
   witnessed in `internal/agent/anthropic_cachebp_test.go`.

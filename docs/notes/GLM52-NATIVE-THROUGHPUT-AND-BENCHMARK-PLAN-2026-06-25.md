@@ -144,7 +144,7 @@ than tensor-core SGEMM — the win is VRAM/bandwidth, not FLOPs). It is:
 - **bit-exact forward** (cosine 1.0) — a correctness guarantee the stock engines do
   not make;
 - the **adversarial capability gate + tamper-evident journal** layered on serving;
-- **cross-worker / cross-session KV reuse** (see [SOTA-COMPARISON.md](../../SOTA-COMPARISON.md)).
+- **cross-worker / cross-session KV reuse** (see [SOTA-COMPARISON.md](https://github.com/anthony-chaudhary/fak/blob/main/SOTA-COMPARISON.md)).
 
 So every comparison table should carry a **correctness column** and a
 **safety/reuse column**, not tok/s alone.

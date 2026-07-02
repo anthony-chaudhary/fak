@@ -8,7 +8,7 @@ description: "Deutsche Einstiegsseite für fak: eine Go-Binary, die jeden Tool-C
 > Dies ist eine **lokalisierte Einstiegsseite (entry point)**, keine vollständige
 > Übersetzung der Dokumentation. Die kanonische Dokumentation ist Englisch — diese Seite
 > gibt dir den Kern, den 60-Sekunden-Beweis und den Installationsweg und reicht dich dann
-> an die [englischen Docs](../../../README.md) weiter.
+> an die [englischen Docs](https://github.com/anthony-chaudhary/fak/blob/main/README.md) weiter.
 > **Hinweis:** Diese Übersetzung ist maschinell erstellt und wartet auf ein natives
 > Review — Korrekturen per Issue/PR sind willkommen.
 >
@@ -49,7 +49,7 @@ fak guard -- claude    # wickelt deinen bestehenden Agenten in einem einzigen Be
   einem 50-Turn-×-5-Agent-Run **~4,1× weniger Arbeit** als ein getunter Warm-Cache-Stack
   (~60× gegenüber einem naiven Re-Send-Loop; die ehrliche Zahl ist 4,1×). Per-Aspect-Routing
   schickt die günstigen Anteile zusätzlich auf günstigere Modelle. Jede Zahl ist in
-  [BENCHMARK-AUTHORITY](../../../BENCHMARK-AUTHORITY.md) belegt.
+  [BENCHMARK-AUTHORITY](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) belegt.
 - **Apache-2.0, keine Beschaffungs-Hürde.** fak ist frei, quelloffen und self-hosted —
   kein Vendor-Vertrag, keine Kreditkarte, kein Account. `git clone` und `go install` sind
   der ganze Weg.
@@ -87,13 +87,13 @@ Ollama / vLLM / SGLang / llama.cpp / LM Studio oder jede OpenAI-kompatible API.
 
 ## Wohin als Nächstes
 
-- [README (der volle Überblick)](../../../README.md)
-- [START-HERE — in 10 Minuten zum lokalen Modell](../../../START-HERE.md)
-- [Getting Started — die Binary installieren](../../../GETTING-STARTED.md)
+- [README (der volle Überblick)](https://github.com/anthony-chaudhary/fak/blob/main/README.md)
+- [START-HERE — in 10 Minuten zum lokalen Modell](https://github.com/anthony-chaudhary/fak/blob/main/START-HERE.md)
+- [Getting Started — die Binary installieren](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md)
 - [Integrations — deinen Agenten anschließen](../../integrations/README.md)
 - [Data residency & compliance — für DSGVO/GDPR](../../explainers/data-residency-and-compliance.md)
 - [EU AI Act Artikel 12 — Audit-Log-Konformität](../../standards/eu-ai-act-article-12-conformance.md)
-- [BENCHMARK-AUTHORITY — die Quelle jeder Zahl](../../../BENCHMARK-AUTHORITY.md)
-- [CLAIMS — was shipped/simuliert/Stub ist](../../../CLAIMS.md)
+- [BENCHMARK-AUTHORITY — die Quelle jeder Zahl](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)
+- [CLAIMS — was shipped/simuliert/Stub ist](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)
 
-Lizenz: [Apache-2.0](../../../LICENSE).
+Lizenz: [Apache-2.0](https://github.com/anthony-chaudhary/fak/blob/main/LICENSE).

@@ -302,7 +302,7 @@ mode while keeping its unshipped status explicit.
   relay/tombstone reason rows.
 - [Context is not memory](CONTEXT-IS-NOT-MEMORY.md) — the durability axis behind memory
   promotion, in full.
-- [`internal/ctxplan` package doc](../internal/ctxplan/doc.go) — the resident-view / context-query
+- [`internal/ctxplan` package doc](https://github.com/anthony-chaudhary/fak/blob/main/internal/ctxplan/doc.go) — the resident-view / context-query
   planner in full, including the Postgres-planner correspondence this glossary summarizes.
 - [The four layers of agent memory](MEMORY-LAYERS-EXPLAINER.md) — the spatial/trust axis this
   glossary's memory-promotion entry complements.

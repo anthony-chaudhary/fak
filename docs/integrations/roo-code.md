@@ -74,7 +74,7 @@ Roo Code can also launch `fak` as an MCP server (`.roo/mcp.json`):
 - **Integration index**: [README.md](README.md)
 - **Compatibility matrix**: [compatibility-matrix.md](compatibility-matrix.md)
 - **Cline recipe** (sibling VS Code agent): [cline.md](cline.md)
-- **Policy schema**: [../../POLICY.md](../../POLICY.md)
+- **Policy schema**: [../../POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - **Roo Code docs**: [https://docs.roocode.com](https://docs.roocode.com)
 
 ## License

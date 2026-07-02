@@ -9,9 +9,9 @@ token-defaults, guard-rsi, dogfood, observability, learning, rsi-maturity, bench
 cuda-dev, tooling-quality). Each is the same machine — a pure KPI set over the
 git-tracked tree, cross-checked against reality, folded into a `*-debt` integer + an
 A–F grade, retired worst-first by the paired RSI skill. The doctrine is
-[`.claude/skills/scorecard/SKILL.md`](../../.claude/skills/scorecard/SKILL.md); the
+[`.claude/skills/scorecard/SKILL.md`](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/scorecard/SKILL.md); the
 2×-then-harden loop that drives any of them is
-[`/score-2x`](../../.claude/skills/score-2x/SKILL.md).
+[`/score-2x`](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/score-2x/SKILL.md).
 
 This note maps the **high-value surfaces that are NOT yet scored** but COULD be, all
 deterministically from the tree (no clock, no network, no runtime). The anchor —
@@ -23,8 +23,8 @@ tree-reading card, `product_scorecard.py` for a catalog card) and re-pointing it
 
 **0. skill-effectiveness** — is each `.claude/skills/*/SKILL.md` BUILT to be effective?
 Nine KPIs over discover / operate / trust / economy; debt key `skill_debt`.
-Tool: `fak skill-effectiveness-scorecard` ([`cmd/fak/skill_effectiveness.go`](../../cmd/fak/skill_effectiveness.go));
-skill: [`/skill-score`](../../.claude/skills/skill-score/SKILL.md);
+Tool: `fak skill-effectiveness-scorecard` ([`cmd/fak/skill_effectiveness.go`](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/skill_effectiveness.go));
+skill: [`/skill-score`](https://github.com/anthony-chaudhary/fak/blob/main/.claude/skills/skill-score/SKILL.md);
 snapshot: [`docs/SKILL-EFFECTIVENESS-SCORECARD.md`](../SKILL-EFFECTIVENESS-SCORECARD.md).
 Baseline at ship: 11 skill-debt over 31 skills, score 92.7 (grade A) — the
 commit-discipline cluster + dead-reference + trigger gaps are the first `/skill-score`
