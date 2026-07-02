@@ -70,9 +70,14 @@ the fleet runs zero workers.
 
 ## Honest fences
 
-- `not yet`: lever 1 is a code change nobody has made — filed as the next
-  checkable step; until then the fleet unfreezes only by restarting the
-  flagged terminal or passing `--max-threads` above 2,767.
+- ~~`not yet`: lever 1 is a code change nobody has made~~ → **shipped
+  2026-07-02** as 69439d98 + c06f9bbf (#2227/#2252, both closed): `host_check()`
+  now hard-refuses only on an ACTIONABLE flag (non-protected, or a fleet agent
+  image); a PROTECTED foreign breach surfaces as ADVISORY on a SAFE host, with
+  tests in `tools/dispatch_preflight_test.py`. Both commits diff-witnessed via
+  `dos_commit_audit`. Same-day confirmation of the note's predictions: the
+  guard reads `flagged 0`, the freeze is gone, and the seat pool moved 2→3
+  available (gem8NEW's reset landed on schedule).
 - The status card prints `max=2` while the scheduled task passes
   `--max-workers 3` — the card probes its own default instead of the task's
   live args; fix the readout before reasoning from it.
