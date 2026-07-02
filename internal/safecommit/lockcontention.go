@@ -35,11 +35,11 @@ import (
 // "transient" here would put a caller into a retry loop against a permanent
 // refusal, which is worse than the historical misclassification this file fixes.
 var gitLockContentionNeedles = []string{
-	"index.lock",           // fatal: Unable to create '.git/index.lock': File exists.
-	"packed-refs.lock",     // ref packing raced a concurrent writer
-	".lock': file exists",  // any other .git/*.lock (config.lock, HEAD.lock, shallow.lock, …)
-	"cannot lock ref",      // error: cannot lock ref 'refs/heads/main': …
-	"another git process",  // the advice trailer git appends to the index.lock fatal
+	"index.lock",          // fatal: Unable to create '.git/index.lock': File exists.
+	"packed-refs.lock",    // ref packing raced a concurrent writer
+	".lock': file exists", // any other .git/*.lock (config.lock, HEAD.lock, shallow.lock, …)
+	"cannot lock ref",     // error: cannot lock ref 'refs/heads/main': …
+	"another git process", // the advice trailer git appends to the index.lock fatal
 }
 
 // isGitLockContention reports whether raw git output describes a lost
