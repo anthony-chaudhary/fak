@@ -179,7 +179,7 @@ fak bench post    --rollup latest|regression [--n N] [--catalog PATH] [--baselin
 fak bench request [--now STAMP | --plan-json FILE] [--top N] [--dry-run]   # post a bench RUN-REQUEST (the bench_plan next-test-per-machine) to the bench channel. A request is a POST, not a dispatch — no inbound listener; the bench-nodes act on it out-of-band
 fak blockers post [--severity status|operator|clear] --title ... [--detail ... --owner "<@U>" --action ... --action-url URL --ref ...] [--dry-run]   # post a BLOCKER to the central Slack #blockers channel: a background `status` line records quietly, an `operator` one is SURFACED (pages <!here>/owner, red, with a do-this-next). FAK_BLOCKERS_* (token falls back to the scoreboard token; #blockers is the built-in default)
 fak blockers feed --issues FILE [--label blocked --repo-url URL] [--dry-run]   # CI roll-up: fold a `gh issue list --json number,title,url,assignees,labels` payload into one card — clear when empty, operator (paged) when a blocker is UNOWNED, background status when all are assigned
-fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `audit` is the read-only staleness report
+fak leaseref  live [--dir DIR] | liveness [--session ME] [--dir DIR] | list [--json] [--dir DIR] | audit [--dir DIR] | reap [--dir DIR] | sync [--remote R] [--push-only|--fetch-only] [--dir DIR]   # cross-machine lease visibility: read refs/fak/locks/* into the dos_arbitrate live_leases shape (#825); `liveness` classifies each live lease self|peer-live|peer-dead|peer-unknown by the owning session's heartbeat (#2164); `audit` is the read-only staleness report; `sync` converges the namespace with a remote (push-then-fetch, side refs only)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak stopfailure plan | reset-stale [--apply]                # inspect and settle stale .dos/stop-failures breaker markers
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
@@ -234,9 +234,10 @@ admission decision:
 
 ```bash
 # make a peer's lease (held on another machine) visible locally, then feed an arbiter
-git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'
+fak leaseref sync           # converge refs/fak/locks/* with origin: push local records, then fetch peers'
 dos arbitrate --lane docs --tree 'docs/**' --leases "$(fak leaseref live)"
 
+fak leaseref sync --fetch-only --remote origin   # import peers' leases without publishing (the old manual `git fetch origin 'refs/fak/locks/*:refs/fak/locks/*'`)
 fak leaseref list           # every record under refs/fak/locks/*, marked LIVE / EXPIRED
 fak leaseref liveness --session $ME   # classify each LIVE lease self|peer-live|peer-dead|peer-unknown by session heartbeat (#2164)
 fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing

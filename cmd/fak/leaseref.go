@@ -61,6 +61,8 @@ func runLeaseref(stdout, stderr io.Writer, argv []string) int {
 		return runLeaserefFence(stdout, stderr, rest)
 	case "renew":
 		return runLeaserefRenew(stdout, stderr, rest)
+	case "sync":
+		return runLeaserefSync(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, leaserefUsage)
 		return 0
@@ -150,6 +152,15 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
   fak leaseref renew --id ID --holder H [--ttl SEC] [--dir DIR]
       Heartbeat: extend YOUR live lease's window WITHOUT bumping the generation. A
       lease taken over by a peer is refused STALE_LEASE; a lapsed/absent lease NO_LEASE.
+
+  fak leaseref sync [--remote R] [--push-only|--fetch-only] [--dir DIR]
+      CONVERGE the refs/fak/locks/* namespace with a remote (default origin): push
+      the local records, then fetch the remote's — the manual refspec the docs used
+      to quote, now a verb a multi-node loop can run every tick. Push runs FIRST
+      and a failed push STOPS the sync, so the force-fetch never regresses a
+      just-acquired local lease the remote has not seen. Deletions do not ride a
+      refspec: a released/reaped lease converges on peers via TTL expiry plus their
+      own 'reap'. Side refs only — no branch, HEAD, or tag ever moves.
 
 This is VISIBILITY, not atomic acquisition across machines: it lets an arbiter SEE a
 cross-machine conflict and does not arbitrate a same-fetch-window race. The fenced
@@ -499,6 +510,35 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 		return leaserefRefused
 	}
 	return 0
+}
+
+// runLeaserefSync is the convergence verb: move the refs/fak/locks/* namespace
+// between this clone and a remote so every node's arbiter sees every node's leases.
+// Directions default to BOTH (push then fetch — the order internal/leaseref/sync.go
+// documents as load-bearing); --push-only / --fetch-only select one, and asking for
+// both selectors at once is a usage error rather than a guess.
+func runLeaserefSync(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak leaseref sync", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
+	remote := fs.String("remote", "origin", "the git remote (name or URL) to converge with")
+	pushOnly := fs.Bool("push-only", false, "publish local lease refs only (skip the fetch)")
+	fetchOnly := fs.Bool("fetch-only", false, "import remote lease refs only (skip the push)")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	*dir = pathutil.ExpandTilde(*dir)
+	if *pushOnly && *fetchOnly {
+		fmt.Fprintln(stderr, "fak leaseref sync: --push-only and --fetch-only are mutually exclusive")
+		return 2
+	}
+	store := leaseref.NewInDir(*dir)
+	res, err := store.Sync(context.Background(), *remote, !*fetchOnly, !*pushOnly)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak leaseref sync: %v\n", err)
+		return 1
+	}
+	return emitLeaserefJSON(stdout, stderr, res, "sync")
 }
 
 func emitLeaserefJSON(stdout, stderr io.Writer, v any, sub string) int {
