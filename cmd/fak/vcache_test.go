@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
@@ -25,11 +26,13 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 	s := out.String()
 	for _, want := range []string{
 		"vCache M5 governor: decision witness live",
-		"pin/lazy/evict actions not registered",
+		"provider action plan live",
+		"heartbeat/explicit-cache transport gated",
 		"vCache M4 chains & recall: implemented",
 		"gated OFF by default; off-path",
 		"M4 recall cost-gate proof: refuted",
 		"context API: ready (GET /v1/fak/ctxvalue; MCP fak_context_value; advice_only=true)",
+		"provider actions API: ready (GET /v1/fak/vcache/actions; CLI fak vcache actions; transport=decision_only)",
 		"context witness replay: run `fak vcache context-witness`",
 		"vcache-context-turns.jsonl",
 		"fak vcache score --json",
@@ -73,6 +76,15 @@ func TestRunVCacheStatusJSONIncludesCodexOpenAIProofs(t *testing.T) {
 		rep.ContextAPI.DefaultSnapshot != vcachesnapshot.DefaultContextPath() ||
 		rep.ContextAPI.NoKeyScoreCommand != "fak vcache score --json" {
 		t.Fatalf("context_api status missing live API contract: %+v", rep.ContextAPI)
+	}
+	if rep.ProviderActions.Verifier != "ready" ||
+		rep.ProviderActions.HTTP != "GET /v1/fak/vcache/actions" ||
+		rep.ProviderActions.CLI != "fak vcache actions" ||
+		rep.ProviderActions.Schema != vcacheobserve.ProviderActionSchema ||
+		!rep.ProviderActions.ReadOnly ||
+		rep.ProviderActions.Transport != "decision_only" ||
+		!strings.Contains(rep.ProviderActions.Reason, "heartbeat/explicit-cache") {
+		t.Fatalf("provider_actions status missing live action API contract: %+v", rep.ProviderActions)
 	}
 	if rep.CodexOpenAI.CachedSampleProof.Status != vcachegov.ProofProven ||
 		rep.CodexOpenAI.CachedSampleProof.SavedTokenEquiv != 1728 {
@@ -312,6 +324,56 @@ func TestRunVCacheStatusIncludesRecentSessionSummary(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status --sessions missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestRunVCacheActionsReadsSnapshot(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"head","unix_millis":1,"input_tokens":40000,"cache_creation_input_tokens":40000}` + "\n" +
+		`{"family":"head","unix_millis":2,"input_tokens":50,"cache_read_input_tokens":40000,"cache_creation_input_tokens":500}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"actions", "--json", "--snapshot", snap}); code != 0 {
+		t.Fatalf("actions --json exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var plan vcacheobserve.ProviderActionPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if plan.Schema != vcacheobserve.ProviderActionSchema || plan.Turns != 2 || plan.FamilyCount != 1 {
+		t.Fatalf("action plan header = %+v", plan)
+	}
+	if plan.Counts.Noop != 1 || len(plan.Actions) != 1 || plan.Actions[0].Action != "ride_natural" {
+		t.Fatalf("action plan = %+v, want one ride-natural row", plan)
+	}
+}
+
+func TestRunVCacheActionsContextOnlySnapshotDoesNotInventProviderRows(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "context.jsonl")
+	if err := os.WriteFile(snap, []byte(`{"family":"context","fak_context_events":1,"fak_context_shed_tokens":900}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"actions", "--json", "--snapshot", snap}); code != 0 {
+		t.Fatalf("actions context-only exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var plan vcacheobserve.ProviderActionPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if plan.Turns != 0 || plan.FamilyCount != 0 || len(plan.Actions) != 0 {
+		t.Fatalf("context-only action plan invented provider rows: %+v", plan)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runVCache(&out, &errb, []string{"actions", "--snapshot", "off"}); code != 0 {
+		t.Fatalf("actions --snapshot off exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "actions: none") {
+		t.Fatalf("human empty action plan missing explicit none:\n%s", out.String())
 	}
 }
 

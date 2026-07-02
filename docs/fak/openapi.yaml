@@ -788,6 +788,30 @@ paths:
               schema: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /v1/fak/vcache/actions:
+    get:
+      tags: [fak-native]
+      summary: Read the live vCache provider-action plan
+      description: |
+        Returns the `fak.vcache.provider-actions.v1` action plan over the same
+        rolling provider-cache window as `/v1/fak/vcache/score`. Each observed
+        prefix family is mapped from the M5 Governor verdict to a concrete
+        provider-cache action row (`ride_natural`, `heartbeat_pin`,
+        `lazy_rebuild`, `evict_manifest`, `no_cache`, or `explicit_cache`) with
+        an actionability state (`noop`, `ready`, or `gated`). The surface is
+        read-only: heartbeat and explicit-cache rows remain gated unless a caller
+        has separate provider capability and byte-identical prefix evidence.
+        Provider cache hits are still observed rebates, never correctness
+        requirements.
+      responses:
+        '200':
+          description: The current provider-cache action plan.
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/ctxvalue:
     get:
       tags: [fak-native]
