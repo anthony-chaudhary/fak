@@ -15,6 +15,7 @@ package main
 //	fak session budget <id> [--turns N] [--tokens N] [--context-tokens N]   # re-set the work allotment live
 //	fak session pace   <id> [--max-tokens N] [--gap-ms N]  # re-set the per-turn throttle
 //	fak session envelope <id> <spec>       # parse/apply one managed-context budget envelope (#1573)
+//	fak session context <id>                # read the managed-context value report
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
@@ -89,7 +90,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	arity := map[string]int{
 		"ls": 0, "status": 1,
 		"stop": 1, "pause": 1, "resume": 1, "throttle": 1,
-		"run": 2, "budget": 1, "pace": 1, "envelope": 2, "budget-envelope": 2, "priority": 2,
+		"run": 2, "budget": 1, "pace": 1, "envelope": 2, "budget-envelope": 2, "context": 1, "priority": 2,
 	}
 	want, known := arity[verb]
 	if !known {
@@ -154,6 +155,8 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		return c.paceVerb(stdout, stderr, *asJSON, pos[0], *maxTokens, *gapMs, *ifRev)
 	case "envelope", "budget-envelope":
 		return c.envelopeVerb(stdout, stderr, *asJSON, pos[0], pos[1], *ifRev, *inspectOnly)
+	case "context":
+		return c.renderContextValue(stdout, stderr, *asJSON, pos[0])
 	case "priority":
 		n, err := strconv.Atoi(pos[1])
 		if err != nil {
@@ -260,6 +263,23 @@ func (c *sessionClient) envelopeVerb(stdout, stderr io.Writer, asJSON bool, id, 
 		rep.State = &st
 	}
 	return emitSessionEnvelopeReport(stdout, stderr, asJSON, rep)
+}
+
+func (c *sessionClient) renderContextValue(stdout, stderr io.Writer, asJSON bool, id string) int {
+	snap, err := c.contextValue(id)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session context: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		return emitSessionJSON(stdout, stderr, snap)
+	}
+	if len(snap.Sessions) == 0 {
+		fmt.Fprintf(stdout, "%s context unknown: no managed-context value row observed yet\n", id)
+		return 0
+	}
+	fmt.Fprintln(stdout, formatSessionContextValue(id, snap.Sessions[0]))
+	return 0
 }
 
 // mergeBudget fills the axes the operator did not name from the session's current
@@ -402,6 +422,32 @@ func formatBudgetEnvelope(env session.BudgetEnvelope) string {
 	return strings.Join(parts, " ")
 }
 
+func formatSessionContextValue(fallbackID string, rep gateway.CtxValueReport) string {
+	trace := rep.TraceID
+	if trace == "" {
+		trace = fallbackID
+	}
+	budget := contextBudgetAxis(rep.Tokens.BudgetTokens)
+	headroom := "n/a"
+	if rep.Tokens.Headroom != nil {
+		headroom = fmt.Sprintf("%d(%.1f%%)", rep.Tokens.Headroom.Tokens, rep.Tokens.Headroom.Pct)
+	}
+	return fmt.Sprintf("%s context step=%s basis=%s phase=%s resident=%d peak=%d budget=%s headroom=%s turns=%d events=%d since_event=%d growth=%.1f/t reason=%q",
+		trace,
+		rep.StepAdvice.StepClass,
+		rep.StepAdvice.Basis,
+		rep.Session.Phase,
+		rep.Tokens.ResidentTokens,
+		rep.Tokens.PeakResidentTokens,
+		budget,
+		headroom,
+		rep.Turns.TurnsObserved,
+		rep.Turns.ContextEvents,
+		rep.Turns.TurnsSinceContextEvent,
+		rep.Tokens.GrowthPerTurn,
+		rep.StepAdvice.Reason)
+}
+
 // formatSessionState renders one drive record as a compact, fixed-shape line so a
 // column scan reads cleanly. Unbounded (-1) budget axes render as "inf"; a reason,
 // when present, is appended.
@@ -477,6 +523,15 @@ type sessionClient struct {
 	base string
 	key  string
 	hc   *http.Client
+}
+
+// contextValue reads one session's managed-context value report.
+func (c *sessionClient) contextValue(id string) (gateway.CtxValueSnapshot, error) {
+	var snap gateway.CtxValueSnapshot
+	q := url.Values{}
+	q.Set("trace", id)
+	err := c.req(http.MethodGet, "/v1/fak/ctxvalue?"+q.Encode(), nil, &snap)
+	return snap, err
 }
 
 // observe reads one session's drive state (GET /v1/fak/session/{id}).
@@ -600,6 +655,7 @@ func sessionUsage(w io.Writer) {
   fak session pace     <id> [--max-tokens N] [--gap-ms N]   re-set the per-turn throttle
   fak session envelope <id> <spec>            apply a managed-context budget envelope
                                                spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
+  fak session context  <id>                   read the managed-context value report
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
