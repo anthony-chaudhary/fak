@@ -163,6 +163,8 @@ func main() {
 		cmdChat(os.Args[2:])
 	case "chatrelay":
 		cmdChatRelay(os.Args[2:])
+	case "relay":
+		cmdRelay(os.Args[2:])
 	case "claude-mac-fak":
 		cmdClaudeMacFak(os.Args[2:])
 	case "codex":
