@@ -34,6 +34,8 @@ func cmdMemory(args []string) {
 		cmdMemoryExplainPromotion(args[1:])
 	case "run":
 		cmdMemoryRun(args[1:])
+	case "recall":
+		os.Exit(runMemoryRecall(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":
 		memoryUsage()
 	default:
@@ -59,6 +61,13 @@ func memoryUsage() {
                  [--query-file PLAN.json] [--dir IMAGE] [--apply] [--out report.json] [--json]
       execute the query against a backend (the in-memory demo corpus, or a recall
       core image with --dir). Mutations are PROPOSED unless --apply is given.
+
+  fak memory recall --intent STR [--store DIR] [--k N] [--budget BYTES] [--json]
+      the loop-turn orientation block (#2346 R1): run the loop-recall driver over
+      the markdown memory store (MEMORY.md + fact files; default: the committed
+      mirror .claude/memory), re-verifying each note's concrete artifact claims
+      at page-in — a stale note is WITHHELD with the failing claim named, a
+      prose-only note renders hedged, and the block is budget-bounded.
 
   fak memory explain-promotion --cell ID [--json]
       explain WHY a promoted cell is in durable memory, using ONLY the structured
@@ -181,7 +190,8 @@ func cmdMemoryRun(argv []string) {
 	k := fs.Int("k", 0, "limit (driver-specific; 0 = driver default)")
 	budget := fs.Int64("budget", 0, "byte budget (0 = unbounded)")
 	dir := fs.String("dir", "", "recall core image directory (default: the in-memory demo corpus)")
-	backendKind := fs.String("backend", "", "backend: \"\"/auto (recall image at --dir, else demo), or \"codex\" (read external Codex memories as a generated recall layer — NOT an AGENTS.md replacement; every cell is external/untrusted and gated)")
+	backendKind := fs.String("backend", "", "backend: \"\"/auto (recall image at --dir, else demo), \"notes\" (a markdown memory store at --store; read-time artifact re-verified), or \"codex\" (read external Codex memories as a generated recall layer — NOT an AGENTS.md replacement; every cell is external/untrusted and gated)")
+	store := fs.String("store", "", "markdown memory store dir for --backend notes (default: the committed mirror .claude/memory)")
 	codexHome := fs.String("codex-home", "", "Codex home for --backend codex (default: $CODEX_HOME or ~/.codex)")
 	includeChronicle := fs.Bool("include-chronicle", false, "with --backend codex, also include the higher-risk screen-generated chronicle memories")
 	apply := fs.Bool("apply", false, "APPLY durable mutations (default: propose only — fail-closed)")
@@ -195,9 +205,12 @@ func cmdMemoryRun(argv []string) {
 	// memq_codex.go); anything else keeps the recall-image-else-demo dispatch.
 	var backend memq.Backend
 	var blabel string
-	if *backendKind == "codex" {
+	switch *backendKind {
+	case "codex":
 		backend, blabel = codexMemoryBackend(*codexHome, *includeChronicle)
-	} else {
+	case "notes":
+		backend, blabel = notesMemoryBackend(*store)
+	default:
 		backend, blabel = memoryBackend(*dir)
 	}
 	caps := memq.Caps{}

@@ -115,7 +115,7 @@ func runLoopAppend(stdout, stderr io.Writer, argv []string) int {
 	var metrics loopKVList
 	fs.Var(&evidence, "evidence", "repeatable KIND=REF evidence ref")
 	fs.Var(&metrics, "metric", "repeatable NAME=INT64 metric")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -178,7 +178,7 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 	dispatchChannel := fs.String("dispatch-channel", "", "override dispatch channel id (default: $FAK_DISPATCH_CHANNEL / .env.slack.local)")
 	dispatchToken := fs.String("dispatch-token", "", "override dispatch bot token (default: $FAK_DISPATCH_TOKEN, then scoreboard token)")
 	noGuard := fs.Bool("no-guard", false, "explicitly disable the default fak guard containment wrapper for this run (logged in the loop ledger)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	cmdArgs := fs.Args()
@@ -452,7 +452,7 @@ func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
 	asJSON := fs.Bool("json", false, "emit the full JSON status")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -492,7 +492,7 @@ func runLoopRepair(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
 	confirm := fs.Bool("confirm", false, "confirm rewriting the ledger to its recovered valid prefix and archiving the broken tail")
 	asJSON := fs.Bool("json", false, "emit the repair report as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -620,7 +620,7 @@ func runLoopHealth(stdout, stderr io.Writer, argv []string) int {
 	registryPath := fs.String("registry", defaultLoopRegistry(), "loop registry JSON path")
 	asJSON := fs.Bool("json", false, "emit the loop-health report as JSON")
 	check := fs.Bool("check", false, "exit 3 when any loop is dark")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -743,7 +743,7 @@ func runLoopRollup(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "directory of per-node ledgers (each file matching --glob is one node)")
 	glob := fs.String("glob", "*.jsonl", "filename glob used with --dir")
 	asJSON := fs.Bool("json", false, "emit the fleet rollup as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -1022,7 +1022,7 @@ func runLoopAdmit(stdout, stderr io.Writer, argv []string) int {
 	policyPath := fs.String("policy", defaultLoopPolicy(), "loop admission policy JSON path")
 	loopID := fs.String("loop", "", "evaluate one loop id (default: every loop in the ledger)")
 	asJSON := fs.Bool("json", false, "emit the decisions as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

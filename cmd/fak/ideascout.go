@@ -29,7 +29,7 @@ func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
 	issuesPath := fs.String("issues", "", "fixture existing issues JSON used with --candidates")
 	today := fs.String("today", "", "override the report date (YYYY-MM-DD), primarily for tests")
 	fs.Usage = func() { fmt.Fprint(stderr, ideaScoutUsage) }
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	seenFlag := map[string]bool{}

@@ -106,7 +106,7 @@ func runSlackHealth(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the per-surface health report as JSON")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (default https://slack.com/api/; for testing/proxying)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

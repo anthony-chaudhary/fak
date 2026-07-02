@@ -49,7 +49,7 @@ func runLoopRecover(stdout, stderr io.Writer, argv []string) int {
 	all := fs.Bool("all", false, "also list running, complete, and failed runs (not just the recovery worklist)")
 	asJSON := fs.Bool("json", false, "emit the raw Result JSON instead of the human table")
 	controlPane := fs.Bool("control-pane", false, "emit the garden control-pane envelope (ok/verdict/reason) for the garden bundle")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

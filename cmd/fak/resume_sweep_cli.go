@@ -60,7 +60,7 @@ func runResumeSweep(stdout, stderr io.Writer, argv []string) int {
 	includeResumed := fs.Bool("include-resumed", false, "don't exclude sessions the ledger shows were already resumed in-window (default: exclude them so an active pass isn't re-flagged)")
 	homeFlag := fs.String("home", "", "user home holding the .claude* account dirs (default: discovered)")
 	regDir := fs.String("reg-dir", "", "registry dir holding resume_ledger.jsonl (default: $FLEET_REG_DIR, else host Fleet registry when present, else <repo>/tools/_registry)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

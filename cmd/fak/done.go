@@ -73,7 +73,7 @@ func runDoneWithRunner(stdout, stderr io.Writer, argv []string, runner doneRunne
 	testTarget := fs.String("test", "fast", "fak test target to run before claiming done (use 'none' to skip only when another witness covers tests)")
 	witness := fs.String("witness", "commit-audit HEAD", "loopgate witness criterion: commit-audit [REF], verify PLAN PHASE, test-witness BASE CAND, witness SOURCE SUBJECT")
 	asJSON := fs.Bool("json", false, "emit the done report as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

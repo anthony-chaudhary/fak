@@ -33,7 +33,7 @@ func runFrontiersweEnvAdapter(stdout, stderr io.Writer, argv []string) int {
 	fakBin := fs.String("fak-bin", frontierswe.DefaultFakBin, "fak binary path/name inside the task image")
 	asJSON := fs.Bool("json", false, "emit only JSON on stdout")
 	out := fs.String("out", "", "write the env-adapter JSON here (default: stdout)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

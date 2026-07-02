@@ -44,7 +44,7 @@ func runProgramReport(stdout, stderr io.Writer, argv []string) int {
 	appendHistory := fs.Bool("append-history", false, "append a dated row to the durable ledger (docs/programs/history.jsonl)")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+programreport.DefaultLedgerRel+")")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

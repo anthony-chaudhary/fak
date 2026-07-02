@@ -41,7 +41,7 @@ func runResumeWhy(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", defaultResumeLedger(), "durable resume ledger JSONL (the record every launcher appends to)")
 	maxAttempts := fs.Int("max-attempts", resume.DefaultMaxResumeAttempts, "give-up cap on automatic resumes of one session")
 	asJSON := fs.Bool("json", false, "emit the underlying records as JSON instead of the narrative")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 1 {

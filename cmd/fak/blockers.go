@@ -46,7 +46,7 @@ func runBlockersPost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_BLOCKERS_CHANNEL / .env.slack.local / #blockers)")
 	token := fs.String("token", "", "override bot token (default: $FAK_BLOCKERS_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -87,7 +87,7 @@ func runBlockersFeed(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_BLOCKERS_CHANNEL / .env.slack.local / #blockers)")
 	token := fs.String("token", "", "override bot token (default: $FAK_BLOCKERS_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

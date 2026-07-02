@@ -77,7 +77,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if err := validateCodexLaunchSplit(*splitMode, *splitWhere); err != nil {

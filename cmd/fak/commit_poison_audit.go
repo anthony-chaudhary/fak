@@ -129,7 +129,7 @@ func runCommitPoisonAudit(stdout, stderr io.Writer, argv []string) int {
 	reviewAll := fs.Bool("review-all", false, "review every scanned commit with --review-model, not just deterministic findings")
 	strict := fs.Bool("strict", false, "exit non-zero on any deterministic finding, including downgraded docs/test fixtures")
 	asJSON := fs.Bool("json", false, "emit the audit report as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/repo works

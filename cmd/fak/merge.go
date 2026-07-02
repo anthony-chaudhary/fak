@@ -22,7 +22,7 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 	target := fs.String("target", "", "ref to preview merging into HEAD (default: origin/<trunk>)")
 	trunk := fs.String("trunk", "main", "trunk branch name used for the default target")
 	asJSON := fs.Bool("json", false, "emit the preview as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	args := fs.Args()

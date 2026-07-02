@@ -76,7 +76,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "with --status, emit the machine-readable drain report")
 	silentHours := fs.Float64("silent-hours", rwEnvFloat("FAK_RESUME_SILENT_HOURS", 2), "with --status, mark red when any unrecovered queued row is silent this many hours (env FAK_RESUME_SILENT_HOURS)")
 	monotonicTicks := fs.Int("monotonic-ticks", rwEnvInt("FAK_RESUME_MONOTONIC_TICKS", 3), "with --status, mark red when AUTO_RESUME depth grows for this many consecutive ticks (env FAK_RESUME_MONOTONIC_TICKS)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

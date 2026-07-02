@@ -168,7 +168,7 @@ func runSlackCheck(stdout, stderr io.Writer, argv []string) int {
 	doAuth := fs.Bool("auth", false, "call Slack auth.test for each resolved token to verify it actually works")
 	asJSON := fs.Bool("json", false, "emit the resolution report as JSON")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (default https://slack.com/api/; for testing/proxying)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -332,7 +332,7 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
 	durable := fs.Bool("durable", false, "enqueue through the durable outbox: the message survives crashes/429s/token drift and is delivered by this call's drain or a later one")
 	dryRun := fs.Bool("dry-run", false, "print what would be sent and exit without posting")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

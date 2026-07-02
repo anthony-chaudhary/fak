@@ -46,7 +46,7 @@ func runMilestoneScorecard(stdout, stderr io.Writer, argv []string) int {
 	pin := fs.Bool("pin", false, "pin today's climb KPIs (matured_cells/milestone_progress) as the baseline in docs/milestones/baseline.json")
 	allowRegress := fs.Bool("allow-regress", false, "with --ratchet: explicitly allow a climb regression (records it but keeps the gate green)")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

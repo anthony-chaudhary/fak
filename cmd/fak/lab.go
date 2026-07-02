@@ -129,7 +129,7 @@ func labStatus(stdout, stderr io.Writer, argv []string) int {
 	all := fs.Bool("all", false, "also print a per-box table")
 	asJSON := fs.Bool("json", false, "emit the folded snapshot as JSON")
 	staleMin := fs.Float64("stale-min", fleet.DefaultStaleSec/60.0, "minutes of silence before a box is flagged stale")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -185,7 +185,7 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	version := fs.String("version", "", "version string the box is running (optional)")
 	note := fs.String("note", "", "short generic note (optional; NO host/IP/channel/token)")
 	reports := fs.String("reports", "", "reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *id == "" || *state == "" {
@@ -218,7 +218,7 @@ func labLs(stdout, stderr io.Writer, argv []string) int {
 	group := fs.String("group", "", "only boxes in this group")
 	class := fs.String("class", "", "only boxes of this class")
 	asJSON := fs.Bool("json", false, "emit the roster as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	ro, ok := labLoadRoster(stderr, *rosterPath)

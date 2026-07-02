@@ -18,7 +18,7 @@ func runCommitStatus(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	asJSON := fs.Bool("json", false, "emit the commit-lane status as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

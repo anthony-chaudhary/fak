@@ -89,7 +89,7 @@ func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 20, "maximum rows per settlement action in output; 0 means all")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
@@ -114,7 +114,7 @@ func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 0, "maximum stale markers to reset; 0 means all candidates")
 	apply := fs.Bool("apply", false, "write consecutive=0 to stale markers; omitted means dry-run")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
@@ -142,7 +142,7 @@ func runStopFailureArchiveMarkerOnly(stdout, stderr io.Writer, argv []string) in
 	common := registerStopFailureCommonFlags(fs)
 	limit := fs.Int("limit", 0, "maximum marker-only files to archive; 0 means all candidates")
 	apply := fs.Bool("apply", false, "move stale marker-only files under .dos/stop-failures/archive; omitted means dry-run")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	now, ok := parseStopFailureNow(*common.nowFlag, stderr)
@@ -171,7 +171,7 @@ func runStopFailureClearReviewed(stdout, stderr io.Writer, argv []string) int {
 	apply := fs.Bool("apply", false, "write consecutive=0 to named recent reviewed markers; omitted means dry-run")
 	var sessions stopFailureSessionList
 	fs.Var(&sessions, "session", "recent reviewed StopFailure session id to clear; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	now, ok := parseStopFailureNow(*common.nowFlag, stderr)

@@ -36,7 +36,7 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	next := fs.Bool("next", false, "emit only the next-work backlog (ladder-skips first)")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if nextSubcommand {
@@ -101,7 +101,7 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

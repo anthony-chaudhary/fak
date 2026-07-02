@@ -36,7 +36,7 @@ func runReleaseStaleness(stdout, stderr io.Writer, argv []string) int {
 	staleDays := fs.Float64("stale-days", def.StaleDays, "days behind the latest tag that make @latest stale (0 disables)")
 	veryStaleCommits := fs.Int("very-stale-commits", def.VeryStaleCommits, "commits behind that make @latest very stale (0 disables)")
 	veryStaleDays := fs.Float64("very-stale-days", def.VeryStaleDays, "days behind that make @latest very stale (0 disables)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

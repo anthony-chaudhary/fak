@@ -178,7 +178,7 @@ func runFleetCapacity(stdout, stderr io.Writer, argv []string) int {
 	product := fs.String("product", "claude", "product family to preflight (claude|opencode|all)")
 	required := fs.Int("require", 0, "fail if fewer than N fresh seats are available")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -256,7 +256,7 @@ func runFleetMonitor(stdout, stderr io.Writer, argv []string) int {
 	staleTx := fs.Duration("stale-transcript", 20*time.Minute, "transcript-idle staleness floor")
 	staleSimple := fs.Duration("stale-child-simple", 5*time.Minute, "simple child-command staleness floor")
 	staleTest := fs.Duration("stale-child-test", 10*time.Minute, "test child-command staleness floor")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -386,7 +386,7 @@ func runFleetJanitor(stdout, stderr io.Writer, argv []string) int {
 	simple := fs.Duration("stale-simple", 5*time.Minute, "simple-shell staleness ceiling")
 	test := fs.Duration("stale-test", 10*time.Minute, "test staleness ceiling")
 	scan := fs.Duration("stale-scan", 5*time.Minute, "broad-scan staleness ceiling")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	plan, err := loadFleetPlan(*planPath)
@@ -501,7 +501,7 @@ func runFleetFold(stdout, stderr io.Writer, argv []string) int {
 	home := fs.String("home", fleetUserHome(), "Claude config home (for transcript discovery)")
 	ledgerPath := fs.String("ledger", "", "append the folded rows to this JSONL ledger (with --write)")
 	write := fs.Bool("write", false, "append the folded rows to --ledger (default is print-only)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	plan, err := loadFleetPlan(*planPath)
@@ -641,7 +641,7 @@ func runFleetReplace(stdout, stderr io.Writer, argv []string) int {
 	ledgerPath := fs.String("ledger", "", "run ledger to update with the superseding row (with --write)")
 	write := fs.Bool("write", false, "append the superseding ledger row (original -> replacement) to --ledger")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a human preview")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if strings.TrimSpace(*session) == "" {

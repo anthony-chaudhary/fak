@@ -42,7 +42,7 @@ func runFrontiersweCacheWitness(stdout, stderr io.Writer, argv []string) int {
 	samples := fs.Int("samples", 0, "live: number of scrapes to take (>0 required with --gateway)")
 	timeout := fs.Float64("timeout-seconds", 15, "live: HTTP fetch timeout per scrape")
 	out := fs.String("out", "", "write the compact JSONL trace ("+frontierswe.CacheWitnessSchema+", one line per turn) here")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

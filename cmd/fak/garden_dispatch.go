@@ -125,7 +125,7 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", "", "loop JSONL ledger path (default: the loop ledger)")
 	policyPath := fs.String("policy", "", "loop admission policy JSON path (default: the loop policy)")
 	noLoopLedger := fs.Bool("no-loop-ledger", false, "skip recording this run in the loop ledger (hermetic probes)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

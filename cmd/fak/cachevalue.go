@@ -62,7 +62,7 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *since != "" {
@@ -91,7 +91,7 @@ func runCachevaluePost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

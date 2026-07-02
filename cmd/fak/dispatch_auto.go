@@ -42,7 +42,7 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 	contextTokens := fs.Int("context-tokens", 0, "optional fleet context-token budget, sliced evenly across the wave; 0 = unset")
 	live := fs.Bool("live", false, "actually spawn the refill through the priced dispatch wave")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	root := *workspace

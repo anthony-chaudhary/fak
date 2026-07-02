@@ -81,7 +81,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	reviewAPIKeyEnv := fs.String("review-api-key-env", envOrDefault("FAK_REVIEW_API_KEY_ENV", "FAK_REVIEW_API_KEY"), "env var holding the bearer token for --review-endpoint (empty value sends no token)")
 	coreLockWitness := fs.String("core-lock-maintenance-witness", "", "independent witness claim that clears a hard-self core-lock maintenance commit")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *reviewMinModels < 0 {
@@ -228,7 +228,7 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 	base := fs.String("base", "", "base SHA the intent was authored against (default: git rev-parse HEAD)")
 	diffDigest := fs.String("diff-digest", "", "optional sha256:<hex> digest of the authored diff")
 	asJSON := fs.Bool("json", false, "emit the submitted record as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
@@ -310,7 +310,7 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	noRollup := fs.Bool("no-rollup", false, "disable batching and drain at most one compatible intent")
 	dryRun := fs.Bool("dry-run", false, "plan only; do not commit or update queue state")
 	asJSON := fs.Bool("json", false, "emit the drain result as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if len(fs.Args()) != 0 {

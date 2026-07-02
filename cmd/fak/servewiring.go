@@ -102,7 +102,7 @@ func runServeWiring(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asMD := fs.Bool("md", false, "emit the markdown table for docs/serve-config.md")
 	check := fs.Bool("check", false, "CI gate: exit non-zero on wiring drift (a row's Config field is gone, or serve.go stopped setting it, or a Config field has no audited row)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

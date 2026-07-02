@@ -23,7 +23,7 @@ func runEditTx(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	var checks stringList
 	fs.Var(&checks, "check", "validation command to run after applying the full set; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

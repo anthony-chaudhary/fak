@@ -76,7 +76,7 @@ func runTaskDecisionAppend(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON")
 	var openThreads stringList
 	fs.Var(&openThreads, "open-thread", "open thread/risk to reload after compaction (repeatable)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -115,7 +115,7 @@ func runTaskDecisionList(stdout, stderr io.Writer, argv []string) int {
 	logPath := fs.String("log", "", "decision log JSONL path (default: .fak/task-decisions/<task>.jsonl)")
 	limit := fs.Int("limit", taskdecision.DefaultReloadLimit, "maximum newest entries to load into reset context")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -185,7 +185,7 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable review/plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *file == "" || fs.NArg() != 0 {
@@ -401,7 +401,7 @@ func runTaskSample(stdout, stderr io.Writer, argv []string) int {
 	total := fs.Float64("total", 0, "total work units, if known")
 	unit := fs.String("unit", "", "work unit label")
 	asJSON := fs.Bool("json", false, "emit the full JSON snapshot")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *done < 0 || *total < 0 {

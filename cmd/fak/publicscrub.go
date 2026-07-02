@@ -41,7 +41,7 @@ func runPublicScrubStaged(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	r := resolveRoot(*root)
@@ -60,7 +60,7 @@ func runPublicScrubRange(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	rest := fs.Args()
@@ -85,7 +85,7 @@ func runPublicScrubMessage(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	rest := fs.Args()
@@ -106,7 +106,7 @@ func runPublicScrubTree(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit scan report as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	r := resolveRoot(*root)

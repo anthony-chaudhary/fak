@@ -24,8 +24,8 @@ func runDispatchUnwitnessedClaim(stdout, stderr io.Writer, argv []string) int {
 	issue := fs.Int("issue", 0, "the GitHub issue number to check (required)")
 	live := fs.Bool("live", false, "actually post the comment via `gh issue comment` (default: dry-run, print only)")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human summary")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 	if *issue <= 0 {
 		fmt.Fprintln(stderr, "fak dispatch unwitnessed-claim: --issue N is required")

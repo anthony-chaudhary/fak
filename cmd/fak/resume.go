@@ -95,8 +95,8 @@ func runResumePlan(stdout, stderr io.Writer, argv []string) int {
 	imageDir := fs.String("image", "", "ground the plan on a portable session image directory: derive resident tokens from its trajectory and idle from its timestamp")
 	transcript := fs.String("transcript", "", "ground the plan on a REAL Claude Code session transcript (.jsonl): derive resident tokens from the last assistant turn's prompt size and idle from its timestamp")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	ttl, ok := parseResumeTTL(*ttlStr)
@@ -165,7 +165,7 @@ func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the decision as JSON")
 	quiet := fs.Bool("quiet", false, "suppress the human line (for use as a launcher gate that reads only the exit code)")
 	explain := fs.Bool("explain", false, "print the full governor posture: policy path+values+source, ledger path, live census, recent refusals/fail-opens, and the verdict (#2173)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -528,7 +528,7 @@ func runResumeValidate(stdout, stderr io.Writer, argv []string) int {
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier to score the projection at: 5m (default) or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
 	asJSON := fs.Bool("json", false, "emit the raw BacktestReport JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *corpus == "" {

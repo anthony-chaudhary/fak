@@ -191,7 +191,7 @@ func runFusedClassify(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	file := fs.String("file", "", "JSON batch of proposed ops ({\"ops\":[{\"tool\",\"engine\",\"class\"}]}); default: the built-in demo turn")
 	asJSON := fs.Bool("json", false, "emit the fused summary as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -226,7 +226,7 @@ func runFusedExplain(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fused explain", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the demo classification + per-op verdicts as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -278,7 +278,7 @@ func runFusedRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fused run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the submitted/reaped fused turn as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

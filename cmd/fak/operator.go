@@ -56,7 +56,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	check := fs.Bool("check", false, "paging gate: exit non-zero only when a human operator item exists")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

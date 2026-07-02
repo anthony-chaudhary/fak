@@ -29,7 +29,7 @@ func runSwebenchSotaSnapshot(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "write the snapshot JSON here")
 	md := fs.String("md", "", "write the house-style markdown report here")
 	asJSON := fs.Bool("json", false, "print the snapshot JSON to stdout (default when --out is empty)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

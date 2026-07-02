@@ -33,7 +33,7 @@ func runHygiene(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
 	gatesCSV := fs.String("gates", "", "comma-separated gate names to run (default: all)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

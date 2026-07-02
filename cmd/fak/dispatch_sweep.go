@@ -46,8 +46,8 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	noLedger := fs.Bool("no-loop-ledger", false, "pass --no-loop-ledger to each tick (hermetic probes)")
 	live := fs.Bool("live", false, "actually spawn workers and drain the queue")
 	asJSON := fs.Bool("json", false, "emit the raw sweep Record JSON instead of the human card")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	root := *workspace

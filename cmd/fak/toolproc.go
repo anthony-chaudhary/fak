@@ -155,7 +155,7 @@ func runToolprocPS(stdout, stderr io.Writer, argv []string) int {
 	defaultDeadlineMS := fs.Int64("default-deadline-ms", 0, "deadline for procs whose spawn declared none (0 = unbounded)")
 	stallMult := fs.Float64("stall-mult", toolproc.DefaultStallMultiplier, "declared-cadence multiplier before a silent proc is STALLED")
 	asJSON := fs.Bool("json", false, "emit the table as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {
@@ -207,7 +207,7 @@ func runToolprocSample(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the folded table as JSON")
 	journal := fs.Bool("journal", false, "print the raw sample journal JSONL (pipe it into `fak toolproc ps --events -`)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -241,7 +241,7 @@ func runToolprocLeaks(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	eventsPath := fs.String("events", "", "JSONL journal of leak-prevention events (required; '-' reads stdin)")
 	asJSON := fs.Bool("json", false, "emit the report as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if strings.TrimSpace(*eventsPath) == "" || fs.NArg() != 0 {

@@ -49,7 +49,7 @@ func runHooksLaneAudit(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit the undeclared leaves as JSON")
 	gate := fs.Int("gate", -1, "exit 1 if the count of undeclared-lane leaves exceeds this threshold (-1 = report only)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	r := resolveRoot(*root)
@@ -109,7 +109,7 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	r := resolveRoot(*root)
@@ -169,7 +169,7 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks commit-msg", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	rest := fs.Args()

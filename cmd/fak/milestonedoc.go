@@ -39,7 +39,7 @@ func runMilestoneStatusDoc(stdout, stderr io.Writer, argv []string) int {
 	emitBlock := fs.Bool("block", false, "emit the generated milestone-climb block to stdout; do not touch the file")
 	asJSON := fs.Bool("json", false, "emit the freshness verdict as JSON")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root) for --write-doc / --check-doc")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

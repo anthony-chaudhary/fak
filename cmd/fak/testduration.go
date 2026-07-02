@@ -127,7 +127,7 @@ The output schema is fak.test_duration_ledger.v1. Budget findings are ranked by
 over-budget time so agents see the next slow package or test first.
 `)
 	}
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

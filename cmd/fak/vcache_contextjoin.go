@@ -30,8 +30,8 @@ func runVCacheContextJoin(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the raw JoinReport JSON instead of the human table")
 	beforeMillis := fs.Int64("before-millis", 0, "override correlation window: event up to N ms BEFORE a change still explains it (default: 5m TTL)")
 	afterMillis := fs.Int64("after-millis", 0, "override correlation window: event up to N ms AFTER a change still explains it (default: 5s)")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 	if len(transcripts) == 0 && strings.TrimSpace(*telemetry) == "" {
 		fmt.Fprintln(stderr, "fak vcache context-join: need at least one --transcript or --telemetry")

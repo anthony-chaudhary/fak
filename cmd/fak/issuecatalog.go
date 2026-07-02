@@ -38,7 +38,7 @@ func runIssueCatalog(stdout, stderr io.Writer, argv []string) int {
 	lensFilter := fs.String("lens", "", "only rows whose lens equals this (default-off|small-blocker|not-advertised|dogfood|benchmark)")
 	keyPrefix := fs.String("key-prefix", "", "only rows whose key starts with this prefix (e.g. perf/kv-cache/)")
 	maxCreate := fs.Int("max-create", 0, "cap the number of CREATE actions this run (0 = no cap); updates are never capped — for waved rollout")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

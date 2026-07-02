@@ -139,7 +139,7 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 	dedupeChecked := fs.Bool("dedupe-checked", false, "producer proved marker dedupe against existing issues")
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	asJSON := fs.Bool("json", false, "emit machine-readable review/result")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	selected := 0

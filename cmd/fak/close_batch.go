@@ -32,8 +32,8 @@ func runDispatchCloseBatch(stdout, stderr io.Writer, argv []string) int {
 	reserve := fs.Int("reserve", 50, "minimum GitHub API budget that must survive each batch")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for rate-limit reset math (0 = current time)")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	raw, code := readDispatchInput(stderr, *in)

@@ -40,7 +40,7 @@ func runDispatchAudit(stdout, stderr io.Writer, argv []string) int {
 	stormMins := fs.Float64("storm-mins", 0, "RETRY_STORM threshold: min wall-clock minutes (0 = default)")
 	heartbeat := fs.Bool("heartbeat", false, "append a STARTED/NEVER_STARTED heartbeat event per worker to the loop ledger (default: off — a routine read-only audit never writes)")
 	ledger := fs.String("ledger", "", "loop JSONL ledger path for --heartbeat (default: the loop ledger)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

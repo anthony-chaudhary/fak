@@ -96,7 +96,7 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 	var region repeatedString
 	fs.Var(&region, "tree", "region glob this loop's writes stay inside (repeatable; overrides the GOAL.md region: field); arms region admission against the live lease fabric")
 	template := fs.Bool("template", false, "print a parseable GOAL.md template and exit")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *template {

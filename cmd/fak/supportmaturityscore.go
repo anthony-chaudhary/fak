@@ -25,7 +25,7 @@ func runSupportMaturityScorecard(stdout, stderr io.Writer, argv []string) int {
 	writeDoc := fs.Bool("write-doc", false, "regenerate the support-maturity matrix block in docs/HARDWARE-MATRIX.md in place")
 	checkDoc := fs.Bool("check-doc", false, "CI gate: red when the committed docs/HARDWARE-MATRIX.md matrix block is stale vs the live grid")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root) for --write-doc / --check-doc")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

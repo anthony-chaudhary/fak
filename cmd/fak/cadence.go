@@ -36,7 +36,7 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
 	timeout := fs.Int("timeout", 300, "per-sub-tool timeout seconds")
 	scoresFrom := fs.String("scores-from", "", "read a scorecard_control_pane.py JSON payload (file path, or '-' for stdin) for the SCORES dimension instead of re-running the ~4-minute pane")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

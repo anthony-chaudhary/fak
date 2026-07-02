@@ -35,8 +35,8 @@ func runDispatchSkipLedger(stdout, stderr io.Writer, argv []string) int {
 	cooldownMin := fs.Int("cooldown-min", 120, "skip a freshest unit attempted within this many minutes (-1 disables)")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for cooldown math and the row timestamp (0 = current time)")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	raw, code := readDispatchInput(stderr, *in)

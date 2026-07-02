@@ -115,7 +115,7 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+dojo.DefaultLedgerRel+")")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -319,7 +319,7 @@ func runDojoList(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dojo list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the registry as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	cat := dojoLeverCatalog()
@@ -350,7 +350,7 @@ func runDojoAblate(stdout, stderr io.Writer, argv []string) int {
 	engine := fs.String("engine", "mock", "engine id (the offline mock by default)")
 	asJSON := fs.Bool("json", false, "emit the dojo report as JSON instead of the human table")
 	check := fs.Bool("check", false, "advisory gate: exit non-zero only if the run could not be measured")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	path := *tracePath
@@ -436,7 +436,7 @@ func runDojoBoard(stdout, stderr io.Writer, argv []string) int {
 	ttlStr := fs.String("ttl", "5m", "provider cache TTL tier the resume-posture lever scores at: 5m or 1h")
 	maxFiles := fs.Int("max-files", 0, "cap the number of transcript files scanned (0 = no cap)")
 	asJSON := fs.Bool("json", false, "emit the board as JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *corpus == "" {
@@ -497,7 +497,7 @@ func runDojoPost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_DOJO_CHANNEL / .env.slack.local / the public dojo channel)")
 	token := fs.String("token", "", "override bot token (default: $FAK_DOJO_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

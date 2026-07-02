@@ -61,7 +61,7 @@ func runEgressCheck(argv []string, stdout, stderr io.Writer) int {
 	host := fs.String("host", "", "classify a bare host or IP directly via the pure egressfloor classifier (no tool call)")
 	argsJSON := fs.String("args", "", "raw tool args as JSON (use with --tool)")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

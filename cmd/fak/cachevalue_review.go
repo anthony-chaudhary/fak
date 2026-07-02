@@ -66,7 +66,7 @@ func runCachevalueReview(stdout, stderr io.Writer, argv []string) int {
 	appendLedger := fs.String("append-ledger", "", "append the machine-readable review row to this JSONL ledger")
 	markdownOut := fs.String("markdown-out", "", "write the generated human review markdown to this path")
 	asJSON := fs.Bool("json", false, "emit one appendable JSONL row instead of markdown")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *since != "" {

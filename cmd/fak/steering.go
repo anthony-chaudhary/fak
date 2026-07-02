@@ -83,7 +83,7 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 	indexDelta := fs.Float64("index-delta", 2.0, "alert: minimum index drop vs the pinned floor to fire")
 	pin := fs.Bool("pin", false, "alert: ratchet the floor down when the read is an improvement")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -127,7 +127,7 @@ func runSteeringPin(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak steering pin", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	scorecardJSON := fs.String("scorecard-json", "", "read the steerability payload from this file instead of running the scorecard (- for stdin)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	snap, err := loadSteeringSnapshot(*scorecardJSON)

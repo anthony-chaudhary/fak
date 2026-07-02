@@ -21,7 +21,7 @@ func runCheckToolFailure(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON")
 	list := fs.Bool("list", false, "list the closed non-guard tool-failure vocabulary")
 	message := fs.String("message", "", "classify a raw tool-failure message into the closed vocabulary")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

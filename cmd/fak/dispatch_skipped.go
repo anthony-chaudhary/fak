@@ -59,7 +59,7 @@ func runDispatchSkipped(stdout, stderr io.Writer, argv []string) int {
 	token := fs.String("token", "", "bot token (default: $FAK_SCOREBOARD_TOKEN / .env.slack.local)")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

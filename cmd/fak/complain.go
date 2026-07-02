@@ -61,7 +61,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to a newly-created complaint; repeatable (default: "+guardcomplaint.Label+")")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

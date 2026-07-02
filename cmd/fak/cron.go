@@ -58,7 +58,7 @@ func runCronEmit(stdout, stderr io.Writer, argv []string) int {
 	fakBin := fs.String("fak-bin", "fak", "path to the fak binary the unit invokes")
 	label := fs.String("label", "", "unit/task name (default fak-loop-<id>)")
 	ledger := fs.String("ledger", "", "loop ledger path passed through to fak loop run")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

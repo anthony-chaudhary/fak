@@ -53,7 +53,7 @@ The output schema is fak.test_shard_plan.v1. Packages are assigned by measured
 elapsed time using deterministic longest-processing-time balancing.
 `)
 	}
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

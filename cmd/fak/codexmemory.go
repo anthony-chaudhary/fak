@@ -41,7 +41,7 @@ func runCodexMemoryDoctor(stdout, stderr io.Writer, argv []string) int {
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	repo := fs.String("repo", "", "repo root to check for the AGENTS.md guidance boundary")
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

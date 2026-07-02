@@ -39,7 +39,7 @@ func runPropagationScorecard(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit the committed snapshot body")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -86,7 +86,7 @@ func runPropagationDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

@@ -59,7 +59,7 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 	overlayInterval := fs.Duration("overlay-interval", 2*time.Second, "refresh interval for --overlay")
 	metrics := fs.Bool("metrics", false, "do not launch Claude; fetch /metrics + /debug/vars using the gateway's own bearer and print them (the panel links 401 from a bare browser click; this needs no token wrangling)")
 	grafanaURL := fs.String("grafana-url", envOrDefault("FAK_MAC_GRAFANA", defaultClaudeMacGrafana), "Grafana base URL shown in the debug panel (the shipped tools/grafana stack)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *gatewayURL == "" {

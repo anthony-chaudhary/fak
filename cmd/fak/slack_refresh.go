@@ -159,7 +159,7 @@ func runSlackWalk(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak slack walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the surface/refresh map as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	rows := buildSlackWalkRows()
@@ -232,7 +232,7 @@ func runSlackRefresh(stdout, stderr io.Writer, argv []string) int {
 	blockersIssues := fs.String("blockers-issues", "", "gh issue-list JSON file to use when refreshing blockers")
 	blockersLabel := fs.String("blockers-label", "blocked", "issue label represented by --blockers-issues")
 	blockersRepoURL := fs.String("blockers-repo-url", "", "repo URL used for the blockers triage link")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

@@ -60,7 +60,7 @@ func runGrafanaPost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_GRAFANA_CHANNEL / .env.slack.local / built-in default)")
 	token := fs.String("token", "", "override bot token (default: $FAK_GRAFANA_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

@@ -31,7 +31,7 @@ func runCachevalueReport(stdout, stderr io.Writer, argv []string) int {
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
 	asJSON := fs.Bool("json", false, "emit the two-track report as JSON instead of the table")
 	markdown := fs.Bool("markdown", false, "emit the two-track report as markdown (mermaid xychart trends + sparklines + a provenance-labelled KPI table) instead of the terminal table")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

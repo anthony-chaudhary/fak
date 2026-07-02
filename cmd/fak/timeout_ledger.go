@@ -33,8 +33,8 @@ func runDispatchTimeoutLedger(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", ".", "workspace root the ledger is persisted under")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for the row timestamp when an attempt does not carry its own (0 = current time)")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	raw, code := readDispatchInput(stderr, *in)

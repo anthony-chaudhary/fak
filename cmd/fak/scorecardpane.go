@@ -44,7 +44,7 @@ func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "CI ratchet gate: exit non-zero only if debt regressed above baseline")
 	baselineFlag := fs.String("baseline", "", "baseline JSON path (default: "+scorecardpane.BaselineRel+")")
 	timeoutSec := fs.Int("timeout", 120, "per-scorecard timeout seconds")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	root := *workspace
@@ -131,7 +131,7 @@ func runRepoHygieneScorecard(stdout, stderr io.Writer, argv []string) int {
 	asMarkdown := fs.Bool("markdown", false, "emit the snapshot markdown body")
 	stamp := fs.String("stamp", "", "date stamp for the markdown header")
 	comparePath := fs.String("compare", "", "print the hygiene-debt delta vs a prior baseline JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	root := *workspace

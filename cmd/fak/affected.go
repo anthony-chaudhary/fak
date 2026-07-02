@@ -98,7 +98,7 @@ func runAffected(stdout, stderr io.Writer, argv []string) int {
 	blame := fs.Bool("blame", false, "on a red run, attribute each failing package mine | peer-wip | peer-preexisting (clean-baseline rerun + --mine closure, #2138); the exit code then reflects only 'mine' reds")
 	var mineFiles pathList
 	fs.Var(&mineFiles, "mine", "repo-relative file YOU changed (repeatable; implies --blame — a red package outside these files' affected closure is attributed peer-wip)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *budget < 0 {

@@ -42,7 +42,7 @@ func runBenchPost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_BENCH_CHANNEL / .env.slack.local)")
 	token := fs.String("token", "", "override bot token (default: $FAK_BENCH_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -87,7 +87,7 @@ func runBenchRequest(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_BENCH_CHANNEL / .env.slack.local)")
 	token := fs.String("token", "", "override bot token (default: $FAK_BENCH_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

@@ -34,8 +34,8 @@ func runDispatchCommitLinks(stdout, stderr io.Writer, argv []string) int {
 	rng := fs.String("range", "HEAD~50..HEAD", "git revision range to scan (git rev-list syntax)")
 	witnessJSON := fs.String("witness-json", "", "read commit-linked issue witness facts and bucket unresolved close-gate failures")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	if strings.TrimSpace(*witnessJSON) != "" {

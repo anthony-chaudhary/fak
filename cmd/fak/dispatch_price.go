@@ -99,7 +99,7 @@ func runDispatchPrice(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root for lane-tree resolution (default: current directory)")
 	inPath := fs.String("in", "", "read proposed fan-out JSON from this file (default: stdin)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

@@ -45,7 +45,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	allowStaleReport := fs.Bool("allow-stale-report", false, "allow --live even when the selected report is older than --max-report-age")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *maxReportAge < 0 {

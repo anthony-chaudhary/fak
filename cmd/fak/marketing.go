@@ -71,7 +71,7 @@ func runMarketingEpic(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL)")
 	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render and print; do not post")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	col, ok := gatherMarketingOrErr(stderr, *root, *rangeFlag, *since, "fak marketing epic")
@@ -96,7 +96,7 @@ func runMarketingRelease(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL)")
 	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render and print; do not post")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *version == "" {
@@ -142,7 +142,7 @@ func runMarketingAEO(stdout, stderr io.Writer, argv []string) int {
 	inject := fs.Bool("inject", false, "after refresh, run tools/gen_structured_data.py to fence the What's-new block into llms.txt")
 	score := fs.Bool("score", false, "after refresh, run the SEO/AEO + agent-readiness scorecards as a freshness report")
 	dryRun := fs.Bool("dry-run", false, "print what would be written; do not touch any file")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -248,7 +248,7 @@ func runMarketingTick(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL / .env.slack.local)")
 	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the artifact and print it; do not post or advance the mark")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -331,7 +331,7 @@ func runMarketingGenerate(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", ".", "repo root to read git/CLAIMS.md from")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	dated := fs.Bool("dated", true, "stamp the digest title with the current week")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
@@ -363,7 +363,7 @@ func runMarketingPost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_MARKETING_CHANNEL / .env.slack.local)")
 	token := fs.String("token", "", "override bot token (default: $FAK_MARKETING_TOKEN, then scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the message and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

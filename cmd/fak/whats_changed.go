@@ -23,7 +23,7 @@ func runWhatsChanged(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	since := fs.String("since", "", "session/base ref to compare from (default: FAK_SESSION_START_SHA, else HEAD)")
 	asJSON := fs.Bool("json", false, "emit the readout as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	paths = append(paths, fs.Args()...)

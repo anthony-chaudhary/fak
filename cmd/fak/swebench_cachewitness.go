@@ -42,7 +42,7 @@ func runSwebenchCacheWitness(stdout, stderr io.Writer, argv []string) int {
 	baselineFile := fs.String("baseline", "", "optional run-start /metrics body to subtract from the end scrape, producing a per-run delta")
 	out := fs.String("out", "", "write the Record JSON here (default: stdout)")
 	timeout := fs.Float64("timeout-seconds", 15, "HTTP fetch timeout in seconds")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

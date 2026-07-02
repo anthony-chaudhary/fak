@@ -56,7 +56,7 @@ func runRollup(stdout, stderr io.Writer, argv []string) int {
 	scoresFrom := fs.String("scores-from", "", "read a scorecard_control_pane.py --json payload (file or '-') for the SCORES overlay")
 	loopsFrom := fs.String("loops-from", "", "read a loop-fleet-health --json payload instead of folding in-process")
 	fleetFrom := fs.String("fleet-from", "", "read a fak lab status --json payload instead of folding in-process")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

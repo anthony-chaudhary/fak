@@ -145,7 +145,7 @@ func runTest(stdout, stderr io.Writer, argv []string) int {
 On Windows, go test is routed to WSL via test.ps1 (native go test is OS-policy-blocked).
 `)
 	}
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *list {

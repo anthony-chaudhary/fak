@@ -54,7 +54,7 @@ func runGardenWalk(stdout, stderr io.Writer, argv []string) int {
 	register := fs.Bool("register", false, "register the durable garden-walk loop unit in the loop registry and return")
 	ledger := fs.String("ledger", "", "loop JSONL ledger path (default: the loop ledger)")
 	registry := fs.String("registry", "", "loop registry JSON path (default: the loop registry)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

@@ -53,7 +53,7 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	epicsFrom := fs.String("epics-from", "", "load the tracked-epic set from a JSON data file (default: the in-code TrackedEpics; seed at "+milestonereport.DefaultTrackedEpicsRel+"). A file carrying a pre-resolved `counts` block folds fully offline (no gh).")
 	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+milestonereport.DefaultLedgerRel+")")
 	date := fs.String("date", "", "snapshot date YYYY-MM-DD (default: today UTC)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -158,7 +158,7 @@ func runMilestonePost(stdout, stderr io.Writer, argv []string) int {
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_MILESTONE_CHANNEL / .env.slack.local / #milestones)")
 	token := fs.String("token", "", "override bot token (default: $FAK_MILESTONE_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

@@ -59,7 +59,7 @@ func runClaimCheck(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 		witnessST  = fs.Bool("witness-self-test", false, "grade the built-in one-claim-per-class witness-scaffold corpus and exit 0 iff every sample classifies as labeled")
 	)
 	fs.Usage = func() { fmt.Fprint(stderr, claimCheckUsage) }
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

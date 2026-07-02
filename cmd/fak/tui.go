@@ -97,7 +97,7 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 	top := fs.Int("top", 25, "number of ranked rows to render in human mode")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the issue TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -142,7 +142,7 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 	top := fs.Int("top", 25, "number of loop rows to render in human mode")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the loop TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -196,7 +196,7 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 	top := fs.Int("top", 25, "number of session rows to render in human mode")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the session TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -239,7 +239,7 @@ func runTUIGarden(stdout, stderr io.Writer, argv []string) int {
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the garden TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -283,7 +283,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the guard TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -573,7 +573,7 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	listTargets := fs.Bool("list-targets", false, "list the named compute targets (mac/gcp/local/anthropic + ~/.fak/targets.json) with a live /healthz column, then exit")
 	targetFlag := fs.String("target", "", "named compute target to chat against (mac/gcp/local/anthropic + ~/.fak/targets.json); the explicit form of the leading `fak c <target>` token")
 	auto := fs.Bool("auto", false, "health/cost/quota-aware automatic compute-target selection with failover (#939): probe every registered target, rank by the documented policy (healthy first, then cheapest/most-local), and launch the best one; --json emits the ranked decision instead of launching")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *listTargets {
@@ -818,7 +818,7 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 	atText := fs.String("at", "", "snapshot time for non-issue panes (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the overview TUI model as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

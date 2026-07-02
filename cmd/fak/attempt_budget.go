@@ -29,8 +29,8 @@ func runDispatchAttemptBudget(stdout, stderr io.Writer, argv []string) int {
 	budget := fs.Int("budget", 0, "attempt budget applied to any issue whose own input omits one (0 = no default, per-issue budget only)")
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for failure-class backoff math (0 = current time)")
 	asJSON := fs.Bool("json", false, "emit the raw Report JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	raw, code := readDispatchInput(stderr, *in)

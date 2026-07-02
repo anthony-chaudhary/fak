@@ -166,7 +166,7 @@ func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 	keyEnv := fs.String("key-env", "FAK_GATEWAY_KEY", "env var name for the bearer key (only used with --remote or non-loopback --addr)")
 	uninstall := fs.Bool("uninstall", false, "remove the gateway service")
 	rotateKey := fs.Bool("rotate-key", false, "mint a fresh bearer key even if one is already persisted (off-host installs reuse the existing key by default so clients keep working)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

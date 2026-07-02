@@ -136,7 +136,7 @@ func benchLoopWalk(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak bench-loop walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	walk := benchloop.Walk()

@@ -49,7 +49,7 @@ func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
 	windowH := fs.Float64("window-h", 10, "only sessions whose transcript changed within N hours")
 	asJSON := fs.Bool("json", false, "emit the full machine record (rows + decisions)")
 	homeFlag := fs.String("home", "", "user home holding the .claude* account dirs (default: $FLEET_USER_HOME, else discovered)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

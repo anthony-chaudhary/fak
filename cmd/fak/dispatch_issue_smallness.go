@@ -35,7 +35,7 @@ func runDispatchIssueSmallnessLint(stdout, stderr io.Writer, stdin io.Reader, ar
 	limit := fs.Int("limit", 500, "max open issues to scan with --open")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	asScorecard := fs.Bool("scorecard", false, "with --open: fold the rated backlog into a control-pane payload for `fak scoreboard post --from -`")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

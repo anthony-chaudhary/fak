@@ -65,7 +65,7 @@ func runSuperloopList(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("superloop list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the registry as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	reg := superloop.Registry()

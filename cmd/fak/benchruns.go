@@ -50,7 +50,7 @@ func benchRunsList(stdout, stderr io.Writer, argv []string) int {
 	since := fs.String("since", "", "filter by start date/string")
 	until := fs.String("until", "", "filter by end date/string")
 	format := fs.String("format", "table", "output format: table|json")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	cat, code := benchRunsCatalog(stderr, *workspace)
@@ -74,7 +74,7 @@ func benchRunsShow(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak bench-runs show", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 1 {
@@ -99,7 +99,7 @@ func benchRunsCompare(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak bench-runs compare", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 2 {
@@ -131,7 +131,7 @@ func benchRunsBest(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	model := fs.String("model", "", "filter by model")
 	metric := fs.String("metric", "peak_tok_per_sec", "metric: peak_tok_per_sec|speedup")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	cat, code := benchRunsCatalog(stderr, *workspace)
@@ -154,7 +154,7 @@ func benchRunsTable(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", "", "filter by model substring")
 	precision := fs.String("precision", "", "filter by precision")
 	format := fs.String("format", "markdown", "output format: markdown|json")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	cat, code := benchRunsCatalog(stderr, *workspace)
@@ -183,7 +183,7 @@ func benchRunsSummary(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	groupBy := fs.String("group-by", "machine", "group by: machine|model")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *groupBy != "machine" && *groupBy != "model" {

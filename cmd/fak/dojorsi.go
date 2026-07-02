@@ -80,7 +80,7 @@ func runDojoRSIFold(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	reportPath := fs.String("report", "", "dojo report JSON from `fak dojo run --json`")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -107,7 +107,7 @@ func runDojoRSIPropose(stdout, stderr io.Writer, argv []string) int {
 	journalPath := fs.String("journal", "", "dojo-RSI journal (default: <root>/"+dojocal.DefaultJournalRel+")")
 	nowStr := fs.String("now", "", "pin selector time (RFC3339 or YYYY-MM-DD)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -173,7 +173,7 @@ func runDojoRSIRewrite(stdout, stderr io.Writer, argv []string) int {
 	claimsPath := fs.String("claims", "", "claim registry path (default: <root>/"+dojocal.ClaimsRelPath+")")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -292,7 +292,7 @@ func runDojoRSIRun(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	opts := parseDojoRSILoopFlags(fs, true)
 	check := fs.Bool("check", false, "honesty-check a kept iteration before accepting it")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -322,7 +322,7 @@ func runDojoRSILoop(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak dojo-rsi loop", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	opts := parseDojoRSILoopFlags(fs, false)
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -340,7 +340,7 @@ func runDojoRSITrend(stdout, stderr io.Writer, argv []string) int {
 	journalPath := fs.String("journal", "", "dojo-RSI journal (default: <root>/"+dojocal.DefaultJournalRel+")")
 	nowStr := fs.String("now", "", "pin trend time (RFC3339 or YYYY-MM-DD)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

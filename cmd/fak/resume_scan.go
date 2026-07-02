@@ -53,8 +53,8 @@ func runResumeScan(stdout, stderr io.Writer, argv []string) int {
 	shedBudget := fs.Int("shed-budget", 0, "CUT target in tokens — what a managed restart keeps (0 = default ~48k)")
 	all := fs.Bool("all", false, "also report sessions that ended cleanly or on a non-rate error")
 	asJSON := fs.Bool("json", false, "emit the raw per-session diagnoses as JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 	if *store == "" {
 		fmt.Fprintln(stderr, "fak resume scan: need --store DIR (a directory of Claude Code .jsonl transcripts)")

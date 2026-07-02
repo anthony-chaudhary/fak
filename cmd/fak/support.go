@@ -52,7 +52,7 @@ func runSupport(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the per-cell read-out as JSON (round-trips)")
 	family := fs.String("family", "", "filter to model families whose name contains this (case-insensitive)")
 	backend := fs.String("backend", "", "filter to this backend (case-insensitive exact match)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

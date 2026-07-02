@@ -25,7 +25,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	dedupeCap := fs.Int("dedupe-cap", 0, "bounded issue scan cap proven before live sync")
 	maxWave := fs.Int("max-wave", 0, "cap leaves per concurrency-safe wave (0 = disjoint-tree bound only)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable cohort plan")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

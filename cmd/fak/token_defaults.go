@@ -45,7 +45,7 @@ func runTokenDefaultsScorecard(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable scorecard JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	p := collectTokenDefaultsScorecard(repoRoot())

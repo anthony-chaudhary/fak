@@ -36,7 +36,7 @@ func runWorkflowAudit(stdout, stderr io.Writer, argv []string) int {
 	writeDoc := fs.Bool("write-doc", false, "regenerate the audit block in "+workflowaudit.DocRel+" in place")
 	checkDoc := fs.Bool("check-doc", false, "CI gate: red when the committed "+workflowaudit.DocRel+" block is stale")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

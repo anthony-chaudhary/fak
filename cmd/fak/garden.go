@@ -58,7 +58,7 @@ func runGarden(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "CI gate: exit non-zero if a gating member regressed or failed to run")
 	deep := fs.Bool("deep", false, "also run the fleet loop-audit member (slower; non-gating advisory)")
 	timeout := fs.Int("timeout", 240, "per-member timeout seconds")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -145,7 +145,7 @@ func runGardenTick(stdout, stderr io.Writer, argv []string) int {
 	ledger := fs.String("ledger", "", "loop JSONL ledger path (default: the loop ledger)")
 	registry := fs.String("registry", "", "loop registry JSON path (default: the loop registry)")
 	dir := fs.String("dir", "", "lease store repo dir (default: git discovery from cwd)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

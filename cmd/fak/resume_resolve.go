@@ -46,7 +46,7 @@ func runResumeResolve(stdout, stderr io.Writer, argv []string) int {
 	noWait := fs.Bool("no-wait", false, "never answer WAIT_RESET: re-home off a blocked owner immediately even when its reset is minutes away")
 	wait := fs.Bool("wait", false, "self-healing mode: when the verdict is WAIT_RESET, sleep out the owner's reset (narrating to stderr), then re-resolve — so `CLAUDE_CONFIG_DIR=\"$(fak resume resolve -wait <sid>)\" claude --resume <sid>` heals the account wall on its own")
 	asJSON := fs.Bool("json", false, "emit the full decision record instead of the bare pin dir")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 1 {

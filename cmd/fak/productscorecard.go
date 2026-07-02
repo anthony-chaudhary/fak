@@ -24,7 +24,7 @@ func runProductScorecard(stdout, stderr io.Writer, argv []string) int {
 	dataPath := fs.String("data", "", "data directory (default: tools/product_scorecard.data)")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	stamp := fs.String("stamp", "", "optional stamp embedded in generated docs")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

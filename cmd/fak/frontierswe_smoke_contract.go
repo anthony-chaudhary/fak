@@ -27,7 +27,7 @@ func runFrontiersweSmokeContract(stdout, stderr io.Writer, argv []string) int {
 	trials := fs.Int("trials", 0, "trials per arm (default: task job.yaml n_attempts, else 1)")
 	out := fs.String("out", "", "write the contract JSON here (default: stdout)")
 	md := fs.String("md", "", "write the contract markdown here")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

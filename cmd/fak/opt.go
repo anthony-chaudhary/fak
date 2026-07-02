@@ -40,7 +40,7 @@ func runOptDiscover(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit the inventory as JSON")
 	check := fs.String("check", "", "coverage ratchet: comma-separated target names that must still be present")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -109,7 +109,7 @@ func runOptRun(stdout, stderr io.Writer, argv []string) int {
 	k := fs.Int("k", 3, "escalation breaker: stop after K consecutive non-keeps")
 	maxCycles := fs.Int("max", 0, "cap on candidates tried (0 = all)")
 	asJSON := fs.Bool("json", false, "emit the run Result as JSON (journal routed off stdout)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 1 {

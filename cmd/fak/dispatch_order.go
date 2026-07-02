@@ -102,8 +102,8 @@ func runDispatchOrder(stdout, stderr io.Writer, argv []string) int {
 	nowUnix := fs.Int64("now", 0, "the clock as unix seconds for cooldown math (0 = current time)")
 	preferOldest := fs.Bool("prefer-oldest", false, "order the kept units OLDEST-first (drain the longest-waiting backlog) instead of freshest-first")
 	asJSON := fs.Bool("json", false, "emit the raw Result JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 
 	raw, code := readDispatchInput(stderr, *in)

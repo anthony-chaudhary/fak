@@ -64,7 +64,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 	list := fs.Bool("list", false, "list known recovery reasons")
 	dir := fs.String("dir", ".", "repo directory")
 	trunk := fs.String("trunk", "", "configured trunk/development branch override")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)

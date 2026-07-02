@@ -85,7 +85,7 @@ func runDispatchScorecard(stdout, stderr io.Writer, argv []string) int {
 	liveRouter := fs.Bool("live-router", false, "include non-gating telemetry from the current workspace issue router")
 	count := fs.Int("count", 4, "live-router wave width to price")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *count < 1 {

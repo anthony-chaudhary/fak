@@ -165,7 +165,7 @@ func runFrontiersweDescribe(stdout, stderr io.Writer, argv []string) int {
 	reuse := fs.Float64("reuse", frontierswe.DefaultReuseRate, "cross-turn reuse rate r in [0,1] for the --tts projection (the value-stack reuse dial; a PROJECTION, not a measurement)")
 	workersArg := fs.String("workers", "", "comma-separated cross-trial counts to sweep for --tts (the n_concurrent_trials prefix-sharing axis); default: 1 + the task's declared trials")
 	task := fs.String("task", "", "restrict the --tts projection to a single task by name (default: all catalog tasks)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

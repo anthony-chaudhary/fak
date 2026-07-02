@@ -130,7 +130,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	noLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for spawned ticks")
 	live := fs.Bool("live", false, "actually spawn workers")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	root := *workspace

@@ -97,7 +97,7 @@ func runSlackOutboxStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak slack outbox status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit the status fold as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	ob, err := openOutbox()
@@ -145,7 +145,7 @@ func runSlackOutboxDrain(stdout, stderr io.Writer, argv []string) int {
 	token := fs.String("token", "", "bot token (default: $FAK_SCOREBOARD_TOKEN, then .env.slack.local)")
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (for testing/proxying)")
 	maxAttempts := fs.Int("max-attempts", 0, "dead-letter a row after this many failed sends (default 5)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	ob, err := openOutbox()
@@ -197,7 +197,7 @@ func runSlackOutboxRetry(stdout, stderr io.Writer, argv []string) int {
 	nonce := fs.String("nonce", "", "re-arm one dead row by nonce")
 	all := fs.Bool("all", false, "re-arm every dead row")
 	dryRun := fs.Bool("dry-run", false, "print which rows would re-arm without writing")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if (*nonce == "") == !*all {
@@ -238,7 +238,7 @@ func runSlackOutboxDead(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak slack outbox dead", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "emit dead rows as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	ob, err := openOutbox()

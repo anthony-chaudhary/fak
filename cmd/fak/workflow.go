@@ -114,7 +114,7 @@ func workflowLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) int 
 func workflowSeed(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("workflow seed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	fmt.Fprint(stdout, workflowlint.SeedTemplate)

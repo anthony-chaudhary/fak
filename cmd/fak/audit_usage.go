@@ -42,7 +42,7 @@ func runAuditUsage(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	journalPath := fs.String("journal", "", "decision journal path (default: the guard audit journal default path)")
 	usageLogPathFlag := fs.String("usage-log", "", "usage log path (default: the usage log default path)")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

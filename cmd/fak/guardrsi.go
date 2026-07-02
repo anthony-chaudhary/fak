@@ -21,7 +21,7 @@ func runGuardVerdictRSI(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak guard-verdict-rsi", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	checkPath := fs.String("check", "", "honesty-gate an emitted iteration JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *checkPath != "" {
@@ -62,7 +62,7 @@ func runGuardVerdictRSIFold(stdout, stderr io.Writer, argv []string) int {
 	audit := fs.String("audit", "", "explicit guard-audit.jsonl to fold")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -93,7 +93,7 @@ func runGuardVerdictRSIRun(stdout, stderr io.Writer, argv []string) int {
 	witnessJSON := fs.String("witness", "", "JSON witness object not authored by the loop, e.g. {\"ok\":true}")
 	outPath := fs.String("out", "", "write iteration JSON to this file")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -136,7 +136,7 @@ func runGuardVerdictRSIRecovery(stdout, stderr io.Writer, argv []string) int {
 	audit := fs.String("audit", "", "explicit guard-audit.jsonl to fold")
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -177,7 +177,7 @@ func runGuardVerdictRSIRoute(stdout, stderr io.Writer, argv []string) int {
 	dryRun := fs.Bool("dry-run", false, "plan the gh issue without touching gh (queue row still written)")
 	repo := fs.String("repo", "", "gh repo for the issue half (default: current repo)")
 	asJSON := fs.Bool("json", false, "emit the control-pane envelope as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {
@@ -322,7 +322,7 @@ func runGuardRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit control-pane JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit scorecard markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

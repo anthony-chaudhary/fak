@@ -25,7 +25,7 @@ func runCodexMCPHealth(stdout, stderr io.Writer, argv []string) int {
 	transportDead := fs.Bool("transport-dead", false, "assert the in-session Codex transport is dead")
 	timeout := fs.Float64("timeout", 30.0, "smoke timeout in seconds")
 	reap := fs.Bool("reap", false, "explicitly reap the remaining PID arguments")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

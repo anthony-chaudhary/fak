@@ -31,8 +31,8 @@ func runVCacheObserve(stdout, stderr io.Writer, argv []string) int {
 	readMult := fs.Float64("read-mult", 0, "override provider cached-read input-token multiplier (default: calibration or 0.1 hypothesis)")
 	write5mMult := fs.Float64("write-5m-mult", vcachegov.WriteMult5Minutes, "5m cache-write input-token multiplier")
 	write1hMult := fs.Float64("write-1h-mult", vcachegov.WriteMult1Hour, "1h cache-write input-token multiplier")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 	if len(transcripts) == 0 && strings.TrimSpace(*telemetry) == "" {
 		fmt.Fprintln(stderr, "fak vcache observe: need at least one --transcript or --telemetry")

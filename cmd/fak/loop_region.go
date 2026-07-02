@@ -44,7 +44,7 @@ func runLoopRegion(stdout, stderr io.Writer, argv []string) int {
 	selfID := fs.String("self", "", "the caller's own lease id, never counted as a conflict (re-admission/renew)")
 	dir := fs.String("dir", "", "repo whose refs/fak/locks/* and dos.toml are read (default: cwd)")
 	jsonOut := fs.Bool("json", false, "emit the decision as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

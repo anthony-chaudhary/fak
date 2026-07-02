@@ -67,7 +67,7 @@ func runReleasePRPlan(stdout, stderr io.Writer, argv []string) int {
 	head := fs.String("head", "", "promotion head ref (default: <release_source> tip)")
 	check := fs.Bool("check", false, "exit 1 if the range holds commits without a (fak <leaf>) ship-stamp")
 	maxFiles := fs.Int("max-files", 20, "file paths listed per unit before folding to a count")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if fs.NArg() != 0 {

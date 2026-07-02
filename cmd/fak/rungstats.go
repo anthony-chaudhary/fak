@@ -58,7 +58,7 @@ func runRungStats(w io.Writer, argv []string) int {
 	fs.Usage = func() {
 		fmt.Fprintln(w, "usage: fak rungstats   (fold a fixed probe set through the real adjudicator chain and print the rung-decision distribution)")
 	}
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 

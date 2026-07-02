@@ -48,8 +48,8 @@ func runResumeStatus(stdout, stderr io.Writer, argv []string) int {
 	maxAttempts := fs.Int("max-attempts", resume.DefaultMaxResumeAttempts, "give-up cap on automatic resumes of one session")
 	all := fs.Bool("all", false, "also report sessions that ended cleanly and have no resume history")
 	asJSON := fs.Bool("json", false, "emit the raw per-session rows as JSON instead of the human table")
-	if err := fs.Parse(argv); err != nil {
-		return 2 // flag already printed the error
+	if !parseFlags(fs, argv) {
+		return 2
 	}
 	if *store == "" {
 		fmt.Fprintln(stderr, "fak resume status: need --store DIR (a directory of Claude Code .jsonl transcripts)")

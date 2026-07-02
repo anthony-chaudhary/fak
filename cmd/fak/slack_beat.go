@@ -152,7 +152,7 @@ func runSlackBeat(stdout, stderr io.Writer, argv []string) int {
 	apiBase := fs.String("api-base", "", "override the Slack API base URL (default https://slack.com/api/; for testing/proxying)")
 	dryRun := fs.Bool("dry-run", false, "fold health and render the beat, but post nothing (fork-safe)")
 	asJSON := fs.Bool("json", false, "emit the beat verdict (and per-surface health) as JSON")
-	if err := fs.Parse(argv); err != nil {
+	if !parseFlags(fs, argv) {
 		return 2
 	}
 
