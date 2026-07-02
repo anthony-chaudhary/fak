@@ -294,6 +294,7 @@ var tier = map[string]int{
 	"laneadmit": 1,
 	"regionadmit": 2,
 	"dispatchauto": 1,
+	"toolprocgate": 4,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
