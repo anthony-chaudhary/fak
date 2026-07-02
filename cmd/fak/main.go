@@ -149,6 +149,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "toolproc":
+		cmdToolproc(os.Args[2:])
 	case "test":
 		cmdTest(os.Args[2:])
 	case "done":
