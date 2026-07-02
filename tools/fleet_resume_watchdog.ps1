@@ -19,10 +19,16 @@ Safety rails:
   * DRY-RUN by default (pass -Live to actually resume).
   * Interactive sessions are SURFACE (never auto-resumed); supervisor workers are
     SUPERVISED (left to run_supervise_loop); throttled accounts are deferred.
+  * Host-wide source governor: every live launch asks `fak resume admit` before
+    spawning, so the box does not burst many `claude --resume` processes across accounts.
   * BOUNDED RETRY: up to -MaxAttempts (default 8) ledger-counted attempts; a repeat
     crasher is re-homed to a fresh seat by the planner and finally left for a human.
     Ledger-gated, survives state-file loss. Operator-settled / auth-wall sids never retry.
-  * Per-tick launch cap.
+  * Per-tick launch cap plus launch spacing.
+  * LIVE-DUPLICATE GUARD: a sid with a `claude --resume <sid>` process already running
+    is skipped, and a sid is launched at most once per tick even if the plan lists it
+    under two accounts (gem7/day30 share one identity, so one transcript can appear twice).
+  * A resume target whose config dir is tombstoned (`.DELETED-*`) is skipped.
 
   .\fleet_resume_watchdog.ps1                 # dry-run: log what it WOULD resume
   .\fleet_resume_watchdog.ps1 -Live           # actually resume (once per session)
@@ -38,7 +44,11 @@ param(
   # and re-homed onto a fresh seat by the planner after repeated in-place failures --
   # instead of stranded on the first re-crash. Override per-invocation with -MaxAttempts.
   [int]$MaxAttempts   = 8,
+  # Pace live launches inside a tick; the source governor also enforces spacing across
+  # ticks and across launchers from the shared ledger.
+  [int]$LaunchSpacingSec = 8,
   [string]$ClaudeExe  = '',
+  [string]$FakExe     = '',
   [string]$LogDir     = '',
   [string]$RegistryDir = '',
   # Active account probing on the registry refresh. 'auto' (default) probes blocked
@@ -106,6 +116,65 @@ if (-not (Test-Path $regDir)) { New-Item -ItemType Directory -Path $regDir -Forc
 $env:FLEET_REG_DIR = $regDir
 $py = Join-Path 'C:\work\job' '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$sourcePolicyPath = if ($env:FAK_RESUME_SOURCE_POLICY) {
+  $env:FAK_RESUME_SOURCE_POLICY
+} else {
+  Join-Path $repoRoot '.fak\resume-source-policy.json'
+}
+if (-not $FakExe) {
+  $fakCandidates = @(
+    $env:FAK_EXE,
+    (Join-Path $repoRoot 'fak.exe'),
+    (Join-Path $repoRoot 'fak'),
+    'fak.exe',
+    'fak'
+  ) | Where-Object { $_ }
+  foreach ($candidate in $fakCandidates) {
+    $resolved = $null
+    if ([System.IO.Path]::IsPathRooted($candidate) -or $candidate.Contains('\') -or $candidate.Contains('/')) {
+      if (Test-Path $candidate) { $resolved = (Resolve-Path $candidate).Path }
+    } else {
+      $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+      if ($cmd) { $resolved = $cmd.Source }
+    }
+    if ($resolved) { $FakExe = $resolved; break }
+  }
+}
+function SourceAdmitGate($ledgerPath, $policyPath) {
+  # FailOpen marks an admit that happened WITHOUT the governor's verdict (missing
+  # binary / gate error) — the caller must surface it durably (#2173): a fail-open
+  # removes the source-concurrency rail, so it can never stay silent.
+  if (-not $FakExe) {
+    return [pscustomobject]@{ Admit = $true; Reason = 'no-fak-binary'; FailOpen = $true }
+  }
+  $output = @()
+  try {
+    $output = & $FakExe resume admit --json --ledger $ledgerPath --policy $policyPath 2>&1
+    $code = $LASTEXITCODE
+  } catch {
+    return [pscustomobject]@{ Admit = $true; Reason = "gate-error:$($_.Exception.Message)"; FailOpen = $true }
+  }
+  $text = ($output | Out-String).Trim()
+  $reason = 'SOURCE_DEFER'
+  if ($text) {
+    try {
+      $doc = $text | ConvertFrom-Json
+      if ($doc.decision.reason) { $reason = $doc.decision.reason }
+    } catch {
+      $reason = $text
+    }
+  }
+  if ($code -eq 3) {
+    return [pscustomobject]@{ Admit = $false; Reason = $reason; FailOpen = $false }
+  }
+  if ($code -eq 0) {
+    return [pscustomobject]@{ Admit = $true; Reason = 'admitted'; FailOpen = $false }
+  }
+  # Fail open: a broken governor must not strand all recovery; the tick's cap/spacing
+  # still bound launch pressure.
+  return [pscustomobject]@{ Admit = $true; Reason = "gate-error:exit-$code $reason"; FailOpen = $true }
+}
 
 # 1. refresh registry + plan (extract in advance). On a live tick, also ACTIVELY probe
 # blocked accounts so a silently-recovered account (re-login / access re-enabled / throttle
@@ -154,12 +223,33 @@ if (Test-Path $ledgerPath) {
       if (-not $s) { return }
       if ($r.manual_override -or ("$($r.action)").StartsWith('consolidate')) { $ledgerBlocked[$s] = $true }
       if ($r.outcome -eq 'unrecoverable') { $ledgerBlocked[$s] = $true }
-      if (($r.phase -eq 'launched') -or ($r.phase -eq 'resumed') -or $r.cause) { $launchCount[$s] = [int]$launchCount[$s] + 1 }
+      $nonLaunchPhase = ($r.phase -eq 'deferred') -or ($r.phase -eq 'considered') -or ($r.phase -eq 'skipped') -or ($r.phase -eq 'gate_fail_open')
+      if (($r.phase -eq 'launched') -or ($r.phase -eq 'resumed') -or ($r.cause -and -not $nonLaunchPhase)) {
+        $launchCount[$s] = [int]$launchCount[$s] + 1
+      }
     } catch {}
   }
 }
-$nowIso = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 $launched = 0
+# One durable warning per tick when the source governor is unavailable (#2173): a
+# fail-open launch runs WITHOUT the host-wide concurrency rail, so it must be visible
+# in the ledger and the Action Center, never silent.
+$gateFailOpenWarned = $false
+
+# Live-duplicate guard: `claude --resume` forks the transcript into a NEW sid, so the
+# planned (old) sid never goes live again in the registry -- without this check every
+# tick re-plans the same dead sid and stacks another resume process on the box (observed
+# 2026-07-01: one sid stacked 4 concurrent copies at the watchdog's 10-min cadence).
+# One process scan serves the whole tick; the map is also updated after each launch so
+# a sid the plan lists twice (duplicate seat identities) launches at most once per tick.
+$liveResume = @{}
+try {
+  Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction Stop | ForEach-Object {
+    if ($_.CommandLine -match '--resume\s+([0-9a-fA-F-]{36})') { $liveResume[$Matches[1]] = $_.ProcessId }
+  }
+} catch {
+  Note "  WARN live-process scan failed ($($_.Exception.Message)) -- duplicate guard inactive this tick"
+}
 
 foreach ($p in @($plan)) {
   if ($launched -ge $MaxPerTick) { Note "  per-tick cap reached ($MaxPerTick)"; break }
@@ -171,12 +261,67 @@ foreach ($p in @($plan)) {
   if ($ledgerBlocked.ContainsKey($sid)) { Note "  SKIP $sid8 -- ledger-blocked (operator-settled or unrecoverable auth wall)"; continue }
   $attempts = [int]$launchCount[$sid]
   if ($attempts -ge $MaxAttempts) { Note "  SKIP $sid8 -- attempt cap reached ($attempts/$MaxAttempts) -- left for a human"; continue }
+  if ($liveResume.ContainsKey($sid)) {
+    Note "  SKIP $sid8 -- already live as pid $($liveResume[$sid]) (no duplicate resume)"
+    if ($Live) {
+      $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; phase = 'skipped'; cause = 'already_live'; live_pid = $liveResume[$sid] } | ConvertTo-Json -Compress
+      Add-Content -Path $ledgerPath -Value $rec
+    }
+    continue
+  }
+  $resumeCfg = if ($p.resume_config_dir) { $p.resume_config_dir } else { $p.config_dir }
+  # Defense-in-depth like the worker-account re-check above: the planner has offered a
+  # tombstoned seat as a re-home target (observed 2026-07-01: resume_account =
+  # .claude-gem8-netra.DELETED-2026-06-29; the launch died on arrival and burned an attempt).
+  if ($resumeCfg -match '\.DELETED') {
+    Note "  SKIP $sid8 -- resume target $resumeCfg is a tombstoned seat"
+    if ($Live) {
+      $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; phase = 'skipped'; cause = 'deleted_seat_target' } | ConvertTo-Json -Compress
+      Add-Content -Path $ledgerPath -Value $rec
+    }
+    continue
+  }
   if (-not $Live) {
     $rh = if ($p.rehomed) { " -> $($p.resume_account) (re-home)" } else { "" }
     Note "  WOULD RESUME $sid8 acct=$acct proj=$($p.project)$rh"; continue
   }
 
-  $resumeCfg = if ($p.resume_config_dir) { $p.resume_config_dir } else { $p.config_dir }
+  # Host-wide source governor (#1341/#1344): this is the dimension the per-tick cap does
+  # not see. It counts live `claude --resume` processes and recent launches across every
+  # account on the box, then exits 3 to defer one more launch.
+  $admit = SourceAdmitGate $ledgerPath $sourcePolicyPath
+  if ($admit.FailOpen -and -not $gateFailOpenWarned) {
+    $gateFailOpenWarned = $true
+    Note "  WARN source governor UNAVAILABLE ($($admit.Reason)) -- failing OPEN; only the per-tick cap/spacing bound launches this tick"
+    # Session-less warning row: every ledger reader keys on `session`, so this row is
+    # invisible to retry accounting; `gate_fail_open` is also a non-launch phase, so it
+    # never counts as launch pressure. It exists for the operator/status surfaces.
+    $warnRec = @{
+      ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+      phase = 'gate_fail_open'
+      cause = 'source_governor_unavailable'
+      reason = $admit.Reason
+      fak_exe = "$FakExe"
+      launcher = 'fleet_resume_watchdog.ps1'
+    } | ConvertTo-Json -Compress
+    Add-Content -Path $ledgerPath -Value $warnRec
+    Toast "Resume source governor OFFLINE" "$($admit.Reason) -- live resumes are fail-open (no host-wide rail)" 'warn' 'resume-gate-failopen' 720
+  }
+  if (-not $admit.Admit) {
+    Note "  DEFER $sid8 acct=$acct -- per-source gate: $($admit.Reason)"
+    $rec = @{
+      ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+      session = $sid
+      account = $p.account
+      resume_account = $p.resume_account
+      phase = 'deferred'
+      cause = 'source_concurrency_gate'
+      reason = $admit.Reason
+    } | ConvertTo-Json -Compress
+    Add-Content -Path $ledgerPath -Value $rec
+    continue
+  }
+
   # re-home: copy the transcript into the target account first, else
   # `claude --resume` (CLAUDE_CONFIG_DIR + cwd scoped) can't find it there.
   if ($p.rehomed) {
@@ -201,14 +346,21 @@ foreach ($p in @($plan)) {
       '--dangerously-skip-permissions') `
     -WorkingDirectory $wd -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $out -RedirectStandardError "$out.err"
-  # record in the durable ledger BEFORE anything else, so a crash can't double-resume
+  # record in the durable ledger BEFORE anything else, so a crash can't double-resume.
+  # ts is computed PER LAUNCH (not once per tick): the source governor's spacing floor
+  # and the launch-spacing witness both read these timestamps, so two launches paced
+  # $LaunchSpacingSec apart must not share one stale tick-start second (#2172).
   $attempt = [int]$launchCount[$sid] + 1
-  $rec = @{ ts = $nowIso; session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp; phase = 'launched'; attempt = $attempt } | ConvertTo-Json -Compress
+  $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; rehomed = [bool]$p.rehomed; project = $p.project; pid = $proc.Id; cause = $p.disp; phase = 'launched'; attempt = $attempt } | ConvertTo-Json -Compress
   Add-Content -Path $ledgerPath -Value $rec
   $launchCount[$sid] = $attempt
+  $liveResume[$sid] = $proc.Id
   $launched++
   Note "  RESUMED $sid8 acct=$acct pid=$($proc.Id) (attempt $attempt/$MaxAttempts; re-eligible if it dies again)"
   Toast "Resumed dead session" "$sid8  ($acct / $($p.project))" 'info' "resume:$sid" 1440
+  if ($LaunchSpacingSec -gt 0 -and $launched -lt $MaxPerTick) {
+    Start-Sleep -Seconds $LaunchSpacingSec
+  }
 }
 
 # 2. alert on true login-blocked accounts -- once per account blocker.
