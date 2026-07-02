@@ -524,6 +524,55 @@ func BuildCompactReport(sessions []Session, agg Aggregate, nsPrefix string, sinc
 	return rep
 }
 
+// BuildCompactReportFromDiscovery discovers transcripts, analyzes the selected
+// window, and returns the compact machine-readable report used by CLI and HTTP
+// action surfaces. Missing default roots are treated as an empty window by
+// Discover; other discovery errors are returned to the caller.
+func BuildCompactReportFromDiscovery(opts DiscoverOptions, includeSubagents bool, max int, generated time.Time) (CompactReport, error) {
+	recs, err := Discover(opts)
+	if err != nil {
+		return CompactReport{}, err
+	}
+	totalDiscovered := len(recs)
+	if max > 0 && len(recs) > max {
+		recs = recs[:max]
+	}
+	sessions := make([]Session, 0, len(recs))
+	for _, rec := range recs {
+		s := Analyze(rec.Path)
+		s.Kind = rec.Kind
+		sessions = append(sessions, s)
+	}
+	included := make([]Session, 0, len(sessions))
+	for _, s := range sessions {
+		if !includeSubagents && s.Kind == "subagent" {
+			continue
+		}
+		included = append(included, s)
+	}
+	agg := AggregateSessions(included)
+	var excluded *Summary
+	if !includeSubagents {
+		allOpts := opts
+		allOpts.IncludeSubagents = true
+		allRecs, err := Discover(allOpts)
+		if err != nil {
+			return CompactReport{}, err
+		}
+		var subRecs []Transcript
+		for _, rec := range allRecs {
+			if rec.Kind == "subagent" {
+				subRecs = append(subRecs, rec)
+			}
+		}
+		if len(subRecs) > 0 {
+			sum := SummarizeTranscripts(subRecs)
+			excluded = &sum
+		}
+	}
+	return BuildCompactReport(included, agg, opts.NamespacePrefix, opts.SinceDays, includeSubagents, max, totalDiscovered, excluded, generated), nil
+}
+
 func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDays *float64, includeSubagents bool, maxSessions int, discoveredCount int, excludedSubagents *Summary, generated time.Time) string {
 	var b strings.Builder
 	ok := validSessions(sessions)
