@@ -25,6 +25,7 @@ type debugVarsResponse struct {
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
 	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
 	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
+	Sessions         []debugSessionVars             `json:"sessions,omitempty"`
 	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
 	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
 	Metrics          debugMetricsVars               `json:"metrics"`
@@ -394,6 +395,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
+		Sessions:         s.debugSessions(ctx),
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
 		Metrics: debugMetricsVars{
@@ -417,6 +419,56 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+}
+
+// debugSessionVars is the per-session drive-state row /debug/vars mirrors for live
+// operator panes (the `fak info` agents sub-pane): which sessions — the main agent and
+// any sub-agents it spawned — are running through this gateway RIGHT NOW, with the
+// resource axes the session registry already tracks. ParentTrace/Generation carry the
+// sub-agent lineage (a row with a parent IS a sub-agent); the budget fields are the
+// REMAINING allotment (what the operator seeded minus what the session consumed), and
+// ElapsedSeconds is live wall-clock. Everything here is a projection of SessionState —
+// no payloads, no transcript text — so the pane stays redaction-safe by construction.
+type debugSessionVars struct {
+	TraceID           string `json:"trace_id"`
+	Run               string `json:"run"`
+	ParentTrace       string `json:"parent_trace,omitempty"`
+	Generation        int    `json:"generation,omitempty"`
+	Priority          int    `json:"priority,omitempty"`
+	TurnsLeft         int    `json:"turns_left"`
+	TokensLeft        int    `json:"tokens_left"`
+	ContextTokensLeft int    `json:"context_tokens_left,omitempty"`
+	ElapsedSeconds    int64  `json:"elapsed_seconds,omitempty"`
+	Assumptions       int    `json:"assumptions,omitempty"`
+}
+
+// debugSessions folds the live session registry into /debug/vars rows. Stopped sessions
+// are dropped (matching debugAssumptions: the pane shows what is running, not history),
+// and rows keep the registry's own order so the main agent — registered first — leads.
+func (s *Server) debugSessions(ctx context.Context) []debugSessionVars {
+	if s.listSessions == nil {
+		return nil
+	}
+	sessions := s.listSessions(ctx)
+	var out []debugSessionVars
+	for _, st := range sessions {
+		if strings.EqualFold(strings.TrimSpace(st.Run), "stopped") {
+			continue
+		}
+		out = append(out, debugSessionVars{
+			TraceID:           strings.TrimSpace(st.TraceID),
+			Run:               strings.TrimSpace(st.Run),
+			ParentTrace:       strings.TrimSpace(st.ParentTrace),
+			Generation:        st.Generation,
+			Priority:          st.Priority,
+			TurnsLeft:         st.Budget.TurnsLeft,
+			TokensLeft:        st.Budget.TokensLeft,
+			ContextTokensLeft: st.Budget.ContextTokensLeft,
+			ElapsedSeconds:    st.Time.ElapsedSeconds,
+			Assumptions:       len(st.Assumptions),
+		})
+	}
+	return out
 }
 
 func (s *Server) debugAssumptions(ctx context.Context) []SessionAssumption {
