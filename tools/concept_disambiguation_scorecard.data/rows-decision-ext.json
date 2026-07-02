@@ -127,7 +127,8 @@
       ],
       "aliases": [
         "decisionheartbeatpin",
-        "decisionlazyrebuild"
+        "decisionlazyrebuild",
+        "providervcachedecisions"
       ],
       "grounding": "decisionridenatural",
       "grounding_kind": "symbol",

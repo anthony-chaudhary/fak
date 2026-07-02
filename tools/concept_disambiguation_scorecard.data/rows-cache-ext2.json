@@ -374,7 +374,8 @@
         "cache_control"
       ],
       "aliases": [
-        "explicitcache"
+        "explicitcache",
+        "providervcachedecisions"
       ],
       "grounding": "nocache",
       "grounding_kind": "symbol",
