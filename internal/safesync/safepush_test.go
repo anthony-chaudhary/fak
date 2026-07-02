@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDecidePush(t *testing.T) {
@@ -161,6 +162,117 @@ func TestSafePush_GitUnavailable(t *testing.T) {
 	}
 	if res.Reason != PushReasonGitMissing {
 		t.Fatalf("git-missing push = %+v, want GIT_UNAVAILABLE", res)
+	}
+}
+
+// swallowPushSleep replaces the retry backoff for the duration of a test,
+// recording each wait instead of actually sleeping.
+func swallowPushSleep(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var waits []time.Duration
+	prev := pushSleep
+	pushSleep = func(d time.Duration) { waits = append(waits, d) }
+	t.Cleanup(func() { pushSleep = prev })
+	return &waits
+}
+
+func TestIsTransientPushNetwork(t *testing.T) {
+	transient := []string{
+		"fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com",
+		"fatal: the remote end hung up unexpectedly",
+		"error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
+		"fatal: unable to access 'https://github.com/x/y/': Failed to connect to github.com port 443: Connection timed out",
+		"fatal: early EOF",
+	}
+	for _, m := range transient {
+		if !isTransientPushNetwork(m) {
+			t.Errorf("should classify transient network: %q", m)
+		}
+	}
+	permanent := []string{
+		"remote: Permission to repo denied to user",
+		"fatal: Authentication failed for 'https://github.com/x/y/'",
+		"remote rejected: PUBLIC_LEAK secret detected",
+		" ! [rejected] main -> main (non-fast-forward)",
+		"remote: error: GH013: Repository rule violations found",
+		"",
+	}
+	for _, m := range permanent {
+		if isTransientPushNetwork(m) {
+			t.Errorf("must NOT retry a permanent failure as network-transient: %q", m)
+		}
+	}
+}
+
+func TestSafePush_TransientNetworkRetriesThenPushes(t *testing.T) {
+	// The first push loses a network blip (remote hung up); the retry lands. No
+	// fetch/divergence dance should run for a network failure — the remote did
+	// not reject anything, the transport just dropped.
+	waits := swallowPushSleep(t)
+	sr := &scriptedRunner{
+		push: []RunResult{
+			{Code: 128, Stderr: []byte("fatal: the remote end hung up unexpectedly")},
+			{Code: 0},
+		},
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if !res.Pushed || res.Attempts != 2 || res.Reason != "" {
+		t.Fatalf("network-blip push = %+v, want pushed on attempt 2", res)
+	}
+	if len(*waits) != 1 || (*waits)[0] <= 0 {
+		t.Fatalf("waits = %v, want exactly one positive backoff before the re-push", *waits)
+	}
+	for _, c := range sr.calls {
+		if strings.HasPrefix(c, "fetch") {
+			t.Errorf("a network blip must not trigger the fetch/divergence dance; calls=%v", sr.calls)
+		}
+	}
+}
+
+func TestSafePush_PersistentNetworkFailureIsUnreachable(t *testing.T) {
+	// A network failure that outlives every retry surfaces as REMOTE_UNREACHABLE
+	// (the retry-eligible class), never PUSH_ERROR (the halt class).
+	swallowPushSleep(t)
+	sr := &scriptedRunner{
+		push: []RunResult{{Code: 128, Stderr: []byte("fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com")}},
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", MaxRetries: 3, Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != PushReasonUnreachable || res.Attempts != 3 {
+		t.Fatalf("persistent network push = %+v, want REMOTE_UNREACHABLE after 3 attempts", res)
+	}
+	if !strings.Contains(res.Detail, "Could not resolve host") {
+		t.Fatalf("detail should carry the raw failure headline, got %q", res.Detail)
+	}
+}
+
+func TestSafePush_RaceRetryBacksOffJittered(t *testing.T) {
+	// The non-ff race retry must not re-push in lockstep: a backoff (with jitter
+	// in (0, base]) runs between attempts.
+	waits := swallowPushSleep(t)
+	sr := &scriptedRunner{
+		push:      []RunResult{nonFF(), {Code: 0}},
+		fetch:     RunResult{Code: 0},
+		ancestors: map[string]int{"origin/main..HEAD": 0},
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if !res.Pushed || res.Attempts != 2 {
+		t.Fatalf("race push = %+v, want pushed on attempt 2", res)
+	}
+	if len(*waits) != 1 {
+		t.Fatalf("waits = %v, want exactly one backoff between the race re-push", *waits)
+	}
+	base := 250 * time.Millisecond // attempt 1: 1²×250ms
+	if (*waits)[0] < base/2 || (*waits)[0] > base {
+		t.Fatalf("backoff %v outside jitter band [%v, %v]", (*waits)[0], base/2, base)
 	}
 }
 
