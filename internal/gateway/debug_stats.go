@@ -32,11 +32,13 @@ package gateway
 // ever emitted, never a prompt byte.
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
@@ -181,7 +183,33 @@ func (s *Server) renderTurnDebugError(trace, wire string, err error, elapsed tim
 	if s == nil || s.debugStatsf == nil {
 		return
 	}
-	s.debugStatsf("%s", formatTurnDebugError(trace, wire, debugErrorReason(err), elapsed))
+	s.debugStatsf("%s", formatTurnDebugError(trace, wire, debugErrorReason(err), elapsed)+debugErrorDetail(err))
+}
+
+// debugErrorDetail renders the rate-limit truth a failure carries beyond its coarse reason
+// token — appended to the FAILED line so a classified condition is never collapsed into an
+// anonymous failure (#2257). Three optional fields, each present only when the error
+// actually carries it: kind= the closed rate-limit vocabulary token (session_limit /
+// weekly_limit / usage_limit / rate_limited — the SAME classification `fak resume scan`
+// derives post-mortem, so the live line and the transcript verdict speak one vocabulary);
+// announced_wait= the full wait the retry loop had announced when the turn died mid-sleep;
+// client_gone= whether the wait ended because the CALLER hung up (the wrapped client's own
+// request timeout — the #2256 supervisor's park signal) rather than a deadline. An error
+// with none of these (a stall, a glitch, a plain 4xx) appends nothing, byte-for-byte.
+func debugErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	var b strings.Builder
+	var se *agent.UpstreamStatusError
+	if errors.As(err, &se) && se.LimitReason != "" {
+		fmt.Fprintf(&b, " kind=%s", debugField(se.LimitReason))
+	}
+	var ri *agent.RetryInterruptedError
+	if errors.As(err, &ri) {
+		fmt.Fprintf(&b, " announced_wait=%s client_gone=%t", ri.AnnouncedWait.Round(time.Second), ri.ClientGone())
+	}
+	return b.String()
 }
 
 // debugErrorReason maps a planner/proxy error to the closed reason token the FAILED debug line
