@@ -137,6 +137,7 @@ const (
 	ReasonWindowFull      = "WINDOW_FULL"       // adaptive writer window is full (retryable)
 	ReasonHookRefused     = "HOOK_REFUSED"      // git/commit-hook refused the commit (exit != 0)
 	ReasonPathspecRace    = "PATHSPEC_RACE"     // a peer swept extra files into the commit — the headline guard
+	ReasonMessageRace     = "MESSAGE_RACE"      // landed subject/body differs from the requested message — commit left intact
 	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
 	ReasonReviewRefuted   = "REVIEW_REFUTED"    // opt-in scout review refuted the diff before commit
@@ -323,7 +324,7 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	}
 	defer cleanup()
 
-	commitArgs := []string{"commit"}
+	commitArgs := []string{"commit", "--cleanup=verbatim"}
 	if opts.SignOff {
 		commitArgs = append(commitArgs, "-s")
 	}
@@ -384,6 +385,21 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
 		recordPathspec = true
 		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonSymlinkEscape, "resolved-targets-within-requested-set=false"
+		return res, nil
+	}
+	if landedMsg, code, merr := run(ctx, opts.Dir, "log", "-1", "--format=%B"); merr != nil {
+		return res, fmt.Errorf("safecommit: git not executable: %w", merr)
+	} else if code != 0 {
+		res.Reason = ReasonMessageRace
+		res.Detail = "could not read landed commit message for verification; commit left intact for review, not pushed"
+		recordPathspec = true
+		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonMessageRace, "committed-message-readable=false"
+		return res, nil
+	} else if !commitMessagesMatch(landedMsg, opts.Message) {
+		res.Reason = ReasonMessageRace
+		res.Detail = "landed commit message does not match the requested message; commit left intact for review, not pushed"
+		recordPathspec = true
+		recordVerdict, recordReason, recordAssertion = witness.VerdictAssertFail, ReasonMessageRace, "committed-message==requested-message=false"
 		return res, nil
 	}
 	res.Verified = true
@@ -785,6 +801,25 @@ func writeMessageFile(msg string) (path string, cleanup func(), err error) {
 		return "", func() {}, err
 	}
 	return name, cleanup, nil
+}
+
+func commitMessagesMatch(landed, requested string) bool {
+	return comparableCommitMessage(landed) == comparableCommitMessage(requested)
+}
+
+func comparableCommitMessage(msg string) string {
+	msg = strings.ReplaceAll(msg, "\r\n", "\n")
+	msg = strings.TrimSpace(msg)
+	lines := strings.Split(msg, "\n")
+	for len(lines) > 0 {
+		last := strings.TrimSpace(lines[len(lines)-1])
+		if last == "" || strings.HasPrefix(strings.ToLower(last), "signed-off-by:") {
+			lines = lines[:len(lines)-1]
+			continue
+		}
+		break
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // trimDetail bounds a captured git/hook stderr+stdout blob so Result.Detail stays a useful

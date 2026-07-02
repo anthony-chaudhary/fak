@@ -218,6 +218,21 @@ func runHooksCommitMsg(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	freshMode, freshEscaped := gateMode("FLEET_FRESH_DELETE_GUARD", "FLEET_ALLOW_FRESH_DELETE")
+	if freshMode != "off" && !freshEscaped && r != "" {
+		if findings, ferr := hooks.FreshDeletionFindings(r, msg); ferr == nil && len(findings) > 0 {
+			fmt.Fprintf(stderr, "FRESH_DELETION: %d fresh staged deletion(s) not named in the commit message:\n", len(findings))
+			for _, f := range findings {
+				fmt.Fprintf(stderr, "  %s\n", formatFinding(f))
+			}
+			if freshMode == "block" {
+				fmt.Fprintln(stderr, "  (FLEET_FRESH_DELETE_GUARD=warn softens; =off disables; FLEET_ALLOW_FRESH_DELETE=1 overrides once)")
+				return 1
+			}
+			fmt.Fprintln(stderr, "  advisory only because FLEET_FRESH_DELETE_GUARD=warn.")
+		}
+	}
+
 	msgMode, msgEscaped := gateMode("FLEET_MSG_GUARD", "FLEET_ALLOW_MSG")
 	if strings.TrimSpace(os.Getenv("FLEET_MSG_GUARD")) == "" {
 		msgMode = "warn"

@@ -21,9 +21,10 @@ import (
 type fakeGit struct {
 	// reply maps a key (see keyFor) to a canned (stdout, code). A missing key returns
 	// ("", 0) — a benign default that suits the read probes.
-	reply map[string]reply
-	calls [][]string
-	err   error // non-nil => git could not be executed (infra failure on every call)
+	reply     map[string]reply
+	calls     [][]string
+	landedMsg string
+	err       error // non-nil => git could not be executed (infra failure on every call)
 }
 
 type reply struct {
@@ -68,7 +69,7 @@ func keyFor(args []string) string {
 		return args[0]
 	case "cat-file":
 		return strings.Join(args, " ")
-	case "symbolic-ref", "diff-tree", "commit", "push", "ls-files":
+	case "symbolic-ref", "diff-tree", "commit", "push", "ls-files", "log":
 		return args[0]
 	default:
 		return args[0]
@@ -81,9 +82,31 @@ func (f *fakeGit) run(_ context.Context, _ string, args ...string) (string, int,
 	}
 	f.calls = append(f.calls, append([]string(nil), args...))
 	if r, ok := f.reply[keyFor(args)]; ok {
+		if len(args) > 0 && args[0] == "commit" && r.code == 0 {
+			f.captureCommitMessage(args)
+		}
 		return r.out, r.code, nil
 	}
+	if len(args) > 0 && args[0] == "log" {
+		return f.landedMsg, 0, nil
+	}
+	if len(args) > 0 && args[0] == "commit" {
+		f.captureCommitMessage(args)
+	}
 	return "", 0, nil
+}
+
+func (f *fakeGit) captureCommitMessage(args []string) {
+	for i, a := range args {
+		if a != "-F" || i+1 >= len(args) {
+			continue
+		}
+		b, err := os.ReadFile(args[i+1])
+		if err == nil {
+			f.landedMsg = string(b)
+		}
+		return
+	}
 }
 
 func (f *fakeGit) sawSubcommand(sub string) bool {
@@ -145,11 +168,13 @@ func onTrunkBase() map[string]reply {
 	}
 }
 
+const baseCommitMessage = "fix(foo): correct the bar — keep the cache prefix\n\n(fak safecommit)"
+
 func baseOpts() Options {
 	return Options{
 		Dir:     "/repo",
 		Paths:   []string{"internal/foo/bar.go"},
-		Message: "fix(foo): correct the bar — keep the cache prefix\n\n(fak safecommit)",
+		Message: baseCommitMessage,
 		SignOff: true,
 	}
 }
@@ -302,6 +327,37 @@ func TestPathspecRace_isTheHeadlineGuard(t *testing.T) {
 	}
 	if res.Pushed {
 		t.Fatalf("race: must not report Pushed")
+	}
+}
+
+func TestMessageRaceRefusesAndDoesNotPush(t *testing.T) {
+	g := &fakeGit{reply: onTrunkBase()}
+	g.reply["log"] = reply{out: "feat(session): peer message landed instead\n\n(fak session)\n", code: 0}
+	opts := baseOpts()
+	opts.Push = true
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
+	if err != nil {
+		t.Fatalf("unexpected infra error: %v", err)
+	}
+	if !res.Committed || res.Verified {
+		t.Fatalf("message race: want Committed && !Verified, got Committed=%v Verified=%v", res.Committed, res.Verified)
+	}
+	if res.Reason != ReasonMessageRace {
+		t.Fatalf("message race: want reason %q, got %+v", ReasonMessageRace, res)
+	}
+	if res.Pushed || g.sawSubcommand("push") {
+		t.Fatalf("message race must not push; res=%+v calls=%v", res, g.calls)
+	}
+	if !strings.Contains(res.Detail, "message does not match") {
+		t.Fatalf("detail should name the message mismatch, got %q", res.Detail)
+	}
+}
+
+func TestCommitMessagesMatchIgnoresDCOAddedByGit(t *testing.T) {
+	landed := baseCommitMessage + "\n\nSigned-off-by: Agent <agent@example.test>\n"
+	if !commitMessagesMatch(landed, baseCommitMessage) {
+		t.Fatalf("git-added DCO trailer should not make the requested message look raced")
 	}
 }
 

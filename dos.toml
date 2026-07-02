@@ -644,6 +644,24 @@ summary  = "a pathspec commit would silently drop a peer's pushed block -- the w
 fix      = "fetch + rebase/merge origin/<trunk> so the working-tree base includes the peer's block, then re-commit; never escape into a side tree. FAK_STALE_BASE_GUARD=warn for advisory mode, =off to disable. Floor: internal/safecommit checkStaleBaseDeletion (fail-open on a fresh base / absent ref)."
 see_also = ["fak/internal/safecommit/stalebase.go", "fak/CLAUDE.md", "fak/AGENTS.md"]
 
+# Fresh deletion: a commit that deletes a path added only a few commits ago is a
+# strong stale-snapshot signature unless the message names the deletion. The
+# commit-msg hook sees both the staged deletion set and the proposed message, so
+# it can distinguish an intentional prune from collateral loss of peer work.
+[reasons.FRESH_DELETION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a staged commit deletes a path added within the recent trunk window, but the commit message does not mention that path -- the shape of a stale-snapshot commit silently reverting peer work"
+fix      = "restore the path if the deletion is collateral; if it is intentional, name the deleted path in the commit message or override once with FLEET_ALLOW_FRESH_DELETE=1. FLEET_FRESH_DELETE_GUARD=warn softens and =off disables. Floor: fak hooks commit-msg FreshDeletionFindings."
+see_also = ["internal/hooks/gate_freshdeletion.go", "fak/AGENTS.md", "issue #2320"]
+
+[reasons.MESSAGE_RACE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a safecommit operation created a commit whose landed subject/body does not match the requested message -- a concurrent writer or hook path mis-bound the witness message"
+fix      = "do not push the commit. Leave it intact for review, recover the intended message in a follow-up witnessed commit or operator maintenance path, and avoid raw git commit on the shared tree. Floor: internal/safecommit post-commit message assertion."
+see_also = ["internal/safecommit/safecommit.go", "issue #2196"]
+
 # Hard-self core-lock enforcement (#1683): the commit path refuses an in-agent edit
 # to self-grading machinery unless an independent maintenance witness is confirmed.
 # The class is declared in internal/corelocks; safecommit consumes only the hard-self

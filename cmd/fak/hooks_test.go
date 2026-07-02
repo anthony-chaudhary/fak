@@ -193,3 +193,37 @@ func TestRunHooks_commitMsgBlocksHardwareTell(t *testing.T) {
 		t.Fatalf("FLEET_ALLOW_HW should escape the hardware gate, got %d; stderr=%s", code, errb.String())
 	}
 }
+
+func TestRunHooks_commitMsgBlocksUnnamedFreshDeletion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	p := "docs/notes/SLACK-CONTROL-FOUNDATION-2026-07-02.md"
+	repo := newRepoWith(t, map[string]string{p: "# Slack control\n"})
+	gitHook(t, repo, "commit", "-m", "docs(notes): add slack control foundation note")
+	if err := os.Remove(filepath.Join(repo, filepath.FromSlash(p))); err != nil {
+		t.Fatal(err)
+	}
+	gitHook(t, repo, "add", "--all", "--", p)
+
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.txt")
+	good := filepath.Join(dir, "good.txt")
+	_ = os.WriteFile(bad, []byte("docs(notes): bind no-babysitting doctrine\n"), 0o644)
+	_ = os.WriteFile(good, []byte("docs(notes): remove Slack Control Foundation note\n"), 0o644)
+	t.Setenv("FLEET_FRESH_DELETE_GUARD", "block")
+
+	var out, errb bytes.Buffer
+	if code := runHooks(&out, &errb, []string{"commit-msg", "--root", repo, bad}); code != 1 {
+		t.Fatalf("unnamed fresh deletion should block, got %d; stderr=%s", code, errb.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("FRESH_DELETION")) {
+		t.Fatalf("stderr should name FRESH_DELETION, got %s", errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := runHooks(&out, &errb, []string{"commit-msg", "--root", repo, good}); code != 0 {
+		t.Fatalf("message naming the deleted note should pass, got %d; stderr=%s", code, errb.String())
+	}
+}

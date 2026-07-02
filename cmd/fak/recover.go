@@ -167,6 +167,26 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{"retry the original path-scoped commit after the merge is clean"},
 		},
+		"FRESH_DELETION": {
+			Reason:     "FRESH_DELETION",
+			Summary:    "a staged commit deletes a recently-added path without naming it in the message",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "restore", "--staged", "<path>"}, Summary: "unstage the suspicious deletion while preserving the working tree", Safe: true},
+				{Argv: []string{"git", "restore", "--", "<path>"}, Summary: "restore the path if the deletion was collateral", Safe: true},
+			},
+			Notes: []string{"if the deletion is intentional, include the deleted path in the commit message or override once with FLEET_ALLOW_FRESH_DELETE=1"},
+		},
+		"MESSAGE_RACE": {
+			Reason:     "MESSAGE_RACE",
+			Summary:    "a commit landed with a different subject/body than the requested message",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "show", "--stat", "HEAD"}, Summary: "inspect the unpushed mis-bound commit and keep it intact for review"},
+				{Argv: []string{"git", "log", "-1", "--format=%B"}, Summary: "read the landed message before deciding the remediation path"},
+			},
+			Notes: []string{"do not push the mis-bound commit as verified; avoid raw git commit on the shared tree and use fak commit by explicit path"},
+		},
 		"MERGE_IN_PROGRESS": {
 			Reason:     "MERGE_IN_PROGRESS",
 			Summary:    "drop your staged paths and wait unless this is your merge to finish",
