@@ -1,8 +1,8 @@
 {
   "schema": "fak-scorecard-control-pane.baseline/1",
-  "commit": "5f5e70fc",
+  "commit": "93ec4579",
   "total_debt": 1257,
-  "grade_debt": 52,
+  "grade_debt": 56,
   "metrics": {
     "doc": 0,
     "readme": 0,
@@ -68,8 +68,8 @@
     "disambiguation": 0,
     "intent_literal": 2,
     "tokendefaults": 0,
-    "guard_rsi": 0,
-    "dogfood": 1,
+    "guard_rsi": 1,
+    "dogfood": 4,
     "conceptusage": 8,
     "maturity": 2,
     "growth": 2,

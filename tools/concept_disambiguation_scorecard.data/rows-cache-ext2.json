@@ -62,7 +62,10 @@
         "vcacheturnssnapshot",
         "vcachesnapshot",
         "observevcacheturn",
-        "fakvcache"
+        "fakvcache",
+        "fakvcachesnapshot",
+        "writeconfiguredvcachesnapshot",
+        "writeexplicitvcachesnapshot"
       ],
       "grounding": "vcacheturns",
       "grounding_kind": "symbol",
