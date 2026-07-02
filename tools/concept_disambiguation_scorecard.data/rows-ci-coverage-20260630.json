@@ -1009,24 +1009,6 @@
       "gaps": []
     },
     {
-      "id": "x-ci-coverage-witness-proof-proofwitness",
-      "canonical": "proofwitness (witness-proof identifier)",
-      "family": "witness-proof",
-      "kind": "symbol",
-      "definition": "proofwitness is the concrete witness-proof identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring witness-proof concepts.",
-      "distinction": "proofwitness is a specific tree identifier in the witness-proof namespace, not the broader sibling concept referenced by x2-witness-proof-witnessstatus.",
-      "distinct_from": [
-        "x2-witness-proof-witnessstatus"
-      ],
-      "aliases": [],
-      "grounding": "proofwitness",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-ci-coverage-cache-providerpromptcachereadtokenequiv",
       "canonical": "providerpromptcachereadtokenequiv (cache identifier)",
       "family": "cache",
