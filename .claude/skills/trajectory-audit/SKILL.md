@@ -1,6 +1,6 @@
 ---
 name: trajectory-audit
-description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens. Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", or wants cross-session efficiency numbers. Read-only — emits a dated report, never edits code.
+description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, and per-file mutation churn. Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
@@ -13,11 +13,16 @@ metadata:
 # /trajectory-audit — cross-session token & cache-efficiency sweep
 
 > Wraps `tools/session_audit.py` (exact token accounting from the transcript
-> `message.usage` records). **Honest scope:** this is the *token-weighted* lens —
-> exact I:O ratio, cache reuse, cost (split by billing bucket), tool mix, heaviest
-> sessions. It does **not** flag read-loops / shell-poll / glob-storms, and it does
-> **not** join the transcript to any external run-id spine. Treat the numbers as a
-> cost/efficiency census, not a behavior audit.
+> `message.usage` records). Two lenses now run on every sweep:
+> the *token-weighted* lens — exact I:O ratio, cache reuse, cost (split by billing
+> bucket), tool mix, heaviest sessions — and the *behavioral* stuck/churn lens
+> (#2365): per-tool call/error counts + error rate, shell timeout kills (exit 143 /
+> "timed out"), foreground sleep-polls (`sleep`/`Start-Sleep` command prefix),
+> Edit/Write read-discipline churn, repeated identical failure signatures (≥3×),
+> and per-file mutation churn (≥5 edits of one file — the rewrite-loop smell).
+> **Honest scope:** it still does **not** flag loops of *successful* identical
+> calls (read-loops / glob-storms — only failures and mutations are looped-checked),
+> and it does **not** join the transcript to any external run-id spine.
 >
 > **Billing buckets — the one cost rule.** Each model's tokens land on its vendor's
 > invoice: `claude-*` is the Anthropic bucket; a `gemini-*` / `gpt-*` / local model
@@ -53,7 +58,9 @@ namespace prefix it scans). Pass `--root` only if your transcripts live elsewher
   skim programmatically.
 - `--all` — drop the namespace filter (audit every project, not just the current repo family).
 - `deep <session.jsonl>` — single-trajectory drill-down (the user asks in order,
-  per-turn token spend) — use only when a heaviest-session row needs a root cause.
+  per-turn token spend, plus the behavior line: errors / timeout kills /
+  sleep-polls / churn / worst repeats) — use when a heaviest-session or
+  behavioral-offender row needs a root cause.
 
 ## Procedure
 
@@ -92,7 +99,17 @@ The report gives you, in order:
 5. **Per-session distributions** — median/p90 of tool-calls, output tokens, I:O
    ratio, cache-hit fraction, read-only fraction. The tails are where the waste is.
 6. **Global tool mix** — a tool dominating the call count is the first thing to question.
-7. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
+7. **Behavioral lens — stuck/churn detectors** — per-tool error rates, timeout
+   kills, sleep-polls, Edit/Write churn, then the two worst-offender tables:
+   sessions with a repeated identical failure (≥3× the same signature = a stuck
+   loop) and sessions with file churn (≥5 mutations of one file = a rewrite-loop
+   smell). These rows are the behavior audit the token lens can't see — each one
+   names a session worth a `deep` drill.
+8. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
+
+The `trend` subcommand carries the same detectors per time bucket (`err%` /
+`t/o` / `slp` / `chrn` columns, plus a `behavior` object in `--json` rows), so a
+regression in fleet behavior is visible week-over-week, not just in one sweep.
 
 Do **not** open the individual `.jsonl` files unless a heaviest-session row needs
 a root cause the rollup can't name. If you do, run `deep <session>` once — don't
@@ -118,7 +135,9 @@ re-read it in a loop.
 
 End with a short operator summary: the headline machine-wide numbers (I:O,
 cache-read share, **cost named by bucket + dominant model**), the single heaviest
-session and its likely cause, and any distribution tail that crosses a sane bar.
+session and its likely cause, the single worst behavioral offender (a repeated
+identical failure or a file-churn loop) if one crossed the threshold, and any
+distribution tail that crosses a sane bar.
 Don't dump the whole table into chat — link the report file.
 
 ## Output
