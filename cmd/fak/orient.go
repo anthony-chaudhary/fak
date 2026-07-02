@@ -16,7 +16,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
-func cmdOrient(argv []string) { os.Exit(runOrient(os.Stdout, os.Stderr, argv)) }
+func cmdOrient(argv []string) {
+	// `fak orient env` — the runtime-environment preflight (#2079), homed here
+	// rather than as a new top-level verb (orient_env.go).
+	if len(argv) > 0 && argv[0] == "env" {
+		os.Exit(runOrientEnv(os.Stdout, os.Stderr, argv[1:]))
+	}
+	os.Exit(runOrient(os.Stdout, os.Stderr, argv))
+}
 
 type orientPathFlags []string
 
