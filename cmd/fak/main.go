@@ -75,6 +75,23 @@ func main() {
 		recordUsage(verb, argv, 2, start)
 		os.Exit(2)
 	}
+	// C2 of epic #2228 (#2231): `fak dev <verb>` is the canonical namespace of the
+	// dev tier. It resolves BEFORE the dispatch switch by rewriting os.Args to the
+	// underlying verb, so the very same case arm runs — byte-identical dispatch, no
+	// re-exec — and the 200-case switch (plus the devindex scanner keyed on its
+	// `switch os.Args[1]` header) stays untouched. The usage journal records the
+	// composite verb ("dev commit" vs bare "commit"): the bare-vs-namespaced
+	// adoption evidence the C5 enforcement flip is gated on.
+	if os.Args[1] == "dev" {
+		v, rest, code := resolveDevVerb(os.Args[2:], os.Stdout, os.Stderr)
+		if code >= 0 {
+			recordUsage(verb, argv, code, start)
+			os.Exit(code)
+		}
+		verb = "dev " + v
+		argv = rest
+		os.Args = append([]string{os.Args[0], v}, rest...)
+	}
 	switch os.Args[1] {
 	case "run":
 		cmdRun(os.Args[2:])
