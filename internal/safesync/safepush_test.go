@@ -166,13 +166,17 @@ func TestSafePush_GitUnavailable(t *testing.T) {
 }
 
 // swallowPushSleep replaces the retry backoff for the duration of a test,
-// recording each wait instead of actually sleeping.
+// recording each wait instead of actually sleeping (still honoring an
+// already-cancelled ctx, like the real pushWait).
 func swallowPushSleep(t *testing.T) *[]time.Duration {
 	t.Helper()
 	var waits []time.Duration
-	prev := pushSleep
-	pushSleep = func(d time.Duration) { waits = append(waits, d) }
-	t.Cleanup(func() { pushSleep = prev })
+	prev := pushWait
+	pushWait = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { pushWait = prev })
 	return &waits
 }
 
@@ -183,6 +187,11 @@ func TestIsTransientPushNetwork(t *testing.T) {
 		"error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
 		"fatal: unable to access 'https://github.com/x/y/': Failed to connect to github.com port 443: Connection timed out",
 		"fatal: early EOF",
+		// GitHub's most common transient SSH throttle, both OpenSSH phrasings.
+		"kex_exchange_identification: Connection closed by remote host\r\nfatal: Could not read from remote repository.",
+		"ssh_exchange_identification: Connection closed by remote host",
+		// curl 52: the server dropped before answering.
+		"fatal: unable to access 'https://github.com/x/y.git/': Empty reply from server",
 	}
 	for _, m := range transient {
 		if !isTransientPushNetwork(m) {
@@ -196,11 +205,40 @@ func TestIsTransientPushNetwork(t *testing.T) {
 		" ! [rejected] main -> main (non-fast-forward)",
 		"remote: error: GH013: Repository rule violations found",
 		"",
+		// A permanent 403 DRAGS transport trailers that match transient needles
+		// ("unexpected disconnect", "the remote end hung up") — the permanent
+		// marker must win or SafePush spins retries against an auth wall.
+		"error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\n" +
+			"send-pack: unexpected disconnect while reading sideband packet\n" +
+			"fatal: the remote end hung up unexpectedly",
+		// SSH auth rejection: "Permission denied (publickey)" is permanent even
+		// though SSH transport failures are otherwise retryable.
+		"git@github.com: Permission denied (publickey).\r\nfatal: Could not read from remote repository.",
 	}
 	for _, m := range permanent {
 		if isTransientPushNetwork(m) {
 			t.Errorf("must NOT retry a permanent failure as network-transient: %q", m)
 		}
+	}
+}
+
+func TestSafePush_403WithTransportTrailersSurfacesImmediately(t *testing.T) {
+	// The full multi-line 403 blob must exit PUSH_ERROR on attempt 1 — no
+	// retries, no REMOTE_UNREACHABLE — despite its transient-looking trailers.
+	waits := swallowPushSleep(t)
+	sr := &scriptedRunner{push: []RunResult{{Code: 128, Stderr: []byte(
+		"error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\n" +
+			"send-pack: unexpected disconnect while reading sideband packet\n" +
+			"fatal: the remote end hung up unexpectedly")}}}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != PushReasonError || res.Attempts != 1 {
+		t.Fatalf("403 push = %+v, want PUSH_ERROR on attempt 1 (permanent wins over trailers)", res)
+	}
+	if len(*waits) != 0 {
+		t.Fatalf("no backoff should fire for a permanent rejection, got %v", *waits)
 	}
 }
 
@@ -273,6 +311,27 @@ func TestSafePush_RaceRetryBacksOffJittered(t *testing.T) {
 	base := 250 * time.Millisecond // attempt 1: 1²×250ms
 	if (*waits)[0] < base/2 || (*waits)[0] > base {
 		t.Fatalf("backoff %v outside jitter band [%v, %v]", (*waits)[0], base/2, base)
+	}
+}
+
+func TestSafePush_CancelledMidBackoffIsHonest(t *testing.T) {
+	// A ctx cancelled during the backoff surfaces as CANCELLED — never as a
+	// misattributed PUSH_ERROR/GIT_UNAVAILABLE from the next (dead) git spawn.
+	swallowPushSleep(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // dead before the first backoff; the swallowed pushWait returns ctx.Err()
+	sr := &scriptedRunner{
+		push: []RunResult{{Code: 128, Stderr: []byte("fatal: the remote end hung up unexpectedly")}},
+	}
+	res, err := SafePush(ctx, PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if res.Pushed || res.Reason != PushReasonCancelled || res.Attempts != 1 {
+		t.Fatalf("cancelled push = %+v, want CANCELLED after attempt 1", res)
+	}
+	if !strings.Contains(res.Detail, "cancelled during retry backoff") {
+		t.Fatalf("detail should name the cancellation, got %q", res.Detail)
 	}
 }
 

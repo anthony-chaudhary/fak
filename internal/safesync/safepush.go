@@ -67,6 +67,7 @@ const (
 	PushReasonExhausted   = "RETRIES_EXHAUSTED"  // still racing after MaxRetries — the trunk is moving fast
 	PushReasonGitMissing  = "GIT_UNAVAILABLE"    // git/fetch could not run
 	PushReasonUnreachable = "REMOTE_UNREACHABLE" // a transient network failure persisted through every retry
+	PushReasonCancelled   = "CANCELLED"          // the caller's ctx was cancelled mid-backoff; no further attempt was made
 )
 
 // PushResult is the structured outcome of SafePush.
@@ -136,7 +137,9 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 			// the network is down the fetch fails too and would misreport GIT_UNAVAILABLE.
 			lastNetDetail = pushFirstLine(msg)
 			if attempt < max {
-				pushBackoff(attempt)
+				if werr := pushBackoff(ctx, attempt); werr != nil {
+					return cancelledResult(res, werr), nil
+				}
 			}
 			continue
 		}
@@ -153,7 +156,9 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 				// The fetch lost the same network blip; ride it out like the push.
 				lastNetDetail = pushFirstLine(fmsg)
 				if attempt < max {
-					pushBackoff(attempt)
+					if werr := pushBackoff(ctx, attempt); werr != nil {
+						return cancelledResult(res, werr), nil
+					}
 				}
 				continue
 			}
@@ -177,7 +182,9 @@ func SafePush(ctx context.Context, opts PushOptions) (PushResult, error) {
 		// re-collides on the still-moving trunk (and hammers the remote). No sleep
 		// after the FINAL attempt — there is nothing left to wait for.
 		if attempt < max {
-			pushBackoff(attempt)
+			if werr := pushBackoff(ctx, attempt); werr != nil {
+				return cancelledResult(res, werr), nil
+			}
 		}
 	}
 	if lastNetDetail != "" {
@@ -213,15 +220,53 @@ var transientPushNetworkNeedles = []string{
 	"returned error: 502",
 	"returned error: 503",
 	"returned error: 504",
-	"rpc failed; http 5", // git's smart-http phrasing of a 5xx
-	"rpc failed; curl",   // git's smart-http phrasing of a transport error
+	"rpc failed; http 5",               // git's smart-http phrasing of a 5xx
+	"rpc failed; curl",                 // git's smart-http phrasing of a transport error
+	"connection closed by remote host", // GitHub SSH throttle (kex/ssh_exchange_identification)
+	"kex_exchange_identification",      // OpenSSH: the connection died during key exchange
+	"ssh_exchange_identification",      // older OpenSSH phrasing of the same throttle
+	"empty reply from server",          // curl 52: the server dropped before answering
+}
+
+// permanentPushMarkers force a failure OUT of the transient class even when a
+// transport needle also matched. A permanent rejection routinely DRAGS transport
+// trailer lines behind it — a real HTTP 403 push emits
+//
+//	error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403
+//	send-pack: unexpected disconnect while reading sideband packet
+//	fatal: the remote end hung up unexpectedly
+//
+// where the trailers match "unexpected disconnect" / "the remote end hung up"
+// though the CAUSE is authorization. When any of these markers is present the
+// whole blob is permanent (PUSH_ERROR) — retrying an auth/permission/rule
+// rejection just spins against the same wall.
+var permanentPushMarkers = []string{
+	"authentication failed",
+	"permission denied",
+	"permission to",     // remote: Permission to <repo> denied to <user>
+	"gh013",             // GitHub push protection / repository rules
+	"push declined",     // ... (push declined due to repository rule violations)
+	"[remote rejected]", // the remote-side refusal bracket (hooks, protections)
+	"returned error: 401",
+	"returned error: 403",
+	"returned error: 404",
+	"http 401",
+	"http 403",
+	"http 404",
 }
 
 // isTransientPushNetwork reports whether push/fetch output describes a transient
 // network/forge failure worth retrying — the class auditreason files under
 // REMOTE_UNREACHABLE (retry-eligible), as opposed to a permanent rejection.
+// Permanent markers win over transient needles: an auth/permission/rule
+// rejection stays PUSH_ERROR even when it drags transport trailer lines.
 func isTransientPushNetwork(out string) bool {
 	low := strings.ToLower(out)
+	for _, marker := range permanentPushMarkers {
+		if strings.Contains(low, marker) {
+			return false
+		}
+	}
 	for _, needle := range transientPushNetworkNeedles {
 		if strings.Contains(low, needle) {
 			return true
@@ -230,22 +275,43 @@ func isTransientPushNetwork(out string) bool {
 	return false
 }
 
-// pushSleep is time.Sleep, injectable so tests exercise the retry loop without
-// real waits.
-var pushSleep = time.Sleep
+// pushWait sleeps d cancellably under ctx, returning ctx.Err() when the wait
+// was cut short. Injectable so tests exercise the retry loop without real
+// waits. Plain time.Sleep here would strand a cancelled caller for up to a
+// full backoff and then misreport the killed git run as PUSH_ERROR /
+// GIT_UNAVAILABLE instead of the honest CANCELLED.
+var pushWait = func(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
 
-// pushBackoff sleeps the pre-retry backoff after failed attempt `attempt`:
+// pushBackoff waits the pre-retry backoff after failed attempt `attempt`:
 // attempt²×250ms capped at 3s, equal-jittered to [base/2, base] — the same
 // shape as internal/agent's upstream schedule, scaled to git-push latencies.
 // The jitter is the point under high concurrency: peers that lost the same
 // race/blip at the same instant fan out instead of re-colliding in lockstep.
-func pushBackoff(attempt int) {
+// A non-nil return means ctx was cancelled mid-wait.
+func pushBackoff(ctx context.Context, attempt int) error {
 	base := time.Duration(attempt*attempt) * 250 * time.Millisecond
 	if base > 3*time.Second {
 		base = 3 * time.Second
 	}
 	half := int64(base / 2)
-	pushSleep(time.Duration(half) + time.Duration(rand.Int63n(half+1)))
+	return pushWait(ctx, time.Duration(half)+time.Duration(rand.Int63n(half+1)))
+}
+
+// cancelledResult stamps res with the honest cancellation outcome: the caller's
+// ctx died mid-backoff, so no further attempt was (or will be) made.
+func cancelledResult(res PushResult, err error) PushResult {
+	res.Reason = PushReasonCancelled
+	res.Detail = "cancelled during retry backoff: " + err.Error()
+	return res
 }
 
 // classifyPushDivergence compares HEAD to the (already fetched) remote ref.
