@@ -44,6 +44,12 @@ OBSERVE_SCHEMA = "fak.vcache.observe.v1"
 SNAPSHOT_ENV = "FAK_VCACHE_SNAPSHOT"
 OBSERVE_FIXTURE = ROOT / "cmd" / "fak" / "testdata" / "vcache_observe_transcript.jsonl"
 TELEMETRY_FIXTURE = ROOT / "cmd" / "fak" / "testdata" / "vcache_prove_telemetry.jsonl"
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def no_window_creationflags() -> int:
+    """Suppress Windows console windows for helper subprocesses."""
+    return _CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 def default_snapshot_path() -> Path:
@@ -91,6 +97,7 @@ def binary_build_info(path: str) -> dict:
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=no_window_creationflags(),
         )
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         return info
@@ -165,7 +172,12 @@ def run_vcache_json(args: list[str], timeout: int) -> tuple[int, dict]:
     """
     cmd = fak_cmd() + ["vcache"] + args
     proc = subprocess.run(
-        cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout
+        cmd,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=no_window_creationflags(),
     )
     try:
         payload = json.loads(proc.stdout)

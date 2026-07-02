@@ -418,13 +418,16 @@ func TestTrackedTreeHasNoPopups(t *testing.T) {
 	for _, v := range rep.PySpawns {
 		t.Errorf("unsuppressed spawn: %s", v)
 	}
+	for _, v := range rep.PyCandidates {
+		t.Errorf("python spawn watchlist: %s", v)
+	}
 	for _, v := range rep.GoExecs {
 		t.Errorf("go exec popup: %s", v)
 	}
 	for _, v := range rep.GoCandidates {
 		t.Errorf("go exec watchlist: %s", v)
 	}
-	if !rep.OK() || len(rep.GoCandidates) > 0 {
+	if !rep.OK() || len(rep.PyCandidates) > 0 || len(rep.GoCandidates) > 0 {
 		t.Errorf("fix: make the installer off-desktop (S4U) or headless (conhost --headless); " +
 			"flag Python spawns with creationflags=no_window_creationflags(); configure Go helper execs")
 	}
