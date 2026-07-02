@@ -161,21 +161,58 @@ func transcriptRoots(opts Options) []string {
 			return []string{filepath.Join(cfg, "projects", namespace)}
 		}
 	}
-	if home == "" {
-		home = strings.TrimSpace(os.Getenv("USERPROFILE"))
+	if home != "" {
+		return transcriptProjectRoots(namespace, []string{home})
 	}
-	if home == "" {
-		home, _ = os.UserHomeDir()
+	var homes []string
+	if p := strings.TrimSpace(os.Getenv("USERPROFILE")); p != "" {
+		homes = append(homes, p)
 	}
-	if home == "" {
-		return nil
+	if h, _ := os.UserHomeDir(); h != "" {
+		homes = append(homes, h)
 	}
-	matches, err := filepath.Glob(filepath.Join(home, ".claude*", "projects", namespace))
+	homes = append(homes, windowsProfileHomes()...)
+	return transcriptProjectRoots(namespace, homes)
+}
+
+func transcriptProjectRoots(namespace string, homes []string) []string {
+	seen := map[string]struct{}{}
+	var roots []string
+	for _, home := range homes {
+		home = strings.TrimSpace(home)
+		if home == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(home, ".claude*", "projects", namespace))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if _, ok := seen[m]; ok {
+				continue
+			}
+			seen[m] = struct{}{}
+			roots = append(roots, m)
+		}
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+func windowsProfileHomes() []string {
+	entries, err := os.ReadDir(filepath.FromSlash("/mnt/c/Users"))
 	if err != nil {
 		return nil
 	}
-	sort.Strings(matches)
-	return matches
+	var homes []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		homes = append(homes, filepath.Join(filepath.FromSlash("/mnt/c/Users"), e.Name()))
+	}
+	sort.Strings(homes)
+	return homes
 }
 
 // scanConflation reads every transcript newer than the window and counts turns that

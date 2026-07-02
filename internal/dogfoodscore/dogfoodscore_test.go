@@ -246,6 +246,30 @@ func TestBuild_FloorAndShape(t *testing.T) {
 	}
 }
 
+func TestTranscriptProjectRoots_DedupesAndSortsHomes(t *testing.T) {
+	base := t.TempDir()
+	homeA := filepath.Join(base, "a")
+	homeB := filepath.Join(base, "b")
+	namespace := stopfailure.DefaultTranscriptNamespace
+	for _, dir := range []string{
+		filepath.Join(homeB, ".claude", "projects", namespace),
+		filepath.Join(homeA, ".claude-work", "projects", namespace),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := transcriptProjectRoots(namespace, []string{homeB, homeA, homeB, ""})
+	want := []string{
+		filepath.Join(homeA, ".claude-work", "projects", namespace),
+		filepath.Join(homeB, ".claude", "projects", namespace),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("transcriptProjectRoots = %v, want %v", got, want)
+	}
+}
+
 func TestBuild_CommittedTranscriptFixturesRedAndGreen(t *testing.T) {
 	root := repoRootFromTest(t)
 	red := Build(Options{
