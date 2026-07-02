@@ -2365,11 +2365,26 @@ def git_date(root: Path) -> str:
         return "unknown"
 
 
+def _default_max_workers() -> int:
+    """Mirror of dispatch_preflight.DEFAULT_MAX_WORKERS (built-in 8, FAK_MAX_WORKERS
+    env knob applied) so the card's probe matches the gate's own ceiling instead of
+    understating the fleet's headroom with a stale local default."""
+    raw = os.environ.get("FAK_MAX_WORKERS", "").strip()
+    try:
+        if raw and int(raw) > 0:
+            return int(raw)
+    except ValueError:
+        pass
+    return 8
+
+
 def main(argv: list[str] | None = None) -> int:
+    default_workers = _default_max_workers()
     ap = argparse.ArgumentParser(description="One-touch always-on dispatcher status card.")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
-    ap.add_argument("--max-workers", type=int, default=2,
-                    help="cap used by the spawn-gate preflight (default: 2)")
+    ap.add_argument("--max-workers", type=int, default=default_workers,
+                    help="cap used by the spawn-gate preflight "
+                         f"(default: {default_workers}; FAK_MAX_WORKERS retunes it)")
     ap.add_argument("--fast", action="store_true",
                     help="skip the two gh-backed folds (backlog + closure); pure-local")
     ap.add_argument("--closure-commits", type=int, default=2500,

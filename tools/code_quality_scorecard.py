@@ -119,19 +119,21 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code. testdata holds
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
-GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", "node_modules", "testdata", "vendor", "__pycache__"}
-# `.claude`, `.fak`, and `.dos` all hold full repo CHECKOUTS / source copies created by
-# the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
-# `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature), and
-# `.dos/_dos_park/_iso_build/` (the DOS kernel's parked isolated-build tree). All are
-# gitignored. Walking them grades every copied .go a second time as phantom debt
-# (a `.claude` worktree inflated this scorecard 13 -> 22; a `.fak/tmp` checkout
-# inflated the architecture work-list 13 -> 27 here; a `.dos/_dos_park/_iso_build` tree
-# inflated architecture/format/tests debt — 9 of 10 "unformatted" files were phantom
-# `.dos` copies), which would make the committed snapshot flap on a transient,
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.claude`, `.fak`, `.dos`, and `.tmp` all hold full repo CHECKOUTS / source copies
+# created by the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation
+# feature), `.fak/tmp/issue<N>-clean-<sha>/` (the dispatch clean-checkout feature),
+# `.dos/_dos_park/_iso_build/` (the DOS kernel's parked isolated-build tree), and
+# `.tmp/pin-check/` + `.tmp/prplan-check/` (the release pin/prplan verification
+# checkouts). All are gitignored. Walking them grades every copied .go a second time
+# as phantom debt (a `.claude` worktree inflated this scorecard 13 -> 22; a `.fak/tmp`
+# checkout inflated the architecture work-list 13 -> 27 here; a `.dos/_dos_park/_iso_build`
+# tree inflated architecture/format/tests debt — 9 of 10 "unformatted" files were phantom
+# `.dos` copies; the `.tmp` release checkouts inflated code debt 41 -> 103, 62 of 103
+# rows phantom), which would make the committed snapshot flap on a transient,
 # gitignored checkout. A worktree copy is identical to its tracked source by
-# construction — so exclude all three, matching the code-slop scorecard's
-# already-present `.claude`/`.fak`/`.dos` exclusion.
+# construction — so exclude all four, matching the code-slop scorecard's
+# exclusion set.
 
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare

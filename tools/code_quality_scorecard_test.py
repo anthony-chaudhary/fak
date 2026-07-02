@@ -100,6 +100,10 @@ def test_agent_checkout_go_files_excluded_from_corpus():
     # `.dos/_dos_park/_iso_build/` is the DOS kernel's parked isolated-build copy —
     # same class of phantom checkout, must be pruned by name too.
     assert cq._excluded_go(".dos/_dos_park/_iso_build/cmd/fak/guard.go")
+    # `.tmp/pin-check/` + `.tmp/prplan-check/` are the release pin/prplan verification
+    # checkouts — same class again (they inflated code debt 41 -> 103, 62 rows phantom).
+    assert cq._excluded_go(".tmp/pin-check/cmd/fak/accounts.go")
+    assert cq._excluded_go(".tmp/prplan-check/internal/gateway/dual_planner.go")
     # first-party kernel paths are still graded
     assert not cq._excluded_go("internal/gateway/metrics.go")
     assert not cq._excluded_go("cmd/fak/guard.go")

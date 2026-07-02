@@ -176,6 +176,164 @@ function SourceAdmitGate($ledgerPath, $policyPath) {
   return [pscustomobject]@{ Admit = $true; Reason = "gate-error:exit-$code $reason"; FailOpen = $true }
 }
 
+function AppendJsonLine($path, $obj) {
+  $dir = Split-Path -Parent $path
+  if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  Add-Content -Path $path -Value ($obj | ConvertTo-Json -Compress)
+}
+
+function ParseUnix($ts) {
+  if (-not $ts) { return [int64]0 }
+  try { return [DateTimeOffset]::Parse("$ts").ToUnixTimeSeconds() } catch { return [int64]0 }
+}
+
+function IsoFromUnix([int64]$unix) {
+  if ($unix -le 0) { return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') }
+  return [DateTimeOffset]::FromUnixTimeSeconds($unix).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+
+function RecordDrainTick($statusLedger, $mode, $planRows) {
+  $ts = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+  AppendJsonLine $statusLedger @{
+    ts = $ts; phase = 'status'; mode = $mode; auto_resume_depth = @($planRows).Count
+  }
+  $seenQueued = @{}
+  if (Test-Path $statusLedger) {
+    Get-Content $statusLedger | ForEach-Object {
+      try {
+        $r = $_ | ConvertFrom-Json
+        if ($r.session -and @('queued','detected','auto_resume') -contains "$($r.phase)") {
+          $seenQueued[$r.session] = $true
+        }
+      } catch {}
+    }
+  }
+  foreach ($p in @($planRows)) {
+    if (-not $p.session -or $seenQueued.ContainsKey($p.session)) { continue }
+    AppendJsonLine $statusLedger @{
+      ts = $ts; session = $p.session; account = $p.account; resume_account = $p.resume_account
+      project = $p.project; phase = 'queued'; mode = $mode; cause = $p.disp
+    }
+    $seenQueued[$p.session] = $true
+  }
+}
+
+function RecordProgressWitness($statusLedger, $mode, $sid, [int64]$lastLaunch, $progress) {
+  if (-not $sid -or $lastLaunch -le 0 -or -not $progress -or [int]$progress.NewTurns -le 0 -or [int64]$progress.ProgressUnix -le $lastLaunch) {
+    return
+  }
+  if (Test-Path $statusLedger) {
+    foreach ($line in Get-Content $statusLedger) {
+      try {
+        $r = $line | ConvertFrom-Json
+        if ($r.session -ne $sid) { continue }
+        $at = [int64](ParseUnix $(if ($r.progress_witnessed_at) { $r.progress_witnessed_at } else { $r.ts }))
+        if ($at -gt $lastLaunch -and (($r.phase -eq 'progress') -or [int]$r.new_turns -gt 0 -or $r.progress_witnessed_at)) {
+          return
+        }
+      } catch {}
+    }
+  }
+  $iso = IsoFromUnix ([int64]$progress.ProgressUnix)
+  AppendJsonLine $statusLedger @{
+    ts = $iso; session = $sid; phase = 'progress'; mode = $mode
+    new_turns = [int]$progress.NewTurns
+    progress_witnessed_at = $iso
+    progress_witness_source = 'transcript_real_turn_after_resume'
+  }
+}
+
+function RecordSettled($statusLedger, $mode, $sid, $reason) {
+  if (-not $sid) { return }
+  AppendJsonLine $statusLedger @{
+    ts = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    session = $sid; phase = 'settled'; mode = $mode; reason = $reason
+  }
+}
+
+function RecordTerminalOutcome($ledgerPath, $sid, $outcome, $reason) {
+  if (-not $sid -or $outcome -ne 'unrecoverable') { return }
+  AppendJsonLine $ledgerPath @{
+    ts = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    session = $sid; phase = 'settled'; outcome = $outcome
+    action = 'consolidate-unrecoverable-resume-wall'; reason = $reason
+  }
+}
+
+function NewestTranscript($sid) {
+  if (-not $sid -or -not $env:USERPROFILE) { return $null }
+  $roots = Get-ChildItem -Path (Join-Path $env:USERPROFILE '.claude*') -Directory -ErrorAction SilentlyContinue
+  $best = $null
+  foreach ($root in @($roots)) {
+    $projects = Join-Path $root.FullName 'projects'
+    if (-not (Test-Path $projects)) { continue }
+    $hit = Get-ChildItem -Path $projects -Recurse -Filter "$sid.jsonl" -File -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($hit -and ((-not $best) -or $hit.LastWriteTime -gt $best.LastWriteTime)) { $best = $hit }
+  }
+  return $best
+}
+
+function MessageText($content) {
+  if ($null -eq $content) { return '' }
+  if ($content -is [string]) { return $content }
+  $parts = @()
+  foreach ($b in @($content)) {
+    if ($b.text) { $parts += "$($b.text)" }
+  }
+  return ($parts -join ' ')
+}
+
+function TranscriptProgress($sid, [int64]$lastLaunch) {
+  $out = [pscustomobject]@{ Outcome = 'unknown'; NewTurns = 0; ProgressUnix = [int64]0; TerminalUnix = [int64]0 }
+  $file = NewestTranscript $sid
+  if (-not $file) { return $out }
+  $terminalText = ''
+  Get-Content $file.FullName -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      $r = $_ | ConvertFrom-Json
+      $ts = ParseUnix $r.timestamp
+      $role = if ($r.message -and $r.message.role) { "$($r.message.role)" } else { "$($r.type)" }
+      if ($role -eq 'user' -or $role -eq 'assistant') {
+        $terminalText = MessageText $r.message.content
+        $out.TerminalUnix = $ts
+      }
+      if ($role -eq 'assistant' -and $r.message -and $r.message.model -and $r.message.model -ne '<synthetic>' -and $r.message.usage) {
+        $prompt = [int]$r.message.usage.input_tokens + [int]$r.message.usage.cache_read_input_tokens + [int]$r.message.usage.cache_creation_input_tokens
+        if ($prompt -gt 0 -and $ts -gt $lastLaunch) {
+          $out.NewTurns = [int]$out.NewTurns + 1
+          if ([int64]$out.ProgressUnix -le 0) { $out.ProgressUnix = $ts }
+        }
+      }
+    } catch {}
+  }
+  $low = $terminalText.ToLowerInvariant()
+  if ($low -match 'login interrupted|please run /login|authentication_error|invalid x-api-key|invalid authentication credentials|401|oauth token has expired|credit balance is too low|organization has disabled claude subscription access|use an anthropic api key instead|not logged in') {
+    $out.Outcome = 'unrecoverable'
+  } elseif ($low -match 'limit\s*[·:|.\-]?\s*resets?' -or $low.Contains('overloaded') -or $terminalText.Contains('529') -or ($low.Contains('api error') -and $low.Contains('rate'))) {
+    $out.Outcome = 'recoverable'
+  } elseif ($terminalText.Trim()) {
+    $out.Outcome = 'progressed'
+  }
+  return $out
+}
+
+function PruneClosedPlanRows($planPath, $closedSids) {
+  if (-not (Test-Path $planPath) -or $closedSids.Count -eq 0) { return }
+  try {
+    $doc = Get-Content $planPath -Raw | ConvertFrom-Json
+    $before = @($doc.plan).Count
+    $doc.plan = @($doc.plan | Where-Object { -not $closedSids.ContainsKey($_.session) })
+    $after = @($doc.plan).Count
+    if ($after -lt $before) {
+      $doc | ConvertTo-Json -Depth 12 | Set-Content -Path $planPath -Encoding UTF8
+      Note ("  pruned {0} closed AUTO_RESUME row(s) from resume_plan.json" -f ($before - $after))
+    }
+  } catch {
+    Note "  WARN could not prune closed resume_plan rows: $($_.Exception.Message)"
+  }
+}
+
 # 1. refresh registry + plan (extract in advance). On a live tick, also ACTIVELY probe
 # blocked accounts so a silently-recovered account (re-login / access re-enabled / throttle
 # expired) re-enters the available pool instead of staying latched on a stale verdict.
@@ -199,6 +357,8 @@ $planPath = Join-Path $regDir 'resume_plan.json'
 $plan = if (Test-Path $planPath) { (Get-Content $planPath -Raw | ConvertFrom-Json).plan } else { @() }
 $mode = if ($Live) { 'LIVE' } else { 'DRY-RUN' }
 Note ("TICK $mode plan={0} window=${WindowH}h cap=$MaxPerTick" -f @($plan).Count)
+$statusLedger = Join-Path $regDir 'resume_watchdog_status.jsonl'
+RecordDrainTick $statusLedger $mode @($plan)
 
 # defense-in-depth: the set of account dir-basenames that policy still treats as
 # workers. fleet_sessions.py already excludes non-workers when it writes the plan,
@@ -214,6 +374,7 @@ try {
 # fresh seat by the planner after repeated in-place failures) instead of once ever.
 $ledgerPath = Join-Path $regDir 'resume_ledger.jsonl'
 $launchCount = @{}
+$lastLaunch = @{}
 $ledgerBlocked = @{}
 if (Test-Path $ledgerPath) {
   Get-Content $ledgerPath | ForEach-Object {
@@ -226,6 +387,8 @@ if (Test-Path $ledgerPath) {
       $nonLaunchPhase = ($r.phase -eq 'deferred') -or ($r.phase -eq 'considered') -or ($r.phase -eq 'skipped') -or ($r.phase -eq 'gate_fail_open')
       if (($r.phase -eq 'launched') -or ($r.phase -eq 'resumed') -or ($r.cause -and -not $nonLaunchPhase)) {
         $launchCount[$s] = [int]$launchCount[$s] + 1
+        $u = ParseUnix $r.ts
+        if ($u -gt [int64]$lastLaunch[$s]) { $lastLaunch[$s] = $u }
       }
     } catch {}
   }
@@ -235,6 +398,7 @@ $launched = 0
 # fail-open launch runs WITHOUT the host-wide concurrency rail, so it must be visible
 # in the ledger and the Action Center, never silent.
 $gateFailOpenWarned = $false
+$closedSids = @{}
 
 # Live-duplicate guard: `claude --resume` forks the transcript into a NEW sid, so the
 # planned (old) sid never goes live again in the registry -- without this check every
@@ -256,11 +420,22 @@ foreach ($p in @($plan)) {
   $sid = $p.session; $sid8 = $sid.Substring(0, 8)
   $acct = ($p.account -replace '\.claude-?', ''); if (-not $acct) { $acct = 'default' }
   if ($workerAccts.Count -and -not $workerAccts.ContainsKey($p.account)) {
-    Note "  SKIP $sid8 -- account $($p.account) is not an offered worker (policy/tombstoned)"; continue
+    Note "  SKIP $sid8 -- account $($p.account) is not an offered worker (policy/tombstoned)"
+    $closedSids[$sid] = $true
+    continue
   }
-  if ($ledgerBlocked.ContainsKey($sid)) { Note "  SKIP $sid8 -- ledger-blocked (operator-settled or unrecoverable auth wall)"; continue }
+  if ($ledgerBlocked.ContainsKey($sid)) {
+    Note "  SKIP $sid8 -- ledger-blocked (operator-settled or unrecoverable auth wall)"
+    $closedSids[$sid] = $true
+    continue
+  }
   $attempts = [int]$launchCount[$sid]
-  if ($attempts -ge $MaxAttempts) { Note "  SKIP $sid8 -- attempt cap reached ($attempts/$MaxAttempts) -- left for a human"; continue }
+  if ($attempts -ge $MaxAttempts) {
+    RecordSettled $statusLedger $mode $sid "attempt cap reached ($attempts/$MaxAttempts)"
+    Note "  SKIP $sid8 -- attempt cap reached ($attempts/$MaxAttempts) -- left for a human"
+    $closedSids[$sid] = $true
+    continue
+  }
   if ($liveResume.ContainsKey($sid)) {
     Note "  SKIP $sid8 -- already live as pid $($liveResume[$sid]) (no duplicate resume)"
     if ($Live) {
@@ -269,12 +444,31 @@ foreach ($p in @($plan)) {
     }
     continue
   }
+  $attempts = [int]$launchCount[$sid]
+  $last = [int64]$lastLaunch[$sid]
+  if ($attempts -gt 0) {
+    $progress = TranscriptProgress $sid $last
+    RecordProgressWitness $statusLedger $mode $sid $last $progress
+    if ([int]$progress.NewTurns -gt 0 -and $progress.Outcome -ne 'recoverable') {
+      Note "  SKIP $sid8 -- already resumed once (resume took)"
+      $closedSids[$sid] = $true
+      continue
+    }
+    if ($progress.Outcome -eq 'unrecoverable' -and [int64]$progress.TerminalUnix -gt $last) {
+      RecordTerminalOutcome $ledgerPath $sid 'unrecoverable' 'terminal auth/access wall after resume'
+      RecordSettled $statusLedger $mode $sid 'terminal auth/access wall after resume'
+      Note "  SKIP $sid8 -- last resume hit an auth/access wall -- a re-resume cannot fix it"
+      $closedSids[$sid] = $true
+      continue
+    }
+  }
   $resumeCfg = if ($p.resume_config_dir) { $p.resume_config_dir } else { $p.config_dir }
   # Defense-in-depth like the worker-account re-check above: the planner has offered a
   # tombstoned seat as a re-home target (observed 2026-07-01: resume_account =
   # .claude-gem8-netra.DELETED-2026-06-29; the launch died on arrival and burned an attempt).
   if ($resumeCfg -match '\.DELETED') {
     Note "  SKIP $sid8 -- resume target $resumeCfg is a tombstoned seat"
+    $closedSids[$sid] = $true
     if ($Live) {
       $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; phase = 'skipped'; cause = 'deleted_seat_target' } | ConvertTo-Json -Compress
       Add-Content -Path $ledgerPath -Value $rec
@@ -362,6 +556,8 @@ foreach ($p in @($plan)) {
     Start-Sleep -Seconds $LaunchSpacingSec
   }
 }
+
+PruneClosedPlanRows $planPath $closedSids
 
 # 2. alert on true login-blocked accounts -- once per account blocker.
 $notifiedPath = Join-Path $regDir '_notified.json'

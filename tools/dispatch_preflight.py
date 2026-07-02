@@ -89,16 +89,37 @@ REFUSE_NO_SEAT = "REFUSE_NO_SEAT"    # seat pool depleted: every seat leased to 
 REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the operator/dos cap
 REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refuse)
 
+def _env_pos_int(name: str, default: int) -> int:
+    """A positive-int env override, falling back to ``default`` on unset/garbage.
+
+    The knobs read through this are the DYNAMIC half of the cap math: the ceiling
+    and the per-worker host budgets assume a box dedicated to the fleet, so an
+    operator on a shared or measured box retunes them per host via env instead of
+    a code change. The Go mirror (internal/dispatchtick.envPosInt) reads the same
+    names with the same tolerant contract."""
+    raw = os.environ.get(name, "").strip()
+    if raw:
+        try:
+            val = int(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return default
+
+
 # Operator's *aspirational* ceiling on simultaneous live dispatch workers — NOT the
 # safety bound. The real DoS proof is the adaptive cap below: min(this, host_cap,
 # seats). host_cap (#1337) auto-throttles to the box's live cores/RAM/thread
 # headroom; the seat pool (#1336) hard-bounds at one worker per routable account so a
-# spawn can never double-book a rate limit. With both gates in place this default was
-# doubled 2->4: the old 2 sat below host_cap and the seat count alike (it was the
-# artificial bottleneck), so raising it simply lets the adaptive gates — which can
-# only LOWER the effective cap — govern. The box is still a live multi-session fleet,
-# so on a loaded host host_cap pulls the effective cap back down automatically.
-DEFAULT_MAX_WORKERS = 4
+# spawn can never double-book a rate limit. Raised 4->8 after the 2->4 doubling
+# proved the pattern: the static ceiling's only job is to sit ABOVE the adaptive
+# gates — which can only LOWER the effective cap — so concurrency rises to what the
+# box and the account pool can actually carry and no further (the 2026-07-01
+# headroom audit witnessed host_cap 16 with the static caps binding first). The
+# FAK_MAX_WORKERS env knob retunes the fleet-wide ceiling per host without a code
+# change; the Go tick (internal/dispatchtick.DefaultMaxWorkers) reads the same knob.
+DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 8)
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count
@@ -993,31 +1014,18 @@ def _int(value: Any, default: int | None = None) -> int | None:
 # a slice of every resource. These per-worker budgets are deliberately conservative
 # (the safe default is "barely grow"); the operator's --max-workers is still the
 # outer ceiling.
-def _env_pos_int(name: str, default: int) -> int:
-    """A positive-int env override, falling back to ``default`` on unset/garbage.
-
-    The host budgets below assume a box DEDICATED to the fleet. On a shared box
-    the live OS-thread total also counts threads the fleet never spawned and
-    cannot reap (another user's editor/browser/agent tree), so the thread
-    dimension throttles to host_cap=1 even with cores and RAM to spare. The
-    operator raises FAK_HOST_THREADS_PER_CORE on such a box to discount that
-    foreign baseline; the boolean host_safe gate (not this gradient) remains the
-    hard stop on a genuine runaway."""
-    raw = os.environ.get(name, "").strip()
-    if raw:
-        try:
-            val = int(raw)
-            if val > 0:
-                return val
-        except ValueError:
-            pass
-    return default
-
-
-HOST_CORES_PER_WORKER = 2       # cores a worker + its hook subprocess tree occupies
-HOST_RAM_MB_PER_WORKER = 1500   # resident MB across that subprocess tree
-HOST_THREADS_PER_CORE = _env_pos_int("FAK_HOST_THREADS_PER_CORE", 400)  # host-wide OS-thread budget, scaled by core count
-HOST_THREADS_PER_WORKER = 200   # OS threads a worker + its hooks add to the box
+# Per-worker host budgets, every one an env knob (FAK_HOST_*) with a conservative
+# built-in guess. They assume a box DEDICATED to the fleet: on a shared box the
+# live OS-thread total also counts threads the fleet never spawned and cannot reap
+# (another user's editor/browser/agent tree), so the thread dimension throttles to
+# host_cap=1 even with cores and RAM to spare — the operator raises
+# FAK_HOST_THREADS_PER_CORE there to discount that foreign baseline. A measured
+# box (headroom-audit lever 5) retunes the per-worker charges the same way. The
+# boolean host_safe gate (not this gradient) remains the hard stop on a runaway.
+HOST_CORES_PER_WORKER = _env_pos_int("FAK_HOST_CORES_PER_WORKER", 2)       # cores a worker + its hook subprocess tree occupies
+HOST_RAM_MB_PER_WORKER = _env_pos_int("FAK_HOST_RAM_MB_PER_WORKER", 1500)  # resident MB across that subprocess tree
+HOST_THREADS_PER_CORE = _env_pos_int("FAK_HOST_THREADS_PER_CORE", 400)     # host-wide OS-thread budget, scaled by core count
+HOST_THREADS_PER_WORKER = _env_pos_int("FAK_HOST_THREADS_PER_WORKER", 200) # OS threads a worker + its hooks add to the box
 HOST_CAP_FLOOR = 1              # never throttle below one worker — the hard stop on
                                 # a genuine runaway stays the host_safe gate, not this
 

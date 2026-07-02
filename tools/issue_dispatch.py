@@ -850,12 +850,30 @@ def render_wave(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _default_max_workers() -> int:
+    """The default worker ceiling, mirrored from dispatch_preflight.DEFAULT_MAX_WORKERS
+    (mirrored, not imported — same rationale as _pid_is_alive): the built-in 8 with the
+    FAK_MAX_WORKERS env knob applied. Keeping the tick's default equal to the gate's
+    means the launcher no longer under-asks (the old static 2 sat below every adaptive
+    gate); the preflight's min(host_cap, dos target, seats) still bounds every spawn."""
+    raw = os.environ.get("FAK_MAX_WORKERS", "").strip()
+    try:
+        if raw and int(raw) > 0:
+            return int(raw)
+    except ValueError:
+        pass
+    return 8
+
+
 def main(argv: list[str] | None = None) -> int:
+    default_workers = _default_max_workers()
     ap = argparse.ArgumentParser(
         description="One guarded, switcher-routed, bounded dispatch tick (dry-run by default).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
-    ap.add_argument("--max-workers", type=int, default=2,
-                    help="hard cap on live workers, enforced by the preflight (default: 2)")
+    ap.add_argument("--max-workers", type=int, default=default_workers,
+                    help="hard cap on live workers, enforced by the preflight "
+                         f"(default: {default_workers}, the preflight ceiling; "
+                         "FAK_MAX_WORKERS retunes it)")
     ap.add_argument("--work-kind", default="engineering",
                     help="switcher work kind (engineering->t1, gardening->t2)")
     ap.add_argument("--lane", default=None,

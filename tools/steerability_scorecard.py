@@ -115,11 +115,12 @@ try:
 except Exception:  # noqa: BLE001 — stand-alone fallback
     FILE_HARD_MAX = 1500
     FUNC_HARD_MAX = 200
-    # `.dos`/`.fak`/`.claude` hold full repo CHECKOUTS / copies the agent machinery leaves
-    # behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`); walking them
+    # `.dos`/`.fak`/`.claude`/`.tmp` hold full repo CHECKOUTS / copies the agent machinery
+    # leaves behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`,
+    # `.tmp/pin-check/` + `.tmp/prplan-check/`); walking them
     # double-grades every copied .go as phantom debt — a `.dos` tree once added 2357 phantom
     # .go to this corpus. Exclude them, matching the code-slop/code-quality scorecards.
-    GO_EXCLUDE_DIRS = {".git", ".dos", ".fak", ".claude", "node_modules", "testdata", "vendor", "__pycache__"}
+    GO_EXCLUDE_DIRS = {".git", ".dos", ".fak", ".claude", ".tmp", "node_modules", "testdata", "vendor", "__pycache__"}
 
     def _safe_read(path: Path) -> str:  # type: ignore[misc]
         try:

@@ -122,6 +122,13 @@ PROTECTED_NAMES = frozenset(
         "services", "lsass", "fontdrvhost", "dwm", "sihost", "memory compression",
         # POSIX init / kernel
         "init", "systemd", "launchd", "kernel_task", "kthreadd",
+        # The fleet's own terminal host (#2227): its thread count scales with
+        # live panes (~16/pane), not with runaway work, so it legitimately
+        # crosses the thread ceiling on a busy interactive host — and killing
+        # it kills every session on the box. Protected = still reported, never
+        # enact-killed, non-actionable for the dispatch preflight (host_cap
+        # remains the governor for pane-scaled thread pressure).
+        "windowsterminal",
     )
 )
 

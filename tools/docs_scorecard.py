@@ -149,7 +149,7 @@ KPI_WEIGHTS: dict[str, float] = {
 # `reachable` and `all` scopes so the corpus is project docs only.
 DOC_EXCLUDE_DIRS = {
     ".git", "node_modules", ".opencode", ".pytest_cache", "__pycache__",
-    ".goal-runs", ".dos", ".claude", "visuals",
+    ".goal-runs", ".dos", ".claude", ".tmp", "visuals",
 }
 
 # Tool-generated artifacts: never scored. The scorecard's own output is a list of

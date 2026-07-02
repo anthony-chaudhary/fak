@@ -61,6 +61,17 @@ class ClassifyTests(unittest.TestCase):
         flagged = self.mod.classify(rows)
         self.assertTrue(flagged[0]["protected"])
 
+    def test_terminal_host_over_ceiling_is_protected(self):
+        # #2227: WindowsTerminal's threads scale with live panes; a busy fleet
+        # host crosses the ceiling legitimately. It must surface as a flag but
+        # carry protected=True so --enact skips it and the dispatch preflight
+        # does not wedge on it.
+        rows = [{"pid": 85884, "name": "WindowsTerminal", "threads": 2320,
+                 "handles": 44156, "ws_mb": 1741}]
+        flagged = self.mod.classify(rows)
+        self.assertEqual([r["pid"] for r in flagged], [85884])
+        self.assertTrue(flagged[0]["protected"])
+
     def test_allowlist_exempts_by_name(self):
         rows = [{"pid": 9, "name": "BigDB", "threads": 50000, "handles": 1, "ws_mb": 1}]
         self.assertEqual(self.mod.classify(rows, allow_names=frozenset({"bigdb"})), [])

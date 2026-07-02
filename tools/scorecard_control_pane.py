@@ -222,7 +222,10 @@ def grade_weight(metric: dict[str, Any]) -> int:
 SCORECARDS: list[dict[str, str]] = [
     {"key": "doc", "debt": "doc_debt", "script": "docs_scorecard.py", "label": "docs"},
     {"key": "readme", "debt": "readme_debt", "script": "readme_freshness_audit.py", "label": "readme-freshness"},
-    {"key": "code", "debt": "code_debt", "script": "code_quality_scorecard.py", "label": "code"},
+    # The control pane already runs inside the CI chain after build/vet/gofmt.
+    # Keep this fold static so the live smoke stays inside its 120s/card budget
+    # instead of duplicating the toolchain passes a second time.
+    {"key": "code", "debt": "code_debt", "script": "code_quality_scorecard.py", "args": "--no-toolchain", "label": "code"},
     {"key": "appeal", "debt": "appeal_debt", "script": "doc_appeal_scorecard.py", "label": "doc-appeal"},
     {"key": "seo", "debt": "seo_debt", "script": "seo_aeo_scorecard.py", "label": "seo"},
     {"key": "demo", "debt": "demo_debt", "script": "demo_quality_scorecard.py", "label": "demo-quality"},
@@ -760,7 +763,7 @@ def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeou
         script_path = root / "tools" / script
         if not script_path.exists():
             return None, f"missing scorecard: tools/{script}"
-        argv = [python, str(script_path), "--json"]
+        argv = [python, str(script_path), "--json", *shlex.split(card.get("args", "") if isinstance(card, dict) else "")]
     try:
         proc = subprocess.run(
             argv,

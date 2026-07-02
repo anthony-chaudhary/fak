@@ -168,9 +168,10 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Directories whose .go is NOT first-party shipped kernel code (same exclusion the
 # code-quality scorecard uses): fixtures, vendored/generated trees.
-GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", "node_modules", "testdata", "vendor", "__pycache__"}
-# `.claude`, `.fak`, and `.dos` all hold full repo CHECKOUTS / source copies created by the
-# agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
+GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", "node_modules", "testdata", "vendor", "__pycache__"}
+# `.claude`, `.fak`, `.dos`, and `.tmp` all hold full repo CHECKOUTS / source copies created
+# by the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
+# `.tmp/pin-check/` + `.tmp/prplan-check/` (the release pin/prplan verification checkouts),
 # `.fak/tmp/issue<N>-clean-<sha>/` (a dispatch worker's clean clone), and `.dos/_iso_build/`
 # (the DOS isolation-build's byte-identical copy of `experiments/` + `internal/`). All are
 # gitignored scratch, not first-party source.

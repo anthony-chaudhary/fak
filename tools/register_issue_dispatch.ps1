@@ -14,13 +14,14 @@ runs ONE guarded issue-resolution tick every few minutes. Each tick:
 SAFE BY DEFAULT: installed WITHOUT -Live, the tick is DRY-RUN -- the task only
 LOGS the plan it would run, spawning nothing. Add -Live to actually spawn workers
 (an explicit opt-in to autonomous spawning). -MaxWorkers is the operator's outer
-ceiling (default 4); the preflight's adaptive cap = min(this, host_cap, seats) is
-the real DoS bound, so a loaded box or a depleted account pool throttles below it.
+ceiling (default 8, or the FAK_MAX_WORKERS env knob at install time); the
+preflight's adaptive cap = min(this, host_cap, seats) is the real DoS bound, so a
+loaded box or a depleted account pool throttles below it.
 NOTE: an already-installed task keeps the -MaxWorkers it was registered with (the
 value is baked into the stored argument list) -- re-run install to pick up a new one.
 
   .\register_issue_dispatch.ps1                       # install, DRY-RUN (logs plans, spawns nothing)
-  .\register_issue_dispatch.ps1 -Live -MaxWorkers 4   # install, LIVE (bounded autonomous spawning)
+  .\register_issue_dispatch.ps1 -Live -MaxWorkers 8   # install, LIVE (bounded autonomous spawning)
   .\register_issue_dispatch.ps1 -Action preview        # print the task action without installing
   .\register_issue_dispatch.ps1 -Action status
   .\register_issue_dispatch.ps1 -Action remove
@@ -30,7 +31,9 @@ param(
   [ValidateSet('install','remove','status','preview')] [string]$Action = 'install',
   [string]$TaskName   = 'FleetIssueDispatch',
   [string]$Workspace  = $(Split-Path -Parent $PSScriptRoot),
-  [int]$MaxWorkers    = 4,
+  # Default mirrors dispatch_preflight.DEFAULT_MAX_WORKERS: built-in 8, retunable
+  # via FAK_MAX_WORKERS (read once here at install; the value is baked into the task).
+  [int]$MaxWorkers    = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 8 }),
   [int]$EveryMinutes  = 10,
   # Which tick the always-on task runs:
   #   resolve (default) -> fak dispatch tick: spawns an ISSUE-resolution

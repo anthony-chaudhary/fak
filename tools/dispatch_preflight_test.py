@@ -1100,51 +1100,85 @@ class SeatRefusalTest(unittest.TestCase):
         self.assertIn("seat", p)
 
 
-class DoubledDefaultCeilingTest(unittest.TestCase):
-    """The 2x-concurrency change (DEFAULT_MAX_WORKERS 2->4) is safe iff the doubled
-    static ceiling is still strictly bounded by the adaptive gates. These tests pin
-    the new default AND prove the doubling can never exceed host_cap or the seat pool
-    — i.e. raising the operator ceiling only realizes concurrency the box and the
-    account roster can actually carry."""
+class RaisedDefaultCeilingTest(unittest.TestCase):
+    """The raised static ceiling (DEFAULT_MAX_WORKERS 4->8, env-tunable via
+    FAK_MAX_WORKERS) is safe iff it stays strictly bounded by the adaptive gates.
+    These tests pin the new default, prove the env knob retunes it both ways, and
+    prove the raise can never exceed host_cap or the seat pool — i.e. raising the
+    operator ceiling only realizes concurrency the box and roster can carry."""
 
-    def test_default_ceiling_is_doubled(self) -> None:
-        # The ceiling itself: pin 4 so a later silent revert is caught.
-        mod = load()
-        self.assertEqual(mod.DEFAULT_MAX_WORKERS, 4)
+    def _load_with_env(self, value: str | None):
+        """Load the module with FAK_MAX_WORKERS pinned (None = unset), hermetic to
+        whatever the real box exports — the constant is resolved at import time."""
+        old = os.environ.pop("FAK_MAX_WORKERS", None)
+        if value is not None:
+            os.environ["FAK_MAX_WORKERS"] = value
+        try:
+            return load()
+        finally:
+            os.environ.pop("FAK_MAX_WORKERS", None)
+            if old is not None:
+                os.environ["FAK_MAX_WORKERS"] = old
 
-    def test_default_ceiling_realizes_2x_on_a_roomy_box_with_seats(self) -> None:
-        # The win: a roomy box with >=4 free seats and no dos throttle lets the default
-        # ceiling fill to 4 — double the old static 2 — governed only by the gates.
-        mod = load()
+    def test_default_ceiling_is_raised(self) -> None:
+        # The ceiling itself: pin 8 so a later silent revert is caught.
+        self.assertEqual(self._load_with_env(None).DEFAULT_MAX_WORKERS, 8)
+
+    def test_env_knob_retunes_the_ceiling(self) -> None:
+        # FAK_MAX_WORKERS is the dynamic half: retune per host, no code change;
+        # garbage / non-positive values fall back to the built-in ceiling.
+        self.assertEqual(self._load_with_env("12").DEFAULT_MAX_WORKERS, 12)
+        self.assertEqual(self._load_with_env("1").DEFAULT_MAX_WORKERS, 1)
+        self.assertEqual(self._load_with_env("garbage").DEFAULT_MAX_WORKERS, 8)
+        self.assertEqual(self._load_with_env("0").DEFAULT_MAX_WORKERS, 8)
+
+    def test_default_ceiling_fills_on_a_roomy_box_with_seats(self) -> None:
+        # The win: a roomy box with >=8 free seats and no dos throttle lets the
+        # default ceiling fill to 8 — governed only by the adaptive gates.
+        mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
-                     seat={"total": 4, "free": 4, "leased": 0, "depleted": False})
+                     seat={"total": 8, "free": 8, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 4)               # min(4, host_cap=32, seats=4)
+        self.assertEqual(p["cap"], 8)               # min(8, host_cap=32, seats=8)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_default_ceiling_still_throttles_on_a_loaded_box(self) -> None:
-        # Safety: doubling the ceiling cannot saturate a loaded host — host_cap pulls
-        # the effective cap back below 4 (here to the floor), exactly as before.
-        mod = load()
+        # Safety: raising the ceiling cannot saturate a loaded host — host_cap pulls
+        # the effective cap back below 8 (here to the floor), exactly as before.
+        mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 8, "free_ram_mb": 64_000, "total_threads": 200_000},
                      seat={"total": 8, "free": 8, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
         self.assertEqual(p["host_cap"], 1)
-        self.assertEqual(p["cap"], 1)               # doubled ceiling, still throttled
+        self.assertEqual(p["cap"], 1)               # raised ceiling, still throttled
         self.assertLess(p["cap"], mod.DEFAULT_MAX_WORKERS)
 
     def test_default_ceiling_still_bounded_by_a_smaller_seat_pool(self) -> None:
-        # Safety: doubling the ceiling cannot double-book accounts — a 3-seat roster
-        # caps the doubled ceiling at 3, not 4 (the live agent-host case).
-        mod = load()
+        # Safety: raising the ceiling cannot double-book accounts — a 3-seat roster
+        # caps the raised ceiling at 3, not 8 (the live agent-host case).
+        mod = self._load_with_env(None)
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=0,
                      host_res={"cores": 64, "free_ram_mb": 128_000, "total_threads": 1000},
                      seat={"total": 3, "free": 3, "leased": 0, "depleted": False})
         p = run_eval(mod, max_workers=mod.DEFAULT_MAX_WORKERS)
-        self.assertEqual(p["cap"], 3)               # min(4, host_cap=32, seats=3)
+        self.assertEqual(p["cap"], 3)               # min(8, host_cap=32, seats=3)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_host_budget_env_knobs_retune_the_gradient(self) -> None:
+        # The per-worker charges are env knobs too (FAK_HOST_*): a measured box can
+        # halve the cores-per-worker guess and double its cores dimension.
+        old = os.environ.pop("FAK_HOST_CORES_PER_WORKER", None)
+        os.environ["FAK_HOST_CORES_PER_WORKER"] = "1"
+        try:
+            mod = load()
+            cap = mod.host_capacity(cores=8, free_ram_mb=128_000, total_threads=1000)
+            self.assertEqual(cap["components"]["cores"], 8)   # 8 // 1, not 8 // 2
+        finally:
+            os.environ.pop("FAK_HOST_CORES_PER_WORKER", None)
+            if old is not None:
+                os.environ["FAK_HOST_CORES_PER_WORKER"] = old
 
 
 if __name__ == "__main__":

@@ -21,11 +21,13 @@ LIVE_FLAG=""
 # ticket -> lane map lives in the generator; re-emit the lane sidecars once.
 LANEMAP="C:/Users/USER/AppData/Local/Temp/pop_lanes.tsv"
 if [ ! -s "$LANEMAP" ]; then
-  PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python tools/popularization_tickets.py --json 2>/dev/null \
-    | PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -c "import json,sys,io
-sys.stdout=io.TextIOWrapper(sys.stdout.buffer,encoding='utf-8')
-d=json.load(sys.stdin)
-for t in d: print(t['title'].replace(chr(9),' '), t['lane'], sep=chr(9))" > "$LANEMAP"
+  if [ -x ./fak ]; then
+    ./fak popularization-tickets --lanes-tsv > "$LANEMAP"
+  elif [ -x ./fak.exe ]; then
+    ./fak.exe popularization-tickets --lanes-tsv > "$LANEMAP"
+  else
+    go run ./cmd/fak popularization-tickets --lanes-tsv > "$LANEMAP"
+  fi
 fi
 
 # open popularization issues, freshest-first (lowest number = filed first = do first)

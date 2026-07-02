@@ -39,7 +39,9 @@
 param(
   # How many distinct-account lanes to allocate. The wave under-fills honestly if
   # fewer distinct accounts are available (granted < count, with a reported shortfall).
-  [int]$Count = 4,
+  # Default mirrors the preflight ceiling (built-in 8, FAK_MAX_WORKERS retunes it);
+  # the per-spawn preflight gate still bounds every worker below it.
+  [int]$Count = $(if ($env:FAK_MAX_WORKERS -match '^[1-9]\d*$') { [int]$env:FAK_MAX_WORKERS } else { 8 }),
   [string]$PointerFile = ".claude/goal-prompts/resolve-tickets-witnessed.md",
   [string]$Workspace   = "C:\work\fleet",
   [string]$LogDir      = "C:\work\fleet\.goal-runs",

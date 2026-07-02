@@ -977,6 +977,10 @@ def test_claude_worktree_go_files_excluded_from_gather():
     # checkout). The gather drops the whole `.claude` subtree, like `.git`/`vendor`.
     assert cs._excluded_go(".claude/worktrees/upstream-err/internal/model/arch.go")
     assert cs._excluded_go(".claude/worktrees/wt/cmd/fak/main.go")
+    # `.tmp/pin-check/` + `.tmp/prplan-check/` (release pin/prplan verification checkouts)
+    # are the same phantom-checkout class — pruned by name too.
+    assert cs._excluded_go(".tmp/pin-check/cmd/fak/main.go")
+    assert cs._excluded_go(".tmp/prplan-check/internal/model/arch.go")
     # RECALL GUARD: a first-party kernel file is still gathered.
     assert not cs._excluded_go("internal/model/arch.go")
     assert not cs._excluded_go("cmd/fak/main.go")

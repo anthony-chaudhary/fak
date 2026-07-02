@@ -101,11 +101,12 @@ KPI_WEIGHTS: dict[str, float] = {
 
 # Files under tools/ that are not gradable first-party modules.
 PY_EXCLUDE_NAMES = {"__init__.py", "conftest.py"}
-# `.dos`/`.fak`/`.claude` hold full repo CHECKOUTS / copies the agent machinery leaves
-# behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`); walking them
+# `.dos`/`.fak`/`.claude`/`.tmp` hold full repo CHECKOUTS / copies the agent machinery
+# leaves behind (`.dos/_dos_park/_iso_build/`, `.fak/tmp/`, `.claude/worktrees/`,
+# `.tmp/pin-check/` + `.tmp/prplan-check/`); walking them
 # double-grades every copied .py as phantom debt (a `.dos` tree once added 537 phantom .py
 # here). Exclude them, matching the code-slop/code-quality scorecards.
-PY_EXCLUDE_DIRS = {"__pycache__", ".git", ".dos", ".fak", ".claude", "testdata", "node_modules"}
+PY_EXCLUDE_DIRS = {"__pycache__", ".git", ".dos", ".fak", ".claude", ".tmp", "testdata", "node_modules"}
 
 
 def _clamp(score: float) -> int:
