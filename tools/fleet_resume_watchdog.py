@@ -131,7 +131,7 @@ def resolve_probe_mode(setting: str, live: bool) -> str:
 RESUME_PROMPT = (
     "Resume where you left off; re-establish any /goal or /loop and continue toward it."
 )
-NON_LAUNCH_PHASES = {"deferred", "considered", "skipped"}
+NON_LAUNCH_PHASES = {"deferred", "considered", "skipped", "gate_fail_open"}
 
 
 def now_iso() -> str:
@@ -164,6 +164,22 @@ def source_admit_gate() -> tuple[bool, str]:
     if r.returncode == 3:
         return False, (r.stdout or r.stderr or "SOURCE_DEFER").strip()
     return True, "admitted"
+
+
+def record_gate_fail_open(ledger_path: str, reason: str) -> dict:
+    """Append the durable, SESSION-LESS gate_fail_open warning row (#2173) and return it.
+
+    Written when the source governor could not answer (missing fak binary / gate error)
+    and the launcher proceeded fail-open. Session-less so every retry-accounting reader
+    (which keys rows by ``session``) ignores it, and ``gate_fail_open`` is in
+    NON_LAUNCH_PHASES so it never counts as launch pressure — it exists purely so an
+    operator/status surface can see the host ran without the source-concurrency rail."""
+    rec = {"ts": now_iso(), "phase": "gate_fail_open",
+           "cause": "source_governor_unavailable", "reason": reason,
+           "fak_exe": FAK_EXE or "", "launcher": "fleet_resume_watchdog.py"}
+    with open(ledger_path, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+    return rec
 
 
 def is_resume_attempt_record(h: dict) -> bool:
@@ -484,6 +500,7 @@ def main() -> int:
                     pass
 
     launched = 0
+    gate_fail_open_warned = False
     for p in plan:
         if launched >= MAX_PER_TICK:
             note(f"  per-tick cap reached ({MAX_PER_TICK})")
@@ -519,6 +536,18 @@ def main() -> int:
         # NOT counted as launch pressure by the next gate check, then skip this session
         # (it stays eligible next tick). Fails open (see source_admit_gate).
         admit_ok, admit_reason = source_admit_gate()
+        if admit_ok and admit_reason != "admitted" and not gate_fail_open_warned:
+            # The gate answered WITHOUT a governor verdict (missing fak binary / gate
+            # error): still fail open — a broken rail must not strand recovery — but
+            # loudly (#2173). One durable session-less warning row per tick (invisible
+            # to retry accounting, `gate_fail_open` is a non-launch phase) plus a toast,
+            # so a host running without the source-concurrency rail is operator-visible.
+            gate_fail_open_warned = True
+            note(f"  WARN source governor UNAVAILABLE ({admit_reason}) -- failing OPEN; "
+                 "only the per-tick cap/spacing bound launches this tick")
+            record_gate_fail_open(ledger_path, admit_reason)
+            toast("Resume source governor OFFLINE",
+                  f"{admit_reason} -- live resumes are fail-open (no host-wide rail)", "warn")
         if not admit_ok:
             note(f"  DEFER {sid8} acct={acct} -- per-source gate: {admit_reason}")
             with open(ledger_path, "a") as fh:

@@ -183,6 +183,209 @@ def test_manual_override_is_authoritative():
     assert blocked and "operator" in why.lower()
 
 
+def test_source_gate_defer_does_not_burn_attempt():
+    wd = _reload({"FAK_MAX_ATTEMPTS": "1"})
+    hist = [{"phase": "deferred", "cause": "source_concurrency_gate",
+             "reason": "SOURCE_SATURATED"}]
+    assert wd.is_resume_attempt_record(hist[0]) is False
+    blocked, why = wd.resume_blocked("sid-defer", hist)
+    assert not blocked, why
+
+
+def test_powershell_watchdog_invokes_source_governor_and_spacing():
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1").read_text(encoding="utf-8")
+    assert "resume admit --json" in ps1
+    assert "SourceAdmitGate $ledgerPath $sourcePolicyPath" in ps1
+    assert "phase = 'deferred'" in ps1
+    assert "source_concurrency_gate" in ps1
+    assert "Start-Sleep -Seconds $LaunchSpacingSec" in ps1
+    # the governor-unavailable path must be loud, never silent (#2173)
+    assert "gate_fail_open" in ps1
+    assert "FailOpen" in ps1
+
+
+def test_gate_fail_open_row_is_not_an_attempt(tmp_path):
+    # The durable governor-unavailable warning row (#2173) must be invisible to retry
+    # accounting: not an attempt record, never blocking, never launch pressure.
+    wd = _reload({"FAK_MAX_ATTEMPTS": "1"})
+    rec = wd.record_gate_fail_open(str(tmp_path / "ledger.jsonl"), "no-fak-binary")
+    assert rec["phase"] in wd.NON_LAUNCH_PHASES
+    assert wd.is_resume_attempt_record(rec) is False
+    # even if a reader attributed the row to a session, it must not block
+    blocked, why = wd.resume_blocked("sid-failopen", [rec])
+    assert not blocked, why
+    # and it landed durably
+    line = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").strip()
+    assert '"gate_fail_open"' in line and "no-fak-binary" in line
+
+
+# ---- PowerShell watchdog behavioral witnesses (#2172) ---------------------------
+#
+# These drive the REAL fleet_resume_watchdog.ps1 in -Live mode inside a hermetic temp
+# fleet: a fake `fak` (scripted exit code) and a fake `claude` (drops a marker file per
+# invocation) prove what the launcher actually DID, not what its source says. Windows-
+# only: the launch path uses Start-Process -WindowStyle, and the crash class under test
+# (#2170/#2172) is a Windows one.
+
+import shutil as _shutil
+import subprocess as _subprocess
+
+_POWERSHELL = _shutil.which("powershell") or _shutil.which("pwsh")
+_ps1_behavioral = __import__("pytest").mark.skipif(
+    os.name != "nt" or not _POWERSHELL,
+    reason="needs Windows + PowerShell (drives the real .ps1 launch path)")
+
+
+def _seed_ps1_fleet(tmp_path, *, fak_exit, fak_reason, sessions, ledger_rows=()):
+    """Build the hermetic fleet layout the .ps1 runs against and return its paths."""
+    import json as _json
+    fleet = tmp_path / "fleet"
+    reg = tmp_path / "reg"
+    log = tmp_path / "log"
+    cfg = tmp_path / "cfg"
+    for d in (fleet, reg, log, cfg):
+        d.mkdir(parents=True, exist_ok=True)
+
+    marker = tmp_path / "claude_launches.txt"
+    claude = tmp_path / "claude.cmd"
+    claude.write_text('@echo off\r\necho launched>>"%s"\r\n' % marker, encoding="ascii")
+
+    fak = tmp_path / "fak.cmd"
+    fak.write_text(
+        '@echo off\r\necho {"decision":{"reason":"%s"}}\r\nexit /b %d\r\n'
+        % (fak_reason, fak_exit), encoding="ascii")
+
+    plan = {"plan": [
+        {"session": sid, "account": ".claude-t", "resume_account": ".claude-t",
+         "project": "C--work-fak", "cwd": None, "disp": "STOPPED_APIERR",
+         "rehomed": False, "config_dir": str(cfg), "resume_config_dir": str(cfg)}
+        for sid in sessions]}
+    (reg / "resume_plan.json").write_text(_json.dumps(plan), encoding="utf-8")
+
+    ledger = reg / "resume_ledger.jsonl"
+    if ledger_rows:
+        ledger.write_text(
+            "".join(_json.dumps(r) + "\n" for r in ledger_rows), encoding="utf-8")
+
+    return {"fleet": fleet, "reg": reg, "log": log, "marker": marker,
+            "claude": claude, "fak": fak, "ledger": ledger}
+
+
+def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8):
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1")
+    env = dict(os.environ)
+    env["FLEET_STATE_DIR"] = str(tmp_path / "state")
+    env["FAK_RESUME_SOURCE_POLICY"] = str(tmp_path / "policy.json")  # hermetic (missing = permissive)
+    env.pop("FAK_EXE", None)
+    return _subprocess.run(
+        [_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1),
+         "-Live", "-Probe", "none",
+         "-FleetDir", str(paths["fleet"]), "-RegistryDir", str(paths["reg"]),
+         "-LogDir", str(paths["log"]), "-ClaudeExe", str(paths["claude"]),
+         "-FakExe", str(paths["fak"]),
+         "-LaunchSpacingSec", str(spacing), "-MaxAttempts", str(max_attempts)],
+        capture_output=True, text=True, timeout=180, env=env)
+
+
+def _ledger_rows(paths):
+    import json as _json
+    if not paths["ledger"].exists():
+        return []
+    return [_json.loads(ln) for ln in
+            paths["ledger"].read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+
+@_ps1_behavioral
+def test_ps1_refused_admit_never_reaches_start_process(tmp_path):
+    """#2172 acceptance: force `fak resume admit` to exit 3 and prove the PowerShell
+    path does NOT Start-Process — the launch is deferred with a structured ledger row."""
+    sid = "11111111-2222-3333-4444-555555555555"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=3, fak_reason="SOURCE_SATURATED",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not paths["marker"].exists(), \
+        "claude was launched despite the source governor refusing (exit 3)"
+    rows = _ledger_rows(paths)
+    deferred = [x for x in rows if x.get("phase") == "deferred"]
+    assert deferred and deferred[0]["cause"] == "source_concurrency_gate"
+    assert deferred[0]["session"] == sid
+    assert "SOURCE_SATURATED" in deferred[0]["reason"]
+    assert "DEFER" in r.stdout
+
+
+@_ps1_behavioral
+def test_ps1_deferred_rows_do_not_trip_max_attempts(tmp_path):
+    """#2172 acceptance: phase="deferred" (and gate_fail_open) ledger rows must not
+    count as attempts — a session deferred by the gate stays launchable."""
+    sid = "22222222-3333-4444-5555-666666666666"
+    prior = [{"ts": "2026-07-01T00:00:00Z", "session": sid, "phase": "deferred",
+              "cause": "source_concurrency_gate", "reason": "SOURCE_SATURATED"},
+             {"ts": "2026-07-01T00:00:01Z", "phase": "gate_fail_open",
+              "cause": "source_governor_unavailable", "reason": "no-fak-binary"}]
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=[sid], ledger_rows=prior)
+    r = _run_ps1_live(tmp_path, paths, max_attempts=1)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "attempt cap" not in r.stdout, \
+        "a deferred row burned the retry cap: " + r.stdout
+    assert paths["marker"].exists(), "the launch should have fired (cap not consumed)"
+    launched = [x for x in _ledger_rows(paths) if x.get("phase") == "launched"]
+    assert launched and launched[0]["attempt"] == 1
+
+
+@_ps1_behavioral
+def test_ps1_launch_spacing_prevents_same_second_starts(tmp_path):
+    """#2172 acceptance: with spacing configured, two live resumes cannot start in the
+    same second — witnessed from the per-launch ledger timestamps."""
+    from datetime import datetime as _dt
+    sids = ["33333333-4444-5555-6666-777777777777",
+            "44444444-5555-6666-7777-888888888888"]
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=0, fak_reason="SOURCE_ADMITTED",
+                            sessions=sids)
+    r = _run_ps1_live(tmp_path, paths, spacing=2)
+    assert r.returncode == 0, r.stdout + r.stderr
+    launched = [x for x in _ledger_rows(paths) if x.get("phase") == "launched"]
+    assert len(launched) == 2, r.stdout
+    t0, t1 = (_dt.strptime(x["ts"], "%Y-%m-%dT%H:%M:%SZ") for x in launched)
+    assert t0 != t1, "two spaced launches recorded the same second (stale tick ts?)"
+    assert abs((t1 - t0).total_seconds()) >= 2
+
+
+@_ps1_behavioral
+def test_ps1_gate_error_fails_open_loudly(tmp_path):
+    """#2173: an unexpected governor exit fails OPEN (the launch still fires) but
+    leaves a durable gate_fail_open warning row and a WARN log line — never silent."""
+    sid = "55555555-6666-7777-8888-999999999999"
+    paths = _seed_ps1_fleet(tmp_path, fak_exit=7, fak_reason="BOOM",
+                            sessions=[sid])
+    r = _run_ps1_live(tmp_path, paths)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert paths["marker"].exists(), "fail-open must not strand recovery"
+    rows = _ledger_rows(paths)
+    warn = [x for x in rows if x.get("phase") == "gate_fail_open"]
+    assert warn and warn[0]["cause"] == "source_governor_unavailable"
+    assert "session" not in warn[0], "warning row must be session-less (invisible to retry accounting)"
+    assert [x for x in rows if x.get("phase") == "launched"]
+    assert "WARN source governor UNAVAILABLE" in r.stdout
+
+
+def test_ps1_parses_clean():
+    """#2172 acceptance: the .ps1 stays syntactically valid — parsed by the real
+    PowerShell language parser, not a regex."""
+    import pytest
+    if not _POWERSHELL:
+        pytest.skip("needs pwsh or powershell for the language parser")
+    ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1")
+    script = (
+        "$t=$null;$e=$null;"
+        "[System.Management.Automation.Language.Parser]::ParseFile('%s',[ref]$t,[ref]$e)|Out-Null;"
+        "if($e.Count){$e|ForEach-Object{$_.Message};exit 1};exit 0" % str(ps1).replace("'", "''"))
+    r = _subprocess.run([_POWERSHELL, "-NoProfile", "-Command", script],
+                        capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, "parse errors:\n" + r.stdout + r.stderr
+
+
 def _setenv(**kv):
     """Set env vars for the duration of a test, returning a restore callable. Used for the
     memory-cotravel gate, which memory_cotravel reads at CALL time (so it must be live when
