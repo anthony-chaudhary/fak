@@ -444,7 +444,10 @@ edit. Every figure is a ROUGH lens, never a bill or a measured SLA. See
 `fak vcache status|prove|prove-telemetry` is the proof surface for the virtual
 provider-cache work. `status` reports the honest current state: the M5 Governor is up
 as a local, off-path policy engine, while provider calibration/warming/recall remain
-open in #716-#718 and the Codex/OpenAI cached-token probe is proven by #727. `prove` runs
+open in #716-#718 and the Codex/OpenAI cached-token probe is proven by #727. Add
+`--sessions` to attach the compact current-workspace session summary (`fak
+session-audit summary --here`): recent Fable/Opus output mix, total context,
+cache-read share, and top long-context sessions. `prove` runs
 the deterministic star-anchor savings arithmetic without a provider or model; the
 default Codex-like workload (4096-token anchor, 7 sibling requests, 10-token suffixes,
 0.1 read / 1.25 write multipliers) proves 21,094.4 token-equivalents saved, 73.4%,
@@ -462,6 +465,11 @@ at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` prov
 reports the verifier as ready, includes a cached-token sample proof and zero-cache
 refutation, and keeps the raw OpenAI API probe as an optional no-credential skip path.
 These are cost proofs only: correctness never depends on a provider cache hit.
+
+`fak session-audit summary --here --since-days 7 --max 40 --json` emits the compact
+machine-readable shape behind that `vcache status --sessions` block. It is scoped by
+the current workspace's Claude transcript namespace by default, labels clipped
+`--max` windows, and keeps exact token counts separate from assumed-cost estimates.
 
 `fak vcache score` also reports per-plane evidence and a separate
 `default_usefulness` score. Provider counters populate `planes.provider_observed`

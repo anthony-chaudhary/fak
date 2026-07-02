@@ -202,7 +202,7 @@ var verbManifest = []Verb{
 	{Name: "serve", Synopsis: "run the OpenAI-compatible gateway in front of a local or remote model", Lane: "gateway"},
 	{Name: "serve-wiring", Synopsis: "audit fak serve flag -> gateway.Config -> runtime-read wiring", Lane: "gateway"},
 	{Name: "session", Synopsis: "the operator control surface for a served session: read live DRIVE state, cancel/update in flight", Lane: "cmd"},
-	{Name: "session-audit", Synopsis: "audit agent session JSONL transcripts (discover/audit/deep), JSON/Markdown reports", Lane: "cmd"},
+	{Name: "session-audit", Synopsis: "audit agent session JSONL transcripts (discover/audit/summary/deep), JSON/Markdown reports plus compact model-mix and long-context summary", Lane: "cmd"},
 	{Name: "sessions", Synopsis: "ingest + score this host's agent transcripts (the session->outcome learn loop)", Lane: "cmd"},
 	{Name: "signal", Synopsis: "job control for a running session (pause/resume/stop/steer) over the control plane", Lane: "cmd"},
 	{Name: "skill-effectiveness-scorecard", Synopsis: "native skill-pack effectiveness control-pane payload", Lane: "cmd"},

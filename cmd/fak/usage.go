@@ -208,9 +208,10 @@ const usageCoreText = `usage:
                 (LLM-D SMOKE WITNESS: probe an llm-d Gateway API OpenAI-compatible
                  route through /v1/models plus streamed /v1/chat/completions, and
                  optionally normalize its vLLM-style metrics under engine=llm-d)
-  fak session-audit discover|audit|deep
+  fak session-audit discover|audit|summary|deep
                 (native transcript audit: discover Claude Code JSONL sessions,
-                 fold exact token/cache/tool/cost observability, and render markdown/JSON)
+                 fold exact token/cache/tool/cost observability, render markdown/JSON,
+                 or emit the compact model-mix + long-context summary)
   fak policy    --dump | --check FILE
                 (--dump writes the built-in DefaultPolicy as a manifest you edit;
                  --check validates a manifest and prints the floor it admits. The
