@@ -359,6 +359,7 @@ const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--
   fak session   ls | status <id> | stop <id> | pause <id> | resume <id> | throttle <id> |
                 run <id> <state> | budget <id> [--turns N] [--tokens N] [--context-tokens N] |
                 pace <id> [--max-tokens N] |
+                audit [summary|discover|audit|deep] [--days N] |
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
                  and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)

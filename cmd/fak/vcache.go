@@ -156,6 +156,7 @@ type vcacheStatusReport struct {
 	RecallProof            vcachechain.RecallProof     `json:"recall_proof"`
 	CodexOpenAI            vcacheCodexOpenAIStatus     `json:"codex_openai"`
 	ContextAPI             vcacheContextAPIStatus      `json:"context_api"`
+	ProviderCalibration    vcacheProviderCalStatus     `json:"provider_calibration"`
 	ProviderActions        vcacheProviderActionStatus  `json:"provider_actions"`
 	RecentObservation      *vcacheRecentObservation    `json:"recent_observation,omitempty"`
 	RecentObservationError string                      `json:"recent_observation_error,omitempty"`
@@ -223,6 +224,16 @@ type vcacheContextAPIStatus struct {
 	Reason              string   `json:"reason"`
 }
 
+type vcacheProviderCalStatus struct {
+	Verifier  string `json:"verifier"`
+	CLI       string `json:"cli"`
+	Input     string `json:"input"`
+	Output    string `json:"output"`
+	Consumer  string `json:"consumer"`
+	LiveProbe string `json:"live_probe"`
+	Reason    string `json:"reason"`
+}
+
 type vcacheProviderActionStatus struct {
 	Verifier  string `json:"verifier"`
 	HTTP      string `json:"http"`
@@ -284,6 +295,8 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "context API: %s (%s; MCP %s; advice_only=%v)\n",
 		rep.ContextAPI.Verifier, rep.ContextAPI.HTTP, rep.ContextAPI.MCPTool, rep.ContextAPI.AdviceOnly)
+	fmt.Fprintf(stdout, "provider calibration: %s (CLI %s; output %s; consumer %s)\n",
+		rep.ProviderCalibration.Verifier, rep.ProviderCalibration.CLI, rep.ProviderCalibration.Output, rep.ProviderCalibration.Consumer)
 	fmt.Fprintf(stdout, "provider actions API: %s (%s; CLI %s; transport=%s)\n",
 		rep.ProviderActions.Verifier, rep.ProviderActions.HTTP, rep.ProviderActions.CLI, rep.ProviderActions.Transport)
 	fmt.Fprintf(stdout, "context witness replay: run `%s` (writes %s); score with `%s`\n",
@@ -1090,6 +1103,15 @@ func defaultVCacheStatus() vcacheStatusReport {
 		}),
 		CodexOpenAI: defaultCodexOpenAIStatus(),
 		ContextAPI:  defaultVCacheContextAPIStatus(),
+		ProviderCalibration: vcacheProviderCalStatus{
+			Verifier:  "ready",
+			CLI:       "fak vcache calibrate",
+			Input:     "provider-cache probe samples JSON/JSONL",
+			Output:    "vcachecal.Calibration JSON",
+			Consumer:  "fak vcache observe --calibration",
+			LiveProbe: "operator-supplied samples; no spendful probe transport is auto-run",
+			Reason:    "fits provider TTL, minimum prefix, and cached-read multiplier from replayed probe samples instead of hard-coded hypotheses",
+		},
 		ProviderActions: vcacheProviderActionStatus{
 			Verifier:  "ready",
 			HTTP:      "GET /v1/fak/vcache/actions",
