@@ -506,6 +506,7 @@ memqdemo-report.json
 .aeo-*
 /_tmp_*
 /.tmp/
+/.tmp_overlay/
 /*_msg_*.txt
 /err.txt
 
