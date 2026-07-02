@@ -60,9 +60,8 @@ fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode   # an Open
 process only. It forwards your real upstream credential
 (and the `cache_control` prompt-cache breakpoints) byte-for-byte, so there is no cost
 regression. On that same boundary, it checks every tool call against a built-in secure
-capability floor: a default-deny allow-list. On exit it prints what the kernel decided:
-`fak guard: 131 kernel decision(s): 121 allowed, 5 denied, 2 repaired,
-0 quarantined, 3 deferred`.
+capability floor: a default-deny allow-list. On exit it prints a compact decision summary:
+`fak guard: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
 For Claude Code, `fak guard` uses your logged-in subscription by default, so no API key is
 required. The full walkthrough includes an end-to-end proof that a real `/v1/messages` turn
@@ -157,9 +156,9 @@ fak preflight --tool refund_payment --args "{}"     # -> DENY (DEFAULT_DENY): no
 fak agent --offline                                 # the injection / destructive-op A/B, fully offline
 ```
 
-Starter floors cover coding agents, customer support, DevOps, trading, and clinical/PHI
-workflows. More domain floors live in the catalogue. Each floor names the dangerous action
-it denies and carries a witness command. Point your agent at one with
+Starter floors cover coding agents and customer support. They also cover DevOps, trading,
+and clinical/PHI workflows. More domain floors live in the catalogue. Each floor names the
+dangerous action it denies and carries a witness command. Point your agent at one with
 `fak guard --policy examples/<file>`. The catalogue:
 [examples/README.md](examples/README.md) and the
 [per-domain table](docs/README-legacy.md#use-cases-by-domain). Every refusal cites a closed
