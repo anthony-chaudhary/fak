@@ -22,6 +22,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
+// EnvPath is the optional override used by guard/serve writers and vcache readers.
+// Set it to a file path to keep a probe/replay artifact separate from the well-known
+// live snapshot, or to "off" to suppress the automatic writer.
+const EnvPath = "FAK_VCACHE_SNAPSHOT"
+
 // DefaultRel is the per-user default snapshot path's basename under the config dir.
 const DefaultRel = "vcache-turns.jsonl"
 
@@ -34,6 +39,31 @@ func DefaultPath() string {
 		return filepath.Join(dir, "fak", DefaultRel)
 	}
 	return filepath.Join(".fak", DefaultRel)
+}
+
+// ConfiguredPath resolves the automatic guard/serve snapshot target. It mirrors the
+// reader-side FAK_VCACHE_SNAPSHOT override used by `fak vcache score/status`, while
+// keeping DefaultPath as the stable well-known fallback for callers that explicitly ask
+// for "default".
+func ConfiguredPath() (string, bool) {
+	path := strings.TrimSpace(os.Getenv(EnvPath))
+	if path == "" {
+		return DefaultPath(), true
+	}
+	if strings.EqualFold(path, "off") {
+		return "", false
+	}
+	return path, true
+}
+
+// WriteConfigured writes the automatic guard/serve snapshot to ConfiguredPath. The
+// returned bool is false only when FAK_VCACHE_SNAPSHOT=off disabled the writer.
+func WriteConfigured(turns []vcacheobserve.Turn) (string, bool, error) {
+	path, ok := ConfiguredPath()
+	if !ok {
+		return "", false, nil
+	}
+	return path, true, Write(path, turns)
 }
 
 // Write replaces the snapshot at path with one JSONL row per turn (truncating any prior

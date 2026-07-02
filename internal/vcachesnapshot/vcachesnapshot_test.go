@@ -34,7 +34,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 }
 
-// A missing snapshot is the common case (no session has run yet) — it must NOT error, and
+// A missing snapshot is the common case (no session has run yet) - it must NOT error, and
 // must signal ok=false so the score falls open to the planned forecast rather than
 // reporting a phantom observed 0x.
 func TestReadMissingFileFailsOpen(t *testing.T) {
@@ -81,5 +81,59 @@ func TestReadSkipsMalformedLine(t *testing.T) {
 func TestDefaultPathBasename(t *testing.T) {
 	if filepath.Base(DefaultPath()) != DefaultRel {
 		t.Fatalf("DefaultPath basename = %q, want %q", filepath.Base(DefaultPath()), DefaultRel)
+	}
+}
+
+func TestConfiguredPathDefaultsToWellKnownPath(t *testing.T) {
+	t.Setenv(EnvPath, "")
+
+	got, ok := ConfiguredPath()
+	if !ok {
+		t.Fatal("ConfiguredPath disabled with an empty override")
+	}
+	if want := DefaultPath(); got != want {
+		t.Fatalf("ConfiguredPath() = %q, want default %q", got, want)
+	}
+}
+
+func TestWriteConfiguredUsesEnvPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "probe-vcache-turns.jsonl")
+	t.Setenv(EnvPath, path)
+
+	got, ok, err := WriteConfigured([]vcacheobserve.Turn{{
+		Family:            "context",
+		ContextEvents:     1,
+		ContextShedTokens: 900,
+	}})
+	if err != nil {
+		t.Fatalf("WriteConfigured() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("WriteConfigured disabled with a file override")
+	}
+	if got != path {
+		t.Fatalf("WriteConfigured path = %q, want %q", got, path)
+	}
+	turns, readOK, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(%q) error = %v", path, err)
+	}
+	if !readOK || len(turns) != 1 || turns[0].ContextEvents != 1 || turns[0].ContextShedTokens != 900 {
+		t.Fatalf("persisted turns = %+v, ok=%v; want one context witness row", turns, readOK)
+	}
+}
+
+func TestWriteConfiguredOffSkipsAutomaticSnapshot(t *testing.T) {
+	t.Setenv(EnvPath, "off")
+
+	got, ok, err := WriteConfigured([]vcacheobserve.Turn{{
+		Family:    "provider",
+		CacheRead: 42,
+	}})
+	if err != nil {
+		t.Fatalf("WriteConfigured(off) error = %v", err)
+	}
+	if ok || got != "" {
+		t.Fatalf("WriteConfigured(off) = path %q ok %v, want disabled empty path", got, ok)
 	}
 }
