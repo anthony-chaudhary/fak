@@ -31,6 +31,15 @@ recurrence body is copied verbatim from
 (the prefill twin of `qwen35.go:linearAttnStep`); only the `i`-loop direction / state dtype
 differs.
 
+```text
+seeded-random weights + inputs
+   |
+   +--> run A: 48-GDN-layer stack, forward scan --+
+   |                                              +--> ρ = ‖Δhidden‖/‖hidden‖ per layer
+   +--> run B: same stack, scan numerics differ --+
+        (`reorder` / `f16state` bracket)
+```
+
 ## The question it answers (falsifiable)
 
 > Is a reduction-order-only (or f16-state) numeric difference, compounded over 48 GDN layers and

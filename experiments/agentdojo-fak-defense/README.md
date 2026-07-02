@@ -51,6 +51,13 @@ A faithful port of the two seams in `internal/ifc/ifc.go`:
    flight. It defers on every non-sink / untainted call, so it only ever *adds*
    restriction.
 
+```text
+tool result --> [source-stamp] --> taint high-water mark
+tool call ----> [sink-gate] ------> defers --> ToolsExecutor
+                     |
+                     +--> refused: tainted data in flight to a sensitive sink
+```
+
 Detection keys on *content* (evadable by paraphrase). IFC keys on *provenance* (a
 paraphrase cannot launder it), so the harmful sink is barred regardless of phrasing
 — the property that holds the local battery at ASR 0.000. Classification order is
