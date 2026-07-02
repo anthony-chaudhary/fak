@@ -269,6 +269,19 @@ func TestSessionAuditActionsJSON(t *testing.T) {
 		byID["checkpoint_reset_top_long_context"].Target != "session:C--work-fak/heavy" {
 		t.Fatalf("long-context action = %+v", byID["checkpoint_reset_top_long_context"])
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	rc = runSessionAudit(&stdout, &stderr, []string{"actions", "--root", root, "--all", "--json", "--fail-on", "high"})
+	if rc != 1 {
+		t.Fatalf("actions --fail-on high rc=%d stderr=%s stdout=%s", rc, stderr.String(), stdout.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatalf("bad gated actions json: %v\n%s", err, stdout.String())
+	}
+	if plan.Gate.Verdict != "refuse" || plan.Gate.Refused != 2 || plan.Gate.Threshold != "high" {
+		t.Fatalf("gate = %+v, want refused high gate", plan.Gate)
+	}
 }
 
 func TestSessionAuditAliasDefaultsToHereSummary(t *testing.T) {

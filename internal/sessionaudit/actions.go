@@ -1,6 +1,9 @@
 package sessionaudit
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const CompactActionPlanSchema = "fak.session_audit.actions.v1"
 
@@ -10,6 +13,7 @@ type CompactActionPlan struct {
 	Generated     string              `json:"generated"`
 	Scope         CompactScope        `json:"scope"`
 	Counts        CompactActionCounts `json:"counts"`
+	Gate          CompactActionGate   `json:"gate,omitempty,omitzero"`
 	Actions       []CompactAction     `json:"actions"`
 	Correctness   string              `json:"correctness"`
 }
@@ -18,6 +22,17 @@ type CompactActionCounts struct {
 	Total  int `json:"total"`
 	High   int `json:"high"`
 	Medium int `json:"medium"`
+}
+
+type CompactActionGate struct {
+	Threshold string `json:"threshold,omitempty"`
+	Verdict   string `json:"verdict,omitempty"`
+	Refused   int    `json:"refused,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+func (g CompactActionGate) IsZero() bool {
+	return g.Threshold == "" && g.Verdict == "" && g.Refused == 0 && g.Reason == ""
 }
 
 type CompactAction struct {
@@ -59,6 +74,64 @@ func BuildCompactActionPlan(rep CompactReport) CompactActionPlan {
 	}
 	plan.Counts.Total = len(plan.Actions)
 	return plan
+}
+
+// ApplyCompactActionGate stamps a guard verdict onto plan. threshold is "high",
+// "medium", or "none"; unknown thresholds return false so CLI callers can emit a
+// usage error. A refused gate is evidence that the audited window should block a
+// new high-cost/long-context launch until a witness confirms the pressure changed.
+func ApplyCompactActionGate(plan CompactActionPlan, threshold string) (CompactActionPlan, bool) {
+	thresholdRank, ok := compactSeverityRank(threshold)
+	if !ok {
+		return plan, false
+	}
+	threshold = compactSeverityName(threshold)
+	gate := CompactActionGate{
+		Threshold: threshold,
+		Verdict:   "allow",
+		Reason:    "no action meets the configured severity threshold",
+	}
+	if thresholdRank == 0 {
+		gate.Reason = "gate disabled"
+		plan.Gate = gate
+		return plan, true
+	}
+	for _, action := range plan.Actions {
+		rank, ok := compactSeverityRank(action.Severity)
+		if ok && rank >= thresholdRank {
+			gate.Refused++
+		}
+	}
+	if gate.Refused > 0 {
+		gate.Verdict = "refuse"
+		gate.Reason = "recent session audit surfaced action(s) at or above the configured severity threshold"
+	}
+	plan.Gate = gate
+	return plan, true
+}
+
+func compactSeverityRank(severity string) (int, bool) {
+	severity = strings.ToLower(strings.TrimSpace(severity))
+	switch severity {
+	case "", "none", "off":
+		return 0, true
+	case "medium":
+		return 1, true
+	case "high":
+		return 2, true
+	default:
+		return 0, false
+	}
+}
+
+func compactSeverityName(severity string) string {
+	severity = strings.ToLower(strings.TrimSpace(severity))
+	switch severity {
+	case "", "none", "off":
+		return "none"
+	default:
+		return severity
+	}
 }
 
 func compactActionFromRecommendation(rep CompactReport, rec CompactRecommendation) (CompactAction, bool) {

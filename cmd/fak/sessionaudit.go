@@ -44,7 +44,7 @@ func sessionAuditUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak session-audit discover [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N]")
 	fmt.Fprintln(w, "       fak session-audit audit    [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json OUT] [--md OUT]")
 	fmt.Fprintln(w, "       fak session-audit summary  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
-	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json]")
+	fmt.Fprintln(w, "       fak session-audit actions  [--since-days N] [--root DIR ...] [--ns-prefix PREFIX|--here] [--all] [--include-subagents] [--max N] [--json] [--fail-on high|medium|none]")
 	fmt.Fprintln(w, "       fak session-audit deep <session.jsonl>")
 }
 
@@ -262,6 +262,7 @@ func runSessionAuditSummary(stdout, stderr io.Writer, argv []string) int {
 func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
 	fs, roots, sinceDays, nsPrefix, here, allNS, includeSubagents, max := sessionAuditCommonFlags("session-audit actions", stderr)
 	asJSON := fs.Bool("json", false, "emit action plan as JSON")
+	failOn := fs.String("fail-on", "", "exit 1 when actions at or above this severity exist: high, medium, or none")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -275,10 +276,28 @@ func runSessionAuditActions(stdout, stderr io.Writer, argv []string) int {
 		return rc
 	}
 	plan := sessionaudit.BuildCompactActionPlan(rep)
+	if *failOn != "" {
+		var ok bool
+		plan, ok = sessionaudit.ApplyCompactActionGate(plan, *failOn)
+		if !ok {
+			fmt.Fprintf(stderr, "fak session-audit actions: invalid --fail-on %q (want high, medium, or none)\n", *failOn)
+			return 2
+		}
+	}
 	if *asJSON {
-		return writeJSON(stdout, plan)
+		rc := writeJSON(stdout, plan)
+		if rc != 0 {
+			return rc
+		}
+		if plan.Gate.Verdict == "refuse" {
+			return 1
+		}
+		return 0
 	}
 	renderSessionAuditActions(stdout, plan)
+	if plan.Gate.Verdict == "refuse" {
+		return 1
+	}
 	return 0
 }
 
@@ -385,6 +404,14 @@ func renderSessionAuditActions(w io.Writer, plan sessionaudit.CompactActionPlan)
 		fmt.Fprintf(w, " scope=%s", plan.Scope.NamespaceFilter)
 	}
 	fmt.Fprintln(w)
+	if plan.Gate.Verdict != "" {
+		fmt.Fprintf(w, "gate: %s threshold=%s refused=%d (%s)\n",
+			plan.Gate.Verdict,
+			plan.Gate.Threshold,
+			plan.Gate.Refused,
+			plan.Gate.Reason,
+		)
+	}
 	if len(plan.Actions) == 0 {
 		fmt.Fprintln(w, "actions: none")
 		return

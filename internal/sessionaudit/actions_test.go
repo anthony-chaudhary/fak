@@ -40,3 +40,34 @@ func TestBuildCompactActionPlanNamesCostAndLongContextActions(t *testing.T) {
 		t.Fatal("plan must carry advisory correctness boundary")
 	}
 }
+
+func TestApplyCompactActionGateRefusesAtThreshold(t *testing.T) {
+	plan := CompactActionPlan{Actions: []CompactAction{
+		{ID: "a", Severity: "high"},
+		{ID: "b", Severity: "medium"},
+	}}
+	gated, ok := ApplyCompactActionGate(plan, "high")
+	if !ok {
+		t.Fatal("high threshold rejected as invalid")
+	}
+	if gated.Gate.Verdict != "refuse" || gated.Gate.Refused != 1 || gated.Gate.Threshold != "high" {
+		t.Fatalf("high gate = %+v, want one refused high action", gated.Gate)
+	}
+	gated, ok = ApplyCompactActionGate(plan, "medium")
+	if !ok {
+		t.Fatal("medium threshold rejected as invalid")
+	}
+	if gated.Gate.Verdict != "refuse" || gated.Gate.Refused != 2 {
+		t.Fatalf("medium gate = %+v, want two refused actions", gated.Gate)
+	}
+	gated, ok = ApplyCompactActionGate(plan, "none")
+	if !ok {
+		t.Fatal("none threshold rejected as invalid")
+	}
+	if gated.Gate.Verdict != "allow" || gated.Gate.Refused != 0 {
+		t.Fatalf("disabled gate = %+v, want allow", gated.Gate)
+	}
+	if _, ok := ApplyCompactActionGate(plan, "urgent"); ok {
+		t.Fatal("unknown threshold should be invalid")
+	}
+}

@@ -705,7 +705,7 @@ func sessionUsage(w io.Writer) {
                                                spec: turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms
   fak session context  <id>                   read the managed-context value report
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
-  fak session audit [summary|actions|discover|audit|deep] [--days N] [--json]
+  fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here
   fak session reset-diff [--in FILE] [--json] [--md]
                                                offline before/after diff for one reset
