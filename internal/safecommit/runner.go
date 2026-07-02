@@ -3,6 +3,7 @@ package safecommit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,23 +73,37 @@ func realLock(opts LockOptions) (func(), error) {
 			path = filepath.Join(gd, "fak-commit.lock")
 		}
 	}
-	if path != "" {
-		reapStaleLock(path)
-	}
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = DefaultLockTimeout
 	}
-	lease, err := gpulease.Acquire(gpulease.Options{
-		Path:    path,
-		NoWait:  opts.NoWait,
-		Timeout: timeout,
-		Logf:    func(string, ...any) {}, // silent: the CLI layer narrates, not the lock
-	})
-	if err != nil {
-		if errors.Is(err, gpulease.ErrBusy) || errors.Is(err, gpulease.ErrTimeout) {
-			return nil, ErrLockBusy
+	// Reap-aware acquire (issue #2339): instead of a single pre-flight reap followed by a
+	// blind blocking wait, poll the lock and RE-reap on every attempt. A holder that dies
+	// (or whose PID is reused) mid-wait is broken within one poll interval rather than
+	// stalling the waiter for the whole timeout — the "waiters do the liveness check inside
+	// their wait loop" half of the fix.
+	acq := func(noWait bool) (func(), error) {
+		lease, err := gpulease.Acquire(gpulease.Options{
+			Path:    path,
+			NoWait:  noWait,
+			Timeout: 0,                       // acquireWithReap owns the bound; each probe is non-blocking
+			Logf:    func(string, ...any) {}, // silent: the CLI layer narrates, not the lock
+		})
+		if err != nil {
+			if errors.Is(err, gpulease.ErrBusy) || errors.Is(err, gpulease.ErrTimeout) {
+				return nil, ErrLockBusy
+			}
+			return nil, err
 		}
+		return lease.Release, nil
+	}
+	reap := func() {
+		if path != "" {
+			reapStaleLock(path)
+		}
+	}
+	release, err := acquireWithReap(acq, reap, opts.NoWait, timeout, lockReapPoll, time.Now, time.Sleep)
+	if err != nil {
 		return nil, err
 	}
 	// Cross-machine VISIBILITY tier (#825): when opted in (FAK_LEASEREF=1), publish the
@@ -98,11 +113,42 @@ func realLock(opts LockOptions) (func(), error) {
 	// leaseref publish/delete failure NEVER blocks or fails the commit (it is the slower,
 	// cross-host tier layered on top — distribution, not atomic acquisition). The record is
 	// deleted on release, composed in front of the flock's own release.
-	release := lease.Release
 	if leaserefEnabled() {
 		release = withLeasePublish(release)
 	}
 	return release, nil
+}
+
+const lockReapPoll = 250 * time.Millisecond
+
+func acquireWithReap(acquire func(noWait bool) (func(), error), reap func(), noWait bool, timeout, poll time.Duration, now func() time.Time, sleep func(time.Duration)) (func(), error) {
+	if poll <= 0 {
+		poll = lockReapPoll
+	}
+	if timeout <= 0 {
+		timeout = DefaultLockTimeout
+	}
+	deadline := now().Add(timeout)
+	for {
+		reap()
+		release, err := acquire(true)
+		if err == nil {
+			return release, nil
+		}
+		if !errors.Is(err, ErrLockBusy) {
+			return nil, err
+		}
+		if noWait || !now().Before(deadline) {
+			return nil, ErrLockBusy
+		}
+		wait := poll
+		if remaining := deadline.Sub(now()); remaining < wait {
+			wait = remaining
+		}
+		if wait > 0 {
+			sleep(wait)
+		}
+	}
 }
 
 // leaserefEnabled reports whether the cross-machine lease-visibility tier is opted in.
@@ -141,25 +187,44 @@ func withLeasePublish(inner func()) func() {
 	}
 }
 
-// reapStaleLock removes the commit lockfile at path when its recorded holder PID is no
-// longer a live process. It is the pre-flight that stops a dead committer from wedging the
+// reapEventf receives a LOCK_BROKEN notice the first-and-only time a stale commit lock
+// is actually broken (issue #2339's "logged event" acceptance). It is a package var so
+// the rare break is visible to an operator by default (stderr) and capturable in tests.
+// A break is genuinely rare — it fires only when a dead/foreign holder's lock is removed —
+// so this is a signal, not hot-path noise.
+var reapEventf = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "fak: "+format+"\n", args...)
+}
+
+// reapStaleLock removes the commit lockfile at path when its recorded holder is no longer
+// a live committer — a DEAD PID, or a live PID whose image is provably foreign (a reused
+// PID number). It is the pre-flight that stops a dead committer from wedging the
 // shared-trunk commit lane (see realLock's doc): gpulease records the holder's PID in the
-// lockfile, so a stale lock is one whose PID is gone. We read that PID, and only if the
-// process is provably not alive do we delete the file — gpulease.Acquire then takes a clean
-// lock on a fresh inode. Every step is best-effort and fail-safe:
-//   - an unreadable/absent file, an unparseable PID, or a STILL-ALIVE holder => do nothing
-//     (we never delete a lock a live committer holds);
+// lockfile, so a stale lock is one whose PID is gone or reused. We read that PID and only
+// break the lock when it is provably not a live committer — gpulease.Acquire then takes a
+// clean lock on a fresh inode. Every step is best-effort and fail-safe:
+//   - an unreadable/absent file, an unparseable PID, a STILL-ALIVE committer, or an image
+//     we cannot read => do nothing (we never delete a lock a live committer holds);
 //   - a remove failure is ignored — Acquire's bounded wait/timeout is the backstop, so the
 //     worst case is the pre-reap regression (wait it out), never a corrupted lock.
 //
-// This is the in-code form of the manual `rm .git/fak-commit.lock` that unblocked a wedged
-// 56-minute commit stall in the field, made automatic and PID-guarded so it is safe to run
-// on every acquire.
+// A successful break emits one structured LOCK_BROKEN event naming the reason, holder PID,
+// and lock age, so a fleet operator can see WHY the lane was unwedged instead of a silent
+// disappearance. This is the in-code form of the manual `rm .git/fak-commit.lock` that
+// unblocked a wedged 56-minute commit stall in the field, made automatic, PID-guarded, and
+// auditable so it is safe to run on every acquire.
 func reapStaleLock(path string) {
-	// Delegate to the exported, single-source-of-truth reaper (lockprobe.go). It is
-	// PID-guarded and fail-safe: a live holder, an absent file, or an unattributable
-	// file are all left untouched; only a provably-dead holder's lock is removed.
-	_ = ReapStaleLock(path)
+	res := ReapStaleLockResult(path)
+	if !res.Reaped {
+		return
+	}
+	if res.Reason == ReapReasonHolderForeign && res.Image != "" {
+		reapEventf("LOCK_BROKEN %s pid=%d age=%ds image=%s path=%s",
+			res.Reason, res.HolderPID, res.AgeSeconds, res.Image, path)
+		return
+	}
+	reapEventf("LOCK_BROKEN %s pid=%d age=%ds path=%s",
+		res.Reason, res.HolderPID, res.AgeSeconds, path)
 }
 
 // leaseID derives a stable-enough, ref-safe lease id for this holder. It is a single safe
