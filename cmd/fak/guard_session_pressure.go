@@ -18,6 +18,7 @@ type guardSessionPressureGateConfig struct {
 	Roots           []string
 	Quiet           bool
 	ReportPath      string
+	LaunchModel     string
 }
 
 func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateConfig) int {
@@ -54,6 +55,7 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 		fmt.Fprintf(stderr, "fak guard: invalid --session-pressure-gate %q (want high, medium, none, or off)\n", cfg.Threshold)
 		return 2
 	}
+	plan = applyGuardSessionPressureLaunchContext(plan, cfg.LaunchModel)
 	if cfg.ReportPath != "" {
 		if err := writeGuardSessionPressureReport(cfg.ReportPath, plan); err != nil {
 			fmt.Fprintf(stderr, "fak guard: --session-pressure-report: %v\n", err)
@@ -78,6 +80,42 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 			plan.Gate.Threshold, plan.Counts.Total, plan.Scope.NamespaceFilter)
 	}
 	return 0
+}
+
+func applyGuardSessionPressureLaunchContext(plan sessionaudit.CompactActionPlan, launchModel string) sessionaudit.CompactActionPlan {
+	launchModel = strings.TrimSpace(launchModel)
+	if plan.Gate.Verdict != "refuse" || launchModel == "" || sessionaudit.ModelTier(launchModel) != "fable" {
+		return plan
+	}
+	thresholdRank, ok := sessionaudit.CompactActionSeverityRank(plan.Gate.Threshold)
+	if !ok || thresholdRank == 0 {
+		return plan
+	}
+	refused := 0
+	for _, action := range plan.Actions {
+		rank, ok := sessionaudit.CompactActionSeverityRank(action.Severity)
+		if !ok || rank < thresholdRank {
+			continue
+		}
+		if guardSessionPressureActionAppliesToFableLaunch(action) {
+			refused++
+		}
+	}
+	plan.Gate.Refused = refused
+	if refused == 0 {
+		plan.Gate.Verdict = "allow"
+		plan.Gate.Reason = fmt.Sprintf("explicit Fable launch model %q satisfies the current high-pressure routing/context actions; no action at the threshold applies to this launch", launchModel)
+	}
+	return plan
+}
+
+func guardSessionPressureActionAppliesToFableLaunch(action sessionaudit.CompactAction) bool {
+	switch action.Kind {
+	case "opus_cost_pressure", "long_context_pressure":
+		return false
+	default:
+		return true
+	}
 }
 
 func writeGuardSessionPressureReport(path string, plan sessionaudit.CompactActionPlan) error {

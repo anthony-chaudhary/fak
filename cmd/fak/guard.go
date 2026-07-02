@@ -285,11 +285,12 @@ func cmdGuard(argv []string) {
 		os.Exit(2)
 	}
 	if code := runGuardSessionPressureGate(os.Stderr, guardSessionPressureGateConfig{
-		Threshold:  *sessionPressureGate,
-		SinceDays:  *sessionPressureDays,
-		Max:        *sessionPressureMax,
-		Quiet:      *quiet,
-		ReportPath: *sessionPressureReport,
+		Threshold:   *sessionPressureGate,
+		SinceDays:   *sessionPressureDays,
+		Max:         *sessionPressureMax,
+		Quiet:       *quiet,
+		ReportPath:  *sessionPressureReport,
+		LaunchModel: *model,
 	}); code != 0 {
 		os.Exit(code)
 	}
