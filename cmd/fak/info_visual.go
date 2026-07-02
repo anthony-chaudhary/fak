@@ -40,6 +40,7 @@ type guardInfoTrend struct {
 	hit      []float64 // cache hit rate, 0..1
 	turns    []float64 // cumulative replies (model turns) — its slope is the work rate
 	inflight []float64 // requests in flight right now
+	heap     []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
 }
 
 // newGuardInfoTrend returns an empty trend ring with the given per-series cap (clamped to >=1).
@@ -63,6 +64,7 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 	t.hit = appendCappedTUI(t.hit, hit, t.cap)
 	t.turns = appendCappedTUI(t.turns, float64(v.Inference.Turns), t.cap)
 	t.inflight = appendCappedTUI(t.inflight, float64(v.Gateway.InflightRequests), t.cap)
+	t.heap = appendCappedTUI(t.heap, float64(v.Runtime.Memory.HeapAllocBytes), t.cap)
 }
 
 // appendCappedTUI appends v to s and keeps only the last capN elements (a fixed-size tail ring).
@@ -149,77 +151,29 @@ func guardInfoRuleTUI(label string, width int) string {
 }
 
 // renderGuardInfoVisualBlock projects one /debug/vars snapshot + the trend ring into the visual
-// sub-pane block. The layout ADAPTS to the pane height so it always fits without scrolling:
-//
-//	full     (height<=0 or >=8): identity + a TRENDS sub-pane (save/hit/work sparklines) and a
-//	                             TASKS sub-pane (cache gauge + safety), each under a section rule
-//	compact  (5..7 rows):        identity + save & hit sparklines + cache gauge + safety, no rules
-//	mini     (3..4 rows):        identity + save sparkline + cache gauge
-//	tiny     (1..2 rows):        identity + the single compact status line
-//
-// Every row is trimmed to the pane width so a sparkline or gauge can never wrap. The block is the
-// in-place-redrawn frame the watch loop pins to the bottom of the pane.
+// sub-pane block. The layout is composed from the guardInfoPanels() registry (info_panels.go):
+// every registered panel that has something to say gets rows, and composeGuardInfoPanels fits
+// them to the pane height — section rules dropped first, then panels degraded full→mini→hidden
+// in degrade order — so the block always fits without scrolling, down to the 1-2 row tiny pane
+// (the single compact status line). Every row is trimmed to the pane width so a sparkline or
+// gauge can never wrap. The block is the in-place-redrawn frame the watch loop pins to the
+// bottom of the pane.
 func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, height int) string {
 	if width <= 0 {
 		width = 80
 	}
 	// Sparkline / gauge widths scale with the pane but stay bounded so the trailing label+value
 	// always has room; on a narrow pane they shrink rather than push the value off-screen.
-	sw := clampIntTUI(width-26, 8, 28)
-	gw := clampIntTUI(width-28, 6, 20)
-
-	id := guardInfoVisualIdentityRow(v)
-	saveRow := " save  " + sparklineTUI(tr.saved, sw) + "  " + signedTokens(guardInfoSaved(v)) + " tok"
-	hitRow := fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(tr.hit, sw), guardInfoHitPct(v), guardInfoMult(v))
-	workRow := fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(tr.turns, sw), v.Inference.Turns, v.Gateway.InflightRequests)
-	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), gw), guardInfoHitPct(v), guardInfoSavingWord(v))
-	if split := guardInfoCacheAttributionText(v); split != "" {
-		cacheRow += " · " + split
+	ctx := guardInfoPanelCtx{
+		v:      v,
+		tr:     tr,
+		width:  width,
+		sparkW: clampIntTUI(width-26, 8, 28),
+		gaugeW: clampIntTUI(width-28, 6, 20),
 	}
-	safetyRow := " safety " + guardInfoSafetyText(v)
-	incidentRow := ""
-	if incident := guardInfoIncidentText(v); incident != "" {
-		incidentRow = " incident " + incident
-	}
-
-	var rows []string
-	switch {
-	case incidentRow != "" && (height <= 0 || height >= 9):
-		rows = []string{
-			id,
-			guardInfoRuleTUI("trends", width),
-			saveRow, hitRow, workRow,
-			guardInfoRuleTUI("tasks", width),
-			cacheRow, safetyRow, incidentRow,
-		}
-	case incidentRow == "" && (height <= 0 || height >= 8):
-		rows = []string{
-			id,
-			guardInfoRuleTUI("trends", width),
-			saveRow, hitRow, workRow,
-			guardInfoRuleTUI("tasks", width),
-			cacheRow, safetyRow,
-		}
-	case height >= 5:
-		if incidentRow != "" {
-			rows = []string{id, saveRow, hitRow, cacheRow, incidentRow}
-			if height >= 6 {
-				rows = []string{id, saveRow, hitRow, cacheRow, safetyRow, incidentRow}
-			}
-		} else {
-			rows = []string{id, saveRow, hitRow, cacheRow, safetyRow}
-		}
-	case height >= 3:
-		if incidentRow != "" {
-			rows = []string{id, cacheRow, incidentRow}
-		} else {
-			rows = []string{id, saveRow, cacheRow}
-		}
-	default:
-		rows = []string{guardInfoVisualTinyRow(v)}
-	}
+	rows := composeGuardInfoPanels(ctx, guardInfoPanels(), height)
 	// Defensive cap: never emit more rows than the pane can hold (keeps the redraw cursor math
-	// exact even if a layout above is mis-sized for an odd pane height).
+	// exact even if a panel mis-sizes for an odd pane height).
 	if height > 0 && len(rows) > height {
 		rows = rows[:height]
 	}

@@ -53,6 +53,18 @@ type guardInfoVars struct {
 		InflightRequests int64   `json:"inflight_requests"`
 		VDSO             bool    `json:"vdso"`
 	} `json:"gateway"`
+	// Runtime is the gateway process's own live resource usage (the subset the
+	// resources sub-pane renders). The gateway always reports the block, so a zero
+	// NumGoroutine — impossible on a live Go process — is the "no data yet / older
+	// gateway" tell the panel hides on, keeping fixtures and stale gateways quiet.
+	Runtime struct {
+		NumGoroutine int `json:"num_goroutine"`
+		Memory       struct {
+			HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
+			SysBytes       uint64 `json:"sys_bytes"`
+			NumGC          uint32 `json:"num_gc"`
+		} `json:"memory"`
+	} `json:"runtime"`
 	Kernel struct {
 		Submits      int64 `json:"submits"`
 		Admitted     int64 `json:"admitted"`
@@ -62,8 +74,18 @@ type guardInfoVars struct {
 		ResultDenies int64 `json:"result_denies"`
 	} `json:"kernel"`
 	Inference struct {
-		Turns int64 `json:"turns"`
+		Turns                 int64   `json:"turns"`
+		CompletionTokens      uint64  `json:"completion_tokens"`
+		OutputTokensPerSecond float64 `json:"output_tokens_per_second"`
+		MeanTTFTSeconds       float64 `json:"mean_ttft_seconds"`
+		InflightMaxAgeSeconds float64 `json:"inflight_max_age_seconds"`
 	} `json:"inference"`
+	// Sessions mirrors the gateway's /debug/vars sessions block: one row per live
+	// session — the main agent and any SUB-AGENTS it spawned (a row with a parent
+	// trace) — with the remaining budget axes and live wall-clock the agents
+	// sub-pane renders. Empty/absent means no session registry is wired (or nothing
+	// is running), and the panel stays hidden rather than fabricating rows.
+	Sessions []guardInfoSession `json:"sessions"`
 	Upstream struct {
 		ErrorsByKind         map[string]uint64 `json:"errors_by_kind"`
 		Retries              uint64            `json:"retries"`
@@ -96,6 +118,24 @@ type guardInfoVars struct {
 	// live session state. It is rendered from /debug/vars only; `fak info` never reads
 	// hidden transcript text to infer what the model might be assuming.
 	Assumptions []gateway.SessionAssumption `json:"assumptions,omitempty"`
+}
+
+// guardInfoSession is the wire shape of one /debug/vars sessions row
+// (internal/gateway debugSessionVars), field-for-field, so a gateway that grows the
+// block needs no change on this side. A non-empty ParentTrace marks a sub-agent;
+// Generation is its spawn depth. The budget fields are what REMAINS of the seeded
+// allotment (0 usually means "never seeded", so the renderer omits, not fabricates).
+type guardInfoSession struct {
+	TraceID           string `json:"trace_id"`
+	Run               string `json:"run"`
+	ParentTrace       string `json:"parent_trace"`
+	Generation        int    `json:"generation"`
+	Priority          int    `json:"priority"`
+	TurnsLeft         int    `json:"turns_left"`
+	TokensLeft        int    `json:"tokens_left"`
+	ContextTokensLeft int    `json:"context_tokens_left"`
+	ElapsedSeconds    int64  `json:"elapsed_seconds"`
+	Assumptions       int    `json:"assumptions"`
 }
 
 // guardInfoManagedContext is the wire shape of a
@@ -646,6 +686,9 @@ func renderGuardInfoLine(v guardInfoVars) string {
 		cache,
 		guardFloorSafetyWord(v.Kernel.Denies, v.Kernel.Transforms, v.Kernel.Quarantines, v.Kernel.ResultDenies),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	if len(v.Sessions) > 0 {
+		line += " · agents " + guardInfoAgentsSummary(v.Sessions)
+	}
 	if prefix := guardInfoPrefixStabilityText(v.PrefixStability); prefix != "" {
 		line += " · " + prefix
 	}
@@ -989,6 +1032,7 @@ func guardInfoLegend() string {
 	fmt.Fprintln(&b, "  cache  = fak re-uses text it already sent so the model costs less. \"saving money\" = the re-use has paid off; \"reused %\" = how much was re-used; \"×N cheaper\" = how much cheaper; tokens = how much you've saved so far (can start below zero).")
 	fmt.Fprintln(&b, "  safety = what fak did to keep you safe: blocked an unsafe action, fixed a risky one before it ran, or set a suspicious result aside.")
 	fmt.Fprintln(&b, "  assumptions = active facts the session is relying on, with source class, confidence, expiry, and origin reference from public session/debug state.")
+	fmt.Fprintln(&b, "  agents = live sessions running through this fak — the main agent plus any sub-agents it spawned, with remaining budget and wall-clock.")
 	fmt.Fprintln(&b, "  replies = answers the model has given · busy with = work happening right now · running = how long fak has been up · \"nothing yet\" = no re-use has happened.")
 	return b.String()
 }
