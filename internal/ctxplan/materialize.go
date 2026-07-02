@@ -62,7 +62,7 @@ func Candidates(spans []Span, f Forecast, cost CostModel) []Candidate {
 // (It is named PlanCells, not Plan, because Plan is the result type.)
 func PlanCells(spans []Span, f Forecast, budget Budget, cost CostModel) Plan {
 	cands := Candidates(spans, f, cost)
-	p := Optimize(cands, budget, pinSet(f.Pins), ObjGreedy)
+	p := OptimizeWithReleases(cands, budget, pinSet(f.Pins), pinSet(f.Releases), ObjGreedy)
 	p.Horizon = f.Horizon
 	return StampPlanID(p, ForecastFingerprint(f))
 }

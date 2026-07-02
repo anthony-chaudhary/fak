@@ -36,6 +36,14 @@ type Forecast struct {
 	// A pin is charged against the budget FIRST. A pin that names a sealed/tombstoned
 	// cell is REFUSED, not forced in: a pin can never launder poison into context.
 	Pins []string `json:"pins,omitempty"`
+	// Releases are cell IDs the model DECLARED no longer useful to the ongoing work —
+	// the free() dual of a pin (#2225). A released, un-pinned cell is elided up front
+	// (ElideReleased) with its recovery handle intact, so a wrong release costs one
+	// demand-page fault, never a lost fact. A pin outranks a release (the over-retain
+	// bias): a cell both pinned and released stays resident, reported as PinHeld. A
+	// release that later faults is RECANTED (release.go) — the declaration is checked
+	// against the witnessed Outcome, never just believed.
+	Releases []string `json:"releases,omitempty"`
 	// Weights combine the per-cell benefit signals into one score. Zero value => use
 	// DefaultWeights via (Weights).orDefault, so a forecast literal that sets none still
 	// plans sensibly.

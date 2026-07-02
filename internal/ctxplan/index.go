@@ -226,7 +226,7 @@ func (ix *Index) Probe(f Forecast, opts ProbeOptions) []Span {
 func (ix *Index) PlanCells(f Forecast, b Budget, cost CostModel, opts ProbeOptions) Plan {
 	spans := ix.Probe(f, opts)
 	cands := Candidates(spans, f, cost)
-	p := Optimize(cands, b, pinSet(f.Pins), ObjGreedy)
+	p := OptimizeWithReleases(cands, b, pinSet(f.Pins), pinSet(f.Releases), ObjGreedy)
 	p.Horizon = f.Horizon
 	return StampPlanID(p, ForecastFingerprint(f))
 }

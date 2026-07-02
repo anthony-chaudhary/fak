@@ -62,6 +62,14 @@ type PlanQuery struct {
 	// planner (a model-authored pin cannot launder poison into context), never forced in.
 	Pins []string `json:"pins,omitempty"`
 
+	// Releases are span IDs the model declares NO LONGER USEFUL to its ongoing work — the
+	// free() dual of Pins (#2225): the agent-facing verb for "I have semantically judged
+	// this context dead; let it go". A released, un-pinned span is elided (recoverable —
+	// a wrong release costs one demand-page fault, never a lost fact) and its budget is
+	// freed. A pin outranks a release; the disposition of every released id comes back in
+	// PlanView.Releases, and a release the next turn refutes is RECANTED (release.go).
+	Releases []string `json:"releases,omitempty"`
+
 	// Weights are the OPTIONAL cost constants the model may retune. The zero value uses
 	// DefaultWeights (relevance dominates), so a query that sets none still scores sensibly.
 	Weights Weights `json:"weights,omitempty"`
@@ -118,6 +126,10 @@ type PlanView struct {
 	// Assumptions is present when the query supplied assumptions. EffectSafe is false when
 	// any item needs a user query or source refresh before an effectful action.
 	Assumptions *AssumptionReport `json:"assumptions,omitempty"`
+	// Releases is present when the query declared releases: the disposition of every
+	// released id (Honored / PinHeld / Gated / Unknown), so the declaring model sees what
+	// its "no longer useful" actually did in the same pass that shows it the plan.
+	Releases *ReleaseReport `json:"releases,omitempty"`
 }
 
 // Plan runs the agent's query through the SAME planner the host uses and returns the typed
@@ -147,6 +159,10 @@ func (q PlanQuery) Plan(spans []Span, cost CostModel) PlanView {
 		report := AssessAssumptions(q.Assumptions, DefaultAssumptionPolicy())
 		view.Assumptions = &report
 	}
+	if len(q.Releases) > 0 {
+		report := buildReleaseReport(p, q.Releases)
+		view.Releases = &report
+	}
 	return view
 }
 
@@ -156,10 +172,11 @@ func (q PlanQuery) Plan(spans []Span, cost CostModel) PlanView {
 // or retune the cost constants under the SAME hard constraints the host path obeys.
 func (q PlanQuery) forecast() Forecast {
 	return Forecast{
-		Intents: q.Intents,
-		Horizon: q.Horizon,
-		Pins:    q.Pins,
-		Weights: q.Weights,
+		Intents:  q.Intents,
+		Horizon:  q.Horizon,
+		Pins:     q.Pins,
+		Releases: q.Releases,
+		Weights:  q.Weights,
 	}
 }
 

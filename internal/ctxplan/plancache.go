@@ -178,6 +178,16 @@ func ForecastFingerprint(f Forecast) string {
 	writeFloat(w.Recency)
 	writeFloat(w.Primacy)
 
+	// Releases are a SET like pins (dedup + sort), hashed only when non-empty so every
+	// release-free fingerprint stays byte-identical to what it was before the release
+	// lane existed — an empty set plans identically, so it must fingerprint identically.
+	if rel := dedupSorted(f.Releases); len(rel) > 0 {
+		writeField("releases")
+		for _, r := range rel {
+			writeField(r)
+		}
+	}
+
 	return hex.EncodeToString(h.Sum(nil))
 }
 

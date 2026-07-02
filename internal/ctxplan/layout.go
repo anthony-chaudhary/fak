@@ -327,7 +327,7 @@ func (ix *Index) PlanLayout(f Forecast, b Budget, cost CostModel, layout Layout)
 		}
 	}
 
-	p := Optimize(planned, b, pins, ObjGreedy)
+	p := OptimizeWithReleases(planned, b, pins, pinSet(f.Releases), ObjGreedy)
 	p.Candidates += len(pointer)
 	p.Elided = append(p.Elided, pointer...)
 	p.Horizon = f.Horizon

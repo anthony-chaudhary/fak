@@ -150,6 +150,7 @@ const (
 	ElideTombstoned = "tombstoned"  // suppressed by context control — never a candidate
 	ElideDuplicate  = "duplicate"   // byte-identical to an already-resident span (equal Digest) — kept cold, recoverable
 	ElidePointer    = "pointer"     // intentionally kept as a recoverable pointer by the area layout
+	ElideReleased   = "released"    // agent-declared no-longer-useful (release.go) — kept cold, recoverable, NOT suppressed
 )
 
 // Objectives.
@@ -201,6 +202,16 @@ type Plan struct {
 // pins may be nil. The result is deterministic: every sort has a total tie-break, so the
 // same (candidates, budget, pins, objective) yields a byte-identical Plan.
 func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective string) Plan {
+	return OptimizeWithReleases(cands, b, pins, nil, objective)
+}
+
+// OptimizeWithReleases is Optimize plus the agent-declared release lane (#2225): a
+// candidate in released that is NOT pinned is elided up front as ElideReleased — cold,
+// recoverable, its budget freed — before dedup and the knapsack run. Precedence is
+// sealed/tombstoned (the trust lanes always win), then pin over release (the over-retain
+// bias: a span both pinned and released stays resident), then release. released may be
+// nil; Optimize delegates here with nil, so the two entry points can never diverge.
+func OptimizeWithReleases(cands []Candidate, b Budget, pins, released map[string]bool, objective string) Plan {
 	// A negative budget is meaningless; clamp to 0 (nothing non-pinned fits) so the
 	// OverBudget branch below is reached ONLY when real pins overrun, never on a stray
 	// negative budget with no pins.
@@ -217,6 +228,8 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 			p.Elided = append(p.Elided, elisionOf(c, ElideSealed))
 		case c.Cell.Tombstoned:
 			p.Elided = append(p.Elided, elisionOf(c, ElideTombstoned))
+		case released[c.Cell.ID] && !pins[c.Cell.ID]:
+			p.Elided = append(p.Elided, elisionOf(c, ElideReleased))
 		default:
 			live = append(live, c)
 		}
