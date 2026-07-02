@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -15,8 +14,7 @@ func (s *Server) handleFakVCacheActions(w http.ResponseWriter, r *http.Request) 
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.vcacheActionPlan())
+	writeJSON(w, http.StatusOK, s.vcacheActionPlan())
 }
 
 func (s *Server) vcacheActionPlan() vcacheobserve.ProviderActionPlan {
