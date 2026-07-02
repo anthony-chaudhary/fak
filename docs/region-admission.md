@@ -49,7 +49,7 @@ Three pieces, deliberately separated:
 | **Dispatch tick** (`fak dispatch tick`) | inline geometric overlap scan, no lane semantics | same acquire path, but the decision is `regionadmit.Decide` — gains lane serialization + exclusive-lane refusal; refusals carry the rung |
 | **`fak loop drive`** | nothing — two loops, or a loop and a dispatch worker, could edit one tree blind | a GOAL.md `lane:` / `region:` (or `--lane` / `--tree`) makes the drive refuse over a live overlapping lease, then **hold a fenced lease** on its region for the whole drive (renewed each turn, released on exit, honest-stop on a mid-drive `STALE_LEASE` takeover) |
 | **Manual session / script** | nothing to consult | `fak loop region --lane <l> [--tree <g>] --actor session:<id>` — the same decision as a standalone verb (exit 0 admit / 3 refuse); hold with `fak leaseref acquire` if admitted |
-| **Super loop** (`fak superloop walk`) | worklist only; two operators could enter the same member | the walk stays read-only; an enter path checks `fak loop region` first, and a member driven through `fak loop drive` inherits the hold automatically (the drive rung, #2224, builds on this gate) |
+| **Super loop** (`fak superloop walk`) | worklist only; two operators could enter the same member | the walk stays read-only and gains nothing automatically **yet**: today an operator entering a member can run `fak loop region` first by hand, and a member that happens to be a lane/region-declaring GOAL loop inherits the hold; the drive rung that enters members *through* this gate is the named follow-on (#2224) |
 | **RSI loop** | physical isolation (private worktree) | unchanged — isolation by construction needs no lease |
 
 Because every surface writes into the **same** `refs/fak/locks/*` namespace,
@@ -91,6 +91,26 @@ every lane/region-declaring loop drive will **refuse** to enter that region
 until it clears. When the work is done, the TTL bounds the record and
 `fak leaseref reap` (or the garden tick) removes it once expired; a CLI
 release twin of `acquire` is a named follow-on.
+
+## Operational consequences worth knowing
+
+- **An exclusive-lane lease stalls the fleet on purpose.** A live lease whose
+  tree sits inside an exclusive lane (`abi`, `release`, `dos`, `global`)
+  refuses *every* new region — that is the dos "runs alone" contract, now
+  enforced at dispatch and loop-drive admission. The flip side: a leaked
+  600-second release-tree lease blocks all spawns until it expires or
+  `fak leaseref reap` / the garden tick clears it. Keep exclusive work's TTLs
+  short and reap promptly.
+- **A narrowed lease keeps its lane.** A lease on a sub-region
+  (`region: internal/gateway/http/**`, or dispatch `--lease-tree`) is
+  classified back to its lane by containment, so same-lane serialization and
+  exclusive-lane blocking still apply to it; a tree spanning several lanes
+  owns no lane and is protected by geometry alone.
+- **The loop-drive lease renews per turn (TTL 3600s by default).** A single
+  agent turn longer than the TTL lapses the lease mid-turn; if nobody took the
+  region meanwhile the next turn boundary reacquires it silently, and if a
+  peer did, the drive honest-stops with the fence's verdict. Pass `--deadline`
+  to size the TTL to the whole drive when turns may run long.
 
 ## Honest boundary
 
