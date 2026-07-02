@@ -25,6 +25,15 @@ Each review has two artifacts:
 - one machine-readable row appended to [`review-ledger.jsonl`](review-ledger.jsonl)
   with the same evidence fields.
 
+```text
++-----------------------+     +----------------------------------+
+| fak cachevalue review | --> | reviews/YYYY-MM-DD.md (markdown) |
++-----------------------+     +----------------------------------+
+            |                 +----------------------------------+
+            +---------------> | review-ledger.jsonl (one row)    |
+                              +----------------------------------+
+```
+
 Generate new dated artifacts from the ledgers rather than hand-writing them:
 
 ```bash
