@@ -17,10 +17,14 @@ and reap advice CANCELS the in-flight work via the lever registered at Spawn
 and arms the revocation table — the full pipeline (spawn → deadline/orphan →
 cancel → post-kill quarantine) is witnessed end-to-end in-process. What
 remains of seam 1 is the wire adapter (the gateway/guard observation
-plumbing). Seam 4 is **shipped in CLI form**: `fak toolproc hook
+plumbing). Seam 4 is **shipped and auto-installed**: `fak toolproc hook
 (pre|post|stop)` turns any hook-capable harness's firings into journal
-events, giving a hooked session a live `fak toolproc ps` table with no proxy
-in the path. Seams 3, 5, and 6 remain **labeled next steps**. The spine is
+events, and `fak guard` now installs the PreToolUse/PostToolUse/SessionEnd
+hooks for Claude children by default (observe mode, fail-open,
+`--toolproc-hooks off` to disable) — a default guarded session carries a
+live `fak toolproc ps` table with zero setup, and SessionEnd (never Stop,
+which fires every turn) marks the orphan boundary. Seams 3, 5, and 6 remain
+**labeled next steps**. The spine is
 offline-provable: `fak toolproc sample` folds a deterministic built-in
 journal, no key, no model, no GPU.
 
