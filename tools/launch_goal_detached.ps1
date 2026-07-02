@@ -30,12 +30,28 @@
   than stalling. If NO account is available at all, the launch FAILS loudly (the whole
   point of the switcher) instead of silently running on a blocked ambient account.
 
+  SPAWN GATE (no-DoS): every launch first passes tools/dispatch_preflight.py — the
+  same gate issue_dispatch.py re-checks per spawn — and refuses on any non-SPAWN_OK
+  verdict (dirty host, no account, seat pool depleted, at cap). The refusal is the
+  safety floor; -SkipPreflight exists only for an operator who explicitly accepts an
+  ungated spawn, never for automation to route around a REFUSE_*.
+
+  SEAT HYGIENE: a parent session running under `fak guard` carries ANTHROPIC_BASE_URL /
+  ANTHROPIC_API_KEY pointing at its session-local loopback gateway. A detached child
+  inheriting them bills through the PARENT's seat (env precedence beats the seat's
+  OAuth login, nullifying CLAUDE_CONFIG_DIR routing) and dies the instant the parent
+  gateway exits — the observed whole-wave same-instant crash (2026-07-01). This
+  launcher strips ANTHROPIC_* and the session-identity vars before spawning, so the
+  worker owns exactly the seat the switcher granted it.
+
 .NOTES
   - The goal condition is read from the launch POINTER file (kept <4000 chars for the
     /goal cap); the worker reads the full spec from disk itself.
   - bypassPermissions is required for an unattended worker (it edits files, runs git).
   - This does NOT modify the tree or commit; it only starts a process. Stop it with
     `Stop-Process -Id <pid>` (the PID is printed and written to the .pid file).
+  - -PlanOnly resolves the account and runs the preflight but spawns NOTHING — the
+    witnessable dry-run for a single dispatch, mirroring the wave launcher's default.
 #>
 [CmdletBinding()]
 param(
@@ -57,7 +73,15 @@ param(
   [string]$FakExe      = '',
   # Let an engineering/tier-1 dispatch fall back to tier 2 when no tier-1 account is
   # free, rather than refusing. Off by default so engineering stays max-quality.
-  [switch]$AllowTierFallback
+  [switch]$AllowTierFallback,
+  # Operator ceiling handed to the spawn-gate preflight (0 = the preflight's own
+  # default). The effective cap stays min(host_cap, dos [supervise].target, this).
+  [int]$PreflightMaxWorkers = 0,
+  # Skip the dispatch_preflight.py spawn gate. An EXPLICIT operator override only:
+  # it removes the no-DoS floor for this one spawn. Never set it from automation.
+  [switch]$SkipPreflight,
+  # Resolve the account + run the preflight + print the plan, but spawn NOTHING.
+  [switch]$PlanOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +115,35 @@ $cond = "/goal $body"
 if ($cond.Length -gt 4000) { throw "goal condition is $($cond.Length) chars (>4000 cap) -- shrink the pointer" }
 
 $claude = (Get-Command claude).Source
+
+# --- Spawn gate: dispatch_preflight.py must say SPAWN_OK (the no-DoS floor) -----------
+# The same gate issue_dispatch.py re-checks per spawn, now fronting THIS spawn point
+# too (the wave launcher dispatches every lane through here, so the whole multi-account
+# path inherits the per-spawn re-check). Fail-safe: no python / no parseable verdict is
+# treated as REFUSE_INSPECT — refuse, never spawn ungated by accident.
+if (-not $SkipPreflight) {
+  $pyCmd = Get-Command python -ErrorAction SilentlyContinue
+  $pyPre = @()
+  if (-not $pyCmd) { $pyCmd = Get-Command py -ErrorAction SilentlyContinue; $pyPre = @('-3') }
+  if (-not $pyCmd) {
+    throw "spawn gate needs python on PATH and none was found (fail-safe: REFUSE_INSPECT) -- fix python, or pass -SkipPreflight to explicitly accept an ungated spawn"
+  }
+  $pfArgs = $pyPre + @((Join-Path $repoRoot 'tools\dispatch_preflight.py'), '--json', '--workspace', "$Workspace")
+  if ($WorkKind)                  { $pfArgs += @('--work-kind', $WorkKind) }
+  if ($PreflightMaxWorkers -gt 0) { $pfArgs += @('--max-workers', "$PreflightMaxWorkers") }
+  $pfRaw = & $pyCmd.Source @pfArgs 2>$null | Out-String
+  $pf = $null
+  try { $pf = $pfRaw | ConvertFrom-Json } catch { $pf = $null }
+  if (-not $pf -or -not $pf.verdict) {
+    throw "spawn gate produced no verdict (python=$($pyCmd.Source), rc=$LASTEXITCODE; fail-safe: REFUSE_INSPECT) -- not spawning"
+  }
+  if ($pf.verdict -ne 'SPAWN_OK') {
+    throw "spawn gate refused: $($pf.verdict) -- $($pf.reason). The refusal IS the no-DoS floor; recover (fix the host / re-login / wait for a seat), do not route around it."
+  }
+  Write-Output ("preflight: SPAWN_OK  live={0} cap={1}" -f $pf.live, $pf.cap)
+} else {
+  Write-Warning "preflight SKIPPED by operator switch -- this spawn is ungated (no host/cap/account check)."
+}
 
 # --- Resolve the account + tier through the switcher (the dispatch integration) -------
 # ONE call to the switcher's canonical front door (`fak fleet-accounts resolve`): pin OR
@@ -127,6 +180,22 @@ $tierSel   = $r.selected_tier
 $fellBack  = [bool]$r.fallback_used
 if (-not $configDir) { throw "resolved account $($r.account) has no config dir" }
 
+if ($PlanOnly) {
+  [pscustomobject]@{
+    plan_only     = $true
+    account       = $acct.account
+    account_tag   = $acct.tag
+    config_dir    = $configDir
+    work_kind     = $WorkKind
+    tier          = "t$tierSel"
+    tier_fallback = $fellBack
+    cond_chars    = $cond.Length
+    preflight     = if ($SkipPreflight) { 'SKIPPED' } else { 'SPAWN_OK' }
+  } | Format-List
+  "PLAN ONLY -- no worker spawned. Re-run without -PlanOnly to dispatch."
+  return
+}
+
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
 $stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
 $tag    = [IO.Path]::GetFileNameWithoutExtension($PointerFile)
@@ -142,6 +211,19 @@ $inF    = Join-Path $LogDir "$tag-$stamp.in.txt"
 # arg reads the prompt from stdin, which is parse-safe. Write the prompt to a UTF-8 file
 # (no BOM) and redirect it in.
 [IO.File]::WriteAllText($inF, $cond, [Text.UTF8Encoding]::new($false))
+
+# OWN THE SEAT: strip guarded-session wiring BEFORE pinning the account. A parent
+# running under `fak guard` exports ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY aimed at
+# its session-local loopback gateway; env precedence beats the seat's OAuth login, so
+# an inheriting child bills the parent's seat and dies when the parent gateway exits
+# (the whole-wave same-instant crash, observed 2026-07-01; the child-stderr tell is
+# "claude.ai connectors are disabled because ANTHROPIC_API_KEY ... is set"). Session-
+# identity vars are dropped too, so the worker is never mistaken for a child session.
+Get-ChildItem Env: | Where-Object { $_.Name -like 'ANTHROPIC_*' } |
+  ForEach-Object { Remove-Item "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+foreach ($n in @('CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION')) {
+  Remove-Item "Env:$n" -ErrorAction SilentlyContinue
+}
 
 # Pin the chosen account for the detached worker. CLAUDE_CONFIG_DIR is inherited by
 # the Start-Process child (it copies the parent env), so the worker runs under the

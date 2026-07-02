@@ -15,9 +15,13 @@
   accountUuid, so two dirs on one account never both get a lane.
 
   It does NOT re-implement the spawn: the dangerous part (Start-Process wiring,
-  CLAUDE_CONFIG_DIR / CLAUDE_CODE_OAUTH_TOKEN pinning, stdin-fed goal) is the
+  CLAUDE_CONFIG_DIR / CLAUDE_CODE_OAUTH_TOKEN pinning, guarded-session env
+  stripping, the dispatch_preflight.py spawn gate, stdin-fed goal) is the
   already-proven launch_goal_detached.ps1, invoked once per lane with -Account
   pinned to that lane's tag. This script owns only the ALLOCATION + ITERATION.
+  Because every lane dispatches through that gated launcher, the preflight cap is
+  re-checked PER SPAWN: a wave honestly under-fills mid-flight the moment the host,
+  seat pool, or cap refuses — it never routes around a REFUSE_*.
 
   PLAN BY DEFAULT. With no -Launch it prints the dispatch plan (which account, dir,
   tier, pool each lane would take) and spawns NOTHING -- safe to run anywhere, and
@@ -49,6 +53,12 @@ param(
   # then PATH fak.
   [string]$FakExe      = '',
   [switch]$AllowTierFallback,
+  # Operator ceiling for the per-spawn preflight gate (0 = use -Count: the wave you
+  # asked for IS your aspirational cap; host_cap / dos target still bound it below).
+  [int]$PreflightMaxWorkers = 0,
+  # Skip the per-spawn dispatch_preflight.py gate in the child launcher. An EXPLICIT
+  # operator override that removes the no-DoS floor for the whole wave. Never automate.
+  [switch]$SkipPreflight,
   # Actually spawn the workers. Without it, this is a dry-run that only prints the plan.
   [switch]$Launch
 )
@@ -164,8 +174,12 @@ foreach ($l in $w.lanes) {
       Account     = $l.tag
       WorkKind    = $WorkKind
       FakExe      = $fak
+      # The wave's requested size is the operator ceiling the per-spawn gate enforces;
+      # the adaptive gates (host_cap, dos [supervise].target, seats) only lower it.
+      PreflightMaxWorkers = $(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count })
     }
     if ($AllowTierFallback) { $fwd.AllowTierFallback = $true }
+    if ($SkipPreflight)     { $fwd.SkipPreflight = $true }
     & $launcher @fwd
     $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $true }
   } catch {
