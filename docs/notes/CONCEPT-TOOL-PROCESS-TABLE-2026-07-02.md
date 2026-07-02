@@ -27,8 +27,12 @@ which fires every turn) marks the orphan boundary. Seam 6 is **wired**:
 `Supervisor.BindPID` binds a spawned call to the OS process tree it
 launched, and a kill/reap tick terminates the bound tree through
 `procguard.KillPID` (`NewOSSupervisor`) in the same act that cancels and
-revokes — reap advice has OS teeth once the embedder binds the pid. Seams
-3 and 5 remain **labeled next steps**. The spine is
+revokes — reap advice has OS teeth once the embedder binds the pid. Seam 5
+is **wired**: the manifest's `tool_runtime` block grants each tool its
+runtime envelope (deadline + heartbeat cadence, validated fail-loud at
+load), and the hook adapter's `--policy` resolves the grant per spawn —
+exact row over `*` catch-all, flags filling when no row matches. Seam
+3 remains a **labeled next step**. The spine is
 offline-provable: `fak toolproc sample` folds a deterministic built-in
 journal, no key, no model, no GPU.
 
@@ -176,10 +180,17 @@ and advice stream. None of this is wired yet.
    RUNNING, and session end flags survivors `TOOL_ORPHANED`. **Remaining**:
    `fak guard` auto-installing the three hook lines (it already installs
    PreCompact and Stop), and a pulse source for streamed output.
-5. **Policy envelope** (`internal/policy`). Deadline and heartbeat cadence
-   belong in the capability manifest, per tool — the runtime envelope granted
-   at admission alongside the capability itself. "You may run this tool" and
-   "you may run it for this long, reporting at this cadence" are one grant.
+5. **Policy envelope** (`internal/policy`) — **wired**. Deadline and
+   heartbeat cadence live in the capability manifest, per tool: the
+   `tool_runtime` block declares `deadline_ms` / `heartbeat_every_ms` rows
+   (exact tool name or `*` catch-all; empty, negative, all-zero, and
+   duplicate rows refuse at load), and `Runtime.ToolRuntime.EnvelopeFor`
+   resolves exact-over-wildcard, nil-safe — absent config grants nothing, so
+   an undeclared envelope still folds QUIET, never STALLED. "You may run
+   this tool" and "you may run it for this long, reporting at this cadence"
+   are one grant: `fak toolproc hook --policy FILE` stamps the resolved
+   grant on each spawn event. What remains is the seam-1 wire adapter doing
+   the same at gateway dispatch.
 6. **procguard bridge** — **wired**. `Supervisor.BindPID(callID, pid)` is
    the tool-call ↔ process-tree binding (self-pid refused; retired on exit,
    prune, or kill), and `NewOSSupervisor` arms `procguard.KillPID` (taskkill
