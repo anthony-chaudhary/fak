@@ -1,0 +1,5 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": ["read_file", "search_web"]
+}
