@@ -142,6 +142,18 @@ heartbeat cadence), observed liveness signals, and a terminal transition.
 Same events + same instant + same config ⇒ byte-identical table (tested), so a
 supervisor tick, a CI gate, and a forensic replay all read the same truth.
 
+## AgentRun boundary
+
+The tool process table is the lifetime engine, not the authority boundary for a
+fleet of nested agents. The public contract for that boundary is
+[`docs/agent-run-leak-prevention.md`](../agent-run-leak-prevention.md): an
+`AgentRun` owns one running agent loop, a `SpawnAttempt` is the only pre-exec
+path to a child run, `PolicyDigest` pins the effective policy snapshot, and the
+launch `ToolCallID` remains the join key for `toolprocgate.Supervisor.Spawn`,
+`Supervisor.BindPID`, revocation, and `TOOL_RESULT_AFTER_KILL` result
+quarantine. Child implementation leaves should consume that vocabulary rather
+than invent a parallel process table beside `toolprocgate`.
+
 ## Enforcement map: the deeper integration points (all labeled next steps)
 
 Each seam below already exists; toolproc gives it a shared clock, vocabulary,
