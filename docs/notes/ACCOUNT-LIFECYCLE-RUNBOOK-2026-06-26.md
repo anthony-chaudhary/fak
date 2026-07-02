@@ -113,6 +113,39 @@ deliberate step.
 - **Re-sync after any external registry edit.** The registry was hand-edited mid-task (a new
   default seat, a dropped entry). Views must be re-synced or `check` goes RED.
 
+### 2026-07-01 — the stale-label meltdown ("setup gem7", day26 recovery)
+
+- **A `.claude.json` label can lie for days.** `~/.claude` claimed gem7@ while its live token
+  was day30's; every surface that trusts the label inherited the lie — including the
+  EMAIL-KEYED hourly backups (`~/.claude-account-backups/gem7_at_…/`), which archived day30
+  tokens under gem7's name for hours. The truth only surfaced when a live session rewrote
+  `oauthAccount`. *Rule: an unverified label is a claim, not a fact — only a refresh probe
+  (launch `claude -p` on the seat) or the reconcile fold is witness-grade.*
+- **"gem7 isn't being used" decoded:** gem7@ had NO live login anywhere. The seat *named*
+  gem7-netra held a second day30@ login, so rotation (correctly) collapsed it as a duplicate;
+  the registry still said `gem7-netra: gem7@, has_creds:false` from an old discover. Fix in
+  flight: `.claude-gem7NEW-netra` prepped + registered `needs_login`; the one step left is
+  interactive — `claude-as gem7NEW-netra` then `/login` as gem7@.
+- **Recovery-by-probe works — probe before declaring an account lost.** day26@ came back
+  WITHOUT a browser: three June-29 cred backups all refreshed cleanly; the restored seat
+  (day26NEW-netra) verified serving and immediately headed the rotation. A dead refresh token
+  fails clean ("Not logged in") and costs nothing. Recipe: copy the backed-up
+  `.credentials.json` into a scratch `CLAUDE_CONFIG_DIR` with a minimal `.claude.json`, run
+  `env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL claude -p "ok" --model haiku`, read back
+  `oauthAccount` for the TRUE account. The refresh ROTATES the token — the scratch copy
+  becomes the only live one, so seat it immediately.
+- **A probe under fak/CI env silently answers with the WRONG auth.** With
+  `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` exported, `claude -p` uses the key — and CLEARS the
+  seat's `.credentials.json` on the way. Always `env -u` both before an OAuth probe.
+- **Label poisoning crosses into backups.** The freshest "day26" email-keyed backup was
+  actually day28@'s token. It refreshed fine, but the org has Claude Code subscription access
+  disabled for day28@ — parked in day28-netra with `enabled:false` so rotation can never land
+  on it, creds preserved for if access returns.
+- **Shipped `fak accounts rotation`** — the full witnessed rotation decision (pool in launch
+  order + every exclusion's closed reason + headroom tier) plus a registry-drift check
+  (stored vs disk identity) that points at `discover --write`. Within minutes of existing it
+  caught a live drift: day30-netra's disk label flipped to day26@ under an active session.
+
 ## Versioning & visibility
 
 The registry **data** is versioned (`fak-config-homes/v1`, family-prefix accept check in
@@ -150,3 +183,19 @@ and the multi-step retire — both now closed.
 - **Session-start seat banner in `c`.** The fak-facing launch, next, and guard paths now expose
   login posture; `c` still only prints `[c] account: <name>`. Extend that banner to flag a
   tombstoned / slated-for-removal seat before the session starts.
+- **Witnessed identity, not labels (2026-07-01).** Identity derivation trusts `.claude.json
+  oauthAccount`, which the stale-label meltdown proved can lie for days and poison the
+  email-keyed backups. Add a witness rung: verify a seat's account via a refresh-probe or the
+  OAuth profile endpoint on a cadence (or at `add`/`discover --write` time), and key backup
+  dirs by VERIFIED account uuid instead of the claimed email.
+- **Auto-heal the registry file on a cadence (2026-07-01).** Live reads (`next`, `list`,
+  `rotation`) refresh in memory, but the FILE rots until someone runs `fak accounts discover
+  --write`. Put it on the hourly monitor (or piggyback `sync`) so external readers — humans,
+  the job roster, the Python switcher — stop inheriting a stale world. `fak accounts rotation`
+  now surfaces the drift count so staleness is at least visible.
+- **Finer load balancing from observed usage (2026-07-01).** RotationHeadroom is a banded
+  tier (room / unknown / walled) with coarse tie-breaks; the operator wants stronger,
+  more automatic balancing. Fold the account rate-limit observer's (`accountobs`) witnessed
+  window data — observed remaining budget and reset times per bucket — into the headroom
+  score, so rotation spreads load by MEASURED headroom instead of session counts, and surface
+  the per-bucket numbers in `fak accounts rotation` so the balance decision is auditable.

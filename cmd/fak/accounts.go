@@ -44,6 +44,10 @@ import (
 //	                                   --guard=false / --skip-permissions=false opt out
 //	fak accounts list                  table of every seat: name, lifecycle, LOGIN status, TRUE identity, creds, rehome, flags
 //	fak accounts status [--json]       observable login report: closed status, can_serve, warnings, next action
+//	fak accounts rotation [--json]     the FULL witnessed rotation decision: the pool in launch order
+//	                                   (with headroom tiers) AND every excluded seat with the reason it
+//	                                   is out (duplicate/reserved/disabled/tombstoned/unservable), plus
+//	                                   a registry-drift check against disk truth
 //	fak accounts resolve <name> [--env] the live config dir serving <name>, following a tombstone's rehome
 //	fak accounts discover [--write]    emit (or MERGE-and-write) a registry.json from ~/.claude* (disk truth)
 //	fak accounts sync                  project the registry into the dos + job roster views AND
@@ -56,7 +60,7 @@ func cmdAccounts(argv []string) { os.Exit(runAccounts(os.Stdout, os.Stderr, argv
 
 func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
-		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
+		fmt.Fprintln(stderr, "usage: fak accounts <add|remove|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write> [flags]")
 		return 2
 	}
 	sub, rest := argv[0], argv[1:]
@@ -156,6 +160,13 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			after = strings.TrimSpace(positional[0])
 		}
 		return accountsNext(stdout, stderr, *registryPath, *homeDir, after, *asJSON, *asEnv, !*noHeadroom)
+
+	case "rotation":
+		// The full witnessed rotation decision — the inspect surface `next` is one row of.
+		// `next` answers "who's next?"; this answers "why THAT seat, and why is every other
+		// seat out?" — the question that costs a source-dive when a bucket silently
+		// disappears from rotation (a stale label, a duplicate collapse, a tombstone).
+		return accountsRotation(stdout, stderr, *registryPath, *homeDir, *asJSON, !*noHeadroom)
 
 	case "pull":
 		return accountsPull(stdout, stderr, positional, *registryPath, *homeDir, *dryRun)
@@ -290,7 +301,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		return accountsVersion(stdout, *asJSON)
 
 	default:
-		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
+		fmt.Fprintf(stderr, "fak accounts: unknown subcommand %q (want add|remove|set-role|set-default|launch|next|rotation|list|status|resolve|pull|discover|sync|check|validate|version|check-twins|gate-write)\n", sub)
 		return 2
 	}
 }
@@ -301,7 +312,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 // VISIBLE — compare it against source, or `go install …/cmd/fak@latest`.
 func accountsVersion(stdout io.Writer, asJSON bool) int {
 	verbs := []string{
-		"add", "remove", "set-role", "set-default", "launch", "next", "list", "status", "resolve", "pull",
+		"add", "remove", "set-role", "set-default", "launch", "next", "rotation", "list", "status", "resolve", "pull",
 		"discover", "sync", "check", "validate", "version", "check-twins", "gate-write",
 	}
 	if asJSON {
@@ -437,6 +448,130 @@ func headroomLabel(score float64) string {
 	default:
 		return "unknown"
 	}
+}
+
+// accountsRotation prints the FULL witnessed rotation decision: the pool in launch order
+// (one seat per DISTINCT account bucket, headroom tiers folded in when available) and every
+// excluded seat with the closed reason it is out. It also cross-checks the STORED registry
+// identities against disk truth and reports drift — the failure mode where a stale
+// .claude.json label (or a re-login that landed on another account) silently reshapes the
+// pool while the registry file keeps narrating the old world. Read-only; the healing
+// command it points at is `fak accounts discover --write`.
+func accountsRotation(stdout, stderr io.Writer, registryPath, homeDir string, asJSON, useHeadroom bool) int {
+	stored, err := loadOrDiscover(registryPath, homeDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
+		return 1
+	}
+	// Snapshot the STORED identities before Refresh: Refresh writes the disk-derived
+	// identity into the same backing Homes slice, so the pre-refresh view must be copied
+	// out or the drift comparison would compare disk with itself.
+	storedIDs := make(map[string]accounts.Identity, len(stored.Homes))
+	for _, h := range stored.Homes {
+		storedIDs[h.Name] = h.Identity
+	}
+	live := stored.Refresh()
+	var hr accounts.RotationHeadroom
+	if useHeadroom {
+		hr = rotationHeadroom(homeDir)
+	}
+	res := live.RotationPlanWithHeadroom(hr)
+	drift := identityDrift(storedIDs, live)
+	if asJSON {
+		stdout.Write(mustJSON(map[string]any{
+			"schema":         "fak.accounts.rotation.v1",
+			"policy":         res.Policy,
+			"order_applied":  res.OrderApplied,
+			"pool":           res.Pool,
+			"excluded":       res.Excluded,
+			"registry_drift": drift,
+		}))
+		fmt.Fprintln(stdout)
+		return 0
+	}
+	fmt.Fprintf(stdout, "# fak %s · rotation over %s · order=%s\n", appversion.Current(), registryPath, res.OrderApplied)
+	fmt.Fprintf(stdout, "POOL — %d distinct account bucket(s), launch order:\n", len(res.Pool))
+	for i, s := range res.Pool {
+		line := fmt.Sprintf("  %d. %-26s %-34s login=%s", i+1, s.Name, s.Email, s.Login)
+		if s.Headroom != nil {
+			line += "  headroom=" + headroomLabel(*s.Headroom)
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	if len(res.Excluded) > 0 {
+		fmt.Fprintf(stdout, "EXCLUDED — %d seat(s) out, each with its reason:\n", len(res.Excluded))
+		for _, s := range res.Excluded {
+			line := fmt.Sprintf("  %-29s %-12s", s.Name, s.Status)
+			if s.Status == accounts.RotationDuplicate && s.Canonical != "" {
+				line += " -> " + s.Canonical
+			}
+			if s.Email != "" {
+				line += "  (" + s.Email + ")"
+			}
+			fmt.Fprintln(stdout, line)
+		}
+	}
+	if len(drift.Seats) == 0 {
+		fmt.Fprintln(stdout, "registry drift: none — stored identities match disk")
+	} else {
+		fmt.Fprintf(stdout, "registry drift: %d seat(s) whose stored identity disagrees with disk — heal with `fak accounts discover --write`:\n", len(drift.Seats))
+		for _, d := range drift.Seats {
+			fmt.Fprintf(stdout, "  %-29s stored %s -> disk %s\n", d.Name, d.Stored, d.Disk)
+		}
+	}
+	return 0
+}
+
+// rotationDrift is the registry-file staleness report `accounts rotation` carries: each
+// seat whose STORED identity (registry.json) no longer matches DISK truth (.claude.json /
+// .credentials.json). The live rotation decision is always computed from disk (Refresh),
+// so drift never corrupts the pool — but every OTHER reader of the file (a human, an
+// external switcher, the job roster) inherits the stale story until it is healed.
+type rotationDrift struct {
+	Seats []rotationDriftSeat `json:"seats"`
+}
+
+// rotationDriftSeat is one drifted seat: the stored vs disk identity, each rendered as
+// "<email-or-account-key> creds=<bool>".
+type rotationDriftSeat struct {
+	Name   string `json:"name"`
+	Stored string `json:"stored"`
+	Disk   string `json:"disk"`
+}
+
+// identityDrift compares each seat's STORED identity (snapshotted before Refresh) against
+// its disk-derived refresh and returns the seats that disagree on account (AccountKey) or
+// credential presence.
+func identityDrift(storedIDs map[string]accounts.Identity, live accounts.Registry) rotationDrift {
+	drift := rotationDrift{Seats: []rotationDriftSeat{}}
+	for _, l := range live.Homes {
+		s, ok := storedIDs[l.Name]
+		if !ok {
+			continue
+		}
+		if s.AccountKey() == l.Identity.AccountKey() && s.HasCreds == l.Identity.HasCreds {
+			continue
+		}
+		drift.Seats = append(drift.Seats, rotationDriftSeat{
+			Name:   l.Name,
+			Stored: driftIdentityLabel(s),
+			Disk:   driftIdentityLabel(l.Identity),
+		})
+	}
+	return drift
+}
+
+// driftIdentityLabel renders an identity for the drift report: the email when known, else
+// the account key, else "-", plus whether live credentials are present.
+func driftIdentityLabel(id accounts.Identity) string {
+	who := id.Email
+	if who == "" {
+		who = id.AccountKey()
+	}
+	if who == "" {
+		who = "-"
+	}
+	return fmt.Sprintf("%s creds=%t", who, id.HasCreds)
 }
 
 // accountsStatus emits the first-class login-status report. It is the machine-readable

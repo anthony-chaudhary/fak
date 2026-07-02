@@ -135,3 +135,58 @@ func TestAccountsLaunchRotate(t *testing.T) {
 		t.Fatalf("expected rotate off bob -> alice:\n%s", errb.String())
 	}
 }
+
+// TestAccountsRotationInspect covers the full witnessed rotation dump — the pool in launch
+// order, every exclusion with its reason, and the registry-drift check — plus the heal loop:
+// a registry whose stored identities lag disk reports drift, `discover --write` heals it,
+// and the re-run reports none.
+func TestAccountsRotationInspect(t *testing.T) {
+	home := t.TempDir()
+	regPath, _, _, _ := rotateRegistry(t, home)
+
+	run := func(args ...string) (string, string, int) {
+		var out, errb bytes.Buffer
+		rc := runAccounts(&out, &errb, append([]string{"rotation", "--registry", regPath, "--home", home}, args...))
+		return out.String(), errb.String(), rc
+	}
+
+	// The fixture registry carries NO identity blocks, so every seat's stored identity
+	// disagrees with disk truth — the exact rot the drift check exists to surface.
+	out, errb, rc := run()
+	if rc != 0 {
+		t.Fatalf("rotation rc=%d stderr=%s", rc, errb)
+	}
+	if !strings.Contains(out, "POOL — 2 distinct account bucket(s)") {
+		t.Fatalf("rotation pool header missing: %q", out)
+	}
+	if !strings.Contains(out, "alice-seat") || !strings.Contains(out, "bob-seat") {
+		t.Fatalf("rotation pool rows missing: %q", out)
+	}
+	if !strings.Contains(out, "carol-seat") || !strings.Contains(out, "reserved") {
+		t.Fatalf("rotation excluded row for reserved carol missing: %q", out)
+	}
+	if !strings.Contains(out, "registry drift: 3 seat(s)") || !strings.Contains(out, "discover --write") {
+		t.Fatalf("rotation drift report missing: %q", out)
+	}
+
+	// JSON form carries the same decision as data.
+	out, _, rc = run("--json")
+	if rc != 0 || !strings.Contains(out, `"schema": "fak.accounts.rotation.v1"`) ||
+		!strings.Contains(out, `"status": "reserved"`) ||
+		!strings.Contains(out, `"registry_drift"`) {
+		t.Fatalf("rotation --json = %q", strings.TrimSpace(out))
+	}
+
+	// Heal the drift the way the report says to, then the re-run is clean.
+	var out2, errb2 bytes.Buffer
+	if rc := runAccounts(&out2, &errb2, []string{"discover", "--write", "--registry", regPath, "--home", home}); rc != 0 {
+		t.Fatalf("discover --write rc=%d stderr=%s", rc, errb2.String())
+	}
+	out, errb, rc = run()
+	if rc != 0 {
+		t.Fatalf("rotation after heal rc=%d stderr=%s", rc, errb)
+	}
+	if !strings.Contains(out, "registry drift: none") {
+		t.Fatalf("rotation after discover --write still drifts: %q", out)
+	}
+}
