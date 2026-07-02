@@ -76,6 +76,13 @@ func TestFromMessage(t *testing.T) {
 		{"connection refused", "fatal: connection refused", ReasonRemoteUnreachable},
 		{"rebase in progress", "fatal: It seems that there is already a rebase in progress", ReasonRebaseInFlight},
 		{"merge in progress", "error: you have not concluded your merge; merge in progress", ReasonRebaseInFlight},
+		// The ref CAS race a concurrent writer wins (no lockfile-API tail) — the
+		// same transient the commit executor classifies LOCK_BUSY.
+		{"ref cas race", "error: cannot lock ref 'refs/heads/main': is at 1234abc but expected 9876def", ReasonLockBusy},
+		// The transport family the push executor (safesync) retries.
+		{"remote hung up", "fatal: the remote end hung up unexpectedly", ReasonRemoteUnreachable},
+		{"ssh throttle", "kex_exchange_identification: Connection closed by remote host", ReasonRemoteUnreachable},
+		{"empty reply", "fatal: unable to access 'https://github.com/x/y.git/': Empty reply from server", ReasonRemoteUnreachable},
 
 		// Permanent signatures.
 		{"no commit found", "commit-audit: no commit found referencing issue #1809", ReasonNoCommitFound},
@@ -125,6 +132,34 @@ func TestTransientMatchedBeforePermanent(t *testing.T) {
 	msg := "Unable to create '.git/index.lock': File exists; also no commit found"
 	if got := FromMessage(msg); got != ReasonLockBusy {
 		t.Errorf("mixed message = %q, want ReasonLockBusy (transient wins)", got)
+	}
+}
+
+// TestPermanentOverridesBeatTransientTrailers proves the override pre-pass: a
+// permanent failure that DRAGS transient-looking trailer prose (an HTTP 403
+// push ending in "the remote end hung up unexpectedly", a corrupt ref carrying
+// "cannot lock ref") must NOT be classified retryable — masking drift as
+// "retry later" is the one direction this package forbids.
+func TestPermanentOverridesBeatTransientTrailers(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+	}{
+		{"403 with transport trailers", "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\n" +
+			"send-pack: unexpected disconnect while reading sideband packet\n" +
+			"fatal: the remote end hung up unexpectedly"},
+		{"corrupt ref", "error: cannot lock ref 'refs/heads/main': unable to resolve reference 'refs/heads/main': reference broken"},
+		{"403 via unable to access", "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 403"},
+		{"ssh auth rejection", "git@github.com: Permission denied (publickey).\r\nfatal: Could not read from remote repository."},
+		{"push protection", "remote: error: GH013: Repository rule violations found for refs/heads/main"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := FromMessage(c.msg)
+			if Classify(got) != Permanent {
+				t.Errorf("FromMessage(%q) = %q (transient) — a permanent marker must win over trailer prose", c.msg, got)
+			}
+		})
 	}
 }
 

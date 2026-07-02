@@ -130,8 +130,37 @@ type signature struct {
 	reason Reason
 }
 
+// permanentOverrides are markers that force a message OUT of the transient
+// tables entirely, BEFORE any transient signature is consulted. They close the
+// trailer-drag hole: a permanent failure routinely carries transient-looking
+// transport or lock prose behind its real cause — an HTTP 403 push ends with
+// "fatal: the remote end hung up unexpectedly", a CORRUPT ref fails as
+// "cannot lock ref '…': unable to resolve reference '…': reference broken" —
+// and matching those trailers would mask genuine drift as "retry later", the
+// one direction this package's doctrine forbids. An override match falls
+// through to the permanent tables (and ultimately ReasonUnknown), so this
+// pre-pass can only ever make classification MORE conservative, never less.
+// The executor-side classifiers (safecommit lockcontention, safesync safepush)
+// hold the same markers; the two halves of the transient-vs-permanent contract
+// must not disagree about the same raw text.
+var permanentOverrides = []string{
+	"reference broken",            // corrupt ref — no retry resolves it
+	"unable to resolve reference", // the ref is unreadable, not merely locked
+	"authentication failed",
+	"permission denied",
+	"gh013",         // GitHub push protection / repository rules
+	"push declined", // ... (push declined due to repository rule violations)
+	"[remote rejected]",
+	"returned error: 401",
+	"returned error: 403",
+	"returned error: 404",
+	"http 401",
+	"http 403",
+	"http 404",
+}
+
 // transientSignatures map raw failure text to the retry-eligible reasons. These
-// are matched BEFORE permanent signatures.
+// are matched BEFORE permanent signatures (but AFTER permanentOverrides).
 var transientSignatures = []signature{
 	{"unable to create", ReasonLockBusy},
 	{".lock': file exists", ReasonLockBusy},
@@ -139,6 +168,7 @@ var transientSignatures = []signature{
 	{"index.lock", ReasonLockBusy},
 	{"packed-refs.lock", ReasonLockBusy},
 	{"another git process", ReasonLockBusy},
+	{"cannot lock ref", ReasonLockBusy}, // a ref CAS race lost to a concurrent writer (corrupt refs are caught by the overrides)
 	{"lock_busy", ReasonLockBusy},
 	{"lock busy", ReasonLockBusy},
 
@@ -154,6 +184,17 @@ var transientSignatures = []signature{
 	{"connection refused", ReasonRemoteUnreachable},
 	{"unable to access", ReasonRemoteUnreachable},
 	{"network is unreachable", ReasonRemoteUnreachable},
+	// The transport family the push executor (safesync) already retries; the
+	// audit path must not fail the same blip closed as permanent drift.
+	{"the remote end hung up", ReasonRemoteUnreachable},
+	{"unexpected disconnect", ReasonRemoteUnreachable},
+	{"early eof", ReasonRemoteUnreachable},
+	{"connection reset", ReasonRemoteUnreachable},
+	{"connection closed by remote host", ReasonRemoteUnreachable},
+	{"kex_exchange_identification", ReasonRemoteUnreachable},
+	{"ssh_exchange_identification", ReasonRemoteUnreachable},
+	{"empty reply from server", ReasonRemoteUnreachable},
+	{"operation timed out", ReasonRemoteUnreachable},
 	{"remote_unreachable", ReasonRemoteUnreachable},
 
 	{"rebase in progress", ReasonRebaseInFlight},
@@ -185,16 +226,28 @@ var permanentSignatures = []signature{
 }
 
 // FromMessage maps a raw audit-failure message to the closed Reason by
-// best-effort, case-insensitive substring match. Transient signatures are
+// best-effort, case-insensitive substring match. permanentOverrides are checked
+// first: a message carrying a permanent marker (an auth/permission/rule
+// rejection, a corrupt ref) skips the transient tables entirely, even when it
+// also drags transient-looking trailer prose. Then transient signatures are
 // checked before permanent ones, so a message that mentions both a passing
 // condition and a miss is treated as retryable rather than prematurely declared
 // drift. A message that matches no known signature returns ReasonUnknown, which
 // Classify reports as Permanent — a genuine miss is never masked as retryable.
 func FromMessage(msg string) Reason {
 	low := strings.ToLower(msg)
-	for _, s := range transientSignatures {
-		if strings.Contains(low, s.needle) {
-			return s.reason
+	overridden := false
+	for _, marker := range permanentOverrides {
+		if strings.Contains(low, marker) {
+			overridden = true
+			break
+		}
+	}
+	if !overridden {
+		for _, s := range transientSignatures {
+			if strings.Contains(low, s.needle) {
+				return s.reason
+			}
 		}
 	}
 	for _, s := range permanentSignatures {
