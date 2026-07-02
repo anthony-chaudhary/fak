@@ -33,6 +33,9 @@ what rots). ``grade`` maps it to A–F. The corpus payload adds **coverage**: wh
 fraction of the core set is reachable from the front door (``README.md`` by link
 BFS — an unreachable core doc is an orphan) and what fraction of the *expected
 topics* (install, quickstart, architecture, security, …) a non-stub doc covers.
+The corpus (and every per-doc entry) also carries ``value`` — the continuous
+quality ratio (score/100, 1.0 == the old 100/100) — plus ``legacy_score`` /
+``legacy_score_scale`` bridge keys, mirroring ``pkg/scorecard``.
 
 ``ok`` is False iff any HARD defect exists (dead link, naive-led headline,
 missing H1, orphan core doc, uncovered topic) — these are required edits, the
@@ -483,9 +486,11 @@ def score_doc(text: str, doc_rel: str, root: Path, *, version: str | None,
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"] for name in KPI_WEIGHTS)
     defects = [f"{k['kpi']}: {d}" for k in kpis for d in k["defects"]]
     soft = [f"{k['kpi']}: {s}" for k in kpis for s in k["soft"]]
+    doc_score = round(score, 1)
     return {
         "path": doc_rel,
-        "score": round(score, 1),
+        "score": doc_score,
+        "value": round(doc_score / 100, 3),
         "grade": grade_letter(score),
         "kpis": {k["kpi"]: k["score"] for k in kpis},
         "kpi_detail": {k["kpi"]: k["detail"] for k in kpis},
@@ -499,7 +504,7 @@ def missing_doc_entry(doc_rel: str) -> dict[str, Any]:
     """A core doc that does not exist on disk is the worst defect: a 0 with one
     hard unit of doc-debt for being absent."""
     return {
-        "path": doc_rel, "score": 0.0, "grade": "F",
+        "path": doc_rel, "score": 0.0, "value": 0.0, "grade": "F",
         "kpis": {k: 0 for k in KPI_WEIGHTS}, "kpi_detail": {},
         "defects": [f"missing: core doc {doc_rel} does not exist on disk"],
         "soft": [], "n_defects": 1,
@@ -606,21 +611,35 @@ def build_payload(*, workspace: str, docs: list[dict[str, Any]],
         grades[d["grade"]] = grades.get(d["grade"], 0) + 1
     worst = sorted(docs, key=lambda d: (d["score"], -d["n_defects"]))[:8]
 
+    median_score = round(sorted(scores)[n // 2], 1) if n else 0.0
+    min_score = round(min(scores), 1) if scores else 0.0
+    max_score = round(max(scores), 1) if scores else 0.0
+
     corpus = {
         "n_docs": n,
+        # Continuous quality ratio (mean_score/100, 1.0 == the old 100/100) —
+        # the primary signal; the 0-100 keys stay as the legacy bridge.
+        "value": round(mean_score / 100, 3),
+        "value_unit": "quality_ratio",
         "mean_score": mean_score,
+        "legacy_score": mean_score,
+        "legacy_score_scale": 100,
         # Corpus-level letter on the shared 90/80/70/60 ladder (#1269): the
         # control pane reads this directly instead of inferring a grade from the
         # corpus score or the occurrence-count debt.
         "grade": grade_letter(mean_score),
-        "median_score": round(sorted(scores)[n // 2], 1) if n else 0.0,
-        "min_score": round(min(scores), 1) if scores else 0.0,
-        "max_score": round(max(scores), 1) if scores else 0.0,
+        "median_score": median_score,
+        "median_value": round(median_score / 100, 3),
+        "min_score": min_score,
+        "min_value": round(min_score / 100, 3),
+        "max_score": max_score,
+        "max_value": round(max_score / 100, 3),
         "grade_distribution": grades,
         "doc_debt": total_defects,
         "doc_debt_in_docs": doc_defects,
         "doc_debt_in_coverage": len(cov.get("defects", [])),
-        "worst": [{"path": d["path"], "score": d["score"], "grade": d["grade"],
+        "worst": [{"path": d["path"], "score": d["score"],
+                   "value": round(d["score"] / 100, 3), "grade": d["grade"],
                    "n_defects": d["n_defects"]} for d in worst],
     }
 

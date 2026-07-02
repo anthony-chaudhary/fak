@@ -257,8 +257,9 @@ def _kpi(name: str, defects: list[str], ok_detail: str, *, soft: list[str] | Non
     soft = soft or []
     pen = KPI_PENALTY[name]
     detail = (bad_detail or f"{len(defects)} defect(s)") if defects else ok_detail
+    score = _clamp(100 - pen * len(defects) - min(10, 2 * len(soft)))
     return {"kpi": name, "group": KPI_GROUP[name],
-            "score": _clamp(100 - pen * len(defects) - min(10, 2 * len(soft))),
+            "score": score, "value": round(score / 100, 3),
             "detail": detail, "defects": defects, "soft": soft}
 
 
@@ -441,8 +442,9 @@ def kpi_kind_grounding_soft(rows: list[dict[str, Any]], doc_verbs: set[str]) -> 
                 soft.append(f"{rid}: cli-verb '{r.get('grounding')}' not documented in cli-reference")
         if kind == "metric" and gk != "metric":
             soft.append(f"{rid}: kind 'metric' but grounding_kind '{gk}' (expected 'metric')")
+    score = _clamp(100 - min(40, 6 * len(soft)))
     return {"kpi": "kind_grounding_soft", "group": "honesty",
-            "score": _clamp(100 - min(40, 6 * len(soft))),
+            "score": score, "value": round(score / 100, 3),
             "detail": "kind agrees with grounding" if not soft else f"{len(soft)} kind/grounding mismatch",
             "defects": [], "soft": soft}
 
@@ -470,8 +472,9 @@ def kpi_hierarchy_soft(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 break
             seen.add(cur)
             cur = parent[cur]
+    score = _clamp(100 - min(30, 6 * len(soft)))
     return {"kpi": "hierarchy_soft", "group": "honesty",
-            "score": _clamp(100 - min(30, 6 * len(soft))),
+            "score": score, "value": round(score / 100, 3),
             "detail": "hierarchy parents resolve" if not soft else f"{len(soft)} hierarchy issue(s)",
             "defects": [], "soft": soft}
 
@@ -676,6 +679,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
             debt_by_group[k["group"]] += len(k["defects"])
     breakdown = sorted(
         ({"kpi": k["kpi"], "group": k["group"], "score": k["score"],
+          "value": round(k["score"] / 100, 3),
           "debt": len(k["defects"]), "detail": k["detail"]} for k in kpis),
         key=lambda x: (-x["debt"], x["score"]))
 
@@ -686,8 +690,11 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     n_crystal = pos.get("crystal", 0)
 
     corpus_out = {
-        "score": score, "grade": grade,
+        "value": round(score / 100, 3), "value_unit": "quality_ratio",
+        "score": score, "legacy_score": score, "legacy_score_scale": 100,
+        "grade": grade,
         "clarity_score": clarity_score,
+        "clarity_value": round(clarity_score / 100, 3),
         "disambiguation_debt": disambiguation_debt,
         "clarity_defects": clarity_defects,
         "coverage_debt": cov["coverage_debt"],

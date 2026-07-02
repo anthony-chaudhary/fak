@@ -184,6 +184,25 @@ def test_payload_clean_is_ok() -> None:
     assert p["ok"] is True and p["verdict"] == "OK", p
 
 
+def test_payload_carries_continuous_value(tmp_path: Path) -> None:
+    # Corpus value is the continuous quality ratio; the 0-100 keys stay as the
+    # legacy bridge — mirrors pkg/scorecard's Fold contract.
+    body = "# Title\n\nA clear one-line intro sentence about the thing.\n\n## A\n\n[x](b.md)\n"
+    (tmp_path / "b.md").write_text("x", encoding="utf-8")
+    d = dsc.score_doc(body, "a.md", tmp_path, version="0.30.0", authority="")
+    assert d["value"] == round(d["score"] / 100, 3), d
+    cov = {"overall_pct": 100.0, "reachability_pct": 100.0, "topic_pct": 100.0,
+           "defects": [], "orphans": [], "missing_topics": []}
+    p = dsc.build_payload(workspace=".", docs=[d], cov=cov)
+    c = p["corpus"]
+    assert c["value"] == round(c["mean_score"] / 100, 3), c
+    assert c["value_unit"] == "quality_ratio", c
+    assert c["legacy_score"] == c["mean_score"], c
+    assert c["legacy_score_scale"] == 100, c
+    assert c["median_value"] == round(c["median_score"] / 100, 3), c
+    assert c["worst"][0]["value"] == round(c["worst"][0]["score"] / 100, 3), c
+
+
 def test_payload_counts_doc_debt() -> None:
     docs = [{"path": "a.md", "score": 80.0, "grade": "B", "n_defects": 2,
              "defects": ["x", "y"], "soft": [], "kpis": {}}]
