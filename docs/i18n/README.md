@@ -14,7 +14,16 @@ signal that the project welcomes them — then get them to the working proof fas
 | Language | Page | Market focus |
 |---|---|---|
 | हिन्दी (Hindi) | [`hi/README.md`](hi/README.md) | India — cost in INR terms, DPDP-Act data residency, self-host, one binary |
+| தமிழ் (Tamil) | [`ta/README.md`](ta/README.md) | India (also SG/LK) — same levers as Hindi: INR cost, DPDP residency, self-host |
+| తెలుగు (Telugu) | [`te/README.md`](te/README.md) | India — same levers as Hindi: INR cost, DPDP residency, self-host |
+| বাংলা (Bengali) | [`bn/README.md`](bn/README.md) | India (also BD) — same levers as Hindi: INR cost, DPDP residency, self-host |
+| मराठी (Marathi) | [`mr/README.md`](mr/README.md) | India — same levers as Hindi: INR cost, DPDP residency, self-host |
+| Deutsch (German) | [`de/README.md`](de/README.md) | EU/DACH — GDPR (DSGVO) self-host residency, EU-AI-Act audit trail |
+| Français (French) | [`fr/README.md`](fr/README.md) | EU/France — RGPD self-host residency, EU-AI-Act audit trail |
 | 简体中文 (Simplified Chinese) | [`zh/README.md`](zh/README.md) | China — domestic models (Qwen/GLM/DeepSeek), PIPL residency, `GOPROXY` onboarding |
+
+Every page links back to this hub, and the Indian-language pages cross-link each other,
+so a reader landing on any one can reach the rest.
 
 ## Status & honesty fence
 

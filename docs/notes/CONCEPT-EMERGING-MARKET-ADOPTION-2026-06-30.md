@@ -64,7 +64,10 @@ props, then hands off to the (English) deep docs. This is what ships with this n
 
 **Fence:** these are machine-authored translations pending native review — the hub marks
 them as such and asks for corrections via issue/PR. Do not claim "professionally
-localized." Follow-ons: other Indian languages (Tamil, Telugu, Bengali, Marathi) and
+localized." Update 2026-07-01: the Indian-language follow-ons shipped — Tamil
+([`ta/`](../i18n/ta/README.md)), Telugu ([`te/`](../i18n/te/README.md)), Bengali
+([`bn/`](../i18n/bn/README.md)), Marathi ([`mr/`](../i18n/mr/README.md)) — each with the
+same machine-authored fence. Remaining follow-ons: native review of all pages and
 Traditional Chinese (TW/HK).
 
 ### 2 — In-language answer-engine discoverability
