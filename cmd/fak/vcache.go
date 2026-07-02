@@ -507,6 +507,7 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			in.Ranked = vcacheobserve.RankedWorkload(turns)
 			in.AnchorSource = vcachescore.AnchorSourceMeasured
 			in.TurnsObserved = len(turns)
+			applyVCacheSnapshotContext(&in, turns)
 		}
 	}
 
@@ -605,6 +606,59 @@ func planeLabel(p vcachescore.PlaneValueReport) string {
 		return "MISSING"
 	}
 	return p.Provenance
+}
+
+func applyVCacheSnapshotContext(in *vcachescore.Input, turns []vcacheobserve.Turn) {
+	var events, shed, dropped, baseline, cost int64
+	for _, t := range turns {
+		events += t.ContextEvents
+		shed += t.ContextShedTokens
+		dropped += t.ContextDroppedTurns
+		baseline += t.ContextBaselineTokens
+		cost += t.ContextCostTokens
+	}
+	if events <= 0 && shed <= 0 && dropped <= 0 {
+		return
+	}
+	if events <= 0 && shed > 0 {
+		events = 1
+	}
+	ev := vcachescore.PlaneEvidenceInput{
+		Available:       true,
+		Provenance:      "WITNESSED",
+		SavedTokenEquiv: float64(nonNegInt64(shed)),
+		Reason: fmt.Sprintf(
+			"persisted guard/serve context snapshot witnessed %d context event(s), shed %d token(s), dropped %d turn(s)",
+			nonNegInt64(events),
+			nonNegInt64(shed),
+			nonNegInt64(dropped),
+		),
+	}
+	if baseline > 0 {
+		ev.BaselineTokenEquiv = float64(baseline)
+		if cost >= 0 {
+			ev.CostTokenEquiv = float64(cost)
+		}
+	}
+	in.Context = ev
+	if in.AgenticActivation.ContextEvents == 0 {
+		in.AgenticActivation.ContextEvents = int64ToInt(nonNegInt64(events))
+	}
+}
+
+func nonNegInt64(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func int64ToInt(n int64) int {
+	maxInt := int64(int(^uint(0) >> 1))
+	if n > maxInt {
+		return int(maxInt)
+	}
+	return int(n)
 }
 
 func defaultVCacheStatus() vcacheStatusReport {

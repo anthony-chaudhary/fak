@@ -30,6 +30,15 @@ type Turn struct {
 	CacheRead     int64  `json:"cache_read_input_tokens"`
 	Ephemeral1h   int64  `json:"ephemeral_1h_input_tokens"`
 	Ephemeral5m   int64  `json:"ephemeral_5m_input_tokens"`
+
+	// Optional fak-authored session evidence attached by the gateway snapshot writer.
+	// Provider telemetry remains the Turn's primary row shape; these fields let the
+	// offline scorecard recover context-plane activation after the guard/serve process exits.
+	ContextEvents         int64 `json:"fak_context_events,omitempty"`
+	ContextShedTokens     int64 `json:"fak_context_shed_tokens,omitempty"`
+	ContextDroppedTurns   int64 `json:"fak_context_dropped_turns,omitempty"`
+	ContextBaselineTokens int64 `json:"fak_context_baseline_tokens,omitempty"`
+	ContextCostTokens     int64 `json:"fak_context_cost_tokens,omitempty"`
 }
 
 // Multipliers carries the provider economics constants (Anthropic defaults: a 0.1x

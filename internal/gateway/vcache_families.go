@@ -86,13 +86,43 @@ func (m *gatewayMetrics) vcacheTurnsSnapshot() ([]vcacheobserve.Turn, bool) {
 		return nil, false
 	}
 	m.vcacheMu.Lock()
-	defer m.vcacheMu.Unlock()
 	if len(m.vcacheTurns) == 0 {
-		return nil, m.vcacheTurnsDropped
+		capped := m.vcacheTurnsDropped
+		m.vcacheMu.Unlock()
+		return nil, capped
 	}
 	out := make([]vcacheobserve.Turn, len(m.vcacheTurns))
 	copy(out, m.vcacheTurns)
-	return out, m.vcacheTurnsDropped
+	capped := m.vcacheTurnsDropped
+	m.vcacheMu.Unlock()
+	m.attachVCacheContextEvidence(out)
+	return out, capped
+}
+
+func (m *gatewayMetrics) attachVCacheContextEvidence(turns []vcacheobserve.Turn) {
+	if m == nil || len(turns) == 0 {
+		return
+	}
+	compact := m.compactionSnapshotData()
+	fired := compact.attempts["fired"]
+	events := fired
+	if events == 0 && compact.shed > 0 {
+		events = 1
+	}
+	if events == 0 && compact.shed == 0 && compact.dropped == 0 {
+		return
+	}
+	turns[0].ContextEvents = uint64ToInt64(events)
+	turns[0].ContextShedTokens = uint64ToInt64(compact.shed)
+	turns[0].ContextDroppedTurns = uint64ToInt64(compact.dropped)
+}
+
+func uint64ToInt64(n uint64) int64 {
+	const maxInt64 = uint64(^uint64(0) >> 1)
+	if n > maxInt64 {
+		return int64(maxInt64)
+	}
+	return int64(n)
 }
 
 func clampNonNeg(n int) int {

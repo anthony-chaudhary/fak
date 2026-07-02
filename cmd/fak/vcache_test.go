@@ -553,6 +553,39 @@ func TestRunVCacheScoreObservedByDefaultFromSnapshot(t *testing.T) {
 	}
 }
 
+func TestRunVCacheScoreSnapshotCarriesContextEvidence(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
+	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920,"fak_context_events":2,"fak_context_shed_tokens":1200,"fak_context_dropped_turns":3,"fak_context_baseline_tokens":2000,"fak_context_cost_tokens":800}` + "\n" +
+		`{"family":"head","unix_millis":2,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
+	if err := os.WriteFile(snap, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--snapshot", snap}); code != 0 && code != 1 {
+		t.Fatalf("score --snapshot exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if !rep.Planes.ContextWitnessed.Available || rep.Planes.ContextWitnessed.Provenance != "WITNESSED" {
+		t.Fatalf("context plane = %+v, want WITNESSED evidence from snapshot", rep.Planes.ContextWitnessed)
+	}
+	if rep.Planes.ContextWitnessed.SavedTokenEquiv != 1200 {
+		t.Fatalf("context saved token-equiv=%g, want 1200", rep.Planes.ContextWitnessed.SavedTokenEquiv)
+	}
+	if rep.Planes.ContextWitnessed.BaselineTokenEquiv != 2000 || rep.Planes.ContextWitnessed.CostTokenEquiv != 800 {
+		t.Fatalf("context baseline/cost=%g/%g, want 2000/800",
+			rep.Planes.ContextWitnessed.BaselineTokenEquiv, rep.Planes.ContextWitnessed.CostTokenEquiv)
+	}
+	if rep.AgenticActivation.ContextEvents != 2 || !rep.AgenticActivation.Active {
+		t.Fatalf("agentic activation = %+v, want two context events active", rep.AgenticActivation)
+	}
+	if rep.DefaultUsefulness.Facets.AgenticActivation == 0 {
+		t.Fatalf("default-usefulness missed context activation: %+v", rep.DefaultUsefulness)
+	}
+}
+
 func TestRunVCacheScoreSnapshotEnvFeedsMeasuredSource(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "vcache-turns.jsonl")
 	body := `{"family":"head","unix_millis":1,"input_tokens":86,"cache_read_input_tokens":1920}` + "\n"
