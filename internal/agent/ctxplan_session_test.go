@@ -375,3 +375,89 @@ func selIDs(p ctxplan.Plan) map[string]bool {
 	}
 	return out
 }
+
+// TestSessionPlannerResetsOnDivergentHistory is the stateless-wire regression witness: one
+// gateway trace ("default" under --context-budget-tokens) carries INDEPENDENT conversations
+// back to back, so the append cursor alone must never decide what a turn renders. Before the
+// divergence check, the second conversation (same length as the first) ingested nothing and the
+// planner rendered conversation ONE's spans forever — the frozen-prompt replay observed live on
+// node-macos-a's qwen3.6-27b serve, where every request answered "Say OK and nothing else.".
+func TestSessionPlannerResetsOnDivergentHistory(t *testing.T) {
+	ctx := context.Background()
+	sp := NewSessionPlanner(64)
+
+	first := []Message{{Role: RoleUser, Content: "Say OK and nothing else."}}
+	out := sp.RenderTurn(ctx, first)
+	if !renderContains(out, "Say OK and nothing else.") {
+		t.Fatalf("premise broken: first conversation not rendered, out=%+v", out)
+	}
+
+	second := []Message{{Role: RoleUser, Content: "What is 7 multiplied by 6?"}}
+	out = sp.RenderTurn(ctx, second)
+	if renderContains(out, "Say OK and nothing else.") {
+		t.Fatalf("stale replay: first conversation's span rendered for the second conversation, out=%+v", out)
+	}
+	if !renderContains(out, "What is 7 multiplied by 6?") {
+		t.Fatalf("second conversation not rendered after reset, out=%+v", out)
+	}
+}
+
+// TestSessionPlannerResetsOnSameLengthPrefixDivergence pins the harder divergence the length
+// check alone cannot see: two conversations of EQUAL length sharing their last message but
+// differing earlier (two fleet clients with the same user text under different system prompts).
+// The prefix fingerprints, not the count, must force the rebuild — otherwise conversation B is
+// served conversation A's system prompt.
+func TestSessionPlannerResetsOnSameLengthPrefixDivergence(t *testing.T) {
+	ctx := context.Background()
+	sp := NewSessionPlanner(64)
+
+	convA := []Message{
+		{Role: RoleSystem, Content: "You are reviewer A."},
+		{Role: RoleUser, Content: "review this diff"},
+	}
+	convB := []Message{
+		{Role: RoleSystem, Content: "You are reviewer B."},
+		{Role: RoleUser, Content: "review this diff"},
+	}
+	sp.RenderTurn(ctx, convA)
+	out := sp.RenderTurn(ctx, convB)
+	if renderContains(out, "You are reviewer A.") {
+		t.Fatalf("stale replay: conversation A's system prompt rendered for conversation B, out=%+v", out)
+	}
+	if !renderContains(out, "You are reviewer B.") {
+		t.Fatalf("conversation B's system prompt not rendered after reset, out=%+v", out)
+	}
+}
+
+// TestSessionPlannerAppendOnlyTurnsDoNotReset guards the flatten the type exists for: a genuine
+// live-loop append (each turn a superset extending the last) must keep the SAME maintained
+// index — pointer-identical, no generational reset — so the Θ(c) incremental path still never
+// rebuilds on the shape it was built for.
+func TestSessionPlannerAppendOnlyTurnsDoNotReset(t *testing.T) {
+	ctx := context.Background()
+	session := recordedSession()
+	sp := NewSessionPlanner(64)
+
+	sp.RenderTurn(ctx, session[:1])
+	idx := sp.Index()
+	for k := 2; k <= len(session); k++ {
+		sp.RenderTurn(ctx, session[:k])
+		if sp.Index() != idx {
+			t.Fatalf("append-only turn %d reset the maintained index — the incremental flatten regressed", k)
+		}
+	}
+	if sp.Len() != len(session) {
+		t.Fatalf("maintained span count = %d, want %d", sp.Len(), len(session))
+	}
+}
+
+// renderContains reports whether any rendered message carries exactly this content — the
+// divergence witnesses assert on rendered bytes, not planner internals.
+func renderContains(msgs []Message, content string) bool {
+	for _, m := range msgs {
+		if m.Content == content {
+			return true
+		}
+	}
+	return false
+}

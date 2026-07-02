@@ -37,6 +37,8 @@ package agent
 
 import (
 	"context"
+	"hash/fnv"
+	"io"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -66,6 +68,7 @@ type SessionPlanner struct {
 	store    *ctxplan.MemStore // the lossless byte store (id "span:<i>"); the demand-page backing
 	index    *ctxplan.Index    // the persistent candidate index, maintained incrementally
 	ingested int               // messages already lowered into store+index (the append cursor)
+	fprints  []uint64          // per-ingested-message fingerprints — the append-only contract's witness
 
 	// Incremental pins, maintained in O(1) per new message so a turn never re-scans all N to
 	// re-derive them: the active goal, the system prompt, the first user turn, and the last
@@ -172,10 +175,21 @@ func (p *CtxViewPlanner) NewSession() *SessionPlanner {
 // path's O(N) per-turn store rebuild. It assigns the SAME ids ("span:<i>") and durability classes
 // as messagesToStore, so a SessionPlanner and the stateless seam address spans identically.
 //
-// It assumes the message history is APPEND-ONLY across turns (the live-loop contract: a turn adds
-// messages, it never rewrites earlier ones — the planner REPLACES compaction, so the prefix is
-// stable). messages[:ingested] are taken as already-indexed and are not re-scanned.
+// The append-only contract (the live-loop shape: a turn adds messages, it never rewrites earlier
+// ones — the planner REPLACES compaction, so the prefix is stable) is VERIFIED per turn, not
+// assumed: a stateless wire like OpenAI /v1/chat/completions sends an INDEPENDENT message list
+// per request, and one gateway trace can carry many unrelated conversations back to back. An
+// incoming history that is shorter than the ingested prefix, or whose prefix does not match it,
+// resets the store/index/pins and re-ingests from scratch — without the reset, the count-only
+// cursor made the planner render the FIRST conversation's spans forever (every later request
+// with <= ingested messages ingested nothing), freezing the served prompt at conversation one.
+// Verification hashes messages[:ingested] — O(prefix bytes), the same order the request already
+// paid to parse its body — so the bounded-probe Θ(c) PLANNING cost is untouched; only a genuine
+// divergence pays the one O(N) rebuild, which is the correctness price, never a replay.
 func (sp *SessionPlanner) ingest(messages []Message) {
+	if sp.divergesFromIngested(messages) {
+		sp.resetConversation()
+	}
 	for i := sp.ingested; i < len(messages); i++ {
 		msg := messages[i]
 		role := msg.Role
@@ -205,8 +219,54 @@ func (sp *SessionPlanner) ingest(messages []Message) {
 		if msg.Role == RoleUser {
 			sp.lastUserContent = msg.Content
 		}
+		sp.fprints = append(sp.fprints, messageFingerprint(msg))
 	}
 	sp.ingested = len(messages)
+}
+
+// divergesFromIngested reports whether the incoming history contradicts the already-ingested
+// prefix: it is shorter than the cursor, or some message in messages[:ingested] no longer
+// fingerprint-matches what was lowered into the store. A zero-ingested planner never diverges.
+// Fingerprints (not stored bytes) keep the check allocation-free; a hash collision can only
+// SUPPRESS a reset (never force one), and the 64-bit FNV space makes that vanishingly unlikely
+// against the alternative the check replaces — trusting the count alone, which replayed a stale
+// conversation on every same-trace stateless request.
+func (sp *SessionPlanner) divergesFromIngested(messages []Message) bool {
+	if len(messages) < sp.ingested {
+		return true
+	}
+	for i, fp := range sp.fprints {
+		if messageFingerprint(messages[i]) != fp {
+			return true
+		}
+	}
+	return false
+}
+
+// resetConversation drops every message-derived structure — store, index, cursor, fingerprints,
+// pins, forecast content — so the next ingest rebuilds from the incoming history alone. The
+// planner's CONFIG survives (Budget/baseBudget/Opts/Layout and the opt-in tenure table): those
+// belong to the session's operator settings, not to the conversation that just diverged.
+func (sp *SessionPlanner) resetConversation() {
+	sp.store = ctxplan.NewMemStore()
+	sp.index = ctxplan.NewIndex()
+	sp.ingested = 0
+	sp.fprints = sp.fprints[:0]
+	sp.goalPin, sp.systemPin, sp.firstUserPin, sp.lastUserPin = "", "", "", ""
+	sp.lastUserContent = ""
+}
+
+// messageFingerprint hashes the fields ingest lowers into planner state (role, name, content)
+// — a divergence in any other field cannot change what the planner renders, so it does not
+// force a rebuild.
+func messageFingerprint(m Message) uint64 {
+	h := fnv.New64a()
+	io.WriteString(h, m.Role)
+	h.Write([]byte{0})
+	io.WriteString(h, m.Name)
+	h.Write([]byte{0})
+	io.WriteString(h, m.Content)
+	return h.Sum64()
 }
 
 // pins returns the incremental pin id list in the same order messagesToStore produces — the
