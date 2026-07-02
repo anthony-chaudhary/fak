@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 	"github.com/anthony-chaudhary/fak/internal/vcachescore"
 )
 
@@ -35,7 +36,12 @@ func (s *Server) vcacheScoreReport() vcachescore.Report {
 			}}
 		}
 	}
-	if ctxEvidence, events, ok := contextPlaneEvidence(sum); ok {
+	if ctxEvidence, events, ok := contextPlaneEvidenceFromTurns(s.vcacheTurnsSnapshotForScore()); ok {
+		in.Context = ctxEvidence
+		if in.AgenticActivation.ContextEvents == 0 {
+			in.AgenticActivation.ContextEvents = events
+		}
+	} else if ctxEvidence, events, ok := contextPlaneEvidence(sum); ok {
 		in.Context = ctxEvidence
 		if in.AgenticActivation.ContextEvents == 0 {
 			in.AgenticActivation.ContextEvents = events
@@ -58,6 +64,49 @@ func (s *Server) vcacheScoreReport() vcachescore.Report {
 		in.ExternalEngine = ext
 	}
 	return vcachescore.Score(in)
+}
+
+func (s *Server) vcacheTurnsSnapshotForScore() []vcacheobserve.Turn {
+	if s == nil {
+		return nil
+	}
+	turns, _ := s.VCacheTurnsSnapshot()
+	return turns
+}
+
+func contextPlaneEvidenceFromTurns(turns []vcacheobserve.Turn) (vcachescore.PlaneEvidenceInput, int, bool) {
+	var events, shed, dropped, baseline, cost int64
+	for _, t := range turns {
+		events = saturatingInt64Add(events, t.ContextEvents)
+		shed = saturatingInt64Add(shed, t.ContextShedTokens)
+		dropped = saturatingInt64Add(dropped, t.ContextDroppedTurns)
+		baseline = saturatingInt64Add(baseline, t.ContextBaselineTokens)
+		cost = saturatingInt64Add(cost, t.ContextCostTokens)
+	}
+	if events <= 0 && shed <= 0 && dropped <= 0 {
+		return vcachescore.PlaneEvidenceInput{}, 0, false
+	}
+	if events <= 0 && shed > 0 {
+		events = 1
+	}
+	ev := vcachescore.PlaneEvidenceInput{
+		Available:       true,
+		Provenance:      "WITNESSED",
+		SavedTokenEquiv: float64(shed),
+		Reason: fmt.Sprintf(
+			"live guard/serve context snapshot witnessed %d context event(s), shed %d token(s), dropped %d turn(s)",
+			events,
+			shed,
+			dropped,
+		),
+	}
+	if baseline > 0 {
+		ev.BaselineTokenEquiv = float64(baseline)
+		if cost >= 0 {
+			ev.CostTokenEquiv = float64(cost)
+		}
+	}
+	return ev, int(events), true
 }
 
 func contextPlaneEvidence(sum AdjudicationSummary) (vcachescore.PlaneEvidenceInput, int, bool) {

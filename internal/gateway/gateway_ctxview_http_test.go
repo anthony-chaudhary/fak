@@ -316,9 +316,11 @@ func TestCtxViewHTTPAnthropicPassthroughPlansView(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
+	const traceID = "ctxview-passthrough-witness"
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(inbound))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "caller-key")
+	req.Header.Set("X-Trace-Id", traceID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -378,5 +380,30 @@ func TestCtxViewHTTPAnthropicPassthroughPlansView(t *testing.T) {
 	}
 	if !foundWeather {
 		t.Error("(c): the elided weather span must be recoverable under a permissive re-plan (exact recall — the store preserved it)")
+	}
+
+	// (d) CONTEXT-PLANE WITNESS: a ctx-view rewrite is a managed-context event, but it is
+	// not compact-history. The always-on ctxvalue surface, vcache snapshot, and live vcache
+	// score should all see the context plane without inflating compaction counters.
+	ctxValue := srv.CtxValueReportFor(traceID)
+	if ctxValue.Turns.ContextEvents != 1 || ctxValue.Turns.TurnsSinceContextEvent != 0 {
+		t.Fatalf("(d): ctxvalue turns = %+v, want one current context event", ctxValue.Turns)
+	}
+	turns, _ := srv.VCacheTurnsSnapshot()
+	if len(turns) == 0 {
+		t.Fatal("(d): vcache snapshot must include the served turn with ctx-view context evidence")
+	}
+	got := turns[0]
+	if got.ContextEvents != 1 || got.ContextDroppedTurns != 1 || got.ContextShedTokens <= 0 {
+		t.Fatalf("(d): vcache context evidence = events:%d shed:%d dropped:%d, want 1/>0/1",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+	if sum := srv.AdjudicationSummary(); sum.CompactionFired != 0 || sum.CompactionShedTokens != 0 {
+		t.Fatalf("(d): ctx-view must not inflate compaction summary: %+v", sum)
+	}
+	score := srv.vcacheScoreReport()
+	if !score.Planes.ContextWitnessed.Available || score.AgenticActivation.ContextEvents != 1 {
+		t.Fatalf("(d): live vcache score context plane = %+v activation=%+v, want witnessed ctx-view event",
+			score.Planes.ContextWitnessed, score.AgenticActivation)
 	}
 }

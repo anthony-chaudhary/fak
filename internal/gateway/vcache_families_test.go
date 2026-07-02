@@ -85,6 +85,57 @@ func TestVCacheTurnsSnapshotCarriesContextOnlyEvidence(t *testing.T) {
 	}
 }
 
+func TestVCacheTurnsSnapshotCarriesCtxViewEvidence(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeVCacheTurn("trace-A", 1, 100, 900, 0)
+	m.observeCtxViewRewrite(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    1,
+		ShedTokens: 700,
+	})
+
+	turns, _ := m.vcacheTurnsSnapshot()
+	if len(turns) != 1 {
+		t.Fatalf("snapshot retained %d turns, want 1", len(turns))
+	}
+	got := turns[0]
+	if got.ContextEvents != 1 || got.ContextShedTokens != 700 || got.ContextDroppedTurns != 1 {
+		t.Fatalf("ctx-view evidence = events:%d shed:%d dropped:%d, want 1/700/1",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+	if comp := m.compactionSnapshotData(); comp.attempts["fired"] != 0 || comp.shed != 0 || comp.dropped != 0 {
+		t.Fatalf("ctx-view evidence must not inflate compaction counters: %+v", comp)
+	}
+}
+
+func TestVCacheTurnsSnapshotCarriesCtxViewOnlyEvidence(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCtxViewRewrite(agent.CompactOutcome{
+		Reason:     agent.CompactReasonNone,
+		Dropped:    2,
+		ShedTokens: 850,
+	})
+
+	turns, capped := m.vcacheTurnsSnapshot()
+	if capped {
+		t.Fatal("ctx-view-only evidence must not mark the provider-cache window capped")
+	}
+	if len(turns) != 1 {
+		t.Fatalf("snapshot retained %d turns, want one context-only witness row", len(turns))
+	}
+	got := turns[0]
+	if got.Family != "context" {
+		t.Fatalf("context-only family = %q, want context", got.Family)
+	}
+	if got.InputTokens != 0 || got.CacheRead != 0 || got.CacheCreation != 0 {
+		t.Fatalf("ctx-view-only row must not invent provider telemetry: %+v", got)
+	}
+	if got.ContextEvents != 1 || got.ContextShedTokens != 850 || got.ContextDroppedTurns != 2 {
+		t.Fatalf("ctx-view evidence = events:%d shed:%d dropped:%d, want 1/850/2",
+			got.ContextEvents, got.ContextShedTokens, got.ContextDroppedTurns)
+	}
+}
+
 func TestServerVCacheTurnsSnapshotCarriesContextEconomics(t *testing.T) {
 	m := newGatewayMetrics(time.Now())
 	m.observeVCacheTurn("trace-A", 1, 100, 900, 0)

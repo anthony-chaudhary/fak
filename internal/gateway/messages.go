@@ -214,7 +214,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// (its content match keys off the decoded req.Messages); the siblings below then see the
 	// already-bounded body and bail (under-budget) in the common case. OFF (identity) by
 	// default; fail-safe.
-	viewPlanned := s.maybePlanAnthropicRaw(ctx, reqTrace, req)
+	viewPlanned, _ := s.maybePlanAnthropicRaw(ctx, reqTrace, req)
 	// Cache-prefix-preserving history compaction (#555): on the Anthropic passthrough,
 	// shrink the OUTBOUND body's OLD turns to the configured resident-token budget while
 	// keeping the cached-prefix bytes verbatim, so a long conversation forwards far fewer
@@ -237,17 +237,13 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// context net back to the harness).
 	fakBail := fakBailReasonFor(compactReason)
 	hcoh := harnessCoherenceInputs{inboundPrefixDigest: inboundPrefixDigest, fakBail: fakBail}
-	if viewPlanned {
-		compacted = true // the ctxview transform shrunk the body too — record the observed cache_read
-	}
+	contextEvent := compacted || viewPlanned
 	// Oversized tool_result elision (the bounded-loss sibling of compaction): after compaction
 	// has dropped whole OLD turns, shrink any remaining oversized tool_result bodies in the
 	// un-cached, non-recent middle to a bounded head+tail form, keeping the cached-prefix bytes
 	// verbatim and never touching a cache_control-bearing message. OFF (identity) by default and
 	// on every non-passthrough wire; fail-safe. Runs on the already-compacted body.
-	if s.maybeElideAnthropicRaw(req) {
-		compacted = true // the elision transform shrank the body too — record the observed cache_read
-	}
+	s.maybeElideAnthropicRaw(req)
 	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
@@ -283,7 +279,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthroughFor(req.Model) && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh) {
+		if s.anthropicPassthroughFor(req.Model) && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, contextEvent, hcoh) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -295,7 +291,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		if s.streamAnthropicPlannerLive(w, r, req, reqTrace, sessionTurn) {
 			return
 		}
-		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh)
+		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, contextEvent, hcoh)
 		return
 	}
 
@@ -328,12 +324,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// changed prefix to fak rather than the harness.
 	s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 		false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
-	s.logInferenceTurn(reqTrace, "anthropic_messages", false, agent.Usage{
+	s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", false, agent.Usage{
 		PromptTokens:             turn.Usage.InputTokens,
 		CompletionTokens:         turn.Usage.OutputTokens,
 		CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 		CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
-	}, turn.Stop, time.Since(began), compacted)
+	}, turn.Stop, time.Since(began), compacted, contextEvent)
 
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
 		ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
@@ -552,23 +548,24 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 // agent.CompactAnthropicHistoryToView returns req.Raw unchanged on any ambiguity, so this
 // never breaks a turn. Applied to req.Raw ONLY — the decoded req.Messages the kernel
 // adjudicates are untouched, so the trust boundary is unchanged.
-func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *agent.AnthropicMessagesRequest) bool {
+func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *agent.AnthropicMessagesRequest) (bool, agent.CompactOutcome) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
-		return false
+		return false, agent.CompactOutcome{}
 	}
 	if s.ctxView == nil || !s.ctxView.Enabled {
-		return false
+		return false, agent.CompactOutcome{}
 	}
 	planned := s.maybePlanMessages(ctx, trace, req.Messages)
 	if len(planned) >= len(req.Messages) {
-		return false // the planner did not elide anything — nothing to materialize
+		return false, agent.CompactOutcome{} // the planner did not elide anything — nothing to materialize
 	}
 	out, outcome := agent.CompactAnthropicHistoryToView(req.Raw, planned)
 	if outcome.Reason != agent.CompactReasonNone {
-		return false // bailed — identity (fail-safe)
+		return false, outcome // bailed — identity (fail-safe)
 	}
 	req.Raw = out
-	return true
+	s.metrics.observeCtxViewRewrite(outcome)
+	return true, outcome
 }
 
 // maybeCompactInboundTools is the INBOUND twin of maybeCompactAnthropicRaw: on the
@@ -1212,7 +1209,7 @@ func fakExtFrom(adjs []ToolAdjudication, results []ResultAdmission) *FakExt {
 	return &FakExt{Adjudications: adjs, ResultAdmissions: results}
 }
 
-func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool, hcoh harnessCoherenceInputs) {
+func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted, contextEvent bool, hcoh harnessCoherenceInputs) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		began := time.Now()
@@ -1228,12 +1225,12 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		}
 		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 			false /*fakWorldBreak*/, false /*sealed*/, int64(turn.Usage.CacheReadInputTokens), int64(turn.Usage.CacheCreationInputTokens))
-		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             turn.Usage.InputTokens,
 			CompletionTokens:         turn.Usage.OutputTokens,
 			CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 			CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
-		}, turn.Stop, time.Since(began), compacted)
+		}, turn.Stop, time.Since(began), compacted, contextEvent)
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
@@ -1296,12 +1293,12 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			}
 			s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 				false /*fakWorldBreak*/, false /*sealed*/, int64(res.turn.Usage.CacheReadInputTokens), int64(res.turn.Usage.CacheCreationInputTokens))
-			s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+			s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 				PromptTokens:             res.turn.Usage.InputTokens,
 				CompletionTokens:         res.turn.Usage.OutputTokens,
 				CacheReadInputTokens:     res.turn.Usage.CacheReadInputTokens,
 				CacheCreationInputTokens: res.turn.Usage.CacheCreationInputTokens,
-			}, res.turn.Stop, time.Since(began), compacted)
+			}, res.turn.Stop, time.Since(began), compacted, contextEvent)
 			streamAnthropicBlocks(send, res.turn.Blocks, res.turn.Stop, res.turn.Usage)
 			return
 		case <-ticker.C:

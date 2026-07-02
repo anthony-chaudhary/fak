@@ -101,7 +101,7 @@ func (m *gatewayMetrics) attachVCacheContextEvidence(turns []vcacheobserve.Turn)
 	if m == nil || len(turns) == 0 {
 		return
 	}
-	events, shed, dropped, ok := vcacheContextEvidenceFromCompaction(m.compactionSnapshotData())
+	events, shed, dropped, ok := vcacheContextEvidence(m.compactionSnapshotData(), m.ctxViewRewriteSnapshotData())
 	if !ok {
 		return
 	}
@@ -114,7 +114,7 @@ func (m *gatewayMetrics) contextOnlyVCacheTurn() []vcacheobserve.Turn {
 	if m == nil {
 		return nil
 	}
-	events, shed, dropped, ok := vcacheContextEvidenceFromCompaction(m.compactionSnapshotData())
+	events, shed, dropped, ok := vcacheContextEvidence(m.compactionSnapshotData(), m.ctxViewRewriteSnapshotData())
 	if !ok {
 		return nil
 	}
@@ -124,6 +124,22 @@ func (m *gatewayMetrics) contextOnlyVCacheTurn() []vcacheobserve.Turn {
 		ContextShedTokens:   shed,
 		ContextDroppedTurns: dropped,
 	}}
+}
+
+func vcacheContextEvidence(compact compactionSnapshot, ctxView ctxViewRewriteSnapshot) (events, shed, dropped int64, ok bool) {
+	if compactEvents, compactShed, compactDropped, compactOK := vcacheContextEvidenceFromCompaction(compact); compactOK {
+		events = saturatingInt64Add(events, compactEvents)
+		shed = saturatingInt64Add(shed, compactShed)
+		dropped = saturatingInt64Add(dropped, compactDropped)
+		ok = true
+	}
+	if ctxView.events > 0 || ctxView.shed > 0 || ctxView.dropped > 0 {
+		events = saturatingInt64Add(events, uint64ToInt64(ctxView.events))
+		shed = saturatingInt64Add(shed, uint64ToInt64(ctxView.shed))
+		dropped = saturatingInt64Add(dropped, uint64ToInt64(ctxView.dropped))
+		ok = true
+	}
+	return events, shed, dropped, ok
 }
 
 func vcacheContextEvidenceFromCompaction(compact compactionSnapshot) (events, shed, dropped int64, ok bool) {

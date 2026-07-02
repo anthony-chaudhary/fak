@@ -130,6 +130,15 @@ type gatewayMetrics struct {
 	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
 	ttlUpgrades          map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
 
+	// ctxViewMu guards ctxplan planned-view rewrites. This is a CONTEXT-plane witness,
+	// but not a history-compaction attempt: the planner materialized an O(1) resident
+	// view onto req.Raw and proved the cached prefix survived, so vcache scoring should
+	// credit the context plane without inflating compaction_fired/debug lines.
+	ctxViewMu      sync.Mutex
+	ctxViewEvents  uint64
+	ctxViewDropped uint64
+	ctxViewShed    uint64
+
 	// toolPruneMu guards the INBOUND tool-definition prune accumulators (the twin of
 	// the compaction family above, for the tools[] axis). maybeCompactInboundTools drops
 	// tool DEFINITIONS the floor can NEVER admit from the outbound tools[] — but only the
@@ -537,6 +546,21 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 			m.compactAnchorStarved++
 		}
 	}
+}
+
+// observeCtxViewRewrite records one successful ctxplan planned-view rewrite. It is
+// intentionally separate from observeCompaction: both transforms can shed request-body
+// residency, but only compact-history should increment compaction attempts, reset-score
+// health, or debug compaction banners.
+func (m *gatewayMetrics) observeCtxViewRewrite(out agent.CompactOutcome) {
+	if m == nil || out.Reason != agent.CompactReasonNone {
+		return
+	}
+	m.ctxViewMu.Lock()
+	m.ctxViewEvents++
+	m.ctxViewDropped += uint64(clampNonNeg(out.Dropped))
+	m.ctxViewShed += uint64(clampNonNeg(out.ShedTokens))
+	m.ctxViewMu.Unlock()
 }
 
 // observeCacheTTLUpgrade records one managed-cache 1h TTL upgrade attempt on the outbound
@@ -1178,6 +1202,10 @@ func addPositiveIntToUint64(total uint64, value int) uint64 {
 }
 
 func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
+	s.logInferenceTurnWithContextEvent(traceID, wire, stream, usage, finishReason, dur, compacted, compacted)
+}
+
+func (s *Server) logInferenceTurnWithContextEvent(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted, contextEvent bool) {
 	if s == nil {
 		return
 	}
@@ -1205,7 +1233,7 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 	// rung: every served turn, all wires, before any sink gating, so the long-session
 	// context report is answerable even with --log and --debug-stats off.
 	s.observeCtxValue(traceID, uncachedPrompt, cacheRead, usage.CacheCreationInputTokens,
-		usage.CompletionTokens, compacted)
+		usage.CompletionTokens, contextEvent)
 	// The per-turn human debug render (#793) fires independently of the JSON --log sink, so
 	// --debug-stats works on a clean (--log off) terminal. It is a no-op unless debugStatsf is
 	// wired, and reuses the #792 rolling health (read-only peek; no double-roll).
@@ -1230,6 +1258,7 @@ func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent
 		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
 		"total_tokens":                usage.TotalTokens,
 		"compaction_fired":            compacted,
+		"context_event":               contextEvent,
 	}
 	if trace := strings.TrimSpace(traceID); trace != "" {
 		ev["trace_id"] = trace
@@ -2002,6 +2031,12 @@ type compactionSnapshot struct {
 	ttlUpgrades         map[string]uint64
 }
 
+type ctxViewRewriteSnapshot struct {
+	events  uint64
+	dropped uint64
+	shed    uint64
+}
+
 type requestMemoryAggregateSnapshot struct {
 	observed map[string]uint64
 	plans    []requestMemoryPlanSnapshot
@@ -2107,6 +2142,19 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		anchorStarved:       m.compactAnchorStarved,
 		uncachedTrimResults: m.uncachedTrimResults,
 		uncachedTrimShed:    m.uncachedTrimShed,
+	}
+}
+
+func (m *gatewayMetrics) ctxViewRewriteSnapshotData() ctxViewRewriteSnapshot {
+	if m == nil {
+		return ctxViewRewriteSnapshot{}
+	}
+	m.ctxViewMu.Lock()
+	defer m.ctxViewMu.Unlock()
+	return ctxViewRewriteSnapshot{
+		events:  m.ctxViewEvents,
+		dropped: m.ctxViewDropped,
+		shed:    m.ctxViewShed,
 	}
 }
 

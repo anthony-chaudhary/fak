@@ -303,7 +303,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 // error). It returns false ONLY when the upstream stream never opened and NOTHING was
 // written to the client — so the caller can fall back to the buffered path with exactly
 // one upstream generation having been attempted.
-func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool, hcoh harnessCoherenceInputs) bool {
+func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted, contextEvent bool, hcoh harnessCoherenceInputs) bool {
 	// Unwrap a dual planner to its proxy side: an API-bound request in dual mode rides
 	// the same byte-preserving relay as proxy-only mode. (The caller has already
 	// excluded dual-mode requests addressed to the LOCAL model via anthropicPassthroughFor.)
@@ -398,12 +398,12 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		// stream end). Same observation the buffered path makes; the family stays path-agnostic.
 		s.metrics.observeHarnessCoherence(reqTrace, time.Now(), hcoh.inboundPrefixDigest, compacted, hcoh.fakBail,
 			false /*fakWorldBreak*/, false /*sealed*/, int64(p.cacheRead), int64(p.cacheCreate))
-		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+		s.logInferenceTurnWithContextEvent(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,
 			CacheReadInputTokens:     p.cacheRead,
 			CacheCreationInputTokens: p.cacheCreate,
-		}, p.finishReason, dur, compacted)
+		}, p.finishReason, dur, compacted, contextEvent)
 		s.debitServedSessionTurn(r.Context(), p.turn, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,

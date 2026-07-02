@@ -186,6 +186,8 @@ func TestCtxViewStreamPassthroughPlansView(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(srv.Close)
+	const traceID = "ctxview-stream-witness"
+	srv.SetDefaultTraceID(traceID)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -230,5 +232,14 @@ func TestCtxViewStreamPassthroughPlansView(t *testing.T) {
 	// accepts the body — verify three messages survive (one stubbed, two resident).
 	if c := strings.Count(forwarded, `"role":`); c != 3 {
 		t.Errorf("(b): the forwarded streaming body must keep all 3 messages (one stubbed in place), got %d role keys:\n%s", c, forwarded)
+	}
+
+	ctxValue := srv.CtxValueReportFor(traceID)
+	if ctxValue.Turns.ContextEvents != 1 || ctxValue.Turns.TurnsSinceContextEvent != 0 {
+		t.Fatalf("streaming ctxvalue turns = %+v, want one current context event", ctxValue.Turns)
+	}
+	turns, _ := srv.VCacheTurnsSnapshot()
+	if len(turns) == 0 || turns[0].ContextEvents != 1 || turns[0].ContextDroppedTurns != 1 || turns[0].ContextShedTokens <= 0 {
+		t.Fatalf("streaming vcache context evidence = %+v, want one ctx-view dropped/shed witness", turns)
 	}
 }
