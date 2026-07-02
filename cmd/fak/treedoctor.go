@@ -96,10 +96,17 @@ func discoverRepoRoot() string {
 }
 
 // gitRunner adapts the os/exec git invocation to treedoctor.Runner (combined output, exit
-// code; error only when git could not be executed).
+// code; error only when git could not be executed). It is shared by treedoctor and sweep.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// GIT_OPTIONAL_LOCKS=0: sweep's burst-time reads (`git status --porcelain`,
+	// the origin probes) run exactly when peers are committing, and a plain
+	// status otherwise opportunistically refreshes the index under
+	// .git/index.lock — colliding with the concurrent writers the sweep is
+	// grouping for. Optional locks off means reads never contend; mandatory
+	// write locks (the doctor's own mutations) are unaffected.
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	if dir != "" {
 		cmd.Dir = dir
 	}
