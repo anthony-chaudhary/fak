@@ -220,7 +220,7 @@ func runResumeWatchdog(stdout, stderr io.Writer, argv []string) int {
 				sid8, p.Account, p.ResumeAccount)
 		}
 
-		pid, err := rwSpawnResumeLaunch(claudeExe, p, resumeCfg, logDir)
+		pid, err := rwSpawnResumeLaunch(claudeExe, p, resumeCfg, logDir, grant)
 		if err != nil {
 			note("  FAIL %s — spawn: %v", sid8, err)
 			continue
@@ -579,11 +579,11 @@ func rwResumeCWD(p resume.WatchdogPlanRow) string {
 	return findRepoRoot(cwd)
 }
 
-func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string) (int, error) {
+func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
 	if claudeExe == "" {
 		return 0, fmt.Errorf("no claude binary (set FLEET_CLAUDE_EXE)")
 	}
-	wd := rwResumeCWD(p)
+	wd := firstString(grant.CWD, rwResumeCWD(p))
 	outPath := filepath.Join(logDir, fmt.Sprintf("resume-%s-%d.log", shortID(p.Session), time.Now().Unix()))
 	stdout, err := os.OpenFile(outPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -598,6 +598,9 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	defer stderr.Close()
 
 	argv := rwResumeArgv(claudeExe, p.Session)
+	if len(grant.Argv) > 0 {
+		argv = grant.Argv
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = wd
 	// The child env drops the parent's guard-gateway/model-API wiring and harness
@@ -605,6 +608,9 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// the 2026-07-01 whole-wave-crash fix: a resumed child inheriting a guarded parent's
 	// ANTHROPIC_BASE_URL routes through the parent's loopback proxy and dies with it).
 	cmd.Env = resume.WatchdogChildEnv(os.Environ(), resumeCfg)
+	if len(grant.Env) > 0 {
+		cmd.Env = envSliceFromMap(grant.Env)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	windowgate.ConfigureBackgroundCommand(cmd)

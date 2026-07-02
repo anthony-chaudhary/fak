@@ -1117,6 +1117,7 @@ func transitionReason(to session.RunState, reason string) string {
 // session-internals-blind wire DTO. Run becomes its lowercase token; everything
 // else is a 1:1 field copy.
 func toGatewaySessionState(s session.State) gateway.SessionState {
+	now := time.Now()
 	return gateway.SessionState{
 		TraceID: s.TraceID,
 		Run:     s.Run.String(),

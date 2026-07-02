@@ -531,7 +531,7 @@ func cmdGuard(argv []string) {
 	mcache, mcErr := resolveGuardManagedCache(*managedCacheMode, guardManagedCacheInputs{
 		// ALONGSIDE mode still has a real provider wire on the proxy side, so only the
 		// PURE local branch (no upstream at all) turns the cache posture off.
-		localModel:  localModel && !localAlongside,
+		localModel:  localModel,
 		provider:    up,
 		apiKey:      apiKey,
 		oauthSource: oauthSource,
