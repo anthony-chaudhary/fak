@@ -280,12 +280,12 @@ func TestOrphanNotes(t *testing.T) {
 	mustWrite(t, root, "INDEX.md", indexMd)
 	mustMkdir(t, root, "docs", "notes")
 	notes := filepath.Join(root, "docs", "notes")
-	mustWrite(t, notes, "2026-01-02-listed.md", "# listed\n")   // dated + listed -> not orphan
-	mustWrite(t, notes, "2026-01-03-prose.md", "# prose\n")     // dated + prose ref -> not orphan
-	mustWrite(t, notes, "2026-01-01-orphan.md", "# orphan\n")   // dated + unlisted -> ORPHAN
-	mustWrite(t, notes, "PLAN-orphan.md", "# plan\n")           // PLAN- + unlisted -> ORPHAN
-	mustWrite(t, notes, "README.md", "# readme\n")              // README -> never a dated note
-	mustWrite(t, notes, "helper.md", "# helper\n")              // undated -> not a dated note
+	mustWrite(t, notes, "2026-01-02-listed.md", "# listed\n") // dated + listed -> not orphan
+	mustWrite(t, notes, "2026-01-03-prose.md", "# prose\n")   // dated + prose ref -> not orphan
+	mustWrite(t, notes, "2026-01-01-orphan.md", "# orphan\n") // dated + unlisted -> ORPHAN
+	mustWrite(t, notes, "PLAN-orphan.md", "# plan\n")         // PLAN- + unlisted -> ORPHAN
+	mustWrite(t, notes, "README.md", "# readme\n")            // README -> never a dated note
+	mustWrite(t, notes, "helper.md", "# helper\n")            // undated -> not a dated note
 
 	c := &Catalog{Root: root}
 	got := c.OrphanNotes()
