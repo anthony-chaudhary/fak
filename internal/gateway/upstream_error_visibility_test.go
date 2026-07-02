@@ -127,8 +127,8 @@ func TestDebugVarsExposeUpstreamIncidents(t *testing.T) {
 	srv.metrics.observeUpstreamError(&agent.UpstreamStatusError{Status: 401})
 	srv.metrics.observeUpstreamError(&agent.UpstreamStatusError{Status: 429})
 	srv.metrics.observeUpstreamAuthRefresh("exhausted")
-	srv.metrics.observeUpstreamRetry()
-	srv.metrics.observeUpstreamRetry()
+	srv.metrics.observeUpstreamRetry(30 * time.Second)
+	srv.metrics.observeUpstreamRetry(90 * time.Second)
 
 	vars := srv.debugVars(time.Now())
 	if vars.Upstream.ErrorsByKind["auth"] != 1 {
@@ -145,6 +145,34 @@ func TestDebugVarsExposeUpstreamIncidents(t *testing.T) {
 	}
 	if vars.Upstream.Retries != 2 {
 		t.Fatalf("/debug/vars upstream retries = %d, want 2: %+v", vars.Upstream.Retries, vars.Upstream)
+	}
+	if vars.Upstream.RetryWaitSeconds != 120 {
+		t.Fatalf("/debug/vars retry wait = %v, want 120 (30s + 90s slept)", vars.Upstream.RetryWaitSeconds)
+	}
+}
+
+// TestUpstreamRetryWaitSecondsRenders proves the retry family carries its TIME twin: the
+// count says how often fak absorbed provider pushback, the wait counter says how much
+// wall-clock that absorption cost — and it renders at 0 on a pushback-free session so the
+// panel exists from the first scrape.
+func TestUpstreamRetryWaitSecondsRenders(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeUpstreamRetry(30 * time.Second)
+	m.observeUpstreamRetry(90 * time.Second)
+	var b strings.Builder
+	m.writeUpstreamErrorMetrics(&b)
+	got := b.String()
+	if !strings.Contains(got, "fak_gateway_upstream_retries_total 2") {
+		t.Fatalf("retry count missing:\n%s", got)
+	}
+	if !strings.Contains(got, "fak_gateway_upstream_retry_wait_seconds_total 120") {
+		t.Fatalf("retry wait seconds missing:\n%s", got)
+	}
+
+	var zero strings.Builder
+	newGatewayMetrics(time.Now()).writeUpstreamErrorMetrics(&zero)
+	if !strings.Contains(zero.String(), "fak_gateway_upstream_retry_wait_seconds_total 0") {
+		t.Fatalf("zero-state retry wait row missing:\n%s", zero.String())
 	}
 }
 

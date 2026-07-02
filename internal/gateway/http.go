@@ -115,6 +115,15 @@ func (s *Server) routeTable() []gatewayRoute {
 		// loop control plane; complements the loopmgr ledger `fak loop status` reads).
 		{"/v1/fak/loops", s.handleFakLoops},
 		{"/v1/models", s.handleModels},
+		// Multi-node dev-server READ plane (#2297, epic #2254 plane 1): the
+		// coordinator clone's live lease view (the dos_arbitrate live_leases
+		// projection) and presence (session descriptors + lease liveness
+		// classification), observed from refs/fak/locks/* at request time.
+		// Read-only; injected by the host CLI (SetLeasePlaneProviders), 404 when
+		// unwired. /v1/sessions is the cross-machine guard-session presence view —
+		// distinct from /v1/fak/sessions, the served-session DRIVE-state snapshot.
+		{"/v1/leases", s.handleLeases},
+		{"/v1/sessions", s.handleLeaseSessions},
 		// MCP-over-HTTP, operational endpoints.
 		{"/mcp", s.handleMCPHTTP},
 		{"/healthz", s.handleHealth},
@@ -963,9 +972,16 @@ func livelockInBandNote(a ToolAdjudication) string {
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	data := []map[string]any{{"id": s.model, "object": "model", "owned_by": "fak"}}
+	// Dual mode (local model alongside the API upstream): advertise the in-kernel
+	// model's id too, so an OpenAI-wire client can DISCOVER the local side instead of
+	// needing out-of-band knowledge of the alias.
+	if d, ok := s.planner.(*DualPlanner); ok {
+		data = append(data, map[string]any{"id": d.LocalModelID(), "object": "model", "owned_by": "fak"})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
-		"data":   []map[string]any{{"id": s.model, "object": "model", "owned_by": "fak"}},
+		"data":   data,
 	})
 }
 

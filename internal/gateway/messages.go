@@ -283,7 +283,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh) {
+		if s.anthropicPassthroughFor(req.Model) && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted, hcoh) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -465,7 +465,7 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 // session with 0 turns left, or session.Unbounded (-1) — leaves the gate's TotalTurns unset, so
 // an un-budgeted or unbounded session is never guessed at.
 func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int) (fired bool, reason string) {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false, ""
 	}
 	if s.compactHistoryBudget <= 0 {
@@ -503,7 +503,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 }
 
 func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesRequest) bool {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || !s.cacheTTL1H {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H {
 		return false
 	}
 	out, outcome := agent.UpgradeAnthropicStableCacheTTL1h(req.Raw)
@@ -525,7 +525,7 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 // on any ambiguity, never touches a cache_control-bearing message, and proves the protected prefix
 // stays byte-identical, so this never breaks a turn or busts the cache. Returns whether it FIRED.
 func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false
 	}
 	if s.elideResultBytes <= 0 {
@@ -553,7 +553,7 @@ func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fi
 // never breaks a turn. Applied to req.Raw ONLY — the decoded req.Messages the kernel
 // adjudicates are untouched, so the trust boundary is unchanged.
 func (s *Server) maybePlanAnthropicRaw(ctx context.Context, trace string, req *agent.AnthropicMessagesRequest) bool {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false
 	}
 	if s.ctxView == nil || !s.ctxView.Enabled {
@@ -588,7 +588,7 @@ func (s *Server) maybeCompactInboundTools(req *agent.AnthropicMessagesRequest) (
 }
 
 func (s *Server) compactInboundToolsWithDecision(req *agent.AnthropicMessagesRequest) promptmmu.ToolSchemaDecision {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.toolFloorDenies == nil {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || s.toolFloorDenies == nil {
 		return promptmmu.ToolSchemaDecision{Strategy: promptmmu.ToolSchemaUnchanged, SkipReason: "gateway-disabled"}
 	}
 	if len(req.Tools) == 0 {
@@ -662,7 +662,7 @@ func (s *Server) logInboundToolSchemaDecision(decision promptmmu.ToolSchemaDecis
 }
 
 func (s *Server) maybeCompactInboundSystem(req *agent.AnthropicMessagesRequest) (pruned []string) {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() || s.systemBlockDrop == nil {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || s.systemBlockDrop == nil {
 		return nil
 	}
 	plans := inboundSystemBlockPlans(req.Raw, s.systemBlockDrop)
@@ -801,6 +801,13 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 		agent.WithTopP(req.TopP),
 		agent.WithStop(req.StopSequences),
 	}
+	// The dual planner (local model alongside the API upstream) routes on the
+	// requested model, so forward it — ONLY there: on the single-planner paths this
+	// wire historically never forwarded the client model, and adding it would change
+	// the proxy upstream bytes.
+	if _, dual := s.planner.(*DualPlanner); dual {
+		opts = append(opts, agent.WithModel(req.Model))
+	}
 	// anthropic→anthropic passthrough: when the upstream IS the real Anthropic API,
 	// forward the client's ORIGINAL request bytes verbatim (so its cache_control
 	// prefix survives → a real cache hit, not a re-billed prefix) and authenticate
@@ -808,7 +815,9 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// adjudicates the RESPONSE's tool calls below; only the request is byte-faithful.
 	// WithRawRequestBody makes the sampling opts above no-ops (the client's own values
 	// are already in req.Raw; re-injecting them would change the cached prefix bytes).
-	if s.anthropicPassthrough() {
+	// Per-request: a dual-mode request addressed to the LOCAL model must decode
+	// in-kernel, never ride raw bytes upstream.
+	if s.anthropicPassthroughFor(req.Model) {
 		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey), agent.WithUpstreamBeta(upstreamBeta))
 	}
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, opts...)
@@ -903,13 +912,40 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 
 // anthropicPassthrough reports whether the gateway is fronting the REAL Anthropic
 // Messages API — i.e. the live planner is an HTTPPlanner configured for the
-// anthropic provider wire. Only then is byte-exact request passthrough both
-// possible (the inbound and upstream wires match) and necessary (to preserve the
-// client's prompt-cache prefix). For the mock, the in-kernel model, or any
-// non-Anthropic upstream, this is false and the turn is built exactly as before.
+// anthropic provider wire (unwrapped from a dual planner's proxy side). Only then is
+// byte-exact request passthrough both possible (the inbound and upstream wires match)
+// and necessary (to preserve the client's prompt-cache prefix). For the mock, the
+// in-kernel model, or any non-Anthropic upstream, this is false and the turn is built
+// exactly as before. This is the PLANNER-level answer; a per-request decision must use
+// anthropicPassthroughFor, which also excludes dual-mode requests addressed to the
+// local model.
 func (s *Server) anthropicPassthrough() bool {
-	hp, ok := s.planner.(*agent.HTTPPlanner)
-	return ok && hp.Provider == agent.ProviderAnthropic
+	hp := unwrapHTTPPlanner(s.planner)
+	return hp != nil && hp.Provider == agent.ProviderAnthropic
+}
+
+// anthropicPassthroughFor is the per-REQUEST passthrough decision: like
+// anthropicPassthrough, but in dual mode a request addressed to the in-kernel model is
+// NOT a passthrough — its bytes must decode locally, never reach the remote API. Every
+// req.Raw-mutating optimization and the byte-preserving relay key on this, so a local
+// request cleanly falls to the planner path (where the dual planner routes it in-kernel)
+// while API-bound requests keep the passthrough byte-for-byte.
+func (s *Server) anthropicPassthroughFor(reqModel string) bool {
+	if d, ok := s.planner.(*DualPlanner); ok && d.RoutesLocal(reqModel) {
+		return false
+	}
+	return s.anthropicPassthrough()
+}
+
+// unwrapHTTPPlanner returns the direct HTTP proxy planner behind p — p itself, or a
+// dual planner's proxy side — and nil for every planner with no single live HTTP
+// upstream (mock, in-kernel, replica fleet).
+func unwrapHTTPPlanner(p agent.Planner) *agent.HTTPPlanner {
+	if d, ok := p.(*DualPlanner); ok {
+		p = d.Proxy()
+	}
+	hp, _ := p.(*agent.HTTPPlanner)
+	return hp
 }
 
 // resultAdmissionNote names any inbound tool result the kernel PAGED OUT so a quarantine

@@ -209,6 +209,12 @@ func debugErrorDetail(err error) string {
 	if errors.As(err, &ri) {
 		fmt.Fprintf(&b, " announced_wait=%s client_gone=%t", ri.AnnouncedWait.Round(time.Second), ri.ClientGone())
 	}
+	// A wait the loop REFUSED to sleep in-handler (#2258): the truthful 429 + Retry-After
+	// went downstream instead — name the wait that was too long and the ceiling it broke.
+	var rc *agent.RetryCeilingError
+	if errors.As(err, &rc) {
+		fmt.Fprintf(&b, " announced_wait=%s ceiling=%s relayed=true", rc.Wait.Round(time.Second), rc.Ceiling.Round(time.Second))
+	}
 	return b.String()
 }
 

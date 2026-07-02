@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -128,6 +129,15 @@ type Config struct {
 	// placeholder key to satisfy its own "do I have credentials" check. Default false
 	// keeps the transparent-hop passthrough (forward the client's own key upstream).
 	PinUpstreamCredential bool
+	// UpstreamResponseObserver, when non-nil, is called with the status + headers of
+	// EVERY upstream provider response the proxy planners receive (buffered,
+	// streaming, and each retry attempt) — the host's read-only window onto the
+	// provider's OBSERVED account-usage headers (anthropic-ratelimit-* /
+	// x-ratelimit-*). `fak guard` points this at its account tracker
+	// (internal/accountobs) so the exit summary can report how loaded the upstream
+	// account is. Read-only by contract: it must not mutate the response. nil (the
+	// default) leaves the planners' transports byte-for-byte unchanged.
+	UpstreamResponseObserver func(status int, header http.Header)
 	// EngineCacheEngine optionally selects a self-hosted serving-engine cache reset
 	// endpoint to call when inbound tool-result admission quarantines bytes before
 	// an upstream proxy turn. Empty disables remote cache reset.
@@ -154,6 +164,12 @@ type Config struct {
 	// InKernelQ4K flags the preloaded model as resident-Q4_K so the chat decode runs
 	// Session.Q4K (the SDOT int8 GEMV path, FAK_Q4K at boot).
 	InKernelQ4K bool
+	// LocalModelID names the model id a client asks for to reach the in-kernel model
+	// when it is served ALONGSIDE a live upstream proxy — BaseURL set AND
+	// InKernelModel+Tokenizer loaded, the dual planner (dual_planner.go). Empty
+	// defaults to "local", and the literal id "local" always routes to the in-kernel
+	// side too. Ignored outside dual mode (the single-planner paths keep Model).
+	LocalModelID string
 	// Backend, when non-nil, makes the in-kernel chat planner decode through the
 	// compute HAL device backend (e.g. CUDA) instead of the CPU session. Set by
 	// `fak serve --backend <name>`. Ignored unless InKernelModel+Tokenizer are set
@@ -986,6 +1002,24 @@ func New(cfg Config) (*Server, error) {
 	t := time.Now()
 	inKernelModelButChatIsMock := false
 	switch {
+	case len(proxyURLs) != 0 && cfg.InKernelModel != nil && cfg.Tokenizer != nil:
+		// DUAL (small local model ALONGSIDE the API upstream, dual_planner.go): a live
+		// proxy AND a loaded in-kernel model in ONE gateway. Requests addressed to the
+		// local model id (Config.LocalModelID, default "local") decode in-kernel with no
+		// upstream call; every other request — including the wrapped agent's default
+		// turns — proxies upstream byte-for-byte as the proxy-only path does.
+		// Historically the proxy silently WON this combination and the loaded weights
+		// were dead; now the combination is the alongside deployment.
+		proxy, perr := newProxyPlanner(cfg, model, proxyURLs)
+		if perr != nil {
+			return nil, perr
+		}
+		localID := localModelIDOr(cfg.LocalModelID)
+		planner, err = NewDualPlanner(proxy, newInKernelChatPlanner(cfg, localID, logf), localID)
+		if err != nil {
+			return nil, err
+		}
+		logf("gateway: dual planner — model id %q (and \"local\") decodes in-kernel; every other model id proxies upstream", localID)
 	case len(proxyURLs) != 0:
 		planner, err = newProxyPlanner(cfg, model, proxyURLs)
 		if err != nil {
@@ -996,33 +1030,7 @@ func New(cfg Config) (*Server, error) {
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
-		// Expert parallelism is model state, set on the in-kernel Model here (the EP rank
-		// lives on the Model, consumed by ffnForLayer); 0/1 is the no-op default.
-		if cfg.ExpertParallelRanks > 1 && !cfg.InKernelModel.IsExpertParallelRankLocal() {
-			cfg.InKernelModel.SetExpertParallelRanks(cfg.ExpertParallelRanks)
-			// Reduce the routed-expert partials through the DEVICE collective the serve
-			// initialized — serve.go gates ranks>1 on a backend advertising Caps().Collective
-			// (the NCCL CollectiveBackend), so the decode AllReduceSum must cross those GPUs,
-			// not the hardcoded single-box LocalCollective glmMoeEPFFN reduced through before.
-			// On cpu-ref the bridge is byte-identical to LocalCollective (collective_bridge_test.go),
-			// so this changes no host-tested bytes; on the NCCL backend the SAME call all-reduces
-			// across the rank fleet. Fail-soft: a backend without the seam leaves the bit-exact
-			// LocalCollective default (the EP output stays correct, just reduced host-side).
-			if cfg.Backend != nil {
-				if err := cfg.InKernelModel.SetExpertParallelDeviceCollective(cfg.Backend); err == nil {
-					logf("gateway: expert-parallel ranks=%d → routed-expert AllReduceSum reduces through device collective %q (Caps().Collective=%v)", cfg.ExpertParallelRanks, cfg.Backend.Name(), cfg.Backend.Caps().Collective)
-				} else {
-					logf("gateway: expert-parallel ranks=%d: backend %q exposes no device collective (%v) — reducing host-side via LocalCollective (correct, single-box)", cfg.ExpertParallelRanks, cfg.Backend.Name(), err)
-				}
-			}
-		} else if cfg.ExpertParallelRanks > 1 && cfg.InKernelModel.IsExpertParallelRankLocal() {
-			// A SHARDED EP rank: the serve already set the rank, the world size, and the DistComm
-			// process-group collective (each rank holds only its band, reduces cross-process). Do
-			// NOT re-wire a single-process device/Local collective here — it would clobber the
-			// cross-process reduce and break the sharded serve (#971).
-			logf("gateway: expert-parallel ranks=%d rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped", cfg.ExpertParallelRanks)
-		}
-		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
+		planner = newInKernelChatPlanner(cfg, model, logf)
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn
@@ -1139,9 +1147,10 @@ func New(cfg Config) (*Server, error) {
 	// backoff is otherwise invisible — up to ~8s of silent waiting. The hook bumps a retry
 	// counter and prints a glanceable `fak-turn … retry` line to the default --debug-stats
 	// sink, so an operator sees the backoff happening instead of a frozen terminal. Only the
-	// direct HTTPPlanner carries the loop; the mock/in-kernel/replica planners don't, so this
-	// is a no-op for them.
-	if hp, ok := planner.(*agent.HTTPPlanner); ok {
+	// direct HTTPPlanner carries the loop — unwrapped from a dual planner's proxy side, which
+	// fronts the same upstream; the mock/in-kernel/replica planners don't, so this is a
+	// no-op for them.
+	if hp := unwrapHTTPPlanner(planner); hp != nil {
 		hp.RetryNotify = s.onUpstreamRetry
 		hp.AuthRefreshNotify = s.onAuthRefresh
 	}
@@ -1172,7 +1181,7 @@ func (s *Server) onUpstreamRetry(attempt, status int, wait time.Duration) {
 		return
 	}
 	if s.metrics != nil {
-		s.metrics.observeUpstreamRetry()
+		s.metrics.observeUpstreamRetry(wait)
 	}
 	if s.debugStatsf != nil {
 		s.debugStatsf("fak-turn retry attempt=%d status=%d wait=%s", attempt, status, wait.Round(100*time.Millisecond))
@@ -1273,6 +1282,40 @@ func proxyBaseURLs(cfg Config) ([]string, error) {
 	return urls, nil
 }
 
+// newInKernelChatPlanner builds the in-kernel chat planner (the model fused into the
+// kernel) advertising modelID, wiring expert parallelism onto the model exactly as the
+// single-planner path always has. Shared by the pure in-kernel case and the dual
+// (local-alongside-API) case so the EP semantics cannot drift between them.
+// Expert parallelism is model state, set on the in-kernel Model here (the EP rank
+// lives on the Model, consumed by ffnForLayer); 0/1 is the no-op default.
+func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any)) agent.Planner {
+	if cfg.ExpertParallelRanks > 1 && !cfg.InKernelModel.IsExpertParallelRankLocal() {
+		cfg.InKernelModel.SetExpertParallelRanks(cfg.ExpertParallelRanks)
+		// Reduce the routed-expert partials through the DEVICE collective the serve
+		// initialized — serve.go gates ranks>1 on a backend advertising Caps().Collective
+		// (the NCCL CollectiveBackend), so the decode AllReduceSum must cross those GPUs,
+		// not the hardcoded single-box LocalCollective glmMoeEPFFN reduced through before.
+		// On cpu-ref the bridge is byte-identical to LocalCollective (collective_bridge_test.go),
+		// so this changes no host-tested bytes; on the NCCL backend the SAME call all-reduces
+		// across the rank fleet. Fail-soft: a backend without the seam leaves the bit-exact
+		// LocalCollective default (the EP output stays correct, just reduced host-side).
+		if cfg.Backend != nil {
+			if err := cfg.InKernelModel.SetExpertParallelDeviceCollective(cfg.Backend); err == nil {
+				logf("gateway: expert-parallel ranks=%d → routed-expert AllReduceSum reduces through device collective %q (Caps().Collective=%v)", cfg.ExpertParallelRanks, cfg.Backend.Name(), cfg.Backend.Caps().Collective)
+			} else {
+				logf("gateway: expert-parallel ranks=%d: backend %q exposes no device collective (%v) — reducing host-side via LocalCollective (correct, single-box)", cfg.ExpertParallelRanks, cfg.Backend.Name(), err)
+			}
+		}
+	} else if cfg.ExpertParallelRanks > 1 && cfg.InKernelModel.IsExpertParallelRankLocal() {
+		// A SHARDED EP rank: the serve already set the rank, the world size, and the DistComm
+		// process-group collective (each rank holds only its band, reduces cross-process). Do
+		// NOT re-wire a single-process device/Local collective here — it would clobber the
+		// cross-process reduce and break the sharded serve (#971).
+		logf("gateway: expert-parallel ranks=%d rank-local (sharded serve) — reducing through the serve's DistComm process group, device-collective wiring skipped", cfg.ExpertParallelRanks)
+	}
+	return agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, modelID, cfg.InKernelQ4K, cfg.Backend, cfg.Metal, cfg.CPUOffloadExperts)
+}
+
 func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
 	if len(baseURLs) == 1 {
 		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, baseURLs[0], model, cfg.APIKey)
@@ -1280,6 +1323,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			return nil, err
 		}
 		p.APIKeyFunc = cfg.APIKeyFunc
+		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		return p, nil
 	}
 	replicas := make([]PlannerReplica, 0, len(baseURLs))
@@ -1289,6 +1333,7 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			return nil, err
 		}
 		p.APIKeyFunc = cfg.APIKeyFunc
+		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		replicas = append(replicas, PlannerReplica{
 			Name:    fmt.Sprintf("replica-%d", i+1),
 			Planner: p,
@@ -1617,6 +1662,8 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 //   - "proxy"    one live upstream provider (fak serve --base-url).
 //   - "replica"  a static round-robin live upstream fleet.
 //   - "inkernel" the model fused into the kernel (fak serve --gguf).
+//   - "dual"     the in-kernel model alongside a live upstream proxy
+//     (--gguf AND --base-url); the local model id routes in-kernel, the rest proxy.
 //
 // A nil or unrecognized planner reports "unknown" rather than masquerading as a
 // real backend.
@@ -1630,6 +1677,8 @@ func plannerKind(p agent.Planner) string {
 		return "replica"
 	case *agent.InKernelPlanner:
 		return "inkernel"
+	case *DualPlanner:
+		return "dual"
 	default:
 		return "unknown"
 	}

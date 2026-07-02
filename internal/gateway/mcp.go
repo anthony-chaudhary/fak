@@ -153,13 +153,19 @@ func (s *Server) dispatchRPC(ctx context.Context, raw []byte) *rpcResponse {
 		return &rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: rpcParseError, Message: "parse error"}}
 	}
 	if len(bytes.TrimSpace(req.ID)) == 0 {
-		// Notification (e.g. notifications/initialized): accept, no response.
+		// Notification: accept, no response. Lifecycle notifications feed the
+		// tool process table (seam 3): cancelled -> kill + revocation arm,
+		// progress -> pulse. Everything else stays a silent accept.
+		s.mcpToolprocNotify(req.Method, req.Params)
 		return nil
 	}
 	if req.JSONRPC != "2.0" {
 		return &rpcResponse{JSONRPC: "2.0", ID: req.ID,
 			Error: &rpcError{Code: rpcInvalidRequest, Message: `jsonrpc must be "2.0"`}}
 	}
+	// Carry the request id so a tools/call arm can correlate a later
+	// notifications/cancelled back to the kernel call it spawned (seam 3).
+	ctx = mcpWithRequestID(ctx, req.ID)
 	result, rerr := s.handleMethod(ctx, req.Method, req.Params)
 	if rerr != nil {
 		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: rerr}
@@ -281,7 +287,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		req := decodeSyscallArgs(p.Arguments)
 		req.TraceID = s.traceFor(req.TraceID)
 		ctx = WithPrincipal(ctx, req.Principal)
+		// The brokered call is a tool process (seam 3): spawn/exit rows in the
+		// same journal the guard hooks feed, keyed by the kernel trace id the
+		// seam-2 revocation gate also keys on.
+		tpID := mcpToolprocSpawn(ctx, req.TraceID, req.Tool)
 		wv, env, err := s.syscall(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
+		mcpToolprocExit(tpID, err)
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}

@@ -35,6 +35,9 @@ type startupProfile struct {
 	start  time.Time
 	ready  time.Time
 	phases []StartupPhase
+	// report is the host's full human-readable startup report — see SetStartupReport
+	// (startup_report.go) for the contract and the `fak info --startup` reader.
+	report string
 }
 
 func newStartupProfile(start time.Time) *startupProfile {

@@ -304,8 +304,11 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 // written to the client — so the caller can fall back to the buffered path with exactly
 // one upstream generation having been attempted.
 func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool, hcoh harnessCoherenceInputs) bool {
-	hp, ok := s.planner.(*agent.HTTPPlanner)
-	if !ok {
+	// Unwrap a dual planner to its proxy side: an API-bound request in dual mode rides
+	// the same byte-preserving relay as proxy-only mode. (The caller has already
+	// excluded dual-mode requests addressed to the LOCAL model via anthropicPassthroughFor.)
+	hp := unwrapHTTPPlanner(s.planner)
+	if hp == nil {
 		return false
 	}
 	flusher, ok := w.(http.Flusher)

@@ -28,7 +28,11 @@ type debugVarsResponse struct {
 	Sessions         []debugSessionVars             `json:"sessions,omitempty"`
 	Assumptions      []SessionAssumption            `json:"assumptions,omitempty"`
 	ContextQueries   []ContextQueryAuditRecord      `json:"context_queries,omitempty"`
-	Metrics          debugMetricsVars               `json:"metrics"`
+	// StartupReport is the full human-readable startup report the host recorded at boot
+	// (fak guard's banner + hook/auth notes) — what `fak info --startup` prints when an
+	// attended launch kept the terminal banner compact. Omitted when the host set none.
+	StartupReport string           `json:"startup_report,omitempty"`
+	Metrics       debugMetricsVars `json:"metrics"`
 }
 
 // debugInferenceVars surfaces the model-generation throughput the kernel/vDSO counters
@@ -57,8 +61,12 @@ type debugInferenceVars struct {
 // debugUpstreamVars mirrors the upstream-error /metrics families into /debug/vars so live
 // operator panes can show provider/API incidents without scraping Prometheus text.
 type debugUpstreamVars struct {
-	ErrorsByKind         map[string]uint64 `json:"errors_by_kind"`
-	Retries              uint64            `json:"retries"`
+	ErrorsByKind map[string]uint64 `json:"errors_by_kind"`
+	Retries      uint64            `json:"retries"`
+	// RetryWaitSeconds is the accumulated wall-clock the backoff loop slept between
+	// those retries — the time twin of Retries, so a live pane can show how much of
+	// the session's slowness was provider pushback fak absorbed.
+	RetryWaitSeconds     float64           `json:"retry_wait_seconds"`
 	AuthRefreshByOutcome map[string]uint64 `json:"auth_refresh_by_outcome"`
 }
 
@@ -398,6 +406,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Sessions:         s.debugSessions(ctx),
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
+		StartupReport:    s.startupReportText(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
@@ -511,6 +520,7 @@ func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
 	}
 	m.upstreamErrMu.Unlock()
 	out.Retries = atomic.LoadUint64(&m.upstreamRetries)
+	out.RetryWaitSeconds = time.Duration(atomic.LoadUint64(&m.upstreamRetryWaitNS)).Seconds()
 	return out
 }
 

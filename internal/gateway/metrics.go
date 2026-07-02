@@ -207,6 +207,14 @@ type gatewayMetrics struct {
 	// RetryNotify hook, off the request path. The metric twin of the `fak-turn … retry` line.
 	upstreamRetries uint64
 
+	// upstreamRetryWaitNS accumulates the wall-clock the backoff loop SLEPT between those
+	// attempts, in nanoseconds — the TIME twin of upstreamRetries. The count says how often
+	// fak absorbed provider pushback on the session's behalf; this says how much of the
+	// session's wall-clock that absorption cost. Before this accumulator each computed wait
+	// reached only the per-occurrence debug line and was dropped in aggregate, so the
+	// dominant "session felt slow" cause (a long 429 window) was unmeasurable after the fact.
+	upstreamRetryWaitNS uint64
+
 	// upstreamAuthRefreshes counts 401 token-rotation self-heals on the rotating-subscription
 	// path, keyed by outcome ("recovered" = a fresh OAuth token was adopted mid-session and the
 	// call re-sent in place; "exhausted" = no fresher token landed within the grace window, so
@@ -417,13 +425,17 @@ func (m *gatewayMetrics) observeUpstreamError(err error) {
 	m.upstreamErrMu.Unlock()
 }
 
-// observeUpstreamRetry counts one upstream retry attempt (the planner's 429/5xx backoff). Atomic
-// and off the request path, called from the RetryNotify hook.
-func (m *gatewayMetrics) observeUpstreamRetry() {
+// observeUpstreamRetry counts one upstream retry attempt (the planner's 429/5xx backoff) and
+// accumulates the wait it slept before re-hitting upstream. Atomic and off the request path,
+// called from the RetryNotify hook. A non-positive wait still counts the attempt.
+func (m *gatewayMetrics) observeUpstreamRetry(wait time.Duration) {
 	if m == nil {
 		return
 	}
 	atomic.AddUint64(&m.upstreamRetries, 1)
+	if wait > 0 {
+		atomic.AddUint64(&m.upstreamRetryWaitNS, uint64(wait))
+	}
 }
 
 // observeUpstreamAuthRefresh counts one 401 token-rotation self-heal by outcome ("recovered" /
@@ -2238,6 +2250,12 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_upstream_errors_total{kind=\"%s\"} %d\n", promQuote(kind), snap[kind])
 	}
 	writeCounter(b, "fak_gateway_upstream_retries_total", "Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.", int64(atomic.LoadUint64(&m.upstreamRetries)))
+	// The time twin of the retry counter: how much wall-clock the backoff loop slept between
+	// attempts. Always emitted (0 on a pushback-free session) so the panel exists from the
+	// first scrape — this is the answer to "how much of my slow session was the provider's
+	// rate limit, absorbed by fak, rather than fak itself".
+	writeHelpType(b, "fak_gateway_upstream_retry_wait_seconds_total", "Wall-clock the backoff loop SLEPT between upstream retry attempts (fak-authored waits in response to OBSERVED, provider-reported 429/5xx) since process start — the time cost of the retries fak absorbed on the session's behalf.", "counter")
+	fmt.Fprintf(b, "fak_gateway_upstream_retry_wait_seconds_total %s\n", promFloat(time.Duration(atomic.LoadUint64(&m.upstreamRetryWaitNS)).Seconds()))
 	// The 401 token-rotation self-heal family: recovered = a fresh subscription OAuth token was
 	// adopted mid-session (the live guarded session healed across a re-login), exhausted = no
 	// fresher token landed within the grace window (the 401 surfaced and the agent dropped into

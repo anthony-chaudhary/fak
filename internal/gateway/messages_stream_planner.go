@@ -117,6 +117,12 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		agent.WithTopK(req.TopK),
 		agent.WithStop(req.StopSequences),
 	}
+	// The dual planner (local model alongside the API upstream) routes on the requested
+	// model, so forward it — ONLY there: the single-planner paths historically never
+	// forwarded the client model on this wire.
+	if _, dual := s.planner.(*DualPlanner); dual {
+		opts = append(opts, agent.WithModel(req.Model))
+	}
 	lease, err := s.beginServedAdmission(r.Context(), sessionTurn, req.Messages, req.Tools, sampleMaxTokens(opts))
 	if err != nil {
 		s.logf("gateway: scheduler admission refused (messages stream): %v", err)
