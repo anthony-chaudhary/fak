@@ -742,6 +742,15 @@ type Server struct {
 	resetHealthMu sync.Mutex
 	resetHealth   map[string]*sessionResetHealth
 
+	// ctxValue holds ONE rolling managed-context record per session trace id, fed by
+	// logInferenceTurn on EVERY served turn (all wires) so the multi-level long-session
+	// context report (ctxvalue.go: tokens / turns / session + step advice) is answerable
+	// live. Minted lazily by ctxValueForLocked and bounded by maxCtxValueSessions with
+	// the same generational reset as resetHealth. Guarded by ctxValueMu. Advice-only:
+	// nothing here feeds the request path.
+	ctxValueMu sync.Mutex
+	ctxValue   map[string]*sessionCtxValue
+
 	// turnSafetyMu guards turnSafety, the per-trace stash of the LAST turn's adjudication
 	// SAFETY delta (calls blocked / repaired this turn, results quarantined this turn). The
 	// per-turn fak-turn debug line (debug_stats.go) already shows the turn's cache/token
