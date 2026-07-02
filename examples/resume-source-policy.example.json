@@ -1,0 +1,9 @@
+{
+  "schema": "fak.resume-source-policy.v1",
+  "default": {
+    "max_live_resumes": 4,
+    "max_launches_per_window": 10,
+    "window_seconds": 300,
+    "min_launch_spacing_seconds": 8
+  }
+}

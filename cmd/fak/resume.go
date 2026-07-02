@@ -54,17 +54,23 @@ func runResume(stdout, stderr io.Writer, argv []string) int {
 		return runResumeValidate(stdout, stderr, argv[1:])
 	case "scan":
 		return runResumeScan(stdout, stderr, argv[1:])
+	case "sweep":
+		return runResumeSweep(stdout, stderr, argv[1:])
+	case "stopped":
+		return runResumeStopped(stdout, stderr, argv[1:])
 	case "status":
 		return runResumeStatus(stdout, stderr, argv[1:])
 	case "admit":
 		return runResumeAdmit(stdout, stderr, argv[1:])
+	case "watchdog":
+		return runResumeWatchdog(stdout, stderr, argv[1:])
 	case "resolve":
 		return runResumeResolve(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		resumeUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, status, admit, or resolve)\n", argv[0])
+		fmt.Fprintf(stderr, "fak resume: unknown subcommand %q (want plan, validate, scan, sweep, stopped, status, admit, watchdog, or resolve)\n", argv[0])
 		resumeUsage(stderr)
 		return 2
 	}
@@ -156,6 +162,7 @@ func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 	minSpacingSec := fs.Int64("min-spacing-sec", 8, "host-wide minimum seconds between launches (0 disables)")
 	asJSON := fs.Bool("json", false, "emit the decision as JSON")
 	quiet := fs.Bool("quiet", false, "suppress the human line (for use as a launcher gate that reads only the exit code)")
+	explain := fs.Bool("explain", false, "print the full governor posture: policy path+values+source, ledger path, live census, recent refusals/fail-opens, and the verdict (#2173)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -167,10 +174,33 @@ func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 	// The policy file is the standing config; explicit flags OVERRIDE it (flag-over-file,
 	// the same precedence launch_admission's --global-cap etc. take). The fail-open loader
 	// makes a missing file the permissive default, then we layer the CLI ceilings on top.
+	// A PRESENT-but-malformed policy REFUSES (exit 3, POLICY_MALFORMED) instead of
+	// usage-erroring (exit 2): launchers fail open on unexpected gate exits, so an exit-2
+	// here would silently turn a policy typo into a fully permissive host (#2173). The
+	// refusal defers launches loudly — the ledger carries the token — until the typo is fixed.
 	policies, err := resume.LoadSourcePolicy(*policyPath)
 	if err != nil {
+		d := resume.SourceDecision{
+			Admit:  false,
+			Reason: resume.ReasonPolicyMalformed,
+			Summary: fmt.Sprintf("policy %s is present but unreadable (%v) — fix or remove it; a MISSING policy is permissive, a malformed one refuses",
+				*policyPath, err),
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, map[string]any{
+				"schema":      "fak.resume-admit.v1",
+				"ledger_path": *ledger,
+				"policy_path": *policyPath,
+				"decision":    d,
+			}); err != nil {
+				fmt.Fprintf(stderr, "fak resume admit: encode json: %v\n", err)
+				return 1
+			}
+		} else if !*quiet {
+			fmt.Fprintf(stdout, "%-6s %-22s %s\n", "REFUSE", d.Reason, d.Summary)
+		}
 		fmt.Fprintf(stderr, "fak resume admit: %v\n", err)
-		return 2
+		return 3
 	}
 	policy := policies.Default
 	applyResumeSourceFlagOverrides(fs, &policy, *maxLive, *maxPerWindow, *windowSec, *minSpacingSec)
@@ -180,16 +210,22 @@ func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 	d := resume.AdmitSource(snap, policy, now)
 
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, map[string]any{
+		doc := map[string]any{
 			"schema":      "fak.resume-admit.v1",
 			"ledger_path": *ledger,
 			"policy_path": *policyPath,
 			"snapshot":    snap,
 			"decision":    d,
-		}); err != nil {
+		}
+		if *explain {
+			doc["explain"] = explainSourceGovernor(*policyPath, *ledger, policy, now)
+		}
+		if err := writeIndentedJSON(stdout, doc); err != nil {
 			fmt.Fprintf(stderr, "fak resume admit: encode json: %v\n", err)
 			return 1
 		}
+	} else if *explain {
+		renderSourceGovernorExplain(stdout, *policyPath, *ledger, policy, snap, d, now)
 	} else if !*quiet {
 		verdict := "ADMIT"
 		if !d.Admit {
@@ -204,6 +240,132 @@ func runResumeAdmit(stdout, stderr io.Writer, argv []string) int {
 		return 3
 	}
 	return 0
+}
+
+// governorLedgerStats folds the trailing-24h governor activity out of the launch
+// ledger: how many real launches fired, how many the gate deferred, and how many
+// fail-open warning rows launchers recorded because the governor was unavailable.
+// These are the status rows for source-governor refusals and fail-open launches
+// (#2173), read straight off the durable ledger every launcher already appends to.
+type governorLedgerStats struct {
+	Launched24h    int   `json:"launched_24h"`
+	Deferred24h    int   `json:"deferred_24h"`
+	FailOpen24h    int   `json:"gate_fail_open_24h"`
+	LastLaunchUnix int64 `json:"last_launch_unix,omitempty"`
+}
+
+// scanGovernorLedgerStats reads the ledger JSONL once and classifies each trailing-24h
+// row by phase: gate_fail_open (a launcher ran without the governor), deferred (the
+// gate refused), considered/skipped (ignored), everything else with a timestamp a real
+// launch — the same launch rule scanLaunchLedger applies. A missing/unreadable ledger
+// yields zeros: no record is no activity, never an error.
+func scanGovernorLedgerStats(path string, now time.Time) governorLedgerStats {
+	var st governorLedgerStats
+	f, err := os.Open(path)
+	if err != nil {
+		return st
+	}
+	defer f.Close()
+
+	cutoff := now.UTC().Add(-24 * time.Hour).Unix()
+	type lrec struct {
+		Ts    string `json:"ts"`
+		Phase string `json:"phase"`
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1<<16), 1<<20)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var r lrec
+		if json.Unmarshal(line, &r) != nil {
+			continue
+		}
+		ts := parseTranscriptUnix(r.Ts)
+		if ts == 0 {
+			continue
+		}
+		inWindow := ts >= cutoff
+		switch strings.ToLower(strings.TrimSpace(r.Phase)) {
+		case "gate_fail_open":
+			if inWindow {
+				st.FailOpen24h++
+			}
+		case "deferred":
+			if inWindow {
+				st.Deferred24h++
+			}
+		case "considered", "skipped":
+			// non-launch bookkeeping rows: not activity worth surfacing
+		default:
+			if inWindow {
+				st.Launched24h++
+			}
+			if ts > st.LastLaunchUnix {
+				st.LastLaunchUnix = ts
+			}
+		}
+	}
+	return st
+}
+
+// explainSourceGovernor assembles the machine-readable governor posture: where the
+// policy came from and what it effectively says, where the ledger lives, the recent
+// refusal / fail-open activity, and which binary answered. One `--explain` call
+// replaces reading `.fak/` and the scheduler actions by hand (#2173).
+func explainSourceGovernor(policyPath, ledgerPath string, policy resume.SourcePolicy, now time.Time) map[string]any {
+	exe, _ := os.Executable()
+	_, statErr := os.Stat(policyPath)
+	_, ledgerErr := os.Stat(ledgerPath)
+	return map[string]any{
+		"policy_path":        policyPath,
+		"policy_file_exists": statErr == nil,
+		"policy_env_set":     strings.TrimSpace(os.Getenv("FAK_RESUME_SOURCE_POLICY")) != "",
+		"policy_effective":   policy,
+		"ledger_path":        ledgerPath,
+		"ledger_exists":      ledgerErr == nil,
+		"recent":             scanGovernorLedgerStats(ledgerPath, now),
+		"executable":         exe,
+	}
+}
+
+// renderSourceGovernorExplain prints the human governor-posture report — the one-command
+// answer to "what rail is this host actually running under, and has it been bypassed?"
+func renderSourceGovernorExplain(w io.Writer, policyPath, ledgerPath string, policy resume.SourcePolicy, snap resume.SourceSnapshot, d resume.SourceDecision, now time.Time) {
+	exe, _ := os.Executable()
+	policySrc := "default path"
+	if strings.TrimSpace(os.Getenv("FAK_RESUME_SOURCE_POLICY")) != "" {
+		policySrc = "env FAK_RESUME_SOURCE_POLICY"
+	}
+	policyState := "MISSING — permissive file defaults; CLI ceilings apply"
+	if _, err := os.Stat(policyPath); err == nil {
+		policyState = "exists"
+	}
+	st := scanGovernorLedgerStats(ledgerPath, now)
+	lastLaunch := "never"
+	if st.LastLaunchUnix > 0 {
+		lastLaunch = time.Unix(st.LastLaunchUnix, 0).UTC().Format(time.RFC3339)
+	}
+	verdict := "ADMIT"
+	if !d.Admit {
+		verdict = "REFUSE"
+	}
+	fmt.Fprintf(w, "source governor posture\n")
+	fmt.Fprintf(w, "  policy:   %s (%s; via %s)\n", policyPath, policyState, policySrc)
+	fmt.Fprintf(w, "            max_live_resumes=%d max_launches_per_window=%d window_seconds=%d min_launch_spacing_seconds=%d\n",
+		policy.MaxLiveResumes, policy.MaxLaunchesPerWindow, policy.WindowSeconds, policy.MinLaunchSpacingSeconds)
+	fmt.Fprintf(w, "  ledger:   %s\n", ledgerPath)
+	fmt.Fprintf(w, "            trailing 24h: launched=%d deferred=%d gate_fail_open=%d; last launch %s\n",
+		st.Launched24h, st.Deferred24h, st.FailOpen24h, lastLaunch)
+	fmt.Fprintf(w, "  census:   %d live `claude --resume` process(es); %d launch(es) in the policy window\n",
+		snap.LiveResumeCount, d.WindowLaunches)
+	fmt.Fprintf(w, "  binary:   %s\n", exe)
+	fmt.Fprintf(w, "  verdict:  %s %s — %s\n", verdict, d.Reason, d.Summary)
+	if st.FailOpen24h > 0 {
+		fmt.Fprintf(w, "  WARNING:  %d gate_fail_open row(s) in 24h — launchers ran WITHOUT the governor; check fak.exe resolution on the scheduled-task path\n", st.FailOpen24h)
+	}
 }
 
 // applyResumeSourceFlagOverrides layers explicitly-set CLI ceilings over the loaded
@@ -315,11 +477,13 @@ func scanLaunchLedger(path string) (times []int64, last int64) {
 // isNonLaunchPhase reports whether a ledger row's phase marks something that is NOT a
 // fired launch — a deferral or consideration is not launch pressure, so counting it would
 // let the gate's own DEFERs cascade into more refusals. Mirrors launch_admission's
-// _NON_LAUNCH_PHASES set. An empty phase is a launch (the watchdog's launched rows and the
-// other launchers' phase-less rows both record a real spawn).
+// _NON_LAUNCH_PHASES set (and the watchdogs' NON_LAUNCH_PHASES, including the
+// gate_fail_open governor-unavailable warning row #2173). An empty phase is a launch
+// (the watchdog's launched rows and the other launchers' phase-less rows both record a
+// real spawn).
 func isNonLaunchPhase(phase string) bool {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "deferred", "considered", "skipped":
+	case "deferred", "considered", "skipped", "gate_fail_open":
 		return true
 	default:
 		return false
@@ -834,11 +998,20 @@ func resumeUsage(w io.Writer) {
   fak resume scan --store DIR [--ttl 5m|1h] [--horizon N] [--shed-budget N]
                   [--input-price F] [--output-price F] [--all] [--json]
 
+  fak resume sweep [--window MIN] [--min-records N] [--bucket B] [--probe]
+                   [--include-resumed] [--home DIR] [--reg-dir DIR] [--json]
+
+  fak resume stopped [--window-h H] [--home DIR] [--json]
+
   fak resume status --store DIR [--ledger FILE] [--max-attempts N] [--all] [--json]
 
   fak resume admit [--max-live N] [--max-per-window N] [--window-sec S]
                    [--min-spacing-sec S] [--ledger FILE] [--policy FILE]
-                   [--json] [--quiet]
+                   [--json] [--quiet] [--explain]
+
+  fak resume watchdog [--live] [--window-h H] [--max-per-tick N] [--max-attempts N]
+                      [--spacing-sec S] [--probe MODE] [--reg-dir DIR] [--log-dir DIR]
+                      [--no-refresh]
 
   fak resume resolve <session-id> [--home DIR] [--cwd DIR] [--dry-run]
                      [--no-probe] [--json]
@@ -854,6 +1027,11 @@ admit is the PER-SOURCE concurrency gate a launcher self-gates on before it spaw
 cap measured) plus the recent launch rate from the durable ledger, and returns ADMIT
 (exit 0) or REFUSE (exit 3) with a structured reason. Gate a launch with:
   fak resume admit --quiet && claude --resume <sid> ...
+The policy file (FAK_RESUME_SOURCE_POLICY, default .fak/resume-source-policy.json;
+tracked template examples/resume-source-policy.example.json) fails OPEN when missing
+but REFUSES (POLICY_MALFORMED, exit 3) when present-and-unparseable, so a typo can
+never silently drop the rail. --explain prints the full posture — policy path+values,
+ledger, live census, trailing-24h deferred/gate_fail_open rows — in one command.
 
 validate back-tests that projection against billed reality: it scans a corpus of real
 Claude Code transcripts, scores how often the cold/warm posture call agreed with the
@@ -872,12 +1050,34 @@ plan (cut/reset vs a cold full re-prefill). The detect-and-plan step before a re
 sizes each session from its last REAL model turn, so the synthetic rate-limit refusal that
 ends a crashed session never mis-sizes it to zero.
 
+sweep is the manifest-free DISCOVERY half of the cross-account resume layer (the Go port
+of tools/resume_sweep.py): it walks every ~/.claude*/projects transcript touched in the
+window, resolves each session's SUPERSET copy (uuid-set + last-ts, never file mtime), and
+buckets it by the action it needs — LIMIT_RESET_PASSED / API_ERR (resumable now),
+LIMIT_RESET_FUTURE (wait), AUTH (needs /login), LIVE (leave alone). The failure mode is
+adjudicated off the error record only, never assistant prose. It resumes nothing.
+
+stopped triages every recently-STOPPED top-level session by HOW it stopped (the Go port of
+tools/stopped_sessions.py): a current synthetic limit banner (STOPPED_LIMIT), an auth wall
+(STOPPED_AUTH), a tool_use that never got its result (STOPPED_MIDTOOL — died mid-work), an
+interruption, a parked background wait, a wrap-up, or a quiet stop — then decides
+resume / defer / skip, deferring any session whose ACCOUNT is throttled. It resumes nothing.
+
 status is the PROVE-THE-RESUME-TOOK runbook over the same store plus the durable resume
 ledger. For every crashed-or-resumed session it folds one label (pending / launched /
 took / re-stranded / gave-up / settled) read from the transcript's own turns, not the
 launcher's "launched" ledger row (which alone cannot tell a resume that took from one
 that silently no-op'd). Actionable sessions sort first, so an agent bringing a dead
 batch back reads the ordered list, acts on the top, and re-runs.
+
+watchdog is ONE TICK of the cross-account resume layer (the Go port of
+tools/fleet_resume_watchdog.py, designed for a ~5-minute schedule and safe by hand):
+refresh the session registry + AUTO_RESUME plan, then resume each planned session under
+its owning account — gated by the self-resume guard, the worker policy, the outcome-aware
+once-gate (a resume that died recoverably stays eligible up to the attempt cap; a clean
+finish or an auth wall burns it), and the host-wide per-source admission. DRY-RUN by
+default: pass --live (or FAK_LIVE=1) to actually spawn, capped per tick and paced between
+spawns. Launches are recorded in the durable resume ledger BEFORE anything else.
 
 example (resume a 250k session idle 2h on a 5-minute cache):
   fak resume plan --resident-tokens 250000 --idle-seconds 7200

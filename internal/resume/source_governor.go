@@ -75,6 +75,14 @@ const (
 	ReasonSourceSaturated = "SOURCE_SATURATED"
 	ReasonLaunchRate      = "LAUNCH_RATE_EXCEEDED"
 	ReasonLaunchSpacing   = "LAUNCH_SPACING_FLOOR"
+
+	// ReasonPolicyMalformed is the refusal a PRESENT-but-unparseable policy file earns
+	// (#2173). A missing policy stays permissive (nobody configured the rail), but a
+	// malformed one refuses: launchers fail open on unexpected gate errors, so an exit-2
+	// usage error would silently turn a typo into a fully permissive host. Refusing with
+	// a structured reason makes the typo loud — deferred launches carrying this token —
+	// instead of invisibly dropping the rail.
+	ReasonPolicyMalformed = "POLICY_MALFORMED"
 )
 
 // SourceSnapshot is the folded host state AdmitSource decides on: pure data, no I/O.
