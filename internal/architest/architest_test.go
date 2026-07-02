@@ -292,6 +292,7 @@ var tier = map[string]int{
 	"devexmeter":       1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	"toolproc":         2,
 	"regionadmit":      2,
+	"toolprocgate":     4, // post-kill tool-result quarantine rung; declared once its leaf landed on the trunk (see the stale-row rule above)
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
