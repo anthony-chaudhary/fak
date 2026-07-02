@@ -504,6 +504,17 @@ func (t *Table) RecontinueAtWithTransaction(parent, child string, fresh Budget, 
 	if carriedTime.Bounded() || carriedTime.ElapsedNanos > 0 {
 		carriedTime = carriedTime.Start(now)
 	}
+	// The spend ceiling is a LINEAGE budget like the wall clock: a hidden context
+	// reset must not zero a dollar cap any more than it zeros Generation or
+	// ElapsedNanos, so when the caller's fresh budget states no spend opinion the
+	// parent's remaining spend allotment (and its cap denominator) carry onto the
+	// child. An explicit fresh spend axis wins — an operator re-arming a new
+	// ceiling meant it. A spend-DRAINED parent carries Left=0 under a positive
+	// cap: the lineage's money stays honestly spent across the reset.
+	if fresh.SpendMicroCentsCap == 0 && fresh.SpendMicroCentsLeft == 0 && parentSt.Budget.SpendMicroCentsCap > 0 {
+		fresh.SpendMicroCentsLeft = parentSt.Budget.SpendMicroCentsLeft
+		fresh.SpendMicroCentsCap = parentSt.Budget.SpendMicroCentsCap
+	}
 	next := State{
 		TraceID:          child,
 		Run:              Running,

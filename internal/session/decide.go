@@ -41,6 +41,7 @@ const (
 	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
 	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
 	ReasonBudgetQueries   = "BUDGET_QUERIES_EXHAUSTED" // ClarificationQueriesLeft hit zero
+	ReasonBudgetSpend     = "BUDGET_SPEND_EXHAUSTED"   // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
 	ReasonPaused          = "PAUSED"                   // operator hold; not terminal, the loop waits
 	ReasonDrained         = "DRAINING"                 // operator stop, taken at this boundary
 	ReasonStopped         = "STOPPED"                  // already terminal

@@ -160,7 +160,22 @@ type Budget struct {
 	ContextTokensCap         int `json:"context_tokens_cap,omitempty"`         // the configured context-budget size; the denominator the pre-exhaustion warning measures consumed-share against (0 = no context budget)
 	ClarificationQueriesLeft int `json:"clarification_queries_left,omitempty"` // remaining clarification/self-query asks; 0 with no cap = not configured
 	ClarificationQueriesCap  int `json:"clarification_queries_cap,omitempty"`  // configured clarification-query budget; positive cap with 0 left = exhausted
+	// SpendMicroCentsLeft is the remaining PRICED-spend allotment in micro-cents
+	// (1e-6 cent = 1e-8 USD — fine enough that every per-token price in the
+	// published Anthropic tables, including the 0.1x cache-read multiplier, debits
+	// as an exact integer). 0 = no spend budget configured, matching the context
+	// axis's convention. The caller prices each turn (the table is deliberately
+	// price-blind — see Usage.CostMicroCents); DebitUsage debits toward zero and
+	// drains the session with ReasonBudgetSpend when the ceiling is crossed.
+	SpendMicroCentsLeft int64 `json:"spend_micro_cents_left,omitempty"`
+	// SpendMicroCentsCap is the configured spend-budget size (the denominator a
+	// consumed-share display measures against); 0 = no spend budget.
+	SpendMicroCentsCap int64 `json:"spend_micro_cents_cap,omitempty"`
 }
+
+// MicroCentsPerCent converts a user-stated cent ceiling (SpendEnvelope.MaxCents)
+// into the micro-cent unit the spend axis debits: 1 cent = 1_000_000 micro-cents.
+const MicroCentsPerCent int64 = 1_000_000
 
 // withContextCap stamps the context-budget capacity (the denominator the pre-exhaustion
 // warning measures consumed-share against, #743) from the remaining when a budget is
@@ -178,6 +193,9 @@ func (b Budget) withContextCap() Budget {
 	if b.ClarificationQueriesCap <= 0 && b.ClarificationQueriesLeft > 0 {
 		b.ClarificationQueriesCap = b.ClarificationQueriesLeft
 	}
+	if b.SpendMicroCentsCap <= 0 && b.SpendMicroCentsLeft > 0 {
+		b.SpendMicroCentsCap = b.SpendMicroCentsLeft
+	}
 	return b
 }
 
@@ -186,6 +204,7 @@ func (b Budget) withContextCap() Budget {
 func (b Budget) turnsUnbounded() bool  { return b.TurnsLeft < 0 }
 func (b Budget) tokensUnbounded() bool { return b.TokensLeft < 0 }
 func (b Budget) contextBounded() bool  { return b.ContextTokensLeft > 0 }
+func (b Budget) spendBounded() bool    { return b.SpendMicroCentsLeft > 0 }
 func (b Budget) clarificationQueriesBounded() bool {
 	return b.ClarificationQueriesCap > 0 || b.ClarificationQueriesLeft > 0
 }

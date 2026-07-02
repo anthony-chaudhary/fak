@@ -112,8 +112,17 @@ func ParseBudgetEnvelope(spec string) (BudgetEnvelope, error) {
 	return env, nil
 }
 
-// SessionBudget projects the envelope onto the session budget axes.
-func (e BudgetEnvelope) SessionBudget() Budget { return e.Budget.withContextCap() }
+// SessionBudget projects the envelope onto the session budget axes. The spend
+// ceiling is projected from cents into the micro-cent axis DebitUsage debits, so a
+// stated `spend=$25` becomes a live runtime budget the moment the host prices turns
+// (Usage.CostMicroCents) — not just an inspectable contract field.
+func (e BudgetEnvelope) SessionBudget() Budget {
+	b := e.Budget
+	if e.Spend.MaxCents > 0 {
+		b.SpendMicroCentsLeft = e.Spend.MaxCents * MicroCentsPerCent
+	}
+	return b.withContextCap()
+}
 
 // SessionPace projects the envelope onto the per-turn pace axes.
 func (e BudgetEnvelope) SessionPace() Pace { return e.Pace }
