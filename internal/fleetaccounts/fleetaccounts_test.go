@@ -611,6 +611,19 @@ func TestResetParsingExpiredVsFuture(t *testing.T) {
 	}
 }
 
+func TestResetParsingUsesLosAngelesHint(t *testing.T) {
+	// 19:00 UTC is noon in Los Angeles on July 3, 2026. A reset string that says
+	// "2pm (America/Los_Angeles)" is still two hours away, even though bare 2pm UTC
+	// would already be expired on a UTC-anchored process.
+	now := mustParse(t, "2026-07-03T19:00:00Z")
+	if got := resetIsFuture("2pm (America/Los_Angeles)", now); got == nil || !*got {
+		t.Fatalf("2pm LA at noon LA should be future; got %v", got)
+	}
+	if got := resetIsFuture("10am (America/Los_Angeles)", now); got == nil || *got {
+		t.Fatalf("10am LA at noon LA should be expired; got %v", got)
+	}
+}
+
 func mustParse(t *testing.T, s string) time.Time {
 	t.Helper()
 	p := parseUTC(s)

@@ -28,6 +28,13 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 	if reset == "" {
 		return time.Time{}, false
 	}
+	loc := now.Location()
+	if strings.Contains(reset, "America/Los_Angeles") {
+		if la, err := time.LoadLocation("America/Los_Angeles"); err == nil {
+			loc = la
+		}
+	}
+	nowInLoc := now.In(loc)
 	raw := parenTail.ReplaceAllString(reset, "")
 	raw = strings.TrimSpace(raw)
 	raw = parenAll.ReplaceAllString(raw, "")
@@ -50,15 +57,15 @@ func resetTime(reset string, now time.Time) (time.Time, bool) {
 			continue
 		}
 		if sp.dated {
-			cand := time.Date(now.Year(), parsed.Month(), parsed.Day(),
-				parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
+			cand := time.Date(nowInLoc.Year(), parsed.Month(), parsed.Day(),
+				parsed.Hour(), parsed.Minute(), 0, 0, loc)
 			if cand.Before(now) && now.Sub(cand) > 180*24*time.Hour {
 				cand = cand.AddDate(1, 0, 0)
 			}
 			return cand, true
 		}
-		cand := time.Date(now.Year(), now.Month(), now.Day(),
-			parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
+		cand := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(),
+			parsed.Hour(), parsed.Minute(), 0, 0, loc)
 		// An undated time-only reset that has already passed today rolls to tomorrow when it
 		// still falls inside the daily-reset slack, exactly as resetIsFuture treats it as a
 		// future reset — so soonness projects onto the same instant that future-ness reports.

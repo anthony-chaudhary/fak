@@ -288,11 +288,15 @@ func Resolve(in ResolveInput) Decision {
 			availability = in.AvailabilityFn()
 		}
 		targets := RehomeTargets(availability, owner.Account, nil, RehomeCap())
+		var statusScreened []TargetProbe
+		targets, statusScreened = filterTargetsByStatus(targets, in.OwnerStatusFn)
 		if len(targets) == 0 {
 			// The fleet burst-spread cap excluded every account by load. A single
 			// interactive resume relaxes it onto the least-loaded healthy seat.
 			relief := RehomeTargets(availability, owner.Account, nil, CapUnbounded)
+			relief, statusScreened = filterTargetsByStatus(relief, in.OwnerStatusFn)
 			if len(relief) == 0 {
+				rec.TargetProbes = statusScreened
 				rec.Action = "PIN_BLOCKED"
 				rec.PinAccount = owner.Account
 				rec.PinConfigDir = owner.ConfigDir
@@ -342,9 +346,11 @@ func Resolve(in ResolveInput) Decision {
 				}
 				tgt = targets[0]
 			}
-			if len(checked) > 0 {
-				rec.TargetProbes = checked
+			if len(statusScreened) > 0 || len(checked) > 0 {
+				rec.TargetProbes = append(statusScreened, checked...)
 			}
+		} else if len(statusScreened) > 0 {
+			rec.TargetProbes = statusScreened
 		}
 	}
 
@@ -433,4 +439,29 @@ func targetProbeConfirmed(probes []TargetProbe, account string) bool {
 		}
 	}
 	return false
+}
+
+func filterTargetsByStatus(targets []Target, statusFn func(account string) OwnerStatus) ([]Target, []TargetProbe) {
+	if statusFn == nil {
+		return targets, nil
+	}
+	out := make([]Target, 0, len(targets))
+	var checked []TargetProbe
+	for _, t := range targets {
+		st := statusFn(t.Account)
+		if st.Available {
+			out = append(out, t)
+			continue
+		}
+		reason := st.BlockReason
+		if reason == "" {
+			reason = "blocked"
+		}
+		checked = append(checked, TargetProbe{
+			Account:     t.Account,
+			Available:   false,
+			BlockReason: reason,
+		})
+	}
+	return out, checked
 }

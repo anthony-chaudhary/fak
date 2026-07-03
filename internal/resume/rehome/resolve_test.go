@@ -107,6 +107,47 @@ func TestResolveRehomesBlockedOwner(t *testing.T) {
 	}
 }
 
+func TestResolveSkipsTargetBlockedByCurrentStatus(t *testing.T) {
+	home := t.TempDir()
+	sid := "s-target-blocked"
+	writeTranscript(t, home, ".claude-owner", testProject, sid, time.Now(), 10)
+	blockedCfg := filepath.Join(home, ".claude-blocked")
+	healthyCfg := filepath.Join(home, ".claude-healthy")
+
+	got := Resolve(ResolveInput{
+		SID: sid, Home: home, CWD: testCWD, ProbeOwner: false,
+		OwnerStatus: &OwnerStatus{Available: false, BlockKind: "usage", StatusSource: "registry", BlockReason: "usage limit"},
+		Availability: []Target{
+			{Account: ".claude-blocked", Available: true, LiveSessions: 0, ConfigDir: blockedCfg},
+			{Account: ".claude-healthy", Available: true, LiveSessions: 1, ConfigDir: healthyCfg},
+		},
+		OwnerStatusFn: func(account string) OwnerStatus {
+			switch account {
+			case ".claude-blocked":
+				return OwnerStatus{Available: false, BlockKind: "usage", BlockReason: "usage limit; resets 2pm"}
+			default:
+				return OwnerStatus{Available: true}
+			}
+		},
+		RehomeFn: RehomeTranscript,
+	})
+	if got.Action != "REHOME" {
+		t.Fatalf("action = %q, want REHOME", got.Action)
+	}
+	if got.PinAccount != ".claude-healthy" {
+		t.Fatalf("pin account = %q, want .claude-healthy", got.PinAccount)
+	}
+	if len(got.TargetProbes) == 0 || got.TargetProbes[0].Account != ".claude-blocked" || got.TargetProbes[0].Available {
+		t.Fatalf("target probes = %+v, want blocked target recorded", got.TargetProbes)
+	}
+	if _, err := os.Stat(filepath.Join(blockedCfg, "projects", testProject, sid+".jsonl")); err == nil {
+		t.Fatal("transcript was copied onto the blocked target")
+	}
+	if _, err := os.Stat(filepath.Join(healthyCfg, "projects", testProject, sid+".jsonl")); err != nil {
+		t.Fatalf("transcript not copied onto healthy target: %v", err)
+	}
+}
+
 func TestResolvePinBlockedNoHealthyTarget(t *testing.T) {
 	home := t.TempDir()
 	sid := "s5"
