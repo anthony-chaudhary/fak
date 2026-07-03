@@ -31,13 +31,6 @@ var (
 	operatorCollectHeaviness = collectHeavinessBriefReport
 )
 
-func cmdOperator(argv []string) {
-	dispatchSubcommands("operator", "brief | heaviness", argv,
-		subcommand{"brief", runOperatorBrief},
-		subcommand{"heaviness", runOperatorHeaviness},
-	)
-}
-
 func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("operator brief", flag.ContinueOnError)
 	fs.SetOutput(stderr)
