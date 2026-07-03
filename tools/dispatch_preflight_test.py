@@ -725,24 +725,44 @@ class WorkerCountTest(unittest.TestCase):
         mod.ambient_codex_pids = lambda: {201, 202}
         self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 3)
 
-    def test_codex_seat_is_single_ambient_login_and_depletes_when_busy(self) -> None:
+    def test_codex_seat_is_ambient_oauth_bucket_and_depletes_at_session_cap(self) -> None:
         mod = load()
-        mod.ambient_codex_pids = lambda: {201}
+        mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
+        mod.ambient_codex_pids = lambda: {201, 202, 203}
         seat = mod.seat_check(ROOT, product="codex")
-        self.assertEqual(seat["total"], 1)
-        self.assertEqual(seat["free"], 0)
-        self.assertEqual(seat["leased"], 1)
-        self.assertTrue(seat["depleted"])
-        self.assertEqual(seat["ambient_live"], 1)
+        self.assertEqual(seat["total"], 10)
+        self.assertEqual(seat["free"], 7)
+        self.assertEqual(seat["leased"], 3)
+        self.assertFalse(seat["depleted"])
+        self.assertEqual(seat["ambient_live"], 3)
 
-    def test_codex_busy_ambient_session_refuses_background_spawn(self) -> None:
+        mod.ambient_codex_pids = lambda: set(range(20))
+        seat = mod.seat_check(ROOT, product="codex")
+        self.assertEqual(seat["total"], 10)
+        self.assertEqual(seat["free"], 0)
+        self.assertEqual(seat["leased"], 10)
+        self.assertTrue(seat["depleted"])
+
+    def test_codex_ambient_oauth_bucket_admits_until_session_cap(self) -> None:
         mod = load()
+        mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
-                     procs=1, seat={"total": 1, "free": 0, "leased": 1,
-                                    "depleted": True, "ambient_live": 1})
+                     procs=3, seat={"total": 10, "free": 7, "leased": 3,
+                                    "depleted": False, "ambient_live": 3})
         p = run_eval(mod, max_workers=4, product="codex")
-        self.assertEqual(p["cap"], 1)
-        self.assertEqual(p["live"], 1)
+        self.assertEqual(p["cap"], 4)
+        self.assertEqual(p["live"], 3)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
+    def test_codex_ambient_oauth_bucket_refuses_at_session_cap(self) -> None:
+        mod = load()
+        mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
+                     procs=10, seat={"total": 10, "free": 0, "leased": 10,
+                                     "depleted": True, "ambient_live": 10})
+        p = run_eval(mod, max_workers=10, product="codex")
+        self.assertEqual(p["cap"], 10)
+        self.assertEqual(p["live"], 10)
         self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
 
     def test_account_check_codex_uses_ambient_login(self) -> None:

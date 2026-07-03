@@ -120,6 +120,7 @@ def _env_pos_int(name: str, default: int) -> int:
 # FAK_MAX_WORKERS env knob retunes the fleet-wide ceiling per host without a code
 # change; the Go tick (internal/dispatchtick.DefaultMaxWorkers) reads the same knob.
 DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 8)
+DEFAULT_CODEX_OAUTH_SESSIONS = _env_pos_int("FAK_CODEX_OAUTH_SESSIONS", 10)
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count
@@ -289,16 +290,18 @@ def seat_check(root: Path, *, product: str) -> dict[str, Any]:
     govern unchanged — fail-OPEN on the seat shaping (the cap still bounds the fleet),
     never fail-closed on a missing view.
 
-    Codex is the one-product exception to the switcher roster: it uses a single ambient
-    ChatGPT login, so the honest pool size is ONE seat, not "no seat pool". Any live
-    Codex CLI process leases that seat, including an attended operator session, so an
-    always-on codex dispatch tick cannot collide with the foreground Codex window/login."""
+    Codex is the one-product exception to the switcher roster: it uses one ambient
+    ChatGPT/OAuth login rather than switcher-managed account dirs. That login is one
+    rate-limit bucket, but the bucket admits multiple concurrent ``codex exec`` sessions,
+    so live Codex processes consume one slot each from a small fixed bucket instead of
+    collapsing the whole product to a single seat."""
     if product == "codex":
+        total = DEFAULT_CODEX_OAUTH_SESSIONS
         live = len(ambient_codex_pids())
-        leased = 1 if live else 0
-        return {"total": 1, "free": 1 - leased, "leased": leased,
-                "depleted": bool(leased), "ambient_live": live,
-                "reason": "codex uses one ambient login/seat"}
+        leased = min(live, total)
+        return {"total": total, "free": max(0, total - live), "leased": leased,
+                "depleted": live >= total, "ambient_live": live,
+                "reason": f"codex ambient OAuth bucket ({total} concurrent sessions)"}
     sw = root / "tools" / "fleet_accounts.py"
     if not sw.exists():
         return {"total": None, "error": f"switcher not found: {sw}"}
