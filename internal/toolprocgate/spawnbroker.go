@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -226,7 +227,7 @@ func normalizeSpawnAttempt(a SpawnAttempt) (SpawnAttempt, error) {
 	// A child process may only be created under an envelope that actually
 	// carries the negotiated spawn capability — an empty or unrelated
 	// envelope is denied before any launcher runs.
-	if !capsInclude(envp.Capabilities, CapAgentRunSpawn) {
+	if !slices.Contains(envp.Capabilities, CapAgentRunSpawn) {
 		return SpawnAttempt{}, fmt.Errorf("MISSING_SPAWN_CAPABILITY")
 	}
 
@@ -255,15 +256,6 @@ func normalizeEnv(in []EnvVar) ([]EnvVar, error) {
 		out = append(out, EnvVar{Name: name, Value: kv.Value})
 	}
 	return out, nil
-}
-
-func capsInclude(caps []abi.Capability, want abi.Capability) bool {
-	for _, c := range caps {
-		if c == want {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizeCaps(in []abi.Capability) []abi.Capability {

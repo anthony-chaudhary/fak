@@ -12,6 +12,7 @@ package a2achan
 
 import (
 	"context"
+	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -46,15 +47,6 @@ const (
 	rankIngress = 40
 )
 
-func hasCap(caps []abi.Capability, want abi.Capability) bool {
-	for _, c := range caps {
-		if c == want {
-			return true
-		}
-	}
-	return false
-}
-
 // gateSend is the send-time capability floor. Fail-closed:
 //   - no CapA2ASend advertised (or it is not a registered/negotiable cap) → deny
 //     with ReasonDefaultDeny (no affirmative send-right);
@@ -75,7 +67,7 @@ func hasCap(caps []abi.Capability, want abi.Capability) bool {
 //
 // Otherwise VerdictAllow.
 func gateSend(from string, to ChannelKey, body abi.Ref, caps []abi.Capability, allowSelfChannel bool) abi.Verdict {
-	if !hasCap(caps, CapA2ASend) || !abi.Supported(CapA2ASend) {
+	if !slices.Contains(caps, CapA2ASend) || !abi.Supported(CapA2ASend) {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "a2achan/gate"}
 	}
 	if body.Taint == abi.TaintQuarantined {
@@ -91,7 +83,7 @@ func gateSend(from string, to ChannelKey, body abi.Ref, caps []abi.Capability, a
 // gateRecv is the recv-time capability floor: without CapA2ARecv advertised (and
 // registered) it denies with ReasonDefaultDeny (no affirmative receive-right).
 func gateRecv(caps []abi.Capability) abi.Verdict {
-	if !hasCap(caps, CapA2ARecv) || !abi.Supported(CapA2ARecv) {
+	if !slices.Contains(caps, CapA2ARecv) || !abi.Supported(CapA2ARecv) {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "a2achan/gate"}
 	}
 	return abi.Verdict{Kind: abi.VerdictAllow, By: "a2achan/gate"}
