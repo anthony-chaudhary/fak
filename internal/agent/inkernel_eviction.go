@@ -87,36 +87,37 @@ func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int, tools 
 	if !p.kvSpanEvict || p.m == nil || p.tok == nil || throughIdx < 0 || throughIdx >= len(messages) {
 		return 0, false
 	}
-	// Lower each message into the incremental token span it adds to the cumulative transcript.
-	// Rendering renderTranscriptTools(messages[:i+1], tools) and slicing past the previous
-	// cumulative length makes the per-segment spans concatenate to EXACTLY the full transcript
-	// token path the generation turn cached (tool-spec folded into the leading system block, #612)
-	// — so the poison segment evicts precisely its own span and the survivors renumber correctly.
-	segIDs, poisonSeg, ok := p.lowerSegments(messages, throughIdx, tools)
+	return p.withSegmentBridge(messages, throughIdx, tools, func(sess *model.Session, bridge *kvmmu.Context, segIDs []kvSegment, poisonSeg string) (int, bool) {
+		freed, found := bridge.Quarantine(poisonSeg)
+		if !found || freed == 0 {
+			return 0, false
+		}
+		// Reference: a session that ONLY prefilled the survivor spans. Equal next-token logits
+		// (within the cross-path FMA tolerance, 0 on amd64) prove the evicted cache is the never-saw
+		// cache. This is the bit-exact reposition invariant, witnessed end-to-end on the live path.
+		exact := p.repositionIsExact(sess, segIDs, poisonSeg)
+		log.Printf("inkernel_chat kvmmu-evict model=%s through_msg=%d freed=%dpos reposition_exact=%v",
+			p.modelID, throughIdx, freed, exact)
+		return freed, exact
+	})
+}
+
+// withSegmentBridge runs the shared span-eviction preamble EvictKVSpan and ElideKVSpans
+// both need: lower the transcript into incremental token spans, take p.mu, and build a
+// fresh-session kvmmu bridge. Any lowering or unsupported-cache failure fails open to
+// (0,false) so the served turn degrades to no eviction rather than crashing.
+func (p *InKernelPlanner) withSegmentBridge(messages []Message, throughIdx int, tools []ToolDef, fn func(sess *model.Session, bridge *kvmmu.Context, segs []kvSegment, poisonID string) (int, bool)) (freed int, repositionExact bool) {
+	segs, poisonID, ok := p.lowerSegments(messages, throughIdx, tools)
 	if !ok {
 		return 0, false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// Build a fresh-session kvmmu bridge over the lowered segments. Fail OPEN on a cache whose
-	// eviction is formally unsupported (a hybrid Gated-DeltaNet recurrence: kvmmu's evict would
-	// panic KVCache.Evict). The byte-gate quarantine already paged the result out, so the KV-MMU
-	// span eviction simply does not engage on such a model rather than crash the served turn.
-	sess, bridge, ok := p.newSegmentBridge(segIDs)
+	sess, bridge, ok := p.newSegmentBridge(segs)
 	if !ok {
 		return 0, false
 	}
-	freed, found := bridge.Quarantine(poisonSeg)
-	if !found || freed == 0 {
-		return 0, false
-	}
-	// Reference: a session that ONLY prefilled the survivor spans. Equal next-token logits
-	// (within the cross-path FMA tolerance, 0 on amd64) prove the evicted cache is the never-saw
-	// cache. This is the bit-exact reposition invariant, witnessed end-to-end on the live path.
-	repositionExact = p.repositionIsExact(sess, segIDs, poisonSeg)
-	log.Printf("inkernel_chat kvmmu-evict model=%s through_msg=%d freed=%dpos reposition_exact=%v",
-		p.modelID, throughIdx, freed, repositionExact)
-	return freed, repositionExact
+	return fn(sess, bridge, segs, poisonID)
 }
 
 // KVSpanElider is the model-side PLANNED-ELISION residency BRIDGE seam the gateway drives on
@@ -173,37 +174,27 @@ func (p *InKernelPlanner) ElideKVSpans(messages []Message, plan ctxplan.Plan) (f
 	if len(plan.Elided) == 0 {
 		return 0, false // the plan elided nothing — residency already matches the view
 	}
-	// Lower every message into its incremental token span (the same lowering EvictKVSpan uses,
-	// through the LAST message so the spans concatenate to exactly the full transcript path). The
-	// segment ids are segIDFor(message, i) — the same ids the plan must carry. #612 threads tools
-	// into the poison-eviction render; this planned-elision residency bridge is a SEPARATE seam
-	// whose driver does not yet carry the request tools, so it keeps its historical tools-less
-	// lowering (nil) — byte-identical to before, a tracked follow-on, not a regression.
-	segIDs, _, ok := p.lowerSegments(messages, len(messages)-1, nil)
-	if !ok {
-		return 0, false
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// Fail OPEN on a cache whose eviction is formally unsupported (a recurrent / GDN cache):
-	// the residency plan simply does not engage rather than panic the served turn.
-	sess, bridge, ok := p.newSegmentBridge(segIDs)
-	if !ok {
-		return 0, false
-	}
-	freed = bridge.ApplyPlan(plan)
-	if freed == 0 {
-		return 0, false // no segment id matched the plan's elided set (or all were held/selected)
-	}
-	// Bit-exact ONLY in the provable direction: every elided span positionally after every
-	// resident one. There, the reference is a prefill of just the resident-prefix spans, and equal
-	// next-token logits prove the elided cache is the only-ever-saw-the-view cache (the
-	// O(1)-residency invariant). Otherwise residency shrank but the never-saw invariant does not
-	// hold, so report false instead of asserting it.
-	repositionExact = p.residencyIsExact(sess, segIDs, plan)
-	log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v",
-		p.modelID, len(plan.Elided), freed, repositionExact)
-	return freed, repositionExact
+	// Lower every message (through the LAST one, so the spans concatenate to exactly the full
+	// transcript path). The segment ids are segIDFor(message, i) — the same ids the plan must
+	// carry. #612 threads tools into the poison-eviction render; this planned-elision residency
+	// bridge is a SEPARATE seam whose driver does not yet carry the request tools, so it keeps
+	// its historical tools-less lowering (nil) — byte-identical to before, a tracked follow-on,
+	// not a regression.
+	return p.withSegmentBridge(messages, len(messages)-1, nil, func(sess *model.Session, bridge *kvmmu.Context, segIDs []kvSegment, _ string) (int, bool) {
+		freed := bridge.ApplyPlan(plan)
+		if freed == 0 {
+			return 0, false // no segment id matched the plan's elided set (or all were held/selected)
+		}
+		// Bit-exact ONLY in the provable direction: every elided span positionally after every
+		// resident one. There, the reference is a prefill of just the resident-prefix spans, and equal
+		// next-token logits prove the elided cache is the only-ever-saw-the-view cache (the
+		// O(1)-residency invariant). Otherwise residency shrank but the never-saw invariant does not
+		// hold, so report false instead of asserting it.
+		exact := p.residencyIsExact(sess, segIDs, plan)
+		log.Printf("inkernel_chat kvmmu-elide model=%s elided=%d freed=%dpos reposition_exact=%v",
+			p.modelID, len(plan.Elided), freed, exact)
+		return freed, exact
+	})
 }
 
 // SegElisionPlan builds the ctxplan.Plan ElideKVSpans consumes from a positional resident/elided
