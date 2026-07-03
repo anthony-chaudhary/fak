@@ -98,6 +98,7 @@ func (w Witness) FinalText() string {
 // state file so a restarted process resumes editing the same message.
 type CardState struct {
 	Channel   string   `json:"channel,omitempty"`
+	Label     string   `json:"label,omitempty"` // run identity, frozen at Start (pre-outcome)
 	PostNonce string   `json:"post_nonce,omitempty"`
 	TS        string   `json:"ts,omitempty"` // resolved from the outbox after the post drains
 	Final     bool     `json:"final,omitempty"`
@@ -154,7 +155,13 @@ func (c *Card) save() error {
 // BEFORE the spool append, so a crash between the two re-enqueues under the
 // SAME nonce on the next Start instead of minting a second card; once the spool
 // row exists, Start refuses (post once).
-func (c *Card) Start(channel, text string, blocks []any) error {
+//
+// label is the run's identity line ("dispatch nightly-fix · run r-42"),
+// FROZEN here — before any outcome exists — and re-rendered as the final
+// edit's prefix, since an edit replaces the whole message. Because it is
+// fixed pre-outcome it cannot carry the run's verdict; the verdict tokens
+// come only from the witness fold.
+func (c *Card) Start(channel, label, text string, blocks []any) error {
 	if c.st.PostNonce != "" {
 		snap, err := c.o.Load()
 		if err != nil {
@@ -173,6 +180,7 @@ func (c *Card) Start(channel, text string, blocks []any) error {
 		return fmt.Errorf("slackoutbox: card start: channel is required")
 	}
 	c.st.Channel = channel
+	c.st.Label = label
 	c.st.PostNonce = NewNonce()
 	if err := c.save(); err != nil {
 		return err
@@ -234,7 +242,11 @@ func (c *Card) Finalize(w Witness) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.o.Enqueue(Row{Channel: c.st.Channel, Text: w.FinalText(), UpdateTS: ts, Source: cardSource + ":final"}); err != nil {
+	text := w.FinalText()
+	if c.st.Label != "" {
+		text = c.st.Label + " — " + text
+	}
+	if _, err := c.o.Enqueue(Row{Channel: c.st.Channel, Text: text, UpdateTS: ts, Source: cardSource + ":final"}); err != nil {
 		return err
 	}
 	c.st.Final = true

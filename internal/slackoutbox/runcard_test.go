@@ -57,10 +57,10 @@ func TestCardLifecyclePostUpdateFinal(t *testing.T) {
 	c := testCard(t, o)
 	w := newCardWire()
 
-	if err := c.Start("C1", "run r-1 started", nil); err != nil {
+	if err := c.Start("C1", "run r-1", "run r-1 started", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Start("C1", "run r-1 started", nil); !errors.Is(err, ErrCardAlreadyStarted) {
+	if err := c.Start("C1", "run r-1", "run r-1 started", nil); !errors.Is(err, ErrCardAlreadyStarted) {
 		t.Fatalf("second Start must refuse, got %v", err)
 	}
 	if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
@@ -91,13 +91,13 @@ func TestCardLifecyclePostUpdateFinal(t *testing.T) {
 	}
 
 	// Exactly ONE post ever; every edit targeted the same ts; the card's final
-	// text is the deterministic witness fold.
+	// text is the start-frozen label plus the deterministic witness fold.
 	joined := strings.Join(w.sends, "\n")
 	if strings.Count(joined, "post ") != 1 {
 		t.Fatalf("card must post exactly once:\n%s", joined)
 	}
-	if w.byTS["1.0"] != wit.FinalText() {
-		t.Fatalf("final card text = %q, want witness fold %q", w.byTS["1.0"], wit.FinalText())
+	if want := "run r-1 — " + wit.FinalText(); w.byTS["1.0"] != want {
+		t.Fatalf("final card text = %q, want label + witness fold %q", w.byTS["1.0"], want)
 	}
 	if !strings.HasPrefix(wit.FinalText(), "SHIPPED · commit abc1234") {
 		t.Fatalf("witness fold wrong: %q", wit.FinalText())
@@ -123,7 +123,7 @@ func TestCardRestartResumesSameCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := newCardWire()
-	if err := c.Start("C1", "started", nil); err != nil {
+	if err := c.Start("C1", "", "started", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
@@ -139,7 +139,7 @@ func TestCardRestartResumesSameCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c2.Start("C1", "started", nil); !errors.Is(err, ErrCardAlreadyStarted) {
+	if err := c2.Start("C1", "", "started", nil); !errors.Is(err, ErrCardAlreadyStarted) {
 		t.Fatalf("restarted process must not post a second card, got %v", err)
 	}
 	if err := c2.Update("recovered, resuming", nil); err != nil {
@@ -166,7 +166,7 @@ func TestCardUpdateBeforePostDrainedRefuses(t *testing.T) {
 	if err := c.Update("too early", nil); !errors.Is(err, ErrCardNotStarted) {
 		t.Fatalf("update before start must refuse, got %v", err)
 	}
-	if err := c.Start("C1", "started", nil); err != nil {
+	if err := c.Start("C1", "", "started", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Update("still too early", nil); !errors.Is(err, ErrCardNotPosted) {
@@ -191,7 +191,7 @@ func TestCardFinalTextIsWitnessSourced(t *testing.T) {
 	o := testOutbox(t)
 	c := testCard(t, o)
 	w := newCardWire()
-	if err := c.Start("C1", "started", nil); err != nil {
+	if err := c.Start("C1", "", "started", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
@@ -221,7 +221,7 @@ func TestCardThreadCarriesOverflowDetail(t *testing.T) {
 	o := testOutbox(t)
 	c := testCard(t, o)
 	w := newCardWire()
-	if err := c.Start("C1", "started", nil); err != nil {
+	if err := c.Start("C1", "", "started", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := o.Drain(context.Background(), w, drainOpts(nil)); err != nil {
