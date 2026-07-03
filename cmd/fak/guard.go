@@ -143,6 +143,7 @@ func cmdGuard(argv []string) {
 	sessionPressureDays := fs.Float64("session-pressure-days", 7, "with --session-pressure-gate, audit transcripts modified within N days for the current workspace namespace")
 	sessionPressureMax := fs.Int("session-pressure-max", 40, "with --session-pressure-gate, maximum recent transcripts to audit before deciding the launch gate")
 	sessionPressureReport := fs.String("session-pressure-report", "", "with --session-pressure-gate, write the fak.session_audit.actions.v1 launch-gate report to FILE before allowing or refusing")
+	sessionPressureJustification := fs.String("session-pressure-justify", "", "with --session-pressure-gate and an explicit Opus --model, non-empty justification that allows the launch while recording the pressure-gate report")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	maxDuration := fs.Duration("max-duration", 0, "govern this guard session to at most this much REAL WALL-CLOCK time (issue #1584), tracked independently of --context-budget-tokens and surviving a --restart-on-budget hidden restart (the elapsed total carries forward, it does not reset to zero). 0 = unbounded (still tracked for `fak session status`, just never stops the run). Query/inspect anytime with `fak session status <id>`; the time budget drains the session to Draining/Stopped with reason TIME_BUDGET_EXHAUSTED exactly like a token-budget exhaustion.")
 	budgetEnvelopeSpec := fs.String("budget-envelope", "", "managed-context budget envelope (#1573): turns=20,tokens=200000,context=64000,wall=2h,spend=$25,throughput=40/s,max-tokens=1024,gap=250ms. Seeds this guard session's budget/pace/wall axes; explicit --context-budget-tokens and --max-duration override those envelope axes.")
@@ -285,12 +286,13 @@ func cmdGuard(argv []string) {
 		os.Exit(2)
 	}
 	if code := runGuardSessionPressureGate(os.Stderr, guardSessionPressureGateConfig{
-		Threshold:   *sessionPressureGate,
-		SinceDays:   *sessionPressureDays,
-		Max:         *sessionPressureMax,
-		Quiet:       *quiet,
-		ReportPath:  *sessionPressureReport,
-		LaunchModel: *model,
+		Threshold:     *sessionPressureGate,
+		SinceDays:     *sessionPressureDays,
+		Max:           *sessionPressureMax,
+		Quiet:         *quiet,
+		ReportPath:    *sessionPressureReport,
+		LaunchModel:   *model,
+		Justification: *sessionPressureJustification,
 	}); code != 0 {
 		os.Exit(code)
 	}

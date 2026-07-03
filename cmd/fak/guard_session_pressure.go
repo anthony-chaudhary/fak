@@ -19,6 +19,7 @@ type guardSessionPressureGateConfig struct {
 	Quiet           bool
 	ReportPath      string
 	LaunchModel     string
+	Justification   string
 }
 
 func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateConfig) int {
@@ -55,7 +56,7 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 		fmt.Fprintf(stderr, "fak guard: invalid --session-pressure-gate %q (want high, medium, none, or off)\n", cfg.Threshold)
 		return 2
 	}
-	plan = applyGuardSessionPressureLaunchContext(plan, cfg.LaunchModel)
+	plan = applyGuardSessionPressureLaunchContext(plan, cfg.LaunchModel, cfg.Justification)
 	if cfg.ReportPath != "" {
 		if err := writeGuardSessionPressureReport(cfg.ReportPath, plan); err != nil {
 			fmt.Fprintf(stderr, "fak guard: --session-pressure-report: %v\n", err)
@@ -82,34 +83,50 @@ func runGuardSessionPressureGate(stderr io.Writer, cfg guardSessionPressureGateC
 	return 0
 }
 
-func applyGuardSessionPressureLaunchContext(plan sessionaudit.CompactActionPlan, launchModel string) sessionaudit.CompactActionPlan {
+func applyGuardSessionPressureLaunchContext(plan sessionaudit.CompactActionPlan, launchModel string, justification string) sessionaudit.CompactActionPlan {
 	launchModel = strings.TrimSpace(launchModel)
-	if plan.Gate.Verdict != "refuse" || launchModel == "" || sessionaudit.ModelTier(launchModel) != "fable" {
+	launchTier := sessionaudit.ModelTier(launchModel)
+	if plan.Gate.Verdict != "refuse" || launchModel == "" || (launchTier != "fable" && launchTier != "opus") {
 		return plan
 	}
 	thresholdRank, ok := sessionaudit.CompactActionSeverityRank(plan.Gate.Threshold)
 	if !ok || thresholdRank == 0 {
 		return plan
 	}
+	hasJustification := strings.TrimSpace(justification) != ""
 	refused := 0
 	for _, action := range plan.Actions {
 		rank, ok := sessionaudit.CompactActionSeverityRank(action.Severity)
 		if !ok || rank < thresholdRank {
 			continue
 		}
-		if guardSessionPressureActionAppliesToFableLaunch(action) {
+		if guardSessionPressureActionAppliesToLaunch(action, launchTier, hasJustification) {
 			refused++
 		}
 	}
 	plan.Gate.Refused = refused
 	if refused == 0 {
 		plan.Gate.Verdict = "allow"
-		plan.Gate.Reason = fmt.Sprintf("explicit Fable launch model %q satisfies the current high-pressure routing/context actions; no action at the threshold applies to this launch", launchModel)
+		switch launchTier {
+		case "fable":
+			plan.Gate.Reason = fmt.Sprintf("explicit Fable launch model %q satisfies the current high-pressure routing/context actions; no action at the threshold applies to this launch", launchModel)
+		case "opus":
+			plan.Gate.Reason = fmt.Sprintf("explicit Opus launch model %q supplied a session-pressure justification; no action at the threshold applies to this launch", launchModel)
+		}
 	}
 	return plan
 }
 
-func guardSessionPressureActionAppliesToFableLaunch(action sessionaudit.CompactAction) bool {
+func guardSessionPressureActionAppliesToLaunch(action sessionaudit.CompactAction, launchTier string, hasJustification bool) bool {
+	if launchTier == "opus" && hasJustification {
+		switch action.Kind {
+		case "opus_cost_pressure", "long_context_pressure":
+			return false
+		}
+	}
+	if launchTier != "fable" {
+		return true
+	}
 	switch action.Kind {
 	case "opus_cost_pressure", "long_context_pressure":
 		return false
