@@ -575,6 +575,7 @@ class EvaluateTest(unittest.TestCase):
         # Hermetic contract-hold ledger: no prior holds, and never write the real
         # .dispatch-runs ledger from a test tick (live hold ticks append to it).
         mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.contract_held_records = lambda runs_dir, **k: []
         mod.record_contract_holds = lambda runs_dir, rows, **k: None
         # Hermetic next()-queue seams: no real gh updatedAt fetch, no live repair
         # worker, no repair cooldown, and a pure repair-prompt fold.
@@ -734,6 +735,11 @@ class EvaluateTest(unittest.TestCase):
             self.assertEqual(mod.contract_held_issues(runs, ttl_h=24,
                                                       now_ts=1_000_100.0),
                              {1207, 1271})
+            records = mod.contract_held_records(runs, ttl_h=24,
+                                                now_ts=1_000_100.0,
+                                                only={1207})
+            self.assertEqual([r["issue"] for r in records], [1207])
+            self.assertEqual(records[0]["reason"], "thin")
             # Past the TTL horizon the holds expire (a backfill gets re-reviewed)...
             self.assertEqual(mod.contract_held_issues(
                 runs, ttl_h=24, now_ts=1_000_000.0 + 25 * 3600), set())
@@ -762,6 +768,37 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["target_issue"], 466)
         self.assertEqual(reviewed, [466])  # 467 skipped from the ledger, unreviewed
         self.assertEqual(p["contract_held_prior"], 1)
+
+    def test_all_prior_contract_holds_plan_repair_worker(self) -> None:
+        """A tick whose picker is empty only because the hold ledger skipped every
+        open candidate is not idle: it plans the existing repair worker from the
+        held rows."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466],
+                          "eligible_by_lane": [["gateway", [467, 466]]],
+                          "by_lane_count": {"gateway": 2}})
+        mod.contract_held_issues = lambda runs_dir, **k: {467, 466}
+        mod.contract_held_records = lambda runs_dir, **k: [
+            {"issue": 467, "number": 467, "score": 8,
+             "reason": "ISSUE_SCOPE_INCOMPLETE, missing:working_spine",
+             "missing_fields": ["working_spine"]},
+            {"issue": 466, "number": 466, "score": 8,
+             "reason": "ISSUE_AGENT_CONTEXT_INCOMPLETE, missing:parent_ref",
+             "missing_fields": ["parent_ref"]},
+        ]
+
+        def boom_review(*_args, **_kwargs):
+            raise AssertionError("prior holds should not be re-reviewed")
+
+        mod.issue_contract_review = boom_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_REPAIR")
+        self.assertEqual(p["action"], "would_repair")
+        self.assertEqual(p["contract_repair"]["batch"], [467, 466])
+        self.assertEqual(p["contract_held_prior"], 2)
 
     def test_hold_tick_records_skipped_and_final_target(self) -> None:
         """A live all-thin tick ledgers every reviewed-and-held issue (skipped heads

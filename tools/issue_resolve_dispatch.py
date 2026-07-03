@@ -817,32 +817,76 @@ def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_T
     work: a repair worker's edit (or a human backfill) bumps updatedAt, so the very
     next tick re-reviews the issue instead of skipping it for a day. Fail-open in
     the conservative direction: no updated timestamp for an issue -> it stays held."""
+    return {int(r.get("issue") or 0) for r in contract_held_records(
+        runs_dir, ttl_h=ttl_h, now_ts=now_ts, updated_ts=updated_ts)}
+
+
+def _missing_fields_from_hold_reason(reason: str) -> list[str]:
+    out: list[str] = []
+    for token in reason.split(","):
+        token = token.strip()
+        if token.startswith("missing:"):
+            field = token.split(":", 1)[1].strip()
+            if field:
+                out.append(field)
+    return out
+
+
+def contract_held_records(
+    runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
+    now_ts: float | None = None,
+    updated_ts: dict[int, float] | None = None,
+    only: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Recent contract-held ledger rows, deduped to the latest verdict per issue.
+
+    ``contract_held_issues`` uses the same reader for its skip set. The richer
+    rows feed the repair-worker arm when the skip set itself emptied the picker:
+    those issues are still work, just grooming work instead of resolution work.
+    """
     if ttl_h <= 0:
-        return set()
+        return []
     ledger = runs_dir / _CONTRACT_HOLD_LEDGER
     if not ledger.is_file():
-        return set()
+        return []
     import time
     now = now_ts if now_ts is not None else time.time()
     horizon = now - ttl_h * 3600
-    held: dict[int, float] = {}
+    held: dict[int, tuple[float, int, dict[str, Any]]] = {}
     try:
         lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        return set()
-    for line in lines:
+        return []
+    only_set = {int(n) for n in only} if only is not None else None
+    for idx, line in enumerate(lines):
         try:
             row = json.loads(line)
             ts = float(row.get("ts") or 0)
             if ts >= horizon:
                 n = int(row.get("issue"))
-                held[n] = max(held.get(n, 0.0), ts)
+                if only_set is not None and n not in only_set:
+                    continue
+                if updated_ts and (updated_ts.get(n) or 0.0) > ts:
+                    continue
+                reason = str(row.get("reason") or "")
+                missing = row.get("missing_fields")
+                if not isinstance(missing, list):
+                    missing = _missing_fields_from_hold_reason(reason)
+                rec = {
+                    "issue": n,
+                    "number": n,
+                    "score": int(row.get("score") or 0),
+                    "reason": reason,
+                    "title": str(row.get("title") or "")[:200],
+                    "missing_fields": [str(m) for m in missing if m],
+                }
+                prev = held.get(n)
+                if prev is None or ts > prev[0] or (ts == prev[0] and idx > prev[1]):
+                    held[n] = (ts, idx, rec)
         except (TypeError, ValueError):
             continue
-    if updated_ts:
-        held = {n: ts for n, ts in held.items()
-                if (updated_ts.get(n) or 0.0) <= ts}
-    return set(held)
+    return [rec for _ts, _idx, rec in sorted(held.values(),
+                                            key=lambda item: (item[0], item[1]))]
 
 
 def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
@@ -863,6 +907,9 @@ def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                     "utc": iso, "ts": now, "issue": int(r.get("issue") or 0),
                     "score": int(r.get("score") or 0),
                     "reason": str(r.get("reason") or "")[:200],
+                    "title": str(r.get("title") or "")[:200],
+                    "missing_fields": [str(m) for m in
+                                       (r.get("missing_fields") or []) if m][:24],
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip re-reviews next tick, never blocks one
@@ -2805,9 +2852,31 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"onto the same leaf tree")})
         return finish(payload)
     if target is None:
+        held_candidate_numbers: set[int] = set()
+        for entry in eligible_lanes or []:
+            try:
+                for n in entry[1] or []:
+                    if int(n) in contract_held_prior:
+                        held_candidate_numbers.add(int(n))
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+        held_rows = contract_held_records(
+            runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts,
+            only=held_candidate_numbers) if held_candidate_numbers else []
+        if held_rows:
+            payload["contract_held_prior"] = len(contract_held_prior)
+            repaired = _maybe_dispatch_contract_repair(
+                root, runs_dir, payload, rows=held_rows, live=live,
+                backend=backend, acct=acct, repair_batch=repair_batch,
+                repair_cooldown_min=repair_cooldown_min,
+                spawn_probe_s=spawn_probe_s, product=product)
+            if repaired is not None:
+                return finish(repaired)
         lanes_considered = [e[0] for e in (eligible_lanes or []) if e and e[1]]
         where = (f"lane '{chosen_lane}'" if len(lanes_considered) <= 1
                  else f"all {len(lanes_considered)} eligible lanes")
+        repair_note = (payload.get("contract_repair") or {}).get("skipped")
+        repair_suffix = f" (contract-repair: {repair_note})" if repair_note else ""
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
                         "reason": (f"every open issue on {where} is "
                                    f"either live ({sorted(live_issues)}), in "
@@ -2815,7 +2884,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"within the last {contract_hold_ttl_h}h "
                                    f"({len(contract_held_prior)} issue(s) awaiting "
                                    f"a contract backfill) — nothing fresh to "
-                                   f"dispatch this tick")})
+                                   f"dispatch this tick{repair_suffix}")})
         return finish(payload)
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
