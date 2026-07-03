@@ -255,12 +255,7 @@ func ParseReadinessTarget(spec string) (ReadinessTarget, error) {
 		Name:    parts[0],
 		BaseURL: parts[1],
 	}
-	if len(parts) >= 3 {
-		target.APIKeyEnv = parts[2]
-	}
-	if len(parts) >= 4 {
-		target.ModelHint = parts[3]
-	}
+	target.APIKeyEnv, target.ModelHint = optionalTargetTail(parts, 2)
 	if err := ReadinessTargetError(target); err != "" {
 		return ReadinessTarget{}, fmt.Errorf("%s", err)
 	}
@@ -277,16 +272,24 @@ func ParseAcceptanceTarget(spec string) (AcceptanceTarget, error) {
 		Provider: NormalizeProvider(parts[1]),
 		BaseURL:  parts[2],
 	}
-	if len(parts) >= 4 {
-		target.APIKeyEnv = parts[3]
-	}
-	if len(parts) >= 5 {
-		target.ModelHint = parts[4]
-	}
+	target.APIKeyEnv, target.ModelHint = optionalTargetTail(parts, 3)
 	if err := AcceptanceTargetError(target); err != "" {
 		return AcceptanceTarget{}, fmt.Errorf("%s", err)
 	}
 	return target, nil
+}
+
+// optionalTargetTail reads the optional api-key-env and model-hint columns of a
+// target spec, starting at parts[idx]. The readiness and acceptance spec
+// grammars share this tail but differ in required-prefix length.
+func optionalTargetTail(parts []string, idx int) (apiKeyEnv, modelHint string) {
+	if len(parts) > idx {
+		apiKeyEnv = parts[idx]
+	}
+	if len(parts) > idx+1 {
+		modelHint = parts[idx+1]
+	}
+	return apiKeyEnv, modelHint
 }
 
 // loadRosterTargets reads a roster JSON file, extracts its "targets" list (an
