@@ -462,23 +462,6 @@ func rwNewestTranscript(home, sid string) string {
 	return best
 }
 
-// rwTerminalText is the text of the transcript's TERMINAL user/assistant record — the
-// last real turn, ignoring trailing control/metadata records. Classification must read
-// only this: a banner five turns back that a later clean turn superseded is NOT the
-// session's current outcome.
-func rwTerminalText(path string) string {
-	if path == "" {
-		return ""
-	}
-	copyRecs := loadSweepCopy(path).Records
-	for i := len(copyRecs) - 1; i >= 0; i-- {
-		if r := copyRecs[i]; r.Role == "user" || r.Role == "assistant" {
-			return r.Text
-		}
-	}
-	return ""
-}
-
 // rwLoadPlan reads the AUTO_RESUME plan fleet_sessions.py writes. Missing/malformed
 // yields an empty plan (the tick logs plan=0 and does nothing), never a crash.
 func rwLoadPlan(path string) []resume.WatchdogPlanRow {
