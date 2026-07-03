@@ -65,4 +65,7 @@ func TestScratchRemovalSafe(t *testing.T) {
 		}
 	}
 	fmt.Printf("RESULT: %d wrong verdicts under no-strip\n", fail)
+	if fail != 0 {
+		t.Fatalf("wrong verdicts under no-strip: %d", fail)
+	}
 }
