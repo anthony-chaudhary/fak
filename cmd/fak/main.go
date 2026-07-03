@@ -37,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -351,6 +352,8 @@ func main() {
 		cmdProgram(os.Args[2:])
 	case "rollup":
 		cmdRollup(os.Args[2:])
+	case "sidecar":
+		cmdSidecar(os.Args[2:])
 	case "nightrun":
 		cmdNightrun(os.Args[2:])
 	case "sessions":
@@ -782,8 +785,14 @@ func cmdAgent(argv []string) {
 	out := fs.String("out", "agent-report.json", "report output path")
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
+	loadedRoute, runOpts, err := loadAgentRouteOptions(*routeManifest)
+	must(err)
+	if loadedRoute != nil {
+		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
+	}
 
 	var planner agent.Planner
 	if *offline || *baseURL == "" {
@@ -803,7 +812,7 @@ func cmdAgent(argv []string) {
 		planner = p
 	}
 
-	res, trace, err := agent.Run(ctx(), planner, *task, *maxTurns)
+	res, trace, err := agent.Run(ctx(), planner, *task, *maxTurns, runOpts...)
 	must(err)
 
 	must(os.WriteFile(*out, jsonIndent(res), 0o644))
@@ -811,6 +820,18 @@ func cmdAgent(argv []string) {
 		_ = os.WriteFile(*logOut, agent.RenderTrace(trace), 0o644)
 	}
 	agent.PrintReport(os.Stdout, res, trace, *out)
+}
+
+func loadAgentRouteOptions(path string) (*modelroute.Manifest, []agent.RunOption, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil, nil
+	}
+	manifest, err := modelroute.LoadManifest(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fak agent: --route-manifest: %w", err)
+	}
+	return &manifest, []agent.RunOption{agent.WithRouteManifest(&manifest)}, nil
 }
 
 func jsonIndent(v any) []byte {
