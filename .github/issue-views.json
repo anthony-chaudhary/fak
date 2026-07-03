@@ -1,7 +1,7 @@
 {
   "version": 1,
   "repo": "anthony-chaudhary/fak",
-  "description": "Named issue views — the default selection surface for fak dispatch and triage. This is the API-readable mirror of the GitHub saved views at https://github.com/anthony-chaudhary/fak/issues/views, which hydrate client-side and are NOT reachable through gh/REST/GraphQL. Edit views here; reconcile against the GitHub UI by hand. Each `query` is GitHub issue-search syntax fed verbatim to `gh issue list --search`. NOTE: `label:a,b` (comma) is OR; two separate `label:` tokens are AND. Always paired with an explicit --limit because gh defaults to 30.",
+  "description": "Named issue views — the default selection surface for fak dispatch and triage. This is the API-readable mirror of the GitHub saved views at https://github.com/anthony-chaudhary/fak/issues/views, which hydrate client-side and are NOT reachable through gh/REST/GraphQL. Edit views here; reconcile against the GitHub UI by hand. Each `query` is GitHub issue-search syntax fed verbatim to `gh issue list --search`. NOTE: `label:a,b` (comma) is OR; two separate `label:` tokens are AND. Always paired with an explicit --limit because gh defaults to 30. WORK-CLASS AXIS: the `dev-leaves` / `infra` / `front-door` views separate the three classes of work (product dev vs fleet infra vs the public release path) via the `class:*` labels — an axis orthogonal to area/priority/milestone. Class is DERIVED from the file-tree lane an issue routes to (tools/issue_lane_router.py derive_class) and backfilled with `python tools/issue_lane_router.py --apply-labels`; see docs/work-class-axis.md.",
   "default": "ready-leaves",
   "limit": 300,
   "views": [
@@ -16,6 +16,24 @@
       "title": "P0/P1 leaves",
       "query": "is:open label:priority/P0,priority/P1 -label:epic -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint sort:created-asc",
       "note": "Prioritized, dispatchable leaves. P0 = load-bearing, do first; P1 = high priority. Oldest-first so the long-waiting work surfaces."
+    },
+    {
+      "slug": "dev-leaves",
+      "title": "Dev leaves (product only)",
+      "query": "is:open label:class:dev -label:epic -label:research -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
+      "note": "The clean day-to-day dispatch surface: product/kernel leaves ONLY, with fleet infra AND the public front-door/release path hidden. Work-CLASS axis (class:dev) — see docs/work-class-axis.md. Class is derived from the file-tree lane an issue routes to (tools/issue_lane_router.py); backfill with `python tools/issue_lane_router.py --apply-labels`."
+    },
+    {
+      "slug": "infra",
+      "title": "Infra (fleet plumbing)",
+      "query": "is:open label:class:infra -label:epic -label:research -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
+      "note": "Fleet machinery — CI/CD, dispatch/supervisor loops, observability/metrics, slack cadence, build, testing infra. The plumbing kept OUT of the dev-leaves stream so product work isn't diluted by it. Work-CLASS axis (class:infra)."
+    },
+    {
+      "slug": "front-door",
+      "title": "Front-door / mainline (release path)",
+      "query": "is:open label:class:frontdoor -label:epic -label:research -label:idea-scout -label:needs-triage -label:triage-only -label:triage_only -label:guard-complaint no:assignee",
+      "note": "The fenced public release path: install/README/getting-started front door, release promotion + version-everything, the branch-regime cutover. Review-heavier — a change here is user-visible. Vocabulary from the branch-regime ADR (docs/branch-regime.md). Work-CLASS axis (class:frontdoor)."
     },
     {
       "slug": "epics",
