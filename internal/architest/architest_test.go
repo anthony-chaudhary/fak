@@ -47,26 +47,27 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"agenticbench":       1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
-	"ailuminate":         1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
-	"apihostprobe":       1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
-	"accountprobe":       1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
-	"dispatchstatus":     1, // pure dispatch lease-status classifier (refs/fak/locks records -> LIVE/EXPIRED + tree-overlap candidate-blocking) ported from tools/dispatch_status.py; stdlib-only, imports nothing internal, off the hot path.
-	"benchcatalog":       1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
-	"sotamatrix":         1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
-	"branchrole":         1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
-	"benchloop":          1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
-	"benchruns":          1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
-	"benchlineagegate":   1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
-	"cachevalueledger":   1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
-	"gatewayusageledger": 1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
-	"benchcli":           1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
-	"benchids":           1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
-	"benchscore":         1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
-	"callavoid":          1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
-	"harnessres":         1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
-	"amdgpu":             1, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
-	"accounts":           1, "accountobs": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"agenticbench":         1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"ailuminate":           1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
+	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
+	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
+	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
+	"dispatchstatus":       1, // pure dispatch lease-status classifier (refs/fak/locks records -> LIVE/EXPIRED + tree-overlap candidate-blocking) ported from tools/dispatch_status.py; stdlib-only, imports nothing internal, off the hot path.
+	"benchcatalog":         1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"sotamatrix":           1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
+	"branchrole":           1, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
+	"benchloop":            1, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
+	"benchlineagegate":     1, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
+	"cachevalueledger":     1, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
+	"gatewayusageledger":   1, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
+	"benchcli":             1, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
+	"benchids":             1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
+	"benchscore":           1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
+	"callavoid":            1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"harnessres":           1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
+	"amdgpu":               1, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
+	"accounts":             1, "accountobs": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 1, "bgloop": 1, "binstamp": 1, "cachewitness": 1, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "dojocal": 1, "experiments": 1, "fleetaccounts": 1, "flock": 1, "issuecontractrepair": 1, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "selfinstall": 1, "sessionaudit": 1, "strmatch": 1,
 	"chatrelay":            1,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
