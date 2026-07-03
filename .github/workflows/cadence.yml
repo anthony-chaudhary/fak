@@ -7,6 +7,7 @@ name: cadence report
 #   * WORK-DONE — git commits + `(fak ` ship-trailer count over a trailing window
 #                 (the dimension that had NO durable cadence report before this).
 #   * RELEASES  — the release-status fold (latest tag + next action).
+#   * MILESTONES — the milestone trend ledger + generated climb status snapshot.
 #
 # Today each lands in a SEPARATE place (garden.yml folds scores daily,
 # release-cadence.yml folds releases every 6h, work-done was nowhere). This makes
@@ -14,13 +15,14 @@ name: cadence report
 # downloadable artifact, with a per-tick TREND vs the durable ledger
 # (docs/cadence/history.jsonl).
 #
-# Fleet's cadence report is dry-run-first. Scheduled ticks extend the ledger
-# locally but do not push. A manual dispatch with dry_run=false is the explicit
-# arm for commit -> push, matching the release-cadence convention that scheduled
-# jobs report (they don't auto-commit the shared trunk — only an explicit manual
-# arm does, cf. release-cadence.yml). The pure fold/trend logic is proven by
-# internal/cadencereport's unit tests (run first below), so a green report is a
-# real signal, not a tool that always passes.
+# Fleet's cadence report is dry-run-first. Scheduled ticks extend the cadence ledger
+# locally but do not push it. A manual dispatch with dry_run=false is the explicit
+# arm for committing the cadence ledger, matching the release-cadence convention.
+# The milestone ledger rides this same weekly tick and keeps the retired
+# milestone-tick kill switch: scheduled runs commit milestone history/status unless
+# FAK_MILESTONE_TICK=0; manual dispatches commit it only when dry_run=false. The pure
+# fold/trend logic is proven by internal/cadencereport's unit tests (run first below),
+# so a green report is a real signal, not a tool that always passes.
 on:
   schedule:
     # Mondays 08:17 UTC — an off-the-hour minute clear of the other scheduled
@@ -55,9 +57,14 @@ jobs:
       contents: write
     env:
       GOTOOLCHAIN: auto
+      # Slack token is a secret; channel id is a repo variable. Absent => the post
+      # step is skipped, while the report still renders to the summary/artifact.
+      FAK_MILESTONE_TOKEN: ${{ secrets.FAK_MILESTONE_TOKEN }}
+      FAK_MILESTONE_CHANNEL: ${{ vars.FAK_MILESTONE_CHANNEL }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref_name }}
           # The work-done dimension counts commits over a trailing window, so the
           # full history must be present (a shallow checkout would undercount).
           fetch-depth: 0
@@ -74,7 +81,7 @@ jobs:
       # The fold/trend logic FIRST: a green report below is only meaningful if the
       # fold that produced it is itself proven correct. The milestone fold rides the
       # SAME loop cadence (issue #1443) so a milestone regression surfaces on the
-      # operator's weekly read, not only the separate milestone-tick.yml cron.
+      # operator's weekly read instead of a separate milestone cron.
       - name: cadence fold self-test
         run: go test ./internal/cadencereport/
 
@@ -104,20 +111,41 @@ jobs:
           PY
           cat cadence-report.txt
 
-      # MILESTONES on the SAME loop cadence (issue #1443). The milestone report's
-      # advisory --check gate runs as a sibling RSI surface here so a stalled roadmap
-      # or an unmeasured climb is visible on the operator's weekly read — the same
-      # cadence the scores/work/releases fold rides. Fail-open like the cadence report:
-      # a non-zero exit (the advisory gate, or a partial roadmap) is surfaced, not
-      # swallowed, so a flaky sub-tool never suppresses the report.
-      - name: milestone report (--check)
+      - name: Arm milestone execute decision
+        id: milestone_arm
+        env:
+          MILESTONE_TICK: ${{ vars.FAK_MILESTONE_TICK }}
+        run: |
+          set -euo pipefail
+          execute=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            execute=true
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "${MILESTONE_TICK:-}" != "0" ]; then
+            execute=true
+          fi
+          echo "execute=$execute" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Milestone execute decision"
+            echo ""
+            echo "event=${{ github.event_name }} · milestone_tick=${MILESTONE_TICK:-unset(=on)} · execute=$execute"
+            echo ""
+            echo "The milestone ledger is DEFAULT-ON for scheduled cadence runs; set repo var FAK_MILESTONE_TICK=0 to fall back to dry-run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # MILESTONES on the SAME loop cadence (issue #1443). This is the former
+      # milestone-tick append/status step, now a sibling of the cadence fold. It
+      # appends exactly once per cadence run and preserves the advisory --check
+      # surface so an unmeasured roadmap is visible on the operator's weekly read.
+      - name: milestone report (same-cadence append)
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          go run ./cmd/fak milestone report --json --check > milestone-report.json
-          echo "milestone-check-exit=$?"
+          go run ./cmd/fak milestone report --json --check --append-history > milestone-report.json
+          echo "milestone-report-exit=$?"
+          go run ./cmd/fak milestone status-doc --write-doc > milestone-status-doc.txt 2>&1
+          echo "milestone-status-exit=$?"
           set -e
           test -s milestone-report.json || echo '{}' > milestone-report.json
           python3 - <<'PY' > milestone-report.txt || echo "(milestone report unreadable)" > milestone-report.txt
@@ -137,27 +165,51 @@ jobs:
           PY
           cat milestone-report.txt
 
-      - name: Dry-run stop
-        if: >-
-          github.event_name == 'schedule' ||
-          (github.event_name == 'workflow_dispatch' && inputs.dry_run)
-        run: |
-          echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
-          echo "Scheduled ticks and default manual runs stop after extending the ledger locally. Dispatch with dry_run=false to commit and push." >> "$GITHUB_STEP_SUMMARY"
+      # Render the card on every cadence run. The live post below is gated on the
+      # milestone execute decision + a wired token, matching the retired tick.
+      - name: Render milestone card
+        if: always()
+        run: go run ./cmd/fak milestone post --dry-run --report-json milestone-report.json > milestone-card.txt 2>&1 || true
 
-      - name: Commit and push ledger
+      - name: Dry-run note
         if: >-
-          github.event_name == 'workflow_dispatch' &&
-          inputs.dry_run == false
+          steps.milestone_arm.outputs.execute != 'true' &&
+          (github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.dry_run))
+        run: |
+          echo "## Dry-run note" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cadence history is committed only by dry_run=false. Milestone history/status ride this same cadence run and honor FAK_MILESTONE_TICK for scheduled execution." >> "$GITHUB_STEP_SUMMARY"
+
+      # POST the card in-channel only on execute and only when the token is wired
+      # (fail open without it). A delivery hiccup must not fail the ledger commit.
+      - name: Post milestone card
+        if: ${{ steps.milestone_arm.outputs.execute == 'true' && env.FAK_MILESTONE_TOKEN != '' }}
+        run: go run ./cmd/fak milestone post --report-json milestone-report.json || true
+
+      - name: Commit and push ledgers
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) ||
+          steps.milestone_arm.outputs.execute == 'true'
         run: |
           set -euo pipefail
           git config user.name "fleet-cadence[bot]"
           git config user.email "fleet-cadence@users.noreply.github.com"
-          git add docs/cadence/history.jsonl
+          subject="docs(cadence): record cadence tick (fak docs)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            git add docs/cadence/history.jsonl
+          fi
+          if [ "${{ steps.milestone_arm.outputs.execute }}" = "true" ]; then
+            git add docs/milestones/history.jsonl docs/milestones/STATUS.md
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              subject="docs(milestones): record same-cadence milestone tick (fak docs)"
+            else
+              subject="docs(cadence): record cadence and milestone tick (fak docs)"
+            fi
+          fi
           if git diff --staged --quiet; then
-            echo "No ledger changes to commit"
+            echo "No ledger or status changes to commit"
           else
-            git commit -s -m "docs(cadence): record cadence tick (fak docs)"
+            git commit -s -m "$subject"
             git push
           fi
 
@@ -176,15 +228,24 @@ jobs:
             echo '```'
             echo '</details>'
             echo
-            echo "## milestones (same-cadence --check)"
+            echo "## milestones (same-cadence append)"
             echo '```'
             cat milestone-report.txt 2>/dev/null || echo "(no milestone report)"
             echo '```'
+            echo '<details><summary>rendered milestone card</summary>'
             echo
-            if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" = "true" ]; then
-              echo "_Dry-run: the ledger was extended locally but not pushed. Dispatch with dry_run=false to commit and push._"
+            echo '```'
+            cat milestone-card.txt 2>/dev/null || echo "(no milestone card)"
+            echo '```'
+            echo '</details>'
+            echo
+            echo
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+              echo "_Manual execute: cadence and milestone ledger changes were committed when present._"
+            elif [ "${{ steps.milestone_arm.outputs.execute }}" = "true" ]; then
+              echo "_Scheduled execute: milestone ledger/status changes were committed when present; cadence history remained local._"
             else
-              echo "_Ledger committed and pushed._"
+              echo "_Dry-run: ledger changes were extended locally but not pushed._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -198,4 +259,6 @@ jobs:
             cadence-report.txt
             milestone-report.json
             milestone-report.txt
+            milestone-card.txt
+            milestone-status-doc.txt
           if-no-files-found: ignore

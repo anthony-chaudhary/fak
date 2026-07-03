@@ -33,7 +33,6 @@ dojo-feed.yml:master
 dojo-rsi-feed.yml:master
 garden.yml:master
 gate-signal.yml:master
-milestone-tick.yml:master
 node-usage-feed.yml:master
 product-feed.yml:master
 release-cadence.yml:master
