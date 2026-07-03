@@ -59,6 +59,14 @@ The per-session `fak guard` exit summary also prints:
 - the **fak-slice diagnostic** naming *why* F is ~0 this session, now pointing back
   at `fak cachevalue report`.
 
+Since c9a8c26a every guard exit ALSO appends a `session_type: "guard"` row to
+`docs/nightrun/gateway-usage.jsonl` (same writer as the serve exits), carrying the
+full compaction counter family **plus `compaction_bail_reasons` and
+`compaction_anchor_starved`** — so the per-session WHY behind a zero fak slice
+(`burst_unprofitable` vs `under_budget` vs anchor-starved) survives the process
+instead of dying with the console. A fleet reader (e.g. the managed-cache proving
+ground) can now diagnose the real-session population after the fact.
+
 ## To make fak's own value actually fire (operator lever)
 
 The goal is a non-zero `fak_share`. The path:
