@@ -20,14 +20,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/boundarylint"
 	"github.com/anthony-chaudhary/fak/internal/pathlint"
 	"github.com/anthony-chaudhary/fak/internal/urllint"
 )
-
-func cmdBoundary(argv []string) { os.Exit(runBoundary(os.Stdout, os.Stderr, argv)) }
 
 // boundaryTell is one finding from any of the three witnesses, normalized to a
 // single closed-vocabulary shape so the JSON view is uniform across linters.
