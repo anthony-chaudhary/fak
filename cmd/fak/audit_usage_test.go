@@ -268,6 +268,15 @@ func TestMergeUsageInputs_MultiRootOrder(t *testing.T) {
 	if cvAbsent.Present || cvAbsent.Path != "" || len(cvAbsent.Rows) != 0 {
 		t.Errorf("cache: want absent over a ledgerless root, got %+v", cvAbsent)
 	}
+
+	gwEmpty := mergeGatewayUsageInputs(nil)
+	if gwEmpty.Present || gwEmpty.Path != "" || len(gwEmpty.Rows) != 0 {
+		t.Errorf("gateway: want absent over no roots, got %+v", gwEmpty)
+	}
+	cvEmpty := mergeCacheValueInputs(nil)
+	if cvEmpty.Present || cvEmpty.Path != "" || len(cvEmpty.Rows) != 0 {
+		t.Errorf("cache: want absent over no roots, got %+v", cvEmpty)
+	}
 }
 
 func mustWriteJSONLRow(t *testing.T, path string, row map[string]any) {
