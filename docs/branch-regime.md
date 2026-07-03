@@ -11,6 +11,12 @@ description: "Decision record and migration runbook for separating fak's hot dev
 `OFF_TRUNK` guard. Do not update agent prompts, hooks, or CI to target `dev`
 until the prerequisites below have landed.
 
+**See also:** [`work-class-axis.md`](work-class-axis.md) carries this ADR's
+front-door / development / release vocabulary down to the *issue backlog* — a
+selectable `class:frontdoor | class:infra | class:dev` axis (three issue-views)
+so an operator can dispatch only product leaves, only fleet infra, or only the
+fenced public release path.
+
 ## Decision
 
 fak will move from one branch doing every job to two long-lived branch roles:

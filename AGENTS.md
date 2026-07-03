@@ -349,6 +349,14 @@ encoded in [`internal/worktype`](internal/worktype/worktype.go):
 read as a stalled deliverable. To mark a new epic as a program, add its number to the
 `epicClass` map in `internal/worktype` (one line) — not a magic number in a report.
 
+A second, orthogonal axis separates work by **class** — fleet **infra** (CI, dispatch
+loops, observability, slack, build) vs product **dev** leaves vs the public
+**front-door / mainline** release path. It is derived from the file-tree lane an issue
+routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
+`fak index work dev-leaves` (product only, plumbing hidden), `... infra`, and
+`... front-door` (the fenced release path). Use it to dispatch one class at a time; see
+[`docs/work-class-axis.md`](docs/work-class-axis.md).
+
 ## Where to go next
 
 | If you want to… | Read |
