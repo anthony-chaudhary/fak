@@ -86,6 +86,16 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		start = time.Now()
 	}
 	var gemmTime time.Duration
+	// Sub-buckets of gemmTime, split by which resident kernel actually served each projection,
+	// so the next prefill-optimization decision is evidence-based rather than assuming the q4_k
+	// Metal GEMM dominates. q4kTime is the q4_k-majority GEMM (Metal q4_k dequant-GEMM under
+	// -tags fakmetal + MetalQ4K, else CPU q4kGemm) INCLUDING the grouped one-command-buffer
+	// GEMMGroup roundtrip; q8Time is the Q8 minority (full-attn q/k + every linear_attn.*),
+	// which on the 36 GiB Mac is OOM-gated onto the CPU qGemm8 path (metalQ8UploadAllowed=false)
+	// and is the suspected real prefill wall; q6kTime is the resident Q6_K/Q5_K matmul weights
+	// (the q4_k_m dense down_proj / lm_head). q4kTime+q8Time+q6kTime == gemmTime by construction
+	// (every timed projection lands in exactly one bucket), so the split is exhaustive and honest.
+	var q4kTime, q8Time, q6kTime time.Duration
 	base := s.Cache.Len()
 	eps := float32(cfg.RMSNormEps)
 
@@ -126,7 +136,18 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		proj = func(name string, Xf []float32, Xq *q8Panel) []float32 {
 			t0 := time.Now()
 			Y := rawProj(name, Xf, Xq)
-			gemmTime += time.Since(t0)
+			dt := time.Since(t0)
+			gemmTime += dt
+			// Attribute this projection to a sub-bucket by the SAME resident-map dispatch order
+			// rawProj (the proj closure above) uses: q4kw first → q4k, else kqw → q6k, else Q8.
+			switch {
+			case m.q4kw[name] != nil:
+				q4kTime += dt
+			case m.kqw[name] != nil:
+				q6kTime += dt
+			default:
+				q8Time += dt
+			}
 			return Y
 		}
 	}
@@ -142,7 +163,13 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		t0 := time.Now()
 		out := s.q4kGemmGroupDispatch(names, Xf, P)
 		if profile {
-			gemmTime += time.Since(t0) // the grouped GEMM+roundtrip, so the profile split stays honest
+			dt := time.Since(t0) // the grouped GEMM+roundtrip, so the profile split stays honest
+			gemmTime += dt
+			// The grouped dispatch fills ONLY the q4_k-resident members in one Metal command
+			// buffer (the q4_k dequant-GEMM + submit/sync roundtrip); every nil member is filled
+			// below by the per-weight proj, which buckets itself. So the grouped time is q4_k-Metal
+			// work and lands in q4kTime — keeping q4k_metal-vs-q8_cpu the honest split.
+			q4kTime += dt
 		}
 		if out == nil {
 			out = make([][]float32, len(names))
@@ -269,6 +296,13 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
 		fmt.Fprintf(os.Stderr, "[metalprof-hybrid P=%d] total=%.1f  gemm+roundtrip=%.1f  rest(recurrence/attn/norm)=%.1f ms path=q4k\n",
 			P, ms(total), ms(gemmTime), ms(rest))
+		// Split the gemm+roundtrip bucket by which resident kernel served each projection. The
+		// three buckets sum to gemm+roundtrip; the point is to tell the next session whether the
+		// durable prefill lever is the Q8 CPU path (q8_cpu dominates → the OOM-gated qGemm8
+		// minority is the wall) or the q4_k Metal kernel (q4k_metal dominates → kernel cleverness
+		// like FAK_Q4K_MM is the lever). The mix on the 27B Mac is the whole question (#71, #977).
+		fmt.Fprintf(os.Stderr, "[metalprof-split P=%d] q4k_metal=%.1f  q8_cpu=%.1f  q6k=%.1f ms  (sum=gemm+roundtrip=%.1f) path=q4k\n",
+			P, ms(q4kTime), ms(q8Time), ms(q6kTime), ms(gemmTime))
 	}
 	return xf
 }

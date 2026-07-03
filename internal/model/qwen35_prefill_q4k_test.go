@@ -231,6 +231,14 @@ func TestPrefillQwen35HybridQ4KProfilePrintsHybridSplit(t *testing.T) {
 		"gemm+roundtrip=",
 		"rest(recurrence/attn/norm)=",
 		"path=q4k",
+		// The gemm+roundtrip split (q4k-metal vs q8-cpu vs q6k) — fillQ4KMajority routes
+		// q/k + every linear_attn.* through Q8 and gate/up/down/v/o through q4kw, so this
+		// synthetic prefill exercises BOTH the q4k and q8 sub-buckets, proving the split
+		// forms host-independently without a Mac Metal runtime.
+		"[metalprof-split P=16]",
+		"q4k_metal=",
+		"q8_cpu=",
+		"q6k=",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("profile output %q missing %q", got, want)
