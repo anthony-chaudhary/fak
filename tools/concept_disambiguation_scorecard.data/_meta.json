@@ -40,7 +40,7 @@
       "id": "session-runtime",
       "name": "Session / scheduling family",
       "roots": ["session", "slot", "scheduler"],
-      "ignore": ["sessions", "scheduling", "scheduled", "slots"],
+      "ignore": ["sessions", "scheduling", "scheduled", "schedulers", "slots"],
       "min_files": 3,
       "note": "Session (the drive record) vs Turn (one round-trip) vs Slot (the free/busy signal) vs Scheduler (the policy that picks the next winner)."
     },
@@ -156,6 +156,18 @@
       "ignore": ["layouts"],
       "min_files": 2,
       "note": "Three disjoint layout concepts: tensor element physical arrangement (RowMajor/ColMajor), ctxplan region profile for layout-aware planning, and attention cache variant seam (standardKVLayout vs mlaKVLayout)."
+    },
+    {
+      "id": "loop",
+      "name": "Loop family",
+      "roots": ["loop"],
+      "ignore": ["loops", "looping", "looped", "loopid", "loopstate", "loopsnapshot",
+                 "loopsnapshotforid", "recordloop", "runloop", "loopconsumes", "faklooprunid",
+                 "q8prefillneedstokenloop", "appendlooprunevent", "buildtuiloopreport",
+                 "defaultloopregistry", "loopdoneunwitnessed", "noloopledger", "loopindexdebt",
+                 "tuiloopreport", "fakbgloopup", "defaultloopledger", "fakloopledger"],
+      "min_files": 3,
+      "note": "The most overloaded word in the repo: a read-only intent walker (fak superloop) vs a bulk wave launcher (/super-loop) vs a ledger+governor (fak loop) vs a per-turn exit gate (loopgate) vs the benchmark surface (bench-loop) vs the stage-coverage scorecard (loop-index) vs the cross-ledger health fold (loopfleet) vs the process babysitter (bgloop) - plus network loopback, a different domain the root swallows."
     }
   ]
 }

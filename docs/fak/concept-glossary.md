@@ -472,10 +472,6 @@ full operational map is [the loop-family map](../notes/CONCEPT-CONTINUAL-WORK-LO
   gates, it does not itself loop. *Not* `fak loop drive` (that is an actual Ralph loop
   that settles one `GOAL.md` witness).
 
-- **loopgate** - the per-turn DOS exit-gate a `fak loop drive` turn passes through
-  (`internal/loopgate`): verified-vs-naive admission for one iteration. *Not* the
-  `loopmgr` governor (that is fleet-level admission over a ledger fold, not one turn).
-
 - **bench-loop (`fak bench-loop`)** - the benchmark control surface that folds the
   benchmark registry + run catalog + nightrun ledger into the single next benchmark
   action. *Not* `loopbench` (`internal/loopgate/loopbench.go`, the verified-vs-naive
