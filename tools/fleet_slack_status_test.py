@@ -26,54 +26,172 @@ def load():
 
 
 class RunTest(unittest.TestCase):
-    def _patch(self, mod, dispatch_verdict, fleet_verdict):
-        mod.dispatch_status.collect = lambda *a, **k: {"verdict": "READY_TO_GROW"}
-        mod.dispatch_status.post_to_slack = lambda payload, **k: dict(dispatch_verdict)
-        mod.fleet_top.snapshot = lambda *a, **k: {"sessions": {"total": 3}}
-        mod.fleet_top.post_to_slack = lambda snap, **k: dict(fleet_verdict)
+    def _patch(self, mod, rollup_verdict=None, dispatch_verdict=None, fleet_verdict=None):
+        mod.dispatch_status.collect = lambda *a, **k: {"verdict": "READY_TO_GROW", "ok": True}
+        mod.fleet_top.snapshot = lambda *a, **k: {
+            "sessions": {"total": 3}, "system": {"verdict": "HEALTHY"}}
+        mod.fleet_top.attach_trend = lambda snap, *a, **k: snap
+        mod.post_rollup = lambda dispatch_payload, fleet_snap, **k: dict(
+            rollup_verdict if rollup_verdict is not None else
+            {"posted": True, "channel": "C0X", "ts": "1"})
+        mod.dispatch_status.post_to_slack = lambda payload, **k: dict(
+            dispatch_verdict if dispatch_verdict is not None else
+            {"posted": True, "channel": "C0X", "ts": "1"})
+        mod.fleet_top.post_to_slack = lambda snap, **k: dict(
+            fleet_verdict if fleet_verdict is not None else
+            {"posted": True, "channel": "C0X", "ts": "2"})
 
-    def test_both_posted_is_ok(self):
+    def test_default_posts_one_rollup(self):
         mod = load()
-        self._patch(mod, {"posted": True, "channel": "C0X", "ts": "1"},
-                    {"posted": True, "channel": "C0X", "ts": "2"})
+        self._patch(mod, {"posted": True, "channel": "C0X", "ts": "9"})
         out = mod.run(ROOT)
         self.assertTrue(out["ok"])
-        self.assertTrue(out["dispatch"]["posted"])
-        self.assertTrue(out["fleet"]["posted"])
+        self.assertEqual(out["mode"], "rollup")
+        self.assertTrue(out["rollup"]["posted"])
+        self.assertEqual(out["rollup"]["ts"], "9")
         self.assertEqual(out["dispatch"]["card_verdict"], "READY_TO_GROW")
         self.assertEqual(out["fleet"]["sessions"], 3)
 
-    def test_one_failed_is_not_ok_but_other_still_runs(self):
+    def test_rollup_failure_is_not_ok(self):
         mod = load()
-        self._patch(mod, {"posted": True, "channel": "C0X"},
-                    {"posted": False, "error": "channel_not_found"})
+        self._patch(mod, {"posted": False, "error": "channel_not_found"})
         out = mod.run(ROOT)
         self.assertFalse(out["ok"])
-        self.assertTrue(out["dispatch"]["posted"])      # the other card still posted
-        self.assertFalse(out["fleet"]["posted"])
+        self.assertFalse(out["rollup"]["posted"])
 
     def test_dry_run_counts_as_ok(self):
         mod = load()
-        self._patch(mod, {"posted": False, "dry_run": True, "channel": "C0X"},
-                    {"posted": False, "dry_run": True, "channel": "C0X"})
+        self._patch(mod, {"posted": False, "dry_run": True, "channel": "C0X"})
         out = mod.run(ROOT, dry_run=True)
         self.assertTrue(out["ok"])
 
-    def test_no_fleet_only_posts_dispatch(self):
+    def test_no_fleet_keeps_one_rollup_with_dispatch_only(self):
         mod = load()
-        self._patch(mod, {"posted": True, "channel": "C0X"},
-                    {"posted": True, "channel": "C0X"})
+        self._patch(mod, {"posted": True, "channel": "C0X"})
         out = mod.run(ROOT, do_fleet=False)
         self.assertIsNotNone(out["dispatch"])
         self.assertIsNone(out["fleet"])
+        self.assertTrue(out["rollup"]["posted"])
         self.assertTrue(out["ok"])
+
+    def test_empty_history_path_disables_trend_recording(self):
+        mod = load()
+        self._patch(mod, {"posted": True, "channel": "C0X"})
+        calls = []
+        mod.fleet_top.attach_trend = lambda snap, *a, **k: calls.append(k) or snap
+        mod.run(ROOT, history_path="")
+        self.assertEqual(calls, [])
+
+    def test_separate_mode_still_posts_both_messages(self):
+        mod = load()
+        self._patch(mod,
+                    dispatch_verdict={"posted": True, "channel": "C0X", "ts": "1"},
+                    fleet_verdict={"posted": True, "channel": "C0X", "ts": "2"})
+        out = mod.run(ROOT, separate=True)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["mode"], "separate")
+        self.assertTrue(out["dispatch"]["posted"])
+        self.assertTrue(out["fleet"]["posted"])
+        self.assertIsNone(out["rollup"])
+
+    def test_separate_mode_one_failed_is_not_ok_but_other_still_runs(self):
+        mod = load()
+        self._patch(mod,
+                    dispatch_verdict={"posted": True, "channel": "C0X"},
+                    fleet_verdict={"posted": False, "error": "channel_not_found"})
+        out = mod.run(ROOT, separate=True)
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["dispatch"]["posted"])
+        self.assertFalse(out["fleet"]["posted"])
 
     def test_skipped_post_is_not_ok(self):
         mod = load()
-        self._patch(mod, {"posted": False, "skipped": "no channel resolved"},
-                    {"posted": False, "skipped": "no channel resolved"})
+        self._patch(mod, {"posted": False, "skipped": "no channel resolved"})
         out = mod.run(ROOT)
         self.assertFalse(out["ok"])
+
+
+class RollupTextTest(unittest.TestCase):
+    def test_rollup_uses_operator_terms_and_one_message_shape(self):
+        mod = load()
+        dispatch_payload = mod.fixture_dispatch_payload(ROOT)
+        fleet_snap = mod.fixture_fleet_snapshot()
+        fleet_snap["trend"] = "trend: usable 3→1 ▇▁ (-2 over 2)"
+
+        text = mod.rollup_text(dispatch_payload, fleet_snap)
+
+        self.assertIn("*fleet roll-up", text)
+        self.assertIn("issue work:", text)
+        self.assertIn("open ticket(s)", text)
+        self.assertIn("agent sessions:", text)
+        self.assertIn("needs you:", text)
+        self.assertIn("being handled:", text)
+        self.assertIn("ticket trend:", text)
+        self.assertIn("capacity trend: usable 3→1", text)
+        self.assertNotIn("plane:", text)
+        self.assertNotIn("```", text)
+
+    def test_rollup_clean_state_says_no_human_action(self):
+        mod = load()
+        dispatch_payload = mod.fixture_dispatch_payload(ROOT)
+        dispatch_payload["ok"] = True
+        dispatch_payload["verdict"] = "READY_TO_GROW"
+        dispatch_payload["backend_health"] = {"dead": [], "stub_rate": []}
+        dispatch_payload["hook_health"] = {"by_backend": []}
+        dispatch_payload["throughput"] = {"na": True}
+        fleet_snap = mod.fleet_top.build_snapshot(
+            {"rows": [], "accounts": [], "throttle": {}},
+            workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z")
+
+        text = mod.rollup_text(dispatch_payload, fleet_snap)
+
+        self.assertIn("needs you: none", text)
+
+
+class PostRollupTest(unittest.TestCase):
+    SLACK_KEYS = ("FAK_DISPATCH_TOKEN", "FAK_DISPATCH_CHANNEL", "FAK_SCOREBOARD_TOKEN")
+
+    def _clear_env(self):
+        import os
+        saved = {k: os.environ.pop(k, None) for k in self.SLACK_KEYS}
+        self.addCleanup(self._restore_env, saved)
+
+    def _restore_env(self, saved):
+        import os
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_post_rollup_sends_one_combined_message(self):
+        import json as _json
+        import os
+        mod = load()
+        self._clear_env()
+        os.environ["FAK_SCOREBOARD_TOKEN"] = "xoxb-test-tok"
+        calls = []
+
+        def transport(url, body, headers, timeout):
+            calls.append({"body": _json.loads(body.decode("utf-8")),
+                          "auth": headers.get("Authorization")})
+            return 200, _json.dumps({"ok": True, "ts": "7.7", "channel": "C0FLEET"})
+
+        verdict = mod.post_rollup(
+            mod.fixture_dispatch_payload(ROOT),
+            mod.fixture_fleet_snapshot(),
+            channel="C0FLEET",
+            transport=transport,
+        )
+
+        self.assertTrue(verdict["posted"])
+        self.assertEqual(len(calls), 1)
+        text = calls[0]["body"]["text"]
+        self.assertIn("*fleet roll-up", text)
+        self.assertIn("issue work:", text)
+        self.assertIn("agent sessions:", text)
+        self.assertNotIn("*dispatch scheduler:*", text)
+        self.assertNotIn("*agent session health", text)
 
 
 class ClassifySignalNoiseTest(unittest.TestCase):
@@ -140,6 +258,13 @@ class SignalScoreTest(unittest.TestCase):
         for cd in score["cards"].values():
             self.assertIn("before", cd)
             self.assertIn("after", cd)
+
+    def test_after_body_is_one_rollup_message(self):
+        mod = load()
+        score = mod.signal_score(ROOT)
+        self.assertIn("*fleet roll-up", score["after_body"])
+        self.assertNotIn("*dispatch scheduler:*", score["after_body"])
+        self.assertNotIn("*agent session health", score["after_body"])
 
     def test_meta_overhead_reported_not_hidden(self):
         mod = load()

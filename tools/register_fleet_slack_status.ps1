@@ -2,7 +2,7 @@
 register_fleet_slack_status.ps1 -- install/remove the OS Scheduled Task that posts the
 WHOLE fleet status to Slack on a cadence: the dispatch_status card (dispatcher +
 supervisor + watchdog-installed + backlog + closure + throughput) AND the fleet_top
-session/account-health snapshot, folded into one tick by tools/fleet_slack_status.py.
+session/account-health snapshot, folded into one roll-up by tools/fleet_slack_status.py.
 
 This is the operator's "the fleet's heartbeat lands in one channel" task. It posts to
 the channel resolved by tools/slack_post: --channel / -SlackChannel first, else the
@@ -13,7 +13,7 @@ NO channel id or token is baked into this script.
 SAFE BY DEFAULT: installed WITHOUT -Live the task posts a DRY-RUN line to its log
 (resolves the channel/token, sends nothing). Add -Live to actually post to Slack.
 
-  .\register_fleet_slack_status.ps1 -Live                              # post both cards, channel from env
+  .\register_fleet_slack_status.ps1 -Live                              # post one roll-up, channel from env
   .\register_fleet_slack_status.ps1 -Live -SlackChannel C0ABC123       # post to an explicit channel
   .\register_fleet_slack_status.ps1 -Live -EveryMinutes 15 -Fast       # 15-min cadence, skip gh folds
   .\register_fleet_slack_status.ps1 -Action status

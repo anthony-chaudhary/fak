@@ -4,16 +4,17 @@ r"""fleet_slack_status — post the WHOLE fleet status to Slack in one scheduled
 The operator wants one channel (e.g. $FAK_DISPATCH_CHANNEL) to carry the fleet's
 heartbeat: the always-on dispatcher + its supervisor + the watchdog-installed state
 (the dispatch_status card) AND the session/account-health plane (the fleet_top
-snapshot). Rather than schedule two tasks, this folds BOTH posts into one process so
-they land together, on one cadence, in one place.
+snapshot). Rather than schedule two Slack messages, this folds BOTH planes into one
+roll-up post so the channel carries one heartbeat per tick.
 
-It is a thin orchestrator over the two tools that already know how to post — it reuses
-``dispatch_status.post_to_slack`` and ``fleet_top.post_to_slack`` (and therefore the
-shared ``slack_post`` resolver: FAK_DISPATCH_TOKEN -> the scoreboard token, channel
-from --channel / FAK_DISPATCH_CHANNEL). It invents no new transport and holds no token
-or channel id in source.
+It is a thin orchestrator over the two tools that already know how to render status:
+``dispatch_status.slack_text`` and ``fleet_top.slack_text`` remain the per-plane
+surfaces, while this module posts one operator roll-up through the shared
+``slack_post`` resolver: FAK_DISPATCH_TOKEN -> the scoreboard token, channel from
+--channel / FAK_DISPATCH_CHANNEL. It invents no new transport and holds no token or
+channel id in source.
 
-  python tools/fleet_slack_status.py                 # post both cards (full fold)
+  python tools/fleet_slack_status.py                 # post one roll-up (full fold)
   python tools/fleet_slack_status.py --dry-run       # resolve + report, send nothing
   python tools/fleet_slack_status.py --fast          # dispatch card skips gh folds
   python tools/fleet_slack_status.py --json          # machine-readable combined verdict
@@ -230,6 +231,10 @@ def fixture_dispatch_payload(root: Path) -> dict[str, Any]:
         run_status=[])
 
 
+def _default_history(root: Path) -> str:
+    return str(root / "docs" / "nightrun" / "fleet-status-history.jsonl")
+
+
 def _boxed_dispatch_body(payload: dict[str, Any]) -> str:
     """Reconstruct the PRE-compaction Slack body for the dispatch card: the boxed
     terminal ``render`` dumped into a code fence — exactly the format Slack carried
@@ -261,8 +266,8 @@ def signal_score(root: Path) -> dict[str, Any]:
     current compact ``slack_text``), classify each, and fold into the noise-debt
     reduction verdict. Deterministic and network-free (pure folds + pure renderers).
 
-    The unit that matters is the COMBINED post — ``fleet_slack_status`` posts both
-    cards together, so the operator reads them as one heartbeat; the headline
+    The unit that matters is the COMBINED post — ``fleet_slack_status`` posts one
+    roll-up message, so the operator reads it as one heartbeat; the headline
     ``multiple`` is the combined noise-debt reduction. Per-card numbers are carried
     for the work-list."""
     payload = fixture_dispatch_payload(root)
@@ -270,7 +275,6 @@ def signal_score(root: Path) -> dict[str, Any]:
 
     cards: dict[str, Any] = {}
     combined_before: list[str] = []
-    combined_after: list[str] = []
     for name, before, after in (
         ("dispatch", _boxed_dispatch_body(payload), dispatch_status.slack_text(payload)),
         ("fleet", _boxed_fleet_body(snap), fleet_top.slack_text(snap)),
@@ -284,10 +288,9 @@ def signal_score(root: Path) -> dict[str, Any]:
                 a["signal_to_noise"] / max(1e-9, b["signal_to_noise"]), 2),
         }
         combined_before.append(before)
-        combined_after.append(after)
 
     before_body = "\n".join(combined_before)
-    after_body = "\n".join(combined_after)
+    after_body = rollup_text(payload, snap)
     cb = classify_signal_noise(before_body)
     ca = classify_signal_noise(after_body)
     multiple = round(cb["noise"] / max(1, ca["noise"]), 2)
@@ -318,6 +321,7 @@ def signal_score(root: Path) -> dict[str, Any]:
         "meta_footer_overhead": meta_overhead,
         "combined": combined,
         "cards": cards,
+        "after_body": after_body,
         "workspace": str(root),
     }
 
@@ -365,39 +369,261 @@ def render_signal_score(p: dict[str, Any]) -> str:
 
 
 def post_dispatch(root: Path, *, channel: str, dry_run: bool, fast: bool,
-                  max_workers: int = 2, closure_commits: int = 2500) -> dict[str, Any]:
+                  max_workers: int = 2, closure_commits: int = 2500,
+                  transport: Any | None = None) -> dict[str, Any]:
     """Build the dispatch status card and post it via dispatch_status.post_to_slack."""
     payload = dispatch_status.collect(root, max_workers=max_workers, fast=fast,
                                       closure_commits=closure_commits)
-    verdict = dispatch_status.post_to_slack(payload, channel=channel, dry_run=dry_run)
+    verdict = dispatch_status.post_to_slack(payload, channel=channel, dry_run=dry_run,
+                                            transport=transport)
     verdict["card_verdict"] = payload.get("verdict")
     return verdict
 
 
 def post_fleet(root: Path, *, channel: str, dry_run: bool,
-               window_h: float = 10.0) -> dict[str, Any]:
+               window_h: float = 10.0, history_path: str = "",
+               trend_window: int = 24, transport: Any | None = None) -> dict[str, Any]:
     """Build the fleet session/account-health snapshot and post it via
     fleet_top.post_to_slack."""
     snap = fleet_top.snapshot(root, window_h)
-    verdict = fleet_top.post_to_slack(snap, channel=channel, dry_run=dry_run)
+    verdict = fleet_top.post_to_slack(snap, channel=channel, dry_run=dry_run,
+                                      history_path=history_path,
+                                      trend_window=trend_window,
+                                      transport=transport)
     verdict["sessions"] = (snap.get("sessions") or {}).get("total")
     return verdict
 
 
+def collect_rollup(root: Path, *, fast: bool, window_h: float,
+                   history_path: str = "", trend_window: int = 24,
+                   dry_run: bool = False,
+                   max_workers: int = 2,
+                   closure_commits: int = 2500,
+                   do_dispatch: bool = True,
+                   do_fleet: bool = True) -> dict[str, Any]:
+    """Collect both status planes for one Slack roll-up. The fleet trend ledger is
+    appended once per live roll-up tick; dry-run previews only read existing history."""
+    dispatch_payload = None
+    fleet_snap = None
+    if do_dispatch:
+        dispatch_payload = dispatch_status.collect(
+            root, max_workers=max_workers, fast=fast, closure_commits=closure_commits)
+    if do_fleet:
+        fleet_snap = fleet_top.snapshot(root, window_h)
+        if history_path:
+            fleet_top.attach_trend(
+                fleet_snap, history_path, window=trend_window, record=not dry_run)
+    return {"dispatch": dispatch_payload, "fleet": fleet_snap}
+
+
+def _strip_prefix(line: str, prefix: str) -> str:
+    return line[len(prefix):].strip() if line.startswith(prefix) else line
+
+
+def _limited_join(rows: list[str], *, limit: int = 3) -> str:
+    kept = [r for r in rows if str(r).strip()][:limit]
+    if len(rows) > limit:
+        kept.append(f"+{len(rows) - limit} more")
+    return "; ".join(kept)
+
+
+def _dispatch_state(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "skipped"
+    try:
+        state = dispatch_status._dispatch_headline_state(payload)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        state = "healthy" if payload.get("ok") else "needs you"
+    verdict = str(payload.get("verdict") or "UNKNOWN")
+    return f"{verdict} ({state})"
+
+
+def _fleet_state(snap: dict[str, Any] | None) -> str:
+    if not snap:
+        return "skipped"
+    sysv = snap.get("system") or {}
+    verdict = str(sysv.get("verdict") or fleet_top.VERDICT_HEALTHY)
+    word = fleet_top.VERDICT_WORD.get(verdict, verdict)
+    esc = int(sysv.get("escalate", 0) or 0)
+    heal = int(sysv.get("self_healing", 0) or 0)
+    tail: list[str] = []
+    if esc:
+        tail.append(f"{esc} need you")
+    if heal:
+        tail.append(f"{heal} self-healing")
+    return word + (f" ({', '.join(tail)})" if tail else "")
+
+
+def _rollup_severity(dispatch_payload: dict[str, Any] | None,
+                     fleet_snap: dict[str, Any] | None) -> tuple[str, str]:
+    if dispatch_payload:
+        dispatch_buckets = dispatch_status._dispatch_slack_buckets(  # type: ignore[attr-defined]
+            dispatch_payload)
+    else:
+        dispatch_buckets = {"action": [], "auto-solving": [], "expected": []}
+    fleet_sys = (fleet_snap or {}).get("system") or {}
+    if dispatch_buckets.get("action") or int(fleet_sys.get("escalate", 0) or 0):
+        return "🔴", "NEEDS YOU"
+    if (dispatch_buckets.get("auto-solving") or dispatch_buckets.get("expected")
+            or int(fleet_sys.get("self_healing", 0) or 0)):
+        return "🔵", "BEING HANDLED"
+    return "🟢", "HEALTHY"
+
+
+def _issue_work_line(payload: dict[str, Any] | None) -> str:
+    if not payload:
+        return "issue work: skipped"
+    d = payload.get("dispatcher") or {}
+    a = d.get("account") or {}
+    b = payload.get("backlog") or {}
+    c = payload.get("closure") or {}
+    parts: list[str] = []
+    if d.get("live") is not None or d.get("cap") is not None:
+        headroom = d.get("headroom")
+        parts.append(f"{d.get('live')}/{d.get('cap')} workers active"
+                     + (f", {headroom} open slot(s)" if isinstance(headroom, int) else ""))
+    if not b.get("na") and b.get("open_issues") is not None:
+        ticket = f"{b.get('open_issues')} open ticket(s)"
+        if b.get("unrouted"):
+            ticket += f", {b.get('unrouted')} need routing"
+        parts.append(ticket)
+    if a.get("tag"):
+        parts.append(f"next account {a.get('tag')}")
+    if not c.get("na") and c.get("closure_rate") is not None:
+        honest = c.get("honest_close_rate")
+        rate = dispatch_status._rate_str(c.get("closure_rate"))  # type: ignore[attr-defined]
+        if honest is not None:
+            rate += "/" + dispatch_status._rate_str(honest)  # type: ignore[attr-defined]
+        parts.append(f"close proof {rate}")
+    return "issue work: " + ("; ".join(parts) if parts else "no local signal")
+
+
+def _session_line(snap: dict[str, Any] | None) -> str:
+    if not snap:
+        return "agent sessions: skipped"
+    sess = snap.get("sessions") or {}
+    acc = snap.get("accounts") or {}
+    return (f"agent sessions: {sess.get('total', 0)} in the last {snap.get('window_h')}h; "
+            f"{acc.get('usable', 0)}/{acc.get('total', 0)} accounts usable")
+
+
+def _trend_lines(dispatch_payload: dict[str, Any] | None,
+                 fleet_snap: dict[str, Any] | None) -> list[str]:
+    lines: list[str] = []
+    if dispatch_payload:
+        trend = dispatch_status._dispatch_trend_line(dispatch_payload.get("throughput") or {})  # type: ignore[attr-defined]
+        if trend:
+            lines.append("ticket trend: " + _strip_prefix(trend, "trend:"))
+    if fleet_snap:
+        trend = str(fleet_snap.get("trend") or "").strip()
+        if trend:
+            lines.append("capacity trend: " + _strip_prefix(trend, "trend:"))
+    return lines
+
+
+def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
+    try:
+        joined = fleet_top._join_attention(items)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        joined = _limited_join([str(i.get("title") or i) for i in items], limit=2)
+    return f"{prefix}: {joined}" if joined else ""
+
+
+def rollup_text(dispatch_payload: dict[str, Any] | None,
+                fleet_snap: dict[str, Any] | None) -> str:
+    """One Slack message for the operator: state, trend, what needs a human, and what
+    the automation is already handling. This deliberately avoids the per-plane
+    "plane:" labels and boxed terminal chrome."""
+    glyph, severity = _rollup_severity(dispatch_payload, fleet_snap)
+    lines: list[str] = [
+        f"{glyph} *fleet roll-up — {severity}*",
+        f"status: issue work {_dispatch_state(dispatch_payload)}; sessions {_fleet_state(fleet_snap)}",
+        _issue_work_line(dispatch_payload),
+        _session_line(fleet_snap),
+    ]
+    lines.extend(_trend_lines(dispatch_payload, fleet_snap))
+
+    needs: list[str] = []
+    handled: list[str] = []
+    waiting: list[str] = []
+    if dispatch_payload:
+        buckets = dispatch_status._dispatch_slack_buckets(dispatch_payload)  # type: ignore[attr-defined]
+        needs.extend("issue work: " + r for r in buckets.get("action", []))
+        handled.extend("issue work: " + r for r in buckets.get("auto-solving", []))
+        waiting.extend("issue work: " + r for r in buckets.get("expected", []))
+    if fleet_snap:
+        attn = fleet_snap.get("attention") or []
+        escalate = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_ESCALATE]
+        healing = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_SELF_HEALING]
+        line = _attention_line("agent sessions", escalate)
+        if line:
+            needs.append(line)
+        line = _attention_line("agent sessions", healing)
+        if line:
+            handled.append(line)
+
+    lines.append("needs you: " + (_limited_join(needs, limit=4) if needs else "none"))
+    if handled:
+        lines.append("being handled: " + _limited_join(handled, limit=3))
+    if waiting:
+        lines.append("normal waiting: " + _limited_join(waiting, limit=2))
+    return "\n".join(line for line in lines if line)
+
+
+def post_rollup(dispatch_payload: dict[str, Any] | None,
+                fleet_snap: dict[str, Any] | None, *,
+                channel: str = "", dry_run: bool = False,
+                transport: Any | None = None) -> dict[str, Any]:
+    try:
+        import slack_post  # sibling module in tools/
+    except Exception as exc:  # noqa: BLE001
+        return {"posted": False, "error": f"slack_post unavailable: {exc}", "skipped": None}
+    return slack_post.send(rollup_text(dispatch_payload, fleet_snap), channel=channel,
+                           dry_run=dry_run, transport=transport,
+                           include_signal_noise=False)
+
+
 def run(root: Path, *, channel: str = "", dry_run: bool = False, fast: bool = False,
         window_h: float = 10.0, do_dispatch: bool = True,
-        do_fleet: bool = True) -> dict[str, Any]:
-    """Post the requested cards and fold the per-card verdicts into one record. Each
-    post is independent: a failure in one is reported, never aborts the other."""
+        do_fleet: bool = True, separate: bool = False,
+        history_path: str | None = None, trend_window: int = 24,
+        transport: Any | None = None) -> dict[str, Any]:
+    """Post one fleet roll-up by default. ``separate`` keeps the legacy two-message
+    mode for operators who explicitly want separate cards."""
     out: dict[str, Any] = {"schema": "fleet-slack-status/1", "workspace": str(root),
-                           "dispatch": None, "fleet": None}
-    if do_dispatch:
-        out["dispatch"] = post_dispatch(root, channel=channel, dry_run=dry_run, fast=fast)
-    if do_fleet:
-        out["fleet"] = post_fleet(root, channel=channel, dry_run=dry_run, window_h=window_h)
-    # ok iff every attempted post either landed or was a dry-run.
-    parts = [v for v in (out["dispatch"], out["fleet"]) if v is not None]
-    out["ok"] = all(bool(v.get("posted") or v.get("dry_run")) for v in parts) if parts else False
+                           "mode": "separate" if separate else "rollup",
+                           "dispatch": None, "fleet": None, "rollup": None}
+    history = _default_history(root) if history_path is None else history_path
+    if separate:
+        if do_dispatch:
+            out["dispatch"] = post_dispatch(root, channel=channel, dry_run=dry_run,
+                                            fast=fast, transport=transport)
+        if do_fleet:
+            out["fleet"] = post_fleet(root, channel=channel, dry_run=dry_run,
+                                      window_h=window_h, history_path=history,
+                                      trend_window=trend_window, transport=transport)
+        parts = [v for v in (out["dispatch"], out["fleet"]) if v is not None]
+        out["ok"] = all(bool(v.get("posted") or v.get("dry_run")) for v in parts) if parts else False
+        return out
+
+    collected = collect_rollup(root, fast=fast, window_h=window_h, history_path=history,
+                               trend_window=trend_window, dry_run=dry_run,
+                               do_dispatch=do_dispatch, do_fleet=do_fleet)
+    dp = collected.get("dispatch")
+    fs = collected.get("fleet")
+    out["dispatch"] = (
+        {"card_verdict": dp.get("verdict"), "ok": dp.get("ok")}
+        if isinstance(dp, dict) else None
+    )
+    out["fleet"] = (
+        {"sessions": (fs.get("sessions") or {}).get("total"),
+         "system": (fs.get("system") or {}).get("verdict")}
+        if isinstance(fs, dict) else None
+    )
+    out["rollup"] = post_rollup(dp, fs, channel=channel, dry_run=dry_run,
+                                transport=transport)
+    out["ok"] = bool((out["rollup"] or {}).get("posted")
+                     or (out["rollup"] or {}).get("dry_run"))
     return out
 
 
@@ -416,7 +642,7 @@ def _line(name: str, v: dict[str, Any] | None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Post the whole fleet status (dispatch card + session health) to Slack.")
+        description="Post one fleet status roll-up (dispatch + session health) to Slack.")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--channel", default="",
                     help="target channel id (default: $FAK_DISPATCH_CHANNEL via slack_post)")
@@ -427,6 +653,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--window", type=float, default=10.0, help="fleet session lookback hours")
     ap.add_argument("--no-dispatch", action="store_true", help="skip the dispatch status card")
     ap.add_argument("--no-fleet", action="store_true", help="skip the fleet session-health card")
+    ap.add_argument("--separate", action="store_true",
+                    help="legacy mode: post dispatch and session health as two messages")
+    ap.add_argument("--history", default="",
+                    help="trend ledger path (default: docs/nightrun/fleet-status-history.jsonl)")
+    ap.add_argument("--no-trend", action="store_true",
+                    help="do not append to / show the fleet trend ledger")
+    ap.add_argument("--trend-window", type=int, default=24,
+                    help="how many trailing trend ticks the roll-up folds")
     ap.add_argument("--json", action="store_true", help="emit the combined verdict as JSON")
     ap.add_argument("--signal-score", action="store_true",
                     help="score the Slack signal/noise (compact vs boxed-and-fenced) on "
@@ -457,15 +691,19 @@ def main(argv: list[str] | None = None) -> int:
         # (exit 0) so it can be run for the number without failing a script.
         return 0 if (score.get("ok") or not args.signal_check) else 1
 
+    history = "" if args.no_trend else (args.history or _default_history(root))
     out = run(root, channel=args.channel, dry_run=args.dry_run, fast=args.fast,
               window_h=args.window, do_dispatch=not args.no_dispatch,
-              do_fleet=not args.no_fleet)
+              do_fleet=not args.no_fleet, separate=args.separate,
+              history_path=history, trend_window=args.trend_window)
 
     if args.json:
         print(json.dumps(out, indent=2))
-    else:
+    elif args.separate:
         print(_line("dispatch", out["dispatch"]))
         print(_line("fleet", out["fleet"]))
+    else:
+        print(_line("fleet roll-up", out["rollup"]))
     return 0 if out.get("ok") else 1
 
 
