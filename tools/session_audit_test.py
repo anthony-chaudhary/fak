@@ -595,5 +595,222 @@ class BehavioralLensTest(unittest.TestCase):
         self.assertEqual(B["beh"]["sleep_polls"], 1)
 
 
+def _restart(marker="Resume"):
+    """A session-restart / compaction marker record (#2375 d1: post_resume signal)."""
+    return {"type": "last-prompt", "lastPrompt": marker,
+            "timestamp": "2026-06-20T00:05:00.000Z"}
+
+
+class NotReadSubclassTest(unittest.TestCase):
+    """#2375 detector 1 — the not_read edit-churn counter conflates three
+    mechanically distinct causes; only true_never_read is agent misbehavior.
+    Sub-classify from signals the transcript already carries."""
+
+    def _one(self, recs):
+        sa = load()
+        s = sa.analyze(_write_transcript(recs))
+        self.assertNotIn("error", s)
+        return sa, s
+
+    def test_post_resume_prior_read_then_restart(self) -> None:
+        # a.go read (5 in real life), a restart marker, then an edit that fails
+        # not-read: the harness read-state reset, not misbehavior.
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Read", tool_id="r1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("r1", "the file body", is_error=False),
+            _restart(),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("e1", "File has not been read yet. Read it first."),
+        ])
+        self.assertEqual(s["behavior"]["edit_churn"], {"not_read": 1})
+        self.assertEqual(s["behavior"]["not_read_classes"], {"post_resume": 1})
+
+    def test_self_duplicate_prior_successful_write(self) -> None:
+        # a.go written once (ok), a forked branch re-issues a stale Write that the
+        # guard fence refuses with not-read: a duplicate, not misbehavior.
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Write", tool_id="w1",
+                       tool_input={"file_path": "C:/x/a.go", "content": "v1"}),
+            _user_result("w1", "wrote file", is_error=False),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Write", tool_id="w2",
+                       tool_input={"file_path": "C:/x/a.go", "content": "stale draft"}),
+            _user_result("w2", "File has not been read yet."),
+        ])
+        self.assertEqual(s["behavior"]["not_read_classes"], {"self_duplicate": 1})
+
+    def test_true_never_read_is_the_real_defect(self) -> None:
+        # No prior read, no prior write, no restart: the genuine never-read edit.
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/never.go"}),
+            _user_result("e1", "File has not been read yet."),
+        ])
+        self.assertEqual(s["behavior"]["not_read_classes"], {"true_never_read": 1})
+
+    def test_self_duplicate_beats_post_resume(self) -> None:
+        # Both signals present (read + restart AND a prior write): the concrete
+        # prior write wins — precedence self_duplicate > post_resume.
+        _, s = self._one([
+            _assistant("m0", out=1, cread=0, ccreate=0, tool="Read", tool_id="r0",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("r0", "body", is_error=False),
+            _restart(),
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Write", tool_id="w1",
+                       tool_input={"file_path": "C:/x/a.go", "content": "v1"}),
+            _user_result("w1", "wrote", is_error=False),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Write", tool_id="w2",
+                       tool_input={"file_path": "C:/x/a.go", "content": "dup"}),
+            _user_result("w2", "File has not been read yet."),
+        ])
+        self.assertEqual(s["behavior"]["not_read_classes"], {"self_duplicate": 1})
+
+    def test_no_restart_prior_read_stays_true_never_read(self) -> None:
+        # Read happened but NO restart marker: the read-state is intact, so a
+        # not-read failure is genuine (post_resume needs the restart signal).
+        _, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Read", tool_id="r1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("r1", "body", is_error=False),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e1",
+                       tool_input={"file_path": "C:/x/a.go"}),
+            _user_result("e1", "File has not been read yet."),
+        ])
+        self.assertEqual(s["behavior"]["not_read_classes"], {"true_never_read": 1})
+
+    def test_subclass_counts_reconcile_with_not_read_total(self) -> None:
+        sa, s = self._one([
+            _assistant("m1", out=1, cread=0, ccreate=0, tool="Write", tool_id="w1",
+                       tool_input={"file_path": "C:/x/a.go", "content": "v"}),
+            _user_result("w1", "ok", is_error=False),
+            _assistant("m2", out=1, cread=0, ccreate=0, tool="Write", tool_id="w2",
+                       tool_input={"file_path": "C:/x/a.go", "content": "dup"}),
+            _user_result("w2", "File has not been read yet."),
+            _assistant("m3", out=1, cread=0, ccreate=0, tool="Edit", tool_id="e3",
+                       tool_input={"file_path": "C:/x/b.go"}),
+            _user_result("e3", "File has not been read yet."),
+        ])
+        nrc = s["behavior"]["not_read_classes"]
+        self.assertEqual(sum(nrc.values()), s["behavior"]["edit_churn"]["not_read"])
+        self.assertEqual(nrc, {"self_duplicate": 1, "true_never_read": 1})
+        agg = sa.aggregate([s])
+        self.assertEqual(agg["behavior"]["not_read_classes"],
+                         {"self_duplicate": 1, "true_never_read": 1})
+
+    def test_restart_record_variants(self) -> None:
+        sa = load()
+        self.assertTrue(sa._is_restart_record({"type": "last-prompt", "lastPrompt": "Resume"}))
+        self.assertTrue(sa._is_restart_record({"type": "summary"}))
+        self.assertTrue(sa._is_restart_record({"isCompactSummary": True}))
+        self.assertTrue(sa._is_restart_record(
+            {"type": "user", "message": {"content": "<command-name>/resume</command-name>"}}))
+        # a prompt that merely MENTIONS resume must not read as a restart.
+        self.assertFalse(sa._is_restart_record(
+            {"type": "user", "message": {"content": "resume the sweep for me"}}))
+        self.assertFalse(sa._is_restart_record({"type": "assistant"}))
+
+
+class SuccessLoopTest(unittest.TestCase):
+    """#2375 detector 2 — loops of SUCCESSFUL identical calls (read-loops /
+    glob-storms / output-file poll loops) the failure/mutation loop checks
+    never see. Count identical (tool, args-digest) calls, subtract errored ones."""
+
+    def _one(self, recs):
+        sa = load()
+        s = sa.analyze(_write_transcript(recs))
+        self.assertNotIn("error", s)
+        return sa, s
+
+    def _reads(self, n, path="C:/x/poll.output", start=0):
+        return [_assistant(f"m{start+i}", out=1, cread=0, ccreate=0, tool="Read",
+                           tool_id=f"r{start+i}", tool_input={"file_path": path})
+                for i in range(n)]
+
+    def test_read_loop_at_threshold_flagged(self) -> None:
+        _, s = self._one(self._reads(8))
+        b = s["behavior"]
+        self.assertEqual(b["max_success_loop"], 8)
+        self.assertEqual(b["success_loops"],
+                         [{"tool": "Read", "target": "C:/x/poll.output", "count": 8}])
+
+    def test_below_threshold_not_flagged(self) -> None:
+        _, s = self._one(self._reads(7))
+        self.assertEqual(s["behavior"]["success_loops"], [])
+        self.assertEqual(s["behavior"]["max_success_loop"], 7)
+
+    def test_errored_calls_subtracted(self) -> None:
+        # 10 identical Reads, one of which ERRORED -> 9 successful, still a loop;
+        # but if 3 error, 7 successful drops below threshold.
+        recs = self._reads(10)
+        recs += [_user_result("r0", "Permission denied")]   # r0 errored
+        _, s = self._one(recs)
+        self.assertEqual(s["behavior"]["success_loops"],
+                         [{"tool": "Read", "target": "C:/x/poll.output", "count": 9}])
+
+        recs2 = self._reads(10)
+        recs2 += [_user_result("r0", "boom"), _user_result("r1", "boom"),
+                  _user_result("r2", "boom")]
+        _, s2 = self._one(recs2)
+        self.assertEqual(s2["behavior"]["success_loops"], [],
+                         "7 successful is below the loop threshold")
+
+    def test_distinct_args_do_not_group(self) -> None:
+        # Different paths -> different digests -> not one loop.
+        recs = self._reads(4, path="C:/x/a.output") + self._reads(4, path="C:/x/b.output", start=4)
+        _, s = self._one(recs)
+        self.assertEqual(s["behavior"]["success_loops"], [])
+        self.assertEqual(s["behavior"]["max_success_loop"], 4)
+
+    def test_sanctioned_poll_tools_excluded(self) -> None:
+        sa = load()
+        # Monitor / TaskOutput are the sanctioned poll surface — never loop-flagged.
+        self.assertNotIn("Monitor", sa.SUCCESS_LOOP_TOOLS)
+        self.assertNotIn("TaskOutput", sa.SUCCESS_LOOP_TOOLS)
+        for t in ("Read", "Glob", "Grep", "LS", "Bash", "PowerShell"):
+            self.assertIn(t, sa.SUCCESS_LOOP_TOOLS)
+        recs = [_assistant(f"m{i}", out=1, cread=0, ccreate=0, tool="Monitor",
+                           tool_id=f"t{i}", tool_input={"selector": "x"})
+                for i in range(12)]
+        s = sa.analyze(_write_transcript(recs))
+        self.assertEqual(s["behavior"]["success_loops"], [])
+
+    def test_glob_storm_flagged_by_pattern(self) -> None:
+        recs = [_assistant(f"m{i}", out=1, cread=0, ccreate=0, tool="Glob",
+                           tool_id=f"g{i}", tool_input={"pattern": "**/*.go"})
+                for i in range(9)]
+        _, s = self._one(recs)
+        self.assertEqual(s["behavior"]["success_loops"],
+                         [{"tool": "Glob", "target": "**/*.go", "count": 9}])
+
+    def test_aggregate_and_report_surface_both_detectors(self) -> None:
+        sa = load()
+        recs = [
+            # a self_duplicate not-read pair
+            _assistant("w1", out=1, cread=0, ccreate=0, tool="Write", tool_id="w1",
+                       tool_input={"file_path": "C:/x/a.go", "content": "v"}),
+            _user_result("w1", "ok", is_error=False),
+            _assistant("w2", out=1, cread=0, ccreate=0, tool="Write", tool_id="w2",
+                       tool_input={"file_path": "C:/x/a.go", "content": "dup"}),
+            _user_result("w2", "File has not been read yet."),
+        ] + self._reads(8)
+        s = sa.analyze(_write_transcript(recs))
+        agg = sa.aggregate([s])
+        self.assertEqual(agg["behavior"]["not_read_classes"], {"self_duplicate": 1})
+        self.assertEqual(len(agg["behavior"]["success_loop_sessions"]), 1)
+        md = sa.report_md([s], agg)
+        self.assertIn("not-read sub-classes", md)
+        self.assertIn("self-duplicate 1", md)
+        self.assertIn("SUCCESSFUL-call loop", md)
+        self.assertIn("C:/x/poll.output", md)
+
+    def test_trend_scan_folds_success_loops(self) -> None:
+        sa = load()
+        with tempfile.TemporaryDirectory() as d:
+            _write_transcript_in(d, "C--work-fak", "sess.jsonl", self._reads(8))
+            buckets, _ = sa.trend_scan([d], "", "day", False)
+        self.assertEqual(buckets["2026-06-20"]["beh"]["success_loop_files"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

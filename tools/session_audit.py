@@ -133,6 +133,60 @@ FILE_CHURN_MIN = 5
 # A gap this long with ZERO transcript records is a harness/API stall — the
 # kind of dead time the sleep-poll counter can't see.
 STALL_GAP_S = 300
+# not_read edit-churn sub-classes (#2375 detector 1). The raw not_read counter
+# conflates three mechanically distinct causes and only the last is misbehavior:
+#   post_resume      — a --resume/compaction reset the harness read-state tracker
+#                      while the compacted context still believed the file was read
+#                      (a prior successful Read of THIS path exists, then a restart
+#                      marker, then the edit fails not-read). Not the agent's fault.
+#   self_duplicate   — a forked/duplicated branch re-issued a stale Write of a file
+#                      the SAME session already wrote; the guard fence caught it (a
+#                      prior successful Write/Edit of THIS path exists). Not misbehavior.
+#   true_never_read  — an edit of a file this session never read: the real defect.
+# Precedence: self_duplicate (concrete prior write) > post_resume (prior read +
+# restart) > true_never_read (default). Listed for stable render order.
+NOT_READ_CLASSES = ("post_resume", "self_duplicate", "true_never_read")
+# A transcript-carried restart/compaction marker: a compaction summary record, or a
+# resume/clear command, or the bare "Resume" continuation prompt. Anchored so a
+# prompt that merely *mentions* resume ("resume the sweep…") does NOT match.
+RESTART_MARKER_RE = re.compile(
+    r"session is being continued from a previous"
+    r"|<command-name>\s*/(?:resume|clear)\b"
+    r"|^\s*resume\s*$",
+    re.IGNORECASE)
+# Successful-call loop detector (#2375 detector 2): loops of SUCCESSFUL identical
+# calls (read-loops / glob-storms / output-file poll loops) that the failure/mutation
+# loop checks never see. Only these tools count — Read/Glob/Grep/LS + a shell reading
+# a file; Monitor/TaskOutput are the SANCTIONED poll surface and are excluded.
+SUCCESS_LOOP_TOOLS = {"Read", "Glob", "Grep", "LS", "Bash", "PowerShell"}
+# This many identical SUCCESSFUL (tool, args-digest) calls in one session is a poll
+# loop / storm, not the healthy 2-4 re-reads of iterative editing.
+SUCCESS_LOOP_MIN = 8
+
+def _tool_path(tool_input):
+    """The file a mutation/read call targets — its read-state identity (#2375 d1)."""
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    return ti.get("file_path") or ti.get("notebook_path")
+
+def _tool_label(name, tool_input):
+    """A short human-readable offender label for a call (path / pattern / command)."""
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    raw = (ti.get("file_path") or ti.get("notebook_path") or ti.get("pattern")
+           or ti.get("path") or ti.get("command") or "")
+    return _norm_head(raw, 120)
+
+def _is_restart_record(r):
+    """True for a session-restart / compaction marker (#2375 d1: post_resume signal)."""
+    if r.get("isCompactSummary") or r.get("type") == "summary":
+        return True
+    lp = r.get("lastPrompt")
+    if isinstance(lp, str) and RESTART_MARKER_RE.search(lp):
+        return True
+    if r.get("type") == "user":
+        c = (r.get("message", {}) or {}).get("content")
+        if isinstance(c, str) and RESTART_MARKER_RE.search(c):
+            return True
+    return False
 
 def _txt_str(content, cap=4000):
     """Flatten a content field (str or list of blocks) to text, capped at `cap`."""
@@ -172,12 +226,26 @@ class BehaviorLens:
         self.timeout_kills = 0
         self.sleep_polls = 0
         self.edit_churn = collections.Counter()    # not_read / stale_read
+        self.not_read_classes = collections.Counter()  # post_resume/self_dup/true (#2375 d1)
         self.verbatim_sigs = collections.Counter() # (tool, args_key, sig) -> n
         self.mass_sigs = collections.Counter()     # (tool, sig) -> n
         self.file_writes = collections.Counter()   # file_path -> mutation calls
         self.file_regions = collections.defaultdict(list)  # path -> [(old_h, new_h)]
+        # not_read sub-classification signals (#2375 d1)
+        self.read_paths = set()      # paths with a prior SUCCESSFUL Read in-session
+        self.mutated_paths = set()   # paths with a prior SUCCESSFUL Write/Edit in-session
+        self.saw_restart = False     # a --resume/compaction marker has been seen
+        # successful-call loop signals (#2375 d2): count identical calls, subtract
+        # the ones that errored, so a loop of SUCCESSFUL calls stands alone.
+        self.call_sigs = collections.Counter()     # (tool, args_key) -> calls
+        self.call_labels = {}                       # (tool, args_key) -> offender label
+        self.err_sig_counts = collections.Counter() # (tool, args_key) -> errored calls
 
-    def see_tool_use(self, name, tool_input):
+    def note_restart(self):
+        """Record that a session-restart / compaction marker occurred (#2375 d1)."""
+        self.saw_restart = True
+
+    def see_tool_use(self, name, tool_input, args_key=None):
         ti = tool_input if isinstance(tool_input, dict) else {}
         if name in SHELL_TOOLS and not ti.get("run_in_background") \
                 and SLEEP_POLL_RE.match(ti.get("command") or ""):
@@ -193,19 +261,58 @@ class BehaviorLens:
                 new_h = hash(_norm_head(ti.get("new_string",
                                                ti.get("content", ""))))
                 self.file_regions[path].append((old_h, new_h))
+        # Successful-call loop tally (#2375 d2): every eligible call keys on its
+        # (tool, args-digest); errored ones are subtracted at summary time.
+        if name in SUCCESS_LOOP_TOOLS and args_key is not None:
+            k = (name, args_key)
+            self.call_sigs[k] += 1
+            self.call_labels[k] = _tool_label(name, tool_input)
 
-    def see_tool_result(self, tool, is_error, text, args_key=None):
+    def _classify_not_read(self, path):
+        """Sub-classify a not_read edit-churn failure (#2375 d1). Precedence:
+        a concrete prior write (self_duplicate) beats a prior read + restart
+        (post_resume); a never-read edit is the real defect (true_never_read)."""
+        if path and path in self.mutated_paths:
+            return "self_duplicate"
+        if self.saw_restart and path and path in self.read_paths:
+            return "post_resume"
+        return "true_never_read"
+
+    def see_tool_result(self, tool, is_error, text, args_key=None, path=None):
         if not is_error:
+            # A success establishes read-state / a prior write for the path — the
+            # signals the not_read sub-classifier reads (#2375 d1).
+            if path:
+                if tool == "Read":
+                    self.read_paths.add(path)
+                elif tool in MUTATION_TOOLS:
+                    self.mutated_paths.add(path)
             return
         self.errors[tool] += 1
+        if tool in SUCCESS_LOOP_TOOLS and args_key is not None:
+            self.err_sig_counts[(tool, args_key)] += 1   # not a SUCCESSFUL call (#2375 d2)
         if tool in SHELL_TOOLS and TIMEOUT_KILL_RE.search(text):
             self.timeout_kills += 1
         for key, sig in EDIT_CHURN_SIGNATURES.items():
             if sig in text:
                 self.edit_churn[key] += 1
+                if key == "not_read":
+                    self.not_read_classes[self._classify_not_read(path)] += 1
         sig = _norm_head(text, 160)
         self.verbatim_sigs[(tool, args_key, sig)] += 1
         self.mass_sigs[(tool, sig)] += 1
+
+    def _success_loop_rows(self):
+        """SUCCESSFUL identical-call loops (#2375 d2): calls minus errored calls,
+        thresholded, worst-first, with the offender label."""
+        rows = []
+        for (tool, ak), n in self.call_sigs.items():
+            succ = n - self.err_sig_counts.get((tool, ak), 0)
+            if succ >= SUCCESS_LOOP_MIN:
+                rows.append({"tool": tool,
+                             "target": self.call_labels.get((tool, ak), ""),
+                             "count": succ})
+        return sorted(rows, key=lambda r: -r["count"])
 
     def _churn_rows(self):
         rows = []
@@ -236,17 +343,23 @@ class BehaviorLens:
                        for (t, sig), n in self.mass_sigs.items()
                        if n >= REPEAT_FAILURE_MIN),
                       key=lambda r: -r["count"])
+        success_loops = self._success_loop_rows()
+        max_success_loop = max((n - self.err_sig_counts.get(k, 0)
+                                for k, n in self.call_sigs.items()), default=0)
         return {
             "tool_errors": dict(self.errors),
             "timeout_kills": self.timeout_kills,
             "sleep_polls": self.sleep_polls,
             "edit_churn": dict(self.edit_churn),
+            "not_read_classes": dict(self.not_read_classes),
             "repeat_failures": repeats[:10],
             "max_repeat_failure": max(self.verbatim_sigs.values(), default=0),
             "failure_mass": mass[:10],
             "max_failure_mass": max(self.mass_sigs.values(), default=0),
             "file_churn": self._churn_rows()[:10],
             "max_file_churn": max(self.file_writes.values(), default=0),
+            "success_loops": success_loops[:10],
+            "max_success_loop": max_success_loop,
         }
 
 def price_for(model):
@@ -382,6 +495,7 @@ def analyze(path):
     lens = BehaviorLens()
     tooluse_names = {}   # tool_use id -> tool name, to attribute tool_results
     tooluse_args = {}    # tool_use id -> args digest, for verbatim-retry keying
+    tooluse_paths = {}   # tool_use id -> target file path, for not_read sub-class (#2375 d1)
     prev_dt = None
     stall_gaps = 0
     max_gap_s = 0.0
@@ -402,6 +516,8 @@ def analyze(path):
             continue
         t = r.get("type")
         rec_types[t] += 1
+        if _is_restart_record(r):
+            lens.note_restart()          # #2375 d1: a --resume/compaction boundary
         ts = r.get("timestamp")
         if ts:
             ts_min = ts if ts_min is None or ts < ts_min else ts_min
@@ -469,11 +585,12 @@ def analyze(path):
                     name = b.get("name", "?")
                     tools[name] += 1
                     tool_input_chars += _txt_len(b.get("input", {}))
+                    ak = hash(json.dumps(b.get("input", {}), sort_keys=True, default=str))
                     if b.get("id"):
                         tooluse_names[b["id"]] = name
-                        tooluse_args[b["id"]] = hash(json.dumps(
-                            b.get("input", {}), sort_keys=True, default=str))
-                    lens.see_tool_use(name, b.get("input"))
+                        tooluse_args[b["id"]] = ak
+                        tooluse_paths[b["id"]] = _tool_path(b.get("input"))
+                    lens.see_tool_use(name, b.get("input"), ak)
                 elif bt in ("thinking", "text"):
                     body = b.get("thinking") if bt == "thinking" else b.get("text")
                     key = (mid, bt, hash(body if isinstance(body, str) else str(body)))
@@ -502,7 +619,8 @@ def analyze(path):
                             tooluse_names.get(b.get("tool_use_id"), "?"),
                             bool(b.get("is_error")),
                             _txt_str(b.get("content", "")),
-                            args_key=tooluse_args.get(b.get("tool_use_id")))
+                            args_key=tooluse_args.get(b.get("tool_use_id")),
+                            path=tooluse_paths.get(b.get("tool_use_id")))
             elif _looks_like_typed_prompt(content) and not r.get("isMeta"):
                 prompts.append((ts, content.strip()[:400]))
 
@@ -593,14 +711,16 @@ def aggregate(sessions):
     # behavioral rollup (#2365) — tolerate sessions replayed from pre-lens JSON
     beh_errors = collections.Counter()
     beh_churn = collections.Counter()
+    beh_not_read = collections.Counter()   # #2375 d1: not_read sub-classes
     beh_timeouts = beh_sleeps = 0
     stall_sessions = 0
     max_gap_s = 0.0
-    repeat_rows, filechurn_rows, mass_rows = [], [], []
+    repeat_rows, filechurn_rows, mass_rows, successloop_rows = [], [], [], []
     for s in S:
         b = s.get("behavior") or {}
         beh_errors.update(b.get("tool_errors", {}))
         beh_churn.update(b.get("edit_churn", {}))
+        beh_not_read.update(b.get("not_read_classes", {}))
         beh_timeouts += b.get("timeout_kills", 0)
         beh_sleeps += b.get("sleep_polls", 0)
         if b.get("stall_gaps", 0):
@@ -613,6 +733,8 @@ def aggregate(sessions):
             mass_rows.append({"session": s["session"], "ns": ns, **r})
         for r in (b.get("file_churn") or [])[:1]:
             filechurn_rows.append({"session": s["session"], "ns": ns, **r})
+        for r in (b.get("success_loops") or [])[:1]:
+            successloop_rows.append({"session": s["session"], "ns": ns, **r})
     per_tool_beh = {t: {"calls": tot_tools.get(t, 0),
                         "errors": beh_errors.get(t, 0),
                         "error_rate": (beh_errors.get(t, 0) / tot_tools[t])
@@ -623,12 +745,14 @@ def aggregate(sessions):
         "timeout_kills": beh_timeouts,
         "sleep_polls": beh_sleeps,
         "edit_churn": dict(beh_churn),
+        "not_read_classes": dict(beh_not_read),
         "wasted_mutation_calls": sum(beh_churn.values()),
         "stall_sessions": stall_sessions,
         "max_gap_s": round(max_gap_s, 1),
         "repeat_failure_sessions": sorted(repeat_rows, key=lambda r: -r["count"])[:10],
         "failure_mass_sessions": sorted(mass_rows, key=lambda r: -r["count"])[:10],
         "file_churn_sessions": sorted(filechurn_rows, key=lambda r: -r["count"])[:10],
+        "success_loop_sessions": sorted(successloop_rows, key=lambda r: -r["count"])[:10],
     }
     return {
         "n_sessions": len(S), "totals": dict(tot), "total_cost_usd": tot_cost,
@@ -830,10 +954,17 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                  f"{fmt_int(beh.get('timeout_kills', 0))}")
         L.append(f"- **Foreground sleep-polls (`sleep`/`Start-Sleep` command prefix):** "
                  f"{fmt_int(beh.get('sleep_polls', 0))}")
+        nrc = beh.get("not_read_classes", {})
         L.append(f"- **Edit/Write churn (wasted mutation calls):** "
                  f"{fmt_int(beh.get('wasted_mutation_calls', 0))}  "
                  f"(not-read {fmt_int(churn.get('not_read', 0))} · "
                  f"stale-read {fmt_int(churn.get('stale_read', 0))})")
+        # #2375 d1 — only true-never-read is agent misbehavior; the other two are
+        # a --resume read-state reset and a guard-caught duplicate write.
+        L.append(f"  - **not-read sub-classes:** post-resume "
+                 f"{fmt_int(nrc.get('post_resume', 0))} · self-duplicate "
+                 f"{fmt_int(nrc.get('self_duplicate', 0))} · **true-never-read "
+                 f"{fmt_int(nrc.get('true_never_read', 0))}** (the real defect)")
         L.append(f"- **Sessions with a ≥{STALL_GAP_S//60}-min zero-record stall "
                  f"(harness/API dead time):** {fmt_int(beh.get('stall_sessions', 0))}"
                  + (f"  (longest gap {beh.get('max_gap_s', 0)/60:.0f} min)"
@@ -874,6 +1005,19 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
                 fp = r["file"].replace("|", "\\|")
                 L.append(f"| {r['session'][:8]} | {r['ns']} | {r['count']} | "
                          f"{r.get('distinct_regions', '—')} | {r.get('reverts', '—')} | {fp} |")
+        sl = beh.get("success_loop_sessions") or []
+        L.append(f"- **Sessions with a SUCCESSFUL-call loop (≥{SUCCESS_LOOP_MIN}× "
+                 f"identical successful Read/Glob/Grep/shell call — read-loop / "
+                 f"glob-storm / output-poll):** {len(sl)}"
+                 + (" — worst below" if sl else ""))
+        if sl:
+            L.append("")
+            L.append("| Session | NS | Tool | × | Target |")
+            L.append("|---|---|---|---:|---|")
+            for r in sl:
+                tgt = (r.get("target") or "")[:80].replace("|", "\\|")
+                L.append(f"| {r['session'][:8]} | {r['ns']} | {r['tool']} | "
+                         f"{r['count']} | {tgt} |")
         L.append("")
 
     L.append("## Top 15 sessions by output tokens\n")
@@ -1036,6 +1180,7 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
         lens = BehaviorLens()
         tooluse_names = {}
         tooluse_args = {}
+        tooluse_paths = {}
         for r in rows_assist:
             msg = r.get("message", {}) or {}
             mid = msg.get("id")
@@ -1069,11 +1214,12 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                         seen_blocks.add(key)
                     name = blk.get("name", "?")
                     B["tools"][name] += 1
+                    ak = hash(json.dumps(blk.get("input", {}), sort_keys=True, default=str))
                     if blk.get("id"):
                         tooluse_names[blk["id"]] = name
-                        tooluse_args[blk["id"]] = hash(json.dumps(
-                            blk.get("input", {}), sort_keys=True, default=str))
-                    lens.see_tool_use(name, blk.get("input"))
+                        tooluse_args[blk["id"]] = ak
+                        tooluse_paths[blk["id"]] = _tool_path(blk.get("input"))
+                    lens.see_tool_use(name, blk.get("input"), ak)
         for r in rows_err:
             content = (r.get("message", {}) or {}).get("content")
             if not isinstance(content, list):
@@ -1084,7 +1230,8 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
                     lens.see_tool_result(
                         tooluse_names.get(blk.get("tool_use_id"), "?"),
                         True, _txt_str(blk.get("content", "")),
-                        args_key=tooluse_args.get(blk.get("tool_use_id")))
+                        args_key=tooluse_args.get(blk.get("tool_use_id")),
+                        path=tooluse_paths.get(blk.get("tool_use_id")))
         s = lens.summary()
         B["tool_errors"].update(s["tool_errors"])
         B["beh"]["timeout_kills"] += s["timeout_kills"]
@@ -1096,6 +1243,8 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
             B["beh"]["failure_mass_files"] += 1
         if s["file_churn"]:   # flagged rewrite-loops only, not raw edit counts
             B["beh"]["file_churn_files"] += 1
+        if s["success_loops"]:   # #2375 d2: successful read-loop / glob-storm / poll
+            B["beh"]["success_loop_files"] += 1
     return buckets, n
 
 def cmd_trend(a):
@@ -1135,7 +1284,8 @@ def cmd_trend(a):
                                   "tool_error_pct": round(errp, 1),
                                   **{k: beh[k] for k in
                                      ("timeout_kills", "sleep_polls", "edit_churn",
-                                      "repeat_failure_files", "file_churn_files")}}})
+                                      "repeat_failure_files", "file_churn_files",
+                                      "success_loop_files")}}})
     if a.json:
         json.dump(rows, open(a.json, "w", encoding="utf-8"), indent=2)
         print(f"\nwrote {a.json}", file=sys.stderr)
@@ -1150,12 +1300,16 @@ def cmd_deep(a):
     b = s["behavior"]
     print(f"behavior: tool_errors={sum(b['tool_errors'].values())} {b['tool_errors']} "
           f"timeout_kills={b['timeout_kills']} sleep_polls={b['sleep_polls']} "
-          f"edit_churn={b['edit_churn']} max_repeat_failure={b['max_repeat_failure']} "
-          f"max_file_churn={b['max_file_churn']}")
+          f"edit_churn={b['edit_churn']} not_read_classes={b.get('not_read_classes', {})} "
+          f"max_repeat_failure={b['max_repeat_failure']} "
+          f"max_file_churn={b['max_file_churn']} "
+          f"max_success_loop={b.get('max_success_loop', 0)}")
     for r in b["repeat_failures"][:5]:
         print(f"  repeat ×{r['count']} [{r['tool']}] {r['sig'][:120]}")
     for r in b["file_churn"][:5]:
         print(f"  churn  ×{r['count']} {r['file']}")
+    for r in b.get("success_loops", [])[:5]:
+        print(f"  succ-loop ×{r['count']} [{r['tool']}] {r['target'][:120]}")
     print("\n## User asks (the trajectory), in order:")
     for i, (ts, txt) in enumerate(s["prompts"]):
         one = " ".join(txt.split())

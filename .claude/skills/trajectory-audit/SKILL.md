@@ -18,11 +18,13 @@ metadata:
 > bucket), tool mix, heaviest sessions — and the *behavioral* stuck/churn lens
 > (#2365): per-tool call/error counts + error rate, shell timeout kills (exit 143 /
 > "timed out"), foreground sleep-polls (`sleep`/`Start-Sleep` command prefix),
-> Edit/Write read-discipline churn, repeated identical failure signatures (≥3×),
-> and per-file mutation churn (≥5 edits of one file — the rewrite-loop smell).
-> **Honest scope:** it still does **not** flag loops of *successful* identical
-> calls (read-loops / glob-storms — only failures and mutations are looped-checked),
-> and it does **not** join the transcript to any external run-id spine.
+> Edit/Write read-discipline churn — sub-classified into post-resume (a `--resume`
+> read-state reset), self-duplicate (a guard-caught duplicate write), and the real
+> defect true-never-read — repeated identical failure signatures (≥3×), per-file
+> mutation churn (≥5 edits of one file — the rewrite-loop smell), and loops of
+> *successful* identical calls (read-loops / glob-storms / output-file poll loops,
+> ≥8× the same tool+args — Monitor/TaskOutput excluded as the sanctioned poll surface).
+> **Honest scope:** it does **not** join the transcript to any external run-id spine.
 >
 > **Billing buckets — the one cost rule.** Each model's tokens land on its vendor's
 > invoice: `claude-*` is the Anthropic bucket; a `gemini-*` / `gpt-*` / local model
