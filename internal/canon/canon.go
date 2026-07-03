@@ -215,6 +215,18 @@ func genericMarkerMetaSuppressed(lowerView string) bool {
 	return false
 }
 
+// DiscussionContext reports whether a lower-cased view reads as discussion /
+// quotation of injection material (a runbook, an issue body, the detector's own
+// source) rather than a live directive — the same cue check the generic-marker
+// meta suppressor uses, exported as a FACT for policy layers. Scan itself only
+// consults it for the two generic markers (the superset contract pins the
+// distinctive phrases unconditionally); a policy caller (normgate's confidence
+// tiering) may additionally use it to decide how LOUDLY to act on a hit Scan
+// already reported. Purely observational: exporting it widens nothing.
+func DiscussionContext(lowerView string) bool {
+	return genericMarkerMetaSuppressed(lowerView)
+}
+
 // onlyGenericMarkerHit reports whether v's InjectionMarkers hit(s) are ALL
 // generic (exfiltrate / you are now) — i.e. none of the distinctive multi-word
 // markers matched. Only in that case is the hit eligible for meta suppression;

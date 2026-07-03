@@ -18,9 +18,12 @@
 // monotonic (most-restrictive wins), so a chained driver can only ADD restriction,
 // never remove a false positive a later driver imposes. normgate therefore treats
 // provenance as a FIRST-CLASS input to its OWN verdict: injection-shaped content
-// is only sealed when its confidence is high. Trusted-local hits, and single-marker
-// untrusted hits with no sink/egress clue, page out as RETRIEVABLE transforms so
-// the bytes stay out of context without raising the loud quarantine banner.
+// is only sealed when its confidence is high. Trusted-local hits, single-marker
+// untrusted hits with no sink/egress clue, and plain-text multi-marker hits whose
+// readable view is discussion/quotation of the threat vocabulary (an issue body or
+// runbook quoting the markers — see highConfidenceInjection) page out as
+// RETRIEVABLE transforms so the bytes stay out of context without raising the loud
+// quarantine banner.
 // Secrets quarantine regardless of source (a leaked credential is worth holding
 // even from a local read).
 //
@@ -151,15 +154,30 @@ type injectionSignal struct {
 	distinctMarkers int
 	obfuscated      bool
 	sinkHint        bool
+	metaProse       bool // the readable view carries discussion/quotation cues (canon.DiscussionContext)
 }
 
 func (s injectionSignal) highConfidence() bool {
-	return s.distinctMarkers >= 2 || s.obfuscated || s.sinkHint
+	if s.obfuscated || s.sinkHint {
+		return true
+	}
+	return s.distinctMarkers >= 2 && !s.metaProse
 }
 
 // highConfidenceInjection separates a low-confidence lexical mention from a payload
 // that looks operational: multiple distinct markers, any marker only revealed by
 // canonicalization/decoding/squeezing, or a co-occurring sensitive sink hint.
+//
+// The multi-marker rung is damped by discussion context (#1330 residual): security
+// prose that QUOTES the threat vocabulary — an issue body, a runbook, this repo's
+// own detector docs — naturally aggregates many distinct markers, so on plain
+// readable text the marker count INVERTS as a confidence signal (the more thorough
+// the doc, the more markers it quotes). Such a body pages out quietly as a
+// retrievable Transform rather than a sealed loud quarantine. The damping never
+// applies to the obfuscated or sink-hint rungs: a marker revealed only by
+// decode/reverse/squeeze, or riding next to an egress sink, seals loudly no matter
+// how discussion-shaped the surrounding prose is — meta cues are cheap to forge,
+// camouflage must not pay.
 func highConfidenceInjection(body []byte) bool {
 	return analyzeInjection(body).highConfidence()
 }
@@ -225,6 +243,7 @@ func analyzeInjection(body []byte) injectionSignal {
 		distinctMarkers: len(markers),
 		obfuscated:      obfuscated,
 		sinkHint:        hasInjectionSinkHint(rawLower),
+		metaProse:       canon.DiscussionContext(strings.ToLower(norm)),
 	}
 }
 
