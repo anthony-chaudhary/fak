@@ -198,9 +198,20 @@ func statusBadge(s devindex.Status) string {
 	return "[" + strings.Join(parts, " · ") + "]"
 }
 
+// indexNeedsQuery is the shared empty-query guard for the subcommands whose search
+// query is mandatory (claims, docs — unlike leaf/verbs, where empty lists all): with
+// no positional query it writes the subcommand's usage line to stderr and reports
+// true, and the caller exits 2 (usage error).
+func indexNeedsQuery(stderr io.Writer, args []string, usage string) bool {
+	if len(args) > 0 {
+		return false
+	}
+	fmt.Fprintln(stderr, usage)
+	return true
+}
+
 func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "fak index claims: needs a search query (a lane, a token, or a capability)")
+	if indexNeedsQuery(stderr, args, "fak index claims: needs a search query (a lane, a token, or a capability)") {
 		return 2
 	}
 	hits := capClaims(cat.SearchClaims(joinArgs(args)), limit)
@@ -234,8 +245,7 @@ func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, 
 }
 
 func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "fak index docs: needs a search query")
+	if indexNeedsQuery(stderr, args, "fak index docs: needs a search query") {
 		return 2
 	}
 	hits := capDocs(cat.SearchDocs(joinArgs(args)), limit)

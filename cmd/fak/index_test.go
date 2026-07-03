@@ -73,12 +73,27 @@ func TestIndexClaimsSearch(t *testing.T) {
 	}
 }
 
-func TestIndexClaimsNeedsQuery(t *testing.T) {
+// requireIndexUsageError runs `fak index <sub>` with no positional query and asserts
+// the mandatory-query contract the claims and docs subcommands share: exit code 2 and
+// the exact one-line usage message on stderr.
+func requireIndexUsageError(t *testing.T, sub, wantStderr string) {
+	t.Helper()
 	root := writeIndexRepo(t)
 	var out, errb bytes.Buffer
-	if rc := runIndex(&out, &errb, []string{"claims", "--root", root}); rc != 2 {
-		t.Errorf("claims with no query rc=%d, want 2 (usage error)", rc)
+	if rc := runIndex(&out, &errb, []string{sub, "--root", root}); rc != 2 {
+		t.Fatalf("%s with no query rc=%d, want 2 (usage error)", sub, rc)
 	}
+	if got := errb.String(); got != wantStderr {
+		t.Errorf("%s empty-query stderr = %q, want %q", sub, got, wantStderr)
+	}
+}
+
+func TestIndexClaimsNeedsQuery(t *testing.T) {
+	requireIndexUsageError(t, "claims", "fak index claims: needs a search query (a lane, a token, or a capability)\n")
+}
+
+func TestIndexDocsNeedsQuery(t *testing.T) {
+	requireIndexUsageError(t, "docs", "fak index docs: needs a search query\n")
 }
 
 func TestIndexClaimsJSON(t *testing.T) {
