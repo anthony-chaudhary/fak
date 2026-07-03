@@ -165,63 +165,76 @@ func hardcodedRefLine(line string) bool {
 	return false
 }
 
+// refClassByExactPath classifies the exact-path occurrences the audit knows by name.
+// Consulted before the prefix rules, preserving the precedence these paths had as
+// switch arms — e.g. the branch-regime docs stay audit-doc, not the docs/ historical
+// family a prefix rule would assign.
+var refClassByExactPath = map[string]string{
+	"docs/branch-regime-hardcoded-ref-audit.md": RefClassAuditDoc,
+	"docs/branch-regime.md":                     RefClassAuditDoc,
+	"docs/ci/workflow-branch-audit.md":          RefClassAuditDoc,
+
+	".github/branch-integration-closeout.md": RefClassHistorical,
+	"BENCHMARK-GOVERNANCE.md":                RefClassHistorical,
+	"GPU.md":                                 RefClassHistorical,
+
+	"AGENTS.md":                                 RefClassDevelopmentSource,
+	"CONTRIBUTING.md":                           RefClassDevelopmentSource,
+	"tools/extend_preflight.py":                 RefClassDevelopmentSource,
+	"tools/fleet_control_pane.py":               RefClassDevelopmentSource,
+	"tools/fleet_control_pane_test.py":          RefClassDevelopmentSource,
+	"cmd/fak/affected.go":                       RefClassDevelopmentSource,
+	"cmd/fak/treedoctor.go":                     RefClassDevelopmentSource,
+	"internal/corelockaudit/corelockaudit.go":   RefClassDevelopmentSource,
+	"internal/gitgate/gitgate.go":               RefClassDevelopmentSource,
+	"internal/safecommit/lockcontention.go":     RefClassDevelopmentSource,
+	"internal/releasestatus/releasestatus.go":   RefClassDevelopmentSource,
+	"internal/treedoctor/treedoctor.go":         RefClassDevelopmentSource,
+	"internal/workerenvelope/workerenvelope.go": RefClassDevelopmentSource,
+	"tools/issue_resolve_witnessed.py":          RefClassDevelopmentSource,
+	"tools/register_worktree_doctor.ps1":        RefClassDevelopmentSource,
+	"tools/worktree_doctor.py":                  RefClassDevelopmentSource,
+
+	"cmd/fak/release.go":                     RefClassPublicFrontDoor,
+	"cmd/fak/release_status.go":              RefClassPublicFrontDoor,
+	"cmd/fak/releasestale.go":                RefClassPublicFrontDoor,
+	"cmd/fak/selfupdate.go":                  RefClassPublicFrontDoor,
+	"cmd/fak/usage.go":                       RefClassPublicFrontDoor,
+	"internal/devindex/verbs.go":             RefClassPublicFrontDoor,
+	"internal/releasestale/releasestale.go":  RefClassPublicFrontDoor,
+	"internal/selfinstall/reap.go":           RefClassPublicFrontDoor,
+	"internal/selfinstall/selfinstall.go":    RefClassPublicFrontDoor,
+	"tools/glm_witness_record.py":            RefClassPublicFrontDoor,
+	"tools/install_self_update_schedule.ps1": RefClassPublicFrontDoor,
+	"tools/release_status.py":                RefClassPublicFrontDoor,
+
+	"tools/demo_robustness_scorecard.py": RefClassPublicGuard,
+
+	"tools/bench_node.README.md": RefClassFixture,
+	"tools/gcp_bench.py":         RefClassFixture,
+}
+
 // ClassifyHardcodedRef classifies a single hard-coded branch ref occurrence.
 func ClassifyHardcodedRef(path, line string) string {
 	p := filepath.ToSlash(path)
+	if class, ok := refClassByExactPath[p]; ok {
+		return class
+	}
 	switch {
 	case strings.HasPrefix(p, ".github/workflows/"):
 		return RefClassWorkflowCovered
-	case p == "docs/branch-regime-hardcoded-ref-audit.md" ||
-		p == "docs/branch-regime.md" ||
-		p == "docs/ci/workflow-branch-audit.md" ||
-		strings.HasPrefix(p, "internal/branchrole/"):
+	case strings.HasPrefix(p, "internal/branchrole/"):
 		return RefClassAuditDoc
 	case strings.HasPrefix(p, "docs/stable-releases/") ||
 		strings.HasPrefix(p, "docs/_audits/") ||
-		strings.HasPrefix(p, "docs/") ||
-		p == ".github/branch-integration-closeout.md" ||
-		p == "BENCHMARK-GOVERNANCE.md" ||
-		p == "GPU.md":
+		strings.HasPrefix(p, "docs/"):
 		return RefClassHistorical
-	case p == "AGENTS.md" ||
-		p == "CONTRIBUTING.md" ||
-		p == "tools/extend_preflight.py" ||
-		p == "tools/fleet_control_pane.py" ||
-		p == "tools/fleet_control_pane_test.py" ||
-		p == "cmd/fak/affected.go" ||
-		p == "cmd/fak/treedoctor.go" ||
-		p == "internal/corelockaudit/corelockaudit.go" ||
-		p == "internal/gitgate/gitgate.go" ||
-		p == "internal/safecommit/lockcontention.go" ||
-		p == "internal/releasestatus/releasestatus.go" ||
-		p == "internal/treedoctor/treedoctor.go" ||
-		p == "internal/workerenvelope/workerenvelope.go" ||
-		p == "tools/issue_resolve_witnessed.py" ||
-		p == "tools/register_worktree_doctor.ps1" ||
-		p == "tools/worktree_doctor.py":
-		return RefClassDevelopmentSource
-	case p == "cmd/fak/release.go" ||
-		p == "cmd/fak/release_status.go" ||
-		p == "cmd/fak/releasestale.go" ||
-		p == "cmd/fak/selfupdate.go" ||
-		p == "cmd/fak/usage.go" ||
-		p == "internal/devindex/verbs.go" ||
-		p == "internal/releasestale/releasestale.go" ||
-		p == "internal/selfinstall/reap.go" ||
-		p == "internal/selfinstall/selfinstall.go" ||
-		strings.HasPrefix(p, "tools/dgx_") ||
-		p == "tools/glm_witness_record.py" ||
-		p == "tools/install_self_update_schedule.ps1" ||
-		p == "tools/release_status.py" ||
+	case strings.HasPrefix(p, "tools/dgx_") ||
 		strings.HasPrefix(p, "tools/forge-rulesets/"):
 		return RefClassPublicFrontDoor
 	case strings.HasPrefix(p, "internal/workflowaudit/"):
 		return RefClassFixture
-	case p == "tools/demo_robustness_scorecard.py":
-		return RefClassPublicGuard
 	case strings.HasPrefix(p, "tools/bench_migrate") ||
-		p == "tools/bench_node.README.md" ||
-		p == "tools/gcp_bench.py" ||
 		strings.HasPrefix(p, "tools/schemas/") ||
 		strings.HasPrefix(p, "experiments/") ||
 		strings.HasSuffix(p, "_test.go") ||
