@@ -21,6 +21,7 @@ const (
 	WaveSidecarSuffix    = ".wave"
 	AccountSidecarSuffix = ".account"
 	BaseSHASidecarSuffix = ".basesha"
+	OpencodePromptNotice = "Read and follow the attached dispatch prompt."
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
 	FallbackMaxWorkers     = 8
@@ -140,7 +141,7 @@ func BuildWorkerCommand(backend, prompt, model string) ([]string, error) {
 		if strings.TrimSpace(model) != "" {
 			cmd = append(cmd, "-m", model)
 		}
-		return append(cmd, prompt), nil
+		return append(cmd, OpencodePromptNotice), nil
 	case "codex":
 		cmd := []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}
 		if strings.TrimSpace(model) != "" {
@@ -152,9 +153,10 @@ func BuildWorkerCommand(backend, prompt, model string) ([]string, error) {
 	}
 }
 
-// WorkerStdinPayload returns the prompt bytes that must be piped to the worker.
+// WorkerStdinPayload returns the prompt bytes that must be piped to, or staged for,
+// the worker outside argv.
 func WorkerStdinPayload(backend, prompt string) string {
-	if backend == "codex" {
+	if backend == "codex" || backend == "opencode" {
 		return prompt
 	}
 	return ""

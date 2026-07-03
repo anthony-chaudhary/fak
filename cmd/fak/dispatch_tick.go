@@ -850,6 +850,16 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	fmt.Fprintf(fh, "# fak-spawn %s issue=%d lane=%s backend=%s argv0=%s\n", stamp, issue, lane, backend, filepath.Base(exe))
 	_ = fh.Sync()
+	stem := strings.TrimSuffix(outLog, filepath.Ext(outLog))
+	if backend == "opencode" && stdinPayload != "" {
+		promptPath := stem + ".prompt.txt"
+		if err := os.WriteFile(promptPath, []byte(stdinPayload), 0o600); err != nil {
+			_ = fh.Close()
+			return dispatchSpawnResult{}, err
+		}
+		command = dispatchAttachOpencodePromptFile(command, promptPath)
+		stdinPayload = ""
+	}
 	cmd := exec.Command(exe, command[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = envSliceFromMap(env)
@@ -871,7 +881,6 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	_ = fh.Close()
 
-	stem := strings.TrimSuffix(outLog, filepath.Ext(outLog))
 	_ = os.WriteFile(stem+".pid", []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 	_ = os.WriteFile(stem+".backend", []byte(backend), 0o644)
 	if leaseID != "" {
@@ -904,6 +913,20 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
 	return res, nil
+}
+
+func dispatchAttachOpencodePromptFile(command []string, promptPath string) []string {
+	out := append([]string(nil), command...)
+	if len(out) == 0 || strings.TrimSpace(promptPath) == "" {
+		return out
+	}
+	if len(out) == 1 {
+		return append(out, "--file", promptPath)
+	}
+	last := out[len(out)-1]
+	out = out[:len(out)-1]
+	out = append(out, "--file", promptPath, last)
+	return out
 }
 
 func probeDispatchSpawn(cmd *exec.Cmd, logPath string, waitS float64) map[string]any {

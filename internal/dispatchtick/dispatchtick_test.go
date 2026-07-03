@@ -22,7 +22,7 @@ func TestBuildWorkerCommandMatchesBackends(t *testing.T) {
 			name:    "opencode pins model",
 			backend: "opencode",
 			model:   "glm-5.2",
-			want:    []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "-m", "glm-5.2", "resolve it"},
+			want:    []string{"opencode", "run", "--print-logs", "--dangerously-skip-permissions", "-m", "glm-5.2", OpencodePromptNotice},
 		},
 		{
 			name:    "codex exec",
@@ -54,8 +54,8 @@ func TestWorkerStdinPayload(t *testing.T) {
 	if got := WorkerStdinPayload("claude", "resolve it"); got != "" {
 		t.Fatalf("claude stdin payload = %q, want empty", got)
 	}
-	if got := WorkerStdinPayload("opencode", "resolve it"); got != "" {
-		t.Fatalf("opencode stdin payload = %q, want empty", got)
+	if got := WorkerStdinPayload("opencode", "resolve it"); got != "resolve it" {
+		t.Fatalf("opencode stdin payload = %q, want prompt", got)
 	}
 }
 
