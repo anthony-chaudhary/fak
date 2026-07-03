@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -802,13 +803,23 @@ func issueContractRepairAction(kind string) string {
 	}
 }
 
-func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
-	var arr []issuecontract.Candidate
-	if err := json.Unmarshal(b, &arr); err == nil {
-		if len(arr) == 0 {
-			return nil, fmt.Errorf("candidate list is empty")
+func decodeIssueContractJSONArray[T any](b []byte, emptyErr string, invalidErr func(error) error) ([]T, bool, error) {
+	var arr []T
+	if err := json.Unmarshal(b, &arr); err != nil {
+		if invalidErr == nil {
+			return nil, false, nil
 		}
-		return arr, nil
+		return nil, true, invalidErr(err)
+	}
+	if len(arr) == 0 {
+		return nil, true, errors.New(emptyErr)
+	}
+	return arr, true, nil
+}
+
+func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) {
+	if arr, decoded, err := decodeIssueContractJSONArray[issuecontract.Candidate](b, "candidate list is empty", nil); decoded || err != nil {
+		return arr, err
 	}
 
 	var obj map[string]json.RawMessage
@@ -817,11 +828,11 @@ func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) 
 	}
 	for _, key := range []string{"candidates", "items"} {
 		if raw, ok := obj[key]; ok {
-			if err := json.Unmarshal(raw, &arr); err != nil {
-				return nil, fmt.Errorf("%s must be an issue-candidate array: %w", key, err)
-			}
-			if len(arr) == 0 {
-				return nil, fmt.Errorf("%s is empty", key)
+			arr, _, err := decodeIssueContractJSONArray[issuecontract.Candidate](raw, key+" is empty", func(err error) error {
+				return fmt.Errorf("%s must be an issue-candidate array: %w", key, err)
+			})
+			if err != nil {
+				return nil, err
 			}
 			return arr, nil
 		}
@@ -841,12 +852,8 @@ func decodeIssueContractCandidates(b []byte) ([]issuecontract.Candidate, error) 
 }
 
 func decodeIssueContractIssues(b []byte) ([]issuecontract.IssueDraft, error) {
-	var arr []issuecontract.IssueDraft
-	if err := json.Unmarshal(b, &arr); err == nil {
-		if len(arr) == 0 {
-			return nil, fmt.Errorf("issue list is empty")
-		}
-		return arr, nil
+	if arr, decoded, err := decodeIssueContractJSONArray[issuecontract.IssueDraft](b, "issue list is empty", nil); decoded || err != nil {
+		return arr, err
 	}
 
 	var obj map[string]json.RawMessage
@@ -855,11 +862,11 @@ func decodeIssueContractIssues(b []byte) ([]issuecontract.IssueDraft, error) {
 	}
 	for _, key := range []string{"issues", "items"} {
 		if raw, ok := obj[key]; ok {
-			if err := json.Unmarshal(raw, &arr); err != nil {
-				return nil, fmt.Errorf("%s must be a GitHub issue array: %w", key, err)
-			}
-			if len(arr) == 0 {
-				return nil, fmt.Errorf("%s is empty", key)
+			arr, _, err := decodeIssueContractJSONArray[issuecontract.IssueDraft](raw, key+" is empty", func(err error) error {
+				return fmt.Errorf("%s must be a GitHub issue array: %w", key, err)
+			})
+			if err != nil {
+				return nil, err
 			}
 			return arr, nil
 		}
