@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -66,5 +67,28 @@ func TestResolveGuardManagedCache(t *testing.T) {
 				t.Fatalf("bannerLine %q does not carry reason %q", line, tc.wantReason)
 			}
 		})
+	}
+}
+
+// TestManagedCacheWiredIntoGuard is the regression sentinel for the --managed-cache WIRING
+// (the token_defaults_test.go idiom). The posture shipped in 8b618eec and a later guard.go
+// change silently dropped every cmdGuard hunk — the resolver and the unit test above survived,
+// so nothing redded while the flag, the gateway lever, and the banner all vanished from the
+// binary. These assertions read the REAL entrypoint source, so the concept's operator
+// visibility (banner + fak_gateway_cache_ttl_upgrade_total witness) cannot detach from its
+// declaration again without failing here.
+func TestManagedCacheWiredIntoGuard(t *testing.T) {
+	src := readEntrypoint(t, "guard.go")
+	if !strings.Contains(src, `fs.String("managed-cache", guardManagedCacheAuto`) {
+		t.Errorf("guard.go must register --managed-cache defaulted to guardManagedCacheAuto")
+	}
+	if !strings.Contains(src, "resolveGuardManagedCache(") {
+		t.Errorf("guard.go must resolve the managed-cache posture from the resolved upstream")
+	}
+	if !regexp.MustCompile(`CacheTTL1H:\s+mcache\.active`).MatchString(src) {
+		t.Errorf("guard.go must wire the resolved posture into gateway Config CacheTTL1H")
+	}
+	if !strings.Contains(src, "mcache.bannerLine()") {
+		t.Errorf("guard.go must print the posture bannerLine into the startup report")
 	}
 }
