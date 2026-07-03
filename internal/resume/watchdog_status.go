@@ -386,15 +386,6 @@ func watchdogMTTRRank(s WatchdogMTTRStatus) int {
 	}
 }
 
-func setEarliest(dst *int64, v int64) {
-	if v <= 0 {
-		return
-	}
-	if *dst == 0 || v < *dst {
-		*dst = v
-	}
-}
-
 func firstNonZero(vals ...int64) int64 {
 	for _, v := range vals {
 		if v > 0 {
