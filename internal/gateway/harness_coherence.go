@@ -175,6 +175,42 @@ func (h *harnessCoherenceMetrics) observe(trace string, now time.Time, digest st
 	return d
 }
 
+// idleExceeds reports whether trace's last served turn (the same per-trace wall clock the
+// cold-TTL signal folds) is older than the message-span cache TTL: h.ttl (the provider's short
+// tier) normally, or a conservative one hour when the --managed-cache 1h upgrade is on. Message
+// breakpoints ride the SHORT tier even under --managed-cache today (the 1h upgrade covers the
+// stable head only, #2176), so the 1h threshold over-waits on purpose: a missed cold fire costs
+// nothing new, a false cold claim would burst a warm cache. Unknown traces (first turn, or a
+// server built without metrics) are never cold.
+func (h *harnessCoherenceMetrics) idleExceeds(trace string, now time.Time, ttl1h bool) bool {
+	if h == nil || trace == "" {
+		return false
+	}
+	threshold := h.ttl
+	if ttl1h {
+		threshold = time.Hour
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry := h.coords[trace]
+	if entry == nil || entry.lastTurn.IsZero() {
+		return false
+	}
+	return now.Sub(entry.lastTurn) > threshold
+}
+
+// coldMessageSpanCache is the gatewayMetrics-level, nil-safe accessor for idleExceeds: has this
+// trace provably idled past the message-breakpoint cache TTL since its last served turn? It is
+// the OBSERVED (never guessed) cold-cache witness the --compact-anchor-head burst gate consumes:
+// an expired message-span suffix re-bills cold this turn with or without a compaction, so a
+// head-anchored fire on a cold trace carries no marginal cache penalty (#1407/#1408).
+func (m *gatewayMetrics) coldMessageSpanCache(trace string, now time.Time, ttl1h bool) bool {
+	if m == nil || m.harnessCoherence == nil {
+		return false
+	}
+	return m.harnessCoherence.idleExceeds(trace, now, ttl1h)
+}
+
 // harnessCoherenceInputs carries the per-turn facts the harness-coherence observation needs that
 // are computed in handleAnthropicMessages (BEFORE fak's transforms) and must reach the streaming
 // finalizers where the provider cache counters land. It threads through the stream functions so the

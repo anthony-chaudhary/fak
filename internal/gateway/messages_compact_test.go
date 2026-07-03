@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 )
 
 // #555 req.Raw step: the gateway compacts the OUTBOUND Anthropic passthrough body to a
@@ -467,7 +469,7 @@ func TestMaybeCompactAnchorHeadDormantWithoutTurnsLeft(t *testing.T) {
 
 	s := anthropicPassthroughServer(1200)
 	s.compactAnchorHead = true
-	fired, reason := s.compactAnthropicRawWithReason(req, 0)
+	fired, reason := s.compactAnthropicRawWithReason(req, 0, "")
 	if fired {
 		t.Fatalf("head anchor with no turns-left horizon must NOT fire, got fired=true reason=%q", reason)
 	}
@@ -489,7 +491,7 @@ func TestMaybeCompactAnchorHeadBreakEvenKeepsWarmSpanWhenUnprofitable(t *testing
 
 	s := anthropicPassthroughServer(2400)
 	s.compactAnchorHead = true
-	fired, reason := s.compactAnthropicRawWithReason(req, 1)
+	fired, reason := s.compactAnthropicRawWithReason(req, 1, "")
 	if fired {
 		t.Fatalf("head anchor with a too-short break-even horizon must NOT fire, got fired=true reason=%q", reason)
 	}
@@ -526,7 +528,7 @@ func TestMaybeCompactAnchorHeadFiresWithTurnsLeft(t *testing.T) {
 
 	// 1. Confirm the default anchor is genuinely dormant on this shape first (the #1407 bug).
 	def := anthropicPassthroughServer(1200)
-	if fired, reason := def.compactAnthropicRawWithReason(req, 1000); fired || reason != agent.CompactReasonUnderBudget {
+	if fired, reason := def.compactAnthropicRawWithReason(req, 1000, ""); fired || reason != agent.CompactReasonUnderBudget {
 		t.Fatalf("default anchor must stay dormant (under_budget) even with turnsLeft supplied (it only gates head mode); got fired=%v reason=%q", fired, reason)
 	}
 	if !bytes.Equal(req.Raw, orig) {
@@ -536,7 +538,7 @@ func TestMaybeCompactAnchorHeadFiresWithTurnsLeft(t *testing.T) {
 	// 2. Head anchor + a generous turns-left horizon (the wired DecideSession case): FIRES.
 	head := anthropicPassthroughServer(1200)
 	head.compactAnchorHead = true
-	fired, reason := head.compactAnthropicRawWithReason(req, 1000)
+	fired, reason := head.compactAnthropicRawWithReason(req, 1000, "")
 	if !fired || reason != "" {
 		t.Fatalf("head anchor with a paying turns-left horizon must FIRE, got fired=%v reason=%q", fired, reason)
 	}
@@ -548,5 +550,62 @@ func TestMaybeCompactAnchorHeadFiresWithTurnsLeft(t *testing.T) {
 	}
 	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
 		t.Fatalf("head-anchored body failed to decode: %v", err)
+	}
+}
+
+// TestMaybeCompactAnchorHeadFiresOnObservedColdTrace is the un-budgeted long-session witness —
+// the first value throughpath for a PLAIN `fak guard -- claude` run with no DecideSession turn
+// budget wired. A trace that idled past the message-breakpoint cache TTL since its last served
+// turn (the harness-coherence per-trace wall clock — OBSERVED, never guessed) has a provably
+// expired message-span suffix, so the head-anchored burst carries zero marginal penalty and the
+// economics gate fires horizon-free. A warm trace on the same server stays conservatively idle.
+func TestMaybeCompactAnchorHeadFiresOnObservedColdTrace(t *testing.T) {
+	s := anthropicPassthroughServer(1200)
+	s.compactAnchorHead = true
+	s.metrics = newGatewayMetrics(time.Now())
+
+	// Prime the per-trace wall clocks: trace-cold last served TWO TTLs ago (provably expired
+	// message spans); trace-warm just now (its cached suffix may still be warm).
+	now := time.Now()
+	s.metrics.observeHarnessCoherence("trace-cold", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
+	s.metrics.observeHarnessCoherence("trace-warm", now, "", false, "", false, false, 0, 0)
+
+	// Warm trace, no horizon: the gate must stay conservative (identity, burst_unprofitable).
+	reqWarm, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode warm: %v", err)
+	}
+	origWarm := append([]byte(nil), reqWarm.Raw...)
+	if fired, reason := s.compactAnthropicRawWithReason(reqWarm, 0, "trace-warm"); fired || reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("warm trace with no horizon must bail burst_unprofitable, got fired=%v reason=%q", fired, reason)
+	}
+	if !bytes.Equal(reqWarm.Raw, origWarm) {
+		t.Fatal("warm-trace bail must leave req.Raw byte-identical")
+	}
+
+	// Cold trace, same server, still no horizon: FIRES.
+	reqCold, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode cold: %v", err)
+	}
+	origCold := append([]byte(nil), reqCold.Raw...)
+	fired, reason := s.compactAnthropicRawWithReason(reqCold, 0, "trace-cold")
+	if !fired || reason != "" {
+		t.Fatalf("provably-cold trace must fire horizon-free, got fired=%v reason=%q", fired, reason)
+	}
+	if bytes.Equal(reqCold.Raw, origCold) || len(reqCold.Raw) >= len(origCold) {
+		t.Fatalf("a cold fire must shrink the body, got %d (in %d)", len(reqCold.Raw), len(origCold))
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(reqCold.Raw); err != nil {
+		t.Fatalf("cold-fired body failed to decode: %v", err)
+	}
+
+	// An unknown trace (first turn — no lastTurn clock yet) is never cold.
+	reqNew, err := agent.DecodeAnthropicMessagesRequest(headOrderedWireBody(t, 120, 2))
+	if err != nil {
+		t.Fatalf("decode new: %v", err)
+	}
+	if fired, reason := s.compactAnthropicRawWithReason(reqNew, 0, "trace-never-seen"); fired || reason != agent.CompactReasonBurstUnprofitable {
+		t.Fatalf("an unseen trace must never read as cold, got fired=%v reason=%q", fired, reason)
 	}
 }

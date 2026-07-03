@@ -229,8 +229,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// economics gate (#1407/#1408). Only a genuinely bounded positive value counts as a
 	// known horizon; 0 (no DecideSession wired, or a session with no turns left) and -1
 	// (session.Unbounded) both leave the gate's TotalTurns unset, so an un-budgeted or
-	// unbounded session never bursts the cache on a guess.
-	compacted, compactReason := s.compactAnthropicRawWithReason(req, sessionTurn.state.Budget.TurnsLeft)
+	// unbounded session never bursts the cache on a guess. reqTrace additionally lets the
+	// gate consult the OBSERVED per-trace idle gap: a trace that idled past the
+	// message-breakpoint cache TTL is provably cold, so a head-anchored fire there carries
+	// no marginal penalty and needs no horizon at all — the unflagged long-session firing
+	// path (#1407's cold case).
+	compacted, compactReason := s.compactAnthropicRawWithReason(req, sessionTurn.state.Budget.TurnsLeft, reqTrace)
 	// fakBail is the harness-coherence view of fak's own compaction this turn: "" for a clean fire
 	// AND for a healthy under_budget no-op, the real reason for any actual bail. Threaded into the
 	// observation below so the coordinator can count a sustained fak-bail streak (when it yields the
@@ -441,10 +445,10 @@ func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
 // fak relays, never a fak claim) is recorded only on turns this actually compacted.
 //
 // Callers outside the live request boundary (tests, and any future non-session caller) have no
-// turn horizon to offer, so this defaults turnsLeft to 0 — the same conservative "unknown
-// horizon" behavior compactAnthropicRawWithReason has always had.
+// turn horizon or trace identity to offer, so this defaults both — the same conservative
+// "unknown horizon, never cold" behavior compactAnthropicRawWithReason has always had.
 func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
-	fired, _ = s.compactAnthropicRawWithReason(req, 0)
+	fired, _ = s.compactAnthropicRawWithReason(req, 0, "")
 	return fired
 }
 
@@ -460,7 +464,12 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 // count from a wired DecideSession) counts as a known horizon; <= 0 — no DecideSession wired, a
 // session with 0 turns left, or session.Unbounded (-1) — leaves the gate's TotalTurns unset, so
 // an un-budgeted or unbounded session is never guessed at.
-func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int) (fired bool, reason string) {
+//
+// trace keys the OBSERVED per-trace idle-gap cold witness (coldMessageSpanCache): a trace that
+// idled past the message-breakpoint cache TTL since its last served turn has a provably expired
+// message-span suffix, so a head-anchored fire there carries no marginal cache penalty and the
+// gate fires horizon-free. "" (no trace — tests, non-session callers) is never cold.
+func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesRequest, turnsLeft int, trace string) (fired bool, reason string) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) {
 		return false, ""
 	}
@@ -491,6 +500,13 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 			opts.CurrentTurn = 1
 			opts.TotalTurns = 1 + turnsLeft
 		}
+		// Observed-cold witness: the per-trace idle gap (the harness-coherence wall clock) has
+		// passed the message-breakpoint cache TTL, so the suffix a head fire would invalidate is
+		// ALREADY expired and re-bills cold this turn regardless — a zero-penalty burst the gate
+		// fires horizon-free. This is what lets a plain, un-budgeted `fak guard -- claude` long
+		// session finally shed its sprawled middle (the #1407 cold case), without ever guessing:
+		// a warm trace still refuses without a repaying horizon.
+		opts.ColdCache = s.metrics.coldMessageSpanCache(trace, time.Now(), s.cacheTTL1H)
 	}
 	out, outcome := agent.CompactAnthropicHistoryWithOptions(req.Raw, opts)
 	req.Raw = out
