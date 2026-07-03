@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/devexmeter"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	ledgerBytes, err := readFileOrStdin(*ledgerPath)
+	ledgerBytes, err := pathutil.ReadFileOrStdin(*ledgerPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "devexmeter: read ledger: %v\n", err)
 		return 2
@@ -64,7 +65,7 @@ func run(stdout, stderr io.Writer, argv []string) int {
 
 func loadIssue(path string, number int, class string) (devexmeter.Issue, error) {
 	if strings.TrimSpace(path) != "" {
-		b, err := readFileOrStdin(path)
+		b, err := pathutil.ReadFileOrStdin(path)
 		if err != nil {
 			return devexmeter.Issue{}, fmt.Errorf("read issue: %w", err)
 		}
@@ -75,13 +76,6 @@ func loadIssue(path string, number int, class string) (devexmeter.Issue, error) 
 		return devexmeter.Issue{}, fmt.Errorf("pass --issue FILE or both --issue-number N --class CLASS")
 	}
 	return devexmeter.Issue{Number: number, Labels: []string{"dev-ex", "friction/" + class}}, nil
-}
-
-func readFileOrStdin(path string) ([]byte, error) {
-	if path == "-" {
-		return io.ReadAll(os.Stdin)
-	}
-	return os.ReadFile(path)
 }
 
 func render(result devexmeter.GateResult) string {

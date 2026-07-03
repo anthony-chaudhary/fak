@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -129,10 +130,7 @@ func scoreboardKPIUpdate(title, kpi, value, grade, verdict, detail, src string) 
 }
 
 func readFromFile(path string) ([]byte, error) {
-	if path == "-" {
-		return io.ReadAll(os.Stdin)
-	}
-	return os.ReadFile(path)
+	return pathutil.ReadFileOrStdin(path)
 }
 
 func defaultSource() string {

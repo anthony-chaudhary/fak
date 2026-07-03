@@ -4,6 +4,7 @@
 package pathutil
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,4 +32,14 @@ func ExpandTilde(p string) string {
 // EnsureDir creates p and any missing parents with the repo's standard directory mode.
 func EnsureDir(p string) error {
 	return os.MkdirAll(p, 0o755)
+}
+
+// ReadFileOrStdin reads the whole named file, treating the conventional "-" as
+// "read everything from stdin" so CLI flags that take a file path also compose
+// with pipes.
+func ReadFileOrStdin(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path)
 }
