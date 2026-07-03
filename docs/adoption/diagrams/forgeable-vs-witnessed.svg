@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="540" viewBox="0 0 900 540" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-labelledby="fvw-title fvw-desc">
+<title id="fvw-title">Forgeable vs witnessed: what an agent says vs what git proves</title>
+<desc id="fvw-desc">Two columns. LEFT "what the agent says" is forgeable: a commit subject, "all tests pass", a recalled memory — each authored by the agent itself. RIGHT "what git proves" is witnessed: the diff, the file set, ancestry — recorded by git, which the agent did not author. A single blue arrow from left to right carries the rule: DOS trusts the right column and re-checks the left against it.</desc>
+<rect x="0" y="0" width="900" height="540" fill="#ffffff"/>
+<text x="450" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#24292f">Forgeable vs witnessed &#8212; the DOS thesis in one image</text>
+<text x="450" y="58" text-anchor="middle" font-size="12.5" fill="#57606a">The model proposes; the kernel disposes &#8212; and re-checks against evidence the agent did not author.</text>
+
+<rect x="40" y="86" width="360" height="366" rx="10" fill="#cf222e" fill-opacity="0.04" stroke="#cf222e" stroke-width="1.2"/>
+<text x="60" y="116" font-size="14" font-weight="700" fill="#cf222e">WHAT THE AGENT SAYS</text>
+<text x="60" y="136" font-size="11.5" fill="#57606a">forgeable &#8212; the agent authored it</text>
+<line x1="60" y1="150" x2="380" y2="150" stroke="#d0d7de" stroke-width="1"/>
+
+<rect x="60" y="170" width="12" height="12" fill="#cf222e"/>
+<text x="80" y="181" font-size="13" font-weight="600" fill="#24292f">a commit subject</text>
+<text x="80" y="200" font-size="11" fill="#57606a">"fix: handle the null case"</text>
+<text x="80" y="216" font-size="10.5" fill="#57606a">the agent typed both the subject and the diff</text>
+
+<rect x="60" y="266" width="12" height="12" fill="#cf222e"/>
+<text x="80" y="277" font-size="13" font-weight="600" fill="#24292f">"all tests pass"</text>
+<text x="80" y="296" font-size="11" fill="#57606a">a status line the worker reported</text>
+<text x="80" y="312" font-size="10.5" fill="#57606a">could mean the failing assertion was deleted</text>
+
+<rect x="60" y="362" width="12" height="12" fill="#cf222e"/>
+<text x="80" y="373" font-size="13" font-weight="600" fill="#24292f">a recalled memory</text>
+<text x="80" y="392" font-size="11" fill="#57606a">"we already migrated that table"</text>
+<text x="80" y="408" font-size="10.5" fill="#57606a">true last week, false this week</text>
+
+<rect x="500" y="86" width="360" height="366" rx="10" fill="#1a7f37" fill-opacity="0.04" stroke="#1a7f37" stroke-width="1.2"/>
+<text x="520" y="116" font-size="14" font-weight="700" fill="#1a7f37">WHAT GIT PROVES</text>
+<text x="520" y="136" font-size="11.5" fill="#57606a">witnessed &#8212; the agent did not author it</text>
+<line x1="520" y1="150" x2="840" y2="150" stroke="#d0d7de" stroke-width="1"/>
+
+<rect x="520" y="170" width="12" height="12" fill="#1a7f37"/>
+<text x="540" y="181" font-size="13" font-weight="600" fill="#24292f">the diff</text>
+<text x="540" y="200" font-size="11" fill="#57606a">the exact lines that changed</text>
+<text x="540" y="216" font-size="10.5" fill="#57606a">git recorded it; not the subject above it</text>
+
+<rect x="520" y="266" width="12" height="12" fill="#1a7f37"/>
+<text x="540" y="277" font-size="13" font-weight="600" fill="#24292f">the file set</text>
+<text x="540" y="296" font-size="11" fill="#57606a">which paths the commit touched</text>
+<text x="540" y="312" font-size="10.5" fill="#57606a">an empty commit cannot fake a change here</text>
+
+<rect x="520" y="362" width="12" height="12" fill="#1a7f37"/>
+<text x="540" y="373" font-size="13" font-weight="600" fill="#24292f">ancestry</text>
+<text x="540" y="392" font-size="11" fill="#57606a">merge-base, tags, the run registry</text>
+<text x="540" y="408" font-size="10.5" fill="#57606a">never the status message the agent sent</text>
+
+<line x1="408" y1="294" x2="484" y2="294" stroke="#0969da" stroke-width="3"/>
+<polygon points="484,286 498,294 484,302" fill="#0969da"/>
+<text x="450" y="262" text-anchor="middle" font-size="12" font-weight="700" fill="#0969da">DOS trusts the right,</text>
+<text x="450" y="278" text-anchor="middle" font-size="12" font-weight="700" fill="#0969da">re-checks the left</text>
+
+<text x="450" y="478" text-anchor="middle" font-size="11" fill="#57606a">Left = what an agent reports (forgeable &#8212; it authored the words). Right = what git records (witnessed &#8212; it did not).</text>
+<text x="450" y="494" text-anchor="middle" font-size="10.5" fill="#57606a">Run them yourself: dos verify &#183; dos commit-audit &#183; dos arbitrate &#183; dos memory recall</text>
+</svg>

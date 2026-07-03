@@ -47,6 +47,16 @@ agents running concurrently, nobody is reading every diff. DOS is the part of
 the system **that does not believe the agents** — it replaces "take the worker's
 word" with "check the artifact the worker cannot forge."
 
+![Two columns: left "what the agent says" (a commit subject, "all tests pass", a recalled memory) marked forgeable; right "what git proves" (the diff, the file set, ancestry) marked witnessed; a single blue arrow carries the rule: DOS trusts the right, re-checks the left](../adoption/diagrams/forgeable-vs-witnessed.svg)
+
+*The whole thesis in one image. The left column is what an agent **reports** —
+forgeable, because the agent authored the words. The right column is what **git
+records** — witnessed, because the agent did not. DOS never passes the left on
+its own word: it re-derives the right and checks the claim against it. The three
+rows on each side are the three checks named below — a done-claim against the
+diff and ancestry, a refusal against a fixed vocabulary, a recalled memory
+against the working tree.*
+
 ## The three things DOS re-checks
 
 A newcomer should be able to name these three. Each maps to a real `dos` verb
