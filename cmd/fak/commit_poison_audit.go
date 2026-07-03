@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -488,8 +487,4 @@ func defaultCommitPoisonAuditGit(ctx context.Context, dir string, args ...string
 		return "", fmt.Errorf("%v: %w: %s", args, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
-}
-
-func cmdCommitPoisonAudit(argv []string) {
-	os.Exit(runCommitPoisonAudit(os.Stdout, os.Stderr, argv))
 }
