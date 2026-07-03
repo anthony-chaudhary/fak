@@ -88,6 +88,80 @@ func TestKQuantMatRowsMatchesDequantRef(t *testing.T) {
 	}
 }
 
+// TestKQuantMatRowsIntoBatchMatchesPerToken pins the dequant-once batched prefill GEMM
+// (kQuantMatRowsIntoBatch, the #2378 lever) BIT-IDENTICAL to looping kQuantMatRowsInto per token.
+// The batch variant dequantizes each weight super-block once and dots it against all P token
+// columns; since each (row,token) uses the SAME super-block order and the SAME (s0+s1)+(s2+s3)
+// four-accumulator dot as the per-token GEMV, the result must equal the per-token loop float-for-
+// float (==, not a tolerance). Pure CPU (no Metal) — runs on any OS. Covers Q6_K + Q5_K (the two
+// resident dense k-quant weight kinds) at P=1,3,16 (single token, small batch, and a wider batch
+// that exercises the row-parallel split across output rows).
+func TestKQuantMatRowsIntoBatchMatchesPerToken(t *testing.T) {
+	// Pin the f32 path: the bit-identity claim is for the f32 dequant-once GEMM, matching the f32
+	// per-token GEMV. A production FAK_KQ_INT8=1 must not flip either side to the approximate int8
+	// path and break the == compare (the batch variant falls back to the per-token loop under SDOT,
+	// which is trivially identical but not what this bit-exactness test is asserting).
+	setKQuantSDOTForTest(false)
+	t.Cleanup(func() { kQuantSDOTForce = 0 })
+	const (
+		out = 9   // odd, to exercise the parallel row split's tail
+		in  = 512 // 2 super-blocks per row
+	)
+	for _, tc := range []struct {
+		name string
+		kind kQuantKind
+	}{{"Q6_K", kindQ6K}, {"Q5_K", kindQ5K}} {
+		t.Run(tc.name, func(t *testing.T) {
+			nblk := in / tc.kind.blockWeights()
+			bb := tc.kind.blockBytes()
+			raw := make([]byte, out*nblk*bb)
+			lcgBytes(raw, 0x243f6a8885a308d3)
+			pinResidentQuantScales(raw, out, nblk, tc.kind)
+			qt := quantizeKQuantFromRaw(raw, out, in, tc.kind)
+			for _, P := range []int{1, 3, 16} {
+				t.Run("P"+itoaP(P), func(t *testing.T) {
+					X := make([]float32, P*in)
+					for i := range X {
+						X[i] = float32((i*13)%37) - 18
+					}
+					// Reference: loop the per-token GEMV, exactly as the old prefill branch did.
+					want := make([]float32, P*out)
+					for tok := 0; tok < P; tok++ {
+						kQuantMatRowsInto(qt, X[tok*in:(tok+1)*in], want[tok*out:(tok+1)*out])
+					}
+					// Batched dequant-once GEMM.
+					got := make([]float32, P*out)
+					kQuantMatRowsIntoBatch(qt, X, P, got)
+					for tok := 0; tok < P; tok++ {
+						for o := 0; o < out; o++ {
+							idx := tok*out + o
+							if got[idx] != want[idx] {
+								t.Fatalf("P=%d tok=%d row=%d: batch=%v per-token=%v (dequant-once GEMM not bit-identical)",
+									P, tok, o, got[idx], want[idx])
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// itoaP renders a small non-negative int without strconv (keeps the test import set minimal).
+func itoaP(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
 func pinResidentQuantScales(raw []byte, out, nblk int, kind kQuantKind) {
 	bb := kind.blockBytes()
 	for o := 0; o < out; o++ {

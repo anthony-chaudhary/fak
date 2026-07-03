@@ -131,14 +131,16 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			// Resident Q5_K/Q6_K matmul weight (the q4_k_m dense down_proj / lm_head now load
 			// Q6_K into kqw, not the Q8 store). Without this branch m.q8(name) below would panic
 			// ("q8 tensor not built") — the prefill twin of the decode-path kqw consultation in
-			// sessionQ4KKernel.mul. The P token rows are looped SERIALLY because kQuantMatRowsInto
-			// already parallelizes across the qt.out output rows via parFor; wrapping it in an
-			// outer parFor would re-enter parDispatchMu and DEADLOCK (parFor is not re-entrant).
-			in := qt.in
+			// sessionQ4KKernel.mul. kQuantMatRowsIntoBatch dequantizes each weight super-block ONCE
+			// and dots it against all P token columns (a GEMM), amortizing the expensive Q6_K/Q5_K
+			// super-block dequant P-fold instead of the old per-token GEMV loop that re-dequantized
+			// every block P times — the #2378 prefill-wall lever (~78% of prefill was this dequant).
+			// It is ONE parForRange over qt.out rows (serial over tokens INSIDE the row body), so it
+			// does not re-enter parDispatchMu (parFor is not re-entrant) and stays bit-identical to
+			// the per-token kQuantMatRowsInto loop. Same Y layout (P×qt.out row-major); still lands
+			// in the q6kTime profile bucket.
 			Y := make([]float32, P*qt.out)
-			for t := 0; t < P; t++ {
-				kQuantMatRowsInto(qt, Xf[t*in:(t+1)*in], Y[t*qt.out:(t+1)*qt.out])
-			}
+			kQuantMatRowsIntoBatch(qt, Xf, P, Y)
 			return Y
 		}
 		return s.q8GemmDispatch(name, m.q8(name), Xq)

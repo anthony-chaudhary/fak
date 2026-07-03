@@ -231,6 +231,63 @@ func kQuantMatRowsRange(qt *kQuantTensor, x, y []float32, lo, hi int) {
 	}
 }
 
+// kQuantMatRowsIntoBatch computes Y[t*out + o] for all P tokens and all out rows, dequantizing
+// each weight super-block ONCE and reusing it across every token column — the dequant-once GEMM
+// twin of kQuantMatRowsInto's per-token GEMV. X is P×in row-major (token t's activation at
+// X[t*in:(t+1)*in]); Y is P×out row-major. It is ONE parForRange over the out rows (no nested
+// parFor → no parDispatchMu re-entry); the per-row body loops the tokens SERIALLY inside the row
+// (not a parFor), hoisting the expensive Q6_K/Q5_K super-block dequant out of the token loop so a
+// weight block is dequantized once instead of P times.
+//
+// Bit-identical to looping kQuantMatRowsInto per token: for each (row o, token t) the four-
+// accumulator dot uses the SAME (s0+s1)+(s2+s3) fixed order and the SAME super-block order as
+// kQuantMatRowsRange, and each token's accumulator is independent, so no cross-token reassociation
+// happens. The int8 SDOT path is APPROXIMATE (activation quantization) and not the prefill wall
+// this batch variant targets (the dense Q6_K/Q5_K down_proj/lm_head ride the f32 path), so when
+// kQuantSDOTEnabled(qt.kind) the batch variant falls back to the per-token kQuantMatRowsInto loop
+// — correctness first; the f32 batch below is the bit-exact dequant-once speedup.
+func kQuantMatRowsIntoBatch(qt *kQuantTensor, X []float32, P int, Y []float32) {
+	if kQuantSDOTEnabled(qt.kind) {
+		in, out := qt.in, qt.out
+		for t := 0; t < P; t++ {
+			kQuantMatRowsInto(qt, X[t*in:(t+1)*in], Y[t*out:(t+1)*out])
+		}
+		return
+	}
+	in, out := qt.in, qt.out
+	blockWeights := qt.kind.blockWeights()
+	rowBytes := qt.rowBytes()
+	bb := qt.kind.blockBytes()
+	parForRange(out, out*in*P, func(lo, hi int) {
+		buf := make([]float32, blockWeights) // reused per (row,block); L1/L2-resident
+		acc := make([]float32, P)            // one accumulator per token column
+		for o := lo; o < hi; o++ {
+			row := qt.raw[o*rowBytes:]
+			for t := 0; t < P; t++ {
+				acc[t] = 0
+			}
+			for b := 0; b < qt.nblk; b++ {
+				// Dequant this super-block ONCE, then dot it against every token column.
+				kQuantDequantSuperBlock(buf, row[b*bb:(b+1)*bb], qt.kind)
+				for t := 0; t < P; t++ {
+					xs := X[t*in+b*blockWeights:]
+					var s0, s1, s2, s3 float32
+					for i := 0; i < blockWeights; i += 4 {
+						s0 += buf[i] * xs[i]
+						s1 += buf[i+1] * xs[i+1]
+						s2 += buf[i+2] * xs[i+2]
+						s3 += buf[i+3] * xs[i+3]
+					}
+					acc[t] += (s0 + s1) + (s2 + s3)
+				}
+			}
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = acc[t]
+			}
+		}
+	})
+}
+
 // quantizeKQuantFromRaw wraps a raw GGUF expert-quant payload as a resident kQuantTensor with NO
 // transform — the bytes ARE the GGUF bytes. The raw-byte twin of quantizeQ4KFromRaw for the
 // mixed-quant expert bulk.
