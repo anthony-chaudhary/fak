@@ -517,16 +517,22 @@ func (m *gatewayMetrics) observeUpstreamForbiddenRetry(outcome string) {
 	m.upstreamErrMu.Unlock()
 }
 
-// observeUpstreamAccountFailover counts one account-scoped failover outcome ("recovered" /
-// "exhausted"), called from the AccountFailoverNotify hook. Off the request path, guarded by the
-// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a junk
-// series. Mirrors observeUpstreamForbiddenRetry — the four upstream self-heal signals (retry,
-// auth-refresh, forbidden-retry, account-failover) stay parallel so an operator reads them alike.
+// observeUpstreamAccountFailover counts one account-failover-arm outcome, called from the
+// AccountFailoverNotify hook. The arm fires for two causes over the SAME swap mechanism, and the
+// outcome label keeps them apart: a 403 ORG WALL reports "recovered" / "exhausted", and a 429
+// ACCOUNT CAP (session/weekly/usage) seat rehome reports "rehomed_seat" / "rehome_seat_unavailable"
+// — the cap can hold for a hours-away reset, so the session swaps to a free sibling seat instead of
+// sleeping on the capped one. Off the request path, guarded by the shared upstreamErrMu. An unknown
+// outcome is ignored so a future caller typo cannot create a junk series. Mirrors
+// observeUpstreamForbiddenRetry — the four upstream self-heal signals (retry, auth-refresh,
+// forbidden-retry, account-failover) stay parallel so an operator reads them alike.
 func (m *gatewayMetrics) observeUpstreamAccountFailover(outcome string) {
 	if m == nil {
 		return
 	}
-	if outcome != "recovered" && outcome != "exhausted" {
+	switch outcome {
+	case "recovered", "exhausted", "rehomed_seat", "rehome_seat_unavailable":
+	default:
 		return
 	}
 	m.upstreamErrMu.Lock()
@@ -2482,8 +2488,8 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	// means N sessions that would otherwise have died on a futile /login were auto-switched onto a
 	// working account. Both series always emitted (even at 0) for panel stability from the first
 	// scrape. OBSERVED denial from the provider; the failover action is WITNESSED (fak authored it).
-	writeHelpType(b, "fak_gateway_upstream_account_failover_total", "Account-scoped failovers on an org/region/billing-walled 403/402, by outcome: recovered (a permitted sibling account was adopted and the walled turn completed in place, healing a session re-login could not) or exhausted (no permitted sibling existed, so the account-scoped denial surfaced).", "counter")
-	for _, outcome := range []string{"recovered", "exhausted"} {
+	writeHelpType(b, "fak_gateway_upstream_account_failover_total", "Account-failover-arm outcomes over the sibling-seat swap, by outcome: an org/region/billing-walled 403/402 reports recovered (a permitted sibling account was adopted and the walled turn completed in place, healing a session re-login could not) or exhausted (no permitted sibling existed, so the account-scoped denial surfaced); a 429 ACCOUNT CAP (session/weekly/usage, whose reset can be hours away) reports rehomed_seat (the session swapped to a free sibling seat and completed the turn now instead of sleeping toward the cap reset) or rehome_seat_unavailable (every sibling seat was capped/walled, so the cap-aware backoff rode it out). OBSERVED denial from the provider; the failover/rehome action is WITNESSED (fak authored it).", "counter")
+	for _, outcome := range []string{"recovered", "exhausted", "rehomed_seat", "rehome_seat_unavailable"} {
 		fmt.Fprintf(b, "fak_gateway_upstream_account_failover_total{outcome=\"%s\"} %d\n", outcome, afSnap[outcome])
 	}
 	writeCounter(b, "fak_gateway_served_inline_total", "Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.", int64(m.servedInlineSnapshot()))

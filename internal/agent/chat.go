@@ -1102,6 +1102,17 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// heal (fired at the next success), never an optimistic one — mirroring the forbidden arm.
 	triedFailover := false
 	failoverPending := false
+	// A 429 that classifies as an ACCOUNT CAP (session/weekly/usage — isAccountCap429) is
+	// recoverable ONCE by REHOMING the session to a permitted sibling seat: such a cap can hold
+	// for the full 5h/7d reset window (and is often a multi-account/billing condition longer than
+	// it looks), so waiting on the capped seat toward its named reset is expensive when a free
+	// sibling seat could serve the turn now. triedRehome caps that at a single seat swap so a run
+	// of capped siblings still falls through to the cap-aware backoff instead of looping the
+	// roster; rehomePending defers the "rehomed" notify to the confirming 200, mirroring the 403
+	// failover arm. A transient rate_limited throttle (capWait "") never triggers this — it keeps
+	// its seat and rides the short backoff.
+	triedRehome := false
+	rehomePending := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
@@ -1137,6 +1148,30 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
 				rs.noteRetryableStatus(resp.StatusCode, raw, resp.Header, 200)
+				// A 429 that names an ACCOUNT CAP (session/weekly/usage) is not a seconds-long
+				// throttle — its named reset can be hours (or a multi-account/billing wall) away.
+				// Rather than sleep on the capped seat toward that reset, rehome the session ONCE to
+				// a permitted sibling seat that can serve the turn now, using the SAME swap mechanism
+				// the 403 org-wall failover uses (failoverAccountCred + AccountFailoverFunc). On a
+				// successful swap re-send immediately (no cap-wait); on no free seat, fall through to
+				// the existing cap-aware backoff below, so behavior is unchanged when rehoming can't
+				// help or is not configured. A transient rate_limited throttle (not an account cap)
+				// skips this entirely and keeps its seat.
+				if !triedRehome && p.AccountFailoverFunc != nil &&
+					isAccountCap429(resp.StatusCode, raw, resp.Header, time.Now()) {
+					if call.failoverAccountCred(p, RehomedSeat) {
+						triedRehome = true
+						rehomePending = true   // confirmed-rehome notify fires at the next 200, not here
+						rs.lastRetryAfter = "" // re-send immediately on the sibling seat; do not wait out the cap
+						rs.lastCapWait = ""
+						attempt-- // the rehome probe is uncounted against the 429 backoff budget
+						continue
+					}
+					// No free sibling seat — every one capped/walled/absent. Report the spent-but-
+					// fruitless rehome so the cap-driven give-up is visible, then ride the backoff.
+					notifyAccountFailover(p, RehomeSeatUnavailable, attempt)
+					triedRehome = true // one report; do not re-notify every capped attempt
+				}
 				continue
 			}
 			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
@@ -1221,6 +1256,13 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if failoverPending {
 			notifyAccountFailover(p, AccountFailoverRecovered, attempt)
 			failoverPending = false
+		}
+		// A 200 after a 429-account-cap seat rehome is a CONFIRMED rehome: the capped session
+		// adopted a permitted sibling seat and completed the turn in place instead of sleeping
+		// toward a hours-away reset. Report it once (rehomePending is one-way here).
+		if rehomePending {
+			notifyAccountFailover(p, RehomedSeat, attempt)
+			rehomePending = false
 		}
 		comp, err := call.adapter.ParseResponse(raw)
 		if err != nil {

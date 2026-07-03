@@ -161,6 +161,10 @@ func TestDebugVarsExposeAccountFailover(t *testing.T) {
 	srv.metrics.observeUpstreamAccountFailover("recovered")
 	srv.metrics.observeUpstreamAccountFailover("recovered")
 	srv.metrics.observeUpstreamAccountFailover("exhausted")
+	// The 429-account-cap seat rehome shares this family with a DISTINCT outcome label, so a
+	// cap-driven rehome is counted and never conflated with an org-wall failover.
+	srv.metrics.observeUpstreamAccountFailover("rehomed_seat")
+	srv.metrics.observeUpstreamAccountFailover("rehome_seat_unavailable")
 	srv.metrics.observeUpstreamAccountFailover("bogus") // must be ignored
 
 	vars := srv.debugVars(time.Now())
@@ -169,6 +173,12 @@ func TestDebugVarsExposeAccountFailover(t *testing.T) {
 	}
 	if vars.Upstream.AccountFailoverByOutcome["exhausted"] != 1 {
 		t.Fatalf("/debug/vars account-failover exhausted = %d, want 1: %+v", vars.Upstream.AccountFailoverByOutcome["exhausted"], vars.Upstream)
+	}
+	if vars.Upstream.AccountFailoverByOutcome["rehomed_seat"] != 1 {
+		t.Fatalf("/debug/vars seat rehome rehomed_seat = %d, want 1: %+v", vars.Upstream.AccountFailoverByOutcome["rehomed_seat"], vars.Upstream)
+	}
+	if vars.Upstream.AccountFailoverByOutcome["rehome_seat_unavailable"] != 1 {
+		t.Fatalf("/debug/vars seat rehome rehome_seat_unavailable = %d, want 1: %+v", vars.Upstream.AccountFailoverByOutcome["rehome_seat_unavailable"], vars.Upstream)
 	}
 	if _, ok := vars.Upstream.AccountFailoverByOutcome["bogus"]; ok {
 		t.Fatalf("a junk outcome must not create a series: %+v", vars.Upstream.AccountFailoverByOutcome)

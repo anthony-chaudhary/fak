@@ -56,6 +56,24 @@ func capProbeInterval() time.Duration {
 	return defaultCapProbeInterval
 }
 
+// isAccountCap429 reports whether a retryable upstream response is an ACCOUNT-SCOPED 429
+// rate-limit cap — a session/weekly/usage limit — as opposed to a transient server-side
+// throttle (rate_limited) or a non-429 overload (5xx/529). It is the honest discriminator
+// that decides whether a 429 is worth REHOMING the session to an available sibling seat:
+// an account cap can hold for the full 5h/7d window (and is frequently a multi-account or
+// billing condition that is "longer than it looks"), so sleeping on the capped seat toward
+// its named reset is expensive when a permitted sibling seat could serve the turn now. A
+// plain throttle clears in seconds, so it keeps the same seat and rides the short backoff.
+//
+// It reuses classifyLimit429's own signal: capWait is non-empty ONLY for an account cap
+// (session/weekly/usage), empty for a rate_limited throttle and for every non-429 status.
+// So there is ONE taxonomy — the same classification that drives the cap-aware wait also
+// decides the rehome — not a second predicate that can drift from it.
+func isAccountCap429(status int, body []byte, h http.Header, now time.Time) bool {
+	_, capWait := classifyLimit429(status, body, h, now)
+	return capWait != ""
+}
+
 // classifyLimit429 classifies one retryable upstream 429 into the closed rate-limit
 // vocabulary shared with the post-mortem transcript scan, and derives the cap-aware
 // wait the retry loop should use when the response carried no Retry-After.

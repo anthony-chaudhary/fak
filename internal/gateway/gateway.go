@@ -1281,9 +1281,14 @@ func (s *Server) onForbiddenRetry(outcome string, attempt int) {
 // swap to a permitted sibling account. outcome is "recovered" (a permitted sibling credential was
 // adopted and the walled turn completed in place, so the session healed onto a working account
 // instead of dropping into a futile /login) or "exhausted" (no failover target existed, so the
-// account-scoped 403 now surfaces). This is the otherwise-INVISIBLE event behind the org-OAuth-
-// disabled failure: with this line an operator sees the session auto-switch accounts — or sees it
-// give up because every account is walled — instead of a silent, unfixable-by-login session loss.
+// account-scoped 403 now surfaces). The SAME hook also reports the 429-account-cap seat rehome that
+// rides this swap mechanism: "rehomed_seat" (a session/weekly/usage cap — whose reset can be hours
+// away — was answered by moving to a free sibling seat that served the turn now, instead of sleeping
+// toward the reset) or "rehome_seat_unavailable" (every sibling seat was capped/walled, so the
+// cap-aware backoff rode it out). This is the otherwise-INVISIBLE event behind the org-OAuth-disabled
+// failure AND the "429 that was longer than it looked": with this line an operator sees the session
+// auto-switch accounts/seats — or sees it give up because every one is walled — instead of a silent
+// session loss.
 func (s *Server) onAccountFailover(outcome string, attempt int) {
 	if s == nil {
 		return
