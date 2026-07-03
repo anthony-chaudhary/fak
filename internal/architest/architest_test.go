@@ -142,6 +142,7 @@ var tier = map[string]int{
 	"agentdemo":     3,                // agentic "try-it" demo spine (epic #1167): a deterministic, no-key tool-using agent loop that folds the REAL kernel per call â€” the live-loop dual of turnbench's trace replay. Composer: imports abi(0)+adjudicator(2)+kernel(2), off the hot path.
 	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
 	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
+	"memvaluescore": 3, // unbounded memory-value scorecard (frontier/pressure/debt) over the committed memory mirror + recall-events ledger; composes recall(3)+memoryread(1)+pkg/scorecard, off the hot path.
 	"selfquery": 3, // unified self-feature catalog over devindex, memq, gateway-supplied tool descriptors, and capindex cards; composer view, off the hot path.
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
