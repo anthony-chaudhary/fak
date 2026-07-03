@@ -154,8 +154,18 @@ func (c Complaint) Key() string {
 	}, "/")
 }
 
+// oneLine collapses every whitespace run — including CR/LF line breaks — to a
+// single space. The summary is documented as a one-line headline, but nothing
+// upstream enforces it: a summary pasted with an embedded newline would
+// otherwise flow verbatim into the gh issue title and break the one-row-per-
+// plan Render output.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // Title renders the issue title — clear and self-describing, with the appealed reason and
-// tool inline so the tracker shows the class at a glance.
+// tool inline so the tracker shows the class at a glance. Line breaks in the
+// summary are collapsed: issue titles and Render rows are single-line surfaces.
 func (c Complaint) Title() string {
 	var b strings.Builder
 	b.WriteString("guard complaint [")
@@ -172,7 +182,7 @@ func (c Complaint) Title() string {
 		b.WriteString(" ")
 		b.WriteString(strings.Join(scope, " "))
 	}
-	if s := strings.TrimSpace(c.Summary); s != "" {
+	if s := oneLine(c.Summary); s != "" {
 		b.WriteString(" — ")
 		b.WriteString(s)
 	}

@@ -57,6 +57,40 @@ func TestKeyStableAndDiscriminating(t *testing.T) {
 	}
 }
 
+// TestTitleCollapsesLineBreaks fences the one-line contract of the title
+// surface: a summary pasted with embedded CR/LF (agents quote refused
+// multi-line commands into their appeals) must not produce a multi-line gh
+// issue title or break the one-row-per-plan Render output. The dedup Key was
+// already newline-safe via slug(); the title was not.
+func TestTitleCollapsesLineBreaks(t *testing.T) {
+	c := sampleComplaint()
+	c.Summary = "guard blocked a quoted compound:\r\n  git commit -m x\n  then the second half"
+	title := c.Title()
+	if strings.ContainsAny(title, "\r\n") {
+		t.Fatalf("title carries line breaks: %q", title)
+	}
+	if !strings.Contains(title, "git commit -m x then the second half") {
+		t.Fatalf("collapse must preserve the words with single spaces: %q", title)
+	}
+
+	row := BuildPlan(c, nil)
+	rendered := Render(Result{Schema: Schema, Mode: "dry-run", Planned: []PlanRow{row}})
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "\r") {
+			t.Fatalf("render row carries a stray CR: %q", line)
+		}
+	}
+	if got := strings.Count(rendered, "[create]"); got != 1 {
+		t.Fatalf("plan row split across lines, %d [create] markers in:\n%s", got, rendered)
+	}
+	// The dedup key stays stable whether the summary arrived folded or flat.
+	flat := c
+	flat.Summary = oneLine(c.Summary)
+	if flat.Key() != c.Key() {
+		t.Fatalf("key differs for folded vs flat summary: %q vs %q", c.Key(), flat.Key())
+	}
+}
+
 func TestBodyMarkerRoundTripAndOccurrences(t *testing.T) {
 	c := sampleComplaint()
 	body := c.Body(1)
