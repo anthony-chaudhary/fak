@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/memvaluescore"
 )
 
 // fixtureMemoryStore writes a markdown memory store whose three notes exercise
@@ -154,6 +156,74 @@ func TestMemoryRecall_formatUnknownFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "yaml") {
 		t.Errorf("stderr must name the unknown format; got:\n%s", errb.String())
+	}
+}
+
+// --ledger appends one fak-memory-value-ledger/1 row per recall that witnesses
+// events, and memvaluescore.FoldLedger folds it — the frontier's event feed:
+// this fixture witnesses 1 fresh render (×2) + 1 stale withholding (×8).
+func TestMemoryRecall_appendsMemoryValueLedgerRow(t *testing.T) {
+	dir := fixtureMemoryStore(t)
+	ledger := filepath.Join(t.TempDir(), "memory-value.jsonl")
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", dir, "--intent", "memory algebra gate", "--ledger", ledger})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	raw, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatalf("ledger row must be appended: %v", err)
+	}
+	var row memoryValueRow
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(raw))), &row); err != nil {
+		t.Fatalf("row must parse: %v\n%s", err, raw)
+	}
+	if row.Schema != memvaluescore.LedgerSchema {
+		t.Errorf("schema = %q, want %q", row.Schema, memvaluescore.LedgerSchema)
+	}
+	// The prose note renders hedged [unverified] — it must NOT count as fresh.
+	if row.Fresh != 1 || row.WithheldStale != 1 || row.Lessons != 0 {
+		t.Errorf("row events = fresh=%d withheld_stale=%d lessons=%d, want 1/1/0", row.Fresh, row.WithheldStale, row.Lessons)
+	}
+	fold := memvaluescore.FoldLedger(ledger)
+	if !fold.Present || fold.Rows != 1 || fold.SkippedRows != 0 {
+		t.Errorf("FoldLedger must accept the row: %+v", fold)
+	}
+	frontier, _ := memvaluescore.Frontier(fold.Events)
+	if frontier != 8+2 {
+		t.Errorf("frontier = %d, want 10 (stale_withheld×8 + fresh_rendered×2)", frontier)
+	}
+}
+
+// A recall that witnesses nothing (empty store) must NOT append a row — a
+// zero-event row would flip recall_value_witnessed without any value.
+func TestMemoryRecall_zeroEventRecallAppendsNothing(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "memory-value.jsonl")
+	var out, errb strings.Builder
+	code := runMemoryRecall(&out, &errb, []string{"--store", filepath.Join(t.TempDir(), "nope"), "--intent", "anything", "--ledger", ledger})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	if _, err := os.Stat(ledger); !os.IsNotExist(err) {
+		t.Errorf("zero-event recall must not create the ledger; stat err = %v", err)
+	}
+}
+
+// The default-path rule: an explicit --store never ledgers into the repo P&L
+// unless --ledger names a path, and "off" always disables — only a default-store
+// recall inherits the committed docs/nightrun ledger.
+func TestMemoryRecall_ledgerPathResolution(t *testing.T) {
+	if got := recallLedgerPath("", "/tmp/fixture-store"); got != "" {
+		t.Errorf("explicit store without --ledger must not append; got %q", got)
+	}
+	if got := recallLedgerPath("off", ""); got != "" {
+		t.Errorf("--ledger off must disable; got %q", got)
+	}
+	if got := recallLedgerPath("/x/custom.jsonl", "/tmp/fixture-store"); got == "" {
+		t.Error("an explicit --ledger path must win even with an explicit store")
+	}
+	if got := recallLedgerPath("", ""); got != "" && !strings.HasSuffix(filepath.ToSlash(got), memvaluescore.DefaultLedgerRel) {
+		t.Errorf("default-store recall must resolve to the committed ledger; got %q", got)
 	}
 }
 

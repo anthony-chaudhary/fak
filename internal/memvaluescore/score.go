@@ -68,8 +68,9 @@ const Schema = "fak-memory-value-scorecard/1"
 const DebtKey = "memory_debt"
 
 // LedgerSchema is the per-row schema of the recall-events ledger this card
-// folds into the frontier. The append seam (in `fak memory recall`) is the
-// parked next step; until it lands the ledger is absent and the frontier is 0.
+// folds into the frontier. `fak memory recall` appends one row per recall that
+// witnesses events; until the first real recall lands a row, the ledger is
+// absent and the frontier is 0.
 const LedgerSchema = "fak-memory-value-ledger/1"
 
 // DefaultStoreRel is the committed fleet-memory mirror, relative to the root.
@@ -425,7 +426,7 @@ func BuildWith(ctx context.Context, store, ledger string, verifier recall.Artifa
 		{
 			Key: "recall_value_witnessed", Group: "value",
 			Score:  binaryScore(fold.Rows > 0),
-			Detail: "the recall-events ledger has witnessed rows — not yet until the `fak memory recall` append seam lands (parked, cmd lane)",
+			Detail: "the recall-events ledger has witnessed rows — `fak memory recall` appends them; not yet until a real recall witnesses an event",
 			Soft:   ledgerSoft(fold),
 		},
 	}
@@ -434,7 +435,7 @@ func BuildWith(ctx context.Context, store, ledger string, verifier recall.Artifa
 		Finding:         "hard structural defects in the memory store — mend in-tree",
 		FindingClean:    "store structurally sound; frontier and pressure are the trend numbers, not grades",
 		NextAction:      "fix the defect list (index rows, orphans, frontmatter), then re-run",
-		NextActionClean: "grow the frontier: land the recall-ledger append seam, then inject verified recall at loop-turn start (R2)",
+		NextActionClean: "grow the frontier: inject verified recall (`fak memory recall`, which ledgers witnessed events) at loop-turn start (R2)",
 		ExtraCorpus: map[string]any{
 			"memory_value_frontier": frontier,
 			"frontier_by_term":      frontierByTerm,

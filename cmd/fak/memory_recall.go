@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/memoryread"
 	"github.com/anthony-chaudhary/fak/internal/memq"
+	"github.com/anthony-chaudhary/fak/internal/memvaluescore"
 	"github.com/anthony-chaudhary/fak/internal/memview"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/recall"
@@ -69,6 +73,7 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 	format := fs.String("format", "markdown", "surface encoding: markdown (default, rich prose) | json | toon | any memview.Register'd format")
 	listFormats := fs.Bool("list-formats", false, "print the registered surface formats and exit")
 	ablateFormats := fs.String("ablate-formats", "", "measure this note set's byte/token cost under every named format (comma-separated, or \"all\") instead of rendering")
+	ledger := fs.String("ledger", "", "append witnessed recall events to this JSONL ledger ("+memvaluescore.LedgerSchema+"). Default: "+memvaluescore.DefaultLedgerRel+" under the repo root when recalling from the default store; an explicit --store never appends unless this flag names a path. \"off\" disables")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -107,6 +112,21 @@ func runMemoryRecall(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		env.Withheld = append(env.Withheld, n)
+	}
+
+	// Ledger the witnessed events (#2346, memvaluescore frontier feed) — but only
+	// when an orientation block is actually delivered (never for ablation
+	// measurement) and only when something was witnessed: a zero-event row would
+	// flip recall_value_witnessed without value. A failed append degrades the
+	// accounting, never the recall — the orientation block is the product.
+	if *ablateFormats == "" {
+		if path := recallLedgerPath(*ledger, *store); path != "" {
+			if row := memoryValueRowFrom(env); row.Fresh+row.WithheldStale > 0 {
+				if err := appendMemoryValueRow(path, row); err != nil {
+					fmt.Fprintf(stderr, "fak memory recall: ledger append: %v (recall output unaffected)\n", err)
+				}
+			}
+		}
 	}
 
 	if *asJSON {
@@ -208,6 +228,86 @@ func formatMetricsTable(metrics []memview.FormatMetrics) string {
 		fmt.Fprintf(&b, "%-10s %10d %10d\n", m.Format, m.Bytes, m.EstimatedTokens)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// memoryValueRow is one fak-memory-value-ledger/1 row — the witnessed recall
+// events memvaluescore.FoldLedger sums into the unbounded value frontier.
+// ts/intent/store are audit context; only schema + the three counts fold.
+type memoryValueRow struct {
+	Schema        string `json:"schema"`
+	TS            string `json:"ts"`
+	Intent        string `json:"intent"`
+	Store         string `json:"store"`
+	Fresh         int    `json:"fresh"`
+	WithheldStale int    `json:"withheld_stale"`
+	Lessons       int    `json:"lessons"`
+}
+
+// memoryValueRowFrom counts the envelope's witnessed events on the frontier's
+// terms: Fresh is claim-VERIFIED rendered notes only (an unverified render is
+// hedged orientation, not witnessed value — fails low), WithheldStale is a
+// stale claim refused before injection (other refusal reasons — sealed,
+// reverify — carry no stale-withholding value), Lessons stays 0 until R3.
+func memoryValueRowFrom(env recallEnvelope) memoryValueRow {
+	row := memoryValueRow{
+		Schema: memvaluescore.LedgerSchema,
+		TS:     time.Now().UTC().Format(time.RFC3339),
+		Intent: env.Intent,
+		Store:  filepath.ToSlash(env.Store),
+	}
+	for _, n := range env.Rendered {
+		if n.Verdict == "fresh" {
+			row.Fresh++
+		}
+	}
+	for _, n := range env.Withheld {
+		if strings.HasPrefix(n.Verdict, "withheld:stale") {
+			row.WithheldStale++
+		}
+	}
+	return row
+}
+
+// recallLedgerPath resolves the --ledger flag: "off" (or "none") disables, a
+// path wins, and empty defaults to the repo's committed ledger — but ONLY when
+// the recall ran over the default committed mirror. An explicit --store (a
+// test fixture, an ad-hoc dir) must never inject its events into the real
+// memory P&L unless the caller names a ledger too.
+func recallLedgerPath(flagVal, storeFlag string) string {
+	switch flagVal {
+	case "off", "none":
+		return ""
+	case "":
+		if storeFlag != "" {
+			return ""
+		}
+		root := resolveRoot("")
+		if root == "" {
+			return ""
+		}
+		return filepath.Join(root, filepath.FromSlash(memvaluescore.DefaultLedgerRel))
+	default:
+		return pathutil.ExpandTilde(flagVal)
+	}
+}
+
+// appendMemoryValueRow appends one JSONL row, creating the parent dir — the
+// same append discipline as the cache-savings ledger writers.
+func appendMemoryValueRow(path string, row memoryValueRow) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	line, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return err
 }
 
 // memoryRecallQuery is intentionally not registered as a `fak memory drivers`
