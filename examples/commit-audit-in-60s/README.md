@@ -105,6 +105,7 @@ self-authored "done" is re-checked against git, not trusted.
 |---|---|
 | `README.md` | this walkthrough |
 | `run.sh` | the one command — builds a throwaway repo, makes both commits, audits each |
+| `EXAMPLE-OUTPUT.md` | a captured representative run showing the unwitnessed and witnessed verdicts |
 
 Related: [`deny-in-60s/`](../deny-in-60s/README.md) (the parallel 60-second demo — a
 default-deny floor refusing an irreversible call); the concept it serves —
