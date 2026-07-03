@@ -1179,26 +1179,25 @@ func resolveTUIAgentClaudeConfig(opt tuiAgentOptions, getenv func(string) string
 		return env, home.Dir, "account:" + home.Name, home.Name, home.Identity.Email, notes, nil
 	}
 	if dir := strings.TrimSpace(opt.ClaudeConfigDir); dir != "" {
-		id := acct.DeriveIdentity(dir)
-		if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
-			notes = append(notes, note)
-		}
 		env = append(env, tuiAgentEnv{Name: "CLAUDE_CONFIG_DIR", Value: dir, Source: "flag"})
-		return env, dir, "flag", "", id.Email, notes, nil
+		return resolveTUIConfigDir(env, dir, "flag", notes)
 	}
 	if dir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		id := acct.DeriveIdentity(dir)
-		if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
-			notes = append(notes, note)
-		}
-		return nil, dir, "inherited-env", "", id.Email, notes, nil
+		return resolveTUIConfigDir(nil, dir, "inherited-env", notes)
 	}
-	dir := guardClaudeConfigDir()
+	return resolveTUIConfigDir(nil, guardClaudeConfigDir(), "default", notes)
+}
+
+// resolveTUIConfigDir resolves a bare Claude config directory (no registry
+// account) into the resolveTUIAgentClaudeConfig return fields: derive its
+// identity, append its login note, and label the source. env is nil for the
+// inherited/default paths, which rely on the ambient CLAUDE_CONFIG_DIR.
+func resolveTUIConfigDir(env []tuiAgentEnv, dir, source string, notes []string) ([]tuiAgentEnv, string, string, string, string, []string, error) {
 	id := acct.DeriveIdentity(dir)
 	if note := tuiLoginNote(acct.Home{Dir: dir, Identity: id}); note != "" {
 		notes = append(notes, note)
 	}
-	return nil, dir, "default", "", id.Email, notes, nil
+	return env, dir, source, "", id.Email, notes, nil
 }
 
 func tuiLoginNote(home acct.Home) string {
