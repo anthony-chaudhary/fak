@@ -436,16 +436,8 @@ func runSlackSend(stdout, stderr io.Writer, argv []string) int {
 }
 
 // redactToken shows only that a token is present plus its last 4 chars, never the secret.
-// (cmd/fak's other redact helper lives in the chatrelay command file; this one is named
-// distinctly so the two never collide.)
 func redactToken(s string) string {
-	if s == "" {
-		return "(unset)"
-	}
-	if len(s) <= 4 {
-		return "****"
-	}
-	return "****" + s[len(s)-4:]
+	return redactSecret(s)
 }
 
 // slackOrDash renders an empty string as "-" for the auth line.

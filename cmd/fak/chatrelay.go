@@ -152,11 +152,5 @@ func orUnset(s string) string {
 
 // redact shows only that a token is present and its last 4 chars, never the secret.
 func redact(s string) string {
-	if s == "" {
-		return "(unset)"
-	}
-	if len(s) <= 4 {
-		return "****"
-	}
-	return "****" + s[len(s)-4:]
+	return redactSecret(s)
 }
