@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 )
 
 // twoTrackReportNow is a fixed clock for the recompute comparison. The Track-2
@@ -50,7 +52,7 @@ func TestCachevalueReportPrintsBothTracksAndNet(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
-		"--ledger", track1, "--savings-ledger", track2, "--since", "2026-06-01",
+		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--since", "2026-06-01",
 	})
 	if code != 0 {
 		t.Fatalf("report exit = %d, stderr=%s", code, errb.String())
@@ -78,7 +80,7 @@ func TestCachevalueReportJSONReproducesFold(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
-		"--ledger", track1, "--savings-ledger", track2, "--json",
+		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--json",
 	})
 	if code != 0 {
 		t.Fatalf("report --json exit = %d, stderr=%s", code, errb.String())
@@ -130,7 +132,7 @@ func TestCachevalueReportMissingTrack2IsHonest(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
-		"--ledger", track1, "--savings-ledger", filepath.Join(dir, "absent.jsonl"),
+		"--ledger", track1, "--savings-ledger", filepath.Join(dir, "absent.jsonl"), "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"),
 	})
 	if code != 0 {
 		t.Fatalf("report with absent Track-2 should still render, exit=%d stderr=%s", code, errb.String())
@@ -157,7 +159,7 @@ func TestCachevalueReportMarkdown(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	code := runCachevalueReport(&out, &errb, []string{
-		"--ledger", track1, "--savings-ledger", track2, "--since", "2026-06-01", "--markdown",
+		"--ledger", track1, "--savings-ledger", track2, "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--since", "2026-06-01", "--markdown",
 	})
 	if code != 0 {
 		t.Fatalf("report --markdown exit = %d, stderr=%s", code, errb.String())
@@ -172,6 +174,77 @@ func TestCachevalueReportMarkdown(t *testing.T) {
 	for _, want := range []string{"WITNESSED", "OBSERVED", "## cache-value P&L"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("--markdown output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCachevalueReportIncludesFleetAggregateAndContextBudget(t *testing.T) {
+	dir := t.TempDir()
+	track1, track2 := writeTwoLedgers(t, dir)
+	usage := filepath.Join(dir, "gateway-usage.jsonl")
+	row := gatewayusageledger.NewRow("exit", "guard", "claude", "g-1", 2*time.Minute, gatewayusageledger.Counters{
+		Total:                12,
+		Allowed:              9,
+		Denied:               2,
+		Transformed:          1,
+		InputTokens:          1000,
+		OutputTokens:         100,
+		CachedPromptTokens:   9000,
+		CacheCreationTokens:  8000,
+		CachedTurns:          2,
+		CompactionFired:      1,
+		CompactionShedTokens: 3000,
+	}, time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC))
+	if err := gatewayusageledger.Append(usage, row); err != nil {
+		t.Fatalf("write usage ledger: %v", err)
+	}
+
+	var out, errb bytes.Buffer
+	code := runCachevalueReport(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", track2,
+		"--usage-ledger", usage,
+		"--context-budget-tokens", "15000",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("report --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var rep cachevaluereport.TwoTrackReport
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("report --json did not decode: %v\n%s", err, out.String())
+	}
+	f := rep.FleetBenefit
+	if f.UsageRows != 1 || f.ExitSessions != 1 || f.SessionTypes["guard"] != 1 {
+		t.Fatalf("fleet usage aggregate = %+v, want one guard exit row", f)
+	}
+	if f.ContextExtensionTokens != 3000 || f.ContextBudgetTokens != 15000 ||
+		f.EquivalentContextWindow == nil || math.Abs(*f.EquivalentContextWindow-0.2) > 1e-9 {
+		t.Fatalf("context-budget extension missing from aggregate: %+v", f)
+	}
+	if f.ObservedAPICostAvoidedUSD == 0 || f.ObservedAPICostReductionPct == nil {
+		t.Fatalf("API cost reduction missing from aggregate: %+v", f)
+	}
+
+	out.Reset()
+	errb.Reset()
+	code = runCachevalueReport(&out, &errb, []string{
+		"--ledger", track1,
+		"--savings-ledger", track2,
+		"--usage-ledger", usage,
+		"--context-budget-tokens", "15000",
+	})
+	if code != 0 {
+		t.Fatalf("report table exit = %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Fleet aggregate",
+		"API cost:",
+		"session extension: 3000 WITNESSED context token(s) shed = 20.00% of a 15000-token budget",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fleet aggregate table missing %q:\n%s", want, got)
 		}
 	}
 }

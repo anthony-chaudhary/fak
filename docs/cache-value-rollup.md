@@ -9,6 +9,7 @@
 Before the roll-up, cache-effectiveness evidence was scattered across five places:
 
 - `docs/nightrun/cache-value.jsonl`, the durable session ledger.
+- `docs/nightrun/gateway-usage.jsonl`, the durable guard/serve usage ledger.
 - `fak nightrun score`, the all-time regression gate over that ledger.
 - `internal/cachevaluereport`, the weekly Track-1 trend fold.
 - Benchmark packets such as `docs/benchmarks/GLM52-FAK-KERNEL-CACHE-VALUE-RESULTS.md`.
@@ -32,6 +33,22 @@ whether the mechanism saved money. A combined number would hide the failure mode
 reuse is real but not net-positive, or where dollars improve for a reason unrelated to
 kernel reuse.
 
+## Fleet Aggregate
+
+`fak cachevalue report` also prints `Fleet aggregate`, an all-time roll-up by default
+(or caller-windowed with `--since`). It joins the two cache ledgers with
+`docs/nightrun/gateway-usage.jsonl` so long-horizon guard use has cumulative counters:
+
+- **Usage**: recorded guard/serve rows, exit sessions, uptime, kernel decisions, token axes.
+- **Saved token-equivalent**: provider prompt-cache token-equivalent plus fak-authored
+  KV-prefix and compaction token-equivalent, with `fak_share`.
+- **API cost**: observed spend, uncached/uncompacted counterfactual, avoided dollars, and
+  percent reduction. Dollar rows remain dollar-blind when no trusted price is present.
+- **Session extension**: WITNESSED compaction-shed context tokens only. Provider cache reads
+  reduce spend/latency but do not enlarge the context window, so they are never counted as
+  session-extension tokens. Pass `--context-budget-tokens N` to normalize shed tokens into
+  percent/window-equivalent for a specific session budget.
+
 ## Honesty Fences
 
 - **#1066 marginal-over-warm-KV fence.** The published Track-1 number is realized
@@ -45,6 +62,9 @@ kernel reuse.
 - **Net, not gross.** Provider-dollar savings must be net of fak's own cost and any
   upstream cache behavior. A gross token drop is useful diagnostic evidence, not a
   publishable dollar-savings headline.
+- **Spend reduction is not session extension.** Provider prompt-cache rebates can reduce
+  API cost, but only fak-authored compaction-shed tokens extend a long-running session's
+  context budget in the aggregate report.
 - **Thin corpus falls open.** Single-turn cold runs have no reuse opportunity. A thin
   multi-turn corpus reports `INSUFFICIENT` instead of fabricating a regression or a win.
 
@@ -84,6 +104,10 @@ A cache-value card should be read top-down:
 - **Track 2 current** appears on the Slack feed when OBSERVED-$ rows exist. It names
   the latest week, net dollars, rebate/compaction/write/spend components, and the
   provider/mechanism buckets so a provider rebate cannot hide fak-authored compaction.
+- **Fleet aggregate** is the cumulative long-horizon line: usage rows and exit sessions
+  from the gateway-usage ledger, total saved token-equivalent by owner, avoided API cost,
+  and context-extension tokens. With `--context-budget-tokens`, the extension line also
+  shows percent of one session window and window-equivalent.
 
 ## Reproduce
 
@@ -107,10 +131,16 @@ The cachevalue front-door spelling for a dated operator report is:
 fak cachevalue report --since 2026-06-22
 ```
 
+To answer "how much longer did this extend a long-horizon session?" for a known budget:
+
+```bash
+fak cachevalue report --since 2026-06-22 --context-budget-tokens 150000
+```
+
 The Slack/feed spelling uses the same two ledgers and can be previewed without posting:
 
 ```bash
-fak cachevalue feed --since 2026-06-22 --dry-run
+fak cachevalue feed --since 2026-06-22 --context-budget-tokens 150000 --dry-run
 ```
 
 For the cache-frontier product review, generate the human note and appendable JSONL row

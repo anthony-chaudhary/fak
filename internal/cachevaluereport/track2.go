@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
@@ -466,6 +467,7 @@ type TwoTrackReport struct {
 	Track2 []SavingsBucket `json:"track2_observed_usd"`
 
 	OwnerAttribution []OwnerAttributionBucket `json:"owner_attribution"`
+	FleetBenefit     FleetBenefitReport       `json:"fleet_benefit"`
 
 	// LatestNetUSD / CumulativeNetUSD are the most-recent period's net and the
 	// running total through it — the P&L headline. BrokeEven is whether the running
@@ -496,6 +498,13 @@ const projectionFence = "cost projection over labelled sources (OBSERVED provide
 // GeneratedAt and to delegate the Track-1 fold). The two folds run independently;
 // nothing is averaged or summed across the provenance boundary.
 func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.Time) TwoTrackReport {
+	return FoldTwoTrackWithUsage(track1, track2, nil, now, FleetBenefitOptions{})
+}
+
+// FoldTwoTrackWithUsage is FoldTwoTrack plus the durable gateway-usage ledger join. It keeps the
+// original two-track P&L intact and adds the cumulative fleet-benefit section that answers
+// "how much did guard/serve usage accrue and how much spend/context did cache work save?"
+func FoldTwoTrackWithUsage(track1 []cachevalueledger.Row, track2 []SavingsRow, usage []gatewayusageledger.Row, now time.Time, opts FleetBenefitOptions) TwoTrackReport {
 	t1 := Fold(track1, now)
 	t2 := foldSavings(track2)
 
@@ -505,6 +514,7 @@ func FoldTwoTrack(track1 []cachevalueledger.Row, track2 []SavingsRow, now time.T
 		Track1:           t1,
 		Track2:           t2,
 		OwnerAttribution: foldOwnerAttribution(t1.Buckets, t2),
+		FleetBenefit:     FoldFleetBenefit(track1, track2, usage, opts),
 		ProjectionFence:  projectionFence,
 		OK:               true,
 		Verdict:          "INSUFFICIENT",
@@ -680,5 +690,6 @@ func RenderTwoTrack(r TwoTrackReport) string {
 			b.Period, b.ProviderPromptCacheTokenEquiv, b.FakAuthoredTokenEquiv, share,
 			b.FakKVPrefixReusedTokens, b.FakCompactionShedTokens, b.FakVDSOAvoidedCalls)
 	}
+	sb.WriteString(RenderFleetBenefit(r.FleetBenefit))
 	return sb.String()
 }

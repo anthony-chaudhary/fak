@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluepost"
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 )
 
 // cmdCachevalue posts the cache-effectiveness P&L roll-up — fak's WITNESSED kernel
@@ -49,15 +50,18 @@ func foldAndEmitCachevalue(stdout, stderr io.Writer, report cachevaluereport.Rep
 }
 
 // runCachevalueFeed handles `fak cachevalue feed` — the cadence roll-up. It reads the
-// durable kernel cache-value ledger (Track 1) and the OBSERVED-$ savings ledger (Track 2),
-// folds them into the two-track P&L report, and posts ONE card. Missing or empty ledgers
-// fold to the honest INSUFFICIENT / missing-track card rather than failing.
+// durable kernel cache-value ledger (Track 1), the OBSERVED-$ savings ledger (Track 2), and
+// the gateway-usage ledger (cumulative fleet usage/session-extension counters), folds them
+// into the two-track P&L report, and posts ONE card. Missing or empty ledgers fold to the
+// honest INSUFFICIENT / missing-track card rather than failing.
 func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak cachevalue feed", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	ledger := fs.String("ledger", cachevalueledger.DefaultLedgerRel, "the durable cache-value ledger to fold (docs/nightrun/cache-value.jsonl)")
 	savingsLedger := fs.String("savings-ledger", cachevaluereport.DefaultSavingsLedgerRel, "the Track-2 OBSERVED-$ ledger to fold (docs/nightrun/cache-savings.jsonl)")
+	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway usage ledger for cumulative fleet usage/session-extension counters (docs/nightrun/gateway-usage.jsonl)")
 	since := fs.String("since", "", "fold only rows on or after this date (YYYY-MM-DD)")
+	contextBudget := fs.Uint64("context-budget-tokens", 0, "optional session context budget denominator; normalizes witnessed shed tokens into window-equivalent extension")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_CACHEVALUE_CHANNEL / .env.slack.local / #cache-value)")
 	token := fs.String("token", "", "override bot token (default: $FAK_CACHEVALUE_TOKEN, then the scoreboard token)")
@@ -74,7 +78,10 @@ func runCachevalueFeed(stdout, stderr io.Writer, argv []string) int {
 
 	track1 := filterTrack1Since(cachevalueledger.ReadLedgerFile(*ledger), *since)
 	track2 := filterTrack2Since(cachevaluereport.ReadSavingsLedgerFile(*savingsLedger), *since)
-	report := cachevaluereport.FoldTwoTrack(track1, track2, time.Now())
+	usage := filterGatewayUsageSince(gatewayusageledger.ReadLedgerFile(*usageLedger), *since)
+	report := cachevaluereport.FoldTwoTrackWithUsage(track1, track2, usage, time.Now(), cachevaluereport.FleetBenefitOptions{
+		ContextBudgetTokens: *contextBudget,
+	})
 	card := cachevaluepost.FoldTwoTrack(report)
 	card.Source = resolveCachevalueSource(*source)
 	return emitCachevalue(stdout, stderr, card, *channel, *token, *dryRun)

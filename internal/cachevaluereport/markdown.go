@@ -133,6 +133,24 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 			fmt.Fprintf(&sb, "| fak share of cache value | %.4f%% | derived: WITNESSED fak / (OBSERVED provider + WITNESSED fak) token-equiv, recorded rows only |\n", pct)
 		}
 	}
+	if r.FleetBenefit.UsageRows > 0 || r.FleetBenefit.Track1Sessions > 0 || r.FleetBenefit.TotalSavedTokenEq != 0 {
+		fmt.Fprintf(&sb, "| cumulative saved token-equiv | %.0f | %s |\n", r.FleetBenefit.TotalSavedTokenEq, r.FleetBenefit.Provenance)
+		if r.FleetBenefit.ObservedCounterfactualUSD != 0 || r.FleetBenefit.ObservedAPICostAvoidedUSD != 0 {
+			reduction := "-"
+			if r.FleetBenefit.ObservedAPICostReductionPct != nil {
+				reduction = fmt.Sprintf("%.2f%%", *r.FleetBenefit.ObservedAPICostReductionPct)
+			}
+			fmt.Fprintf(&sb, "| cumulative API cost avoided | $%.4f (%s reduction) | OBSERVED provider/cache cost projection |\n",
+				r.FleetBenefit.ObservedAPICostAvoidedUSD, reduction)
+		}
+		if r.FleetBenefit.ContextExtensionTokens > 0 || r.FleetBenefit.ContextBudgetTokens > 0 {
+			extension := fmt.Sprintf("%d token(s)", r.FleetBenefit.ContextExtensionTokens)
+			if r.FleetBenefit.ContextBudgetTokens > 0 && r.FleetBenefit.EquivalentContextWindow != nil {
+				extension = fmt.Sprintf("%s / %.4f context window(s)", extension, *r.FleetBenefit.EquivalentContextWindow)
+			}
+			fmt.Fprintf(&sb, "| cumulative session extension | %s | WITNESSED fak compaction-shed tokens only |\n", extension)
+		}
+	}
 	return sb.String()
 }
 

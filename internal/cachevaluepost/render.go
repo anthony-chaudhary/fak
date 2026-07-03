@@ -158,7 +158,7 @@ func (c Card) currentLine() string {
 	if c.TwoTrack == nil {
 		return track1
 	}
-	return track1 + "\n" + currentTrack2Line(*c.TwoTrack)
+	return track1 + "\n" + currentTrack2Line(*c.TwoTrack) + "\n" + currentFleetBenefitLine(*c.TwoTrack)
 }
 
 func currentTrack2Line(r cachevaluereport.TwoTrackReport) string {
@@ -185,6 +185,31 @@ func currentTrack2Line(r cachevaluereport.TwoTrackReport) string {
 	}
 	return fmt.Sprintf("Track 2 current: %s net $%.4f (rebate $%.4f + compact $%.4f - write $%.4f - spend $%.4f), cumulative $%.4f, %d session(s), %d provider/mechanism bucket(s): %s",
 		latest, net, rebate, compact, writePremium, spend, cumulative, sessions, buckets, strings.Join(sortedKeys(dims), ", "))
+}
+
+func currentFleetBenefitLine(r cachevaluereport.TwoTrackReport) string {
+	f := r.FleetBenefit
+	if f.UsageRows == 0 && f.Track1Sessions == 0 && f.TotalSavedTokenEq == 0 {
+		return "Fleet aggregate: no durable usage/savings rows yet"
+	}
+	parts := []string{
+		fmt.Sprintf("Fleet aggregate: rows %d, exit sessions %d, saved %.0f token-equiv", f.UsageRows, f.ExitSessions, f.TotalSavedTokenEq),
+	}
+	if f.ObservedCounterfactualUSD != 0 || f.ObservedAPICostAvoidedUSD != 0 {
+		reduction := "-"
+		if f.ObservedAPICostReductionPct != nil {
+			reduction = fmt.Sprintf("%.2f%%", *f.ObservedAPICostReductionPct)
+		}
+		parts = append(parts, fmt.Sprintf("API avoided $%.4f (%s)", f.ObservedAPICostAvoidedUSD, reduction))
+	}
+	if f.ContextExtensionTokens > 0 {
+		extension := fmt.Sprintf("shed %d context tok", f.ContextExtensionTokens)
+		if f.ContextBudgetTokens > 0 && f.EquivalentContextWindow != nil {
+			extension = fmt.Sprintf("%s (%.4f window)", extension, *f.EquivalentContextWindow)
+		}
+		parts = append(parts, extension)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func sortedKeys(m map[string]struct{}) []string {
@@ -281,10 +306,12 @@ func (c Card) Blocks() []any {
 
 func (c Card) signalNoise() slackmeta.Score {
 	track2 := ""
+	fleet := ""
 	if c.TwoTrack != nil {
 		track2 = currentTrack2Line(*c.TwoTrack)
+		fleet = currentFleetBenefitLine(*c.TwoTrack)
 	}
-	signal := 1 + slackmeta.NonEmpty(c.finding(), c.currentLine(), c.trendLine(), c.nextAction(), c.fence(), track2) + len(c.bucketLines())
+	signal := 1 + slackmeta.NonEmpty(c.finding(), c.currentLine(), c.trendLine(), c.nextAction(), c.fence(), track2, fleet) + len(c.bucketLines())
 	noise := 1 + slackmeta.NonEmpty(c.Report.Schema, c.Source)
 	return slackmeta.New(signal, noise, "reuse finding, trend, bucket rows, and honesty fence vs schema/source")
 }

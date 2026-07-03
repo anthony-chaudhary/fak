@@ -40,6 +40,7 @@ func TestCachevalueFeedDryRunRendersCard(t *testing.T) {
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "cache-value.jsonl")
 	savings := filepath.Join(dir, "cache-savings.jsonl")
+	usage := filepath.Join(dir, "absent-usage.jsonl")
 	// Two multi-turn weeks, trending up (60% -> 80% realized reuse).
 	body := `{"date":"2026-06-15","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":600}
 {"date":"2026-06-22","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":800}
@@ -55,7 +56,7 @@ func TestCachevalueFeedDryRunRendersCard(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runCachevalueFeed(&out, &errb, []string{"--ledger", ledger, "--savings-ledger", savings, "--dry-run", "--source", "agent"})
+	code := runCachevalueFeed(&out, &errb, []string{"--ledger", ledger, "--savings-ledger", savings, "--usage-ledger", usage, "--dry-run", "--source", "agent"})
 	if code != 0 {
 		t.Fatalf("feed --dry-run exit = %d, stderr=%s", code, errb.String())
 	}
@@ -85,6 +86,7 @@ func TestCachevalueFeedSinceFiltersBothLedgers(t *testing.T) {
 	dir := t.TempDir()
 	ledger := filepath.Join(dir, "cache-value.jsonl")
 	savings := filepath.Join(dir, "cache-savings.jsonl")
+	usage := filepath.Join(dir, "absent-usage.jsonl")
 	if err := os.WriteFile(ledger, []byte(`{"date":"2026-06-15","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":600}
 {"date":"2026-06-22","session_type":"guard","turns":10,"prompt_tokens":1000,"reused_tokens":800}
 `), 0o600); err != nil {
@@ -100,6 +102,7 @@ func TestCachevalueFeedSinceFiltersBothLedgers(t *testing.T) {
 	code := runCachevalueFeed(&out, &errb, []string{
 		"--ledger", ledger,
 		"--savings-ledger", savings,
+		"--usage-ledger", usage,
 		"--since", "2026-06-22",
 		"--dry-run",
 	})
@@ -121,7 +124,8 @@ func TestCachevalueFeedSinceFiltersBothLedgers(t *testing.T) {
 func TestCachevalueFeedEmptyLedgerIsHonest(t *testing.T) {
 	clearSlackEnv(t)
 	var out, errb bytes.Buffer
-	code := runCachevalueFeed(&out, &errb, []string{"--ledger", filepath.Join(t.TempDir(), "absent.jsonl"), "--dry-run"})
+	dir := t.TempDir()
+	code := runCachevalueFeed(&out, &errb, []string{"--ledger", filepath.Join(dir, "absent.jsonl"), "--usage-ledger", filepath.Join(dir, "absent-usage.jsonl"), "--dry-run"})
 	if code != 0 {
 		t.Fatalf("feed --dry-run on a missing ledger should still render, exit=%d stderr=%s", code, errb.String())
 	}
