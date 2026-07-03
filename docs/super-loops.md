@@ -136,8 +136,18 @@ runnable as printed. The registered set:
   + the gardening bundle. Nesting the sweep (instead of duplicating its members)
   keeps each surface's debt counted exactly **once** at the root — a once-only test
   pins that no scorecard key is walked by two intents.
-- **`improve-loops`** — the loop-index scorecard + the dogfood scorecard + the live
-  loop ledgers (dispatch, cadence, dojo) + the gardening bundle.
+- **`improve-loops`** — the loop-index scorecard + the dogfood scorecard + the
+  goal-scoped issue-dispatch intent + the live loop ledgers (cadence, dojo) + the
+  gardening bundle.
+- **`drain-issues`** — the aggregate issue-dispatch intent. It keeps the legacy
+  dispatch progress row visible, then descends into the goal-specific issue-drain
+  intents.
+- **`drain-throughput`** — the throughput issue-drain intent. It walks
+  `issue-resolve-dispatch/claude/throughput` and enters
+  `fak dispatch tick --goal throughput` when the loop is stale or dark.
+- **`drain-high-priority`** — the high-priority issue-drain intent. It walks
+  `issue-resolve-dispatch/claude/high-priority` and enters
+  `fak dispatch tick --goal high-priority` when that loop is stale or dark.
 - **`manage-benchmarks`** — the benchmark-DX scorecard + the `nightrun` collection
   loop + a descend pointer into `fak bench-loop status`, the benchmark-specific
   control surface.

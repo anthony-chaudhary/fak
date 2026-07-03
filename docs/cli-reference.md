@@ -368,10 +368,13 @@ one to spawn workers. The actual contract:
 - `fak garden walk` — **propose-only**. It classifies the open-issue backlog and emits a
   budget-bounded, worst-first worklist with the exact `gh`/dispatch command per item, but it
   never runs any of them — no worker is spawned by `garden walk` itself.
-- **Dispatch loops** (`fak dispatch tick`, the `issue-resolve-dispatch/<backend>` Task Scheduler
-  arm — see [`docs/dispatch-loop.md`](dispatch-loop.md)) are the only path that actually spawns
-  workers, and they own the safety machinery that has to guard that: seat/weekly-cap checks, lane
-  lease / DOS arbitration, and the issue worker prompt + picker semantics.
+- **Dispatch loops** (`fak dispatch tick`, the `issue-resolve-dispatch/<backend>[/<goal-token>]`
+  Task Scheduler arm — see [`docs/dispatch-loop.md`](dispatch-loop.md)) are the only path that
+  actually spawns workers, and they own the safety machinery that has to guard that: seat/weekly-cap
+  checks, lane lease / DOS arbitration, and the issue worker prompt + picker semantics. `--goal
+  throughput` and `--goal high-priority` give background loops separate ledger and lease-holder
+  identities while keeping overlapping path trees serialized by the same lease fabric. The matching
+  super-loop intents are `drain-throughput`, `drain-high-priority`, and the aggregate `drain-issues`.
 
 Today there is no bridge command wired between `garden walk`'s proposed worklist and dispatch's
 spawn path — an operator (or another script) has to carry the `--json` worklist over by hand.
