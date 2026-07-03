@@ -809,7 +809,18 @@ type HTTPPlanner struct {
 	// UpstreamAPIKey (the transparent passthrough hop) still wins over both; an empty/failed
 	// APIKeyFunc result falls back to the static APIKey. nil leaves the static-key path
 	// byte-for-byte unchanged.
-	APIKeyFunc           func() string
+	APIKeyFunc func() string
+	// ExtraHeaders are trusted host-supplied upstream headers applied after the adapter's
+	// normal auth/content headers. They are for provider account-routing metadata that is
+	// not part of the generic adapter contract, e.g. the ChatGPT-Account-Id header the
+	// Codex ChatGPT backend requires beside its bearer token. Copied per request so callers
+	// can keep their config map immutable by convention.
+	ExtraHeaders map[string]string
+	// ExtraHeadersFunc supplies fresh upstream headers per request, paired with APIKeyFunc
+	// for rotating subscription credentials whose routing metadata lives in the same file
+	// as the token. Dynamic headers override ExtraHeaders on matching names. nil leaves the
+	// static/no-extra-header path unchanged.
+	ExtraHeadersFunc     func() map[string]string
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
@@ -860,6 +871,34 @@ type HTTPPlanner struct {
 	// per-outcome counter and prints a "fak-turn forbidden-retry" line. nil = behavior
 	// byte-for-byte unchanged (the recovery arm itself is independent of the hook).
 	ForbiddenRetryNotify func(outcome string, attempt int)
+
+	// AccountFailoverFunc, when non-nil, supplies a REPLACEMENT upstream credential when the
+	// current one hits an ACCOUNT-SCOPED wall — a 403 whose body says this credential's
+	// organization (or region/billing) is denied, even though the credential itself is valid
+	// (see classifyUpstream -> RemedyFailoverAccount; the canonical case is the org-OAuth-
+	// disabled 403). No retry or re-login on THIS account can clear such a wall, so the arm
+	// asks for a different account whose org still permits the request. reason is a classified
+	// enum label (never the raw upstream body — the body must not cross this boundary), telling
+	// the func WHY the swap is needed. It returns the new credential (a permitted sibling
+	// account's live token) and ok=true when a failover target exists, or ok=false when there is
+	// none (every sibling is walled/absent) — in which case the 403 surfaces terminally with the
+	// actionable message, exactly as before. The guard builds this closure to enumerate sibling
+	// config homes, pick one on a different, permitted, non-demoted org, and return its live
+	// token; it also STICKILY redirects the per-request APIKeyFunc to the adopted account so the
+	// swap persists across turns (the session heals in place, no restart). nil leaves every path
+	// byte-for-byte unchanged.
+	AccountFailoverFunc func(reason string) (newCred string, ok bool)
+
+	// AccountFailoverNotify, when non-nil, is called when the account-failover arm resolves —
+	// separately from the other three notify hooks so an org/region/billing failover is never
+	// conflated with a 429/5xx backoff, a 401 token rotation, or a transient-403 flap (four
+	// distinct causes, four metrics). outcome is "recovered" when a permitted sibling credential
+	// was adopted and the call re-sent in place (the walled session healed onto a working
+	// account), or "exhausted" when no failover target existed and the account-scoped 403 is
+	// about to surface. It is the observability hook for the otherwise-INVISIBLE account-swap
+	// event. The gateway sets it to a per-outcome counter + a "fak-turn account-failover" line.
+	// nil = behavior byte-for-byte unchanged (the arm itself is independent of the hook).
+	AccountFailoverNotify func(outcome string, attempt int)
 }
 
 // NewHTTPPlanner builds a live planner with a bounded timeout. The per-request
@@ -908,6 +947,26 @@ func (p *HTTPPlanner) effectiveAPIKey() string {
 		}
 	}
 	return p.APIKey
+}
+
+func (p *HTTPPlanner) effectiveExtraHeaders() map[string]string {
+	var out map[string]string
+	add := func(in map[string]string) {
+		for k, v := range in {
+			if strings.TrimSpace(k) == "" {
+				continue
+			}
+			if out == nil {
+				out = make(map[string]string, len(in))
+			}
+			out[k] = v
+		}
+	}
+	add(p.ExtraHeaders)
+	if p.ExtraHeadersFunc != nil {
+		add(p.ExtraHeadersFunc())
+	}
+	return out
 }
 
 // SetExtraBodyJSON validates and installs provider-specific top-level request
@@ -1035,6 +1094,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// 403 terminally. fbState tracks that arm's own attempt count + deadline, independent of the
 	// 429/5xx budget so a permanent entitlement 403 can never inherit the multi-hour window.
 	var fbState forbiddenRetryState
+	// A 403 that names an ACCOUNT-SCOPED wall (org OAuth disabled, region, billing) is recoverable
+	// ONCE by swapping to a permitted sibling account — no retry or re-login on THIS credential can
+	// clear it. triedFailover caps that at a single account swap so a run of walled siblings still
+	// fails fast instead of looping through the roster. failoverPending is set when a swap has
+	// happened but is not yet confirmed by a 200, so the "recovered" notify reports a CONFIRMED
+	// heal (fired at the next success), never an optimistic one — mirroring the forbidden arm.
+	triedFailover := false
+	failoverPending := false
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
@@ -1117,6 +1184,28 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 					notifyForbiddenRetry(p, ForbiddenRetryExhausted, attempt)
 				}
 			}
+			// An ACCOUNT-SCOPED wall (a 403/402 whose body says this credential's org/region/billing
+			// is denied — classifyUpstream -> RemedyFailoverAccount) is not fixable by retry or
+			// re-login on THIS account: every re-login mints another token for the same walled org.
+			// The one remedy is a DIFFERENT account whose org still permits the request. Try it ONCE,
+			// after the transient arm above has ruled out a clearing capacity flap. On success adopt
+			// the sibling credential and re-send in place (uncounted); the guard's failover closure
+			// also stickily redirects APIKeyFunc so the swap persists across turns. On no target,
+			// fall through to the terminal return with the honest message.
+			if classifyUpstream(resp.StatusCode, raw) == RemedyFailoverAccount && !triedFailover && p.AccountFailoverFunc != nil {
+				if call.failoverAccountCred(p, RemedyFailoverAccount.String()) {
+					triedFailover = true
+					failoverPending = true // confirmed-heal notify fires at the next 200, not here
+					rs.lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
+					rs.lastStatus = resp.StatusCode
+					rs.lastRetryAfter = "" // re-send immediately with the permitted account; do not wait
+					attempt--
+					continue
+				}
+				// No permitted sibling to fail over to — every account is walled or absent. Report
+				// the spent-but-fruitless failover so the account-scoped 403 give-up is visible.
+				notifyAccountFailover(p, AccountFailoverExhausted, attempt)
+			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 		}
 		// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal: the abuse/capacity
@@ -1125,6 +1214,13 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if fbState.attempted() {
 			notifyForbiddenRetry(p, ForbiddenRetryRecovered, attempt)
 			fbState.fired = false
+		}
+		// A 200 after an account swap is a CONFIRMED failover heal: the walled session adopted a
+		// permitted sibling account and completed the turn in place instead of surfacing a futile
+		// /login. Report it once (failoverPending is one-way here).
+		if failoverPending {
+			notifyAccountFailover(p, AccountFailoverRecovered, attempt)
+			failoverPending = false
 		}
 		comp, err := call.adapter.ParseResponse(raw)
 		if err != nil {

@@ -151,6 +151,30 @@ func TestDebugVarsExposeUpstreamIncidents(t *testing.T) {
 	}
 }
 
+// TestDebugVarsExposeAccountFailover proves the account-scoped failover family surfaces on
+// /debug/vars the same recovered/exhausted way the auth-refresh and forbidden-retry families do,
+// carries both series even at zero (so a "recovered N / exhausted 0" panel exists from the first
+// scrape), and ignores a junk outcome (no drift series). This is the org-OAuth-disabled signal:
+// its "recovered" count is the number of sessions auto-switched off a walled account.
+func TestDebugVarsExposeAccountFailover(t *testing.T) {
+	srv := newTestServer(t)
+	srv.metrics.observeUpstreamAccountFailover("recovered")
+	srv.metrics.observeUpstreamAccountFailover("recovered")
+	srv.metrics.observeUpstreamAccountFailover("exhausted")
+	srv.metrics.observeUpstreamAccountFailover("bogus") // must be ignored
+
+	vars := srv.debugVars(time.Now())
+	if vars.Upstream.AccountFailoverByOutcome["recovered"] != 2 {
+		t.Fatalf("/debug/vars account-failover recovered = %d, want 2: %+v", vars.Upstream.AccountFailoverByOutcome["recovered"], vars.Upstream)
+	}
+	if vars.Upstream.AccountFailoverByOutcome["exhausted"] != 1 {
+		t.Fatalf("/debug/vars account-failover exhausted = %d, want 1: %+v", vars.Upstream.AccountFailoverByOutcome["exhausted"], vars.Upstream)
+	}
+	if _, ok := vars.Upstream.AccountFailoverByOutcome["bogus"]; ok {
+		t.Fatalf("a junk outcome must not create a series: %+v", vars.Upstream.AccountFailoverByOutcome)
+	}
+}
+
 // TestUpstreamRetryWaitSecondsRenders proves the retry family carries its TIME twin: the
 // count says how often fak absorbed provider pushback, the wait counter says how much
 // wall-clock that absorption cost — and it renders at 0 on a pushback-free session so the

@@ -72,6 +72,13 @@ type debugUpstreamVars struct {
 	// bounded retry cleared a transient abuse/capacity gate) vs exhausted (a permanent
 	// entitlement 403 surfaced). The permission-flap twin of AuthRefreshByOutcome.
 	ForbiddenRetryByOutcome map[string]uint64 `json:"forbidden_retry_by_outcome"`
+	// AccountFailoverByOutcome mirrors the account-scoped failover family: recovered (a
+	// 403/402 named this credential's org/region/billing as walled and a permitted sibling
+	// account was adopted so the walled turn completed in place — a heal re-login cannot do)
+	// vs exhausted (no permitted sibling existed and the account-scoped denial surfaced). The
+	// org-OAuth-disabled twin of ForbiddenRetryByOutcome — its "recovered" count is the number
+	// of sessions auto-switched off a walled account instead of dying on a futile /login.
+	AccountFailoverByOutcome map[string]uint64 `json:"account_failover_by_outcome"`
 	// LastForbiddenDetail is a SCRUBBED, bounded snapshot of the most recent PERSISTENT 403's
 	// upstream body — the one operator-side signal that tells org-disabled apart from
 	// model-not-permitted apart from an abuse gate, which the 2026-07-03 gem8 storm proved was
@@ -523,6 +530,10 @@ func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
 			"recovered": 0,
 			"exhausted": 0,
 		},
+		AccountFailoverByOutcome: map[string]uint64{
+			"recovered": 0,
+			"exhausted": 0,
+		},
 	}
 	if m == nil {
 		return out
@@ -536,6 +547,9 @@ func (m *gatewayMetrics) debugUpstreamVars() debugUpstreamVars {
 	}
 	for k, v := range m.upstreamForbiddenRetries {
 		out.ForbiddenRetryByOutcome[k] = v
+	}
+	for k, v := range m.upstreamAccountFailovers {
+		out.AccountFailoverByOutcome[k] = v
 	}
 	out.LastForbiddenDetail = m.lastForbiddenDetail
 	m.upstreamErrMu.Unlock()

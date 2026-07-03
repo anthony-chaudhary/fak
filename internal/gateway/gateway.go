@@ -123,6 +123,27 @@ type Config struct {
 	// token per request. Empty result falls back to APIKey. nil keeps the static-key path
 	// unchanged.
 	APIKeyFunc func() string
+	// AccountFailoverFunc, when non-nil, supplies a REPLACEMENT upstream credential from a
+	// permitted SIBLING account when the current one hits an ACCOUNT-SCOPED wall — a 403/402
+	// whose body says this credential's organization (or region/billing) is denied even though
+	// the credential is valid (the canonical case: the org has OAuth/subscription inference
+	// disabled upstream, so every re-login is futile). It flows onto the planner's hook of the
+	// same name; `fak guard` builds it to walk the sibling config homes, pick one on a different,
+	// permitted, non-demoted account, and hand back its live token — also stickily redirecting
+	// APIKeyFunc to the adopted account so the swap persists across turns. reason is a classified
+	// remedy label, never a raw upstream body. nil keeps the terminal-on-account-403 behavior
+	// unchanged.
+	AccountFailoverFunc func(reason string) (newCred string, ok bool)
+	// ExtraHeaders are trusted host-supplied headers added to every upstream provider
+	// request in proxy mode. They carry account-routing metadata that is not a generic
+	// provider credential, such as ChatGPT-Account-Id for Codex ChatGPT subscription
+	// sessions. Empty/nil preserves the historical adapter headers exactly.
+	ExtraHeaders map[string]string
+	// ExtraHeadersFunc supplies fresh host headers per proxied request. It is paired with
+	// APIKeyFunc for rotating subscription credentials whose header metadata is resolved
+	// from the same source as the bearer token. nil preserves the static/no-extra-header
+	// path.
+	ExtraHeadersFunc func() map[string]string
 	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
 	// configured APIKey and IGNORE the inbound client's credential — the subscription
 	// path, where fak holds the real OAuth token and the wrapped client only sends a
@@ -1174,6 +1195,7 @@ func New(cfg Config) (*Server, error) {
 		hp.RetryNotify = s.onUpstreamRetry
 		hp.AuthRefreshNotify = s.onAuthRefresh
 		hp.ForbiddenRetryNotify = s.onForbiddenRetry
+		hp.AccountFailoverNotify = s.onAccountFailover
 	}
 
 	// Build the in-kernel background-loop supervisor and register the built-in loops
@@ -1248,6 +1270,29 @@ func (s *Server) onForbiddenRetry(outcome string, attempt int) {
 	}
 	if s.debugStatsf != nil {
 		s.debugStatsf("fak-turn forbidden-retry outcome=%s attempt=%d", outcome, attempt)
+	}
+}
+
+// onAccountFailover is the planner's AccountFailoverNotify hook: surface an ACCOUNT-SCOPED failover
+// outcome — the response to a 403/402 whose body says this credential's organization (or region or
+// billing) is walled, even though the credential is valid. It is SEPARATE from the other three
+// notify hooks (a 429/5xx backoff, a 401 token rotation, a transient-403 flap) because the cause is
+// distinct — a permanent PER-CREDENTIAL wall that no retry or re-login clears — and so is the fix:
+// swap to a permitted sibling account. outcome is "recovered" (a permitted sibling credential was
+// adopted and the walled turn completed in place, so the session healed onto a working account
+// instead of dropping into a futile /login) or "exhausted" (no failover target existed, so the
+// account-scoped 403 now surfaces). This is the otherwise-INVISIBLE event behind the org-OAuth-
+// disabled failure: with this line an operator sees the session auto-switch accounts — or sees it
+// give up because every account is walled — instead of a silent, unfixable-by-login session loss.
+func (s *Server) onAccountFailover(outcome string, attempt int) {
+	if s == nil {
+		return
+	}
+	if s.metrics != nil {
+		s.metrics.observeUpstreamAccountFailover(outcome)
+	}
+	if s.debugStatsf != nil {
+		s.debugStatsf("fak-turn account-failover outcome=%s attempt=%d", outcome, attempt)
 	}
 }
 
@@ -1366,6 +1411,9 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			return nil, err
 		}
 		p.APIKeyFunc = cfg.APIKeyFunc
+		p.AccountFailoverFunc = cfg.AccountFailoverFunc
+		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
+		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		return p, nil
 	}
@@ -1376,6 +1424,9 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			return nil, err
 		}
 		p.APIKeyFunc = cfg.APIKeyFunc
+		p.AccountFailoverFunc = cfg.AccountFailoverFunc
+		p.ExtraHeaders = cloneConfigHeaders(cfg.ExtraHeaders)
+		p.ExtraHeadersFunc = cfg.ExtraHeadersFunc
 		wrapUpstreamObserver(p.Client, cfg.UpstreamResponseObserver)
 		replicas = append(replicas, PlannerReplica{
 			Name:    fmt.Sprintf("replica-%d", i+1),
@@ -1383,6 +1434,19 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 		})
 	}
 	return NewReplicaRouter(model, replicas)
+}
+
+func cloneConfigHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		if strings.TrimSpace(k) != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // MarkReady stamps the instant the gateway became able to serve requests, closing

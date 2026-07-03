@@ -244,6 +244,15 @@ type gatewayMetrics struct {
 	// 2026-07-03 gem8 transient-403 storm showed was missing.
 	upstreamForbiddenRetries map[string]uint64
 
+	// upstreamAccountFailovers counts ACCOUNT-SCOPED failover outcomes, keyed by outcome
+	// ("recovered" = a 403/402 named this credential's org/region/billing as walled and a permitted
+	// sibling account was adopted so the turn completed in place; "exhausted" = no failover target
+	// existed and the account-scoped denial surfaced). Written by observeUpstreamAccountFailover off
+	// the request path under upstreamErrMu. The metric twin of the `fak-turn account-failover` line —
+	// the observability behind the org-OAuth-disabled failure, where re-login is futile and only an
+	// account swap heals the session.
+	upstreamAccountFailovers map[string]uint64
+
 	// lastForbiddenDetail is a SCRUBBED, bounded snapshot of the most recent PERSISTENT 403's
 	// upstream body — the operator-only drilldown (loopback /debug/vars) that tells org-disabled
 	// apart from model-not-permitted apart from an abuse gate. Set through scrubForbiddenDetail
@@ -377,6 +386,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		upstreamErrors:           map[string]uint64{},
 		upstreamAuthRefreshes:    map[string]uint64{},
 		upstreamForbiddenRetries: map[string]uint64{},
+		upstreamAccountFailovers: map[string]uint64{},
 		harnessCoherence:         newHarnessCoherenceMetrics(compactcohere.DefaultProviderCacheTTL),
 		routing:                  newRoutingMetrics(),
 		vcacheGovernor:           newVCacheGovernorDecisionJournal(),
@@ -504,6 +514,26 @@ func (m *gatewayMetrics) observeUpstreamForbiddenRetry(outcome string) {
 		m.upstreamForbiddenRetries = map[string]uint64{}
 	}
 	m.upstreamForbiddenRetries[outcome]++
+	m.upstreamErrMu.Unlock()
+}
+
+// observeUpstreamAccountFailover counts one account-scoped failover outcome ("recovered" /
+// "exhausted"), called from the AccountFailoverNotify hook. Off the request path, guarded by the
+// shared upstreamErrMu. An unknown outcome is ignored so a future caller typo cannot create a junk
+// series. Mirrors observeUpstreamForbiddenRetry — the four upstream self-heal signals (retry,
+// auth-refresh, forbidden-retry, account-failover) stay parallel so an operator reads them alike.
+func (m *gatewayMetrics) observeUpstreamAccountFailover(outcome string) {
+	if m == nil {
+		return
+	}
+	if outcome != "recovered" && outcome != "exhausted" {
+		return
+	}
+	m.upstreamErrMu.Lock()
+	if m.upstreamAccountFailovers == nil {
+		m.upstreamAccountFailovers = map[string]uint64{}
+	}
+	m.upstreamAccountFailovers[outcome]++
 	m.upstreamErrMu.Unlock()
 }
 
@@ -972,6 +1002,17 @@ type AdjudicationSummary struct {
 	// summary so the operator SEES how often fak ended a turn, the otherwise-invisible
 	// false-stop the --deny-all-continue Stop-hook auto-resumes the agent past.
 	DenyAllStops uint64 `json:"deny_all_stops"`
+
+	// CacheTTLUpgrade* folds the managed-cache 1h TTL-upgrade lever (--managed-cache,
+	// epic #1844 C6) into the same exit frame, WITNESSED (fak authored the cache_control
+	// splice, and the upgrader re-proves the body redecodes before returning changed
+	// bytes): CacheTTLUpgraded counts turns whose stable-head breakpoint fak actually
+	// extended to the 1h tier; CacheTTLUpgradeReasons is the per-refusal breakdown over
+	// the closed agent.TTLUpgradeReason* vocabulary. The family is recorded only while
+	// the lever is on, so zero/absent means OFF, while a zero upgraded count WITH reason
+	// rows means ON-but-ineligible (every head refused) — visible, not silent.
+	CacheTTLUpgraded       uint64            `json:"cache_ttl_upgrades_upgraded"`
+	CacheTTLUpgradeReasons map[string]uint64 `json:"cache_ttl_upgrade_reasons,omitempty"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -1006,6 +1047,19 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.DenyAllStops, _ = m.denyAllSnapshot()
 	if len(comp.bailReasons) > 0 {
 		sum.CompactionBailReasons = comp.bailReasons
+	}
+	// Managed-cache TTL-upgrade outcomes (#1844 C6): split the snapshot's one outcome
+	// map into the upgraded count and the refusal-reason breakdown, attaching the map
+	// only when non-empty so a lever-off session keeps the JSON field absent (omitempty).
+	sum.CacheTTLUpgraded = comp.ttlUpgrades["upgraded"]
+	ttlReasons := map[string]uint64{}
+	for reason, n := range comp.ttlUpgrades {
+		if reason != "upgraded" {
+			ttlReasons[reason] = n
+		}
+	}
+	if len(ttlReasons) > 0 {
+		sum.CacheTTLUpgradeReasons = ttlReasons
 	}
 	kv := cacheobs.Default.Snapshot()
 	sum.KVPrefixPromptTokens = kv.PromptTokens
@@ -2379,6 +2433,10 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	for k, v := range m.upstreamForbiddenRetries {
 		fbSnap[k] = v
 	}
+	afSnap := make(map[string]uint64, len(m.upstreamAccountFailovers))
+	for k, v := range m.upstreamAccountFailovers {
+		afSnap[k] = v
+	}
 	m.upstreamErrMu.Unlock()
 	writeHelpType(b, "fak_gateway_upstream_errors_total", "Upstream/planner turn failures, OBSERVED from the provider and relayed by fak (not a fak fault), by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).", "counter")
 	kinds := make([]string, 0, len(snap))
@@ -2416,6 +2474,17 @@ func (m *gatewayMetrics) writeUpstreamErrorMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_upstream_forbidden_retry_total", "403 transient-permission recoveries, by outcome: recovered (a retry within the bounded window returned 200, so a transient abuse/capacity gate cleared and the session healed in place) or exhausted (the window/attempts elapsed still 403ing, so a permanent entitlement denial surfaced). OBSERVED from the provider, absorbed by fak.", "counter")
 	for _, outcome := range []string{"recovered", "exhausted"} {
 		fmt.Fprintf(b, "fak_gateway_upstream_forbidden_retry_total{outcome=\"%s\"} %d\n", outcome, fbSnap[outcome])
+	}
+	// The account-scoped failover family: recovered = a 403/402 named this credential's org/region/
+	// billing as walled and fak adopted a permitted SIBLING account so the turn completed in place;
+	// exhausted = no permitted sibling existed and the account-scoped denial surfaced. This is the
+	// org-OAuth-disabled signal — a wall that no retry or re-login clears — so a "recovered N" here
+	// means N sessions that would otherwise have died on a futile /login were auto-switched onto a
+	// working account. Both series always emitted (even at 0) for panel stability from the first
+	// scrape. OBSERVED denial from the provider; the failover action is WITNESSED (fak authored it).
+	writeHelpType(b, "fak_gateway_upstream_account_failover_total", "Account-scoped failovers on an org/region/billing-walled 403/402, by outcome: recovered (a permitted sibling account was adopted and the walled turn completed in place, healing a session re-login could not) or exhausted (no permitted sibling existed, so the account-scoped denial surfaced).", "counter")
+	for _, outcome := range []string{"recovered", "exhausted"} {
+		fmt.Fprintf(b, "fak_gateway_upstream_account_failover_total{outcome=\"%s\"} %d\n", outcome, afSnap[outcome])
 	}
 	writeCounter(b, "fak_gateway_served_inline_total", "Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.", int64(m.servedInlineSnapshot()))
 }

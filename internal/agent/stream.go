@@ -67,6 +67,7 @@ type upstreamCall struct {
 	body         []byte
 	apiKey       string
 	upstreamBeta string
+	extraHeaders map[string]string
 	quarantined  int
 	redacted     int                   // rung 5 (#572): messages whose content was span-redacted pre-send
 	redactions   []TranscriptRedaction // the full reversible records (CAS Original) behind that count (#882)
@@ -121,6 +122,49 @@ func notifyForbiddenRetry(p *HTTPPlanner, outcome string, attempt int) {
 	}
 }
 
+// Account-failover outcomes reported to HTTPPlanner.AccountFailoverNotify. When a 403 names an
+// ACCOUNT-SCOPED wall (org/region/billing — classifyUpstream -> RemedyFailoverAccount), the arm
+// either RECOVERED (a permitted sibling account's credential was adopted and the call re-sent in
+// place, so a walled session healed onto a working account instead of dropping into a futile
+// /login) or was EXHAUSTED (no failover target existed — every sibling walled/absent — so the
+// account-scoped 403 surfaces terminally). Counted apart from the transient-403 flap because the
+// cause is different (a permanent per-credential wall, not a clearing capacity gate) and so is the
+// fix (swap accounts, not wait).
+const (
+	AccountFailoverRecovered = "recovered"
+	AccountFailoverExhausted = "exhausted"
+)
+
+// notifyAccountFailover fires the planner's AccountFailoverNotify hook if set. Centralized so the
+// three account-failover sites (Complete, CompleteStream, StreamAnthropicRaw) report identically,
+// mirroring notifyForbiddenRetry.
+func notifyAccountFailover(p *HTTPPlanner, outcome string, attempt int) {
+	if p != nil && p.AccountFailoverNotify != nil {
+		p.AccountFailoverNotify(outcome, attempt)
+	}
+}
+
+// failoverAccountCred asks the planner's AccountFailoverFunc for a REPLACEMENT credential from a
+// permitted sibling account, adopting it onto this call in place. Unlike refreshAPIKeyWait — which
+// polls for a FRESHER token of the SAME (walled) account and so can never escape an org-scoped
+// wall — this rotates to a DIFFERENT account whose org still permits the request. reason is the
+// classified remedy label (never the raw upstream body). It returns true and mutates c.apiKey when
+// a failover target was found (the caller re-sends the same attempt with the new credential), or
+// false when there is none — leaving the 403 to surface terminally. A nil AccountFailoverFunc (no
+// sibling roster wired) makes this a no-op false, so the historical terminal-on-org-403 behavior is
+// exactly preserved when failover is not configured.
+func (c *upstreamCall) failoverAccountCred(p *HTTPPlanner, reason string) bool {
+	if p == nil || p.AccountFailoverFunc == nil {
+		return false
+	}
+	if newCred, ok := p.AccountFailoverFunc(reason); ok && newCred != "" && newCred != c.apiKey {
+		c.apiKey = newCred
+		c.extraHeaders = p.effectiveExtraHeaders()
+		return true
+	}
+	return false
+}
+
 // refreshAPIKeyWait is refreshAPIKey with a bounded grace window for the RE-LOGIN race.
 // A 401 on the rotating-subscription path means the token fak just sent is dead; the fix
 // is to send the rotated-in replacement. But when the token expired, the upstream 401s the
@@ -143,6 +187,7 @@ func (c *upstreamCall) refreshAPIKeyWait(ctx context.Context, p *HTTPPlanner) bo
 	}
 	if fresh, ok := waitForFreshAPIKey(ctx, p, c.apiKey); ok {
 		c.apiKey = fresh
+		c.extraHeaders = p.effectiveExtraHeaders()
 		return true
 	}
 	return false
@@ -191,6 +236,11 @@ func waitForFreshAPIKey(ctx context.Context, p *HTTPPlanner, current string) (st
 // It mirrors the header logic Complete ran inline before the extraction.
 func (c *upstreamCall) headers() map[string]string {
 	h := c.adapter.Headers(c.apiKey)
+	for k, v := range c.extraHeaders {
+		if strings.TrimSpace(k) != "" {
+			h[k] = v
+		}
+	}
 	if c.upstreamBeta != "" && c.adapter.Provider() == ProviderAnthropic {
 		h["anthropic-beta"] = mergeBeta(h["anthropic-beta"], c.upstreamBeta)
 	}
@@ -288,6 +338,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	// the planner's EFFECTIVE key, which re-resolves a rotating subscription token per
 	// request (effectiveAPIKey) instead of a frozen boot-time string.
 	apiKey := p.effectiveAPIKey()
+	extraHeaders := p.effectiveExtraHeaders()
 	authRefreshable := sp.UpstreamAPIKey == "" && p.APIKeyFunc != nil
 	if sp.UpstreamAPIKey != "" {
 		apiKey = sp.UpstreamAPIKey
@@ -298,6 +349,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		body:            reqBody,
 		apiKey:          apiKey,
 		upstreamBeta:    sp.UpstreamBeta,
+		extraHeaders:    extraHeaders,
 		quarantined:     len(quarantines),
 		redacted:        redactedN,
 		redactions:      redactions,

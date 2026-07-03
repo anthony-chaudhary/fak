@@ -713,10 +713,22 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 				// This 403 already SURVIVED fak's bounded transient-recovery arm (a few paced
 				// retries across a short window; see agent.forbiddenRetryState) — so it is the
 				// PERSISTENT kind, not a server-side abuse/capacity flap that would have cleared.
-				// The message says so and names the two real fixes, deliberately NOT leading with
+				// The message says so and names the real fixes, deliberately NOT leading with
 				// "run /login": on the 2026-07-03 gem8 storm the harness turned this into a
-				// spurious /login for a denial that was transient and login could not fix. Login is
-				// now ONE option (for an expired entitlement), not the headline.
+				// spurious /login for a denial that was transient and login could not fix.
+				//
+				// The ORGANIZATION-scoped OAuth disable is the canonical deceiving case: the
+				// credential is valid, but this org has subscription/OAuth inference turned off
+				// upstream, so EVERY re-login mints another token for the same walled org and is
+				// futile. When fak also has an account roster it will already have tried to fail
+				// over to a permitted sibling (see account-failover); reaching this terminal message
+				// means that failover found no permitted account. So this arm names the real cause
+				// and the real fixes (a different account, or a plain API key) and does NOT tell the
+				// operator to re-login — the one instruction that cannot possibly help here.
+				if agent.IsOrgOAuthDisabled([]byte(se.Body)) {
+					return se.Status, "upstream_org_oauth_disabled",
+						"upstream denied access (HTTP 403): this organization has OAuth/subscription inference disabled upstream. The credential is valid but the ORG is walled, so re-login cannot fix it (every login mints another token for the same org). fak found no permitted sibling account to fail over to. Fix: switch to an account whose organization permits access, or use a plain API key (ANTHROPIC_API_KEY / --api-key-env) for API billing, or ask the org admin to re-enable subscription access."
+				}
 				return se.Status, "upstream_forbidden",
 					"upstream denied access (HTTP 403), persisting past fak's retry window — the credential is valid but lacks permission for this model, org, or region. If this entitlement should exist, re-login or check the subscription/plan; if you meant a different model, switch to a permitted one. (A transient 403 would have self-healed; this one did not.)"
 			case http.StatusNotFound: // 404

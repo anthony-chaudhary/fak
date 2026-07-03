@@ -161,6 +161,7 @@ func cmdGuard(argv []string) {
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
 	codexConfig := fs.Bool("codex-config", true, "when wrapping Codex, inject per-run -c model_provider/model_providers.fak overrides so Codex talks to the in-process gateway over the Responses wire. Codex-only; pass --codex-config=false if you already configured the fak provider yourself.")
+	codexHome := fs.String("codex-home", "", "Codex home directory for `codex login` auth.json when wrapping Codex (default: $CODEX_HOME or ~/.codex). Used only for ChatGPT-subscription OAuth; --api-key-env keeps API billing explicit.")
 	mcpRegister := fs.Bool("mcp-register", true, "register fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_tools_search) into the wrapped Claude Code child by default, via a session-scoped --mcp-config pointing at this gateway's /mcp endpoint. Claude-only; ADDS to any project/user MCP config the child already loads, never replaces it. Every call is still re-adjudicated by the guard floor — this widens discovery, not the danger floor. Pass --mcp-register=false if you already supply your own MCP config.")
 	managedCacheMode := fs.String("managed-cache", guardManagedCacheAuto, "actively manage the provider prompt-cache on the outbound Anthropic wire: auto|on|off (epic #1844 C6). ACTIVE upgrades the stable-prefix cache_control breakpoint to Anthropic's 1h TTL tier, so a long session that idles past the default 5m cache window (a human stepping away, a slow tool, a rate-limit stall) re-enters on a 0.1x cache READ instead of re-writing the whole prefix; the upgrade is byte-safe (only an existing stable system/tools-head breakpoint is extended, volatile heads refused) and witnessed on /metrics as fak_gateway_cache_ttl_upgrade_total. AUTO (default) activates ONLY when this session provably bills an API key (--api-key-env resolved a key on the Anthropic wire) — there the 2x one-time 1h write premium vs repeated 1.25x prefix re-writes is the operator's own dollars; a subscription-OAuth or passthrough session stays passive. on forces it; off disables.")
 	compress := fs.Bool("compress", false, "activate the native context-compressor for this session: shrink benign tool results (ANSI/control strip, CR-redraw collapse, duplicate-line fold, JSON minify) before they enter model context, only when the saving clears the worth-it floor and never on poison, with the original preserved (reversible). Equivalent to FAK_COMPRESSOR=native for this process; an explicit FAK_COMPRESSOR wins. See `fak headroom bench` for the savings and `fak headroom status` for the live decision breakdown.")
@@ -488,7 +489,14 @@ func cmdGuard(argv []string) {
 		// from disk, so a long guarded session (which outlives the ~1h token) always sends
 		// the live token the client has since rotated — never the frozen boot-time one that
 		// would 401 even after a fresh /login.
-		apiKeyFunc func() string
+		apiKeyFunc       func() string
+		extraHeaders     map[string]string
+		extraHeadersFunc func() map[string]string
+		// accountFailoverFunc, when set on the pinned path, supplies a permitted sibling
+		// account's live token when the current account hits an ACCOUNT-SCOPED 403 wall (org
+		// OAuth disabled / region / billing). It also stickily advances the config dir apiKeyFunc
+		// reads from, so a walled session heals onto a working account and stays there.
+		accountFailoverFunc func(reason string) (string, bool)
 	)
 	tUpstream := time.Now()
 	if localModel && !localAlongside {
@@ -497,7 +505,7 @@ func cmdGuard(argv []string) {
 		us := resolveGuardUpstream(*provider, command[0], *baseURL, remoteBase, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 		up, providerAutodetected, resolvedBase = us.provider, us.autodetected, us.baseURL
 		apiKey, pinUpstream, oauthSource = us.apiKey, us.pinUpstream, us.oauthSource
-		if pinUpstream {
+		if pinUpstream && up == "anthropic" {
 			credPath = filepath.Join(us.claudeConfigDir, ".credentials.json")
 		}
 		// No subscription token anywhere AND the child has no key of its own: a headless spawn
@@ -525,9 +533,32 @@ func cmdGuard(argv []string) {
 		// in the file the frozen string never re-reads. So on this path we hand the gateway
 		// a credential FUNC that re-reads the live token per request. It falls back to the
 		// boot-time apiKey on a transient read miss (the planner's effectiveAPIKey contract).
-		if pinUpstream {
+		if pinUpstream && up == "anthropic" {
 			tokenEnv := *oauthTokenEnv
+			// The account-failover state is seeded with the pinned config dir. Until a failover
+			// fires it is inert (currentConfigDir == the pinned dir, walled set empty), so the
+			// token path below is byte-for-byte the historical one. On an account-scoped 403 the
+			// planner's hook calls af.failover, which advances currentConfigDir to a permitted
+			// sibling — and apiKeyFunc then reads THAT account's rotating token, making the swap
+			// sticky across turns. A homeRoot we cannot resolve leaves af nil and disables failover
+			// (the historical terminal-on-account-403 behavior), never a crash.
+			var af *accountFailover
+			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
+				af = newAccountFailover(homeRoot, us.claudeConfigDir, nil)
+				accountFailoverFunc = af.failover
+			}
 			apiKeyFunc = func() string {
+				// After a failover, read the ADOPTED sibling account's live token directly from its
+				// config dir; that dir differs from the pinned one only once af.failover has run.
+				if af != nil {
+					if dir := af.currentConfigDir(); dir != "" && dir != us.claudeConfigDir {
+						if tok, live := readLiveAccessToken(dir, time.Now()); live {
+							return tok
+						}
+						// The adopted account's token is momentarily unreadable/expired — fall through
+						// to the default resolve rather than dropping auth entirely.
+					}
+				}
 				// Quiet resolve: this runs on EVERY turn to pick up the rotated token, so a
 				// genuinely-expired credential must not reprint the expiry WARNING per request
 				// (it fired once at boot via resolveGuardUpstream). io.Discard silences only the
@@ -552,11 +583,23 @@ func cmdGuard(argv []string) {
 		// the child hit a raw upstream_unauthorized. An interactive launch, or a launch not
 		// pinning the subscription, is left alone (Ran=false) — see guardRunHeadlessRehydrate's
 		// doc for why.
-		if pinUpstream {
+		if pinUpstream && up == "anthropic" {
 			if v := guardRunHeadlessRehydrate(cmdGuardStdinInteractive(), pinUpstream, credPath); v.Refused {
 				fmt.Fprintf(os.Stderr, "fak guard: STALE_CRED — the Claude subscription OAuth token in %s is expired and did not refresh within the wait window, and stdin is not a terminal — refusing to spawn a headless agent that would only hit a raw upstream 401.%s\n", v.CredPath, guardLoginStatusNote(us))
 				fmt.Fprintln(os.Stderr, "  fix: run `claude` once to log in (refreshes the token), or `claude setup-token` for a long-lived token, or export CLAUDE_CODE_OAUTH_TOKEN, or raise FAK_AUTH_REFRESH_WINDOW if a refresh is just slow.")
 				os.Exit(2)
+			}
+		}
+		if guardCodexSubscriptionEligible(command, up, *baseURL, remoteBase, *apiKeyEnv) {
+			if cred, err := resolveCodexSubscriptionCredential(*codexHome); err == nil {
+				apiKey = cred.AccessToken
+				pinUpstream = true
+				oauthSource = cred.Source
+				resolvedBase = guardCodexChatGPTBackendBaseURL
+				extraHeaders = guardCodexSubscriptionHeaders(cred)
+				apiKeyFunc, extraHeadersFunc = newCodexSubscriptionRefreshers(*codexHome, cred)
+			} else if strings.TrimSpace(os.Getenv(guardCodexEnvKey(*apiKeyEnv))) == "" && !*quiet {
+				fmt.Fprintf(os.Stderr, "fak guard: Codex ChatGPT subscription unavailable: %v\n", err)
 			}
 		}
 	}
@@ -778,7 +821,14 @@ func cmdGuard(argv []string) {
 		// Re-resolve the pinned subscription OAuth token per request so a long session
 		// never sends the stale boot-time bearer (the 401-after-relogin bug). nil in every
 		// non-pinned path leaves the static-APIKey behavior byte-for-byte unchanged.
-		APIKeyFunc: apiKeyFunc,
+		APIKeyFunc:       apiKeyFunc,
+		ExtraHeaders:     extraHeaders,
+		ExtraHeadersFunc: extraHeadersFunc,
+		// On an ACCOUNT-SCOPED 403 wall (org OAuth disabled / region / billing), fail over to a
+		// permitted sibling account instead of surfacing a 403 that no re-login can fix. nil on
+		// every non-pinned path (and when the home root is unresolvable), preserving the
+		// historical terminal-on-account-403 behavior exactly.
+		AccountFailoverFunc: accountFailoverFunc,
 		// LOCAL in-kernel model (--gguf): a loaded model + tokenizer with an EMPTY BaseURL
 		// makes the gateway serve BOTH /v1/messages (claude) and /v1/chat/completions (codex)
 		// from fak's own engine — no upstream call. With --alongside (BaseURL ALSO set) the
@@ -1022,6 +1072,17 @@ func cmdGuard(argv []string) {
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
 	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
+	if codexInstall.Applied && pinUpstream && up == "openai-responses" && strings.TrimSpace(oauthSource) != "" {
+		codexInstall.AuthMode = "chatgpt"
+		codexInstall.AuthSource = oauthSource
+	}
+	codexAuthEnv, codexAuthErr := guardCodexAuthEnv(codexInstall, apiKey, localModel && !localAlongside, os.Getenv)
+	if codexAuthErr != nil {
+		cancel()
+		fmt.Fprintln(os.Stderr, "fak guard:", codexAuthErr)
+		os.Exit(2)
+	}
+	injected = append(injected, codexAuthEnv...)
 	injected = append(injected, guardClaudeAutoCompactWindowInjection(up, *model, command)...)
 	// Live discovery (#1499): register fak's fak_index_*/fak_memory_*/fak_tools_search
 	// MCP tools into the wrapped Claude child by default, so a default `fak guard --
@@ -1077,7 +1138,7 @@ func cmdGuard(argv []string) {
 		// note (subscription OAuth vs passthrough) only applies when fak proxies an API.
 		if !localModel {
 			switch {
-			case pinUpstream:
+			case pinUpstream && up == "anthropic":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — Claude Pro/Max subscription (provider-reported identity; OAuth token from %s, sent as a bearer token)\n", oauthSource)
 			case up == "anthropic" && apiKey != "":
 				fmt.Fprintf(&startupReport, "fak guard: upstream auth — API key (from --api-key-env %s; API billing)\n", *apiKeyEnv)
@@ -1102,6 +1163,16 @@ func cmdGuard(argv []string) {
 		if maxDurationLimit > 0 {
 			fmt.Fprintf(&startupReport, "fak guard: session time budget — trace_id=%s max_duration=%s\n", guardTraceID, maxDurationLimit.String())
 		}
+	}
+	auditThreadPath := auditLabel
+	if auditJournal != nil {
+		auditThreadPath = auditJournal.Path()
+	}
+	if row, err := enqueueGuardSessionThread(guardTraceID, up, command, auditThreadPath, time.Now()); err == nil {
+		fmt.Fprintf(&startupReport, "fak guard: slack thread — queued root in %s (nonce=%s)\n", row.Channel, row.Nonce)
+		startGuardSessionThreadDrain()
+	} else {
+		fmt.Fprintf(&startupReport, "fak guard: slack thread — unavailable: %v\n", err)
 	}
 
 	srv.SetStartupReport(startupReport.String())
