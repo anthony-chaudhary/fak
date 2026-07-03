@@ -112,6 +112,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Web-agent measurement summary](docs/webbench-real-measurements-summary.md) — the rolled-up real-run numbers.
 - [DOS hook cost](docs/perf-dos-hook-cost.md) — what the commit-time guards cost in practice.
 - [Runaway-guard cost](docs/perf-runaway-guard.md) — the cost of the process-reaper backstop.
+- [Defender exclusion baseline (Windows fleet hosts)](docs/host-defender-exclusions.md) — the per-spawn Defender scan tax (~21% of a core measured), the narrow exclusion set that removes it, the elevated one-paste apply/verify, and the honest security trade-off.
 
 ## Status & tracking
 
