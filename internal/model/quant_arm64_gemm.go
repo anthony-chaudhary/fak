@@ -70,19 +70,3 @@ func qGemm8TileInto(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	}
 }
 
-// qMatRows4NEON computes y[lo:hi] for the decode GEMV: four output rows at a time through the NEON
-// micro-kernel, the [lo,hi) row remainder (hi-lo not a multiple of 4) through the matching scalar
-// reference qgemm8cell(...,4) so the whole range uses the same deferred-reduction order. Reduction
-// order is qgemm8cell's, NOT qdot8scalar's — the faster, more-accurate order the AVX-512 GEMV
-// already ships (gated by the Q8 oracle tests), so quant decode now matches quant prefill exactly
-// (both route through qgemm8cell(...,4)).
-func qMatRows4NEON(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) {
-	in, nblk := qt.in, qt.nblk
-	o := lo
-	for ; o+4 <= hi; o += 4 {
-		qmatrows4NEON(&qt.q[o*in], &qv.q[0], &qt.d[o*nblk], &qv.d[0], in, nblk, &y[o])
-	}
-	for ; o < hi; o++ {
-		y[o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qv.q, qv.d, nblk, 4)
-	}
-}
