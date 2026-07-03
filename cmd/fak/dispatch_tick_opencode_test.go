@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -21,5 +23,24 @@ func TestDispatchAttachOpencodePromptFileKeepsPromptOutOfArgv(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(got, " "), "your goal: resolve GitHub issue") {
 		t.Fatalf("attached command leaked full dispatch prompt into argv: %#v", got)
+	}
+}
+
+func TestUnwrapOpencodeNpmShimTargetsRealExecutable(t *testing.T) {
+	npm := t.TempDir()
+	real := filepath.Join(npm, "node_modules", "opencode-ai", "bin", "opencode.exe")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("fake exe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := unwrapOpencodeNpmShim(filepath.Join(npm, "opencode.cmd"))
+	if got != real {
+		t.Fatalf("unwrap target = %q, want %q", got, real)
+	}
+	if got := unwrapOpencodeNpmShim(filepath.Join(npm, "claude.cmd")); got != "" {
+		t.Fatalf("non-opencode shim unwrapped to %q", got)
 	}
 }

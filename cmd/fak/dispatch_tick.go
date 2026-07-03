@@ -840,10 +840,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	stamp := time.Now().UTC().Format("20060102-150405")
 	outLog := filepath.Join(runsDir, fmt.Sprintf("resolve-%d-%s.log", issue, stamp))
-	exe := command[0]
-	if p, err := exec.LookPath(exe); err == nil {
-		exe = p
-	}
+	exe := resolveDispatchWorkerExecutable(backend, command[0])
 	fh, err := os.OpenFile(outLog, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return dispatchSpawnResult{}, err
@@ -927,6 +924,36 @@ func dispatchAttachOpencodePromptFile(command []string, promptPath string) []str
 	out = out[:len(out)-1]
 	out = append(out, "--file", promptPath, "--", last)
 	return out
+}
+
+func resolveDispatchWorkerExecutable(backend, name string) string {
+	exe := name
+	if p, err := exec.LookPath(exe); err == nil {
+		exe = p
+	}
+	if backend == "opencode" && runtime.GOOS == "windows" {
+		if target := unwrapOpencodeNpmShim(exe); target != "" {
+			return target
+		}
+	}
+	return exe
+}
+
+func unwrapOpencodeNpmShim(exe string) string {
+	switch strings.ToLower(filepath.Base(exe)) {
+	case "opencode", "opencode.cmd", "opencode.bat", "opencode.ps1":
+	default:
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	if dir == "" || dir == "." {
+		return ""
+	}
+	target := filepath.Join(dir, "node_modules", "opencode-ai", "bin", "opencode.exe")
+	if st, err := os.Stat(target); err == nil && !st.IsDir() {
+		return target
+	}
+	return ""
 }
 
 func probeDispatchSpawn(cmd *exec.Cmd, logPath string, waitS float64) map[string]any {
