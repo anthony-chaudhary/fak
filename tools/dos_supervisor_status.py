@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dispatch_worker import install_no_window_subprocess_defaults
+
+install_no_window_subprocess_defaults(subprocess)
+
 SCHEMA = "fleet-dos-supervisor-status/1"
 
 OK_VERDICTS = {

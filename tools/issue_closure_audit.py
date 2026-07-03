@@ -36,6 +36,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
+from dispatch_worker import no_window_creationflags
+
 SCHEMA = "fleet-issue-closure-audit/1"
 
 # Where the per-SHA audit cache lives, next to the dispatch loop's other run
@@ -106,6 +108,7 @@ def run_text(cmd: list[str], cwd: Path, *, timeout: int = 60) -> dict[str, Any]:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            creationflags=no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"stdout": "", "stderr": str(exc), "returncode": 1, "_error": str(exc)}

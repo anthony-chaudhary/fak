@@ -295,6 +295,10 @@ func classifyLiveProcess(proc LiveProcess) (LiveProcessFinding, bool) {
 		finding.Level = "watchlist"
 		finding.Category = "browser_automation_process"
 		finding.Reason = "browser automation process is alive; verify it is headless, offscreen, or intentionally attended"
+	case liveGitHubCLIProcess(proc) && liveProcessAutomationOwned(proc):
+		finding.Level = "violation"
+		finding.Category = "repo_github_cli_process"
+		finding.Reason = "GitHub CLI helper process is owned by automation; launch it with CREATE_NO_WINDOW/hidden so it cannot flash"
 	case liveConsoleTool(proc) && liveProcessAutomationOwned(proc):
 		finding.Level = "watchlist"
 		finding.Category = "repo_console_process"
@@ -361,6 +365,14 @@ func liveHighSignalConsoleTool(proc LiveProcess) bool {
 	return false
 }
 
+func liveGitHubCLIProcess(proc LiveProcess) bool {
+	switch liveProcessToolName(proc) {
+	case "gh", "gh.exe":
+		return true
+	}
+	return false
+}
+
 func liveProcessToolName(proc LiveProcess) string {
 	name := strings.TrimSpace(proc.Name)
 	if name == "" {
@@ -380,8 +392,9 @@ func liveProcessAutomationOwned(proc LiveProcess) bool {
 	}, " "))
 	return strmatch.ContainsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
+		`\appdata\local\temp\claude\`, `/appdata/local/temp/claude/`, `\scratchpad\`, `/scratchpad/`,
 		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
-		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex")
+		"playwright-mcp", "@playwright/mcp", "dos-mcp", "codex", "claude.exe")
 }
 
 func liveProcessIgnored(proc LiveProcess) bool {
@@ -445,6 +458,10 @@ func classifyVisibleWindow(win VisibleWindow) (VisibleWindowFinding, bool) {
 	}
 	finding := visibleWindowFinding(win)
 	switch {
+	case visibleGitHubCLIWindow(win) && visibleAutomationOwned(win):
+		finding.Level = "violation"
+		finding.Category = "repo_github_cli_window"
+		finding.Reason = "visible GitHub CLI window owned by automation"
 	case visibleConsoleTool(win) && visibleAutomationOwned(win):
 		finding.Level = "violation"
 		finding.Category = "repo_console_tool"
@@ -511,11 +528,25 @@ func visibleConsoleTool(win VisibleWindow) bool {
 	return false
 }
 
+func visibleGitHubCLIWindow(win VisibleWindow) bool {
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(strings.ReplaceAll(win.Name, "\\", "/")), ".exe"))
+	return name == "gh"
+}
+
 func visibleAutomationOwned(win VisibleWindow) bool {
-	text := strings.ToLower(win.Path + " " + win.CommandLine + " " + win.Title)
+	text := strings.ToLower(strings.Join([]string{
+		win.Path,
+		win.CommandLine,
+		win.ParentName,
+		win.ParentCommandLine,
+		win.GrandparentName,
+		win.GrandparentCommandLine,
+	}, " "))
 	return strmatch.ContainsAny(text,
 		`c:\work\fak`, `/c/work/fak`, `c:\work\fleet`, `/c/work/fleet`, `c:\work\job`, `/c/work/job`,
-		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`)
+		`\appdata\local\temp\claude\`, `/appdata/local/temp/claude/`, `\scratchpad\`, `/scratchpad/`,
+		`\tools\`, `/tools/`, `\scripts\`, `/scripts/`, `.dispatch-runs`, `fleet`, `watchdog`,
+		"dos-mcp", "codex", "claude.exe")
 }
 
 func visibleBrowserAutomation(win VisibleWindow) bool {
@@ -816,7 +847,11 @@ func forEachPythonSpawn(src string, fn func(args string, off int)) {
 // PySpawnViolations returns one message per subprocess spawn that lacks a
 // creationflags hint, but only for a module that opts into the suppressor. Pure.
 func PySpawnViolations(rel, src string) []string {
-	if !reOptIn.MatchString(src) {
+	hard := hardPythonBackgroundPath(rel)
+	if !reOptIn.MatchString(src) && !hard {
+		return nil
+	}
+	if hard && PyDefaultSuppressorInstalled(src) {
 		return nil
 	}
 	var out []string
@@ -940,6 +975,21 @@ func pythonCandidateIgnoredPath(rel string) bool {
 	return strings.HasSuffix(base, "_test.py") ||
 		strings.HasPrefix(rel, "examples/") ||
 		strings.HasPrefix(rel, "testdata/")
+}
+
+func hardPythonBackgroundPath(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	switch {
+	case strings.HasPrefix(rel, "tools/dispatch_"):
+		return true
+	case strings.HasPrefix(rel, "tools/issue_"):
+		return true
+	case strings.HasPrefix(rel, "tools/dos_supervisor_"):
+		return true
+	case rel == "tools/fleet_dos_dispatch_watchdog.py":
+		return true
+	}
+	return false
 }
 
 // ---- Go background helper window-suppression rules ---------------------- //

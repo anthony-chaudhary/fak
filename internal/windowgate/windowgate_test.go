@@ -122,22 +122,36 @@ func TestClassifyVisibleWindows(t *testing.T) {
 		{
 			PID: 4, Name: "Slack", Title: "fleet-status",
 		},
+		{
+			PID: 5, Name: "gh", Title: "gh issue create",
+			CommandLine:       `gh issue create --title "T" --body-file -`,
+			ParentPID:         41600,
+			ParentName:        "python.exe",
+			ParentCommandLine: `python.exe C:\Users\USER\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
+		},
 	})
-	if len(rep.Violations) != 1 {
-		t.Fatalf("visible violations = %d %v, want repo-owned powershell only", len(rep.Violations), rep.Violations)
+	if len(rep.Violations) != 2 {
+		t.Fatalf("visible violations = %d %v, want repo-owned powershell and gh automation", len(rep.Violations), rep.Violations)
 	}
 	if len(rep.Watchlist) != 2 {
 		t.Fatalf("visible watchlist = %d %v, want terminal + browser automation", len(rep.Watchlist), rep.Watchlist)
 	}
-	if len(rep.Findings) != 3 {
+	if len(rep.Findings) != 4 {
 		t.Fatalf("visible findings = %d %+v, want structured rows for classified windows", len(rep.Findings), rep.Findings)
 	}
+	var gh *VisibleWindowFinding
 	var browser *VisibleWindowFinding
 	for i := range rep.Findings {
+		if rep.Findings[i].Category == "repo_github_cli_window" {
+			gh = &rep.Findings[i]
+		}
 		if rep.Findings[i].Category == "browser_automation" {
 			browser = &rep.Findings[i]
-			break
 		}
+	}
+	if gh == nil || gh.Level != "violation" || gh.ParentName != "python.exe" ||
+		!strings.Contains(gh.ParentCommandLine, `Temp\claude`) {
+		t.Fatalf("gh automation finding = %+v, want hard violation with parent attribution", gh)
 	}
 	if browser == nil {
 		t.Fatalf("missing browser automation finding: %+v", rep.Findings)
@@ -170,10 +184,10 @@ func TestClassifyLiveProcesses(t *testing.T) {
 	rep := ClassifyLiveProcesses([]LiveProcess{
 		{
 			PID: 10, Name: "gh.exe",
-			CommandLine:       `gh issue list --repo C:\work\fak`,
+			CommandLine:       `gh issue create --title "T" --body-file -`,
 			ParentPID:         9,
 			ParentName:        "python.exe",
-			ParentCommandLine: `python.exe C:\work\fak\tools\worker.py`,
+			ParentCommandLine: `python.exe C:\Users\USER\AppData\Local\Temp\claude\C--work-fak\scratchpad\file_issues.py`,
 		},
 		{
 			PID: 11, Name: "cmd.exe",
@@ -200,11 +214,11 @@ func TestClassifyLiveProcesses(t *testing.T) {
 			CommandLine: `pwsh.exe -Command "go run ./cmd/fak windowgate --live-processes"`,
 		},
 	})
-	if len(rep.Violations) != 0 {
-		t.Fatalf("live process violations = %v, want advisory only", rep.Violations)
+	if len(rep.Violations) != 1 {
+		t.Fatalf("live process violations = %v, want gh automation to fail hard", rep.Violations)
 	}
-	if len(rep.Watchlist) != 3 {
-		t.Fatalf("live process watchlist = %d %v, want repo gh + unreadable cmd + browser", len(rep.Watchlist), rep.Watchlist)
+	if len(rep.Watchlist) != 2 {
+		t.Fatalf("live process watchlist = %d %v, want unreadable cmd + browser", len(rep.Watchlist), rep.Watchlist)
 	}
 	if rep.Observed["gh.exe"] != 1 || rep.Observed["cmd.exe"] != 1 || rep.Observed["chrome.exe"] != 1 {
 		t.Fatalf("observed counts = %+v, want gh/cmd/top-level-chrome counts", rep.Observed)
@@ -219,8 +233,8 @@ func TestClassifyLiveProcesses(t *testing.T) {
 			t.Fatalf("unexpected URL leak in live process finding: %+v", finding)
 		}
 	}
-	if cats["repo_console_process"] != 1 || cats["unattributed_console_process"] != 1 || cats["browser_automation_process"] != 1 {
-		t.Fatalf("categories = %+v, want one of each live-process class", cats)
+	if cats["repo_github_cli_process"] != 1 || cats["unattributed_console_process"] != 1 || cats["browser_automation_process"] != 1 {
+		t.Fatalf("categories = %+v, want gh/process/browser live-process classes", cats)
 	}
 	var browser *LiveProcessFinding
 	for i := range rep.Findings {
@@ -309,6 +323,24 @@ func TestPySpawnCandidatesSurfaceNonOptInConsoleTools(t *testing.T) {
 	spacedInstalled := "import subprocess\ninstall_no_window_subprocess_defaults( subprocess )\nsubprocess.run(['gh'])\n"
 	if got := PySpawnCandidates("tools/m.py", spacedInstalled); len(got) != 0 {
 		t.Fatalf("spaced installer call should be clean, got %v", got)
+	}
+}
+
+func TestPyHardBackgroundPathFlagsVariableSpawns(t *testing.T) {
+	src := "import subprocess\n\ndef run_text(cmd):\n    return subprocess.run(cmd, capture_output=True)\n\ndef fetch():\n    return run_text(['gh', 'issue', 'list'])\n"
+	got := PySpawnViolations("tools/issue_lane_router.py", src)
+	if len(got) != 1 {
+		t.Fatalf("PySpawnViolations = %d %v, want hard-path variable spawn violation", len(got), got)
+	}
+	if !strings.Contains(got[0], ReasonUnsuppressedSpawn) {
+		t.Fatalf("violation lacks reason token: %v", got)
+	}
+}
+
+func TestPyHardBackgroundPathAllowsDefaultSuppressor(t *testing.T) {
+	src := "import subprocess\nfrom dispatch_worker import install_no_window_subprocess_defaults\ninstall_no_window_subprocess_defaults(subprocess)\n\ndef run_text(cmd):\n    return subprocess.run(cmd, capture_output=True)\n"
+	if got := PySpawnViolations("tools/issue_closure_audit.py", src); len(got) != 0 {
+		t.Fatalf("default suppressor should satisfy hard background path, got %v", got)
 	}
 }
 

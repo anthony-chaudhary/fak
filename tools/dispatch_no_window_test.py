@@ -31,6 +31,8 @@ import dispatch_account_topup  # noqa: E402
 import dispatch_glm_docs  # noqa: E402
 import dispatch_preflight  # noqa: E402
 import dispatch_worker  # noqa: E402
+import issue_closure_audit  # noqa: E402
+import issue_lane_router  # noqa: E402
 import issue_resolve_dispatch as ird  # noqa: E402
 import issue_worker_prompt  # noqa: E402
 
@@ -139,6 +141,18 @@ class ForwardsSuppressorTest(unittest.TestCase):
         self._assert_forwards(
             dispatch_preflight,
             lambda: dispatch_preflight.run_json(["fak", "version"], cwd=Path("."), timeout=5),
+        )
+
+    def test_issue_lane_router_run_text(self):
+        self._assert_forwards(
+            issue_lane_router,
+            lambda: issue_lane_router.run_text(["gh", "issue", "list"], cwd=Path("."), timeout=5),
+        )
+
+    def test_issue_closure_audit_run_text(self):
+        self._assert_forwards(
+            issue_closure_audit,
+            lambda: issue_closure_audit.run_text(["gh", "issue", "list"], cwd=Path("."), timeout=5),
         )
 
     def test_issue_resolve_taskkill_reaper(self):

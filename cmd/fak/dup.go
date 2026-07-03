@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/clonescan"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // cmdDup is `fak dup` — the AUTHORING-TIME dedup query. Where the code-slop
@@ -192,6 +193,7 @@ func addedGoByFile(staged bool, rng string) (map[string]string, error) {
 	} else {
 		cmd = exec.Command("git", "diff", "--unified=0", rng, "--", "*.go")
 	}
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
@@ -230,7 +232,9 @@ func parseAddedGo(diff string) map[string]string {
 
 // trackedGoTree returns the git-tracked *.go files as rel-path -> source text.
 func trackedGoTree() (map[string]string, error) {
-	out, err := exec.Command("git", "ls-files", "*.go").Output()
+	cmd := exec.Command("git", "ls-files", "*.go")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
@@ -256,7 +260,9 @@ func trackedRelPath(path string) string {
 	if err != nil {
 		return ""
 	}
-	root, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	root, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

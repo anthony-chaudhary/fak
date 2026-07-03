@@ -36,6 +36,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dispatch_worker import install_no_window_subprocess_defaults
+
+install_no_window_subprocess_defaults(subprocess)
+
 DEFAULT_FIELDS = "number,title,labels,updatedAt,assignees,url"
 
 

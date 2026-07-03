@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from dispatch_worker import no_window_creationflags
+
 SCHEMA = "fleet-issue-lane-router/1"
 
 # Mirrored from issue_triage.py (small; triage is not an importable package).
@@ -154,6 +156,7 @@ def run_text(cmd: list[str], cwd: Path, *, timeout: int = 60) -> dict[str, Any]:
         proc = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            creationflags=no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"stdout": "", "stderr": str(exc), "returncode": 1, "_error": str(exc)}
