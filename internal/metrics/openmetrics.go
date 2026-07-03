@@ -276,22 +276,33 @@ func validateOpenMetricType(metricType OpenMetricType) error {
 	}
 }
 
+// scanOpenMetricName returns the index of the first byte of name that
+// violates the OpenMetrics identifier grammar [A-Za-z_][A-Za-z0-9_]*
+// (digits allowed after the first byte). allowColon additionally admits
+// ':' (metric names only). ok is true when every byte is valid.
+func scanOpenMetricName(name string, allowColon bool) (i int, ok bool) {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || (allowColon && c == ':') {
+			continue
+		}
+		if i > 0 && c >= '0' && c <= '9' {
+			continue
+		}
+		return i, false
+	}
+	return 0, true
+}
+
 func validateMetricName(name string) error {
 	if name == "" {
 		return fmt.Errorf("empty name")
 	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
+	if i, ok := scanOpenMetricName(name, true); !ok {
 		if i == 0 {
-			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == ':' {
-				continue
-			}
 			return fmt.Errorf("name must start with [A-Za-z_:]")
 		}
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == ':' {
-			continue
-		}
-		return fmt.Errorf("name contains invalid byte %q", c)
+		return fmt.Errorf("name contains invalid byte %q", name[i])
 	}
 	return nil
 }
@@ -300,18 +311,11 @@ func validateLabelName(name string) error {
 	if name == "" {
 		return fmt.Errorf("empty label name")
 	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
+	if i, ok := scanOpenMetricName(name, false); !ok {
 		if i == 0 {
-			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' {
-				continue
-			}
 			return fmt.Errorf("label %q must start with [A-Za-z_]", name)
 		}
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' {
-			continue
-		}
-		return fmt.Errorf("label %q contains invalid byte %q", name, c)
+		return fmt.Errorf("label %q contains invalid byte %q", name, name[i])
 	}
 	return nil
 }
