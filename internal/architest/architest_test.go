@@ -298,7 +298,7 @@ var tier = map[string]int{
 	"regionadmit":      2,
 	"toolprocgate":     4, // post-kill tool-result quarantine rung; declared once its leaf landed on the trunk (see the stale-row rule above)
 
-	"operatortouches":       1, // R1 babysitting counter (#2270): pure fold over loopmgr's loop-event ledger measuring human touches per witnessed shipped unit; imports only loopmgr (tier 1), off the hot path.
+	"operatortouches":       1, // R1 babysitting counter (#2270): pure fold over loopmgr's loop-event ledger measuring human touches per witnessed shipped unit; mttr_sessions is fed by the R4 drain witness (#2273); imports loopmgr(1)+resume(1), off the hot path.
 	"popularizationtickets": 1, // embedded popularization-ticket curriculum (tickets.json) + pure fold/render over it; stdlib-only, off the hot path.
 	"qwen36nodereports":     2, // qwen36 node-report harvester: reads/unzips node artifacts and folds a versioned report; tool-shaped mechanism leaf, shells out off the hot path, imports nothing internal.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the

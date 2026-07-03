@@ -10,11 +10,13 @@
 // neither table claims is counted as UNKNOWN and surfaced for classification,
 // not silently binned.
 //
-// v0 honesty fences: mttr_sessions and escalation_handling_p50 report not_yet
-// until their source rows exist (the resume-drain witness #2273 / #1146, and
-// the R2 escalation packet's ack row #2271). silent_hours is computed from
-// the loop ledger alone (heartbeat/end gaps), not yet from a liveness oracle
-// (#750).
+// Honesty fences: escalation_handling_p50 reports not_yet until the R2
+// escalation packet's ack row exists (#2271). mttr_sessions is fed by the R4
+// recovery drain witness (#2273 / #1146): measured over the drain report's
+// RECOVERED rows (detected → witnessed progress; a launched row alone never
+// counts) when the caller supplies Params.Drain, not_yet naming the missing
+// witness otherwise. silent_hours is computed from the loop ledger alone
+// (heartbeat/end gaps), not yet from a liveness oracle (#750).
 package operatortouches
 
 import (
@@ -23,6 +25,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 // Schema tags the JSON report.
@@ -199,6 +202,12 @@ type Report struct {
 type Params struct {
 	AsOf        time.Time
 	SilentBound time.Duration
+
+	// Drain is the R4 recovery drain witness (#2273): the report
+	// `fak resume watchdog --status` folds from the resume ledgers. Its
+	// recovered MTTR rows are the mttr_sessions source; nil reports not_yet
+	// with the missing witness named.
+	Drain *resume.WatchdogDrainStatus
 }
 
 // Fold computes the R1 report from loop-event rows (any number of ledgers,
@@ -366,9 +375,35 @@ func Fold(events []loopmgr.Event, p Params) Report {
 		}
 	}
 
-	r.MTTRSessions = KPI{
-		Status:  KPINotYet,
-		Missing: "resume watchdog ledger fold not wired — needs the recovery drain witness (#2273 / #1146)",
+	// MTTR sessions: the R4 recovery drain witness (#2273) is the source. Only a
+	// RECOVERED row carries an MTTR — detected_at → progress_witnessed_at, where
+	// recovery required an oracle progress read after the launch (launched≠took:
+	// a launched_unproven row never counts toward recovery time).
+	var mttr []float64
+	if p.Drain != nil {
+		for _, row := range p.Drain.MTTRSessions {
+			if row.Status != resume.WatchdogMTTRRecovered {
+				continue
+			}
+			if row.DetectedAt > 0 && row.ProgressWitnessedAt > row.DetectedAt {
+				mttr = append(mttr, float64(row.ProgressWitnessedAt-row.DetectedAt))
+			}
+		}
+	}
+	switch {
+	case p.Drain == nil:
+		r.MTTRSessions = KPI{
+			Status:  KPINotYet,
+			Missing: "no resume drain report supplied — feed Params.Drain from the recovery drain witness, `fak resume watchdog --status` (#2273 / #1146)",
+		}
+	case len(mttr) == 0:
+		r.MTTRSessions = KPI{
+			Status:  KPINotYet,
+			Missing: "drain report carries no recovered rows — a launched row alone never counts (#2273 launched≠took)",
+		}
+	default:
+		sort.Float64s(mttr)
+		r.MTTRSessions = KPI{Status: KPIMeasured, Value: mttr[len(mttr)/2], Unit: "seconds"}
 	}
 
 	return r
