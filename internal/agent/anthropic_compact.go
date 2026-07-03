@@ -98,11 +98,13 @@ const (
 	// the lever stays idle — the #1407 dormancy, surfaced by the AnchorStarved diagnostic (#1409).
 	CompactAnchorFirstBP CompactAnchor = iota
 	// CompactAnchorHead re-anchors the protected prefix on the stable provider head — a top-level
-	// system/tools cache_control breakpoint serialized BEFORE messages[] — making the WHOLE message
-	// array compactible. This is what lets compaction fire on real traffic (#1407), but a fire
-	// bursts the recent message breakpoint's cached suffix, so it is gated on CacheBurstPaysBack
-	// economics (#1408). Opt-in: a warm-cache session must keep CompactAnchorFirstBP's byte-identical
-	// body, so the firing path only chooses this when the operator asks AND the burst repays.
+	// system/tools cache_control breakpoint, wherever it serializes (real Claude Code puts it
+	// AFTER messages[]; the provider cache is keyed on the semantic tools→system→messages
+	// hierarchy, not JSON key order) — making the WHOLE message array compactible. This is what
+	// lets compaction fire on real traffic (#1407), but a fire bursts the recent message
+	// breakpoint's cached suffix, so it is gated on CacheBurstPaysBack economics (#1408): it only
+	// fires when a known session horizon repays the burst, or when the caller OBSERVED the
+	// suffix's cache already cold (CompactOptions.ColdCache — a zero-penalty burst).
 	CompactAnchorHead
 )
 
@@ -128,6 +130,13 @@ type CompactOptions struct {
 	CurrentTurn int
 	ReadMult    float64 // provider cache-read price multiplier (<=0 ⇒ defaultCacheReadMult)
 	WriteMult   float64 // provider cache-write price multiplier (<=0 ⇒ defaultCacheWriteMult)
+	// ColdCache: the caller OBSERVED that this session's message-span cache entries have already
+	// expired (e.g. the trace idled past the provider's message-breakpoint TTL since its last
+	// served turn). An expired suffix re-bills cold this turn whether or not we compact, so the
+	// head-anchored burst gate prices the one-time invalidation at ZERO and can fire without a
+	// session horizon — the exact cold case #1407 says the lever was built for. Never set this
+	// from a guess: a false cold claim converts a warm cache read into a cold re-write.
+	ColdCache bool
 }
 
 // CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
@@ -165,13 +174,15 @@ func anchorCompactablePrefix(raw []byte, minElems int) (elems []json.RawMessage,
 //
 // In CompactAnchorFirstBP (the default) pfxEnd is the FIRST messages[] cache_control breakpoint
 // (or -1 when only a top-level `system` breakpoint exists). In CompactAnchorHead, when the stable
-// provider head — a top-level system/tools cache_control breakpoint serialized BEFORE messages[]
-// — exists, pfxEnd is forced to -1 so the WHOLE message array is compactible (#1407/#1408). Head
-// re-anchoring engages ONLY when the head genuinely precedes messages[] in the byte stream: that
-// is exactly what keeps the dominant cached head's byte prefix stable across the drop. A head
-// serialized AFTER messages[] would have its prefix shifted by the drop (bursting the dominant
-// cache), so head mode falls back to the first-breakpoint anchor there — never silently bursting
-// the head. The firstbp condition below is left byte-identical to the pre-#1408 behavior.
+// provider head — a top-level system/tools cache_control breakpoint — exists ANYWHERE in the
+// object, pfxEnd is forced to -1 so the WHOLE message array is compactible (#1407/#1408). The
+// head's serialization position does not matter: the provider's prompt cache is keyed on the
+// SEMANTIC prompt hierarchy (tools → system → messages), never on the raw JSON key order, and the
+// splice rewrites bytes only inside the messages[] array span — verifySplicedBody proves both the
+// pre-messages prefix AND the post-messages tail survive verbatim. (An earlier serialized-
+// before-messages engagement condition made head mode unreachable on real Claude Code traffic,
+// which serializes messages[] BEFORE system/tools — live capture 2026-07-02.) The firstbp
+// condition below is left byte-identical to the pre-#1408 behavior.
 func anchorCompactablePrefixMode(raw []byte, minElems int, anchor CompactAnchor) (elems []json.RawMessage, spans []elementSpan, pfxEnd int, bail CompactOutcome, ok bool) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
@@ -187,7 +198,7 @@ func anchorCompactablePrefixMode(raw []byte, minElems int, anchor CompactAnchor)
 	}
 	pfxEnd = firstBreakpointMessage(elems)
 	headReanchored := false
-	if anchor == CompactAnchorHead && stableHeadBeforeMessages(raw, obj, spans) {
+	if anchor == CompactAnchorHead && stableHeadMarked(obj) {
 		pfxEnd = -1 // whole message array compactible; the stable cached head is the top-level system/tools block
 		headReanchored = true
 	}
@@ -199,27 +210,18 @@ func anchorCompactablePrefixMode(raw []byte, minElems int, anchor CompactAnchor)
 	return elems, spans, pfxEnd, CompactOutcome{}, true
 }
 
-// stableHeadBeforeMessages reports whether a top-level system/tools cache_control breakpoint —
-// the stable cached head the provider reuses every turn — is serialized BEFORE the messages[]
-// array in raw. Only then does dropping middle messages leave the head's byte prefix unchanged,
-// so the dominant cache read survives a head-anchored fire (a head serialized after messages[]
-// would have its prefix shifted by the drop). The value bytes of obj[key] are a verbatim slice
-// of raw, so bytes.Index locates them — the same anchor technique decodeArrayElements uses.
-func stableHeadBeforeMessages(raw []byte, obj map[string]json.RawMessage, spans []elementSpan) bool {
-	if len(spans) == 0 {
-		return false
-	}
-	msgsStart := spans[0].start
-	for _, key := range []string{"system", "tools"} {
-		v, ok := obj[key]
-		if !ok || !rawHasCacheControl(v) {
-			continue
-		}
-		if off := bytes.Index(raw, v); off >= 0 && off < msgsStart {
-			return true
-		}
-	}
-	return false
+// stableHeadMarked reports whether the request carries a stable provider-head cache_control
+// breakpoint — a top-level system/tools block the provider reuses every turn. The head's byte
+// POSITION in the request object deliberately does not gate engagement: the provider's prompt
+// cache is keyed on the semantic prompt hierarchy (tools → system → messages), not on the raw
+// JSON key order, so a marked head anchors a head-mode fire wherever it happens to serialize.
+// Byte safety is proven separately — the splice rewrites bytes only inside the messages[] array
+// span, and verifySplicedBody proves the pre-messages prefix AND the post-messages tail (which
+// carries system/tools on real Claude Code traffic, whose key order is messages BEFORE
+// system/tools — live capture 2026-07-02) survive verbatim. The earlier serialized-before-
+// messages condition made head mode structurally unreachable on that flagship traffic (#1407).
+func stableHeadMarked(obj map[string]json.RawMessage) bool {
+	return rawHasCacheControl(obj["system"]) || rawHasCacheControl(obj["tools"])
 }
 
 // CompactAnthropicHistoryWithOutcome is the observable form on the default (warm-cache-safe)
@@ -233,12 +235,13 @@ func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, Compact
 // CompactAnthropicHistoryWithOptions is the parameterized core of the cache-prefix-preserving
 // history rewrite. With CompactAnchorFirstBP (the default) it protects through the first messages[]
 // breakpoint and only sheds the middle after it — the warm-cache-safe behavior every existing
-// caller relies on. With CompactAnchorHead it re-anchors on the stable system/tools head (when that
-// head precedes messages[]), making the whole message array compactible so the lever can fire on
-// real Claude Code traffic (#1407); because such a fire bursts the recent breakpoint's cached
-// suffix, it is gated on CacheBurstPaysBack economics and only fires when the burst repays within
-// the session horizon (#1408). All byte-level guarantees (verbatim protected prefix, re-decode +
-// prefix-equality proof, fail-safe identity on any ambiguity) are identical across both anchors.
+// caller relies on. With CompactAnchorHead it re-anchors on the stable system/tools head (wherever
+// it serializes — see stableHeadMarked), making the whole message array compactible so the lever
+// can fire on real Claude Code traffic (#1407); because such a fire bursts the recent breakpoint's
+// cached suffix, it is gated on CacheBurstPaysBack economics and only fires when the burst repays
+// within the session horizon, or costs nothing because the caller observed that cache already cold
+// (#1408, CompactOptions.ColdCache). All byte-level guarantees (verbatim protected prefix + body
+// tail, re-decode proof, fail-safe identity on any ambiguity) are identical across both anchors.
 func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte, CompactOutcome) {
 	budget := opts.Budget
 	if budget <= 0 || len(raw) == 0 {
@@ -370,6 +373,12 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 			writeMult = defaultCacheWriteMult
 		}
 		droppedCachedTokens, invalidatedSuffixTokens := headBurstEconomics(elems, pfxEnd+1, keepStart)
+		if opts.ColdCache {
+			// Observed-cold (never guessed): the suffix's cache entries have already expired, so
+			// this turn re-bills them at the cold write rate with or without the drop — the burst
+			// carries no marginal penalty and the gate fires horizon-free (breakEven 0).
+			invalidatedSuffixTokens = 0
+		}
 		if !CacheBurstPaysBack(opts.TotalTurns, opts.CurrentTurn, droppedCachedTokens, invalidatedSuffixTokens, readMult, writeMult) {
 			return raw, CompactOutcome{Reason: CompactReasonBurstUnprofitable, SuffixTokens: suffixTokens}
 		}
@@ -425,10 +434,14 @@ const (
 )
 
 // verifySplicedBody is the shared post-splice proof both the compaction and elision rewrites
-// run: the result must still decode as a valid Messages request, and the protected prefix
-// bytes (through spans[pfxEnd], or just the array open when pfxEnd<0) must be byte-identical
-// to the input. Either failing is a splice bug, not a reason to ship a broken / cache-busting
-// body — the caller returns identity with its own labeled reason.
+// run: the result must still decode as a valid Messages request, the protected prefix bytes
+// (through spans[pfxEnd], or just the array open when pfxEnd<0) must be byte-identical to the
+// input, and the body TAIL — every byte after the last messages[] element, i.e. the `]` plus
+// every trailing top-level key — must survive verbatim. The tail proof is what makes a
+// head-anchored fire safe on the real Claude Code key order (messages BEFORE system/tools):
+// there the marked stable head lives in the tail, not the prefix. Any failure is a splice bug,
+// not a reason to ship a broken / cache-busting body — the caller returns identity with its own
+// labeled reason.
 func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceVerdict {
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
 		return spliceVerdictRedecodeFail
@@ -439,6 +452,11 @@ func verifySplicedBody(raw, out []byte, spans []elementSpan, pfxEnd int) spliceV
 	}
 	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
 		return spliceVerdictPrefixMismatch
+	}
+	if len(spans) > 0 {
+		if tail := raw[spans[len(spans)-1].end:]; !bytes.HasSuffix(out, tail) {
+			return spliceVerdictPrefixMismatch // the tail carries the head on the CC shape — same burst class
+		}
 	}
 	return spliceVerdictOK
 }

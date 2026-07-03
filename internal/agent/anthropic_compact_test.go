@@ -526,13 +526,14 @@ func TestCacheBurstPaysBackOnKnownSessionHorizon(t *testing.T) {
 	}
 }
 
-// headOrderedBody models REAL Claude Code traffic for the head anchor (#1407/#1408): the stable
-// cache_control head is a top-level `system` block serialized BEFORE messages[] (Go struct field
+// headOrderedBody is the head-BEFORE-messages variant of the #1407 dormant shape: the stable
+// cache_control head is a top-level `system` block serialized before messages[] (Go struct field
 // order is the JSON key order), and the ONLY messages[] breakpoint sits on a RECENT turn
-// (recentBpBack from the end). This is the #1407 dormant shape — firstBreakpointMessage anchors
-// near the end — but because the head genuinely precedes messages[], CompactAnchorHead can
-// re-anchor on it and (economics permitting) fire. Contrast recentOnlyBreakpointBody, whose
-// alphabetical json.Marshal(map) order puts `system` AFTER messages[], so head mode must fall back.
+// (recentBpBack from the end). NOTE this is NOT the real Claude Code key order — a live capture
+// (2026-07-02) shows real CC serializes messages[] BEFORE system/tools, i.e. the
+// recentOnlyBreakpointBody shape. Head mode engages on BOTH (the provider cache is keyed on the
+// semantic tools→system→messages hierarchy, not JSON key order); this fixture keeps the
+// head-in-prefix variant covered.
 func headOrderedBody(t *testing.T, nMsgs, recentBpBack int) []byte {
 	t.Helper()
 	type block map[string]any
@@ -644,21 +645,56 @@ func TestCompactHeadAnchorRespectsBurstEconomics(t *testing.T) {
 	}
 }
 
-// TestCompactHeadAnchorFallsBackWhenHeadAfterMessages proves head mode is byte-safe regardless of
-// key order: when the stable head is serialized AFTER messages[] (so a drop would shift its prefix
-// and burst the dominant cache), head mode must NOT engage — it falls back to the first-breakpoint
-// anchor, which on the recent-only shape stays dormant (identity), even with a generous horizon.
-func TestCompactHeadAnchorFallsBackWhenHeadAfterMessages(t *testing.T) {
+// TestCompactHeadAnchorEngagesWhenHeadAfterMessages is the REAL-Claude-Code-shape witness: a live
+// capture (2026-07-02) shows real CC serializes messages[] BEFORE the marked system/tools head —
+// exactly recentOnlyBreakpointBody's alphabetical key order. Head mode must engage there too (the
+// provider cache is keyed on the semantic tools→system→messages hierarchy, not JSON key order):
+// with a paying horizon it FIRES, sheds the middle, and every byte outside the messages[] array —
+// including the trailing `system` head — survives verbatim. The earlier serialized-before-messages
+// engagement condition made head mode structurally unreachable on this flagship shape.
+func TestCompactHeadAnchorEngagesWhenHeadAfterMessages(t *testing.T) {
 	// recentOnlyBreakpointBody uses json.Marshal(map) → alphabetical keys → `system` AFTER messages[].
 	raw := recentOnlyBreakpointBody(t, 120, 2)
 	out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, TotalTurns: 1000, CurrentTurn: 1})
-	if !bytes.Equal(out, raw) {
-		t.Fatalf("head must fall back to firstbp (identity) when the head is serialized after messages[]; body changed")
+	if outcome.Reason != CompactReasonNone {
+		t.Fatalf("head anchor must FIRE on the real (head-after-messages) shape with a paying horizon, got reason=%q (%+v)", outcome.Reason, outcome)
 	}
-	if outcome.Reason != CompactReasonUnderBudget || !outcome.AnchorStarved {
-		t.Fatalf("the fallback firstbp anchor must report the dormant under_budget+AnchorStarved diagnostic, got reason=%q starved=%v",
-			outcome.Reason, outcome.AnchorStarved)
+	if bytes.Equal(out, raw) || len(out) >= len(raw) {
+		t.Fatalf("a head-anchored fire must shrink the body, got %d (in %d)", len(out), len(raw))
 	}
+	// The marked stable head serializes AFTER messages[] here, so it must ride the verbatim body
+	// tail: every byte after the last messages[] element in raw must survive as out's suffix.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !bytes.Contains(out, obj["system"]) {
+		t.Fatalf("head-anchored fire lost the trailing `system` head bytes — would burst the dominant cache")
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("head-anchored body failed to decode: %v", err)
+	}
+	assertAlternation(t, out)
+}
+
+// TestCompactHeadAnchorColdCacheFiresWithoutHorizon proves the observed-cold path (#1407's "the
+// case it was built for"): when the caller WITNESSED the message-span cache expired
+// (CompactOptions.ColdCache — e.g. the session idled past the provider TTL), the burst carries no
+// marginal penalty, so head mode fires with NO session horizon at all. The warm no-horizon bail
+// (TestCompactHeadAnchorRespectsBurstEconomics) is unchanged.
+func TestCompactHeadAnchorColdCacheFiresWithoutHorizon(t *testing.T) {
+	raw := recentOnlyBreakpointBody(t, 120, 2)
+	out, outcome := CompactAnthropicHistoryWithOptions(raw, CompactOptions{Budget: 1200, Anchor: CompactAnchorHead, ColdCache: true})
+	if outcome.Reason != CompactReasonNone {
+		t.Fatalf("observed-cold head anchor must fire horizon-free, got reason=%q (%+v)", outcome.Reason, outcome)
+	}
+	if bytes.Equal(out, raw) || outcome.Dropped <= 0 || outcome.ShedTokens <= 0 {
+		t.Fatalf("a cold fire must shed real work, got dropped=%d shed=%d", outcome.Dropped, outcome.ShedTokens)
+	}
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("cold-fired body failed to decode: %v", err)
+	}
+	assertAlternation(t, out)
 }
 
 // assertAlternation fails if any two consecutive messages share a role — Anthropic rejects
