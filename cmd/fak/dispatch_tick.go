@@ -26,21 +26,25 @@ import (
 )
 
 type dispatchTickOptions struct {
-	Workspace      string
-	MaxWorkers     int
-	WorkKind       string
-	Lane           string
-	TargetIssue    int
-	LeaseID        string
-	LeaseTree      []string
-	Backend        string
-	Goal           string
-	GoalProfile    string
-	ExcludeLanes   []string
-	Live           bool
-	Refresh        bool
-	PreferNewest   bool
-	Generation     string
+	Workspace    string
+	MaxWorkers   int
+	WorkKind     string
+	Lane         string
+	TargetIssue  int
+	LeaseID      string
+	LeaseTree    []string
+	Backend      string
+	Goal         string
+	GoalProfile  string
+	ExcludeLanes []string
+	Live         bool
+	Refresh      bool
+	PreferNewest bool
+	Generation   string
+	// View scopes the tick's issue routing to a named issue-view from
+	// .github/issue-views.json (#1411). Empty disables the scoping; the CLI
+	// flag defaults it to the operator-marked `current` board/milestone focus.
+	View           string
 	CooldownMin    int
 	WorkerTimeoutS int
 	SpawnProbeS    float64
@@ -130,6 +134,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	noRefresh := fs.Bool("no-refresh", false, "skip the per-tick account-registry refresh")
 	preferNewest := fs.Bool("prefer-newest", false, "pick the NEWEST open issue on the lane first (default: oldest first, to drain the backlog)")
 	generationFlag := fs.String("generation", "", "generation horizon to admit: now|next|second-next|future|all (default: now+next; only engages when a candidate carries a gen/* label)")
+	view := fs.String("view", dispatchDefaultView, "scope issue routing to this named issue-view from .github/issue-views.json (empty disables; an unresolvable or empty view fail-softs to the full open backlog)")
 	cooldownMin := fs.Int("cooldown-min", dispatchtick.DefaultCooldownMinutes, "skip issues attempted within this many minutes (0 disables)")
 	workerTimeoutS := fs.Int("worker-timeout-s", dispatchtick.DefaultWorkerTimeoutS, "worker lease TTL base in seconds (0 uses default)")
 	spawnProbeS := fs.Float64("spawn-probe-s", dispatchtick.DefaultSpawnProbeS, "seconds to wait after spawn to catch immediate empty-log exits")
@@ -188,6 +193,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		Refresh:        !*noRefresh,
 		PreferNewest:   *preferNewest,
 		Generation:     strings.TrimSpace(*generationFlag),
+		View:           strings.TrimSpace(*view),
 		CooldownMin:    *cooldownMin,
 		WorkerTimeoutS: *workerTimeoutS,
 		SpawnProbeS:    maxFloat64(0, *spawnProbeS),
@@ -222,6 +228,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	if opts.WorkerTimeoutS <= 0 {
 		opts.WorkerTimeoutS = dispatchtick.DefaultWorkerTimeoutS
 	}
+	// #1411: scope this tick's native issue routing to the named view. The CLI
+	// flag defaults View to `current`; a programmatic tick (wave/sweep/garden)
+	// that leaves View empty keeps today's full-backlog behavior.
+	dispatchTickView = opts.View
 
 	reg := map[string]any{"skipped": true}
 	if opts.Refresh {

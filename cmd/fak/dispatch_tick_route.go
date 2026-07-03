@@ -336,10 +336,27 @@ func dispatchLaneBetterForGoal(profile string, priority, stepBudget, count int, 
 	return lane < chosen
 }
 
-func dispatchRouteIssuesNative(root string, _ io.Writer) (dispatchtick.RouterPayload, error) {
+// dispatchDefaultView is the named issue-view (.github/issue-views.json) the
+// unattended `fak dispatch tick` scopes its issue selection to by default: the
+// operator-marked board/milestone focus (#1411). `--view ""` disables the
+// scoping; a missing, unresolvable, or empty view fail-softs to the full open
+// backlog so the tick never starves (parity with issue_lane_router.py --view).
+const dispatchDefaultView = "current"
+
+// dispatchTickView is the view slug the native router scopes its open-issue
+// fetch to. A package seam rather than a dispatchRouteIssues parameter so the
+// seam's many stubs keep their signature; only the tick writes it (from its
+// --view flag), so every other dispatch verb keeps the full open backlog.
+var dispatchTickView = ""
+
+// Seams so a test can drive the view/backlog selection without gh.
+var dispatchFetchViewIssues = dispatchFetchViewIssuesGH
+var dispatchFetchBacklogIssues = dispatchFetchOpenIssues
+
+func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
 	const issueLimit = 1000
 	taxonomy, taxErr := dispatchLaneTaxonomy(root)
-	issues, issueErr := dispatchFetchOpenIssues(root, issueLimit)
+	issues, injected, issueErr := dispatchFetchScopedIssues(root, stderr, dispatchTickView, issueLimit)
 	fetchErrs := []string{}
 	if taxErr != nil {
 		fetchErrs = append(fetchErrs, taxErr.Error())
@@ -352,8 +369,100 @@ func dispatchRouteIssuesNative(root string, _ io.Writer) (dispatchtick.RouterPay
 		Taxonomy:   taxonomy,
 		Issues:     issues,
 		IssueLimit: issueLimit,
+		Injected:   injected,
 		FetchError: strings.Join(fetchErrs, "; "),
 	}), nil
+}
+
+// dispatchFetchScopedIssues fetches the open-issue set the router folds. A
+// non-empty view names an issue-view slug: the view's slice drives routing
+// (injected=true, so coverage reports the slice, not a full-fetch cap). It
+// FAIL-SOFTS to the full open backlog when the view cannot be resolved or
+// fetched, or when it yields no dispatchable issue -- the same two WARN
+// branches tools/issue_lane_router.py --view ships, so an unattended tick
+// never starves on a bad or still-empty `current` view.
+func dispatchFetchScopedIssues(root string, stderr io.Writer, view string, limit int) ([]dispatchtick.Issue, bool, error) {
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	view = strings.TrimSpace(view)
+	if view != "" {
+		viewIssues, err := dispatchFetchViewIssues(root, view, limit)
+		switch {
+		case err != nil:
+			fmt.Fprintf(stderr, "WARN: --view %q: %v; using full open backlog\n", view, err)
+		case !dispatchAnyDispatchable(viewIssues):
+			fmt.Fprintf(stderr, "WARN: --view %q: no dispatchable issues; using full open backlog\n", view)
+		default:
+			return viewIssues, true, nil
+		}
+	}
+	issues, err := dispatchFetchBacklogIssues(root, limit)
+	return issues, false, err
+}
+
+func dispatchAnyDispatchable(issues []dispatchtick.Issue) bool {
+	for _, issue := range issues {
+		if dispatchtick.IsDispatchable(issue, "") {
+			return true
+		}
+	}
+	return false
+}
+
+// dispatchViewQuery resolves a view slug against .github/issue-views.json
+// (the API-readable mirror of the GitHub saved views) to the repo and the
+// issue-search query that materializes it.
+func dispatchViewQuery(root, slug string) (repo, query string, err error) {
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "issue-views.json"))
+	if err != nil {
+		return "", "", err
+	}
+	var cfg struct {
+		Repo  string `json:"repo"`
+		Views []struct {
+			Slug  string `json:"slug"`
+			Query string `json:"query"`
+		} `json:"views"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", "", fmt.Errorf("issue-views.json: %w", err)
+	}
+	for _, v := range cfg.Views {
+		if v.Slug == slug {
+			if strings.TrimSpace(v.Query) == "" {
+				return "", "", fmt.Errorf("view %q has an empty query", slug)
+			}
+			return cfg.Repo, v.Query, nil
+		}
+	}
+	return "", "", fmt.Errorf("unknown view %q in issue-views.json", slug)
+}
+
+func dispatchFetchViewIssuesGH(root, slug string, limit int) ([]dispatchtick.Issue, error) {
+	repo, query, err := dispatchViewQuery(root, slug)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	args := []string{"issue", "list"}
+	if repo != "" {
+		args = append(args, "--repo", repo)
+	}
+	args = append(args, "--search", query, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body")
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = root
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	var issues []dispatchtick.Issue
+	if uerr := json.Unmarshal(out, &issues); uerr != nil {
+		if err != nil {
+			return nil, fmt.Errorf("gh issue list --search: %w (%s)", err, strings.TrimSpace(string(out)))
+		}
+		return nil, fmt.Errorf("gh issue list --search produced invalid JSON: %w", uerr)
+	}
+	return issues, nil
 }
 
 var dispatchLoadLaneTaxonomy = func(root string) (dispatchtick.LaneTaxonomy, error) {
