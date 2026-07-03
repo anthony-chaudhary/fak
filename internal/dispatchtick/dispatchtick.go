@@ -21,7 +21,7 @@ const (
 	WaveSidecarSuffix    = ".wave"
 	AccountSidecarSuffix = ".account"
 	BaseSHASidecarSuffix = ".basesha"
-	OpencodePromptNotice = "Read and follow the attached dispatch prompt."
+	OpencodePromptNotice = "Resolve GitHub issue # from the attached dispatch prompt."
 	// FallbackMaxWorkers is the built-in aspirational ceiling used when the
 	// operator sets no FAK_MAX_WORKERS; see DefaultMaxWorkers for the contract.
 	FallbackMaxWorkers     = 8

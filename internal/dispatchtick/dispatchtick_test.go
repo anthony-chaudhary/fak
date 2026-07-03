@@ -59,6 +59,15 @@ func TestWorkerStdinPayload(t *testing.T) {
 	}
 }
 
+func TestOpencodePromptNoticeKeepsLivenessMarker(t *testing.T) {
+	if !strings.Contains(strings.ToLower(OpencodePromptNotice), "resolve github issue #") {
+		t.Fatalf("opencode prompt notice %q lost the issue-worker liveness marker", OpencodePromptNotice)
+	}
+	if len(OpencodePromptNotice) > 96 {
+		t.Fatalf("opencode prompt notice is too long for argv safety: %d", len(OpencodePromptNotice))
+	}
+}
+
 func TestPickTargetIssueSkipsLiveAndCooling(t *testing.T) {
 	got, ok := PickTargetIssue([]int{10, 11, 12}, map[int]bool{10: true, 11: true})
 	if !ok || got != 12 {
