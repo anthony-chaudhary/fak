@@ -235,19 +235,7 @@ func transcriptText(raw json.RawMessage) string {
 // generic usage cap — so "(not your usage limit) · Rate limited" is correctly read as a rate
 // throttle rather than a usage cap.
 func classifyLimit(text string) (string, bool) {
-	s := strings.ToLower(text)
-	switch {
-	case strings.Contains(s, "session limit"):
-		return resume.LimitSession, true
-	case strings.Contains(s, "weekly limit"):
-		return resume.LimitWeekly, true
-	case strings.Contains(s, "rate limit"), strings.Contains(s, "rate-limit"), strings.Contains(s, "429"):
-		return resume.LimitRate, true
-	case strings.Contains(s, "usage limit"):
-		return resume.LimitUsage, true
-	default:
-		return "", false
-	}
+	return resume.ClassifyLimitText(text)
 }
 
 // renderScan prints the rate-limited crashes (and, with --all, the rest) as an aligned table:

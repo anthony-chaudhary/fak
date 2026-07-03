@@ -158,43 +158,27 @@ func TestResumeStatusJSON(t *testing.T) {
 	}
 }
 
-func TestResumeStatusBareFableLimitIsRecoverable(t *testing.T) {
-	store := t.TempDir()
+func TestResumeStatusBareFableLimitWaitsBeforeRefire(t *testing.T) {
 	const sid = "fablelim"
 	body := `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
 {"type":"assistant","timestamp":"2020-01-01T00:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"working"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":90000,"cache_creation_input_tokens":0,"output_tokens":300}}}
 {"type":"assistant","timestamp":"2020-01-01T00:31:00Z","isApiErrorMessage":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."}],"usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":0}}}
 `
-	if err := os.WriteFile(filepath.Join(store, sid+".jsonl"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
-	row := `{"ts":"2020-01-01T00:30:00Z","session":"` + sid + `","phase":"launched","action":"auto_resume"}` + "\n"
-	if err := os.WriteFile(ledger, []byte(row), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	tr := scanTranscriptForStatus(strings.NewReader(body))
+	hist := []resume.Attempt{{
+		UnixSeconds: parseTranscriptUnix("2020-01-01T00:30:00Z"),
+		Phase:       "launched",
+		Action:      "auto_resume",
+	}}
+	rowOut := foldStatusRow(sid, tr, hist, resume.SourceDecision{Admit: true},
+		resume.DefaultMaxResumeAttempts, parseTranscriptUnix("2020-01-01T00:31:30Z"))
 
-	out, errb, code := runResumeStatusAt("--store", store, "--ledger", ledger, "--json")
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	if rowOut.SessionID != sid {
+		t.Fatalf("session = %q, want %s", rowOut.SessionID, sid)
 	}
-	var doc struct {
-		Sessions []struct {
-			SessionID    string             `json:"session_id"`
-			Outcome      resume.Outcome     `json:"outcome"`
-			State        resume.ResumeState `json:"resume_state"`
-			NewTurns     int                `json:"new_turns_since_resume"`
-			RetryBlocked bool               `json:"retry_blocked"`
-			RetryReason  string             `json:"retry_reason"`
-		} `json:"sessions"`
+	if rowOut.Crash != resume.CrashRateLimit || rowOut.LimitReason != resume.LimitUsage {
+		t.Fatalf("crash/limit = %q/%q, want rate_limit/usage_limit", rowOut.Crash, rowOut.LimitReason)
 	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil {
-		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
-	}
-	if len(doc.Sessions) != 1 || doc.Sessions[0].SessionID != sid {
-		t.Fatalf("sessions = %+v, want exactly %s", doc.Sessions, sid)
-	}
-	rowOut := doc.Sessions[0]
 	if rowOut.Outcome != resume.OutcomeRecoverable || rowOut.State != resume.ResumeReStranded {
 		t.Fatalf("outcome/state = %q/%q, want recoverable/re-stranded", rowOut.Outcome, rowOut.State)
 	}
@@ -203,6 +187,9 @@ func TestResumeStatusBareFableLimitIsRecoverable(t *testing.T) {
 	}
 	if rowOut.RetryBlocked || !strings.Contains(rowOut.RetryReason, "failed recoverably") {
 		t.Fatalf("retry = blocked:%v reason:%q, want recoverable retry", rowOut.RetryBlocked, rowOut.RetryReason)
+	}
+	if rowOut.NextAction != resume.ActWaitReset || rowOut.Fire {
+		t.Fatalf("next = %q fire=%v, want wait_reset/false", rowOut.NextAction, rowOut.Fire)
 	}
 }
 
