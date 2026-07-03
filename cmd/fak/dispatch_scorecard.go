@@ -389,7 +389,7 @@ func dispatchScoreWaveExecutionPlan(root string) dispatchPlanProbe {
 	if err != nil {
 		return dispatchScoreProbe("wave_execution_plan", false, err.Error(), nil)
 	}
-	plan := dispatchWaveExecutionPlans(root, "claude", "engineering", "wave-score", 0, price.RunTargets, []dispatchtick.AccountWaveLane{
+	plan := dispatchWaveExecutionPlans(root, "claude", "engineering", "", dispatchGoalProfileThroughput, "wave-score", 0, price.RunTargets, []dispatchtick.AccountWaveLane{
 		{Tag: "acct-a", Account: ".claude-a", ConfigDir: "acct-a", Model: "claude", SelectedTier: 1, Rank: 0, WaveID: "wave-score", Size: 2},
 		{Tag: "acct-b", Account: ".claude-b", ConfigDir: "acct-b", Model: "claude", SelectedTier: 1, Rank: 1, WaveID: "wave-score", Size: 2},
 	}, false)
@@ -645,9 +645,9 @@ func dispatchScoreRouterPathScope() dispatchPlanProbe {
 }
 
 func dispatchScoreReactiveLeaseFloor(root string) dispatchPlanProbe {
-	first := acquireDispatchLaneLease(root, "score-gateway", "gateway", []string{"internal/gateway/**"}, 60)
-	overlap := acquireDispatchLaneLease(root, "score-gateway-http", "gateway-http", []string{"internal/gateway/http.go"}, 60)
-	disjoint := acquireDispatchLaneLease(root, "score-docs", "docs", []string{"docs/**"}, 60)
+	first := acquireDispatchLaneLease(root, "score-gateway", "gateway", []string{"internal/gateway/**"}, 60, "")
+	overlap := acquireDispatchLaneLease(root, "score-gateway-http", "gateway-http", []string{"internal/gateway/http.go"}, 60, "")
+	disjoint := acquireDispatchLaneLease(root, "score-docs", "docs", []string{"docs/**"}, 60, "")
 	pass := dispatchMapBool(first, "acquired") &&
 		dispatchMapBool(overlap, "refused") &&
 		dispatchMapString(overlap, "reason") == dispatchorder.ReasonCollisionRisk &&
