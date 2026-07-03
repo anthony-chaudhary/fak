@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "id": "x-issue1420-plan-leaserefsyncplaninput",
+      "canonical": "LeaseRefSyncPlanInput (lease-ref sync decision state)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "LeaseRefSyncPlanInput (internal/loopdrive/leaseref_sync.go) is the pure input struct that decides which ambient lease-ref convergence calls belong around a loop-drive tick: its Surface, Remote, and LeaseRefsWritten fields feed LeaseRefSyncPlan, where LeaseRefsWritten=true (the tick acquired, released, or reaped a refs/fak/locks/* record) is what adds the publish-after-write step.",
+      "distinction": "The pure INPUT state fed to the planner - NOT LeaseRefSyncPlan (the base constructor that consumes it and returns the []LeaseRefSyncStep plan) and NOT LeaseRefSyncPlanForSurface (the surface-profile wrapper that stamps in.Surface before delegating to LeaseRefSyncPlan) and NOT LeaseRefSyncStep (one convergence operation in the returned plan, not the input to it).",
+      "distinct_from": ["x-issue1420-plan-leaserefsyncplanforsurface"],
+      "aliases": [],
+      "grounding": "LeaseRefSyncPlanInput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x-issue1420-plan-leaserefsyncplanforsurface",
+      "canonical": "LeaseRefSyncPlanForSurface (surface-profile lease-ref sync constructor)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "LeaseRefSyncPlanForSurface (internal/loopdrive/leaseref_sync.go) is the explicit profile constructor for the three #2302 wiring surfaces (dispatch preflight, loop-drive ticks, garden's stale-lease rung): it stamps the requested surface onto a LeaseRefSyncPlanInput and delegates to LeaseRefSyncPlan, so every surface reuses the same safe boundary rule - fetch before deciding, push after the tick writes lease refs.",
+      "distinction": "The surface-PROFILE wrapper that sets in.Surface then calls through - NOT LeaseRefSyncPlan (the base constructor it delegates to, which defaults an empty surface to generic) and NOT LeaseRefSyncPlanInput (the pure input struct it stamps the surface onto) and NOT LeaseRefSyncSurface (the enum naming which of the three profiles is being built).",
+      "distinct_from": ["x-issue1420-plan-leaserefsyncplaninput"],
+      "aliases": [],
+      "grounding": "LeaseRefSyncPlanForSurface",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
