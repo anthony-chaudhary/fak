@@ -306,8 +306,15 @@ demo-tool-tests:
 	@python3 tools/claude_historical_guard_audit_test.py
 	@echo "demo-tool-tests OK"
 
-# demo-scorecards: content-only demo quality and robustness scorecards. These are
-# read-only and deterministic: no model, no network, no build.
+# demo-scorecards: per-card regression sentinels for every grade-A scorecard (#1423
+# Part 1, the "stays Excellent" half of epic #1414). Each scorecard's bare run exits 1
+# the moment it picks up even one defect, so a regression on a clean surface reds
+# `make ci` here — the per-card complement to the portfolio grade ratchet
+# (scorecard-ratchet), which catches a letter-slip across the whole family. Read-only
+# and deterministic: no model, no network, no build. A card is wired once it is BOTH
+# grade A AND debt 0; an indebted grade-A card (code-slop below; also agent-readiness,
+# product, cuda-dev, popularization under the B1-B6 burndown) reds the gate on day 1, so
+# it is added the moment its debt reaches 0 — never before (the trap #1268 #E names).
 demo-scorecards:
 	@python3 tools/demo_quality_scorecard_test.py
 	@python3 tools/demo_quality_scorecard.py
@@ -323,6 +330,24 @@ demo-scorecards:
 	@python3 tools/bench_dx_scorecard.py --check-doc
 	@python3 tools/intent_literal_scorecard_test.py
 	@python3 tools/intent_literal_scorecard.py >/dev/null
+	@python3 tools/stability_scorecard_test.py
+	@python3 tools/stability_scorecard.py >/dev/null
+	@python3 tools/observability_scorecard_test.py
+	@python3 tools/observability_scorecard.py >/dev/null
+	@python3 tools/rsi_maturity_scorecard_test.py
+	@python3 tools/rsi_maturity_scorecard.py >/dev/null
+	@python3 tools/doc_appeal_scorecard_test.py
+	@python3 tools/doc_appeal_scorecard.py >/dev/null
+	@python3 tools/persona_readiness_scorecard_test.py
+	@python3 tools/persona_readiness_scorecard.py >/dev/null
+	@python3 tools/persona_fit_scorecard_test.py
+	@python3 tools/persona_fit_scorecard.py >/dev/null
+	@python3 tools/concept_disambiguation_scorecard_test.py
+	@python3 tools/concept_disambiguation_scorecard.py >/dev/null
+	@python3 tools/docs_scorecard_test.py
+	@python3 tools/docs_scorecard.py >/dev/null
+	@python3 tools/sota_coverage_scorecard_test.py
+	@python3 tools/sota_coverage_scorecard.py >/dev/null
 	@echo "demo-scorecards OK"
 # code-slop scorecard: only the unit-test line gates here for now. The bare run +
 # --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so
