@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -83,26 +82,6 @@ func (j *vcacheGovernorDecisionJournal) recordsCopy() []vcacheGovernorDecisionRe
 	out := make([]vcacheGovernorDecisionRecord, len(j.records))
 	copy(out, j.records)
 	return out
-}
-
-func (j *vcacheGovernorDecisionJournal) latestDecisionCounts() map[vcachegov.GovernorDecision]int {
-	counts := make(map[vcachegov.GovernorDecision]int, len(vcacheGovernorDecisionOrder))
-	for _, decision := range vcacheGovernorDecisionOrder {
-		counts[decision] = 0
-	}
-	if j == nil {
-		return counts
-	}
-	latest := map[string]vcachegov.GovernorDecision{}
-	for _, r := range j.recordsCopy() {
-		latest[r.Family] = vcachegov.GovernorDecision(r.Decision)
-	}
-	for _, decision := range latest {
-		if _, ok := counts[decision]; ok {
-			counts[decision]++
-		}
-	}
-	return counts
 }
 
 func (m *gatewayMetrics) observeVCacheGovernorDecision(family string, tsUnixMillis int64, turns []vcacheobserve.Turn) vcacheGovernorDecisionRecord {
