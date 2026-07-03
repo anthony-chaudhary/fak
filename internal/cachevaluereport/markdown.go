@@ -140,8 +140,18 @@ func RenderTwoTrackMarkdown(r TwoTrackReport) string {
 			if r.FleetBenefit.ObservedAPICostReductionPct != nil {
 				reduction = fmt.Sprintf("%.2f%%", *r.FleetBenefit.ObservedAPICostReductionPct)
 			}
-			fmt.Fprintf(&sb, "| cumulative API cost avoided | $%.4f (%s reduction) | OBSERVED provider/cache cost projection |\n",
-				r.FleetBenefit.ObservedAPICostAvoidedUSD, reduction)
+			fmt.Fprintf(&sb, "| cumulative API cost avoided | $%.4f (provider $%.4f + fak $%.4f, %s reduction) | OBSERVED provider/cache cost projection |\n",
+				r.FleetBenefit.ObservedAPICostAvoidedUSD, r.FleetBenefit.ProviderAPICostAvoidedUSD,
+				r.FleetBenefit.FakAPICostAvoidedUSD, reduction)
+		}
+		if r.FleetBenefit.SpanDays > 0 {
+			prov := ""
+			if r.FleetBenefit.RateProvisional {
+				prov = " — PROVISIONAL (thin window)"
+			}
+			fmt.Fprintf(&sb, "| API cost avoided run-rate | provider $%.2f/day + fak $%.2f/day = $%.2f/day ($%.2f/week, over %.2fd)%s | OBSERVED provider-cache economics |\n",
+				r.FleetBenefit.ProviderUSDAvoidedPerDay, r.FleetBenefit.FakUSDAvoidedPerDay,
+				r.FleetBenefit.USDAvoidedPerDay, r.FleetBenefit.USDAvoidedPerWeek, r.FleetBenefit.SpanDays, prov)
 		}
 		if r.FleetBenefit.ContextExtensionTokens > 0 || r.FleetBenefit.ContextBudgetTokens > 0 {
 			extension := fmt.Sprintf("%d token(s)", r.FleetBenefit.ContextExtensionTokens)
