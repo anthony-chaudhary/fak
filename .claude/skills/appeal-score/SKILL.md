@@ -146,6 +146,28 @@ git commit -s -F <msgfile> -- README.md          # options BEFORE --, paths AFTE
   eye and skip them. For anything machine-generated, fix the generator rather than
   its output.
 
+## Verified reads (closure evidence)
+
+Record each burndown child's before/after here so the next worker re-measures
+against the same baseline instead of re-deriving it.
+
+- **README.md — #1421 (B5 of the #1414 portfolio burndown).** Baseline read
+  quoted in the issue body: **71.5/100 (C)**, 28 units of appeal-debt, weakest on
+  clarity **54** and priority **59**. Verified read on trunk 2026-07-03:
+  **100.0/100 (A)**, zero appeal-debt, all five axes at 100 (clarity 100,
+  priority 100, voice 100, scannability 100, organization 100). The lift landed
+  through intervening front-page work (the README refresh commits), so the
+  baseline numbers were already stale by the time B5 was picked up — measure
+  before editing, don't "fix" passages the tool no longer flags. Re-derive with
+  one command from the repo root:
+
+  ```bash
+  python tools/doc_appeal_scorecard.py --json   # README.md 100.0/100 (A), appeal_debt 0
+  ```
+
+  The A is not frozen: README is a hot shared-trunk file, so re-run the scorecard
+  at closure time rather than trusting this snapshot.
+
 ## When to run this
 
 - After a release, a headline-number change, or any substantial README edit.
