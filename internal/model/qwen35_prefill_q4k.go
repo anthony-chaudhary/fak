@@ -5,6 +5,8 @@ import (
 	"math"
 	"os"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 // qwen35_prefill_q4k.go is the resident-Q4_K twin of qwen35_prefill.go (the Q8 hybrid
@@ -96,6 +98,16 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	// (the q4_k_m dense down_proj / lm_head). q4kTime+q8Time+q6kTime == gemmTime by construction
 	// (every timed projection lands in exactly one bucket), so the split is exhaustive and honest.
 	var q4kTime, q8Time, q6kTime time.Duration
+	// q4kGPUCompute is the on-GPU execute window (cb.GPUEndTime-cb.GPUStartTime, via
+	// metalgemm.LastGEMMGPUMs) summed over every q4_k Metal dispatch that lands in q4kTime — the
+	// grouped GEMMGroup path (q4kGemmGroupDispatch) and the per-weight GEMM path (q4kGemmDispatch).
+	// LastGEMMGPUMs reflects only the MOST RECENT dispatch, so it is read immediately after EACH
+	// dispatch and accumulated (never once at the end). q4kRoundtrip = q4kTime - q4kGPUCompute is
+	// the wall-time remainder: CPU-side encode/commit/sync + the H2D activation upload. On a
+	// non-fakmetal build (or when the q4_k upload declined and the dispatch fell back to CPU
+	// q4kGemm) LastGEMMGPUMs returns 0, so q4kGPUCompute stays 0 and q4kRoundtrip == q4kTime — the
+	// honest degenerate: no GPU window to attribute, all of q4kTime is wall time.
+	var q4kGPUCompute time.Duration
 	base := s.Cache.Len()
 	eps := float32(cfg.RMSNormEps)
 
@@ -143,6 +155,11 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			switch {
 			case m.q4kw[name] != nil:
 				q4kTime += dt
+				// The q4kw branch just ran q4kGemmDispatch → one Q4KWeight.GEMM = one Metal
+				// command buffer, which freshly stored its on-GPU execute window. Read it right
+				// here (most-recent-dispatch semantics) and add to the GPU-compute sub-total. On
+				// CPU fallback / non-fakmetal it is 0, so roundtrip absorbs all of this dt.
+				q4kGPUCompute += time.Duration(metalgemm.LastGEMMGPUMs() * float64(time.Millisecond))
 			case m.kqw[name] != nil:
 				q6kTime += dt
 			default:
@@ -170,6 +187,14 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 			// below by the per-weight proj, which buckets itself. So the grouped time is q4_k-Metal
 			// work and lands in q4kTime — keeping q4k_metal-vs-q8_cpu the honest split.
 			q4kTime += dt
+			// out != nil ⟺ GEMMGroup actually dispatched (one command buffer) and freshly stored
+			// its on-GPU execute window; read it HERE, before the nil→make reassignment below, and
+			// only when it dispatched — a declined group (out == nil) ran no GEMMGroup, so
+			// LastGEMMGPUMs would be a stale prior value and the per-weight proj fallbacks below
+			// bucket their own GPU time instead.
+			if out != nil {
+				q4kGPUCompute += time.Duration(metalgemm.LastGEMMGPUMs() * float64(time.Millisecond))
+			}
 		}
 		if out == nil {
 			out = make([][]float32, len(names))
@@ -303,6 +328,21 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 		// like FAK_Q4K_MM is the lever). The mix on the 27B Mac is the whole question (#71, #977).
 		fmt.Fprintf(os.Stderr, "[metalprof-split P=%d] q4k_metal=%.1f  q8_cpu=%.1f  q6k=%.1f ms  (sum=gemm+roundtrip=%.1f) path=q4k\n",
 			P, ms(q4kTime), ms(q8Time), ms(q6kTime), ms(gemmTime))
+		// Split q4k_metal itself into GPU-compute vs roundtrip. q4kGPUCompute is the summed
+		// cb.GPUEndTime-cb.GPUStartTime of every q4_k Metal dispatch (grouped + per-weight);
+		// q4kRoundtrip is the wall-time remainder (CPU encode/commit/sync + H2D upload). This is
+		// the lever question this session answers: if roundtrip dominates, the next lever is
+		// upload-caching / command-buffer batching (fewer submit/sync); if gpu_compute dominates,
+		// it is fp16-staging / a GPU counter trace / kernel cleverness. Sum-check: gpu_compute +
+		// roundtrip == q4k_metal by construction (roundtrip is defined as the remainder), though
+		// gpu_compute may carry small slop vs the wall window since the GPU-execute window and the
+		// wall window are not perfectly nested (the wall clock also brackets the cgo call boundary).
+		q4kRoundtrip := q4kTime - q4kGPUCompute
+		if q4kRoundtrip < 0 {
+			q4kRoundtrip = 0
+		}
+		fmt.Fprintf(os.Stderr, "[metalprof-q4ksplit P=%d] q4k_gpu_compute=%.1f  q4k_roundtrip=%.1f ms  (sum=q4k_metal=%.1f) path=q4k\n",
+			P, ms(q4kGPUCompute), ms(q4kRoundtrip), ms(q4kTime))
 	}
 	return xf
 }

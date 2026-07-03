@@ -239,6 +239,13 @@ func TestPrefillQwen35HybridQ4KProfilePrintsHybridSplit(t *testing.T) {
 		"q4k_metal=",
 		"q8_cpu=",
 		"q6k=",
+		// The q4k_metal → gpu_compute vs roundtrip split (this session's lever). On a
+		// non-fakmetal host metalgemm.LastGEMMGPUMs() returns 0, so gpu_compute=0 and
+		// roundtrip=q4k_metal — we assert the LINE and the FIELD names form host-independently,
+		// not specific nonzero values (those need a Mac Metal runtime).
+		"[metalprof-q4ksplit P=16]",
+		"q4k_gpu_compute=",
+		"q4k_roundtrip=",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("profile output %q missing %q", got, want)
