@@ -5,15 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/fleetpane"
 )
 
 var fleetPaneRunner fleetpane.Runner = fleetpane.OSRunner{}
-
-func cmdFleetPane(argv []string) { os.Exit(runFleetPane(os.Stdout, os.Stderr, argv)) }
 
 func runFleetPane(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak fleetpane", flag.ContinueOnError)
