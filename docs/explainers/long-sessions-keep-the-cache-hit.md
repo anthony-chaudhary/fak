@@ -9,7 +9,8 @@ description: "Why a long Claude Code session gets expensive, why the obvious fix
 
 > The sibling explainers ([addressable KV cache](addressable-kv-cache.md),
 > [the frozen-trajectory cache cliff](frozen-trajectory-cache-cliff.md)) cover the
-> theory of cache reuse. This one is the practical version: the one flag on
+> theory of cache reuse, and [long-session economics](long-session-economics.md) is
+> the cost/why version. This one is the practical version: the one flag on
 > `fak guard` that stops a growing session from getting more expensive every turn,
 > and exactly what it does and does not promise.
 
