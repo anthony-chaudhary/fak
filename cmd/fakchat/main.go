@@ -20,12 +20,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -454,34 +454,5 @@ func printPhaseProfile(mode string, pr *model.PhaseProfile) {
 // sample returns the next token id: argmax when temp<=0, else a temperature-scaled
 // softmax draw.
 func sample(logits []float32, temp float64, rng *rand.Rand) int {
-	if temp <= 0 {
-		best, bi := float32(-math.MaxFloat32), 0
-		for i, x := range logits {
-			if x > best {
-				best, bi = x, i
-			}
-		}
-		return bi
-	}
-	maxL := float32(-math.MaxFloat32)
-	for _, x := range logits {
-		if x > maxL {
-			maxL = x
-		}
-	}
-	var sum float64
-	probs := make([]float64, len(logits))
-	for i, x := range logits {
-		p := math.Exp(float64(x-maxL) / temp)
-		probs[i] = p
-		sum += p
-	}
-	r := rng.Float64() * sum
-	for i, p := range probs {
-		r -= p
-		if r <= 0 {
-			return i
-		}
-	}
-	return len(logits) - 1
+	return agent.SampleLogits(logits, temp, rng)
 }

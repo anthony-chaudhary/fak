@@ -8,9 +8,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-// sampleLogits mirrors cmd/fakchat.sample: argmax when temp<=0, else a
-// temperature-scaled softmax draw. topK then topP truncate the stochastic path, in
-// that order (the standard top-k → top-p pipeline): top-k keeps only the k
+// SampleLogits returns the next token id: argmax when temp<=0, else a
+// temperature-scaled softmax draw.
+func SampleLogits(logits []float32, temp float64, rng *rand.Rand) int {
+	return sampleLogits(logits, temp, 0, 0, rng)
+}
+
+// sampleLogits is the in-kernel sampler. topK then topP truncate the stochastic
+// path, in that order (the standard top-k → top-p pipeline): top-k keeps only the k
 // highest-probability tokens, then nucleus (top-p) keeps the smallest set whose
 // cumulative mass reaches topP. The tail each step excludes is zeroed before the
 // draw. A topK<=0 or topK>=len(logits) disables top-k; a topP<=0 or topP>=1 disables

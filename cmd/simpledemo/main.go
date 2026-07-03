@@ -23,7 +23,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -38,6 +37,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -1024,42 +1024,10 @@ func stopTokenIDs(tok *tokenizer.Tokenizer, ggufPath string) map[int]bool {
 
 // sample picks the next token using temperature sampling.
 func sample(logits []float32, temp float64, rng *rand.Rand) int {
-	if temp <= 0 || len(logits) == 0 {
-		// Greedy argmax
-		best, idx := float32(-math.MaxFloat32), 0
-		for i, v := range logits {
-			if v > best {
-				best, idx = v, i
-			}
-		}
-		return idx
+	if len(logits) == 0 {
+		return 0
 	}
-
-	// Temperature sampling
-	maxL := float32(-math.MaxFloat32)
-	for _, v := range logits {
-		if v > maxL {
-			maxL = v
-		}
-	}
-
-	sum := float64(0)
-	probs := make([]float64, len(logits))
-	for i, v := range logits {
-		p := math.Exp(float64(v-maxL) / temp)
-		probs[i] = p
-		sum += p
-	}
-
-	// Roulette wheel selection
-	r := rng.Float64() * sum
-	for i, p := range probs {
-		r -= p
-		if r <= 0 {
-			return i
-		}
-	}
-	return len(logits) - 1
+	return agent.SampleLogits(logits, temp, rng)
 }
 
 // decodeReply runs one reply's autoregressive decode loop: starting from the
