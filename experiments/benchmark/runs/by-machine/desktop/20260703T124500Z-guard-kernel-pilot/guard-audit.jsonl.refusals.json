@@ -1,0 +1,7 @@
+{
+  "schema": "fak.guard.refusal-carry-forward.v1",
+  "trace_id": "guard",
+  "audit_path": "experiments/benchmark/runs/by-machine/desktop/20260703T124500Z-guard-kernel-pilot/guard-audit.jsonl",
+  "written_at_unix": 1783108228,
+  "refusals": null
+}

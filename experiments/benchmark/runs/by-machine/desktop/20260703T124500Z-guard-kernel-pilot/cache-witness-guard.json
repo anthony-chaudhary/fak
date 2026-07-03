@@ -1,0 +1,29 @@
+{
+  "gateway_url": "file://experiments/benchmark/runs/by-machine/desktop/20260703T124500Z-guard-kernel-pilot/metrics-guard.txt",
+  "gateway_uptime_turns": 28,
+  "kv_prefix": {
+    "turns": 28,
+    "prompt_tokens": 1370,
+    "reused_tokens": 615,
+    "frozen_turns": 0,
+    "partial_turns": 14,
+    "cold_turns": 14
+  },
+  "cache_bit_scope": "aggregate-run-kv-prefix-reuse",
+  "provider_cache_read_tokens": 0,
+  "cache_value": {
+    "kv_prefix_reused_tokens": 615,
+    "prompt_tokens": 1370,
+    "realized_reuse_ratio": 0.4489051094890511,
+    "publishable_value_family": "marginal-over-tuned-warm-KV (internal/swebench cost.go B/C; ~1.0x single-session, ~1.0-1.31x modest fleet, ~4.1x only on a 50x5 fleet)",
+    "single_session_marginal_over_warm_kv_x": 1,
+    "fleet_marginal_source": "internal/swebench cost.AggregatePrefill (B/C across worker counts)",
+    "vs_naive_multiple_excluded": true,
+    "note": "Realized reuse is WITNESSED; a tuned warm-KV server earns the same turn-over-turn reuse on a single trajectory, so fak's marginal over it is ~1.0x here. The \u003e1.0x cache value is cross-worker shared-prefix (cost.go B/C). The vs-naive re-prefill multiple (1/(1-reuse), the ~17.9-23.4x band) is NOT a cache value and is excluded per #1066."
+  },
+  "provenance": {
+    "cache_value": "WITNESSED",
+    "kv_prefix": "WITNESSED",
+    "provider_cache_read_tokens": "OBSERVED"
+  }
+}

@@ -1,0 +1,7 @@
+{
+ "arm": "direct",
+ "cred_like_names": [
+  "GLAMA_API_KEY"
+ ],
+ "base_url_var_present": false
+}

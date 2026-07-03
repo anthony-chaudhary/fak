@@ -1,0 +1,1 @@
+{"seq":1,"ts_unix_nano":1783108296426999600,"kind":"DENY","tool":"wipe_disk","trace_id":"guard","verdict":"DENY","reason":"DEFAULT_DENY","by":"monitor","args_digest":"9709ec54579021c7302d65bd2bcf36afb3a84e52e3edb29857ed33bd3abe2035","prev_hash":"","hash":"c2f4ecfd01d603bc08045022ac036849cd80037f22638202504c1a59ec06d732","call_seq":9223372036854775809}

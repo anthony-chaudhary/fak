@@ -162,19 +162,39 @@ verbatim.
 
 ## 6. Runnable today vs not-yet
 
-**Runnable today (no box):**
-- The deterministic prefill-elimination floor (A/C 17.9×→23.4×) is already
-  dos-bound offline — it is the geometry ceiling the K1 cache value chases.
-- Guard verdict-RSI folds on any guarded session's journal (upstream-agnostic).
-- This design + the nightrun dispatch rows (below).
+**Witnessed today — the CPU-scale pilot (all five axes, no box):**
+A runnable stand-in for the GPU server matrix landed 2026-07-03 at
+[`experiments/benchmark/runs/by-machine/desktop/20260703T124500Z-guard-kernel-pilot/`](../../experiments/benchmark/runs/by-machine/desktop/20260703T124500Z-guard-kernel-pilot/RESULTS.md).
+Same seams, same witnesses, model swapped down to Qwen2.5-1.5B Q8_0 served by
+`fak serve --engine inkernel` (the kernel we control), driver run guard-off vs
+guard-on. Results, all WITNESSED on this host:
+- **Axis 1:** fak's own KV-prefix cache BIT — 615/1370 prefill tokens reused
+  (44.9%), provider `cache_read` = 0 (no provider).
+- **Axis 2:** guard-on−off single-turn TTFB delta = −0.056 s median — the hop is
+  within measurement noise of a ~4.5 s decode (the "guard ≈ free next to decode"
+  claim, measured).
+- **Axis 3:** a forced `wipe_disk` tool call DENIED (`DEFAULT_DENY/TERMINAL`,
+  denied before a wasted round-trip), in a hash-chained journal that
+  `fak audit verify` confirms intact.
+- **Axis 4:** zero provider credentials in the K-arm child env.
+- **Axis 5:** two independent gateway processes produced byte-identical KV
+  counters on the identical workload — greedy-argmax determinism.
+
+Also runnable-today without any box: the deterministic prefill-elimination floor
+(A/C 17.9×→23.4×, dos-bound offline — the geometry ceiling the K1 cache value
+chases), guard verdict-RSI folding on any guarded journal, and the nightrun
+dispatch rows below.
 
 **`not yet` (missing witness = a GPU server class box session, the #1012 residual):**
-- Every per-arm number in §5. Next checkable step: a box that satisfies the
-  nightrun rows below picks them up (`fak nightrun plan` surfaces them as
-  manual frontier recipes); first artifact is one K1 guard-on run producing
-  journal + cache-witness.json + usage rows.
-- Constrained-decode enforcement (axis 3) additionally needs the guard→kernel
-  grammar wiring; the benchmark prices its value before it's built.
+- The **GLM-5.2** per-arm numbers and the **K2 (vLLM/SGLang)** arm from §5 — the
+  pilot proves the harness and every witness end-to-end at CPU scale, so the GPU server
+  run is a substitution of model+box, not new wiring. Next checkable step: a box
+  that satisfies the nightrun rows below picks them up (`fak nightrun plan`
+  surfaces them as manual frontier recipes); first artifact is one K1 GLM-5.2
+  guard-on run producing journal + cache-witness.json + usage rows.
+- Moving axis-3 enforcement *before* generation (constrained decode) still needs
+  the guard→kernel grammar wiring; the pilot prices what it would buy (today the
+  deny fires pre-round-trip but post-decode).
 
 ## 7. Insertion points
 

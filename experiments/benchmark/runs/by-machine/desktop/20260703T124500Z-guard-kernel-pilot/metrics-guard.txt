@@ -1,0 +1,709 @@
+# HELP fak_gateway_up Whether the fak gateway process is scrapeable.
+# TYPE fak_gateway_up gauge
+fak_gateway_up 1
+# HELP fak_gateway_start_time_seconds Unix start time of this fak gateway process.
+# TYPE fak_gateway_start_time_seconds gauge
+fak_gateway_start_time_seconds 1783108106
+# HELP fak_gateway_time_to_ready_seconds Total wall-clock from process start to the gateway becoming ready to serve (0 until ready).
+# TYPE fak_gateway_time_to_ready_seconds gauge
+fak_gateway_time_to_ready_seconds 5.3337763
+# HELP fak_gateway_ready_time_seconds Unix instant the gateway became ready to serve (0 until ready).
+# TYPE fak_gateway_ready_time_seconds gauge
+fak_gateway_ready_time_seconds 1783108106
+# HELP fak_gateway_startup_phase_duration_seconds Wall-clock cost of each fak gateway boot phase (flag-parse, policy-load, planner-init, vdso-config, kernel-init, listener-bind, and model-load with --gguf).
+# TYPE fak_gateway_startup_phase_duration_seconds gauge
+fak_gateway_startup_phase_duration_seconds{phase="flag-parse"} 0
+fak_gateway_startup_phase_duration_seconds{phase="policy-load"} 0.0007256
+fak_gateway_startup_phase_duration_seconds{phase="upstream-resolve"} 0
+fak_gateway_startup_phase_duration_seconds{phase="path-lookup"} 0.0026483
+fak_gateway_startup_phase_duration_seconds{phase="model-load"} 4.2342322
+fak_gateway_startup_phase_duration_seconds{phase="tokenizer-load"} 1.0930969
+fak_gateway_startup_phase_duration_seconds{phase="listener-bind"} 0.0010002
+fak_gateway_startup_phase_duration_seconds{phase="planner-init"} 0.0005046
+fak_gateway_startup_phase_duration_seconds{phase="vdso-config"} 0
+fak_gateway_startup_phase_duration_seconds{phase="kernel-init"} 0
+# HELP fak_gateway_startup_unaccounted_seconds Boot wall-clock not explained by any named startup phase (time_to_ready minus the sum of phase durations). Near-zero means startup is fully instrumented.
+# TYPE fak_gateway_startup_unaccounted_seconds gauge
+fak_gateway_startup_unaccounted_seconds 0.0015685000000003058
+# HELP fak_gateway_inflight_requests HTTP requests currently executing in the fak gateway.
+# TYPE fak_gateway_inflight_requests gauge
+fak_gateway_inflight_requests 1
+# HELP fak_gateway_inflight_max_age_seconds Age of the oldest HTTP request currently in flight (0 when idle).
+# TYPE fak_gateway_inflight_max_age_seconds gauge
+fak_gateway_inflight_max_age_seconds 0
+# HELP fak_gateway_inflight_requests_by_route HTTP requests currently executing, by route.
+# TYPE fak_gateway_inflight_requests_by_route gauge
+# HELP fak_gateway_build_info Static fak gateway build and runtime labels.
+# TYPE fak_gateway_build_info gauge
+fak_gateway_build_info{version="0.37.0",engine="inkernel",model="inkernel",vdso="true"} 1
+# HELP fak_gateway_http_requests_total HTTP requests served by route, method, and status.
+# TYPE fak_gateway_http_requests_total counter
+fak_gateway_http_requests_total{route="/healthz",method="GET",status="200"} 1
+fak_gateway_http_requests_total{route="/v1/chat/completions",method="POST",status="200"} 28
+# HELP fak_gateway_http_request_duration_seconds HTTP request latency by route, method, and status.
+# TYPE fak_gateway_http_request_duration_seconds histogram
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.0001"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.0005"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.001"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.005"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.01"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.025"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.05"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.1"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.25"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="0.5"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="1"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="2.5"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="5"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="10"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="30"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="60"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="120"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="300"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="600"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="900"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="1800"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/healthz",method="GET",status="200",le="+Inf"} 1
+fak_gateway_http_request_duration_seconds_sum{route="/healthz",method="GET",status="200"} 0
+fak_gateway_http_request_duration_seconds_count{route="/healthz",method="GET",status="200"} 1
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.0001"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.0005"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.001"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.005"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.01"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.025"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.05"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.1"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.25"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="0.5"} 0
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="1"} 2
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="2.5"} 5
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="5"} 14
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="10"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="30"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="60"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="120"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="300"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="600"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="900"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="1800"} 28
+fak_gateway_http_request_duration_seconds_bucket{route="/v1/chat/completions",method="POST",status="200",le="+Inf"} 28
+fak_gateway_http_request_duration_seconds_sum{route="/v1/chat/completions",method="POST",status="200"} 121.21358269999999
+fak_gateway_http_request_duration_seconds_count{route="/v1/chat/completions",method="POST",status="200"} 28
+# HELP fak_gateway_upstream_errors_total Upstream/planner turn failures, OBSERVED from the provider and relayed by fak (not a fak fault), by kind (stalled, unreachable, oom, rate_limited, auth, forbidden, status_4xx, status_5xx, other).
+# TYPE fak_gateway_upstream_errors_total counter
+# HELP fak_gateway_upstream_retries_total Upstream retry attempts — fak's exponential backoff in response to OBSERVED, provider-reported 429/5xx from the planner — since process start.
+# TYPE fak_gateway_upstream_retries_total counter
+fak_gateway_upstream_retries_total 0
+# HELP fak_gateway_upstream_retry_wait_seconds_total Wall-clock the backoff loop SLEPT between upstream retry attempts (fak-authored waits in response to OBSERVED, provider-reported 429/5xx) since process start — the time cost of the retries fak absorbed on the session's behalf.
+# TYPE fak_gateway_upstream_retry_wait_seconds_total counter
+fak_gateway_upstream_retry_wait_seconds_total 0
+# HELP fak_gateway_upstream_auth_refresh_total 401 token-rotation self-heals on the rotating Claude subscription path, by outcome: recovered (a fresh OAuth token was adopted mid-session and the call re-sent in place) or exhausted (no fresher token landed within the grace window, so the 401 surfaced).
+# TYPE fak_gateway_upstream_auth_refresh_total counter
+fak_gateway_upstream_auth_refresh_total{outcome="recovered"} 0
+fak_gateway_upstream_auth_refresh_total{outcome="exhausted"} 0
+# HELP fak_gateway_upstream_forbidden_retry_total 403 transient-permission recoveries, by outcome: recovered (a retry within the bounded window returned 200, so a transient abuse/capacity gate cleared and the session healed in place) or exhausted (the window/attempts elapsed still 403ing, so a permanent entitlement denial surfaced). OBSERVED from the provider, absorbed by fak.
+# TYPE fak_gateway_upstream_forbidden_retry_total counter
+fak_gateway_upstream_forbidden_retry_total{outcome="recovered"} 0
+fak_gateway_upstream_forbidden_retry_total{outcome="exhausted"} 0
+# HELP fak_gateway_served_inline_total Read-only tool calls the vDSO served LOCALLY on a served turn (vDSO live in the hot path): a re-proposed read whose fresh cached answer fak folded into the assistant turn and dropped before the client could re-run it — each one a saved engine round-trip. WITNESSED (fak authored the serve), distinct from the kernel fak_kernel_vdso_hits_total which only the explicit k.Syscall path bumps.
+# TYPE fak_gateway_served_inline_total counter
+fak_gateway_served_inline_total 0
+# HELP fak_bgloop_registered In-kernel background loops registered with the supervisor.
+# TYPE fak_bgloop_registered gauge
+fak_bgloop_registered 1
+# HELP fak_bgloop_ticks_total Background-loop ticks that completed cleanly, by loop.
+# TYPE fak_bgloop_ticks_total counter
+fak_bgloop_ticks_total{loop="heartbeat"} 5
+# HELP fak_bgloop_errors_total Background-loop ticks that returned an error, by loop.
+# TYPE fak_bgloop_errors_total counter
+fak_bgloop_errors_total{loop="heartbeat"} 0
+# HELP fak_bgloop_panics_total Background-loop ticks that panicked and were recovered, by loop.
+# TYPE fak_bgloop_panics_total counter
+fak_bgloop_panics_total{loop="heartbeat"} 0
+# HELP fak_bgloop_restarts_total Background-loop backoff restarts (errors + panics), by loop.
+# TYPE fak_bgloop_restarts_total counter
+fak_bgloop_restarts_total{loop="heartbeat"} 0
+# HELP fak_bgloop_pauses_total Background-loop fires the admit gate refused, by loop.
+# TYPE fak_bgloop_pauses_total counter
+fak_bgloop_pauses_total{loop="heartbeat"} 0
+# HELP fak_bgloop_last_tick_timestamp_seconds Unix time of each background loop's last completed tick (0 if none yet).
+# TYPE fak_bgloop_last_tick_timestamp_seconds gauge
+fak_bgloop_last_tick_timestamp_seconds{loop="heartbeat"} 1783108226
+# HELP fak_bgloop_up Background-loop liveness: 1 when not stopped, 0 when stopped.
+# TYPE fak_bgloop_up gauge
+fak_bgloop_up{loop="heartbeat",state="idle"} 1
+# HELP fak_gateway_operations_total Gateway kernel operations by operation, verdict, and deciding adjudicator (by).
+# TYPE fak_gateway_operations_total counter
+# HELP fak_gateway_operation_duration_seconds Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).
+# TYPE fak_gateway_operation_duration_seconds histogram
+# HELP fak_kernel_submits_total Kernel submissions since process start.
+# TYPE fak_kernel_submits_total counter
+fak_kernel_submits_total 0
+# HELP fak_kernel_vdso_hits_total Kernel submissions served by the vDSO fast path.
+# TYPE fak_kernel_vdso_hits_total counter
+fak_kernel_vdso_hits_total 0
+# HELP fak_kernel_engine_calls_total Kernel submissions that reached the engine.
+# TYPE fak_kernel_engine_calls_total counter
+fak_kernel_engine_calls_total 0
+# HELP fak_kernel_denies_total Kernel submissions denied before execution.
+# TYPE fak_kernel_denies_total counter
+fak_kernel_denies_total 0
+# HELP fak_kernel_transforms_total Kernel submissions transformed by adjudication.
+# TYPE fak_kernel_transforms_total counter
+fak_kernel_transforms_total 0
+# HELP fak_kernel_quarantines_total Kernel result admissions quarantined by the result-side stack.
+# TYPE fak_kernel_quarantines_total counter
+fak_kernel_quarantines_total 0
+# HELP fak_kernel_result_denies_total Kernel result admissions hard-refused by the result-side stack.
+# TYPE fak_kernel_result_denies_total counter
+fak_kernel_result_denies_total 0
+# HELP fak_kernel_admitted_total Kernel result admissions that were accepted or transformed.
+# TYPE fak_kernel_admitted_total counter
+fak_kernel_admitted_total 0
+# HELP fak_kernel_decisions_total Kernel decisions by winning adjudication rung, verdict kind, and reason (passive; re-derived off the hot path).
+# TYPE fak_kernel_decisions_total counter
+# HELP fak_fused_turns_total Turns that emitted at least one classical and one weight-classified operation.
+# TYPE fak_fused_turns_total counter
+fak_fused_turns_total 0
+# HELP fak_turns_total Turns that emitted at least one classified classical or weight operation.
+# TYPE fak_turns_total counter
+fak_turns_total 0
+# HELP fak_turn_ops_total Kernel operations by fused-turn concept family (unknown ops do not enter the fused-turn denominator).
+# TYPE fak_turn_ops_total counter
+# HELP fak_fused_turn_rate Cumulative fused-turn rate: fak_fused_turns_total / fak_turns_total.
+# TYPE fak_fused_turn_rate gauge
+fak_fused_turn_rate 0
+# HELP fak_gateway_vdso_hit_ratio Current cumulative vDSO hit ratio over kernel submissions.
+# TYPE fak_gateway_vdso_hit_ratio gauge
+fak_gateway_vdso_hit_ratio 0
+# HELP fak_vdso_lookups_total vDSO fast-path lookups attempted (tier-1/2/3 consulted).
+# TYPE fak_vdso_lookups_total counter
+fak_vdso_lookups_total 0
+# HELP fak_vdso_hits_total vDSO fast-path lookups served locally (a hit at any tier).
+# TYPE fak_vdso_hits_total counter
+fak_vdso_hits_total 0
+# HELP fak_vdso_hit_rate vDSO lookup hit rate (hits/lookups) from the live vdso.Default stats API.
+# TYPE fak_vdso_hit_rate gauge
+fak_vdso_hit_rate 0
+# HELP fak_vdso_cache_fills_total vDSO tier-2 cache entries filled since start (cumulative; the vDSO exports no live occupancy).
+# TYPE fak_vdso_cache_fills_total counter
+fak_vdso_cache_fills_total 0
+# HELP fak_vdso_invalidations_total Write-shaped completions that stranded cached reads (the vDSO exports no per-entry LRU-eviction counter; this is the nearest invalidation signal).
+# TYPE fak_vdso_invalidations_total counter
+fak_vdso_invalidations_total 0
+# HELP fak_vdso_misses_total vDSO fast-path lookups that returned no local answer, by reason (DESTRUCTIVE: write-shaped tool, never cacheable; MISSING_HINTS: no readOnly/idempotent hint; RESOURCE_MISNAMED: read cannot name its entity; WITNESS_REVOKED: entry's external witness was refuted; NOT_CACHED: cacheable but unfilled or epoch-stranded).
+# TYPE fak_vdso_misses_total counter
+fak_vdso_misses_total{reason="DESTRUCTIVE"} 0
+fak_vdso_misses_total{reason="MISSING_HINTS"} 0
+fak_vdso_misses_total{reason="NOT_CACHED"} 0
+fak_vdso_misses_total{reason="RESOURCE_MISNAMED"} 0
+fak_vdso_misses_total{reason="WITNESS_REVOKED"} 0
+# HELP fak_vdso_cachemeta_emit_dropped_total cachemeta cache-event emissions dropped because the tier-2 key failed to parse (FromVDSOKey error), by reason.
+# TYPE fak_vdso_cachemeta_emit_dropped_total counter
+fak_vdso_cachemeta_emit_dropped_total{reason="key_parse"} 0
+# HELP fak_cache_events_total cachemeta cache-entry lifecycle/verdict events folded across every cache plane (the unified-stream fold; vDSO tier-2 tool cache is the live producer today).
+# TYPE fak_cache_events_total counter
+fak_cache_events_total 0
+# HELP fak_cache_bytes_moved_total Bytes moved across residency tiers by cache events (0 until a byte-moving producer, e.g. the live-engine KV recorder, feeds the stream; the local vDSO cache moves no bytes).
+# TYPE fak_cache_bytes_moved_total counter
+fak_cache_bytes_moved_total 0
+# HELP fak_cache_event_breakdown_total Cache events by plane, residency tier, and kind (fill/hit/evict/revoke for the local tool cache; hit/miss/fault for verdict-shaped producers).
+# TYPE fak_cache_event_breakdown_total counter
+# HELP fak_blob_puts_total Payloads stored into the content-addressed blob store (CAS puts; small inline payloads never reach the store and are not counted).
+# TYPE fak_blob_puts_total counter
+fak_blob_puts_total 0
+# HELP fak_blob_dedup_hits_total CAS puts whose digest was already resident — content-addressed dedup, the byte stored once and shared by the vDSO cache and the context-MMU.
+# TYPE fak_blob_dedup_hits_total counter
+fak_blob_dedup_hits_total 0
+# HELP fak_blob_resolves_total Blob materializations (Resolve) served from the CAS.
+# TYPE fak_blob_resolves_total counter
+fak_blob_resolves_total 0
+# HELP fak_blob_resident_blobs Distinct blobs currently resident in the shared CAS.
+# TYPE fak_blob_resident_blobs gauge
+fak_blob_resident_blobs 0
+# HELP fak_blob_resident_bytes Total bytes currently resident in the shared CAS (the live footprint a leak/pressure alarm watches).
+# TYPE fak_blob_resident_bytes gauge
+fak_blob_resident_bytes 0
+# HELP fak_blob_evicted_total Digests dropped by the CAS byte bound (only ever UNPINNED transient payloads; a rising count is real working pressure or a leak the bound is absorbing).
+# TYPE fak_blob_evicted_total counter
+fak_blob_evicted_total 0
+# HELP fak_blob_max_bytes Configured resident-footprint ceiling for the CAS in bytes (0 = unbounded).
+# TYPE fak_blob_max_bytes gauge
+fak_blob_max_bytes 1073741824
+# HELP fak_blob_dedup_ratio Fraction of CAS puts served by content dedup (dedup_hits/puts; 0 when nothing has been put).
+# TYPE fak_blob_dedup_ratio gauge
+fak_blob_dedup_ratio 0
+# HELP fak_gateway_kv_prefix_turns_total In-kernel model turns observed for KV-prefix reuse (the planner reported a prompt-token count).
+# TYPE fak_gateway_kv_prefix_turns_total counter
+fak_gateway_kv_prefix_turns_total 28
+# HELP fak_gateway_kv_prefix_prompt_tokens_total Prompt (prefill) tokens summed across in-kernel turns — the denominator of the realized cache-hit.
+# TYPE fak_gateway_kv_prefix_prompt_tokens_total counter
+fak_gateway_kv_prefix_prompt_tokens_total 1370
+# HELP fak_gateway_kv_prefix_reused_tokens_total Prompt tokens served from the cached KV prefix (the RadixAttention match) across in-kernel turns — the prefill work the kernel did NOT redo. Distinct from the provider's cache_read (fak_gateway_inference_cached_prompt_tokens_total).
+# TYPE fak_gateway_kv_prefix_reused_tokens_total counter
+fak_gateway_kv_prefix_reused_tokens_total 615
+# HELP fak_gateway_kv_prefix_turns_by_regime_total In-kernel turns by reuse regime — the live cliff distribution. frozen: reuse >= 0.90 (the append-only ceiling); partial: 0.10-0.90; cold: < 0.10 (a cold first prefill, or a head-mutated / fanned-out turn that left the frozen single-linear regime — see docs/explainers/frozen-trajectory-cache-cliff.md).
+# TYPE fak_gateway_kv_prefix_turns_by_regime_total counter
+fak_gateway_kv_prefix_turns_by_regime_total{regime="frozen"} 0
+fak_gateway_kv_prefix_turns_by_regime_total{regime="partial"} 14
+fak_gateway_kv_prefix_turns_by_regime_total{regime="cold"} 14
+# HELP fak_gateway_kv_prefix_reuse_ratio Realized in-kernel KV-prefix cache-hit: reused / prompt tokens across served turns (0 until the first turn). A single append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold fan-out, or a divergent prefix drives it down — the frozen-trajectory cache cliff, measured live.
+# TYPE fak_gateway_kv_prefix_reuse_ratio gauge
+fak_gateway_kv_prefix_reuse_ratio 0.4489051094890511
+# HELP fak_gateway_kv_memory_enabled Whether a local reusable KV prefix cache is active for this planner. Proxy/mock planners emit no resident-KV series.
+# TYPE fak_gateway_kv_memory_enabled gauge
+fak_gateway_kv_memory_enabled{class="kv_cache",scope="host",backend="radixkv"} 1
+# HELP fak_gateway_kv_memory_dtype_info Storage dtype for local KV-cache rows under this planner/backend. Current HAL KV rows are f32; proxy/mock planners emit no resident-KV series.
+# TYPE fak_gateway_kv_memory_dtype_info gauge
+fak_gateway_kv_memory_dtype_info{class="kv_cache",scope="host",backend="radixkv",dtype="f32"} 1
+# HELP fak_gateway_kv_memory_bytes_per_token Estimated bytes for one resident KV position under this model layout (classed as kv_cache).
+# TYPE fak_gateway_kv_memory_bytes_per_token gauge
+fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="host",backend="radixkv"} 86016
+# HELP fak_gateway_kv_memory_headroom_ratio Fraction of reported capacity reserved when calculating resident KV-cache fit budget.
+# TYPE fak_gateway_kv_memory_headroom_ratio gauge
+fak_gateway_kv_memory_headroom_ratio{class="kv_cache",scope="host",backend="radixkv"} 0.15
+# HELP fak_gateway_kv_memory_capacity_known Whether the planner reported capacity for the resident KV-cache memory scope.
+# TYPE fak_gateway_kv_memory_capacity_known gauge
+fak_gateway_kv_memory_capacity_known{class="kv_cache",scope="host",backend="radixkv"} 1
+# HELP fak_gateway_kv_memory_capacity_free_known Whether the planner reported current free bytes for the resident KV-cache memory scope.
+# TYPE fak_gateway_kv_memory_capacity_free_known gauge
+fak_gateway_kv_memory_capacity_free_known{class="kv_cache",scope="host",backend="radixkv"} 1
+# HELP fak_gateway_kv_memory_capacity_bytes Reported capacity bytes for the resident KV-cache memory scope. The free row is omitted when current free bytes are unknown.
+# TYPE fak_gateway_kv_memory_capacity_bytes gauge
+fak_gateway_kv_memory_capacity_bytes{class="kv_cache",scope="host",backend="radixkv",kind="total"} 272252637184
+fak_gateway_kv_memory_capacity_bytes{class="kv_cache",scope="host",backend="radixkv",kind="free"} 223705636864
+# HELP fak_gateway_kv_memory_fit_bytes Headroom-adjusted fit summary for resident KV-cache memory. kind=want is current resident bytes; kind=budget and kind=margin are omitted when capacity is unknown.
+# TYPE fak_gateway_kv_memory_fit_bytes gauge
+fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="want"} 116379648
+fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="budget"} 190248714035
+fak_gateway_kv_memory_fit_bytes{class="kv_cache",scope="host",backend="radixkv",kind="margin"} 190132334387
+# HELP fak_gateway_kv_memory_resident_tokens True resident KV prefix positions held by the local prefix cache. This can exceed the LRU edge-token budget on deep radix chains.
+# TYPE fak_gateway_kv_memory_resident_tokens gauge
+fak_gateway_kv_memory_resident_tokens{class="kv_cache",scope="host",backend="radixkv"} 1353
+# HELP fak_gateway_kv_memory_resident_bytes Estimated resident local KV-cache bytes, derived from resident prefix positions and model KV geometry.
+# TYPE fak_gateway_kv_memory_resident_bytes gauge
+fak_gateway_kv_memory_resident_bytes{class="kv_cache",scope="host",backend="radixkv"} 116379648
+# HELP fak_gateway_kv_memory_lru_tokens Radix KV edge-token count enforced by the LRU budget. This is not the same as true resident prefix positions.
+# TYPE fak_gateway_kv_memory_lru_tokens gauge
+fak_gateway_kv_memory_lru_tokens{class="kv_cache",scope="host",backend="radixkv"} 221
+# HELP fak_gateway_kv_memory_budget_tokens Configured radix KV LRU edge-token budget (0 means unbounded).
+# TYPE fak_gateway_kv_memory_budget_tokens gauge
+fak_gateway_kv_memory_budget_tokens{class="kv_cache",scope="host",backend="radixkv"} 0
+# HELP fak_gateway_kv_memory_max_depth_tokens Longest cached KV prefix depth in tokens.
+# TYPE fak_gateway_kv_memory_max_depth_tokens gauge
+fak_gateway_kv_memory_max_depth_tokens{class="kv_cache",scope="host",backend="radixkv"} 110
+# HELP fak_gateway_kv_memory_nodes Radix KV prefix-cache nodes currently resident.
+# TYPE fak_gateway_kv_memory_nodes gauge
+fak_gateway_kv_memory_nodes{class="kv_cache",scope="host",backend="radixkv"} 26
+# HELP fak_gateway_kv_memory_leaves Radix KV prefix-cache leaves currently resident.
+# TYPE fak_gateway_kv_memory_leaves gauge
+fak_gateway_kv_memory_leaves{class="kv_cache",scope="host",backend="radixkv"} 14
+# HELP fak_gateway_kv_memory_evictions_total Radix KV prefix-cache evictions by cause: lru pressure or policy/quarantine.
+# TYPE fak_gateway_kv_memory_evictions_total counter
+fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="lru"} 0
+fak_gateway_kv_memory_evictions_total{class="kv_cache",scope="host",backend="radixkv",kind="policy"} 0
+# HELP fak_gateway_kv_memory_splits_total Radix KV prefix-cache edge splits performed to expose reusable mid-edge prefixes.
+# TYPE fak_gateway_kv_memory_splits_total counter
+fak_gateway_kv_memory_splits_total{class="kv_cache",scope="host",backend="radixkv"} 11
+# HELP fak_gateway_inference_requests_total Model completion turns served by the gateway planner, by finish reason.
+# TYPE fak_gateway_inference_requests_total counter
+fak_gateway_inference_requests_total{finish_reason="length"} 2
+fak_gateway_inference_requests_total{finish_reason="stop"} 26
+# HELP fak_gateway_inference_prompt_tokens_total Prompt (input) tokens summed across served model turns.
+# TYPE fak_gateway_inference_prompt_tokens_total counter
+fak_gateway_inference_prompt_tokens_total 1370
+# HELP fak_gateway_inference_completion_tokens_total Completion (generated) tokens summed across served model turns.
+# TYPE fak_gateway_inference_completion_tokens_total counter
+fak_gateway_inference_completion_tokens_total 104
+# HELP fak_gateway_inference_cached_prompt_tokens_total Prompt (input) tokens the upstream PROVIDER served from its own prompt cache (cache_read) across served turns, normalized across Anthropic/OpenAI/Gemini. This is provider-side reuse — distinct from the local fak_vdso_*/fak_cache_* caches — and reads 0 on the in-kernel path (no provider).
+# TYPE fak_gateway_inference_cached_prompt_tokens_total counter
+fak_gateway_inference_cached_prompt_tokens_total 0
+# HELP fak_gateway_provider_cache_local_trust Whether the upstream PROVIDER's prompt-cache reuse counts as LOCAL TRUST (#432 acceptance 3). Structurally 0: provider cache is performance evidence (cost/latency) only — derived live from the cachemeta provider_prefix materialization gate, not a prose promise. A 1 would mean the trust/performance separation regressed.
+# TYPE fak_gateway_provider_cache_local_trust gauge
+fak_gateway_provider_cache_local_trust 0
+# HELP fak_gateway_inference_cached_prompt_hits_total Served model turns whose prompt got a provider prompt-cache READ (cached tokens > 0). The hit COUNT behind the cached-prompt-tokens total above.
+# TYPE fak_gateway_inference_cached_prompt_hits_total counter
+fak_gateway_inference_cached_prompt_hits_total 0
+# HELP fak_gateway_inference_cached_prompt_hit_ratio Fraction of served model turns that hit the provider prompt cache (cached_prompt_hits / turns; 0 until the first turn). The provider-cache analogue of fak_gateway_vdso_hit_ratio.
+# TYPE fak_gateway_inference_cached_prompt_hit_ratio gauge
+fak_gateway_inference_cached_prompt_hit_ratio 0
+# HELP fak_gateway_inference_duration_seconds_total Cumulative wall-clock spent inside the planner generating completions (prefill+decode on the in-kernel path; round-trip on a proxy).
+# TYPE fak_gateway_inference_duration_seconds_total counter
+fak_gateway_inference_duration_seconds_total 121.19820600000001
+# HELP fak_gateway_inference_output_tokens_per_second Mean output tokens/sec across served turns (completion tokens / total inference wall-clock; 0 until the first turn).
+# TYPE fak_gateway_inference_output_tokens_per_second gauge
+fak_gateway_inference_output_tokens_per_second 0.858098510138013
+# HELP fak_gateway_inference_ttft_turns_total Served turns whose time-to-first-token (prefill boundary) was observable — the streaming passthrough path only. The denominator behind the prefill seconds/rate below; buffered turns are excluded.
+# TYPE fak_gateway_inference_ttft_turns_total counter
+fak_gateway_inference_ttft_turns_total 0
+# HELP fak_gateway_inference_prefill_seconds_total Cumulative time-to-first-token wall-clock (prompt ingest + first token) across turns that measured it. Decode wall-clock is fak_gateway_inference_duration_seconds_total minus this over the same turns.
+# TYPE fak_gateway_inference_prefill_seconds_total counter
+fak_gateway_inference_prefill_seconds_total 0
+# HELP fak_gateway_inference_prefill_tokens_per_second Prefill throughput: prompt (input) tokens ingested per second of TTFT wall-clock, over the turns that measured TTFT (prefill_prompt_tokens / prefill_seconds; 0 until the first measured turn). This is the cold-prefill rate that dominates a slow first request.
+# TYPE fak_gateway_inference_prefill_tokens_per_second gauge
+fak_gateway_inference_prefill_tokens_per_second 0
+# HELP fak_gateway_inference_decode_tokens_per_second Decode throughput: completion (generated) tokens per second of DECODE wall-clock (total inference time minus prefill) over the turns that measured TTFT (0 until the first measured turn). The steady-state generation speed, undiluted by cold prefill — contrast fak_gateway_inference_output_tokens_per_second, which blends both.
+# TYPE fak_gateway_inference_decode_tokens_per_second gauge
+fak_gateway_inference_decode_tokens_per_second 0
+# HELP fak_gateway_inference_ttft_seconds Time-to-first-token (prefill: prompt ingest + first token) distribution, over the streamed turns whose prefill boundary was observable. The percentile view behind fak_gateway_inference_prefill_seconds_total's mean. fak analogue of vLLM time_to_first_token_seconds.
+# TYPE fak_gateway_inference_ttft_seconds histogram
+fak_gateway_inference_ttft_seconds_bucket{le="0.0001"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.0005"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.001"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.005"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.01"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.025"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.05"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.1"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.25"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="0.5"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="1"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="2.5"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="5"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="10"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="30"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="60"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="120"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="300"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="600"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="900"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="1800"} 0
+fak_gateway_inference_ttft_seconds_bucket{le="+Inf"} 0
+fak_gateway_inference_ttft_seconds_sum 0
+fak_gateway_inference_ttft_seconds_count 0
+# HELP fak_gateway_inference_tpot_seconds Per-output-token (inter-token) latency distribution = decode wall-clock / generated tokens, per measured turn. The percentile view behind fak_gateway_inference_decode_tokens_per_second. fak analogue of vLLM inter_token_latency_seconds.
+# TYPE fak_gateway_inference_tpot_seconds histogram
+fak_gateway_inference_tpot_seconds_bucket{le="0.0001"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.0005"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.001"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.005"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.01"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.025"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.05"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.1"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.25"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="0.5"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="1"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="2.5"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="5"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="10"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="30"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="60"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="120"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="300"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="600"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="900"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="1800"} 0
+fak_gateway_inference_tpot_seconds_bucket{le="+Inf"} 0
+fak_gateway_inference_tpot_seconds_sum 0
+fak_gateway_inference_tpot_seconds_count 0
+# HELP fak_gateway_inference_e2e_seconds Whole model-turn wall-clock distribution, over EVERY served turn (buffered or streamed). fak analogue of vLLM e2e_request_latency_seconds.
+# TYPE fak_gateway_inference_e2e_seconds histogram
+fak_gateway_inference_e2e_seconds_bucket{le="0.0001"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.0005"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.001"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.005"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.01"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.025"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.05"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.1"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.25"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="0.5"} 0
+fak_gateway_inference_e2e_seconds_bucket{le="1"} 2
+fak_gateway_inference_e2e_seconds_bucket{le="2.5"} 5
+fak_gateway_inference_e2e_seconds_bucket{le="5"} 14
+fak_gateway_inference_e2e_seconds_bucket{le="10"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="30"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="60"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="120"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="300"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="600"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="900"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="1800"} 28
+fak_gateway_inference_e2e_seconds_bucket{le="+Inf"} 28
+fak_gateway_inference_e2e_seconds_sum 121.19820600000001
+fak_gateway_inference_e2e_seconds_count 28
+# HELP fak_serving_time_to_first_token_seconds Time to first token, normalized onto the fak serving schema. Name aligns with vLLM time_to_first_token_seconds; labels identify worker, engine, and model.
+# TYPE fak_serving_time_to_first_token_seconds histogram
+# HELP fak_serving_time_per_output_token_seconds Time per output token, normalized onto the fak serving schema. Name aligns with vLLM time_per_output_token_seconds; labels identify worker, engine, and model.
+# TYPE fak_serving_time_per_output_token_seconds histogram
+# HELP fak_serving_inter_token_latency_seconds Inter-token latency, normalized onto the fak serving schema for engines that publish ITL separately from TPOT.
+# TYPE fak_serving_inter_token_latency_seconds histogram
+# HELP fak_serving_goodput_requests_per_second Serving goodput in successful requests per second for the worker. Scrape emitters may derive this from upstream success-counter deltas; native emitters feed the same schema directly.
+# TYPE fak_serving_goodput_requests_per_second gauge
+fak_serving_goodput_requests_per_second{worker="local",engine="inkernel",model="inkernel"} 0.23102652196023427
+# HELP fak_serving_num_requests_running Requests currently running on the serving worker. Name aligns with vLLM num_requests_running.
+# TYPE fak_serving_num_requests_running gauge
+fak_serving_num_requests_running{worker="local",engine="inkernel",model="inkernel"} 0
+# HELP fak_serving_num_requests_waiting Requests waiting in the serving worker queue. Name aligns with vLLM num_requests_waiting.
+# TYPE fak_serving_num_requests_waiting gauge
+fak_serving_num_requests_waiting{worker="local",engine="inkernel",model="inkernel"} 0
+# HELP fak_serving_kv_cache_usage_perc KV-cache utilization for the serving worker. Name aligns with vLLM kv_cache_usage_perc.
+# TYPE fak_serving_kv_cache_usage_perc gauge
+fak_serving_kv_cache_usage_perc{worker="local",engine="inkernel",model="inkernel"} 0.000611723871759034
+# HELP fak_serving_prefix_cache_hit_rate Prefix-cache hit rate for the serving worker. Scrape emitters derive this from vLLM prefix_cache_hits / prefix_cache_queries counters when a direct hit-rate gauge is absent.
+# TYPE fak_serving_prefix_cache_hit_rate gauge
+fak_serving_prefix_cache_hit_rate{worker="local",engine="inkernel",model="inkernel"} 0.4489051094890511
+# HELP fak_harness_cpu_seconds_total CPU seconds consumed by the fak guard harness, by half (kernel=guard+gateway, agent=wrapped child) and mode (user/system).
+# TYPE fak_harness_cpu_seconds_total gauge
+fak_harness_cpu_seconds_total{half="kernel",mode="user"} 651.375
+fak_harness_cpu_seconds_total{half="kernel",mode="system"} 33.703125
+# HELP fak_harness_rss_bytes Current resident set size of the fak guard harness, by half.
+# TYPE fak_harness_rss_bytes gauge
+fak_harness_rss_bytes{half="kernel"} 6683688960
+# HELP fak_harness_peak_rss_bytes Peak resident set size of the fak guard harness this session, by half.
+# TYPE fak_harness_peak_rss_bytes gauge
+fak_harness_peak_rss_bytes{half="kernel"} 6683688960
+# HELP fak_harness_io_bytes_total Disk/block I/O bytes by the fak guard harness, by half and direction.
+# TYPE fak_harness_io_bytes_total gauge
+fak_harness_io_bytes_total{half="kernel",dir="read"} 1658558297
+fak_harness_io_bytes_total{half="kernel",dir="write"} 13038
+# HELP fak_harness_net_bytes_total Upstream network bytes by the fak guard harness (the gateway's agent↔LLM proxy traffic), by half and direction.
+# TYPE fak_harness_net_bytes_total gauge
+fak_harness_net_bytes_total{half="kernel",dir="rx"} 14635
+fak_harness_net_bytes_total{half="kernel",dir="tx"} 31790
+# HELP fak_harness_goroutines Peak goroutine count observed in the fak guard kernel this session.
+# TYPE fak_harness_goroutines gauge
+fak_harness_goroutines 39
+# HELP fak_harness_go_heap_sys_bytes Peak Go heap bytes obtained from the OS by the fak guard kernel this session.
+# TYPE fak_harness_go_heap_sys_bytes gauge
+fak_harness_go_heap_sys_bytes 6646464512
+# HELP fak_harness_num_cpu Logical CPU count of the host running the fak guard harness.
+# TYPE fak_harness_num_cpu gauge
+fak_harness_num_cpu 32
+# HELP fak_harness_elapsed_seconds Wall-clock seconds the fak guard harness was sampled this session.
+# TYPE fak_harness_elapsed_seconds gauge
+fak_harness_elapsed_seconds 121.50672
+# HELP fak_gateway_in_kernel_oom_total LOCAL in-kernel device OOMs and capacity precheck refusals, bucketed by memory class. These are WITNESSED fak-owned resource faults, distinct from provider-side errors.
+# TYPE fak_gateway_in_kernel_oom_total counter
+# HELP fak_gateway_in_kernel_oom_failed_bytes_total Cumulative bytes requested by local in-kernel allocation OOMs and capacity refusals, bucketed by memory class.
+# TYPE fak_gateway_in_kernel_oom_failed_bytes_total counter
+# HELP fak_gateway_in_kernel_oom_last_failed_bytes Most recent failed allocation or refused plan size for each memory class (0 until that class has faulted).
+# TYPE fak_gateway_in_kernel_oom_last_failed_bytes gauge
+# HELP fak_gateway_compaction_attempts_total WITNESSED (fak authored): Anthropic history-compaction attempts by outcome: fired (body rewritten, protected prefix shipped byte-identical), bailed (returned identity), off (budget unset).
+# TYPE fak_gateway_compaction_attempts_total counter
+fak_gateway_compaction_attempts_total{outcome="fired"} 0
+fak_gateway_compaction_attempts_total{outcome="bailed"} 0
+fak_gateway_compaction_attempts_total{outcome="off"} 0
+# HELP fak_gateway_compaction_bail_reason_total WITNESSED (fak authored): why a compaction attempt bailed to identity (closed set: under_budget|non_json|no_messages_key|too_few_msgs|no_breakpoint|window_no_drop|splice_failed|redecode_failed|prefix_mismatch). prefix_mismatch>0 is the ONLY fak-fault cache signal and must stay 0; splice_failed/redecode_failed are splice bugs and must stay 0 too.
+# TYPE fak_gateway_compaction_bail_reason_total counter
+# HELP fak_gateway_compaction_anchor_starved_total WITNESSED (fak authored): under_budget bails whose protected prefix ALREADY exceeded the budget — the cache_control anchor swallowed the conversation, so compaction structurally cannot fire no matter how long the session grows. A SUBSET of bail_reason{reason="under_budget"}, broken out because the two are opposite: plain under_budget is a benign short session, anchor-starved is the dormant-on-real-Claude-Code-traffic pathology (issue #1407) that no budget tightening fixes.
+# TYPE fak_gateway_compaction_anchor_starved_total counter
+fak_gateway_compaction_anchor_starved_total 0
+# HELP fak_gateway_compaction_dropped_turns_total WITNESSED (fak authored): whole messages stubbed out across all fires.
+# TYPE fak_gateway_compaction_dropped_turns_total counter
+fak_gateway_compaction_dropped_turns_total 0
+# HELP fak_gateway_compaction_shed_tokens_total WITNESSED (fak authored): estimated tokens fak removed from the outbound body by history compaction fires plus uncached-tail trim (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.
+# TYPE fak_gateway_compaction_shed_tokens_total counter
+fak_gateway_compaction_shed_tokens_total 0
+# HELP fak_gateway_compaction_cache_read_tokens_total OBSERVED (provider-reported, relayed verbatim): cumulative cache_read_input_tokens on compacted turns. Pair with shed_tokens to see the net effect; attribute nothing to fak from it alone — fak only guarantees the prefix it shipped was byte-identical (see attempts{fired} with prefix_mismatch=0).
+# TYPE fak_gateway_compaction_cache_read_tokens_total counter
+fak_gateway_compaction_cache_read_tokens_total 0
+# HELP fak_gateway_compaction_post_fire_cache_read_tokens OBSERVED (provider-reported): cache_read_input_tokens on the MOST RECENT compacted turn. If this craters while fires climb, the prefix fak shipped was still byte-identical (witnessed by fired with prefix_mismatch=0), so the provider did not reuse it for a reason fak does NOT control: cache TTL expiry, eviction, or the client moving its own breakpoint. Only bail_reason{reason="prefix_mismatch"}>0 is fak's bug.
+# TYPE fak_gateway_compaction_post_fire_cache_read_tokens gauge
+fak_gateway_compaction_post_fire_cache_read_tokens 0
+# HELP fak_gateway_uncached_trim_results_total WITNESSED (fak authored): oversized old tool_result bodies shrunk in the uncached post-breakpoint region. The transform keeps the protected cache prefix byte-identical and leaves recent/cache_control-bearing results intact.
+# TYPE fak_gateway_uncached_trim_results_total counter
+fak_gateway_uncached_trim_results_total 0
+# HELP fak_gateway_uncached_trim_shed_tokens_total WITNESSED (fak authored): estimated tokens removed by uncached-tail oversized-result trim, also folded into fak_gateway_compaction_shed_tokens_total for the owner="fak" cache-savings attribution.
+# TYPE fak_gateway_uncached_trim_shed_tokens_total counter
+fak_gateway_uncached_trim_shed_tokens_total 0
+# HELP fak_gateway_cache_ttl_upgrade_total WITNESSED (fak authored): managed-cache 1h TTL upgrade attempts on the outbound Anthropic wire, by outcome: upgraded (ttl:"1h" spliced into the stable system/tools-head cache_control) or the bail reason (no_stable_breakpoint|already_1h|ttl_already_set|volatile_head|non_json|splice_failed|redecode_failed). Rows exist only while --managed-cache is ACTIVE. splice_failed/redecode_failed are fak bugs and must stay 0. The provider honoring the 1h tier across an idle gap is OBSERVED via cache_read, not claimed by this counter.
+# TYPE fak_gateway_cache_ttl_upgrade_total counter
+fak_gateway_cache_ttl_upgrade_total{outcome="upgraded"} 0
+# HELP fak_gateway_cache_breakpoint_placement_total WITNESSED (fak authored): offensive cache-breakpoint placements on the outbound Anthropic wire, by outcome: placed (a cache_control breakpoint spliced onto the stable system/tools head of a caller that sent none) or the bail reason (already_set|no_stable_head|volatile_head|non_json|splice_failed|redecode_failed). placed is the fak-unlocked slice — the provider cache_read those turns earn would be 0 without it; already_set is the client's own cache, not fak's. The provider serving turns 2..N from that cache is OBSERVED via cache_read, not claimed by this counter.
+# TYPE fak_gateway_cache_breakpoint_placement_total counter
+fak_gateway_cache_breakpoint_placement_total{outcome="placed"} 0
+# HELP fak_gateway_inbound_tools_pruned_total WITNESSED (fak authored): cumulative unreachable tool DEFINITIONS dropped from the outbound tools[] across the session. A pure uncached-token saving — the pruner drops only tools after the cache_control breakpoint and re-proves the protected prefix is byte-identical, so a counted prune never bursts the provider-side upstream cache.
+# TYPE fak_gateway_inbound_tools_pruned_total counter
+fak_gateway_inbound_tools_pruned_total 0
+# HELP fak_gateway_inbound_tools_prune_turns_total WITNESSED (fak authored): turns on which at least one unreachable tool def was pruned from tools[]. Zero on a harness (e.g. Claude Code) whose single cache_control breakpoint sits on the LAST tool, since nothing is then droppable.
+# TYPE fak_gateway_inbound_tools_prune_turns_total counter
+fak_gateway_inbound_tools_prune_turns_total 0
+# HELP fak_gateway_compaction_reset_shadow_total WITNESSED (fak policy, recommend-only): compacted turns scored by the resetScore SHADOW policy, by reason (healthy_cache|stale_prefix|cache_decay|cooldown|unknown_provider). SHADOW mode acts on nothing — this is what the cut-vs-reset crossover WOULD recommend, not a reset that happened. The cache ratios scored are OBSERVED (provider-reported).
+# TYPE fak_gateway_compaction_reset_shadow_total counter
+fak_gateway_compaction_reset_shadow_total{reason="healthy_cache"} 0
+fak_gateway_compaction_reset_shadow_total{reason="stale_prefix"} 0
+fak_gateway_compaction_reset_shadow_total{reason="cache_decay"} 0
+fak_gateway_compaction_reset_shadow_total{reason="cooldown"} 0
+fak_gateway_compaction_reset_shadow_total{reason="unknown_provider"} 0
+# HELP fak_gateway_compaction_reset_recommendations_total WITNESSED (fak policy, recommend-only): compacted turns whose resetScore SHADOW verdict was ShouldReset. In SHADOW mode NONE were acted on — the count is the reset pressure the policy held back, cut-by-default.
+# TYPE fak_gateway_compaction_reset_recommendations_total counter
+fak_gateway_compaction_reset_recommendations_total 0
+# HELP fak_gateway_compaction_reset_score The most recent compacted turn's 0..1 resetScore reset-pressure magnitude (0 = clearly keep cutting, 1 = clearly reset). Reported even when the cooldown holds the recommendation, so the building pressure is visible. Advisory: nothing acts on it in SHADOW mode.
+# TYPE fak_gateway_compaction_reset_score gauge
+fak_gateway_compaction_reset_score 0
+# HELP fak_guard_deny_all_stops_total Served turns whose EVERY proposed tool call the capability floor refused, forcing the wire to report end_turn (a stop the agent did not choose; the v0.15.0 contract that keeps the client from hanging on a dropped tool_use block). The guard --deny-all-continue Stop-hook reads the consecutive gauge below to auto-continue the agent past these.
+# TYPE fak_guard_deny_all_stops_total counter
+fak_guard_deny_all_stops_total 0
+# HELP fak_guard_deny_all_consecutive Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). The bounded signal the guard --deny-all-continue Stop-hook polls: 1..MAX continues the agent, above MAX it gives up and lets the turn end.
+# TYPE fak_guard_deny_all_consecutive gauge
+fak_guard_deny_all_consecutive 0
+# HELP fak_harness_coherence_turns_total WITNESSED (fak authored): served Anthropic passthrough turns folded into the harness-coherence coordinator. The denominator for the event family below.
+# TYPE fak_harness_coherence_turns_total counter
+fak_harness_coherence_turns_total 0
+# HELP fak_harness_coherence_events_total WITNESSED (fak authored): served turns by attributed prefix event (stable|fak_cut|fak_world_break|harness_rewrite|cold_ttl). harness_rewrite is the harness acting as a cache-DESTROYING second compactor (the inbound protected-prefix digest changed in a way fak never causes); cold_ttl is the provider cache going cold on an unchanged prefix. Attributed from CONTENT-FREE facts only (a prefix digest delta, fak's own compaction outcome, the provider's relayed cache counters, the idle gap).
+# TYPE fak_harness_coherence_events_total counter
+fak_harness_coherence_events_total{event="stable"} 0
+fak_harness_coherence_events_total{event="fak_cut"} 0
+fak_harness_coherence_events_total{event="fak_world_break"} 0
+fak_harness_coherence_events_total{event="harness_rewrite"} 0
+fak_harness_coherence_events_total{event="cold_ttl"} 0
+# HELP fak_harness_coherence_harness_rewrites_total WITNESSED (fak authored): turns on which the HARNESS rewrote its own history (auto-compaction / /compact) — the inbound protected-prefix digest changed, which fak never causes (it forwards the prefix verbatim). Each bursts the provider cache (a cache_creation event), the opposite of what fak's cache-preserving compaction just worked to avoid.
+# TYPE fak_harness_coherence_harness_rewrites_total counter
+fak_harness_coherence_harness_rewrites_total 0
+# HELP fak_harness_coherence_quarantine_at_risk_total WITNESSED (fak authored): harness-rewrite turns where a fak-sealed (quarantined) span preceded the rewrite — the poisoned span may have been folded into the harness summary, surviving the kernel's quarantine. The trust hole this policy exists to make observable (fak controls the wire, not the harness transcript).
+# TYPE fak_harness_coherence_quarantine_at_risk_total counter
+fak_harness_coherence_quarantine_at_risk_total 0
+# HELP fak_harness_coherence_bursts_total WITNESSED (fak authored): turns that (will) cost a provider cache_creation burst — a harness rewrite or a cold-TTL rebuild. Lets an operator read the provider-cache cost of the two managers colliding.
+# TYPE fak_harness_coherence_bursts_total counter
+fak_harness_coherence_bursts_total 0
+# HELP fak_harness_coherence_posture The CURRENT standing PreCompact posture the actuator (#1133, rung C) enforces when `fak guard` installs the Claude Code hook: 1 = block (exit 2 — suppress the harness's auto-compaction while fak's cache-preserving compaction is coping; the default), 0 = allow (exit 0 — fak's compaction has bailed for a sustained streak, so the harness is the only context net left).
+# TYPE fak_harness_coherence_posture gauge
+fak_harness_coherence_posture 1
+# HELP fak_gateway_routing_decisions_total WITNESSED (fak authored): per-aspect model-routing decisions the gateway took on the served path. The denominator for the by-strategy/rule/aspect families below; 0 until a RouteManifest is configured AND a tool call has routed.
+# TYPE fak_gateway_routing_decisions_total counter
+fak_gateway_routing_decisions_total 0
+# HELP fak_gateway_routing_decisions_by_strategy_total WITNESSED (fak authored): routing decisions by selected strategy (default|single|ensemble). default = no rule matched (the fail-closed default plan); single = a one-model pick; ensemble = a multi-model plan folded by a reduction.
+# TYPE fak_gateway_routing_decisions_by_strategy_total counter
+fak_gateway_routing_decisions_by_strategy_total{strategy="default"} 0
+fak_gateway_routing_decisions_by_strategy_total{strategy="single"} 0
+fak_gateway_routing_decisions_by_strategy_total{strategy="ensemble"} 0
+# HELP fak_gateway_routing_decisions_by_rule_total WITNESSED (fak authored): routing decisions by the matched manifest rule name. "(default)" is the fail-closed bucket where no rule matched. One series per rule the gateway has actually routed through.
+# TYPE fak_gateway_routing_decisions_by_rule_total counter
+# HELP fak_gateway_routing_decisions_by_aspect_total WITNESSED (fak authored): routing decisions by the routed subject's aspect (the granularity fak routes at: request|tool_call|query|state|step|…). "(none)" is an unset aspect.
+# TYPE fak_gateway_routing_decisions_by_aspect_total counter
+# HELP fak_gateway_routing_ensemble_decisions_total WITNESSED (fak authored): routing decisions whose selected plan is a multi-model ensemble (len(members) > 1, folded by a reduction). A subset of the decisions total.
+# TYPE fak_gateway_routing_ensemble_decisions_total counter
+fak_gateway_routing_ensemble_decisions_total 0
+# HELP fak_gateway_routing_scout_calls_total WITNESSED (fak authored): scout classify-first calls the routed plans named (1 per decision whose plan set a scout model, summed). The cheap classify-then-route probe count.
+# TYPE fak_gateway_routing_scout_calls_total counter
+fak_gateway_routing_scout_calls_total 0
+# HELP fak_gateway_routing_overhead_seconds_total WITNESSED (fak authored): cumulative wall-clock the routing decision itself cost (summed Decision overhead), the verifiable routing-overhead axis that sets fak apart from a learned-predictor router. Pure-function routing, so this stays tiny.
+# TYPE fak_gateway_routing_overhead_seconds_total counter
+fak_gateway_routing_overhead_seconds_total 0
+# HELP fak_gateway_resume_projection_boundaries_total WITNESSED (fak hook, observe-only): live resume boundaries the host fired the resume residual hook on. Default-off: 0 until the opt-in hook is enabled. Nothing acts on a resume here.
+# TYPE fak_gateway_resume_projection_boundaries_total counter
+fak_gateway_resume_projection_boundaries_total 0
+# HELP fak_gateway_resume_projection_posture_total WITNESSED (fak resume.Plan, observe-only): live resume boundaries by PROJECTED cache posture (cold|warm|unknown) — the cold/warm call resume.Plan made from idle-vs-TTL. Emitted at 0 so the panel exists pre-first-boundary.
+# TYPE fak_gateway_resume_projection_posture_total counter
+fak_gateway_resume_projection_posture_total{posture="cold"} 0
+fak_gateway_resume_projection_posture_total{posture="warm"} 0
+fak_gateway_resume_projection_posture_total{posture="unknown"} 0
+# HELP fak_gateway_resume_projection_recommendation_total WITNESSED (fak resume.Plan, observe-only): live resume boundaries by RECOMMENDED re-entry strategy (resume_full|cut|reset). SHADOW: the recommendation is surfaced, never auto-applied — the host owns whether to act. Emitted at 0 so the panel exists pre-first-boundary.
+# TYPE fak_gateway_resume_projection_recommendation_total counter
+fak_gateway_resume_projection_recommendation_total{strategy="resume_full"} 0
+fak_gateway_resume_projection_recommendation_total{strategy="cut"} 0
+fak_gateway_resume_projection_recommendation_total{strategy="reset"} 0
+# HELP fak_gateway_resume_projection_cost_delta_usd The most recent resume boundary's prompt-cache cost RESIDUAL: the provider's first-post-resume bill (OBSERVED, provider-relayed cache_read/cache_creation priced at this model's base input) MINUS fak's PROJECTED cold re-prefill cost (resume.Plan, fak-authored). ~0 means the calibrated projection tracked the live bill; positive means the live resume cost MORE than projected. Output excluded so this is purely the prompt-cache effect.
+# TYPE fak_gateway_resume_projection_cost_delta_usd gauge
+fak_gateway_resume_projection_cost_delta_usd 0
+# HELP fak_gateway_resume_projection_cold_write_share_residual The most recent resume boundary's cold-write-share RESIDUAL: the OBSERVED live cold-write share (cache_creation / prompt, provider-relayed) MINUS fak's calibrated ColdWriteShare (#955). ~0 confirms the calibrated constant holds on live traffic; a persistent drift is the signal to refit it.
+# TYPE fak_gateway_resume_projection_cold_write_share_residual gauge
+fak_gateway_resume_projection_cold_write_share_residual 0
+# HELP fak_sched_running Sequences currently running (admitted) in the native serving scheduler.
+# TYPE fak_sched_running gauge
+fak_sched_running 0
+# HELP fak_sched_waiting Sequences waiting for admission in the native serving scheduler.
+# TYPE fak_sched_waiting gauge
+fak_sched_waiting 0
+# HELP fak_sched_tokens_in_use Token admission budget currently held by the running set.
+# TYPE fak_sched_tokens_in_use gauge
+fak_sched_tokens_in_use 0
+# HELP fak_sched_max_num_seqs Configured max-num-seqs running-set cap (0 = uncapped).
+# TYPE fak_sched_max_num_seqs gauge
+fak_sched_max_num_seqs 256
+# HELP fak_sched_max_wait_rounds Oldest current waiter's age in admission rounds (starvation visibility).
+# TYPE fak_sched_max_wait_rounds gauge
+fak_sched_max_wait_rounds 0
+# HELP fak_sched_admitted_total Requests promoted into the running set.
+# TYPE fak_sched_admitted_total counter
+fak_sched_admitted_total 28
+# HELP fak_sched_queued_total Requests placed on the waiting queue.
+# TYPE fak_sched_queued_total counter
+fak_sched_queued_total 0
+# HELP fak_sched_shed_total Requests shed under overload (waiting queue at bound; HTTP 429).
+# TYPE fak_sched_shed_total counter
+fak_sched_shed_total 0
+# HELP fak_sched_denied_total Requests rejected by a per-tenant trust verdict.
+# TYPE fak_sched_denied_total counter
+fak_sched_denied_total 0
+# HELP fak_gateway_turns_saved_total Agent turns the kernel saved the served fleet, by mechanism: vdso_dedup = a duplicate read served from the fast path with no engine round-trip; grammar_repair = a malformed tool call repaired in-syscall instead of costing the baseline a retry turn. The comparable 'turns saved' headline (LIVE-RESULTS.md) is this measured against a no-kernel baseline arm; this is the live cumulative count of each mechanism firing.
+# TYPE fak_gateway_turns_saved_total counter
+fak_gateway_turns_saved_total{mechanism="vdso_dedup"} 0
+fak_gateway_turns_saved_total{mechanism="grammar_repair"} 0
+# HELP fak_gateway_context_pollutions_blocked_total Untrusted/poisoned tool-result payloads the context-MMU paged out before they reached the model's context window — each a context-window pollution (and on a weak model a derailment) prevented. The live 'context saved' KPI.
+# TYPE fak_gateway_context_pollutions_blocked_total counter
+fak_gateway_context_pollutions_blocked_total 0
+# HELP fak_gateway_context_pollution_rate Quarantines per kernel submission, computed live over this process's submissions (the A/B report's context_pollution_rate; 0 when nothing has been submitted).
+# TYPE fak_gateway_context_pollution_rate gauge
+fak_gateway_context_pollution_rate 0
+# HELP fak_gateway_agent_seconds_total Cumulative wall-clock the gateway spent doing agent work: model generation (inference) plus kernel operation adjudication/dispatch (syscall, adjudicate, admit). The denominator for a live tokens/turns-per-agent-second view.
+# TYPE fak_gateway_agent_seconds_total counter
+fak_gateway_agent_seconds_total 121.19820600000001
+# HELP fak_cache_saved_by_owner Cache-like token-equivalent saving by owner. owner="provider" is OBSERVED provider prompt-cache net (read rebate minus write premium); owner="fak" is WITNESSED fak-authored token savings (compaction shed + in-kernel KV-prefix reuse).
+# TYPE fak_cache_saved_by_owner gauge
+fak_cache_saved_by_owner{owner="provider"} 0
+fak_cache_saved_by_owner{owner="fak"} 615
+# HELP fak_cache_saved_by_mechanism Cache-like token-equivalent saving by owner/mechanism. provider_prompt_cache_write_premium is negative when cache writes have not yet been repaid; fak_vdso is not included here because its current witness is avoided calls, emitted separately.
+# TYPE fak_cache_saved_by_mechanism gauge
+fak_cache_saved_by_mechanism{owner="provider",mechanism="provider_prompt_cache_read"} 0
+fak_cache_saved_by_mechanism{owner="provider",mechanism="provider_prompt_cache_write_premium"} -0
+fak_cache_saved_by_mechanism{owner="fak",mechanism="compaction_shed"} 0
+fak_cache_saved_by_mechanism{owner="fak",mechanism="kv_prefix_reuse"} 615
+# HELP fak_cache_saved_token_equiv_by_owner Cache-like token-equivalent saving by owner. owner="provider" is OBSERVED provider prompt-cache net (read rebate minus write premium); owner="fak" is WITNESSED fak-authored token savings (compaction shed + in-kernel KV-prefix reuse).
+# TYPE fak_cache_saved_token_equiv_by_owner gauge
+fak_cache_saved_token_equiv_by_owner{owner="provider"} 0
+fak_cache_saved_token_equiv_by_owner{owner="fak"} 615
+# HELP fak_cache_saved_token_equiv_by_mechanism Cache-like token-equivalent saving by mechanism. provider_prompt_cache_write_premium is negative when cache writes have not yet been repaid; fak_vdso is not included here because its current witness is avoided calls, emitted separately.
+# TYPE fak_cache_saved_token_equiv_by_mechanism gauge
+fak_cache_saved_token_equiv_by_mechanism{owner="provider",mechanism="provider_prompt_cache_read"} 0
+fak_cache_saved_token_equiv_by_mechanism{owner="provider",mechanism="provider_prompt_cache_write_premium"} -0
+fak_cache_saved_token_equiv_by_mechanism{owner="fak",mechanism="compaction_shed"} 0
+fak_cache_saved_token_equiv_by_mechanism{owner="fak",mechanism="kv_prefix_reuse"} 615
+# HELP fak_cache_avoided_calls_by_mechanism_total Cache-like avoided engine calls by fak-authored mechanism. VDSO is counted here, not in token-equivalent gauges, because the live witness is skipped calls rather than prompt tokens.
+# TYPE fak_cache_avoided_calls_by_mechanism_total counter
+fak_cache_avoided_calls_by_mechanism_total{owner="fak",mechanism="vdso"} 0
+# HELP fak_model_load_info Static labels for the model loaded at boot: source path, loader mode, and the slowest (bottleneck) load phase.
+# TYPE fak_model_load_info gauge
+fak_model_load_info{source="C:/Users/USER/.cache/fak-models/gguf/Qwen2.5-1.5B-Instruct.Q8_0.gguf",mode="gguf-lean-q8",bottleneck="quant_builder_add"} 1
+# HELP fak_model_load_duration_seconds Total wall-clock to load model weights at boot.
+# TYPE fak_model_load_duration_seconds gauge
+fak_model_load_duration_seconds 4.2342322
+# HELP fak_model_load_bytes Total bytes read/materialized while loading model weights at boot.
+# TYPE fak_model_load_bytes gauge
+fak_model_load_bytes 20165193728
+# HELP fak_model_load_tensors Number of tensors materialized while loading model weights at boot.
+# TYPE fak_model_load_tensors gauge
+fak_model_load_tensors 338
+# HELP fak_model_load_phase_duration_seconds Wall-clock cost of each model-weight load phase at boot.
+# TYPE fak_model_load_phase_duration_seconds gauge
+fak_model_load_phase_duration_seconds{phase="quant_builder_add"} 1.350916
+fak_model_load_phase_duration_seconds{phase="gguf_open_index"} 1.0185823
+fak_model_load_phase_duration_seconds{phase="gguf_read"} 0.4584179
+fak_model_load_phase_duration_seconds{phase="gguf_dequant"} 0.3731292
+fak_model_load_phase_duration_seconds{phase="gguf_map_shape"} 0.0048327
+fak_model_load_phase_duration_seconds{phase="gguf_normalize"} 0.0005345
+fak_model_load_phase_duration_seconds{phase="gguf_config"} 0.0005234
+fak_model_load_phase_duration_seconds{phase="quant_builder_finalize"} 0
+# HELP fak_model_load_phase_bytes Bytes processed by each model-weight load phase at boot.
+# TYPE fak_model_load_phase_bytes gauge
+fak_model_load_phase_bytes{phase="quant_builder_add"} 6174857216
+fak_model_load_phase_bytes{phase="gguf_open_index"} 0
+fak_model_load_phase_bytes{phase="gguf_read"} 1640622080
+fak_model_load_phase_bytes{phase="gguf_dequant"} 6174857216
+fak_model_load_phase_bytes{phase="gguf_map_shape"} 0
+fak_model_load_phase_bytes{phase="gguf_normalize"} 6174857216
+fak_model_load_phase_bytes{phase="gguf_config"} 0
+fak_model_load_phase_bytes{phase="quant_builder_finalize"} 0
+# HELP fak_model_load_phase_tensors Tensors processed by each model-weight load phase at boot.
+# TYPE fak_model_load_phase_tensors gauge
+fak_model_load_phase_tensors{phase="quant_builder_add"} 338
+fak_model_load_phase_tensors{phase="gguf_open_index"} 0
+fak_model_load_phase_tensors{phase="gguf_read"} 338
+fak_model_load_phase_tensors{phase="gguf_dequant"} 338
+fak_model_load_phase_tensors{phase="gguf_map_shape"} 338
+fak_model_load_phase_tensors{phase="gguf_normalize"} 338
+fak_model_load_phase_tensors{phase="gguf_config"} 0
+fak_model_load_phase_tensors{phase="quant_builder_finalize"} 0
