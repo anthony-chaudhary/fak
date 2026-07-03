@@ -560,14 +560,16 @@ func runFleetFold(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func appendLedgerRows(path string, rows []fleetmon.LedgerRow) error {
+// appendLedgerLines appends one encoded line per item to the ledger at path,
+// creating the file if needed.
+func appendLedgerLines[T any](path string, items []T, encode func(T) (string, error)) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	for _, r := range rows {
-		line, err := fleetmon.AppendLedgerLine(r)
+	for _, item := range items {
+		line, err := encode(item)
 		if err != nil {
 			return err
 		}
@@ -578,22 +580,12 @@ func appendLedgerRows(path string, rows []fleetmon.LedgerRow) error {
 	return nil
 }
 
+func appendLedgerRows(path string, rows []fleetmon.LedgerRow) error {
+	return appendLedgerLines(path, rows, fleetmon.AppendLedgerLine)
+}
+
 func appendJanitorDecisions(path string, decisions []fleetmon.JanitorDecision) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for _, d := range decisions {
-		line, err := fleetmon.AppendJanitorDecisionLine(d)
-		if err != nil {
-			return err
-		}
-		if _, err := f.WriteString(line + "\n"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return appendLedgerLines(path, decisions, fleetmon.AppendJanitorDecisionLine)
 }
 
 func renderFoldMarkdown(s fleetmon.RunLedgerSummary) string {
