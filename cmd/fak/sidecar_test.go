@@ -130,3 +130,17 @@ func TestSidecarMutuallyExclusiveSurfaces(t *testing.T) {
 		t.Fatalf("rc=%d, want 2 for --json+--slack", rc)
 	}
 }
+
+// TestSidecarResolvesDefaultPython guards the live-smoke contract: an empty
+// --python (the default) MUST resolve to the workspace interpreter, not reach
+// exec.Command("") and fail with "exec: no command". The sessions/accounts
+// census is the census the issue's "live smoke on this host shows >=1 claude
+// row" witness drives off the DEFAULT invocation (no flags).
+func TestSidecarResolvesDefaultPython(t *testing.T) {
+	if got := resolvePython(""); got == "" {
+		t.Fatal("resolvePython(\"\") is empty: default invocation would hit exec.Command(\"\") and fail with 'exec: no command'")
+	}
+	if got := resolvePython("/usr/bin/python3.13"); got != "/usr/bin/python3.13" {
+		t.Errorf("resolvePython ignored an explicit interpreter: got %q", got)
+	}
+}

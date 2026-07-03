@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cadencereport"
+	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/sidecar"
 )
 
@@ -159,6 +160,7 @@ func loadCensus(root, python, from string, timeoutSec int) (map[string]any, stri
 		}
 		return m, ""
 	}
+	python = resolvePython(python)
 	payload, runErr := cadencereport.RunPyEnvelope(root,
 		[]string{"tools/fleet_sessions.py", "json"}, python, time.Duration(timeoutSec)*time.Second)
 	if runErr != "" {
@@ -168,6 +170,20 @@ func loadCensus(root, python, from string, timeoutSec int) (map[string]any, stri
 		return nil, "collector returned no payload"
 	}
 	return payload, ""
+}
+
+// resolvePython returns the explicit interpreter or the workspace default. The
+// sidecar's --python flag defaults to "" (auto); without this resolution the
+// empty string reaches cadencereport.RunPyEnvelope and exec.Command("") fails
+// with "exec: no command", leaving the sessions/accounts census UNMEASURED on
+// the default invocation — the very smoke the issue's witness exercises. This
+// mirrors cadencereport.CollectWithScores, which resolves the default before
+// the same RunPyEnvelope call.
+func resolvePython(p string) string {
+	if p == "" {
+		return gardenbundle.DefaultPython()
+	}
+	return p
 }
 
 // censusSessions maps the fleet_sessions `rows` into sidecar SessionRows, skipping
