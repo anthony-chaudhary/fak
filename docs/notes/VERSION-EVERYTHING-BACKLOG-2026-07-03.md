@@ -12,15 +12,13 @@ peak 6 leaves at once.
 
 ## Filing state
 
-`not yet` — the plan is contract-complete and cohort-validated, but live
-GitHub issue creation from this host is egress-gated (see the host GitHub
-write discipline: `gh` writes are blocked; closures ride `Closes #N` commit
-bodies). Next checkable step: an authorized session (or operator) runs the
-filing pass from this JSON — every candidate carries key/title/body sections
-(`current_state`, `why_now`, `working_spine`, scope, `done_condition`,
-`witness`, `acceptance_gate`, `closure_binding`), labels, priority, and
-`parent_ref: modver-epic` for milestone/epic binding; keys are the dedupe
-markers, so a re-run is idempotent. Milestone every issue at creation.
+FILED 2026-07-03: epic **#2458** + 44 children **#2459–#2502**, all on
+milestone `version-everything` (16), label `version-everything`, zero
+failures. Each issue body opens with its `<!-- fak-issue-key: <key> -->`
+dedupe marker (the plan JSON key), so a re-filing pass is idempotent and
+`issue_closure_audit` can bind closes. Child order follows the plan's
+candidate order: #2459 = `modver-tools-keyspace` … #2502 =
+`modver-agentsmd-doctrine`.
 
 ## The map (by theme)
 
