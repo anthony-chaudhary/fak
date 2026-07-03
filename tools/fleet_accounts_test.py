@@ -637,6 +637,49 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(routed["account"]["tag"], "gem8")  # fewest live, not alphabetical
         self.assertEqual(routed["account"]["route_weight"], 0)
 
+    def test_account_cap_sidecar_blocks_selected_tag_and_routes_around_it(self) -> None:
+        import datetime as dt
+        account_dir(self.home, ".claude-day26NEW-netra-acct")
+        account_dir(self.home, ".claude-gem8NEW-netra-acct")
+        runs = self.home / "runs"
+        runs.mkdir()
+        until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)).isoformat()
+        (runs / "account-cap-claude.json").write_text(json.dumps({
+            "product": "claude",
+            "account": "day26NEW-netra",
+            "kind": "weekly",
+            "reset_text": "",
+            "evidence_log": "resolve-2272.log",
+            "detected": "2026-07-03T22:39:51Z",
+            "until": until,
+        }), encoding="utf-8")
+
+        rows = fleet_accounts.annotate_accounts(
+            fleet_accounts.discover_accounts(str(self.home),
+                                             config_home=str(self.config_home)),
+            registry={}, cap_runs_dir=str(runs))
+        by_tag = {r["tag"]: r for r in rows}
+
+        self.assertFalse(by_tag["day26NEW-netra"]["available"])
+        self.assertEqual(by_tag["day26NEW-netra"]["block_kind"], "usage")
+        routed = fleet_accounts.route_account(rows, "ship it", "engineering",
+                                              product="claude")
+        self.assertTrue(routed["ok"])
+        self.assertEqual(routed["account"]["tag"], "gem8NEW-netra")
+
+    def test_malformed_account_cap_sidecar_fails_open(self) -> None:
+        account_dir(self.home, ".claude-day26NEW-netra-acct")
+        runs = self.home / "runs"
+        runs.mkdir()
+        (runs / "account-cap-claude.json").write_text("{not json", encoding="utf-8")
+
+        rows = fleet_accounts.annotate_accounts(
+            fleet_accounts.discover_accounts(str(self.home),
+                                             config_home=str(self.config_home)),
+            registry={}, cap_runs_dir=str(runs))
+
+        self.assertTrue({r["tag"]: r for r in rows}["day26NEW-netra"]["available"])
+
     def test_route_account_json_contract_for_detached_launcher(self) -> None:
         # launch_goal_detached.ps1 parses route's account.dir + selected_tier +
         # fallback_used + ok. Lock that shape so a rename can't silently break the

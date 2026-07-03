@@ -1501,11 +1501,14 @@ class WeeklyCapGateTest(unittest.TestCase):
     )
 
     def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
-                      backend: str = "claude") -> None:
+                      backend: str = "claude", account_tag: str | None = None) -> None:
+        import json
         import os
         log = runs / name
         log.write_text(body, encoding="utf-8")
         log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        if account_tag:
+            log.with_suffix(".account").write_text(json.dumps({"tag": account_tag}), encoding="utf-8")
         os.utime(log, (mtime, mtime))
 
     def test_scan_detects_recent_tiny_banner_only(self) -> None:
@@ -1548,6 +1551,53 @@ class WeeklyCapGateTest(unittest.TestCase):
             # claude scan must NOT pick up an opencode worker's log
             self.assertIsNone(mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now))
             self.assertIsNotNone(mod._scan_recent_cap_banner(runs, product="opencode", lookback_min=45, now_ts=now))
+
+    def test_check_scoped_to_matching_account_sidecar(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1-generic.log", self.SESSION_BANNER,
+                               mtime=now - 60)
+            self._write_worker(runs, "resolve-2-july1.log", self.SESSION_BANNER,
+                               mtime=now - 30, account_tag="july1-netra")
+            out = mod.check_weekly_cap(runs, product="claude",
+                                       account_tag="gem8NEW-netra", now_ts=now)
+            self.assertFalse(out["capped"])
+            self.assertFalse((runs / "account-cap-claude.json").exists())
+
+            self._write_worker(runs, "resolve-3-gem8.log", self.SESSION_BANNER,
+                               mtime=now - 10, account_tag="gem8NEW-netra")
+            out = mod.check_weekly_cap(runs, product="claude",
+                                       account_tag="gem8NEW-netra", now_ts=now)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["evidence_log"], "resolve-3-gem8.log")
+
+    def test_persisted_hold_with_unmatched_evidence_is_cleared(self) -> None:
+        import datetime as dt
+        import json
+        import tempfile
+        mod = load()
+        now_utc = dt.datetime(2026, 7, 3, 20, 0, 0)
+        now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-generic.log", self.SESSION_BANNER,
+                               mtime=now_ts - 60)
+            (runs / "account-cap-claude.json").write_text(json.dumps({
+                "product": "claude",
+                "account": "gem8NEW-netra",
+                "kind": "session",
+                "reset_text": "2pm",
+                "evidence_log": "resolve-generic.log",
+                "detected": "2026-07-03T20:00:00Z",
+                "until": "2026-07-03T21:00:00Z",
+            }), encoding="utf-8")
+            out = mod.check_weekly_cap(runs, product="claude",
+                                       account_tag="gem8NEW-netra", now_ts=now_ts)
+            self.assertFalse(out["capped"])
+            self.assertFalse((runs / "account-cap-claude.json").exists())
 
     def test_scan_detects_glm_weekly_monthly_wall(self) -> None:
         import tempfile
@@ -1596,7 +1646,8 @@ class WeeklyCapGateTest(unittest.TestCase):
         now = 1_000_000.0
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
-            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60)
+            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60,
+                               account_tag="smith")
             first = mod.check_weekly_cap(runs, product="claude", account_tag="smith", now_ts=now)
             self.assertTrue(first["capped"])
             self.assertEqual(first["source"], "banner")
@@ -1613,7 +1664,8 @@ class WeeklyCapGateTest(unittest.TestCase):
         now = 1_000_000.0
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
-            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60)
+            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60,
+                               account_tag="smith")
             mod.check_weekly_cap(runs, product="claude", account_tag="smith", now_ts=now)
             # Far past the Jun-25 reset -> hold expires, state cleared, spawning resumes.
             future = 1_000_000.0 + 30 * 86400
@@ -1708,7 +1760,8 @@ class WeeklyCapGateTest(unittest.TestCase):
         now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
-            self._write_worker(runs, "resolve-438-x.log", self.SESSION_BANNER, mtime=now_ts - 60)
+            self._write_worker(runs, "resolve-438-x.log", self.SESSION_BANNER,
+                               mtime=now_ts - 60, account_tag="gem8-netra")
             out = mod.check_weekly_cap(runs, product="claude", account_tag="gem8-netra",
                                        now_ts=now_ts)
             self.assertTrue(out["capped"])
@@ -1728,7 +1781,8 @@ class WeeklyCapGateTest(unittest.TestCase):
         now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
-            self._write_worker(runs, "resolve-9-w.log", self.BANNER, mtime=now_ts - 60)
+            self._write_worker(runs, "resolve-9-w.log", self.BANNER, mtime=now_ts - 60,
+                               account_tag="smith")
             out = mod.check_weekly_cap(runs, product="claude", account_tag="smith",
                                        now_ts=now_ts)
             self.assertTrue(out["capped"])
@@ -1746,7 +1800,7 @@ class WeeklyCapGateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._write_worker(runs, "resolve-1451-glm.log", self.GLM_WALL,
-                               mtime=now_ts - 60, backend="opencode")
+                               mtime=now_ts - 60, backend="opencode", account_tag="glm")
             out = mod.check_weekly_cap(runs, product="opencode", account_tag="glm",
                                        now_ts=now_ts)
             self.assertTrue(out["capped"])
@@ -1778,6 +1832,100 @@ class WeeklyCapGateTest(unittest.TestCase):
         self.assertEqual(p["action"], "weekly_capped")
         self.assertIn("Jun 25, 1pm", p["reason"])
         self.assertEqual(p["weekly_cap"]["until"], "2026-06-25T20:00:00Z")
+
+    def test_evaluate_reroutes_once_when_selected_account_is_capped(self) -> None:
+        mod = load()
+        capped = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+                  "account": {"tag": "day26NEW-netra", "tier": 1,
+                              "model": "opus", "dir": "/acct/day26"}}
+        spare = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+                 "account": {"tag": "gem8NEW-netra", "tier": 1,
+                             "model": "opus", "dir": "/acct/gem8"}}
+        preflights: list[str] = []
+
+        def preflight(root, **kw):
+            preflights.append(str(kw.get("product")))
+            return capped if len(preflights) == 1 else spare
+
+        caps: list[str] = []
+
+        def cap_check(runs_dir, **kw):
+            tag = str(kw.get("account_tag") or "")
+            caps.append(tag)
+            if tag == "day26NEW-netra":
+                return {"capped": True, "until": "2026-07-04T00:00:00Z",
+                        "reset_text": "", "source": "state"}
+            return {"capped": False}
+
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = preflight
+        mod.check_weekly_cap = cap_check
+        mod.check_backend_health = lambda *a, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda *a, **k: []
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": k.get("timeout_s"), "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
+        mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        mod.lane_issue_numbers = lambda root, lane, exclude=None: {
+            "lane": "gateway", "numbers": [467],
+            "by_lane_count": {"gateway": 1},
+            "eligible_by_lane": [["gateway", [467]]],
+        }
+        mod.live_resolution_issues = lambda runs_dir: set()
+        mod.live_resolution_lanes = lambda runs_dir: set()
+        mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 900, "title": f"title {n}"}
+        mod.issue_contract_review = passing_issue_contract
+        mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("dry-run must never spawn"))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False, contract_hold_ttl_h=0)
+
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["account"]["tag"], "gem8NEW-netra")
+        self.assertEqual(preflights, ["claude", "claude"])
+        self.assertEqual(caps, ["day26NEW-netra", "gem8NEW-netra"])
+        self.assertEqual(p["account_cap_reroute"]["from"]["tag"], "day26NEW-netra")
+        self.assertEqual(p["account_cap_reroute"]["account"]["tag"], "gem8NEW-netra")
+
+    def test_evaluate_keeps_weekly_capped_when_reroute_returns_same_account(self) -> None:
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "day26NEW-netra", "tier": 1,
+                           "model": "opus", "dir": "/acct/day26"}}
+        preflights = 0
+
+        def preflight(root, **kw):
+            nonlocal preflights
+            preflights += 1
+            return pre
+
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = preflight
+        mod.check_weekly_cap = lambda runs_dir, **k: {
+            "capped": True, "until": "2026-07-04T00:00:00Z",
+            "reset_text": "", "source": "state"}
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": k.get("timeout_s"), "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
+        mod.prune_dead_sidecars = lambda runs_dir, **k: {"pruned": []}
+        mod.check_backend_health = lambda *a, **k: {"state": "healthy"}
+        mod.read_dead_backends = lambda *a, **k: []
+        mod.lane_issue_numbers = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("same capped account must short-circuit before lane router"))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "WEEKLY_CAPPED")
+        self.assertEqual(preflights, 2)
+        self.assertEqual(p["account_cap_reroute"]["reason"],
+                         "reroute did not find a different account")
 
 
 class EvaluateBackendHealthTest(unittest.TestCase):

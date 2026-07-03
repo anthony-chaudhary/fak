@@ -1274,6 +1274,25 @@ def _backend_of_log(log: Path) -> str:
     return m.group(1) if m else "claude"
 
 
+def _account_tag_of_log(log: Path) -> str | None:
+    """Return the switcher account tag stamped next to ``log``, if any.
+
+    Account sidecars are written before the child can produce output. A quota
+    banner without this sidecar is not positive evidence for whichever account
+    the next tick happens to route to, so account-scoped cap checks ignore it.
+    """
+    try:
+        rec = json.loads(log.with_suffix(ACCOUNT_SIDECAR_SUFFIX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(rec, dict):
+        tag = rec.get("tag") or rec.get("account")
+        return str(tag) if tag else None
+    if isinstance(rec, str) and rec:
+        return rec
+    return None
+
+
 # How many trailing bytes of a worker log to inspect for the quota banner. A walled
 # worker emits the banner as the LAST thing it writes, so the tail is where it lives;
 # bounding the read keeps a multi-MB productive log cheap to scan and stops its early
@@ -1345,7 +1364,7 @@ def _write_cap_hold(runs_dir: Path, *, product: str, account_tag: str | None,
 
 
 def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
-                            now_ts: float) -> dict[str, Any] | None:
+                            now_ts: float, account_tag: str | None = None) -> dict[str, Any] | None:
     """The most-recent worker log (this backend, mtime within ``lookback_min``)
     whose TAIL is the quota-limit banner → ``{reset_text, evidence_log}``, else None.
     Scanning only the tail (not the whole file, and not size-gated) catches a codex
@@ -1366,6 +1385,8 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
             continue
         if _backend_of_log(log) != product:
             continue
+        if account_tag and _account_tag_of_log(log) != account_tag:
+            continue
         hit = _cap_hit_from_text(_log_tail_text(log), evidence_log=log.name)
         if not hit:
             continue
@@ -1374,6 +1395,23 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
     if best is None:
         return None
     return {"reset_text": best[1], "evidence_log": best[2], "kind": best[3]}
+
+
+def _persisted_hold_matches_account(runs_dir: Path, state: dict[str, Any],
+                                    account_tag: str | None) -> bool:
+    """True when a persisted cap hold is still attributable to ``account_tag``.
+
+    Old state written before account-scoped scanning can name the next selected
+    account even though the evidence log was generic. If the state points at an
+    evidence log, require that log's account sidecar to still match before
+    honoring the hold.
+    """
+    if not account_tag:
+        return True
+    evidence = str(state.get("evidence_log") or "")
+    if not evidence:
+        return True
+    return _account_tag_of_log(runs_dir / evidence) == account_tag
 
 
 def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | None:
@@ -1441,7 +1479,8 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
         state_path = runs_dir / f"account-cap-{product}.json"
         hit = _scan_recent_cap_banner(runs_dir, product=product,
-                                      lookback_min=lookback_min, now_ts=now_ts)
+                                      lookback_min=lookback_min, now_ts=now_ts,
+                                      account_tag=account_tag)
         if hit:
             return _write_cap_hold(runs_dir, product=product, account_tag=account_tag,
                                    hit=hit, now_ts=now_ts, fallback_min=fallback_min,
@@ -1454,6 +1493,12 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
                 return {"capped": False}
             until = _iso_to_utc(state.get("until") or "")
             if state.get("account") == account_tag and until and now_utc < until:
+                if not _persisted_hold_matches_account(runs_dir, state, account_tag):
+                    try:
+                        state_path.unlink()
+                    except OSError:
+                        pass
+                    return {"capped": False}
                 return {"capped": True, "until": state.get("until"),
                         "reset_text": state.get("reset_text", ""), "source": "state"}
             if until and now_utc >= until:
@@ -2453,6 +2498,39 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
+    account_cap_reroute: dict[str, Any] | None = None
+
+    def _preflight_public(doc: dict[str, Any]) -> dict[str, Any]:
+        return {"verdict": doc.get("verdict"), "reason": doc.get("reason"),
+                "cap": doc.get("cap"), "live": doc.get("live")}
+
+    def _account_public(account: dict[str, Any]) -> dict[str, Any]:
+        return {k: account.get(k) for k in ("tag", "tier", "model", "dir")}
+
+    def _same_account(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        for key in ("tag", "dir"):
+            lv = str(left.get(key) or "")
+            rv = str(right.get(key) or "")
+            if lv and rv and lv == rv:
+                return True
+        return False
+
+    def _weekly_capped_payload(blocked_cap: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
+            "preflight": _preflight_public(pre),
+            "account": _account_public(acct),
+            "weekly_cap": blocked_cap, "ok": False, "action": "weekly_capped",
+            "verdict": "WEEKLY_CAPPED",
+            "reason": (f"account '{acct.get('tag')}' is weekly-capped (resets "
+                       f"{blocked_cap.get('reset_text') or '?'}); holding spawn until "
+                       f"{blocked_cap.get('until')} — re-arm is automatic at the reset"),
+        }
+        if account_cap_reroute:
+            payload["account_cap_reroute"] = account_cap_reroute
+        return finish(payload)
 
     # Weekly-cap gate — BEFORE the lane router's gh work. A logged-in account can
     # still be quota-exhausted; the preflight returns SPAWN_OK regardless. Without
@@ -2463,19 +2541,30 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     cap = (check_weekly_cap(runs_dir, product=product, account_tag=acct.get("tag"))
            if pre_ok else {"capped": False})
     if pre_ok and cap.get("capped"):
-        return finish({
-            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
-            "max_workers": max_workers, "registry_refresh": reg,
-            "timed_out_workers": reaped, "pruned_sidecars": pruned,
-            "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
-                          "cap": pre.get("cap"), "live": pre.get("live")},
-            "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
-            "weekly_cap": cap, "ok": False, "action": "weekly_capped",
-            "verdict": "WEEKLY_CAPPED",
-            "reason": (f"account '{acct.get('tag')}' is weekly-capped (resets "
-                       f"{cap.get('reset_text') or '?'}); holding spawn until "
-                       f"{cap.get('until')} — re-arm is automatic at the reset"),
-        })
+        reroute_pre = issue_dispatch.preflight(
+            root, max_workers=eff_max_workers, work_kind=work_kind, product=product)
+        reroute_ok = reroute_pre.get("verdict") == "SPAWN_OK"
+        reroute_acct = reroute_pre.get("account") or {}
+        account_cap_reroute = {
+            "attempted": True,
+            "from": _account_public(acct),
+            "preflight": _preflight_public(reroute_pre),
+            "account": _account_public(reroute_acct),
+        }
+        if reroute_ok and reroute_acct and not _same_account(acct, reroute_acct):
+            reroute_cap = check_weekly_cap(
+                runs_dir, product=product, account_tag=reroute_acct.get("tag"))
+            account_cap_reroute["weekly_cap"] = reroute_cap
+            if not reroute_cap.get("capped"):
+                pre, pre_ok, acct, cap = reroute_pre, True, reroute_acct, reroute_cap
+            else:
+                account_cap_reroute["reason"] = "rerouted account is also capped"
+                return _weekly_capped_payload(cap)
+        else:
+            account_cap_reroute["reason"] = (
+                "reroute did not find a different account"
+                if reroute_ok else "reroute preflight refused")
+            return _weekly_capped_payload(cap)
 
     # Backend-health gate (the self-suppress half) — AFTER weekly-cap, same shape. If
     # THIS backend is spinning dead (a streak of banner-only/0-byte deaths the cap
@@ -2579,6 +2668,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         # Surface the commit-time witness verdicts (#1324 proposal #2) only on a live
         # tick where the sweep ran, so a dry-run payload stays byte-identical.
         **({"witnessed_slots": witnessed} if live else {}),
+        **({"account_cap_reroute": account_cap_reroute} if account_cap_reroute else {}),
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},

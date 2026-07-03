@@ -121,6 +121,12 @@ POLICY_PATH = os.environ.get(
 POLICY_EXAMPLE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "accounts_policy.example.json")
 REGISTRY_PATH = os.path.join(REG_DIR, "sessions.json")
+RUNS_DIRNAME = ".dispatch-runs"
+ACCOUNT_CAP_PREFIX = "account-cap-"
+ACCOUNT_CAP_RUNS_DIR = os.environ.get(
+    "FLEET_ACCOUNT_CAP_RUNS_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), RUNS_DIRNAME),
+)
 
 # How fresh an active-probe ledger entry must be to override the registry's carried
 # status. The probe LEDGER (account_probe's probe_ledger.jsonl) is a SEPARATE file from
@@ -419,6 +425,82 @@ def _normalize_throttle(throttle: dict | None) -> dict:
             out[account] = dict(info)
         else:
             out[account] = {"reset": info}
+    return out
+
+
+def _account_cap_until(state: dict) -> dt.datetime | None:
+    until = _parse_utc(state.get("until") if isinstance(state, dict) else None)
+    if until is None:
+        return None
+    return until.astimezone(dt.timezone.utc)
+
+
+def active_account_cap_throttles(
+    rows: list[dict],
+    *,
+    runs_dir: str | os.PathLike[str] | None = None,
+    now: dt.datetime | None = None,
+) -> dict[str, dict]:
+    """Return throttle entries derived from active account-cap sidecars.
+
+    issue_resolve_dispatch.py writes ``.dispatch-runs/account-cap-<product>.json``
+    after a live worker proves a quota wall. The switcher routes by account
+    basename, while the sidecar stores product + short tag, so this folds active
+    holds through the discovered roster before ``runtime_status()`` runs. Missing,
+    malformed, expired, or unmatchable sidecars contribute nothing (fail-open).
+    """
+    by_product_tag: dict[tuple[str, str], str] = {}
+    for row in rows:
+        if row.get("kind") != "worker":
+            continue
+        product = str(row.get("product") or account_product(str(row.get("account") or ""))).lower()
+        account = str(row.get("account") or "")
+        tag = str(row.get("tag") or account_tag(account)).lower()
+        if product and account and tag:
+            by_product_tag[(product, tag)] = account
+            by_product_tag[(product, account.lower())] = account
+
+    rd = Path(runs_dir or ACCOUNT_CAP_RUNS_DIR)
+    if not rd.is_dir():
+        return {}
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
+    else:
+        now = now.astimezone(dt.timezone.utc)
+
+    out: dict[str, dict] = {}
+    for path in sorted(rd.glob(f"{ACCOUNT_CAP_PREFIX}*.json")):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        until = _account_cap_until(state)
+        if until is None or until <= now:
+            continue
+        product = str(
+            state.get("product")
+            or path.stem[len(ACCOUNT_CAP_PREFIX):]
+        ).lower()
+        tag = str(state.get("account") or "").lower()
+        account = by_product_tag.get((product, tag))
+        if not account:
+            continue
+        reset = str(state.get("until") or "")
+        kind = str(state.get("kind") or "session").lower()
+        throttle = {
+            "reset": reset,
+            "since": state.get("detected"),
+            "source": "account-cap-sidecar",
+            "cap_kind": kind,
+            "reset_text": state.get("reset_text") or "",
+        }
+        if kind == "weekly":
+            throttle["weekly"] = reset
+        out[account] = throttle
     return out
 
 
@@ -944,14 +1026,27 @@ def runtime_status(account: str, registry: dict | None = None,
 def annotate_accounts(rows: list[dict], registry: dict | None = None,
                       throttle: dict | None = None,
                       sessions: list[dict] | None = None,
-                      probe_ledger: bool | None = None) -> list[dict]:
+                      probe_ledger: bool | None = None,
+                      cap_runs_dir: str | os.PathLike[str] | None = None) -> list[dict]:
     """Attach live availability fields to discover_accounts() rows."""
+    raw_reg = load_registry() if registry is None else registry
+    reg = copy.deepcopy(raw_reg) if isinstance(raw_reg, dict) else {}
+    effective_probe_ledger = True if registry is None and probe_ledger is None else probe_ledger
+    effective_throttle = _normalize_throttle(
+        throttle if throttle is not None
+        else (reg.get("throttle") if isinstance(reg, dict) else None)
+    )
+    effective_throttle.update(
+        active_account_cap_throttles(rows, runs_dir=cap_runs_dir))
+    if effective_throttle:
+        reg["throttle"] = effective_throttle
     out = []
     for row in rows:
         r = dict(row)
         if r.get("kind") == "worker":
             r.update(runtime_status(
-                r["account"], registry, throttle, sessions, probe_ledger=probe_ledger))
+                r["account"], reg, sessions=sessions,
+                probe_ledger=effective_probe_ledger))
         else:
             r.update({
                 "available": False,
