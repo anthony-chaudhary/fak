@@ -51,7 +51,7 @@ var loginRequiredRE = regexp.MustCompile(`(?i)Login interrupted|please run /logi
 var apiErrRE = regexp.MustCompile(`(?i)isApiErrorMessage|API Error|overloaded_error|\boverloaded\b|` +
 	`\b429\b|\b529\b|\b503\b|fetch failed|ECONNRESET|ETIMEDOUT|` +
 	`socket hang up|Internal Server Error|service unavailable|` +
-	`connection error|network error`)
+	`connection error|network error|request timed out`)
 
 // Resets is the set of usage-limit reset windows one throttle banner carries. Claude's
 // banner can name a short (hourly/daily) window AND a weekly one in the same message;

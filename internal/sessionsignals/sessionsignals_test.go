@@ -115,6 +115,11 @@ func TestIsAPIErrorExcludesAuth(t *testing.T) {
 	if IsAPIError("API Error: 401 authentication_error") {
 		t.Fatal("auth outranks: a 401 wall is not a retry-now API error")
 	}
+	// The bare retry banner a dying session leaves as its terminal record (#2368) —
+	// no "API Error" prefix, just the timeout text.
+	if !IsAPIError("Request timed out.") {
+		t.Fatal("a bare request-timeout banner is a transient API error")
+	}
 }
 
 func TestTerminalFailurePrecedenceAndEmpty(t *testing.T) {
