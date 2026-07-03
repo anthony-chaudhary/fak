@@ -169,6 +169,8 @@ CONTRACT_OVERLAY_DIRNAME = "contract-overlays"
 #              to opencode relieves the opus weekly-quota throughput ceiling.
 BACKENDS = ("claude", "opencode", "codex")
 _BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode", "codex": "codex"}
+OPENCODE_PROMPT_NOTICE = "Resolve GitHub issue # from the attached dispatch prompt."
+OPENCODE_PROMPT_FILE_SUFFIX = ".prompt.txt"
 
 
 def repo_root() -> Path:
@@ -917,10 +919,13 @@ def build_worker_command(backend: str, prompt: str, model: str | None) -> list[s
     if backend == "claude":
         return ["claude", "-p", "--permission-mode", "bypassPermissions", prompt]
     if backend == "opencode":
-        cmd = ["opencode", "run", "--dangerously-skip-permissions"]
+        # Keep the full dispatch prompt out of argv. The live spawn path writes it
+        # beside the log and attaches it with ``--file``; this short notice keeps
+        # process listings small while preserving the issue-worker liveness marker.
+        cmd = ["opencode", "run", "--print-logs", "--dangerously-skip-permissions"]
         if model:
             cmd += ["-m", model]  # pin the exact model so the run is reproducible/traced
-        cmd.append(prompt)
+        cmd.append(OPENCODE_PROMPT_NOTICE)
         return cmd
     if backend == "codex":
         # `codex exec` is the headless analogue of `claude -p` / `opencode run`;
@@ -934,6 +939,59 @@ def build_worker_command(backend: str, prompt: str, model: str | None) -> list[s
         cmd.append(prompt)
         return cmd
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
+def _command_basename(path: str) -> str:
+    """Return a command basename for POSIX or Windows-shaped paths."""
+    return os.path.basename(str(path).replace("\\", "/")).lower()
+
+
+def unwrap_opencode_npm_shim(exe: str) -> str:
+    """Return the real opencode executable behind the Windows npm shim, if present."""
+    if _command_basename(exe) not in {"opencode", "opencode.exe", "opencode.cmd",
+                                      "opencode.bat", "opencode.ps1"}:
+        return ""
+    parent = Path(exe).parent
+    if str(parent) in ("", "."):
+        return ""
+    target = parent / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
+    try:
+        return str(target) if target.is_file() else ""
+    except OSError:
+        return ""
+
+
+def resolve_worker_executable(backend: str, name: str) -> str:
+    exe = shutil.which(name) or name
+    if backend == "opencode" and os.name == "nt":
+        target = unwrap_opencode_npm_shim(exe)
+        if target:
+            return target
+    return exe
+
+
+def attach_opencode_prompt_file(command: list[str], prompt_path: Path | str) -> list[str]:
+    """Attach the staged dispatch prompt while keeping the final notice as text."""
+    out = list(command)
+    prompt = str(prompt_path)
+    if not out or not prompt.strip():
+        return out
+    if len(out) == 1:
+        return [*out, "--file", prompt]
+    last = out[-1]
+    return [*out[:-1], "--file", prompt, "--", last]
+
+
+def resolve_opencode_command(command: list[str]) -> list[str]:
+    """Resolve the opencode token even when it is nested behind ``fak guard --``."""
+    out = list(command)
+    for idx, token in enumerate(out):
+        if _command_basename(token) in {"opencode", "opencode.exe", "opencode.cmd",
+                                        "opencode.bat", "opencode.ps1"} \
+                and idx + 1 < len(out) and out[idx + 1] == "run":
+            out[idx] = resolve_worker_executable("opencode", token)
+            break
+    return out
 
 
 def _opencode_config_home(account_dir: str, runs_dir: Path) -> str:
@@ -1134,7 +1192,8 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        account: dict[str, Any] | None = None,
                        base_sha: str | None = None,
                        spawn_probe_s: float = 0.0,
-                       log_prefix: str = "resolve") -> dict[str, Any]:
+                       log_prefix: str = "resolve",
+                       prompt_payload: str | None = None) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
@@ -1151,7 +1210,15 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"{log_prefix}-{issue}-{stamp}.log"
-    exe = shutil.which(command[0]) or command[0]
+    prompt_file: Path | None = None
+    if backend == "opencode":
+        if prompt_payload is None:
+            raise ValueError("opencode worker spawn requires prompt_payload")
+        prompt_file = out_log.with_suffix(OPENCODE_PROMPT_FILE_SUFFIX)
+        prompt_file.write_text(prompt_payload, encoding="utf-8")
+        command = resolve_opencode_command(
+            attach_opencode_prompt_file(command, prompt_file))
+    exe = resolve_worker_executable(backend, command[0])
     argv = [exe, *command[1:]]
     if membership is not None:
         env = {**env, **wave_membership_env(**membership)}
@@ -1187,6 +1254,8 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
         (out_log.with_suffix(BASE_SHA_SIDECAR_SUFFIX)).write_text(base_sha, encoding="utf-8")
     result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,
                               "lane": lane, "backend": backend}
+    if prompt_file is not None:
+        result["prompt_file"] = str(prompt_file)
     acct = write_account_sidecar(out_log, account)
     if acct:
         result["account"] = acct
@@ -2411,7 +2480,8 @@ def _maybe_dispatch_contract_repair(
     payload["guarded"] = guarded
     spawned = spawn_issue_worker(command, env, root, runs_dir, rec["issues"][0],
                                  REPAIR_LANE, backend, account=acct,
-                                 spawn_probe_s=spawn_probe_s, log_prefix="repair")
+                                 spawn_probe_s=spawn_probe_s, log_prefix="repair",
+                                 prompt_payload=rec["prompt"] if backend == "opencode" else None)
     try:
         Path(str(spawned.get("log") or "")).with_suffix(
             REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(nums, encoding="utf-8")
@@ -2919,7 +2989,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     rc_head, head_out = _git_capture(root, ["rev-parse", "HEAD"])
     base_sha = head_out.strip() if rc_head == 0 and head_out.strip() else None
     spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
-                                 account=acct, base_sha=base_sha, spawn_probe_s=spawn_probe_s)
+                                 account=acct, base_sha=base_sha, spawn_probe_s=spawn_probe_s,
+                                 prompt_payload=rec["prompt"] if backend == "opencode" else None)
     early = spawned.get("early_exit") or {}
     if early.get("checked") and not early.get("alive"):
         # The spawn died immediately, so the lane lease we just took now guards a

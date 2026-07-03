@@ -1214,14 +1214,54 @@ class BuildWorkerCommandTest(unittest.TestCase):
         mod = load()
         self.assertEqual(
             mod.build_worker_command("opencode", "PROMPT", "zai-coding-plan/glm-5.2"),
-            ["opencode", "run", "--dangerously-skip-permissions",
-             "-m", "zai-coding-plan/glm-5.2", "PROMPT"])
+            ["opencode", "run", "--print-logs", "--dangerously-skip-permissions",
+             "-m", "zai-coding-plan/glm-5.2", mod.OPENCODE_PROMPT_NOTICE])
 
     def test_opencode_command_without_model(self) -> None:
         mod = load()
         self.assertEqual(
             mod.build_worker_command("opencode", "PROMPT", None),
-            ["opencode", "run", "--dangerously-skip-permissions", "PROMPT"])
+            ["opencode", "run", "--print-logs", "--dangerously-skip-permissions",
+             mod.OPENCODE_PROMPT_NOTICE])
+
+    def test_opencode_command_keeps_full_prompt_out_of_argv(self) -> None:
+        mod = load()
+        full_prompt = "your goal: resolve GitHub issue #2588 with lots of detail"
+        got = mod.build_worker_command("opencode", full_prompt, "glm")
+        self.assertNotIn(full_prompt, got)
+        self.assertIn("resolve github issue #", mod.OPENCODE_PROMPT_NOTICE.lower())
+        self.assertLessEqual(len(mod.OPENCODE_PROMPT_NOTICE), 96)
+
+    def test_opencode_prompt_file_is_attached_before_notice(self) -> None:
+        mod = load()
+        got = mod.attach_opencode_prompt_file(
+            ["opencode", "run", "--print-logs", "-m", "glm", mod.OPENCODE_PROMPT_NOTICE],
+            r"C:\work\fak\.dispatch-runs\resolve-2588.prompt.txt")
+        self.assertEqual(got, [
+            "opencode", "run", "--print-logs", "-m", "glm",
+            "--file", r"C:\work\fak\.dispatch-runs\resolve-2588.prompt.txt",
+            "--", mod.OPENCODE_PROMPT_NOTICE])
+
+    def test_opencode_prompt_file_survives_guard_wrapper(self) -> None:
+        mod = load()
+        got = mod.attach_opencode_prompt_file(
+            ["fak", "guard", "--provider", "openai", "--", "opencode", "run",
+             mod.OPENCODE_PROMPT_NOTICE],
+            "resolve-2588.prompt.txt")
+        self.assertEqual(got[-4:], ["--file", "resolve-2588.prompt.txt",
+                                    "--", mod.OPENCODE_PROMPT_NOTICE])
+
+    def test_unwrap_opencode_npm_shim_targets_real_executable(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            npm = Path(d)
+            real = npm / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
+            real.parent.mkdir(parents=True)
+            real.write_text("fake exe", encoding="utf-8")
+            self.assertEqual(
+                mod.unwrap_opencode_npm_shim(str(npm / "opencode.cmd")), str(real))
+            self.assertEqual(mod.unwrap_opencode_npm_shim(str(npm / "claude.cmd")), "")
 
     def test_codex_command_shape(self) -> None:
         mod = load()
@@ -2146,6 +2186,47 @@ class WaveMembershipTest(unittest.TestCase):
             sidecars = list(runs.glob("*.account"))
             self.assertEqual(len(sidecars), 1)
             self.assertEqual(json.loads(sidecars[0].read_text(encoding="utf-8")), account)
+
+    def test_opencode_spawn_stages_prompt_and_unwraps_npm_shim(self) -> None:
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["argv"] = argv
+                captured["env"] = kwargs.get("env")
+                self.pid = 2588
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            npm = runs / "npm"
+            real = npm / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
+            real.parent.mkdir(parents=True)
+            real.write_text("fake exe", encoding="utf-8")
+            full_prompt = "your goal: resolve GitHub issue #2588 with private details"
+            command = mod.build_worker_command("opencode", full_prompt, "glm")
+
+            def _which(name):
+                return str(npm / "opencode.cmd") if name == "opencode" else None
+
+            with mock.patch.object(mod.shutil, "which", _which), \
+                    mock.patch.object(mod.os, "name", "nt"), \
+                    mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(
+                    command, {"DISPATCH_LANE": "dispatch"}, runs, runs,
+                    issue=2588, lane="dispatch", backend="opencode",
+                    prompt_payload=full_prompt)
+
+            argv = captured["argv"]
+            self.assertEqual(argv[0], str(real))
+            self.assertIn("--file", argv)
+            self.assertIn("--", argv)
+            self.assertIn(mod.OPENCODE_PROMPT_NOTICE, argv)
+            self.assertNotIn(full_prompt, argv)
+            prompt_file = Path(res["prompt_file"])
+            self.assertEqual(prompt_file.read_text(encoding="utf-8"), full_prompt)
 
     def test_spawn_without_membership_writes_no_wave_sidecar(self) -> None:
         # The default single-worker path is unchanged: no membership -> no .wave file.
