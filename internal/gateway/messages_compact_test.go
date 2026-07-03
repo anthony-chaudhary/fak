@@ -455,6 +455,123 @@ func headOrderedWireBody(t *testing.T, nMsgs, recentBpBack int) []byte {
 	return raw
 }
 
+// TestFakCompactionShedNetSavingOnClaudeCodePath is the economic + attribution witness for the
+// ONE cache-value mechanism that applies to the flagship `fak guard -- claude` path: history
+// compaction-shed. It is the compaction analog of TestFakPlacementUnlocksProviderCacheSavings
+// (docs/notes/FAK-OFFENSIVE-CACHE-PLACEMENT-SAVINGS-WITNESS-2026-07-01.md), which prices the
+// OTHER mechanism (breakpoint placement) — but placement is identity on Claude Code (which marks
+// its own head), so that witness claims none of the flagship-path value. This one does.
+//
+// The gap it closes (epic #1844 / #1407): the unit tests above prove head-anchored compaction
+// FIRES on the real Claude-Code-shaped body (head-marked system + a recent message breakpoint) via
+// the observed-cold long-session path. But none priced the net fak-authored saving or attributed
+// it, so docs/notes/FAK-GUARD-CACHE-VALUE-SHARE-2026-07-01.md could only record fak_share = 0 on
+// the guard path (anchor-starvation, no captured fire). This witness prices a real fire end-to-end
+// through the LIVE gateway metrics and the SHIPPED CachePricing model, and proves the counterfactual
+// (firstBP default on the identical body sheds nothing → $0 fak saving). Deterministic: no key, no
+// network, no GPU.
+//
+// PROVENANCE (per docs/standards/net-true-value.md):
+//   - The shed is WITNESSED: it comes from the real Server.compactAnthropicRawWithReason transform
+//     on the real body, read back off the live gatewayMetrics adjudication summary (the same counter
+//     /metrics and the guard exit line render), never a hand-computed number.
+//   - The counterfactual is WITNESSED: the identical body under the firstBP default (compactAnchorHead
+//     off) is forwarded unchanged → CompactionShedTokens == 0 → $0 fak saving.
+//   - The attribution is STRUCTURAL: compaction-shed is fak-authored — the provider never sheds the
+//     conversation middle, it re-bills it every turn. MechanismSavings splits it under owner=fak.
+//   - The magnitude is MODELED: the shipped gateway.CachePricing model at the Opus-4.8 example base
+//     input rate ($5/MTok), the same rate and model the placement witness uses, so the two artifacts
+//     are directly comparable.
+func TestFakCompactionShedNetSavingOnClaudeCodePath(t *testing.T) {
+	// A real Claude-Code-shaped body: a system head that marks its OWN cache_control breakpoint
+	// (the stable cached head the provider reuses) plus a RECENT message breakpoint. On the
+	// warm-cache-safe firstBP default this anchors near the end and the lever stays dormant
+	// (anchor-starved, #1407); only head re-anchoring makes the sprawled middle compactible.
+	body := headOrderedWireBody(t, 120, 2)
+
+	// --- Live fire on the flagship path (head-anchored, observed-cold long session) ---
+	fireSrv := anthropicPassthroughServer(1200)
+	fireSrv.compactAnchorHead = true
+	fireSrv.metrics = newGatewayMetrics(time.Now())
+	// This trace last served two provider-cache TTLs ago: its message-span suffix is provably
+	// expired, so the head-anchored burst carries zero marginal penalty and fires horizon-free —
+	// the un-budgeted plain-`fak guard -- claude` long-session case (#1407's cold path).
+	now := time.Now()
+	fireSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
+
+	reqFire, err := agent.DecodeAnthropicMessagesRequest(body)
+	if err != nil {
+		t.Fatalf("decode fire body: %v", err)
+	}
+	origLen := len(reqFire.Raw)
+	fired, reason := fireSrv.compactAnthropicRawWithReason(reqFire, 0, "long-session")
+	if !fired || reason != "" {
+		t.Fatalf("head-anchored compaction must fire on the observed-cold Claude Code body, got fired=%v reason=%q", fired, reason)
+	}
+	if len(reqFire.Raw) >= origLen {
+		t.Fatalf("a fire must shrink the forwarded body, got %d (in %d)", len(reqFire.Raw), origLen)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(reqFire.Raw); err != nil {
+		t.Fatalf("compacted body failed to re-decode: %v", err)
+	}
+
+	// Read the WITNESSED shed off the live summary — the exact counter /metrics and the guard exit
+	// line render — then split it by owner and price it with the shipped model.
+	sum := fireSrv.metrics.adjudicationSummary()
+	if sum.CompactionShedTokens == 0 {
+		t.Fatal("a fired compaction must record a nonzero WITNESSED shed on the live summary")
+	}
+	mech := sum.MechanismSavings()
+	if mech.FakCompactionShedTokens != sum.CompactionShedTokens {
+		t.Fatalf("compaction shed must attribute to owner=fak: got %d, summary %d", mech.FakCompactionShedTokens, sum.CompactionShedTokens)
+	}
+	pricing := CachePricing{InputPerMTokUSD: ClaudeOpus48InputPerMTokUSD, OutputPerMTokUSD: ClaudeOpus48OutputPerMTokUSD}
+	// The shed is input tokens fak did NOT forward: each would otherwise re-bill at the full input
+	// price (the conversation middle is not cache_control-marked, so the provider never caches it —
+	// it is uncached remainder every turn). The saving is thus shed × base input price, 100% fak.
+	fakTokenEquiv := mech.FakTokenEquiv()
+	fakSavingUSD := fakTokenEquiv * perToken(pricing.InputPerMTokUSD)
+	if fakSavingUSD <= 0 {
+		t.Fatalf("fak-authored compaction saving must be positive, got $%.6f", fakSavingUSD)
+	}
+
+	// --- Counterfactual: the SAME body on the firstBP default sheds nothing → $0 fak saving ---
+	baseSrv := anthropicPassthroughServer(1200) // compactAnchorHead stays false (the default)
+	baseSrv.metrics = newGatewayMetrics(time.Now())
+	baseSrv.metrics.observeHarnessCoherence("long-session", now.Add(-2*compactcohere.DefaultProviderCacheTTL), "", false, "", false, false, 0, 0)
+	reqBase, err := agent.DecodeAnthropicMessagesRequest(body)
+	if err != nil {
+		t.Fatalf("decode base body: %v", err)
+	}
+	origBase := append([]byte(nil), reqBase.Raw...)
+	baseFired, _ := baseSrv.compactAnthropicRawWithReason(reqBase, 0, "long-session")
+	if baseFired {
+		t.Fatal("the firstBP default must stay dormant (anchor-starved) on this Claude Code body — the #1407 baseline")
+	}
+	if !bytes.Equal(reqBase.Raw, origBase) {
+		t.Fatal("a dormant firstBP default must forward the body byte-for-byte")
+	}
+	baseMech := baseSrv.metrics.adjudicationSummary().MechanismSavings()
+	baseSavingUSD := baseMech.FakTokenEquiv() * perToken(pricing.InputPerMTokUSD)
+	if baseSavingUSD != 0 {
+		t.Fatalf("the firstBP-default counterfactual must save $0 of fak-authored value, got $%.6f", baseSavingUSD)
+	}
+
+	// The witness block (printed under -v), mirroring the placement note so the two mechanisms'
+	// artifacts read the same way.
+	t.Logf("FAK-AUTHORED COMPACTION-SHED SAVINGS WITNESS (#1407 head-anchored, flagship `fak guard -- claude` path)")
+	t.Logf("  scope         : real Claude-Code-shaped body (system head marks its OWN cache_control + a recent message breakpoint); 120-turn session; observed-cold long-session trace; Opus-4.8 example input rate {$%.0f/MTok}", pricing.InputPerMTokUSD)
+	t.Logf("  fire          : WITNESSED — real Server.compactAnthropicRawWithReason head-anchored fire, forwarded body %d→%d bytes, re-decodes clean, cached prefix byte-identical", origLen, len(reqFire.Raw))
+	t.Logf("  counterfactual: WITNESSED — same body on the firstBP default (compactAnchorHead off) stays dormant (anchor-starved, #1407) → forwarded byte-for-byte → $0 fak saving")
+	t.Logf("  attribution   : STRUCTURAL — compaction-shed is owner=fak (the provider re-bills the un-cached conversation middle every turn; only fak sheds it)")
+	t.Logf("  magnitude     : MODELED   — shipped gateway.CachePricing at the base input rate, the same model+rate the offensive-placement witness uses")
+	t.Logf("  ---- economics ----")
+	t.Logf("  fak shed          : %d tok (WITNESSED, owner=fak, off the live adjudication summary)", sum.CompactionShedTokens)
+	t.Logf("  fak saving        : $%.6f  (head-anchored long session)", fakSavingUSD)
+	t.Logf("  firstBP baseline  : $%.6f  (the #1407 anchor-starved dormancy this fixes)", baseSavingUSD)
+	t.Logf("  net fak-authored  : $%.6f  = 100%% fak-attributed (the provider never sheds the middle)", fakSavingUSD-baseSavingUSD)
+}
+
 // TestMaybeCompactAnchorHeadDormantWithoutTurnsLeft: --compact-anchor-head is opt-in but the
 // request boundary carries no session-turns horizon (turnsLeft=0, e.g. DecideSession unwired) —
 // the #1407/#1408 burst-economics gate stays conservative and does NOT fire, same as the default
