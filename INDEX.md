@@ -89,6 +89,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [DOS kernel transfer playbook](docs/dos-kernel-transfer-playbook.md) — moving the trust substrate to a new repo.
 - [Prefill visuals](docs/prefill-visuals.md) — the diagrams behind prefill reuse.
 - [Adoption visuals](docs/adoption-visuals.md) — five figures for how to think about using fak: where the binary sits, the rung-by-rung on-ramp, the honest fak-authored vs provider-observed value split, which integration shape fits, and when the perf win is real.
+- [Adoption-signals dashboard spec](docs/adoption/signals.md) — the honest signals worth watching to tell whether fak/DOS is actually being adopted (stars, forks, watchers, mentions, directory listings, integration recipes, distinct harnesses, docs reachability): where each is collected, and — the load-bearing column — what each does NOT prove. Every signal labeled `OBSERVED` (a number a third party controls) vs `WITNESSED` (an artifact fak authored) per the [conflation discipline](docs/CONFLATION-SCORECARD.md); no vanity total ships without its disclaimer, no number is invented. Dimension K of the [concept-popularization epic](docs/notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md).
 
 ## Operating the agent fleet
 
