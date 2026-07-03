@@ -72,6 +72,11 @@ type sweepGroup struct {
 	// AllAlready is true when EVERY path in the lane is AlreadyShipped: the whole lane is already on
 	// the trunk and there is nothing to commit — discard the working copies instead.
 	AllAlready bool `json:"all_already,omitempty"`
+	// Units splits a too-large lane group (> atomicUnitTarget paths) into directory-coherent
+	// sub-commits an operator/loop lands one at a time. Empty (omitted) when the lane already fits
+	// the atomic-unit target, so the JSON shape is byte-for-byte unchanged for the common small-lane
+	// case. When present, the union of every Unit.Paths equals Paths exactly (conservation).
+	Units []sweepSubUnit `json:"units,omitempty"`
 }
 
 // sweepPlan is the full grouped view of a dirty working tree.
@@ -80,6 +85,27 @@ type sweepPlan struct {
 	Groups     []sweepGroup `json:"groups"`
 	NoLane     []sweepEntry `json:"no_lane,omitempty"`
 	Junk       []sweepEntry `json:"junk,omitempty"`
+}
+
+// atomicUnitTarget is the largest number of paths a single sweep sub-commit should carry. A lane
+// group above it is split into directory-coherent sub-units so an operator/loop lands the change in
+// reasonable, SMALL commits instead of one non-atomic blob. Chosen at the existing "medium lane"
+// soft threshold in scoreSweepGroup (>10 paths first costs score) so a split is proposed exactly
+// when the group first stops looking like one reasonable commit — below the hard >25 penalty, not
+// at it. A lane of atomicUnitTarget or fewer paths is left whole (Units omitted).
+const atomicUnitTarget = 10
+
+// sweepSubUnit is a directory-coherent slice of a lane's Paths small enough to be one reasonable
+// commit. It is populated only when a lane group exceeds atomicUnitTarget; the union of a group's
+// Units equals its Paths EXACTLY and each path appears in exactly one unit (the conservation
+// invariant — a split never drops or reclassifies an in-progress change). Units are ordered
+// deterministically by Dir so the Index a loop reads is stable across runs on the same tree.
+type sweepSubUnit struct {
+	Index        int      `json:"index"`                   // 1-based, stable order — the `--unit N` selector
+	Dir          string   `json:"dir"`                     // immediate parent directory of this unit's paths ("" = repo root)
+	Paths        []string `json:"paths"`                   // sorted; a subset of the parent group's Paths
+	Score        int      `json:"score"`                   // scoreSweepGroup over THIS slice — proof the split raised per-unit readiness
+	ScoreReasons []string `json:"score_reasons,omitempty"` // why this sub-unit's Score dropped below 100
 }
 
 // laneResolver maps a repo-relative path to its `(fak <lane>)` leaf, "" when none can be inferred.
@@ -145,6 +171,7 @@ func classifyDirty(entries []dirtyEntry, resolve laneResolver, origin originProb
 			ScoreReasons:   reasons,
 			AlreadyShipped: already,
 			AllAlready:     len(already) > 0 && len(already) == len(paths),
+			Units:          splitLaneUnits(dirty, atomicUnitTarget),
 		})
 	}
 	return plan
@@ -191,6 +218,67 @@ func scoreSweepGroup(entries []dirtyEntry) (int, []string) {
 		return 1, reasons
 	}
 	return score, reasons
+}
+
+// splitLaneUnits partitions a lane's dirtyEntries into directory-coherent sub-units when the lane
+// is larger than target. It returns nil when the lane already fits in one commit (len <= target),
+// so the caller leaves Units omitted and the plan is unchanged for the common small-lane case.
+//
+// PURE — no git, no dos.toml — so it unit-tests with literal dirtyEntry slices exactly like
+// scoreSweepGroup. The algorithm buckets each entry by its IMMEDIATE PARENT directory (all of
+// internal/hooks/*.go land in one unit), orders the buckets by their sorted directory key (sorting
+// KEYS, not raw paths, keeps a cut a coherent directory slice rather than an arbitrary alphabetical
+// path cut), and emits one 1-based unit per key. A directory that ALONE exceeds target stays one
+// unit: its per-unit Score carries the size deduction — a signal to the operator, never an
+// arbitrary intra-directory alphabetical split. (Deeper coarsening — e.g. collapsing singleton
+// units to the top-level path segment — is deliberately left as future work: it needs its own
+// heuristic knob and is not required to land small, coherent commits.)
+//
+// Conservation is STRUCTURAL: every entry lands in exactly one bucket and every bucket becomes
+// exactly one unit, so the union of the returned Unit.Paths equals the input paths exactly and no
+// in-progress change is ever dropped. TestSplitLaneUnitsConservation pins this.
+func splitLaneUnits(entries []dirtyEntry, target int) []sweepSubUnit {
+	if len(entries) <= target {
+		return nil
+	}
+	byDir := map[string][]dirtyEntry{}
+	for _, e := range entries {
+		byDir[sweepDirKey(e.Path)] = append(byDir[sweepDirKey(e.Path)], e)
+	}
+	dirs := make([]string, 0, len(byDir))
+	for d := range byDir {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	units := make([]sweepSubUnit, 0, len(dirs))
+	for i, dir := range dirs {
+		bucket := byDir[dir]
+		sort.Slice(bucket, func(a, b int) bool { return bucket[a].Path < bucket[b].Path })
+		paths := make([]string, len(bucket))
+		for j, e := range bucket {
+			paths[j] = e.Path
+		}
+		score, reasons := scoreSweepGroup(bucket)
+		units = append(units, sweepSubUnit{
+			Index:        i + 1,
+			Dir:          dir,
+			Paths:        paths,
+			Score:        score,
+			ScoreReasons: reasons,
+		})
+	}
+	return units
+}
+
+// sweepDirKey returns the immediate parent directory of a repo-relative path in normalized (forward
+// slash, no leading "./") form — the bucket key splitLaneUnits groups by. A root-level path (no
+// separator) buckets under "" so it groups with its siblings at the repo root.
+func sweepDirKey(p string) string {
+	n := normSweepPath(p)
+	if i := strings.LastIndexByte(n, '/'); i >= 0 {
+		return n[:i]
+	}
+	return ""
 }
 
 func sweepStatusKind(e dirtyEntry) string {

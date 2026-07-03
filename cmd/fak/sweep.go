@@ -43,6 +43,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the plan as JSON")
 	apply := fs.Bool("apply", false, "commit one lane group (requires --lane and -m); default is plan-only")
 	lane := fs.String("lane", "", "with --apply: the lane to commit")
+	unit := fs.Int("unit", 0, "with --apply: commit only sub-unit N of the lane (from groups[].units[].index; 0 = the whole lane)")
 	msg := fs.String("m", "", "with --apply: the commit subject (a `(fak <lane>)` trailer is appended if absent)")
 	push := fs.Bool("push", false, "with --apply: push after a VERIFIED commit (plain push, never --force)")
 	noOrigin := fs.Bool("no-origin", false, "skip the per-path origin/<trunk> relation probe (NEW/AHEAD/ALREADY); faster, but a stale already-shipped duplicate is no longer flagged")
@@ -71,7 +72,7 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	plan := classifyDirty(entries, hooksLaneResolver(root), origin)
 
 	if *apply {
-		return runSweepApply(stdout, stderr, root, plan, *lane, *msg, only, *push)
+		return runSweepApply(stdout, stderr, root, plan, *lane, *msg, only, *unit, *push)
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, plan); err != nil {
@@ -84,11 +85,13 @@ func runSweep(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-// runSweepApply commits one lane group through the safe-commit path. It NEVER invents a subject:
-// --lane and -m are both required, so the caller (a human or a loop reading --json) always owns
-// the claim. The `(fak <lane>)` trailer is appended when absent, the message is pre-linted (the
+// runSweepApply commits one lane group — or one directory-coherent sub-unit of it — through the
+// safe-commit path. It NEVER invents a subject: --lane and -m are both required, so the caller (a
+// human or a loop reading --json) always owns the claim. --unit N narrows the commit to sub-unit N
+// of the lane's split (0 = the whole lane); it composes with --path, which then narrows within the
+// selected unit. The `(fak <lane>)` trailer is appended when absent, the message is pre-linted (the
 // shared trunk has no amend), and safecommit verifies only the requested paths landed.
-func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, msg string, only []string, push bool) int {
+func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, msg string, only []string, unit int, push bool) int {
 	lane = strings.TrimSpace(lane)
 	if lane == "" || strings.TrimSpace(msg) == "" {
 		fmt.Fprintln(stderr, "fak sweep --apply: --lane L and -m SUBJECT are both required (a sweep never invents a subject for peer work)")
@@ -107,9 +110,31 @@ func runSweepApply(stdout, stderr io.Writer, root string, plan sweepPlan, lane, 
 		return 3
 	}
 
+	// --unit N selects one sub-unit of the lane's split BEFORE the --path narrowing. It resolves
+	// against the freshly re-derived plan, so a lane that no longer splits (dropped to <= the
+	// atomic-unit target since the plan was read) correctly refuses rather than committing a stale
+	// slice. An out-of-range or not-applicable unit is a usage error (2), like a missing -m.
 	paths := group.Paths
+	if unit > 0 {
+		if len(group.Units) == 0 {
+			fmt.Fprintf(stderr, "fak sweep --apply: lane %q is not split into sub-units (it fits one commit; drop --unit)\n", lane)
+			return 2
+		}
+		var picked *sweepSubUnit
+		for i := range group.Units {
+			if group.Units[i].Index == unit {
+				picked = &group.Units[i]
+				break
+			}
+		}
+		if picked == nil {
+			fmt.Fprintf(stderr, "fak sweep --apply: lane %q has no sub-unit %d (valid: 1..%d)\n", lane, unit, len(group.Units))
+			return 2
+		}
+		paths = picked.Paths
+	}
 	if len(only) > 0 {
-		paths = intersectPaths(group.Paths, only)
+		paths = intersectPaths(paths, only)
 		if len(paths) == 0 {
 			fmt.Fprintf(stderr, "fak sweep --apply: none of the --path values are dirty stampable paths in lane %q\n", lane)
 			return 3
@@ -255,6 +280,27 @@ func renderSweepPlan(w io.Writer, plan sweepPlan) {
 			}
 			if !g.AllAlready {
 				fmt.Fprintf(w, "    -> fak sweep --apply --lane %s -m \"<type>(%s): <verb> <what>\" [--push]\n", g.Lane, g.Lane)
+			}
+			// A too-large lane also gets a directory-coherent sub-unit plan: commit these one at a
+			// time so the change lands in small, reviewable units instead of one blob. The whole-lane
+			// hint above still stands — sub-units are the RECOMMENDED path, not the only one.
+			if len(g.Units) > 0 && !g.AllAlready {
+				fmt.Fprintf(w, "    LARGE lane (%d paths) — commit in %d directory-coherent sub-unit(s):\n", len(g.Paths), len(g.Units))
+				for _, u := range g.Units {
+					dir := u.Dir
+					if dir == "" {
+						dir = "(repo root)"
+					}
+					fmt.Fprintf(w, "      unit %d  dir %-24s score %3d  (%d path(s))\n", u.Index, dir, u.Score, len(u.Paths))
+					for _, p := range u.Paths {
+						tag := ""
+						if already[p] {
+							tag = "  [ALREADY on origin]"
+						}
+						fmt.Fprintf(w, "        %s%s\n", p, tag)
+					}
+					fmt.Fprintf(w, "        -> fak sweep --apply --lane %s --unit %d -m \"<type>(%s): <verb> <what>\" [--push]\n", g.Lane, u.Index, g.Lane)
+				}
 			}
 		}
 	}
