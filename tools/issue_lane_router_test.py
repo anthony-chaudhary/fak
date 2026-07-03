@@ -27,6 +27,9 @@ m = load()
 LANES = [
     "gateway", "compute", "docs", "tools", "experiments", "model", "abi",
     "bench", "ci", "sessionimage", "promptmmu", "devindex", "metrics", "examples",
+    # work-class fixtures: two hard-classed infra lanes, a frontdoor lane, and the
+    # operator-gated release lane (exclusive).
+    "slackoutbox", "appversion", "release",
 ]
 # Real-layout trees (the Go module is the repo ROOT): `internal/...`, NOT
 # `fak/internal/...`. Mirrors the corrected `dos doctor --json` output after the
@@ -48,6 +51,9 @@ TREES = {
     "devindex": ["internal/devindex/**"],
     "metrics": ["internal/metrics/**"],
     "examples": ["examples/**"],
+    "slackoutbox": ["internal/slackoutbox/**"],
+    "appversion": ["internal/appversion/**"],
+    "release": ["internal/release/**"],
 }
 
 
@@ -563,6 +569,120 @@ class LaneConfTagTest(unittest.TestCase):
         md = m.render_md(payload, date="2026-07-01")
         self.assertIn("| #7 | lane-policy:exclusive lane 'abi' is human-owned/operator-gated; held before spawn | exclusive:abi |", md)
         self.assertIn("do not spawn an issue worker", md)
+
+
+class WorkClassTest(unittest.TestCase):
+    """The work-CLASS axis (frontdoor / infra / dev) derived on top of the lane.
+
+    Precedence is frontdoor > infra > dev: a cross-cutting front-door signal wins
+    regardless of lane; else a hard-classed lane decides; else a mixed lane with a
+    fleet-plumbing cue is infra; else the `dev` residual."""
+
+    def cls(self, iss: dict) -> str:
+        return route(iss)["class"]
+
+    def test_product_leaf_is_dev(self):
+        self.assertEqual(self.cls(issue(1, "feat(model): add rope scaling")), m.CLASS_DEV)
+        self.assertEqual(self.cls(issue(2, "perf(gateway): batch decode")), m.CLASS_DEV)
+
+    def test_hard_infra_lane_is_infra(self):
+        self.assertEqual(self.cls(issue(3, "fix(ci): pin the runner image")), m.CLASS_INFRA)
+        self.assertEqual(self.cls(issue(4, "feat(metrics): add a histogram")), m.CLASS_INFRA)
+        self.assertEqual(self.cls(issue(5, "feat(slackoutbox): thread card")), m.CLASS_INFRA)
+
+    def test_hard_frontdoor_lane_is_frontdoor(self):
+        self.assertEqual(self.cls(issue(6, "feat(appversion): derive versions")),
+                         m.CLASS_FRONTDOOR)
+
+    def test_front_door_path_signal_beats_dev_residual(self):
+        # A docs-lane issue that names a public front-door surface classes frontdoor,
+        # not dev — the fenced release path must not leak into the default dev stream.
+        iss = issue(7, "docs(readme): refresh the install section",
+                    body="updates README.md and the install.sh on-ramp")
+        r = route(iss)
+        self.assertEqual(r["lane"], "docs")
+        self.assertEqual(r["class"], m.CLASS_FRONTDOOR)
+
+    def test_front_door_scope_signal(self):
+        # A release-path scope classes frontdoor even when the lane is exclusive/blocked
+        # (release is operator-gated, so the dispatch lane is None) — the class survives.
+        r = route(issue(8, "feat(release): promote dev to main"))
+        self.assertEqual(r["class"], m.CLASS_FRONTDOOR)
+
+    def test_front_door_label_overrides_infra_lane(self):
+        # version-everything is a front-door label: it wins over the ci lane's infra seed.
+        r = route(issue(9, "fix(ci): version badge on the README",
+                        labels=["version-everything"]))
+        self.assertEqual(r["lane"], "ci")
+        self.assertEqual(r["class"], m.CLASS_FRONTDOOR)
+
+    def test_mixed_tools_lane_dispatch_cue_is_infra(self):
+        r = route(issue(10, "feat(dispatch): supervisor cadence knob",
+                        labels=["dispatch"]))
+        self.assertEqual(r["lane"], "tools")
+        self.assertEqual(r["class"], m.CLASS_INFRA)
+
+    def test_mixed_tools_lane_no_cue_is_dev(self):
+        # A generic tools helper with no plumbing cue falls to the dev residual.
+        r = route(issue(11, "feat(tools): add a kernel-parse helper"))
+        self.assertEqual(r["lane"], "tools")
+        self.assertEqual(r["class"], m.CLASS_DEV)
+
+    def test_lane_class_default_is_dev(self):
+        self.assertEqual(m.lane_class("engine"), m.CLASS_DEV)
+        self.assertEqual(m.lane_class(None), m.CLASS_DEV)
+        self.assertEqual(m.lane_class("ci"), m.CLASS_INFRA)
+        self.assertEqual(m.lane_class("appversion"), m.CLASS_FRONTDOOR)
+
+    def test_payload_rolls_up_by_class(self):
+        routes = [route(issue(1, "feat(model): x")),
+                  route(issue(2, "fix(ci): y")),
+                  route(issue(3, "feat(appversion): z"))]
+        payload = m.build_payload(workspace="C:/work/fleet", routes=routes, trees=TREES)
+        self.assertEqual(payload["counts"]["by_class"],
+                         {m.CLASS_FRONTDOOR: 1, m.CLASS_INFRA: 1, m.CLASS_DEV: 1})
+        self.assertEqual(payload["classes"][m.CLASS_INFRA]["issues"], [2])
+
+    def test_render_shows_class_rollup(self):
+        routes = [route(issue(1, "feat(model): x")), route(issue(2, "fix(ci): y"))]
+        text = m.render(m.build_payload(workspace="C:/work/fleet", routes=routes,
+                                        trees=TREES))
+        self.assertIn("by class:", text)
+        self.assertIn("infra=1", text)
+        self.assertIn("dev=1", text)
+
+
+class ClassLabelBackfillTest(unittest.TestCase):
+    """The gated `--apply-labels` backfill diff is pure + idempotent."""
+
+    def test_adds_missing_class_label(self):
+        changes = m.plan_class_label_changes(
+            [{"number": 5, "class": "infra"}], {5: set()})
+        self.assertEqual(changes, [{"number": 5, "add": ["class:infra"], "remove": []}])
+
+    def test_already_correct_is_noop(self):
+        changes = m.plan_class_label_changes(
+            [{"number": 5, "class": "dev"}], {5: {"class:dev", "bug"}})
+        self.assertEqual(changes, [])
+
+    def test_swaps_stale_sibling(self):
+        changes = m.plan_class_label_changes(
+            [{"number": 5, "class": "frontdoor"}], {5: {"class:infra"}})
+        self.assertEqual(changes,
+                         [{"number": 5, "add": ["class:frontdoor"], "remove": ["class:infra"]}])
+
+    def test_apply_false_never_writes(self):
+        # apply=False must be a pure preview: no gh invoked, applied flag False.
+        result = m.apply_class_label_changes(
+            Path("."), [{"number": 5, "add": ["class:infra"], "remove": []}], apply=False)
+        self.assertEqual(result, {"applied": False, "changed": 1, "errors": []})
+
+    def test_render_label_plan_marks_dry_run(self):
+        text = m.render_label_plan(
+            [{"number": 5, "add": ["class:infra"], "remove": []}], applied=False)
+        self.assertIn("DRY-RUN", text)
+        self.assertIn("#5", text)
+        self.assertIn("+class:infra", text)
 
 
 if __name__ == "__main__":

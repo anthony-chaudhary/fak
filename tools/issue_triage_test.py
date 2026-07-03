@@ -75,9 +75,22 @@ class ClassifyScoreTest(unittest.TestCase):
 
     def test_bare_issue_gets_all_missing_tags(self):
         g = m.classify(_issue(4, labels=[], idle_days_ago=0), NOW, {})
-        for tag in ("needs-priority", "needs-kind", "needs-area", "needs-milestone",
-                    "bare"):
+        for tag in ("needs-priority", "needs-kind", "needs-area", "needs-class",
+                    "needs-milestone", "bare"):
             self.assertIn(tag, g["tags"])
+
+    def test_needs_class_when_no_class_label(self):
+        # A fully-area-labeled issue with no class:* label still needs the work-class
+        # axis (infra vs dev vs front-door) — a SEPARATE gap from needs-area.
+        g = m.classify(_issue(9, labels=["priority/P2", "bug", "gpu"], idle_days_ago=0),
+                       NOW, {})
+        self.assertIn("needs-class", g["tags"])
+        self.assertNotIn("needs-area", g["tags"])  # gpu is an area
+
+    def test_no_needs_class_when_class_label_present(self):
+        g = m.classify(_issue(10, labels=["priority/P2", "bug", "gpu", "class:infra"],
+                              idle_days_ago=0), NOW, {})
+        self.assertNotIn("needs-class", g["tags"])
 
     def test_needs_milestone_when_absent(self):
         # A fully-labeled issue with no milestone is still a triage gap: it never

@@ -2,7 +2,7 @@
 """GitHub issue triage + rank + garden helper for fleet — the /issue-triage helper.
 
 READ-ONLY. Fetches OPEN issues via `gh`, classifies each into triage buckets
-(missing priority/kind/area/milestone, orphaned high-prio, stale, dormant question,
+(missing priority/kind/area/class/milestone, orphaned high-prio, stale, dormant question,
 likely-duplicate, bare), ranks them into a deterministic attention order, and emits:
 
   --json            the full triage model (stdout)
@@ -21,6 +21,9 @@ Label taxonomy is fleet's, baked in as defaults:
               (also tolerated as kind: build, research)
   area      agentic-serving | trust-floor | model-arch | compute | gpu |
               model | substrate | loader | security | dispatch | rsi | licensing
+  class     class:frontdoor | class:infra | class:dev  (work-class axis: the
+              public release path vs fleet infra vs product dev — SEPARATE from
+              area; derived from the lane an issue routes to)
   workflow  in-progress | duplicate | wontfix | invalid | help wanted |
               good first issue
 Override thresholds via flags; override label sets via --config (JSON file).
@@ -69,6 +72,13 @@ KIND = {"bug", "enhancement", "documentation", "question", "performance",
 AREA = {"agentic-serving", "trust-floor", "model-arch", "compute", "gpu",
         "model", "substrate", "loader", "security", "dispatch", "rsi",
         "licensing"}
+# CLASS is a SEPARATE axis from AREA: area = which subsystem, class = which KIND of
+# work (fleet infra vs product dev vs the public front-door/release path). It lets
+# an operator hide the CI/dispatch/observability plumbing and dispatch only product
+# leaves, or fence the release path. The label is `class:<name>`; the value is
+# DERIVED from the lane an issue routes to (issue_lane_router.derive_class) rather
+# than hand-picked, so a freshly-triaged issue is born with the right class.
+CLASS = {"class:frontdoor", "class:infra", "class:dev"}
 WORKFLOW = {"in-progress", "duplicate", "wontfix", "invalid", "help wanted",
             "good first issue"}
 # Bare kind fallback for the "documentation" docs(fak) spam pattern — the
@@ -88,7 +98,7 @@ def _load_config(path: str | None) -> None:
         "workflow": [...], "stale_days": N, "q_idle_days": N, "dup_jaccard": F}"""
     if not path:
         return
-    global PRIORITY, KIND, AREA, WORKFLOW, STALE_DAYS, Q_IDLE_DAYS, DUP_JACCARD
+    global PRIORITY, KIND, AREA, CLASS, WORKFLOW, STALE_DAYS, Q_IDLE_DAYS, DUP_JACCARD
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     if "priority" in cfg:
         PRIORITY = {k: int(v) for k, v in cfg["priority"].items()}
@@ -96,6 +106,8 @@ def _load_config(path: str | None) -> None:
         KIND = set(cfg["kind"])
     if "area" in cfg:
         AREA = set(cfg["area"])
+    if "class" in cfg:
+        CLASS = set(cfg["class"])
     if "workflow" in cfg:
         WORKFLOW = set(cfg["workflow"])
     STALE_DAYS = int(cfg.get("stale_days", STALE_DAYS))
@@ -173,6 +185,8 @@ def classify(issue: dict, now: dt.datetime, dup_groups: dict[int, int]) -> dict:
         tags.append("needs-kind")
     if not (labels & AREA):
         tags.append("needs-area")
+    if not (labels & CLASS):
+        tags.append("needs-class")
     if not issue.get("milestone"):
         tags.append("needs-milestone")
     if not labels:
@@ -318,6 +332,7 @@ def render_md(report: dict, as_of: str) -> str:
         "",
         f"**Open issues:** {c['open']}  ·  needs-priority {c['needs_priority']}  "
         f"·  needs-kind {c['needs_kind']}  ·  needs-area {c['needs_area']}  ·  "
+        f"needs-class {c['needs_class']}  ·  "
         f"needs-milestone {c['needs_milestone']}  ·  orphan {c['orphan']}  ·  "
         f"stale {c['stale']}  ·  dormant-Q {c['dormant_question']}  "
         f"·  likely-dup {c['likely_dup']}  ·  bare {c['bare']}",
@@ -422,6 +437,7 @@ def build_report(issues: list[dict], now: dt.datetime) -> dict:
             "needs_priority": count("needs-priority"),
             "needs_kind": count("needs-kind"),
             "needs_area": count("needs-area"),
+            "needs_class": count("needs-class"),
             "needs_milestone": count("needs-milestone"),
             "orphan": count("orphan"),
             "stale": count("stale"),

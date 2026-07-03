@@ -15,8 +15,12 @@ dispositions sidecar it already builds. UNROUTED is a first-class, surfaced
 output — an issue with no defensible lane is never force-fit (and an exclusive
 lane is never auto-handed to a heuristic-driven worker).
 
-Read-only. It never edits, labels, or closes an issue. The dispatch worker (and
-the operator) consume the map; writing sidecars / closing tickets stays gated.
+Read-only BY DEFAULT: routing never edits, labels, or closes an issue; the dispatch
+worker (and the operator) consume the map. The one exception is the operator-gated
+`--apply-labels` backfill, which reconciles each issue's `class:*` work-class label
+(frontdoor / infra / dev — the axis that separates the public release path and fleet
+infra from product dev leaves). It DRY-RUNS by default and writes to GitHub only under
+the explicit `--apply-labels-write` flag. Closing tickets / writing sidecars stays gated.
 
 Run from the repo ROOT (dos resolves its lane taxonomy from the nearest dos.toml;
 from fak/ it scaffolds a throwaway wrong-lane config).
@@ -128,6 +132,116 @@ CONFIDENCE_RANK = {
     "label": 2,
     "keyword": 1,
     "none": 0,
+}
+
+# ---------------------------------------------------------------------------
+# Work-CLASS axis (infra / frontdoor / dev) — orthogonal to the lane an issue
+# routes to. The lane says WHAT FILE-TREE the work touches; the class says WHAT
+# KIND of work it is, so an operator can select "product leaves only" (hide the
+# CI/dispatch/observability plumbing) or "the public release path" (the fenced
+# front-door bucket) from the same issue-views the lane router already feeds.
+#
+# The class is DERIVED, not hand-labeled: it falls out of the lane an issue
+# already routes to (LANE_CLASS below), with a cross-cutting front-door override
+# on top (FRONT_DOOR_* signals) because the release path spans docs/cmd/ci and is
+# not captured by any single leaf lane. Vocabulary matches the branch-regime ADR
+# (docs/branch-regime.md #1694): front-door / development / release roles.
+#
+#  - frontdoor: the public release path — install/README/getting-started front
+#    door, release promotion + version-everything, the branch-regime cutover.
+#  - infra: fleet machinery — CI/CD, dispatch/supervisor loops, observability,
+#    slack cadence, build, testing infra, host maintenance.
+#  - dev: product/kernel leaves — the residual default (engine, model, gateway,
+#    compute, recall, …), the clean day-to-day dispatch surface.
+CLASS_INFRA = "infra"
+CLASS_FRONTDOOR = "frontdoor"
+CLASS_DEV = "dev"
+WORK_CLASSES = (CLASS_FRONTDOOR, CLASS_INFRA, CLASS_DEV)
+
+# The GitHub label carrying each class (the `--apply-labels` backfill target). One
+# label per class so the axis is selectable in GitHub's own UI/saved-views and in
+# the `.github/issue-views.json` class views (front-door / dev-leaves / infra).
+CLASS_LABEL = {
+    CLASS_FRONTDOOR: "class:frontdoor",
+    CLASS_INFRA: "class:infra",
+    CLASS_DEV: "class:dev",
+}
+# color + one-line description for `gh label create` (branch-regime vocabulary).
+CLASS_LABEL_SPEC = {
+    CLASS_FRONTDOOR: ("B60205", "Work class: public release / front-door path "
+                                "(install, README, release promotion, version-everything)"),
+    CLASS_INFRA: ("5319E7", "Work class: fleet infrastructure "
+                            "(CI/CD, dispatch loops, observability, slack, build, testing)"),
+    CLASS_DEV: ("0E8A16", "Work class: product/kernel dev leaf (the default day-to-day work)"),
+}
+ALL_CLASS_LABELS = set(CLASS_LABEL.values())
+
+# Lane -> class seed. Any lane NOT listed defaults to `dev` (the product residual).
+# Conservative and commented: only lanes that are unambiguously fleet-plumbing are
+# `infra`; only lanes that are unambiguously release-path are `frontdoor`. The
+# mixed lanes (`tools`, `docs`, `cmd`) are NOT hard-classed here — they resolve via
+# the issue's own scope/label/path signals in derive_class (a `tools` dispatch
+# issue is infra; a `tools` kernel-helper issue is dev; a `docs` README issue is
+# frontdoor; a `docs` design-note issue is dev).
+LANE_CLASS: dict[str, str] = {
+    # infra — fleet machinery.
+    "ci": CLASS_INFRA,               # .github/** CI/CD pipelines
+    "metrics": CLASS_INFRA,          # observability / telemetry surface
+    "slackwire": CLASS_INFRA,        # slack control-surface transport
+    "slackoutbox": CLASS_INFRA,      # slack outbound cadence
+    "dispatchauto": CLASS_INFRA,     # dispatch/supervisor automation
+    "loopdrive": CLASS_INFRA,        # loop-driver plumbing
+    "rsiloop": CLASS_INFRA,          # RSI loop engine (self-improvement machinery)
+    "tracesink": CLASS_INFRA,        # trace/telemetry sink
+    "operatorbrief": CLASS_INFRA,    # operator-facing status plumbing
+    # frontdoor — public release path (lane-level; cmd/docs stay signal-gated).
+    "appversion": CLASS_FRONTDOOR,   # per-module derived versions (version-everything)
+    "shipgate": CLASS_FRONTDOOR,     # ship/promotion gate
+    "release": CLASS_FRONTDOOR,      # release lane (exclusive; operator-gated)
+    # everything else -> dev via lane_class()'s default.
+}
+
+# Lanes whose class genuinely depends on the issue, not the lane alone. For these
+# the front-door / infra signal sets decide; absent a signal they fall to `dev`.
+MIXED_LANES = {"tools", "docs", "cmd"}
+
+# Front-door SIGNAL set (fires independent of lane — the release path is
+# cross-cutting). Any hit classes the issue `frontdoor`, the fenced bucket.
+# Widest-signal on purpose: a false-positive INTO the fenced bucket (an operator
+# reviews it) is safer than a release-path issue leaking into the default dev
+# stream. Labels, scopes, and path/keyword surfaces are all checked.
+FRONT_DOOR_LABELS = {
+    "version-everything", "adoption", "popularization", "brand",
+}
+FRONT_DOOR_SCOPES = {
+    "release", "install", "readme", "getting-started", "start-here",
+    "promote", "promotion", "version", "branch-regime", "branchregime",
+    "front-door", "frontdoor", "appversion",
+}
+# Public front-door surfaces named in an issue title/body (regex, case-insensitive).
+# Anchored to real release-path files so ordinary prose ("the main agent") never
+# trips it — mirrors the narrow intent of docs/branch-regime-public-front-door-audit.md.
+FRONT_DOOR_PATH_RE = re.compile(
+    r"(?<![\w./-])("
+    r"README\.md|INSTALL\.md|GETTING-STARTED\.md|START-HERE\.md"
+    r"|install\.sh|docs/branch-regime[\w./-]*"
+    r"|\.github/workflows/release[\w.-]*\.yml"
+    r")",
+    re.IGNORECASE,
+)
+
+# Infra SIGNAL set for the MIXED lanes (mainly `tools`): a dispatch/observability/
+# CI/slack cue on a mixed-lane issue makes it infra rather than dev. Keyed on the
+# same scope/label vocabulary the lane router already understands.
+INFRA_SCOPES = {
+    "dispatch", "observability", "ops", "grafana", "ci", "ci-cd", "cicd",
+    "build", "slack", "watchdog", "metrics", "telemetry", "supervisor",
+    "scoreboard", "nightrun",
+}
+INFRA_LABELS = {
+    "ci-cd", "build", "dispatch", "observability", "slack-cadence",
+    "slack-watchdog", "area:slack", "testing", "coverage", "deployment",
+    "track/G-foundation", "velocity", "score-signal",
 }
 
 # Issues a required HUMAN/EXTERNAL action genuinely blocks (e.g. a legal trademark
@@ -313,6 +427,57 @@ def is_dispatchable(issue: dict[str, Any]) -> bool:
     return not is_blocked_by_human(issue) and not is_epic(issue)
 
 
+def lane_class(lane: str | None) -> str:
+    """The seed class for a lane from LANE_CLASS, defaulting to `dev` (the product
+    residual). A MIXED lane (`tools`/`docs`/`cmd`) also returns `dev` here — its
+    real class is decided by the issue's own signals in derive_class."""
+    if not lane:
+        return CLASS_DEV
+    return LANE_CLASS.get(lane, CLASS_DEV)
+
+
+def is_front_door(issue: dict[str, Any], scope: str | None, typ: str | None) -> bool:
+    """True when a cross-cutting front-door signal fires: a front-door label, a
+    release-path scope/type, or a public-front-door surface named in title/body.
+    Independent of the routed lane — the release path spans docs/cmd/ci."""
+    if _label_names(issue) & FRONT_DOOR_LABELS:
+        return True
+    if scope in FRONT_DOOR_SCOPES or typ in FRONT_DOOR_SCOPES:
+        return True
+    text = str(issue.get("title") or "") + "\n" + str(issue.get("body") or "")
+    return bool(FRONT_DOOR_PATH_RE.search(text))
+
+
+def is_infra_signal(issue: dict[str, Any], scope: str | None, typ: str | None) -> bool:
+    """True when a mixed-lane issue carries a fleet-plumbing cue (dispatch,
+    observability, CI, slack, build). Used to class a `tools`/`docs`/`cmd` issue
+    `infra` rather than letting it fall to the `dev` residual."""
+    if _label_names(issue) & INFRA_LABELS:
+        return True
+    return scope in INFRA_SCOPES or typ in INFRA_SCOPES
+
+
+def derive_class(issue: dict[str, Any], lane: str | None) -> str:
+    """The work-CLASS for a routed issue: frontdoor > infra > dev.
+
+    Front-door wins outright (the fenced release-path bucket) whenever its
+    cross-cutting signal fires, regardless of lane. Otherwise the lane's seed
+    class (LANE_CLASS) decides, except a MIXED lane, where a fleet-plumbing cue
+    promotes the issue to `infra`; absent any signal a mixed lane falls to `dev`.
+    Pure + deterministic — same issue, same class."""
+    scope = _scope_token(str(issue.get("title") or ""))
+    typ = _type_token(str(issue.get("title") or ""))
+    if is_front_door(issue, scope, typ):
+        return CLASS_FRONTDOOR
+    seed = lane_class(lane)
+    if seed != CLASS_DEV:
+        return seed  # a hard-classed infra/frontdoor lane
+    # dev seed (product leaf OR a mixed lane): a fleet-plumbing cue makes it infra.
+    if is_infra_signal(issue, scope, typ):
+        return CLASS_INFRA
+    return CLASS_DEV
+
+
 def route_issue(
     issue: dict[str, Any],
     concurrent: list[str],
@@ -420,7 +585,11 @@ def route_issue(
     return _route(issue, None, "none", "unrouted", False, unrouted_reason=reason)
 
 
-def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None) -> dict[str, Any]:
+def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None,
+           class_lane: str | None = None) -> dict[str, Any]:
+    # The work-class derives from the routed lane (or, for a blocked/unrouted issue,
+    # the class_lane the caller passes so the class survives even without a dispatch
+    # lane). Front-door still overrides via derive_class regardless of lane.
     return {
         "number": issue.get("number"),
         "title": str(issue.get("title") or "")[:80],
@@ -429,6 +598,7 @@ def _route(issue, lane, confidence, signal, conflict, *, unrouted_reason=None) -
         "signal": signal,
         "signal_conflict": bool(conflict),
         "unrouted_reason": unrouted_reason,
+        "class": derive_class(issue, lane if lane is not None else class_lane),
     }
 
 
@@ -438,7 +608,8 @@ def _blocked_route(issue, lane: str, signal: str, policy: str) -> dict[str, Any]
         issue, None, "none", signal, False,
         unrouted_reason=(
             f"lane-policy:{policy} lane '{lane}' is human-owned/operator-gated; "
-            f"held before spawn"))
+            f"held before spawn"),
+        class_lane=lane)
     out["blocked_lane"] = lane
     out["blocked_policy"] = policy
     out["unblock_action"] = EXCLUSIVE_UNBLOCK_ACTION
@@ -542,9 +713,14 @@ def build_payload(
         for i in skipped_blocked
     ]
     by_conf: dict[str, int] = {k: 0 for k in CONFIDENCE_RANK}
+    by_class: dict[str, int] = {k: 0 for k in WORK_CLASSES}
+    class_issues: dict[str, list[int]] = {k: [] for k in WORK_CLASSES}
     lane_routes: dict[str, list[dict[str, Any]]] = {}
     for r in routes:
         by_conf[r["confidence"]] = by_conf.get(r["confidence"], 0) + 1
+        cls = r.get("class") or CLASS_DEV
+        by_class[cls] = by_class.get(cls, 0) + 1
+        class_issues.setdefault(cls, []).append(int(r.get("number") or 0))
         lane = r["lane"]
         if lane:
             lane_routes.setdefault(lane, []).append(r)
@@ -560,13 +736,17 @@ def build_payload(
         # a future confidence-weighted lane picker) can see how well-aimed a lane is.
         lane_rs = sorted(lane_rs, key=_lane_issue_sort_key)
         lane_by_conf: dict[str, int] = {}
+        lane_by_class: dict[str, int] = {}
         for r in lane_rs:
             lane_by_conf[r["confidence"]] = lane_by_conf.get(r["confidence"], 0) + 1
+            rcls = r.get("class") or CLASS_DEV
+            lane_by_class[rcls] = lane_by_class.get(rcls, 0) + 1
         lanes[lane] = {
             "tree": trees.get(lane, []),
             "count": len(lane_rs),
             "issues": [r["number"] for r in lane_rs],
             "by_confidence": lane_by_conf,
+            "by_class": lane_by_class,
         }
 
     total = len(routes)
@@ -617,7 +797,15 @@ def build_payload(
         "counts": {
             "open": total, "routed": routed, "unrouted": unrouted,
             "unrouted_frac": frac, "by_confidence": by_conf,
+            "by_class": by_class,
             "skipped_human_blocked": len(skipped),
+        },
+        "classes": {
+            cls: {
+                "count": by_class.get(cls, 0),
+                "issues": sorted(class_issues.get(cls, []), reverse=True),
+            }
+            for cls in WORK_CLASSES
         },
         "lanes": dict(sorted(lanes.items(), key=lambda kv: (-kv[1]["count"], kv[0]))),
         "issues": sorted(routes, key=_route_sort_key),
@@ -730,12 +918,32 @@ def _lane_conf_tag(by_conf: dict[str, int] | None) -> str:
         if by_conf.get(k))
 
 
+# Short labels for the per-lane class mix in the human render.
+_CLASS_ABBR = {CLASS_FRONTDOOR: "front", CLASS_INFRA: "infra", CLASS_DEV: "dev"}
+
+
+def _lane_class_tag(by_class: dict[str, int] | None) -> str:
+    """Compact class-mix tag for a lane, front-door first (e.g. 'front 2·dev 5').
+    '' when a lane is single-class (its class is already obvious from LANE_CLASS);
+    only surfaced when a lane genuinely SPANS classes — the mixed lanes (tools/
+    docs/cmd) where the split is the whole point."""
+    present = {k: v for k, v in (by_class or {}).items() if v}
+    if len(present) < 2:
+        return ""
+    return "·".join(
+        f"{_CLASS_ABBR.get(k, k)} {present[k]}"
+        for k in WORK_CLASSES if present.get(k))
+
+
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("counts") or {}
+    bc = c.get("by_class") or {}
+    class_line = "  ·  ".join(f"{cls}={bc.get(cls, 0)}" for cls in WORK_CLASSES)
     lines = [
         f"issue-lane router: {payload.get('verdict')} ({payload.get('finding')})",
         f"routed={c.get('routed')}/{c.get('open')} unrouted={c.get('unrouted')} "
         f"(frac={c.get('unrouted_frac')})  by_conf={c.get('by_confidence')}",
+        f"by class:  {class_line}",
         f"next: {payload.get('next_action')}",
     ]
     skipped = payload.get("skipped_human_blocked") or []
@@ -750,7 +958,9 @@ def render(payload: dict[str, Any]) -> str:
     for lane, grp in list((payload.get("lanes") or {}).items())[:20]:
         nums = ",".join(f"#{n}" for n in grp["issues"][:10])
         tag = _lane_conf_tag(grp.get("by_confidence"))
-        lines.append(f"    {lane:<14} {grp['count']:>2}  {nums}" + (f"  [{tag}]" if tag else ""))
+        ctag = _lane_class_tag(grp.get("by_class"))
+        suffix = "".join([f"  [{tag}]" if tag else "", f"  {{{ctag}}}" if ctag else ""])
+        lines.append(f"    {lane:<14} {grp['count']:>2}  {nums}" + suffix)
     unrouted = [r for r in payload.get("issues", []) if r["lane"] is None]
     if unrouted:
         lines.append(f"  UNROUTED ({len(unrouted)}) — operator triage:")
@@ -769,6 +979,7 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
         f"- routed **{c.get('routed')}/{c.get('open')}**, UNROUTED {c.get('unrouted')} "
         f"(frac {c.get('unrouted_frac')})",
         f"- by confidence: `{c.get('by_confidence')}`",
+        f"- by class: `{c.get('by_class')}`",
         f"- verdict: `{payload.get('verdict')}` — {payload.get('reason')}",
     ]
     coverage = payload.get("coverage") or {}
@@ -799,6 +1010,91 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Class-label backfill (the ONE write path — gated behind --apply-labels)
+# ---------------------------------------------------------------------------
+
+def plan_class_label_changes(
+    routes: list[dict[str, Any]],
+    current_labels: dict[int, set[str]],
+) -> list[dict[str, Any]]:
+    """Pure: compute the class-label add/remove diff per routed issue.
+
+    `routes` are the router's per-issue result rows (each with `number` + `class`);
+    `current_labels` maps issue number -> its current label-name set. For each issue
+    whose class label is missing or whose sibling class labels are stale, emit
+    {number, add: [...], remove: [...]}. Issues already correct are omitted (so the
+    backfill is idempotent). Deterministic — sorted by issue number."""
+    changes: list[dict[str, Any]] = []
+    for r in routes:
+        num = int(r.get("number") or 0)
+        if not num:
+            continue
+        want = CLASS_LABEL.get(r.get("class") or CLASS_DEV)
+        have = current_labels.get(num, set())
+        have_class = have & ALL_CLASS_LABELS
+        add = [] if (want in have_class) else [want]
+        remove = sorted(have_class - {want})
+        if add or remove:
+            changes.append({"number": num, "add": add, "remove": remove})
+    return changes
+
+
+def ensure_class_labels(workspace: Path, *, apply: bool) -> list[str]:
+    """Create the three class:* labels if absent (idempotent `gh label create
+    --force`). Returns the labels it (re)created. No-op preview when apply=False."""
+    created: list[str] = []
+    for cls in WORK_CLASSES:
+        name = CLASS_LABEL[cls]
+        color, desc = CLASS_LABEL_SPEC[cls]
+        created.append(name)
+        if apply:
+            # --force upserts: create-or-update color/description, never errors on
+            # an existing label. Matches the repo's ad-hoc `gh label create` pattern.
+            run_text(["gh", "label", "create", name, "--color", color,
+                      "--description", desc, "--force"], workspace)
+    return created
+
+
+def apply_class_label_changes(
+    workspace: Path, changes: list[dict[str, Any]], *, apply: bool,
+) -> dict[str, Any]:
+    """Apply (or preview) the class-label diff via `gh issue edit`. When apply is
+    False this only reports what WOULD change — the tool's read-only-by-default
+    contract. Returns a summary {applied, changed, errors}."""
+    errors: list[str] = []
+    if apply:
+        for ch in changes:
+            args = ["gh", "issue", "edit", str(ch["number"])]
+            for lab in ch["add"]:
+                args += ["--add-label", lab]
+            for lab in ch["remove"]:
+                args += ["--remove-label", lab]
+            res = run_text(args, workspace, timeout=60)
+            if res.get("returncode"):
+                errors.append(f"#{ch['number']}: {res.get('stderr') or 'gh edit failed'}")
+    return {"applied": apply, "changed": len(changes), "errors": errors}
+
+
+def render_label_plan(changes: list[dict[str, Any]], *, applied: bool,
+                      errors: list[str] | None = None) -> str:
+    """Human render of the class-label backfill diff (dry-run or applied)."""
+    head = "APPLIED" if applied else "DRY-RUN (no writes — pass --apply-labels-write to commit)"
+    lines = [f"class-label backfill: {head} — {len(changes)} issue(s) need a change"]
+    for ch in changes[:40]:
+        parts = []
+        if ch["add"]:
+            parts.append("+" + ",".join(ch["add"]))
+        if ch["remove"]:
+            parts.append("-" + ",".join(ch["remove"]))
+        lines.append(f"    #{ch['number']:<6} {' '.join(parts)}")
+    if len(changes) > 40:
+        lines.append(f"    … and {len(changes) - 40} more")
+    for e in errors or []:
+        lines.append(f"  ! {e}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Route open GitHub issues to dos.toml lanes (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
@@ -820,6 +1116,15 @@ def main(argv: list[str] | None = None) -> int:
                          "instead of the full open backlog. FAIL-SOFT: an empty or "
                          "unresolved view falls through to the full backlog so an "
                          "unattended tick never starves. Ignored when --issues is set.")
+    ap.add_argument("--apply-labels", action="store_true",
+                    help="reconcile each issue's class:* GitHub label with its derived "
+                         "work-class (frontdoor/infra/dev). DRY-RUN by default — prints "
+                         "the label add/remove diff WITHOUT writing. Add "
+                         "--apply-labels-write to actually commit the writes.")
+    ap.add_argument("--apply-labels-write", action="store_true",
+                    help="with --apply-labels, actually WRITE the class:* labels to "
+                         "GitHub (create the labels + `gh issue edit`). The only "
+                         "outward-facing action this tool takes; operator-gated.")
     args = ap.parse_args(argv)
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
@@ -861,6 +1166,26 @@ def main(argv: list[str] | None = None) -> int:
         scope_alias=scope_alias, label_alias=label_alias,
         keyword_alias=keyword_alias,
     )
+
+    if args.apply_labels:
+        # The ONE write path. Build the current-label map from the same issue set the
+        # router folded (fetcher when a view/--issues narrowed it, else a fresh fetch),
+        # plan the idempotent add/remove diff, and apply ONLY under --apply-labels-write.
+        do_write = args.apply_labels_write
+        src_issues = (fetcher(workspace) if fetcher
+                      else fetch_issues(workspace, limit=args.issue_limit))
+        current_labels = {
+            int(i.get("number") or 0): _label_names(i) for i in src_issues
+        }
+        routed_rows = [r for r in payload.get("issues", []) if r.get("number")]
+        changes = plan_class_label_changes(routed_rows, current_labels)
+        ensure_class_labels(workspace, apply=do_write)
+        result = apply_class_label_changes(workspace, changes, apply=do_write)
+        if args.json:
+            print(json.dumps({"label_backfill": result, "changes": changes}, indent=2))
+        else:
+            print(render_label_plan(changes, applied=do_write, errors=result["errors"]))
+        return 1 if result["errors"] else 0
 
     if args.md:
         date = run_text(["git", "log", "-1", "--format=%cs"], workspace)["stdout"].strip() or "unknown"
