@@ -1024,16 +1024,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// sharing one upstream account rides out a long 429/529 overload window far better with
 	// more, longer-spaced retries than with a fast give-up.
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
-	var lastErr error
-	// lastStatusErr holds the last error that carried a real upstream HTTP status (and any
-	// Retry-After). It is kept SEPARATE from lastErr and is NEVER cleared by a subsequent
-	// transient transport error, so a network glitch on a later attempt cannot shadow the
-	// 429/503/529 that actually drove the failure: on exhaustion we surface the real status
-	// (and Retry-After), not an opaque 502 (#1358).
-	var lastStatusErr *UpstreamStatusError
-	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
-	lastRetryAfter := "" // the triggering response's Retry-After header, honored as the next wait
-	lastCapWait := ""    // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
+	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	// A 401 on the pinned/rotating subscription path is recoverable ONCE: the on-disk
 	// OAuth token may have rotated (or been briefly torn) between resolve and send, so we
 	// re-read it fresh and retry. triedAuthRefresh caps that at a single extra attempt so a
@@ -1050,7 +1041,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			// budget is the bound a spent budget stops the loop (surface the last error) and a
 			// cancelled context returns promptly — carrying the classified 429/5xx truth when
 			// one is pending (#2257). See retryBackoffWait for the shared step.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
+			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return nil, err
 			}
@@ -1071,30 +1062,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if deterministicTransportError(err) {
 				return nil, &UpstreamUnreachableError{Err: err}
 			}
-			lastErr = err
-			lastStatus = 0      // a transient transport error has no HTTP status
-			lastRetryAfter = "" // ...and no Retry-After to honor — fall back to backoff
-			lastCapWait = ""    // a glitch is not a cap: never stretch its retry to a cap probe
-			continue            // lastStatusErr is left intact: a glitch can't shadow a real status
+			rs.noteTransportGlitch(err)
+			continue
 		}
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			if retryableStatus(resp.StatusCode) {
-				ra := resp.Header.Get("Retry-After")
-				se := &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: ra}
-				// Classify a 429 LIVE against the closed rate-limit vocabulary (#1362): the
-				// error we may finally surface names the kind the recovery acted on, and a
-				// session/weekly/usage cap waits toward its named reset instead of hammering
-				// the transient schedule. A non-429 (or a plain throttle) leaves the wait
-				// decision byte-for-byte unchanged.
-				cls, capWait := classifyLimit429(resp.StatusCode, raw, resp.Header, time.Now())
-				se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
-				lastErr = se
-				lastStatusErr = se
-				lastStatus = resp.StatusCode
-				lastRetryAfter = ra // a 429/503/529 may NAME when to retry — honor it as the next wait
-				lastCapWait = capWait
+				rs.noteRetryableStatus(resp.StatusCode, raw, resp.Header, 200)
 				continue
 			}
 			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
@@ -1109,9 +1084,9 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				if call.refreshAPIKeyWait(ctx, p) {
 					triedAuthRefresh = true
 					notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
-					lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
-					lastStatus = resp.StatusCode
-					lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
+					rs.lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
+					rs.lastStatus = resp.StatusCode
+					rs.lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
 					// Do not count the credential-refresh retry against the backoff schedule:
 					// rewind so the next iteration re-sends immediately with the fresh token.
 					attempt--
@@ -1163,13 +1138,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp.PreSendRedactionRecords = call.redactions
 		return comp, nil
 	}
-	// Prefer the last error that carried a real upstream status (and Retry-After) over a
-	// later transient transport glitch, so the gateway surfaces the true 429/503/529 +
-	// Retry-After rather than an opaque 502 (#1358).
-	if lastStatusErr != nil {
-		return nil, fmt.Errorf("planner: failed after retries: %w", lastStatusErr)
-	}
-	return nil, fmt.Errorf("planner: failed after retries: %w", lastErr)
+	return nil, rs.exhausted("planner: failed after retries")
 }
 
 func (p *HTTPPlanner) attachProviderCacheTelemetry(comp *Completion, reqBody []byte, provider Provider) {

@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -93,22 +92,14 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	triedAuthRefresh := false
 	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
-	var lastErr error
-	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
-	// by a later transport glitch, so exhaustion surfaces the true status + Retry-After.
-	var lastStatusErr *UpstreamStatusError
-	lastStatus := 0      // the status that triggered the pending retry (0 = a transient transport error)
-	lastRetryAfter := "" // the triggering response's Retry-After, honored as the next wait
-	lastCapWait := ""    // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
+	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
 			// buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry` line fires
-			// for the streaming passthrough too), then wait — honoring a named Retry-After, else
-			// the jittered exponential schedule; a spent budget stops; a context cancelled
-			// mid-wait carries the classified 429/5xx truth (#2257). See retryBackoffWait.
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
+			// for the streaming passthrough too), then wait. See retryBackoffWait.
+			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return err
 			}
@@ -139,11 +130,8 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 			if deterministicTransportError(derr) {
 				return &UpstreamUnreachableError{Err: derr}
 			}
-			lastErr = derr
-			lastStatus = 0
-			lastRetryAfter = ""
-			lastCapWait = "" // a glitch is not a cap: never stretch its retry to a cap probe
-			continue         // lastStatusErr left intact
+			rs.noteTransportGlitch(derr)
+			continue
 		}
 		if r.StatusCode == http.StatusOK {
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
@@ -157,17 +145,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
-			ra := r.Header.Get("Retry-After")
-			se := &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
-			// Classify a 429 LIVE (#1362): see Complete — a session/weekly/usage cap waits
-			// toward its named reset; a plain throttle keeps today's wait decision.
-			cls, capWait := classifyLimit429(r.StatusCode, raw, r.Header, time.Now())
-			se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
-			lastErr = se
-			lastStatusErr = se
-			lastStatus = r.StatusCode
-			lastRetryAfter = ra
-			lastCapWait = capWait
+			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
 			continue
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
@@ -199,11 +177,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	if resp == nil {
-		// Prefer the real upstream status (and Retry-After) over a later transport glitch (#1358).
-		if lastStatusErr != nil {
-			return fmt.Errorf("planner: streaming failed after retries: %w", lastStatusErr)
-		}
-		return fmt.Errorf("planner: streaming failed after retries: %w", lastErr)
+		return rs.exhausted("planner: streaming failed after retries")
 	}
 	defer resp.Body.Close()
 	// The gateway only takes this path against the real Anthropic API, but guard anyway:

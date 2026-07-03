@@ -364,19 +364,13 @@ type openAIStreamChunk struct {
 // it) or, after exhausting attempts, the true upstream status error (never a later glitch).
 func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*http.Response, error) {
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
-	var lastErr error
-	// lastStatusErr: see Complete (#1358) — the last real-HTTP-status error, never cleared
-	// by a later transport glitch, so exhaustion surfaces the true status + Retry-After.
-	var lastStatusErr *UpstreamStatusError
-	lastStatus := 0
-	lastRetryAfter := ""
-	lastCapWait := "" // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
+	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	triedAuthRefresh := false
 	var fbState forbiddenRetryState // bounded transient-403 recovery arm (see retry.go), mirrors Complete
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			stop, err := p.retryBackoffWait(ctx, attempt, lastStatus, lastRetryAfter, lastCapWait, lastStatusErr, deadline, budgetOn)
+			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
 			if err != nil {
 				return nil, err
 			}
@@ -395,11 +389,8 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			if deterministicTransportError(err) {
 				return nil, &UpstreamUnreachableError{Err: err}
 			}
-			lastErr = err
-			lastStatus = 0
-			lastRetryAfter = ""
-			lastCapWait = "" // a glitch is not a cap: never stretch its retry to a cap probe
-			continue         // lastStatusErr left intact
+			rs.noteTransportGlitch(err)
+			continue
 		}
 		if r.StatusCode == http.StatusOK {
 			// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal (see Complete).
@@ -413,17 +404,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
 		if retryableStatus(r.StatusCode) {
-			ra := r.Header.Get("Retry-After")
-			se := &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: ra}
-			// Classify a 429 LIVE (#1362): see Complete — a session/weekly/usage cap waits
-			// toward its named reset; a plain throttle keeps today's wait decision.
-			cls, capWait := classifyLimit429(r.StatusCode, raw, r.Header, time.Now())
-			se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
-			lastErr = se
-			lastStatusErr = se
-			lastStatus = r.StatusCode
-			lastRetryAfter = ra
-			lastCapWait = capWait
+			rs.noteRetryableStatus(r.StatusCode, raw, r.Header, 400)
 			continue
 		}
 		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
@@ -434,9 +415,9 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			if call.refreshAPIKeyWait(ctx, p) {
 				triedAuthRefresh = true
 				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
-				lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
-				lastStatus = r.StatusCode
-				lastRetryAfter = ""
+				rs.lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
+				rs.lastStatus = r.StatusCode
+				rs.lastRetryAfter = ""
 				attempt--
 				continue
 			}
@@ -456,11 +437,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	if resp == nil {
-		// Prefer the real upstream status (and Retry-After) over a later transport glitch (#1358).
-		if lastStatusErr != nil {
-			return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastStatusErr)
-		}
-		return nil, fmt.Errorf("planner: streaming failed after retries: %w", lastErr)
+		return nil, rs.exhausted("planner: streaming failed after retries")
 	}
 	return resp, nil
 }
