@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -99,6 +100,7 @@ func (e SpawnDeniedError) Error() string {
 type SpawnBroker struct {
 	mu     sync.Mutex
 	audits []SpawnAudit
+	leaks  []LeakEvent
 }
 
 func NewSpawnBroker() *SpawnBroker {
@@ -106,12 +108,16 @@ func NewSpawnBroker() *SpawnBroker {
 }
 
 func (b *SpawnBroker) Admit(attempt SpawnAttempt) (SpawnGrant, error) {
+	return b.admitAt(attempt, time.Now().UnixMilli())
+}
+
+func (b *SpawnBroker) admitAt(attempt SpawnAttempt, atMS int64) (SpawnGrant, error) {
 	audit := auditForAttempt(attempt)
 	normalized, err := normalizeSpawnAttempt(attempt)
 	if err != nil {
 		audit.Verdict = SpawnVerdictDeny
 		audit.Reason = err.Error()
-		b.appendAudit(audit)
+		b.appendAuditAndLeak(audit, atMS)
 		return SpawnGrant{}, SpawnDeniedError{Audit: audit}
 	}
 
@@ -132,7 +138,7 @@ func (b *SpawnBroker) Admit(attempt SpawnAttempt) (SpawnGrant, error) {
 
 	audit = auditForGrant(grant, SpawnVerdictAllow, "")
 	grant.Audit = audit
-	b.appendAudit(audit)
+	b.appendAuditAndLeak(audit, atMS)
 	return grant, nil
 }
 
@@ -151,13 +157,25 @@ func (b *SpawnBroker) Audits() []SpawnAudit {
 	return out
 }
 
-func (b *SpawnBroker) appendAudit(a SpawnAudit) {
+func (b *SpawnBroker) LeakEvents() []LeakEvent {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]LeakEvent, len(b.leaks))
+	copy(out, b.leaks)
+	return out
+}
+
+func (b *SpawnBroker) appendAuditAndLeak(a SpawnAudit, atMS int64) {
 	if b == nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.audits = append(b.audits, a)
+	b.leaks = append(b.leaks, LeakEventFromSpawnAudit(a, atMS))
 }
 
 func normalizeSpawnAttempt(a SpawnAttempt) (SpawnAttempt, error) {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -27,26 +28,40 @@ const (
 // ChildOutput is a byte slice produced by a child/subagent boundary before a
 // parent context, transcript sidecar, or normal log observes it.
 type ChildOutput struct {
-	AgentRunID string
-	CallID     string
-	Tool       string
-	Channel    OutputChannel
-	Bytes      []byte
+	AgentRunID      string
+	ParentRunID     string
+	ToolCallID      string
+	TraceID         string
+	PolicyDigest    string
+	Backend         string
+	DescendantState DescendantState
+	AtMS            int64
+	CallID          string
+	Tool            string
+	Channel         OutputChannel
+	Bytes           []byte
 }
 
 // OutputAdmission is the safe-to-forward result of admitting ChildOutput.
 // Bytes are the admitted payload or quarantine/deny stub, never the original
 // bytes when a result-admission rung held them out.
 type OutputAdmission struct {
-	AgentRunID  string
-	CallID      string
-	Channel     OutputChannel
-	InputLen    int
-	InputSHA256 string
-	Verdict     abi.Verdict
-	Result      *abi.Result
-	Bytes       []byte
-	Meta        map[string]string
+	AgentRunID      string
+	ParentRunID     string
+	ToolCallID      string
+	TraceID         string
+	PolicyDigest    string
+	Backend         string
+	DescendantState DescendantState
+	CallID          string
+	Channel         OutputChannel
+	InputLen        int
+	InputSHA256     string
+	Verdict         abi.Verdict
+	Result          *abi.Result
+	Bytes           []byte
+	Meta            map[string]string
+	LeakEvent       *LeakEvent
 }
 
 // AdmitChildOutput routes child-owned bytes through the registered result
@@ -64,10 +79,8 @@ func AdmitChildOutput(ctx context.Context, in ChildOutput) OutputAdmission {
 	if tool == "" {
 		tool = "child_output"
 	}
-	trace := in.CallID
-	if trace == "" {
-		trace = in.AgentRunID
-	}
+	trace := firstNonEmpty(in.TraceID, in.CallID, in.ToolCallID, in.AgentRunID)
+	toolCallID := firstNonEmpty(in.ToolCallID, in.CallID)
 	body := append([]byte(nil), in.Bytes...)
 	sum := sha256.Sum256(body)
 	meta := map[string]string{
@@ -81,6 +94,10 @@ func AdmitChildOutput(ctx context.Context, in ChildOutput) OutputAdmission {
 		TraceID: trace,
 		Meta: map[string]string{
 			"agent_run_id":   in.AgentRunID,
+			"parent_run_id":  in.ParentRunID,
+			"tool_call_id":   toolCallID,
+			"policy_digest":  in.PolicyDigest,
+			"backend":        in.Backend,
 			"source_channel": string(channel),
 		},
 	}
@@ -109,17 +126,31 @@ func AdmitChildOutput(ctx context.Context, in ChildOutput) OutputAdmission {
 		r.Meta["reason"] = rn
 		v.Meta["reason"] = rn
 	}
-	return OutputAdmission{
-		AgentRunID:  in.AgentRunID,
-		CallID:      in.CallID,
-		Channel:     channel,
-		InputLen:    len(body),
-		InputSHA256: meta["input_sha256"],
-		Verdict:     v,
-		Result:      r,
-		Bytes:       resolveOutputBytes(ctx, r.Payload),
-		Meta:        cloneStringMap(r.Meta),
+	admission := OutputAdmission{
+		AgentRunID:      in.AgentRunID,
+		ParentRunID:     in.ParentRunID,
+		ToolCallID:      toolCallID,
+		TraceID:         trace,
+		PolicyDigest:    in.PolicyDigest,
+		Backend:         in.Backend,
+		DescendantState: in.DescendantState,
+		CallID:          in.CallID,
+		Channel:         channel,
+		InputLen:        len(body),
+		InputSHA256:     meta["input_sha256"],
+		Verdict:         v,
+		Result:          r,
+		Bytes:           resolveOutputBytes(ctx, r.Payload),
+		Meta:            cloneStringMap(r.Meta),
 	}
+	atMS := in.AtMS
+	if atMS <= 0 {
+		atMS = time.Now().UnixMilli()
+	}
+	if ev, ok := LeakEventFromOutputAdmission(admission, atMS); ok {
+		admission.LeakEvent = &ev
+	}
+	return admission
 }
 
 func admitChildResult(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {

@@ -7,6 +7,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 const (
@@ -171,6 +173,70 @@ func ValidateLeakEvent(ev LeakEvent) error {
 	return nil
 }
 
+// LeakEventFromSpawnAudit adapts the spawn broker's bounded audit row into the
+// leak-prevention event stream consumed by the operator report.
+func LeakEventFromSpawnAudit(a SpawnAudit, atMS int64) LeakEvent {
+	action := LeakSpawnDenied
+	reason := safeLeakReason(a.Reason, "SPAWN_DENIED")
+	descendant := DescendantNone
+	if a.Verdict == SpawnVerdictAllow {
+		action = LeakSpawnAllowed
+		reason = safeLeakReason(a.Reason, "SPAWN_ALLOWED")
+		descendant = DescendantRunning
+	}
+	return LeakEvent{
+		Schema:          LeakEventSchema,
+		Action:          action,
+		AtMS:            positiveLeakAtMS(atMS),
+		AgentRunID:      safeLeakToken(a.AgentRunID, 256, "unknown"),
+		ParentRunID:     safeLeakToken(a.ParentRunID, 256, "unknown"),
+		ToolCallID:      safeLeakToken(a.ToolCallID, 256, "unknown"),
+		TraceID:         safeLeakToken(a.ToolCallID, 256, "unknown"),
+		PolicyDigest:    safeLeakToken(a.PolicyDigest, 256, "unknown"),
+		Backend:         safeLeakToken(a.Backend, 256, "unknown"),
+		Reason:          reason,
+		BoundedRef:      BoundedRef{Kind: "spawn_audit", Digest: digest([]string{a.ArgvDigest, a.EnvDigest, a.CWD, a.Argv0}), Len: 0},
+		SourceChannel:   "spawn",
+		DescendantState: descendant,
+	}
+}
+
+// LeakEventFromOutputAdmission adapts a child-output admission refusal into the
+// same leak-prevention stream. Benign/admitted output is intentionally silent.
+func LeakEventFromOutputAdmission(out OutputAdmission, atMS int64) (LeakEvent, bool) {
+	switch out.Verdict.Kind {
+	case abi.VerdictQuarantine, abi.VerdictDeny, abi.VerdictRequireWitness:
+	default:
+		return LeakEvent{}, false
+	}
+	digestToken := strings.TrimSpace(out.InputSHA256)
+	if digestToken == "" {
+		digestToken = digest([]string{out.AgentRunID, out.ToolCallID, out.TraceID, string(out.Channel)})
+	} else if !strings.HasPrefix(digestToken, "sha256:") {
+		digestToken = "sha256:" + digestToken
+	}
+	descendant := out.DescendantState
+	if descendant == "" {
+		descendant = DescendantUnknown
+	}
+	reason := safeLeakReason(abi.ReasonName(out.Verdict.Reason), "OUTPUT_QUARANTINED")
+	return LeakEvent{
+		Schema:          LeakEventSchema,
+		Action:          LeakOutputQuarantined,
+		AtMS:            positiveLeakAtMS(atMS),
+		AgentRunID:      safeLeakToken(out.AgentRunID, 256, "unknown"),
+		ParentRunID:     safeLeakToken(out.ParentRunID, 256, "unknown"),
+		ToolCallID:      safeLeakToken(firstNonEmpty(out.ToolCallID, out.CallID), 256, "unknown"),
+		TraceID:         safeLeakToken(firstNonEmpty(out.TraceID, out.CallID, out.ToolCallID), 256, "unknown"),
+		PolicyDigest:    safeLeakToken(out.PolicyDigest, 256, "unknown"),
+		Backend:         safeLeakToken(out.Backend, 256, "unknown"),
+		Reason:          reason,
+		BoundedRef:      BoundedRef{Kind: "sha256", Digest: safeLeakToken(digestToken, 256, "unknown"), Len: int64(out.InputLen)},
+		SourceChannel:   safeLeakToken(string(out.Channel), 256, "unknown"),
+		DescendantState: descendant,
+	}, true
+}
+
 func LeakReportFromEvents(events []LeakEvent) LeakReport {
 	rep := LeakReport{
 		Schema: LeakReportSchema,
@@ -276,6 +342,41 @@ func reasonToken(s string) bool {
 		return false
 	}
 	return true
+}
+
+func positiveLeakAtMS(atMS int64) int64 {
+	if atMS <= 0 {
+		return 1
+	}
+	return atMS
+}
+
+func safeLeakToken(s string, limit int, fallback string) string {
+	s = strings.TrimSpace(s)
+	if boundedToken(s, limit) {
+		return s
+	}
+	if s == "" {
+		return fallback
+	}
+	return digest([]string{s})
+}
+
+func safeLeakReason(s, fallback string) string {
+	s = strings.TrimSpace(s)
+	if reasonToken(s) {
+		return s
+	}
+	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func renderCounts(m map[string]int) string {
