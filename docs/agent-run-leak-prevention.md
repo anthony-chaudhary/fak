@@ -274,3 +274,15 @@ does not claim live spawn containment is implemented. The current shipped
 pieces it relies on are the policy runtime envelope, `internal/toolproc`, and
 `internal/toolprocgate`; child leaves must wire the broker and adapters without
 inventing incompatible IDs or a second process table.
+
+The pre-spawn admission core is now shipped: `internal/toolprocgate`'s
+`SpawnBroker.Admit` takes a `SpawnAttempt` (AgentRunID, ParentRunID,
+ToolCallID, PolicyDigest, argv/env/cwd, backend, capability envelope) and
+returns a sanitized `SpawnGrant` or a typed deny **before any process
+exists** — including `MISSING_SPAWN_CAPABILITY` for an envelope that does not
+carry `agentrun.spawn.v1`. Guard child launches (`cmd/fak/guard_child.go`)
+and the dispatch/account/resume worker launch surfaces
+(`cmd/fak/dispatch_tick_broker.go`) route through it; a denied attempt never
+reaches a launcher, and audits carry digests and env *names*, never raw
+argv/env values. Process-tree containment, egress controls, and the
+MCP/ToolExec adapters remain open leaves.
