@@ -1139,6 +1139,13 @@ func finishGuardChildAndReport(runErr error, childState *os.ProcessState, srv *g
 		_ = cachevalueledger.Append("guard", agentName, cachevalueledger.DefaultLedgerRel, stats)
 	}
 	appendObservedCacheSavings("guard", provider, agentName, srv.AdjudicationSummary())
+	// Append the gateway-usage exit row (#1610), same writer as the serve exits, so a
+	// guard session's full served-turn counter family — compaction fired/bailed/shed
+	// among them — survives the process instead of dying with the console summary.
+	// Until now only `fak serve` exits reached this ledger, so the per-session WHY
+	// behind a zero fak-slice (burst_unprofitable vs anchor-starved vs under_budget)
+	// was unrecoverable after exit on the flagship guard path (epic #1601 gap).
+	persistGatewayUsageObservation(srv, "guard", agentName)
 	if dojoMode {
 		_ = persistLiveDojoEpisode("guard", srv)
 	}

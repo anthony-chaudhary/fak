@@ -366,6 +366,8 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 		CompactionDroppedTurns:    adj.CompactionDroppedTurns,
 		CompactionShedTokens:      adj.CompactionShedTokens,
 		CompactionCacheReadTokens: adj.CompactionCacheReadTokens,
+		CompactionBailReasons:     adj.CompactionBailReasons,
+		CompactionAnchorStarved:   adj.CompactionAnchorStarved,
 
 		ToolPruneTurns: adj.ToolPruneTurns,
 		ToolPruneCount: adj.ToolPruneCount,

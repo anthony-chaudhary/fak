@@ -68,6 +68,14 @@ type Counters struct {
 	CompactionDroppedTurns    uint64 `json:"compaction_dropped_turns"`
 	CompactionShedTokens      uint64 `json:"compaction_shed_tokens"`
 	CompactionCacheReadTokens uint64 `json:"compaction_cache_read_tokens"`
+	// Per-reason breakdown of CompactionBailed (the closed agent.CompactReason*
+	// vocabulary) plus the anchor-starved subset of under_budget — the per-session
+	// WHY behind a zero fak shed slice (#1407/#1408). Durable here so a fleet reader
+	// can still tell burst_unprofitable (warm session, no horizon) from a genuinely
+	// small session after the process is gone; before this, the breakdown lived only
+	// on the in-process /metrics and the console exit summary.
+	CompactionBailReasons   map[string]uint64 `json:"compaction_bail_reasons,omitempty"`
+	CompactionAnchorStarved uint64            `json:"compaction_anchor_starved,omitempty"`
 
 	// Tool-definition prune (WITNESSED).
 	ToolPruneTurns uint64 `json:"tool_prune_turns"`
