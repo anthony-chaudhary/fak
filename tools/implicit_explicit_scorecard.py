@@ -909,11 +909,16 @@ def load_corpus(root: Path) -> dict[str, Any]:
             rel = str(gp.relative_to(root)).replace("\\", "/")
             _scan_go_file(text, rel, sym_files, literal_files, hedges, decl_tokens)
 
+    # The card's own generated folder is NOT documentation: counting it would let a
+    # regenerated README (which echoes every positioned symbol) silently retire
+    # code-only signals from the universe - the exact self-gaming the doctrine bans.
+    own_doc_dir = (root / GENERATED_DOC_DIR).resolve()
     doc_files: list[Path] = []
     for dd in _DOC_DIRS:
         ddir = root / dd
         if ddir.is_dir():
-            doc_files += _walk_files(ddir, ".md")
+            doc_files += [p for p in _walk_files(ddir, ".md")
+                          if own_doc_dir not in p.resolve().parents]
     for rd in _ROOT_DOCS:
         p = root / rd
         if p.exists():

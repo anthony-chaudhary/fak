@@ -15,9 +15,9 @@ The sibling [concept-disambiguation scorecard](../concept-disambiguation-scoreca
 
 | Metric | Value |
 |---|---|
-| **Score** | **43.5/100** (grade F) = 4.3/10 |
-| **Coverage** | **13.0%** (29/223 implicit-concept signals positioned) |
-| **Implicitness-debt** | **194** (naming 0 + coverage 194) |
+| **Score** | **43.4/100** (grade F) = 4.3/10 |
+| **Coverage** | **12.9%** (29/225 implicit-concept signals positioned) |
+| **Implicitness-debt** | **196** (naming 0 + coverage 196) |
 | Explicit concepts | 0 of 20 positioned |
 | As of | 2026-07-03 (fak dev) |
 
@@ -36,28 +36,28 @@ The sibling [concept-disambiguation scorecard](../concept-disambiguation-scoreca
 ## Standing at a glance
 
 ```text
-implicit-explicit chart - 20 concepts - score 43.5/100 (grade F) - implicitness-debt 194
+implicit-explicit chart - 20 concepts - score 43.4/100 (grade F) - implicitness-debt 196
 
 explicitness ladder (count of concepts, named -> fog):
   * explicit     ............................ 0
-  c named-code   ###################......... 8
+  c named-code   #######################..... 9
   d named-doc    ............................ 0
-  ~ hinted       ############################ 12
+  ~ hinted       ############################ 11
   . latent       ............................ 0
 
 explicitness mix by signal (each cell = one concept):
   code-only       cccccccc             (8 concept(s); 0 explicit)
   doc-only        ~~~~~~~~             (8 concept(s); 0 explicit)
   hinted          ~                    (1 concept(s); 0 explicit)
-  latent-literal  ~~~                  (3 concept(s); 0 explicit)
+  latent-literal  c~~                  (3 concept(s); 0 explicit)
 
 coverage by signal kind (positioned / discovered):
-  doc-only        ###......................... 13/137
-  code-only       ######...................... 11/48
+  doc-only        ###......................... 13/138
+  code-only       ######...................... 11/49
   latent-literal  ###......................... 4/37
   hinted          ############################ 1/1
 
-signal coverage  [####............................] 13.0%  (29/223 implicit signals positioned)
+signal coverage  [####............................] 12.9%  (29/225 implicit signals positioned)
 
 legend: * explicit   c named-code   d named-doc   ~ hinted   . latent
 ```
@@ -72,6 +72,7 @@ legend: * explicit   c named-code   d named-doc   ~ hinted   . latent
 | c | named-code | code-only | **evidence ref** - the struct that points a witness at an artifact it can read back (a file path, a git object) - the unit of witnessable evidence in taskmgr/loopmgr, in 17 production files and zero docs despite the witness pipeline being a headline concept | `EvidenceRef` |
 | c | named-code | code-only | **indented-JSON emitter** - the helper (declared per package, 59 production files) that emits the canonical two-space-indented JSON for --json verb output, with a no-escape variant - the de-facto JSON output contract of the CLI, stated in no doc | `writeIndentedJSON` |
 | c | named-code | code-only | **per-verb ParseFlags convention** - the convention that every CLI verb declares its own ParseFlags/parseFlags helper (139 production files) with reject-args and or-help variants - the single most repeated declared name in the tree, described nowhere | `ParseFlags` |
+| c | named-code | latent-literal | **provider overload status 529** - the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in stream-retry and account-rotation paths - internal/agent/retry.go names it (const statusOverloaded = 529) but ~8 other production files (gateway, attemptbudget, agent siblings) still use the bare literal, and no doc mentions either form | `statusOverloaded` |
 | c | named-code | code-only | **tilde expansion helper** - the internal/pathutil helper that expands a leading ~ in user-supplied paths (54 production files) - the reason ~/foo works in every fak flag, a behavior users rely on that no doc promises | `ExpandTilde` |
 | c | named-code | code-only | **weight-bearing engine** - the engine-interface predicate saying whether an engine actually carries model weights (real inference: DynamoEngine true) or is a stub/proxy (readEngine, localEngine false) - a load-bearing trust distinction that appears in 13 production files and zero docs | `WeightBearing` |
 | ~ | hinted | doc-only | **ground truth** - the section (29 docs) pointing at the artifact/command a reader can run to verify a claim themselves - fak's evidence-over-assertion convention, unnamed and undefined | `GroundTruth` |
@@ -81,7 +82,6 @@ legend: * explicit   c named-code   d named-doc   ~ hinted   . latent
 | ~ | hinted | doc-only | **hot path** - used in 45 docs for the latency-critical code route (decode loop, gateway serve path) - borrowed jargon everyone assumes, but WHICH paths are the hot paths is never enumerated, so the term cannot be checked | `HotPath` |
 | ~ | hinted | latent-literal | **in-repo deterministic LCG** - the textbook linear-congruential PRNG (state*1103515245 + 12345, masked to 31 bits) re-implemented inline in 14+ files (bench, benchids, cmdutil, agent) for deterministic jitter/ids - the multiplier and increment are never named, so the shared PRNG convention is invisible | `lcgMultiplier` |
 | ~ | hinted | doc-only | **promotion gate** - the criteria a claim/feature must meet to move up a maturity rung - a heading in 22 docs (plus 'Promotion rule' in 10) with no code symbol and no definition, despite gating being fak's favorite mechanism | `PromotionGate` |
-| ~ | hinted | latent-literal | **provider overload status 529** - the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in the stream-retry and account-rotation paths of ~9 files as a bare literal - unlike 429, no http.Status* name exists for it, so the concept has no name at all | `statusProviderOverloaded` |
 | ~ | hinted | latent-literal | **the conflated 300 literal** - a bare 300 on non-const lines in ~40 production files that conflates at least four distinct concepts: 300ms settle sleeps, the HTTP redirect boundary (StatusCode >= 300), a compaction-shed token budget, and sweep sizes - none of them named | `settleSleepMillis` |
 | ~ | hinted | doc-only | **trust boundary** - the line between what the kernel verifies and what it merely receives from an untrusted agent - a heading in 33 docs and the load-bearing idea of the whole system, with no code identifier and no glossary definition | `TrustBoundary` |
 | ~ | hinted | hinted | **unmeasured-containment residual** - the standing residual that fak's privacy/prompt-injection containment is a design posture, not a measured leakage number - repeated across research triages (MIRROR #1007) as an italicized hedge, never as a named, trackable residual | `ContainmentUnmeasured` |
@@ -103,8 +103,8 @@ legend: * explicit   c named-code   d named-doc   ~ hinted   . latent
 
 | Signal | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| doc-only | 13 | 137 | 124 |
-| code-only | 11 | 48 | 37 |
+| doc-only | 13 | 138 | 125 |
+| code-only | 11 | 49 | 38 |
 | latent-literal | 4 | 37 | 33 |
 | hinted | 1 | 1 | 0 |
 

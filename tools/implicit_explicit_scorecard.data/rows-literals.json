@@ -40,15 +40,16 @@
       "signal": "latent-literal",
       "evidence": "529",
       "evidence_kind": "literal",
-      "current_name": "",
-      "proposed_name": "statusProviderOverloaded",
-      "named_symbol": "",
+      "current_name": "statusOverloaded",
+      "proposed_name": "",
+      "named_symbol": "statusOverloaded",
       "doc_anchor": "",
-      "definition": "the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in the stream-retry and account-rotation paths of ~9 files as a bare literal - unlike 429, no http.Status* name exists for it, so the concept has no name at all",
+      "definition": "the non-standard HTTP 529 the Anthropic API returns when overloaded, load-bearing in stream-retry and account-rotation paths - internal/agent/retry.go names it (const statusOverloaded = 529) but ~8 other production files (gateway, attemptbudget, agent siblings) still use the bare literal, and no doc mentions either form",
       "aliases": [],
-      "verdict": "hinted",
+      "verdict": "named-code",
       "gaps": [
-        "declare statusProviderOverloaded once (internal/agent) and use it at every retryable-status check"
+        "spread the named constant to the bare-literal sites (gateway, attemptbudget) - the name exists but is package-private and unshared",
+        "mention the 529 overload semantics in the model-accounts / gateway docs"
       ]
     }
   ]
