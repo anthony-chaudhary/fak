@@ -23,16 +23,17 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/randhex"
 )
 
 // guardOffValues: a FLEET_DOGFOOD_GUARD whose normalized value is one of these turns
@@ -170,11 +171,10 @@ func sanitizeAuditName(s string) string {
 // rand are fine here (off the resume-cacheable workflow path); a rand failure falls
 // back to a pid-derived token (still unique enough paired with the pid prefix).
 func randToken() string {
-	var b [4]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%08x", os.Getpid())
+	if token, ok := randhex.String(4); ok {
+		return token
 	}
-	return hex.EncodeToString(b[:])
+	return fmt.Sprintf("%08x", os.Getpid())
 }
 
 // guardWrap fronts a raw worker argv with `fak guard -- <worker>` so the kernel
@@ -239,7 +239,7 @@ func guardedLaunchCommand(command []string, lane, backend, workspace string, env
 		return command, false
 	}
 	wrapped := guardWrap(command, fakBin, lane, backend, workspace, env)
-	return wrapped, !sliceEqual(wrapped, command)
+	return wrapped, !slices.Equal(wrapped, command)
 }
 
 // processEnvMap snapshots the process environment as a map (the default env for the
@@ -255,13 +255,5 @@ func processEnvMap() map[string]string {
 }
 
 func sliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }

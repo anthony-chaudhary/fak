@@ -2,13 +2,14 @@ package slackoutbox
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/randhex"
 )
 
 // Spool/state file names inside the outbox directory. Both are append-only JSONL: the
@@ -126,13 +127,18 @@ type Outbox struct {
 
 // Open ensures dir exists and returns an Outbox over it.
 func Open(dir string) (*Outbox, error) {
-	if dir == "" {
-		return nil, fmt.Errorf("slackoutbox: empty spool dir")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	o := &Outbox{dir: dir, now: time.Now}
+	if err := o.prepare(); err != nil {
 		return nil, err
 	}
-	return &Outbox{dir: dir, now: time.Now}, nil
+	return o, nil
+}
+
+func (o *Outbox) prepare() error {
+	if o.dir == "" {
+		return fmt.Errorf("slackoutbox: empty spool dir")
+	}
+	return pathutil.EnsureDir(o.dir)
 }
 
 // Dir returns the spool directory (for diagnostics).
@@ -140,13 +146,12 @@ func (o *Outbox) Dir() string { return o.dir }
 
 // NewNonce returns a fresh 128-bit hex idempotency nonce.
 func NewNonce() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand failing is a broken host; fall back to a time-derived nonce
-		// rather than refusing to enqueue a durable message.
-		return fmt.Sprintf("t-%d", time.Now().UnixNano())
+	if nonce, ok := randhex.String(16); ok {
+		return nonce
 	}
-	return hex.EncodeToString(b[:])
+	// crypto/rand failing is a broken host; fall back to a time-derived nonce
+	// rather than refusing to enqueue a durable message.
+	return fmt.Sprintf("t-%d", time.Now().UnixNano())
 }
 
 // Enqueue validates the row, stamps nonce/card-key/enqueued-at defaults, and appends it

@@ -44,6 +44,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/blob"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // InlineMax mirrors blob.InlineMax: a payload this small or smaller is returned
@@ -100,7 +101,7 @@ func NewWithBudget(dir string, maxBytes int64) (*Store, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("blobfs: empty store directory")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := pathutil.EnsureDir(dir); err != nil {
 		return nil, fmt.Errorf("blobfs: create store dir %s: %w", dir, err)
 	}
 	s := &Store{

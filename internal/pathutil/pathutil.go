@@ -27,3 +27,8 @@ func ExpandTilde(p string) string {
 	}
 	return p
 }
+
+// EnsureDir creates p and any missing parents with the repo's standard directory mode.
+func EnsureDir(p string) error {
+	return os.MkdirAll(p, 0o755)
+}

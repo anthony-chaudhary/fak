@@ -1,6 +1,9 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // splitBatchedMoEExperts materializes HF Mixtral/Qwen-MoE packed expert tensors
 // into the per-expert canonical names the runtime uses. HF exports:
@@ -33,7 +36,7 @@ func splitBatchedMoEExperts(cfg Config, man map[string]tensorMeta) error {
 // requireMoESplitShape validates a packed MoE tensor's shape and f32 byte
 // count before a zero-copy split.
 func requireMoESplitShape(name string, meta tensorMeta, wantShape []int) error {
-	if !sameShape(meta.Shape, wantShape) {
+	if !slices.Equal(meta.Shape, wantShape) {
 		return fmt.Errorf("model: MoE tensor %s has shape %v, want %v", name, meta.Shape, wantShape)
 	}
 	wantBytes := 4
@@ -111,13 +114,5 @@ func firstTensor(man map[string]tensorMeta, names ...string) (string, tensorMeta
 }
 
 func sameShape(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }
