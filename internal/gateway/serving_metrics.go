@@ -14,6 +14,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
 // ServingMetricsEmitter returns rows in the normalized fak_serving_* schema.
@@ -813,7 +814,7 @@ func parsePromLabels(s string) (map[string]string, bool) {
 		if !strings.HasPrefix(s, `"`) {
 			return nil, false
 		}
-		value, n, ok := parsePromQuoted(s)
+		value, n, ok := metrics.ParsePromQuotedLabel(s)
 		if !ok {
 			return nil, false
 		}
@@ -821,37 +822,6 @@ func parsePromLabels(s string) (map[string]string, bool) {
 		s = s[n:]
 	}
 	return labels, true
-}
-
-func parsePromQuoted(s string) (string, int, bool) {
-	var b strings.Builder
-	escaped := false
-	for i, r := range s {
-		if i == 0 {
-			continue
-		}
-		if escaped {
-			switch r {
-			case 'n':
-				b.WriteByte('\n')
-			case '\\', '"':
-				b.WriteRune(r)
-			default:
-				b.WriteRune(r)
-			}
-			escaped = false
-			continue
-		}
-		if r == '\\' {
-			escaped = true
-			continue
-		}
-		if r == '"' {
-			return b.String(), i + 1, true
-		}
-		b.WriteRune(r)
-	}
-	return "", 0, false
 }
 
 func applyServingPromSample(row *ServingMetricRow, sample promSample, counters *servingScrapeCounters) {

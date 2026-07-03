@@ -393,6 +393,39 @@ func escapeOpenMetricLabelValue(s string) string {
 	return escapeOpenMetricString(s, true)
 }
 
+// ParsePromQuotedLabel decodes one Prometheus quoted label value. Callers are
+// expected to pass a string beginning with the opening quote.
+func ParsePromQuotedLabel(s string) (string, int, bool) {
+	var b strings.Builder
+	escaped := false
+	for i, r := range s {
+		if i == 0 {
+			continue
+		}
+		if escaped {
+			switch r {
+			case 'n':
+				b.WriteByte('\n')
+			case '\\', '"':
+				b.WriteRune(r)
+			default:
+				b.WriteRune(r)
+			}
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			return b.String(), i + 1, true
+		}
+		b.WriteRune(r)
+	}
+	return "", 0, false
+}
+
 // escapeOpenMetricString escapes backslash and newline runes for OpenMetrics
 // text exposition. When escapeQuote is set the double-quote rune is also
 // escaped, as required inside quoted label values; help text leaves it verbatim.

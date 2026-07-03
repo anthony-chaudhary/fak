@@ -199,3 +199,29 @@ func TestRenderOpenMetricsTextRejectsInvalidHistogramBuckets(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePromQuotedLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		in    string
+		value string
+		n     int
+		ok    bool
+	}{
+		{name: "plain", in: `"model"`, value: "model", n: 7, ok: true},
+		{name: "trailing", in: `"model",le="1"`, value: "model", n: 7, ok: true},
+		{name: "escapes", in: `"a\n\\\"b"`, value: "a\n\\\"b", n: 10, ok: true},
+		{name: "unknown escape preserved", in: `"a\qb"`, value: "aqb", n: 6, ok: true},
+		{name: "unterminated", in: `"model`, ok: false},
+		{name: "dangling escape", in: `"model\`, ok: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			value, n, ok := ParsePromQuotedLabel(tc.in)
+			if value != tc.value || n != tc.n || ok != tc.ok {
+				t.Fatalf("ParsePromQuotedLabel(%q) = (%q, %d, %v), want (%q, %d, %v)", tc.in, value, n, ok, tc.value, tc.n, tc.ok)
+			}
+		})
+	}
+}
