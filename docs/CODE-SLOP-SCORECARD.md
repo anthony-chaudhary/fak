@@ -16,17 +16,17 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 | Metric | Value |
 |---|---|
-| Slop-score | 49.9/100 (grade F) |
-| **Slop-debt (total HARD defects)** | **836** |
+| Slop-score | 52.1/100 (grade F) |
+| **Slop-debt (total HARD defects)** | **832** |
 | Soft signals (advisory) | 78 |
 
 ## Per-KPI (worst-first)
 
 | KPI | Score | Slop-debt | Detail |
 |---|---:|---:|---|
-| duplication | 0/100 | 813 | 813 duplicated block(s) (copy-pasted across 2+ sites) |
-| dead_code | 0/100 | 21 | 21 dead unexported symbol(s) |
-| vacuous_tests | 90/100 | 1 | 1 vacuous of 9805 Test func(s) |
+| duplication | 0/100 | 812 | 812 duplicated block(s) (copy-pasted across 2+ sites) |
+| dead_code | 10/100 | 18 | 18 dead unexported symbol(s) |
+| vacuous_tests | 90/100 | 1 | 1 vacuous of 9820 Test func(s) |
 | comment_slop | 97/100 | 1 | 1 comment-slop site(s) |
 | stub_masquerade | 100/100 | 0 | no exported stub-masquerade |
 | churn_bloat | 100/100 | 0 | no commits in range (skipped) |
@@ -54,6 +54,6 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 > When `promotable` is yes: review the elapsed window for any false positive, then move the `stub_masquerade` finding from `soft` to `defects` and bump `KPI_WEIGHTS["stub_masquerade"]` in `tools/code_slop_scorecard.py` — the deliberate flip.
 
-> 836 unit(s) of slop-debt; score 49.9/100 (grade F); heaviest KPI: duplication (813 defect(s))
+> 832 unit(s) of slop-debt; score 52.1/100 (grade F); heaviest KPI: duplication (812 defect(s))
 
 > next: retire slop-debt worst-first (see corpus.breakdown + per-KPI defects): de-duplicate clones, delete dead unexported symbols, drop commented-out code + tautological doc comments, add assertions to vacuous tests; re-run to prove the drop

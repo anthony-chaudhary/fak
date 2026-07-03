@@ -161,27 +161,6 @@ func quantizeAWQFromRaw(raw []byte, scales []float32, out, in int) *awqTensor {
 	return &awqTensor{out: out, in: in, raw: raw, scales: scales}
 }
 
-// awq returns the resident AWQ tensor for a name.
-func (m *Model) awq(name string) *awqTensor {
-	if m.awqw == nil {
-		panic("model: no AWQ tensors loaded (call Model.LoadAWQ)")
-	}
-	qt, ok := m.awqw[name]
-	if !ok {
-		panic("model: AWQ tensor not found: " + name)
-	}
-	return qt
-}
-
-// hasAWQ reports whether an AWQ copy exists for a name.
-func (m *Model) hasAWQ(name string) bool {
-	if m.awqw == nil {
-		return false
-	}
-	_, ok := m.awqw[name]
-	return ok
-}
-
 // AWQCount returns how many tensors hold an AWQ copy.
 func (m *Model) AWQCount() int {
 	return len(m.awqw)
