@@ -210,13 +210,21 @@ func (m *Model) expertParallelGLMMoEDelta(layer int, xn any, mat matKernel, pick
 	if err != nil {
 		return nil, err
 	}
+	return m.addGLMSharedExpertsOnce(layer, xn, mat, delta), nil
+}
+
+// addGLMSharedExpertsOnce adds the replicated GLM plural shared-expert term to the reduced
+// routed delta, in place. Both EP GLM twins share this exact ONCE-after-the-reduce add: the
+// shared expert is replicated on every rank (never sharded), so adding it before the reduce
+// would sum it N times. No-op when the model carries no mlp.shared_experts.* weights.
+func (m *Model) addGLMSharedExpertsOnce(layer int, xn any, mat matKernel, delta []float32) []float32 {
 	if m.Cfg.NSharedExperts > 0 && m.hasWeight(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
 		shared := glmSharedExperts(m, layer, xn, mat)
 		for i := range delta {
 			delta[i] += shared[i]
 		}
 	}
-	return delta, nil
+	return delta
 }
 
 // expertParallelRankLocalGLMMoEDelta is the SHARDED (multi-process) twin of
@@ -254,13 +262,7 @@ func (m *Model) expertParallelRankLocalGLMMoEDelta(layer int, xn any, mat matKer
 	if err != nil {
 		return nil, err
 	}
-	if m.Cfg.NSharedExperts > 0 && m.hasWeight(layerName(layer, "mlp.shared_experts.gate_proj.weight")) {
-		shared := glmSharedExperts(m, layer, xn, mat)
-		for i := range delta {
-			delta[i] += shared[i]
-		}
-	}
-	return delta, nil
+	return m.addGLMSharedExpertsOnce(layer, xn, mat, delta), nil
 }
 
 // SetExpertParallelRanks records the expert-parallel rank count the live MoE forward shards the
