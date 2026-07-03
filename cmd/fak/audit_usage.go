@@ -122,6 +122,9 @@ func readUsageLogInput(path string) auditusage.UsageLogInput {
 // file is skipped (never an error), Present is true once any root has one, Path
 // is the first present path, and rows from every present root append in root order.
 func collectRootLedgerRows[T any](roots []string, pathForRoot func(string) string, read func(string) []T) (present bool, firstPath string, rows []T) {
+	if len(roots) == 0 {
+		return false, "", nil
+	}
 	for _, root := range roots {
 		path := pathForRoot(root)
 		if _, err := os.Stat(path); err != nil {
