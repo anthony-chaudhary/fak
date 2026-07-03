@@ -7,9 +7,13 @@ carries the whole family: **anything you want to progress gets a named score**,
 and every conversation about progress becomes one of two moves — *improve the
 score* or *improve the scoring method*.
 
-This is the epic spine note. The epic and its ~40 child issues are filed on the
-tracker (see the epic issue for the live checklist); this note is the durable
-statement of the concept, the positioning, and the seams.
+This is the epic spine note. The epic is filed as **#2533** with 42 children
+(**#2534–#2575**: spine #2534–#2542, then scorers, hierarchy/sub-agents,
+steering, integrations, meta, and production hygiene — the epic carries the
+grouped checklist). All children were validated contract-dispatchable through
+`fak issue cohort --from-issues` before filing and carry `fak-trajctl-key`
+dedupe markers. This note is the durable statement of the concept, the
+positioning, and the seams.
 
 ## The problem (four concrete failure shapes)
 
