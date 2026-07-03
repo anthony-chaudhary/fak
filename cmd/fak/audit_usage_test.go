@@ -232,6 +232,44 @@ func TestRunAuditUsage_BadSinceIsUsageError(t *testing.T) {
 	}
 }
 
+func TestMergeUsageInputs_MultiRootOrder(t *testing.T) {
+	rootA := t.TempDir()
+	rootMissing := t.TempDir() // no ledgers: must be skipped, not error
+	rootC := t.TempDir()
+	roots := []string{rootA, rootMissing, rootC}
+
+	mustWriteJSONLRow(t, gatewayUsagePathForRoot(rootA), map[string]any{"schema": "fak-gateway-usage-ledger/1", "unix_millis": 1000, "kind": "exit", "session_type": "guard"})
+	mustWriteJSONLRow(t, gatewayUsagePathForRoot(rootC), map[string]any{"schema": "fak-gateway-usage-ledger/1", "unix_millis": 3000, "kind": "exit", "session_type": "guard"})
+	mustWriteJSONLRow(t, cacheValuePathForRoot(rootA), map[string]any{"schema": "fak-cache-value-ledger/1", "date": "2026-06-30", "session_type": "guard", "unix_millis": 1000})
+	mustWriteJSONLRow(t, cacheValuePathForRoot(rootC), map[string]any{"schema": "fak-cache-value-ledger/1", "date": "2026-06-30", "session_type": "guard", "unix_millis": 3000})
+
+	gw := mergeGatewayUsageInputs(roots)
+	if !gw.Present || gw.Path != gatewayUsagePathForRoot(rootA) {
+		t.Errorf("gateway: want present with first-root path %s, got present=%v path=%s", gatewayUsagePathForRoot(rootA), gw.Present, gw.Path)
+	}
+	if len(gw.Rows) != 2 || gw.Rows[0].UnixMillis != 1000 || gw.Rows[1].UnixMillis != 3000 {
+		t.Errorf("gateway: want rows appended in root order [1000 3000], got %+v", gw.Rows)
+	}
+
+	cv := mergeCacheValueInputs(roots)
+	if !cv.Present || cv.Path != cacheValuePathForRoot(rootA) {
+		t.Errorf("cache: want present with first-root path %s, got present=%v path=%s", cacheValuePathForRoot(rootA), cv.Present, cv.Path)
+	}
+	if len(cv.Rows) != 2 || cv.Rows[0].UnixMillis != 1000 || cv.Rows[1].UnixMillis != 3000 {
+		t.Errorf("cache: want rows appended in root order [1000 3000], got %+v", cv.Rows)
+	}
+
+	// A root set with no ledgers anywhere stays absent: no path, no rows.
+	gwAbsent := mergeGatewayUsageInputs([]string{rootMissing})
+	if gwAbsent.Present || gwAbsent.Path != "" || len(gwAbsent.Rows) != 0 {
+		t.Errorf("gateway: want absent over a ledgerless root, got %+v", gwAbsent)
+	}
+	cvAbsent := mergeCacheValueInputs([]string{rootMissing})
+	if cvAbsent.Present || cvAbsent.Path != "" || len(cvAbsent.Rows) != 0 {
+		t.Errorf("cache: want absent over a ledgerless root, got %+v", cvAbsent)
+	}
+}
+
 func mustWriteJSONLRow(t *testing.T, path string, row map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

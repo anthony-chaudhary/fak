@@ -118,24 +118,31 @@ func readUsageLogInput(path string) auditusage.UsageLogInput {
 	return in
 }
 
+// collectRootLedgerRows scans roots in order for a root-scoped ledger: a missing
+// file is skipped (never an error), Present is true once any root has one, Path
+// is the first present path, and rows from every present root append in root order.
+func collectRootLedgerRows[T any](roots []string, pathForRoot func(string) string, read func(string) []T) (present bool, firstPath string, rows []T) {
+	for _, root := range roots {
+		path := pathForRoot(root)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		present = true
+		if firstPath == "" {
+			firstPath = path
+		}
+		rows = append(rows, read(path)...)
+	}
+	return present, firstPath, rows
+}
+
 func gatewayUsagePathForRoot(root string) string {
 	return filepath.Join(root, filepath.FromSlash(gatewayusageledger.DefaultLedgerRel))
 }
 
 func mergeGatewayUsageInputs(roots []string) auditusage.GatewayUsageInput {
-	var out auditusage.GatewayUsageInput
-	for _, root := range roots {
-		path := gatewayUsagePathForRoot(root)
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		out.Present = true
-		if out.Path == "" {
-			out.Path = path
-		}
-		out.Rows = append(out.Rows, gatewayusageledger.ReadLedgerFile(path)...)
-	}
-	return out
+	present, path, rows := collectRootLedgerRows(roots, gatewayUsagePathForRoot, gatewayusageledger.ReadLedgerFile)
+	return auditusage.GatewayUsageInput{Present: present, Path: path, Rows: rows}
 }
 
 func cacheValuePathForRoot(root string) string {
@@ -143,19 +150,8 @@ func cacheValuePathForRoot(root string) string {
 }
 
 func mergeCacheValueInputs(roots []string) auditusage.CacheValueInput {
-	var out auditusage.CacheValueInput
-	for _, root := range roots {
-		path := cacheValuePathForRoot(root)
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		out.Present = true
-		if out.Path == "" {
-			out.Path = path
-		}
-		out.Rows = append(out.Rows, cachevalueledger.ReadLedgerFile(path)...)
-	}
-	return out
+	present, path, rows := collectRootLedgerRows(roots, cacheValuePathForRoot, cachevalueledger.ReadLedgerFile)
+	return auditusage.CacheValueInput{Present: present, Path: path, Rows: rows}
 }
 
 func dispatchRunsDirForRoot(root string) string {
