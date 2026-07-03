@@ -19,8 +19,9 @@
 //     match) over a cell's fields — the WHERE clause, authorable as JSON, never a Go
 //     closure, so an agent or an MCP client can write one.
 //   - A Query is an ordered pipeline of Ops: scan | filter | rank | limit | budget
-//     (the pure SELECT side) and render | tombstone | consolidate | reclassify |
-//     prune (the EFFECT side). The pipeline threads a working set of cells.
+//     (the pure SELECT side) and dedup | render | tombstone | consolidate |
+//     reclassify | prune (the EFFECT side). The pipeline threads a working set of
+//     cells.
 //   - Plan/Explain renders the pipeline (and its per-step cell counts) WITHOUT
 //     executing — the "step through this before you run it" surface.
 //   - Run executes the pipeline against a Backend.

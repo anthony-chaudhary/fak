@@ -44,8 +44,9 @@ func Drivers() []Driver {
 func init() {
 	// recall — the top-K most relevant benign cells, rendered into context. This is
 	// recall.Session.Recall expressed in the algebra: filter to the un-sealed,
-	// un-tombstoned candidates, rank by descending relevance to the intent, take K,
-	// render. (Equivalence to recall.Recall is witnessed in drivers_test.go.)
+	// un-tombstoned candidates, collapse byte-identical twins, rank by descending
+	// relevance to the intent, take K, render. (Equivalence to recall.Recall on a
+	// non-duplicate corpus is witnessed in drivers_test.go.)
 	Register(Driver{
 		Name: "recall",
 		Doc:  "render the top-K cells most relevant to the intent (≡ recall.Recall)",
@@ -62,6 +63,7 @@ func init() {
 						{Op: PredEq, Field: "sealed", Value: "false"},
 						{Op: PredEq, Field: "tombstoned", Value: "false"},
 					}}},
+					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
 					{Kind: OpLimit, K: k},
 					{Kind: OpRender},
@@ -90,6 +92,7 @@ func init() {
 							{Op: PredEq, Field: "durability", Value: DurabilityDurable},
 						}},
 					}}},
+					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
 					{Kind: OpBudget, Bytes: p.Budget},
 					{Kind: OpRender},

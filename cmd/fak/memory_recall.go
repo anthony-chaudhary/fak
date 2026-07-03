@@ -328,6 +328,7 @@ func memoryRecallQuery(intent string, k int, budget int64) memq.Query {
 				{Op: memq.PredEq, Field: "sealed", Value: "false"},
 				{Op: memq.PredEq, Field: "tombstoned", Value: "false"},
 			}}},
+			{Kind: memq.OpDedup},
 			{Kind: memq.OpRank, By: memq.RankRelevance, Desc: true},
 			{Kind: memq.OpLimit, K: k},
 			{Kind: memq.OpBudget, Bytes: budget},

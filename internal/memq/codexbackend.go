@@ -240,6 +240,7 @@ func init() {
 						{Op: PredEq, Field: "sealed", Value: "false"},
 						{Op: PredEq, Field: "tombstoned", Value: "false"},
 					}}},
+					{Kind: OpDedup},
 					{Kind: OpRank, By: RankRelevance, Desc: true},
 					{Kind: OpLimit, K: k},
 					{Kind: OpRender},

@@ -101,6 +101,18 @@ func TestRecallDriverDedupsBeforeLimit(t *testing.T) {
 	b.WithVerifier(splitVerifier)
 
 	q := Get0(t, "recall").Build(Params{Intent: "build server acme east", K: 2})
+	dedupAt, limitAt := -1, -1
+	for i, op := range q.Ops {
+		switch op.Kind {
+		case OpDedup:
+			dedupAt = i
+		case OpLimit:
+			limitAt = i
+		}
+	}
+	if dedupAt < 0 || limitAt < 0 || dedupAt > limitAt {
+		t.Fatalf("recall driver must dedup before limit; dedupAt=%d limitAt=%d ops=%+v", dedupAt, limitAt, q.Ops)
+	}
 	res, err := Run(context.Background(), b, q, Caps{})
 	if err != nil {
 		t.Fatal(err)

@@ -90,6 +90,8 @@ func detailOf(op Op) string {
 			return "keep all (no byte budget set)"
 		}
 		return fmt.Sprintf("keep the prefix whose cumulative size <= %d bytes", op.Bytes)
+	case OpDedup:
+		return "collapse byte-identical cells by content digest (read-only; folded siblings recorded)"
 	case OpRender:
 		return "materialize the set into context (read-only page-in through the trust gate; sealed cells refused)"
 	case OpTombstone:

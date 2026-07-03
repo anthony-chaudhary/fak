@@ -731,7 +731,7 @@ var memoryInputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
     "driver": {"type": "string", "description": "a built-in strategy name (see fak_memory_drivers); omit if you supply an inline query"},
-    "query": {"type": "object", "description": "an inline authored memq Query: {intent, ops:[{kind, pred?, by?, desc?, k?, bytes?, reason?}]}. Ops: scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune"},
+    "query": {"type": "object", "description": "an inline authored memq Query: {intent, near_dup_threshold?, ops:[{kind, pred?, by?, desc?, k?, bytes?, reason?}]}. Ops: scan|filter|rank|limit|budget|dedup|render|tombstone|consolidate|reclassify|prune"},
     "intent": {"type": "string", "description": "the task intent (drives relevance ranking and default match terms)"},
     "k": {"type": "integer", "description": "limit (driver-specific; 0 = driver default)"},
     "budget": {"type": "integer", "description": "byte budget for the rendered/selected set (0 = unbounded)"},
