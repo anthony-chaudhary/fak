@@ -787,6 +787,18 @@ type Server struct {
 	turnSafetyMu sync.Mutex
 	turnSafety   map[string]turnSafetyDelta
 
+	// placementFired records, per trace, whether fak's OFFENSIVE cache-breakpoint placement
+	// (agent.PlaceAnthropicCacheBreakpoint) actually PLACED a breakpoint on THIS turn — i.e. the
+	// caller sent no cache_control of its own and fak spliced one onto the stable head. That is the
+	// one slice where the provider's cache_read this turn is unambiguously fak-UNLOCKED (without the
+	// placement a no-breakpoint caller earns 0 provider cache), so the per-turn debug line can credit
+	// it as fak-authored (fak=<tok> placement-unlocked) instead of the conservative fak=0. Written at
+	// the placement site (recordPlacement) and read-and-cleared by the render (takePlacement), so each
+	// line reports THIS turn's placement, never a running cumulative. Same reaper/bound as turnSafety.
+	// SHADOW-only: an observability signal, never on the request path.
+	placementMu    sync.Mutex
+	placementFired map[string]bool
+
 	// livelock tracks consecutive identical refused tool calls per trace so the third
 	// repeat can be surfaced as a structured LIVELOCK_DETECTED envelope inside the same
 	// turn stream. It records only tool names and args digests, never raw arguments.

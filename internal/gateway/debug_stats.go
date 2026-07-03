@@ -43,23 +43,33 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
-// turnSafetyDelta is ONE turn's adjudication SAFETY outcome — the calls the kernel BLOCKED and
-// REPAIRED, and the inbound results it QUARANTINED, on that turn alone. It is the safety half of
-// the per-turn fak-turn debug line, the counterpart to the cache/token VALUE the line already
-// shows. topReason carries the dominant deny/quarantine reason (a closed-vocabulary token, e.g.
-// POLICY_BLOCK) so the glanceable line can say WHY, not just how many. It is a per-turn delta, not
-// a cumulative — recordTurnSafety stores exactly this turn's counts and takeTurnSafety clears them
-// on read, so two deny turns each render blocked=1, never 1 then 2.
+// turnSafetyDelta is ONE turn's per-turn EXTRAS folded into the fak-turn line beyond the raw
+// cache/token counters: the adjudication SAFETY outcome — the calls the kernel BLOCKED and
+// REPAIRED, and the inbound results it QUARANTINED — plus placementUnlocked, the cache-attribution
+// bit that says fak's own offensive breakpoint placement is what unlocked this turn's provider
+// cache. topReason carries the dominant deny/quarantine reason (a closed-vocabulary token, e.g.
+// POLICY_BLOCK) so the glanceable line can say WHY, not just how many. Every field is a per-turn
+// delta, not a cumulative — recordTurnSafety/recordPlacement store exactly this turn's signal and
+// takeTurnSafety/takePlacement clear it on read, so two deny turns each render blocked=1, never 1
+// then 2, and fak= credit appears only on the turns fak actually placed a breakpoint.
 type turnSafetyDelta struct {
 	blocked     int
 	repaired    int
 	quarantined int
 	topReason   string
 	livelock    guardrsi.LivelockEnvelope
+	// placementUnlocked is true when fak's offensive cache-breakpoint placement FIRED this turn
+	// (the caller sent no cache_control and fak spliced one onto the stable head). It is the
+	// per-turn fak-authored witness the fak= slice needed: on a placement-fired turn the provider
+	// cache_read is fak-unlocked (a no-breakpoint caller earns 0 provider cache without it), so the
+	// line credits it as fak= instead of the conservative fak=0. Never set on the already_set
+	// (Claude-Code) shape, whose cache is the client's own.
+	placementUnlocked bool
 }
 
-// any reports whether the delta has anything worth rendering — a clean ALLOW-everything turn has
-// none of the three, so the fak-turn line stays byte-identical to a value-only turn.
+// any reports whether the delta has any SAFETY action worth rendering — a clean ALLOW-everything
+// turn has none of the three, so the safety= suffix stays absent. placementUnlocked is deliberately
+// excluded: it is a cache-attribution signal rendered in the fak= slice, not the safety= suffix.
 func (d turnSafetyDelta) any() bool { return d.blocked > 0 || d.repaired > 0 || d.quarantined > 0 }
 
 // foldTurnSafety derives a turn's safety delta from the SAME per-turn slices the proxy already
@@ -139,6 +149,45 @@ func (s *Server) takeTurnSafety(trace string) turnSafetyDelta {
 	return d
 }
 
+// recordPlacement stashes, under its trace, that fak's offensive cache-breakpoint placement FIRED
+// this turn (the caller sent no cache_control and fak spliced one onto the stable head). The per-turn
+// debug render reads-and-clears it to credit the resulting provider cache_read as fak-unlocked. It
+// mirrors recordTurnSafety exactly: a no-op for the empty trace, bounded by the same reaper so an
+// unbounded stream of distinct traces cannot grow the map without limit, and cleared on read so each
+// line carries THIS turn's placement, never a cumulative. Only a genuine placement is recorded — a
+// caller that already had a breakpoint (already_set) leaves no stash, so the render keeps fak=0.
+func (s *Server) recordPlacement(trace string) {
+	if s == nil || trace == "" {
+		return
+	}
+	s.placementMu.Lock()
+	if s.placementFired == nil {
+		s.placementFired = map[string]bool{}
+	}
+	if len(s.placementFired) >= maxResetHealthSessions {
+		for k := range s.placementFired {
+			delete(s.placementFired, k)
+			break
+		}
+	}
+	s.placementFired[trace] = true
+	s.placementMu.Unlock()
+}
+
+// takePlacement returns and CLEARS whether placement fired for a trace. Clearing on read keeps the
+// credit per-turn: the next turn starts from nothing, so fak= is only shown on turns fak actually
+// placed a breakpoint on. False means no placement was stashed this turn (identity / already_set).
+func (s *Server) takePlacement(trace string) bool {
+	if s == nil || trace == "" {
+		return false
+	}
+	s.placementMu.Lock()
+	fired := s.placementFired[trace]
+	delete(s.placementFired, trace)
+	s.placementMu.Unlock()
+	return fired
+}
+
 // peekResetHealth scores a session's CURRENT rolling compaction-health WITHOUT mutating it or
 // minting a record. ok is false when the session has no rolling health yet (it has never been
 // compacted), so the debug render reports health=n/a rather than a phantom unknown_provider.
@@ -168,6 +217,10 @@ func (s *Server) renderTurnDebugStats(trace, wire string, stream bool, finish st
 	// Take (and clear) this turn's safety delta so the line carries the blocked/repaired/
 	// quarantined half alongside the cache/token value. Clearing keeps it per-turn.
 	safety := s.takeTurnSafety(trace)
+	// Take (and clear) this turn's placement bit: if fak placed a breakpoint the caller didn't send,
+	// this turn's provider cache_read is fak-unlocked, so the fak= slice credits it. Clearing keeps
+	// the credit per-turn — fak= appears only on the turns fak actually placed a breakpoint.
+	safety.placementUnlocked = s.takePlacement(trace)
 	s.debugStatsf("%s", formatTurnDebugStatsWithBudget(trace, wire, stream, finish, prompt, completion, cacheRead, cacheCreate, compacted, s.compactHistoryBudget, d, have, safety))
 }
 
@@ -300,11 +353,21 @@ func formatTurnDebugStatsWithBudget(trace, wire string, stream bool, finish stri
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak-turn trace=%s %s", debugField(trace), verdict)
-	// prov=<net token-equiv> with the % of the uncached baseline it represents. The fak
-	// per-turn slice is explicitly 0 because this call site has no per-turn shed/KV witness;
-	// session-level attribution folds those in from their own counters.
+	// prov=<net token-equiv> with the % of the uncached baseline it represents — the provider's own
+	// cache saving (OBSERVED, relayed). fak=<net> is the slice fak AUTHORED: normally 0 at this call
+	// site (no per-turn shed/KV witness here; session-level attribution folds those in from their own
+	// counters), but on a turn where fak's offensive breakpoint placement FIRED (safety.placementUnlocked
+	// — the caller sent no cache_control), the provider cache_read is fak-UNLOCKED: a no-breakpoint
+	// caller earns 0 provider cache without the placement, so the whole net saving is fak-authored and
+	// credited as fak=<net> (placement-unlocked). Never on the already_set (Claude-Code) shape, whose
+	// cache is the client's own — there placementUnlocked is false and fak stays 0.
 	if cacheRead > 0 || cacheCreate > 0 {
-		fmt.Fprintf(&b, " prov=%s tok (%s%% of prompt) fak=0 tok", HumanTokenEquiv(proof.SavedTokenEquiv), strconv.FormatFloat(proof.SavedPct, 'f', 0, 64))
+		fmt.Fprintf(&b, " prov=%s tok (%s%% of prompt)", HumanTokenEquiv(proof.SavedTokenEquiv), strconv.FormatFloat(proof.SavedPct, 'f', 0, 64))
+		if safety.placementUnlocked && proof.SavedTokenEquiv > 0 {
+			fmt.Fprintf(&b, " fak=%s tok (placement-unlocked)", HumanTokenEquiv(proof.SavedTokenEquiv))
+		} else {
+			b.WriteString(" fak=0 tok")
+		}
 	} else {
 		b.WriteString(" prov=0 tok fak=0 tok")
 	}

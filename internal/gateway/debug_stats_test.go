@@ -70,6 +70,71 @@ func TestFormatTurnDebugStats_LeadsWithVerdictAndNetSaving(t *testing.T) {
 	}
 }
 
+func TestFormatTurnDebugStats_PlacementUnlockedCreditsFak(t *testing.T) {
+	// Same economics as the net-saving test (prompt=20, read=60, write=20 => net 49 token-equiv),
+	// but this turn fak's OFFENSIVE breakpoint placement fired (the caller sent no cache_control),
+	// so the provider cache_read is fak-UNLOCKED: without the placement a no-breakpoint caller earns
+	// 0 provider cache, so the whole net saving is fak-authored and must render as fak=<net>.
+	placed := formatTurnDebugStats("t1", "w", true, "end_turn", 20, 5, 60, 20, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true, turnSafetyDelta{placementUnlocked: true})
+	// prov= still names the provider's own number (OBSERVED); fak= now carries the fak-unlocked slice.
+	for _, want := range []string{"prov=49 tok (49% of prompt)", "fak=49 tok (placement-unlocked)"} {
+		if !strings.Contains(placed, want) {
+			t.Fatalf("placement-fired turn want %q: %s", want, placed)
+		}
+	}
+	// The conservative fak=0 must be GONE — the whole point is that fak is no longer credited 0.
+	if strings.Contains(placed, "fak=0 tok") {
+		t.Fatalf("placement-fired turn must not read fak=0: %s", placed)
+	}
+
+	// HONESTY FENCE: with NO placement this turn (the already_set / Claude-Code shape, or a turn where
+	// fak placed nothing), the identical counters must stay fak=0 — the provider cache is the client's
+	// own, not fak's. This is the same call minus the placementUnlocked bit.
+	notPlaced := formatTurnDebugStats("t1", "w", true, "end_turn", 20, 5, 60, 20, true,
+		ResetDecision{Reason: ResetReasonHealthy}, true)
+	if !strings.Contains(notPlaced, "prov=49 tok (49% of prompt) fak=0 tok") {
+		t.Fatalf("no-placement turn must stay fak=0: %s", notPlaced)
+	}
+	if strings.Contains(notPlaced, "placement-unlocked") {
+		t.Fatalf("no-placement turn must not claim placement-unlocked: %s", notPlaced)
+	}
+
+	// A placement bit on a turn with NO provider cache activity earns nothing to credit — fak stays 0
+	// (there is no unlocked read to attribute), never a phantom placement-unlocked=0.
+	placedButCold := formatTurnDebugStats("t1", "w", false, "end_turn", 100, 5, 0, 0, false,
+		ResetDecision{}, false, turnSafetyDelta{placementUnlocked: true})
+	if !strings.Contains(placedButCold, "prov=0 tok fak=0 tok") || strings.Contains(placedButCold, "placement-unlocked") {
+		t.Fatalf("placement bit on a cold turn must stay prov/fak=0 with no placement-unlocked slice: %s", placedButCold)
+	}
+}
+
+// TestServerPlacementStashIsPerTurn proves the record/take stash on Server is a per-turn delta keyed
+// by trace: recordPlacement sets the bit, takePlacement returns AND clears it, and a second take
+// reads false — so fak= credit lands on exactly the turn fak placed a breakpoint, never the next.
+func TestServerPlacementStashIsPerTurn(t *testing.T) {
+	s := &Server{}
+	if s.takePlacement("t1") {
+		t.Fatalf("no placement recorded yet: take must be false")
+	}
+	s.recordPlacement("t1")
+	s.recordPlacement("t2")
+	if !s.takePlacement("t1") {
+		t.Fatalf("recorded t1: take must be true")
+	}
+	if s.takePlacement("t1") {
+		t.Fatalf("take clears on read: second take of t1 must be false")
+	}
+	if !s.takePlacement("t2") {
+		t.Fatalf("t2 is independent: take must be true")
+	}
+	// Empty trace is a safe no-op both ways (tests / non-session callers).
+	s.recordPlacement("")
+	if s.takePlacement("") {
+		t.Fatalf("empty trace must never stash")
+	}
+}
+
 func TestFormatTurnDebugStats_BudgetLineWarnsNearCompactionThreshold(t *testing.T) {
 	line := formatTurnDebugStatsWithBudget("t1", "w", true, "end_turn",
 		20_000, 100, 20_000, 0, false, 48_000, ResetDecision{Reason: ResetReasonHealthy}, true)
@@ -237,6 +302,37 @@ func TestRecordTurnSafety_IsPerTurnNotCumulative(t *testing.T) {
 	}
 	if strings.Contains(lines[2], "blocked:") {
 		t.Fatalf("a turn with no recorded safety action must carry no safety half: %s", lines[2])
+	}
+}
+
+// TestRecordPlacement_CreditsFakOnLiveRenderPerTurn drives the FULL live render pipeline
+// (logInferenceTurn -> renderTurnDebugStats -> takePlacement), not just the formatter, to witness
+// the wiring end to end: a turn where fak recorded a placement renders fak=<n> (placement-unlocked)
+// on the live per-turn line, and — because the stash clears on read — the NEXT turn with identical
+// provider cache_read stays fak=0 (the credit is per-turn, tied to the turn fak actually placed).
+func TestRecordPlacement_CreditsFakOnLiveRenderPerTurn(t *testing.T) {
+	s := newResetShadowServer()
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	// Turn 1: fak placed a breakpoint this turn (the caller sent none). The provider cache_read is
+	// fak-unlocked, so the live line must credit fak.
+	s.recordPlacement("t1")
+	s.logInferenceTurn("t1", "anthropic_messages", true,
+		agent.Usage{PromptTokens: 20, CacheReadInputTokens: 60, CacheCreationInputTokens: 20}, "end_turn", time.Millisecond, false)
+	// Turn 2: SAME trace, identical provider counters, but NO placement recorded — the stash cleared
+	// on read, so this turn's provider cache is the client's own (or a warm read fak didn't unlock).
+	s.logInferenceTurn("t1", "anthropic_messages", true,
+		agent.Usage{PromptTokens: 20, CacheReadInputTokens: 60, CacheCreationInputTokens: 20}, "end_turn", time.Millisecond, false)
+
+	if len(lines) != 2 {
+		t.Fatalf("want 2 rendered turns, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "placement-unlocked") || strings.Contains(lines[0], "fak=0 tok") {
+		t.Fatalf("turn 1 (placement recorded) must credit fak as placement-unlocked: %s", lines[0])
+	}
+	if strings.Contains(lines[1], "placement-unlocked") || !strings.Contains(lines[1], "fak=0 tok") {
+		t.Fatalf("turn 2 (no placement — stash cleared) must stay fak=0, not claim placement: %s", lines[1])
 	}
 }
 

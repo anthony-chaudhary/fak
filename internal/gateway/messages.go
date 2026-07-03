@@ -485,7 +485,16 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 	// bytes; the decoded req.Messages the kernel adjudicates are untouched, so the trust boundary
 	// is unchanged. The net effect is visible on the SAME readback: placement makes compaction
 	// fire (CompactionFired) and the provider cache_read it relays now covers the cached head.
-	req.Raw = agent.PlaceAnthropicCacheBreakpoint(req.Raw)
+	placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
+	req.Raw = placed
+	s.metrics.observePlacement(placement)
+	if placement.Reason == agent.BreakpointReasonNone {
+		// fak placed a breakpoint the caller did NOT send: the provider cache_read this turn is
+		// fak-unlocked (a no-breakpoint caller earns 0 provider cache otherwise). Stash it so the
+		// per-turn debug render credits it as fak-authored. Keyed by the same trace the render
+		// reads (reqTrace); the empty-trace path (tests, non-session callers) is a safe no-op.
+		s.recordPlacement(trace)
+	}
 	opts := agent.CompactOptions{Budget: s.compactHistoryBudget, Anchor: agent.CompactAnchorFirstBP}
 	if s.compactAnchorHead {
 		// #1407/#1408 opt-in: re-anchor on the stable head so anchor-starved sessions can

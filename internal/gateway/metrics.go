@@ -129,6 +129,7 @@ type gatewayMetrics struct {
 	uncachedTrimResults  uint64            // WITNESSED: oversized old tool_result bodies shrunk by the uncached-tail trim.
 	uncachedTrimShed     uint64            // WITNESSED: estimated tokens removed by uncached-tail trim, folded into compactShed for fak attribution.
 	ttlUpgrades          map[string]uint64 // WITNESSED: managed-cache 1h TTL upgrade attempts by outcome ("upgraded" | agent.TTLUpgradeReason*). Recorded only while the lever (--managed-cache / CacheTTL1H) is on, so a zero panel with the lever active means every head was ineligible — visible, not silent.
+	placementAttempts    map[string]uint64 // WITNESSED: offensive cache-breakpoint placement attempts by outcome ("placed" | agent.BreakpointReason*). "placed" is the fak-authored slice — a breakpoint spliced onto a caller that sent none, so the provider cache_read it earns is fak-unlocked; "already_set" is the Claude-Code shape fak leaves alone (the client's cache, not fak's).
 
 	// ctxViewMu guards ctxplan planned-view rewrites. This is a CONTEXT-plane witness,
 	// but not a history-compaction attempt: the planner materialized an O(1) resident
@@ -367,6 +368,7 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		compactAttempts:          map[string]uint64{},
 		compactBailReasons:       map[string]uint64{},
 		ttlUpgrades:              map[string]uint64{},
+		placementAttempts:        map[string]uint64{},
 		reqMemoryObserved:        map[string]uint64{},
 		reqMemoryPlan:            map[requestMemoryMetricKey]*requestMemoryMetricStats{},
 		reqMemoryTokens:          map[requestMemoryTokenKey]*requestMemoryTokenStats{},
@@ -640,6 +642,29 @@ func (m *gatewayMetrics) observeCacheTTLUpgrade(reason string) {
 		m.ttlUpgrades = map[string]uint64{}
 	}
 	m.ttlUpgrades[outcome]++
+	m.compactMu.Unlock()
+}
+
+// observePlacement records one offensive cache-breakpoint placement attempt on the outbound
+// Anthropic wire, bucketed by the closed agent.BreakpointReason* outcome ("" — an actual placement
+// — counts as "placed"). WITNESSED: fak authored the splice, and the placer re-proves the body
+// redecodes and the cached prefix stays byte-identical before returning changed bytes. Called on
+// every Anthropic passthrough turn while compaction is configured on, so the "placed" bucket is the
+// always-on witness of fak-authored cache unlocking even with --debug-stats off — while "already_set"
+// counts the Claude-Code shape fak deliberately leaves to the client's own cache.
+func (m *gatewayMetrics) observePlacement(out agent.BreakpointOutcome) {
+	if m == nil {
+		return
+	}
+	outcome := out.Reason
+	if outcome == "" {
+		outcome = "placed"
+	}
+	m.compactMu.Lock()
+	if m.placementAttempts == nil {
+		m.placementAttempts = map[string]uint64{}
+	}
+	m.placementAttempts[outcome]++
 	m.compactMu.Unlock()
 }
 
@@ -2086,6 +2111,7 @@ type compactionSnapshot struct {
 	uncachedTrimResults uint64
 	uncachedTrimShed    uint64
 	ttlUpgrades         map[string]uint64
+	placementAttempts   map[string]uint64
 }
 
 type ctxViewRewriteSnapshot struct {
@@ -2188,10 +2214,15 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 	for k, v := range m.ttlUpgrades {
 		ttlUpgrades[k] = v
 	}
+	placementAttempts := map[string]uint64{}
+	for k, v := range m.placementAttempts {
+		placementAttempts[k] = v
+	}
 	return compactionSnapshot{
 		attempts:            attempts,
 		bailReasons:         bailReasons,
 		ttlUpgrades:         ttlUpgrades,
+		placementAttempts:   placementAttempts,
 		dropped:             m.compactDropped,
 		shed:                m.compactShed,
 		cacheReads:          m.compactCacheReads,
@@ -2736,6 +2767,26 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	sort.Strings(ttlReasons)
 	for _, r := range ttlReasons {
 		fmt.Fprintf(b, "fak_gateway_cache_ttl_upgrade_total{outcome=%q} %d\n", promQuote(r), snap.ttlUpgrades[r])
+	}
+
+	// WITNESSED (fak authored): the OFFENSIVE cache-breakpoint placement family (#806). "placed"
+	// counts turns where fak spliced a cache_control breakpoint onto the stable head of a caller that
+	// sent none — the fak-UNLOCKED slice, since a no-breakpoint caller earns 0 provider cache without
+	// it. "already_set" counts the Claude-Code shape fak leaves to the client's own cache (NOT fak's).
+	// The "placed" row is emitted even at 0 so a passthrough that never placed is visible, not silent.
+	// splice_failed/redecode_failed are fak bugs and must stay 0.
+	writeHelpType(b, "fak_gateway_cache_breakpoint_placement_total",
+		"WITNESSED (fak authored): offensive cache-breakpoint placements on the outbound Anthropic wire, by outcome: placed (a cache_control breakpoint spliced onto the stable system/tools head of a caller that sent none) or the bail reason (already_set|no_stable_head|volatile_head|non_json|splice_failed|redecode_failed). placed is the fak-unlocked slice — the provider cache_read those turns earn would be 0 without it; already_set is the client's own cache, not fak's. The provider serving turns 2..N from that cache is OBSERVED via cache_read, not claimed by this counter.", "counter")
+	fmt.Fprintf(b, "fak_gateway_cache_breakpoint_placement_total{outcome=%q} %d\n", "placed", snap.placementAttempts["placed"])
+	placementReasons := make([]string, 0, len(snap.placementAttempts))
+	for r := range snap.placementAttempts {
+		if r != "placed" {
+			placementReasons = append(placementReasons, r)
+		}
+	}
+	sort.Strings(placementReasons)
+	for _, r := range placementReasons {
+		fmt.Fprintf(b, "fak_gateway_cache_breakpoint_placement_total{outcome=%q} %d\n", promQuote(r), snap.placementAttempts[r])
 	}
 
 	// The INBOUND tool-floor prune family (the tools[] twin of the compaction shed above).
