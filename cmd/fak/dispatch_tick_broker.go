@@ -9,24 +9,26 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
 const launchBrokerMetadataSchema = "agent-run-spawn-adapter/1"
 
 type launchBrokerMetadata struct {
-	Schema         string
-	Surface        string
-	Backend        string
-	AgentRunID     string
-	ParentRunID    string
-	ToolCallID     string
-	PolicyDigest   string
-	ArgvDigest     string
-	EnvDigest      string
-	EnvCount       int
-	SecretEnvCount int
-	CWD            string
+	Schema            string
+	Surface           string
+	Backend           string
+	AgentRunID        string
+	ParentRunID       string
+	ToolCallID        string
+	PolicyDigest      string
+	ArgvDigest        string
+	EnvDigest         string
+	EnvCount          int
+	SecretEnvCount    int
+	StrippedSecretEnv []string
+	CWD               string
 }
 
 type launchBrokerAttempt struct {
@@ -109,25 +111,27 @@ func denyLaunchBrokerGrant(a launchBrokerAttempt, reason string) launchBrokerGra
 }
 
 func newLaunchBrokerAttempt(surface, backend string, argv []string, env map[string]string, cwd string) launchBrokerAttempt {
+	sanitized, stripped := sanitizeLaunchEnv(env)
 	a := launchBrokerAttempt{
 		Surface: strings.TrimSpace(surface),
 		Backend: strings.TrimSpace(backend),
 		Argv:    append([]string(nil), argv...),
-		Env:     copyStringMap(env),
+		Env:     sanitized,
 		CWD:     strings.TrimSpace(cwd),
 	}
 	envShape := launchBrokerEnvShape(a.Env)
 	a.Metadata = launchBrokerMetadata{
-		Schema:         launchBrokerMetadataSchema,
-		Surface:        a.Surface,
-		Backend:        a.Backend,
-		ParentRunID:    firstNonEmpty(a.Env["FAK_AGENT_RUN_ID"], a.Env["AGENT_RUN_ID"], a.Env["CLAUDE_CODE_SESSION_ID"]),
-		ToolCallID:     firstNonEmpty(a.Env["TOOL_CALL_ID"], a.Env["CLAUDE_TOOL_CALL_ID"]),
-		ArgvDigest:     "argv-sha256:" + launchBrokerDigest(a.Argv),
-		EnvDigest:      "env-sha256:" + launchBrokerDigest(envShape),
-		EnvCount:       len(a.Env),
-		SecretEnvCount: launchBrokerSecretEnvCount(a.Env),
-		CWD:            launchBrokerRedactedCWD(a.CWD),
+		Schema:            launchBrokerMetadataSchema,
+		Surface:           a.Surface,
+		Backend:           a.Backend,
+		ParentRunID:       firstNonEmpty(a.Env["FAK_AGENT_RUN_ID"], a.Env["AGENT_RUN_ID"], a.Env["CLAUDE_CODE_SESSION_ID"]),
+		ToolCallID:        firstNonEmpty(a.Env["TOOL_CALL_ID"], a.Env["CLAUDE_TOOL_CALL_ID"]),
+		ArgvDigest:        "argv-sha256:" + launchBrokerDigest(a.Argv),
+		EnvDigest:         "env-sha256:" + launchBrokerDigest(envShape),
+		EnvCount:          len(a.Env),
+		SecretEnvCount:    launchBrokerSecretEnvCount(a.Env),
+		StrippedSecretEnv: stripped,
+		CWD:               launchBrokerRedactedCWD(a.CWD),
 	}
 	if a.Metadata.ToolCallID == "" {
 		a.Metadata.ToolCallID = "toolcall-" + launchBrokerDigest([]string{a.Surface, a.Backend, a.Metadata.ArgvDigest})
@@ -208,6 +212,9 @@ func launchBrokerMetadataMap(m launchBrokerMetadata) map[string]any {
 	}
 	if m.SecretEnvCount > 0 {
 		out["secret_env_count"] = m.SecretEnvCount
+	}
+	if len(m.StrippedSecretEnv) > 0 {
+		out["stripped_secret_env"] = append([]string(nil), m.StrippedSecretEnv...)
 	}
 	return out
 }
@@ -311,6 +318,25 @@ func launchBrokerDigest(parts []string) string {
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// sanitizeLaunchEnv applies the always-on #2358 secret floor to a brokered
+// child's inherited environment: policy.StripInheritedSecrets removes every
+// credential-bearing ambient variable (the exfiltration path a spawned worker
+// could otherwise carry to a subagent or descendant) while leaving PATH, the OS
+// floor, and the non-secret DISPATCH_/FLEET_/CLAUDE_CONFIG_DIR config the worker
+// legitimately needs untouched. It generalizes the ad-hoc
+// delete(env, "CLAUDE_CODE_OAUTH_TOKEN") the dispatch launcher already did by
+// hand into one floor every launch surface shares. It returns the surviving env
+// as a fresh map plus the sorted NAMES stripped (never the values) for the
+// audit metadata, so an operator can inspect which secrets the boundary held out.
+func sanitizeLaunchEnv(env map[string]string) (map[string]string, []string) {
+	if len(env) == 0 {
+		return copyStringMap(env), nil
+	}
+	kept, stripped := policy.StripInheritedSecrets(envSliceFromMap(env))
+	sort.Strings(stripped)
+	return envMap(kept), stripped
 }
 
 func copyStringMap(in map[string]string) map[string]string {
