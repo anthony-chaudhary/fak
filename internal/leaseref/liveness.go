@@ -62,6 +62,10 @@ const sessionStateStopped = "STOPPED"
 // session_id, ..., liveness, reclaimable, evidence} in one object.
 type ClassifiedLease struct {
 	Record
+	// Node is the stable machine id from the holder's <node-id>/<session-id>
+	// convention (#2304) — the "WHICH MACHINE holds this?" component. A legacy
+	// free-form holder classifies NodeUnknown, never an error (nodeident.go).
+	Node        string `json:"node"`
 	Liveness    string `json:"liveness"`
 	Reclaimable bool   `json:"reclaimable"`
 	Evidence    string `json:"evidence"`
@@ -126,6 +130,7 @@ func (s *Store) ClassifyLive(ctx context.Context, selfSession string, now time.T
 		class, ev := ClassifyLiveness(r, byID, selfSession, now)
 		out = append(out, ClassifiedLease{
 			Record:      r,
+			Node:        r.HolderNode(),
 			Liveness:    class,
 			Reclaimable: class == LivenessPeerDead,
 			Evidence:    ev,

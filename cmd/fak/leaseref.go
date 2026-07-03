@@ -145,6 +145,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       --session S binds the lease to its owning session descriptor so 'liveness'
       can classify it by heartbeat (#2164); a renew adopts a binding a legacy
       record lacked but never rebinds an existing one.
+      When --holder is omitted and --session is given, the holder is MINTED as
+      <node-id>/<session-id> (#2304): node-id is this machine's stable identity,
+      hostname-keyed to the hardware catalog (experiments/benchmark/catalog.json).
+      list/liveness/audit surface that node component; a legacy free-form holder
+      classifies node-unknown, never an error.
 
   fak leaseref fence --id ID --holder H --generation N [--dir DIR]
       The GATE an agent runs BEFORE a write: is the lease you hold still current?
@@ -249,7 +254,14 @@ func runLeaserefList(stdout, stderr io.Writer, argv []string) int {
 		if r.Expired(now) {
 			status = "EXPIRED"
 		}
-		fmt.Fprintf(stdout, "%-24s holder=%s tree=%v ttl=%ds %s\n", r.ID, r.Holder, r.TreeGlobs, r.TTLSeconds, status)
+		// Surface the node component when the holder carries the
+		// <node-id>/<session-id> convention (#2304); a legacy free-form
+		// holder shows unchanged.
+		node := ""
+		if hi := leaseref.ParseHolder(r.Holder); hi.Structured() {
+			node = " node=" + hi.Node
+		}
+		fmt.Fprintf(stdout, "%-24s holder=%s%s tree=%v ttl=%ds %s\n", r.ID, r.Holder, node, r.TreeGlobs, r.TTLSeconds, status)
 	}
 	return 0
 }
@@ -380,6 +392,7 @@ func leaserefAuditLeaseRow(r leaseref.Record, now time.Time, expired bool) map[s
 		"lane":                  leaserefAuditLane(r.ID),
 		"owner":                 r.Holder,
 		"holder":                r.Holder,
+		"node":                  r.HolderNode(),
 		"tree":                  append([]string(nil), r.TreeGlobs...),
 		"age_seconds":           age,
 		"age_threshold_seconds": r.TTLSeconds,
@@ -440,6 +453,13 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	if *id == "" {
 		fmt.Fprintln(stderr, "fak leaseref acquire: --id is required")
 		return 2
+	}
+	// Writer adoption of the node-identity convention (#2304): when the caller
+	// names its session but no holder, mint holder = <node-id>/<session-id> from
+	// this machine's stable node id (hostname keyed to the hardware catalog).
+	// An explicit --holder is always honored verbatim.
+	if *holder == "" && *session != "" {
+		*holder = leaseref.MintHolder(leaseref.LocalNodeID(*dir), *session)
 	}
 	store := leaseref.NewInDir(*dir)
 	rec, v, err := store.AcquireFenced(context.Background(), leaseref.Record{
