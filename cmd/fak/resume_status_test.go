@@ -206,6 +206,53 @@ func TestResumeStatusBareFableLimitIsRecoverable(t *testing.T) {
 	}
 }
 
+func TestResumeStatusLaunchedWithoutNewTurnsWaitsForProgress(t *testing.T) {
+	store := t.TempDir()
+	const sid = "waitprog"
+	body := `{"type":"user","timestamp":"2020-01-01T00:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2020-01-01T00:00:05Z","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"working cleanly before the resume launch"}],"usage":{"input_tokens":4000,"cache_read_input_tokens":90000,"cache_creation_input_tokens":0,"output_tokens":300}}}
+`
+	if err := os.WriteFile(filepath.Join(store, sid+".jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ledger := filepath.Join(t.TempDir(), "resume_ledger.jsonl")
+	row := `{"ts":"2020-01-01T00:30:00Z","session":"` + sid + `","phase":"launched","action":"auto_resume"}` + "\n"
+	if err := os.WriteFile(ledger, []byte(row), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errb, code := runResumeStatusAt("--store", store, "--ledger", ledger, "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var doc struct {
+		Sessions []struct {
+			SessionID  string             `json:"session_id"`
+			State      resume.ResumeState `json:"resume_state"`
+			NewTurns   int                `json:"new_turns_since_resume"`
+			NextAction resume.NextAction  `json:"next_action"`
+			NextReason string             `json:"next_reason"`
+			Fire       bool               `json:"fire"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if len(doc.Sessions) != 1 || doc.Sessions[0].SessionID != sid {
+		t.Fatalf("sessions = %+v, want exactly %s", doc.Sessions, sid)
+	}
+	rowOut := doc.Sessions[0]
+	if rowOut.State != resume.ResumeLaunched || rowOut.NewTurns != 0 {
+		t.Fatalf("state/newTurns = %q/%d, want launched/0", rowOut.State, rowOut.NewTurns)
+	}
+	if rowOut.NextAction != resume.ActWaitProgress || rowOut.Fire {
+		t.Fatalf("next = %q fire=%v, want wait_progress/false", rowOut.NextAction, rowOut.Fire)
+	}
+	if !strings.Contains(rowOut.NextReason, "progress") {
+		t.Fatalf("next reason = %q, want progress witness language", rowOut.NextReason)
+	}
+}
+
 // TestResumeStatusUsageErrors covers exit-2 (no --store) and exit-1 (missing store dir).
 func TestResumeStatusUsageErrors(t *testing.T) {
 	if _, _, code := runResumeStatusAt(); code != 2 {

@@ -213,7 +213,8 @@ func resumeRunCommand(sid string) string {
 }
 
 // actionRank orders the runbook fire-first: run, then the deferrals (wait_reset,
-// hold_admission), then the human-owned walls (login, gave_up), then the quiet done tail.
+// hold_admission), then launched-but-unproven rows, then the human-owned walls
+// (login, gave_up), then the quiet done tail.
 func actionRank(a resume.NextAction) int {
 	switch a {
 	case resume.ActRun:
@@ -222,12 +223,14 @@ func actionRank(a resume.NextAction) int {
 		return 1
 	case resume.ActHoldAdmission:
 		return 2
-	case resume.ActLogin:
+	case resume.ActWaitProgress:
 		return 3
-	case resume.ActGaveUp:
+	case resume.ActLogin:
 		return 4
-	default: // done
+	case resume.ActGaveUp:
 		return 5
+	default: // done
+		return 6
 	}
 }
 
@@ -449,9 +452,9 @@ func renderResumeStatus(w io.Writer, store string, rows []statusRow, admit resum
 		counts[r.NextAction]++
 	}
 	fmt.Fprintf(w, "resume status — %d session(s) in %s\n", len(rows), store)
-	fmt.Fprintf(w, "  next: %d run   %d wait-reset   %d hold-admission   %d login   %d gave-up   %d done\n",
+	fmt.Fprintf(w, "  next: %d run   %d wait-reset   %d hold-admission   %d wait-progress   %d login   %d gave-up   %d done\n",
 		counts[resume.ActRun], counts[resume.ActWaitReset], counts[resume.ActHoldAdmission],
-		counts[resume.ActLogin], counts[resume.ActGaveUp], counts[resume.ActDone])
+		counts[resume.ActWaitProgress], counts[resume.ActLogin], counts[resume.ActGaveUp], counts[resume.ActDone])
 	if !admit.Admit {
 		fmt.Fprintf(w, "  host admission: REFUSED (%s) — %d run-eligible session(s) held\n", admit.Reason, counts[resume.ActHoldAdmission])
 	}

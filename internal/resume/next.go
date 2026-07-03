@@ -47,14 +47,17 @@ const (
 	// ceiling / launch-rate / spacing floor (the per-source 529 burst wall). Defer until
 	// RetryAfterUnix, then re-evaluate — a batch-wide backpressure, not a per-session block.
 	ActHoldAdmission NextAction = "hold_admission"
+	// ActWaitProgress: a resume has fired, but the transcript has not yet produced a
+	// post-launch progress witness. Do not fire a duplicate; keep watching.
+	ActWaitProgress NextAction = "wait_progress"
 	// ActLogin: the last attempt hit an auth/login/credit/access wall — a re-resume cannot
 	// fix it. A human must clear the account (interactive /login) before it can be resumed.
 	ActLogin NextAction = "login"
 	// ActGaveUp: the automatic-resume attempt budget is spent. No further automatic resume
 	// will fire; a human owns the decision to force one.
 	ActGaveUp NextAction = "gave_up"
-	// ActDone: nothing to fire — the resume took, an operator settled it, it is a fired-but-
-	// unproven launch (burn-once), or the session ended cleanly. The good/quiet tail.
+	// ActDone: nothing to fire — the resume took, an operator settled it, or the session
+	// ended cleanly. The good/quiet tail.
 	ActDone NextAction = "done"
 )
 
@@ -144,8 +147,8 @@ type NextVerdict struct {
 // fixed order so the verdict is deterministic and the first binding constraint wins:
 //
 //  1. The RetryGate blocks a new resume → we are NOT firing. Split the reason by why:
-//     an auth wall (login), a spent attempt budget (gave_up), or a resume that already
-//     took / is unproven / was settled (done).
+//     an auth wall (login), a spent attempt budget (gave_up), a fired-but-unproven launch
+//     (wait_progress), or a resume that already took / was settled (done).
 //  2. The gate allows a resume (pending, or a recoverable re-strand under the cap) → this
 //     session is fire-eligible. Check the preconditions before firing:
 //     a. a wall-clock cap whose reset has NOT surely elapsed → wait_reset;
@@ -164,6 +167,9 @@ func FoldNextAction(in NextInput) NextVerdict {
 				Reason: "last resume hit an auth/access wall — a re-resume cannot fix it; a human must /login"}
 		case in.State == ResumeGaveUp:
 			return NextVerdict{Action: ActGaveUp, Reason: in.Retry.Reason}
+		case in.State == ResumeLaunched:
+			return NextVerdict{Action: ActWaitProgress,
+				Reason: "resume launched; waiting for post-launch progress evidence"}
 		default:
 			return NextVerdict{Action: ActDone, Reason: in.Retry.Reason}
 		}

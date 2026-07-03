@@ -128,6 +128,23 @@ func TestFoldNextActionGaveUp(t *testing.T) {
 	}
 }
 
+// TestFoldNextActionWaitProgress: a resume launch with no post-launch turn is not
+// "done"; it is a no-duplicate wait for the progress witness.
+func TestFoldNextActionWaitProgress(t *testing.T) {
+	v := FoldNextAction(NextInput{
+		State:    ResumeLaunched,
+		Outcome:  OutcomeProgressed,
+		Retry:    RetryDecision{Blocked: true, Reason: "already resumed once (resume took)"},
+		Admitted: true,
+	})
+	if v.Action != ActWaitProgress || v.Fire {
+		t.Fatalf("action = %q fire=%v, want wait_progress/false (%s)", v.Action, v.Fire, v.Reason)
+	}
+	if !strings.Contains(v.Reason, "progress") {
+		t.Fatalf("reason = %q, want progress witness language", v.Reason)
+	}
+}
+
 // TestFoldNextActionDone: a resume that took is blocked from re-firing and is not a wall →
 // done (the quiet tail).
 func TestFoldNextActionDone(t *testing.T) {
