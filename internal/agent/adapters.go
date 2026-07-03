@@ -51,10 +51,17 @@ type adapterRequest struct {
 	Messages    []Message
 	Tools       []ToolDef
 	Temperature float64
-	MaxTokens   int
-	TopP        *float64 // nil => omit from the wire (planner/provider default)
-	TopK        *int     // nil => omit; only the providers with a native top-k field carry it
-	Stop        []string // empty => omit from the wire
+	// OmitTemperature suppresses the temperature field for provider variants that reject
+	// it. The normal OpenAI Responses API leaves this false; Codex's ChatGPT backend
+	// requires it when using the subscription route.
+	OmitTemperature bool
+	// OmitMaxOutputTokens suppresses max_output_tokens for provider variants that reject
+	// it, again scoped to Codex's ChatGPT subscription backend.
+	OmitMaxOutputTokens bool
+	MaxTokens           int
+	TopP                *float64 // nil => omit from the wire (planner/provider default)
+	TopK                *int     // nil => omit; only the providers with a native top-k field carry it
+	Stop                []string // empty => omit from the wire
 	// ResponseFormat / LogitBias are the OpenAI structured/guided-decode carriers
 	// (#560). They ride on the wire ONLY where the provider has a native field
 	// (OpenAI/xAI chat-completions); other providers omit them (their path is
@@ -380,8 +387,8 @@ type openAIResponsesRequest struct {
 	Input           []openAIResponsesItem `json:"input"`
 	Tools           []openAIResponsesTool `json:"tools,omitempty"`
 	ToolChoice      string                `json:"tool_choice,omitempty"`
-	Temperature     float64               `json:"temperature"`
-	MaxOutputTokens int                   `json:"max_output_tokens,omitempty"`
+	Temperature     *float64              `json:"temperature,omitempty"`
+	MaxOutputTokens *int                  `json:"max_output_tokens,omitempty"`
 	TopP            *float64              `json:"top_p,omitempty"` // Responses API has no `stop`
 	// Text carries the Responses-API structured-output control. The chat wire's
 	// `response_format` carrier (adapterRequest.ResponseFormat) maps here as
@@ -389,8 +396,9 @@ type openAIResponsesRequest struct {
 	// wrapper hoisted into `format`), `json_object`/`text` pass through. The
 	// Responses API deprecated the flat `response_format` key in favor of this
 	// nesting, so this is how the SAME structured-output request reaches /responses.
-	Text  *openAIResponsesText `json:"text,omitempty"`
-	Store bool                 `json:"store"`
+	Text   *openAIResponsesText `json:"text,omitempty"`
+	Store  bool                 `json:"store"`
+	Stream bool                 `json:"stream,omitempty"`
 }
 
 // openAIResponsesText is the `text` envelope on the Responses API; only its
@@ -454,16 +462,25 @@ func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"
 	}
+	var temp *float64
+	if !r.OmitTemperature {
+		temp = &r.Temperature
+	}
+	var maxOutput *int
+	if !r.OmitMaxOutputTokens && r.MaxTokens > 0 {
+		maxOutput = &r.MaxTokens
+	}
 	return json.Marshal(openAIResponsesRequest{
 		Model:           r.Model,
 		Input:           openAIResponsesInput(r.Messages),
 		Tools:           openAIResponsesTools(r.Tools),
 		ToolChoice:      toolChoice,
-		Temperature:     r.Temperature,
-		MaxOutputTokens: r.MaxTokens,
+		Temperature:     temp,
+		MaxOutputTokens: maxOutput,
 		TopP:            r.TopP,
 		Text:            responsesText(r.ResponseFormat),
 		Store:           false,
+		Stream:          r.Stream,
 	})
 }
 

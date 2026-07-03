@@ -688,6 +688,87 @@ func TestHTTPPlannerUsesProviderAdapterAndPreSendQuarantine(t *testing.T) {
 	}
 }
 
+func TestHTTPPlannerSendsExtraUpstreamHeaders(t *testing.T) {
+	var gotAuth, gotAccount, gotDynamic string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAccount = r.Header.Get("ChatGPT-Account-Id")
+		gotDynamic = r.Header.Get("X-Fak-Dynamic")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer ts.Close()
+
+	planner, err := NewProviderHTTPPlanner(string(ProviderOpenAIResponses), ts.URL, "gpt-test", "subscription-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner.ExtraHeaders = map[string]string{"ChatGPT-Account-Id": "acct-static"}
+	planner.ExtraHeadersFunc = func() map[string]string {
+		return map[string]string{"X-Fak-Dynamic": "yes"}
+	}
+	if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools()); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if gotAuth != "Bearer subscription-token" {
+		t.Fatalf("Authorization = %q, want bearer subscription-token", gotAuth)
+	}
+	if gotAccount != "acct-static" {
+		t.Fatalf("ChatGPT-Account-Id = %q, want acct-static", gotAccount)
+	}
+	if gotDynamic != "yes" {
+		t.Fatalf("X-Fak-Dynamic = %q, want yes", gotDynamic)
+	}
+}
+
+func TestHTTPPlannerForceResponsesStreamBuffersSSE(t *testing.T) {
+	var gotStream bool
+	var gotAccept string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotStream, _ = body["stream"].(bool)
+		if _, ok := body["temperature"]; ok {
+			t.Fatalf("forced Codex Responses stream must omit unsupported temperature: %v", body)
+		}
+		if _, ok := body["max_output_tokens"]; ok {
+			t.Fatalf("forced Codex Responses stream must omit unsupported max_output_tokens: %v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\",\"output\":[]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.output_item.done\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"content\":[],\"summary\":[]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.output_item.done\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.completed\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":\"gpt-test\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")
+	}))
+	defer ts.Close()
+
+	planner, err := NewProviderHTTPPlanner(string(ProviderOpenAIResponses), ts.URL, "gpt-test", "subscription-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner.ForceResponsesStream = true
+	comp, err := planner.Complete(context.Background(), adapterTestMessages(""), nil)
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if !gotStream {
+		t.Fatal("forced Responses stream did not set stream=true")
+	}
+	if gotAccept != "text/event-stream" {
+		t.Fatalf("Accept = %q, want text/event-stream", gotAccept)
+	}
+	if comp.Message.Content != "ok" || comp.Model != "gpt-test" {
+		t.Fatalf("completion = %+v, want buffered SSE response content/model", comp)
+	}
+}
+
 // TestAnthropicAdapterOAuthScheme proves the credential-scheme rule that makes a
 // Claude Pro/Max SUBSCRIPTION usable through the gateway: an OAuth token
 // ("sk-ant-oat…") is sent as Authorization: Bearer + the oauth beta — never as
