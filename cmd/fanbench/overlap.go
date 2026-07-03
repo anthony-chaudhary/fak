@@ -10,7 +10,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
-	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
@@ -40,14 +39,6 @@ type fanbenchOverlapReport struct {
 	ConcurrentEngineCalls int64   `json:"concurrent_engine_calls"`
 	MaxConcurrentReap     int64   `json:"max_concurrent_reap"`
 	HonestyCaveat         string  `json:"honesty_caveat"`
-}
-
-func writeOverlap(ctx context.Context, outPath string, opt fanbenchOverlapOptions) error {
-	rep, err := runOverlap(ctx, opt)
-	if err != nil {
-		return err
-	}
-	return benchcli.WriteReport(outPath, rep)
 }
 
 func runOverlap(ctx context.Context, opt fanbenchOverlapOptions) (fanbenchOverlapReport, error) {
