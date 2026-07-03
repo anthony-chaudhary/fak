@@ -40,7 +40,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How does fak prevent prompt injection?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It uses two independent gates rather than one classifier: The capability lock. A dangerous tool is simply not on the allow-list, so no amount of injected text changes the answer. The lever was never wired up. Result quarantine. Suspicious tool results are held out of the model's context entirely, so a booby-trapped document never reaches the model to influence it. The detector that flags suspicious results is deliberately treated as evadable (~100% evadable by design): it is a bonus, never the floor. An attacker has to beat two structural gates rather than fool one screener. In live tests, prompt injection reached the unprotected baseline 5/5 and fak walled it off 5/5."
+        "text": "It uses two independent gates rather than one classifier: The capability lock. A dangerous tool is simply not on the allow-list, so no amount of injected text changes the answer. The lever was never wired up. Result quarantine. Suspicious tool results are held out of the model's context entirely, so a booby-trapped document never reaches the model to influence it. The detector that flags suspicious results is deliberately treated as evadable (~100% evadable by design): it is a bonus, never the floor. An attacker has to beat two structural gates rather than fool one screener. In live tests, prompt injection reached the unprotected baseline 5/5 and fak walled it off 5/5. The full before/after walk-through — the same injected prompt against a classifier stack and against fak — is in Why default-deny beats a classifier."
       }
     },
     {
@@ -1684,7 +1684,9 @@ It uses two independent gates rather than one classifier:
 The detector that *flags* suspicious results is deliberately treated as evadable (~100%
 evadable by design): it is a bonus, never the floor. An attacker has to beat two
 structural gates rather than fool one screener. In live tests, prompt injection reached the
-unprotected baseline 5/5 and `fak` walled it off 5/5.
+unprotected baseline 5/5 and `fak` walled it off 5/5. The full before/after walk-through —
+the same injected prompt against a classifier stack and against fak — is in
+[Why default-deny beats a classifier](explainers/default-deny-vs-classifier.md).
 
 ## Does fak address the OWASP Agentic Top-10 and the MCP Top-10?
 
