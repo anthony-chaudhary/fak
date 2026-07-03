@@ -331,7 +331,7 @@ func TestNativeServeLoopStreamsRunArmDeltasAndMetrics(t *testing.T) {
 	})
 	select {
 	case <-planner.firstDelta:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("test planner had not reached its first delta before the client observed it")
 	}
 	close(planner.releaseSecond)
