@@ -477,6 +477,10 @@ class EvaluateTest(unittest.TestCase):
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.issue_contract_review = passing_issue_contract
+        # Hermetic contract-hold ledger: no prior holds, and never write the real
+        # .dispatch-runs ledger from a test tick (live hold ticks append to it).
+        mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.record_contract_holds = lambda runs_dir, rows, **k: None
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
@@ -533,6 +537,158 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
         self.assertIn("ISSUE_SCOPE_INCOMPLETE", p["reason"])
         self.assertEqual(p["issue_contract_gate"]["score"], 40)
+
+    def test_contract_hold_scans_to_next_ready_issue(self) -> None:
+        """A THIN head issue no longer wedges the tick: the pick scans forward
+        (oldest-first order preserved) to the oldest contract-READY issue and
+        spawns that, recording the skipped heads transparently."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466, 452],
+                          "by_lane_count": {"gateway": 3}})
+
+        def per_issue_review(root, issue, number, **_kw):
+            if number == 467:  # the thin head that used to hold every tick
+                return {"ok": False, "unavailable": False, "score": 8,
+                        "spine_priority": 0,
+                        "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                                   "missing_fields": ["working_spine"],
+                                   "score": {"total": 8}}}
+            return passing_issue_contract()
+
+        mod.issue_contract_review = per_issue_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 466)
+        self.assertEqual([r["issue"] for r in p["contract_skipped"]], [467])
+        self.assertIn("ISSUE_SCOPE_INCOMPLETE", p["contract_skipped"][0]["reason"])
+        # The recorded gate is the CHOSEN issue's (passing), not the skipped head's.
+        self.assertTrue(p["issue_contract_gate"]["ok"])
+
+    def test_contract_scan_bounded_holds_when_none_ready(self) -> None:
+        """When every scanned issue is thin, the tick still HOLDs (the floor is
+        never relaxed) and the reason names the scan so the hold is legible."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466, 452],
+                          "by_lane_count": {"gateway": 3}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertIn("scanned 3 lane issue(s)", p["reason"])
+        self.assertEqual([r["issue"] for r in p["contract_skipped"]], [467, 466])
+        self.assertEqual(p["target_issue"], 452)
+
+    def test_contract_scan_respects_budget(self) -> None:
+        """contract_scan caps how many issues one tick may review: with a budget
+        of 2 and three thin issues, only the first two are reviewed."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466, 452],
+                          "by_lane_count": {"gateway": 3}})
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return {"ok": False, "unavailable": False, "score": 8,
+                    "spine_priority": 0,
+                    "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                               "missing_fields": ["working_spine"],
+                               "score": {"total": 8}}}
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False, contract_scan=2)
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertEqual(reviewed, [467, 466])
+
+    def test_contract_hold_ledger_roundtrip_and_ttl(self) -> None:
+        """record_contract_holds appends only on LIVE ticks; contract_held_issues
+        honors the TTL horizon and the 0-disables contract."""
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            rows = [{"issue": 1207, "score": 8, "reason": "thin"},
+                    {"issue": 1271, "score": 0, "reason": "thin"}]
+            mod.record_contract_holds(runs, rows, live=False, now_ts=1_000_000.0)
+            self.assertEqual(mod.contract_held_issues(runs, ttl_h=24,
+                                                      now_ts=1_000_100.0), set())
+            mod.record_contract_holds(runs, rows, live=True, now_ts=1_000_000.0)
+            self.assertEqual(mod.contract_held_issues(runs, ttl_h=24,
+                                                      now_ts=1_000_100.0),
+                             {1207, 1271})
+            # Past the TTL horizon the holds expire (a backfill gets re-reviewed)...
+            self.assertEqual(mod.contract_held_issues(
+                runs, ttl_h=24, now_ts=1_000_000.0 + 25 * 3600), set())
+            # ...and 0 disables the gate outright.
+            self.assertEqual(mod.contract_held_issues(runs, ttl_h=0,
+                                                      now_ts=1_000_100.0), set())
+
+    def test_prior_contract_holds_advance_the_scan(self) -> None:
+        """An issue held on a PRIOR tick is skipped without a re-review, so the
+        bounded scan window advances across ticks instead of pinning to the head."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466, 452],
+                          "by_lane_count": {"gateway": 3}})
+        mod.contract_held_issues = lambda runs_dir, **k: {467}
+        reviewed: list[int] = []
+
+        def counting_review(root, issue, number, **_kw):
+            reviewed.append(number)
+            return passing_issue_contract()
+
+        mod.issue_contract_review = counting_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 466)
+        self.assertEqual(reviewed, [466])  # 467 skipped from the ledger, unreviewed
+        self.assertEqual(p["contract_held_prior"], 1)
+
+    def test_hold_tick_records_skipped_and_final_target(self) -> None:
+        """A live all-thin tick ledgers every reviewed-and-held issue (skipped heads
+        plus the final held target) so the next tick starts past them."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466, 452],
+                          "by_lane_count": {"gateway": 3}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        recorded: list[dict] = []
+        mod.record_contract_holds = (
+            lambda runs_dir, rows, **k: recorded.extend(rows))
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True)
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertEqual([r["issue"] for r in recorded], [467, 466, 452])
+
+    def test_pinned_issue_is_never_substituted_by_scan(self) -> None:
+        """--issue pins an operator-vetted target: a thin pinned issue HOLDs the
+        tick exactly as before -- the scan must not swap in a different issue."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 401, 388],
+                          "by_lane_count": {"gateway": 3}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane="gateway", live=False, issue_override=401)
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertEqual(p["target_issue"], 401)
+        self.assertNotIn("contract_skipped", p)
 
     def test_force_downgrades_contract_hold_to_advisory(self) -> None:
         """--force (operator best-effort): a contract that WOULD hold is downgraded

@@ -109,6 +109,17 @@ DEFAULT_SPAWN_PROBE_S = 5.0
 DEFAULT_REALLOC_CEILING = 2
 LOOP_ID_PREFIX = "issue-resolve-dispatch"
 DEFAULT_ISSUE_CONTRACT_MIN_SCORE = 100
+# Contract-ready pick: how many lane issues (oldest first) one tick may contract-
+# review while scanning past held THIN heads for a spawnable target. Each review
+# shells one bounded `fak issue contract`, so this caps tick latency, not safety --
+# the floor itself is never relaxed by the scan.
+DEFAULT_CONTRACT_SCAN = 8
+# How long a contract-HELD issue stays skipped before it is re-reviewed. The TTL is
+# what lets a later backfill (contract fields added to the issue body) re-enter the
+# pool without a manual reset; the skip is what makes the bounded scan CUMULATIVE
+# across ticks instead of re-reviewing the same thin heads forever.
+DEFAULT_CONTRACT_HOLD_TTL_H = 24
+_CONTRACT_HOLD_LEDGER = "contract-holds.jsonl"
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -595,6 +606,64 @@ def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
         if n not in skip:
             return n
     return None
+
+
+def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
+                         now_ts: float | None = None) -> set[int]:
+    """Issue numbers whose contract review HELD within the last ``ttl_h`` hours --
+    read from the ledger live ticks append via ``record_contract_holds``. This is
+    what makes the bounded contract scan CUMULATIVE: with an oldest-first pick, a
+    deep stratum of pre-contract-era issues at the head of a lane would otherwise be
+    re-reviewed identically every tick and the scan window would never advance (the
+    #1207 wedge: 8 reviews per tick, the same 8 thin heads, forever). Skipping
+    recently-held issues moves the window ~scan-budget issues per tick, so a
+    hundreds-deep thin backlog is swept in hours. After the TTL an issue is
+    re-reviewed, so a contract backfill re-enters it with no manual reset.
+    0 disables the gate."""
+    if ttl_h <= 0:
+        return set()
+    ledger = runs_dir / _CONTRACT_HOLD_LEDGER
+    if not ledger.is_file():
+        return set()
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - ttl_h * 3600
+    held: set[int] = set()
+    try:
+        lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return set()
+    for line in lines:
+        try:
+            row = json.loads(line)
+            if float(row.get("ts") or 0) >= horizon:
+                held.add(int(row.get("issue")))
+        except (TypeError, ValueError):
+            continue
+    return held
+
+
+def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
+                          live: bool, now_ts: float | None = None) -> None:
+    """Append this tick's contract-HELD issues to the skip ledger. Live ticks only:
+    a dry-run must stay side-effect-free (the payload still reports the holds)."""
+    if not live or not rows:
+        return
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    iso = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger = runs_dir / _CONTRACT_HOLD_LEDGER
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        with ledger.open("a", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps({
+                    "utc": iso, "ts": now, "issue": int(r.get("issue") or 0),
+                    "score": int(r.get("score") or 0),
+                    "reason": str(r.get("reason") or "")[:200],
+                }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # fail-open: a missed skip re-reviews next tick, never blocks one
 
 
 def build_worker_command(backend: str, prompt: str, model: str | None) -> list[str]:
@@ -1957,6 +2026,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               loop_ledger: Path | None = None,
               issue_override: int | None = None,
               force: bool = False,
+              contract_scan: int = DEFAULT_CONTRACT_SCAN,
+              contract_hold_ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
               lease_runner: Any | None = None) -> dict[str, Any]:
     # lease_runner is the injectable `fak leaseref` seam (default: a real
     # subprocess). Tests pass a canned runner returning {rc, verdict} so the whole
@@ -2089,7 +2160,12 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # landable drain. The held set is read from the recorded no-commit reason the
     # witness sweep above just bound, so an auth_wall still re-probes after its window.
     held_no_commit = held_no_commit_issues(witnessed)
-    skip = live_issues | cooled | held_no_commit
+    # ...AND an issue whose contract review HELD within the TTL -- re-reviewing it
+    # would hold identically (the body has not grown a contract in the meantime),
+    # so skipping it lets the bounded scan advance to unreviewed issues instead of
+    # pinning the scan window to the same thin heads every tick.
+    contract_held_prior = contract_held_issues(runs_dir, ttl_h=contract_hold_ttl_h)
+    skip = live_issues | cooled | held_no_commit | contract_held_prior
     target = pick_target_issue(pick.get("numbers") or [], skip)
     # Operator override: pin an explicit, already-vetted target issue instead of
     # the lane's freshest-first auto-pick. The full safety chain STILL runs on the
@@ -2160,15 +2236,55 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     if target is None:
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
                         "reason": (f"every open issue on lane '{chosen_lane}' is "
-                                   f"either live ({sorted(live_issues)}) or in "
-                                   f"cooldown ({sorted(cooled)}) — nothing fresh to "
+                                   f"either live ({sorted(live_issues)}), in "
+                                   f"cooldown ({sorted(cooled)}), or contract-held "
+                                   f"within the last {contract_hold_ttl_h}h "
+                                   f"({len(contract_held_prior)} issue(s) awaiting "
+                                   f"a contract backfill) — nothing fresh to "
                                    f"dispatch this tick")})
         return finish(payload)
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
+    contract = issue_contract_review(root, rec.get("issue_record"), target)
+
+    def _contract_holds(c: dict[str, Any]) -> bool:
+        return bool(c.get("unavailable") or not c.get("ok") or
+                    int(c.get("score") or 0) < DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+
+    # Contract-ready pick: the readiness gate holds THIN issues, not the whole tick.
+    # With the oldest-first pick, one pre-contract issue at the head of a lane wedged
+    # the loop permanently -- every tick re-picked the same held head and launched
+    # nothing while the lane had contract-ready issues deeper in (#1207 held the
+    # 232-issue docs lane this way). Scan forward -- bounded at `contract_scan`
+    # reviews, oldest-first order preserved -- to the oldest issue that PASSES the
+    # floor. A pinned --issue keeps its exact old semantics (the operator vetted that
+    # one issue; never silently substitute a different one), --force still accepts
+    # the thin head unscanned, and an UNAVAILABLE review (the contract tool itself
+    # failed) stops the scan -- every further review would fail identically.
+    contract_skipped: list[dict[str, Any]] = []
+    while (_contract_holds(contract) and not force and issue_override is None
+           and not contract.get("unavailable")
+           and len(contract_skipped) + 1 < max(1, contract_scan)):
+        nxt = pick_target_issue(pick.get("numbers") or [], skip | {target})
+        if nxt is None:
+            break
+        contract_skipped.append({
+            "issue": target,
+            "score": int(contract.get("score") or 0),
+            "reason": issue_contract_hold_reason(contract)[:200],
+        })
+        skip.add(target)
+        target = nxt
+        rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
+        contract = issue_contract_review(root, rec.get("issue_record"), target)
+
+    payload["target_issue"] = target
     payload["prompt_chars"] = rec.get("prompt_chars")
     payload["issue_title"] = rec.get("title")
-    contract = issue_contract_review(root, rec.get("issue_record"), target)
+    if contract_skipped:
+        payload["contract_skipped"] = contract_skipped
+    if contract_held_prior:
+        payload["contract_held_prior"] = len(contract_held_prior)
     payload["issue_contract_gate"] = {
         "ok": bool(contract.get("ok")),
         "unavailable": bool(contract.get("unavailable")),
@@ -2177,14 +2293,27 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "min_score": DEFAULT_ISSUE_CONTRACT_MIN_SCORE,
         "reason": issue_contract_hold_reason(contract),
     }
-    contract_hold = (contract.get("unavailable") or not contract.get("ok") or
-                     int(contract.get("score") or 0) < DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+    contract_hold = _contract_holds(contract)
+    # Persist every held verdict (skipped heads + a held final target) so the next
+    # tick's scan starts past them -- the cumulative half of the contract-ready pick.
+    # An UNAVAILABLE verdict is a tool failure, not an issue verdict: never ledger it.
+    ledger_rows = list(contract_skipped)
+    if (contract_hold and not force and not contract.get("unavailable")
+            and issue_override is None):
+        ledger_rows.append({"issue": target,
+                            "score": int(contract.get("score") or 0),
+                            "reason": issue_contract_hold_reason(contract)[:200]})
+    record_contract_holds(runs_dir, ledger_rows, live=live)
     if contract_hold and not force:
+        reason = issue_contract_hold_reason(contract)
+        if contract_skipped:
+            reason = (f"scanned {len(contract_skipped) + 1} lane issue(s), none "
+                      f"contract-ready; last (#{target}): {reason}")
         payload.update({
             "ok": False,
             "action": "issue_contract_hold",
             "verdict": "ISSUE_CONTRACT_HOLD",
-            "reason": issue_contract_hold_reason(contract),
+            "reason": reason,
         })
         return finish(payload)
     if contract_hold and force:
@@ -2435,6 +2564,18 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"ceiling on extra worker slots a HEALTHY backend may claim "
                          f"from dead siblings in one tick (backend-health reallocation; "
                          f"default {DEFAULT_REALLOC_CEILING}, 0 disables the budget bump)")
+    ap.add_argument("--contract-scan", type=int, default=DEFAULT_CONTRACT_SCAN,
+                    help=f"max lane issues (oldest first) one tick may contract-review "
+                         f"while scanning past held THIN heads for a spawnable target "
+                         f"(default {DEFAULT_CONTRACT_SCAN}; 1 restores the old "
+                         f"head-only behavior). The floor itself is never relaxed.")
+    ap.add_argument("--contract-hold-ttl-h", type=int,
+                    default=DEFAULT_CONTRACT_HOLD_TTL_H,
+                    help=f"skip an issue whose contract review HELD within this many "
+                         f"hours (ledger: {RUNS_DIRNAME}/{_CONTRACT_HOLD_LEDGER}), so "
+                         f"the bounded scan advances across ticks instead of "
+                         f"re-reviewing the same thin heads (default "
+                         f"{DEFAULT_CONTRACT_HOLD_TTL_H}; 0 disables)")
     ap.add_argument("--loop-ledger", default="",
                     help="append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
     ap.add_argument("--no-loop-ledger", action="store_true",
@@ -2460,7 +2601,9 @@ def main(argv: list[str] | None = None) -> int:
                        loop_ledger=(Path(args.loop_ledger).resolve()
                                     if args.loop_ledger else None),
                        issue_override=args.issue,
-                       force=args.force)
+                       force=args.force,
+                       contract_scan=max(1, args.contract_scan),
+                       contract_hold_ttl_h=max(0, args.contract_hold_ttl_h))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return tick_exit_code(payload)
 
