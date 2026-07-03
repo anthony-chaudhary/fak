@@ -86,6 +86,7 @@ dos.runs/
 # Mermaid render toolchain for the visuals deck (regenerate via visuals/render.sh)
 visuals/node_modules/
 visuals/.render-scratch/
+visuals/cfg.json
 
 # Single-writer release lock — machine-local critical-section state written by
 # tools/release_lock.py (holder owner/pid/host/TTL). Regenerated per release; the
