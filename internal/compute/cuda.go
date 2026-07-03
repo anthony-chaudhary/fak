@@ -528,12 +528,8 @@ func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *c
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes}
 }
 
-// dallocManaged allocates directly from cudaMallocManaged. Used by the residency-budget path for
-// cold weights. Caller holds cudaMu.
-func (c *cudaBackend) dallocManaged(nbytes int) *cudaBuf {
-	return c.dallocManagedClass(nbytes, MemoryOffload, "dallocManaged")
-}
-
+// dallocManagedClass allocates directly from cudaMallocManaged. Used by the residency-budget
+// path for cold weights. Caller holds cudaMu.
 func (c *cudaBackend) dallocManagedClass(nbytes int, class MemoryClass, site string) *cudaBuf {
 	p := C.fcuda_malloc_managed(C.size_t(nbytes))
 	if p == nil {
