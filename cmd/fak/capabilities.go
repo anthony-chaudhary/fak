@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -19,8 +18,6 @@ import (
 // shared-path verbs fak_changes/dos_arbitrate), each with the exact call to
 // make. See internal/selfquery/capabilities.go for why this stays a distinct,
 // narrower surface instead of widening fak_feature_query in place.
-
-func cmdCapabilities(argv []string) { os.Exit(runCapabilities(os.Stdout, os.Stderr, argv)) }
 
 func runCapabilities(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("capabilities", flag.ContinueOnError)
