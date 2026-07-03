@@ -173,26 +173,37 @@ func deriveGrade(debt int) string {
 // Score are pointers so a missing/null value serializes as JSON null (the Python
 // contract: an errored card has "debt": null), distinct from a measured zero.
 type Metric struct {
-	Key         string   `json:"key"`
-	Label       string   `json:"label"`
-	DebtKey     string   `json:"debt_key"`
-	Debt        *int     `json:"debt"`
-	Grade       *string  `json:"grade"`
-	Value       *float64 `json:"value"`
-	Score       *float64 `json:"score"`
-	OK          bool     `json:"ok"`
-	Verdict     string   `json:"verdict"`
-	Error       string   `json:"error,omitempty"`
-	EffGrade    string   `json:"eff_grade,omitempty"`
-	GradeWeight *int     `json:"grade_weight,omitempty"`
+	Key          string   `json:"key"`
+	Label        string   `json:"label"`
+	DebtKey      string   `json:"debt_key"`
+	Debt         *int     `json:"debt"`
+	Grade        *string  `json:"grade"`
+	RatchetGrade *string  `json:"ratchet_grade,omitempty"`
+	RatchetScore *float64 `json:"ratchet_score,omitempty"`
+	Value        *float64 `json:"value"`
+	Score        *float64 `json:"score"`
+	OK           bool     `json:"ok"`
+	Verdict      string   `json:"verdict"`
+	Error        string   `json:"error,omitempty"`
+	EffGrade     string   `json:"eff_grade,omitempty"`
+	GradeWeight  *int     `json:"grade_weight,omitempty"`
 }
 
 // displayGrade is the single source of truth for a metric's effective letter grade.
-// Three-tier precedence: the scorecard's own EMITTED letter (scale-invariant) > a
-// continuous VALUE-derived letter on the shared ladder (scale-invariant) > a
-// legacy SCORE-derived letter (Python fallback) > a DEBT-derived letter by magnitude
-// (scale-variant, last resort).
+// Precedence: an explicitly emitted ratchet letter/score, when a scorecard has a
+// stable gate-specific lens, then the scorecard's own emitted letter, then a
+// continuous VALUE-derived letter, then a legacy SCORE-derived letter, then a
+// debt-derived fallback.
 func displayGrade(m Metric) string {
+	if m.RatchetGrade != nil {
+		g := strings.ToUpper(*m.RatchetGrade)
+		if _, ok := gradeDebt[g]; ok {
+			return g
+		}
+	}
+	if m.RatchetScore != nil {
+		return gradeFromScore(*m.RatchetScore)
+	}
 	if m.Grade != nil {
 		g := strings.ToUpper(*m.Grade)
 		if _, ok := gradeDebt[g]; ok {
@@ -228,6 +239,7 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 	}
 	debt := findInt(payload, card.Debt)
 	valuePtr := findValue(payload)
+	ratchetScorePtr := findScore(payload, "ratchet_score")
 	var scorePtr *float64
 	if sk := scoreKeys[card.Key]; sk != "" {
 		scorePtr = findScore(payload, sk)
@@ -238,12 +250,14 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 	}
 	m := Metric{
 		Key: card.Key, Label: card.Label, DebtKey: card.Debt,
-		Debt:    debt,
-		Grade:   findGrade(payload),
-		Value:   valuePtr,
-		Score:   scorePtr,
-		OK:      asBool(payload["ok"]),
-		Verdict: asString(payload["verdict"]),
+		Debt:         debt,
+		Grade:        findGrade(payload),
+		RatchetGrade: findString(payload, "ratchet_grade"),
+		RatchetScore: ratchetScorePtr,
+		Value:        valuePtr,
+		Score:        scorePtr,
+		OK:           asBool(payload["ok"]),
+		Verdict:      asString(payload["verdict"]),
 	}
 	if debt == nil {
 		m.Error = "missing " + card.Debt + " in payload"

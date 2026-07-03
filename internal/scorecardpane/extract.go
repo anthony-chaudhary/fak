@@ -79,24 +79,30 @@ func findInt(payload any, key string) *int {
 	return nil
 }
 
-// findGrade is the portfolio grade a scorecard reports at corpus/doc/top level, if
-// any (no deep walk — a per-item grade must not stand in for the corpus letter).
-func findGrade(payload any) *string {
+// findString is the corpus/doc/top-level string stored under key, if any (no deep
+// walk — a per-item grade must not stand in for the corpus letter).
+func findString(payload any, key string) *string {
 	p, ok := payload.(map[string]any)
 	if !ok {
 		return nil
 	}
 	for _, nest := range []string{"corpus", "doc"} {
 		if sub, ok := p[nest].(map[string]any); ok {
-			if g, ok := sub["grade"].(string); ok {
+			if g, ok := sub[key].(string); ok {
 				return &g
 			}
 		}
 	}
-	if g, ok := p["grade"].(string); ok {
+	if g, ok := p[key].(string); ok {
 		return &g
 	}
 	return nil
+}
+
+// findGrade is the portfolio grade a scorecard reports at corpus/doc/top level,
+// if any.
+func findGrade(payload any) *string {
+	return findString(payload, "grade")
 }
 
 // findScore is the corpus/doc/top-level aggregate score stored under key, if any.

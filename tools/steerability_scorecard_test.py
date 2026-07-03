@@ -257,6 +257,19 @@ def test_fold_index_is_weighted_not_count() -> None:
     assert "orientation" in moves[0]["why"]
 
 
+def test_fold_churn_stays_out_of_hard_ratchet_grade() -> None:
+    # Churn is a HEAD-relative history read. It remains in the human headline but
+    # cannot anchor the control-pane hard grade ratchet.
+    p = st.build_payload(workspace="/x", kpis=_kpis(
+        file_size_dist={"score": 10, "soft": ["large p90"]},
+        churn_concentration={"score": 0, "soft": ["hotspot"]},
+    ))
+    c = p["corpus"]
+    assert c["grade"] == "B"
+    assert c["ratchet_grade"] == "A"
+    assert c["ratchet_excluded_kpis"] == ["churn_concentration"]
+
+
 def test_render_markdown_names_clean_gain_and_top_moves() -> None:
     p = st.build_payload(workspace="/x", kpis=_kpis(
         package_doc_frac={"score": 50, "soft": ["half"]}))

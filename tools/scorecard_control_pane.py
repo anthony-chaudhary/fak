@@ -195,12 +195,18 @@ def derive_grade(debt: int) -> str:
 def display_grade(metric: dict[str, Any]) -> str:
     """The single source of truth for a metric's effective letter grade.
 
-    Three-tier precedence: the scorecard's own EMITTED letter (scale-invariant) >
-    a SCORE-derived letter on the shared ladder (scale-invariant) > a DEBT-derived
-    letter by magnitude (scale-variant, last resort). Both the severity weight and
-    the rendered breakdown read this, so the number and the displayed letter can
-    never diverge.
+    Precedence: an explicitly emitted ratchet letter/score, when a scorecard has a
+    stable gate-specific lens, then the scorecard's own emitted letter, then a
+    score-derived letter, then a debt-derived fallback. Both the severity weight
+    and the rendered breakdown read this, so the number and the displayed letter
+    can never diverge.
     """
+    ratchet_grade = metric.get("ratchet_grade")
+    if isinstance(ratchet_grade, str) and ratchet_grade.upper() in GRADE_DEBT:
+        return ratchet_grade.upper()
+    ratchet_score = metric.get("ratchet_score")
+    if isinstance(ratchet_score, (int, float)) and not isinstance(ratchet_score, bool):
+        return grade_from_score(float(ratchet_score))
     grade = metric.get("grade")
     if isinstance(grade, str) and grade.upper() in GRADE_DEBT:
         return grade.upper()
@@ -363,13 +369,18 @@ def find_int(payload: Any, key: str) -> int | None:
 
 def find_grade(payload: Any) -> str | None:
     """The portfolio grade a scorecard reports at corpus/doc level, if any."""
+    return find_string(payload, "grade")
+
+
+def find_string(payload: Any, key: str) -> str | None:
+    """The corpus/doc/top-level string stored under ``key``, if any."""
     if isinstance(payload, dict):
         for nest in ("corpus", "doc"):
             sub = payload.get(nest)
-            if isinstance(sub, dict) and isinstance(sub.get("grade"), str):
-                return str(sub["grade"])
-        if isinstance(payload.get("grade"), str):
-            return str(payload["grade"])
+            if isinstance(sub, dict) and isinstance(sub.get(key), str):
+                return str(sub[key])
+        if isinstance(payload.get(key), str):
+            return str(payload[key])
     return None
 
 
@@ -419,6 +430,8 @@ def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
         "debt_key": debt_key,
         "debt": debt,
         "grade": find_grade(payload),
+        "ratchet_grade": find_string(payload, "ratchet_grade"),
+        "ratchet_score": find_score(payload, "ratchet_score"),
         "score": find_score(payload, score_key) if score_key else None,
         "ok": bool(payload.get("ok")),
         "verdict": str(payload.get("verdict") or ""),

@@ -200,6 +200,11 @@ KPI_GROUP: dict[str, str] = {
     "churn_concentration": "correction",
 }
 
+# Included in the human headline, excluded from the hard control-pane grade
+# ratchet. This KPI reads a HEAD-relative git range and therefore moves as commits
+# land even when the tree shape is byte-identical.
+RATCHET_EXCLUDED_KPIS: frozenset[str] = frozenset({"churn_concentration"})
+
 # An internal-package import line, in any of the forms present in the tree:
 #   "github.com/anthony-chaudhary/fak/internal/abi"
 #   fakmodel "github.com/anthony-chaudhary/fak/internal/model"   (alias)
@@ -573,6 +578,15 @@ def kpi_churn_concentration(churn: dict[str, int], rng: str, available: bool) ->
 # Fold: KPIs -> steerability index, grade, steerability-debt, control-pane payload.
 # ---------------------------------------------------------------------------
 
+def weighted_index(by_name: dict[str, dict[str, Any]],
+                   *, exclude: frozenset[str] = frozenset()) -> float:
+    names = [n for n in KPI_WEIGHTS if n in by_name and n not in exclude]
+    denom = sum(KPI_WEIGHTS[n] for n in names)
+    if denom <= 0:
+        return 100.0
+    return round(sum(KPI_WEIGHTS[n] * by_name[n]["score"] for n in names) / denom, 1)
+
+
 def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
                   error: str | None = None) -> dict[str, Any]:
     if error:
@@ -583,11 +597,12 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
             "workspace": workspace, "corpus": {}, "kpis": [],
         }
     by_name = {k["kpi"]: k for k in kpis}
-    index = round(sum(KPI_WEIGHTS[n] * by_name[n]["score"]
-                      for n in KPI_WEIGHTS if n in by_name), 1)
+    index = weighted_index(by_name)
+    ratchet_index = weighted_index(by_name, exclude=RATCHET_EXCLUDED_KPIS)
     steerability_debt = sum(len(k["defects"]) for k in kpis)
     n_soft = sum(len(k["soft"]) for k in kpis)
     grade = grade_letter(index)
+    ratchet_grade = grade_letter(ratchet_index)
     debt_by_group = {g: 0 for g in GROUPS}
     score_by_group: dict[str, list[int]] = {g: [] for g in GROUPS}
     for k in kpis:
@@ -617,6 +632,9 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     corpus = {
         # the headline: a 0-100 growth-invariant steerability INDEX, not a debt pile
         "index": index, "score": index, "grade": grade,
+        "ratchet_score": ratchet_index,
+        "ratchet_grade": ratchet_grade,
+        "ratchet_excluded_kpis": sorted(RATCHET_EXCLUDED_KPIS),
         "steerability_debt": steerability_debt,
         "soft_signals": n_soft,
         "debt_by_group": debt_by_group,

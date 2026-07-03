@@ -359,6 +359,21 @@ def test_grade_precedence_emitted_letter_beats_score_beats_debt() -> None:
     assert scp.display_grade({"grade": None, "score": None, "debt": 3}) == "C"
 
 
+def test_ratchet_grade_precedence_beats_headline_grade() -> None:
+    # Steerability's headline grade includes HEAD-relative churn, but its emitted
+    # ratchet grade excludes that non-anchorable KPI. The hard grade ratchet must
+    # use the stable field when present.
+    metric = {
+        "ratchet_grade": "A",
+        "ratchet_score": 92.8,
+        "grade": "B",
+        "score": 88.2,
+        "debt": 0,
+    }
+    assert scp.display_grade(metric) == "A"
+    assert scp.grade_weight(metric) == 0
+
+
 def test_metric_from_payload_stamps_corpus_score_for_scoreless_cards() -> None:
     # the seo card emits overall_score at corpus level but no corpus grade; the
     # fold must carry that score so grade_weight can derive the true grade.
@@ -371,6 +386,22 @@ def test_metric_from_payload_stamps_corpus_score_for_scoreless_cards() -> None:
     code = next(c for c in scp.SCORECARDS if c["key"] == "code")
     m2 = scp.metric_from_payload(code, {"corpus": {"code_debt": 5, "grade": "C", "score": 72}})
     assert m2["score"] is None and m2["grade"] == "C"
+
+
+def test_metric_from_payload_carries_ratchet_grade_for_steerability() -> None:
+    steer = next(c for c in scp.SCORECARDS if c["key"] == "steer")
+    payload = {"corpus": {
+        "steerability_debt": 0,
+        "grade": "B",
+        "score": 88.2,
+        "ratchet_grade": "A",
+        "ratchet_score": 92.9,
+    }}
+    m = scp.metric_from_payload(steer, payload)
+    assert m["grade"] == "B"
+    assert m["ratchet_grade"] == "A"
+    assert m["ratchet_score"] == 92.9
+    assert scp.display_grade(m) == "A"
 
 
 def test_find_score_prefers_corpus_over_nested_entries() -> None:

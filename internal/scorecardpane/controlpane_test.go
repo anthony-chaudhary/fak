@@ -52,6 +52,39 @@ func TestMetricFromPayloadDocAppealNesting(t *testing.T) {
 	}
 }
 
+func TestMetricFromPayloadUsesRatchetGradeForControlWeight(t *testing.T) {
+	card := Card{Key: "steer", Debt: "steerability_debt", Label: "steerability"}
+	payload := map[string]any{"corpus": map[string]any{
+		"steerability_debt": float64(0),
+		"grade":             "B",
+		"score":             88.2,
+		"ratchet_grade":     "A",
+		"ratchet_score":     92.9,
+	}}
+	m := MetricFromPayload(card, payload, "")
+	if m.Grade == nil || *m.Grade != "B" {
+		t.Fatalf("headline grade: want B, got %v", m.Grade)
+	}
+	if m.RatchetGrade == nil || *m.RatchetGrade != "A" {
+		t.Fatalf("ratchet grade: want A, got %v", m.RatchetGrade)
+	}
+	if got := displayGrade(m); got != "A" {
+		t.Fatalf("displayGrade must prefer ratchet grade, got %q", got)
+	}
+	p := Fold([]Metric{m}, &Baseline{
+		Schema:       BaselineSchema,
+		Commit:       "old0000",
+		TotalDebt:    0,
+		GradeDebt:    0,
+		Metrics:      map[string]int{"steer": 0},
+		GradeWeights: map[string]int{"steer": 0},
+	}, "/repo", "new1111")
+	if p.GradeDebt != 0 || len(p.Trend.GradeRegressed) != 0 {
+		t.Fatalf("stable ratchet grade should not regress: grade_debt=%d regressions=%+v",
+			p.GradeDebt, p.Trend.GradeRegressed)
+	}
+}
+
 func TestMetricFromPayloadErrorRow(t *testing.T) {
 	card := Card{Key: "ui_quality", Debt: "ui_quality_debt", Label: "ui-quality"}
 	m := MetricFromPayload(card, nil, "non-JSON output (exit 2): boom")
