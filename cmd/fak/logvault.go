@@ -41,6 +41,11 @@ func runLogvault(w, ew io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	if fs.NArg() > 0 {
+		// `fak logvault -vault X capture` must not silently run the default verb.
+		fmt.Fprintf(ew, "logvault: unexpected argument %q — the verb comes first: fak logvault %s [flags]\n", fs.Arg(0), fs.Arg(0))
+		return 2
+	}
 	if *repo == "" {
 		cwd, err := os.Getwd()
 		if err != nil {

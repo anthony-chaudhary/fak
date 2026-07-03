@@ -30,15 +30,15 @@ import (
 // ManifestRow is one durable capture record. Field order up to Note is the
 // hash-chain pre-image order — do not reorder without bumping the chain.
 type ManifestRow struct {
-	Seq        uint64 `json:"seq"`          // monotonic 1-based order anchor
-	TSUnixNano int64  `json:"ts_unix_nano"` // wall-clock time anchor
-	Op         string `json:"op"`           // capture-full | capture-append | capture-rewrite | skip-error
-	Source     string `json:"source"`       // registry source id
-	RelPath    string `json:"rel_path"`     // forward-slash path relative to the source root
-	Bytes      int64  `json:"bytes"`        // bytes written to the vault by this op
-	SizeAfter  int64  `json:"size_after"`   // source file size at capture time
-	MTimeUnix  int64  `json:"mtime_unix"`   // source file mtime at capture time (seconds)
-	SHA256     string `json:"sha256"`       // full-content hash of the source at capture ("" on skip-error)
+	Seq        uint64 `json:"seq"`             // monotonic 1-based order anchor
+	TSUnixNano int64  `json:"ts_unix_nano"`    // wall-clock time anchor
+	Op         string `json:"op"`              // capture-full | capture-append | capture-rewrite | capture-touch | skip-error
+	Source     string `json:"source"`          // registry source id
+	RelPath    string `json:"rel_path"`        // forward-slash path relative to the source root
+	Bytes      int64  `json:"bytes"`           // bytes written to the vault by this op
+	SizeAfter  int64  `json:"size_after"`      // source byte position the hash covers at capture time
+	MTimeNano  int64  `json:"mtime_unix_nano"` // source file mtime at capture time (nanoseconds — second granularity misses same-second truncate-replaces)
+	SHA256     string `json:"sha256"`          // full-content hash of the source at capture ("" on skip-error)
 	Note       string `json:"note,omitempty"`
 	PrevHash   string `json:"prev_hash"` // hash of the previous row ("" at genesis)
 	Hash       string `json:"hash"`      // manifestChainHash(PrevHash, this row)
@@ -52,7 +52,7 @@ func manifestChainHash(prev string, r ManifestRow) string {
 	io.WriteString(h, prev)
 	fmt.Fprintf(h, "\x1f%d\x1f%d\x1f%s\x1f%s\x1f%s\x1f%d\x1f%d\x1f%d\x1f%s\x1f%s",
 		r.Seq, r.TSUnixNano, r.Op, r.Source, r.RelPath,
-		r.Bytes, r.SizeAfter, r.MTimeUnix, r.SHA256, r.Note)
+		r.Bytes, r.SizeAfter, r.MTimeNano, r.SHA256, r.Note)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -68,16 +68,30 @@ type Manifest struct {
 // ManifestName is the manifest's file name inside the vault root.
 const ManifestName = "vault-manifest.jsonl"
 
+// AnchorName is the out-of-band chain-head sidecar: {seq, hash} of the last
+// completed capture, rewritten atomically after each one. Verify cross-checks
+// it so a truncated or deleted manifest cannot silently verify clean.
+const AnchorName = "vault-head.json"
+
 // OpenManifest opens (creating if absent) the vault manifest in append mode,
 // recovering the chain head from existing rows so a new capture CONTINUES the
-// chain. A torn final line is tolerated (skipped), matching the house posture
-// that a damaged tail never bricks startup — Verify reports it instead.
+// chain. A torn final line (crash mid-append) is TRUNCATED before reopening —
+// appending after partial bytes would merge the next row into one unparseable
+// line and permanently fail verification on an untampered vault.
 func OpenManifest(vaultDir string) (*Manifest, error) {
 	if err := os.MkdirAll(vaultDir, 0o755); err != nil {
 		return nil, fmt.Errorf("logvault: mkdir vault: %w", err)
 	}
 	path := filepath.Join(vaultDir, ManifestName)
-	rows, _ := ReadManifestRows(path) // tolerant: missing or torn file is a valid empty/partial history
+	if err := truncateTornTail(path); err != nil {
+		return nil, fmt.Errorf("logvault: repair manifest tail: %w", err)
+	}
+	rows, err := ReadManifestRows(path)
+	if err != nil {
+		// A manifest that exists but cannot be read must not fork the chain by
+		// restarting at seq 1 — fail loudly instead.
+		return nil, fmt.Errorf("logvault: read manifest: %w", err)
+	}
 	m := &Manifest{path: path}
 	if n := len(rows); n > 0 {
 		m.seq = rows[n-1].Seq
@@ -90,6 +104,90 @@ func OpenManifest(vaultDir string) (*Manifest, error) {
 	m.f = f
 	m.bw = bufio.NewWriter(f)
 	return m, nil
+}
+
+// truncateTornTail cuts an unterminated final line off the manifest. The torn
+// row was never acknowledged (its capture crashed before returning), and the
+// next capture re-does the operation, so dropping the partial bytes loses
+// nothing while keeping every following append parseable.
+func truncateTornTail(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil || size == 0 {
+		return err
+	}
+	// Scan backwards in chunks for the last newline.
+	const chunk = 64 * 1024
+	buf := make([]byte, chunk)
+	end := size
+	for end > 0 {
+		start := end - chunk
+		if start < 0 {
+			start = 0
+		}
+		n, err := f.ReadAt(buf[:end-start], start)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		for i := n - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				return f.Truncate(start + int64(i) + 1)
+			}
+		}
+		end = start
+	}
+	return f.Truncate(0) // no newline at all: the whole file is one torn line
+}
+
+// Head returns the current chain head (last committed seq + hash).
+func (m *Manifest) Head() (uint64, string) { return m.seq, m.lastHash }
+
+// anchor is the persisted chain head.
+type anchor struct {
+	Seq  uint64 `json:"seq"`
+	Hash string `json:"hash"`
+}
+
+// WriteAnchor atomically records the chain head sidecar for vaultDir.
+func WriteAnchor(vaultDir string, seq uint64, hash string) error {
+	b, err := json.Marshal(anchor{Seq: seq, Hash: hash})
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(vaultDir, AnchorName)
+	tmp := path + ".part"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+		return err
+	}
+	os.Remove(path) // Windows: rename does not replace via this path on all filesystems
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// readAnchor loads the chain-head sidecar; a missing file returns (zero, false).
+func readAnchor(vaultDir string) (anchor, bool, error) {
+	b, err := os.ReadFile(filepath.Join(vaultDir, AnchorName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return anchor{}, false, nil
+		}
+		return anchor{}, false, err
+	}
+	var a anchor
+	if err := json.Unmarshal(b, &a); err != nil {
+		return anchor{}, false, err
+	}
+	return a, true, nil
 }
 
 // Append stamps the order anchor + chain hash and commits the row.
@@ -115,7 +213,7 @@ func (m *Manifest) Append(row ManifestRow) (ManifestRow, error) {
 	return row, nil
 }
 
-// Close flushes and closes the underlying file.
+// Close flushes, fsyncs, and closes the underlying file.
 func (m *Manifest) Close() error {
 	if m.bw != nil {
 		if err := m.bw.Flush(); err != nil {
@@ -123,6 +221,10 @@ func (m *Manifest) Close() error {
 		}
 	}
 	if m.f != nil {
+		if err := m.f.Sync(); err != nil {
+			m.f.Close()
+			return err
+		}
 		return m.f.Close()
 	}
 	return nil
@@ -182,7 +284,7 @@ func VerifyManifest(path string) (int, error) {
 // fileState is the replayed latest-known capture state of one source file.
 type fileState struct {
 	SizeAfter int64
-	MTimeUnix int64
+	MTimeNano int64
 	SHA256    string
 }
 
@@ -196,7 +298,7 @@ func replayStates(rows []ManifestRow) map[string]fileState {
 		}
 		states[r.Source+"\x00"+r.RelPath] = fileState{
 			SizeAfter: r.SizeAfter,
-			MTimeUnix: r.MTimeUnix,
+			MTimeNano: r.MTimeNano,
 			SHA256:    r.SHA256,
 		}
 	}

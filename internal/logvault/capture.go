@@ -3,6 +3,8 @@ package logvault
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -10,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 // Op names for manifest rows and plan lines.
@@ -17,8 +21,12 @@ const (
 	OpFull    = "capture-full"
 	OpAppend  = "capture-append"
 	OpRewrite = "capture-rewrite"
+	OpTouch   = "capture-touch" // content verified unchanged, mtime advanced
 	OpSkip    = "skip-error"
 )
+
+// LockName is the vault's single-writer capture lock file.
+const LockName = "vault.lock"
 
 // SourceStats folds one source's outcome for a plan or capture pass.
 type SourceStats struct {
@@ -44,32 +52,61 @@ func (v *Vault) mirrorPath(srcID, relPath string) string {
 	return filepath.Join(v.Dir, "by-source", srcID, filepath.FromSlash(relPath))
 }
 
-// historyPath is where a superseded mirror version is retired to.
+// historyPath is where a superseded mirror version is retired to. 16 hex chars
+// of the content hash key the slot (a shorter prefix risks two different prior
+// versions colliding and the earlier one being silently destroyed).
 func (v *Vault) historyPath(srcID, relPath, sha string) string {
 	short := sha
-	if len(short) > 8 {
-		short = short[:8]
+	if len(short) > 16 {
+		short = short[:16]
 	}
 	return filepath.Join(v.Dir, "by-source", srcID, ".history", filepath.FromSlash(relPath)+"."+short)
 }
 
+// walkProblem records a subtree the walk could not read — silence here would
+// make a permission-denied directory look successfully backed up.
+type walkProblem struct {
+	Rel string
+	Err error
+}
+
+// pathWithin reports whether path is p itself or inside it (both cleaned abs).
+func pathWithin(path, p string) bool {
+	if path == p {
+		return true
+	}
+	return strings.HasPrefix(path, p+string(os.PathSeparator))
+}
+
 // walkSource visits every non-excluded regular file under the source root and
 // calls fn with the forward-slash relative path and its info. A missing root is
-// a valid empty source. Excluded directory prefixes are pruned without descent.
-func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo) error) (missing bool, err error) {
+// a valid empty source; an unreadable subtree is returned as a problem, never
+// silently skipped. Excluded directory prefixes are pruned without descent.
+func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo) error) (missing bool, problems []walkProblem, err error) {
 	if _, statErr := os.Stat(src.Root); statErr != nil {
-		return true, nil
+		return true, nil, nil
 	}
 	vaultAbs, _ := filepath.Abs(v.Dir)
+	srcAbs, _ := filepath.Abs(src.Root)
+	// A source that IS the vault (or lives inside it) would capture the vault
+	// into itself and grow without bound: a config error, refused loudly. The
+	// vault living inside a source root is fine — the walk prunes it below.
+	if vaultAbs != "" && pathWithin(srcAbs, vaultAbs) {
+		return false, nil, fmt.Errorf("logvault: source %s root %s overlaps the vault %s", src.ID, src.Root, v.Dir)
+	}
 	err = filepath.WalkDir(src.Root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil // unreadable entry: skip, capture records per-file errors it can see
-		}
 		relOS, relErr := filepath.Rel(src.Root, path)
-		if relErr != nil || relOS == "." {
+		rel := ""
+		if relErr == nil && relOS != "." {
+			rel = filepath.ToSlash(relOS)
+		}
+		if walkErr != nil {
+			problems = append(problems, walkProblem{Rel: rel, Err: walkErr})
 			return nil
 		}
-		rel := filepath.ToSlash(relOS)
+		if relOS == "." {
+			return nil
+		}
 		if d.IsDir() {
 			if abs, _ := filepath.Abs(path); vaultAbs != "" && abs == vaultAbs {
 				return filepath.SkipDir // never capture the vault into itself
@@ -84,11 +121,12 @@ func (v *Vault) walkSource(src Source, fn func(relPath string, info fs.FileInfo)
 		}
 		info, infoErr := d.Info()
 		if infoErr != nil {
+			problems = append(problems, walkProblem{Rel: rel, Err: infoErr})
 			return nil
 		}
 		return fn(rel, info)
 	})
-	return false, err
+	return false, problems, err
 }
 
 // Plan diffs the live sources against the manifest replay without copying or
@@ -103,15 +141,15 @@ func (v *Vault) Plan() ([]SourceStats, error) {
 	var out []SourceStats
 	for _, src := range v.Sources {
 		st := SourceStats{Source: src.ID}
-		missing, walkErr := v.walkSource(src, func(rel string, info fs.FileInfo) error {
+		missing, problems, walkErr := v.walkSource(src, func(rel string, info fs.FileInfo) error {
 			st.Files++
 			prev, seen := states[src.ID+"\x00"+rel]
-			size, mtime := info.Size(), info.ModTime().Unix()
+			size, mtime := info.Size(), info.ModTime().UnixNano()
 			switch {
 			case !seen:
 				st.Full++
 				st.CopyBytes += size
-			case size == prev.SizeAfter && mtime == prev.MTimeUnix:
+			case size == prev.SizeAfter && mtime == prev.MTimeNano:
 				st.Unchanged++
 			case size > prev.SizeAfter:
 				st.Append++
@@ -125,6 +163,7 @@ func (v *Vault) Plan() ([]SourceStats, error) {
 		if walkErr != nil {
 			return nil, walkErr
 		}
+		st.Errors += len(problems)
 		st.Missing = missing
 		out = append(out, st)
 	}
@@ -134,8 +173,26 @@ func (v *Vault) Plan() ([]SourceStats, error) {
 // Capture copies every new/changed source file into the vault and appends one
 // chained manifest row per operation. Sources are read-only: files are opened
 // for read and never locked; a file that cannot be read (e.g. a Windows sharing
-// violation) is recorded as a skip-error row and retried next capture.
+// violation) is recorded as a skip-error row and retried next capture. The
+// vault itself is single-writer: a cross-process lock serializes captures so
+// two runs cannot interleave manifest rows and fork the chain.
 func (v *Vault) Capture() ([]SourceStats, error) {
+	if err := os.MkdirAll(v.Dir, 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(filepath.Join(v.Dir, LockName), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err := flock.TryLock(lock); err != nil {
+		if errors.Is(err, flock.ErrLockBusy) {
+			return nil, fmt.Errorf("logvault: another capture holds %s", LockName)
+		}
+		return nil, err
+	}
+	defer flock.Unlock(lock)
+
 	man, err := OpenManifest(v.Dir)
 	if err != nil {
 		return nil, err
@@ -149,11 +206,11 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 	var out []SourceStats
 	for _, src := range v.Sources {
 		st := SourceStats{Source: src.ID}
-		missing, walkErr := v.walkSource(src, func(rel string, info fs.FileInfo) error {
+		missing, problems, walkErr := v.walkSource(src, func(rel string, info fs.FileInfo) error {
 			st.Files++
 			prev, seen := states[src.ID+"\x00"+rel]
-			size, mtime := info.Size(), info.ModTime().Unix()
-			if seen && size == prev.SizeAfter && mtime == prev.MTimeUnix {
+			size, mtime := info.Size(), info.ModTime().UnixNano()
+			if seen && size == prev.SizeAfter && mtime == prev.MTimeNano {
 				st.Unchanged++
 				return nil
 			}
@@ -162,8 +219,11 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 			// hash actually covers, not the stat-time size, so the next capture
 			// classifies the continuation as a clean append.
 			sizeAfter := written
-			if op == OpAppend {
+			switch op {
+			case OpAppend:
 				sizeAfter = prev.SizeAfter + written
+			case OpTouch:
+				sizeAfter = prev.SizeAfter
 			}
 			row := ManifestRow{
 				TSUnixNano: time.Now().UnixNano(),
@@ -172,7 +232,7 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 				RelPath:    rel,
 				Bytes:      written,
 				SizeAfter:  sizeAfter,
-				MTimeUnix:  mtime,
+				MTimeNano:  mtime,
 				SHA256:     sha,
 			}
 			if capErr != nil {
@@ -189,12 +249,13 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 					st.Append++
 				case OpRewrite:
 					st.Rewrite++
-				case "": // content identical after re-hash (mtime-only touch): no row needed
+				case OpTouch:
+					// Content verified identical; the row just advances the recorded
+					// mtime so the next capture takes the cheap unchanged path again.
 					st.Unchanged++
-					return nil
 				}
 				st.CopyBytes += written
-				states[src.ID+"\x00"+rel] = fileState{SizeAfter: sizeAfter, MTimeUnix: mtime, SHA256: sha}
+				states[src.ID+"\x00"+rel] = fileState{SizeAfter: sizeAfter, MTimeNano: mtime, SHA256: sha}
 			}
 			_, appendErr := man.Append(row)
 			return appendErr
@@ -202,8 +263,25 @@ func (v *Vault) Capture() ([]SourceStats, error) {
 		if walkErr != nil {
 			return out, walkErr
 		}
+		for _, p := range problems {
+			st.Errors++
+			if _, appendErr := man.Append(ManifestRow{
+				TSUnixNano: time.Now().UnixNano(),
+				Op:         OpSkip,
+				Source:     src.ID,
+				RelPath:    p.Rel,
+				Note:       "walk: " + p.Err.Error(),
+			}); appendErr != nil {
+				return out, appendErr
+			}
+		}
 		st.Missing = missing
 		out = append(out, st)
+	}
+	if seq, hash := man.Head(); seq > 0 {
+		if err := WriteAnchor(v.Dir, seq, hash); err != nil {
+			return out, err
+		}
 	}
 	return out, nil
 }
@@ -229,14 +307,21 @@ func (v *Vault) captureFile(src Source, rel string, prev fileState, seen bool, s
 			return "", 0, "", hashErr
 		}
 		if curSHA == prev.SHA256 {
-			return "", 0, curSHA, nil // touch only — verified unchanged
+			return OpTouch, 0, curSHA, nil // verified unchanged, advance mtime only
 		}
 		if _, statErr := os.Stat(mirror); statErr == nil {
-			hist := v.historyPath(src.ID, rel, prev.SHA256)
+			// Retire under the mirror's ACTUAL content hash: after an interrupted
+			// append the mirror can differ from the last recorded state, and filing
+			// it under prev.SHA256 would put wrong bytes behind that name.
+			histSHA := prev.SHA256
+			if mirrorSHA, mhErr := hashFile(mirror); mhErr == nil {
+				histSHA = mirrorSHA
+			}
+			hist := v.historyPath(src.ID, rel, histSHA)
 			if mkErr := os.MkdirAll(filepath.Dir(hist), 0o755); mkErr != nil {
 				return "", 0, "", mkErr
 			}
-			os.Remove(hist) // same superseded content re-retired: idempotent
+			os.Remove(hist) // same-hash slot: identical content re-retired, idempotent
 			if mvErr := os.Rename(mirror, hist); mvErr != nil {
 				return "", 0, "", mvErr
 			}
@@ -251,8 +336,14 @@ func (v *Vault) captureFile(src Source, rel string, prev fileState, seen bool, s
 // tryAppend streams the source once: it hashes the first prev.SizeAfter bytes
 // and, if that prefix still matches the last captured content, appends only the
 // delta to the mirror while finishing the full-content hash. op "" with nil
-// error means the prefix diverged (caller rewrites).
+// error means append is not safe (prefix diverged, or the mirror is missing or
+// not exactly prev.SizeAfter bytes — e.g. after an interrupted append) and the
+// caller must recapture in full; appending onto a diverged mirror would
+// duplicate bytes into the backup permanently.
 func (v *Vault) tryAppend(srcPath, mirror string, prev fileState) (op string, written int64, sha string, err error) {
+	if mi, statErr := os.Stat(mirror); statErr != nil || mi.Size() != prev.SizeAfter {
+		return "", 0, "", nil
+	}
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return "", 0, "", err
@@ -265,15 +356,17 @@ func (v *Vault) tryAppend(srcPath, mirror string, prev fileState) (op string, wr
 	if hex.EncodeToString(h.Sum(nil)) != prev.SHA256 {
 		return "", 0, "", nil // rewritten in place, not an append
 	}
-	if _, err := os.Stat(mirror); err != nil {
-		return "", 0, "", nil // mirror lost: recapture in full
-	}
 	out, err := os.OpenFile(mirror, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return "", 0, "", err
 	}
-	defer out.Close()
 	written, err = io.Copy(io.MultiWriter(out, h), f)
+	if err == nil {
+		err = out.Sync()
+	}
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -298,6 +391,9 @@ func copyToMirror(srcPath, mirror string) (written int64, sha string, err error)
 	}
 	h := sha256.New()
 	written, err = io.Copy(io.MultiWriter(out, h), f)
+	if err == nil {
+		err = out.Sync() // a manifest row must never outlive the bytes behind it
+	}
 	closeErr := out.Close()
 	if err == nil {
 		err = closeErr
@@ -334,9 +430,16 @@ type VerifyProblem struct {
 	Reason  string
 }
 
-// Verify re-derives the manifest chain, then re-hashes mirror files against the
-// replayed state. sample bounds how many mirrors are re-hashed (0 = all),
-// chosen by deterministic stride so repeated runs cover the same set.
+// Verify re-derives the manifest chain, cross-checks it against the head
+// anchor (so a truncated or deleted manifest cannot verify clean), then
+// re-hashes mirror files against the replayed state. sample bounds how many
+// mirrors are re-hashed (0 = all), chosen by deterministic stride so repeated
+// runs cover the same set.
+//
+// Honesty note: the chain + anchor catch corruption, truncation, and casual
+// edits. They are not proof against an adversary with full write access to the
+// vault, who can recompute hashes and rewrite the anchor — that requires an
+// off-vault anchor (the off-box replication rung).
 func (v *Vault) Verify(sample int) (chainRows int, checked int, problems []VerifyProblem, err error) {
 	manPath := filepath.Join(v.Dir, ManifestName)
 	chainRows, err = VerifyManifest(manPath)
@@ -346,6 +449,21 @@ func (v *Vault) Verify(sample int) (chainRows int, checked int, problems []Verif
 	rows, err := ReadManifestRows(manPath)
 	if err != nil {
 		return chainRows, 0, nil, err
+	}
+	if a, ok, aErr := readAnchor(v.Dir); aErr != nil {
+		problems = append(problems, VerifyProblem{Reason: "head anchor unreadable: " + aErr.Error()})
+	} else if ok {
+		switch {
+		case uint64(len(rows)) < a.Seq:
+			problems = append(problems, VerifyProblem{Reason: fmt.Sprintf("manifest truncated: anchor head seq %d, manifest tail seq %d", a.Seq, len(rows))})
+		case rows[a.Seq-1].Hash != a.Hash:
+			problems = append(problems, VerifyProblem{Reason: fmt.Sprintf("manifest row %d hash disagrees with head anchor", a.Seq)})
+		}
+	}
+	if len(rows) == 0 {
+		if ents, rdErr := os.ReadDir(filepath.Join(v.Dir, "by-source")); rdErr == nil && len(ents) > 0 {
+			problems = append(problems, VerifyProblem{Reason: "manifest is empty but by-source/ holds captured content (manifest lost?)"})
+		}
 	}
 	states := replayStates(rows)
 	keys := make([]string, 0, len(states))
