@@ -216,7 +216,14 @@ func formatFakSliceDiagnostic(sum gateway.AdjudicationSummary) string {
 	if len(reasons) == 0 {
 		reasons = append(reasons, "M2/default-on cache gates did not fire on this traffic")
 	}
-	return fmt.Sprintf("fak guard: fak-slice diagnostic — F is ~0 because %s.\n", strings.Join(reasons, "; "))
+	// Point the operator at the one command that shows the accumulated cross-session
+	// value and the provider-vs-fak owner split, so "F is ~0 this session" is legible as
+	// "the provider is doing the caching; fak's own shed did not fire" rather than a dead
+	// end. This is the fak-OWN cache-value path (outbound compaction-shed on the passthrough
+	// #555) — see docs/notes/GUARD-OWN-CACHE-VALUE-PATH.md for how to make it fire.
+	return fmt.Sprintf("fak guard: fak-slice diagnostic — F is ~0 because %s.\n"+
+		"  see: fak cachevalue report   (provider-vs-fak owner split over all sessions; docs/notes/GUARD-OWN-CACHE-VALUE-PATH.md)\n",
+		strings.Join(reasons, "; "))
 }
 
 func fakSliceDiagnosticRelevant(sum gateway.AdjudicationSummary) bool {

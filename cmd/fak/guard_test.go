@@ -974,7 +974,13 @@ func TestFormatAuditSummary(t *testing.T) {
 		CompactionBudget:        48000,
 		CompactionAnchorStarved: 1,
 	})
-	for _, want := range []string{"fak-slice diagnostic", "anchor-starved x1", "--compact-anchor-head"} {
+	for _, want := range []string{
+		"fak-slice diagnostic", "anchor-starved x1", "--compact-anchor-head",
+		// The diagnostic must point at the one command that shows the accumulated
+		// owner split, so "F is ~0 this session" is not a dead end (goal: the fak-OWN
+		// cache-value path should not need re-discovery).
+		"fak cachevalue report", "GUARD-OWN-CACHE-VALUE-PATH.md",
+	} {
 		if !strings.Contains(anchorStarved, want) {
 			t.Errorf("anchor-starved zero-slice diagnostic missing %q:\n%s", want, anchorStarved)
 		}
