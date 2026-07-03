@@ -252,6 +252,7 @@ SCORECARDS: list[dict[str, str]] = [
     # deterministic, graded against the render source (the source IS the oracle).
     {"key": "ui_quality", "debt": "ui_quality_debt", "script": "", "cmd": "go run ./cmd/fak ui-quality-scorecard --json", "label": "ui-quality"},
     {"key": "disambiguation", "debt": "disambiguation_debt", "script": "concept_disambiguation_scorecard.py", "label": "concept-disambiguation"},
+    {"key": "implicit", "debt": "implicitness_debt", "script": "implicit_explicit_scorecard.py", "label": "implicit-explicit"},
     {"key": "intent_literal", "debt": "intent_literal_debt", "script": "intent_literal_scorecard.py", "label": "intent-literal"},
     {"key": "tokendefaults", "debt": "token_defaults_debt", "script": "", "cmd": "go run ./cmd/fak token-defaults-scorecard --json", "label": "token-defaults"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
