@@ -27,7 +27,9 @@ flags a misconfiguration rather than a silent no-op.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -427,6 +429,79 @@ def _limited_join(rows: list[str], *, limit: int = 3) -> str:
     return "; ".join(kept)
 
 
+def _friendly_time(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return "the reset time"
+    try:
+        stamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return stamp.astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    except ValueError:
+        return text
+
+
+def _operator_action(row: str) -> str:
+    row = str(row or "").strip()
+    m = re.match(
+        r"^auth_failed=\d+ \[([^\]]+)\]; next action: run `fak accounts status` "
+        r"and re-login or remove the named seat\(s\)$", row)
+    if m:
+        return f"login failed for {m.group(1)}; run `fak accounts status`, then re-login/remove it"
+    m = re.match(r"^([A-Za-z0-9_.-]+) majority-stub \(([^)]+)\); inspect backend output$", row)
+    if m:
+        product = m.group(1)
+        return f"{product} returned no output in {m.group(2)}; inspect logs before adding capacity"
+    m = re.match(
+        r"^([A-Za-z0-9_.-]+) guard hooks unbound \(([^)]+)\); workers ran unhooked$", row)
+    if m:
+        return f"{m.group(1)} guard not attached ({m.group(2)}); restart before trusting them"
+    m = re.match(r"^throughput BELOW_TARGET: ([^ ]+) vs target ([^ ]+)$", row)
+    if m:
+        return f"ticket closes below target: {m.group(1)} vs {m.group(2)}"
+    return row
+
+
+def _operator_handled(row: str) -> str:
+    row = str(row or "").strip()
+    m = re.match(r"^([A-Za-z0-9_.-]+) held dead; lane ([^;]+) reallocated(; re-probe every .+)?$", row)
+    if m:
+        product, lane, cadence = m.group(1), m.group(2), m.group(3) or ""
+        cadence = cadence.replace("; re-probe", "; rechecks")
+        return f"{product} paused after failed starts; {lane} work reallocated{cadence}"
+    return row
+
+
+def _operator_waiting(payload: dict[str, Any] | None, rows: list[str]) -> list[str]:
+    out: list[str] = []
+    cap = (payload or {}).get("weekly_cap") or {}
+    if cap:
+        product = str(cap.get("product") or "worker").strip()
+        account = str(cap.get("account") or (
+            ((payload or {}).get("dispatcher") or {}).get("account") or {}).get("tag")
+            or "account").strip()
+        reset = _friendly_time(cap.get("reset_text") or cap.get("until"))
+        out.append(
+            f"{product} account {account} is capped until {reset}; wait for auto recheck")
+
+    for row in rows:
+        text = str(row or "").strip()
+        if not text:
+            continue
+        if "weekly-capped until" in text:
+            continue
+        if text == "at configured worker-slot cap":
+            out.append("worker slots are full; wait for a worker to finish")
+            continue
+        if (text.startswith("supervisor PLAN_SURFACE_EMPTY")
+                or text.startswith("scheduler liveness says STALLED")
+                or text.startswith("worker/lease cross-check clean")
+                or "none blocking current candidates" in text
+                or "0 blocking current candidates" in text):
+            continue
+        out.append(text)
+    return out
+
+
 def _dispatch_state(payload: dict[str, Any] | None) -> str:
     if not payload:
         return "skipped"
@@ -435,7 +510,15 @@ def _dispatch_state(payload: dict[str, Any] | None) -> str:
     except Exception:  # noqa: BLE001
         state = "healthy" if payload.get("ok") else "needs you"
     verdict = str(payload.get("verdict") or "UNKNOWN")
-    return f"{verdict} ({state})"
+    if state == "ACTION":
+        return "needs you"
+    if state == "auto-solving":
+        return "being handled"
+    if state == "expected":
+        return "waiting"
+    if verdict == "READY_TO_GROW":
+        return "ready for more workers"
+    return "healthy" if state == "healthy" else state.lower()
 
 
 def _fleet_state(snap: dict[str, Any] | None) -> str:
@@ -443,12 +526,14 @@ def _fleet_state(snap: dict[str, Any] | None) -> str:
         return "skipped"
     sysv = snap.get("system") or {}
     verdict = str(sysv.get("verdict") or fleet_top.VERDICT_HEALTHY)
-    word = fleet_top.VERDICT_WORD.get(verdict, verdict)
+    word = fleet_top.VERDICT_WORD.get(verdict, verdict).lower()
+    if word == "needs you":
+        word = "attention"
     esc = int(sysv.get("escalate", 0) or 0)
     heal = int(sysv.get("self_healing", 0) or 0)
     tail: list[str] = []
     if esc:
-        tail.append(f"{esc} need you")
+        tail.append(f"{esc} human")
     if heal:
         tail.append(f"{heal} self-healing")
     return word + (f" ({', '.join(tail)})" if tail else "")
@@ -481,9 +566,9 @@ def _issue_work_line(payload: dict[str, Any] | None) -> str:
     if d.get("live") is not None or d.get("cap") is not None:
         headroom = d.get("headroom")
         parts.append(f"{d.get('live')}/{d.get('cap')} workers active"
-                     + (f", {headroom} open slot(s)" if isinstance(headroom, int) else ""))
+                     + (f", {headroom} slots open" if isinstance(headroom, int) else ""))
     if not b.get("na") and b.get("open_issues") is not None:
-        ticket = f"{b.get('open_issues')} open ticket(s)"
+        ticket = f"{b.get('open_issues')} open tickets"
         if b.get("unrouted"):
             ticket += f", {b.get('unrouted')} need routing"
         parts.append(ticket)
@@ -493,8 +578,13 @@ def _issue_work_line(payload: dict[str, Any] | None) -> str:
         honest = c.get("honest_close_rate")
         rate = dispatch_status._rate_str(c.get("closure_rate"))  # type: ignore[attr-defined]
         if honest is not None:
-            rate += "/" + dispatch_status._rate_str(honest)  # type: ignore[attr-defined]
-        parts.append(f"close proof {rate}")
+            verified = dispatch_status._rate_str(honest)  # type: ignore[attr-defined]
+            if verified != rate:
+                parts.append(f"close rate {rate}/h, verified {verified}/h")
+            else:
+                parts.append(f"verified close rate {verified}/h")
+        else:
+            parts.append(f"close rate {rate}/h")
     return "issue work: " + ("; ".join(parts) if parts else "no local signal")
 
 
@@ -526,6 +616,7 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
         joined = fleet_top._join_attention(items)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
         joined = _limited_join([str(i.get("title") or i) for i in items], limit=2)
+    joined = joined.replace("[DEAD_MIDTOOL]", "stuck mid-tool")
     return f"{prefix}: {joined}" if joined else ""
 
 
@@ -548,9 +639,12 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     waiting: list[str] = []
     if dispatch_payload:
         buckets = dispatch_status._dispatch_slack_buckets(dispatch_payload)  # type: ignore[attr-defined]
-        needs.extend("issue work: " + r for r in buckets.get("action", []))
-        handled.extend("issue work: " + r for r in buckets.get("auto-solving", []))
-        waiting.extend("issue work: " + r for r in buckets.get("expected", []))
+        needs.extend("issue work: " + _operator_action(r)
+                     for r in buckets.get("action", []))
+        handled.extend("issue work: " + _operator_handled(r)
+                       for r in buckets.get("auto-solving", []))
+        waiting.extend("issue work: " + r
+                       for r in _operator_waiting(dispatch_payload, buckets.get("expected", [])))
     if fleet_snap:
         attn = fleet_snap.get("attention") or []
         escalate = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_ESCALATE]
@@ -566,7 +660,7 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     if handled:
         lines.append("being handled: " + _limited_join(handled, limit=3))
     if waiting:
-        lines.append("normal waiting: " + _limited_join(waiting, limit=2))
+        lines.append("waiting: " + _limited_join(waiting, limit=2))
     return "\n".join(line for line in lines if line)
 
 

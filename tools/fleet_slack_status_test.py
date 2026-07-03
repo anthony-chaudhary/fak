@@ -122,12 +122,19 @@ class RollupTextTest(unittest.TestCase):
 
         self.assertIn("*fleet roll-up", text)
         self.assertIn("issue work:", text)
-        self.assertIn("open ticket(s)", text)
+        self.assertIn("open tickets", text)
         self.assertIn("agent sessions:", text)
         self.assertIn("needs you:", text)
         self.assertIn("being handled:", text)
         self.assertIn("ticket trend:", text)
         self.assertIn("capacity trend: usable 3→1", text)
+        self.assertIn("status: issue work needs you", text)
+        self.assertIn("returned no output", text)
+        self.assertIn("ticket closes below target", text)
+        self.assertNotIn("READY_TO_GROW (ACTION)", text)
+        self.assertNotIn("majority-stub", text)
+        self.assertNotIn("BELOW_TARGET", text)
+        self.assertNotIn("close proof", text)
         self.assertNotIn("plane:", text)
         self.assertNotIn("```", text)
 
@@ -146,6 +153,56 @@ class RollupTextTest(unittest.TestCase):
         text = mod.rollup_text(dispatch_payload, fleet_snap)
 
         self.assertIn("needs you: none", text)
+
+    def test_rollup_weekly_cap_is_local_and_human_readable(self):
+        mod = load()
+        dispatch_payload = mod.fixture_dispatch_payload(ROOT)
+        dispatch_payload["weekly_cap"] = {
+            "product": "claude",
+            "account": "july1-netra",
+            "until": "2026-07-03T20:23:24Z",
+        }
+        dispatch_payload["backend_health"] = {"dead": [], "stub_rate": []}
+        dispatch_payload["hook_health"] = {"by_backend": []}
+        dispatch_payload["throughput"] = {"na": True}
+
+        text = mod.rollup_text(dispatch_payload, mod.fixture_fleet_snapshot())
+
+        self.assertIn("claude account july1-netra is capped until", text)
+        self.assertIn("wait for auto recheck", text)
+        self.assertIn("2026-07-03 13:23", text)
+        self.assertNotIn("weekly-capped until 2026-07-03T20:23:24Z", text)
+
+    def test_rollup_filters_noop_waiting_rows(self):
+        mod = load()
+        kept = mod._operator_waiting({
+            "weekly_cap": {},
+        }, [
+            "supervisor PLAN_SURFACE_EMPTY; none blocking current candidates",
+            "scheduler liveness says STALLED; report-only",
+            "worker/lease cross-check clean",
+            "at configured worker-slot cap",
+            "queue wait on lane docs",
+        ])
+
+        self.assertEqual(kept, [
+            "worker slots are full; wait for a worker to finish",
+            "queue wait on lane docs",
+        ])
+
+    def test_rollup_rewords_backend_jargon(self):
+        mod = load()
+
+        self.assertEqual(
+            mod._operator_action("claude majority-stub (10/17 recent logs); inspect backend output"),
+            "claude returned no output in 10/17 recent logs; inspect logs before adding capacity",
+        )
+        self.assertEqual(
+            mod._operator_handled(
+                "opencode held dead; lane docs-explainers reallocated; re-probe every 30m"),
+            "opencode paused after failed starts; docs-explainers work reallocated; "
+            "rechecks every 30m",
+        )
 
 
 class PostRollupTest(unittest.TestCase):
