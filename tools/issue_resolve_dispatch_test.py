@@ -51,6 +51,24 @@ class PickTargetTest(unittest.TestCase):
         self.assertEqual(mod.pick_target_issue([], set()), None)
 
 
+class ContractScanStreamTest(unittest.TestCase):
+    def test_round_robin_across_lanes_oldest_first_within(self) -> None:
+        mod = load()
+        eligible = [["docs", [1, 2, 3]], ["tools", [10]], ["policy", [20, 21]]]
+        self.assertEqual(
+            mod.contract_scan_stream(eligible, skip=set()),
+            [("docs", 1), ("tools", 10), ("policy", 20),
+             ("docs", 2), ("policy", 21), ("docs", 3)])
+
+    def test_skip_and_empty_lanes_drop_out(self) -> None:
+        mod = load()
+        eligible = [["docs", [1, 2]], ["tools", [10]], ["bench", []]]
+        self.assertEqual(mod.contract_scan_stream(eligible, skip={1, 10}),
+                         [("docs", 2)])
+        self.assertEqual(mod.contract_scan_stream([], skip=set()), [])
+        self.assertEqual(mod.contract_scan_stream(None, skip=set()), [])
+
+
 class CooldownTest(unittest.TestCase):
     def test_recent_log_is_in_cooldown_old_one_is_not(self) -> None:
         import os
@@ -296,6 +314,30 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         self.assertEqual(out["candidates"], [])
         self.assertEqual(out["reaped"], [])
 
+    def test_timed_out_repair_worker_is_reaped_too(self) -> None:
+        # A runaway contract-repair worker is subject to the SAME wall-clock cap
+        # as a resolution worker — the reaper sweeps both log prefixes.
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        killed: list[int] = []
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = runs / "repair-1207-20260702-180000.log"
+            log.write_text("", encoding="utf-8")
+            pid_file = log.with_suffix(".pid")
+            pid_file.write_text("105", encoding="utf-8")
+            os.utime(pid_file, (now - 4000, now - 4000))
+            def probe(pid):
+                return {"alive": True, "create_time": now - 4001,
+                        "name": "claude.exe", "cmdline": ""}
+            out = mod.reap_timed_out_workers(
+                runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
+                killer=lambda pid: (killed.append(pid) or {"ok": True, "returncode": 0}))
+        self.assertEqual([r["pid"] for r in out["reaped"]], [105])
+        self.assertEqual(killed, [105])
+
 
 class PruneDeadSidecarsTest(unittest.TestCase):
     def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
@@ -322,6 +364,28 @@ class PruneDeadSidecarsTest(unittest.TestCase):
             out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
             self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
             self.assertEqual(sorted(p.name for p in runs.glob("resolve-825-*")), [])
+
+    def test_dead_repair_sidecar_and_issues_sibling_are_pruned(self) -> None:
+        # Repair corpses (pid + the .issues batch sidecar) are swept like resolve
+        # corpses, so stale repair sidecars never pin the seat count or the
+        # repair-admission scan's directory.
+        import os
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            pid_file = runs / "repair-1207-20260702-180000.pid"
+            pid_file.write_text("58753", encoding="utf-8")
+            stem = pid_file.with_suffix("")
+            for suf in (".log", ".backend", mod.REPAIR_ISSUES_SIDECAR_SUFFIX):
+                stem.with_suffix(suf).write_text("", encoding="utf-8")
+            os.utime(pid_file, (now - 4000, now - 4000))
+            def probe(pid):
+                return {"alive": False}
+            out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            self.assertEqual(out["pruned"], ["repair-1207-20260702-180000.pid"])
+            self.assertEqual(sorted(p.name for p in runs.glob("repair-1207-*")), [])
 
     def test_recycled_shell_in_window_is_pruned(self) -> None:
         # The exact ghost: a recycled cmd.exe whose create time lands inside the
@@ -481,6 +545,17 @@ class EvaluateTest(unittest.TestCase):
         # .dispatch-runs ledger from a test tick (live hold ticks append to it).
         mod.contract_held_issues = lambda runs_dir, **k: set()
         mod.record_contract_holds = lambda runs_dir, rows, **k: None
+        # Hermetic next()-queue seams: no real gh updatedAt fetch, no live repair
+        # worker, no repair cooldown, and a pure repair-prompt fold.
+        mod.open_issue_updated_map = lambda root, **k: {}
+        mod.live_repair_workers = lambda runs_dir, **k: []
+        mod.recently_repaired_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.issue_worker_prompt.build_repair = (
+            lambda rows, *, workspace, min_score=100: {
+                "kind": "contract-repair",
+                "issues": [int(r.get("number") or 0) for r in rows],
+                "prompt": "repair " + ",".join(str(r.get("number")) for r in rows),
+                "prompt_chars": 10})
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
         mod.reap_timed_out_workers = lambda runs_dir, **k: {
             "timeout_s": k.get("timeout_s"), "live": k.get("live"),
@@ -530,8 +605,11 @@ class EvaluateTest(unittest.TestCase):
                 "score": {"total": 40},
             },
         }
+        # repair_batch=0: this test pins the plain HOLD path (with repair enabled
+        # an all-thin tick dispatches a contract-repair worker instead — covered
+        # by the ContractRepair tests below).
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=True)
+                         lane=None, live=True, repair_batch=0)
         self.assertFalse(p["ok"])
         self.assertEqual(p["action"], "issue_contract_hold")
         self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
@@ -579,7 +657,7 @@ class EvaluateTest(unittest.TestCase):
             "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
                        "missing_fields": ["working_spine"], "score": {"total": 8}}}
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=False)
+                         lane=None, live=False, repair_batch=0)  # pin the HOLD path
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
         self.assertIn("scanned 3 lane issue(s)", p["reason"])
@@ -605,7 +683,7 @@ class EvaluateTest(unittest.TestCase):
 
         mod.issue_contract_review = counting_review
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=False, contract_scan=2)
+                         lane=None, live=False, contract_scan=2, repair_batch=0)
         self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
         self.assertEqual(reviewed, [467, 466])
 
@@ -669,9 +747,159 @@ class EvaluateTest(unittest.TestCase):
         mod.record_contract_holds = (
             lambda runs_dir, rows, **k: recorded.extend(rows))
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=True)
+                         lane=None, live=True, repair_batch=0)  # pin the HOLD path
         self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
         self.assertEqual([r["issue"] for r in recorded], [467, 466, 452])
+
+    def test_scan_crosses_lanes_to_a_ready_issue(self) -> None:
+        """Lane-level head-of-line fix: when the busiest lane's head is thin, the
+        scan's round-robin stream reaches ANOTHER eligible lane's ready issue in
+        the same tick instead of starving it behind the fat lane."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "docs", "numbers": [100, 101],
+                          "by_lane_count": {"docs": 2, "tools": 1},
+                          "eligible_by_lane": [["docs", [100, 101]],
+                                               ["tools", [200]]]})
+
+        def per_issue_review(root, issue, number, **_kw):
+            if number == 200:
+                return passing_issue_contract()
+            return {"ok": False, "unavailable": False, "score": 8,
+                    "spine_priority": 0,
+                    "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                               "missing_fields": ["working_spine"],
+                               "score": {"total": 8}}}
+
+        mod.issue_contract_review = per_issue_review
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_SPAWN")
+        self.assertEqual(p["target_issue"], 200)
+        self.assertEqual(p["lane"], "tools")  # crossed from docs to tools
+        self.assertEqual([(r["lane"], r["issue"]) for r in p["contract_skipped"]],
+                         [("docs", 100)])  # round-robin: docs head first
+
+    def test_all_thin_dry_run_plans_a_repair_worker(self) -> None:
+        """The self-serve arm: a window where EVERYTHING fails the gate plans a
+        contract-repair worker on the held issues instead of a bare hold."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466],
+                          "by_lane_count": {"gateway": 2}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "WOULD_REPAIR")
+        self.assertEqual(p["action"], "would_repair")
+        self.assertEqual(p["contract_repair"]["batch"], [467, 466])
+        self.assertEqual(mod.tick_exit_code(p), 0)  # benign: work was dispatched
+
+    def test_all_thin_live_spawns_repair_worker_with_repair_prefix(self) -> None:
+        """A live all-thin tick SPAWNS the repair worker: repair log prefix (so
+        resolve-only scans never see it), the contract-repair pseudo-lane (no lane
+        lease), and the .issues batch sidecar naming every groomed issue."""
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            self._patch(mod, pre=self.SPAWN_OK,
+                        pick={"lane": "gateway", "numbers": [467, 466],
+                              "by_lane_count": {"gateway": 2}})
+            mod.issue_contract_review = lambda *a, **k: {
+                "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+                "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                           "missing_fields": ["working_spine"],
+                           "score": {"total": 8}}}
+            seen: dict = {}
+
+            def fake_spawn(command, env, cwd, log_dir, issue, lane, backend,
+                           **kwargs):
+                seen.update({"issue": issue, "lane": lane,
+                             "log_prefix": kwargs.get("log_prefix"),
+                             "env_issues": env.get("FLEET_REPAIR_ISSUES")})
+                log = Path(td) / f"repair-{issue}-20260702-190000.log"
+                log.write_text("# fak-spawn", encoding="utf-8")
+                return {"pid": 41, "log": str(log), "issue": issue,
+                        "lane": lane, "backend": backend}
+
+            mod.spawn_issue_worker = fake_spawn
+            p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                             lane=None, live=True)
+            self.assertTrue(p["ok"])
+            self.assertEqual(p["verdict"], "REPAIR_SPAWNED")
+            self.assertEqual(p["action"], "repair_spawned")
+            self.assertEqual(seen["log_prefix"], "repair")
+            self.assertEqual(seen["lane"], mod.REPAIR_LANE)
+            self.assertEqual(seen["issue"], 467)  # batch head names the sidecars
+            self.assertEqual(seen["env_issues"], "467,466")
+            sidecar = Path(td) / ("repair-467-20260702-190000"
+                                  + mod.REPAIR_ISSUES_SIDECAR_SUFFIX)
+            self.assertEqual(sidecar.read_text(encoding="utf-8"), "467,466")
+
+    def test_live_repair_worker_blocks_a_second_groomer(self) -> None:
+        """Repair admission is serialized: with a groomer already alive, the tick
+        reports REPAIR_IN_FLIGHT (benign) instead of stacking a second one."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467],
+                          "by_lane_count": {"gateway": 1}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        mod.live_repair_workers = lambda runs_dir, **k: [
+            {"pid": 999, "pid_file": "repair-1207-20260702-180000.pid",
+             "issue": 1207}]
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True)  # boom-spawn proves nothing spawns
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["verdict"], "REPAIR_IN_FLIGHT")
+        self.assertEqual(mod.tick_exit_code(p), 0)
+
+    def test_repair_cooldown_falls_back_to_plain_hold(self) -> None:
+        """Issues a groomer already attempted are not re-groomed inside the
+        cooldown: with every held candidate cooled, the tick HOLDs and says why."""
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467, 466],
+                          "by_lane_count": {"gateway": 2}})
+        mod.issue_contract_review = lambda *a, **k: {
+            "ok": False, "unavailable": False, "score": 8, "spine_priority": 0,
+            "review": {"ok": False, "reasons": ["ISSUE_SCOPE_INCOMPLETE"],
+                       "missing_fields": ["working_spine"], "score": {"total": 8}}}
+        mod.recently_repaired_issues = (
+            lambda runs_dir, *, cooldown_min, **k: {467, 466})
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "ISSUE_CONTRACT_HOLD")
+        self.assertIn("repair cooldown", p["reason"])
+        self.assertIn("cooldown", p["contract_repair"]["skipped"])
+
+    def test_hold_ledger_updatedat_readmits_a_backfilled_issue(self) -> None:
+        """The repair-pipeline turnaround: an issue whose GitHub updatedAt is
+        NEWER than its held verdict re-enters the pick immediately; one whose
+        body has not changed stays held until the TTL."""
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            rows = [{"issue": 1207, "score": 8, "reason": "thin"},
+                    {"issue": 1271, "score": 0, "reason": "thin"}]
+            mod.record_contract_holds(runs, rows, live=True, now_ts=1_000_000.0)
+            held = mod.contract_held_issues(
+                runs, ttl_h=24, now_ts=1_000_100.0,
+                updated_ts={1207: 1_000_050.0})  # edited AFTER the held verdict
+            self.assertEqual(held, {1271})  # 1207 re-admitted, 1271 still held
+            held = mod.contract_held_issues(
+                runs, ttl_h=24, now_ts=1_000_100.0,
+                updated_ts={1207: 999_000.0})  # stale edit: predates the verdict
+            self.assertEqual(held, {1207, 1271})
 
     def test_pinned_issue_is_never_substituted_by_scan(self) -> None:
         """--issue pins an operator-vetted target: a thin pinned issue HOLDs the
@@ -746,6 +974,9 @@ class EvaluateTest(unittest.TestCase):
             {"timeout_s": k.get("timeout_s"), "live": k.get("live"),
              "candidates": [{"pid": 101}], "reaped": [{"pid": 101}], "would_reap": []})
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.contract_held_issues = lambda runs_dir, **k: set()
+        mod.open_issue_updated_map = lambda root, **k: {}
+        mod.record_contract_holds = lambda runs_dir, rows, **k: None
         mod.lane_issue_numbers = lambda root, lane, exclude=None: {
             "lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()

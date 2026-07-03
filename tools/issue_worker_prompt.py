@@ -234,6 +234,108 @@ def build(number: int, lane: str, *, workspace: Path) -> dict[str, Any]:
     }
 
 
+# --- Contract-repair prompt --------------------------------------------------
+# The dispatcher's issue-contract gate (floor 100) holds an issue whose 17-field
+# structured contract is incomplete. The backlog largely predates that schema, so
+# a tick whose whole scan window fails the gate would idle forever waiting for a
+# HUMAN to groom issues. Instead it spawns ONE worker on this prompt: bring the
+# named issues up to contract BY EDITING THE ISSUES THEMSELVES (gh issue edit),
+# never the repo tree — the self-serve arm of the readiness gate. Honesty rules
+# mirror render_prompt: no invented scope, verify-before-claim, honest holds.
+
+def _repair_row_line(row: dict[str, Any]) -> str:
+    n = row.get("number") or row.get("issue")
+    title = str(row.get("title") or "").strip()[:80]
+    missing = [str(m) for m in (row.get("missing_fields") or []) if m][:12]
+    reasons = [str(r) for r in (row.get("reasons") or []) if r][:4]
+    bits = [f"- #{n}" + (f" ({title})" if title else "")]
+    if missing:
+        bits.append(f"  missing fields: {', '.join(missing)}")
+    if reasons:
+        bits.append(f"  gate reasons: {', '.join(reasons)}")
+    return "\n".join(bits)
+
+
+def render_repair_prompt(rows: list[dict[str, Any]], *, workspace: str,
+                         min_score: int = 100) -> str:
+    """Render the contract-repair prompt for a batch of gate-held issues.
+    Pure: no I/O. ``rows`` carry {number,title,missing_fields,reasons} as the
+    dispatcher's contract scan recorded them."""
+    numbers = [str(r.get("number") or r.get("issue")) for r in rows]
+    issue_lines = "\n".join(_repair_row_line(r) for r in rows)
+    return f"""your goal: bring {len(rows)} open GitHub issue(s) (#{', #'.join(numbers)}) up to \
+this repo's structured dispatch contract by EDITING EACH ISSUE ON GITHUB \
+(`gh issue edit`), so the always-on dispatcher can spawn resolution workers on \
+them — WITHOUT changing any issue's intent and WITHOUT touching the repository \
+working tree.
+
+why: the dispatcher refuses to spawn on an issue whose contract review scores \
+below {min_score}. These issues predate the contract schema — the content the \
+fields need is usually already in the issue's own title, body, and thread; your \
+job is to reshape that evidence into the named sections, not to invent scope.
+
+the issues (work each one, oldest first):
+{issue_lines}
+
+how to work each issue:
+- `gh issue view <N>` and read the full thread first; then orient once with \
+`AGENTS.md` and `llms.txt` if you have not already.
+- Append ONLY the missing contract sections to the body (`gh issue edit <N> \
+--body-file <f>`), preserving every existing line of the body verbatim above \
+your additions. Never delete or rewrite existing prose.
+- Derive every field honestly from the issue's own content and the repo. If a \
+field's true answer is not derivable from that evidence, write the honest short \
+form (`unknown — needs operator input: <the one question>`) rather than a \
+fabricated specific.
+- An issue that cannot honestly satisfy the contract as ONE dispatchable leaf \
+(an epic that needs splitting, or work that belongs elsewhere) gets a comment \
+`contract-hold: <why>` instead of a fake contract; leave its body alone and \
+move on to the next issue.
+- Verify each repair before claiming it: \
+`gh issue view <N> --json number,title,body,labels --jq '[.]' > .dispatch-runs/contract-verify-<N>.json` \
+then `go run ./cmd/fak issue contract --from-issues \
+.dispatch-runs/contract-verify-<N>.json --live --json` (from the repo root; use \
+`fak` from PATH if installed). The repair is done ONLY when that review reports \
+ok with score.total >= {min_score}. Do not claim a pass you did not run.
+
+hard rules:
+- The repo tree is READ-ONLY for you: no commits, no tracked-file edits, no \
+branches, no staging. Scratch files go under `.dispatch-runs/` (gitignored) only.
+- Edit only the issues listed above; never any other issue.
+- Never close an issue — closure is the auditor's job, bound to witnessed commits.
+
+acceptance (your stop condition): every listed issue either passes the contract \
+review you actually ran, or carries an honest `contract-hold:` comment naming \
+the blocker. End with a final report: per issue — repaired+verified, or \
+held(+why). Honesty over a green-looking lie: the dispatcher re-reviews every \
+issue with the same gate on its next tick, so an unverified claim is caught \
+immediately.
+
+workspace: {workspace}. issues: #{', #'.join(numbers)}.
+"""
+
+
+def build_repair(rows: list[dict[str, Any]], *, workspace: Path,
+                 min_score: int = 100) -> dict[str, Any]:
+    """The contract-repair analogue of :func:`build`. Pure fold over the rows the
+    dispatcher's contract scan already collected — no gh fetch (the worker
+    re-reads each live issue itself)."""
+    prompt = render_repair_prompt(rows, workspace=str(workspace), min_score=min_score)
+    issues: list[int] = []
+    for r in rows:
+        try:
+            issues.append(int(r.get("number") or r.get("issue") or 0))
+        except (TypeError, ValueError):
+            continue
+    return {
+        "schema": SCHEMA,
+        "kind": "contract-repair",
+        "issues": issues,
+        "prompt": prompt,
+        "prompt_chars": len(prompt),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Render the issue-resolution prompt for one open issue.")

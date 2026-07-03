@@ -579,6 +579,22 @@ class WorkerCountTest(unittest.TestCase):
                                              "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}, probe=probe), {101})
 
+    def test_live_repair_worker_pid_counts_toward_cap(self) -> None:
+        # A contract-repair worker (repair-<N>-<stamp>.pid, spawned by the
+        # dispatcher when its whole contract-scan window fails the gate) burns
+        # the same account seat a resolution worker does — it must pin the cap.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "repair-1207-20260702-190000.pid"
+            side.write_text("303", encoding="utf-8")
+            os.utime(side, (now, now))
+            def probe(pid):
+                return {"alive": True, "create_time": now - 1,
+                        "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={303}, probe=probe), {303})
+
     def test_live_resolve_worker_pids_rejects_recycled_shell_in_window(self) -> None:
         # The ghost that pinned the dispatcher at cap: a recycled cmd.exe whose
         # create time happens to fall inside a stale sidecar's spawn window, with

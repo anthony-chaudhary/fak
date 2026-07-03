@@ -134,7 +134,11 @@ RUNS_DIRNAME = ".dispatch-runs"
 # stdin-fed worker, whose command line carries no scannable marker (#2226).
 GOAL_RUNS_DIRNAME = ".goal-runs"
 _GOAL_PID_RE = re.compile(r".+-\d{8}-\d{6}\.pid$")
-_RESOLVE_PID_RE = re.compile(r"resolve-\d+-\d{8}-\d{6}\.pid$")
+# Both worker kinds occupy a seat: resolve-<N> (issue resolution) and
+# repair-<N> (contract repair, spawned by the same dispatcher when its whole
+# scan window fails the issue-contract gate). Counting only resolve-*.pid here
+# would let repair workers ride outside the cap.
+_RESOLVE_PID_RE = re.compile(r"(?:resolve|repair)-\d+-\d{8}-\d{6}\.pid$")
 _SIDECAR_CREATE_BEFORE_WINDOW_SECONDS = 5 * 60
 _SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
 # Process names a real dispatch worker actually runs as. The create-time-window
@@ -827,7 +831,9 @@ def live_resolve_worker_pids(
     probe: Callable[[int], dict[str, Any]] | None = None,
     product: str | None = None,
 ) -> set[int]:
-    """Live issue-resolution workers from `.dispatch-runs/resolve-*.pid`.
+    """Live dispatch workers from `.dispatch-runs/resolve-*.pid` AND
+    `.dispatch-runs/repair-*.pid` — a contract-repair worker burns the same
+    account seat a resolution worker does, so both pin the cap.
 
     When ``product`` is given, only sidecars whose ``.backend`` tag is in that
     product's pool are counted, so a claude worker does not pin the opencode cap.
@@ -842,7 +848,7 @@ def live_resolve_worker_pids(
     if not runs_dir.is_dir():
         return set()
     pids: set[int] = set()
-    for pid_file in runs_dir.glob("resolve-*.pid"):
+    for pid_file in (*runs_dir.glob("resolve-*.pid"), *runs_dir.glob("repair-*.pid")):
         if not _RESOLVE_PID_RE.match(pid_file.name):
             continue
         pid = _read_resolve_pid_sidecar(pid_file)

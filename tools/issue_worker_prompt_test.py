@@ -121,6 +121,51 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("no body", p)
 
 
+class RenderRepairPromptTest(unittest.TestCase):
+    ROWS = [
+        {"number": 1207, "title": "docs(docs): session-lifecycle one-pager",
+         "missing_fields": ["done_condition", "acceptance_gate", "scope"],
+         "reasons": ["ISSUE_SCOPE_INCOMPLETE"]},
+        {"number": 1381, "title": "perf(metal): fused expert MLP",
+         "missing_fields": ["work_unit"], "reasons": ["ISSUE_UNROUTED"]},
+    ]
+
+    def test_names_every_issue_and_its_missing_fields(self) -> None:
+        mod = load()
+        p = mod.render_repair_prompt(self.ROWS, workspace="C:/work/fak")
+        self.assertIn("#1207", p)
+        self.assertIn("#1381", p)
+        self.assertIn("done_condition", p)
+        self.assertIn("ISSUE_UNROUTED", p)
+
+    def test_edits_issues_never_the_repo_tree(self) -> None:
+        # The load-bearing boundary: a repair worker's entire output is issue
+        # edits + comments; the repo tree stays read-only and issues are never
+        # closed by it.
+        mod = load()
+        p = mod.render_repair_prompt(self.ROWS, workspace="C:/work/fak")
+        self.assertIn("gh issue edit", p)
+        self.assertIn("READ-ONLY", p)
+        self.assertIn("no commits", p)
+        self.assertIn("Never close an issue", p)
+
+    def test_demands_verified_pass_and_honest_hold(self) -> None:
+        mod = load()
+        p = mod.render_repair_prompt(self.ROWS, workspace="C:/work/fak")
+        self.assertIn("issue contract --from-issues", p)  # the verify command
+        self.assertIn("Do not claim a pass you did not run", p)
+        self.assertIn("contract-hold:", p)  # the honest per-issue escape hatch
+
+    def test_build_repair_folds_rows_without_io(self) -> None:
+        mod = load()
+        rec = mod.build_repair(self.ROWS, workspace=Path("C:/work/fak"))
+        self.assertEqual(rec["kind"], "contract-repair")
+        self.assertEqual(rec["issues"], [1207, 1381])
+        self.assertEqual(rec["prompt_chars"], len(rec["prompt"]))
+        # Bounded: the whole batch prompt stays well under the /goal-style caps.
+        self.assertLess(rec["prompt_chars"], 8000)
+
+
 class FetchIssueDecodeTest(unittest.TestCase):
     """fetch_issue must decode gh output as UTF-8 and never crash — the docstring
     promises a minimal record on ANY failure. A non-cp1252 byte in an issue body

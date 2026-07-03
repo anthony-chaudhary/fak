@@ -30,6 +30,16 @@ instead of raced. This is the upstream half of the verified loop — deny the
 collision by structure, *before* the spawn — paired with the downstream
 commit-time closure audit (the ``#N``-in-subject witness, still the close arm).
 
+Contract-ready pick, next()-queue style: the issue-contract gate holds THIN
+issues, never the whole tick. One tick contract-reviews a bounded window
+(``--contract-scan``) of candidates drawn round-robin ACROSS eligible lanes
+(oldest first within a lane), held verdicts persist in a TTL'd skip ledger so
+the window advances across ticks, and an issue whose GitHub ``updatedAt`` is
+newer than its held verdict re-enters early. When the WHOLE window fails the
+gate, the tick spawns one contract-REPAIR worker (``--repair-batch``) that
+brings the held issues up to contract themselves via ``gh issue edit`` — the
+self-serve arm that keeps a pre-schema backlog from wedging dispatch forever.
+
 Loop ledger: the CLI path appends this dispatcher tick to fak's durable loop
 ledger by default (``fak loop append``): every tick records ``fire`` and
 admitted/refused ``admit`` rows, live spawns record ``start``, and successful ticks
@@ -97,6 +107,12 @@ LEASE_ID_PREFIX = "resolve-"
 # a backstop, not the primary release (that is the witnessed release on exit).
 LEASE_TTL_MARGIN_S = 600
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
+# Contract-repair workers get their OWN log prefix so the resolve-only scans
+# (issue cooldown, live-issue/lane de-dup, the commit witness sweep) never see
+# them -- a repair run must not cool an issue, hold a lane, or grade as a
+# no-commit resolution slot. The reap/prune sweeps DO cover both prefixes.
+_REPAIR_LOG_RE = re.compile(r"repair-(\d+)-")
+_ANY_WORKER_LOG_RE = re.compile(r"(?:resolve|repair)-(\d+)-")
 # The `lane=<L>` field of the `# fak-spawn` header `spawn_issue_worker` flushes as
 # the first line of every worker log (used by the pre-spawn lane-lease gate, #1310).
 _SPAWN_LANE_RE = re.compile(r"\blane=(\S+)")
@@ -120,6 +136,23 @@ DEFAULT_CONTRACT_SCAN = 8
 # across ticks instead of re-reviewing the same thin heads forever.
 DEFAULT_CONTRACT_HOLD_TTL_H = 24
 _CONTRACT_HOLD_LEDGER = "contract-holds.jsonl"
+# Contract-repair dispatch: when the WHOLE scan window fails the gate, the tick
+# spawns one worker to bring the held issues up to contract themselves (gh issue
+# edit) instead of idling until a human grooms the backlog. The batch bounds one
+# worker's grooming load; 0 disables repair dispatch entirely.
+DEFAULT_REPAIR_BATCH = 5
+# An issue a repair worker already ATTEMPTED is not re-groomed inside this window
+# (anti-churn for un-repairables). A SUCCESSFUL repair needs no cooldown escape:
+# its edit bumps the issue's updatedAt, which re-admits it past the hold ledger.
+DEFAULT_REPAIR_COOLDOWN_MIN = 360
+# The pseudo-lane a repair worker runs under (guard-audit naming, child env). It
+# takes NO lane lease -- it edits GitHub issues, not repo files; admission is
+# serialized by the live repair-sidecar scan instead (max one in flight).
+REPAIR_LANE = "contract-repair"
+# Batch sidecar next to each repair-<N>-<stamp>.log naming EVERY issue in the
+# worker's batch (the log name carries only the first), so the repair cooldown
+# covers the whole batch.
+REPAIR_ISSUES_SIDECAR_SUFFIX = ".issues"
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -314,6 +347,8 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
     if explicit_lane:
         chosen = explicit_lane
         held: list[str] = []
+        # An explicit lane bounds the contract scan to that lane (operator intent).
+        eligible_ranked = [[chosen, nums_by_lane.get(chosen, [])]]
     else:
         self_source = ({ln for ln in nums_by_lane if issue_dispatch.is_self_source_tree(trees.get(ln))}
                        if guarded else set())
@@ -321,8 +356,14 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
         eligible = {k: v for k, v in nums_by_lane.items()
                     if k not in exclude and k not in self_source}
         chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
+        # Every eligible lane with open issues, busiest first (name-tiebroken so the
+        # order is deterministic) -- the lane rank the cross-lane contract scan walks.
+        eligible_ranked = [[k, v] for k, v in
+                           sorted(eligible.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+                           if v]
     return {"lane": chosen, "numbers": nums_by_lane.get(chosen or "", []),
             "by_lane_count": by_lane_count,
+            "eligible_by_lane": eligible_ranked,
             "excluded_lanes": sorted(exclude),
             "self_modify_held": held,
             "router_error": router.get("_error")}
@@ -453,6 +494,68 @@ def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
     return recent
 
 
+def live_repair_workers(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Contract-repair workers still ALIVE (``repair-<N>-<stamp>.pid``,
+    identity-gated exactly like the resolve sidecars). The dispatcher admits at
+    most ONE repair worker at a time -- it holds no lane lease (it edits GitHub
+    issues, not repo files), so this scan is its serializer."""
+    out: list[dict[str, Any]] = []
+    if not runs_dir.is_dir():
+        return out
+    for pid_file in sorted(runs_dir.glob("repair-*.pid")):
+        m = _REPAIR_LOG_RE.search(pid_file.name)
+        if not m:
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(
+                pid_file, alive=alive, probe=probe):
+            continue
+        try:
+            pid: int | None = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            pid = None
+        out.append({"pid": pid, "pid_file": pid_file.name, "issue": int(m.group(1))})
+    return out
+
+
+def recently_repaired_issues(runs_dir: Path, *, cooldown_min: int,
+                             now_ts: float | None = None) -> set[int]:
+    """Issues a contract-repair worker ATTEMPTED within the window -- the mtime of
+    each ``repair-<N>-*.log`` plus every issue in its ``.issues`` batch sidecar.
+    Anti-churn for un-repairables: an issue a worker could not honestly bring to
+    contract must not be re-groomed every tick. A SUCCESSFUL repair needs no
+    escape hatch here -- its edit bumps updatedAt, which re-admits the issue past
+    the hold ledger, and a passing review never reaches the repair path again.
+    0 disables the gate."""
+    if cooldown_min <= 0 or not runs_dir.is_dir():
+        return set()
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - cooldown_min * 60
+    recent: set[int] = set()
+    for log in runs_dir.glob("repair-*.log"):
+        m = _REPAIR_LOG_RE.search(log.name)
+        if not m:
+            continue
+        try:
+            if log.stat().st_mtime < horizon:
+                continue
+        except OSError:
+            continue
+        recent.add(int(m.group(1)))
+        try:
+            extra = log.with_suffix(REPAIR_ISSUES_SIDECAR_SUFFIX).read_text(
+                encoding="utf-8")
+            recent.update(int(x) for x in extra.split(",") if x.strip())
+        except (OSError, ValueError):
+            pass
+    return recent
+
+
 def terminate_issue_worker_tree(pid: int) -> dict[str, Any]:
     """Kill one detached issue worker and its descendants.
 
@@ -505,8 +608,9 @@ def reap_timed_out_workers(
     if not runs_dir.is_dir():
         return {"timeout_s": timeout_s, "live": live, "candidates": [],
                 "reaped": [], "would_reap": []}
-    for pid_file in sorted(runs_dir.glob("resolve-*.pid")):
-        m = _LOG_ISSUE_RE.search(pid_file.name)
+    for pid_file in sorted((*runs_dir.glob("resolve-*.pid"),
+                            *runs_dir.glob("repair-*.pid"))):
+        m = _ANY_WORKER_LOG_RE.search(pid_file.name)
         if not m:
             continue
         try:
@@ -570,9 +674,11 @@ def prune_dead_sidecars(
     if not runs_dir.is_dir():
         return {"live": live, "pruned": pruned, "would_prune": would_prune}
     sibling_suffixes = (".log", ".backend", ".wave", ".account",
-                        BASE_SHA_SIDECAR_SUFFIX, WITNESS_SIDECAR_SUFFIX)
-    for pid_file in sorted(runs_dir.glob("resolve-*.pid")):
-        if not _LOG_ISSUE_RE.search(pid_file.name):
+                        BASE_SHA_SIDECAR_SUFFIX, WITNESS_SIDECAR_SUFFIX,
+                        REPAIR_ISSUES_SIDECAR_SUFFIX)
+    for pid_file in sorted((*runs_dir.glob("resolve-*.pid"),
+                            *runs_dir.glob("repair-*.pid"))):
+        if not _ANY_WORKER_LOG_RE.search(pid_file.name):
             continue
         try:
             age_s = max(0.0, now - pid_file.stat().st_mtime)
@@ -608,8 +714,38 @@ def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
     return None
 
 
+def contract_scan_stream(eligible_by_lane: list[Any] | None,
+                         skip: set[int]) -> list[tuple[str, int]]:
+    """The cross-lane candidate stream the bounded contract scan walks: round-robin
+    ACROSS eligible lanes (rank order preserved: busiest first) and oldest-first
+    WITHIN a lane, skipping live/cooled/held issues. This is the lane-level half of
+    the head-of-line-blocking fix: with a lane-local scan, one fat lane whose head
+    stratum is all pre-contract-era thin issues (docs: 232) starves every other
+    lane's READY issues out of the scan window for ticks on end; interleaving gives
+    each eligible lane's oldest candidate a look inside a single window. Pure:
+    plain data in, [(lane, issue), ...] out."""
+    queues: list[tuple[str, list[int]]] = []
+    for entry in eligible_by_lane or []:
+        try:
+            lane, numbers = entry[0], entry[1]
+        except (TypeError, IndexError, KeyError):
+            continue
+        nums = [n for n in (numbers or []) if n not in skip]
+        if lane and nums:
+            queues.append((str(lane), nums))
+    stream: list[tuple[str, int]] = []
+    depth = 0
+    while any(depth < len(nums) for _, nums in queues):
+        for lane, nums in queues:
+            if depth < len(nums):
+                stream.append((lane, nums[depth]))
+        depth += 1
+    return stream
+
+
 def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
-                         now_ts: float | None = None) -> set[int]:
+                         now_ts: float | None = None,
+                         updated_ts: dict[int, float] | None = None) -> set[int]:
     """Issue numbers whose contract review HELD within the last ``ttl_h`` hours --
     read from the ledger live ticks append via ``record_contract_holds``. This is
     what makes the bounded contract scan CUMULATIVE: with an oldest-first pick, a
@@ -619,7 +755,14 @@ def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_T
     recently-held issues moves the window ~scan-budget issues per tick, so a
     hundreds-deep thin backlog is swept in hours. After the TTL an issue is
     re-reviewed, so a contract backfill re-enters it with no manual reset.
-    0 disables the gate."""
+    0 disables the gate.
+
+    ``updated_ts`` ({issue: GitHub updatedAt epoch}, from ``open_issue_updated_map``)
+    re-admits an issue whose body changed AFTER its latest held verdict without
+    waiting out the TTL -- the turnaround that makes the contract-REPAIR pipeline
+    work: a repair worker's edit (or a human backfill) bumps updatedAt, so the very
+    next tick re-reviews the issue instead of skipping it for a day. Fail-open in
+    the conservative direction: no updated timestamp for an issue -> it stays held."""
     if ttl_h <= 0:
         return set()
     ledger = runs_dir / _CONTRACT_HOLD_LEDGER
@@ -628,7 +771,7 @@ def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_T
     import time
     now = now_ts if now_ts is not None else time.time()
     horizon = now - ttl_h * 3600
-    held: set[int] = set()
+    held: dict[int, float] = {}
     try:
         lines = ledger.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -636,11 +779,16 @@ def contract_held_issues(runs_dir: Path, *, ttl_h: int = DEFAULT_CONTRACT_HOLD_T
     for line in lines:
         try:
             row = json.loads(line)
-            if float(row.get("ts") or 0) >= horizon:
-                held.add(int(row.get("issue")))
+            ts = float(row.get("ts") or 0)
+            if ts >= horizon:
+                n = int(row.get("issue"))
+                held[n] = max(held.get(n, 0.0), ts)
         except (TypeError, ValueError):
             continue
-    return held
+    if updated_ts:
+        held = {n: ts for n, ts in held.items()
+                if (updated_ts.get(n) or 0.0) <= ts}
+    return set(held)
 
 
 def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
@@ -664,6 +812,50 @@ def record_contract_holds(runs_dir: Path, rows: list[dict[str, Any]], *,
                 }, ensure_ascii=False) + "\n")
     except OSError:
         pass  # fail-open: a missed skip re-reviews next tick, never blocks one
+
+
+def _parse_gh_timestamp(value: Any) -> float | None:
+    """Epoch seconds from a gh ISO-8601 timestamp (``2026-07-02T18:33:12Z``);
+    None on anything unparseable (fail-open, the caller keeps the issue held)."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return dt.datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
+def open_issue_updated_map(root: Path, *, cap: int = 1000,
+                           runner: Any = subprocess.run) -> dict[int, float]:
+    """``{number: updatedAt-epoch}`` for open issues -- ONE bulk ``gh issue list``
+    call per tick. Feeds ``contract_held_issues``'s re-admission check so a
+    contract backfill (a repair worker's edit, or a human's) re-enters the pick
+    on the NEXT tick instead of waiting out the hold TTL. Fail-open: any error
+    returns {} (no re-admission that tick; the TTL stays the backstop)."""
+    try:
+        proc = runner(
+            ["gh", "issue", "list", "--state", "open", "--limit", str(cap),
+             "--json", "number,updatedAt"],
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=60, creationflags=no_window_creationflags())
+        rows = json.loads(proc.stdout or "[]") if proc.returncode == 0 else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+    out: dict[int, float] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            n = int(row.get("number"))
+        except (TypeError, ValueError):
+            continue
+        ts = _parse_gh_timestamp(row.get("updatedAt"))
+        if ts is not None:
+            out[n] = ts
+    return out
 
 
 def build_worker_command(backend: str, prompt: str, model: str | None) -> list[str]:
@@ -889,11 +1081,15 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        membership: dict[str, Any] | None = None,
                        account: dict[str, Any] | None = None,
                        base_sha: str | None = None,
-                       spawn_probe_s: float = 0.0) -> dict[str, Any]:
+                       spawn_probe_s: float = 0.0,
+                       log_prefix: str = "resolve") -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
-    arm, silent-worker scan, and in-flight de-dup all see it uniformly.
+    arm, silent-worker scan, and in-flight de-dup all see it uniformly. A
+    contract-repair spawn passes ``log_prefix="repair"`` so those resolve-only
+    scans never see it, while the reap/prune sweeps and the preflight seat count
+    (which cover both prefixes) still do.
 
     ``membership`` (``{rank, wave_id, size, shortfall}``, as ``allocate_wave`` stamps
     each lane) is OPTIONAL: when given, the worker's rank/wave identity is stamped
@@ -902,7 +1098,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     — the worker stays a detached lane."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
-    out_log = log_dir / f"resolve-{issue}-{stamp}.log"
+    out_log = log_dir / f"{log_prefix}-{issue}-{stamp}.log"
     exe = shutil.which(command[0]) or command[0]
     argv = [exe, *command[1:]]
     if membership is not None:
@@ -2015,6 +2211,123 @@ def record_loop_tick(root: Path, payload: dict[str, Any],
     }
 
 
+def _contract_missing_fields(contract: dict[str, Any]) -> list[str]:
+    review = contract.get("review") if isinstance(contract.get("review"), dict) else {}
+    return [str(m) for m in (review.get("missing_fields") or []) if m]
+
+
+def _maybe_dispatch_contract_repair(
+    root: Path, runs_dir: Path, payload: dict[str, Any], *,
+    rows: list[dict[str, Any]], live: bool, backend: str,
+    acct: dict[str, Any], repair_batch: int, repair_cooldown_min: int,
+    spawn_probe_s: float, product: str,
+) -> dict[str, Any] | None:
+    """The self-serve arm of the readiness gate: when a WHOLE scan window fails
+    the issue-contract floor, dispatch ONE worker to bring the held issues up to
+    contract themselves (``gh issue edit``, verified against the same gate)
+    instead of idling until a human grooms the backlog -- with a ~700-issue
+    pre-schema backlog, a scan-only tick otherwise converges to a permanent hold.
+
+    Returns the completed tick payload (repair spawned / planned / in flight), or
+    None when repair cannot run (disabled, or every held candidate is inside the
+    repair cooldown) -- the caller falls through to the plain ISSUE_CONTRACT_HOLD
+    with ``payload["contract_repair"]`` saying why. Admission: at most ONE repair
+    worker at a time (serialized by the live repair-sidecar scan; it takes no
+    lane lease because it never touches repo files), and the spawned worker
+    occupies a preflight seat like any resolution worker."""
+    if repair_batch <= 0:
+        payload["contract_repair"] = {"skipped": "disabled (--repair-batch 0)"}
+        return None
+    in_flight = live_repair_workers(runs_dir)
+    if in_flight:
+        payload["contract_repair"] = {"in_flight": in_flight}
+        payload.update({
+            "ok": True, "action": "repair_in_flight", "verdict": "REPAIR_IN_FLIGHT",
+            "reason": (f"every scanned candidate fails the contract gate and a "
+                       f"contract-repair worker (pid {in_flight[0].get('pid')}) is "
+                       f"already grooming the backlog — waiting for it, not "
+                       f"stacking a second groomer onto the same issues")})
+        return payload
+    cooled = recently_repaired_issues(runs_dir, cooldown_min=repair_cooldown_min)
+    batch = [r for r in rows if int(r.get("issue") or 0)
+             and int(r.get("issue") or 0) not in cooled][:repair_batch]
+    if not batch:
+        payload["contract_repair"] = {
+            "skipped": (f"all {len(rows)} held candidate(s) inside the "
+                        f"{repair_cooldown_min}-min repair cooldown")}
+        return None
+    prompt_rows = [{
+        "number": r.get("issue"),
+        "title": r.get("title"),
+        "missing_fields": r.get("missing_fields") or [],
+        "reasons": [t for t in str(r.get("reason") or "").split(", ")
+                    if t.startswith("ISSUE_")][:4],
+    } for r in batch]
+    rec = issue_worker_prompt.build_repair(
+        prompt_rows, workspace=root, min_score=DEFAULT_ISSUE_CONTRACT_MIN_SCORE)
+    payload["contract_repair"] = {"batch": rec["issues"],
+                                  "prompt_chars": rec["prompt_chars"]}
+    nums = ",".join(str(n) for n in rec["issues"])
+    if not live:
+        payload.update({
+            "ok": True, "action": "would_repair", "verdict": "WOULD_REPAIR",
+            "reason": (f"every scanned candidate fails the contract gate; would "
+                       f"spawn 1 {backend} contract-repair worker on issue(s) "
+                       f"{nums} to bring them up to contract")})
+        return payload
+    model = acct.get("model") if backend == "opencode" else None
+    if backend == "claude":
+        env = issue_dispatch.worker_env(acct.get("dir"), REPAIR_LANE, root)
+    elif backend == "codex":
+        env = codex_worker_env(acct.get("dir"), REPAIR_LANE, root)
+    else:
+        env = opencode_worker_env(acct.get("dir"), REPAIR_LANE, root, runs_dir)
+    env["FLEET_REPAIR_ISSUES"] = nums
+    command, guarded = dispatch_worker.guarded_launch_command(
+        build_worker_command(backend, rec["prompt"], model),
+        REPAIR_LANE, backend, root, env)
+    if guarded:
+        dispatch_worker.guard_env_augment(env)
+    payload["command"] = command
+    payload["guarded"] = guarded
+    spawned = spawn_issue_worker(command, env, root, runs_dir, rec["issues"][0],
+                                 REPAIR_LANE, backend, account=acct,
+                                 spawn_probe_s=spawn_probe_s, log_prefix="repair")
+    try:
+        Path(str(spawned.get("log") or "")).with_suffix(
+            REPAIR_ISSUES_SIDECAR_SUFFIX).write_text(nums, encoding="utf-8")
+    except OSError:
+        pass  # cooldown degrades to first-issue-only; never blocks the spawn
+    early = spawned.get("early_exit") or {}
+    if early.get("checked") and not early.get("alive"):
+        cap_hit = _cap_hit_from_text(
+            str(early.get("tail") or ""),
+            evidence_log=Path(str(spawned.get("log") or "")).name)
+        if cap_hit:
+            import time
+            payload["quota_cap"] = _write_cap_hold(
+                runs_dir, product=product, account_tag=acct.get("tag"),
+                hit=cap_hit, now_ts=time.time(), fallback_min=60,
+                source="early_exit")
+        payload.update({
+            "ok": False, "action": "spawn_failed", "verdict": "SPAWN_FAILED",
+            "spawned": spawned,
+            "reason": (f"{backend} contract-repair worker pid {spawned['pid']} "
+                       f"for issue(s) {nums} exited within {early.get('wait_s')}s "
+                       f"with code {early.get('returncode')}"
+                       + (" and produced an empty log" if early.get("silent") else ""))})
+        _record(runs_dir, payload)
+        return payload
+    payload.update({
+        "ok": True, "action": "repair_spawned", "verdict": "REPAIR_SPAWNED",
+        "spawned": spawned,
+        "reason": (f"spawned {backend} contract-repair worker pid {spawned['pid']} "
+                   f"on issue(s) {nums} — it edits the ISSUES up to contract "
+                   f"(no lane lease; the repo tree is read-only for it)")})
+    _record(runs_dir, payload)
+    return payload
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
@@ -2028,6 +2341,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               force: bool = False,
               contract_scan: int = DEFAULT_CONTRACT_SCAN,
               contract_hold_ttl_h: int = DEFAULT_CONTRACT_HOLD_TTL_H,
+              repair_batch: int = DEFAULT_REPAIR_BATCH,
+              repair_cooldown_min: int = DEFAULT_REPAIR_COOLDOWN_MIN,
               lease_runner: Any | None = None) -> dict[str, Any]:
     # lease_runner is the injectable `fak leaseref` seam (default: a real
     # subprocess). Tests pass a canned runner returning {rc, verdict} so the whole
@@ -2164,9 +2479,25 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # would hold identically (the body has not grown a contract in the meantime),
     # so skipping it lets the bounded scan advance to unreviewed issues instead of
     # pinning the scan window to the same thin heads every tick.
-    contract_held_prior = contract_held_issues(runs_dir, ttl_h=contract_hold_ttl_h)
+    # A prior hold is re-admitted early when the issue's GitHub updatedAt is newer
+    # than its held verdict (a repair worker's edit or a human backfill) -- one
+    # bulk gh call, fail-open to the TTL backstop.
+    contract_held_prior = contract_held_issues(
+        runs_dir, ttl_h=contract_hold_ttl_h,
+        updated_ts=(open_issue_updated_map(root) if contract_hold_ttl_h > 0 else None))
     skip = live_issues | cooled | held_no_commit | contract_held_prior
-    target = pick_target_issue(pick.get("numbers") or [], skip)
+    # The cross-lane candidate stream the bounded contract scan walks (busiest
+    # lane's oldest candidate first, then each other eligible lane's, round-robin).
+    # Falls back to the single chosen lane when the router fold predates the
+    # eligible_by_lane key (hermetic test stubs).
+    eligible_lanes = pick.get("eligible_by_lane")
+    if not eligible_lanes and chosen_lane:
+        eligible_lanes = [[chosen_lane, pick.get("numbers") or []]]
+    scan_stream = contract_scan_stream(eligible_lanes, skip)
+    if scan_stream:
+        chosen_lane, target = scan_stream[0]
+    else:
+        target = pick_target_issue(pick.get("numbers") or [], skip)
     # Operator override: pin an explicit, already-vetted target issue instead of
     # the lane's freshest-first auto-pick. The full safety chain STILL runs on the
     # pinned issue -- preflight cap, the issue-contract gate, the lane lease, and
@@ -2234,8 +2565,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"onto the same leaf tree")})
         return finish(payload)
     if target is None:
+        lanes_considered = [e[0] for e in (eligible_lanes or []) if e and e[1]]
+        where = (f"lane '{chosen_lane}'" if len(lanes_considered) <= 1
+                 else f"all {len(lanes_considered)} eligible lanes")
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
-                        "reason": (f"every open issue on lane '{chosen_lane}' is "
+                        "reason": (f"every open issue on {where} is "
                                    f"either live ({sorted(live_issues)}), in "
                                    f"cooldown ({sorted(cooled)}), or contract-held "
                                    f"within the last {contract_hold_ttl_h}h "
@@ -2262,23 +2596,29 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # the thin head unscanned, and an UNAVAILABLE review (the contract tool itself
     # failed) stops the scan -- every further review would fail identically.
     contract_skipped: list[dict[str, Any]] = []
+    scan_pos = 0  # position of `target` in the cross-lane stream
     while (_contract_holds(contract) and not force and issue_override is None
            and not contract.get("unavailable")
            and len(contract_skipped) + 1 < max(1, contract_scan)):
-        nxt = pick_target_issue(pick.get("numbers") or [], skip | {target})
-        if nxt is None:
+        if scan_pos + 1 >= len(scan_stream):
             break
         contract_skipped.append({
             "issue": target,
+            "lane": chosen_lane,
+            "title": rec.get("title"),
             "score": int(contract.get("score") or 0),
             "reason": issue_contract_hold_reason(contract)[:200],
+            "missing_fields": _contract_missing_fields(contract),
         })
-        skip.add(target)
-        target = nxt
+        scan_pos += 1
+        chosen_lane, target = scan_stream[scan_pos]
         rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
         contract = issue_contract_review(root, rec.get("issue_record"), target)
 
     payload["target_issue"] = target
+    payload["lane"] = chosen_lane
+    payload["lane_issue_count"] = (pick.get("by_lane_count") or {}).get(
+        chosen_lane, payload.get("lane_issue_count"))
     payload["prompt_chars"] = rec.get("prompt_chars")
     payload["issue_title"] = rec.get("title")
     if contract_skipped:
@@ -2301,14 +2641,35 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     if (contract_hold and not force and not contract.get("unavailable")
             and issue_override is None):
         ledger_rows.append({"issue": target,
+                            "lane": chosen_lane,
+                            "title": rec.get("title"),
                             "score": int(contract.get("score") or 0),
-                            "reason": issue_contract_hold_reason(contract)[:200]})
+                            "reason": issue_contract_hold_reason(contract)[:200],
+                            "missing_fields": _contract_missing_fields(contract)})
     record_contract_holds(runs_dir, ledger_rows, live=live)
     if contract_hold and not force:
+        # Self-serve before idling: a genuine all-scanned-fail tick dispatches a
+        # contract-REPAIR worker on the held candidates instead of just holding.
+        # Never on a pinned --issue (operator vetted THAT issue, not grooming) or
+        # an UNAVAILABLE review (tool failure, not an issue verdict).
+        if issue_override is None and not contract.get("unavailable"):
+            repaired = _maybe_dispatch_contract_repair(
+                root, runs_dir, payload, rows=ledger_rows, live=live,
+                backend=backend, acct=acct, repair_batch=repair_batch,
+                repair_cooldown_min=repair_cooldown_min,
+                spawn_probe_s=spawn_probe_s, product=product)
+            if repaired is not None:
+                return finish(repaired)
         reason = issue_contract_hold_reason(contract)
         if contract_skipped:
-            reason = (f"scanned {len(contract_skipped) + 1} lane issue(s), none "
+            lanes_scanned = {r.get("lane") for r in contract_skipped} | {chosen_lane}
+            span = (f"issue(s) across {len(lanes_scanned)} lanes"
+                    if len(lanes_scanned) > 1 else "lane issue(s)")
+            reason = (f"scanned {len(contract_skipped) + 1} {span}, none "
                       f"contract-ready; last (#{target}): {reason}")
+        repair_note = (payload.get("contract_repair") or {}).get("skipped")
+        if repair_note:
+            reason = f"{reason} (contract-repair: {repair_note})"
         payload.update({
             "ok": False,
             "action": "issue_contract_hold",
@@ -2457,6 +2818,18 @@ def render(p: dict[str, Any]) -> str:
     if p.get("spawned"):
         s = p["spawned"]
         lines.append(f"  spawned pid={s.get('pid')} issue=#{s.get('issue')} log={s.get('log')}")
+    cs = p.get("contract_skipped") or []
+    if cs:
+        lanes = sorted({str(r.get("lane")) for r in cs if r.get("lane")})
+        lines.append(f"  scan      : {len(cs)} contract-held head(s) skipped"
+                     + (f" across lanes [{','.join(lanes)}]" if len(lanes) > 1 else ""))
+    cr = p.get("contract_repair") or {}
+    if cr.get("batch"):
+        lines.append(f"  repair    : issue(s) {cr['batch']} -> {p.get('verdict')}")
+    elif cr.get("skipped"):
+        lines.append(f"  repair    : skipped — {cr['skipped']}")
+    elif cr.get("in_flight"):
+        lines.append(f"  repair    : in flight (pid {cr['in_flight'][0].get('pid')})")
     rl = p.get("reallocation") or {}
     if rl.get("bonus") or rl.get("claimed_lanes"):
         frm = ",".join(x for x in (rl.get("from") or []) if x)
@@ -2495,6 +2868,8 @@ def render(p: dict[str, Any]) -> str:
 # a real crash.
 BENIGN_ACTIONS = frozenset({
     "spawned", "would_spawn",                            # work dispatched
+    "repair_spawned", "would_repair",                    # contract grooming dispatched
+    "repair_in_flight",                                  # a groomer is already on it
     "no_issue", "no_lane", "lane_busy", "lane_leased",   # nothing to spawn
     "issue_contract_hold",                               # issue needs scope before spawn
     "refused",                                           # preflight backpressure (host at cap / no account)
@@ -2575,7 +2950,20 @@ def main(argv: list[str] | None = None) -> int:
                          f"hours (ledger: {RUNS_DIRNAME}/{_CONTRACT_HOLD_LEDGER}), so "
                          f"the bounded scan advances across ticks instead of "
                          f"re-reviewing the same thin heads (default "
-                         f"{DEFAULT_CONTRACT_HOLD_TTL_H}; 0 disables)")
+                         f"{DEFAULT_CONTRACT_HOLD_TTL_H}; 0 disables). An issue whose "
+                         f"GitHub updatedAt is newer than its held verdict re-enters "
+                         f"early — a contract backfill needs no TTL wait.")
+    ap.add_argument("--repair-batch", type=int, default=DEFAULT_REPAIR_BATCH,
+                    help=f"when EVERY scanned candidate fails the contract gate, "
+                         f"spawn one contract-repair worker on up to this many held "
+                         f"issues to bring them up to contract themselves via gh "
+                         f"issue edit (default {DEFAULT_REPAIR_BATCH}; 0 disables "
+                         f"repair dispatch — the tick then just HOLDs)")
+    ap.add_argument("--repair-cooldown-min", type=int,
+                    default=DEFAULT_REPAIR_COOLDOWN_MIN,
+                    help=f"skip an issue a repair worker already attempted within "
+                         f"this many minutes (anti-churn for un-repairables; default "
+                         f"{DEFAULT_REPAIR_COOLDOWN_MIN}; 0 disables)")
     ap.add_argument("--loop-ledger", default="",
                     help="append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
     ap.add_argument("--no-loop-ledger", action="store_true",
@@ -2603,7 +2991,9 @@ def main(argv: list[str] | None = None) -> int:
                        issue_override=args.issue,
                        force=args.force,
                        contract_scan=max(1, args.contract_scan),
-                       contract_hold_ttl_h=max(0, args.contract_hold_ttl_h))
+                       contract_hold_ttl_h=max(0, args.contract_hold_ttl_h),
+                       repair_batch=max(0, args.repair_batch),
+                       repair_cooldown_min=max(0, args.repair_cooldown_min))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return tick_exit_code(payload)
 
