@@ -22,6 +22,8 @@ value is baked into the stored argument list) -- re-run install to pick up a new
 
   .\register_issue_dispatch.ps1                       # install, DRY-RUN (logs plans, spawns nothing)
   .\register_issue_dispatch.ps1 -Live -MaxWorkers 8   # install, LIVE (bounded autonomous spawning)
+  .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchThroughput -Goal throughput
+  .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchPriority -Goal high-priority
   .\register_issue_dispatch.ps1 -Action preview        # print the task action without installing
   .\register_issue_dispatch.ps1 -Action status
   .\register_issue_dispatch.ps1 -Action remove
@@ -50,6 +52,13 @@ param(
   # Comma-separated lanes to drop from the busiest-pick (e.g. the opus task excludes
   # 'docs' so the glm task owns it). Ignored when -Lane is set.
   [string]$ExcludeLane = '',
+  # Optional resolve-mode goal. A named goal is passed to `fak dispatch tick` and
+  # suffixes the scheduler wrapper loop id, so throughput and high-priority tasks
+  # are visible as separate actors in the loop ledger and lease holders.
+  [string]$Goal = '',
+  # Optional picker profile for a custom goal. Known aliases are normalized to the
+  # native dispatch profiles: throughput and high-priority.
+  [string]$GoalProfile = '',
   # Optional path to a fak binary. If unset, the installer probes ./fak.exe, PATH fak,
   # then falls back to `go run ./cmd/fak` so source-tree installs cannot silently use
   # a stale binary that lacks `fak loop`.
@@ -73,6 +82,76 @@ if ($Action -eq 'remove') {
 
 . (Join-Path $PSScriptRoot 'fak_loop_task.ps1')
 
+function Resolve-DispatchGoalProfile {
+  param([string]$Value)
+  switch (([string]$Value).Trim().ToLowerInvariant()) {
+    'default'       { return 'throughput' }
+    'open'          { return 'throughput' }
+    'open tasks'    { return 'throughput' }
+    'open-tasks'    { return 'throughput' }
+    'open_tasks'    { return 'throughput' }
+    'backlog'       { return 'throughput' }
+    'throughput'    { return 'throughput' }
+    'priority'      { return 'high-priority' }
+    'prio'          { return 'high-priority' }
+    'high priority' { return 'high-priority' }
+    'high-priority' { return 'high-priority' }
+    'high_priority' { return 'high-priority' }
+    'highpriority'  { return 'high-priority' }
+    'p0-p1'         { return 'high-priority' }
+    'p0'            { return 'high-priority' }
+    'urgent'        { return 'high-priority' }
+    default         { return '' }
+  }
+}
+
+function ConvertTo-DispatchGoalToken {
+  param([string]$Value)
+  $trimmed = ([string]$Value).Trim()
+  if (-not $trimmed) { return '' }
+  $token = ([regex]::Replace($trimmed, '[^A-Za-z0-9_.-]', '-')).Trim([char[]]@('-', '.'))
+  if ($token -eq 'unknown') { return '' }
+  return $token
+}
+
+function Get-DispatchGoalConfig {
+  param(
+    [string]$Goal,
+    [string]$GoalProfile
+  )
+  $goalValue = ([string]$Goal).Trim()
+  $profileValue = ([string]$GoalProfile).Trim()
+  $profile = ''
+  if ($profileValue) {
+    $profile = Resolve-DispatchGoalProfile $profileValue
+    if (-not $profile) {
+      throw "dispatch goal profile '$GoalProfile' is unknown (want throughput|high-priority)"
+    }
+  }
+  if (-not $profile) {
+    $profile = Resolve-DispatchGoalProfile $goalValue
+    if ($profile -and $goalValue) { $goalValue = $profile }
+  }
+  if (-not $profile) { $profile = 'throughput' }
+  if (-not $goalValue -and $profileValue) { $goalValue = $profile }
+
+  $token = ConvertTo-DispatchGoalToken $goalValue
+  if ($goalValue -and -not $token) {
+    throw "dispatch goal '$Goal' has no usable identity"
+  }
+  return [pscustomobject]@{
+    Goal    = $goalValue
+    Profile = $profile
+    Token   = $token
+  }
+}
+
+$goalCfg = Get-DispatchGoalConfig -Goal $Goal -GoalProfile $GoalProfile
+$goalProfileInput = ([string]$GoalProfile).Trim()
+if ($Mode -ne 'resolve' -and ($goalCfg.Goal -or $goalProfileInput)) {
+  throw "-Goal and -GoalProfile are supported only with -Mode resolve"
+}
+
 # Register the tick through `fak loop run` via the ScheduledTasks cmdlets, NOT
 # through a `powershell.exe -Command "..."` wrapper. The wrapper was a SILENT-NO-OP
 # trap: a standard install path can contain spaces, and the nested quotes needed to
@@ -89,6 +168,8 @@ if ($Mode -eq 'resolve') {
   if ($Backend -ne 'claude') { $childArgs += @('--backend', $Backend) }
   if ($Lane)                 { $childArgs += @('--lane', $Lane) }
   if ($ExcludeLane)          { $childArgs += @('--exclude-lane', $ExcludeLane) }
+  if ($goalCfg.Goal)         { $childArgs += @('--goal', $goalCfg.Goal) }
+  if ($goalProfileInput)     { $childArgs += @('--goal-profile', $goalCfg.Profile) }
 } else {
   $py = (Get-Command python -ErrorAction SilentlyContinue).Source
   if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
@@ -99,7 +180,12 @@ if ($Mode -eq 'resolve') {
   $childArgs = @($py, $tick, '--workspace', $Workspace, '--max-workers', [string]$MaxWorkers, '--json')
   if ($Live) { $childArgs += '--live' }
 }
-$wrapperLoop = if ($Mode -eq 'resolve') { "issue-resolve-dispatch/task-scheduler/$Backend" } else { 'issue-dispatch/task-scheduler' }
+if ($Mode -eq 'resolve') {
+  $wrapperLoop = "issue-resolve-dispatch/task-scheduler/$Backend"
+  if ($goalCfg.Token) { $wrapperLoop += "/$($goalCfg.Token)" }
+} else {
+  $wrapperLoop = 'issue-dispatch/task-scheduler'
+}
 $taskAction = New-FakLoopScheduledTaskAction -Workspace $Workspace -FakExe $FakExe -LoopId $wrapperLoop -ChildArgs $childArgs
 
 if ($Action -eq 'preview') {
@@ -117,6 +203,9 @@ if ($Action -eq 'preview') {
     backend           = $Backend
     lane              = $Lane
     exclude_lane      = $ExcludeLane
+    goal              = $goalCfg.Goal
+    goal_profile      = $goalCfg.Profile
+    goal_token        = $goalCfg.Token
   } | ConvertTo-Json -Depth 6
   return
 }
@@ -136,9 +225,13 @@ Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger
                -Principal $principal -Settings $settings -Force | Out-Null
 
 $runMode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
-Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName), current-user S4U, $runMode"
+$goalText = if ($goalCfg.Token) { ", goal=$($goalCfg.Token)" } else { "" }
+Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName)$goalText, current-user S4U, $runMode"
 Write-Output "loop ledger:  .fak\loops.jsonl via fak loop run ($wrapperLoop)"
 Write-Output "check status any time:  python tools\dispatch_status.py"
 if (-not $Live) {
-  Write-Output "to go live later:  .\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers"
+  $goLive = ".\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers"
+  if ($goalCfg.Goal)     { $goLive += " -Goal `"$($goalCfg.Goal)`"" }
+  if ($goalProfileInput) { $goLive += " -GoalProfile `"$($goalCfg.Profile)`"" }
+  Write-Output "to go live later:  $goLive"
 }
