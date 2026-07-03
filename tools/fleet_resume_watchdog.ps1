@@ -36,7 +36,7 @@ Safety rails:
 [CmdletBinding()]
 param(
   [switch]$Live,
-  [string]$FleetDir   = 'C:\work\fleet',
+  [string]$FleetDir   = '',
   [int]$WindowH       = 6,
   [int]$MaxPerTick    = 4,
   # Ledger-counted resume attempts per session before it is left for a human. Was an
@@ -86,6 +86,8 @@ if (-not $LogDir) { $LogDir = Join-Path $stateRoot 'watchdog' }
 if (-not $RegistryDir) { $RegistryDir = Join-Path $stateRoot 'registry' }
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $log = Join-Path $LogDir 'resume_watchdog.log'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $FleetDir) { $FleetDir = $repoRoot }
 $notify = Join-Path $FleetDir 'tools\notify.ps1'
 function Note($m) {
   $line = "{0}  {1}" -f ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')), $m
@@ -116,7 +118,6 @@ if (-not (Test-Path $regDir)) { New-Item -ItemType Directory -Path $regDir -Forc
 $env:FLEET_REG_DIR = $regDir
 $py = Join-Path 'C:\work\job' '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
-$repoRoot = Split-Path -Parent $PSScriptRoot
 $sourcePolicyPath = if ($env:FAK_RESUME_SOURCE_POLICY) {
   $env:FAK_RESUME_SOURCE_POLICY
 } else {
@@ -366,9 +367,13 @@ RecordDrainTick $statusLedger $mode @($plan)
 # workers. fleet_sessions.py already excludes non-workers when it writes the plan,
 # but a stale plan file could predate the policy — so re-check each entry here too.
 $workerAccts = @{}
+$accountRows = @{}
 try {
   $acctDoc = & $py (Join-Path $FleetDir 'tools\fleet_accounts.py') json 2>$null | ConvertFrom-Json
-  foreach ($a in @($acctDoc.accounts | Where-Object { $_.kind -eq 'worker' })) { $workerAccts[$a.account] = $true }
+  foreach ($a in @($acctDoc.accounts)) {
+    $accountRows[$a.account] = $a
+    if ($a.kind -eq 'worker') { $workerAccts[$a.account] = $true }
+  }
 } catch {}
 
 # durable resume ledger: count prior launches per session and flag operator-settled /
@@ -484,6 +489,7 @@ foreach ($p in @($plan)) {
     continue
   }
   $resumeCfg = if ($p.resume_config_dir) { $p.resume_config_dir } else { $p.config_dir }
+  $resumeAcct = if ($p.resume_account) { "$($p.resume_account)" } else { "$($p.account)" }
   # Defense-in-depth like the worker-account re-check above: the planner has offered a
   # tombstoned seat as a re-home target (observed 2026-07-01: resume_account =
   # .claude-gem8-netra.DELETED-2026-06-29; the launch died on arrival and burned an attempt).
@@ -492,6 +498,27 @@ foreach ($p in @($plan)) {
     $closedSids[$sid] = $true
     if ($Live) {
       $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; phase = 'skipped'; cause = 'deleted_seat_target' } | ConvertTo-Json -Compress
+      Add-Content -Path $ledgerPath -Value $rec
+    }
+    continue
+  }
+  if ($accountRows.Count -and $resumeAcct -and $accountRows.ContainsKey($resumeAcct)) {
+    $target = $accountRows[$resumeAcct]
+    if ($target.kind -ne 'worker' -or $target.blocked -or -not $target.available) {
+      $why = if ($target.block_reason) { "$($target.block_reason)" } else { "kind=$($target.kind) available=$($target.available) blocked=$($target.blocked)" }
+      Note "  SKIP $sid8 -- resume target $resumeAcct is not launchable ($why)"
+      $closedSids[$sid] = $true
+      if ($Live) {
+        $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; phase = 'skipped'; cause = 'blocked_resume_target'; reason = $why } | ConvertTo-Json -Compress
+        Add-Content -Path $ledgerPath -Value $rec
+      }
+      continue
+    }
+  } elseif ($workerAccts.Count -and $resumeAcct -and -not $workerAccts.ContainsKey($resumeAcct)) {
+    Note "  SKIP $sid8 -- resume target $resumeAcct is not an offered worker (policy/tombstoned)"
+    $closedSids[$sid] = $true
+    if ($Live) {
+      $rec = @{ ts = ([DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')); session = $sid; account = $p.account; resume_account = $p.resume_account; phase = 'skipped'; cause = 'nonworker_resume_target' } | ConvertTo-Json -Compress
       Add-Content -Path $ledgerPath -Value $rec
     }
     continue
