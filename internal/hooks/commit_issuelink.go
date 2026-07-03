@@ -25,6 +25,9 @@ var (
 	// issueNounRE — the repo's house NOUN form, mirror of the auditor's _ISSUE_NOUN_RE:
 	// `issue #N` / `issues #N, #M`, written in commit bodies when a change resolves a ticket.
 	issueNounRE = regexp.MustCompile(`(?i)\bissues?\b[\s:]*((?:#\d+[\s,]*(?:and\s+)?)+)`)
+	// dependencyTailRE keeps dependency prose like "issues #1791 builds on" from
+	// becoming a resolving close. Mirror of the auditor's _DEPENDENCY_TAIL_RE.
+	dependencyTailRE = regexp.MustCompile(`(?i)^\s*(?:builds?\s+on|depends?\s+on|blocks?|blocked\s+by)\b`)
 	// anyRefRE — any `#N` reference, mirror of the auditor's _REF_RE (a negative-lookbehind in
 	// Python; Go's RE2 has no lookbehind, so the boundary is enforced manually in issueRefs).
 	anyRefRE = regexp.MustCompile(`#(\d+)\b`)
@@ -51,7 +54,7 @@ func lintIssueLink(message string) issueLinkResult {
 		return res
 	}
 	// Rung 2: the house noun form anywhere.
-	if issueNounRE.MatchString(message) {
+	if issueNounResolving(message) {
 		res.resolving = true
 		return res
 	}
@@ -61,6 +64,19 @@ func lintIssueLink(message string) issueLinkResult {
 		res.resolving = true
 	}
 	return res
+}
+
+func issueNounResolving(message string) bool {
+	for _, loc := range issueNounRE.FindAllStringSubmatchIndex(message, -1) {
+		if len(loc) < 4 || loc[3] < 0 {
+			continue
+		}
+		if dependencyTailRE.MatchString(message[loc[3]:]) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // issueRefs returns every distinct issue number referenced in s, in first-seen order. The boundary

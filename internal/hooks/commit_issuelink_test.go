@@ -23,6 +23,7 @@ func TestLintIssueLink_resolvingForms(t *testing.T) {
 		{"resolved verb body", "fix(x): do it\n\nResolved #5", true},
 		{"house noun form", "fix(x): do it\n\nThis fixes the bug (issue #42)", true},
 		{"house noun plural", "fix(x): do it\n\nissues #1, #2 and #3", true},
+		{"dependency noun form", "fix(x): do it\n\nThese issues #1791 builds on: #1404 and #1462.", false},
 		{"body mention only is NOT resolving", "fix(x): do it\n\nsee also #77 for context", false},
 		{"no ref at all", "fix(gateway): correct the reclaim (fak gateway)", false},
 	}

@@ -47,10 +47,11 @@ class BindingClassifierTest(unittest.TestCase):
         refs = m.parse_git_log(_log(("abc1234", "fix(gateway): drop bad tool call", "Fixes #142.")))
         self.assertEqual(refs[142][0]["kind"], m.RESOLVING)
 
-    def test_ref_in_subject_is_mention_without_close_verb(self):
-        # A bare #N in the SUBJECT is only a mention; resolving needs a close verb.
+    def test_ref_in_subject_binds_worker_contract(self):
+        # Dispatch workers are required to put #N in the subject; that is a
+        # resolving position even without a separate GitHub close verb.
         refs = m.parse_git_log(_log(("abc1234", "fix(tools): NameError (#178)", "body")))
-        self.assertEqual(refs[178][0]["kind"], m.MENTION)
+        self.assertEqual(refs[178][0]["kind"], m.RESOLVING)
 
     def test_relates_to_in_body_is_mention_only(self):
         refs = m.parse_git_log(_log(("abc1234", "docs(memory): note", "Relates to #118 #130; context.")))
@@ -77,17 +78,16 @@ class BindingClassifierTest(unittest.TestCase):
         kinds = {r["kind"] for r in refs[50]}
         self.assertIn(m.RESOLVING, kinds)
 
-    def test_issue_noun_form_is_mention_without_close_verb(self):
-        # Noun-form issue refs are prose mentions unless the same number also has
-        # an explicit close/fix/resolve #N binding.
+    def test_issue_noun_form_is_resolving(self):
+        # The commit hook accepts the house noun form; the audit must match it.
         refs = m.parse_git_log(_log(("efc0e78", "feat(recall): persist index", "Close the false-exact gap (issue #501).")))
-        self.assertEqual(refs[501][0]["kind"], m.MENTION)
+        self.assertEqual(refs[501][0]["kind"], m.RESOLVING)
 
-    def test_issues_list_form_is_mention_only(self):
-        # 'issues #N, #M' is often dependency prose; it must not resolve either number.
+    def test_issues_list_form_is_resolving(self):
+        # The repo's house form binds every listed issue.
         refs = m.parse_git_log(_log(("e60b92e", "feat(agent): planner", "Lands the planner (issues #558, #565).")))
-        self.assertEqual(refs[558][0]["kind"], m.MENTION)
-        self.assertEqual(refs[565][0]["kind"], m.MENTION)
+        self.assertEqual(refs[558][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[565][0]["kind"], m.RESOLVING)
 
     def test_issue_noun_dependency_regression_is_mention(self):
         refs = m.parse_git_log(_log((
@@ -116,6 +116,12 @@ class BindingClassifierTest(unittest.TestCase):
         refs = m.parse_git_log(_log(("ship777", "feat(recall): candidate index", "Fixes #74.")))
         self.assertEqual(refs[74][0]["kind"], m.RESOLVING)
         g = m.grade_issue(_issue(74, state="OPEN"), refs[74], {"ship777": _audit()})
+        self.assertEqual(g["bucket"], m.OPEN_WITNESSED)
+
+    def test_open_witnessed_discovered_via_subject_ref(self):
+        refs = m.parse_git_log(_log(("ship778", "feat(recall): candidate index (#75) (fak recall)", "")))
+        self.assertEqual(refs[75][0]["kind"], m.RESOLVING)
+        g = m.grade_issue(_issue(75, state="OPEN"), refs[75], {"ship778": _audit()})
         self.assertEqual(g["bucket"], m.OPEN_WITNESSED)
 
 

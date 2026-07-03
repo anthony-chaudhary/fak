@@ -59,11 +59,15 @@ _FIELD = "\x1f"
 _RECORD = "\x1e"
 _GIT_PRETTY = f"--pretty=format:%H{_FIELD}%s{_FIELD}%b{_RECORD}"
 
-# A resolving reference: the GitHub-closing verbs in front of #N. We deliberately
-# DO NOT trust GitHub's own closedByPullRequestsReferences here — in this repo it
-# is always empty (no PR-keyword workflow), so the binding must be reconstructed
-# from the commit text the repo actually writes.
+# A resolving reference: mirror internal/hooks/commit_issuelink.go so the
+# author-time commit gate and this audit agree on what closes an issue.
 _RESOLVE_RE = re.compile(r"\b(?:close|fixe?|resolve)[sd]?\s+#(\d+)\b", re.IGNORECASE)
+# Repo house form, also mirrored from internal/hooks/commit_issuelink.go.
+_ISSUE_NOUN_RE = re.compile(r"\bissues?\b[\s:]*((?:#\d+[\s,]*(?:and\s+)?)+)", re.IGNORECASE)
+_DEPENDENCY_TAIL_RE = re.compile(
+    r"^\s*(?:builds?\s+on|depends?\s+on|blocks?|blocked\s+by)\b",
+    re.IGNORECASE,
+)
 # Any issue reference: '#' + digits at a word boundary. The leading boundary
 # excludes token noise like 'xoxb-...#118' embedded in a longer non-word run only
 # when it is genuinely glued; a normal 'Relates to #118' still matches (and is
@@ -145,12 +149,10 @@ def read_json_from_text(text: str) -> dict[str, Any]:
 def classify_refs(subject: str, body: str) -> dict[int, str]:
     """Classify every #N in one commit as RESOLVING or MENTION.
 
-    RESOLVING requires the GitHub-closing VERB form (close/fix/resolve #N, in
-    subject or body). Every other reference — including a bare subject #N or prose
-    like "issues #A builds on" — is only a MENTION and never counts toward
-    TRUE_RESOLVED. This is intentionally conservative: a missed resolving link is
-    an auditable OPEN_WITNESSED/CLAIMED gap, while a false resolving link can close
-    the wrong issue.
+    RESOLVING is the same grammar the commit hook previews: a GitHub-closing
+    VERB form (close/fix/resolve #N), the repo house noun form (issue #N /
+    issues #N, #M), or any #N in the subject line. A bare body-only reference
+    like "see #118" is a MENTION and never counts toward TRUE_RESOLVED.
     """
     subject = subject or ""
     body = body or ""
@@ -158,6 +160,11 @@ def classify_refs(subject: str, body: str) -> dict[int, str]:
     out: dict[int, str] = {}
 
     resolve_refs = {int(m) for m in _RESOLVE_RE.findall(text)}
+    for m in _ISSUE_NOUN_RE.finditer(text):
+        if _DEPENDENCY_TAIL_RE.match(text[m.end(1):]):
+            continue
+        resolve_refs.update(int(n) for n in _REF_RE.findall(m.group(1)))
+    resolve_refs.update(int(n) for n in _REF_RE.findall(subject))
 
     for n in _REF_RE.findall(text):
         num = int(n)
