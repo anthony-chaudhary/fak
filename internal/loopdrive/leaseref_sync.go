@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+// LeaseRefSyncSurface names the caller surface whose tick is being wrapped with
+// ambient lease-ref convergence. It lets the shell record why a sync ran without
+// re-deriving boundary semantics from free text.
+type LeaseRefSyncSurface string
+
+const (
+	LeaseRefSyncSurfaceGeneric           LeaseRefSyncSurface = "generic"
+	LeaseRefSyncSurfaceDispatchPreflight LeaseRefSyncSurface = "dispatch_preflight"
+	LeaseRefSyncSurfaceLoopDriveTick     LeaseRefSyncSurface = "loop_drive_tick"
+	LeaseRefSyncSurfaceGardenStaleLease  LeaseRefSyncSurface = "garden_stale_lease"
+)
+
 // LeaseRefSyncBoundary names the loop-drive lease-ref sync boundary. The shell
 // owns the actual `fak leaseref sync` call; this package only models when that
 // call belongs in a tick.
@@ -32,6 +44,7 @@ const (
 // LeaseRefSyncStep is one ambient convergence operation a loop-drive tick should
 // run around the lease/admission boundary.
 type LeaseRefSyncStep struct {
+	Surface   LeaseRefSyncSurface
 	Boundary  LeaseRefSyncBoundary
 	Direction LeaseRefSyncDirection
 	Remote    string
@@ -43,6 +56,7 @@ type LeaseRefSyncStep struct {
 // calls belong around a tick. LeaseRefsWritten means the tick acquired,
 // released, or reaped at least one refs/fak/locks/* record.
 type LeaseRefSyncPlanInput struct {
+	Surface          LeaseRefSyncSurface
 	Remote           string
 	LeaseRefsWritten bool
 }
@@ -52,11 +66,16 @@ type LeaseRefSyncPlanInput struct {
 // changed lease refs. Steps are advisory: transport failures are surfaced by
 // LeaseRefSyncReport but do not become fatal loop policy.
 func LeaseRefSyncPlan(in LeaseRefSyncPlanInput) []LeaseRefSyncStep {
+	surface := in.Surface
+	if surface == "" {
+		surface = LeaseRefSyncSurfaceGeneric
+	}
 	remote := strings.TrimSpace(in.Remote)
 	if remote == "" {
 		remote = "origin"
 	}
 	steps := []LeaseRefSyncStep{{
+		Surface:   surface,
 		Boundary:  LeaseRefSyncBeforeDecide,
 		Direction: LeaseRefSyncFetchOnly,
 		Remote:    remote,
@@ -65,6 +84,7 @@ func LeaseRefSyncPlan(in LeaseRefSyncPlanInput) []LeaseRefSyncStep {
 	}}
 	if in.LeaseRefsWritten {
 		steps = append(steps, LeaseRefSyncStep{
+			Surface:   surface,
 			Boundary:  LeaseRefSyncAfterWrite,
 			Direction: LeaseRefSyncPushOnly,
 			Remote:    remote,
@@ -73,6 +93,51 @@ func LeaseRefSyncPlan(in LeaseRefSyncPlanInput) []LeaseRefSyncStep {
 		})
 	}
 	return steps
+}
+
+// LeaseRefSyncPlanForSurface is the explicit profile constructor for the three
+// #2302 wiring surfaces: dispatch preflight, loop-drive ticks, and garden's
+// stale-lease rung. Each uses the same safe boundary rule: fetch before deciding;
+// push after the tick writes lease refs.
+func LeaseRefSyncPlanForSurface(surface LeaseRefSyncSurface, in LeaseRefSyncPlanInput) []LeaseRefSyncStep {
+	in.Surface = surface
+	return LeaseRefSyncPlan(in)
+}
+
+// LeaseRefSyncCommandArgs renders the argv after the `fak` binary for one sync
+// step. The shell may call runLeaserefSync directly or exec these args; either
+// way it does not need to reinterpret boundary directions.
+func LeaseRefSyncCommandArgs(step LeaseRefSyncStep, dir string) ([]string, error) {
+	remote := strings.TrimSpace(step.Remote)
+	if remote == "" {
+		remote = "origin"
+	}
+	args := []string{"leaseref", "sync"}
+	if strings.TrimSpace(dir) != "" {
+		args = append(args, "--dir", strings.TrimSpace(dir))
+	}
+	args = append(args, "--remote", remote)
+	switch step.Direction {
+	case LeaseRefSyncFetchOnly:
+		args = append(args, "--fetch-only")
+	case LeaseRefSyncPushOnly:
+		args = append(args, "--push-only")
+	default:
+		return nil, fmt.Errorf("lease-ref sync step has unknown direction %q", step.Direction)
+	}
+	return args, nil
+}
+
+// LeaseRefSyncDirections returns the internal/leaseref Sync booleans for a step.
+func LeaseRefSyncDirections(step LeaseRefSyncStep) (doPush, doFetch bool, err error) {
+	switch step.Direction {
+	case LeaseRefSyncFetchOnly:
+		return false, true, nil
+	case LeaseRefSyncPushOnly:
+		return true, false, nil
+	default:
+		return false, false, fmt.Errorf("lease-ref sync step has unknown direction %q", step.Direction)
+	}
 }
 
 // LeaseRefSyncAttempt records the observed result of one planned sync step. Err
