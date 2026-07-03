@@ -53,6 +53,19 @@ not a tuned server: no continuous batching, no paged attention, no multi-tenant
 scheduler. For real serving, you run `fak serve` in front of vLLM / SGLang /
 llama.cpp — not instead of them.
 
+What `fak` *does* collapse is the **operational surface** of governing that
+boundary. The usual governed-serving stack is four cooperating processes — a
+reverse proxy, a policy layer, a result-quarantine service, an audit sidecar —
+each its own deploy, port, and config. `fak` carries the same four
+responsibilities as in-process stages of one static Go binary: you add flags, not
+components.
+
+![Two columns with the same four responsibilities labeled identically on both sides — reverse proxy / gateway, policy / capability floor, result quarantine, audit journal. Left, the usual governed-serving stack runs them as four separate processes; right, one static fak binary holds the same four as in-process stages. A blue arrow reads "four processes → one": you add flags, not components](../adoption/diagrams/single-binary.svg)
+
+That is the honest boundary of the drop-in claim: `fak` does not make your tokens
+faster, but it does replace a multi-process governance stack with one process that
+does the same job.
+
 ## 2. None of its primitives is novel — and that is the point
 
 A 29-claim prior-art audit scored **0/29 novel**

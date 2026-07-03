@@ -174,6 +174,10 @@ reason code you can assert on (`POLICY_BLOCK`, `SECRET_EXFIL`, …). Read
 [POLICY.md](POLICY.md) and [docs/integrations/agent-memory.md](docs/integrations/agent-memory.md),
 or watch the boundary work: [the agent-kernel explainer, a 44-second silent MP4](visuals/agent-kernel-video.mp4).
 
+![Two columns with the same four responsibilities labeled identically on both sides — reverse proxy / gateway, policy / capability floor, result quarantine, audit journal. Left, the usual governed-serving stack runs them as four separate processes with four configs, four ports, and network hops between them; right, one static fak binary holds the same four as in-process stages — one process, one config. A blue arrow reads "four processes → one": you add flags, not components](docs/adoption/diagrams/single-binary.svg)
+
+<sub>Same four responsibilities on both sides; the collapse from four cooperating services to one process is the only difference. The floor is a flag you add to a binary you already run, not a stack you assemble and operate. The honest boundary: [what fak is not](docs/explainers/what-fak-is-not.md).</sub>
+
 ## Install
 
 ```bash
