@@ -128,6 +128,9 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		}
 		switch {
 		case verdict.OK:
+			// #2302: a renewed lease ref is a write — publish it promptly so a
+			// peer node's next decide sees this hold. Nonfatal (see helper doc).
+			syncLoopDriveTickLeaseRefs(h.store, true)
 			return nil, nil
 		case string(verdict.Reason) == leaseref.ReasonNoLease:
 			h.held = false // lapsed, untaken: fall through to reacquire
@@ -139,6 +142,10 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 			}, nil
 		}
 	}
+	// #2302: converge peer lease refs BEFORE the decide read so admission sees
+	// other nodes' holds. Fetch-only, nonfatal — a node offline from origin
+	// decides on local evidence, exactly as it did before this wire.
+	syncLoopDriveTickLeaseRefs(h.store, false)
 	live, _, err := h.store.Live(ctx, now)
 	if err != nil {
 		return nil, fmt.Errorf("read live leases: %w", err)
@@ -169,6 +176,9 @@ func (h *loopDriveRegionHold) ensure(now time.Time) (*loopDriveRegionRefusal, er
 		}, nil
 	}
 	h.held = true
+	// #2302: a freshly acquired lease ref is a write — publish it so peers see
+	// this hold at their next decide. Nonfatal; the acquire already succeeded.
+	syncLoopDriveTickLeaseRefs(h.store, true)
 	return nil, nil
 }
 
