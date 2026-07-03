@@ -153,6 +153,14 @@ REPAIR_LANE = "contract-repair"
 # worker's batch (the log name carries only the first), so the repair cooldown
 # covers the whole batch.
 REPAIR_ISSUES_SIDECAR_SUFFIX = ".issues"
+# Where a repair worker LANDS its backfill: one local overlay file per issue
+# (issue-<N>.md), merged into the issue record at contract-review time. GitHub
+# issue mutations are operator-gated on this host (there is no sanctioned
+# automated issue-edit verb; the egress floor blocks a worker's direct edit),
+# so the overlay is the write path a worker may actually complete: dispatch
+# admission reads body+overlay, while the REAL issue body edit stays a manual,
+# operator-approved step driven by the repair manifest.
+CONTRACT_OVERLAY_DIRNAME = "contract-overlays"
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -182,8 +190,41 @@ def _fak_command_prefix(root: Path) -> list[str]:
     return ["go", "run", "./cmd/fak"]
 
 
+def contract_overlay_path(runs_dir: Path, number: int) -> Path:
+    return runs_dir / CONTRACT_OVERLAY_DIRNAME / f"issue-{int(number)}.md"
+
+
+def read_contract_overlay(runs_dir: Path, number: int | None) -> str:
+    """The local contract backfill for one issue, '' when absent/unreadable
+    (fail-open: no overlay simply reviews the bare body, exactly as before)."""
+    if not number:
+        return ""
+    try:
+        return contract_overlay_path(runs_dir, int(number)).read_text(
+            encoding="utf-8", errors="replace").strip()
+    except (OSError, TypeError, ValueError):
+        return ""
+
+
+def contract_overlay_times(runs_dir: Path) -> dict[int, float]:
+    """``{issue: overlay mtime}`` for every local backfill on disk — folded into
+    the hold ledger's re-admission timestamps so a fresh overlay re-enters its
+    issue on the NEXT tick (the local analogue of a GitHub updatedAt bump)."""
+    out: dict[int, float] = {}
+    overlay_dir = runs_dir / CONTRACT_OVERLAY_DIRNAME
+    if not overlay_dir.is_dir():
+        return out
+    for f in overlay_dir.glob("issue-*.md"):
+        try:
+            out[int(f.stem.split("-", 1)[1])] = f.stat().st_mtime
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
 def _issue_record_for_contract(issue: dict[str, Any] | None,
-                               number: int | None) -> dict[str, Any]:
+                               number: int | None,
+                               overlay: str = "") -> dict[str, Any]:
     issue = issue if isinstance(issue, dict) else {}
     labels = []
     for lab in issue.get("labels") or []:
@@ -197,10 +238,16 @@ def _issue_record_for_contract(issue: dict[str, Any] | None,
         num = int(issue.get("number") or number or 0)
     except (TypeError, ValueError):
         num = int(number or 0)
+    body = str(issue.get("body") or "")
+    if overlay:
+        # The dispatch-admission view of the issue is body + local backfill; the
+        # marker keeps the merge legible in any dumped record.
+        body = (body + "\n\n<!-- local contract overlay "
+                f"({RUNS_DIRNAME}/{CONTRACT_OVERLAY_DIRNAME}) -->\n" + overlay)
     return {
         "number": num,
         "title": str(issue.get("title") or f"issue #{num}").strip(),
-        "body": str(issue.get("body") or ""),
+        "body": body,
         "labels": labels,
     }
 
@@ -209,11 +256,16 @@ def issue_contract_review(root: Path, issue: dict[str, Any] | None,
                           number: int | None,
                           runner: Any = subprocess.run) -> dict[str, Any]:
     tmp: Path | None = None
+    # Merge any local backfill before scoring: the dispatch-admission view of an
+    # issue is body + overlay, so a repair worker's landed overlay flips the very
+    # next review without any GitHub write.
+    overlay = read_contract_overlay(root / RUNS_DIRNAME, number)
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
                                          delete=False) as f:
             tmp = Path(f.name)
-            json.dump([_issue_record_for_contract(issue, number)], f, ensure_ascii=False)
+            json.dump([_issue_record_for_contract(issue, number, overlay)],
+                      f, ensure_ascii=False)
             f.write("\n")
         cmd = [
             *_fak_command_prefix(root),
@@ -2479,12 +2531,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     # would hold identically (the body has not grown a contract in the meantime),
     # so skipping it lets the bounded scan advance to unreviewed issues instead of
     # pinning the scan window to the same thin heads every tick.
-    # A prior hold is re-admitted early when the issue's GitHub updatedAt is newer
-    # than its held verdict (a repair worker's edit or a human backfill) -- one
-    # bulk gh call, fail-open to the TTL backstop.
+    # A prior hold is re-admitted early when the issue changed AFTER its held
+    # verdict: a GitHub updatedAt bump (a human backfill; one bulk gh call,
+    # fail-open) OR a fresh local contract overlay (a repair worker's landed
+    # backfill — the write path a worker can actually complete on this host).
+    if contract_hold_ttl_h > 0:
+        refreshed_ts = open_issue_updated_map(root)
+        for n, ts in contract_overlay_times(runs_dir).items():
+            refreshed_ts[n] = max(refreshed_ts.get(n) or 0.0, ts)
+    else:
+        refreshed_ts = None
     contract_held_prior = contract_held_issues(
-        runs_dir, ttl_h=contract_hold_ttl_h,
-        updated_ts=(open_issue_updated_map(root) if contract_hold_ttl_h > 0 else None))
+        runs_dir, ttl_h=contract_hold_ttl_h, updated_ts=refreshed_ts)
     skip = live_issues | cooled | held_no_commit | contract_held_prior
     # The cross-lane candidate stream the bounded contract scan walks (busiest
     # lane's oldest candidate first, then each other eligible lane's, round-robin).

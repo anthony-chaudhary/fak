@@ -260,14 +260,22 @@ def render_repair_prompt(rows: list[dict[str, Any]], *, workspace: str,
                          min_score: int = 100) -> str:
     """Render the contract-repair prompt for a batch of gate-held issues.
     Pure: no I/O. ``rows`` carry {number,title,missing_fields,reasons} as the
-    dispatcher's contract scan recorded them."""
+    dispatcher's contract scan recorded them.
+
+    The worker's write target is a LOCAL OVERLAY file per issue, never GitHub:
+    issue mutations are operator-gated on this host (the egress floor blocks a
+    worker's direct edit), and the dispatcher's contract review merges
+    body+overlay itself — so the overlay is both the write a worker can actually
+    complete and the backfill the gate actually reads."""
     numbers = [str(r.get("number") or r.get("issue")) for r in rows]
     issue_lines = "\n".join(_repair_row_line(r) for r in rows)
     return f"""your goal: bring {len(rows)} open GitHub issue(s) (#{', #'.join(numbers)}) up to \
-this repo's structured dispatch contract by EDITING EACH ISSUE ON GITHUB \
-(`gh issue edit`), so the always-on dispatcher can spawn resolution workers on \
-them — WITHOUT changing any issue's intent and WITHOUT touching the repository \
-working tree.
+this repo's structured dispatch contract by writing ONE LOCAL CONTRACT OVERLAY \
+per issue — `.dispatch-runs/contract-overlays/issue-<N>.md` — containing the \
+missing contract sections. The dispatcher reviews each issue as body+overlay, \
+so a landed overlay is what unblocks dispatch. You make NO GitHub write of any \
+kind: issue edits are operator-gated on this host, and the operator applies \
+overlays to the real issue bodies later via the repair manifest.
 
 why: the dispatcher refuses to spawn on an issue whose contract review scores \
 below {min_score}. These issues predate the contract schema — the content the \
@@ -278,38 +286,38 @@ the issues (work each one, oldest first):
 {issue_lines}
 
 how to work each issue:
-- `gh issue view <N>` and read the full thread first; then orient once with \
-`AGENTS.md` and `llms.txt` if you have not already.
-- Append ONLY the missing contract sections to the body (`gh issue edit <N> \
---body-file <f>`), preserving every existing line of the body verbatim above \
-your additions. Never delete or rewrite existing prose.
+- `gh issue view <N>` (read-only) and read the full thread first; then orient \
+once with `AGENTS.md` and `llms.txt` if you have not already.
+- Write ONLY the missing contract sections into \
+`.dispatch-runs/contract-overlays/issue-<N>.md` (create the directory if \
+needed). The overlay is APPENDED to the body at review time — never restate or \
+rewrite the existing body, only add the absent sections.
 - Derive every field honestly from the issue's own content and the repo. If a \
 field's true answer is not derivable from that evidence, write the honest short \
 form (`unknown — needs operator input: <the one question>`) rather than a \
 fabricated specific.
 - An issue that cannot honestly satisfy the contract as ONE dispatchable leaf \
-(an epic that needs splitting, or work that belongs elsewhere) gets a comment \
-`contract-hold: <why>` instead of a fake contract; leave its body alone and \
-move on to the next issue.
+(an epic that needs splitting, or work that belongs elsewhere) gets NO overlay; \
+name it and the reason in your final report and move on to the next issue.
 - Verify each repair before claiming it: \
-`gh issue view <N> --json number,title,body,labels --jq '[.]' > .dispatch-runs/contract-verify-<N>.json` \
-then `go run ./cmd/fak issue contract --from-issues \
-.dispatch-runs/contract-verify-<N>.json --live --json` (from the repo root; use \
-`fak` from PATH if installed). The repair is done ONLY when that review reports \
-ok with score.total >= {min_score}. Do not claim a pass you did not run.
+`python tools/issue_contract_repair.py --verify <N> --json` (from the repo \
+root) re-reviews the issue WITH your overlay merged. The repair is done ONLY \
+when that reports ok with score >= {min_score}. Do not claim a pass you did \
+not run.
 
 hard rules:
-- The repo tree is READ-ONLY for you: no commits, no tracked-file edits, no \
-branches, no staging. Scratch files go under `.dispatch-runs/` (gitignored) only.
-- Edit only the issues listed above; never any other issue.
-- Never close an issue — closure is the auditor's job, bound to witnessed commits.
+- Your ONLY writes are overlay files under `.dispatch-runs/contract-overlays/` \
+(plus scratch under `.dispatch-runs/`). The repo tree is READ-ONLY: no commits, \
+no tracked-file edits, no branches, no staging.
+- NO GitHub writes of any kind — no issue edit, no comment, no label, no close. \
+Reads (`gh issue view`) are fine.
+- Work only the issues listed above; never any other issue.
 
-acceptance (your stop condition): every listed issue either passes the contract \
-review you actually ran, or carries an honest `contract-hold:` comment naming \
-the blocker. End with a final report: per issue — repaired+verified, or \
-held(+why). Honesty over a green-looking lie: the dispatcher re-reviews every \
-issue with the same gate on its next tick, so an unverified claim is caught \
-immediately.
+acceptance (your stop condition): every listed issue either passes the \
+overlay-merged contract review you actually ran, or is named in your final \
+report with the honest blocker. Honesty over a green-looking lie: the \
+dispatcher re-reviews every issue with the same gate on its next tick, so an \
+unverified claim is caught immediately.
 
 workspace: {workspace}. issues: #{', #'.join(numbers)}.
 """

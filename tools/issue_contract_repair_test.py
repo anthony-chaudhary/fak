@@ -41,6 +41,43 @@ def _contract(*, ok=False, score=0, reasons=None, missing_fields=None, lane=None
             "spine_priority": 0, "review": review}
 
 
+class VerifyIssueTest(unittest.TestCase):
+    """--verify N: the repair worker's verify-before-claim step re-reviews one
+    issue with its local overlay merged. Hermetic: gh fetch and the ird seams
+    are replaced; nothing live runs."""
+
+    def _ird_ns(self, contract, overlay=""):
+        import types
+        return types.SimpleNamespace(
+            issue_contract_review=lambda ws, issue, n: contract,
+            read_contract_overlay=lambda runs, n: overlay,
+            issue_contract_hold_reason=lambda c: "reasoned hold text",
+            RUNS_DIRNAME=".dispatch-runs",
+            DEFAULT_ISSUE_CONTRACT_MIN_SCORE=100,
+            no_window_creationflags=lambda: 0,
+        )
+
+    def test_overlay_merged_pass_reports_ok(self) -> None:
+        mod = load()
+        mod.fetch_issue_record = lambda ws, n: _issue(1207, body="b")
+        mod.ird = self._ird_ns({"ok": True, "score": 100, "unavailable": False},
+                               overlay="Done condition: gate passes")
+        row = mod.verify_issue(ROOT, 1207)
+        self.assertTrue(row["ok"])
+        self.assertEqual(row["score"], 100)
+        self.assertTrue(row["overlay_present"])
+
+    def test_still_thin_review_reports_hold(self) -> None:
+        mod = load()
+        mod.fetch_issue_record = lambda ws, n: _issue(1207, body="b")
+        mod.ird = self._ird_ns({"ok": False, "score": 8, "unavailable": False})
+        row = mod.verify_issue(ROOT, 1207)
+        self.assertFalse(row["ok"])
+        self.assertEqual(row["score"], 8)
+        self.assertFalse(row["overlay_present"])
+        self.assertEqual(row["reason"], "reasoned hold text")
+
+
 class RepairKindsTest(unittest.TestCase):
     def test_split_reasons(self) -> None:
         mod = load()

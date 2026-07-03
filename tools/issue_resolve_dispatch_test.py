@@ -51,6 +51,37 @@ class PickTargetTest(unittest.TestCase):
         self.assertEqual(mod.pick_target_issue([], set()), None)
 
 
+class ContractOverlayTest(unittest.TestCase):
+    def test_record_merges_overlay_into_body(self) -> None:
+        mod = load()
+        rec = mod._issue_record_for_contract(
+            {"number": 7, "title": "t", "body": "base body"}, 7,
+            "Done condition: the gate passes")
+        self.assertIn("base body", rec["body"])
+        self.assertIn("Done condition: the gate passes", rec["body"])
+        self.assertIn("local contract overlay", rec["body"])  # legible merge marker
+        # No overlay -> the record is byte-identical to before.
+        self.assertEqual(
+            mod._issue_record_for_contract({"number": 7, "body": "base body"}, 7)["body"],
+            "base body")
+
+    def test_read_and_times_roundtrip(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            self.assertEqual(mod.read_contract_overlay(runs, 1207), "")
+            self.assertEqual(mod.contract_overlay_times(runs), {})
+            path = mod.contract_overlay_path(runs, 1207)
+            path.parent.mkdir(parents=True)
+            path.write_text("Scope: one file\n", encoding="utf-8")
+            (path.parent / "not-an-overlay.md").write_text("x", encoding="utf-8")
+            self.assertEqual(mod.read_contract_overlay(runs, 1207), "Scope: one file")
+            times = mod.contract_overlay_times(runs)
+            self.assertEqual(sorted(times), [1207])
+            self.assertGreater(times[1207], 0)
+
+
 class ContractScanStreamTest(unittest.TestCase):
     def test_round_robin_across_lanes_oldest_first_within(self) -> None:
         mod = load()

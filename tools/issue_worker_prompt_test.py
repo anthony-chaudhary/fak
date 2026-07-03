@@ -138,23 +138,26 @@ class RenderRepairPromptTest(unittest.TestCase):
         self.assertIn("done_condition", p)
         self.assertIn("ISSUE_UNROUTED", p)
 
-    def test_edits_issues_never_the_repo_tree(self) -> None:
-        # The load-bearing boundary: a repair worker's entire output is issue
-        # edits + comments; the repo tree stays read-only and issues are never
-        # closed by it.
+    def test_writes_local_overlays_never_github_or_the_repo_tree(self) -> None:
+        # The load-bearing boundary: a repair worker's ONLY write is the local
+        # overlay file (issue mutations are operator-gated on this host); the
+        # repo tree stays read-only and GitHub is never written.
         mod = load()
         p = mod.render_repair_prompt(self.ROWS, workspace="C:/work/fak")
-        self.assertIn("gh issue edit", p)
+        self.assertIn("contract-overlays/issue-<N>.md", p)
+        self.assertIn("NO GitHub writes", p)
         self.assertIn("READ-ONLY", p)
         self.assertIn("no commits", p)
-        self.assertIn("Never close an issue", p)
+        self.assertNotIn("gh issue edit", p)  # the write path a worker CANNOT land
 
     def test_demands_verified_pass_and_honest_hold(self) -> None:
         mod = load()
         p = mod.render_repair_prompt(self.ROWS, workspace="C:/work/fak")
-        self.assertIn("issue contract --from-issues", p)  # the verify command
-        self.assertIn("Do not claim a pass you did not run", p)
-        self.assertIn("contract-hold:", p)  # the honest per-issue escape hatch
+        # verify-before-claim runs the overlay-merged review, and un-repairables
+        # get NO overlay (named in the final report), never a fabricated pass.
+        self.assertIn("issue_contract_repair.py --verify", p)
+        self.assertIn("Do not claim a pass you did", p)
+        self.assertIn("NO overlay", p)
 
     def test_build_repair_folds_rows_without_io(self) -> None:
         mod = load()

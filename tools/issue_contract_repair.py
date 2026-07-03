@@ -30,8 +30,15 @@ Usage:
     python tools/issue_contract_repair.py --lane docs --limit 10 --json
     python tools/issue_contract_repair.py --limit 50 --markdown --out docs/_audits/issue-contract-repairs-2026-07-01.md
     python tools/issue_contract_repair.py --actions --out docs/_audits/issue-contract-repairs-2026-07-01.json
+    python tools/issue_contract_repair.py --verify 1207 --json   # overlay-merged re-review
 
-Exit codes: 0 = ran clean (including "no candidates") · 2 = infra error.
+`--verify N` is the contract-repair worker's verify-before-claim step: it
+re-reviews ONE issue with its local overlay
+(`.dispatch-runs/contract-overlays/issue-<N>.md`) merged — exactly the review
+the dispatcher's next tick runs.
+
+Exit codes: 0 = ran clean (including "no candidates"; for --verify: the review
+passes the floor) · 3 = --verify still holds · 2 = infra error.
 """
 from __future__ import annotations
 
@@ -322,12 +329,51 @@ def render_markdown(manifest: dict[str, Any]) -> str:
     return "\n".join(L)
 
 
+def fetch_issue_record(workspace: Path, number: int) -> dict[str, Any]:
+    """One issue (number/title/body/labels) via a read-only ``gh issue view``."""
+    proc = subprocess.run(
+        ["gh", "issue", "view", str(number), "--json", "number,title,body,labels"],
+        cwd=str(workspace), capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=60, creationflags=ird.no_window_creationflags())
+    if proc.returncode != 0:
+        raise RuntimeError(f"gh issue view {number} failed (rc={proc.returncode}): "
+                           f"{(proc.stderr or '').strip() or 'no stderr'}")
+    return json.loads(proc.stdout or "{}")
+
+
+def verify_issue(workspace: Path, number: int) -> dict[str, Any]:
+    """Re-review ONE issue with its local contract overlay merged — the repair
+    worker's verify-before-claim step. ``issue_contract_review`` itself merges
+    the overlay (`.dispatch-runs/contract-overlays/issue-<N>.md`), so this is
+    exactly the review the dispatcher's next tick will run."""
+    issue = fetch_issue_record(workspace, number)
+    contract = ird.issue_contract_review(workspace, issue, number)
+    score = int(contract.get("score") or 0)
+    ok = bool(contract.get("ok")) and score >= ird.DEFAULT_ISSUE_CONTRACT_MIN_SCORE
+    overlay = ird.read_contract_overlay(workspace / ird.RUNS_DIRNAME, number)
+    return {
+        "issue": int(number),
+        "ok": ok,
+        "score": score,
+        "floor": ird.DEFAULT_ISSUE_CONTRACT_MIN_SCORE,
+        "overlay_present": bool(overlay),
+        "overlay_chars": len(overlay),
+        "unavailable": bool(contract.get("unavailable")),
+        "reason": ird.issue_contract_hold_reason(contract),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Issue-contract repair-assist manifest (read-only).")
     ap.add_argument("--workspace", default=None, help="repo root (default: this tool's repo)")
     ap.add_argument("--lane", default=None, help="restrict to one dispatch lane")
     ap.add_argument("--limit", type=int, default=50,
                     help="max issues to examine, oldest issue number first (default: 50)")
+    ap.add_argument("--verify", type=int, default=None, metavar="N",
+                    help="re-review ONE issue with its local contract overlay "
+                         "merged (the repair worker's verify step). Exit 0 when "
+                         "the review passes the floor, 3 when it still holds, "
+                         "2 on infra error.")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--actions", action="store_true")
@@ -337,6 +383,23 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = Path(a.workspace).resolve() if a.workspace else ird.repo_root()
     as_of = a.as_of or dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+    if a.verify is not None:
+        try:
+            row = verify_issue(workspace, a.verify)
+        except (RuntimeError, OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        if a.json:
+            print(json.dumps(row, indent=2))
+        else:
+            state = "PASSES" if row["ok"] else "HOLDS"
+            print(f"issue #{row['issue']}: {state} score={row['score']}/"
+                  f"{row['floor']} overlay={'yes' if row['overlay_present'] else 'no'}"
+                  f"\n  {row['reason'][:300]}")
+        if row.get("unavailable"):
+            return 2
+        return 0 if row["ok"] else 3
 
     try:
         manifest = build_manifest(workspace, lane=a.lane, limit=a.limit, as_of=as_of)
