@@ -124,9 +124,10 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("issue work:", text)
         self.assertIn("open tickets", text)
         self.assertIn("agent sessions:", text)
-        self.assertIn("needs you:", text)
+        self.assertIn("operator moves:", text)
         self.assertIn("being handled:", text)
         self.assertIn("ticket trend:", text)
+        self.assertIn("last loop close 1.5h ago", text)
         self.assertIn("capacity trend: usable 3→1", text)
         self.assertIn("status: issue work needs you", text)
         self.assertIn("returned no output", text)
@@ -152,7 +153,7 @@ class RollupTextTest(unittest.TestCase):
 
         text = mod.rollup_text(dispatch_payload, fleet_snap)
 
-        self.assertIn("needs you: none", text)
+        self.assertIn("operator moves: none", text)
 
     def test_rollup_weekly_cap_is_local_and_human_readable(self):
         mod = load()
@@ -182,11 +183,13 @@ class RollupTextTest(unittest.TestCase):
             "scheduler liveness says STALLED; report-only",
             "worker/lease cross-check clean",
             "at configured worker-slot cap",
+            "1 active lane lease(s), 1 blocking current candidates (resolve-docs lane=docs blocks #2548)",
             "queue wait on lane docs",
         ])
 
         self.assertEqual(kept, [
             "worker slots are full; wait for a worker to finish",
+            "lane lease is blocking work: resolve-docs lane=docs blocks #2548; wait or pick another lane",
             "queue wait on lane docs",
         ])
 
@@ -203,6 +206,23 @@ class RollupTextTest(unittest.TestCase):
             "opencode paused after failed starts; docs-explainers work reallocated; "
             "rechecks every 30m",
         )
+        self.assertEqual(
+            mod._operator_action(
+                "worker/lease orphans: clean=0, orphan-process=0, orphan-lease=1"),
+            "cleanup needed: 1 stale lease; inspect dispatch status before launching more",
+        )
+
+    def test_rollup_rewords_session_status_codes(self):
+        mod = load()
+
+        line = mod._attention_line("agent sessions", [{
+            "title": "resume 1",
+            "detail": "[STOPPED_APIERR] C--work-fak age=0.9m",
+            "command": "",
+        }])
+
+        self.assertIn("api error", line)
+        self.assertNotIn("STOPPED_APIERR", line)
 
 
 class PostRollupTest(unittest.TestCase):

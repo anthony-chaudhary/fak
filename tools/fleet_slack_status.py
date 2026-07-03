@@ -440,6 +440,28 @@ def _friendly_time(raw: Any) -> str:
         return text
 
 
+def _friendly_minutes(raw: Any) -> str:
+    try:
+        mins = float(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    if mins < 60:
+        return f"{mins:g}m"
+    hours = mins / 60
+    if hours < 24:
+        return f"{hours:.1f}".rstrip("0").rstrip(".") + "h"
+    days = hours / 24
+    return f"{days:.1f}".rstrip("0").rstrip(".") + "d"
+
+
+def _operator_trend(line: str) -> str:
+    return re.sub(
+        r"last loop close ([0-9.]+)m ago",
+        lambda m: f"last loop close {_friendly_minutes(m.group(1))} ago",
+        line,
+    )
+
+
 def _operator_action(row: str) -> str:
     row = str(row or "").strip()
     m = re.match(
@@ -458,6 +480,20 @@ def _operator_action(row: str) -> str:
     m = re.match(r"^throughput BELOW_TARGET: ([^ ]+) vs target ([^ ]+)$", row)
     if m:
         return f"ticket closes below target: {m.group(1)} vs {m.group(2)}"
+    m = re.match(
+        r"^worker/lease orphans: clean=([0-9]+), orphan-process=([0-9]+), orphan-lease=([0-9]+)$",
+        row,
+    )
+    if m:
+        op = int(m.group(2))
+        ol = int(m.group(3))
+        bits: list[str] = []
+        if op:
+            bits.append(f"{op} orphan process" + ("" if op == 1 else "es"))
+        if ol:
+            bits.append(f"{ol} stale lease" + ("" if ol == 1 else "s"))
+        what = ", ".join(bits) if bits else "stale worker state"
+        return f"cleanup needed: {what}; inspect dispatch status before launching more"
     return row
 
 
@@ -491,6 +527,16 @@ def _operator_waiting(payload: dict[str, Any] | None, rows: list[str]) -> list[s
             continue
         if text == "at configured worker-slot cap":
             out.append("worker slots are full; wait for a worker to finish")
+            continue
+        m = re.match(
+            r"^([0-9]+) active lane lease\(s\), ([0-9]+) blocking current candidates(?: \((.*)\))?$",
+            text,
+        )
+        if m:
+            blocking = int(m.group(2))
+            detail = m.group(3) or "current candidates"
+            if blocking:
+                out.append(f"lane lease is blocking work: {detail}; wait or pick another lane")
             continue
         if (text.startswith("supervisor PLAN_SURFACE_EMPTY")
                 or text.startswith("scheduler liveness says STALLED")
@@ -603,7 +649,7 @@ def _trend_lines(dispatch_payload: dict[str, Any] | None,
     if dispatch_payload:
         trend = dispatch_status._dispatch_trend_line(dispatch_payload.get("throughput") or {})  # type: ignore[attr-defined]
         if trend:
-            lines.append("ticket trend: " + _strip_prefix(trend, "trend:"))
+            lines.append("ticket trend: " + _operator_trend(_strip_prefix(trend, "trend:")))
     if fleet_snap:
         trend = str(fleet_snap.get("trend") or "").strip()
         if trend:
@@ -616,7 +662,18 @@ def _attention_line(prefix: str, items: list[dict[str, Any]]) -> str:
         joined = fleet_top._join_attention(items)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
         joined = _limited_join([str(i.get("title") or i) for i in items], limit=2)
-    joined = joined.replace("[DEAD_MIDTOOL]", "stuck mid-tool")
+    replacements = {
+        "DEAD_MIDTOOL": "stuck mid-tool",
+        "DEAD_KILLED": "killed mid-turn",
+        "USER_CLOSED": "user stopped",
+        "STOPPED_LIMIT": "rate limit",
+        "STOPPED_APIERR": "api error",
+        "INFRA_AUTH": "auth needed",
+        "PARKED_WAIT": "waiting on task",
+        "STOPPED_QUIET": "quiet",
+    }
+    for code, label in replacements.items():
+        joined = joined.replace(f"[{code}]", label)
     return f"{prefix}: {joined}" if joined else ""
 
 
@@ -639,12 +696,9 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     waiting: list[str] = []
     if dispatch_payload:
         buckets = dispatch_status._dispatch_slack_buckets(dispatch_payload)  # type: ignore[attr-defined]
-        needs.extend("issue work: " + _operator_action(r)
-                     for r in buckets.get("action", []))
-        handled.extend("issue work: " + _operator_handled(r)
-                       for r in buckets.get("auto-solving", []))
-        waiting.extend("issue work: " + r
-                       for r in _operator_waiting(dispatch_payload, buckets.get("expected", [])))
+        needs.extend(_operator_action(r) for r in buckets.get("action", []))
+        handled.extend(_operator_handled(r) for r in buckets.get("auto-solving", []))
+        waiting.extend(_operator_waiting(dispatch_payload, buckets.get("expected", [])))
     if fleet_snap:
         attn = fleet_snap.get("attention") or []
         escalate = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_ESCALATE]
@@ -656,7 +710,7 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
         if line:
             handled.append(line)
 
-    lines.append("needs you: " + (_limited_join(needs, limit=4) if needs else "none"))
+    lines.append("operator moves: " + (_limited_join(needs, limit=4) if needs else "none"))
     if handled:
         lines.append("being handled: " + _limited_join(handled, limit=3))
     if waiting:
