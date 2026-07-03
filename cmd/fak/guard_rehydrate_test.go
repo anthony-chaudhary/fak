@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 // guard_rehydrate_test.go — the #1834 witness: a headless `fak accounts launch` /
@@ -55,6 +57,10 @@ func TestGuardHeadlessCredCheck_LiveCredentialNoWait(t *testing.T) {
 // through the wait window (simulating Claude Code — or an operator's re-auth cron — rotating
 // the token concurrently) is picked up as refreshed=true, without ever needing a 401 to fire.
 func TestGuardHeadlessCredCheck_ExpiredThenRefreshedInPlace(t *testing.T) {
+	// This test exercises the WAIT-for-rotation path (a concurrent `claude` rewriting the file),
+	// so disable the active-refresh trigger — otherwise the default-on branch would spawn a real
+	// `claude` before the poll loop is ever reached.
+	t.Setenv("FAK_GUARD_AUTO_REFRESH", "0")
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, ".credentials.json")
 	startMs := int64(1_700_000_000_000)
@@ -85,6 +91,8 @@ func TestGuardHeadlessCredCheck_ExpiredThenRefreshedInPlace(t *testing.T) {
 // a credential that stays expired for the whole wait window reports fresh=false,
 // refreshed=false — never blocking forever, never silently claiming success.
 func TestGuardHeadlessCredCheck_ExpiredNeverRefreshesWithinWindow(t *testing.T) {
+	// Wait-path test: disable the active-refresh trigger so we reach the poll loop deterministically.
+	t.Setenv("FAK_GUARD_AUTO_REFRESH", "0")
 	dir := t.TempDir()
 	credPath := filepath.Join(dir, ".credentials.json")
 	startMs := int64(1_700_000_000_000)
@@ -127,6 +135,11 @@ func TestGuardHeadlessCredCheck_NoCredentialFile(t *testing.T) {
 // fail if this wiring is ever removed (Ran would stay false and Refused would stay false for
 // the stale-and-unrefreshable case, masking the exact 401 regression #1834 reports).
 func TestGuardRunHeadlessRehydrate(t *testing.T) {
+	// These subtests witness the wait/refuse/park outcomes on the real time.Now/nil-spawn path.
+	// The active-refresh trigger (default-on) would spawn a real `claude` against an expired
+	// credential here, so disable it for the whole group; its own behavior is covered separately
+	// by the credrefresh tests and the active-refresh subtest below.
+	t.Setenv("FAK_GUARD_AUTO_REFRESH", "0")
 	t.Run("headless_refreshable_credential_proceeds_no_401", func(t *testing.T) {
 		dir := t.TempDir()
 		credPath := filepath.Join(dir, ".credentials.json")
@@ -231,4 +244,118 @@ func TestGuardRunHeadlessRehydrate(t *testing.T) {
 			t.Fatal("a launch not pinning the Claude subscription OAuth token has no credential this rung understands and must not run")
 		}
 	})
+}
+
+// TestGuardCredCheck_ActiveRefreshShortCircuitsPoll is the active-refresh witness: an expired
+// credential is refreshed in place by a spawn (standing in for `claude -p` rotating the token),
+// and the check returns refreshed=true WITHOUT ever entering the poll/wait loop. Before this
+// wiring the only recovery was to wait for someone else to rewrite the file.
+func TestGuardCredCheck_ActiveRefreshShortCircuitsPoll(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	nowMs := int64(1_700_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+	writeCred(t, credPath, "sk-ant-oat01-expired", nowMs-1)
+
+	slept := 0
+	var spawn accounts.RefreshSpawn = func(ctx context.Context, cfgDir string) error {
+		// the spawn rotates the on-disk token forward, as `claude -p` would
+		writeCred(t, filepath.Join(cfgDir, ".credentials.json"), "sk-ant-oat01-rotated", nowMs+3_600_000)
+		return nil
+	}
+	check := guardCredCheckWithRefresh(credPath, guardHeadlessRehydrateWindowDuration(), now,
+		func(time.Duration) { slept++ }, spawn)
+
+	fresh, refreshed := check(context.Background())
+	if fresh || !refreshed {
+		t.Fatalf("active refresh: got fresh=%v refreshed=%v, want fresh=false refreshed=true", fresh, refreshed)
+	}
+	if slept != 0 {
+		t.Fatalf("a successful active refresh must not enter the poll/wait loop; slept %d times", slept)
+	}
+}
+
+// TestGuardCredCheck_AutoRefreshDisabledFallsThroughToPoll pins the opt-out safety: with
+// FAK_GUARD_AUTO_REFRESH=0 the spawn is never called and the check behaves exactly like the old
+// wait-for-rotation poll (here: never rotates, so it exhausts the window and refuses).
+func TestGuardCredCheck_AutoRefreshDisabledFallsThroughToPoll(t *testing.T) {
+	t.Setenv("FAK_GUARD_AUTO_REFRESH", "0")
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	startMs := int64(1_700_000_000_000)
+	elapsed := time.Duration(0)
+	now := func() time.Time { return time.UnixMilli(startMs).Add(elapsed) }
+	writeCred(t, credPath, "sk-ant-oat01-expired", startMs-1)
+
+	spawnCalled := false
+	var spawn accounts.RefreshSpawn = func(ctx context.Context, cfgDir string) error {
+		spawnCalled = true
+		return nil
+	}
+	sleep := func(d time.Duration) { elapsed += d }
+	check := guardCredCheckWithRefresh(credPath, guardHeadlessRehydrateWindowDuration(), now, sleep, spawn)
+
+	fresh, refreshed := check(context.Background())
+	if fresh || refreshed {
+		t.Fatalf("disabled auto-refresh, never-rotated: got fresh=%v refreshed=%v, want both false", fresh, refreshed)
+	}
+	if spawnCalled {
+		t.Fatal("FAK_GUARD_AUTO_REFRESH=0 must not call the refresh spawn at all")
+	}
+}
+
+// TestGuardCredCheck_SkewRefreshesBeforeExpiry proves the proactive skew: a token that is still
+// live NOW but expires within the skew window is treated as needing refresh, and a rotating spawn
+// clears it as refreshed rather than letting a request race the imminent expiry.
+func TestGuardCredCheck_SkewRefreshesBeforeExpiry(t *testing.T) {
+	t.Setenv("FAK_GUARD_REFRESH_SKEW", "5m")
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	nowMs := int64(1_700_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+	// expires in 2 minutes: still live now, but inside the 5-minute skew window
+	writeCred(t, credPath, "sk-ant-oat01-soon", nowMs+2*60*1000)
+
+	rotated := false
+	var spawn accounts.RefreshSpawn = func(ctx context.Context, cfgDir string) error {
+		rotated = true
+		writeCred(t, filepath.Join(cfgDir, ".credentials.json"), "sk-ant-oat01-rotated", nowMs+3_600_000)
+		return nil
+	}
+	check := guardCredCheckWithRefresh(credPath, guardHeadlessRehydrateWindowDuration(), now,
+		func(time.Duration) {}, spawn)
+
+	fresh, refreshed := check(context.Background())
+	if !rotated {
+		t.Fatal("a token expiring within the skew window must trigger a proactive refresh")
+	}
+	if fresh || !refreshed {
+		t.Fatalf("skew refresh: got fresh=%v refreshed=%v, want fresh=false refreshed=true", fresh, refreshed)
+	}
+}
+
+// TestGuardCredCheck_SkewButRefreshFailsStillServesLiveToken guards the regression I was careful
+// to avoid: inside the skew window, if refresh does NOT land but the token is still live right
+// now, the check must return fresh=true immediately, never block on a wait for a not-yet-due
+// rotation.
+func TestGuardCredCheck_SkewButRefreshFailsStillServesLiveToken(t *testing.T) {
+	t.Setenv("FAK_GUARD_REFRESH_SKEW", "5m")
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, ".credentials.json")
+	nowMs := int64(1_700_000_000_000)
+	now := func() time.Time { return time.UnixMilli(nowMs) }
+	writeCred(t, credPath, "sk-ant-oat01-soon", nowMs+2*60*1000) // live now, within skew
+
+	slept := 0
+	var spawn accounts.RefreshSpawn = func(ctx context.Context, cfgDir string) error { return nil } // no rotation
+	check := guardCredCheckWithRefresh(credPath, guardHeadlessRehydrateWindowDuration(), now,
+		func(time.Duration) { slept++ }, spawn)
+
+	fresh, refreshed := check(context.Background())
+	if !fresh || refreshed {
+		t.Fatalf("skew, refresh failed, token still live: got fresh=%v refreshed=%v, want fresh=true refreshed=false", fresh, refreshed)
+	}
+	if slept != 0 {
+		t.Fatalf("a still-live token must not block on the wait loop; slept %d times", slept)
+	}
 }

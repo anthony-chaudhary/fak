@@ -262,7 +262,24 @@ func guardHeadlessCredCheck(credPath string, now func() time.Time, sleep func(ti
 // so the pre-spawn #1834 rehydrate rung (a short, rotation-in-progress window) and the
 // post-crash auth-recovery path (guardMaybeRecoverAuthCrash — a much longer, human-paced
 // window) share ONE poll implementation instead of two copies that could drift.
+//
+// When the credential is found expired, the check first TRIGGERS a refresh actively (spawn one
+// `claude -p` against the config dir, which makes Claude Code rotate its own credential file)
+// rather than only WAITING for something else to rewrite it — closing the headless-expiry gap
+// where an idle seat's token died with no interactive `claude` around to refresh it. The trigger
+// is gated on FAK_GUARD_AUTO_REFRESH (default on) and, when it advances the on-disk expiry, the
+// poll/wait below is skipped entirely. Only if the trigger is disabled or does not rotate the
+// token do we fall through to the original poll — the human-relogin backstop stays intact.
 func guardCredCheckWithWindow(credPath string, window time.Duration, now func() time.Time, sleep func(time.Duration)) accounts.CredCheck {
+	return guardCredCheckWithRefresh(credPath, window, now, sleep, nil)
+}
+
+// guardCredCheckWithRefresh is guardCredCheckWithWindow with an injectable refresh spawn, so a
+// test can drive the active-refresh branch deterministically without exec'ing a real `claude`.
+// A nil spawn uses accounts.DefaultRefreshSpawn in production; the FAK_GUARD_AUTO_REFRESH knob
+// (not the spawn being nil) is what disables the branch, so a test can also assert the
+// disabled-path behavior is byte-for-byte the old poll.
+func guardCredCheckWithRefresh(credPath string, window time.Duration, now func() time.Time, sleep func(time.Duration), spawn accounts.RefreshSpawn) accounts.CredCheck {
 	if now == nil {
 		now = time.Now
 	}
@@ -276,14 +293,39 @@ func guardCredCheckWithWindow(credPath string, window time.Duration, now func() 
 		expiresAt, ok := credExpiresAt(credPath)
 		return ok && expiresAt.After(t)
 	}
+	skew := guardRefreshSkew()
 	return func(ctx context.Context) (fresh bool, refreshed bool) {
 		if _, ok := credExpiresAt(credPath); !ok {
 			// No parseable credential on disk at all (missing/torn/no token) — nothing this
 			// rung can vouch for or refresh; fail closed to the caller's STALE_CRED refusal.
 			return false, false
 		}
+		// The initial gate looks ahead by skew: a token that expires within the skew window is
+		// treated as needing refresh NOW, so the rotation lands before a request races expiry
+		// (matching Claude Code's own refresh-early behavior). The post-refresh and post-poll
+		// confirmations below use bare now() — a token live at this instant is a real success.
+		if credLive(now().Add(skew)) {
+			return true, false // comfortably live: no wait needed, first request goes out immediately
+		}
+		// Expired: try to CAUSE a refresh in place before falling back to waiting for one. A
+		// successful rotation returns immediately; a no-op (refresh token dead, or the branch
+		// disabled) drops through to the poll + the caller's human-relogin backstop. The trigger
+		// runs under its own bounded sub-context so a hung `claude` can never wedge this check.
+		if guardAutoRefreshEnabled() {
+			cfgDir := filepath.Dir(credPath)
+			rctx, cancel := context.WithTimeout(ctx, guardAutoRefreshTimeout())
+			did, _ := accounts.TriggerRefresh(rctx, cfgDir, spawn, now)
+			cancel()
+			if did && credLive(now()) {
+				return false, true
+			}
+		}
+		// A refresh was wanted but did not land. If the token is nonetheless still live at this
+		// instant (we were inside the proactive skew window, not actually expired), let the first
+		// request go out now rather than blocking on a wait for a rotation that is not yet due —
+		// the skew is a nudge, never a stall for a still-usable token.
 		if credLive(now()) {
-			return true, false // still live: no wait needed, first request goes out immediately
+			return true, false
 		}
 		deadline := now().Add(window)
 		for {
@@ -301,6 +343,55 @@ func guardCredCheckWithWindow(credPath string, window time.Duration, now func() 
 			}
 		}
 	}
+}
+
+// guardAutoRefreshEnabled reports whether the active-refresh branch (spawning `claude -p` to make
+// Claude Code rotate its own credential) is on. It defaults ON — the whole point is to self-heal a
+// headless seat's expiry without a human — and is disabled only by an explicit falsey
+// FAK_GUARD_AUTO_REFRESH ("0"/"false"/"off"/"no"), which restores the pure wait-for-rotation poll.
+func guardAutoRefreshEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_GUARD_AUTO_REFRESH"))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// guardAutoRefreshTimeout bounds a single active-refresh spawn. It defaults to
+// guardHeadlessRehydrateWindow (the same 30s ceiling the wait path uses) so a refresh turn that
+// never returns cannot outlast the window it is meant to avoid; FAK_GUARD_AUTO_REFRESH_TIMEOUT
+// overrides it (any Go duration), clamped to a sane floor/ceiling.
+func guardAutoRefreshTimeout() time.Duration {
+	const def = guardHeadlessRehydrateWindow
+	if v := strings.TrimSpace(os.Getenv("FAK_GUARD_AUTO_REFRESH_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			if d > 5*time.Minute {
+				return 5 * time.Minute
+			}
+			return d
+		}
+	}
+	return def
+}
+
+// guardRefreshSkew is how far BEFORE a token's expiry the proactive check treats it as needing
+// refresh, so the rotation lands before a request races the lapse (Claude Code refreshes ~5min
+// early; we match that). Applied only to the initial refresh-decision gate, never to the
+// confirmations that a token is live right now. Defaults to 5m; FAK_GUARD_REFRESH_SKEW overrides
+// it (any Go duration), clamped to a non-negative value under a sane ceiling. 0 disables the
+// look-ahead, restoring the strict "only refresh once actually expired" behavior.
+func guardRefreshSkew() time.Duration {
+	const def = 5 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("FAK_GUARD_REFRESH_SKEW")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d > time.Hour {
+				return time.Hour
+			}
+			return d
+		}
+	}
+	return def
 }
 
 // guardHeadlessRehydrateVerdict is cmdGuard's outcome from running the #1834 proactive
