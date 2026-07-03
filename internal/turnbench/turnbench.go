@@ -56,17 +56,14 @@ package turnbench
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
@@ -97,45 +94,20 @@ type Call struct {
 }
 
 // Trace is a frozen, replayable, class-labeled tool-call slice.
-type Trace struct {
-	SliceID string `json:"slice_id"`
-	Calls   []Call `json:"calls"`
-}
-
-// LoadTrace reads a trace JSON file.
-func LoadTrace(path string) (*Trace, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var t Trace
-	if err := json.Unmarshal(b, &t); err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
+type Trace benchcli.Trace[Call]
 
 // WorkloadHash is a stable hash of the trace's calls (tool+args+meta, in order).
 // The Class/Note documentation fields are deliberately excluded — relabeling a
 // call's expected class does not change the workload the kernel actually runs.
 func (t *Trace) WorkloadHash() string {
-	h := sha256.New()
-	h.Write([]byte(t.SliceID))
-	for _, c := range t.Calls {
-		h.Write([]byte(c.Tool))
-		h.Write([]byte{0})
-		h.Write(c.Args)
-		h.Write([]byte{0})
-		keys := make([]string, 0, len(c.Meta))
-		for k := range c.Meta {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			h.Write([]byte(k + "=" + c.Meta[k] + ";"))
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return benchcli.WorkloadHashBy(t.SliceID, t.Calls, func(c Call) benchcli.TraceCall {
+		return benchcli.TraceCall{Tool: c.Tool, Args: c.Args, Meta: c.Meta}
+	})
+}
+
+// LoadTrace reads a trace JSON file.
+func LoadTrace(path string) (*Trace, error) {
+	return benchcli.LoadJSONFile[Trace](path)
 }
 
 // CostModel converts a saved model turn into tokens, dollars, and latency. Every

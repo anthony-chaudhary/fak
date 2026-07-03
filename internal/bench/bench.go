@@ -18,13 +18,9 @@ package bench
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"runtime"
-	"sort"
 	"strconv"
 	"time"
 
@@ -42,45 +38,19 @@ type Call struct {
 }
 
 // Trace is a frozen, replayable tool-call slice.
-type Trace struct {
-	SliceID string `json:"slice_id"`
-	Calls   []Call `json:"calls"`
-}
+type Trace benchcli.Trace[Call]
 
 // LoadTrace reads a trace JSON file.
 func LoadTrace(path string) (*Trace, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var t Trace
-	if err := json.Unmarshal(b, &t); err != nil {
-		return nil, err
-	}
-	return &t, nil
+	return benchcli.LoadJSONFile[Trace](path)
 }
 
 // WorkloadHash is a stable hash of the trace's calls (the identical-workload
 // guard input, unit 80/81). Independent of arm.
 func (t *Trace) WorkloadHash() string {
-	h := sha256.New()
-	h.Write([]byte(t.SliceID))
-	// sort-independent: calls are replayed in order, so hash them in order.
-	for _, c := range t.Calls {
-		h.Write([]byte(c.Tool))
-		h.Write([]byte{0})
-		h.Write(c.Args)
-		h.Write([]byte{0})
-		keys := make([]string, 0, len(c.Meta))
-		for k := range c.Meta {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			h.Write([]byte(k + "=" + c.Meta[k] + ";"))
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return benchcli.WorkloadHashBy(t.SliceID, t.Calls, func(c Call) benchcli.TraceCall {
+		return benchcli.TraceCall(c)
+	})
 }
 
 // adjReps is the inner calibration loop for the adjudication-latency measurement.
