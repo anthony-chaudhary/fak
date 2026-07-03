@@ -408,12 +408,33 @@ itself died. It posts through the same transport as `fak slack send` and resolve
 (default `$FAK_DISPATCH_CHANNEL`, then `$FAK_SCOREBOARD_CHANNEL`) the same env-then-file way;
 `--dry-run` renders fork-safe, exit-coded so a scheduled tick flags a misconfiguration.
 
+`fak slack outbox` is the **durable outbox** — the recovery leg ([#2262](https://github.com/anthony-chaudhary/fak/issues/2262),
+epic [#2259](https://github.com/anthony-chaudhary/fak/issues/2259)). check/health/beat *detect*
+a dropped post; the outbox is what stops the drop: producers (`fak slack send --durable`, the
+scoreboard feeder) ENQUEUE a row into an append-only local JSONL spool
+(`$FAK_SLACK_OUTBOX_DIR`, default `.dispatch-runs/slack-outbox`) and return once it is on
+disk — never a network call. One lock-serialized drainer then posts per-channel FIFO through
+the shared transport: it honors `Retry-After`, paces ≤1 msg/s per channel, coalesces queued
+`chat.update` rows for the same card to the newest state, and closes the crash-between-post-
+and-record window with a nonce probe (the nonce rides in message `metadata`; a half-succeeded
+post is recovered, never re-sent — at-least-once with idempotent posts is the honest
+contract). A row that exhausts its retry budget goes `dead` — kept, listed, operator-retryable
+— never silently dropped; every outgoing body passes the PUBLIC_LEAK/SECRET_SHAPE needle scan
+first, and a hit refuses the row terminally with the finding as its structured reason.
+`fak slack health` gains an `outbox` rung: dead rows or a pending backlog older than 2h grade
+the surface non-OK, so a wedged drain pages instead of rotting.
+
 ```bash
 fak slack check --auth   # resolution + does each token work? (offline-by-default)
 fak slack health         # + did a post actually land inside each feeder's cadence?
 fak slack health --json  # machine-readable verdict for the watchdog / a dashboard
 fak slack beat           # post a one-line liveness pulse even when nothing else posted
 fak slack beat --dry-run # render the pulse, resolve channel/token, post nothing (fork-safe)
+fak slack send --durable --channel C… --text "…"   # enqueue-then-drain: survives a dead wire
+fak slack outbox status [--json]   # pending/posted/dead/refused counts + ages (watchdog food)
+fak slack outbox drain [--dry-run] # run one serialized drain pass now (dry-run: plan only)
+fak slack outbox retry --all|--nonce N [--dry-run]  # re-arm dead rows for the next drain
+fak slack outbox dead [--json]     # list dead rows with their structured reasons
 ```
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
