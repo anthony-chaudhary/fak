@@ -488,8 +488,10 @@ commands; add `--fail-on high` to make that ledger a guard gate that exits 1 whe
 recent cost/context pressure should block more high-cost turns. `fak guard
 --session-pressure-gate high --model claude-fable-5` treats the explicit Fable
 route as satisfying those current high-pressure actions while explicit Opus or
-unknown routes still refuse. `GET /v1/fak/session-audit/actions` serves the same
-read-only action ledger for gateway/control clients. Both are scoped by
+unknown routes still refuse; add `--session-pressure-justify "..."` with an
+explicit Opus model to allow a justified high-cost launch without disabling the
+gate. `GET /v1/fak/session-audit/actions` serves the same read-only action
+ledger for gateway/control clients. Both are scoped by
 the current workspace's Claude transcript namespace by default, label clipped
 `--max` windows, and keep exact token counts separate from assumed-cost estimates.
 
