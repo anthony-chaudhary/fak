@@ -16,4 +16,3 @@ commit-audit: 1/1 commit(s) make a claim their diff does not witness.
 witnessed   c4c8495  [diff-witnessed]  code-effect claim witnessed by a touched source file
 exit=0
 ```
-
