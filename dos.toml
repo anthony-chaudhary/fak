@@ -202,6 +202,14 @@ concurrent = [
   "toolprocgate",
   "slackwire",
   "slackoutbox",
+  # reconciled 2026-07-02 (fak commit -preview advisory on the #2368/#2367 fixes):
+  # internal/resume is a real committed leaf (the crash-resume decision kernel:
+  # scan/outcome/next/watchdog + rehome/signals/stopped/sweep subpackages) that had
+  # NO declared lane -- a `(fak resume)` ship-stamp could not bind to a lane and the
+  # arbiter could not detect a same-tree collision on internal/resume/** edits. Its
+  # cmd/fak resume_*.go shims stay in the `cmd` lane, keeping every leaf tree
+  # pairwise-disjoint per the header invariant.
+  "resume",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -292,6 +300,7 @@ autopick = [
   "toolprocgate",
   "slackwire",
   "slackoutbox",
+  "resume", # internal/resume leaf (the crash-resume decision kernel), see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -464,6 +473,7 @@ dispatchauto = ["internal/dispatchauto/**"]
 toolprocgate = ["internal/toolprocgate/**"]
 slackwire = ["internal/slackwire/**"]
 slackoutbox = ["internal/slackoutbox/**"]
+resume = ["internal/resume/**"] # crash-resume decision kernel; cmd/fak resume_*.go shims stay in the `cmd` lane
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
