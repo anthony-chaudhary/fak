@@ -127,6 +127,11 @@ type Session struct {
 	// time.Now calls.
 	PhaseProfiler *PhaseProfiler
 
+	// q4kExpertStats is opt-in readback for resident-Q4_K MoE decode. It records how many
+	// routed experts the Q4_K session saw, and how many actually took the Metal Q6_K-down
+	// fused path. The counters are session-local; generation already owns a Session serially.
+	q4kExpertStats Q4KExpertStats
+
 	// tap is an opt-in diagnostic dump hook for a single decode position. Nil on all
 	// normal sessions; tests and FAK_HIDDEN_TAP use it to capture hidden-state probes.
 	tap       *hiddenTap

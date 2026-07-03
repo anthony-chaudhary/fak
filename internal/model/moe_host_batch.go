@@ -188,6 +188,7 @@ func (m *Model) batchedMetalExperts(s *Session, layer int, xn, delta []float32, 
 	gate := make([]string, K)
 	up := make([]string, K)
 	down := make([]string, K)
+	q6Down := 0
 	for i, pk := range picks {
 		if m.has(expertName(layer, pk.expert, "gate_proj.bias")) ||
 			m.has(expertName(layer, pk.expert, "up_proj.bias")) ||
@@ -197,11 +198,15 @@ func (m *Model) batchedMetalExperts(s *Session, layer int, xn, delta []float32, 
 		gate[i] = expertName(layer, pk.expert, "gate_proj.weight")
 		up[i] = expertName(layer, pk.expert, "up_proj.weight")
 		down[i] = expertName(layer, pk.expert, "down_proj.weight")
+		if dq := m.kqw[down[i]]; dq != nil && dq.kind == kindQ6K {
+			q6Down++
+		}
 	}
 	outs := s.q4kFusedMLPBatch(gate, up, down, xn)
 	if outs == nil {
 		return false
 	}
+	s.recordMetalFusedQ6KDownExperts(q6Down, true)
 	H := m.Cfg.HiddenSize
 	for i, pk := range picks {
 		o := outs[i]

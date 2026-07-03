@@ -183,6 +183,10 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 	gn := expertName(layer, expert, "gate_proj.weight")
 	un := expertName(layer, expert, "up_proj.weight")
 	dn := expertName(layer, expert, "down_proj.weight")
+	q6Down := false
+	if dq := m.kqw[dn]; dq != nil && dq.kind == kindQ6K {
+		q6Down = true
+	}
 	// Fused on-GPU expert MLP fast path: when the resident-Q4_K Metal kernel is active, the
 	// activation is silu (no GELU), and this expert carries no bias, run gate→silu·up→down for the
 	// ONE fired expert in a single command buffer with the I-wide intermediate resident — the same
@@ -196,7 +200,13 @@ func expertSwiGLU(m *Model, layer, expert int, xn any, mat matKernel) []float32 
 		if sk, ok := mat.(sessionQ4KKernel); ok {
 			if xf, ok2 := xn.([]float32); ok2 {
 				if out := sk.s.q4kFusedMLP(gn, un, dn, xf); out != nil {
+					if q6Down {
+						sk.s.recordMetalFusedQ6KDownExperts(1, false)
+					}
 					return out
+				}
+				if q6Down {
+					sk.s.recordMetalFusedQ6KDownFallback(1)
 				}
 			}
 		}
@@ -369,6 +379,9 @@ func (moeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	H := m.Cfg.HiddenSize
 	delta := make([]float32, H)
 	picks := route(m, layer, xn, mat)
+	if sk, ok := mat.(sessionQ4KKernel); ok {
+		sk.s.recordQ4KExpertRoute(len(picks))
+	}
 	// Batched-expert decode lever (#1382): the top-k routed experts of a Qwen3.6-27B q4_k_m MoE
 	// layer are the dominant decode cost (mlp_decode, ~32-54% — the MAC-QWEN36 diagnosis), and the
 	// per-expert loop below fires ONE command buffer / parFor per expert. Two batched paths collapse

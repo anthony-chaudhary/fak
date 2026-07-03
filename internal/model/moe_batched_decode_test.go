@@ -114,3 +114,76 @@ func TestMoEFFNBatchedMatchesLoop(t *testing.T) {
 	}
 	t.Logf("moeFFN batched == per-expert loop, max|Δ|=0 over %d picks / %d experts", len(picks), E)
 }
+
+func TestQ4KExpertStatsRecordRoutedExpertsWithoutFakingMetal(t *testing.T) {
+	const H, MI, E, K = 256, 256, 6, 2
+	cfg := Config{
+		HiddenSize: H, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 2,
+		IntermediateSize: MI, MoEIntermediateSize: MI, VocabSize: 4,
+		RMSNormEps: 1e-5, RopeTheta: 10000,
+		NumExperts: E, NumExpertsPerTok: K, NormTopKProb: true, EOSTokenID: -1,
+	}
+	rng := rand.New(rand.NewSource(7777))
+
+	mkQ4K := func(out, in int) *q4kTensor {
+		nblk := in / qkK
+		raw := make([]byte, out*nblk*q4kBlockBytes)
+		blk := make([]byte, q4kBlockBytes)
+		for o := 0; o < out; o++ {
+			for b := 0; b < nblk; b++ {
+				randQ4KBlock(rng, blk)
+				copy(raw[(o*nblk+b)*q4kBlockBytes:], blk)
+			}
+		}
+		return quantizeQ4KFromRaw(raw, out, in)
+	}
+	mkQ6K := func(out, in int) *kQuantTensor {
+		nblk := in / qkK
+		raw := make([]byte, out*nblk*q6kBlockBytes)
+		for i := range raw {
+			raw[i] = byte(rng.Intn(256))
+		}
+		return quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+	}
+
+	m := &Model{Cfg: cfg, q4kw: map[string]*q4kTensor{}, kqw: map[string]*kQuantTensor{}}
+	m.q4kw[routerName(0)] = mkQ4K(E, H)
+	for e := 0; e < E; e++ {
+		m.q4kw[expertName(0, e, "gate_proj.weight")] = mkQ4K(MI, H)
+		m.q4kw[expertName(0, e, "up_proj.weight")] = mkQ4K(MI, H)
+		m.kqw[expertName(0, e, "down_proj.weight")] = mkQ6K(H, MI)
+	}
+
+	xn := make([]float32, H)
+	for i := range xn {
+		xn[i] = float32(rng.NormFloat64())
+	}
+	s := m.NewSession()
+	delta := moeFFN{}.apply(m, 0, xn, sessionQ4KKernel{s: s})
+
+	stats := s.Q4KExpertStats()
+	if stats.RoutedExperts != K {
+		t.Fatalf("routed experts = %d, want top-k %d", stats.RoutedExperts, K)
+	}
+	if stats.MetalFusedQ6KDownExperts != 0 || stats.MetalFusedQ6KDownBatches != 0 {
+		t.Fatalf("pure host run must not claim Metal fused Q6_K-down success: %+v", stats)
+	}
+	if stats.MetalFusedQ6KDownFallbacks != K {
+		t.Fatalf("Q6_K-down fallback experts = %d, want %d", stats.MetalFusedQ6KDownFallbacks, K)
+	}
+	if got := stats.MetalFusedQ6KDownFraction(); got != 0 {
+		t.Fatalf("MetalFusedQ6KDownFraction = %g, want 0 without a Metal fused success", got)
+	}
+	var norm float64
+	for _, v := range delta {
+		norm += float64(v) * float64(v)
+	}
+	if norm == 0 {
+		t.Fatalf("delta is all-zero; stats test is vacuous")
+	}
+
+	s.ResetQ4KExpertStats()
+	if got := s.Q4KExpertStats(); got != (Q4KExpertStats{}) {
+		t.Fatalf("ResetQ4KExpertStats left counters behind: %+v", got)
+	}
+}
