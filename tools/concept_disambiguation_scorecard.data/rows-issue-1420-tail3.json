@@ -1,0 +1,19 @@
+{
+  "rows": [
+    {
+      "id": "x-issue1420-plan-worktreecandidate",
+      "canonical": "WorktreeCandidate (dojocal recalibration payload)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "WorktreeCandidate (internal/dojocal/worktree.go) is the single (lever, metric) recalibration the dojocal worktree arm measures: the cell to re-point plus the corpus-mean claim to swap in, built from the worst RECALIBRATE of `fak dojo-rsi propose` and carried as the Payload of a rsiloop.Candidate.",
+      "distinction": "The dojocal recalibration PAYLOAD measured inside one worktree arm - NOT rsiloop (the generic keep-or-revert loop that measures it) and NOT GenerationCandidate/ReviewCandidate (issue-planning candidates in the plan family, which propose issues to open, not RSI cells to re-point).",
+      "distinct_from": ["rsiloop", "x-goal25-plan-generationcandidate", "x-plan-reviewcandidate"],
+      "aliases": [],
+      "grounding": "WorktreeCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
