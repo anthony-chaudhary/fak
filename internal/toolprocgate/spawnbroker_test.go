@@ -105,6 +105,30 @@ func TestSpawnBrokerGrantSanitizesPropagatesMetadataAndAudits(t *testing.T) {
 	}
 }
 
+func TestSpawnBrokerDeniesAttemptWithoutSpawnCapability(t *testing.T) {
+	broker := NewSpawnBroker()
+	_, err := broker.Admit(SpawnAttempt{
+		AgentRunID:   "agent-1",
+		ToolCallID:   "tool-1",
+		PolicyDigest: "sha256:policy",
+		Argv:         []string{"agent"},
+		CWD:          t.TempDir(),
+		Backend:      "guard",
+		Envelope:     CapabilityEnvelope{Capabilities: []abi.Capability{"other.cap"}},
+	})
+	var denied SpawnDeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("Admit returned %T/%v, want SpawnDeniedError", err, err)
+	}
+	if denied.Audit.Reason != "MISSING_SPAWN_CAPABILITY" {
+		t.Fatalf("deny reason = %q, want MISSING_SPAWN_CAPABILITY", denied.Audit.Reason)
+	}
+	audits := broker.Audits()
+	if len(audits) != 1 || audits[0].Verdict != SpawnVerdictDeny {
+		t.Fatalf("audits = %+v, want one deny audit", audits)
+	}
+}
+
 func TestSpawnBrokerRejectsInvalidEnvelope(t *testing.T) {
 	broker := NewSpawnBroker()
 	_, err := broker.Admit(SpawnAttempt{

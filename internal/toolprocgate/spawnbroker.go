@@ -205,6 +205,12 @@ func normalizeSpawnAttempt(a SpawnAttempt) (SpawnAttempt, error) {
 		return SpawnAttempt{}, fmt.Errorf("NEGATIVE_CAPABILITY_ENVELOPE")
 	}
 	envp.Capabilities = normalizeCaps(envp.Capabilities)
+	// A child process may only be created under an envelope that actually
+	// carries the negotiated spawn capability — an empty or unrelated
+	// envelope is denied before any launcher runs.
+	if !capsInclude(envp.Capabilities, CapAgentRunSpawn) {
+		return SpawnAttempt{}, fmt.Errorf("MISSING_SPAWN_CAPABILITY")
+	}
 
 	a.Argv = argv
 	a.Env = env
@@ -231,6 +237,15 @@ func normalizeEnv(in []EnvVar) ([]EnvVar, error) {
 		out = append(out, EnvVar{Name: name, Value: kv.Value})
 	}
 	return out, nil
+}
+
+func capsInclude(caps []abi.Capability, want abi.Capability) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeCaps(in []abi.Capability) []abi.Capability {
