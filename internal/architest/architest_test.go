@@ -308,6 +308,7 @@ var tier = map[string]int{
 	"operatortouches":       1, // R1 babysitting counter (#2270): pure fold over loopmgr's loop-event ledger measuring human touches per witnessed shipped unit; mttr_sessions is fed by the R4 drain witness (#2273); imports loopmgr(1)+resume(1), off the hot path.
 	"popularizationtickets": 1, // embedded popularization-ticket curriculum (tickets.json) + pure fold/render over it; stdlib-only, off the hot path.
 	"qwen36nodereports":     2, // qwen36 node-report harvester: reads/unzips node artifacts and folds a versioned report; tool-shaped mechanism leaf, shells out off the hot path, imports nothing internal.
+	"trajctl":               1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
