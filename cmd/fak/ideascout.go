@@ -5,13 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ideascout"
 )
-
-func cmdIdeaScout(argv []string) { os.Exit(runIdeaScout(os.Stdout, os.Stderr, argv)) }
 
 func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("idea-scout", flag.ContinueOnError)
