@@ -1,0 +1,44 @@
+{
+  "rows": [
+    {
+      "id": "drive-plan-planmeta",
+      "canonical": "PlanMeta (agentdemo plan provenance)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "agentdemo.PlanMeta is the provenance block a model arm attaches to a proposed plan - the Provider, Model, Rung, AsOf, and Source recording which model produced the Steps - carried as the `plan` field of the trychatdemo response and rendered by renderPlanMeta.",
+      "distinction": "It is the WITNESS metadata about who produced a plan, NOT the Step list it accompanies, a ctxplan resident-view Plan (PlanCells), nor an issue-sync PlanRow.",
+      "distinct_from": [
+        "PlanCells (ctxplan)",
+        "PlanRow (issue create/update decision row)"
+      ],
+      "aliases": [
+        "renderplanmeta"
+      ],
+      "grounding": "planmeta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "drive-witness-proof-claimwitnessed",
+      "canonical": "ClaimWitnessed (dispatch-tick sweep verdict)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "dispatchtick.ClaimWitnessed is the CLAIM_WITNESSED verdict a finished dispatch worker's slot grades into when `dos commit-audit` confirms its resolving commit cleared the diff-witnessed keep-bit - the positive branch of the .witness sidecar claim vocabulary (ClaimWitnessed / ClaimUnwitnessed / ClaimNoCommit).",
+      "distinction": "It records that a worker's commit WAS independently corroborated by the closure audit, NOT the abi require-witness REQUEST for proof (VerdictRequireWitness) nor the kernel's terminal DENY label for missing proof (ReasonUnwitnessed).",
+      "distinct_from": [
+        "VerdictRequireWitness (abi verdict)",
+        "ReasonUnwitnessed (deny reason)"
+      ],
+      "aliases": [],
+      "grounding": "claimwitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
