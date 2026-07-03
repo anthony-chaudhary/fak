@@ -909,7 +909,10 @@ func writeSSEData(w http.ResponseWriter, v any) error {
 func denySummary(adjs []ToolAdjudication) string {
 	parts := make([]string, 0, len(adjs))
 	for _, a := range adjs {
-		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, a.Verdict.Reason, a.Verdict.Disposition)
+		part := fmt.Sprintf("%s: %s (%s/%s)", a.Tool, a.Verdict.Kind, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+		if note := reversibilityGateNote(a); note != "" {
+			part += " " + note
+		}
 		if a.Livelock != nil {
 			part += " " + livelockInBandNote(a)
 		}
@@ -931,7 +934,10 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	for _, a := range adjs {
 		switch {
 		case !a.Admitted:
-			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, a.Verdict.Reason, a.Verdict.Disposition)
+			entry := fmt.Sprintf("%s (%s/%s)", a.Tool, reasonOrKind(a.Verdict), a.Verdict.Disposition)
+			if note := reversibilityGateNote(a); note != "" {
+				entry += " " + note
+			}
 			if a.Livelock != nil {
 				entry += " " + livelockInBandNote(a)
 			}
