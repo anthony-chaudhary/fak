@@ -129,7 +129,8 @@ class RollupTextTest(unittest.TestCase):
         self.assertIn("ticket trend:", text)
         self.assertIn("last loop close 1.5h ago", text)
         self.assertIn("capacity trend: usable 3→1", text)
-        self.assertIn("status: issue work needs you", text)
+        self.assertIn("status: issue work needs operator", text)
+        self.assertIn("sessions need attention", text)
         self.assertIn("returned no output", text)
         self.assertIn("ticket closes below target", text)
         self.assertNotIn("READY_TO_GROW (ACTION)", text)
@@ -211,6 +212,35 @@ class RollupTextTest(unittest.TestCase):
                 "worker/lease orphans: clean=0, orphan-process=0, orphan-lease=1"),
             "cleanup needed: 1 stale lease; inspect dispatch status before launching more",
         )
+
+    def test_rollup_dedupes_account_login_actions(self):
+        mod = load()
+        dispatch_payload = mod.fixture_dispatch_payload(ROOT)
+        dispatch_payload["seat_inventory"] = {
+            "schema": "fleet-seat-pool/1",
+            "seats": [{"tag": "gem7-netra", "hold_reason": "auth_failed"}],
+        }
+        dispatch_payload["backend_health"] = {"dead": [], "stub_rate": []}
+        dispatch_payload["hook_health"] = {"by_backend": []}
+        dispatch_payload["throughput"] = {"na": True}
+        fleet_snap = mod.fleet_top.build_snapshot({
+            "rows": [],
+            "accounts": [{
+                "tag": "gem7-netra",
+                "available": False,
+                "blocked": True,
+                "throttled": False,
+                "block_kind": "auth",
+                "block_reason": "auth/login required",
+                "config_dir": "C:/Users/USER/.claude-gem7-netra",
+            }],
+            "throttle": {},
+        }, workspace="C:/work/fak", window_h=10.0, now="2026-06-29T18:00:00Z")
+
+        text = mod.rollup_text(dispatch_payload, fleet_snap)
+
+        self.assertIn("login failed for gem7-netra", text)
+        self.assertNotIn("agent sessions: login gem7-netra", text)
 
     def test_rollup_rewords_session_status_codes(self):
         mod = load()

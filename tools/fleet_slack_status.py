@@ -497,6 +497,23 @@ def _operator_action(row: str) -> str:
     return row
 
 
+def _operator_login_tags(rows: list[str]) -> set[str]:
+    tags: set[str] = set()
+    for row in rows:
+        m = re.match(
+            r"^auth_failed=\d+ \[([^\]]+)\]; next action: run `fak accounts status` "
+            r"and re-login or remove the named seat\(s\)$",
+            str(row or "").strip(),
+        )
+        if not m:
+            continue
+        for tag in re.split(r",\s*", m.group(1)):
+            tag = tag.strip()
+            if tag and not tag.startswith("+"):
+                tags.add(tag)
+    return tags
+
+
 def _operator_handled(row: str) -> str:
     row = str(row or "").strip()
     m = re.match(r"^([A-Za-z0-9_.-]+) held dead; lane ([^;]+) reallocated(; re-probe every .+)?$", row)
@@ -557,7 +574,7 @@ def _dispatch_state(payload: dict[str, Any] | None) -> str:
         state = "healthy" if payload.get("ok") else "needs you"
     verdict = str(payload.get("verdict") or "UNKNOWN")
     if state == "ACTION":
-        return "needs you"
+        return "needs operator"
     if state == "auto-solving":
         return "being handled"
     if state == "expected":
@@ -574,14 +591,14 @@ def _fleet_state(snap: dict[str, Any] | None) -> str:
     verdict = str(sysv.get("verdict") or fleet_top.VERDICT_HEALTHY)
     word = fleet_top.VERDICT_WORD.get(verdict, verdict).lower()
     if word == "needs you":
-        word = "attention"
+        word = "need attention"
     esc = int(sysv.get("escalate", 0) or 0)
     heal = int(sysv.get("self_healing", 0) or 0)
     tail: list[str] = []
     if esc:
-        tail.append(f"{esc} human")
+        tail.append(f"{esc} operator")
     if heal:
-        tail.append(f"{heal} self-healing")
+        tail.append(f"{heal} auto-handled")
     return word + (f" ({', '.join(tail)})" if tail else "")
 
 
@@ -696,12 +713,21 @@ def rollup_text(dispatch_payload: dict[str, Any] | None,
     waiting: list[str] = []
     if dispatch_payload:
         buckets = dispatch_status._dispatch_slack_buckets(dispatch_payload)  # type: ignore[attr-defined]
-        needs.extend(_operator_action(r) for r in buckets.get("action", []))
+        action_rows = buckets.get("action", [])
+        dispatch_login_tags = _operator_login_tags(action_rows)
+        needs.extend(_operator_action(r) for r in action_rows)
         handled.extend(_operator_handled(r) for r in buckets.get("auto-solving", []))
         waiting.extend(_operator_waiting(dispatch_payload, buckets.get("expected", [])))
+    else:
+        dispatch_login_tags = set()
     if fleet_snap:
         attn = fleet_snap.get("attention") or []
         escalate = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_ESCALATE]
+        if dispatch_login_tags:
+            escalate = [
+                i for i in escalate
+                if not (i.get("kind") == "login" and str(i.get("tag") or "") in dispatch_login_tags)
+            ]
         healing = [i for i in attn if i.get("lifecycle") == fleet_top.LIFECYCLE_SELF_HEALING]
         line = _attention_line("agent sessions", escalate)
         if line:
